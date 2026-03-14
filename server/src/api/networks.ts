@@ -406,6 +406,16 @@ networksRouter.post('/:id/votes/:roundId', globalRateLimit, requireAuth, (req, r
       }
     }
 
+    // If space_deletion round concluded and passed, remove the space on this instance
+    if (round.concluded && round.type === 'space_deletion') {
+      const vetoCount = round.votes.filter(v => v.vote === 'veto').length;
+      if (vetoCount === 0 && round.spaceId) {
+        import('../spaces/spaces.js').then(({ removeSpace }) => {
+          removeSpace(round.spaceId!).catch(err => log.error(`space_deletion vote side-effect: ${err}`));
+        }).catch(err => log.error(`space_deletion import: ${err}`));
+      }
+    }
+
     saveConfig(cfg);
     log.info(`Vote cast in round ${round.roundId}: ${parsed.data.vote} (concluded=${round.concluded})`);
     res.json({ concluded: round.concluded, round });

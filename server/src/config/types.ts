@@ -35,7 +35,7 @@ export interface StorageConfig {
 export type NetworkType = 'closed' | 'democratic' | 'club' | 'braintree';
 export type SyncDirection = 'both' | 'push';
 export type VoteValue = 'yes' | 'veto';
-export type VoteRoundType = 'join' | 'remove';
+export type VoteRoundType = 'join' | 'remove' | 'space_deletion';
 
 export interface NetworkMember {
   instanceId: string;
@@ -45,6 +45,7 @@ export interface NetworkMember {
   direction: SyncDirection;
   lastSyncAt?: string;       // ISO8601 — set only on successful sync
   lastSeqReceived?: Record<string, number>;  // spaceId → last seq ingested from this peer
+  lastSeqPushed?: Record<string, number>;    // spaceId → last seq we confirmed pushed to this peer
   consecutiveFailures?: number;  // incremented on each failed sync; reset to 0 on success
   parentInstanceId?: string; // braintree only
   /** Set during a temporary reparent; stores the original parent so it can be restored. */
@@ -71,6 +72,7 @@ export interface VoteRound {
   inviteKeyHash?: string;    // bcrypt of invite key (join rounds only)
   concluded?: boolean;
   pendingMember?: NetworkMember;  // stored on join rounds; added to members when vote passes
+  spaceId?: string;              // populated for space_deletion rounds
 }
 
 export interface NetworkConfig {

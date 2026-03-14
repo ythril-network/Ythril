@@ -7,7 +7,7 @@
       "name": "test-token",
       "hash": "$2b$12$jiDdW0MO/klsn/YKimPPj.1tA/ZcQLjzMv9qK5KfR/qSmmwIW/dz2",
       "createdAt": "2026-03-14T20:55:00.189Z",
-      "lastUsed": "2026-03-14T21:46:56.362Z",
+      "lastUsed": "2026-03-14T23:49:44.266Z",
       "expiresAt": null
     },
     {
@@ -121,6 +121,238 @@
       "createdAt": "2026-03-14T21:46:11.835Z",
       "lastUsed": null,
       "expiresAt": null
+    },
+    {
+      "id": "418b3c9d-5b60-46db-a96b-84baf10f2dda",
+      "name": "peer-rsa-handshake-a",
+      "hash": "$2b$12$7UoMPN4Iy4VAX.jvG22owOil7QtecppZ8X.niUDjcG9HTdYSvpl9W",
+      "createdAt": "2026-03-14T23:09:01.104Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "69ec4397-08d3-44ed-9b41-883ced3be36e",
+      "name": "bt-peer-a",
+      "hash": "$2b$12$jx8Pb5yL1icl6SmSGgY4PuppQ1fpTbsU/spKt1zIWc3YoRwqux8Lm",
+      "createdAt": "2026-03-14T23:09:34.596Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "f29c8758-73a5-4723-8551-bb137bb533f7",
+      "name": "peer-token-a",
+      "hash": "$2b$12$7ZqZE1N/GsSpQZcLYb0vI.eyL5sgRxxRApo4kWb2.P6SpUx/BQHyO",
+      "createdAt": "2026-03-14T23:09:34.864Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "d097ad38-36b5-418c-8032-990de210831d",
+      "name": "dem-peer-a",
+      "hash": "$2b$12$Pdug.2P50sgCIq2WDK6AY.F2Mto.EiSy/caPyz6BxjO.RNLEuFWzm",
+      "createdAt": "2026-03-14T23:09:54.686Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "e5aed002-ca5f-4a7a-9a1b-d5ea2eaefdd5",
+      "name": "peer-rsa-handshake-a",
+      "hash": "$2b$12$njpOeSYVjL3mhsarCTiaduOHejX/6vRSBQ0wMU6vjg36Ayt7HepQi",
+      "createdAt": "2026-03-14T23:21:44.472Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "bb7bc84b-72f9-4551-85a0-c183808dc818",
+      "name": "peer-token-a",
+      "hash": "$2b$12$8EUFAa2M.ITQcLqWI/wK0uGMGo9NtGtou3N7YgSpWvvNbogN4Essq",
+      "createdAt": "2026-03-14T23:22:09.852Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "2dceddfa-462e-4b6e-8bdf-b1160aecf848",
+      "name": "peer-token-a",
+      "hash": "$2b$12$xcMdj1W3dq43gM/VXgSiGesJHy1Niyh1.jSZqsOyGuuLQKLaQb86i",
+      "createdAt": "2026-03-14T23:32:04.129Z",
+      "lastUsed": "2026-03-14T23:32:10.002Z",
+      "expiresAt": null
+    },
+    {
+      "id": "e661ec8b-526a-4da6-aa67-1437c92d2799",
+      "name": "dem-peer-a",
+      "hash": "$2b$12$7.tC2VGE3fDnYisaxypSN.dfbQeiFjwcbVMDJ17a8IZoLpEkUXVdO",
+      "createdAt": "2026-03-14T23:32:16.958Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "60479c37-efe5-406c-bf15-ec220d604a0b",
+      "name": "bt-peer-a",
+      "hash": "$2b$12$XNFP4ND6wQgwaHVGK5ClC.qVnLQhIU52922nj1DbKPMHT9Zvi7.zu",
+      "createdAt": "2026-03-14T23:32:21.825Z",
+      "lastUsed": "2026-03-14T23:32:30.167Z",
+      "expiresAt": null
+    },
+    {
+      "id": "ef497516-258f-466e-9a01-08b82f382367",
+      "name": "peer-rsa-handshake-a",
+      "hash": "$2b$12$G79bIjaDhKDaBYKjSTFvUOTEWWYUSxKDIcV3QOQasKo3P.z/mXSoW",
+      "createdAt": "2026-03-14T23:33:03.942Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "6c32db12-3b2e-46c8-8e7a-427966dc84cc",
+      "name": "bt-peer-a",
+      "hash": "$2b$12$A/.k9RLlLtuYtsA29PwerelBZC/IjtIkhe0FtCdmPHub7M7SeeSji",
+      "createdAt": "2026-03-14T23:33:16.117Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "88eff921-f806-4206-a252-ca9953f0384f",
+      "name": "peer-token-a",
+      "hash": "$2b$12$3dVEmBgsIjO/DKc1p5Bz6OQpzFa6vdRQ/mPoxbEZ6/4Trh8ChY3mm",
+      "createdAt": "2026-03-14T23:33:16.391Z",
+      "lastUsed": "2026-03-14T23:33:23.929Z",
+      "expiresAt": null
+    },
+    {
+      "id": "38e39ae9-8963-4220-93c9-2d2bc713d202",
+      "name": "dem-peer-a",
+      "hash": "$2b$12$XHz1tyPBzqeYW8Vy8dKSmuraIs02KTkiP22XVj9ujDSTfTWBFY3MW",
+      "createdAt": "2026-03-14T23:33:24.788Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "116b90b5-ad8d-4379-87a2-4e235a41cd7f",
+      "name": "peer-token-a",
+      "hash": "$2b$12$m9NQBVqlLVs7E8kz.Vc3t.lECkgBnnIjyiVVLnABfiGUdO2QJLaQ.",
+      "createdAt": "2026-03-14T23:33:36.657Z",
+      "lastUsed": "2026-03-14T23:33:44.416Z",
+      "expiresAt": null
+    },
+    {
+      "id": "cedeb680-6eef-4304-819a-fef87f149dae",
+      "name": "dem-peer-a",
+      "hash": "$2b$12$pIXzhDRGAu6eJF0mTx3qLuLfiJLI5e70eqCm9ZXfNkI5wiNDtp8Nm",
+      "createdAt": "2026-03-14T23:33:44.763Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "4a875923-3ad9-4f10-ac97-a7b4507e8311",
+      "name": "bt-peer-a",
+      "hash": "$2b$12$C5Lpg.0LT/tQFYKceFOsyOcLRKsuZvhLZqBgzeytwMN12.uv0OSSG",
+      "createdAt": "2026-03-14T23:33:45.804Z",
+      "lastUsed": "2026-03-14T23:33:55.687Z",
+      "expiresAt": null
+    },
+    {
+      "id": "94792315-4219-4f6f-bf87-9d317d974d22",
+      "name": "bt-peer-a",
+      "hash": "$2b$12$pRAi1M.yXepF4InbJBYT0.L404li8Q8Fc9TuW4/W4/yodlZ5B/PoO",
+      "createdAt": "2026-03-14T23:33:53.038Z",
+      "lastUsed": "2026-03-14T23:34:03.137Z",
+      "expiresAt": null
+    },
+    {
+      "id": "af4aa22f-be96-4871-90f3-68c9decb7e28",
+      "name": "bt-peer-a",
+      "hash": "$2b$12$06F4cUL9uK33HtACrMSQT.oKKB.8ksqRvi.69oW0LM7UhNmudGHqi",
+      "createdAt": "2026-03-14T23:34:09.461Z",
+      "lastUsed": "2026-03-14T23:34:19.405Z",
+      "expiresAt": null
+    },
+    {
+      "id": "56cf8aa3-52ee-40f4-9e22-ab52afcf9273",
+      "name": "peer-token-a",
+      "hash": "$2b$12$LxiI3emIE/MNV9lm.VlyX./VFPze9a/NiGWKM1EjiZOwViF0xd5Um",
+      "createdAt": "2026-03-14T23:34:31.643Z",
+      "lastUsed": "2026-03-14T23:34:40.997Z",
+      "expiresAt": null
+    },
+    {
+      "id": "af07fe90-b80c-4eba-aa4f-cf528aec20fa",
+      "name": "dem-peer-a",
+      "hash": "$2b$12$wcjg1QBRTWZmF2RbRiOOp.SFHeXzeoHrH9E.XCdc93eyXvQ5UBuzG",
+      "createdAt": "2026-03-14T23:34:41.326Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "ca82b3f5-7705-4213-aed2-db10d1058245",
+      "name": "bt-peer-a",
+      "hash": "$2b$12$qdVkXUdvn3LwTaI53bvTVeQGuq5rF1qoOyYBpCzD/oydAOAOLZkpG",
+      "createdAt": "2026-03-14T23:34:42.379Z",
+      "lastUsed": "2026-03-14T23:34:53.245Z",
+      "expiresAt": null
+    },
+    {
+      "id": "ab76e79f-46c5-4f1a-b95d-1edf0c884ad7",
+      "name": "peer-token-a",
+      "hash": "$2b$12$rLEaGEGAXSglo2ZRnyZnse8k1ODpS3YR.92rbZtoBLBHpTKErCVm6",
+      "createdAt": "2026-03-14T23:35:01.935Z",
+      "lastUsed": "2026-03-14T23:35:11.786Z",
+      "expiresAt": null
+    },
+    {
+      "id": "58c0879a-6b0b-440a-9d2f-dc359e76e20d",
+      "name": "dem-peer-a",
+      "hash": "$2b$12$A0H8M93YCup0QvzZtbpD6Ovg/q6K4FOC/fdfDcR7zwDGKD6iDdMaW",
+      "createdAt": "2026-03-14T23:35:12.094Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "7f1c6e26-2b7f-4320-be4e-dc0c788e662e",
+      "name": "bt-peer-a",
+      "hash": "$2b$12$CHbmiSy9PzjfmQah8N9K5ewWz2vLkSCWkVYu3eSHFi4KlsnJIrWJe",
+      "createdAt": "2026-03-14T23:35:13.138Z",
+      "lastUsed": "2026-03-14T23:35:24.297Z",
+      "expiresAt": null
+    },
+    {
+      "id": "0708647d-5752-416a-a1ab-73a4a9663016",
+      "name": "peer-rsa-handshake-a",
+      "hash": "$2b$12$3mFoTPbYp0awJJi3MmWtkuqgII5Yg.6haYuU4gpdA30gTPm94ve8e",
+      "createdAt": "2026-03-14T23:36:01.861Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "0c46f2a6-0b30-4647-aaf7-e0aedf934b18",
+      "name": "peer-rsa-handshake-a",
+      "hash": "$2b$12$.gvxWjOUHHulWmVcVGe35eWBBsdqpFUUAA3ORt/cw2DZBZ.w.iT/.",
+      "createdAt": "2026-03-14T23:48:18.086Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "44ef0478-4abe-4eaf-95fc-f142fb8d9af6",
+      "name": "bt-peer-a",
+      "hash": "$2b$12$ljjOXbHptyQLn8ec4rsspOwLMq/i8LmCUIxR/GY753H4FSfFOb7XC",
+      "createdAt": "2026-03-14T23:49:26.887Z",
+      "lastUsed": "2026-03-14T23:49:39.555Z",
+      "expiresAt": null
+    },
+    {
+      "id": "028bab22-776f-4e30-b17b-ee04e47856a9",
+      "name": "peer-token-a",
+      "hash": "$2b$12$KDwmd791ggF5PGFmIANIV.EkBmb5xkRtg9DvrP6tXzF4bqY0PjFe2",
+      "createdAt": "2026-03-14T23:49:34.119Z",
+      "lastUsed": "2026-03-14T23:49:44.615Z",
+      "expiresAt": null
+    },
+    {
+      "id": "30198452-eeff-4417-9b6c-846365eeed31",
+      "name": "dem-peer-a",
+      "hash": "$2b$12$YsYFkqsyyUuNTiZhKO4K9u4sXx73GLD6kKmlha9iSaTdXQsGs3AKi",
+      "createdAt": "2026-03-14T23:49:44.468Z",
+      "lastUsed": null,
+      "expiresAt": null
     }
   ],
   "spaces": [
@@ -175,6 +407,161 @@
       ],
       "pendingRounds": [],
       "createdAt": "2026-03-14T21:45:59.597Z"
+    },
+    {
+      "id": "1da6d336-5038-4ef6-b7b4-fff9fbddf402",
+      "label": "Test Braintree",
+      "type": "braintree",
+      "spaces": [
+        "general"
+      ],
+      "votingDeadlineHours": 24,
+      "members": [
+        {
+          "instanceId": "instance-c",
+          "label": "Instance C",
+          "url": "http://ythril-c:3200",
+          "tokenHash": "$2b$12$.ZOSpC7uOSuC1TIIWtYY4.ZdHSKC5Bg9HU3j8LRAK68xw/6uPuRWG",
+          "direction": "push",
+          "parentInstanceId": "44192c15-8ca1-4afa-9c63-445094b73c5d",
+          "lastSyncAt": "2026-03-14T23:32:31.781Z",
+          "consecutiveFailures": 0
+        }
+      ],
+      "pendingRounds": [],
+      "createdAt": "2026-03-14T23:32:22.214Z"
+    },
+    {
+      "id": "eb4e32c2-8ef7-4131-9a4b-5fb19d15b1f4",
+      "label": "Test Braintree",
+      "type": "braintree",
+      "spaces": [
+        "general"
+      ],
+      "votingDeadlineHours": 24,
+      "members": [
+        {
+          "instanceId": "instance-c",
+          "label": "Instance C",
+          "url": "http://ythril-c:3200",
+          "tokenHash": "$2b$12$GG6AF2rQs2vqbHd71m2qT.OnSBrjFNcLrko6w0yCG5HMq1rvUaBKm",
+          "direction": "push",
+          "parentInstanceId": "44192c15-8ca1-4afa-9c63-445094b73c5d",
+          "consecutiveFailures": 2
+        }
+      ],
+      "pendingRounds": [],
+      "createdAt": "2026-03-14T23:33:46.201Z"
+    },
+    {
+      "id": "c49118a1-cfeb-4ff2-8fce-24444759f330",
+      "label": "Test Braintree",
+      "type": "braintree",
+      "spaces": [
+        "general"
+      ],
+      "votingDeadlineHours": 24,
+      "members": [
+        {
+          "instanceId": "instance-c",
+          "label": "Instance C",
+          "url": "http://ythril-c:3200",
+          "tokenHash": "$2b$12$x7GTVLlBbNL6sQ4FE7msDusagJSG78BAHHpiTsIdXi1EXv2dl1bi6",
+          "direction": "push",
+          "parentInstanceId": "44192c15-8ca1-4afa-9c63-445094b73c5d",
+          "consecutiveFailures": 2
+        }
+      ],
+      "pendingRounds": [],
+      "createdAt": "2026-03-14T23:33:53.482Z"
+    },
+    {
+      "id": "bc3f4dfa-9edb-4fc3-86dc-c5a628528859",
+      "label": "Test Braintree",
+      "type": "braintree",
+      "spaces": [
+        "general"
+      ],
+      "votingDeadlineHours": 24,
+      "members": [
+        {
+          "instanceId": "instance-c",
+          "label": "Instance C",
+          "url": "http://ythril-c:3200",
+          "tokenHash": "$2b$12$VfZwYpum4C/ukckzTwLBSegEmlfIdnI6NgcWEO1M3S6ottKjH7SR2",
+          "direction": "push",
+          "parentInstanceId": "44192c15-8ca1-4afa-9c63-445094b73c5d",
+          "consecutiveFailures": 2
+        }
+      ],
+      "pendingRounds": [],
+      "createdAt": "2026-03-14T23:34:09.850Z"
+    },
+    {
+      "id": "1336879a-28d4-4d01-b37f-e1162f4f6f94",
+      "label": "Test Braintree",
+      "type": "braintree",
+      "spaces": [
+        "general"
+      ],
+      "votingDeadlineHours": 24,
+      "members": [
+        {
+          "instanceId": "instance-c",
+          "label": "Instance C",
+          "url": "http://ythril-c:3200",
+          "tokenHash": "$2b$12$uYpJYeL7MZmoefxhA.ZiKOacAuft842Z6g8ykGcfiKSEmgIH7UrDe",
+          "direction": "push",
+          "parentInstanceId": "44192c15-8ca1-4afa-9c63-445094b73c5d",
+          "consecutiveFailures": 2
+        }
+      ],
+      "pendingRounds": [],
+      "createdAt": "2026-03-14T23:34:42.794Z"
+    },
+    {
+      "id": "c8edb3c8-6e8f-404c-9530-d3962369938c",
+      "label": "Test Braintree",
+      "type": "braintree",
+      "spaces": [
+        "general"
+      ],
+      "votingDeadlineHours": 24,
+      "members": [
+        {
+          "instanceId": "instance-c",
+          "label": "Instance C",
+          "url": "http://ythril-c:3200",
+          "tokenHash": "$2b$12$wd5mTJnNZImV40pr68XzKu7T/fsubzUhp3YlKZopa6Qa/ZLmX3NOe",
+          "direction": "push",
+          "parentInstanceId": "44192c15-8ca1-4afa-9c63-445094b73c5d",
+          "consecutiveFailures": 2
+        }
+      ],
+      "pendingRounds": [],
+      "createdAt": "2026-03-14T23:35:13.545Z"
+    },
+    {
+      "id": "05e8c3fe-0dc5-48f1-bb24-05c6011d66a9",
+      "label": "Test Braintree",
+      "type": "braintree",
+      "spaces": [
+        "general"
+      ],
+      "votingDeadlineHours": 24,
+      "members": [
+        {
+          "instanceId": "instance-c",
+          "label": "Instance C",
+          "url": "http://ythril-c:3200",
+          "tokenHash": "$2b$12$PG2AKeLKkzBVOUKfb/nhY.w/wsCq8fxPZag.79kwjacTHfd/jZwqW",
+          "direction": "push",
+          "parentInstanceId": "44192c15-8ca1-4afa-9c63-445094b73c5d",
+          "consecutiveFailures": 2
+        }
+      ],
+      "pendingRounds": [],
+      "createdAt": "2026-03-14T23:49:27.282Z"
     }
   ],
   "setup": {

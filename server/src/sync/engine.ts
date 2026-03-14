@@ -39,6 +39,13 @@ import { resolveSafePath } from '../files/sandbox.js';
 // offline peer can block an entire sync cycle by that duration per attempt.
 const FETCH_TIMEOUT_MS = 10_000;
 
+// Longer timeout for batch push/pull payloads: 200 docs × a few KB each can be
+// several hundred KB over a slow WAN link.
+const BATCH_FETCH_TIMEOUT_MS = 60_000;
+
+// Docs pushed per batch-upsert request (caps per-request payload size).
+const PUSH_BATCH_SIZE = 200;
+
 // After this many consecutive sync failures for a single member, we emit a
 // prominent warning. The member is NOT auto-removed — that is a human decision.
 const STALE_FAILURE_THRESHOLD = 10;
@@ -177,6 +184,41 @@ export async function runSyncForNetwork(networkId: string): Promise<{ synced: nu
   }
 
   log.info(`Sync cycle complete for '${net.label}': ${synced} ok, ${errors} errors`);
+
+  // ── Orphan detection (braintree only) ──────────────────────────────────
+  // After the sync loop finishes, check if any member's parentInstanceId points to
+  // a node that no longer exists in the member list.  This catches silent departures
+  // where the N-7 notify was never received.
+  if (net.type === 'braintree') {
+    const freshCfg = getConfig();
+    const freshNet = freshCfg.networks.find(n => n.id === networkId);
+    if (freshNet) {
+      const memberIds = new Set(freshNet.members.map(m => m.instanceId));
+      memberIds.add(freshCfg.instanceId);  // current node is never in its own member list
+      const orphans = freshNet.members.filter(
+        m => m.parentInstanceId && !memberIds.has(m.parentInstanceId),
+      );
+      if (orphans.length > 0) {
+        let changed = false;
+        const me = freshNet.members.find(m => m.instanceId === freshCfg.instanceId);
+        for (const orphan of orphans) {
+          log.warn(
+            `ORPHAN DETECTED: '${orphan.label}' (${orphan.instanceId}) in '${freshNet.label}' ` +
+            `has parentInstanceId '${orphan.parentInstanceId}' which is not in the member list. ` +
+            `Auto-adopting as direct child of this instance.`,
+          );
+          orphan.parentInstanceId = freshCfg.instanceId;
+          if (me) {
+            me.children = me.children ?? [];
+            if (!me.children.includes(orphan.instanceId)) me.children.push(orphan.instanceId);
+          }
+          changed = true;
+        }
+        if (changed) saveConfig(freshCfg);
+      }
+    }
+  }
+
   return { synced, errors };
 }
 
@@ -203,6 +245,11 @@ async function runSyncForMember(net: NetworkConfig, member: NetworkMember): Prom
     // Production environments use trusted certs — skipTlsVerify is a dev-only escape hatch.
   };
 
+  const batchFetchOpts: RequestInit = {
+    headers,
+    signal: AbortSignal.timeout(BATCH_FETCH_TIMEOUT_MS),
+  };
+
   for (const spaceId of net.spaces) {
     // Push to this member if the direction allows it (push or both).
     // Pull from this member if bidirectional (both), or for non-braintree networks.
@@ -212,10 +259,10 @@ async function runSyncForMember(net: NetworkConfig, member: NetworkMember): Prom
     const shouldPush = member.direction === 'both' || member.direction === 'push';
 
     if (shouldPull) {
-      await pullFromPeer(member, spaceId, net.id, headers, fetchOpts);
+      await pullFromPeer(member, spaceId, net.id, headers, fetchOpts, batchFetchOpts);
     }
     if (shouldPush) {
-      await pushToPeer(member, spaceId, net.id, headers, fetchOpts);
+      await pushToPeer(member, spaceId, net.id, headers, fetchOpts, batchFetchOpts);
     }
 
     // Sync file manifest
@@ -237,6 +284,7 @@ async function pullFromPeer(
   networkId: string,
   headers: Record<string, string>,
   opts: RequestInit,
+  batchOpts: RequestInit,
 ): Promise<void> {
   const cfg = getConfig();
   const freshNet = cfg.networks.find(n => n.id === networkId);
@@ -256,43 +304,42 @@ async function pullFromPeer(
     log.warn(`pullFromPeer tombstones from ${member.label}: ${err}`);
   }
 
-  // Pull memories
+  // Pull memories — use full=true to return complete docs in a single pass,
+  // eliminating the N per-document secondary fetches that would be brutal over WAN.
   let highestSeq = sinceSeq;
   let cursor: string | null = null;
   let page = 0;
   do {
     const params = new URLSearchParams({
-      spaceId, networkId, sinceSeq: String(sinceSeq), limit: '200',
+      spaceId, networkId, sinceSeq: String(sinceSeq), limit: '200', full: 'true',
       ...(cursor ? { cursor } : {}),
     });
-    const resp = await fetch(`${member.url}/api/sync/memories?${params}`, opts);
+    const resp = await fetch(`${member.url}/api/sync/memories?${params}`, batchOpts);
     if (!resp.ok) { log.warn(`Pull memories from ${member.label} returned ${resp.status}`); break; }
-    const { items, nextCursor } = await resp.json() as { items: { _id: string; seq: number; deletedAt?: string }[]; nextCursor: string | null };
+    const { items, nextCursor } = await resp.json() as {
+      items: (MemoryDoc | { _id: string; seq: number; deletedAt: string })[]; nextCursor: string | null;
+    };
 
-    for (const stub of items) {
-      if (stub.deletedAt) continue; // already handled via tombstones
-      const full = await fetch(`${member.url}/api/sync/memories/${stub._id}?spaceId=${encodeURIComponent(spaceId)}&networkId=${encodeURIComponent(networkId)}`, opts);
-      if (!full.ok) continue;
-      const doc = await full.json() as MemoryDoc;
+    for (const item of items) {
+      if ('deletedAt' in item && item.deletedAt) continue; // already handled via tombstones above
+      const doc = item as MemoryDoc;
       await upsertMemory(spaceId, doc);
       if (doc.seq > highestSeq) highestSeq = doc.seq;
     }
     cursor = nextCursor;
     page++;
-  } while (cursor && page < 50); // safety: max 50 pages (~10k docs) per sync run
+  } while (cursor && page < 50);
 
   // Pull entities
   cursor = null; page = 0;
   do {
-    const params = new URLSearchParams({ spaceId, networkId, sinceSeq: String(sinceSeq), limit: '200', ...(cursor ? { cursor } : {}) });
-    const resp = await fetch(`${member.url}/api/sync/entities?${params}`, opts);
+    const params = new URLSearchParams({ spaceId, networkId, sinceSeq: String(sinceSeq), limit: '200', full: 'true', ...(cursor ? { cursor } : {}) });
+    const resp = await fetch(`${member.url}/api/sync/entities?${params}`, batchOpts);
     if (!resp.ok) break;
-    const { items, nextCursor } = await resp.json() as { items: { _id: string; seq: number }[]; nextCursor: string | null };
-    for (const stub of items) {
-      const full = await fetch(`${member.url}/api/sync/entities/${stub._id}?spaceId=${encodeURIComponent(spaceId)}&networkId=${encodeURIComponent(networkId)}`, opts);
-      if (!full.ok) continue;
-      const doc = await full.json() as EntityDoc;
-      await upsertEntity(spaceId, doc);
+    const { items, nextCursor } = await resp.json() as { items: (EntityDoc | { _id: string; seq: number; deletedAt: string })[]; nextCursor: string | null };
+    for (const item of items) {
+      if ('deletedAt' in item && item.deletedAt) continue;
+      await upsertEntity(spaceId, item as EntityDoc);
     }
     cursor = nextCursor; page++;
   } while (cursor && page < 50);
@@ -300,15 +347,13 @@ async function pullFromPeer(
   // Pull edges
   cursor = null; page = 0;
   do {
-    const params = new URLSearchParams({ spaceId, networkId, sinceSeq: String(sinceSeq), limit: '200', ...(cursor ? { cursor } : {}) });
-    const resp = await fetch(`${member.url}/api/sync/edges?${params}`, opts);
+    const params = new URLSearchParams({ spaceId, networkId, sinceSeq: String(sinceSeq), limit: '200', full: 'true', ...(cursor ? { cursor } : {}) });
+    const resp = await fetch(`${member.url}/api/sync/edges?${params}`, batchOpts);
     if (!resp.ok) break;
-    const { items, nextCursor } = await resp.json() as { items: { _id: string; seq: number }[]; nextCursor: string | null };
-    for (const stub of items) {
-      const full = await fetch(`${member.url}/api/sync/edges/${stub._id}?spaceId=${encodeURIComponent(spaceId)}&networkId=${encodeURIComponent(networkId)}`, opts);
-      if (!full.ok) continue;
-      const doc = await full.json() as EdgeDoc;
-      await upsertEdge(spaceId, doc);
+    const { items, nextCursor } = await resp.json() as { items: (EdgeDoc | { _id: string; seq: number; deletedAt: string })[]; nextCursor: string | null };
+    for (const item of items) {
+      if ('deletedAt' in item && item.deletedAt) continue;
+      await upsertEdge(spaceId, item as EdgeDoc);
     }
     cursor = nextCursor; page++;
   } while (cursor && page < 50);
@@ -334,13 +379,15 @@ async function pushToPeer(
   networkId: string,
   headers: Record<string, string>,
   opts: RequestInit,
+  batchOpts: RequestInit,
 ): Promise<void> {
-  // Get the last seq the peer has received from us (stored remotely — we ask them)
-  // Simplified: push everything from seq 0 (peers deduplicate via upsert)
-  // In production this would store the peer's last-ack seq per-space server-side.
+  const cfg = getConfig();
+  const freshNet = cfg.networks.find(n => n.id === networkId);
+  const memberState = freshNet?.members.find(m => m.instanceId === member.instanceId);
+  const lastSeqPushed = memberState?.lastSeqPushed?.[spaceId] ?? 0;
 
-  // Push tombstones
-  const myTombstones = await listTombstones(spaceId, 0, 500);
+  // Push tombstones — only those newer than the last push watermark
+  const myTombstones = await listTombstones(spaceId, lastSeqPushed, 500);
   if (myTombstones.length > 0) {
     const resp = await fetch(`${member.url}/api/sync/tombstones?spaceId=${encodeURIComponent(spaceId)}&networkId=${encodeURIComponent(networkId)}`, {
       ...opts,
@@ -350,37 +397,63 @@ async function pushToPeer(
     if (!resp.ok) log.warn(`Push tombstones to ${member.label}: ${resp.status}`);
   }
 
-  // Push memories
-  const memories = await col<MemoryDoc>(`${spaceId}_memories`).find({}).toArray() as MemoryDoc[];
-  for (const mem of memories) {
-    const resp = await fetch(`${member.url}/api/sync/memories?spaceId=${encodeURIComponent(spaceId)}&networkId=${encodeURIComponent(networkId)}`, {
-      ...opts,
-      method: 'POST',
-      body: JSON.stringify(mem),
+  // Fetch only docs changed since the last push — then send in batches via batch-upsert.
+  // This makes push O(changed) instead of O(total), and O(ceil(changed/200)) HTTP requests
+  // instead of O(changed) — critical for WAN-distributed brains.
+  const memories = await col<MemoryDoc>(`${spaceId}_memories`)
+    .find({ seq: { $gt: lastSeqPushed } } as never).sort({ seq: 1 }).toArray() as MemoryDoc[];
+  const entities = await col<EntityDoc>(`${spaceId}_entities`)
+    .find({ seq: { $gt: lastSeqPushed } } as never).sort({ seq: 1 }).toArray() as EntityDoc[];
+  const edges = await col<EdgeDoc>(`${spaceId}_edges`)
+    .find({ seq: { $gt: lastSeqPushed } } as never).sort({ seq: 1 }).toArray() as EdgeDoc[];
+
+  let maxSeqPushed = lastSeqPushed;
+
+  // Send in PUSH_BATCH_SIZE slices; stop early on persistent failure
+  const batchEndpoint = `${member.url}/api/sync/batch-upsert?spaceId=${encodeURIComponent(spaceId)}&networkId=${encodeURIComponent(networkId)}`;
+  let pushFailed = false;
+
+  for (let i = 0; i < memories.length; i += PUSH_BATCH_SIZE) {
+    if (pushFailed) break;
+    const batch = memories.slice(i, i + PUSH_BATCH_SIZE);
+    const resp = await fetch(batchEndpoint, {
+      ...batchOpts, method: 'POST',
+      body: JSON.stringify({ memories: batch }),
     });
-    if (!resp.ok) log.warn(`Push memory ${mem._id} to ${member.label}: ${resp.status}`);
+    if (!resp.ok) { log.warn(`Batch push memories to ${member.label}: ${resp.status}`); pushFailed = true; break; }
+    maxSeqPushed = Math.max(maxSeqPushed, batch[batch.length - 1]!.seq);
   }
 
-  // Push entities
-  const entities = await col<EntityDoc>(`${spaceId}_entities`).find({}).toArray() as EntityDoc[];
-  for (const ent of entities) {
-    const resp = await fetch(`${member.url}/api/sync/entities?spaceId=${encodeURIComponent(spaceId)}&networkId=${encodeURIComponent(networkId)}`, {
-      ...opts,
-      method: 'POST',
-      body: JSON.stringify(ent),
+  for (let i = 0; i < entities.length && !pushFailed; i += PUSH_BATCH_SIZE) {
+    const batch = entities.slice(i, i + PUSH_BATCH_SIZE);
+    const resp = await fetch(batchEndpoint, {
+      ...batchOpts, method: 'POST',
+      body: JSON.stringify({ entities: batch }),
     });
-    if (!resp.ok) log.warn(`Push entity ${ent._id} to ${member.label}: ${resp.status}`);
+    if (!resp.ok) { log.warn(`Batch push entities to ${member.label}: ${resp.status}`); pushFailed = true; break; }
+    maxSeqPushed = Math.max(maxSeqPushed, batch[batch.length - 1]!.seq);
   }
 
-  // Push edges
-  const edges = await col<EdgeDoc>(`${spaceId}_edges`).find({}).toArray() as EdgeDoc[];
-  for (const edge of edges) {
-    const resp = await fetch(`${member.url}/api/sync/edges?spaceId=${encodeURIComponent(spaceId)}&networkId=${encodeURIComponent(networkId)}`, {
-      ...opts,
-      method: 'POST',
-      body: JSON.stringify(edge),
+  for (let i = 0; i < edges.length && !pushFailed; i += PUSH_BATCH_SIZE) {
+    const batch = edges.slice(i, i + PUSH_BATCH_SIZE);
+    const resp = await fetch(batchEndpoint, {
+      ...batchOpts, method: 'POST',
+      body: JSON.stringify({ edges: batch }),
     });
-    if (!resp.ok) log.warn(`Push edge ${edge._id} to ${member.label}: ${resp.status}`);
+    if (!resp.ok) { log.warn(`Batch push edges to ${member.label}: ${resp.status}`); pushFailed = true; break; }
+    maxSeqPushed = Math.max(maxSeqPushed, batch[batch.length - 1]!.seq);
+  }
+
+  // Persist the push high-water mark so next sync only sends new/changed docs
+  if (maxSeqPushed > lastSeqPushed) {
+    const freshCfg = getConfig();
+    const freshNet2 = freshCfg.networks.find(n => n.id === networkId);
+    const m = freshNet2?.members.find(m => m.instanceId === member.instanceId);
+    if (m) {
+      m.lastSeqPushed ??= {};
+      m.lastSeqPushed[spaceId] = maxSeqPushed;
+      saveConfig(freshCfg);
+    }
   }
 }
 

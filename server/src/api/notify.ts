@@ -10,7 +10,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../auth/middleware.js';
 import { notifyRateLimit } from '../rate-limit/middleware.js';
-import { getConfig } from '../config/loader.js';
+import { getConfig, saveConfig } from '../config/loader.js';
 import { log } from '../util/log.js';
 
 export const notifyRouter = Router();
@@ -93,6 +93,41 @@ notifyRouter.post('/', notifyRateLimit, requireAuth, (req, res) => {
         log.error(`Triggered sync for network ${networkId} failed: ${err}`),
       );
     }).catch(err => log.error(`Failed to import sync engine: ${err}`));
+  }
+
+  // For space_deletion_pending events, trigger a sync so we pull the vote round immediately
+  if (event === 'space_deletion_pending') {
+    import('../sync/engine.js').then(({ runSyncForNetwork }) => {
+      runSyncForNetwork(networkId).catch(err =>
+        log.error(`Triggered sync (space_deletion_pending) for network ${networkId} failed: ${err}`),
+      );
+    }).catch(err => log.error(`Failed to import sync engine (space_deletion_pending): ${err}`));
+  }
+
+  // N-7: when a member departs, auto-adopt its children as direct children of this instance
+  if (event === 'member_departed' && net.type === 'braintree') {
+    const orphans = net.members.filter(m => m.parentInstanceId === instanceId);
+    if (orphans.length > 0) {
+      const cfgW = getConfig();
+      const netW = cfgW.networks.find(n => n.id === networkId);
+      if (netW) {
+        let changed = false;
+        for (const orphan of netW.members.filter(m => m.parentInstanceId === instanceId)) {
+          orphan.parentInstanceId = cfgW.instanceId;
+          const me = netW.members.find(m => m.instanceId === cfgW.instanceId);
+          if (me) {
+            me.children = me.children ?? [];
+            if (!me.children.includes(orphan.instanceId)) me.children.push(orphan.instanceId);
+          }
+          log.info(
+            `N-7 auto-adopt: re-parented '${orphan.label}' (${orphan.instanceId}) ` +
+            `from departed ${instanceId} in network '${netW.label}'`,
+          );
+          changed = true;
+        }
+        if (changed) saveConfig(cfgW);
+      }
+    }
   }
 
   res.status(204).end();

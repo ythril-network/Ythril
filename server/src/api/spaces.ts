@@ -1,9 +1,11 @@
 import { Router } from 'express';
 import { requireAuth } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
-import { getConfig } from '../config/loader.js';
+import { getConfig, saveConfig, getSecrets } from '../config/loader.js';
 import { createSpace, removeSpace, slugify } from '../spaces/spaces.js';
 import { z } from 'zod';
+import { v4 as uuidv4 } from 'uuid';
+import { log } from '../util/log.js';
 
 export const spacesRouter = Router();
 
@@ -12,6 +14,10 @@ const CreateSpaceBody = z.object({
   label: z.string().min(1).max(200),
   folders: z.array(z.string()).optional(),
   minGiB: z.number().positive().optional(),
+});
+
+const DeleteSpaceBody = z.object({
+  confirm: z.literal(true),
 });
 
 // GET /api/spaces
@@ -45,12 +51,86 @@ spacesRouter.post('/', globalRateLimit, requireAuth, async (req, res) => {
 });
 
 // DELETE /api/spaces/:id
+//
+// Solo space (not in any network): requires { "confirm": true } body to guard against accidents.
+// Networked space: opens a space_deletion vote round on every network that includes this space,
+// casts this instance's own yes vote immediately, notifies all peers, and returns 202.
+// The space is only deleted once the vote passes on each network.
 spacesRouter.delete('/:id', globalRateLimit, requireAuth, async (req, res) => {
   const id = req.params['id'] as string;
-  const ok = await removeSpace(id);
-  if (!ok) {
+  const cfg = getConfig();
+
+  const space = cfg.spaces.find(s => s.id === id);
+  if (!space) {
     res.status(404).json({ error: `Space '${id}' not found` });
     return;
   }
-  res.status(204).end();
+
+  if (space.builtIn) {
+    res.status(400).json({ error: `Space '${id}' is a built-in space and cannot be deleted` });
+    return;
+  }
+
+  const networkedIn = cfg.networks.filter(n => n.spaces.includes(id));
+
+  // ── Solo path ─────────────────────────────────────────────────────────────
+  if (networkedIn.length === 0) {
+    const body = DeleteSpaceBody.safeParse(req.body);
+    if (!body.success || !body.data.confirm) {
+      res.status(400).json({
+        error: 'This space is not in any network. Send { "confirm": true } to delete it permanently.',
+      });
+      return;
+    }
+    const ok = await removeSpace(id);
+    if (!ok) { res.status(404).json({ error: `Space '${id}' not found` }); return; }
+    res.status(204).end();
+    return;
+  }
+
+  // ── Networked path ────────────────────────────────────────────────────────
+  // Open a space_deletion vote round on every network that contains this space.
+  // This instance votes yes immediately; deletion happens once each round passes.
+  const rounds: { networkId: string; networkLabel: string; roundId: string }[] = [];
+  const now = new Date().toISOString();
+
+  for (const net of networkedIn) {
+    const roundId = uuidv4();
+    const deadline = new Date(Date.now() + net.votingDeadlineHours * 3_600_000).toISOString();
+    net.pendingRounds.push({
+      roundId,
+      type: 'space_deletion',
+      subjectInstanceId: cfg.instanceId,
+      subjectLabel: cfg.instanceLabel,
+      subjectUrl: '',       // not meaningful for space deletion
+      deadline,
+      openedAt: now,
+      votes: [{ instanceId: cfg.instanceId, vote: 'yes', castAt: now }],
+      spaceId: id,
+    });
+    rounds.push({ networkId: net.id, networkLabel: net.label, roundId });
+  }
+  saveConfig(cfg);
+
+  // Notify all peers (best-effort — failures are logged but don't abort the response)
+  const secrets = getSecrets();
+  for (const net of networkedIn) {
+    for (const member of net.members) {
+      const peerToken = secrets.peerTokens[member.instanceId];
+      if (!peerToken) continue;
+      fetch(`${member.url}/api/notify`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${peerToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          networkId: net.id,
+          instanceId: cfg.instanceId,
+          event: 'space_deletion_pending',
+          data: { spaceId: id, spaceLabel: space.label },
+        }),
+        signal: AbortSignal.timeout(5_000),
+      }).catch(err => log.warn(`notify ${member.label} of space_deletion_pending: ${err}`));
+    }
+  }
+
+  res.status(202).json({ status: 'vote_pending', rounds });
 });

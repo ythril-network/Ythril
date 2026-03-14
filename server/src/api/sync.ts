@@ -56,36 +56,35 @@ function spaceAllowed(spaceId: string, networkId?: string): boolean {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * GET /api/sync/memories?spaceId=&networkId=&sinceSeq=&limit=&cursor=
- * Returns paginated { _id, seq, deletedAt? } stubs for incremental sync.
+ * GET /api/sync/memories?spaceId=&networkId=&sinceSeq=&limit=&cursor=&full=
+ * Returns paginated stubs by default.  Add ?full=true to return complete docs
+ * in a single pass (eliminates the N per-document fetches on the pull side).
  */
 syncRouter.get('/memories', syncRateLimit, requireAuth, async (req, res) => {
   try {
-    const { spaceId, networkId, sinceSeq = '0', limit = '100', cursor } = req.query as Record<string, string>;
+    const { spaceId, networkId, sinceSeq = '0', limit = '100', cursor, full: fullParam } = req.query as Record<string, string>;
     if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
     if (!spaceAllowed(spaceId, networkId)) { res.status(403).json({ error: 'Forbidden' }); return; }
 
     const sinceVal = cursor ? decodeCursor(cursor) : parseInt(sinceSeq, 10);
     const pageSize = Math.min(parseInt(limit, 10) || 100, 500);
+    const returnFull = fullParam === 'true';
 
-    const docs = await col<MemoryDoc>(`${spaceId}_memories`)
-      .find({ seq: { $gt: sinceVal } } as never)
-      .sort({ seq: 1 })
-      .limit(pageSize + 1)
-      .project({ _id: 1, seq: 1 })
-      .toArray() as { _id: string; seq: number }[];
+    const rawDocs = returnFull
+      ? await col<MemoryDoc>(`${spaceId}_memories`).find({ seq: { $gt: sinceVal } } as never).sort({ seq: 1 }).limit(pageSize + 1).toArray() as MemoryDoc[]
+      : await col<MemoryDoc>(`${spaceId}_memories`).find({ seq: { $gt: sinceVal } } as never).sort({ seq: 1 }).limit(pageSize + 1).project({ _id: 1, seq: 1 }).toArray() as { _id: string; seq: number }[];
 
-    const hasMore = docs.length > pageSize;
-    const items = hasMore ? docs.slice(0, pageSize) : docs;
-    const nextCursor = hasMore ? encodeCursor(items[items.length - 1]!.seq) : null;
+    const hasMore = rawDocs.length > pageSize;
+    const items: typeof rawDocs = hasMore ? rawDocs.slice(0, pageSize) : rawDocs;
+    const nextCursor = hasMore ? encodeCursor((items[items.length - 1] as { seq: number }).seq) : null;
 
-    // Also include any tombstones in this range
+    // Tombstone stubs are always appended (tombstones are stubs regardless of full mode)
     const tombstones = await listTombstones(spaceId, sinceVal, pageSize);
     const tombs = tombstones
       .filter(t => t.type === 'memory')
       .map(t => ({ _id: t._id, seq: t.seq, deletedAt: t.deletedAt }));
 
-    res.json({ items: [...items, ...tombs].sort((a, b) => a.seq - b.seq), nextCursor });
+    res.json({ items: [...items, ...tombs].sort((a, b) => (a as { seq: number }).seq - (b as { seq: number }).seq), nextCursor });
   } catch (err) {
     log.error(`sync GET memories: ${err}`);
     res.status(500).json({ error: 'Internal error' });
@@ -183,30 +182,28 @@ syncRouter.post('/memories', syncRateLimit, requireAuth, async (req, res) => {
 
 syncRouter.get('/entities', syncRateLimit, requireAuth, async (req, res) => {
   try {
-    const { spaceId, networkId, sinceSeq = '0', limit = '100', cursor } = req.query as Record<string, string>;
+    const { spaceId, networkId, sinceSeq = '0', limit = '100', cursor, full: fullParam } = req.query as Record<string, string>;
     if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
     if (!spaceAllowed(spaceId, networkId)) { res.status(403).json({ error: 'Forbidden' }); return; }
 
     const sinceVal = cursor ? decodeCursor(cursor) : parseInt(sinceSeq, 10);
     const pageSize = Math.min(parseInt(limit, 10) || 100, 500);
+    const returnFull = fullParam === 'true';
 
-    const docs = await col<EntityDoc>(`${spaceId}_entities`)
-      .find({ seq: { $gt: sinceVal } } as never)
-      .sort({ seq: 1 })
-      .limit(pageSize + 1)
-      .project({ _id: 1, seq: 1 })
-      .toArray() as { _id: string; seq: number }[];
+    const rawDocs = returnFull
+      ? await col<EntityDoc>(`${spaceId}_entities`).find({ seq: { $gt: sinceVal } } as never).sort({ seq: 1 }).limit(pageSize + 1).toArray() as EntityDoc[]
+      : await col<EntityDoc>(`${spaceId}_entities`).find({ seq: { $gt: sinceVal } } as never).sort({ seq: 1 }).limit(pageSize + 1).project({ _id: 1, seq: 1 }).toArray() as { _id: string; seq: number }[];
 
-    const hasMore = docs.length > pageSize;
-    const items = hasMore ? docs.slice(0, pageSize) : docs;
-    const nextCursor = hasMore ? encodeCursor(items[items.length - 1]!.seq) : null;
+    const hasMore = rawDocs.length > pageSize;
+    const items: typeof rawDocs = hasMore ? rawDocs.slice(0, pageSize) : rawDocs;
+    const nextCursor = hasMore ? encodeCursor((items[items.length - 1] as { seq: number }).seq) : null;
 
     const tombstones = await listTombstones(spaceId, sinceVal, pageSize);
     const tombs = tombstones
       .filter(t => t.type === 'entity')
       .map(t => ({ _id: t._id, seq: t.seq, deletedAt: t.deletedAt }));
 
-    res.json({ items: [...items, ...tombs].sort((a, b) => a.seq - b.seq), nextCursor });
+    res.json({ items: [...items, ...tombs].sort((a, b) => (a as { seq: number }).seq - (b as { seq: number }).seq), nextCursor });
   } catch (err) {
     log.error(`sync GET entities: ${err}`);
     res.status(500).json({ error: 'Internal error' });
@@ -271,30 +268,28 @@ syncRouter.post('/entities', syncRateLimit, requireAuth, async (req, res) => {
 
 syncRouter.get('/edges', syncRateLimit, requireAuth, async (req, res) => {
   try {
-    const { spaceId, networkId, sinceSeq = '0', limit = '100', cursor } = req.query as Record<string, string>;
+    const { spaceId, networkId, sinceSeq = '0', limit = '100', cursor, full: fullParam } = req.query as Record<string, string>;
     if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
     if (!spaceAllowed(spaceId, networkId)) { res.status(403).json({ error: 'Forbidden' }); return; }
 
     const sinceVal = cursor ? decodeCursor(cursor) : parseInt(sinceSeq, 10);
     const pageSize = Math.min(parseInt(limit, 10) || 100, 500);
+    const returnFull = fullParam === 'true';
 
-    const docs = await col<EdgeDoc>(`${spaceId}_edges`)
-      .find({ seq: { $gt: sinceVal } } as never)
-      .sort({ seq: 1 })
-      .limit(pageSize + 1)
-      .project({ _id: 1, seq: 1 })
-      .toArray() as { _id: string; seq: number }[];
+    const rawDocs = returnFull
+      ? await col<EdgeDoc>(`${spaceId}_edges`).find({ seq: { $gt: sinceVal } } as never).sort({ seq: 1 }).limit(pageSize + 1).toArray() as EdgeDoc[]
+      : await col<EdgeDoc>(`${spaceId}_edges`).find({ seq: { $gt: sinceVal } } as never).sort({ seq: 1 }).limit(pageSize + 1).project({ _id: 1, seq: 1 }).toArray() as { _id: string; seq: number }[];
 
-    const hasMore = docs.length > pageSize;
-    const items = hasMore ? docs.slice(0, pageSize) : docs;
-    const nextCursor = hasMore ? encodeCursor(items[items.length - 1]!.seq) : null;
+    const hasMore = rawDocs.length > pageSize;
+    const items: typeof rawDocs = hasMore ? rawDocs.slice(0, pageSize) : rawDocs;
+    const nextCursor = hasMore ? encodeCursor((items[items.length - 1] as { seq: number }).seq) : null;
 
     const tombstones = await listTombstones(spaceId, sinceVal, pageSize);
     const tombs = tombstones
       .filter(t => t.type === 'edge')
       .map(t => ({ _id: t._id, seq: t.seq, deletedAt: t.deletedAt }));
 
-    res.json({ items: [...items, ...tombs].sort((a, b) => a.seq - b.seq), nextCursor });
+    res.json({ items: [...items, ...tombs].sort((a, b) => (a as { seq: number }).seq - (b as { seq: number }).seq), nextCursor });
   } catch (err) {
     log.error(`sync GET edges: ${err}`);
     res.status(500).json({ error: 'Internal error' });
@@ -346,6 +341,104 @@ syncRouter.post('/edges', syncRateLimit, requireAuth, async (req, res) => {
     res.status(200).json({ status: 'ok' });
   } catch (err) {
     log.error(`sync POST edges: ${err}`);
+    res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BATCH UPSERT
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * POST /api/sync/batch-upsert?spaceId=&networkId=
+ * Accept arrays of memories, entities and/or edges and upsert them all in one
+ * request.  Same conflict rules as the individual POST endpoints.
+ * Limits: 500 docs per type per request to cap payload size.
+ */
+syncRouter.post('/batch-upsert', syncRateLimit, requireAuth, async (req, res) => {
+  try {
+    const { spaceId, networkId } = req.query as Record<string, string>;
+    if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
+    if (!spaceAllowed(spaceId, networkId)) { res.status(403).json({ error: 'Forbidden' }); return; }
+
+    const body = req.body as { memories?: MemoryDoc[]; entities?: EntityDoc[]; edges?: EdgeDoc[] };
+    const memories = Array.isArray(body?.memories) ? body.memories.slice(0, 500) : [];
+    const entities = Array.isArray(body?.entities) ? body.entities.slice(0, 500) : [];
+    const edges    = Array.isArray(body?.edges)    ? body.edges.slice(0, 500)    : [];
+
+    // ── Memories ─────────────────────────────────────────────────────────
+    const memStats = { inserted: 0, updated: 0, forked: 0, skipped: 0, tombstoned: 0 };
+    for (const incoming of memories) {
+      if (!incoming?._id || typeof incoming.seq !== 'number') continue;
+      const tomb = await col<TombstoneDoc>(`${spaceId}_tombstones`)
+        .findOne({ _id: incoming._id, type: 'memory' } as never) as TombstoneDoc | null;
+      if (tomb && tomb.seq >= incoming.seq) { memStats.tombstoned++; continue; }
+
+      const existing = await col<MemoryDoc>(`${spaceId}_memories`)
+        .findOne({ _id: incoming._id } as never) as MemoryDoc | null;
+      if (!existing) {
+        await col<MemoryDoc>(`${spaceId}_memories`).insertOne(incoming as never);
+        memStats.inserted++;
+      } else if (incoming.seq > existing.seq) {
+        await col<MemoryDoc>(`${spaceId}_memories`).replaceOne({ _id: incoming._id } as never, incoming as never);
+        memStats.updated++;
+      } else if (incoming.seq === existing.seq && incoming.fact !== existing.fact) {
+        const { v4: uuidv4 } = await import('uuid');
+        const forkSeq = await nextSeq(spaceId);
+        const fork: MemoryDoc = {
+          ...incoming, _id: uuidv4(), forkOf: incoming._id, seq: forkSeq,
+          createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+        };
+        await col<MemoryDoc>(`${spaceId}_memories`).insertOne(fork as never);
+        memStats.forked++;
+      } else {
+        memStats.skipped++;
+      }
+    }
+
+    // ── Entities ─────────────────────────────────────────────────────────
+    const entStats = { upserted: 0, skipped: 0, tombstoned: 0 };
+    for (const incoming of entities) {
+      if (!incoming?._id || typeof incoming.seq !== 'number') continue;
+      const tomb = await col<TombstoneDoc>(`${spaceId}_tombstones`)
+        .findOne({ _id: incoming._id, type: 'entity' } as never) as TombstoneDoc | null;
+      if (tomb && tomb.seq >= incoming.seq) { entStats.tombstoned++; continue; }
+
+      const existing = await col<EntityDoc>(`${spaceId}_entities`)
+        .findOne({ _id: incoming._id } as never) as EntityDoc | null;
+      if (!existing || incoming.seq > existing.seq) {
+        await col<EntityDoc>(`${spaceId}_entities`).replaceOne(
+          { _id: incoming._id } as never, incoming as never, { upsert: true },
+        );
+        entStats.upserted++;
+      } else {
+        entStats.skipped++;
+      }
+    }
+
+    // ── Edges ─────────────────────────────────────────────────────────────
+    const edgeStats = { upserted: 0, skipped: 0, tombstoned: 0 };
+    for (const incoming of edges) {
+      if (!incoming?._id || typeof incoming.seq !== 'number') continue;
+      const tomb = await col<TombstoneDoc>(`${spaceId}_tombstones`)
+        .findOne({ _id: incoming._id, type: 'edge' } as never) as TombstoneDoc | null;
+      if (tomb && tomb.seq >= incoming.seq) { edgeStats.tombstoned++; continue; }
+
+      const existing = await col<EdgeDoc>(`${spaceId}_edges`)
+        .findOne({ _id: incoming._id } as never) as EdgeDoc | null;
+      if (!existing || incoming.seq > existing.seq) {
+        await col<EdgeDoc>(`${spaceId}_edges`).replaceOne(
+          { _id: incoming._id } as never, incoming as never, { upsert: true },
+        );
+        edgeStats.upserted++;
+      } else {
+        edgeStats.skipped++;
+      }
+    }
+
+    res.status(200).json({ status: 'ok', memories: memStats, entities: entStats, edges: edgeStats });
+  } catch (err) {
+    log.error(`sync POST batch-upsert: ${err}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -554,6 +647,16 @@ syncRouter.post('/networks/:networkId/votes/:roundId', syncRateLimit, requireAut
 
     // Check if the round should auto-conclude
     concludeRoundIfReady(net, round);
+
+    // If a space_deletion round just passed, remove the space on this instance
+    if (round.concluded && round.type === 'space_deletion') {
+      const vetoCount = round.votes.filter(v => v.vote === 'veto').length;
+      if (vetoCount === 0 && round.spaceId) {
+        import('../spaces/spaces.js').then(({ removeSpace }) => {
+          removeSpace(round.spaceId!).catch(err => log.error(`space_deletion gossip side-effect: ${err}`));
+        }).catch(err => log.error(`space_deletion import: ${err}`));
+      }
+    }
 
     saveConfig(cfg);
     res.status(200).json({ status: 'ok' });

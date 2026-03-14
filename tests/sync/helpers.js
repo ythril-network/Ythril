@@ -49,6 +49,14 @@ export async function del(baseUrl, token, path) {
   return reqJson(baseUrl, token, path, { method: 'DELETE' });
 }
 
+/** DELETE with JSON body */
+export async function delWithBody(baseUrl, token, path, data) {
+  return reqJson(baseUrl, token, path, {
+    method: 'DELETE',
+    body: JSON.stringify(data),
+  });
+}
+
 /** GET */
 export async function get(baseUrl, token, path) {
   return reqJson(baseUrl, token, path);

@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del } from './sync/helpers.js';
+import { INSTANCES, post, get, del, delWithBody } from './sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'sync', 'configs');
@@ -31,9 +31,10 @@ describe('Space management', () => {
   });
 
   after(async () => {
-    // Clean up any spaces we created
+    // Clean up any spaces we created.
+    // Use { confirm: true } body since solo-space deletion now requires it.
     for (const id of createdSpaceIds) {
-      await del(INSTANCES.a, tokenA, `/api/spaces/${id}`).catch(() => {});
+      await delWithBody(INSTANCES.a, tokenA, `/api/spaces/${id}`, { confirm: true }).catch(() => {});
     }
   });
 
@@ -111,5 +112,36 @@ describe('Space management', () => {
   it('Delete non-existent space returns 404', async () => {
     const r = await del(INSTANCES.a, tokenA, '/api/spaces/does-not-exist');
     assert.equal(r.status, 404);
+  });
+
+  it('Delete solo space without { confirm: true } body is rejected with 400', async () => {
+    const created = await post(INSTANCES.a, tokenA, '/api/spaces', { label: 'Gov Solo No-Confirm' });
+    assert.equal(created.status, 201);
+    const spaceId = created.body.space?.id;
+    createdSpaceIds.push(spaceId);
+
+    const r = await del(INSTANCES.a, tokenA, `/api/spaces/${spaceId}`);
+    assert.equal(r.status, 400, `Expected 400, got ${r.status}`);
+    assert.ok(
+      r.body?.error?.toLowerCase().includes('confirm'),
+      `Error should mention 'confirm', got: ${r.body?.error}`,
+    );
+  });
+
+  it('Delete solo space with { confirm: true } succeeds immediately — 204', async () => {
+    const created = await post(INSTANCES.a, tokenA, '/api/spaces', { label: 'Gov Solo Confirm-Del' });
+    assert.equal(created.status, 201);
+    const spaceId = created.body.space?.id;
+    // Don't push to createdSpaceIds — we're deleting it in this test
+
+    const r = await delWithBody(INSTANCES.a, tokenA, `/api/spaces/${spaceId}`, { confirm: true });
+    assert.equal(r.status, 204, `Expected 204, got ${r.status}`);
+
+    // Must no longer appear in the space list
+    const listR = await get(INSTANCES.a, tokenA, '/api/spaces');
+    assert.ok(
+      !listR.body?.spaces?.some(s => s.id === spaceId),
+      'Space must not appear in list after confirmed deletion',
+    );
   });
 });
