@@ -7,7 +7,7 @@
       "name": "test-token",
       "hash": "$2b$12$jiDdW0MO/klsn/YKimPPj.1tA/ZcQLjzMv9qK5KfR/qSmmwIW/dz2",
       "createdAt": "2026-03-14T20:55:00.189Z",
-      "lastUsed": "2026-03-14T21:36:40.413Z",
+      "lastUsed": "2026-03-14T21:46:56.362Z",
       "expiresAt": null
     },
     {
@@ -57,6 +57,70 @@
       "createdAt": "2026-03-14T21:36:40.571Z",
       "lastUsed": null,
       "expiresAt": null
+    },
+    {
+      "id": "39cfdcf8-0405-4e8c-a043-0d508cc17fe1",
+      "name": "peer-rsa-handshake-a",
+      "hash": "$2b$12$O56dSvo0A2XvGhPmWEIwZuL5qPQbkqZqnLh0k7lhiZ4v3vz7qboJG",
+      "createdAt": "2026-03-14T21:41:05.666Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "68b1265e-d07b-4b84-b57c-7170e4d52def",
+      "name": "peer-rsa-handshake-a",
+      "hash": "$2b$12$TjE7L4fG2eyae6zOwRfOguY0DNfaK5/iAU.5xPm3qdGS3p86mF.iK",
+      "createdAt": "2026-03-14T21:42:11.043Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "1661f0c6-f368-43a5-83e0-52089fd130b0",
+      "name": "peer-rsa-handshake-a",
+      "hash": "$2b$12$wnJY23YCluftqPywcJmGS.NiIF0Dx14Ux/QOXhCwZVks85VGam7Ae",
+      "createdAt": "2026-03-14T21:44:02.317Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "85724262-dac5-4feb-af9d-4b7782321158",
+      "name": "peer-rsa-handshake-a",
+      "hash": "$2b$12$lvGZOaeHKfU3uGMxHErSXut1Px5MuiSIuOBNEouUnS5lQJvF4Rdui",
+      "createdAt": "2026-03-14T21:44:42.464Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "1e3d51c2-1790-4343-aea7-eca139dde58b",
+      "name": "peer-rsa-handshake-a",
+      "hash": "$2b$12$h7yPBvbLkLDu07o7su6lhudhR8rH6GZjbk6rjZu4Nk1nNQAkVM4nG",
+      "createdAt": "2026-03-14T21:45:42.929Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "69ee0cc7-0836-478f-b27c-904d312fc3c6",
+      "name": "bt-peer-a",
+      "hash": "$2b$12$RrR9tOiCIFvgTLXW18yFV.3c34F8I9FV6XOsrH6KD/rh7N9bdcDOq",
+      "createdAt": "2026-03-14T21:45:59.209Z",
+      "lastUsed": "2026-03-14T21:46:03.227Z",
+      "expiresAt": null
+    },
+    {
+      "id": "72c1df45-c545-4d49-9408-040ea3d21bad",
+      "name": "peer-token-a",
+      "hash": "$2b$12$V.qE2SpivIurg835MsG0tOe3EasCnsrdBNWbU5IB6rM3iTf4bqd/e",
+      "createdAt": "2026-03-14T21:46:06.528Z",
+      "lastUsed": "2026-03-14T21:46:10.713Z",
+      "expiresAt": null
+    },
+    {
+      "id": "4ebed985-e8a9-498a-8463-f9d7a827a7fb",
+      "name": "dem-peer-a",
+      "hash": "$2b$12$c2CXkGT58Vhkc07hG3wfyusWHKOu2.Od6oz/fJ3VMA/LXZo4cg.G2",
+      "createdAt": "2026-03-14T21:46:11.835Z",
+      "lastUsed": null,
+      "expiresAt": null
     }
   ],
   "spaces": [
@@ -89,6 +153,28 @@
       ],
       "pendingRounds": [],
       "createdAt": "2026-03-14T20:55:29.499Z"
+    },
+    {
+      "id": "f6d04e4f-1b46-4f83-9bbd-076e35e34665",
+      "label": "Test Braintree",
+      "type": "braintree",
+      "spaces": [
+        "general"
+      ],
+      "votingDeadlineHours": 24,
+      "members": [
+        {
+          "instanceId": "instance-c",
+          "label": "Instance C",
+          "url": "http://ythril-c:3200",
+          "tokenHash": "$2b$12$RDnXJuE7.Nt8OgrHrc85zOen3TTXJijBbVdZrA6SjtmE6fuqfQzSe",
+          "direction": "push",
+          "parentInstanceId": "instance-b",
+          "lastSyncAt": "2026-03-14T21:46:04.649Z"
+        }
+      ],
+      "pendingRounds": [],
+      "createdAt": "2026-03-14T21:45:59.597Z"
     }
   ],
   "setup": {

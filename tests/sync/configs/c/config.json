@@ -7,7 +7,7 @@
       "name": "test-token",
       "hash": "$2b$12$yFXQK2EqyPXI7AjIgkOeB.PG.qDqZKzCXCEsjgsT0sEndyxVc1bWS",
       "createdAt": "2026-03-14T20:55:01.997Z",
-      "lastUsed": "2026-03-14T21:22:04.588Z",
+      "lastUsed": "2026-03-14T21:46:53.393Z",
       "expiresAt": null
     },
     {
@@ -127,6 +127,124 @@
       "createdAt": "2026-03-14T21:22:05.071Z",
       "lastUsed": null,
       "expiresAt": null
+    },
+    {
+      "id": "8aed80ac-24e1-42d9-b8e0-48bad25c9be7",
+      "name": "rl-probe",
+      "hash": "$2b$12$qeYsKJ4qeST8MIkWmxn7DOKBGdTvJtO2mahsK/SFqSmItflef1nDK",
+      "createdAt": "2026-03-14T21:44:11.578Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "753eaf53-4b53-4f2a-bfff-2906d07e5c86",
+      "name": "rl-burst-0",
+      "hash": "$2b$12$I1ycCnlbqTaZ/GoHwzddwe5xsAIAunHdFynx3JlVX5bwJc147HqjO",
+      "createdAt": "2026-03-14T21:44:11.782Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "f0f01b55-915e-4b07-a3cc-e1083e141489",
+      "name": "rl-burst-1",
+      "hash": "$2b$12$QmGDwd64llXzZfFu271CquouL6NIf2q9LhAA7zpwIkcTvE0mfBeDq",
+      "createdAt": "2026-03-14T21:44:11.787Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "99f8a7c5-0596-428b-9f1e-b6c6a654e8dd",
+      "name": "rl-burst-2",
+      "hash": "$2b$12$8MkPp7igBxMhGfZVX4JqoeDemQq198K0suhEIB/HSl6i1Aqhtpux.",
+      "createdAt": "2026-03-14T21:44:11.792Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "61bc92f5-9c2c-4516-8240-6274ef5f6aea",
+      "name": "rl-burst-3",
+      "hash": "$2b$12$BrYgSEfK9smYu6X68cqfmOMBS7f9LmVQ5gk1EEb5DV8iBh5GKH8FK",
+      "createdAt": "2026-03-14T21:44:11.796Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "86dc69b9-8c55-4f9f-aaa7-c81a1a7a69ea",
+      "name": "rl-burst-4",
+      "hash": "$2b$12$bzhjTkjhMmUN.1eb0PrM3.id7hmRG4pmUXlNCuxIornYqNz7pv0ze",
+      "createdAt": "2026-03-14T21:44:11.961Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "9eadb0de-9a43-4885-a916-1b85d4fb0647",
+      "name": "rl-burst-6",
+      "hash": "$2b$12$H5m1b6aXWWS79FwEeQ6vPexpLCFArh3zMHX3Bg3sjEf0yFYfSJ/Vm",
+      "createdAt": "2026-03-14T21:44:11.965Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "23bb9594-ccae-4fde-8442-8fe5da5060c1",
+      "name": "rl-burst-5",
+      "hash": "$2b$12$zRydqq.7Ct5kcWE1EvW76uRlNcNIJrzh3cDkZrOIAYR5eTN5RJUXi",
+      "createdAt": "2026-03-14T21:44:11.969Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "6cb6f93c-c48b-4c3c-adab-e9e65b0998ad",
+      "name": "rl-burst-7",
+      "hash": "$2b$12$g4tU3tfD4bzM.gmxJFcRp.BD9uykHZF/2eDc5F/rORB5dJaes197u",
+      "createdAt": "2026-03-14T21:44:11.974Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "8029932b-a756-47b9-b623-3fa005405a14",
+      "name": "rl-burst-8",
+      "hash": "$2b$12$Jj82Gtezq1jQ1KDvXJ8tauIul6dYoYYp7jBjmC30.YO4UlFk.mWt2",
+      "createdAt": "2026-03-14T21:44:12.125Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "22487c80-a7ac-4252-ba0f-0919d4b640cc",
+      "name": "bt-peer-b",
+      "hash": "$2b$12$RR.Ed8azYT9/nqU6GMouYOlB3w57FMkhkD/Iol8sDfQJ2rXcjNCPi",
+      "createdAt": "2026-03-14T21:45:59.378Z",
+      "lastUsed": "2026-03-14T21:46:04.641Z",
+      "expiresAt": null
+    },
+    {
+      "id": "e6b6a13f-9baf-4bee-8075-804a230da031",
+      "name": "dem-peer-c",
+      "hash": "$2b$12$CHVLIY6sFcLPu2KbW8pAxeLRumeg6OA/DNWQm4wBpEM6p3tJuZImi",
+      "createdAt": "2026-03-14T21:46:12.259Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "e7bb876c-5299-4524-b872-f5078dada9de",
+      "name": "peer:B-apply-test (handshake)",
+      "hash": "$2b$12$RtYsHppVvI2thsoPOdymAONfnJi5NaKwhsHYI4qeeuwwgoecxdle.",
+      "createdAt": "2026-03-14T21:46:50.136Z",
+      "lastUsed": null,
+      "expiresAt": null,
+      "spaces": [
+        "general"
+      ]
+    },
+    {
+      "id": "68ae8148-50e3-4587-9047-487e4a4ac6ed",
+      "name": "peer:B-finalize-bad (handshake)",
+      "hash": "$2b$12$4kJG0T.tnMkyeNZrpy5uK.ocAvFwBn3iN0y2pI4LQR4GVpAdPW6aG",
+      "createdAt": "2026-03-14T21:46:52.346Z",
+      "lastUsed": null,
+      "expiresAt": null,
+      "spaces": [
+        "general"
+      ]
     }
   ],
   "spaces": [

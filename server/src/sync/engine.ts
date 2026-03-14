@@ -34,6 +34,15 @@ import { getDataRoot } from '../config/loader.js';
 import { createHash } from 'node:crypto';
 import { resolveSafePath } from '../files/sandbox.js';
 
+// Timeout for every outbound fetch to a peer.
+// Without this, the OS TCP timeout (~75 s on Linux) applies, which means one
+// offline peer can block an entire sync cycle by that duration per attempt.
+const FETCH_TIMEOUT_MS = 10_000;
+
+// After this many consecutive sync failures for a single member, we emit a
+// prominent warning. The member is NOT auto-removed — that is a human decision.
+const STALE_FAILURE_THRESHOLD = 10;
+
 // ── Cron scheduler ─────────────────────────────────────────────────────────
 
 const _scheduledTimers = new Map<string, ReturnType<typeof setInterval>>();
@@ -97,6 +106,27 @@ function parseSyncSchedule(s: string): number | null {
 
 // ── Per-network sync ────────────────────────────────────────────────────────
 
+/** Increment the consecutive failure counter for a member and persist it. Returns new count. */
+function _incrementFailureCount(networkId: string, instanceId: string): number {
+  const cfg = getConfig();
+  const net = cfg.networks.find(n => n.id === networkId);
+  const member = net?.members.find(m => m.instanceId === instanceId);
+  if (!member) return 1;
+  member.consecutiveFailures = (member.consecutiveFailures ?? 0) + 1;
+  saveConfig(cfg);
+  return member.consecutiveFailures;
+}
+
+/** Reset (or set) the consecutive failure counter for a member and persist it. */
+function _persistFailureCount(networkId: string, instanceId: string, value: number): void {
+  const cfg = getConfig();
+  const net = cfg.networks.find(n => n.id === networkId);
+  const member = net?.members.find(m => m.instanceId === instanceId);
+  if (!member) return;
+  member.consecutiveFailures = value;
+  saveConfig(cfg);
+}
+
 /** Run a full sync cycle for a network: iterate members and sync each space. */
 export async function runSyncForNetwork(networkId: string): Promise<{ synced: number; errors: number }> {
   const cfg = getConfig();
@@ -110,9 +140,39 @@ export async function runSyncForNetwork(networkId: string): Promise<{ synced: nu
     try {
       await runSyncForMember(net, member);
       synced++;
+      // Reset failure counter on success
+      _persistFailureCount(net.id, member.instanceId, 0);
+
+      // If any members were temporarily re-parented away from this peer while it was
+      // offline, now is the right moment to surface the choice to the admin.
+      const reparentedChildren = net.members.filter(
+        m => m.originalParentInstanceId === member.instanceId,
+      );
+      for (const rc of reparentedChildren) {
+        log.warn(
+          `REPARENT_REVERT_AVAILABLE: original parent '${member.label}' is back online. ` +
+          `'${rc.label}' (${rc.instanceId}) was temporarily re-parented during the outage. ` +
+          `To restore original topology: POST /api/networks/${net.id}/members/${rc.instanceId}/revert-parent. ` +
+          `To make the adoption permanent:  POST /api/networks/${net.id}/members/${rc.instanceId}/adopt.`,
+        );
+      }
     } catch (err) {
       log.error(`Sync failed for member ${member.label} (${member.instanceId}): ${err}`);
       errors++;
+      const failures = _incrementFailureCount(net.id, member.instanceId);
+      if (failures === STALE_FAILURE_THRESHOLD) {
+        const hasChildren = net.type === 'braintree' && (member.children?.length ?? 0) > 0;
+        log.warn(
+          `PEER UNREACHABLE: '${member.label}' in network '${net.label}' has failed ` +
+          `${failures} consecutive sync cycles. Last success: ${member.lastSyncAt ?? 'never'}. ` +
+          `Member has NOT been removed — manual action required.` +
+          (hasChildren
+            ? ` NOTE: this node has ${member.children!.length} child(ren) in a braintree network — its entire subtree is now partitioned from this brain until it comes back online.`
+            : ''),
+        );
+      } else if (failures > STALE_FAILURE_THRESHOLD && failures % 10 === 0) {
+        log.warn(`PEER STILL UNREACHABLE: '${member.label}' (${failures} consecutive failures, last success: ${member.lastSyncAt ?? 'never'})`);
+      }
     }
   }
 
@@ -137,6 +197,7 @@ async function runSyncForMember(net: NetworkConfig, member: NetworkMember): Prom
 
   const fetchOpts: RequestInit = {
     headers,
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     // Node 18/22 fetch doesn't support skipTlsVerify natively.
     // For skipTlsVerify, we use an undici dispatcher via env override only in non-prod.
     // Production environments use trusted certs — skipTlsVerify is a dev-only escape hatch.

@@ -77,6 +77,9 @@ interface HandshakeSession {
     instanceUrl: string;
   };
   expiresAt: number; // epoch ms
+  /** When set, this session is a braintree reparent, not a new join.
+   *  The instanceId of the grandchild being temporarily re-parented. */
+  reparentInstanceId?: string;
 }
 
 const _sessions = new Map<string, HandshakeSession>();
@@ -96,6 +99,9 @@ setInterval(purgeExpired, 5 * 60 * 1000).unref();
 
 const GenerateBody = z.object({
   networkId: z.string().uuid(),
+  /** When set, this invite is a braintree reparent — not a new join.
+   *  The target must already be a member whose parent is offline. */
+  reparentInstanceId: z.string().uuid().optional(),
 });
 
 const ApplyBody = z.object({
@@ -152,10 +158,26 @@ inviteRouter.post('/generate', globalRateLimit, requireAuth, async (req, res) =>
   const parsed = GenerateBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
 
-  const { networkId } = parsed.data;
+  const { networkId, reparentInstanceId } = parsed.data;
   const cfg = getConfig();
   const net = cfg.networks.find(n => n.id === networkId);
   if (!net) { res.status(404).json({ error: 'Network not found' }); return; }
+
+  if (reparentInstanceId) {
+    if (net.type !== 'braintree') {
+      res.status(400).json({ error: 'reparentInstanceId is only valid for braintree networks' });
+      return;
+    }
+    const target = net.members.find(m => m.instanceId === reparentInstanceId);
+    if (!target) {
+      res.status(404).json({ error: 'reparentInstanceId is not a member of this network' });
+      return;
+    }
+    if ((target.consecutiveFailures ?? 0) < 10) {
+      // Warn but don't block — admin may want to reparent proactively
+      log.warn(`Reparent invite generated for '${target.label}' whose parent does not yet appear offline (${target.consecutiveFailures ?? 0} consecutive failures)`);
+    }
+  }
 
   // Generate ephemeral RSA-4096 key pair (OAEP safe for ~470-byte payloads; our PATs are ~44 bytes)
   const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
@@ -175,9 +197,12 @@ inviteRouter.post('/generate', globalRateLimit, requireAuth, async (req, res) =>
     privateKeyPem: privateKey as string,
     publicKeyPem: publicKey as string,
     expiresAt,
+    reparentInstanceId,
   });
 
-  log.info(`Invite handshake generated for network ${networkId} (session ${sessionKey})`);
+  log.info(`Invite handshake generated for network ${networkId} (session ${sessionKey})${
+    reparentInstanceId ? ` [reparent target: ${reparentInstanceId}]` : ''
+  }`);
 
   res.status(201).json({
     handshakeId,
@@ -216,10 +241,13 @@ inviteRouter.post('/apply', authRateLimit, async (req, res) => {
   const net = cfg.networks.find(n => n.id === networkId);
   if (!net) { res.status(404).json({ error: 'Network not found' }); return; }
 
-  // Ensure the joining instance is not already a member
+  // Ensure the joining instance is not already a member — unless this is a reparent session
+  // targeting exactly that instance (the grandchild re-applying under a new parent).
   if (net.members.some(m => m.instanceId === instanceId)) {
-    res.status(409).json({ error: 'Instance is already a member of this network' });
-    return;
+    if (!session.reparentInstanceId || session.reparentInstanceId !== instanceId) {
+      res.status(409).json({ error: 'Instance is already a member of this network' });
+      return;
+    }
   }
 
   // Validate the peer's RSA public key is parseable before proceeding
@@ -294,7 +322,7 @@ inviteRouter.post('/finalize', authRateLimit, async (req, res) => {
 
   const { instanceId, instanceLabel, instanceUrl } = session.pendingMember;
 
-  // Add the new member to the network config
+  // Commit to config
   const cfg = getConfig();
   const net = cfg.networks.find(n => n.id === session.networkId);
   if (!net) { res.status(404).json({ error: 'Network not found' }); return; }
@@ -302,31 +330,68 @@ inviteRouter.post('/finalize', authRateLimit, async (req, res) => {
   // Hash B's token for inbound validation (stored in member record)
   const tokenHash = await bcrypt.hash(peerToken, BCRYPT_ROUNDS);
 
-  const newMember: NetworkMember = {
-    instanceId,
-    label: instanceLabel,
-    url: instanceUrl,
-    tokenHash,
-    direction: net.type === 'braintree' ? 'push' : 'both',
-    lastSyncAt: undefined,
-    lastSeqReceived: {},
-    children: net.type === 'braintree' ? [] : undefined,
-  };
-
-  net.members.push(newMember);
-  saveConfig(cfg);
-
   // Store A's outbound token for B (the one B generated for A to use)
   const secrets = getSecrets();
   secrets.peerTokens[instanceId] = peerToken;
   saveSecrets(secrets);
 
+  let responseStatus: 'joined' | 'reparented';
+
+  if (session.reparentInstanceId) {
+    // ── Reparent path ───────────────────────────────────────────────────────
+    // Update the existing member record instead of creating a new one.
+    const target = net.members.find(m => m.instanceId === session.reparentInstanceId);
+    if (!target) {
+      res.status(400).json({ error: 'Reparent target member not found — was it removed?' });
+      return;
+    }
+
+    // Remove from old parent's children array
+    if (target.parentInstanceId) {
+      const oldParent = net.members.find(m => m.instanceId === target.parentInstanceId);
+      if (oldParent?.children) {
+        oldParent.children = oldParent.children.filter(c => c !== session.reparentInstanceId);
+      }
+    }
+
+    // Save old parent before overwriting, set new parent to this instance
+    target.originalParentInstanceId = target.parentInstanceId;
+    target.parentInstanceId = cfg.instanceId;
+    target.tokenHash = tokenHash;
+    target.consecutiveFailures = 0;
+    target.lastSeqReceived ??= {};
+
+    // Add to this instance's children array
+    const selfInNet = net.members.find(m => m.instanceId === cfg.instanceId);
+    if (selfInNet?.children && !selfInNet.children.includes(session.reparentInstanceId)) {
+      selfInNet.children.push(session.reparentInstanceId);
+    }
+
+    log.info(`Reparent handshake complete: '${instanceLabel}' (${instanceId}) temporarily re-parented to this instance in network ${session.networkId}`);
+    responseStatus = 'reparented';
+  } else {
+    // ── Normal join path ────────────────────────────────────────────────────
+    const newMember: NetworkMember = {
+      instanceId,
+      label: instanceLabel,
+      url: instanceUrl,
+      tokenHash,
+      direction: net.type === 'braintree' ? 'push' : 'both',
+      lastSyncAt: undefined,
+      lastSeqReceived: {},
+      children: net.type === 'braintree' ? [] : undefined,
+    };
+    net.members.push(newMember);
+    log.info(`Invite handshake complete: ${instanceLabel} (${instanceId}) joined network ${session.networkId}`);
+    responseStatus = 'joined';
+  }
+
+  saveConfig(cfg);
+
   // Discard the session — private key is no longer needed
   _sessions.delete(sessionKey);
 
-  log.info(`Invite handshake complete: ${instanceLabel} (${instanceId}) joined network ${session.networkId}`);
-
-  res.json({ status: 'joined', instanceId, networkId: session.networkId });
+  res.json({ status: responseStatus, instanceId, networkId: session.networkId, temporary: session.reparentInstanceId != null });
 });
 
 // ── GET /api/invite/status/:handshakeId ───────────────────────────────────────

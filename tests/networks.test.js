@@ -168,7 +168,7 @@ describe('Network invite key', () => {
     const r = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/invite`, {});
     assert.ok(r.status === 200 || r.status === 201, `Expected 200 or 201, got ${r.status}: ${JSON.stringify(r.body)}`);
     assert.ok(r.body.inviteKey, 'inviteKey should be returned');
-    assert.ok(r.body.inviteKey.startsWith('ythrilnetwork_'), 'Key format check');
+    assert.ok(r.body.inviteKey.startsWith('ythril_invite_'), 'Key format check: expected ythril_invite_ prefix');
   });
 
   it('Rotating key invalidates old one and returns a new one', async () => {
@@ -297,8 +297,8 @@ describe('RSA invite handshake', () => {
     const member = netR.body.members?.find(m => m.instanceId === '22222222-2222-2222-8222-222222222222');
     assert.ok(member, 'Instance B should be a member after handshake');
 
-    // Verify the token A received works to authenticate to B
-    const pingB = await get(INSTANCES.b, tokenForB, '/api/tokens');
-    assert.equal(pingB.status, 200, 'Token A received via handshake must work on B');
+    // tokenForB was created by A for B to call A — verify it works against A
+    const pingA = await get(INSTANCES.a, tokenForB, '/api/tokens');
+    assert.equal(pingA.status, 200, 'tokenForB (A-issued PAT) must authenticate to instance A');
   });
 });

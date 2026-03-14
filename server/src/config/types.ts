@@ -43,9 +43,12 @@ export interface NetworkMember {
   url: string;
   tokenHash: string;         // bcrypt of the token this instance uses to auth inbound from peer
   direction: SyncDirection;
-  lastSyncAt?: string;       // ISO8601
+  lastSyncAt?: string;       // ISO8601 — set only on successful sync
   lastSeqReceived?: Record<string, number>;  // spaceId → last seq ingested from this peer
+  consecutiveFailures?: number;  // incremented on each failed sync; reset to 0 on success
   parentInstanceId?: string; // braintree only
+  /** Set during a temporary reparent; stores the original parent so it can be restored. */
+  originalParentInstanceId?: string;
   children?: string[];       // instanceIds of direct children (braintree)
   skipTlsVerify?: boolean;   // non-default; UI shows security warning when true
 }
@@ -82,6 +85,13 @@ export interface NetworkConfig {
   syncSchedule?: string;     // cron expression; omit = manual only
   inviteKeyHash?: string;    // bcrypt of current active invite key
   createdAt: string;
+  /** Set on THIS instance when it has been temporarily re-parented in a braintree.
+   *  Cleared when the reparent is made permanent (`adopt`) or reverted. */
+  temporaryReparent?: {
+    newParentInstanceId: string;      // grandparent that adopted us
+    originalParentInstanceId: string; // offline intermediate we bypassed
+    reparentedAt: string;             // ISO8601
+  };
 }
 
 export interface Config {
