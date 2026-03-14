@@ -1,0 +1,32 @@
+{
+  "name": "@ytrai/server",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "latest",
+    "bcrypt": "^6",
+    "express": "^5",
+    "express-rate-limit": "^8",
+    "mongodb": "^7",
+    "multer": "^2",
+    "node-cron": "^4",
+    "uuid": "^13",
+    "zod": "^4"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^5",
+    "@types/express": "^5",
+    "@types/multer": "^1",
+    "@types/node": "^22",
+    "@typescript-eslint/eslint-plugin": "^8",
+    "@typescript-eslint/parser": "^8",
+    "eslint": "^9",
+    "tsx": "^4",
+    "typescript": "^5"
+  }
+}

@@ -1,0 +1,47 @@
+services:
+  ytrai:
+    build: .
+    container_name: ytrai
+    restart: unless-stopped
+    ports:
+      - "3200:3200"
+    volumes:
+      # Config and secrets — keep outside image, mode 0600 enforced at startup
+      - ./config:/config
+      # Persistent data: files + MongoDB brain
+      - ytrai-data:/data
+    environment:
+      CONFIG_PATH: /config/config.json
+      DATA_ROOT: /data
+      MONGO_URI: mongodb://ytrai-mongo:27017
+      NODE_ENV: production
+    depends_on:
+      ytrai-mongo:
+        condition: service_healthy
+    networks:
+      - ytrai-internal
+
+  ytrai-mongo:
+    # mongodb/mongodb-atlas-local includes mongot — required for $vectorSearch
+    image: mongodb/mongodb-atlas-local:latest
+    container_name: ytrai-mongo
+    restart: unless-stopped
+    volumes:
+      - ytrai-mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ping:1}).ok"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+    networks:
+      - ytrai-internal
+
+volumes:
+  ytrai-data:
+  ytrai-mongo-data:
+
+networks:
+  ytrai-internal:
+    driver: bridge
+    internal: false   # set true to isolate; open for external embedding endpoint access
