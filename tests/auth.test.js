@@ -102,9 +102,10 @@ describe('Token lifecycle', () => {
   });
 
   it('Space-scoped token rejected on wrong space', async () => {
-    // Create a second space
+    // Use a unique label per run to avoid conflicts when previous runs left
+    // created spaces behind (e.g. after a mid-test failure).
     const space = await post(INSTANCES.a, tokenA, '/api/spaces', {
-      label: 'Auth Test Space',
+      label: 'Auth Test Space ' + Date.now(),
     });
     assert.equal(space.status, 201);
     const spaceId = space.body.space?.id;

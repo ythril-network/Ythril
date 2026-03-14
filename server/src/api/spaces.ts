@@ -31,8 +31,17 @@ spacesRouter.post('/', globalRateLimit, requireAuth, async (req, res) => {
   }
   const { id: rawId, label, folders, minGiB } = parsed.data;
   const id = rawId ?? slugify(label);
-  const space = await createSpace({ id, label, folders, minGiB });
-  res.status(201).json({ space });
+  try {
+    const space = await createSpace({ id, label, folders, minGiB });
+    res.status(201).json({ space });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('already exists')) {
+      res.status(409).json({ error: msg });
+    } else {
+      res.status(500).json({ error: 'Failed to create space' });
+    }
+  }
 });
 
 // DELETE /api/spaces/:id

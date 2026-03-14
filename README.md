@@ -142,4 +142,4 @@ Commercial licensing is available for closed-source SaaS or proprietary deployme
 
 Contact:
 - GitHub issues: open an issue in this repository
-- Commercial inquiries: contact repository owner `MetalMMagic`
+- Commercial inquiries: contact repository owner `contact@ythril.net`

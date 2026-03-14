@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { requireAuth } from '../auth/middleware.js';
+import { requireSpaceAuth } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { listMemories, deleteMemory, countMemories } from '../brain/memory.js';
 import { listEntities, deleteEntity } from '../brain/entities.js';
@@ -19,7 +19,7 @@ export const brainRouter = Router();
 // These are the primary REST endpoints used by API clients and integration tests.
 
 // POST /api/brain/:spaceId/memories — create a memory
-brainRouter.post('/:spaceId/memories', globalRateLimit, requireAuth, async (req, res) => {
+brainRouter.post('/:spaceId/memories', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const cfg = getConfig();
   if (!cfg.spaces.some(s => s.id === spaceId)) {
@@ -69,7 +69,7 @@ brainRouter.post('/:spaceId/memories', globalRateLimit, requireAuth, async (req,
 });
 
 // GET /api/brain/:spaceId/memories — list memories
-brainRouter.get('/:spaceId/memories', globalRateLimit, requireAuth, async (req, res) => {
+brainRouter.get('/:spaceId/memories', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const cfg = getConfig();
   if (!cfg.spaces.some(s => s.id === spaceId)) {
@@ -83,7 +83,7 @@ brainRouter.get('/:spaceId/memories', globalRateLimit, requireAuth, async (req, 
 });
 
 // GET /api/brain/:spaceId/memories/:id — get single memory
-brainRouter.get('/:spaceId/memories/:id', globalRateLimit, requireAuth, async (req, res) => {
+brainRouter.get('/:spaceId/memories/:id', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const id = req.params['id'] as string;
   const cfg = getConfig();
@@ -97,7 +97,7 @@ brainRouter.get('/:spaceId/memories/:id', globalRateLimit, requireAuth, async (r
 });
 
 // DELETE /api/brain/:spaceId/memories/:id — delete memory
-brainRouter.delete('/:spaceId/memories/:id', globalRateLimit, requireAuth, async (req, res) => {
+brainRouter.delete('/:spaceId/memories/:id', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const id = req.params['id'] as string;
   const ok = await deleteMemory(spaceId, id);
@@ -106,7 +106,7 @@ brainRouter.delete('/:spaceId/memories/:id', globalRateLimit, requireAuth, async
 });
 
 // GET /api/brain/spaces/:spaceId/stats
-brainRouter.get('/spaces/:spaceId/stats', globalRateLimit, requireAuth, async (req, res) => {
+brainRouter.get('/spaces/:spaceId/stats', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const cfg = getConfig();
   if (!cfg.spaces.some(s => s.id === spaceId)) {
@@ -122,7 +122,7 @@ brainRouter.get('/spaces/:spaceId/stats', globalRateLimit, requireAuth, async (r
 });
 
 // GET /api/brain/spaces/:spaceId/memories
-brainRouter.get('/spaces/:spaceId/memories', globalRateLimit, requireAuth, async (req, res) => {
+brainRouter.get('/spaces/:spaceId/memories', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const cfg = getConfig();
   if (!cfg.spaces.some(s => s.id === spaceId)) {
@@ -136,7 +136,7 @@ brainRouter.get('/spaces/:spaceId/memories', globalRateLimit, requireAuth, async
 });
 
 // DELETE /api/brain/spaces/:spaceId/memories/:id
-brainRouter.delete('/spaces/:spaceId/memories/:id', globalRateLimit, requireAuth, async (req, res) => {
+brainRouter.delete('/spaces/:spaceId/memories/:id', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const id = req.params['id'] as string;
   const ok = await deleteMemory(spaceId, id);
@@ -145,7 +145,7 @@ brainRouter.delete('/spaces/:spaceId/memories/:id', globalRateLimit, requireAuth
 });
 
 // GET /api/brain/spaces/:spaceId/entities
-brainRouter.get('/spaces/:spaceId/entities', globalRateLimit, requireAuth, async (req, res) => {
+brainRouter.get('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const cfg = getConfig();
   if (!cfg.spaces.some(s => s.id === spaceId)) {
@@ -158,7 +158,7 @@ brainRouter.get('/spaces/:spaceId/entities', globalRateLimit, requireAuth, async
 });
 
 // DELETE /api/brain/spaces/:spaceId/entities/:id
-brainRouter.delete('/spaces/:spaceId/entities/:id', globalRateLimit, requireAuth, async (req, res) => {
+brainRouter.delete('/spaces/:spaceId/entities/:id', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const id = req.params['id'] as string;
   const ok = await deleteEntity(spaceId, id);
@@ -167,7 +167,7 @@ brainRouter.delete('/spaces/:spaceId/entities/:id', globalRateLimit, requireAuth
 });
 
 // GET /api/brain/spaces/:spaceId/edges
-brainRouter.get('/spaces/:spaceId/edges', globalRateLimit, requireAuth, async (req, res) => {
+brainRouter.get('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const cfg = getConfig();
   if (!cfg.spaces.some(s => s.id === spaceId)) {
@@ -180,7 +180,7 @@ brainRouter.get('/spaces/:spaceId/edges', globalRateLimit, requireAuth, async (r
 });
 
 // DELETE /api/brain/spaces/:spaceId/edges/:id
-brainRouter.delete('/spaces/:spaceId/edges/:id', globalRateLimit, requireAuth, async (req, res) => {
+brainRouter.delete('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const id = req.params['id'] as string;
   const ok = await deleteEdge(spaceId, id);
@@ -189,7 +189,7 @@ brainRouter.delete('/spaces/:spaceId/edges/:id', globalRateLimit, requireAuth, a
 });
 
 // GET /api/brain/spaces/:spaceId/reindex-status
-brainRouter.get('/spaces/:spaceId/reindex-status', globalRateLimit, requireAuth, (req, res) => {
+brainRouter.get('/spaces/:spaceId/reindex-status', globalRateLimit, requireSpaceAuth, (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const cfg = getConfig();
   if (!cfg.spaces.some(s => s.id === spaceId)) {
@@ -202,7 +202,7 @@ brainRouter.get('/spaces/:spaceId/reindex-status', globalRateLimit, requireAuth,
 // POST /api/brain/spaces/:spaceId/reindex
 // Re-embeds all memories in a space using the currently configured model.
 // Long-running: may take minutes for large spaces. Progress is logged server-side.
-brainRouter.post('/spaces/:spaceId/reindex', globalRateLimit, requireAuth, async (req, res) => {
+brainRouter.post('/spaces/:spaceId/reindex', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const cfg = getConfig();
   if (!cfg.spaces.some(s => s.id === spaceId)) {

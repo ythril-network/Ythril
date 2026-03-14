@@ -7,7 +7,7 @@
       "name": "test-token",
       "hash": "$2b$12$jiDdW0MO/klsn/YKimPPj.1tA/ZcQLjzMv9qK5KfR/qSmmwIW/dz2",
       "createdAt": "2026-03-14T20:55:00.189Z",
-      "lastUsed": "2026-03-14T21:19:20.274Z",
+      "lastUsed": "2026-03-14T21:36:40.413Z",
       "expiresAt": null
     },
     {
@@ -31,6 +31,30 @@
       "name": "dem-peer-a",
       "hash": "$2b$12$sLiEWkMsJAhpBVFi2pIF8.yOpnpb9wpZ5O14wdBbYC5mogbiKjz4K",
       "createdAt": "2026-03-14T20:55:40.564Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "ab73972f-e4c3-4591-a897-e4c581cbbf4c",
+      "name": "peer-vote-test",
+      "hash": "$2b$12$TLoWaDN1LO/GLXWWOvOHMud71HvRuAf6OSZAmFQiH8Z6Q28rid5I6",
+      "createdAt": "2026-03-14T21:33:14.077Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "daf57234-2653-4e2e-a847-d2c00fb4871b",
+      "name": "peer-dup",
+      "hash": "$2b$12$jlyDBjUZZ57TStln5pmn8uENtbTB40AWfK3jYNxADr5sWJLoeVegK",
+      "createdAt": "2026-03-14T21:33:14.444Z",
+      "lastUsed": null,
+      "expiresAt": null
+    },
+    {
+      "id": "bf61ba7c-7223-496f-a546-52d55ff0ac13",
+      "name": "peer-rsa-handshake-a",
+      "hash": "$2b$12$DxarLXET7jHRJg8e49F4EuNF6DGwpGN6CKt/9y5DdhGyYr7z98AJC",
+      "createdAt": "2026-03-14T21:36:40.571Z",
       "lastUsed": null,
       "expiresAt": null
     }

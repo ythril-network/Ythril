@@ -41,8 +41,9 @@ describe('authRateLimit on POST /api/tokens', () => {
     });
     // Should be 201 on first request
     assert.ok(r.status === 201 || r.status === 429, `Expected 201 or 429, got ${r.status}`);
-    const limit = r.headers.get('ratelimit-limit') ?? r.headers.get('x-ratelimit-limit');
-    assert.ok(limit !== null, 'Should have RateLimit-Limit header');
+    // express-rate-limit with standardHeaders:'draft-7' sends a combined 'RateLimit' header
+    const limit = r.headers.get('ratelimit') ?? r.headers.get('ratelimit-limit') ?? r.headers.get('x-ratelimit-limit');
+    assert.ok(limit !== null, 'Should have RateLimit (draft-7) or RateLimit-Limit header');
   });
 
   it('Burst 11 token creates → at least one 429 (authRateLimit = 10/min)', async () => {
