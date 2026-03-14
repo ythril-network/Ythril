@@ -190,7 +190,8 @@ sequenceDiagram
     A->>A: votes yes
     Note over Root,A: both ancestors approved
     A-->>L: admitted — begins syncing with A
-    Note over Root,A,L: Node B and B1 are NOT notified<br/>and do NOT sync with A3
+    Note over A,L: Node B and B1 are NOT notified
+    Note over A,L: and do NOT sync with A3
 ```
 
 A leaf added under Node A does **not** sync directly with Node B or its subtree — sync only flows along the tree edges.
