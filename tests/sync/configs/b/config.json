@@ -1,0 +1,73 @@
+{
+  "instanceId": "44192c15-8ca1-4afa-9c63-445094b73c5d",
+  "instanceLabel": "Test Instance B",
+  "tokens": [
+    {
+      "id": "ca7018e8-7122-41b2-8286-29c72e9cea26",
+      "name": "test-token",
+      "hash": "$2b$12$jiDdW0MO/klsn/YKimPPj.1tA/ZcQLjzMv9qK5KfR/qSmmwIW/dz2",
+      "createdAt": "2026-03-14T20:55:00.189Z",
+      "lastUsed": "2026-03-14T20:55:40.405Z",
+      "expiresAt": null
+    },
+    {
+      "id": "313c0794-bec1-4be5-846d-02b26a73447f",
+      "name": "bt-peer-a",
+      "hash": "$2b$12$qhflWpI/5svj9U6ADljmkOxBSVPd1Gaip0yC4kGk5gcAzf2jfUEt.",
+      "createdAt": "2026-03-14T20:55:29.032Z",
+      "lastUsed": "2026-03-14T20:55:33.885Z",
+      "expiresAt": null
+    },
+    {
+      "id": "f779967e-a026-47c4-a7ba-084614f08aeb",
+      "name": "peer-token-a",
+      "hash": "$2b$12$yLzC7xZHKbF8vUT2k0/j0ebuHVul7uKr1vY58u/2KGRVGF2brKt6O",
+      "createdAt": "2026-03-14T20:55:37.132Z",
+      "lastUsed": "2026-03-14T20:55:39.452Z",
+      "expiresAt": null
+    },
+    {
+      "id": "58c1a040-19ef-4225-937d-bff51c32bc9f",
+      "name": "dem-peer-a",
+      "hash": "$2b$12$sLiEWkMsJAhpBVFi2pIF8.yOpnpb9wpZ5O14wdBbYC5mogbiKjz4K",
+      "createdAt": "2026-03-14T20:55:40.564Z",
+      "lastUsed": null,
+      "expiresAt": null
+    }
+  ],
+  "spaces": [
+    {
+      "id": "general",
+      "label": "General",
+      "builtIn": true,
+      "folders": []
+    }
+  ],
+  "networks": [
+    {
+      "id": "20a2bbb3-472d-4ecb-8f30-6a6a10561b69",
+      "label": "Test Braintree",
+      "type": "braintree",
+      "spaces": [
+        "general"
+      ],
+      "votingDeadlineHours": 24,
+      "members": [
+        {
+          "instanceId": "instance-c",
+          "label": "Instance C",
+          "url": "http://ythril-c:3200",
+          "tokenHash": "$2b$12$Ztcm0uB.XM7fPSwZBKZQKO1ZoslaO58RoH6B4NZuYZiggmkzekJOG",
+          "direction": "push",
+          "parentInstanceId": "instance-b",
+          "lastSyncAt": "2026-03-14T20:55:30.843Z"
+        }
+      ],
+      "pendingRounds": [],
+      "createdAt": "2026-03-14T20:55:29.499Z"
+    }
+  ],
+  "setup": {
+    "completed": true
+  }
+}

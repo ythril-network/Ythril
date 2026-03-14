@@ -101,7 +101,7 @@ export function getEmbeddingConfig() {
 
 export function getMongoUri(): string {
   const cfg = _config;
-  return cfg?.mongo?.uri ?? process.env['MONGO_URI'] ?? 'mongodb://ythril-mongo:27017';
+  return cfg?.mongo?.uri ?? process.env['MONGO_URI'] ?? 'mongodb://ythril-mongo:27017/?directConnection=true';
 }
 
 export function getDataRoot(): string {

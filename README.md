@@ -132,6 +132,12 @@ Minimal AGPL explanation:
 - If you provide Ythril as a network service with your modifications, you must make the modified source available to users of that service under AGPL.
 - If you want closed-source SaaS/proprietary deployment, use a commercial license.
 
+Ythril's semantic recall feature depends on `mongot`, a proprietary sidecar bundled
+in the `mongodb/mongodb-atlas-local` Docker image. This binary is not distributed by
+Ythril and is pulled separately by Docker at deploy time. It does not affect Ythril's
+AGPL obligations. See [docs/dependencies.md](docs/dependencies.md) for the full
+analysis.
+
 Commercial licensing is available for closed-source SaaS or proprietary deployments.
 
 Contact:

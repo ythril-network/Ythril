@@ -1,0 +1,42 @@
+{
+  "instanceId": "5238da77-e487-481f-b868-50ba68075db6",
+  "instanceLabel": "Test Instance C",
+  "tokens": [
+    {
+      "id": "1bb54118-8147-473c-9041-2d685404abfd",
+      "name": "test-token",
+      "hash": "$2b$12$yFXQK2EqyPXI7AjIgkOeB.PG.qDqZKzCXCEsjgsT0sEndyxVc1bWS",
+      "createdAt": "2026-03-14T20:55:01.997Z",
+      "lastUsed": "2026-03-14T20:55:40.791Z",
+      "expiresAt": null
+    },
+    {
+      "id": "0e02d30f-5fa8-405f-a1af-655030795eab",
+      "name": "bt-peer-b",
+      "hash": "$2b$12$5k2ERQACTDyQM.XY9dZfMOndKBwAKps8E/iI3tQG7kdmOT0uIwQC6",
+      "createdAt": "2026-03-14T20:55:29.331Z",
+      "lastUsed": "2026-03-14T20:55:30.839Z",
+      "expiresAt": null
+    },
+    {
+      "id": "88261e3e-237e-441b-90fa-7e47b4782184",
+      "name": "dem-peer-c",
+      "hash": "$2b$12$G.IUJZK/duRJ0DiAv16s8.Jv5YtYj9ctodI.K/2kxCQIEJxKiIiae",
+      "createdAt": "2026-03-14T20:55:40.950Z",
+      "lastUsed": null,
+      "expiresAt": null
+    }
+  ],
+  "spaces": [
+    {
+      "id": "general",
+      "label": "General",
+      "builtIn": true,
+      "folders": []
+    }
+  ],
+  "networks": [],
+  "setup": {
+    "completed": true
+  }
+}

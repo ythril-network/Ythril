@@ -217,3 +217,54 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+## Runtime Dependency: mongodb/mongodb-atlas-local (Docker image)
+
+Ythril's `docker-compose.yml` references the `mongodb/mongodb-atlas-local` container
+image published by MongoDB, Inc. This image is **not bundled with or distributed by
+Ythril** — it is pulled independently by Docker from Docker Hub at deployment time.
+
+### What the image contains
+
+The image packages two components:
+
+- **MongoDB Community Edition** — the `mongod` server process.
+  License: Server Side Public License v1 (SSPL).
+  Source: https://github.com/mongodb/mongo
+
+- **mongot** — a proprietary search-and-vector-index sidecar process developed
+  by MongoDB, Inc. `mongot` is required by Ythril to execute `$vectorSearch`
+  aggregation stages (semantic recall). Its source code is not publicly available.
+  MongoDB, Inc. distributes `mongot` free of charge for use with MongoDB Community
+  and Atlas Local deployments under their terms of service.
+
+### Relationship to Ythril's AGPL-3.0 license
+
+Ythril communicates with `mongod`/`mongot` exclusively over a TCP network socket
+on the private `ythril-internal` Docker bridge network. No MongoDB or `mongot`
+code is linked into, compiled with, or incorporated into the Ythril application
+binary or source tree.
+
+Under established GPL/AGPL interpretation, a program communicating with a separate
+server process over a network socket does not form a "combined work" that triggers
+copyleft extension to that server. The AGPL-3.0 obligations that apply to Ythril's
+source code do not extend to `mongod` or `mongot`.
+
+Ythril does not offer MongoDB or `mongot` as a hosted service. SSPL's "Service
+Provision" clause targets entities providing the covered software itself as a
+service; using MongoDB as a backing store for an unrelated application is outside
+that clause's scope.
+
+### Practical consequence for users
+
+Users who deploy Ythril accept the `mongodb/mongodb-atlas-local` image terms
+separately and independently of Ythril's AGPL-3.0 license. Ythril's source
+obligations are unaffected.
+
+The dependency on the proprietary `mongot` binary means that the semantic recall
+feature (`query`, `recall`, `recall_global` MCP tools) cannot currently be
+provided by a fully open-source stack. This is acknowledged as a known constraint.
+A future version of Ythril may introduce an optional vector-search backend allowing
+deployment without `mongot`.

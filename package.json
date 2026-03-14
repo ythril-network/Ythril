@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
   "private": true,
+  "type": "module",
   "workspaces": ["server"],
   "scripts": {
     "dev": "npm run dev --workspace=server",

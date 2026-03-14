@@ -25,9 +25,10 @@ export async function applyRemoteTombstone(tombstone: TombstoneDoc): Promise<voi
     { upsert: true },
   );
 
-  // If the doc already exists locally with a higher seq, the remote tombstone is stale — skip
+  // If the doc already exists locally with a strictly higher seq, the remote tombstone is stale — skip
+  // Note: equal seq means we just inserted it above (or it already existed at same seq), so still apply.
   const existing = await col<TombstoneDoc>(`${spaceId}_tombstones`).findOne({ _id } as never);
-  if (existing && (existing as TombstoneDoc).seq >= seq) return;
+  if (existing && (existing as TombstoneDoc).seq > seq) return;
 
   // Delete the underlying document
   const collMap: Record<string, string> = {

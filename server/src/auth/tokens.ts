@@ -34,15 +34,45 @@ export async function verifyToken(token: string, hash: string): Promise<boolean>
   return bcrypt.compare(token, hash);
 }
 
+// ── Token verification cache ────────────────────────────────────────────────
+// bcrypt.compare() is intentionally slow; cache successful verifications to
+// avoid O(n×bcrypt) cost on every authenticated request.
+const _tokenCache = new Map<string, { tokenId: string; expiresAt: number }>();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+/** Invalidate the in-memory cache entry for a given token plaintext.
+ *  Call when revoking or rotating a token. */
+export function invalidateTokenCache(plaintext: string): void {
+  _tokenCache.delete(plaintext);
+}
+
 /** Find the matching TokenRecord for a plaintext token (null if none) */
 export async function findMatchingToken(
   plaintext: string,
 ): Promise<TokenRecord | null> {
   const config = getConfig();
+
+  // Fast path: check in-memory cache
+  const cached = _tokenCache.get(plaintext);
+  if (cached && Date.now() < cached.expiresAt) {
+    const record = config.tokens.find(t => t.id === cached.tokenId);
+    if (record) {
+      if (record.expiresAt && new Date(record.expiresAt) < new Date()) {
+        _tokenCache.delete(plaintext);
+        return null;
+      }
+      return record;
+    }
+    // Token was deleted — evict cache entry
+    _tokenCache.delete(plaintext);
+  }
+
+  // Slow path: linear scan with bcrypt
   for (const record of config.tokens) {
     const ok = await verifyToken(plaintext, record.hash);
     if (!ok) continue;
     if (record.expiresAt && new Date(record.expiresAt) < new Date()) continue;
+    _tokenCache.set(plaintext, { tokenId: record.id, expiresAt: Date.now() + CACHE_TTL_MS });
     return record;
   }
   return null;

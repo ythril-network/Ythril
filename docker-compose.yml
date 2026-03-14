@@ -13,7 +13,7 @@
     environment:
       CONFIG_PATH: /config/config.json
       DATA_ROOT: /data
-      MONGO_URI: mongodb://ythril-mongo:27017
+      MONGO_URI: mongodb://ythril-mongo:27017/?directConnection=true
       NODE_ENV: production
     depends_on:
       ythril-mongo:
@@ -28,18 +28,22 @@
     restart: unless-stopped
     volumes:
       - ythril-mongo-data:/data/db
+      # Persist /data/configdb so the replica-set keyfile survives container restarts
+      - ythril-mongo-configdb:/data/configdb
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ping:1}).ok"]
+      # Wait for the replica set to elect a primary (not just mongod accepting connections)
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand({replSetGetStatus:1}).myState===1 ? 1 : quit(1)"]
       interval: 10s
       timeout: 10s
-      retries: 12
-      start_period: 30s
+      retries: 18
+      start_period: 40s
     networks:
       - ythril-internal
 
 volumes:
   ythril-data:
   ythril-mongo-data:
+  ythril-mongo-configdb:
 
 networks:
   ythril-internal:

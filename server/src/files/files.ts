@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { createHash } from 'crypto';
 import { resolveSafePath, spaceRoot } from './sandbox.js';
+import { getConfig, getDataRoot } from '../config/loader.js';
 
 export interface FileEntry {
   name: string;
@@ -94,4 +95,64 @@ export async function moveFile(
   const dstAbs = resolveSafePath(spaceId, dstPath);
   await fs.mkdir(path.dirname(dstAbs), { recursive: true });
   await fs.rename(srcAbs, dstAbs);
+}
+
+/** Recursively sum file sizes under a directory. Returns 0 if dir doesn't exist. */
+export async function getDirSizeBytes(dir: string): Promise<number> {
+  let total = 0;
+  let entries;
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      total += await getDirSizeBytes(full);
+    } else if (entry.isFile()) {
+      try {
+        const st = await fs.stat(full);
+        total += st.size;
+      } catch { /* skip inaccessible files */ }
+    }
+  }
+  return total;
+}
+
+export interface QuotaCheckResult {
+  /** true = proceed with write; false = reject with 507 */
+  allowed: boolean;
+  /** true = within hard limit but past soft limit — caller should include storageWarning */
+  softWarning: boolean;
+}
+
+/**
+ * Check files storage quotas before a write operation.
+ *
+ * Checks:
+ *  1. Global files hard limit (storage.files.hardLimitGiB): total bytes in data/files/
+ *  2. Global files soft limit (storage.files.softLimitGiB): warn but allow
+ *
+ * @param incomingBytes estimated size of the incoming write (0 for a safe check with no addend)
+ */
+export async function checkFilesQuota(incomingBytes: number): Promise<QuotaCheckResult> {
+  const cfg = getConfig();
+  const fileLimits = cfg.storage?.files;
+  if (!fileLimits) return { allowed: true, softWarning: false };
+
+  const filesRoot = path.join(getDataRoot(), 'files');
+  const currentBytes = await getDirSizeBytes(filesRoot);
+  const projectedBytes = currentBytes + incomingBytes;
+
+  const GiB = 1024 ** 3;
+
+  if (fileLimits.hardLimitGiB !== undefined && projectedBytes > fileLimits.hardLimitGiB * GiB) {
+    return { allowed: false, softWarning: false };
+  }
+
+  const softWarning = fileLimits.softLimitGiB !== undefined
+    && currentBytes >= fileLimits.softLimitGiB * GiB;
+
+  return { allowed: true, softWarning };
 }

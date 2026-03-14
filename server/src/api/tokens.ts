@@ -9,7 +9,7 @@ export const tokensRouter = Router();
 const CreateTokenBody = z.object({
   name: z.string().min(1).max(200),
   expiresAt: z.string().datetime().nullish(),
-  spaces: z.array(z.string().min(1)).optional(),
+  spaces: z.array(z.string().min(1)).max(1000).optional(),
 });
 
 // GET /api/tokens — list tokens (hashes excluded)

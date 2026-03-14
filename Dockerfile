@@ -46,6 +46,9 @@ ENV MONGO_URI=mongodb://ythril-mongo:27017
 
 EXPOSE 3200
 
+# Pre-create mount-point directories owned by node so volume mounts are writable
+RUN mkdir -p /data /config && chown -R node:node /data /config
+
 # Run as non-root user
 USER node
 

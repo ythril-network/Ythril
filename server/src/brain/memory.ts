@@ -3,6 +3,7 @@ import { col } from '../db/mongo.js';
 import { nextSeq } from '../util/seq.js';
 import { embed } from './embedding.js';
 import { getConfig, getEmbeddingConfig } from '../config/loader.js';
+import { needsReindex } from '../spaces/spaces.js';
 import type { MemoryDoc, TombstoneDoc } from '../config/types.js';
 
 function authorRef() {
@@ -55,6 +56,13 @@ export async function recall(
   query: string,
   topK = 10,
 ): Promise<RecallResult[]> {
+  if (needsReindex(spaceId)) {
+    const embCfg = getEmbeddingConfig();
+    throw new Error(
+      `Space '${spaceId}' has embeddings from a different model than the currently configured '${embCfg.model}'. ` +
+      `Semantic recall is disabled until re-indexed. Call POST /api/brain/spaces/${spaceId}/reindex.`,
+    );
+  }
   const embResult = await embed(query);
   const embCfg = getEmbeddingConfig();
 

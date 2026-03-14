@@ -4,6 +4,9 @@ import { authRateLimit } from '../rate-limit/middleware.js';
 import { getSecrets } from '../config/loader.js';
 import { createToken, listTokens, revokeToken, updateTokenSpaces } from '../auth/tokens.js';
 import { getConfig } from '../config/loader.js';
+import { createSpace, removeSpace, slugify } from '../spaces/spaces.js';
+import { getDirSizeBytes } from '../files/files.js';
+import { spaceRoot } from '../files/sandbox.js';
 import {
   requireSettingsAuth,
   setSettingsSessionCookie,
@@ -47,11 +50,19 @@ settingsRouter.post('/logout', (_req, res) => {
 settingsRouter.use(requireSettingsAuth);
 
 // ── GET /settings — main settings page ──────────────────────────────────────
-settingsRouter.get('/', async (_req, res) => {
+settingsRouter.get('/', async (req, res) => {
   const tokens = listTokens();
   const spaces = getConfig().spaces;
+  const spaceError = typeof req.query['spaceError'] === 'string' ? req.query['spaceError'] : undefined;
+
+  // Compute file storage per space (best-effort)
+  const storageSizes: Record<string, number> = {};
+  await Promise.all(spaces.map(async s => {
+    storageSizes[s.id] = await getDirSizeBytes(spaceRoot(s.id));
+  }));
+
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(settingsPage(tokens, spaces));
+  res.send(settingsPage(tokens, spaces, storageSizes, spaceError));
 });
 
 // ── POST /settings/tokens — create a new PAT ────────────────────────────────
@@ -85,6 +96,45 @@ settingsRouter.post('/tokens/:id/spaces', (req, res) => {
   res.redirect(303, '/settings');
 });
 
+// ── POST /settings/spaces — create a new space ─────────────────────────────
+settingsRouter.post('/spaces', async (req, res) => {
+  const label: string = (req.body?.label ?? '').trim();
+  if (!label) {
+    res.status(400).json({ error: 'Space label is required' });
+    return;
+  }
+  const rawId: string = (req.body?.id ?? '').trim();
+  const id = rawId || slugify(label);
+  try {
+    await createSpace({ id, label });
+    log.info(`Settings: created space id=${id} label="${label}"`);
+  } catch (err) {
+    // Likely duplicate ID — surface as flash-style redirect with error in query
+    const msg = err instanceof Error ? err.message : String(err);
+    res.redirect(303, `/settings?spaceError=${encodeURIComponent(msg)}`);
+    return;
+  }
+  res.redirect(303, '/settings');
+});
+
+// ── POST /settings/spaces/:id/delete — remove a space ────────────────────────
+settingsRouter.post('/spaces/:id/delete', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const ok = await removeSpace(id);
+    if (!ok) {
+      res.status(404).json({ error: `Space '${id}' not found` });
+      return;
+    }
+    log.info(`Settings: deleted space id=${id}`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.redirect(303, `/settings?spaceError=${encodeURIComponent(msg)}`);
+    return;
+  }
+  res.redirect(303, '/settings');
+});
+
 // ── DELETE /settings/tokens/:id — revoke a PAT ──────────────────────────────
 settingsRouter.post('/tokens/:id/revoke', async (req, res) => {
   const { id } = req.params;
@@ -103,6 +153,13 @@ function esc(str: string): string {
   return str
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
 const baseStyle = `
@@ -159,7 +216,12 @@ function spaceCheckboxes(allSpaces: {id:string;label:string}[], selected?: strin
   }).join('');
 }
 
-function settingsPage(tokens: ReturnType<typeof listTokens>, spaces: {id:string;label:string}[]): string {
+function settingsPage(
+  tokens: ReturnType<typeof listTokens>,
+  spaces: { id: string; label: string; builtIn: boolean }[],
+  storageSizes: Record<string, number>,
+  spaceError?: string,
+): string {
   const rows = tokens.map(t => {
     const spacesLabel = !t.spaces ? 'All' : t.spaces.length === 0 ? 'None' : t.spaces.map(id => spaces.find(s=>s.id===id)?.label ?? id).join(', ');
     return `
@@ -192,6 +254,24 @@ function settingsPage(tokens: ReturnType<typeof listTokens>, spaces: {id:string;
       <div>${spaceCheckboxes(spaces, undefined)}</div>
     </div>` : '';
 
+  const spaceRows = spaces.map(s => {
+    const bytes = storageSizes[s.id] ?? 0;
+    const sizeLabel = formatBytes(bytes);
+    return `
+    <tr>
+      <td><code style="font-size:0.85rem">${esc(s.id)}</code></td>
+      <td>${esc(s.label)}</td>
+      <td style="color:#888">${s.builtIn ? 'Yes' : '\u2014'}</td>
+      <td style="color:#888;font-size:0.85rem">${sizeLabel}</td>
+      <td>${s.builtIn ? '' : `
+        <form method="POST" action="/settings/spaces/${esc(s.id)}/delete" style="margin:0"
+              onsubmit="return confirm('Delete space \u201c${esc(s.label)}\u201d?\n\nData in MongoDB and files will be retained but the space will be removed from config.')">
+          <button class="btn btn-danger" type="submit" style="padding:0.3rem 0.7rem;font-size:0.8rem">Delete</button>
+        </form>`}
+      </td>
+    </tr>`;
+  }).join('');
+
   return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ythril \u2014 Settings</title><style>${baseStyle}</style></head><body>
@@ -201,6 +281,7 @@ function settingsPage(tokens: ReturnType<typeof listTokens>, spaces: {id:string;
     <form method="POST" action="/settings/logout">
       <button class="btn" type="submit" style="background:#333">Sign out</button>
     </form>
+    <a class="btn" href="/brain" style="background:#1a1a3a;border:1px solid #444">Brain &rarr;</a>
   </div>
 
   <h2>Access tokens</h2>
@@ -219,6 +300,27 @@ function settingsPage(tokens: ReturnType<typeof listTokens>, spaces: {id:string;
       <button class="btn" type="submit">Create</button>
     </div>
     ${spaceSection}
+  </form>
+
+  <h2>Spaces</h2>
+  ${spaceError ? `<p class="error">${esc(spaceError)}</p>` : ''}
+  <table>
+    <thead><tr><th>ID</th><th>Label</th><th>Built-in</th><th>File storage</th><th></th></tr></thead>
+    <tbody>${spaceRows}</tbody>
+  </table>
+  <h3 style="font-size:0.95rem;margin:1.5rem 0 0.75rem">Create space</h3>
+  <form method="POST" action="/settings/spaces">
+    <div style="display:flex;gap:0.75rem;align-items:flex-end;flex-wrap:wrap">
+      <div>
+        <label>Label</label>
+        <input type="text" name="label" placeholder="e.g. Work" maxlength="200" required>
+      </div>
+      <div>
+        <label>ID <span style="color:#555">(optional)</span></label>
+        <input type="text" name="id" placeholder="e.g. work" maxlength="40" pattern="[a-z0-9-]+">
+      </div>
+      <button class="btn" type="submit">Create</button>
+    </div>
   </form>
 </div>
 </body></html>`;

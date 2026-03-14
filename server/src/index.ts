@@ -5,6 +5,7 @@ import { connectMongo, closeMongo } from './db/mongo.js';
 import { initAllSpaces } from './spaces/spaces.js';
 import { createApp } from './app.js';
 import { generateSetupCode } from './setup/routes.js';
+import { startSyncScheduler, stopSyncScheduler } from './sync/engine.js';
 import { log } from './util/log.js';
 
 const PORT = Number(process.env['PORT'] ?? 3200);
@@ -39,10 +40,15 @@ async function main(): Promise<void> {
         log.warn('');
       }
     }
+  }
 
-    // Connect MongoDB and initialise spaces
-    await connectMongo();
+  // Always connect to MongoDB — needed on first run so the setup route can
+  // initialise the general space immediately after writing the config.
+  await connectMongo();
+
+  if (!isFirstRun) {
     await initAllSpaces();
+    startSyncScheduler();
   }
 
   const app = createApp();
@@ -58,6 +64,7 @@ async function main(): Promise<void> {
   // Graceful shutdown
   const shutdown = async (signal: string) => {
     log.info(`${signal} received — shutting down`);
+    stopSyncScheduler();
     server.close(() => log.info('HTTP server closed'));
     await closeMongo();
     process.exit(0);

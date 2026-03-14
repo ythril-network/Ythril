@@ -1,11 +1,24 @@
 import { v4 as uuidv4 } from 'uuid';
-import { getDb } from '../db/mongo.js';
+import { getDb, col } from '../db/mongo.js';
 import { getConfig, saveConfig, getEmbeddingConfig } from '../config/loader.js';
 import { ensureSpaceFilesDir } from '../files/files.js';
 import { log } from '../util/log.js';
-import type { SpaceConfig } from '../config/types.js';
+import type { SpaceConfig, MemoryDoc } from '../config/types.js';
 
 const SPACE_COLLECTIONS = ['memories', 'entities', 'edges', 'tombstones'] as const;
+
+// ── Embedding model mismatch tracking ──────────────────────────────────────
+const _reindexNeeded = new Set<string>();
+
+/** Returns true if the space has stored embeddings from a different model */
+export function needsReindex(spaceId: string): boolean {
+  return _reindexNeeded.has(spaceId);
+}
+
+/** Clear the reindex flag after a successful reindex */
+export function clearReindexFlag(spaceId: string): void {
+  _reindexNeeded.delete(spaceId);
+}
 
 /** Create all required MongoDB collections and indexes for a space */
 export async function initSpace(spaceId: string): Promise<void> {
@@ -45,6 +58,24 @@ export async function initSpace(spaceId: string): Promise<void> {
 
   // Ensure files directory exists
   await ensureSpaceFilesDir(spaceId);
+
+  // Check for embedding model mismatch — if stored memories use a different
+  // model than configured, recall results would be semantically invalid.
+  const embCfg2 = getEmbeddingConfig();
+  const sample = await col<MemoryDoc>(`${spaceId}_memories`).findOne(
+    {},
+    { projection: { embeddingModel: 1 } },
+  );
+  if (sample?.embeddingModel && sample.embeddingModel !== embCfg2.model) {
+    log.warn(
+      `Space '${spaceId}': stored embeddings use model '${sample.embeddingModel}' ` +
+      `but config specifies '${embCfg2.model}'. ` +
+      `Semantic recall is disabled until re-indexed (POST /api/brain/spaces/${spaceId}/reindex).`,
+    );
+    _reindexNeeded.add(spaceId);
+  } else {
+    _reindexNeeded.delete(spaceId);
+  }
 }
 
 /**

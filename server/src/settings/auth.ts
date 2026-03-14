@@ -38,8 +38,6 @@ function verifySessionToken(token: string): boolean {
     const secrets = getSecrets();
     const config = getConfig();
     const payload = Buffer.from(payloadB64, 'base64url').toString();
-    // eslint-disable-next-line no-console
-    console.error(`[auth-debug] payload="${payload}" instanceId="${config.instanceId}" starts=${payload.startsWith(`${config.instanceId}:`)}`);
     if (!payload.startsWith(`${config.instanceId}:`)) return false;
     const expectedSig = createHmac('sha256', secrets.settingsPasswordHash)
       .update(payload)
@@ -70,8 +68,6 @@ export function clearSettingsSessionCookie(res: Response): void {
 export function requireSettingsAuth(req: Request, res: Response, next: NextFunction): void {
   // Parse cookie from raw header (no cookie-parser dependency needed)
   const raw = req.headers.cookie ?? '';
-  // eslint-disable-next-line no-console
-  console.error(`[auth-debug] cookie header: "${raw.slice(0, 120)}"`);
   let token: string | undefined;
   for (const part of raw.split(';')) {
     const [k, ...v] = part.trim().split('=');

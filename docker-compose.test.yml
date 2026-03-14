@@ -1,0 +1,150 @@
+##
+## Multi-instance test Docker Compose
+##
+## Spins up three independent Ythril instances (a, b, c) each with their own
+## MongoDB.  Use this to test sync networks without any shared state.
+##
+## Node topology for tests:
+##   Closed network:     a <-> b (both directions)
+##   Braintree:          a (root) -> b (node) -> c (leaf)
+##   Democratic:         a, b, c  (3-way vote)
+##
+## Usage:
+##   docker compose -f docker-compose.test.yml up --build -d
+##   docker compose -f docker-compose.test.yml down -v
+##
+## Pre-requisites:
+##   scripts/test-setup/init-a.json  — config for instance A
+##   scripts/test-setup/init-b.json  — config for instance B
+##   scripts/test-setup/init-c.json  — config for instance C
+##   (See tests/sync/README.md for setup instructions)
+##
+
+services:
+  # ──────────────────────────────────────────
+  # Instance A  (port 3200)
+  # ──────────────────────────────────────────
+  ythril-a:
+    build: .
+    container_name: ythril-a
+    ports:
+      - "3200:3200"
+    volumes:
+      - ./tests/sync/configs/a:/config
+      - ythril-data-a:/data
+    environment:
+      CONFIG_PATH: /config/config.json
+      DATA_ROOT: /data
+      MONGO_URI: mongodb://ythril-mongo-a:27017/?directConnection=true
+      NODE_ENV: test
+    depends_on:
+      ythril-mongo-a:
+        condition: service_healthy
+    networks:
+      - ythril-test
+
+  ythril-mongo-a:
+    image: mongodb/mongodb-atlas-local:latest
+    container_name: ythril-mongo-a
+    volumes:
+      - ythril-mongo-a-data:/data/db
+      - ythril-mongo-a-configdb:/data/configdb
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand({replSetGetStatus:1}).myState===1 ? 1 : quit(1)"]
+      interval: 10s
+      timeout: 10s
+      retries: 18
+      start_period: 40s
+    networks:
+      - ythril-test
+
+  # ──────────────────────────────────────────
+  # Instance B  (port 3201)
+  # ──────────────────────────────────────────
+  ythril-b:
+    build: .
+    container_name: ythril-b
+    ports:
+      - "3201:3200"
+    volumes:
+      - ./tests/sync/configs/b:/config
+      - ythril-data-b:/data
+    environment:
+      CONFIG_PATH: /config/config.json
+      DATA_ROOT: /data
+      MONGO_URI: mongodb://ythril-mongo-b:27017/?directConnection=true
+      NODE_ENV: test
+    depends_on:
+      ythril-mongo-b:
+        condition: service_healthy
+    networks:
+      - ythril-test
+
+  ythril-mongo-b:
+    image: mongodb/mongodb-atlas-local:latest
+    container_name: ythril-mongo-b
+    volumes:
+      - ythril-mongo-b-data:/data/db
+      - ythril-mongo-b-configdb:/data/configdb
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand({replSetGetStatus:1}).myState===1 ? 1 : quit(1)"]
+      interval: 10s
+      timeout: 10s
+      retries: 18
+      start_period: 40s
+    networks:
+      - ythril-test
+
+  # ──────────────────────────────────────────
+  # Instance C  (port 3202)  — braintree leaf
+  # ──────────────────────────────────────────
+  ythril-c:
+    build: .
+    container_name: ythril-c
+    ports:
+      - "3202:3200"
+    volumes:
+      - ./tests/sync/configs/c:/config
+      - ythril-data-c:/data
+    environment:
+      CONFIG_PATH: /config/config.json
+      DATA_ROOT: /data
+      MONGO_URI: mongodb://ythril-mongo-c:27017/?directConnection=true
+      NODE_ENV: test
+    depends_on:
+      ythril-mongo-c:
+        condition: service_healthy
+    networks:
+      - ythril-test
+
+  ythril-mongo-c:
+    image: mongodb/mongodb-atlas-local:latest
+    container_name: ythril-mongo-c
+    volumes:
+      - ythril-mongo-c-data:/data/db
+      - ythril-mongo-c-configdb:/data/configdb
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand({replSetGetStatus:1}).myState===1 ? 1 : quit(1)"]
+      interval: 10s
+      timeout: 10s
+      retries: 18
+      start_period: 40s
+    networks:
+      - ythril-test
+
+volumes:
+  ythril-data-a:
+  ythril-data-b:
+  ythril-data-c:
+  ythril-mongo-a-data:
+  ythril-mongo-b-data:
+  ythril-mongo-c-data:
+  ythril-mongo-a-configdb:
+  ythril-mongo-b-configdb:
+  ythril-mongo-c-configdb:
+
+networks:
+  ythril-test:
+    driver: bridge
+    # All containers share this bridge network.
+    # They refer to each other by container name: http://ythril-a:3200

@@ -1,0 +1,348 @@
+/**
+ * Invite handshake API — zero-copy token exchange via RSA.
+ *
+ * Problem solved: adding a peer to a network currently requires manually copying
+ * a PAT token out-of-band. This is error-prone and leaks plaintext credentials.
+ *
+ * Solution: an ephemeral RSA-OAEP handshake where each side encrypts the token
+ * it generates for the other party using that party's public key. No token ever
+ * travels in plaintext; the only things shared out-of-band are URLs and ephemeral
+ * RSA public keys (neither is secret).
+ *
+ * Flow
+ * ────
+ * 1. Inviting instance A  POST /api/invite/generate   (authenticated)
+ *    → Returns { handshakeId, inviteUrl, rsaPublicKeyPem, expiresAt }
+ *    A's user shares (inviteUrl + rsaPublicKeyPem) with B's user however they like
+ *    (Signal, email, a readable QR code — nothing sensitive).
+ *
+ * 2. Joining instance B   POST /api/invite/apply       (unauthenticated; handshakeId is the credential)
+ *    → Body: { handshakeId, networkId, instanceId, instanceLabel, instanceUrl, rsaPublicKeyPem }
+ *    A validates handshakeId, creates a PAT for B, encrypts with B's public key.
+ *    Returns { encryptedTokenForB, rsaPublicKeyPem: A's pub key, instanceId: A's instanceId }
+ *
+ * 3. Joining instance B   POST /api/invite/finalize    (unauthenticated; handshakeId is the credential)
+ *    → Body: { handshakeId, encryptedTokenForA }
+ *    A decrypts B's token using A's private key, stores in secrets.peerTokens.
+ *    Handshake complete — both sides can now sync.
+ *
+ * Security properties
+ * ───────────────────
+ * - RSA-4096-OAEP-SHA256: token payload is ~44 bytes, well within RSA-OAEP limits.
+ * - Private keys are held in-memory only for ≤ 1 hour and discarded immediately after finalize.
+ * - handshakeId is a random UUID; stored bcrypt-hashed to prevent timing attacks.
+ * - Rate-limited to 5 req/min on apply/finalize (invite key validation attempts).
+ * - A handshake session expires after 1 hour; any attempt after expiry is rejected.
+ * - The PAT A creates for B is a standard scoped token — it can be revoked at any time.
+ *
+ * Route prefix: /api/invite
+ */
+
+import { Router } from 'express';
+import { v4 as uuidv4 } from 'uuid';
+import bcrypt from 'bcrypt';
+import crypto from 'node:crypto';
+import { z } from 'zod';
+import { requireAuth } from '../auth/middleware.js';
+import { authRateLimit, globalRateLimit } from '../rate-limit/middleware.js';
+import { getConfig, saveConfig, getSecrets, saveSecrets } from '../config/loader.js';
+import { createToken } from '../auth/tokens.js';
+import { log } from '../util/log.js';
+import type { NetworkMember } from '../config/types.js';
+
+export const inviteRouter = Router();
+
+const BCRYPT_ROUNDS = 12;
+const HANDSHAKE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+// ── In-memory handshake store ────────────────────────────────────────────────
+// Sessions are ephemeral: private keys must never be persisted to disk.
+
+interface HandshakeSession {
+  /** bcrypt hash of the plaintext handshakeId */
+  idHash: string;
+  networkId: string;
+  /** A's ephemeral RSA private key (PEM) — held only for finalize step */
+  privateKeyPem: string;
+  /** A's ephemeral RSA public key (PEM) — sent to B in the apply response */
+  publicKeyPem: string;
+  /** B's RSA public key — received during apply, used to encrypt the token for B */
+  peerPublicKeyPem?: string;
+  /** The PAT id A created for B — needed to link pending token to member record */
+  tokenForPeerId?: string;
+  /** B's instance info — stored at apply time, committed to config at finalize */
+  pendingMember?: {
+    instanceId: string;
+    instanceLabel: string;
+    instanceUrl: string;
+  };
+  expiresAt: number; // epoch ms
+}
+
+const _sessions = new Map<string, HandshakeSession>();
+
+/** Purge expired sessions (run periodically) */
+function purgeExpired(): void {
+  const now = Date.now();
+  for (const [key, session] of _sessions) {
+    if (session.expiresAt < now) {
+      _sessions.delete(key);
+    }
+  }
+}
+setInterval(purgeExpired, 5 * 60 * 1000).unref();
+
+// ── Schemas ──────────────────────────────────────────────────────────────────
+
+const GenerateBody = z.object({
+  networkId: z.string().uuid(),
+});
+
+const ApplyBody = z.object({
+  handshakeId: z.string().uuid(),
+  networkId: z.string().uuid(),
+  instanceId: z.string().uuid(),
+  instanceLabel: z.string().min(1).max(200),
+  instanceUrl: z.string().url(),
+  rsaPublicKeyPem: z.string().min(100),
+});
+
+const FinalizeBody = z.object({
+  handshakeId: z.string().uuid(),
+  /** B's PAT for A, RSA-OAEP encrypted with A's public key, base64-encoded */
+  encryptedTokenForA: z.string().min(1),
+});
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** Encrypt a short string (token) with an RSA public key using OAEP-SHA256 */
+function rsaEncrypt(plaintext: string, publicKeyPem: string): string {
+  const buf = Buffer.from(plaintext, 'utf8');
+  const encrypted = crypto.publicEncrypt(
+    { key: publicKeyPem, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' },
+    buf,
+  );
+  return encrypted.toString('base64');
+}
+
+/** Decrypt with an RSA private key using OAEP-SHA256 */
+function rsaDecrypt(cipherBase64: string, privateKeyPem: string): string {
+  const buf = Buffer.from(cipherBase64, 'base64');
+  const decrypted = crypto.privateDecrypt(
+    { key: privateKeyPem, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' },
+    buf,
+  );
+  return decrypted.toString('utf8');
+}
+
+/** Look up a session by plaintext handshakeId (constant-time bcrypt compare) */
+async function findSession(handshakeId: string): Promise<[string, HandshakeSession] | null> {
+  for (const [key, session] of _sessions) {
+    if (session.expiresAt < Date.now()) continue;
+    const match = await bcrypt.compare(handshakeId, session.idHash);
+    if (match) return [key, session];
+  }
+  return null;
+}
+
+// ── POST /api/invite/generate ─────────────────────────────────────────────────
+// Authenticated members generate an invite handshake session for a network.
+
+inviteRouter.post('/generate', globalRateLimit, requireAuth, async (req, res) => {
+  const parsed = GenerateBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+
+  const { networkId } = parsed.data;
+  const cfg = getConfig();
+  const net = cfg.networks.find(n => n.id === networkId);
+  if (!net) { res.status(404).json({ error: 'Network not found' }); return; }
+
+  // Generate ephemeral RSA-4096 key pair (OAEP safe for ~470-byte payloads; our PATs are ~44 bytes)
+  const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
+    modulusLength: 4096,
+    publicKeyEncoding: { type: 'spki', format: 'pem' },
+    privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+  });
+
+  const handshakeId = uuidv4();
+  const idHash = await bcrypt.hash(handshakeId, BCRYPT_ROUNDS);
+  const sessionKey = uuidv4(); // internal map key
+  const expiresAt = Date.now() + HANDSHAKE_TTL_MS;
+
+  _sessions.set(sessionKey, {
+    idHash,
+    networkId,
+    privateKeyPem: privateKey as string,
+    publicKeyPem: publicKey as string,
+    expiresAt,
+  });
+
+  log.info(`Invite handshake generated for network ${networkId} (session ${sessionKey})`);
+
+  res.status(201).json({
+    handshakeId,
+    networkId,
+    inviteUrl: `${req.protocol}://${req.get('host')}/api/invite/apply`,
+    rsaPublicKeyPem: publicKey,
+    expiresAt: new Date(expiresAt).toISOString(),
+  });
+});
+
+// ── POST /api/invite/apply ─────────────────────────────────────────────────────
+// Called by the joining instance. Not authenticated — handshakeId is the credential.
+
+inviteRouter.post('/apply', authRateLimit, async (req, res) => {
+  const parsed = ApplyBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+
+  const { handshakeId, networkId, instanceId, instanceLabel, instanceUrl, rsaPublicKeyPem } = parsed.data;
+
+  const found = await findSession(handshakeId);
+  if (!found) { res.status(401).json({ error: 'Invalid or expired handshake ID' }); return; }
+  const [sessionKey, session] = found;
+
+  if (session.networkId !== networkId) {
+    res.status(400).json({ error: 'Network ID does not match invite' });
+    return;
+  }
+
+  const cfg = getConfig();
+  const net = cfg.networks.find(n => n.id === networkId);
+  if (!net) { res.status(404).json({ error: 'Network not found' }); return; }
+
+  // Ensure the joining instance is not already a member
+  if (net.members.some(m => m.instanceId === instanceId)) {
+    res.status(409).json({ error: 'Instance is already a member of this network' });
+    return;
+  }
+
+  // Validate the peer's RSA public key is parseable before proceeding
+  try {
+    crypto.createPublicKey(rsaPublicKeyPem);
+  } catch {
+    res.status(400).json({ error: 'Invalid rsaPublicKeyPem' });
+    return;
+  }
+
+  // Create a PAT that B will use to authenticate inbound requests to A
+  const { record, plaintext: tokenForB } = await createToken({
+    name: `peer:${instanceLabel} (handshake)`,
+    expiresAt: null,
+    spaces: net.spaces, // scoped to only the network's spaces
+  });
+
+  // Encrypt the token with B's public key — only B can decrypt it
+  const encryptedTokenForB = rsaEncrypt(tokenForB, rsaPublicKeyPem);
+
+  // Store B's public key and pending member data so finalize can complete the registration
+  session.peerPublicKeyPem = rsaPublicKeyPem;
+  session.tokenForPeerId = record.id;
+  session.pendingMember = { instanceId, instanceLabel, instanceUrl };
+  _sessions.set(sessionKey, session);
+
+  log.info(`Invite apply from ${instanceLabel} (${instanceId}) for network ${networkId}`);
+
+  res.json({
+    encryptedTokenForB,
+    rsaPublicKeyPem: session.publicKeyPem,
+    instanceId: cfg.instanceId,
+    instanceLabel: cfg.instanceLabel,
+    networkId,
+    networkLabel: net.label,
+    networkType: net.type,
+    spaces: net.spaces,
+  });
+});
+
+// ── POST /api/invite/finalize ─────────────────────────────────────────────────
+// Called by the joining instance after it has decrypted its token and generated one for A.
+
+inviteRouter.post('/finalize', authRateLimit, async (req, res) => {
+  const parsed = FinalizeBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+
+  const { handshakeId, encryptedTokenForA } = parsed.data;
+
+  const found = await findSession(handshakeId);
+  if (!found) { res.status(401).json({ error: 'Invalid or expired handshake ID' }); return; }
+  const [sessionKey, session] = found;
+
+  if (!session.pendingMember || !session.peerPublicKeyPem || !session.tokenForPeerId) {
+    res.status(400).json({ error: 'Handshake not in apply state — call /apply first' });
+    return;
+  }
+
+  // Decrypt B's token using A's private key
+  let peerToken: string;
+  try {
+    peerToken = rsaDecrypt(encryptedTokenForA, session.privateKeyPem);
+  } catch {
+    res.status(400).json({ error: 'Failed to decrypt encryptedTokenForA — wrong key or corrupt payload' });
+    return;
+  }
+
+  if (!peerToken.startsWith('ythril_')) {
+    res.status(400).json({ error: 'Decrypted token has unexpected format' });
+    return;
+  }
+
+  const { instanceId, instanceLabel, instanceUrl } = session.pendingMember;
+
+  // Add the new member to the network config
+  const cfg = getConfig();
+  const net = cfg.networks.find(n => n.id === session.networkId);
+  if (!net) { res.status(404).json({ error: 'Network not found' }); return; }
+
+  // Hash B's token for inbound validation (stored in member record)
+  const tokenHash = await bcrypt.hash(peerToken, BCRYPT_ROUNDS);
+
+  const newMember: NetworkMember = {
+    instanceId,
+    label: instanceLabel,
+    url: instanceUrl,
+    tokenHash,
+    direction: net.type === 'braintree' ? 'push' : 'both',
+    lastSyncAt: undefined,
+    lastSeqReceived: {},
+    children: net.type === 'braintree' ? [] : undefined,
+  };
+
+  net.members.push(newMember);
+  saveConfig(cfg);
+
+  // Store A's outbound token for B (the one B generated for A to use)
+  const secrets = getSecrets();
+  secrets.peerTokens[instanceId] = peerToken;
+  saveSecrets(secrets);
+
+  // Discard the session — private key is no longer needed
+  _sessions.delete(sessionKey);
+
+  log.info(`Invite handshake complete: ${instanceLabel} (${instanceId}) joined network ${session.networkId}`);
+
+  res.json({ status: 'joined', instanceId, networkId: session.networkId });
+});
+
+// ── GET /api/invite/status/:handshakeId ───────────────────────────────────────
+// Allows the joining side to poll whether the handshake was completed.
+
+inviteRouter.get('/status/:handshakeId', authRateLimit, async (req, res) => {
+  const handshakeId = req.params['handshakeId'] as string;
+  if (!handshakeId || handshakeId.length < 10) {
+    res.status(400).json({ error: 'Invalid handshakeId' });
+    return;
+  }
+
+  const found = await findSession(handshakeId);
+  if (!found) {
+    // Could be expired, completed (deleted), or never existed — all map to 404
+    res.status(404).json({ status: 'not_found' });
+    return;
+  }
+  const [, session] = found;
+
+  res.json({
+    status: session.pendingMember ? 'applied' : 'pending',
+    expiresAt: new Date(session.expiresAt).toISOString(),
+  });
+});

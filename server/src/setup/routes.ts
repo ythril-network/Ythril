@@ -194,11 +194,11 @@ setupRouter.post('/', authRateLimit, async (req, res) => {
   loadConfig();
   loadSecrets();
 
-  // Initialise the general space (best-effort — MongoDB may not be ready yet)
+  // Initialise the general space
   try {
     await ensureGeneralSpace();
   } catch (err) {
-    log.warn(`Could not initialise general space during setup (MongoDB may not be available yet): ${err}`);
+    log.warn(`Could not initialise general space during setup: ${err}`);
   }
 
   // Clear setup code from memory

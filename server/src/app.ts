@@ -2,6 +2,13 @@ import express from 'express';
 import { tokensRouter } from './api/tokens.js';
 import { brainRouter } from './api/brain.js';
 import { spacesRouter } from './api/spaces.js';
+import { filesRouter } from './api/files.js';
+import { conflictsRouter } from './api/conflicts.js';
+import { syncRouter } from './api/sync.js';
+import { networksRouter } from './api/networks.js';
+import { notifyRouter } from './api/notify.js';
+import { inviteRouter } from './api/invite.js';
+import { brainUiRouter } from './brain-ui/routes.js';
 import { setupRouter } from './setup/routes.js';
 import { settingsRouter } from './settings/routes.js';
 import { mcpRouter } from './mcp/router.js';
@@ -35,6 +42,9 @@ export function createApp() {
   // ── Settings UI ──────────────────────────────────────────────────────────
   app.use('/settings', settingsRouter);
 
+  // ── Brain UI ─────────────────────────────────────────────────────────────
+  app.use('/brain', brainUiRouter);
+
   // ── Redirect bare root ───────────────────────────────────────────────────
   app.get('/', (_req, res) => {
     res.redirect(302, configExists() ? '/settings' : '/setup');
@@ -44,6 +54,12 @@ export function createApp() {
   app.use('/api/tokens', tokensRouter);
   app.use('/api/brain', brainRouter);
   app.use('/api/spaces', spacesRouter);
+  app.use('/api/files', filesRouter);
+  app.use('/api/conflicts', conflictsRouter);
+  app.use('/api/sync', syncRouter);
+  app.use('/api/networks', networksRouter);
+  app.use('/api/notify', notifyRouter);
+  app.use('/api/invite', inviteRouter);
 
   // ── MCP endpoints ────────────────────────────────────────────────────────
   app.use('/mcp', mcpRouter);

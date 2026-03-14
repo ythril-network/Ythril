@@ -6,7 +6,7 @@ import type { SpaceCounterDoc } from '../config/types.js';
  * Safe for concurrent callers — uses findOneAndUpdate with $inc.
  */
 export async function nextSeq(spaceId: string): Promise<number> {
-  const counters = col<SpaceCounterDoc>('ytrai_counters');
+  const counters = col<SpaceCounterDoc>('ythril_counters');
   const result = await counters.findOneAndUpdate(
     { _id: spaceId },
     { $inc: { seq: 1 } },
