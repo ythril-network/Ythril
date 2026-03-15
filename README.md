@@ -11,7 +11,7 @@ Each brain combines three things in one place:
 - file management inside isolated spaces
 - MCP tool access for assistants and clients
 
-It works in single-brain mode for personal use, or in networked mode for shared spaces across trusted members. Networking is explicit and policy-driven: each brain decides what spaces to share, with whom, and in which direction. Local data ownership is a physical fact — no network governance can delete data from another member's machine.
+It works in single-brain mode for personal use, or in networked mode for shared spaces across trusted members. A common single-person setup is running one brain on your server and another on your laptop — both owned by you, syncing selected spaces so your context, files, and memories follow you across devices. Networking is explicit and policy-driven: each brain decides what spaces to share, with whom, and in which direction. Local data ownership is a physical fact — no network governance can delete data from another member's machine.
 
 Think of it as the operational layer between your data, your models, and your day-to-day workflows.
 
@@ -21,7 +21,7 @@ flowchart LR
 	C --> L[LLM]
 	C -->|HTTP API| HAPI[File Manager\n& Settings]
 
-	subgraph Brain
+	subgraph Brain["🧠 Your Brain"]
 		subgraph S1[Space]
 			S1MCP[MCP\n/mcp/space1]
 			S1MCP --> S1Mem[Memories] --> S1MD[(data)]
@@ -41,7 +41,7 @@ flowchart LR
 	L -->|/mcp/space1| S1MCP
 	L -->|/mcp/space2| S2MCP
 
-	subgraph OB[Other Brain]
+	subgraph OB["🧠 Other Brain\n(e.g. your laptop, a teammate)"]
 		subgraph OS[Space]
 			OSMCP[MCP]
 			OSMCP --> OSMem[Memories] --> OSMD[(data)]
@@ -50,6 +50,22 @@ flowchart LR
 	end
 
 	S1 <-.->|optional sync| OS
+
+	classDef yourBrain fill:#1e3a5f,stroke:#4a90d9,color:#e8f4ff
+	classDef otherBrain fill:#2d1b4e,stroke:#9b6dd6,color:#f0e8ff
+	classDef space fill:#0d2b1a,stroke:#3a9e6a,color:#d4f5e4
+	classDef mcp fill:#1a2a1a,stroke:#5cb85c,color:#c8f0c8
+	classDef data fill:#1a1a2e,stroke:#6666aa,color:#d0d0f0
+	classDef client fill:#2e2a1a,stroke:#c8a040,color:#fff8e0
+	classDef http fill:#2a1a1a,stroke:#c84040,color:#ffe0e0
+
+	class Brain yourBrain
+	class OB otherBrain
+	class S1,S2,OS space
+	class S1MCP,S2MCP,OSMCP mcp
+	class S1MD,S1FD,S2MD,S2FD,OSMD,OSFD data
+	class U,C,L client
+	class HAPI http
 ```
 
 ## Philosophy
