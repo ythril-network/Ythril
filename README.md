@@ -107,26 +107,54 @@ Then open setup in your browser, enter the generated setup code, and complete th
 
 One brain can participate in multiple networks simultaneously, each scoped to different spaces and governed independently.
 
+**Standalone** — single brain, no sync, full local control.
+
 ```mermaid
 flowchart LR
-	Y[Your Brain]
-
-	Y <-->|Closed| C1[Personal Devices]
-	Y <-->|Democratic| C2[Team Alpha]
-	Y <-->|Club| C3[Research Group]
-	Y -->|Braintree| C4[Subscriber Tree]
-
-	classDef net fill:#1a1a2e,stroke:#6666aa,color:#d0d0f0
-	class C1,C2,C3,C4 net
+	A[🧠 Brain]
 ```
 
-- **Standalone** — single brain, no sync, full local control.
-- **Closed** — symmetric sync between a fixed set of members; unanimous vote required to add or remove anyone.
-- **Democratic** — majority vote governs membership; designed for larger, more open teams.
-- **Club** — the inviting member approves joins unilaterally; lightweight for small trusted groups.
-- **Braintree** — push-only tree from a root publisher down to subscribers; intermediate nodes can be re-parented automatically if they go offline.
+**Closed** — symmetric sync between a fixed set of members; unanimous vote required to add or remove anyone.
 
-For full topology diagrams and governance rules, see [docs/network-types.md](docs/network-types.md).
+```mermaid
+flowchart LR
+	A[🧠 Brain A] <--> B[🧠 Brain B]
+	A <--> C[🧠 Brain C]
+	B <--> C
+```
+
+**Democratic** — majority vote governs membership; designed for larger, more open teams.
+
+```mermaid
+flowchart LR
+	A[🧠 Brain A] <--> B[🧠 Brain B]
+	A <--> C[🧠 Brain C]
+	A <--> D[🧠 Brain D]
+	B <--> C
+	B <--> D
+	C <--> D
+```
+
+**Club** — the inviting member approves joins unilaterally; lightweight for small trusted groups.
+
+```mermaid
+flowchart LR
+	A[🧠 Inviter] <--> B[🧠 Brain B]
+	A <--> C[🧠 Brain C]
+```
+
+**Braintree** — push-only tree from a root publisher down to subscribers; intermediate nodes re-parent automatically if they go offline.
+
+```mermaid
+flowchart TD
+	R[🧠 Root] --> A[🧠 Brain A]
+	R --> B[🧠 Brain B]
+	A --> C[🧠 Brain C]
+	A --> D[🧠 Brain D]
+	B --> E[🧠 Brain E]
+```
+
+For full governance rules and sync behaviour, see [docs/network-types.md](docs/network-types.md).
 
 ## Security
 
