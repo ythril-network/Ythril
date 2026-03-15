@@ -1082,8 +1082,8 @@ Items are ordered by dependency — each group unlocks the next.
 - [ ] Server-rendered HTML UI at `/files` over the existing `/api/files` HTTP API: directory listing, upload form, download link, delete, rename
 
 ### 9. Settings UI: networks (depends on gossip completion + sync_now)
-- [ ] Networks section on `/settings`: list networks, per-network sync schedule config, manual "Sync now" trigger, last-sync timestamp, consecutive failure count
+- [x] Networks section on `/settings`: list networks, per-network sync schedule config, manual "Sync now" trigger, last-sync timestamp, consecutive failure count
 
 ### 10. Settings UI: votes (depends on vote propagation + leave/removal flows)
-- [ ] Open votes banner on main `/settings` page (count of pending rounds across all networks)
-- [ ] Per-network create / join / leave flows in the networks section
+- [x] Open votes banner on main `/settings` page (count of pending rounds across all networks)
+- [x] Per-network create / join / leave flows in the networks section
