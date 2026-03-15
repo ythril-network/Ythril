@@ -105,53 +105,60 @@ Then open setup in your browser, enter the generated setup code, and complete th
 
 ## Brain Networks
 
-One brain can participate in multiple networks simultaneously, each scoped to different spaces and governed independently.
+One brain can participate in multiple networks simultaneously, each scoped to different spaces and governed independently. It is always **spaces** that sync across brains — not the whole brain.
 
 **Standalone** — single brain, no sync, full local control.
 
 ```mermaid
 flowchart LR
-	A[🧠 Brain]
+	subgraph BA["🧠 Brain"]
+		SA[space]
+	end
 ```
 
-**Closed** — symmetric sync between a fixed set of members; unanimous vote required to add or remove anyone.
+**Closed / Democratic / Club** — symmetric space sync; all members exchange data in both directions. The three types share the same sync topology and differ only in governance: Closed requires unanimous vote to change membership, Democratic uses majority vote, Club lets the inviter approve joins unilaterally.
 
 ```mermaid
 flowchart LR
-	A[🧠 Brain A] <--> B[🧠 Brain B]
-	A <--> C[🧠 Brain C]
-	B <--> C
+	subgraph BA["🧠 Brain A"]
+		SA[space]
+	end
+	subgraph BB["🧠 Brain B"]
+		SB[space]
+	end
+	subgraph BC["🧠 Brain C"]
+		SC[space]
+	end
+
+	SA <--> SB
+	SA <--> SC
+	SB <--> SC
 ```
 
-**Democratic** — majority vote governs membership; designed for larger, more open teams.
-
-```mermaid
-flowchart LR
-	A[🧠 Brain A] <--> B[🧠 Brain B]
-	A <--> C[🧠 Brain C]
-	A <--> D[🧠 Brain D]
-	B <--> C
-	B <--> D
-	C <--> D
-```
-
-**Club** — the inviting member approves joins unilaterally; lightweight for small trusted groups.
-
-```mermaid
-flowchart LR
-	A[🧠 Inviter] <--> B[🧠 Brain B]
-	A <--> C[🧠 Brain C]
-```
-
-**Braintree** — push-only tree from a root publisher down to subscribers; intermediate nodes re-parent automatically if they go offline.
+**Braintree** — push-only from a root space down to subscriber spaces; intermediate nodes re-parent automatically if they go offline.
 
 ```mermaid
 flowchart TD
-	R[🧠 Root] --> A[🧠 Brain A]
-	R --> B[🧠 Brain B]
-	A --> C[🧠 Brain C]
-	A --> D[🧠 Brain D]
-	B --> E[🧠 Brain E]
+	subgraph BR["🧠 Root"]
+		SR[space]
+	end
+	subgraph BA["🧠 Brain A"]
+		SA[space]
+	end
+	subgraph BB["🧠 Brain B"]
+		SB[space]
+	end
+	subgraph BC["🧠 Brain C"]
+		SC[space]
+	end
+	subgraph BD["🧠 Brain D"]
+		SD[space]
+	end
+
+	SR --> SA
+	SR --> SB
+	SA --> SC
+	SA --> SD
 ```
 
 For full governance rules and sync behaviour, see [docs/network-types.md](docs/network-types.md).
