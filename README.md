@@ -11,7 +11,13 @@ Each brain combines three things in one place:
 - file management inside isolated spaces
 - MCP tool access for assistants and clients
 
-It works in single-brain mode for personal use, or in networked mode for shared spaces across trusted members. A common single-person setup is running one brain on your server and another on your laptop — both owned by you, syncing selected spaces so your context, files, and memories follow you across devices. Networking is explicit and policy-driven: each brain decides what spaces to share, with whom, and in which direction. Local data ownership is a physical fact — no network governance can delete data from another member's machine.
+It works in single-brain mode for personal use, or in networked mode for shared spaces across trusted members. Networking is explicit and policy-driven: each brain decides what spaces to share, with whom, and in which direction. Local data ownership is a physical fact — no network governance can delete data from another member's machine.
+
+Common setups:
+
+- **Personal, multi-device** — run one brain on your server and another on your laptop. Both are yours. Sync selected spaces so your context, files, and memories follow you across devices without any cloud intermediary.
+- **Team knowledge base** — each engineer runs their own brain. A shared `eng-kb` space is synced across the team. Spaces for personal notes or client projects stay private. Assistants scoped to a token can only see what that token is allowed to read — useful for compartmentalising by team, project, or clearance level.
+- **Research collaboration** — a researcher shares a `papers` space with collaborators at other institutions. Each party keeps their own annotations and working notes in private spaces. The shared space carries only what everyone has agreed to pool. No central server; no one organisation owns the data.
 
 Think of it as the operational layer between your data, your models, and your day-to-day workflows.
 
