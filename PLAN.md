@@ -982,71 +982,109 @@ npm-debug.log*
 ## Implementation Phases
 
 ### Phase 1 — Core (runnable, MCP-compliant)
-- [ ] Compose stack scaffold (`ythril` + `ythril-mongo`)
-- [ ] First-run setup: generate setup code to stdout; setup form collects code + instance label + settings password; `config.json` + `secrets.json` written at `0600`; startup check rejects world-readable files; redirect to `/settings` after setup
-- [ ] Random `instanceId` UUID generated at first run, stored in config
-- [ ] Embedding config: OpenAI-compatible `/v1/embeddings` endpoint; default Ollama `nomic-embed-text-v1.5` 768d cosine
-- [ ] MongoDB `$vectorSearch` index creation on space init; mismatch detection + re-index background job
-- [ ] Per-space monotonic `seq` counter; increment on every write and delete
-- [ ] Edge + entity schema with `createdAt`, `seq`, `author`
-- [ ] Tombstone collection `{spaceId}_tombstones`
-- [ ] PAT token CRUD API (`/api/tokens`)
-- [ ] All MCP tools: `remember`, `recall` (parallel for recall_global), `query` (operator whitelist + maxTimeMS), `read_file`, `write_file`, `list_dir`, `delete_file`, `create_dir`, `move_file`
-- [ ] `/tools/list` and `/tools/call` MCP endpoints (HTTP+SSE)
-- [ ] Sandbox path enforcement: URL-decode + unicode-normalise before resolution
-- [ ] `Authorization` header redaction in all log output
-- [ ] Rate limiting middleware: auth/setup 10/min per IP; global 300/min per token
-- [ ] TLS non-loopback warning on startup
-- [ ] Health endpoint: `GET /health`
+- [x] Compose stack scaffold (`ythril` + `ythril-mongo`)
+- [x] First-run setup: generate setup code to stdout; setup form collects code + instance label + settings password; `config.json` + `secrets.json` written at `0600`; startup check rejects world-readable files; redirect to `/settings` after setup
+- [x] Random `instanceId` UUID generated at first run, stored in config
+- [x] Embedding config: OpenAI-compatible `/v1/embeddings` endpoint; default Ollama `nomic-embed-text-v1.5` 768d cosine
+- [x] MongoDB `$vectorSearch` index creation on space init; mismatch detection + re-index background job
+- [x] Per-space monotonic `seq` counter; increment on every write and delete
+- [x] Edge + entity schema with `createdAt`, `seq`, `author`
+- [x] Tombstone collection `{spaceId}_tombstones`
+- [x] PAT token CRUD API (`/api/tokens`)
+- [x] All MCP tools: `remember`, `recall` (parallel for recall_global), `query` (operator whitelist + maxTimeMS), `read_file`, `write_file`, `list_dir`, `delete_file`, `create_dir`, `move_file`
+- [x] `/tools/list` and `/tools/call` MCP endpoints (HTTP+SSE)
+- [x] Sandbox path enforcement: URL-decode + unicode-normalise before resolution
+- [x] `Authorization` header redaction in all log output
+- [x] Rate limiting middleware: auth/setup 10/min per IP; global 300/min per token
+- [x] TLS non-loopback warning on startup
+- [x] Health endpoint: `GET /health`
 
 ### Phase 2 — Settings UI + File Manager
 - [ ] File manager at `/files`: browse, upload, download, delete, rename
-- [ ] `maxUploadBodyBytes` enforced at HTTP layer (HTTP 413 before processing)
-- [ ] Destructive endpoints accept confirm in body only (not query string)
-- [ ] Space allowlist enforced on `/api/conflicts` and all data-returning endpoints
-- [ ] Settings UI at `/settings`: password-authenticated (bcrypt verify + session cookie); token CRUD (create, list, revoke); storage display; space management
+- [x] `maxUploadBodyBytes` enforced at HTTP layer (HTTP 413 before processing)
+- [x] Destructive endpoints accept confirm in body only (not query string)
+- [x] Space allowlist enforced on `/api/conflicts` and all data-returning endpoints
+- [x] Settings UI at `/settings`: password-authenticated (bcrypt verify + session cookie); token CRUD (create, list, revoke); storage display; space management
 
 ### Phase 3 — Brain UI + Storage Quotas
-- [ ] Brain UI at `/brain`: memory list, entity viewer, bulk delete
+- [x] Brain UI at `/brain`: memory list, entity viewer, bulk delete
 - [x] Storage quota config + enforcement (soft + hard)
-- [ ] Settings UI: storage section with used/limit display
+- [x] Settings UI: storage section with used/limit display
 
 ### Phase 4 — Sync
-- [ ] Network CRUD API (`/api/networks`): create, list, leave
-- [ ] Invite key generation: bcrypt at rest, shown once; join request flow
-- [ ] `secrets.json` for outbound peer credentials (`0600`; never in `config.json`)
-- [ ] Peer TLS: strict cert validation by default; per-peer `skipTlsVerify` flag with UI warning
-- [ ] `sync_now` peerId validated against member list (no direct URL use)
-- [ ] Rate limit on `POST /api/notify`: 60/min per sender instanceId
-- [ ] Gossip poisoning protection: relay-vs-direct-record conflict held for review
-- [ ] Incremental sync: `sinceSeq` cursor on all brain sync endpoints; `since` timestamp on file manifest
-- [ ] Paginated brain sync endpoints (`limit` + opaque `cursor`)
-- [ ] Tombstone sync: `GET /api/sync/tombstones?sinceSeq=<n>`; tombstone application on receive
-- [ ] File manifest uses SHA-256; `modified` advisory only
-- [ ] Brain conflict resolution: seq-wins; co-author fork on equal-seq; tombstone vs live-doc precedence
-- [ ] Brain sync (memories, entities, edges)
+- [x] Network CRUD API (`/api/networks`): create, list, leave
+- [x] Invite key generation: bcrypt at rest, shown once; join request flow
+- [x] `secrets.json` for outbound peer credentials (`0600`; never in `config.json`)
+- [x] Peer TLS: strict cert validation by default; per-peer `skipTlsVerify` flag with UI warning
+- [x] `sync_now` peerId validated against member list (no direct URL use)
+- [x] Rate limit on `POST /api/notify`: 60/min per sender instanceId
+- [x] Gossip poisoning protection: relay-vs-direct-record conflict held for review
+- [x] Incremental sync: `sinceSeq` cursor on all brain sync endpoints; `since` timestamp on file manifest
+- [x] Paginated brain sync endpoints (`limit` + opaque `cursor`)
+- [x] Tombstone sync: `GET /api/sync/tombstones?sinceSeq=<n>`; tombstone application on receive
+- [x] File manifest uses SHA-256; `modified` advisory only
+- [x] Brain conflict resolution: seq-wins; co-author fork on equal-seq; tombstone vs live-doc precedence
+- [x] Brain sync (memories, entities, edges)
 - [ ] Gossip: member list exchange piggybacked on sync cycles
 - [ ] Settings UI: networks section (sync schedule, trigger, history log)
 - [ ] `list_peers` + `sync_now` MCP tools (operate on networks)
 
 ### Phase 5 — Spaces
-- [ ] Space CRUD API (`/api/spaces`)
-- [ ] Space deletion vote flow: upstream passthrough to Braintree root; notify channel event `space_deletion_pending`; transfer affordance; veto = retain own copy
-- [ ] Auto-create file directories + MongoDB collections + `$vectorSearch` indexes on space creation
-- [ ] Per-space MCP endpoint routing (`/mcp/:spaceId`)
-- [ ] Enforce space isolation on all file and brain operations
-- [ ] Settings UI: spaces section
+- [x] Space CRUD API (`/api/spaces`)
+- [x] Space deletion vote flow: upstream passthrough to Braintree root; notify channel event `space_deletion_pending`; transfer affordance; veto = retain own copy
+- [x] Auto-create file directories + MongoDB collections + `$vectorSearch` indexes on space creation
+- [x] Per-space MCP endpoint routing (`/mcp/:spaceId`)
+- [x] Enforce space isolation on all file and brain operations
+- [x] Settings UI: spaces section
 
 ### Phase 6 — Network Governance
-- [ ] Voting round engine: open round on join request, collect votes via gossip, evaluate pass/fail conditions per network type
+- [x] Voting round engine: open round on join request, collect votes via gossip, evaluate pass/fail conditions per network type
 - [ ] Vote propagation in gossip protocol
-- [ ] Invite key lifecycle: issue → open round → consumed on result
-- [ ] Network types: Closed, Democratic, Club, Braintree
+- [x] Invite key lifecycle: issue → open round → consumed on result
+- [x] Network types: Closed, Democratic, Club, Braintree
 - [ ] Braintree: ancestor path resolution + per-ancestor vote collection
 - [ ] Leave flow: unilateral departure + departure gossip broadcast
 - [ ] Removal flow: removal round via vote; notify ejected instance on next sync attempt; ejected member keeps data
 - [ ] Off-grid / fork: departing or ejected member can create a new network from their data
-- [ ] Per-membership sync direction (`both` / `push`); enforce at sync time
-- [ ] `POST /api/notify` endpoint; network-scoped token auth; `vote_pending` + `member_departed` events
+- [x] Per-membership sync direction (`both` / `push`); enforce at sync time
+- [x] `POST /api/notify` endpoint; network-scoped token auth; `vote_pending` + `member_departed` events
 - [ ] Settings UI: pending votes banner, create / join / leave flows
 - [ ] Merkle root per space (opt-in via network `merkle` flag)
+
+---
+
+## TODO
+
+Items are ordered by dependency — each group unlocks the next.
+
+### 1. Gossip completion (unlocks vote propagation + UI history)
+- [ ] Engine calls `POST /api/sync/networks/:networkId/members` on each peer during sync cycles to push own member record (gossip member list exchange piggybacked on sync)
+
+### 2. Vote propagation (unlocks Braintree ancestor votes + votes UI)
+- [ ] Engine calls `GET /api/sync/networks/:networkId/votes` on each peer during sync; relays new votes via `POST /api/sync/networks/:networkId/votes/:roundId`
+
+### 3. Leave + removal flows (unlocks off-grid/fork)
+- [ ] Leave flow: broadcast `member_departed` notify event to all peers before removing the network locally (DELETE `/api/networks/:id` currently does no broadcast)
+- [ ] Removal flow: after remove vote concludes and passes, send `member_removed` notify event to ejected instance; return `401 {"error":"ejected"}` on any subsequent sync attempt from that instanceId
+
+### 4. Braintree governance (depends on vote propagation)
+- [ ] Resolve ancestor path up root via `parentInstanceId` chain on join requests; collect per-ancestor votes before opening the local round
+
+### 5. Off-grid / fork (depends on leave + removal)
+- [ ] `POST /api/networks/:id/fork` — creates a new standalone or closed network seeded from current space data, available to a departing or ejected member
+
+### 6. Merkle root (independent)
+- [ ] Compute SHA-256 tree over space seq watermarks + file manifest hashes; expose via `GET /api/sync/merkle?spaceId=&networkId=`; engine compares roots during sync and flags divergence when network `merkle` flag is set
+
+### 7. `sync_now` MCP tool (independent)
+- [ ] Add `sync_now` tool to `mcp/router.ts`: accepts `peerId` (instanceId), validates against member list, triggers one sync cycle, returns outcome
+
+### 8. File manager UI (independent)
+- [ ] Server-rendered HTML UI at `/files` over the existing `/api/files` HTTP API: directory listing, upload form, download link, delete, rename
+
+### 9. Settings UI: networks (depends on gossip completion + sync_now)
+- [ ] Networks section on `/settings`: list networks, per-network sync schedule config, manual "Sync now" trigger, last-sync timestamp, consecutive failure count
+
+### 10. Settings UI: votes (depends on vote propagation + leave/removal flows)
+- [ ] Open votes banner on main `/settings` page (count of pending rounds across all networks)
+- [ ] Per-network create / join / leave flows in the networks section
