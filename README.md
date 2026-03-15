@@ -240,12 +240,13 @@ node --test --test-reporter=spec tests/red-team-tests/token-brute-force.test.js
 
 ### Sync integration tests
 
-Cover multi-instance sync, conflict detection, and all four network governance types.
+Cover multi-instance sync, conflict detection, gossip member exchange, and all four network governance types.
 
 ```sh
 node --test --test-reporter=spec \
   tests/sync/conflict.test.js tests/sync/closed-network.test.js \
-  tests/sync/braintree.test.js tests/sync/democratic.test.js
+  tests/sync/braintree.test.js tests/sync/democratic.test.js \
+  tests/sync/gossip.test.js
 ```
 
 All tests must pass before merging. A failing red-team test is treated as a security regression.

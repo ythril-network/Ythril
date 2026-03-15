@@ -560,8 +560,8 @@ syncRouter.post('/networks/:networkId/members', syncRateLimit, requireAuth, asyn
     if (!net) { res.status(404).json({ error: 'Network not found' }); return; }
 
     const incoming = req.body as Partial<NetworkMember>;
-    if (!incoming?.instanceId || !incoming?.label || !incoming?.url) {
-      res.status(400).json({ error: 'instanceId, label, url required' });
+    if (!incoming?.instanceId || !incoming?.label) {
+      res.status(400).json({ error: 'instanceId and label required' });
       return;
     }
 
@@ -595,7 +595,11 @@ syncRouter.post('/networks/:networkId/members', syncRateLimit, requireAuth, asyn
       }
     }
 
-    res.status(200).json({ status: 'ok' });
+    // Piggyback our own identity in the response so the caller can update their record for us
+    const selfUrl = process.env['INSTANCE_URL'] ?? '';
+    const selfRecord: Record<string, unknown> = { instanceId: cfg.instanceId, label: cfg.instanceLabel };
+    if (selfUrl) selfRecord['url'] = selfUrl;
+    res.status(200).json({ status: 'ok', self: selfRecord });
   } catch (err) {
     log.error(`sync POST members: ${err}`);
     res.status(500).json({ error: 'Internal error' });

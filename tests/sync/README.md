@@ -24,6 +24,7 @@
    node --test tests/sync/braintree.test.js
    node --test tests/sync/democratic.test.js
    node --test tests/sync/conflict.test.js
+   node --test tests/sync/gossip.test.js
    ```
    Or run all:
    ```
@@ -58,6 +59,11 @@
 - Add C via vote: A votes no (veto) -> fails with veto
 - Add C via vote: A yes, B yes, C (self skip) -> passes
 
+### Gossip (a ↔ b)
+- Verify that a sync trigger causes A to push its `instanceLabel` to B (self-announce piggyback)
+- Verify that B's current `instanceLabel` appears in A's member view after a sync trigger (self-record in response)
+- Verify gossip poisoning: a member cannot overwrite another member's record
+
 ### Conflict
 - Write the same memory ID on A and B simultaneously (requires manual seq injection)
 - Sync A→B; verify fork exists on B
@@ -70,6 +76,11 @@ tests/sync/
   README.md           — this file
   setup.js            — first-run setup helper (creates configs/)
   helpers.js          — shared fetch helpers
+  gossip.test.js
+  closed-network.test.js
+  braintree.test.js
+  democratic.test.js
+  conflict.test.js
   configs/
     a/                — populated by setup.js
     b/

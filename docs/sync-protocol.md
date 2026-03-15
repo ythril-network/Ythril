@@ -8,15 +8,16 @@ This document describes how two brains exchange data in a sync cycle: the sequen
 
 Sync is **peer-to-peer over plain HTTPS**. Each brain calls its peers directly using the URL stored in the `member.url` config field — typically `https://brain.example.com`. There is no central broker.
 
-A sync cycle for a single member consists of three phases in order:
+A sync cycle for a single member consists of four phases in order:
 
 | Phase | Direction | Description |
 |-------|-----------|-------------|
 | **Pull** | peer → us | Fetch everything the peer has that we haven't seen yet |
 | **Push** | us → peer | Upload everything we have that the peer hasn't seen yet |
 | **File sync** | peer → us | Download files whose SHA-256 digest differs from ours |
+| **Gossip** | us ↔ peer | Exchange member identity records (label, URL, children) |
 
-Phases 1 and 2 are gated by [watermarks](#watermarks) so only new or changed documents travel over the wire. Phase 3 is manifest-based and equally incremental.
+Phases 1 and 2 are gated by [watermarks](#watermarks) so only new or changed documents travel over the wire. Phase 3 is manifest-based and equally incremental. Phase 4 propagates identity metadata across the member graph.
 
 ---
 
@@ -176,6 +177,24 @@ File sync uses the standard 10 s timeout per request. Large files that exceed th
 
 ---
 
+## Gossip phase
+
+After file sync, each engine cycle performs a lightweight member identity exchange with each peer:
+
+1. **Self-announce** — `POST /api/sync/networks/:networkId/members` with `{ instanceId, label, children?, url? }`. The `url` field is included only when the `INSTANCE_URL` environment variable is set; if omitted, the peer keeps the URL it already has on record.
+
+2. **Self-record piggyback** — the receiving peer includes its own current identity in the `200` response as `{ status: 'ok', self: { instanceId, label, url? } }`. The caller updates its local member entry for that peer from this payload — no separate GET is needed.
+
+3. **Pull member view** — `GET /api/sync/networks/:networkId/members` fetches the peer's full member list. Any record whose `instanceId` is already known locally (but is not our own `instanceId`) has its `url`, `label`, and `children` merged in if they differ.
+
+### Gossip poisoning protection
+
+On the receiving side, the `POST /api/sync/networks/:networkId/members` endpoint only updates the record for the exact `instanceId` in the request body. It will not update any other member's record — so a compromise peer cannot overwrite other members' identity details. Unknown `instanceId` values (not already in the member list) are silently acknowledged as `{ status: 'unknown_member' }` and never auto-added.
+
+On the pulling side, records returned by `GET /members` that share our own `instanceId` are never applied.
+
+---
+
 ## API reference
 
 All endpoints are under `/api/sync` and require a `Bearer` token that resolves to a network member (peer token, not a user PAT). Rate-limited per IP.
@@ -193,6 +212,7 @@ All endpoints are under `/api/sync` and require a `Bearer` token that resolves t
 | `GET` | `/api/sync/tombstones` | `spaceId`, `networkId`, `sinceSeq` | `{ memories[], entities[], edges[] }` |
 | `GET` | `/api/sync/manifest` | `spaceId`, `networkId` | `{ manifest[{ path, sha256, size, modifiedAt }] }` |
 | `GET` | `/api/sync/info` | — | `{ instanceId, label, version }` |
+| `GET` | `/api/sync/networks/:networkId/members` | `networkId` | `{ members[{ instanceId, label, url, direction, … }], updatedAt }` |
 
 `?full=true` on the list endpoints returns complete documents instead of `{_id,seq}` stubs. Maximum `limit` is 500. Tombstone stubs (items with `deletedAt`) are always appended to list responses regardless of `full` mode.
 
@@ -207,3 +227,12 @@ All endpoints are under `/api/sync` and require a `Bearer` token that resolves t
 | `POST` | `/api/sync/tombstones` | `{ tombstones[] }` | `200 { applied: N }` |
 
 `POST /batch-upsert` is the primary push path used by the engine. The individual `POST /memories`, `/entities`, `/edges` endpoints remain for backwards compatibility and direct API usage.
+
+### Gossip endpoints
+
+| Method | Path | Body | Returns |
+|--------|------|------|---------|
+| `GET` | `/api/sync/networks/:networkId/members` | — | `{ members[], updatedAt }` |
+| `POST` | `/api/sync/networks/:networkId/members` | `{ instanceId, label, url?, children? }` | `{ status: 'ok'\|'unknown_member', self?: { instanceId, label, url? } }` |
+
+The `self` field in the `POST` response carries the receiver's own identity so the caller can update its record for the peer in a single round-trip.

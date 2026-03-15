@@ -269,11 +269,129 @@ async function runSyncForMember(net: NetworkConfig, member: NetworkMember): Prom
     await syncFiles(member, spaceId, net.id, headers, fetchOpts);
   }
 
+  // ── Gossip: member list exchange ──────────────────────────────────────────
+  // 1. Push our own self-record to this peer so it stays current on our URL/label.
+  // 2. Pull the peer's view of the member list; update our local records for any
+  //    members whose URL/label/children changed.
+  await gossipWithPeer(net, member, headers, fetchOpts);
+
   // Update lastSyncAt
   const freshCfg = getConfig();
   const freshNet = freshCfg.networks.find(n => n.id === net.id);
   const m = freshNet?.members.find(m => m.instanceId === member.instanceId);
   if (m) { m.lastSyncAt = new Date().toISOString(); saveConfig(freshCfg); }
+}
+
+// ── Gossip: member list exchange ────────────────────────────────────────────
+
+/**
+ * Exchange member records with a single peer:
+ *  1. POST our self-record to the peer (so the peer knows our current URL/label).
+ *  2. GET the peer's member list view; merge any updated records into our own config.
+ *
+ * Failures are non-fatal — gossip is best-effort and logged at warn level.
+ */
+async function gossipWithPeer(
+  net: NetworkConfig,
+  member: NetworkMember,
+  headers: Record<string, string>,
+  opts: RequestInit,
+): Promise<void> {
+  const cfg = getConfig();
+  const base = `${member.url}/api/sync/networks/${encodeURIComponent(net.id)}`;
+
+  // 1. Push self-record to peer
+  try {
+    // Determine our own public URL: prefer the INSTANCE_URL env var; fall back to empty
+    // string so the peer keeps whatever URL it already has for us.
+    const selfUrl = process.env['INSTANCE_URL'] ?? '';
+    const selfRecord: Record<string, unknown> = {
+      instanceId: cfg.instanceId,
+      label: cfg.instanceLabel,
+      children: net.members
+        .filter(m => m.parentInstanceId === cfg.instanceId)
+        .map(m => m.instanceId),
+    };
+    if (selfUrl) selfRecord['url'] = selfUrl;
+    const resp = await fetch(`${base}/members`, {
+      ...opts,
+      method: 'POST',
+      body: JSON.stringify(selfRecord),
+    });
+    if (resp.ok) {
+      // Peer may piggyback its own self-record in the response so we can update our entry for it
+      try {
+        const body = await resp.json() as { status: string; self?: Partial<NetworkMember> };
+        const peerSelf = body.self;
+        if (peerSelf?.instanceId === member.instanceId) {
+          const freshCfg = getConfig();
+          const freshNet = freshCfg.networks.find(n => n.id === net.id);
+          if (freshNet) {
+            const local = freshNet.members.find(m => m.instanceId === member.instanceId);
+            if (local) {
+              let changed = false;
+              if (peerSelf.url && peerSelf.url !== local.url) { local.url = peerSelf.url; changed = true; }
+              if (peerSelf.label && peerSelf.label !== local.label) { local.label = peerSelf.label; changed = true; }
+              if (changed) {
+                log.info(`Gossip: updated ${member.label} via self-piggyback (${net.id})`);
+                saveConfig(freshCfg);
+              }
+            }
+          }
+        }
+      } catch { /* ignore JSON parse failures */ }
+    } else {
+      log.warn(`Gossip self-push to ${member.label}: HTTP ${resp.status}`);
+    }
+  } catch (err) {
+    log.warn(`Gossip self-push to ${member.label}: ${err}`);
+  }
+
+  // 2. Pull peer's member view and merge into our config
+  try {
+    const resp = await fetch(`${base}/members`, opts);
+    if (!resp.ok) {
+      log.warn(`Gossip pull from ${member.label}: HTTP ${resp.status}`);
+      return;
+    }
+    const { members: peerView } = await resp.json() as { members: Partial<NetworkMember>[] };
+    if (!Array.isArray(peerView)) return;
+
+    const fresh = getConfig();
+    const freshNet = fresh.networks.find(n => n.id === net.id);
+    if (!freshNet) return;
+
+    let changed = false;
+    for (const peerRecord of peerView) {
+      if (!peerRecord.instanceId) continue;
+      // Never update our own record from gossip (poisoning protection on our side)
+      if (peerRecord.instanceId === fresh.instanceId) continue;
+      const local = freshNet.members.find(m => m.instanceId === peerRecord.instanceId);
+      if (!local) continue; // unknown member — do not auto-add
+      // Merge: only update mutable identity fields (url, label, children)
+      let updated = false;
+      if (peerRecord.url && peerRecord.url !== local.url) {
+        local.url = peerRecord.url;
+        updated = true;
+      }
+      if (peerRecord.label && peerRecord.label !== local.label) {
+        local.label = peerRecord.label;
+        updated = true;
+      }
+      if (peerRecord.children !== undefined &&
+          JSON.stringify(peerRecord.children) !== JSON.stringify(local.children)) {
+        local.children = peerRecord.children;
+        updated = true;
+      }
+      if (updated) {
+        log.info(`Gossip: updated member ${local.label} (${local.instanceId}) in network ${net.id}`);
+        changed = true;
+      }
+    }
+    if (changed) saveConfig(fresh);
+  } catch (err) {
+    log.warn(`Gossip pull from ${member.label}: ${err}`);
+  }
 }
 
 // ── Pull (ingest from peer) ─────────────────────────────────────────────────

@@ -353,6 +353,38 @@
       "createdAt": "2026-03-14T23:49:44.468Z",
       "lastUsed": null,
       "expiresAt": null
+    },
+    {
+      "id": "0db4678c-8ba2-430d-972b-73e1059ee59d",
+      "name": "test-token",
+      "hash": "$2b$12$PB/jebY0flHdhaLtJONGzOpTOGTG4odsPxEXhmYIMqukmR3RqSzxC",
+      "createdAt": "2026-03-15T09:01:02.643Z",
+      "lastUsed": "2026-03-15T09:18:07.351Z",
+      "expiresAt": null
+    },
+    {
+      "id": "9b15774a-02d9-4032-ad73-cec5a2e9eaa2",
+      "name": "gossip-test-peer-a-1773565437639",
+      "hash": "$2b$12$45Ng2GC6EknA.k2/tUUMMuMimkx5BC4B/MFuie3GUqZJtevxs5YvG",
+      "createdAt": "2026-03-15T09:04:05.244Z",
+      "lastUsed": "2026-03-15T09:04:22.788Z",
+      "expiresAt": null
+    },
+    {
+      "id": "9bbcf5ef-3751-473f-91db-f80924dc9893",
+      "name": "gossip-test-peer-a-1773566005193",
+      "hash": "$2b$12$9/774TbkTxZi1B6l80RCke0Hh3qpuhBio1qjgQJh3JkebO7uSrHjG",
+      "createdAt": "2026-03-15T09:13:31.843Z",
+      "lastUsed": "2026-03-15T09:13:49.548Z",
+      "expiresAt": null
+    },
+    {
+      "id": "c16ae2ed-b7e6-4eed-bbdd-5faa301b9bf3",
+      "name": "gossip-test-peer-a-1773566269649",
+      "hash": "$2b$12$npnv/CkhAexNuiJuoXv58.QIiH3fg4Yhhu/yAr.qgH3A.m8xm1KP.",
+      "createdAt": "2026-03-15T09:17:56.506Z",
+      "lastUsed": "2026-03-15T09:18:06.813Z",
+      "expiresAt": null
     }
   ],
   "spaces": [

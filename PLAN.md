@@ -1025,7 +1025,7 @@ npm-debug.log*
 - [x] File manifest uses SHA-256; `modified` advisory only
 - [x] Brain conflict resolution: seq-wins; co-author fork on equal-seq; tombstone vs live-doc precedence
 - [x] Brain sync (memories, entities, edges)
-- [ ] Gossip: member list exchange piggybacked on sync cycles
+- [x] Gossip: member list exchange piggybacked on sync cycles
 - [ ] Settings UI: networks section (sync schedule, trigger, history log)
 - [ ] `list_peers` + `sync_now` MCP tools (operate on networks)
 
@@ -1058,7 +1058,7 @@ npm-debug.log*
 Items are ordered by dependency — each group unlocks the next.
 
 ### 1. Gossip completion (unlocks vote propagation + UI history)
-- [ ] Engine calls `POST /api/sync/networks/:networkId/members` on each peer during sync cycles to push own member record (gossip member list exchange piggybacked on sync)
+- [x] Engine calls `POST /api/sync/networks/:networkId/members` on each peer during sync cycles to push own member record (gossip member list exchange piggybacked on sync)
 
 ### 2. Vote propagation (unlocks Braintree ancestor votes + votes UI)
 - [ ] Engine calls `GET /api/sync/networks/:networkId/votes` on each peer during sync; relays new votes via `POST /api/sync/networks/:networkId/votes/:roundId`

@@ -733,6 +733,14 @@
       "createdAt": "2026-03-14T23:49:44.919Z",
       "lastUsed": null,
       "expiresAt": null
+    },
+    {
+      "id": "4dcb4b7d-e0d4-48e9-b68b-c79e360060c2",
+      "name": "test-token",
+      "hash": "$2b$12$00VNCxMnJWnBc.wX/f1V0uM4BEr/tB90JvUxYSRBFN/vw60DjeYja",
+      "createdAt": "2026-03-15T09:01:03.068Z",
+      "lastUsed": null,
+      "expiresAt": null
     }
   ],
   "spaces": [
