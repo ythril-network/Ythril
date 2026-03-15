@@ -6,18 +6,14 @@ Security hardening tests that simulate common attacker techniques against a live
 
 ## Prerequisites
 
-All three Docker containers must be running:
+All three Docker containers must be running (use the test compose file, not the
+default one — the test stack starts three independent instances each with its own
+MongoDB):
 
 ```sh
-docker compose up -d
+docker compose -f docker-compose.test.yml up --build -d
 # or
-docker ps   # verify ythril, ythril-b, ythril-c are Up
-```
-
-Instance A also needs to be connected to the test network:
-
-```sh
-docker network connect ythril_ythril-test ythril
+docker ps   # verify ythril-a, ythril-b, ythril-c are Up
 ```
 
 Token files must exist (from `tests/sync/setup.js`):

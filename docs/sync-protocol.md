@@ -26,7 +26,7 @@ Phases 1 and 2 are gated by [watermarks](#watermarks) so only new or changed doc
 Sync can be triggered two ways:
 
 - **Scheduled** — `syncSchedule` on the network config (e.g. `"*/5 minutes"`, `"every 1h"`) starts a cron timer per network at startup. Format supports `*/N minutes|hours` and `every Nm|Nh`.
-- **Manual** — `POST /api/sync/trigger { networkId }` runs the cycle immediately and returns `{ synced, errors }`.
+- **Manual** — `POST /api/notify/trigger { networkId }` runs the cycle immediately and returns `{ synced, errors }`.
 
 ---
 
