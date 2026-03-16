@@ -1,10 +1,15 @@
 import { Router } from 'express';
 import { requireAuth } from '../auth/middleware.js';
-import { authRateLimit } from '../rate-limit/middleware.js';
+import { authRateLimit, globalRateLimit } from '../rate-limit/middleware.js';
 import { createToken, listTokens, revokeToken } from '../auth/tokens.js';
 import { z } from 'zod';
 
 export const tokensRouter = Router();
+
+// GET /api/auth/me — returns the current token's metadata (used by the Angular SPA to verify a PAT)
+tokensRouter.get('/me', globalRateLimit, requireAuth, (req, res) => {
+  res.json(req.authToken);
+});
 
 const CreateTokenBody = z.object({
   name: z.string().min(1).max(200),

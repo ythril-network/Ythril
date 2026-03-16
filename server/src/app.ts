@@ -1,4 +1,6 @@
 import express from 'express';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { tokensRouter } from './api/tokens.js';
 import { brainRouter } from './api/brain.js';
 import { spacesRouter } from './api/spaces.js';
@@ -8,15 +10,18 @@ import { syncRouter } from './api/sync.js';
 import { networksRouter } from './api/networks.js';
 import { notifyRouter } from './api/notify.js';
 import { inviteRouter } from './api/invite.js';
-import { brainUiRouter } from './brain-ui/routes.js';
-import { filesUiRouter } from './files-ui/routes.js';
 import { setupRouter } from './setup/routes.js';
-import { settingsRouter } from './settings/routes.js';
 import { mcpRouter } from './mcp/router.js';
 import { globalRateLimit } from './rate-limit/middleware.js';
 import { configExists, reloadConfig } from './config/loader.js';
 import { requireAuth } from './auth/middleware.js';
 import { log } from './util/log.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+/** Path to the compiled Angular SPA — configurable via env for Docker flexibility */
+const clientDist =
+  process.env['CLIENT_DIST'] ??
+  path.resolve(__dirname, '..', '..', 'client', 'dist', 'browser');
 
 export function createApp() {
   const app = express();
@@ -38,21 +43,21 @@ export function createApp() {
     res.json({ status: 'ok', ts: new Date().toISOString() });
   });
 
-  // ── Setup (first-run only) ───────────────────────────────────────────────
-  app.use('/setup', setupRouter);
+  // ── Setup (first-run only) — JSON API ────────────────────────────────────
+  app.use('/api/setup', setupRouter);
+  app.use('/setup', setupRouter);  // legacy HTML form (kept for non-SPA access)
 
   // ── Settings UI ──────────────────────────────────────────────────────────
-  app.use('/settings', settingsRouter);
+  // Served by the Angular SPA — no server-rendered HTML routes here.
 
-  // ── Brain UI ─────────────────────────────────────────────────────────────
-  app.use('/brain', brainUiRouter);
-
-  // ── File Manager UI ───────────────────────────────────────────────────────
-  app.use('/files', filesUiRouter);
+  // ── Brain UI / File Manager ───────────────────────────────────────────────
+  // Served by the Angular SPA — no server-rendered HTML routes here.
 
   // ── Redirect bare root ───────────────────────────────────────────────────
+  // The Angular SPA handles all routing. The root redirect below is only a
+  // safety fallback if the static middleware cannot find index.html.
   app.get('/', (_req, res) => {
-    res.redirect(302, configExists() ? '/settings' : '/setup');
+    res.redirect(302, configExists() ? '/brain' : '/setup');
   });
 
   // ── API routes ───────────────────────────────────────────────────────────
@@ -81,6 +86,19 @@ export function createApp() {
       const msg = err instanceof Error ? err.message : String(err);
       res.status(500).json({ error: msg });
     }
+  });
+
+  // ── Angular SPA — static assets ──────────────────────────────────────────
+  // Serve the compiled Angular app. All non-API routes fall through to
+  // index.html so Angular's client-side router handles navigation.
+  app.use(express.static(clientDist));
+
+  // ── SPA fallback — return index.html for all unmatched GET requests ───────
+  app.get('*', (_req, res, next) => {
+    const indexPath = path.join(clientDist, 'index.html');
+    res.sendFile(indexPath, (err) => {
+      if (err) next(); // fall through to 404 if index.html not built yet
+    });
   });
 
   // ── 404 handler ──────────────────────────────────────────────────────────

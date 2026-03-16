@@ -5,6 +5,7 @@ import bcrypt from 'bcrypt';
 import { authRateLimit } from '../rate-limit/middleware.js';
 import { configExists, saveConfig, saveSecrets, loadSecrets, loadConfig } from '../config/loader.js';
 import { ensureGeneralSpace } from '../spaces/spaces.js';
+import { createToken } from '../auth/tokens.js';
 import { log } from '../util/log.js';
 import type { Config, SecretsFile } from '../config/types.js';
 
@@ -20,6 +21,11 @@ export function generateSetupCode(): string {
 }
 
 export const setupRouter = Router();
+
+// ── GET /status — used by Angular SPA to check first-run state ───────────
+setupRouter.get('/status', (_req, res) => {
+  res.json({ configured: configExists() });
+});
 
 // GET /setup — HTML form
 setupRouter.get('/', authRateLimit, (_req, res) => {
@@ -208,6 +214,62 @@ setupRouter.post('/', authRateLimit, async (req, res) => {
 
   // Redirect to settings to log in and create the first token
   res.redirect(303, '/settings');
+});
+
+// POST /api/setup — JSON variant for the Angular SPA
+// Creates instance config + first admin PAT; returns { plaintext }
+setupRouter.post('/json', authRateLimit, async (req, res) => {
+  if (configExists()) {
+    res.status(404).json({ error: 'Already configured' });
+    return;
+  }
+
+  const { code, label, settingsPassword } = req.body ?? {};
+
+  if (!pendingSetupCode || String(code ?? '').trim().toUpperCase() !== pendingSetupCode.toUpperCase()) {
+    res.status(400).json({ error: 'Invalid setup code' });
+    return;
+  }
+  if (!label || typeof label !== 'string' || !label.trim()) {
+    res.status(400).json({ error: 'Instance label is required' });
+    return;
+  }
+  if (!settingsPassword || typeof settingsPassword !== 'string' || settingsPassword.length < 8) {
+    res.status(400).json({ error: 'Settings password must be at least 8 characters' });
+    return;
+  }
+
+  const instanceId = uuidv4();
+  const config: Config = {
+    instanceId,
+    instanceLabel: label.trim(),
+    tokens: [],
+    spaces: [],
+    networks: [],
+    setup: { completed: true },
+  };
+
+  await saveConfig(config);
+  const settingsPasswordHash = await bcrypt.hash(settingsPassword, 12);
+  const secrets: SecretsFile = { settingsPasswordHash, peerTokens: {} };
+  await saveSecrets(secrets);
+  loadConfig();
+  loadSecrets();
+
+  try {
+    await ensureGeneralSpace();
+  } catch (err) {
+    log.warn(`Could not initialise general space during JSON setup: ${err}`);
+  }
+
+  // Create the initial admin PAT so the Angular app can log in immediately
+  const { record, plaintext } = await createToken({ name: 'Admin', expiresAt: null });
+
+  pendingSetupCode = null;
+  log.info(`Setup complete (JSON). Brain ID: ${instanceId}`);
+
+  const { hash: _h, ...safeRecord } = record;
+  res.status(201).json({ token: safeRecord, plaintext });
 });
 
 function escapeHtml(str: string): string {
