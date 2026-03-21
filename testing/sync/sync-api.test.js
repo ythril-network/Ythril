@@ -291,14 +291,16 @@ describe('GET /api/sync/memories — listing and cursor pagination', () => {
   });
 
   it('full=true returns complete memory documents (not just stubs)', async () => {
-    // Seed a known memory
+    // Seed a known memory with a known seq
     const id = `fullmode-${RUN}`;
+    const seedSeq = Date.now();
     await post(INSTANCES.a, token, '/api/sync/memories?spaceId=general', {
-      _id: id, spaceId: 'general', fact: `full mode test ${RUN}`, seq: Date.now(), embedding: [], tags: ['fullmode'],
+      _id: id, spaceId: 'general', fact: `full mode test ${RUN}`, seq: seedSeq, embedding: [], tags: ['fullmode'],
       entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
     });
-    const r = await reqJson(INSTANCES.a, token, '/api/sync/memories?spaceId=general&full=true&limit=200');
+    // Use sinceSeq to target just this item (avoids being buried by earlier batch items)
+    const r = await reqJson(INSTANCES.a, token, `/api/sync/memories?spaceId=general&full=true&sinceSeq=${seedSeq - 1}&limit=5`);
     assert.equal(r.status, 200);
     const item = r.body.items.find(i => i._id === id);
     assert.ok(item, `Seeded memory ${id} must appear in full=true response`);

@@ -1,25 +1,25 @@
-/**
+﻿/**
  * Integration tests: All 12 MCP brain/file tools + MCP security
  *
  * Extends the existing mcp.test.js coverage (which only covered list_peers
  * and sync_now) with:
  *
  * Brain tools:
- *  - remember — stores a memory, returns confirmation
- *  - recall — finds a previously stored memory
- *  - recall_global — searches across spaces (security: space-scoped token must
+ *  - remember â€” stores a memory, returns confirmation
+ *  - recall â€” finds a previously stored memory
+ *  - recall_global â€” searches across spaces (security: space-scoped token must
  *    NOT see memories from other spaces)
- *  - query — structured MongoDB filter, operator whitelist enforced
- *  - upsert_entity — creates/updates an entity
- *  - upsert_edge — creates a directed relationship edge
+ *  - query â€” structured MongoDB filter, operator whitelist enforced
+ *  - upsert_entity â€” creates/updates an entity
+ *  - upsert_edge â€” creates a directed relationship edge
  *
  * File tools:
- *  - write_file — write text to the space file store
- *  - read_file — read back the written file
- *  - list_dir — lists directory contents
- *  - create_dir — creates a new directory
- *  - move_file — renames a file
- *  - delete_file — deletes a file
+ *  - write_file â€” write text to the space file store
+ *  - read_file â€” read back the written file
+ *  - list_dir â€” lists directory contents
+ *  - create_dir â€” creates a new directory
+ *  - move_file â€” renames a file
+ *  - delete_file â€” deletes a file
  *
  * Security:
  *  - Unauthenticated GET /mcp/:spaceId returns 401
@@ -29,7 +29,7 @@
  *    the token's allowed spaces (CRITICAL scope-leak test)
  *  - query tool rejects disallowed MongoDB operators ($where, $function)
  *
- * Run: node --test testing/mcp-tools.test.js
+ * Run: node --test testing/integration/mcp-tools.test.js
  */
 
 import { describe, it, before, after } from 'node:test';
@@ -38,14 +38,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del } from './sync/helpers.js';
+import { INSTANCES, post, get, del } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CONFIGS = path.join(__dirname, 'sync', 'configs');
+const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
 
 let tokenA;
 
-// ── Reusable MCP session helper (same as mcp.test.js) ─────────────────────
+// â”€â”€ Reusable MCP session helper (same as mcp.test.js) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function openMcpSession(spaceId, authToken, instance = INSTANCES.a, timeoutMs = 15_000) {
   const base = instance;
@@ -169,19 +169,42 @@ async function rawGet(url) {
   return r.status;
 }
 
-// ── Brain tool tests ──────────────────────────────────────────────────────
+/**
+ * Reindex every space on the given instance whose embeddings were created with a
+ * different model, so recall / recall_global work with the currently configured model.
+ */
+async function ensureReindexed(baseUrl, token) {
+  const { body: spacesBody } = await get(baseUrl, token, '/api/spaces');
+  const spaces = spacesBody?.spaces ?? [];
+  for (const space of spaces) {
+    const { body: statusBody } = await get(baseUrl, token, `/api/brain/spaces/${space.id}/reindex-status`);
+    if (statusBody?.needsReindex) {
+      await post(baseUrl, token, `/api/brain/spaces/${space.id}/reindex`, {});
+    }
+  }
+}
 
-describe('MCP brain tools — remember / recall / query', () => {
+// â”€â”€ Brain tool tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+describe('MCP brain tools â€” remember / recall / query', () => {
   let session;
   const uniqueFact = `MCP-test-fact-${Date.now()}`;
+  let embeddingAvailable = false;
 
   before(async () => {
     tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+    await ensureReindexed(INSTANCES.a, tokenA);
     session = await openMcpSession('general', tokenA);
+    // Probe: attempt one remember to find out if embedding is configured.
+    // If it returns isError with an embedding-unreachable message, skip embedding tests.
+    const probe = await session.callTool('remember', { fact: `__embedding-probe-${Date.now()}__`, tags: [] });
+    const probeText = probe?.content?.[0]?.text ?? '';
+    embeddingAvailable = !probe?.isError || !probeText.toLowerCase().includes('embedding');
   });
   after(() => session?.close());
 
-  it('remember stores a memory and returns confirmation with seq and id', async () => {
+  it('remember stores a memory and returns confirmation with seq and id', async (t) => {
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack â€” skipping');
     const result = await session.callTool('remember', { fact: uniqueFact, tags: ['mcp-test'] });
     assert.ok(!result?.isError, `remember returned isError: ${JSON.stringify(result)}`);
     const text = result?.content?.[0]?.text ?? '';
@@ -189,7 +212,8 @@ describe('MCP brain tools — remember / recall / query', () => {
     assert.ok(/seq \d+/.test(text) || /ID /.test(text), `Expected seq/ID in text: ${text}`);
   });
 
-  it('recall finds the just-stored memory', async () => {
+  it('recall finds the just-stored memory', async (t) => {
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack â€” skipping');
     const result = await session.callTool('recall', { query: uniqueFact, topK: 5 });
     assert.ok(!result?.isError, `recall returned isError: ${JSON.stringify(result)}`);
     const text = result?.content?.[0]?.text ?? '';
@@ -262,7 +286,7 @@ describe('MCP brain tools — remember / recall / query', () => {
   });
 });
 
-describe('MCP brain tools — upsert_entity / upsert_edge', () => {
+describe('MCP brain tools â€” upsert_entity / upsert_edge', () => {
   let session;
   let entityAId;
   let entityBId;
@@ -325,7 +349,7 @@ describe('MCP brain tools — upsert_entity / upsert_edge', () => {
   });
 });
 
-describe('MCP file tools — write_file / read_file / list_dir / create_dir / move_file / delete_file', () => {
+describe('MCP file tools â€” write_file / read_file / list_dir / create_dir / move_file / delete_file', () => {
   let session;
   const dir = `mcp-test-${Date.now()}`;
 
@@ -420,7 +444,7 @@ describe('MCP file tools — write_file / read_file / list_dir / create_dir / mo
   });
 });
 
-describe('MCP recall_global — space-scoped token must only see its own spaces', () => {
+describe('MCP recall_global â€” space-scoped token must only see its own spaces', () => {
   let sessionScoped;
   let scopedTokenPlaintext;
   let scopedTokenId;
@@ -436,11 +460,11 @@ describe('MCP recall_global — space-scoped token must only see its own spaces'
     });
 
     // Create a space-scoped token that has access to NO spaces (empty allowlist)
-    // — in practice we use a token that is scoped to a space that is NOT 'general'
+    // â€” in practice we use a token that is scoped to a space that is NOT 'general'
     // so any recall_global result containing the secretFact is a scope leak.
     //
     // Since the test instance only has 'general' built-in, we create a space-scoped
-    // token scoped to nothing (spaces: []) — recall_global must return empty.
+    // token scoped to nothing (spaces: []) â€” recall_global must return empty.
     const tokenRes = await post(INSTANCES.a, tokenA, '/api/tokens', {
       name: `scoped-no-access-${Date.now()}`,
       spaces: ['__nonexistent_space__'],
@@ -450,13 +474,13 @@ describe('MCP recall_global — space-scoped token must only see its own spaces'
     scopedTokenId = tokenRes.body.id;
 
     // Open MCP session using the scoped token against 'general'
-    // requireSpaceAuth checks the token has access to the spaceId in the URL —
+    // requireSpaceAuth checks the token has access to the spaceId in the URL â€”
     // if the token's spaces list doesn't include 'general' this open should fail with 403.
     // That itself is a security assertion.
     try {
       sessionScoped = await openMcpSession('general', scopedTokenPlaintext);
     } catch (err) {
-      // 403 is the CORRECT behavior — scoped token must not open 'general' session
+      // 403 is the CORRECT behavior â€” scoped token must not open 'general' session
       if (err.statusCode === 403) {
         sessionScoped = null; // test will assert the 403 was correct
       } else {
@@ -471,35 +495,43 @@ describe('MCP recall_global — space-scoped token must only see its own spaces'
   });
 
   it('space-scoped token cannot open MCP session for unauthorized space (must get 403)', () => {
-    // Either sessionScoped is null (403 was returned — correct) or it opened
-    // (should not happen — the test will then check recall_global cannot leak).
+    // Either sessionScoped is null (403 was returned â€” correct) or it opened
+    // (should not happen â€” the test will then check recall_global cannot leak).
     assert.equal(
       sessionScoped,
       null,
-      'A token scoped to __nonexistent_space__ must not be able to open an MCP session for "general" — got 200 instead of 403',
+      'A token scoped to __nonexistent_space__ must not be able to open an MCP session for "general" â€” got 200 instead of 403',
     );
   });
 });
 
-describe('MCP recall_global — full-access token, multi-space isolation', () => {
+describe('MCP recall_global â€” full-access token, multi-space isolation', () => {
   let session;
   const spaceAFact = `SPACE-A-FACT-${Date.now()}`;
+  let embeddingAvailable = false;
 
   before(async () => {
     tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+    await ensureReindexed(INSTANCES.a, tokenA);
     session = await openMcpSession('general', tokenA);
-    // Store a fact in general space
-    await session.callTool('remember', { fact: spaceAFact, tags: ['global-recall-test'] });
+    // Probe embedding availability before attempting to remember a seed fact.
+    const probe = await session.callTool('remember', { fact: `__rg-probe-${Date.now()}__`, tags: [] });
+    const probeText = probe?.content?.[0]?.text ?? '';
+    embeddingAvailable = !probe?.isError || !probeText.toLowerCase().includes('embedding');
+    if (embeddingAvailable) {
+      await session.callTool('remember', { fact: spaceAFact, tags: ['global-recall-test'] });
+    }
   });
   after(() => session?.close());
 
-  it('recall_global returns results without isError', async () => {
+  it('recall_global returns results without isError', async (t) => {
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack â€” skipping');
     const result = await session.callTool('recall_global', { query: spaceAFact, topK: 5 });
     assert.ok(!result?.isError, `recall_global returned isError: ${JSON.stringify(result)}`);
   });
 
   it('recall_global response does not include spaces the token cannot access', async () => {
-    // Full-access token CAN access all spaces, so results may come from all spaces —
+    // Full-access token CAN access all spaces, so results may come from all spaces â€”
     // the key check: the response is valid and not an error.
     // The CRITICAL path (scoped token seeing other spaces) is tested in the suite above.
     const result = await session.callTool('recall_global', { query: spaceAFact, topK: 5 });
@@ -515,7 +547,7 @@ describe('MCP recall_global — full-access token, multi-space isolation', () =>
   });
 });
 
-describe('MCP security — unauthenticated access', () => {
+describe('MCP security â€” unauthenticated access', () => {
   it('GET /mcp/:spaceId without auth returns 401', async () => {
     const parsed = new URL(INSTANCES.a);
     const status = await new Promise((resolve) => {

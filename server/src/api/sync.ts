@@ -12,16 +12,19 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { col } from '../db/mongo.js';
 import { syncRateLimit } from '../rate-limit/middleware.js';
-import { getConfig, getSecrets } from '../config/loader.js';
+import { getConfig, getSecrets, getDataRoot } from '../config/loader.js';
 import { listTombstones, applyRemoteTombstone } from '../brain/tombstones.js';
 import { requireAuth } from '../auth/middleware.js';
 import { log } from '../util/log.js';
 import { nextSeq } from '../util/seq.js';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import type {
   MemoryDoc,
   EntityDoc,
   EdgeDoc,
   TombstoneDoc,
+  FileTombstoneDoc,
   NetworkMember,
 } from '../config/types.js';
 
@@ -107,10 +110,13 @@ syncRouter.get('/memories', syncRateLimit, requireAuth, async (req, res) => {
     const items: typeof rawDocs = hasMore ? rawDocs.slice(0, pageSize) : rawDocs;
     const nextCursor = hasMore ? encodeCursor((items[items.length - 1] as { seq: number }).seq) : null;
 
-    // Tombstone stubs are always appended (tombstones are stubs regardless of full mode)
+    // Tombstone stubs are appended within the current page's seq range only.
+    // Capping at the last memory item's seq prevents tombstones with high seq
+    // from appearing on both the current page AND the next page (cursor duplicate bug).
+    const pageMaxSeq = items.length > 0 ? (items[items.length - 1] as { seq: number }).seq : sinceVal;
     const tombstones = await listTombstones(spaceId, sinceVal, pageSize);
     const tombs = tombstones
-      .filter(t => t.type === 'memory')
+      .filter(t => t.type === 'memory' && t.seq <= pageMaxSeq)
       .map(t => ({ _id: t._id, seq: t.seq, deletedAt: t.deletedAt }));
 
     res.json({ items: [...items, ...tombs].sort((a, b) => (a as { seq: number }).seq - (b as { seq: number }).seq), nextCursor });
@@ -237,9 +243,10 @@ syncRouter.get('/entities', syncRateLimit, requireAuth, async (req, res) => {
     const items: typeof rawDocs = hasMore ? rawDocs.slice(0, pageSize) : rawDocs;
     const nextCursor = hasMore ? encodeCursor((items[items.length - 1] as { seq: number }).seq) : null;
 
+    const pageMaxSeq = items.length > 0 ? (items[items.length - 1] as { seq: number }).seq : sinceVal;
     const tombstones = await listTombstones(spaceId, sinceVal, pageSize);
     const tombs = tombstones
-      .filter(t => t.type === 'entity')
+      .filter(t => t.type === 'entity' && t.seq <= pageMaxSeq)
       .map(t => ({ _id: t._id, seq: t.seq, deletedAt: t.deletedAt }));
 
     res.json({ items: [...items, ...tombs].sort((a, b) => (a as { seq: number }).seq - (b as { seq: number }).seq), nextCursor });
@@ -327,9 +334,10 @@ syncRouter.get('/edges', syncRateLimit, requireAuth, async (req, res) => {
     const items: typeof rawDocs = hasMore ? rawDocs.slice(0, pageSize) : rawDocs;
     const nextCursor = hasMore ? encodeCursor((items[items.length - 1] as { seq: number }).seq) : null;
 
+    const pageMaxSeq = items.length > 0 ? (items[items.length - 1] as { seq: number }).seq : sinceVal;
     const tombstones = await listTombstones(spaceId, sinceVal, pageSize);
     const tombs = tombstones
-      .filter(t => t.type === 'edge')
+      .filter(t => t.type === 'edge' && t.seq <= pageMaxSeq)
       .map(t => ({ _id: t._id, seq: t.seq, deletedAt: t.deletedAt }));
 
     res.json({ items: [...items, ...tombs].sort((a, b) => (a as { seq: number }).seq - (b as { seq: number }).seq), nextCursor });
@@ -574,6 +582,87 @@ syncRouter.get('/manifest', syncRateLimit, requireAuth, async (req, res) => {
     res.json({ manifest });
   } catch (err) {
     log.error(`sync GET manifest: ${err}`);
+    res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FILE TOMBSTONES
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * GET /api/sync/file-tombstones?spaceId=&networkId=&since=<isoTimestamp>
+ * Returns file deletion tombstones so peers can replicate file removals.
+ * Omit `since` for all tombstones; provide an ISO timestamp for incremental sync.
+ */
+syncRouter.get('/file-tombstones', syncRateLimit, requireAuth, async (req, res) => {
+  try {
+    const { spaceId, networkId, since } = req.query as Record<string, string>;
+    if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
+    if (!spaceAllowed(spaceId, networkId, req.authToken?.spaces)) { res.status(403).json({ error: 'Forbidden' }); return; }
+
+    const filter = since
+      ? { spaceId, deletedAt: { $gt: since } }
+      : { spaceId };
+    const tombstones = await col<FileTombstoneDoc>(`${spaceId}_file_tombstones`)
+      .find(filter as never)
+      .sort({ deletedAt: 1 })
+      .limit(5000)
+      .toArray();
+    res.json({ tombstones });
+  } catch (err) {
+    log.error(`sync GET file-tombstones: ${err}`);
+    res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+/**
+ * POST /api/sync/file-tombstones
+ * Accepts file-deletion tombstones from a peer and applies them locally:
+ * each tombstone causes the corresponding file to be removed from the local
+ * filesystem and the tombstone to be recorded in our MongoDB so we can
+ * re-propagate it to further peers.
+ */
+syncRouter.post('/file-tombstones', syncRateLimit, requireAuth, async (req, res) => {
+  try {
+    const { spaceId, tombstones } = req.body as { spaceId?: string; tombstones?: unknown[] };
+    if (!spaceId || typeof spaceId !== 'string') { res.status(400).json({ error: 'spaceId required' }); return; }
+    if (!Array.isArray(tombstones)) { res.status(400).json({ error: 'tombstones must be array' }); return; }
+    if (!spaceAllowed(spaceId, undefined, req.authToken?.spaces)) { res.status(403).json({ error: 'Forbidden' }); return; }
+
+    const spaceFiles = path.resolve(getDataRoot(), 'files', spaceId);
+    let applied = 0;
+
+    for (const raw of tombstones) {
+      const ts = raw as Partial<FileTombstoneDoc>;
+      if (!ts._id || !ts.path || typeof ts.path !== 'string') continue;
+
+      // Path-traversal guard — must stay within the space's files directory.
+      const rel = ts.path.replace(/\\/g, '/').replace(/^\/+/, '');
+      const abs = path.join(spaceFiles, rel);
+      if (!abs.startsWith(spaceFiles + path.sep) && abs !== spaceFiles) continue;
+
+      // Delete the file (ignore if already gone).
+      await fs.unlink(abs).catch(() => {});
+
+      // Record tombstone locally so we can propagate it to further peers.
+      const doc: FileTombstoneDoc = {
+        _id: ts._id,
+        spaceId,
+        path: rel,
+        deletedAt: typeof ts.deletedAt === 'string' ? ts.deletedAt : new Date().toISOString(),
+      };
+      await col<FileTombstoneDoc>(`${spaceId}_file_tombstones`).updateOne(
+        { _id: doc._id } as never,
+        { $setOnInsert: doc } as never,
+        { upsert: true },
+      );
+      applied++;
+    }
+
+    res.json({ applied });
+  } catch (err) {
+    log.error(`sync POST file-tombstones: ${err}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });

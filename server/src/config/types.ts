@@ -19,7 +19,9 @@ export interface SpaceConfig {
 }
 
 export interface EmbeddingConfig {
-  baseUrl: string;
+  /** If set, route embedding requests to this OpenAI-compatible HTTP endpoint.
+   *  If absent, the bundled local ONNX model is used (default, works out of the box). */
+  baseUrl?: string;
   model: string;
   dimensions: number;
   similarity: 'cosine' | 'dotProduct' | 'euclidean';
@@ -175,6 +177,13 @@ export interface TombstoneDoc {
   deletedAt: string;
   instanceId: string;
   seq: number;
+}
+
+export interface FileTombstoneDoc {
+  _id: string;         // UUID
+  spaceId: string;
+  path: string;        // relative path (same convention as ManifestEntry.path)
+  deletedAt: string;   // ISO8601 — used by peers to prune expired tombstones
 }
 
 export interface ConflictDoc {

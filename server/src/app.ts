@@ -88,6 +88,13 @@ export function createApp() {
     }
   });
 
+  // ── API 404 — must precede SPA fallback ─────────────────────────────────
+  // Any /api/ path not matched by the routers above is an unknown endpoint.
+  // Return JSON 404 here so the SPA fallback never swallows API typos.
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ error: 'Not found' });
+  });
+
   // ── Angular SPA — static assets ──────────────────────────────────────────
   // Serve the compiled Angular app. All non-API routes fall through to
   // index.html so Angular's client-side router handles navigation.

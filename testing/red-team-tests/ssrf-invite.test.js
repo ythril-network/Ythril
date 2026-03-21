@@ -22,7 +22,7 @@
  * Run: node --test testing/red-team-tests/ssrf-invite.test.js
  */
 
-import { describe, it, before } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';

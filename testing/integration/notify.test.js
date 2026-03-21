@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Integration tests: Gossip / notify channel
  *
  * Covers:
@@ -8,7 +8,7 @@
  *
  * All tests run against instance A (port 3200) only. No multi-instance setup required.
  *
- * Run: node --test testing/notify.test.js
+ * Run: node --test testing/integration/notify.test.js
  */
 
 import { describe, it, before, after } from 'node:test';
@@ -16,10 +16,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del } from './sync/helpers.js';
+import { INSTANCES, post, get, del } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const TOKEN_FILE = path.join(__dirname, 'sync', 'configs', 'a', 'token.txt');
+const TOKEN_FILE = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
 
 let token;
 let networkId;
@@ -31,7 +31,7 @@ describe('Notify channel', () => {
   before(async () => {
     token = fs.readFileSync(TOKEN_FILE, 'utf8').trim();
 
-    // Create a braintree network — braintree uses direct member add (no vote round)
+    // Create a braintree network â€” braintree uses direct member add (no vote round)
     // so the member is immediately queryable.
     const netR = await post(INSTANCES.a, token, '/api/networks', {
       label: `Notify Test Network ${Date.now()}`,
@@ -59,7 +59,7 @@ describe('Notify channel', () => {
     }
   });
 
-  // ── POST /api/notify — event ingestion ─────────────────────────────────────
+  // â”€â”€ POST /api/notify â€” event ingestion â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   it('ping event returns 204', async () => {
     const r = await post(INSTANCES.a, token, '/api/notify', {
@@ -177,7 +177,7 @@ describe('Notify channel', () => {
     assert.equal(r.status, 401, `Expected 401, got ${r.status}`);
   });
 
-  // ── GET /api/notify — event log ─────────────────────────────────────────────
+  // â”€â”€ GET /api/notify â€” event log â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   it('GET /api/notify returns event log with events array', async () => {
     // Submit a ping first so there is at least one event to find
@@ -220,7 +220,7 @@ describe('Notify channel', () => {
     assert.equal(r.status, 401, `Expected 401, got ${r.status}`);
   });
 
-  // ── POST /api/notify/trigger ────────────────────────────────────────────────
+  // â”€â”€ POST /api/notify/trigger â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   it('POST /api/notify/trigger with valid networkId returns 200', async () => {
     const r = await post(INSTANCES.a, token, '/api/notify/trigger', { networkId });

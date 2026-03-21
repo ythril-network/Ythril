@@ -1,0 +1,172 @@
+﻿TAP version 13
+# Subtest: MCP security ΓÇö authentication
+    # Subtest: GET /mcp without auth returns 401
+    not ok 1 - GET /mcp without auth returns 401
+      ---
+      duration_ms: 32.0427
+      type: 'test'
+      location: 'O:\\Projects\\Ythril\\testing\\red-team-tests\\mcp-security.test.js:101:3'
+      failureType: 'testCodeFailure'
+      error: |-
+        Expected values to be strictly equal:
+        
+        200 !== 401
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 401
+      actual: 200
+      operator: 'strictEqual'
+      stack: |-
+        TestContext.<anonymous> (file:///O:/Projects/Ythril/testing/red-team-tests/mcp-security.test.js:103:12)
+        process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+        async Test.run (node:internal/test_runner/test:1125:7)
+        async Promise.all (index 0)
+        async Suite.run (node:internal/test_runner/test:1533:7)
+        async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3)
+      ...
+    # Subtest: POST /mcp/messages without auth returns 401
+    not ok 2 - POST /mcp/messages without auth returns 401
+      ---
+      duration_ms: 5.4791
+      type: 'test'
+      location: 'O:\\Projects\\Ythril\\testing\\red-team-tests\\mcp-security.test.js:106:3'
+      failureType: 'testCodeFailure'
+      error: |-
+        Expected values to be strictly equal:
+        
+        404 !== 401
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 401
+      actual: 404
+      operator: 'strictEqual'
+      stack: |-
+        TestContext.<anonymous> (file:///O:/Projects/Ythril/testing/red-team-tests/mcp-security.test.js:112:12)
+        process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+        async Test.run (node:internal/test_runner/test:1125:7)
+        async Suite.processPendingSubtests (node:internal/test_runner/test:787:7)
+      ...
+    # Subtest: Token prefix collision ΓÇö 8-char prefix alone must return 401
+    not ok 3 - Token prefix collision ΓÇö 8-char prefix alone must return 401
+      ---
+      duration_ms: 2.9639
+      type: 'test'
+      location: 'O:\\Projects\\Ythril\\testing\\red-team-tests\\mcp-security.test.js:115:3'
+      failureType: 'testCodeFailure'
+      error: |-
+        VULNERABILITY: Short prefix "ythril_test_adm" was accepted as a valid token (got 200).
+        
+        200 !== 401
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 401
+      actual: 200
+      operator: 'strictEqual'
+      stack: |-
+        TestContext.<anonymous> (file:///O:/Projects/Ythril/testing/red-team-tests/mcp-security.test.js:124:12)
+        process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+        async Test.run (node:internal/test_runner/test:1125:7)
+        async Suite.processPendingSubtests (node:internal/test_runner/test:787:7)
+      ...
+    # Subtest: Completely invalid token returns 401
+    not ok 4 - Completely invalid token returns 401
+      ---
+      duration_ms: 1.9503
+      type: 'test'
+      location: 'O:\\Projects\\Ythril\\testing\\red-team-tests\\mcp-security.test.js:128:3'
+      failureType: 'testCodeFailure'
+      error: |-
+        Expected values to be strictly equal:
+        
+        200 !== 401
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 401
+      actual: 200
+      operator: 'strictEqual'
+      stack: |-
+        TestContext.<anonymous> (file:///O:/Projects/Ythril/testing/red-team-tests/mcp-security.test.js:132:12)
+        process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+        async Test.run (node:internal/test_runner/test:1125:7)
+        async Suite.processPendingSubtests (node:internal/test_runner/test:787:7)
+      ...
+    1..4
+not ok 1 - MCP security ΓÇö authentication
+  ---
+  duration_ms: 43.4813
+  type: 'suite'
+  location: 'O:\\Projects\\Ythril\\testing\\red-team-tests\\mcp-security.test.js:96:1'
+  failureType: 'subtestsFailed'
+  error: '4 subtests failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: MCP security ΓÇö recall_global scope isolation
+    # Subtest: recall_global must not return memories outside the token's allowed spaces
+    ok 1 - recall_global must not return memories outside the token's allowed spaces
+      ---
+      duration_ms: 15.7648
+      type: 'test'
+      ...
+    1..1
+ok 2 - MCP security ΓÇö recall_global scope isolation
+  ---
+  duration_ms: 15.9155
+  type: 'suite'
+  ...
+# Subtest: MCP security ΓÇö remember tool input validation
+    # Subtest: remember with a 200KB fact returns isError=true
+    ok 1 - remember with a 200KB fact returns isError=true
+      ---
+      duration_ms: 2.1864
+      type: 'test'
+      ...
+    1..1
+ok 3 - MCP security ΓÇö remember tool input validation
+  ---
+  duration_ms: 2.2915
+  type: 'suite'
+  ...
+# Subtest: MCP security ΓÇö query tool operator allowlist
+    # Subtest: query with $where returns isError=true
+    ok 1 - query with $where returns isError=true
+      ---
+      duration_ms: 2.2216
+      type: 'test'
+      ...
+    # Subtest: query with $function returns isError=true
+    ok 2 - query with $function returns isError=true
+      ---
+      duration_ms: 1.9944
+      type: 'test'
+      ...
+    # Subtest: query with deeply nested filter (>8 deep) returns isError=true
+    ok 3 - query with deeply nested filter (>8 deep) returns isError=true
+      ---
+      duration_ms: 1.9014
+      type: 'test'
+      ...
+    # Subtest: query with allowed operators ($eq, $in, $and) returns results (not error)
+    ok 4 - query with allowed operators ($eq, $in, $and) returns results (not error)
+      ---
+      duration_ms: 1.466
+      type: 'test'
+      ...
+    1..4
+ok 4 - MCP security ΓÇö query tool operator allowlist
+  ---
+  duration_ms: 7.7998
+  type: 'suite'
+  ...
+1..4
+# tests 10
+# suites 4
+# pass 6
+# fail 4
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 116.3462

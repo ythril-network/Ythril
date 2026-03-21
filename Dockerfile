@@ -1,5 +1,5 @@
 ﻿# ── Stage 1: Build Angular SPA ───────────────────────────────────────────────
-FROM node:22-alpine AS client-builder
+FROM node:22-slim AS client-builder
 
 WORKDIR /build
 
@@ -16,10 +16,10 @@ RUN npm run build:prod --workspace=client
 # Angular output: client/dist/browser/
 
 # ── Stage 2: Build server ────────────────────────────────────────────────────
-FROM node:22-alpine AS builder
+FROM node:22-slim AS builder
 
 # Build tools required for bcrypt native C++ addon
-RUN apk add --no-cache python3 make g++
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 
@@ -38,9 +38,10 @@ COPY server/ ./server/
 RUN npm run build --workspace=server
 
 # ── Stage 2: Production ──────────────────────────────────────────────────────
-FROM node:22-alpine AS production
+FROM node:22-slim AS production
 
-RUN apk add --no-cache python3 make g++
+# Build tools for bcrypt native addon (compiled during npm ci --omit=dev)
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -57,7 +58,16 @@ COPY --from=builder /build/server/dist ./server/dist
 # Copy compiled Angular SPA from client-builder
 COPY --from=client-builder /build/client/dist/browser ./client/dist/browser
 
-# Runtime environment
+# Pre-download & cache the embedding model so first startup is instant and fully offline.
+# MODEL_CACHE_DIR is baked into the image layer; the node user has read/write access.
+ENV MODEL_CACHE_DIR=/app/model-cache
+RUN printf '%s\n' \
+    'import { pipeline, env } from "@huggingface/transformers";' \
+    'env.cacheDir = process.env.MODEL_CACHE_DIR;' \
+    'console.log("Downloading nomic-embed-text-v1.5 (~274 MB, cached in image)...");' \
+    'await pipeline("feature-extraction", "nomic-ai/nomic-embed-text-v1.5");' \
+    'console.log("Embedding model ready.");' \
+    > /app/server/warm.mjs && node /app/server/warm.mjs && rm /app/server/warm.mjs
 ENV NODE_ENV=production
 ENV PORT=3200
 ENV CONFIG_PATH=/config/config.json
@@ -68,7 +78,7 @@ ENV CLIENT_DIST=/app/client/dist/browser
 EXPOSE 3200
 
 # Pre-create mount-point directories owned by node so volume mounts are writable
-RUN mkdir -p /data /config && chown -R node:node /data /config
+RUN mkdir -p /data /config && chown -R node:node /data /config /app/model-cache
 
 # Run as non-root user
 USER node

@@ -63,7 +63,7 @@ export async function recall(
       `Semantic recall is disabled until re-indexed. Call POST /api/brain/spaces/${spaceId}/reindex.`,
     );
   }
-  const embResult = await embed(query);
+  const embResult = await embed(query, 'query');
   const embCfg = getEmbeddingConfig();
 
   const pipeline = [

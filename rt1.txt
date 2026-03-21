@@ -1,0 +1,175 @@
+﻿TAP version 13
+# Subtest: Missing / malformed authorization
+    # Subtest: No Authorization header ΓåÆ 401
+    ok 1 - No Authorization header ΓåÆ 401
+      ---
+      duration_ms: 31.4534
+      type: 'test'
+      ...
+    # Subtest: Empty Authorization header ΓåÆ 401
+    ok 2 - Empty Authorization header ΓåÆ 401
+      ---
+      duration_ms: 3.0094
+      type: 'test'
+      ...
+    # Subtest: Authorization: Bearer (no token) ΓåÆ 401
+    ok 3 - Authorization: Bearer (no token) ΓåÆ 401
+      ---
+      duration_ms: 1.7573
+      type: 'test'
+      ...
+    # Subtest: Authorization: Basic dXNlcjpwYXNz (basic auth) ΓåÆ 401
+    ok 4 - Authorization: Basic dXNlcjpwYXNz (basic auth) ΓåÆ 401
+      ---
+      duration_ms: 1.3524
+      type: 'test'
+      ...
+    # Subtest: Authorization: Token xyz (wrong scheme) ΓåÆ 401
+    ok 5 - Authorization: Token xyz (wrong scheme) ΓåÆ 401
+      ---
+      duration_ms: 1.0305
+      type: 'test'
+      ...
+    1..5
+ok 1 - Missing / malformed authorization
+  ---
+  duration_ms: 39.2894
+  type: 'suite'
+  ...
+# Subtest: Invalid token values
+    # Subtest: Completely random string ΓåÆ 401
+    ok 1 - Completely random string ΓåÆ 401
+      ---
+      duration_ms: 1.3819
+      type: 'test'
+      ...
+    # Subtest: Token with wrong prefix (no "ythril_") ΓåÆ 401
+    ok 2 - Token with wrong prefix (no "ythril_") ΓåÆ 401
+      ---
+      duration_ms: 1.4282
+      type: 'test'
+      ...
+    # Subtest: Token that looks correct but is wrong ΓåÆ 401
+    ok 3 - Token that looks correct but is wrong ΓåÆ 401
+      ---
+      duration_ms: 1.6277
+      type: 'test'
+      ...
+    # Subtest: Null bytes in token ΓåÆ rejected (fetch error or 401)
+    ok 4 - Null bytes in token ΓåÆ rejected (fetch error or 401)
+      ---
+      duration_ms: 0.3293
+      type: 'test'
+      ...
+    # Subtest: Very long token (DoS probe) ΓåÆ 401 not 500
+    ok 5 - Very long token (DoS probe) ΓåÆ 401 not 500
+      ---
+      duration_ms: 1.4518
+      type: 'test'
+      ...
+    # Subtest: JSON object disguised as token ΓåÆ 401
+    ok 6 - JSON object disguised as token ΓåÆ 401
+      ---
+      duration_ms: 1.2891
+      type: 'test'
+      ...
+    # Subtest: SQL injection in token ΓåÆ 401
+    ok 7 - SQL injection in token ΓåÆ 401
+      ---
+      duration_ms: 0.8339
+      type: 'test'
+      ...
+    # Subtest: NoSQL injection in token ΓåÆ 401
+    ok 8 - NoSQL injection in token ΓåÆ 401
+      ---
+      duration_ms: 0.911
+      type: 'test'
+      ...
+    1..8
+ok 2 - Invalid token values
+  ---
+  duration_ms: 9.5618
+  type: 'suite'
+  ...
+# Subtest: Cross-instance token rejection
+    # Subtest: Instance B's token rejected by instance A ΓåÆ 401
+    not ok 1 - Instance B's token rejected by instance A ΓåÆ 401
+      ---
+      duration_ms: 3.1733
+      type: 'test'
+      location: 'O:\\Projects\\Ythril\\testing\\red-team-tests\\auth-bypass.test.js:92:3'
+      failureType: 'testCodeFailure'
+      error: |-
+        B's token must not authenticate against A
+        
+        200 !== 401
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 401
+      actual: 200
+      operator: 'strictEqual'
+      stack: |-
+        TestContext.<anonymous> (file:///O:/Projects/Ythril/testing/red-team-tests/auth-bypass.test.js:108:12)
+        process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+        async Test.run (node:internal/test_runner/test:1125:7)
+        async Promise.all (index 0)
+        async Suite.run (node:internal/test_runner/test:1533:7)
+        async Test.processPendingSubtests (node:internal/test_runner/test:787:7)
+      ...
+    1..1
+not ok 3 - Cross-instance token rejection
+  ---
+  duration_ms: 3.6269
+  type: 'suite'
+  location: 'O:\\Projects\\Ythril\\testing\\red-team-tests\\auth-bypass.test.js:91:1'
+  failureType: 'subtestsFailed'
+  error: '1 subtest failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: Protected routes without auth return 401 not 500
+    # Subtest: GET /api/tokens without auth ΓåÆ 401
+    ok 1 - GET /api/tokens without auth ΓåÆ 401
+      ---
+      duration_ms: 1.1579
+      type: 'test'
+      ...
+    # Subtest: GET /api/spaces without auth ΓåÆ 401
+    ok 2 - GET /api/spaces without auth ΓåÆ 401
+      ---
+      duration_ms: 0.8908
+      type: 'test'
+      ...
+    # Subtest: GET /api/networks without auth ΓåÆ 401
+    ok 3 - GET /api/networks without auth ΓåÆ 401
+      ---
+      duration_ms: 0.8821
+      type: 'test'
+      ...
+    # Subtest: GET /api/files/general without auth ΓåÆ 401
+    ok 4 - GET /api/files/general without auth ΓåÆ 401
+      ---
+      duration_ms: 1.0389
+      type: 'test'
+      ...
+    # Subtest: GET /api/brain/general/memories without auth ΓåÆ 401
+    ok 5 - GET /api/brain/general/memories without auth ΓåÆ 401
+      ---
+      duration_ms: 0.8384
+      type: 'test'
+      ...
+    1..5
+ok 4 - Protected routes without auth return 401 not 500
+  ---
+  duration_ms: 4.9599
+  type: 'suite'
+  ...
+1..4
+# tests 19
+# suites 4
+# pass 18
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 112.2908

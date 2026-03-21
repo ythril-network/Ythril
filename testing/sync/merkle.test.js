@@ -133,8 +133,10 @@ describe('Merkle root', () => {
       assert.equal(after.status, 200);
       assert.notEqual(after.body.root, before.body.root,
         'Root must change after writing a new document');
-      assert.equal(after.body.leafCount, before.body.leafCount + 1,
-        'leafCount must increase by 1');
+      // Use >= rather than strict +1 because other tests may write to the shared
+      // 'general' space concurrently when the suite is run in parallel.
+      assert.ok(after.body.leafCount >= before.body.leafCount + 1,
+        `leafCount must increase by at least 1 (before=${before.body.leafCount}, after=${after.body.leafCount})`);
     });
   });
 

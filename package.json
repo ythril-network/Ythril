@@ -10,6 +10,8 @@
     "build": "npm run build --workspace=server && npm run build:prod --workspace=client",
     "build:server": "npm run build --workspace=server",
     "build:client": "npm run build:prod --workspace=client",
-    "start": "npm run start --workspace=server"
+    "start": "npm run start --workspace=server",
+    "docker:build": "docker compose build && docker builder prune --keep-storage 3g --force",
+    "docker:build:test": "docker compose -f testing/docker-compose.test.yml build && docker builder prune --keep-storage 3g --force"
   }
 }

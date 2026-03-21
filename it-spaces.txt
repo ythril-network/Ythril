@@ -1,0 +1,151 @@
+﻿TAP version 13
+# Subtest: Space management
+    # Subtest: Create space with auto-generated slug from label
+    not ok 1 - Create space with auto-generated slug from label
+      ---
+      duration_ms: 42.2569
+      type: 'test'
+      location: 'O:\\Projects\\Ythril\\testing\\integration\\spaces.test.js:41:3'
+      failureType: 'testCodeFailure'
+      error: |-
+        {"error":"Space 'test-research-space' already exists"}
+        
+        409 !== 201
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 201
+      actual: 409
+      operator: 'strictEqual'
+      stack: |-
+        TestContext.<anonymous> (file:///O:/Projects/Ythril/testing/integration/spaces.test.js:43:12)
+        process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+        async Test.run (node:internal/test_runner/test:1125:7)
+        async Promise.all (index 0)
+        async Suite.run (node:internal/test_runner/test:1533:7)
+        async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3)
+      ...
+    # Subtest: Create space with explicit id
+    not ok 2 - Create space with explicit id
+      ---
+      duration_ms: 5.2312
+      type: 'test'
+      location: 'O:\\Projects\\Ythril\\testing\\integration\\spaces.test.js:50:3'
+      failureType: 'testCodeFailure'
+      error: |-
+        {"error":"Space 'explicit-test-space' already exists"}
+        
+        409 !== 201
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 201
+      actual: 409
+      operator: 'strictEqual'
+      stack: |-
+        TestContext.<anonymous> (file:///O:/Projects/Ythril/testing/integration/spaces.test.js:55:12)
+        process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+        async Test.run (node:internal/test_runner/test:1125:7)
+        async Suite.processPendingSubtests (node:internal/test_runner/test:787:7)
+      ...
+    # Subtest: Duplicate space ID is rejected
+    ok 3 - Duplicate space ID is rejected
+      ---
+      duration_ms: 2.7202
+      type: 'test'
+      ...
+    # Subtest: Invalid slug characters in id rejected
+    ok 4 - Invalid slug characters in id rejected
+      ---
+      duration_ms: 2.5147
+      type: 'test'
+      ...
+    # Subtest: List spaces includes newly created spaces
+    ok 5 - List spaces includes newly created spaces
+      ---
+      duration_ms: 3.0179
+      type: 'test'
+      ...
+    # Subtest: Space data is isolated ├óΓé¼ΓÇ¥ writes to one space not visible in another
+    ok 6 - Space data is isolated ├óΓé¼ΓÇ¥ writes to one space not visible in another
+      ---
+      duration_ms: 23.2252
+      type: 'test'
+      ...
+    # Subtest: Delete built-in general space is rejected
+    ok 7 - Delete built-in general space is rejected
+      ---
+      duration_ms: 2.7491
+      type: 'test'
+      ...
+    # Subtest: Delete non-existent space returns 404
+    ok 8 - Delete non-existent space returns 404
+      ---
+      duration_ms: 1.75
+      type: 'test'
+      ...
+    # Subtest: Delete solo space without { confirm: true } body is rejected with 400
+    not ok 9 - Delete solo space without { confirm: true } body is rejected with 400
+      ---
+      duration_ms: 1.9444
+      type: 'test'
+      location: 'O:\\Projects\\Ythril\\testing\\integration\\spaces.test.js:117:3'
+      failureType: 'testCodeFailure'
+      error: |-
+        Expected values to be strictly equal:
+        
+        409 !== 201
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 201
+      actual: 409
+      operator: 'strictEqual'
+      stack: |-
+        TestContext.<anonymous> (file:///O:/Projects/Ythril/testing/integration/spaces.test.js:119:12)
+        process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+        async Test.run (node:internal/test_runner/test:1125:7)
+        async Suite.processPendingSubtests (node:internal/test_runner/test:787:7)
+      ...
+    # Subtest: Delete solo space with { confirm: true } succeeds immediately ├óΓé¼ΓÇ¥ 204
+    not ok 10 - Delete solo space with { confirm: true } succeeds immediately ├óΓé¼ΓÇ¥ 204
+      ---
+      duration_ms: 2.2627
+      type: 'test'
+      location: 'O:\\Projects\\Ythril\\testing\\integration\\spaces.test.js:131:3'
+      failureType: 'testCodeFailure'
+      error: |-
+        Expected values to be strictly equal:
+        
+        409 !== 201
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 201
+      actual: 409
+      operator: 'strictEqual'
+      stack: |-
+        TestContext.<anonymous> (file:///O:/Projects/Ythril/testing/integration/spaces.test.js:133:12)
+        process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+        async Test.run (node:internal/test_runner/test:1125:7)
+        async Suite.processPendingSubtests (node:internal/test_runner/test:787:7)
+      ...
+    1..10
+not ok 1 - Space management
+  ---
+  duration_ms: 89.3271
+  type: 'suite'
+  location: 'O:\\Projects\\Ythril\\testing\\integration\\spaces.test.js:28:1'
+  failureType: 'subtestsFailed'
+  error: '4 subtests failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+1..1
+# tests 10
+# suites 1
+# pass 6
+# fail 4
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 138.7325

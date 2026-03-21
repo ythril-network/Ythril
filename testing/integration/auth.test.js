@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Integration tests: Authentication & Token lifecycle
  *
  * Covers:
@@ -10,7 +10,7 @@
  *  - Missing / malformed auth header
  *  - Rate limiting on token creation (authRateLimit)
  *
- * Run: node --test testing/auth.test.js
+ * Run: node --test testing/integration/auth.test.js
  */
 
 import { describe, it, before } from 'node:test';
@@ -19,10 +19,10 @@ import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, reqJson } from './sync/helpers.js';
+import { INSTANCES, post, get, del, reqJson } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CONFIGS = path.join(__dirname, 'sync', 'configs');
+const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
 
 let tokenA;
 
@@ -139,13 +139,13 @@ describe('Token lifecycle', () => {
   });
 });
 
-// ── Startup migration ──────────────────────────────────────────────────────
+// â”€â”€ Startup migration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Validates that tokens lacking the `prefix` field (created before the field
 // was introduced) are automatically evicted when the server restarts, and that
 // the eviction does not affect tokens that do have a prefix.
 //
 // NOTE: this test restarts the ythril-a container, so it must run last.
-// ──────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 describe('Startup migration: prefix-less tokens are evicted', () => {
   async function waitForHealth(url, timeoutMs = 30_000) {
     const deadline = Date.now() + timeoutMs;
@@ -160,7 +160,7 @@ describe('Startup migration: prefix-less tokens are evicted', () => {
   }
 
   it('prefix-less token is rejected after restart; admin token survives', async () => {
-    // 1. Create a fresh token — it will have a prefix field set by createToken()
+    // 1. Create a fresh token â€” it will have a prefix field set by createToken()
     const create = await post(INSTANCES.a, tokenA, '/api/tokens', { name: 'legacy-sim-token' });
     assert.equal(create.status, 201);
     const legacyId = create.body.token.id;
@@ -183,7 +183,7 @@ describe('Startup migration: prefix-less tokens are evicted', () => {
     execSync('docker restart ythril-a');
     await waitForHealth(INSTANCES.a);
 
-    // 4. The legacy token must be rejected — migration pruned it
+    // 4. The legacy token must be rejected â€” migration pruned it
     const afterLegacy = await get(INSTANCES.a, legacyPlaintext, '/api/tokens');
     assert.equal(afterLegacy.status, 401, 'Prefix-less token must be rejected after migration');
 

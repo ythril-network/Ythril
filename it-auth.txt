@@ -1,0 +1,147 @@
+﻿TAP version 13
+# Subtest: Token lifecycle
+    # Subtest: Create token returns plaintext once
+    not ok 1 - Create token returns plaintext once
+      ---
+      duration_ms: 0
+      type: 'test'
+      location: 'O:\\Projects\\Ythril\\testing\\integration\\auth.test.js:34:3'
+      failureType: 'cancelledByParent'
+      error: 'test did not finish before its parent and was cancelled'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    # Subtest: Token list never exposes hashes
+    not ok 2 - Token list never exposes hashes
+      ---
+      duration_ms: 0
+      type: 'test'
+      location: 'O:\\Projects\\Ythril\\testing\\integration\\auth.test.js:45:3'
+      failureType: 'cancelledByParent'
+      error: 'test did not finish before its parent and was cancelled'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    # Subtest: Expired token is rejected
+    not ok 3 - Expired token is rejected
+      ---
+      duration_ms: 0
+      type: 'test'
+      location: 'O:\\Projects\\Ythril\\testing\\integration\\auth.test.js:56:3'
+      failureType: 'cancelledByParent'
+      error: 'test did not finish before its parent and was cancelled'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    # Subtest: Revoked token no longer authenticates
+    not ok 4 - Revoked token no longer authenticates
+      ---
+      duration_ms: 0
+      type: 'test'
+      location: 'O:\\Projects\\Ythril\\testing\\integration\\auth.test.js:74:3'
+      failureType: 'cancelledByParent'
+      error: 'test did not finish before its parent and was cancelled'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    # Subtest: No auth header returns 401
+    not ok 5 - No auth header returns 401
+      ---
+      duration_ms: 0
+      type: 'test'
+      location: 'O:\\Projects\\Ythril\\testing\\integration\\auth.test.js:93:3'
+      failureType: 'cancelledByParent'
+      error: 'test did not finish before its parent and was cancelled'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    # Subtest: Invalid token format returns 401
+    not ok 6 - Invalid token format returns 401
+      ---
+      duration_ms: 0
+      type: 'test'
+      location: 'O:\\Projects\\Ythril\\testing\\integration\\auth.test.js:100:3'
+      failureType: 'cancelledByParent'
+      error: 'test did not finish before its parent and was cancelled'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    # Subtest: Space-scoped token rejected on wrong space
+    not ok 7 - Space-scoped token rejected on wrong space
+      ---
+      duration_ms: 0
+      type: 'test'
+      location: 'O:\\Projects\\Ythril\\testing\\integration\\auth.test.js:105:3'
+      failureType: 'cancelledByParent'
+      error: 'test did not finish before its parent and was cancelled'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    # Subtest: Revoking non-existent token returns 404
+    not ok 8 - Revoking non-existent token returns 404
+      ---
+      duration_ms: 0
+      type: 'test'
+      location: 'O:\\Projects\\Ythril\\testing\\integration\\auth.test.js:136:3'
+      failureType: 'cancelledByParent'
+      error: 'test did not finish before its parent and was cancelled'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    1..8
+not ok 1 - Token lifecycle
+  ---
+  duration_ms: 0.6211
+  type: 'suite'
+  location: 'O:\\Projects\\Ythril\\testing\\integration\\auth.test.js:29:1'
+  failureType: 'hookFailed'
+  error: "ENOENT: no such file or directory, open 'O:\\Projects\\Ythril\\testing\\integration\\sync\\configs\\a\\token.txt'"
+  code: 'ENOENT'
+  stack: |-
+    Object.readFileSync (node:fs:440:20)
+    SuiteContext.<anonymous> (file:///O:/Projects/Ythril/testing/integration/auth.test.js:31:17)
+    TestHook.runInAsyncScope (node:async_hooks:228:14)
+    TestHook.run (node:internal/test_runner/test:1118:25)
+    TestHook.run (node:internal/test_runner/test:1442:18)
+    TestHook.run (node:internal/util:602:20)
+    Suite.runHook (node:internal/test_runner/test:1036:20)
+    Suite.run (node:internal/test_runner/test:1527:18)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3)
+  ...
+# Subtest: Startup migration: prefix-less tokens are evicted
+    # Subtest: prefix-less token is rejected after restart; admin token survives
+    not ok 1 - prefix-less token is rejected after restart; admin token survives
+      ---
+      duration_ms: 39.3934
+      type: 'test'
+      location: 'O:\\Projects\\Ythril\\testing\\integration\\auth.test.js:162:3'
+      failureType: 'testCodeFailure'
+      error: |-
+        Expected values to be strictly equal:
+        
+        401 !== 201
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 201
+      actual: 401
+      operator: 'strictEqual'
+      stack: |-
+        TestContext.<anonymous> (file:///O:/Projects/Ythril/testing/integration/auth.test.js:165:12)
+        process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+        async Test.run (node:internal/test_runner/test:1125:7)
+        async Promise.all (index 0)
+        async Suite.run (node:internal/test_runner/test:1533:7)
+        async Test.processPendingSubtests (node:internal/test_runner/test:787:7)
+      ...
+    1..1
+not ok 2 - Startup migration: prefix-less tokens are evicted
+  ---
+  duration_ms: 39.6473
+  type: 'suite'
+  location: 'O:\\Projects\\Ythril\\testing\\integration\\auth.test.js:149:1'
+  failureType: 'subtestsFailed'
+  error: '1 subtest failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+1..2
+# tests 9
+# suites 2
+# pass 0
+# fail 1
+# cancelled 8
+# skipped 0
+# todo 0
+# duration_ms 89.5447

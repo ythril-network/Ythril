@@ -1,0 +1,128 @@
+﻿TAP version 13
+# Subtest: Network CRUD
+    # Subtest: Create a closed network
+    ok 1 - Create a closed network
+      ---
+      duration_ms: 52.2238
+      type: 'test'
+      ...
+    # Subtest: Create a democratic network
+    ok 2 - Create a democratic network
+      ---
+      duration_ms: 9.5554
+      type: 'test'
+      ...
+    # Subtest: Create a club network
+    ok 3 - Create a club network
+      ---
+      duration_ms: 9.8091
+      type: 'test'
+      ...
+    # Subtest: Create a braintree network
+    ok 4 - Create a braintree network
+      ---
+      duration_ms: 6.7735
+      type: 'test'
+      ...
+    # Subtest: Networks are listed after creation
+    ok 5 - Networks are listed after creation
+      ---
+      duration_ms: 3.4659
+      type: 'test'
+      ...
+    # Subtest: tokenHash is never exposed in network list
+    ok 6 - tokenHash is never exposed in network list
+      ---
+      duration_ms: 2.7721
+      type: 'test'
+      ...
+    # Subtest: Creating network with unknown space is rejected
+    ok 7 - Creating network with unknown space is rejected
+      ---
+      duration_ms: 2.4147
+      type: 'test'
+      ...
+    1..7
+ok 1 - Network CRUD
+  ---
+  duration_ms: 106.9899
+  type: 'suite'
+  ...
+# Subtest: Network voting ├óΓé¼ΓÇ¥ closed (unanimous)
+    # Subtest: Add member to closed network opens a voting round
+    ok 1 - Add member to closed network opens a voting round
+      ---
+      duration_ms: 172.1277
+      type: 'test'
+      ...
+    # Subtest: Second add of same member is rejected with 409
+    ok 2 - Second add of same member is rejected with 409
+      ---
+      duration_ms: 164.4362
+      type: 'test'
+      ...
+    1..2
+ok 2 - Network voting ├óΓé¼ΓÇ¥ closed (unanimous)
+  ---
+  duration_ms: 347.1438
+  type: 'suite'
+  ...
+# Subtest: Network invite key
+    # Subtest: Generate invite key returns a key string
+    ok 1 - Generate invite key returns a key string
+      ---
+      duration_ms: 162.8851
+      type: 'test'
+      ...
+    # Subtest: Rotating key invalidates old one and returns a new one
+    ok 2 - Rotating key invalidates old one and returns a new one
+      ---
+      duration_ms: 315.0517
+      type: 'test'
+      ...
+    # Subtest: Invite key not exposed in network GET response
+    ok 3 - Invite key not exposed in network GET response
+      ---
+      duration_ms: 2.442
+      type: 'test'
+      ...
+    1..3
+ok 3 - Network invite key
+  ---
+  duration_ms: 490.6115
+  type: 'suite'
+  ...
+# Subtest: RSA invite handshake
+    # Subtest: Generate handshake returns RSA public key and expiry
+    ok 1 - Generate handshake returns RSA public key and expiry
+      ---
+      duration_ms: 244.0291
+      type: 'test'
+      ...
+    # Subtest: Handshake apply with invalid ID returns 401
+    ok 2 - Handshake apply with invalid ID returns 401
+      ---
+      duration_ms: 154.0571
+      type: 'test'
+      ...
+    # Subtest: Full RSA handshake exchanges tokens without plaintext exposure
+    ok 3 - Full RSA handshake exchanges tokens without plaintext exposure
+      ---
+      duration_ms: 1697.117
+      type: 'test'
+      ...
+    1..3
+ok 4 - RSA invite handshake
+  ---
+  duration_ms: 2108.9324
+  type: 'suite'
+  ...
+1..4
+# tests 15
+# suites 4
+# pass 15
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3105.6476

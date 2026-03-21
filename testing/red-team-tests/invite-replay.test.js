@@ -111,7 +111,9 @@ describe('Invite handshake security', () => {
       networkId,
       instanceId: crypto.randomUUID(),
       instanceLabel: 'B-apply-test',
-      instanceUrl: INSTANCES.b,
+      // Use a public-format URL: localhost is blocked by SSRF guard (correct behaviour).
+      // apply() only stores the URL — no outbound request is made here.
+      instanceUrl: 'https://b.ythril-test.example.com',
       rsaPublicKeyPem: bPubKey,
     };
     const applyResp = await fetch(`${INVITE_INSTANCE}/api/invite/apply`, {
@@ -157,7 +159,7 @@ describe('Invite handshake security', () => {
         networkId,
         instanceId: crypto.randomUUID(),
         instanceLabel: 'B-finalize-bad',
-        instanceUrl: INSTANCES.b,
+        instanceUrl: 'https://b.ythril-test.example.com',
         rsaPublicKeyPem: bPubKey,
       }),
     });
@@ -173,7 +175,7 @@ describe('Invite handshake security', () => {
         // garbage — not encrypted with A's public key
         encryptedTokenForA: Buffer.from('this is not valid RSA ciphertext').toString('base64'),
         instanceLabel: 'attack-instance',
-        instanceUrl: `${INSTANCES.b}`,
+        instanceUrl: 'https://b.ythril-test.example.com',
       }),
     });
     assert.ok(finalizeResp.status >= 400,

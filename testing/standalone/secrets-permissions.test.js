@@ -72,14 +72,28 @@ describe('secrets.json — existence', () => {
     assert.doesNotThrow(() => JSON.parse(raw), 'secrets.json must be valid JSON');
   });
 
-  it('secrets.json does NOT contain plaintext token values (only bcrypt hashes)', () => {
+  it('secrets.json settingsPasswordHash is a bcrypt hash', () => {
+    // peerTokens are OUTGOING credentials used to authenticate HTTP calls to peer instances.
+    // They must be stored as plaintext — you cannot reconstruct a token from a bcrypt hash.
+    // Their confidentiality is protected by file-system permissions (0600), not hashing.
+    // settingsPasswordHash, by contrast, is a local password and IS correctly bcrypt-hashed.
     const obj = JSON.parse(fs.readFileSync(SECRETS_FILE, 'utf8'));
-    // peerTokens values should be bcrypt hashes (start with $2b$) not plaintext ythril_ tokens
+    assert.ok(typeof obj.settingsPasswordHash === 'string', 'settingsPasswordHash is missing');
+    assert.ok(
+      obj.settingsPasswordHash.startsWith('$2b$') || obj.settingsPasswordHash.startsWith('$2a$'),
+      `settingsPasswordHash should be a bcrypt hash, got: ${String(obj.settingsPasswordHash).slice(0, 10)}...`
+    );
+  });
+
+  it('peerTokens values are non-empty strings (plaintext outgoing credentials)', () => {
+    // peerTokens are plaintext by design — they are Bearer tokens sent to peer instances.
+    // Protection is via file permissions (0600); see the POSIX suite below.
+    const obj = JSON.parse(fs.readFileSync(SECRETS_FILE, 'utf8'));
     const peerTokens = obj.peerTokens ?? {};
     for (const [peer, val] of Object.entries(peerTokens)) {
       assert.ok(
-        (typeof val === 'string') && (val.startsWith('$2b$') || val.startsWith('$2a$')),
-        `peerToken for '${peer}' looks like a plaintext token, not a bcrypt hash: ${String(val).slice(0, 20)}...`
+        typeof val === 'string' && val.length > 0,
+        `peerToken for '${peer}' should be a non-empty string, got: ${JSON.stringify(val)}`
       );
     }
   });

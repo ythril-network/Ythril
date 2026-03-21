@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Integration tests: Brain API (memories, entities, edges)
  *
  * Covers:
@@ -11,7 +11,7 @@
  *  - Wipe all memories (confirm required)
  *  - Brain stats endpoint
  *
- * Run: node --test testing/brain.test.js
+ * Run: node --test testing/integration/brain.test.js
  */
 
 import { describe, it, before } from 'node:test';
@@ -19,16 +19,16 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del } from './sync/helpers.js';
+import { INSTANCES, post, get, del } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CONFIGS = path.join(__dirname, 'sync', 'configs');
+const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
 
 let tokenA;
 
 function token() { return tokenA; }
 
-describe('Brain — memories', () => {
+describe('Brain â€” memories', () => {
   before(() => {
     tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
   });
@@ -93,7 +93,7 @@ describe('Brain — memories', () => {
   });
 });
 
-describe('Brain — stats', () => {
+describe('Brain â€” stats', () => {
   it('Stats endpoint returns counts', async () => {
     const r = await get(INSTANCES.a, token(), '/api/brain/spaces/general/stats');
     assert.equal(r.status, 200, JSON.stringify(r.body));
@@ -101,19 +101,19 @@ describe('Brain — stats', () => {
   });
 });
 
-describe('Brain — conflicts protection', () => {
+describe('Brain â€” conflicts protection', () => {
   it('Writing to a wrongly spelled spaceId returns error', async () => {
     const r = await post(INSTANCES.a, token(), '/api/brain/GENERAL/memories', {
       fact: 'Case sensitivity test',
     });
-    // Space IDs are lowercase — GENERAL should 404
+    // Space IDs are lowercase â€” GENERAL should 404
     assert.ok(r.status === 404 || r.status === 400, `Got ${r.status}`);
   });
 });
 
-// ── Entities CRUD ─────────────────────────────────────────────────────────
+// â”€â”€ Entities CRUD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-describe('Brain — entities CRUD (/api/brain/spaces/:spaceId/entities)', () => {
+describe('Brain â€” entities CRUD (/api/brain/spaces/:spaceId/entities)', () => {
   const RUN = Date.now();
 
   it('List entities returns {entities:[...]}', async () => {
@@ -134,9 +134,9 @@ describe('Brain — entities CRUD (/api/brain/spaces/:spaceId/entities)', () => 
 
   it('Delete entity returns 204 and it is gone', async () => {
     // First create an entity via the MCP upsert route
-    // Use the sync endpoint as a seeding shortcut — upsert directly into the DB
+    // Use the sync endpoint as a seeding shortcut â€” upsert directly into the DB
     const entId = `test-entity-${RUN}`;
-    await (await import('./sync/helpers.js')).post(INSTANCES.a, token(), '/api/sync/entities?spaceId=general', {
+    await (await import('../sync/helpers.js')).post(INSTANCES.a, token(), '/api/sync/entities?spaceId=general', {
       _id: entId, spaceId: 'general', name: `EntityForDelete-${RUN}`,
       type: 'concept', tags: [], seq: Date.now(),
       author: { instanceId: 'test', instanceLabel: 'Test' },
@@ -153,9 +153,9 @@ describe('Brain — entities CRUD (/api/brain/spaces/:spaceId/entities)', () => 
   });
 });
 
-// ── Edges CRUD ────────────────────────────────────────────────────────────
+// â”€â”€ Edges CRUD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-describe('Brain — edges CRUD (/api/brain/spaces/:spaceId/edges)', () => {
+describe('Brain â€” edges CRUD (/api/brain/spaces/:spaceId/edges)', () => {
   const RUN = Date.now();
 
   it('List edges returns {edges:[...]}', async () => {
@@ -175,7 +175,7 @@ describe('Brain — edges CRUD (/api/brain/spaces/:spaceId/edges)', () => {
   });
 
   it('Delete edge returns 204 and it is gone', async () => {
-    const { post: syncPost } = await import('./sync/helpers.js');
+    const { post: syncPost } = await import('../sync/helpers.js');
     const entA = `edge-from-${RUN}`;
     const entB = `edge-to-${RUN}`;
     const edgeId = `test-edge-${RUN}`;
@@ -206,14 +206,14 @@ describe('Brain — edges CRUD (/api/brain/spaces/:spaceId/edges)', () => {
   });
 });
 
-// ── Memory list pagination ────────────────────────────────────────────────
+// â”€â”€ Memory list pagination â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-describe('Brain — memory list limit/skip pagination', () => {
+describe('Brain â€” memory list limit/skip pagination', () => {
   const RUN = Date.now();
 
   before(async () => {
     // Seed 8 memories to guarantee meaningful pagination
-    const { post: syncPost } = await import('./sync/helpers.js');
+    const { post: syncPost } = await import('../sync/helpers.js');
     for (let i = 0; i < 8; i++) {
       await syncPost(INSTANCES.a, token(), '/api/sync/memories?spaceId=general', {
         _id: `paginate-${RUN}-${i}`, spaceId: 'general', fact: `Pagination seed ${RUN} item ${i}`,
@@ -228,7 +228,7 @@ describe('Brain — memory list limit/skip pagination', () => {
     const r = await get(INSTANCES.a, token(), '/api/brain/general/memories?limit=3');
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.ok(Array.isArray(r.body.memories), 'memories must be array');
-    assert.ok(r.body.memories.length <= 3, `Expected ≤3 items, got ${r.body.memories.length}`);
+    assert.ok(r.body.memories.length <= 3, `Expected â‰¤3 items, got ${r.body.memories.length}`);
   });
 
   it('skip pagination returns disjoint results', async () => {
@@ -242,16 +242,16 @@ describe('Brain — memory list limit/skip pagination', () => {
     }
   });
 
-  it('limit cap — limit > 500 is capped at 500', async () => {
+  it('limit cap â€” limit > 500 is capped at 500', async () => {
     const r = await get(INSTANCES.a, token(), '/api/brain/general/memories?limit=9999');
     assert.equal(r.status, 200);
-    assert.ok(r.body.limit <= 500, `Expected limit ≤500 in response, got ${r.body.limit}`);
+    assert.ok(r.body.limit <= 500, `Expected limit â‰¤500 in response, got ${r.body.limit}`);
   });
 });
 
-// ── Reindex status ────────────────────────────────────────────────────────
+// â”€â”€ Reindex status â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-describe('Brain — reindex-status endpoint', () => {
+describe('Brain â€” reindex-status endpoint', () => {
   it('Returns {spaceId, needsReindex} for valid space', async () => {
     const r = await get(INSTANCES.a, token(), '/api/brain/spaces/general/reindex-status');
     assert.equal(r.status, 200, JSON.stringify(r.body));
@@ -270,9 +270,9 @@ describe('Brain — reindex-status endpoint', () => {
   });
 });
 
-// ── Memory fact validation ────────────────────────────────────────────────
+// â”€â”€ Memory fact validation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-describe('Brain — memory fact validation', () => {
+describe('Brain â€” memory fact validation', () => {
   it('Returns 400 if fact is missing', async () => {
     const r = await post(INSTANCES.a, token(), '/api/brain/general/memories', { tags: ['nofact'] });
     assert.equal(r.status, 400);

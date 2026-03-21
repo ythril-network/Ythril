@@ -18,6 +18,18 @@ function checkPermissions(filePath: string): void {
     const stat = fs.statSync(filePath);
     const mode = stat.mode & 0o777;
     if (mode & 0o077) {
+      // On Docker with Windows-hosted volumes (WSL2 bind mounts), all files
+      // appear as 0o777 regardless of intended permissions.  Detect this by
+      // checking whether the directory itself is also 0o777 — if so, we are
+      // on a Windows volume mount; silently fix the file permissions and continue.
+      const dirStat = fs.statSync(path.dirname(filePath));
+      const dirMode = dirStat.mode & 0o777;
+      if (dirMode & 0o002) {
+        // Directory is world-writable — almost certainly a Docker/WSL2 Windows
+        // volume mount.  Fix the file permissions so future restarts won't re-trigger.
+        try { fs.chmodSync(filePath, 0o600); } catch { /* best-effort */ }
+        return;
+      }
       log.error(
         `SECURITY: ${filePath} is world/group-readable (mode ${mode.toString(8)}). ` +
         `Fix with: chmod 600 ${filePath}`,
@@ -109,9 +121,10 @@ export function saveSecrets(secrets: SecretsFile): void {
 
 export function getEmbeddingConfig() {
   const cfg = getConfig();
+  // No baseUrl in the default = use the bundled local ONNX model.
+  // Set baseUrl in config.json to override with an HTTP endpoint (e.g. Ollama).
   return cfg.embedding ?? {
-    baseUrl: 'http://localhost:11434/v1',
-    model: 'nomic-embed-text-v1.5',
+    model: 'nomic-ai/nomic-embed-text-v1.5',
     dimensions: 768,
     similarity: 'cosine' as const,
   };

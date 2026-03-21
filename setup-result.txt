@@ -1,0 +1,25 @@
+﻿Ythril test setup
+=================
+
+Setting up instance a (ythril-a)...
+  Waiting for http://localhost:3200 to be healthy...
+node :   ERROR for instance a: Could not find setup code in logs for ythril-a. Is it a first run?
+At line:1 char:1
++ node testing/sync/setup.js 2>&1 | Out-File -Encoding utf8 o:\Projects ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (  ERROR for ins...it a first run?:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+Setting up instance b (ythril-b)...
+  Waiting for http://localhost:3201 to be healthy...
+  ERROR for instance b: Could not find setup code in logs for ythril-b. Is it a first run?
+
+Setting up instance c (ythril-c)...
+  Waiting for http://localhost:3202 to be healthy...
+  ERROR for instance c: Could not find setup code in logs for ythril-c. Is it a first run?
+
+Setup summary:
+
+Run tests with:
+  node --test testing/sync/*.test.js

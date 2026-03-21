@@ -35,6 +35,9 @@ import {
 } from '../files/files.js';
 import { checkQuota, QuotaError } from '../quota/quota.js';
 import { resolveSafePath, spaceRoot } from '../files/sandbox.js';
+import { col } from '../db/mongo.js';
+import type { FileTombstoneDoc } from '../config/types.js';
+import { v4 as uuidv4 } from 'uuid';
 
 export const filesRouter = Router();
 
@@ -294,6 +297,14 @@ filesRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, r
   // Regular file
   try {
     await deleteFile(spaceId, filePath);
+    // Write a file tombstone so peers can replicate the deletion on their next sync.
+    const tombstone: FileTombstoneDoc = {
+      _id: uuidv4(),
+      spaceId,
+      path: filePath.replace(/\\/g, '/'),
+      deletedAt: new Date().toISOString(),
+    };
+    await col<FileTombstoneDoc>(`${spaceId}_file_tombstones`).insertOne(tombstone as never);
     res.status(204).end();
   } catch (err) {
     if (err instanceof RangeError) {

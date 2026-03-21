@@ -1,20 +1,20 @@
-/**
+﻿/**
  * Integration tests: File manager API  (/api/files/:spaceId)
  *
  * Covers:
  *  - Upload file (JSON body, raw bytes)
- *  - Download file (GET → raw bytes)
- *  - List directory (GET → JSON)
+ *  - Download file (GET â†’ raw bytes)
+ *  - List directory (GET â†’ JSON)
  *  - Delete file (204), delete file missing (404)
  *  - Delete directory requires { confirm: true } (422 without, 204 with)
  *  - Move/rename file (PATCH)
  *  - mkdir (POST /mkdir)
  *  - Path traversal blocked (400)
- *  - Non-existent path → 404
- *  - Non-existent space → 404
- *  - No auth → 401
+ *  - Non-existent path â†’ 404
+ *  - Non-existent space â†’ 404
+ *  - No auth â†’ 401
  *
- * Run: node --test testing/files.test.js
+ * Run: node --test testing/integration/files.test.js
  */
 
 import { describe, it, before } from 'node:test';
@@ -22,10 +22,10 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, req, reqJson, get, del, post } from './sync/helpers.js';
+import { INSTANCES, req, reqJson, get, del, post } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const TOKEN_FILE_A = path.join(__dirname, 'sync', 'configs', 'a', 'token.txt');
+const TOKEN_FILE_A = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
 
 let tokenA;
 

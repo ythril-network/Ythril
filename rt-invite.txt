@@ -1,0 +1,104 @@
+﻿TAP version 13
+# Subtest: Invite handshake security
+    # Subtest: Generate invite handshake returns valid structure
+    ok 1 - Generate invite handshake returns valid structure
+      ---
+      duration_ms: 341.7308
+      type: 'test'
+      ...
+    # Subtest: Apply with non-existent handshakeId ΓåÆ 4xx
+    ok 2 - Apply with non-existent handshakeId ΓåÆ 4xx
+      ---
+      duration_ms: 38.3541
+      type: 'test'
+      ...
+    # Subtest: Apply with valid handshakeId succeeds
+    not ok 3 - Apply with valid handshakeId succeeds
+      ---
+      duration_ms: 1020.4722
+      type: 'test'
+      location: 'O:\\Projects\\Ythril\\testing\\red-team-tests\\invite-replay.test.js:94:3'
+      failureType: 'testCodeFailure'
+      error: |-
+        Apply failed: {"error":"[\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"instanceUrl\"\n    ],\n    \"message\": \"Peer URL must use http(s) and must not target private IPs, loopback, ULA/link-local IPv6, cloud metadata endpoints, or include embedded credentials\"\n  }\n]"}
+        
+        400 !== 200
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 200
+      actual: 400
+      operator: 'strictEqual'
+      stack: |-
+        TestContext.<anonymous> (file:///O:/Projects/Ythril/testing/red-team-tests/invite-replay.test.js:123:12)
+        process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+        async Test.run (node:internal/test_runner/test:1125:7)
+        async Suite.processPendingSubtests (node:internal/test_runner/test:787:7)
+      ...
+    # Subtest: Finalize with invalid/garbage ciphertext ΓåÆ 4xx
+    not ok 4 - Finalize with invalid/garbage ciphertext ΓåÆ 4xx
+      ---
+      duration_ms: 255.4813
+      type: 'test'
+      location: 'O:\\Projects\\Ythril\\testing\\red-team-tests\\invite-replay.test.js:136:3'
+      failureType: 'testCodeFailure'
+      error: |-
+        Expected values to be strictly equal:
+        
+        400 !== 200
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 200
+      actual: 400
+      operator: 'strictEqual'
+      stack: |-
+        TestContext.<anonymous> (file:///O:/Projects/Ythril/testing/red-team-tests/invite-replay.test.js:164:12)
+        process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+        async Test.run (node:internal/test_runner/test:1125:7)
+        async Suite.processPendingSubtests (node:internal/test_runner/test:787:7)
+      ...
+    # Subtest: Finalize with non-existent handshakeId ΓåÆ 4xx
+    ok 5 - Finalize with non-existent handshakeId ΓåÆ 4xx
+      ---
+      duration_ms: 2.4452
+      type: 'test'
+      ...
+    1..5
+not ok 1 - Invite handshake security
+  ---
+  duration_ms: 1857.5652
+  type: 'suite'
+  location: 'O:\\Projects\\Ythril\\testing\\red-team-tests\\invite-replay.test.js:48:1'
+  failureType: 'subtestsFailed'
+  error: '2 subtests failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: Invite status endpoint
+    # Subtest: Status of non-existent handshake ΓåÆ 400 (invalid UUID format)
+    ok 1 - Status of non-existent handshake ΓåÆ 400 (invalid UUID format)
+      ---
+      duration_ms: 427.1664
+      type: 'test'
+      ...
+    # Subtest: Status of valid-format-but-missing handshake UUID ΓåÆ 404
+    ok 2 - Status of valid-format-but-missing handshake UUID ΓåÆ 404
+      ---
+      duration_ms: 429.1106
+      type: 'test'
+      ...
+    1..2
+ok 2 - Invite status endpoint
+  ---
+  duration_ms: 856.7472
+  type: 'suite'
+  ...
+1..2
+# tests 7
+# suites 2
+# pass 5
+# fail 2
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2763.2678

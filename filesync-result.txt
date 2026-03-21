@@ -1,0 +1,84 @@
+﻿TAP version 13
+# Subtest: File sync ΓÇö cross-instance
+    # Subtest: file written on A syncs to B after trigger
+    ok 1 - file written on A syncs to B after trigger
+      ---
+      duration_ms: 2018.3666
+      type: 'test'
+      ...
+    # Subtest: file overwritten on A propagates updated sha256 to B
+    ok 2 - file overwritten on A propagates updated sha256 to B
+      ---
+      duration_ms: 4035.2465
+      type: 'test'
+      ...
+    # Subtest: file deleted on A propagates deletion to B
+    ok 3 - file deleted on A propagates deletion to B
+      ---
+      duration_ms: 4042.1197
+      type: 'test'
+      ...
+    # Subtest: hash mismatch creates conflict copy on receiving side ΓÇö local file preserved
+    ok 4 - hash mismatch creates conflict copy on receiving side ΓÇö local file preserved
+      ---
+      duration_ms: 2040.4598
+      type: 'test'
+      ...
+    1..4
+ok 1 - File sync ΓÇö cross-instance
+  ---
+  duration_ms: 12659.6683
+  type: 'suite'
+  ...
+# Subtest: GET /api/sync/manifest
+    # Subtest: requires spaceId ΓÇö returns 400 without it
+    ok 1 - requires spaceId ΓÇö returns 400 without it
+      ---
+      duration_ms: 2.343
+      type: 'test'
+      ...
+    # Subtest: returns 403 for an unknown spaceId
+    ok 2 - returns 403 for an unknown spaceId
+      ---
+      duration_ms: 1.4654
+      type: 'test'
+      ...
+    # Subtest: returns 200 with a manifest array for the general space
+    ok 3 - returns 200 with a manifest array for the general space
+      ---
+      duration_ms: 5.4055
+      type: 'test'
+      ...
+    # Subtest: manifest entries include path, sha256, size, modifiedAt
+    ok 4 - manifest entries include path, sha256, size, modifiedAt
+      ---
+      duration_ms: 4.4813
+      type: 'test'
+      ...
+    # Subtest: manifest ?since= filters to only recently modified files
+    ok 5 - manifest ?since= filters to only recently modified files
+      ---
+      duration_ms: 116.0736
+      type: 'test'
+      ...
+    # Subtest: returns 401 without auth
+    ok 6 - returns 401 without auth
+      ---
+      duration_ms: 1.466
+      type: 'test'
+      ...
+    1..6
+ok 2 - GET /api/sync/manifest
+  ---
+  duration_ms: 131.981
+  type: 'suite'
+  ...
+1..2
+# tests 10
+# suites 2
+# pass 10
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 12839.574

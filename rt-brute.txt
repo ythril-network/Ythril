@@ -1,0 +1,61 @@
+﻿TAP version 13
+# Subtest: Brute-force token enumeration on POST /api/tokens
+    # Subtest: 11 concurrent invalid-token attempts ΓåÆ at least one 429
+    not ok 1 - 11 concurrent invalid-token attempts ΓåÆ at least one 429
+      ---
+      duration_ms: 42.3073
+      type: 'test'
+      location: 'O:\\Projects\\Ythril\\testing\\red-team-tests\\token-brute-force.test.js:34:3'
+      failureType: 'testCodeFailure'
+      error: 'Expected at least one 429 in burst, got: [401,401,401,401,401,401,401,401,401,401,401]'
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: true
+      actual: false
+      operator: '=='
+      stack: |-
+        TestContext.<anonymous> (file:///O:/Projects/Ythril/testing/red-team-tests/token-brute-force.test.js:45:12)
+        process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+        async Test.run (node:internal/test_runner/test:1125:7)
+        async Promise.all (index 0)
+        async Suite.run (node:internal/test_runner/test:1533:7)
+        async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3)
+      ...
+    # Subtest: Rate-limit response includes Retry-After or RateLimit headers
+    ok 2 - Rate-limit response includes Retry-After or RateLimit headers
+      ---
+      duration_ms: 15.9384
+      type: 'test'
+      ...
+    1..2
+not ok 1 - Brute-force token enumeration on POST /api/tokens
+  ---
+  duration_ms: 58.8215
+  type: 'suite'
+  location: 'O:\\Projects\\Ythril\\testing\\red-team-tests\\token-brute-force.test.js:33:1'
+  failureType: 'subtestsFailed'
+  error: '1 subtest failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: Unauthenticated endpoint rate limiting (invite/apply)
+    # Subtest: 11 invalid apply attempts ΓåÆ at least one 429 or all 4xx
+    ok 1 - 11 invalid apply attempts ΓåÆ at least one 429 or all 4xx
+      ---
+      duration_ms: 5.9772
+      type: 'test'
+      ...
+    1..1
+ok 2 - Unauthenticated endpoint rate limiting (invite/apply)
+  ---
+  duration_ms: 6.0713
+  type: 'suite'
+  ...
+1..2
+# tests 3
+# suites 2
+# pass 2
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 115.712

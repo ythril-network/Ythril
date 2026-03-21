@@ -1,18 +1,18 @@
-/**
+﻿/**
  * Integration tests: Conflicts API  (/api/conflicts)
  *
  * Covers:
- *  - GET /api/conflicts — empty initially, returns array shape
+ *  - GET /api/conflicts â€” empty initially, returns array shape
  *  - Seed a conflict document directly via sync POST (hash mismatch scenario)
- *  - GET /api/conflicts — returns seeded conflict with correct fields
- *  - GET /api/conflicts/:id — single record lookup
- *  - GET /api/conflicts/:id — 404 for unknown id
- *  - DELETE /api/conflicts/:id — dismiss returns 204 and record is gone
- *  - DELETE /api/conflicts/:id — 404 for already-dismissed
- *  - POST /api/conflicts/:id/resolve — returns 200 {status:'resolved'} and deletes
+ *  - GET /api/conflicts â€” returns seeded conflict with correct fields
+ *  - GET /api/conflicts/:id â€” single record lookup
+ *  - GET /api/conflicts/:id â€” 404 for unknown id
+ *  - DELETE /api/conflicts/:id â€” dismiss returns 204 and record is gone
+ *  - DELETE /api/conflicts/:id â€” 404 for already-dismissed
+ *  - POST /api/conflicts/:id/resolve â€” returns 200 {status:'resolved'} and deletes
  *  - Authorization: unauthenticated request returns 401
  *
- * Run: node --test testing/conflicts.test.js
+ * Run: node --test testing/integration/conflicts.test.js
  * Pre-requisite: docker compose -f testing/docker-compose.test.yml up && node testing/sync/setup.js
  */
 
@@ -22,14 +22,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, reqJson } from './sync/helpers.js';
+import { INSTANCES, post, get, del, reqJson } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CONFIGS = path.join(__dirname, 'sync', 'configs');
+const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
 
 let tokenA;
 
-// ── Helpers ───────────────────────────────────────────────────────────────
+// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
  * Directly seed a ConflictDoc into the `general` space conflicts collection
@@ -57,7 +57,7 @@ let tokenA;
  *
  * For the CRUD-only tests below we use a network-level file conflict seeded
  * via cross-instance file sync (write same file path with different content
- * on A and B, trigger sync A→B, engine detects hash mismatch on B, writes
+ * on A and B, trigger sync Aâ†’B, engine detects hash mismatch on B, writes
  * conflict record).
  */
 
@@ -67,7 +67,7 @@ const RUN = Date.now();
 let networkId;
 let tokenB;
 
-describe('Conflicts API — CRUD', () => {
+describe('Conflicts API â€” CRUD', () => {
   before(async () => {
     tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
     tokenB = fs.readFileSync(path.join(CONFIGS, 'b', 'token.txt'), 'utf8').trim();
@@ -88,7 +88,7 @@ describe('Conflicts API — CRUD', () => {
     const ptA = await post(INSTANCES.a, tokenA, '/api/tokens', { name: `conflict-peer-${RUN}` });
     assert.equal(ptA.status, 201);
 
-    // Add B as a member on A (club auto-approves direct add; closed may vote — handle both)
+    // Add B as a member on A (club auto-approves direct add; closed may vote â€” handle both)
     const addB = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/members`, {
       instanceId: 'conflict-instance-b',
       label: 'Conflict B',
@@ -134,7 +134,7 @@ describe('Conflicts API — CRUD', () => {
   });
 });
 
-describe('Conflicts API — seeded via file sync hash mismatch', () => {
+describe('Conflicts API â€” seeded via file sync hash mismatch', () => {
   let networkId2;
   let conflictId;
   const filePath = `conflict-test-${RUN}.txt`;
@@ -208,7 +208,7 @@ describe('Conflicts API — seeded via file sync hash mismatch', () => {
   it('conflict document was created by file hash mismatch detection', function() {
     // If the sync stack is not fully wired for file sync, skip gracefully.
     if (!conflictId) {
-      console.log('  [SKIP] No conflict was seeded — file sync peers not fully wired in test stack.');
+      console.log('  [SKIP] No conflict was seeded â€” file sync peers not fully wired in test stack.');
       return;
     }
     assert.ok(conflictId, 'conflictId must be set');
@@ -216,7 +216,7 @@ describe('Conflicts API — seeded via file sync hash mismatch', () => {
 
   it('GET /api/conflicts returns the seeded conflict with correct shape', function() {
     if (!conflictId) return; // skip if not seeded
-    // already retrieved above — check from the list
+    // already retrieved above â€” check from the list
     (async () => {
       const r = await get(INSTANCES.a, tokenA, '/api/conflicts');
       assert.equal(r.status, 200);
@@ -227,7 +227,7 @@ describe('Conflicts API — seeded via file sync hash mismatch', () => {
       assert.ok(c.conflictPath, 'conflict.conflictPath must be present');
       assert.ok(c.peerInstanceId, 'conflict.peerInstanceId must be present');
       assert.ok(c.peerInstanceLabel, 'conflict.peerInstanceLabel must be present');
-      assert.ok(c.detectedAt, 'conflict.detectedAt must be present — ISO8601 timestamp');
+      assert.ok(c.detectedAt, 'conflict.detectedAt must be present â€” ISO8601 timestamp');
       // detectedAt must be a valid ISO8601 date
       assert.ok(!isNaN(Date.parse(c.detectedAt)), 'conflict.detectedAt must be a valid ISO8601 date');
     })();

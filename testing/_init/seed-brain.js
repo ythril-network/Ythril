@@ -9,14 +9,14 @@
  *  - 15 edges linking entities
  *
  * Usage:
- *   node testing/seed-brain.js [port] [token]
+ *   node testing/_init/seed-brain.js [port] [token]
  *
  *   port   — defaults to 3200
  *   token  — defaults to content of testing/sync/configs/a/token.txt
  *
  * Examples:
- *   node testing/seed-brain.js 3200 yt_mytoken123
- *   node testing/seed-brain.js 3201 $(cat testing/sync/configs/b/token.txt)
+ *   node testing/_init/seed-brain.js 3200 yt_mytoken123
+ *   node testing/_init/seed-brain.js 3201 $(cat testing/sync/configs/b/token.txt)
  */
 
 import fs from 'fs';
@@ -30,10 +30,10 @@ const BASE  = `http://localhost:${PORT}`;
 const TOKEN = process.argv[3] ?? readTokenFile();
 
 function readTokenFile() {
-  const p = path.join(__dirname, 'sync', 'configs', 'a', 'token.txt');
+  const p = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
   if (fs.existsSync(p)) return fs.readFileSync(p, 'utf8').trim();
   console.error('No token provided and testing/sync/configs/a/token.txt not found.');
-  console.error('Usage: node testing/seed-brain.js <port> <token>');
+  console.error('Usage: node testing/_init/seed-brain.js <port> <token>');
   process.exit(1);
 }
 

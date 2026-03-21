@@ -1,0 +1,169 @@
+﻿TAP version 13
+# Subtest: POST /api/sync/memories ΓÇö conflict rules
+    # Subtest: returns {status:"inserted"} for a new document
+    ok 1 - returns {status:"inserted"} for a new document
+      ---
+      duration_ms: 200.1468
+      type: 'test'
+      ...
+    # Subtest: returns {status:"updated"} when incoming seq > existing seq
+    ok 2 - returns {status:"updated"} when incoming seq > existing seq
+      ---
+      duration_ms: 29.3312
+      type: 'test'
+      ...
+    # Subtest: returns {status:"skipped"} for equal seq + identical fact
+    ok 3 - returns {status:"skipped"} for equal seq + identical fact
+      ---
+      duration_ms: 9.7912
+      type: 'test'
+      ...
+    # Subtest: returns {status:"skipped"} when incoming seq < existing seq (older remote)
+    ok 4 - returns {status:"skipped"} when incoming seq < existing seq (older remote)
+      ---
+      duration_ms: 9.54
+      type: 'test'
+      ...
+    # Subtest: returns {status:"forked"} for equal seq + different fact
+    ok 5 - returns {status:"forked"} for equal seq + different fact
+      ---
+      duration_ms: 15.2608
+      type: 'test'
+      ...
+    # Subtest: tombstone with seq >= incoming returns {status:"tombstoned"} (insert blocked)
+    ok 6 - tombstone with seq >= incoming returns {status:"tombstoned"} (insert blocked)
+      ---
+      duration_ms: 10.2167
+      type: 'test'
+      ...
+    # Subtest: tombstone with seq < incoming allows the insert
+    ok 7 - tombstone with seq < incoming allows the insert
+      ---
+      duration_ms: 10.9602
+      type: 'test'
+      ...
+    # Subtest: returns 400 without spaceId
+    ok 8 - returns 400 without spaceId
+      ---
+      duration_ms: 1.6063
+      type: 'test'
+      ...
+    # Subtest: returns 400 for invalid memory document (missing seq)
+    ok 9 - returns 400 for invalid memory document (missing seq)
+      ---
+      duration_ms: 1.596
+      type: 'test'
+      ...
+    1..9
+ok 1 - POST /api/sync/memories ΓÇö conflict rules
+  ---
+  duration_ms: 289.2714
+  type: 'suite'
+  ...
+# Subtest: POST /api/sync/batch-upsert
+    # Subtest: returns 400 without spaceId
+    ok 1 - returns 400 without spaceId
+      ---
+      duration_ms: 1.7059
+      type: 'test'
+      ...
+    # Subtest: returns 200 with per-type stats for valid batch
+    ok 2 - returns 200 with per-type stats for valid batch
+      ---
+      duration_ms: 10.6587
+      type: 'test'
+      ...
+    # Subtest: batch-upsert respects existing tombstone ΓÇö tombstoned doc not re-inserted
+    ok 3 - batch-upsert respects existing tombstone ΓÇö tombstoned doc not re-inserted
+      ---
+      duration_ms: 8.319
+      type: 'test'
+      ...
+    # Subtest: batch-upsert silently skips documents with missing _id or seq
+    ok 4 - batch-upsert silently skips documents with missing _id or seq
+      ---
+      duration_ms: 1.5543
+      type: 'test'
+      ...
+    # Subtest: batch-upsert caps memories at 500 per type
+    ok 5 - batch-upsert caps memories at 500 per type
+      ---
+      duration_ms: 1213.8558
+      type: 'test'
+      ...
+    # Subtest: returns 403 for forbidden space
+    ok 6 - returns 403 for forbidden space
+      ---
+      duration_ms: 1.5945
+      type: 'test'
+      ...
+    # Subtest: returns 401 without auth
+    ok 7 - returns 401 without auth
+      ---
+      duration_ms: 1.2119
+      type: 'test'
+      ...
+    1..7
+ok 2 - POST /api/sync/batch-upsert
+  ---
+  duration_ms: 1239.158
+  type: 'suite'
+  ...
+# Subtest: GET /api/sync/memories ΓÇö listing and cursor pagination
+    # Subtest: requires spaceId
+    ok 1 - requires spaceId
+      ---
+      duration_ms: 1.1999
+      type: 'test'
+      ...
+    # Subtest: returns 403 for unknown spaceId
+    ok 2 - returns 403 for unknown spaceId
+      ---
+      duration_ms: 0.8948
+      type: 'test'
+      ...
+    # Subtest: returns items and nextCursor for the general space
+    ok 3 - returns items and nextCursor for the general space
+      ---
+      duration_ms: 3.4551
+      type: 'test'
+      ...
+    # Subtest: full=true returns complete memory documents (not just stubs)
+    ok 4 - full=true returns complete memory documents (not just stubs)
+      ---
+      duration_ms: 8.0834
+      type: 'test'
+      ...
+    # Subtest: cursor from page 1 retrieves different items on page 2
+    ok 5 - cursor from page 1 retrieves different items on page 2
+      ---
+      duration_ms: 22.8591
+      type: 'test'
+      ...
+    # Subtest: sinceSeq=0 returns all memories
+    ok 6 - sinceSeq=0 returns all memories
+      ---
+      duration_ms: 5.2318
+      type: 'test'
+      ...
+    # Subtest: returns 401 without auth
+    ok 7 - returns 401 without auth
+      ---
+      duration_ms: 1.2023
+      type: 'test'
+      ...
+    1..7
+ok 3 - GET /api/sync/memories ΓÇö listing and cursor pagination
+  ---
+  duration_ms: 43.1579
+  type: 'suite'
+  ...
+1..3
+# tests 23
+# suites 3
+# pass 23
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1622.2553

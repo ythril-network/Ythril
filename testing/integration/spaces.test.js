@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Integration tests: Space management
  *
  * Covers:
@@ -9,7 +9,7 @@
  *  - Duplicate space ID rejected
  *  - Invalid slug characters rejected
  *
- * Run: node --test testing/spaces.test.js
+ * Run: node --test testing/integration/spaces.test.js
  */
 
 import { describe, it, before, after } from 'node:test';
@@ -17,13 +17,14 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, delWithBody } from './sync/helpers.js';
+import { INSTANCES, post, get, del, delWithBody } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CONFIGS = path.join(__dirname, 'sync', 'configs');
+const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
 
 let tokenA;
 const createdSpaceIds = [];
+const RUN_ID = Date.now();
 
 describe('Space management', () => {
   before(() => {
@@ -39,7 +40,7 @@ describe('Space management', () => {
   });
 
   it('Create space with auto-generated slug from label', async () => {
-    const r = await post(INSTANCES.a, tokenA, '/api/spaces', { label: 'Test Research Space' });
+    const r = await post(INSTANCES.a, tokenA, '/api/spaces', { label: `Test Research Space ${RUN_ID}` });
     assert.equal(r.status, 201, JSON.stringify(r.body));
     const id = r.body.space?.id;
     assert.ok(id, 'space id should be present');
@@ -49,17 +50,17 @@ describe('Space management', () => {
 
   it('Create space with explicit id', async () => {
     const r = await post(INSTANCES.a, tokenA, '/api/spaces', {
-      id: 'explicit-test-space',
+      id: `explicit-test-space-${RUN_ID}`,
       label: 'Explicit ID Space',
     });
     assert.equal(r.status, 201, JSON.stringify(r.body));
-    assert.equal(r.body.space?.id, 'explicit-test-space');
-    createdSpaceIds.push('explicit-test-space');
+    assert.equal(r.body.space?.id, `explicit-test-space-${RUN_ID}`);
+    createdSpaceIds.push(`explicit-test-space-${RUN_ID}`);
   });
 
   it('Duplicate space ID is rejected', async () => {
     const r = await post(INSTANCES.a, tokenA, '/api/spaces', {
-      id: 'explicit-test-space',
+      id: `explicit-test-space-${RUN_ID}`,
       label: 'Duplicate',
     });
     assert.ok(r.status === 400 || r.status === 409, `Expected 400 or 409, got ${r.status}`);
@@ -78,12 +79,14 @@ describe('Space management', () => {
     assert.equal(r.status, 200);
     const ids = r.body.spaces?.map(s => s.id) ?? [];
     assert.ok(ids.includes('general'), 'general space should always be present');
-    assert.ok(ids.includes('explicit-test-space'));
+    assert.ok(ids.includes(`explicit-test-space-${RUN_ID}`));
   });
 
-  it('Space data is isolated — writes to one space not visible in another', async () => {
-    // Write a memory to explicit-test-space
-    const writeR = await post(INSTANCES.a, tokenA, '/api/brain/explicit-test-space/memories', {
+  it('Space data is isolated â€” writes to one space not visible in another', async () => {
+    // Use the explicit-test-space created in this run
+    const isolationSpace = `explicit-test-space-${RUN_ID}`;
+    // Write a memory to the explicit-test-space (it was created above and pushed to createdSpaceIds)
+    const writeR = await post(INSTANCES.a, tokenA, `/api/brain/${isolationSpace}/memories`, {
       fact: 'Isolated space fact',
       tags: ['isolation-test'],
     });
@@ -94,10 +97,10 @@ describe('Space management', () => {
     const generalR = await get(INSTANCES.a, tokenA, '/api/brain/general/memories');
     assert.equal(generalR.status, 200);
     const found = generalR.body.memories?.some(m => m._id === memId);
-    assert.ok(!found, 'Memory from explicit-test-space must not appear in general space');
+    assert.ok(!found, `Memory from ${isolationSpace} must not appear in general space`);
 
-    // Should appear in explicit-test-space
-    const ownSpaceR = await get(INSTANCES.a, tokenA, '/api/brain/explicit-test-space/memories');
+    // Should appear in the isolation space
+    const ownSpaceR = await get(INSTANCES.a, tokenA, `/api/brain/${isolationSpace}/memories`);
     assert.equal(ownSpaceR.status, 200);
     const ownFound = ownSpaceR.body.memories?.some(m => m._id === memId);
     assert.ok(ownFound, 'Memory should be visible in its own space');
@@ -105,7 +108,7 @@ describe('Space management', () => {
 
   it('Delete built-in general space is rejected', async () => {
     const r = await del(INSTANCES.a, tokenA, '/api/spaces/general');
-    // Either 400 or 403 — must not succeed
+    // Either 400 or 403 â€” must not succeed
     assert.ok(r.status >= 400, `Deleting general space should fail, got ${r.status}`);
   });
 
@@ -115,7 +118,7 @@ describe('Space management', () => {
   });
 
   it('Delete solo space without { confirm: true } body is rejected with 400', async () => {
-    const created = await post(INSTANCES.a, tokenA, '/api/spaces', { label: 'Gov Solo No-Confirm' });
+    const created = await post(INSTANCES.a, tokenA, '/api/spaces', { label: `Gov Solo No-Confirm ${RUN_ID}` });
     assert.equal(created.status, 201);
     const spaceId = created.body.space?.id;
     createdSpaceIds.push(spaceId);
@@ -128,11 +131,11 @@ describe('Space management', () => {
     );
   });
 
-  it('Delete solo space with { confirm: true } succeeds immediately — 204', async () => {
-    const created = await post(INSTANCES.a, tokenA, '/api/spaces', { label: 'Gov Solo Confirm-Del' });
+  it('Delete solo space with { confirm: true } succeeds immediately â€” 204', async () => {
+    const created = await post(INSTANCES.a, tokenA, '/api/spaces', { label: `Gov Solo Confirm-Del ${RUN_ID}` });
     assert.equal(created.status, 201);
     const spaceId = created.body.space?.id;
-    // Don't push to createdSpaceIds — we're deleting it in this test
+    // Don't push to createdSpaceIds â€” we're deleting it in this test
 
     const r = await delWithBody(INSTANCES.a, tokenA, `/api/spaces/${spaceId}`, { confirm: true });
     assert.equal(r.status, 204, `Expected 204, got ${r.status}`);

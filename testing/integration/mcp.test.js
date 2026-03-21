@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Integration tests: MCP tool endpoint
  *
  * Covers:
@@ -13,7 +13,7 @@
  * endpoint event to get the sessionId, then POST JSON-RPC 2.0 calls to
  * /mcp/:spaceId/messages?sessionId=... and read the result events off the stream.
  *
- * Run: node --test testing/mcp.test.js
+ * Run: node --test testing/integration/mcp.test.js
  */
 
 import { describe, it, before, after } from 'node:test';
@@ -22,14 +22,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, del } from './sync/helpers.js';
+import { INSTANCES, post, del } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CONFIGS = path.join(__dirname, 'sync', 'configs');
+const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
 
 let token;
 
-// ── SSE MCP session helper ──────────────────────────────────────────────────
+// â”€â”€ SSE MCP session helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
  * Open an MCP SSE session using Node's `http` module (works on Node 18).
@@ -162,7 +162,7 @@ async function openMcpSession(spaceId, timeoutMs = 15_000) {
   });
 }
 
-// ── Tests ──────────────────────────────────────────────────────────────────
+// â”€â”€ Tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('MCP tools', () => {
   before(() => {
@@ -202,7 +202,7 @@ describe('MCP tools', () => {
     });
   });
 
-  describe('list_peers — no networks', () => {
+  describe('list_peers â€” no networks', () => {
     let session;
     before(async () => { session = await openMcpSession('general'); });
     after(() => session?.close());
@@ -222,7 +222,7 @@ describe('MCP tools', () => {
     });
   });
 
-  describe('list_peers — with a peer', () => {
+  describe('list_peers â€” with a peer', () => {
     let session;
     let networkId;
     const PEER_ID = `list-peers-test-${Date.now()}`;
@@ -287,7 +287,7 @@ describe('MCP tools', () => {
     });
   });
 
-  describe('sync_now — no networks configured', () => {
+  describe('sync_now â€” no networks configured', () => {
     let session;
     before(async () => { session = await openMcpSession('general'); });
     after(() => session?.close());
@@ -303,7 +303,7 @@ describe('MCP tools', () => {
     });
   });
 
-  describe('sync_now — SSRF guard', () => {
+  describe('sync_now â€” SSRF guard', () => {
     let session;
     before(async () => { session = await openMcpSession('general'); });
     after(() => session?.close());
@@ -319,7 +319,7 @@ describe('MCP tools', () => {
     });
   });
 
-  describe('sync_now — with a real peer', () => {
+  describe('sync_now â€” with a real peer', () => {
     let session;
     let networkId;
     let peerTokenId;
@@ -329,7 +329,7 @@ describe('MCP tools', () => {
       session = await openMcpSession('general');
 
       // Create a minimal braintree network with a fake peer so sync_now has a
-      // valid peerId to target.  The peer URL is unreachable — the test only
+      // valid peerId to target.  The peer URL is unreachable â€” the test only
       // checks that the call is attempted and returns a result (error is fine).
       const ptRes = await post(INSTANCES.a, token, '/api/tokens', { name: `mcp-peer-${Date.now()}` });
       assert.equal(ptRes.status, 201);

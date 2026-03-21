@@ -527,7 +527,13 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[]): Server {
 
 // ── Express router ───────────────────────────────────────────────────────────
 
+import { requireAuth } from '../auth/middleware.js';
+
 export const mcpRouter = Router();
+
+// All MCP routes require authentication — unauthenticated requests must not
+// fall through to the SPA and return 200.
+mcpRouter.use(requireAuth);
 
 // GET /mcp/:spaceId  — open SSE stream
 mcpRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, res) => {
@@ -561,4 +567,9 @@ mcpRouter.post('/:spaceId/messages', globalRateLimit, requireSpaceAuth, async (r
     return;
   }
   await transport.handlePostMessage(req, res, req.body);
+});
+
+// Catch-all for unrecognised MCP paths — must not fall through to SPA
+mcpRouter.use((_req, res) => {
+  res.status(404).json({ error: 'Not found' });
 });

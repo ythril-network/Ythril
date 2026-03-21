@@ -1,0 +1,32 @@
+﻿TAP version 13
+# Subtest: SSRF ΓÇö invite /apply must block private instanceUrl values
+not ok 1 - SSRF ΓÇö invite /apply must block private instanceUrl values
+  ---
+  duration_ms: 1175.7811
+  type: 'suite'
+  location: 'O:\\Projects\\Ythril\\testing\\red-team-tests\\ssrf-invite.test.js:44:1'
+  failureType: 'testCodeFailure'
+  error: 'after is not defined'
+  code: 'ERR_TEST_FAILURE'
+  name: 'ReferenceError'
+  stack: |-
+    SuiteContext.<anonymous> (file:///O:/Projects/Ythril/testing/red-team-tests/ssrf-invite.test.js:73:3)
+    Suite.runInAsyncScope (node:async_hooks:228:14)
+    Suite.createBuild (node:internal/test_runner/test:1493:13)
+    new Suite (node:internal/test_runner/test:1484:28)
+    Test.createSubtest (node:internal/test_runner/test:864:18)
+    run (node:internal/test_runner/harness:364:28)
+    test (node:internal/test_runner/harness:378:12)
+    file:///O:/Projects/Ythril/testing/red-team-tests/ssrf-invite.test.js:44:1
+    ModuleJob.run (node:internal/modules/esm/module_job:430:25)
+    async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:661:26)
+  ...
+1..1
+# tests 0
+# suites 1
+# pass 0
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1225.7823

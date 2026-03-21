@@ -28,6 +28,7 @@ import type {
   EntityDoc,
   EdgeDoc,
   TombstoneDoc,
+  FileTombstoneDoc,
   ConflictDoc,
   VoteRound,
   VoteCast,
@@ -779,6 +780,57 @@ async function syncFiles(
   opts: RequestInit,
 ): Promise<void> {
   try {
+    // ── 1. Apply peer's file tombstones (deletions) first ─────────────────
+    // Fetch tombstones before the manifest so that files deleted on the peer
+    // are removed locally before the manifest comparison runs.
+    try {
+      const tsResp = await fetch(
+        `${member.url}/api/sync/file-tombstones?spaceId=${encodeURIComponent(spaceId)}&networkId=${encodeURIComponent(networkId)}`,
+        opts,
+      );
+      if (tsResp.ok) {
+        const { tombstones } = await tsResp.json() as { tombstones: { path: string }[] };
+        const spaceDataRoot = getDataRoot();
+        const spaceFiles = path.resolve(spaceDataRoot, 'files', spaceId);
+        for (const ts of tombstones) {
+          try {
+            // Normalise to prevent path traversal (sandbox-safe relative path).
+            const rel = ts.path.replace(/\\/g, '/').replace(/^\/+/, '');
+            const abs = path.join(spaceFiles, rel);
+            if (!abs.startsWith(spaceFiles + path.sep) && abs !== spaceFiles) continue;
+            await fs.unlink(abs).catch(() => { /* already gone — ignore */ });
+          } catch { /* ignore per-file errors */ }
+        }
+      } else {
+        log.warn(`File tombstones from ${member.label}: ${tsResp.status}`);
+      }
+    } catch (err) {
+      // Tombstone fetch is best-effort; continue with manifest sync.
+      log.warn(`File tombstone fetch from ${member.label}: ${err}`);
+    }
+
+    // ── 1b. Push our file tombstones to the peer ──────────────────────────
+    // Files we deleted locally must be propagated to the peer so they disappear there too.
+    try {
+      const ourTombstones = await col<FileTombstoneDoc>(`${spaceId}_file_tombstones`)
+        .find({ spaceId } as never)
+        .toArray();
+      if (ourTombstones.length > 0) {
+        await fetch(
+          `${member.url}/api/sync/file-tombstones`,
+          {
+            ...opts,
+            method: 'POST',
+            body: JSON.stringify({ spaceId, tombstones: ourTombstones }),
+          },
+        );
+        // Ignore response — best-effort; peer will log errors internally.
+      }
+    } catch (err) {
+      log.warn(`Push file tombstones to ${member.label}: ${err}`);
+    }
+
+    // ── 2. Fetch peer manifest and download new/changed files ─────────────
     const resp = await fetch(`${member.url}/api/sync/manifest?spaceId=${encodeURIComponent(spaceId)}&networkId=${encodeURIComponent(networkId)}`, opts);
     if (!resp.ok) { log.warn(`File manifest from ${member.label}: ${resp.status}`); return; }
     const { manifest } = await resp.json() as { manifest: { path: string; sha256: string; size: number; modifiedAt: string }[] };
@@ -795,7 +847,10 @@ async function syncFiles(
       if (local && local.sha256 === remote.sha256) continue; // already in sync
 
       try {
-        const dl = await fetch(`${member.url}/api/files/${encodeURIComponent(spaceId)}/${encodeURIComponent(remote.path)}`, opts);
+        const dl = await fetch(
+          `${member.url}/api/files/${encodeURIComponent(spaceId)}?path=${encodeURIComponent(remote.path)}`,
+          opts,
+        );
         if (!dl.ok) { log.warn(`DL file ${remote.path} from ${member.label}: ${dl.status}`); continue; }
         const buf = Buffer.from(await dl.arrayBuffer());
         const sha = createHash('sha256').update(buf).digest('hex');
@@ -841,6 +896,42 @@ async function syncFiles(
         }
       } catch (err) {
         log.warn(`File sync error for ${remote.path}: ${err}`);
+      }
+    }
+
+    // ── 3. Push our files that the peer doesn't have or that we have updated ─
+    // • Peer doesn't have the file at all → push new
+    // • Peer has an older version (our modifiedAt > peer modifiedAt) → push update
+    // • Peer is at same version or newer → skip (pull step handled that)
+    const peerManifestMap = new Map(manifest.map(e => [e.path, e]));
+    for (const [localPath, localEntry] of oursMap) {
+      const peerEntry = peerManifestMap.get(localPath);
+      if (peerEntry) {
+        if (localEntry.sha256 === peerEntry.sha256) continue; // already in sync
+        if (localEntry.modifiedAt <= peerEntry.modifiedAt) continue; // peer is same age or newer
+        // fall through — our version is newer, push the update
+      }
+      try {
+        const absPath = path.join(spaceRoot, localPath);
+        const bytes = await fs.readFile(absPath);
+        const pushResp = await fetch(
+          `${member.url}/api/files/${encodeURIComponent(spaceId)}?path=${encodeURIComponent(localPath)}`,
+          {
+            method: 'POST',
+            headers: {
+              Authorization: headers['Authorization'],
+              'Content-Type': 'application/octet-stream',
+              'Content-Length': String(bytes.length),
+            },
+            body: bytes,
+            signal: AbortSignal.timeout(BATCH_FETCH_TIMEOUT_MS),
+          },
+        );
+        if (!pushResp.ok) {
+          log.warn(`Push file '${localPath}' to ${member.label}: HTTP ${pushResp.status}`);
+        }
+      } catch (err) {
+        log.warn(`Push file '${localPath}' to ${member.label}: ${err}`);
       }
     }
   } catch (err) {

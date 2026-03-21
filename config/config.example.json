@@ -5,8 +5,7 @@
   "spaces": [],
   "networks": [],
   "embedding": {
-    "baseUrl": "http://localhost:11434/v1",
-    "model": "nomic-embed-text-v1.5",
+    "model": "nomic-ai/nomic-embed-text-v1.5",
     "dimensions": 768,
     "similarity": "cosine"
   },

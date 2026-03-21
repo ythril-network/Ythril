@@ -18,9 +18,11 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { INSTANCES } from '../sync/helpers.js';
 
-/** Send one token-creation attempt with a fake Bearer token */
+/** Send one token-creation attempt with a fake Bearer token.
+ * Uses instance C — only C runs with real auth rate limiting (A and B have
+ * SKIP_AUTH_RATE_LIMIT=true to avoid exhausting the window during parallel tests). */
 async function tryCreate(fakeToken) {
-  return fetch(`${INSTANCES.b}/api/tokens`, {
+  return fetch(`${INSTANCES.c}/api/tokens`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -75,7 +77,7 @@ describe('Unauthenticated endpoint rate limiting (invite/apply)', () => {
   it('11 invalid apply attempts → at least one 429 or all 4xx', async () => {
     const results = await Promise.all(
       Array.from({ length: 11 }, (_, i) =>
-        fetch(`${INSTANCES.b}/api/invite/apply`, {
+        fetch(`${INSTANCES.c}/api/invite/apply`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
