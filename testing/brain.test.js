@@ -110,3 +110,193 @@ describe('Brain — conflicts protection', () => {
     assert.ok(r.status === 404 || r.status === 400, `Got ${r.status}`);
   });
 });
+
+// ── Entities CRUD ─────────────────────────────────────────────────────────
+
+describe('Brain — entities CRUD (/api/brain/spaces/:spaceId/entities)', () => {
+  const RUN = Date.now();
+
+  it('List entities returns {entities:[...]}', async () => {
+    const r = await get(INSTANCES.a, token(), '/api/brain/spaces/general/entities');
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.ok(Array.isArray(r.body.entities), 'entities must be an array');
+  });
+
+  it('List entities returns 404 for unknown space', async () => {
+    const r = await get(INSTANCES.a, token(), '/api/brain/spaces/no-such-space/entities');
+    assert.equal(r.status, 404);
+  });
+
+  it('List entities returns 401 without auth', async () => {
+    const r = await fetch(`${INSTANCES.a}/api/brain/spaces/general/entities`);
+    assert.equal(r.status, 401);
+  });
+
+  it('Delete entity returns 204 and it is gone', async () => {
+    // First create an entity via the MCP upsert route
+    // Use the sync endpoint as a seeding shortcut — upsert directly into the DB
+    const entId = `test-entity-${RUN}`;
+    await (await import('./sync/helpers.js')).post(INSTANCES.a, token(), '/api/sync/entities?spaceId=general', {
+      _id: entId, spaceId: 'general', name: `EntityForDelete-${RUN}`,
+      type: 'concept', tags: [], seq: Date.now(),
+      author: { instanceId: 'test', instanceLabel: 'Test' },
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    });
+
+    const delR = await del(INSTANCES.a, token(), `/api/brain/spaces/general/entities/${entId}`);
+    assert.equal(delR.status, 204, `Delete: ${JSON.stringify(delR.body)}`);
+  });
+
+  it('Delete non-existent entity returns 404', async () => {
+    const r = await del(INSTANCES.a, token(), '/api/brain/spaces/general/entities/does-not-exist');
+    assert.equal(r.status, 404);
+  });
+});
+
+// ── Edges CRUD ────────────────────────────────────────────────────────────
+
+describe('Brain — edges CRUD (/api/brain/spaces/:spaceId/edges)', () => {
+  const RUN = Date.now();
+
+  it('List edges returns {edges:[...]}', async () => {
+    const r = await get(INSTANCES.a, token(), '/api/brain/spaces/general/edges');
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.ok(Array.isArray(r.body.edges), 'edges must be an array');
+  });
+
+  it('List edges returns 404 for unknown space', async () => {
+    const r = await get(INSTANCES.a, token(), '/api/brain/spaces/no-such-space/edges');
+    assert.equal(r.status, 404);
+  });
+
+  it('List edges returns 401 without auth', async () => {
+    const r = await fetch(`${INSTANCES.a}/api/brain/spaces/general/edges`);
+    assert.equal(r.status, 401);
+  });
+
+  it('Delete edge returns 204 and it is gone', async () => {
+    const { post: syncPost } = await import('./sync/helpers.js');
+    const entA = `edge-from-${RUN}`;
+    const entB = `edge-to-${RUN}`;
+    const edgeId = `test-edge-${RUN}`;
+
+    await syncPost(INSTANCES.a, token(), '/api/sync/entities?spaceId=general', {
+      _id: entA, spaceId: 'general', name: `EdgeFrom-${RUN}`, type: 'concept', tags: [],
+      seq: Date.now(), author: { instanceId: 'test', instanceLabel: 'Test' },
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    });
+    await syncPost(INSTANCES.a, token(), '/api/sync/entities?spaceId=general', {
+      _id: entB, spaceId: 'general', name: `EdgeTo-${RUN}`, type: 'concept', tags: [],
+      seq: Date.now() + 1, author: { instanceId: 'test', instanceLabel: 'Test' },
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    });
+    await syncPost(INSTANCES.a, token(), '/api/sync/edges?spaceId=general', {
+      _id: edgeId, spaceId: 'general', from: entA, to: entB, label: 'test-rel',
+      seq: Date.now() + 2, author: { instanceId: 'test', instanceLabel: 'Test' },
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    });
+
+    const delR = await del(INSTANCES.a, token(), `/api/brain/spaces/general/edges/${edgeId}`);
+    assert.equal(delR.status, 204, `Delete: ${JSON.stringify(delR.body)}`);
+  });
+
+  it('Delete non-existent edge returns 404', async () => {
+    const r = await del(INSTANCES.a, token(), '/api/brain/spaces/general/edges/does-not-exist');
+    assert.equal(r.status, 404);
+  });
+});
+
+// ── Memory list pagination ────────────────────────────────────────────────
+
+describe('Brain — memory list limit/skip pagination', () => {
+  const RUN = Date.now();
+
+  before(async () => {
+    // Seed 8 memories to guarantee meaningful pagination
+    const { post: syncPost } = await import('./sync/helpers.js');
+    for (let i = 0; i < 8; i++) {
+      await syncPost(INSTANCES.a, token(), '/api/sync/memories?spaceId=general', {
+        _id: `paginate-${RUN}-${i}`, spaceId: 'general', fact: `Pagination seed ${RUN} item ${i}`,
+        seq: Date.now() + i, embedding: [], tags: ['pagination-test'], entityIds: [],
+        author: { instanceId: 'test', instanceLabel: 'Test' },
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
+      });
+    }
+  });
+
+  it('limit=3 returns at most 3 memories', async () => {
+    const r = await get(INSTANCES.a, token(), '/api/brain/general/memories?limit=3');
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.ok(Array.isArray(r.body.memories), 'memories must be array');
+    assert.ok(r.body.memories.length <= 3, `Expected ≤3 items, got ${r.body.memories.length}`);
+  });
+
+  it('skip pagination returns disjoint results', async () => {
+    const page1 = await get(INSTANCES.a, token(), '/api/brain/general/memories?limit=3&skip=0');
+    const page2 = await get(INSTANCES.a, token(), '/api/brain/general/memories?limit=3&skip=3');
+    assert.equal(page1.status, 200);
+    assert.equal(page2.status, 200);
+    const p1Ids = new Set(page1.body.memories.map(m => m._id));
+    for (const m of page2.body.memories) {
+      assert.ok(!p1Ids.has(m._id), `Duplicate id ${m._id} across pages`);
+    }
+  });
+
+  it('limit cap — limit > 500 is capped at 500', async () => {
+    const r = await get(INSTANCES.a, token(), '/api/brain/general/memories?limit=9999');
+    assert.equal(r.status, 200);
+    assert.ok(r.body.limit <= 500, `Expected limit ≤500 in response, got ${r.body.limit}`);
+  });
+});
+
+// ── Reindex status ────────────────────────────────────────────────────────
+
+describe('Brain — reindex-status endpoint', () => {
+  it('Returns {spaceId, needsReindex} for valid space', async () => {
+    const r = await get(INSTANCES.a, token(), '/api/brain/spaces/general/reindex-status');
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.spaceId, 'general');
+    assert.ok(typeof r.body.needsReindex === 'boolean', 'needsReindex must be boolean');
+  });
+
+  it('Returns 404 for unknown space', async () => {
+    const r = await get(INSTANCES.a, token(), '/api/brain/spaces/no-such-space/reindex-status');
+    assert.equal(r.status, 404);
+  });
+
+  it('Returns 401 without auth', async () => {
+    const r = await fetch(`${INSTANCES.a}/api/brain/spaces/general/reindex-status`);
+    assert.equal(r.status, 401);
+  });
+});
+
+// ── Memory fact validation ────────────────────────────────────────────────
+
+describe('Brain — memory fact validation', () => {
+  it('Returns 400 if fact is missing', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/general/memories', { tags: ['nofact'] });
+    assert.equal(r.status, 400);
+  });
+
+  it('Returns 400 if fact exceeds 50 000 characters', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/general/memories', {
+      fact: 'x'.repeat(50_001),
+    });
+    assert.equal(r.status, 400);
+  });
+
+  it('Returns 400 if tags contains non-string', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/general/memories', {
+      fact: 'valid fact',
+      tags: [1, 2, 3],
+    });
+    assert.equal(r.status, 400);
+  });
+
+  it('Returns 201 at exactly 50 000 character fact', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/general/memories', {
+      fact: 'a'.repeat(50_000),
+    });
+    assert.equal(r.status, 201, `Boundary-value fact should be accepted: ${JSON.stringify(r.body)}`);
+  });
+});

@@ -177,25 +177,18 @@ export interface TombstoneDoc {
   seq: number;
 }
 
+export interface ConflictDoc {
+  _id: string;
+  spaceId: string;
+  originalPath: string;   // relative path of the local file (version kept)
+  conflictPath: string;   // relative path of the conflict copy (incoming version renamed)
+  peerInstanceId: string;
+  peerInstanceLabel: string;
+  detectedAt: string;     // ISO8601
+}
+
 export interface SpaceCounterDoc {
   _id: string;  // spaceId
   seq: number;
 }
 
-// ── Conflict document (stored in ythril_conflicts collection) ──────────────
-
-export type ConflictKind = 'file' | 'memory' | 'entity' | 'edge';
-
-export interface ConflictDoc {
-  _id: string;
-  kind: ConflictKind;
-  spaceId: string;
-  networkId: string;
-  path?: string;                // file conflicts only
-  docId?: string;               // brain conflicts only
-  localVersion: { seq?: number; hash?: string; modifiedAt: string; instanceLabel: string };
-  incomingVersion: { seq?: number; hash?: string; modifiedAt: string; instanceLabel: string; content?: unknown };
-  detectedAt: string;
-  resolvedAt?: string;
-  resolution?: 'keep-local' | 'keep-incoming' | 'keep-both' | 'discard-incoming';
-}

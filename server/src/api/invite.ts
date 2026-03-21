@@ -48,6 +48,7 @@ import { authRateLimit, globalRateLimit } from '../rate-limit/middleware.js';
 import { getConfig, saveConfig, getSecrets, saveSecrets } from '../config/loader.js';
 import { createToken } from '../auth/tokens.js';
 import { log } from '../util/log.js';
+import { isSsrfSafeUrl, SSRF_SAFE_MESSAGE } from '../util/ssrf.js';
 import type { NetworkMember } from '../config/types.js';
 
 export const inviteRouter = Router();
@@ -104,12 +105,14 @@ const GenerateBody = z.object({
   reparentInstanceId: z.string().uuid().optional(),
 });
 
+const INVITE_SSRF_SAFE_URL = z.string().url().refine(isSsrfSafeUrl, { message: SSRF_SAFE_MESSAGE });
+
 const ApplyBody = z.object({
   handshakeId: z.string().uuid(),
   networkId: z.string().uuid(),
   instanceId: z.string().uuid(),
   instanceLabel: z.string().min(1).max(200),
-  instanceUrl: z.string().url(),
+  instanceUrl: INVITE_SSRF_SAFE_URL,
   rsaPublicKeyPem: z.string().min(100),
 });
 

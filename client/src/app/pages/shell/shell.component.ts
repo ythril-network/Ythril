@@ -1,6 +1,7 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, OnInit, signal } from '@angular/core';
 import { RouterOutlet, RouterLink, RouterLinkActive, Router } from '@angular/router';
 import { AuthService } from '../../core/auth.service';
+import { ApiService } from '../../core/api.service';
 
 @Component({
   selector: 'app-shell',
@@ -117,6 +118,19 @@ import { AuthService } from '../../core/auth.service';
       opacity: 0.8;
     }
 
+    .nav-badge {
+      margin-left: auto;
+      background: var(--danger, #e53e3e);
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      border-radius: 999px;
+      padding: 1px 6px;
+      min-width: 18px;
+      text-align: center;
+      line-height: 16px;
+    }
+
     .main {
       flex: 1;
       overflow-y: auto;
@@ -146,9 +160,16 @@ import { AuthService } from '../../core/auth.service';
         <a class="nav-link" routerLink="/brain" routerLinkActive="active">
           <span class="nav-icon">🧠</span>Brain
         </a>
-        <a class="nav-link" routerLink="/files" routerLinkActive="active">
+        <a class="nav-link" routerLink="/files" routerLinkActive="active"
+           [routerLinkActiveOptions]="{ exact: true }">
           <span class="nav-icon">📁</span>Files
         </a>
+        @if (conflictCount() > 0) {
+          <a class="nav-link" routerLink="/files/conflicts" routerLinkActive="active">
+            <span class="nav-icon">⚠️</span>Conflicts
+            <span class="nav-badge">{{ conflictCount() }}</span>
+          </a>
+        }
 
         <span class="nav-section-label">Admin</span>
         <a class="nav-link" routerLink="/settings/tokens" routerLinkActive="active">
@@ -172,11 +193,30 @@ import { AuthService } from '../../core/auth.service';
     </div>
   `,
 })
-export class ShellComponent {
+export class ShellComponent implements OnInit {
   private auth = inject(AuthService);
   private router = inject(Router);
+  private api = inject(ApiService);
+
+  conflictCount = signal(0);
+
+  private _pollTimer: ReturnType<typeof setInterval> | null = null;
+
+  ngOnInit(): void {
+    this.loadConflictCount();
+    // Refresh badge every 60 s so it tracks new conflicts without a page reload
+    this._pollTimer = setInterval(() => this.loadConflictCount(), 60_000);
+  }
+
+  private loadConflictCount(): void {
+    this.api.listConflicts().subscribe({
+      next: ({ conflicts }) => this.conflictCount.set(conflicts.length),
+      error: () => { /* non-fatal — badge stays at last known value */ },
+    });
+  }
 
   logout(): void {
+    if (this._pollTimer !== null) clearInterval(this._pollTimer);
     this.auth.logout();
     this.router.navigate(['/login']);
   }

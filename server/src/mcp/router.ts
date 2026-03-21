@@ -29,7 +29,7 @@ import {
 const transports = new Map<string, SSEServerTransport>();
 
 /** Create a MCP Server instance with all tools bound to the given space */
-function createMcpServer(spaceId: string): Server {
+function createMcpServer(spaceId: string, tokenSpaces?: string[]): Server {
   const server = new Server(
     { name: 'ythril', version: '0.1.0' },
     { capabilities: { tools: {} } },
@@ -289,7 +289,10 @@ function createMcpServer(spaceId: string): Server {
           if (!query.trim()) throw new Error('query must not be empty');
           const topK = typeof a['topK'] === 'number' ? a['topK'] : 5;
           const cfg = getConfig();
-          const spaceIds = cfg.spaces.map(s => s.id);
+          // Only search spaces allowed by the calling token (tokenSpaces undefined = all spaces).
+          const spaceIds = cfg.spaces
+            .filter(s => !tokenSpaces || tokenSpaces.includes(s.id))
+            .map(s => s.id);
           const results = await recallGlobal(spaceIds, query, topK);
           return {
             content: [
@@ -544,7 +547,7 @@ mcpRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, res) =
     log.debug(`MCP session ${transport.sessionId} closed (space: ${spaceId})`);
   });
 
-  const server = createMcpServer(spaceId);
+  const server = createMcpServer(spaceId, req.authToken?.spaces);
   log.debug(`MCP session ${transport.sessionId} opened (space: ${spaceId})`);
   await server.connect(transport);
 });

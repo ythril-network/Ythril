@@ -94,7 +94,7 @@ export function createApp() {
   app.use(express.static(clientDist));
 
   // ── SPA fallback — return index.html for all unmatched GET requests ───────
-  app.get('*', (_req, res, next) => {
+  app.get('/{*path}', (_req, res, next) => {
     const indexPath = path.join(clientDist, 'index.html');
     res.sendFile(indexPath, (err) => {
       if (err) next(); // fall through to 404 if index.html not built yet

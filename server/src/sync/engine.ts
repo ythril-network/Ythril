@@ -28,6 +28,7 @@ import type {
   EntityDoc,
   EdgeDoc,
   TombstoneDoc,
+  ConflictDoc,
   VoteRound,
   VoteCast,
 } from '../config/types.js';
@@ -36,6 +37,7 @@ import fs from 'node:fs/promises';
 import { getDataRoot } from '../config/loader.js';
 import { createHash } from 'node:crypto';
 import { resolveSafePath } from '../files/sandbox.js';
+import { v4 as uuidv4 } from 'uuid';
 
 // Timeout for every outbound fetch to a peer.
 // Without this, the OS TCP timeout (~75 s on Linux) applies, which means one
@@ -790,20 +792,55 @@ async function syncFiles(
 
     for (const remote of manifest) {
       const local = oursMap.get(remote.path);
-      if (!local || local.sha256 !== remote.sha256) {
-        // Download from peer
-        try {
-          const dl = await fetch(`${member.url}/api/files/${encodeURIComponent(spaceId)}/${encodeURIComponent(remote.path)}`, opts);
-          if (!dl.ok) { log.warn(`DL file ${remote.path} from ${member.label}: ${dl.status}`); continue; }
-          const buf = Buffer.from(await dl.arrayBuffer());
-          const sha = createHash('sha256').update(buf).digest('hex');
-          if (sha !== remote.sha256) { log.warn(`SHA mismatch for ${remote.path} from ${member.label}`); continue; }
+      if (local && local.sha256 === remote.sha256) continue; // already in sync
+
+      try {
+        const dl = await fetch(`${member.url}/api/files/${encodeURIComponent(spaceId)}/${encodeURIComponent(remote.path)}`, opts);
+        if (!dl.ok) { log.warn(`DL file ${remote.path} from ${member.label}: ${dl.status}`); continue; }
+        const buf = Buffer.from(await dl.arrayBuffer());
+        const sha = createHash('sha256').update(buf).digest('hex');
+        if (sha !== remote.sha256) { log.warn(`SHA mismatch for ${remote.path} from ${member.label}`); continue; }
+
+        if (!local) {
+          // File is new locally — write directly to the original path
           const absPath = path.join(spaceRoot, remote.path);
           await fs.mkdir(path.dirname(absPath), { recursive: true });
           await fs.writeFile(absPath, buf);
-        } catch (err) {
-          log.warn(`File sync error for ${remote.path}: ${err}`);
+        } else {
+          // File exists locally with a different hash — keep local, save incoming
+          // under a conflict-copy name so the user can decide which version to keep.
+          const ext = path.extname(remote.path);
+          const base = path.basename(remote.path, ext);
+          const dir = path.dirname(remote.path);
+          // Sanitise peer label so the filename stays filesystem-safe on all OSes
+          const safeLabel = member.label.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 20);
+          // ISO timestamp with colons/dots replaced to be valid on Windows/macOS/Linux
+          const ts = new Date().toISOString().replace(/:/g, '-').replace(/\./g, '-');
+          const conflictName = `${base}_${ts}_${safeLabel}${ext}`;
+          const conflictRelPath = dir === '.' ? conflictName : `${dir}/${conflictName}`;
+          const absConflictPath = path.join(spaceRoot, conflictRelPath);
+          await fs.mkdir(path.dirname(absConflictPath), { recursive: true });
+          await fs.writeFile(absConflictPath, buf);
+
+          // Persist a conflict record so the UI can surface it to the user
+          const conflictDoc: ConflictDoc = {
+            _id: uuidv4(),
+            spaceId,
+            originalPath: remote.path,
+            conflictPath: conflictRelPath,
+            peerInstanceId: member.instanceId,
+            peerInstanceLabel: member.label,
+            detectedAt: new Date().toISOString(),
+          };
+          await col<ConflictDoc>(`${spaceId}_conflicts`).insertOne(conflictDoc as never);
+
+          log.warn(
+            `FILE_CONFLICT: '${remote.path}' from peer '${member.label}' differs from local copy. ` +
+            `Conflict copy saved as '${conflictRelPath}'. Resolve in Settings → Conflicts.`,
+          );
         }
+      } catch (err) {
+        log.warn(`File sync error for ${remote.path}: ${err}`);
       }
     }
   } catch (err) {

@@ -27,7 +27,27 @@ import type {
 
 export const syncRouter = Router();
 
-// ── Paginated cursor helpers ───────────────────────────────────────────────
+// ── Safety limits ─────────────────────────────────────────────────────────
+
+/**
+ * Upper bound on any seq value accepted from a remote peer.
+ * Prevents an attacker from submitting seq = Number.MAX_SAFE_INTEGER (9007199254740991)
+ * to permanently poison the high-water mark, causing all future legitimate
+ * writes by other peers to be silently ignored.
+ *
+ * 2^50 ≈ 1.1 quadrillion — larger than any realistic counter, but safely
+ * below MAX_SAFE_INTEGER so that nextSeq() arithmetic stays in safe range.
+ */
+const MAX_SYNC_SEQ = 2 ** 50; // 1_125_899_906_842_624
+
+/**
+ * Maximum number of fork copies that can accumulate for a single memory _id.
+ * Prevents a "forkOf bomb" where an attacker repeatedly sends equal-seq docs
+ * with different content to create an unbounded chain of fork copies.
+ */
+const MAX_FORK_DEPTH = 10;
+
+// ── Paginated cursor helpers ─────────────────────────────────────────────────
 
 function encodeCursor(seq: number): string {
   return Buffer.from(String(seq)).toString('base64url');
@@ -135,6 +155,10 @@ syncRouter.post('/memories', syncRateLimit, requireAuth, async (req, res) => {
       res.status(400).json({ error: 'Invalid memory document' });
       return;
     }
+    if (incoming.seq > MAX_SYNC_SEQ) {
+      res.status(400).json({ error: `seq must not exceed ${MAX_SYNC_SEQ}` });
+      return;
+    }
 
     // Check for tombstone — if a tombstone with >= seq exists, skip
     const tombstone = await col<TombstoneDoc>(`${spaceId}_tombstones`)
@@ -162,7 +186,13 @@ syncRouter.post('/memories', syncRateLimit, requireAuth, async (req, res) => {
     }
 
     if (incoming.seq === existing.seq && incoming.fact !== existing.fact) {
-      // Concurrent independent edit — fork
+      // Concurrent independent edit — fork; but cap the chain length
+      const forkCount = await col<MemoryDoc>(`${spaceId}_memories`)
+        .countDocuments({ forkOf: incoming._id } as never);
+      if (forkCount >= MAX_FORK_DEPTH) {
+        res.status(400).json({ error: `Fork depth limit (${MAX_FORK_DEPTH}) exceeded for _id '${incoming._id}'` });
+        return;
+      }
       const { v4: uuidv4 } = await import('uuid');
       const forkSeq = await nextSeq(spaceId);
       const fork: MemoryDoc = {
@@ -242,6 +272,10 @@ syncRouter.post('/entities', syncRateLimit, requireAuth, async (req, res) => {
     const incoming = req.body as EntityDoc;
     if (!incoming?._id || typeof incoming.seq !== 'number') {
       res.status(400).json({ error: 'Invalid entity document' });
+      return;
+    }
+    if (incoming.seq > MAX_SYNC_SEQ) {
+      res.status(400).json({ error: `seq must not exceed ${MAX_SYNC_SEQ}` });
       return;
     }
 
@@ -330,6 +364,10 @@ syncRouter.post('/edges', syncRateLimit, requireAuth, async (req, res) => {
       res.status(400).json({ error: 'Invalid edge document' });
       return;
     }
+    if (incoming.seq > MAX_SYNC_SEQ) {
+      res.status(400).json({ error: `seq must not exceed ${MAX_SYNC_SEQ}` });
+      return;
+    }
 
     const tombstone = await col<TombstoneDoc>(`${spaceId}_tombstones`)
       .findOne({ _id: incoming._id, type: 'edge' } as never) as TombstoneDoc | null;
@@ -379,6 +417,7 @@ syncRouter.post('/batch-upsert', syncRateLimit, requireAuth, async (req, res) =>
     const memStats = { inserted: 0, updated: 0, forked: 0, skipped: 0, tombstoned: 0 };
     for (const incoming of memories) {
       if (!incoming?._id || typeof incoming.seq !== 'number') continue;
+      if (incoming.seq > MAX_SYNC_SEQ) { memStats.skipped++; continue; }
       const tomb = await col<TombstoneDoc>(`${spaceId}_tombstones`)
         .findOne({ _id: incoming._id, type: 'memory' } as never) as TombstoneDoc | null;
       if (tomb && tomb.seq >= incoming.seq) { memStats.tombstoned++; continue; }
@@ -392,6 +431,10 @@ syncRouter.post('/batch-upsert', syncRateLimit, requireAuth, async (req, res) =>
         await col<MemoryDoc>(`${spaceId}_memories`).replaceOne({ _id: incoming._id } as never, incoming as never);
         memStats.updated++;
       } else if (incoming.seq === existing.seq && incoming.fact !== existing.fact) {
+        // Cap fork chains to prevent unbounded growth
+        const forkCount = await col<MemoryDoc>(`${spaceId}_memories`)
+          .countDocuments({ forkOf: incoming._id } as never);
+        if (forkCount >= MAX_FORK_DEPTH) { memStats.skipped++; continue; }
         const { v4: uuidv4 } = await import('uuid');
         const forkSeq = await nextSeq(spaceId);
         const fork: MemoryDoc = {
@@ -409,6 +452,7 @@ syncRouter.post('/batch-upsert', syncRateLimit, requireAuth, async (req, res) =>
     const entStats = { upserted: 0, skipped: 0, tombstoned: 0 };
     for (const incoming of entities) {
       if (!incoming?._id || typeof incoming.seq !== 'number') continue;
+      if (incoming.seq > MAX_SYNC_SEQ) { entStats.skipped++; continue; }
       const tomb = await col<TombstoneDoc>(`${spaceId}_tombstones`)
         .findOne({ _id: incoming._id, type: 'entity' } as never) as TombstoneDoc | null;
       if (tomb && tomb.seq >= incoming.seq) { entStats.tombstoned++; continue; }
@@ -429,6 +473,7 @@ syncRouter.post('/batch-upsert', syncRateLimit, requireAuth, async (req, res) =>
     const edgeStats = { upserted: 0, skipped: 0, tombstoned: 0 };
     for (const incoming of edges) {
       if (!incoming?._id || typeof incoming.seq !== 'number') continue;
+      if (incoming.seq > MAX_SYNC_SEQ) { edgeStats.skipped++; continue; }
       const tomb = await col<TombstoneDoc>(`${spaceId}_tombstones`)
         .findOne({ _id: incoming._id, type: 'edge' } as never) as TombstoneDoc | null;
       if (tomb && tomb.seq >= incoming.seq) { edgeStats.tombstoned++; continue; }

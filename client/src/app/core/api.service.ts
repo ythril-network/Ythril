@@ -111,6 +111,7 @@ export interface ConflictRecord {
   conflictPath: string;
   detectedAt: string;
   peerInstanceId: string;
+  peerInstanceLabel: string;
 }
 
 // ── API service ───────────────────────────────────────────────────────────────

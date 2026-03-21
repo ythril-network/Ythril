@@ -22,58 +22,17 @@ export const networksRouter = Router();
 const BCRYPT_ROUNDS = 12;
 
 // ── SSRF-safe peer URL validation ────────────────────────────────────────────
-//
-// z.string().url() only checks URL syntax; it accepts private IP ranges and
-// cloud metadata endpoints that would expose internal services via sync requests.
-// All peer URLs must resolve to public, non-privileged hosts.
-
-// Matches private/loopback/link-local IPv4 ranges that must never be sync peer URLs:
-//   10/8 (RFC-1918), 172.16-31/12 (RFC-1918), 192.168/16 (RFC-1918),
-//   169.254/16 (link-local / AWS+Azure IMDS), 127/8 (loopback), 0.0.0.0
-const PRIVATE_IP_RE =
-  /^(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|169\.254\.\d{1,3}\.\d{1,3}|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|0\.0\.0\.0)$/;
-
-function isSsrfSafeUrl(raw: string): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(raw);
-  } catch {
-    return false; // malformed URL
-  }
-
-  // Only http and https are valid transport schemes for a sync peer
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
-
-  // Reject embedded credentials — they belong in the token, not the URL
-  if (parsed.username || parsed.password) return false;
-
-  const host = parsed.hostname.toLowerCase();
-
-  // Block localhost by name
-  if (host === 'localhost') return false;
-
-  // Block loopback IPv6
-  if (host === '[::1]' || host === '::1') return false;
-
-  // Block GCP metadata server (FQDN, not just IP)
-  if (host === 'metadata.google.internal') return false;
-
-  // Block private/link-local/loopback IPv4 ranges
-  if (PRIVATE_IP_RE.test(host)) return false;
-
-  return true;
-}
+// Shared validator from util/ssrf.ts covers:
+//   RFC-1918 IPv4, loopback, 169.254 IMDS, IPv6 ULA (fc00::/7),
+//   IPv6 link-local (fe80::/10), GCP metadata FQDN, embedded credentials.
+import { isSsrfSafeUrl, SSRF_SAFE_MESSAGE } from '../util/ssrf.js';
 
 // ── Schemas ─────────────────────────────────────────────────────────────────
 
 const SSRF_SAFE_URL = z
   .string()
   .url()
-  .refine(isSsrfSafeUrl, {
-    message:
-      'Peer URL must use http(s) and must not target private IPs, loopback, ' +
-      'cloud metadata endpoints, or include embedded credentials',
-  });
+  .refine(isSsrfSafeUrl, { message: SSRF_SAFE_MESSAGE });
 
 const CreateNetworkBody = z.object({
   id: z.string().uuid().optional(),  // optional pre-specified ID for cross-instance registration
