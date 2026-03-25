@@ -10,6 +10,7 @@ import { syncRouter } from './api/sync.js';
 import { networksRouter } from './api/networks.js';
 import { notifyRouter } from './api/notify.js';
 import { inviteRouter } from './api/invite.js';
+import { mfaRouter } from './api/mfa.js';
 import { setupRouter } from './setup/routes.js';
 import { mcpRouter } from './mcp/router.js';
 import { globalRateLimit } from './rate-limit/middleware.js';
@@ -70,6 +71,7 @@ export function createApp() {
   app.use('/api/networks', networksRouter);
   app.use('/api/notify', notifyRouter);
   app.use('/api/invite', inviteRouter);
+  app.use('/api/mfa', mfaRouter);
 
   // ── MCP endpoints ────────────────────────────────────────────────────────
   app.use('/mcp', mcpRouter);

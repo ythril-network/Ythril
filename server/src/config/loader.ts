@@ -44,7 +44,13 @@ function checkPermissions(filePath: string): void {
 // ── Config ─────────────────────────────────────────────────────────────────
 
 export function configExists(): boolean {
-  return fs.existsSync(CONFIG_PATH);
+  if (!fs.existsSync(CONFIG_PATH)) return false;
+  try {
+    const raw = fs.readFileSync(CONFIG_PATH, 'utf8').trim();
+    return raw.length > 0 && JSON.parse(raw) !== null;
+  } catch {
+    return false;
+  }
 }
 
 export function loadConfig(): Config {
@@ -94,8 +100,8 @@ export function saveConfig(config: Config): void {
 export function loadSecrets(): SecretsFile {
   checkPermissions(SECRETS_PATH);
   if (!fs.existsSync(SECRETS_PATH)) {
-    // Pre-setup: no secrets file yet — return empty shell (settingsPasswordHash populated during setup)
-    _secrets = { settingsPasswordHash: '', peerTokens: {} };
+    // Pre-setup: no secrets file yet — return empty shell
+    _secrets = { peerTokens: {} };
     return _secrets;
   }
   const raw = fs.readFileSync(SECRETS_PATH, 'utf8');

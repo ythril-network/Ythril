@@ -102,6 +102,7 @@ export async function createToken(opts: {
   name: string;
   expiresAt?: string | null;
   spaces?: string[];
+  admin?: boolean;
 }): Promise<{ record: TokenRecord; plaintext: string }> {
   const plaintext = generateToken();
   const hash = await hashToken(plaintext);
@@ -114,6 +115,7 @@ export async function createToken(opts: {
     lastUsed: null,
     expiresAt: opts.expiresAt ?? null,
     spaces: opts.spaces,
+    admin: opts.admin ?? false,
   };
   const config = getConfig();
   config.tokens.push(record);
@@ -144,4 +146,24 @@ export async function revokeToken(id: string): Promise<boolean> {
   if (config.tokens.length === before) return false;
   saveConfig(config);
   return true;
+}
+
+/** Rotate a token: generate a new plaintext/hash for an existing record.
+ *  The old plaintext is immediately invalidated (cache miss on next request).
+ *  Returns the new plaintext, or null if the token was not found.
+ */
+export async function regenerateToken(id: string): Promise<string | null> {
+  const config = getConfig();
+  const idx = config.tokens.findIndex(t => t.id === id);
+  if (idx < 0) return null;
+  const plaintext = generateToken();
+  const hash = await hashToken(plaintext);
+  config.tokens[idx]!.hash = hash;
+  config.tokens[idx]!.prefix = plaintext.slice(0, 8);
+  saveConfig(config);
+  // Evict any cached entry for the old plaintext by scanning the cache
+  for (const [key, val] of _tokenCache) {
+    if (val.tokenId === id) _tokenCache.delete(key);
+  }
+  return plaintext;
 }

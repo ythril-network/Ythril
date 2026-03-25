@@ -65,6 +65,11 @@ export const routes: Routes = [
             loadComponent: () =>
               import('./pages/settings/networks.component').then(m => m.NetworksComponent),
           },
+          {
+            path: 'mfa',
+            loadComponent: () =>
+              import('./pages/settings/mfa.component').then(m => m.MfaComponent),
+          },
         ],
       },
     ],

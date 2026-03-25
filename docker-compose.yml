@@ -15,6 +15,9 @@
       DATA_ROOT: /data
       MONGO_URI: mongodb://ythril-mongo:27017/?directConnection=true
       NODE_ENV: production
+      # Pass DEBUG=1 from the host shell to enable verbose logging:
+      #   DEBUG=1 docker compose up
+      DEBUG: ${DEBUG:-}
     depends_on:
       ythril-mongo:
         condition: service_healthy
@@ -26,6 +29,11 @@
     image: mongodb/mongodb-atlas-local:latest
     container_name: ythril-mongo
     restart: unless-stopped
+    # Suppress MongoDB's internal logs — they are not useful during normal
+    # operation. Set DEBUG=1 on the host and use `docker compose logs ythril-mongo`
+    # if you need to inspect MongoDB internals.
+    logging:
+      driver: "none"
     volumes:
       - ythril-mongo-data:/data/db
       # Persist /data/configdb so the replica-set keyfile survives container restarts

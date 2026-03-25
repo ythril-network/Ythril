@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAuth } from '../auth/middleware.js';
+import { requireAuth, requireAdmin, requireAdminMfa } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { getConfig, saveConfig, getSecrets } from '../config/loader.js';
 import { createSpace, removeSpace, slugify } from '../spaces/spaces.js';
@@ -41,7 +41,7 @@ spacesRouter.get('/', globalRateLimit, requireAuth, async (_req, res) => {
 });
 
 // POST /api/spaces
-spacesRouter.post('/', globalRateLimit, requireAuth, async (req, res) => {
+spacesRouter.post('/', globalRateLimit, requireAdminMfa, async (req, res) => {
   const parsed = CreateSpaceBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -68,7 +68,7 @@ spacesRouter.post('/', globalRateLimit, requireAuth, async (req, res) => {
 // Networked space: opens a space_deletion vote round on every network that includes this space,
 // casts this instance's own yes vote immediately, notifies all peers, and returns 202.
 // The space is only deleted once the vote passes on each network.
-spacesRouter.delete('/:id', globalRateLimit, requireAuth, async (req, res) => {
+spacesRouter.delete('/:id', globalRateLimit, requireAdminMfa, async (req, res) => {
   const id = req.params['id'] as string;
   const cfg = getConfig();
 

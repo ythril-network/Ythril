@@ -1,7 +1,6 @@
 ﻿import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { randomBytes } from 'crypto';
-import bcrypt from 'bcrypt';
 import { authRateLimit } from '../rate-limit/middleware.js';
 import { configExists, saveConfig, saveSecrets, loadSecrets, loadConfig } from '../config/loader.js';
 import { ensureGeneralSpace } from '../spaces/spaces.js';
@@ -70,26 +69,16 @@ setupRouter.get('/', authRateLimit, (_req, res) => {
       <label>Brain label</label>
       <input type="text" name="label" id="label" placeholder="My Brain" maxlength="100" required>
       <div class="field-hint" id="labelHint"></div>
-      <label>Settings password</label>
-      <input type="password" name="settingsPassword" id="pw" autocomplete="new-password" required>
-      <div class="field-hint" id="pwHint"></div>
-      <label>Confirm settings password</label>
-      <input type="password" name="settingsPasswordConfirm" id="pw2" autocomplete="new-password" required>
-      <div class="field-hint" id="pw2Hint"></div>
       <button type="submit" id="submitBtn" disabled>Complete setup</button>
     </form>
   </div>
   <script>
     const code  = document.getElementById('code');
     const label = document.getElementById('label');
-    const pw    = document.getElementById('pw');
-    const pw2   = document.getElementById('pw2');
     const btn   = document.getElementById('submitBtn');
 
     const codeHint  = document.getElementById('codeHint');
     const labelHint = document.getElementById('labelHint');
-    const pwHint    = document.getElementById('pwHint');
-    const pw2Hint   = document.getElementById('pw2Hint');
 
     function setHint(el, input, msg, ok) {
       el.textContent = msg;
@@ -114,29 +103,10 @@ setupRouter.get('/', authRateLimit, (_req, res) => {
       if (!label.value.trim()) { setHint(labelHint, label, '', false); ok = false; }
       else { setHint(labelHint, label, '', true); }
 
-      // Password strength
-      const pwVal = pw.value;
-      if (!pwVal) {
-        setHint(pwHint, pw, '', false); ok = false;
-      } else if (pwVal.length < 8) {
-        setHint(pwHint, pw, 'Minimum 8 characters', false); ok = false;
-      } else {
-        setHint(pwHint, pw, '', true);
-      }
-
-      // Confirm
-      if (!pw2.value) {
-        setHint(pw2Hint, pw2, '', false); ok = false;
-      } else if (pw2.value !== pwVal) {
-        setHint(pw2Hint, pw2, 'Passwords do not match', false); ok = false;
-      } else {
-        setHint(pw2Hint, pw2, 'Passwords match', true);
-      }
-
       btn.disabled = !ok;
     }
 
-    [code, label, pw, pw2].forEach(el => el.addEventListener('input', validate));
+    [code, label].forEach(el => el.addEventListener('input', validate));
   </script>
 </body>
 </html>`);
@@ -151,8 +121,6 @@ setupRouter.post('/', authRateLimit, async (req, res) => {
 
   const code: string = req.body?.code ?? '';
   const label: string = (req.body?.label ?? '').trim();
-  const settingsPassword: string = req.body?.settingsPassword ?? '';
-  const settingsPasswordConfirm: string = req.body?.settingsPasswordConfirm ?? '';
 
   if (!pendingSetupCode || code.trim().toUpperCase() !== pendingSetupCode.toUpperCase()) {
     res.status(400).setHeader('Content-Type', 'text/html; charset=utf-8').send(`
@@ -164,16 +132,6 @@ setupRouter.post('/', authRateLimit, async (req, res) => {
 
   if (!label) {
     res.status(400).send(errorPage('Brain label is required'));
-    return;
-  }
-
-  if (!settingsPassword || settingsPassword.length < 8) {
-    res.status(400).send(errorPage('Settings password must be at least 8 characters'));
-    return;
-  }
-
-  if (settingsPassword !== settingsPasswordConfirm) {
-    res.status(400).send(errorPage('Passwords do not match'));
     return;
   }
 
@@ -189,31 +147,43 @@ setupRouter.post('/', authRateLimit, async (req, res) => {
     setup: { completed: true },
   };
 
-  // Write config first so loader.getConfig() works
   await saveConfig(config);
-
-  // Hash settings password and write secrets
-  const settingsPasswordHash = await bcrypt.hash(settingsPassword, 12);
-  const secrets: SecretsFile = { settingsPasswordHash, peerTokens: {} };
+  const secrets: SecretsFile = { peerTokens: {} };
   await saveSecrets(secrets);
-  // Load both config and secrets into memory so auth middleware works immediately
   loadConfig();
   loadSecrets();
 
-  // Initialise the general space
   try {
     await ensureGeneralSpace();
   } catch (err) {
     log.warn(`Could not initialise general space during setup: ${err}`);
   }
 
-  // Clear setup code from memory
-  pendingSetupCode = null;
+  // Create the initial admin PAT
+  const { record, plaintext } = await createToken({ name: 'Admin', admin: true, expiresAt: null });
+  const { hash: _h, ...safeRecord } = record;
 
+  pendingSetupCode = null;
   log.info(`Setup complete. Brain ID: ${instanceId}`);
 
-  // Redirect to settings to log in and create the first token
-  res.redirect(303, '/settings');
+  // Show the token once — it will not be retrievable again
+  res.setHeader('Content-Type', 'text/html; charset=utf-8').send(`<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>ythril — Setup Complete</title>
+<style>body{font-family:system-ui,sans-serif;background:#0f0f0f;color:#eee;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
+.card{background:#1a1a1a;border:1px solid #333;border-radius:10px;padding:2rem;max-width:520px;width:100%}
+h1{margin:0 0 1rem;font-size:1.2rem;color:#4c4}
+.token{background:#111;border:1px solid #444;border-radius:6px;padding:0.6rem 0.9rem;font-family:monospace;font-size:0.9rem;word-break:break-all;margin:0.75rem 0}
+.warn{color:#fa4;font-size:0.85rem;margin:0.5rem 0 1.25rem}
+a{display:block;text-align:center;padding:0.6rem;background:#6060f0;color:#fff;border-radius:6px;text-decoration:none;font-size:1rem}
+a:hover{background:#7070ff}</style></head>
+<body><div class="card">
+  <h1>Setup complete</h1>
+  <p>Your first admin token is shown below. <strong>Copy it now — it will not be shown again.</strong></p>
+  <div class="token" id="tok">${escapeHtml(plaintext)}</div>
+  <p class="warn">Store it in a password manager or secret vault. Use it as a Bearer token for API and MCP access.</p>
+  <p style="font-size:0.82rem;color:#888;margin-bottom:1.25rem">Token name: <strong>${escapeHtml(safeRecord.name)}</strong> &nbsp;·&nbsp; Created: ${escapeHtml(safeRecord.createdAt)}</p>
+  <a href="/settings">Open settings &rarr;</a>
+</div></body></html>`);
 });
 
 // POST /api/setup — JSON variant for the Angular SPA
@@ -224,7 +194,7 @@ setupRouter.post('/json', authRateLimit, async (req, res) => {
     return;
   }
 
-  const { code, label, settingsPassword } = req.body ?? {};
+  const { code, label } = req.body ?? {};
 
   if (!pendingSetupCode || String(code ?? '').trim().toUpperCase() !== pendingSetupCode.toUpperCase()) {
     res.status(400).json({ error: 'Invalid setup code' });
@@ -232,10 +202,6 @@ setupRouter.post('/json', authRateLimit, async (req, res) => {
   }
   if (!label || typeof label !== 'string' || !label.trim()) {
     res.status(400).json({ error: 'Instance label is required' });
-    return;
-  }
-  if (!settingsPassword || typeof settingsPassword !== 'string' || settingsPassword.length < 8) {
-    res.status(400).json({ error: 'Settings password must be at least 8 characters' });
     return;
   }
 
@@ -250,8 +216,7 @@ setupRouter.post('/json', authRateLimit, async (req, res) => {
   };
 
   await saveConfig(config);
-  const settingsPasswordHash = await bcrypt.hash(settingsPassword, 12);
-  const secrets: SecretsFile = { settingsPasswordHash, peerTokens: {} };
+  const secrets: SecretsFile = { peerTokens: {} };
   await saveSecrets(secrets);
   loadConfig();
   loadSecrets();
@@ -263,7 +228,7 @@ setupRouter.post('/json', authRateLimit, async (req, res) => {
   }
 
   // Create the initial admin PAT so the Angular app can log in immediately
-  const { record, plaintext } = await createToken({ name: 'Admin', expiresAt: null });
+  const { record, plaintext } = await createToken({ name: 'Admin', admin: true, expiresAt: null });
 
   pendingSetupCode = null;
   log.info(`Setup complete (JSON). Brain ID: ${instanceId}`);

@@ -34,7 +34,7 @@ export async function initSpace(spaceId: string): Promise<void> {
     const name = `${spaceId}_${suffix}`;
     if (!existing.has(name)) {
       await db.createCollection(name);
-      log.info(`Created collection ${name}`);
+      log.debug(`Created collection ${name}`);
     }
   }
 
@@ -114,7 +114,7 @@ async function ensureVectorSearchIndex(
       return;
     }
     // Dimensions changed — drop and recreate
-    log.info(`Recreating vector search index ${indexName} (dimensions changed: ${existingDims} → ${numDimensions})`);
+    log.warn(`Recreating vector search index ${indexName} (dimensions changed: ${existingDims} → ${numDimensions})`);
     try {
       await coll.dropSearchIndex(indexName);
       // Wait for drop to propagate
@@ -124,7 +124,7 @@ async function ensureVectorSearchIndex(
     }
   }
 
-  log.info(`Creating vector search index ${indexName} (${numDimensions}d, ${similarity})`);
+  log.debug(`Creating vector search index ${indexName} (${numDimensions}d, ${similarity})`);
   try {
     await coll.createSearchIndex({
       name: indexName,
@@ -151,7 +151,7 @@ async function ensureVectorSearchIndex(
     try {
       const current = await coll.listSearchIndexes(indexName).toArray() as typeof indexes;
       if (current[0]?.status === 'READY') {
-        log.info(`Vector search index ${indexName} is READY`);
+        log.debug(`Vector search index ${indexName} is READY`);
         return;
       }
     } catch { /* ignore intermittent errors during polling */ }
@@ -163,7 +163,7 @@ async function ensureVectorSearchIndex(
 export async function initAllSpaces(): Promise<void> {
   const cfg = getConfig();
   for (const space of cfg.spaces) {
-    log.info(`Initialising space: ${space.id}`);
+    log.debug(`Initialising space: ${space.id}`);
     await initSpace(space.id);
   }
 }

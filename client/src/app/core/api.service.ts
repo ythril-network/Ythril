@@ -32,6 +32,7 @@ export interface TokenRecord {
   lastUsed?: string;
   expiresAt?: string;
   spaces?: string[];
+  admin: boolean;
 }
 
 export interface Memory {
@@ -91,6 +92,14 @@ export interface NetworkMember {
   label: string;
   endpoint: string;
   syncDirection?: 'both' | 'push';
+}
+
+export interface InviteBundle {
+  handshakeId: string;
+  inviteUrl: string;
+  rsaPublicKeyPem: string;
+  networkId: string;
+  expiresAt: string;
 }
 
 export interface VoteRound {
@@ -157,19 +166,43 @@ export class ApiService {
 
   // ── Tokens ────────────────────────────────────────────────────────────────
 
+  getMe(): Observable<TokenRecord> {
+    return this.http.get<TokenRecord>('/api/tokens/me');
+  }
+
   listTokens(): Observable<{ tokens: TokenRecord[] }> {
     return this.http.get<{ tokens: TokenRecord[] }>('/api/tokens');
   }
 
-  createToken(body: { name: string; expiresAt?: string; spaces?: string[] }): Observable<{ token: TokenRecord; plaintext: string }> {
+  createToken(body: { name: string; expiresAt?: string; spaces?: string[]; admin?: boolean }): Observable<{ token: TokenRecord; plaintext: string }> {
     return this.http.post<{ token: TokenRecord; plaintext: string }>('/api/tokens', body);
+  }
+
+  regenerateToken(id: string): Observable<{ plaintext: string }> {
+    return this.http.post<{ plaintext: string }>(`/api/tokens/${id}/regenerate`, {});
   }
 
   revokeToken(id: string): Observable<void> {
     return this.http.delete<void>(`/api/tokens/${id}`);
   }
 
-  // ── Brain — stats ─────────────────────────────────────────────────────────
+  // ── MFA ───────────────────────────────────────────────────────────────────
+
+  getMfaStatus(): Observable<{ enabled: boolean }> {
+    return this.http.get<{ enabled: boolean }>('/api/mfa/status');
+  }
+
+  setupMfa(): Observable<{ secret: string; otpauth: string }> {
+    return this.http.post<{ secret: string; otpauth: string }>('/api/mfa/setup', {});
+  }
+
+  verifyMfaCode(code: string): Observable<{ valid: boolean }> {
+    return this.http.post<{ valid: boolean }>('/api/mfa/verify', { code });
+  }
+
+  disableMfa(): Observable<void> {
+    return this.http.delete<void>('/api/mfa');
+  }
 
   getSpaceStats(spaceId: string): Observable<SpaceStats> {
     return this.http.get<SpaceStats>(`/api/brain/spaces/${spaceId}/stats`);
@@ -271,8 +304,27 @@ export class ApiService {
     return this.http.delete<void>(`/api/networks/${id}`, { body: { confirm: true } });
   }
 
-  generateInviteKey(networkId: string): Observable<{ inviteKey: string }> {
-    return this.http.post<{ inviteKey: string }>(`/api/networks/${networkId}/invite-key`, {});
+  generateInvite(networkId: string): Observable<InviteBundle> {
+    return this.http.post<InviteBundle>('/api/invite/generate', { networkId });
+  }
+
+  joinRemote(body: {
+    handshakeId: string;
+    inviteUrl: string;
+    rsaPublicKeyPem: string;
+    networkId: string;
+    myUrl: string;
+    expiresAt?: string;
+  }): Observable<{ status: string; networkId: string; networkLabel: string; networkType: string; spaces: string[]; instanceId?: string; instanceLabel?: string }> {
+    return this.http.post<any>('/api/networks/join-remote', body);
+  }
+
+  removeMember(networkId: string, instanceId: string): Observable<void> {
+    return this.http.delete<void>(`/api/networks/${networkId}/members/${instanceId}`);
+  }
+
+  updateNetworkSchedule(networkId: string, syncSchedule: string): Observable<any> {
+    return this.http.patch<any>(`/api/networks/${networkId}`, { syncSchedule });
   }
 
   updateSyncSchedule(networkId: string, memberId: string, schedule: string): Observable<void> {

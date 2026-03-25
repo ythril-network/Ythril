@@ -8,19 +8,30 @@ import { generateSetupCode } from './setup/routes.js';
 import { startSyncScheduler, stopSyncScheduler } from './sync/engine.js';
 import { log } from './util/log.js';
 
+// Enable debug logging when --debug flag is passed or DEBUG env is already set.
+if (process.argv.includes('--debug')) {
+  process.env['DEBUG'] = '1';
+}
+
 const PORT = Number(process.env['PORT'] ?? 3200);
+
+// ANSI helpers — no-op when stdout is not a TTY (e.g. piped logs)
+const isTTY = process.stdout.isTTY;
+const BOLD   = isTTY ? '\x1b[1m'           : '';
+const ORANGE = isTTY ? '\x1b[38;5;208m'    : '';
+const GREEN  = isTTY ? '\x1b[32m'          : '';
+const YELLOW = isTTY ? '\x1b[33m'          : '';
+const RESET  = isTTY ? '\x1b[0m'           : '';
 
 async function main(): Promise<void> {
   const isFirstRun = !configExists();
 
-  if (isFirstRun) {
-    const code = generateSetupCode();
-    log.info('──────────────────────────────────────────────');
-    log.info('  ythril — First-run setup required');
-    log.info(`  Setup code: ${code}`);
-    log.info('  Navigate to http://localhost:' + PORT + '/setup');
-    log.info('──────────────────────────────────────────────');
-  } else {
+  // Generate (and hold) setup code before any async work so it's in scope for
+  // the listen banner. The code is ephemeral — generateSetupCode() stores it in
+  // memory and clears it after the first successful POST /api/setup.
+  const setupCode = isFirstRun ? generateSetupCode() : null;
+
+  if (!isFirstRun) {
     loadConfig();
     loadSecrets();
 
@@ -51,11 +62,11 @@ async function main(): Promise<void> {
         iface => iface && !iface.internal && iface.family === 'IPv4',
       );
       if (hasExternal) {
-        log.warn('');
-        log.warn('  ⚠  WARNING: allowInsecurePlaintext is true and this host has external');
-        log.warn('     network interfaces. All traffic (including tokens) is unencrypted.');
-        log.warn('     Deploy behind TLS termination (Nginx/Caddy/ingress) in production.');
-        log.warn('');
+        console.warn(
+          `\n${YELLOW}  ⚠  WARNING${RESET}  allowInsecurePlaintext is true and this host has external\n` +
+          `     network interfaces. All traffic (including tokens) is unencrypted.\n` +
+          `     Deploy behind TLS termination (Nginx/Caddy/ingress) in production.\n`,
+        );
       }
     }
   }
@@ -73,17 +84,25 @@ async function main(): Promise<void> {
   const server = createServer(app);
 
   server.listen(PORT, () => {
-    log.info(`ythril server listening on port ${PORT}`);
+    const url = `http://localhost:${PORT}`;
+    console.log('');
     if (isFirstRun) {
-      log.info(`Open http://localhost:${PORT}/setup to complete setup`);
+      console.log(`  ${BOLD}ythril${RESET}  ·  first-run setup required`);
+      console.log('');
+      console.log(`  URL         ${url}`);
+      console.log(`  Setup code  ${ORANGE}${setupCode}${RESET}`);
+      console.log('');
+    } else {
+      console.log(`  ${BOLD}ythril${RESET}  ${GREEN}✓ ready${RESET}  ·  ${url}`);
+      console.log('');
     }
   });
 
   // Graceful shutdown
   const shutdown = async (signal: string) => {
-    log.info(`${signal} received — shutting down`);
+    log.debug(`${signal} received — shutting down`);
     stopSyncScheduler();
-    server.close(() => log.info('HTTP server closed'));
+    server.close(() => log.debug('HTTP server closed'));
     await closeMongo();
     process.exit(0);
   };

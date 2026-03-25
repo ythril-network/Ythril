@@ -1,449 +1,1265 @@
 # Ythril User Guide
 
-Practical reference for operating a Ythril brain: managing networks, controlling membership, and understanding the governance rules that govern each network type.
 
-For high-level concepts (what the network types *mean*) see [network-types.md](network-types.md).  
+
+Complete reference for installing, configuring, and operating Ythril brains. Covers first-run setup, the web UI, token and space management, data persistence, running multiple brains, and network configuration for syncing spaces across brains.
+
+
+
+For network type concepts see [network-types.md](network-types.md).  
+
 For the wire protocol see [sync-protocol.md](sync-protocol.md).
 
+
+
 ---
+
+
 
 ## Table of contents
 
-1. [Creating a network](#creating-a-network)
-2. [Managing members](#managing-members)
-3. [Governance and voting](#governance-and-voting)
-4. [Braintree governance in detail](#braintree-governance-in-detail)
-5. [Leaving a network](#leaving-a-network)
-6. [Triggering sync manually](#triggering-sync-manually)
-7. [Merkle integrity](#merkle-integrity)
+
+
+1. [Installation](#installation)
+
+2. [First-run setup](#first-run-setup)
+
+3. [The web UI](#the-web-ui)
+
+4. [Token management](#token-management)
+
+5. [Two-factor authentication (MFA)](#two-factor-authentication-mfa)
+
+6. [Space management](#space-management)
+
+7. [Storage quotas](#storage-quotas)
+
+8. [Running multiple brains](#running-multiple-brains)
+
+9. [Data persistence and recovery](#data-persistence-and-recovery)
+
+10. [Brain networks](#brain-networks)
+
+11. [Creating a network](#creating-a-network)
+
+11. [Inviting another brain](#inviting-another-brain)
+
+12. [Joining a network](#joining-a-network)
+
+13. [Managing members](#managing-members)
+
+14. [Sync schedule](#sync-schedule)
+
+15. [Governance and voting](#governance-and-voting)
+
+16. [Braintree networks](#braintree-networks)
+
+17. [Leaving a network](#leaving-a-network)
+
+18. [Forking a network](#forking-a-network)
+
+19. [Triggering sync manually](#triggering-sync-manually)
+
+20. [Merkle integrity](#merkle-integrity)
+
+
 
 ---
 
-## Creating a network
+
+
+## Installation
+
+
+
+Starting a single brain requires only Docker. No other dependencies.
+
+
+
+```bash
+
+docker compose up --build
 
 ```
-POST /api/networks
-Authorization: Bearer <PAT>
+
+
+
+This builds the image and brings up two containers:
+
+
+
+| Container | Role |
+
+|-----------|------|
+
+| `ythril` | Brain server — REST API, MCP endpoints, Angular web UI (port 3200) |
+
+| `ythril-mongo` | MongoDB Atlas Local with the `mongot` sidecar required for semantic (`$vectorSearch`) queries |
+
+
+
+On first start, MongoDB's replica set needs to elect a primary before the server starts accepting connections. This takes up to about three minutes. The server prints the startup banner when it is ready.
+
+
+
+Once running, open `http://localhost:3200` in a browser to complete setup.
+
+
+
+On subsequent starts, when the image is already built:
+
+
+
+```bash
+
+docker compose up
+
 ```
 
-Body fields:
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `label` | string | yes | Human-readable name |
-| `type` | `"closed"` \| `"democratic"` \| `"club"` \| `"braintree"` | yes | Governance model |
-| `spaces` | string[] | yes | Space IDs to include in this network |
-| `votingDeadlineHours` | integer (1–72) | no (default 24) | How long a vote round stays open |
-| `id` | UUID | no | Pre-specify an ID; useful when registering the same network on a second brain |
-| `myParentInstanceId` | UUID | no | **Braintree only.** This brain's parent in the tree. Omit to declare this brain the root. |
 
-**Example — create root of a braintree:**
+To stop without losing data:
 
-```json
-POST /api/networks
-{
-  "label": "Engineering team",
-  "type": "braintree",
-  "spaces": ["eng-kb"],
-  "votingDeadlineHours": 48
-}
+
+
+```bash
+
+docker compose down
+
 ```
 
-Response `201`:
 
-```json
-{
-  "id": "a1b2c3d4-...",
-  "label": "Engineering team",
-  "type": "braintree",
-  "spaces": ["eng-kb"],
-  "votingDeadlineHours": 48,
-  "members": [],
-  "pendingRounds": [],
-  "createdAt": "2026-03-15T12:00:00.000Z"
-}
+
+### Startup output
+
+By default the server prints a minimal banner when it is ready — just enough to confirm it started OK.
+
+**First run** (no `config.json` yet):
+
+```
+  ythril  ·  first-run setup required
+
+  URL         http://localhost:3200
+  Setup code  A1B2-C3D4-E5F6-G7H8
 ```
 
-**Example — register the same network on a second brain (intermediate node):**
+The setup code is printed in orange when the terminal supports colour.
 
-If Brain B wants to join the network and knows it will sit one level below Brain A:
+**Subsequent starts** (brain already configured):
 
-```json
-POST /api/networks
-{
-  "id": "a1b2c3d4-...",
-  "label": "Engineering team",
-  "type": "braintree",
-  "spaces": ["eng-kb"],
-  "votingDeadlineHours": 48,
-  "myParentInstanceId": "<instanceId of Brain A>"
-}
+```
+  ythril  ✓ ready  ·  http://localhost:3200
 ```
 
-`myParentInstanceId` tells Brain B: *"My position in this tree is directly below Brain A."* This is used during governance to build the ancestor path for any join or removal round Brain B opens.
+
+
+To see verbose logs from all subsystems (MongoDB, sync engine, spaces, etc.) pass `DEBUG=1`:
+
+
+
+```bash
+
+DEBUG=1 docker compose up
+
+```
+
+
 
 ---
 
-## Managing members
 
-### Add a member
 
-```
-POST /api/networks/:id/members
-Authorization: Bearer <PAT>
-```
+## First-run setup
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `instanceId` | string | yes | The candidate brain's instance ID |
-| `label` | string | yes | Human-readable name for this peer |
-| `url` | string (URL) | yes | Base URL of the peer's API |
-| `token` | string | yes | Plaintext peer authentication token |
-| `direction` | `"both"` \| `"push"` | no (default `"both"`) | Sync direction; braintree networks always use `"push"` |
-| `parentInstanceId` | UUID | no | **Braintree only.** Declares who the new member's parent is in the tree |
-| `skipTlsVerify` | boolean | no | Disable TLS verification (dev/test only; shows security warning) |
-
-**Possible responses:**
-
-| Status | Meaning |
-|--------|---------|
-| `201` | Member added immediately (club, braintree root, or single-ancestor braintree that auto-approved) |
-| `202` | Vote round opened; member pending approval — see [Governance and voting](#governance-and-voting) |
-| `409` | Member already exists |
-
-### Remove a member
+On first start, before `config.json` exists, the server generates a one-time setup code and shows it in the startup banner:
 
 ```
-DELETE /api/networks/:id/members/:instanceId
-Authorization: Bearer <PAT>
+  ythril  ·  first-run setup required
+
+  URL         http://localhost:3200
+  Setup code  A1B2-C3D4-E5F6-G7H8
 ```
 
-| Status | Meaning |
-|--------|---------|
-| `204` | Member removed immediately |
-| `202` | Vote round opened for removal |
-
----
-
-## Governance and voting
-
-When a join or removal triggers a vote round, the caller receives `202` with a `roundId`:
-
-```json
-{
-  "status": "vote_pending",
-  "roundId": "59cb42c5-..."
-}
-```
-
-### List open rounds
-
-```
-GET /api/networks/:id/votes
-Authorization: Bearer <PAT>
-```
-
-Returns all rounds (open and concluded) for that network.
-
-### Cast a vote
-
-```
-POST /api/networks/:id/votes/:roundId
-Authorization: Bearer <PAT>
-Content-Type: application/json
-
-{ "vote": "yes" }
-```
-
-or
-
-```json
-{ "vote": "veto" }
-```
-
-Response:
-
-```json
-{
-  "concluded": true,
-  "round": { "roundId": "...", "passed": true, ... }
-}
-```
-
-- If the round has not yet reached its threshold, `concluded` is `false` and the round stays open until more votes arrive or the deadline passes.
-- A single `"veto"` always concludes the round immediately with `passed: false` (for `closed` and `braintree` networks). For `democratic` networks a veto also blocks regardless of yes count.
-
-### Vote propagation
-
-Votes are gossiped between peers during each sync cycle — you do not need to call every relevant brain directly. Cast your vote once on your own brain; the engine pushes it to all peers during the next sync.
-
----
-
-## Braintree governance in detail
-
-Braintree is the only network type where governance is **position-dependent** in the tree.
-
-### The ancestor path rule
-
-Every join or removal triggers a vote round on the **inviting/proposing brain**. The required voters are exactly the brains on the path from the proposer up to the root, including the proposer itself.
-
-```
-Root (must vote)
-  └── Node A (must vote — opened the round)
-        └── Leaf B (candidate — not a required voter)
-```
-
-If Node A opens a round to add Leaf B, **both Node A and Root must vote yes**. Node A is always one of the required voters because it opened the round (it implicitly approves its own proposal by auto-casting yes). Root then decides whether to allow the addition deeper in its tree.
-
-For a **root-level add** (the root itself is inviting a direct child), the ancestor path is just `[root]`. The root auto-casts yes and the round concludes immediately → `201` returned directly, no 202.
-
-### `requiredVoters`
-
-The vote round stores the computed path at creation time:
-
-```json
-{
-  "roundId": "...",
-  "type": "join",
-  "requiredVoters": ["<instanceId of Node A>", "<instanceId of Root>"],
-  "votes": [
-    { "instanceId": "<instanceId of Node A>", "vote": "yes", "castAt": "..." }
-  ],
-  "concluded": false
-}
-```
-
-The round concludes (passes) when every entry in `requiredVoters` has a yes vote. Any single veto in `requiredVoters` immediately concludes the round as failed.
-
-### Setting up a multi-level tree
-
-**Step 1.** Create the network on the root brain (no `myParentInstanceId`):
-
-```json
-POST /api/networks  (on Root)
-{
-  "type": "braintree",
-  "label": "My tree",
-  "spaces": ["shared"]
-}
-→ 201, id = "net-123"
-```
-
-**Step 2.** Add Node A as a direct child of Root:
-
-```json
-POST /api/networks/net-123/members  (on Root)
-{
-  "instanceId": "<Node A instanceId>",
-  "label": "Node A",
-  "url": "https://node-a.example.com",
-  "token": "<PAT from Node A>",
-  "direction": "push",
-  "parentInstanceId": "<Root instanceId>"
-}
-→ 201 (root auto-approves, single ancestor)
-```
-
-**Step 3.** Register the network on Node A, declaring Root as parent:
-
-```json
-POST /api/networks  (on Node A)
-{
-  "id": "net-123",
-  "type": "braintree",
-  "label": "My tree",
-  "spaces": ["shared"],
-  "myParentInstanceId": "<Root instanceId>"
-}
-```
-
-**Step 4.** Node A adds Leaf B (requires both Node A and Root to approve):
-
-```json
-POST /api/networks/net-123/members  (on Node A)
-{
-  "instanceId": "<Leaf B instanceId>",
-  "label": "Leaf B",
-  "url": "https://leaf-b.example.com",
-  "token": "<PAT from Leaf B>",
-  "direction": "push",
-  "parentInstanceId": "<Node A instanceId>"
-}
-→ 202 { "status": "vote_pending", "roundId": "..." }
-```
-
-Node A auto-cast its yes vote. The round now waits for Root.
-
-**Step 5.** Root discovers the round via gossip (trigger sync or wait for the scheduled cycle), then votes:
-
-```json
-POST /api/networks/net-123/votes/<roundId>  (on Root)
-{ "vote": "yes" }
-→ 200 { "concluded": true }
-```
-
-**Step 6.** Root's engine pushes the yes vote back to Node A on the next sync. Node A's round concludes and Leaf B is added to Node A's member list. Sync from Node A to Leaf B begins.
-
-### Removal in a braintree
-
-Same ancestor-path rule applies. The required voters are the ancestors of the **subject's parent** — i.e. the path from the subject's direct parent up to the root.
-
-If Root removes Node A directly: `requiredVoters = [Root]` → immediate `204`.  
-If Node A removes Leaf B: `requiredVoters = [Node A, Root]` → same two-step approval as joining.
-
-### What happens if an ancestor vetoes
-
-A veto from any `requiredVoter` concludes the round immediately as failed. The candidate is not added (or the subject is not removed). The veto is propagated via gossip and the opening brain sees `concluded=true, passed=false` on its next sync cycle.
-
-### Backward compatibility
-
-Rounds created before `requiredVoters` was introduced (i.e. rounds with no `requiredVoters` field) fall back to the old behaviour: all current members must vote yes. This means existing data is never broken by upgrades.
-
----
-
-## Leaving a network
-
-A brain can leave any network it belongs to:
-
-```
-DELETE /api/networks/:id
-Authorization: Bearer <PAT>
-```
-
-This broadcasts a `member_departed` event to all peers before removing the network locally. Peers remove this brain from their member list on the next sync. All local data in the network's spaces is retained — the network config is removed, not the underlying space data.
-
-For braintree networks, a departing intermediate node partitions its subtree. Leaves that were beneath it must either wait for the parent to return or be re-admitted under a different parent.
-
----
-
-## Going off-grid: forking a network
-
-A departing or ejected member can create a new, independent network seeded from their local copy of the data — they become the root of a new tree.
-
-```
-POST /api/networks/:id/fork
-Authorization: Bearer <PAT>
-Content-Type: application/json
-
-{
-  "label": "My fork",
-  "type": "closed",
-  "votingDeadlineHours": 24,
-  "spaces": ["space-id-1"]
-}
-```
-
-| Field | Required | Description |
-|---|---|---|
-| `label` | Yes | Human-readable name for the new network |
-| `type` | No | `closed` (default) or `club` |
-| `votingDeadlineHours` | No | Defaults to the source network's value, or 24 if unavailable |
-| `spaces` | Conditional | Required if the source network has already been removed locally (ejection case); optional override otherwise |
-
-**Scenarios:**
-
-- **Still a member** — `:id` matches a live network in `cfg.networks`. `spaces` and `votingDeadlineHours` are inherited from the source; you can override both in the body.
-- **Ejected** — when a `member_removed` notification is received, the source `NetworkConfig` is deleted from `cfg.networks` and the network id is recorded in `ejectedFromNetworks`. After ejection the source network is gone, so you **must** supply `spaces` explicitly. All requested space ids must exist locally.
-- **Unknown id** — if the id is in neither `cfg.networks` nor `ejectedFromNetworks` the call returns `404`.
-
-**What the fork produces:**
-
-- A brand-new `NetworkConfig` with a fresh UUID
-- No members and no pending rounds — the fork is a clean starting point
-- The caller is implicitly the root; they can then invite peers via the normal `POST /api/networks/:id/invite` → join flow
-- The original network (if still present) is not touched
-
-**Status codes:**
-
-| Code | Meaning |
-|------|---------|
-| `201` | Fork created; response body is the new `NetworkConfig` |
-| `400` | Validation error: missing `label`, unknown space id, or ejected network with no `spaces` in body |
-| `404` | Network id not found and not in `ejectedFromNetworks` |
-
----
-
-## Triggering sync manually
-
-```
-POST /api/notify/trigger
-Authorization: Bearer <PAT>
-Content-Type: application/json
-
-{ "networkId": "<network id>" }
-```
-
-Runs a full sync cycle immediately for the given network (all spaces, all peers including gossip and vote propagation). Returns `200 { "status": "triggered" }` before the cycle completes — it runs asynchronously.
-
-This is useful during governance flows where you want to pull a peer's open vote rounds or push a just-cast vote without waiting for the scheduled sync interval.
-
----
-
-## Merkle integrity
-
-Each network can opt in to Merkle-based divergence detection by setting `"merkle": true` in its network config. When enabled, the sync engine computes a SHA-256 binary Merkle tree over the contents of each shared space after every sync cycle and compares roots with the remote peer. A mismatch is logged as a `MERKLE_DIVERGENCE` warning — no automatic corrective action is taken; the warning is an alert for manual investigation.
-
-### Enabling Merkle for a network
-
-Add `"merkle": true` when creating the network:
-
-```json
-POST /api/networks
-{
-  "label": "My secure net",
-  "spaces": ["shared"],
-  "merkle": true
-}
-```
-
-Or include it when registering a network that was created by a peer:
-
-```json
-POST /api/networks
-{
-  "id": "<existing network id>",
-  "label": "My secure net",
-  "spaces": ["shared"],
-  "merkle": true
-}
-```
-
-### Querying the Merkle root
-
-```
-GET /api/sync/merkle?spaceId=<space id>&networkId=<network id>
-Authorization: Bearer <PAT>
-```
-
-Response:
-
-```json
-{
-  "spaceId": "shared",
-  "networkId": "<network id>",
-  "root": "<64-char hex SHA-256>",
-  "leafCount": 42,
-  "computedAt": "2025-01-01T00:00:00.000Z"
-}
-```
+Open `http://localhost:3200`. The setup form asks for:
 
 | Field | Description |
 |-------|-------------|
-| `root` | SHA-256 Merkle root of all memory documents and files in the space. An empty space returns `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` (SHA-256 of the empty string). |
+| Setup code | Copy from the startup banner |
+| Brain label | Human-readable name for this instance (shown to peers in networks) |
+
+
+
+On submit, the server:
+
+
+
+1. Creates `config/config.json` and `config/secrets.json` with mode 0600
+
+2. Auto-creates a `general` space
+
+3. Generates your first PAT and displays it **once** — copy it immediately; it cannot be retrieved again
+
+
+
+The setup code is single-use and discarded after successful setup. If the container restarts before setup is completed, a new code is generated.
+
+
+
+---
+
+
+
+## The web UI
+
+
+
+Log in with your PAT at `http://localhost:3200`. The left navigation has four sections:
+
+
+
+| Section | What it does |
+
+|---------|--------------|
+
+| **Brain** | Store and search memories (semantic recall), manage entities and knowledge-graph edges |
+
+| **Files** | Browse, upload, download, move, delete files within each space; resolve sync conflicts |
+
+| **Settings** | Token management, space administration, network configuration, storage usage |
+
+
+
+Every section is scoped to the spaces your token allows. A token with `spaces: ["eng-kb"]` sees only `eng-kb` throughout the UI; no other space is visible or accessible.
+
+
+
+The token is stored in browser `localStorage` under the key `ythril_token`. Logging out clears it.
+
+
+
+---
+
+
+
+## Token management
+
+
+
+All API and MCP access requires a Bearer PAT (`ythril_` prefix, 32 random bytes, base62-encoded). Tokens are bcrypt-hashed at storage time and never logged or returned in plaintext after creation.
+
+
+
+### Admin vs non-admin tokens
+
+
+
+Every token carries an **admin** flag:
+
+
+
+| Flag | Access |
+|------|--------|
+| `admin: true` | Full access — token management, space create/delete, all network management |
+| `admin: false` | Data-only access — brain, files, MCP, read-only spaces and networks list |
+
+
+
+The first token created during setup is always admin. Only an admin token can create further tokens (admin or non-admin). Leaked integration tokens scoped to a space cannot escalate to admin privileges.
+
+
+
+### From Settings → Tokens
+
+
+
+- **Create** — provide a name, an optional expiry date, an optional space allowlist, and (if your token is admin) an **Admin** checkbox. The plaintext is shown once.
+
+- **Rotate** (↺) — generates a new secret for the token in place. The old plaintext is invalidated immediately; the new one is shown once. Use this for credential rotation without revoking the record.
+
+- **Revoke** (✕) — deletes the token permanently. Any cached verification expires within 5 minutes.
+
+
+
+**Space allowlist** — leave empty to grant access to all current and future spaces. Populate to restrict a token to specific spaces:
+
+
+
+```json
+
+{
+
+  "name": "claude-desktop",
+
+  "spaces": ["general", "eng-kb"]
+
+}
+
+```
+
+
+
+A revoked or expired token gets `401` on all endpoints.
+
+
+
+**Connecting an MCP client** (e.g. Claude Desktop):
+
+
+
+```json
+
+"ythril-general": {
+
+  "type": "sse",
+
+  "url": "http://localhost:3200/mcp/general",
+
+  "headers": { "Authorization": "Bearer ythril_..." }
+
+}
+
+```
+
+
+
+Each space has its own MCP endpoint at `/mcp/{spaceId}`. A single PAT can serve multiple MCP entries if it has access to all required spaces.
+
+
+
+---
+
+
+
+## Two-factor authentication (MFA)
+
+MFA adds an optional TOTP (time-based one-time password) requirement on top of admin PAT authentication. When enabled, every **admin mutation** — creating or revoking tokens, creating or deleting spaces — must also supply a valid 6-digit code via the `X-TOTP-Code` header. Read-only endpoints and all data-plane (brain, files, MCP) endpoints are unaffected.
+
+MFA is **disabled by default**. It is enabled and managed from **Settings → MFA** in the web UI.
+
+
+
+### Enrolling
+
+1. Open **Settings → MFA** and click **Enable MFA**.
+2. Scan the QR code with an authenticator app (Google Authenticator, Authy, 1Password, Bitwarden, etc.). If your app requires manual entry, use the base32 key displayed below the QR code. The QR code is generated entirely in your browser — the TOTP secret is never sent to any external service.
+3. Enter a 6-digit code from your app and click **Confirm**. The server verifies the code before saving the secret — if the code is wrong, the secret is discarded and no change is made.
+4. On success, a green **Enabled** badge appears.
+
+> The base32 key is shown only once during enrollment. If you need to recover it later, disable MFA and re-enroll.
+
+
+
+### How it works in the client
+
+The web client intercepts any `40 3 MFA_REQUIRED` response and automatically opens a TOTP prompt. Once you enter a valid code:
+
+- The interceptor retries the original request with `X-TOTP-Code` attached.
+- The code is **cached in memory** (not `localStorage`) for **15 minutes** so you are not re-prompted on every button click.
+- The cache is invalidated if the server returns `MFA_INVALID` (stale or wrong code) or when you navigate away from the page or close the tab.
+
+API clients and MCP clients using admin tokens must supply the header themselves:
+
+```http
+POST /api/tokens
+Authorization: Bearer ythril_...
+X-TOTP-Code: 123456
+Content-Type: application/json
+
+{ "name": "new-token" }
+```
+
+
+
+### TOTP parameters
+
+| Parameter | Value |
+|-----------|-------|
+| Algorithm | SHA-1 (maximum authenticator compatibility) |
+| Step | 30 seconds |
+| Digits | 6 |
+| Clock tolerance | ±30 s (one step in each direction) |
+
+
+
+### Disabling MFA
+
+Click **Disable MFA** in **Settings → MFA** and confirm. Disabling does **not** require an existing TOTP code — this is intentional: it is the recovery path if you lose your authenticator.
+
+Security model: a valid admin PAT is required. Physical possession of `secrets.json` alone is insufficient — you still need an admin token.
+
+After disabling, admin mutations immediately stop requiring `X-TOTP-Code`.
+
+
+
+### Rotating the TOTP secret
+
+To move to a new authenticator app or replace a potentially-compromised secret:
+
+1. Disable MFA (no TOTP code needed).
+2. Re-enroll from scratch — a fresh secret is generated.
+
+
+
+### Recovery if you lose your authenticator
+
+If you have lost access to your authenticator app and cannot produce a valid code, disable MFA directly via the API with an admin PAT:
+
+```bash
+curl -X DELETE http://localhost:3200/api/mfa \
+  -H "Authorization: Bearer ythril_..."
+```
+
+This succeeds with `204 No Content` and immediately removes the TOTP requirement. Re-enroll with a new authenticator when ready.
+
+If you have also lost all admin tokens, there is no API-level recovery path. Restore a backup of `config/secrets.json` or re-run first-run setup with `docker compose down -v && docker compose up`.
+
+
+
+---
+
+
+
+## Space management
+
+
+
+A space is a fully isolated container for memories, entities, edges, and files. Every piece of data lives inside exactly one space.
+
+
+
+- The `general` space is created automatically on first run.
+
+- Additional spaces are created from **Settings → Spaces** or via `POST /api/spaces`.
+
+- Each space gets its own MongoDB collections (`{spaceId}_memories`, `{spaceId}_entities`, `{spaceId}_edges`, `{spaceId}_tombstones`), its own file directory (`/data/{spaceId}/`), and its own MCP endpoint (`/mcp/{spaceId}`).
+
+- Spaces are **private by default**. A space only leaves the brain when it is explicitly included in a network.
+
+- **Deleting a space** on a standalone brain is immediate (requires `{ "confirm": true }` in the request body). On a networked brain it opens a vote round so all peers can react before the data is removed locally.
+
+
+
+### Space IDs
+
+
+
+Space IDs must be alphanumeric plus hyphens, maximum 40 characters, and unique on the instance. Choose IDs that are stable — they appear in MCP endpoint URLs, MongoDB collection names, and file paths. They cannot be renamed after creation.
+
+
+
+---
+
+
+
+## Storage quotas
+
+
+
+Optional soft and hard limits can be configured per category in `config.json`:
+
+
+
+```json
+
+"storage": {
+
+  "total": { "softLimitGiB": 150, "hardLimitGiB": 200 },
+
+  "files": { "softLimitGiB": 100, "hardLimitGiB": 140 },
+
+  "brain": { "softLimitGiB": 50,  "hardLimitGiB": 60  }
+
+}
+
+```
+
+
+
+| Threshold | Behaviour |
+
+|-----------|----------|
+
+| Below soft limit | Normal write |
+
+| Above soft limit, below hard | Write succeeds; response includes `"storageWarning": true` |
+
+| Above hard limit | Write rejected with HTTP 507 |
+
+
+
+Usage is measured at write time — there is no background cache. Current usage per space is visible in **Settings → Storage** and in the `GET /api/spaces` response.
+
+
+
+Quota fields are optional. Omitting a category means no limit is enforced for it.
+
+
+
+---
+
+
+
+## Running multiple brains
+
+
+
+Each brain is an independent Docker Compose stack. To run two brains on one machine, give each a separate Compose project name and a different host port.
+
+
+
+**Option A — `-p` flag (recommended, no file duplication):**
+
+
+
+```bash
+
+# Brain A — default project name, port 3200
+
+docker compose up -d
+
+
+
+# Brain B — separate project name, port 3201
+
+# Edit the host port in a second copy of docker-compose.yml first:
+
+#   ports: ["3201:3200"]
+
+docker compose -p ythril-b -f docker-compose.brain-b.yml up -d
+
+```
+
+
+
+The `-p ythril-b` flag namespaces all volumes and container names automatically:
+
+
+
+| Resource | Brain A | Brain B |
+
+|----------|---------|--------|
+
+| Containers | `ythril`, `ythril-mongo` | `ythril-b-ythril-1`, `ythril-b-ythril-mongo-1` |
+
+| Volumes | `ythril_ythril-data`, etc. | `ythril-b_ythril-data`, etc. |
+
+| Port | 3200 | 3201 |
+
+
+
+Keep the `config/` bind-mount directories separate too — each brain needs its own `config.json` and `secrets.json`. Point each stack's `volumes:` section to a different host path (e.g. `./config-a:/config` and `./config-b:/config`).
+
+
+
+Each brain then goes through its own first-run setup independently. They know nothing about each other until you explicitly configure a network between them.
+
+
+
+---
+
+
+
+## Data persistence and recovery
+
+
+
+All persistent data lives in **named Docker volumes**, not inside containers. Removing or recreating containers never loses data.
+
+
+
+| Volume | What it stores |
+
+|--------|----------------|
+
+| `ythril_ythril-data` | All file storage (`/data/{spaceId}/`) |
+
+| `ythril_ythril-mongo-data` | All brain data: memories, entities, edges, tombstones |
+
+| `ythril_ythril-mongo-configdb` | MongoDB replica set keyfile |
+
+
+
+The `config/` directory is a host **bind mount** — `config.json` and `secrets.json` are plain files in your project folder and survive any container lifecycle event.
+
+
+
+### Safe stop/start cycle
+
+
+
+```bash
+
+docker compose down        # stops and removes containers — data intact
+
+docker compose up          # reattaches volumes — picks up exactly where it left off
+
+```
+
+
+
+### Destroying all data
+
+
+
+```bash
+
+docker compose down -v     # ⚠ permanently deletes all named volumes
+
+```
+
+
+
+This is the only `docker compose` command that destroys brain data. The `-v` flag must be passed explicitly — it is never triggered by accident.
+
+
+
+### Recovery after downtime — networked brains
+
+
+
+When two brains that are peers in a network both come back up after downtime, no manual reconnection step is required. Each brain:
+
+
+
+1. Reconnects to its own MongoDB volume and restores all local state
+
+2. Loads `config.json`, which contains the network and peer configuration
+
+3. Starts the sync cron scheduler
+
+4. On the first scheduled (or manually triggered) sync cycle, sends each peer a request for everything after the last recorded watermark (`lastSeqReceived`)
+
+
+
+Tombstone records (delete events) are included in the incremental sync, so any deletions that happened while one brain was offline propagate correctly on the next cycle. No data is duplicated; no data is silently lost.
+
+
+
+---
+
+
+
+## Brain networks
+
+
+
+Networks are the mechanism by which **specific spaces** on one brain are synced with spaces on a peer brain. It is always a **space** — not a whole brain — that participates in a network. A brain can belong to multiple networks simultaneously, each scoped to different spaces.
+
+
+
+```
+
+Brain A                          Brain B
+
+├── space: general ────────────── space: general   (via "Personal" network)
+
+├── space: work    ────────────── space: work       (via "Team" network)
+
+└── space: private               (not in any network — never leaves Brain A)
+
+```
+
+
+
+A brain's unshared spaces are invisible to all peers regardless of what networks the brain belongs to.
+
+
+
+### What a network is
+
+
+
+A network is a named configuration object that exists on **every participating brain**. It records:
+
+
+
+- The governance type (`closed`, `democratic`, `club`, or `braintree`)
+
+- The space IDs being synced
+
+- The member list (other brains, their URLs, and their peer tokens)
+
+- Any open vote rounds
+
+
+
+Each brain's copy of the network is kept in sync by the gossip layer — member changes, vote events, and sync watermarks all propagate during regular sync cycles.
+
+
+
+### Governance types at a glance
+
+
+
+| Type | Join approval | Good for |
+
+|------|--------------|----------|
+
+| `closed` | All members unanimous | Personal multi-device (every device is yours) |
+
+| `democratic` | ≥ 50% + no vetoes | Small teams where any one member can't block alone |
+
+| `club` | The inviter alone | Open collaboration where the inviter vouches for candidates |
+
+| `braintree` | All ancestors from inviter to root | Hierarchical org where senior nodes control who joins |
+
+
+
+For full governance rules and sequencing see [network-types.md](network-types.md).
+
+
+
+---
+
+
+
+## Creating a network
+
+
+
+Open **Settings → Networks** in the left sidebar.
+
+
+
+1. Enter a **Network label** (e.g. "Team Brain").
+
+2. Choose a **Type** — see the table below.
+
+3. Enter the **Space IDs** to sync (comma-separated; e.g. `general`).
+
+4. Set a **Voting deadline** in hours (default 48 h — only relevant for democratic/club/braintree networks).
+
+5. Click **Create network**.
+
+
+
+The new network appears in the list below the form.
+
+
+
+| Type | Who can join |
+
+|------|-------------|
+
+| **Closed** | Invite-only; the admin adds members directly |
+
+| **Democratic** | Simple majority vote among existing members |
+
+| **Club** | Admin decides unilaterally — no vote needed |
+
+| **Braintree** | Hierarchical tree — parent nodes approve children |
+
+
+
+> For a detailed explanation of governance rules see [network-types.md](network-types.md).
+
+
+
+---
+
+
+
+## Inviting another brain
+
+
+
+To let another brain join one of your networks:
+
+
+
+1. Expand the network card by clicking its row.
+
+2. In the **Invite** section click **Generate invite**.
+
+3. A JSON invite bundle appears. Click **Copy bundle**.
+
+4. Send that bundle to the other brain's admin — by email, chat, or any out-of-band channel.
+
+
+
+**The invite expires after 24 hours.** Generate a new one if it lapses.
+
+
+
+> **Security:** The bundle contains an RSA-4096 public key and a one-time handshake ID. No authentication token is included — the cryptographic exchange happens server-side when the other brain joins.
+
+
+
+---
+
+
+
+## Joining a network
+
+
+
+On the brain that was *invited* (Brain B):
+
+
+
+1. Open **Settings → Networks**.
+
+2. Find the **Join an existing network** card.
+
+3. Paste the invite bundle JSON you received into the textarea.
+
+4. Enter **this brain's publicly reachable URL** (e.g. `https://brain-b.example.com`).  
+
+   This is the address Brain A will use to reach Brain B for sync — it must be reachable from Brain A.
+
+5. Click **Join network**.
+
+
+
+Ythril performs the RSA handshake in the background. Both brains exchange sync tokens securely without any token ever appearing in the UI. On success the network appears in Brain B's network list.
+
+
+
+> **First sync** happens on the next scheduled cycle. Click **Sync now** inside the network card to run it immediately.
+
+
+
+---
+
+
+
+## Managing members
+
+
+
+Expand a network card to see its current member list.
+
+
+
+### Remove a member
+
+
+
+Click the **×** button on the right of any member row and confirm the prompt.
+
+
+
+| Network type | Result |
+
+|---|---|
+
+| Closed | Member removed immediately |
+
+| Democratic / Club | Vote round opened; removal takes effect when threshold is met |
+
+| Braintree | Ancestors in the tree must approve — see [Braintree networks](#braintree-networks) |
+
+
+
+---
+
+
+
+## Sync schedule
+
+
+
+Expand a network card and find the **Sync** section.
+
+
+
+- Enter a **cron expression** in the schedule field (e.g. `0 * * * *` for every hour on the hour). Leave empty for manual-only sync.
+
+- Click **Save schedule** to persist it.
+
+- Click **Sync now** to run an immediate sync cycle regardless of the schedule.
+
+
+
+Standard 5-field cron syntax: `minute hour day month weekday`.  
+
+6-field (seconds-precision): prepend a seconds field, e.g. `0 0 * * * *` (every minute at :00).
+
+
+
+---
+
+
+
+## Governance and voting
+
+
+
+For democratic, club, and braintree networks, some operations (join, remove member) open a **vote round** instead of taking effect immediately.
+
+
+
+When a pending vote exists on a network, expand that network's card and scroll to the **Open votes** section. Each entry shows:
+
+
+
+- The operation type (`join` or `remove`) and the subject name
+
+- **✓ Yes** and **✗ No** buttons
+
+
+
+Cast your vote once on your own brain. Votes are propagated to all peers during the next sync cycle — you do not need to reach every brain directly.
+
+
+
+### How rounds conclude
+
+
+
+| Network type | Passes when |
+
+|---|---|
+
+| Democratic | More than half of current members vote yes (no vetoes) |
+
+| Club | N/A — admin adds and removes members directly without voting |
+
+| Closed | All current members vote yes |
+
+| Braintree | All ancestors of the proposer vote yes (see below) |
+
+
+
+A single **veto** (`no` vote) from any required voter immediately closes the round as failed, regardless of remaining yes votes.
+
+
+
+---
+
+
+
+## Braintree networks
+
+
+
+Braintree is a hierarchical governance model. Each brain has a fixed position in a parent–child tree. Governance decisions flow up the tree: the proposer and all ancestors up to the root must approve.
+
+
+
+### Setting up a braintree in the UI
+
+
+
+**Step 1 — Create the network on the root brain**
+
+
+
+On Brain A (Root): open **Settings → Networks**, create a network with type **Braintree**.
+
+
+
+**Step 2 — Invite Brain B as a direct child of Root**
+
+
+
+Still on Brain A:
+
+
+
+1. Expand the network card → **Generate invite** → copy bundle.
+
+2. Send bundle to Brain B's admin.
+
+
+
+On Brain B:
+
+
+
+1. **Settings → Networks → Join an existing network**.
+
+2. Paste the bundle, enter Brain B's URL, click **Join network**.
+
+3. Brain B is now a leaf node directly under Root.
+
+
+
+Because Root is a single-ancestor chain for this join, Brain A auto-approves and the join completes immediately.
+
+
+
+**Step 3 — Add a grandchild (requires Root approval)**
+
+
+
+On Brain B, invite Brain C the same way. When Brain C joins, the round needs approval from both Brain B and Brain A (Root). Brain B auto-casts yes. Root sees the vote round on the next sync cycle (or use **Sync now**). Open the network card on Root, find the vote under **Open votes**, and click **✓ Yes**.
+
+
+
+### How the ancestor-path rule works
+
+
+
+Every join or removal triggers a vote round on the **proposing brain**. Required voters are the proposing brain plus every ancestor up to the root:
+
+
+
+```
+
+Root  ← must vote yes
+
+  └── Node A  ← opened the round, auto-votes yes
+
+        └── Leaf B (candidate)
+
+```
+
+
+
+Root-level additions have a single required voter (Root itself), so Root auto-approves them → `201` response, no round opened.
+
+
+
+### Registering an existing network on a new brain (API)
+
+
+
+If you need to set up a brain as an intermediate node without using the join-via-invite flow, you can register the network via the API specifying `myParentInstanceId`:
+
+
+
+```json
+
+POST /api/networks
+
+{
+
+  "id": "<existing network id>",
+
+  "label": "Engineering team",
+
+  "type": "braintree",
+
+  "spaces": ["eng-kb"],
+
+  "myParentInstanceId": "<instanceId of parent brain>"
+
+}
+
+```
+
+
+
+---
+
+
+
+## Leaving a network
+
+
+
+Expand the network card and click **Leave network** at the bottom.
+
+
+
+This broadcasts a departure notification to all peers before removing the network locally. Your data in the network's spaces is kept — only the network config is removed.
+
+
+
+For braintree networks, a departing intermediate node partitions its subtree. Leaves beneath it must wait for the parent to return or be re-admitted under a different parent.
+
+
+
+> **API reference:**
+
+> ```
+
+> DELETE /api/networks/:id
+
+> Authorization: Bearer <PAT>
+
+> ```
+
+
+
+---
+
+
+
+## Forking a network
+
+
+
+Forking creates a new independent network seeded from your local copy of the data. This is useful when you have been ejected or want to start a parallel network from a snapshot.
+
+
+
+Forking is available via the API only:
+
+
+
+```
+
+POST /api/networks/:id/fork
+
+Authorization: Bearer <PAT>
+
+Content-Type: application/json
+
+
+
+{
+
+  "label": "My fork",
+
+  "type": "closed",
+
+  "votingDeadlineHours": 24,
+
+  "spaces": ["space-id-1"]
+
+}
+
+```
+
+
+
+| Field | Required | Description |
+
+|---|---|---|
+
+| `label` | Yes | Human-readable name for the new network |
+
+| `type` | No | `closed` (default) or `club` |
+
+| `votingDeadlineHours` | No | Defaults to the source value, or 24 |
+
+| `spaces` | Conditional | Required if ejected (source network already removed); optional otherwise |
+
+
+
+**Scenarios:**
+
+
+
+- **Still a member** — `:id` matches a live network. Spaces and deadline are inherited; you can override both.
+
+- **Ejected** — when a `member_removed` event is received the source `NetworkConfig` is deleted and its id is recorded in `ejectedFromNetworks`. You **must** supply `spaces` explicitly because the source config is gone.
+
+- **Unknown id** — not in networks or `ejectedFromNetworks` → `404`.
+
+
+
+The fork gets a fresh UUID, no members, and no pending rounds. You become the implicit root and can invite peers via the normal generate-invite → join flow.
+
+
+
+---
+
+
+
+## Triggering sync manually
+
+
+
+Use the **Sync now** button inside any network card, or call the API directly:
+
+
+
+```
+
+POST /api/notify/trigger
+
+Authorization: Bearer <PAT>
+
+Content-Type: application/json
+
+
+
+{ "networkId": "<network id>" }
+
+```
+
+
+
+Returns `200 { "status": "triggered" }` immediately; the cycle runs asynchronously. Useful during governance flows when you want to push a just-cast vote or pull a peer's open rounds without waiting for the scheduled interval.
+
+
+
+---
+
+
+
+## Merkle integrity
+
+
+
+Each network can opt in to Merkle-based divergence detection. When enabled, the sync engine computes a SHA-256 binary Merkle tree over the contents of each shared space after every sync cycle and compares roots with the remote peer. A mismatch is logged as a `MERKLE_DIVERGENCE` warning — no automatic corrective action is taken.
+
+
+
+### Enabling Merkle for a network
+
+
+
+Add `"merkle": true` when creating or registering a network via the API:
+
+
+
+```json
+
+POST /api/networks
+
+{
+
+  "label": "My secure net",
+
+  "spaces": ["shared"],
+
+  "merkle": true
+
+}
+
+```
+
+
+
+### Querying the Merkle root
+
+
+
+```
+
+GET /api/sync/merkle?spaceId=<space id>&networkId=<network id>
+
+Authorization: Bearer <PAT>
+
+```
+
+
+
+Response:
+
+
+
+```json
+
+{
+
+  "spaceId": "shared",
+
+  "networkId": "<network id>",
+
+  "root": "<64-char hex SHA-256>",
+
+  "leafCount": 42,
+
+  "computedAt": "2025-01-01T00:00:00.000Z"
+
+}
+
+```
+
+
+
+| Field | Description |
+
+|-------|-------------|
+
+| `root` | SHA-256 Merkle root of all documents and files in the space. An empty space returns `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`. |
+
 | `leafCount` | Number of leaf nodes (documents + files) that were hashed. |
-| `computedAt` | ISO timestamp when the root was computed. |
 
-Returns `403` if the caller's PAT does not have access to the requested space (or the space does not exist).
+| `computedAt` | ISO timestamp when the root was last computed. |
 
-### Divergence warning
-
-When the sync engine detects that two peers' roots differ after sync, it emits a log line:
-
-```
-WARN [engine] MERKLE_DIVERGENCE spaceId=<id> networkId=<id> local=<hex> remote=<hex>
-```
-
-Common causes:
-- In-flight writes on either side that haven't replicated yet (transient — resolves on the next sync cycle)
-- A document was mutated directly in the database without going through the API (permanent until the document is written through the API again)
-- Data loss or corruption on one peer

@@ -67,14 +67,14 @@ export function startSyncScheduler(): void {
   for (const net of cfg.networks) {
     scheduleSyncForNetwork(net.id, net.syncSchedule);
   }
-  log.info(`Sync scheduler started (${cfg.networks.length} networks)`);
+  log.debug(`Sync scheduler started (${cfg.networks.length} networks)`);
 }
 
 /** Stop all scheduled timers */
 export function stopSyncScheduler(): void {
   for (const [id, timer] of _scheduledTimers) {
     clearInterval(timer);
-    log.info(`Sync scheduler stopped for network ${id}`);
+    log.debug(`Sync scheduler stopped for network ${id}`);
   }
   _scheduledTimers.clear();
 }

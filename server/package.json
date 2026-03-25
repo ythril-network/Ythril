@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "@ythril/server",
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
@@ -17,6 +17,7 @@
     "mongodb": "^7",
     "multer": "^2",
     "node-cron": "^4",
+    "otplib": "^13.4.0",
     "uuid": "^13",
     "zod": "^4"
   },

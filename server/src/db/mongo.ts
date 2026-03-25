@@ -7,12 +7,12 @@ const DB_NAME = 'ythril';
 
 export async function connectMongo(): Promise<MongoClient> {
   const uri = getMongoUri();
-  log.info(`Connecting to MongoDB at ${uri.replace(/\/\/.*@/, '//[credentials]@')}`);
+  log.debug(`Connecting to MongoDB at ${uri.replace(/\/\/.*@/, '//[credentials]@')}`);
   _client = new MongoClient(uri, {
     serverSelectionTimeoutMS: 10_000,
   });
   await _client.connect();
-  log.info('MongoDB connected');
+  log.debug('MongoDB connected');
   return _client;
 }
 

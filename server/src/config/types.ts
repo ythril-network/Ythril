@@ -7,6 +7,7 @@ export interface TokenRecord {
   lastUsed: string | null;
   expiresAt: string | null;
   spaces?: string[];    // allowlist of space IDs; omit = all spaces
+  admin: boolean;       // true = may access admin-gated routes
 }
 
 export interface SpaceConfig {
@@ -120,8 +121,8 @@ export interface Config {
 }
 
 export interface SecretsFile {
-  settingsPasswordHash: string;   // bcrypt hash of the settings UI password
   peerTokens: Record<string, string>;
+  totpSecret?: string;  // base32 TOTP secret; absent = MFA disabled
 }
 
 // ── MongoDB document shapes ────────────────────────────────────────────────
