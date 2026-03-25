@@ -41,9 +41,12 @@ Tokens are created during first-run setup or via `POST /api/tokens`. The plainte
 
 | Token Type | Access |
 |---|---|
-| Full-access | All spaces and all endpoints |
+| Full-access | All spaces, read + write |
 | Space-scoped | Only endpoints for listed spaces; admin routes blocked |
+| Read-only | Read/search only — all mutations (create, update, delete) blocked |
 | Admin | Full-access + admin-only routes (networks, tokens, config) |
+
+> A token **cannot** be both `admin` and `readOnly`.
 
 ### Auth Middleware Levels
 
@@ -53,6 +56,7 @@ Tokens are created during first-run setup or via `POST /api/tokens`. The plainte
 | `requireAdmin` | Token with `admin: true` |
 | `requireAdminMfa` | Admin token + MFA verified (if MFA enabled) |
 | `requireSpaceAuth` | Token with access to the `:spaceId` in the URL |
+| `denyReadOnly` | Applied on mutating routes — blocks `readOnly` tokens |
 
 ---
 
@@ -108,6 +112,8 @@ Retry-After: 42
 ## Brain API
 
 Base path: `/api/brain`
+
+> **Proxy spaces:** Read operations aggregate across all member spaces. Write operations require `?targetSpace=<member>` in the query string.
 
 ### Write a Memory
 
@@ -378,6 +384,8 @@ Re-computes all embeddings with the current model. Returns `202 Accepted`.
 
 Base path: `/api/files`
 
+> **Proxy spaces:** Read operations (GET) search across all member spaces. Write operations (POST, DELETE, PATCH, mkdir) require `?targetSpace=<member>` in the query string.
+
 ### Upload a File (raw bytes)
 
 ```
@@ -518,13 +526,55 @@ POST /api/spaces
 ```json
 {
   "id": "research",
-  "label": "Research Notes"
+  "label": "Research Notes",
+  "description": "Papers, notes, and findings from the AI research team."
 }
 ```
 
 `id` must match `^[a-z0-9-]+$`, max 40 chars. If omitted, auto-generated.
+`description` (max 2000 chars) is surfaced to MCP clients as space-level instructions, telling AI agents what this brain is about.
 
 **Response** `201`: the created space object.
+
+---
+
+### Create a Proxy Space
+
+A proxy space is a virtual space that groups multiple real spaces into a single endpoint. Reads aggregate across all member spaces; writes require a `targetSpace` parameter to specify the destination.
+
+```
+POST /api/spaces
+```
+
+```json
+{
+  "id": "all-research",
+  "label": "All Research",
+  "description": "Aggregated view of biology and physics research spaces.",
+  "proxyFor": ["bio-research", "physics-research"]
+}
+```
+
+**Rules:**
+- All `proxyFor` members must be existing real spaces (not proxies — nesting is not allowed).
+- Proxy spaces are virtual: no DB collections or file directories are created.
+- The calling token must have access to **all** member spaces.
+
+**Read operations** (GET memories, entities, edges, files, recall, query) aggregate results across all member spaces transparently.
+
+**Write operations** (POST memories, write_file, upsert_entity, etc.) require a `targetSpace` query parameter:
+
+```
+POST /api/brain/all-research/memories?targetSpace=bio-research
+```
+
+```json
+{ "fact": "CRISPR efficiency improved by 40% with new guide RNA design." }
+```
+
+The `targetSpace` must be one of the proxy's `proxyFor` members. Omitting it on a write returns `400`.
+
+**MCP**: When connected via MCP to a proxy space, read tools (`recall`, `query`, `read_file`, `list_dir`) aggregate automatically. Write tools (`remember`, `upsert_entity`, `write_file`, etc.) accept an optional `targetSpace` argument — required when the MCP endpoint is a proxy space.
 
 ---
 
@@ -585,6 +635,7 @@ POST /api/tokens
   "name": "MCP Agent",
   "spaces": ["general", "research"],
   "admin": false,
+  "readOnly": false,
   "expiresAt": "2027-01-01T00:00:00.000Z"
 }
 ```
@@ -1243,6 +1294,14 @@ Re-reads `config.json` from disk. Useful after manual edits.
 ## MCP (Model Context Protocol)
 
 Ythril exposes an MCP server via SSE for AI agent integration. Each connection is scoped to a single space.
+
+### Space Instructions
+
+If a space has a `description`, it is sent to the MCP client as `instructions` during the server handshake. This tells the AI agent what the brain space contains before it calls any tools — no need for the agent to "discover" the space's purpose by reading data first.
+
+### Read-Only Tokens
+
+When connecting with a `readOnly` token, mutating tools (`remember`, `upsert_entity`, `upsert_edge`, `write_file`, `delete_file`, `create_dir`, `move_file`, `sync_now`) are **hidden** from `tools/list` and rejected with an error if called directly. Read-only tools (`recall`, `recall_global`, `query`, `read_file`, `list_dir`, `list_peers`) work normally.
 
 ### Connecting
 

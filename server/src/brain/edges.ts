@@ -19,6 +19,7 @@ export async function upsertEdge(
   to: string,
   label: string,
   weight?: number,
+  type?: string,
 ): Promise<EdgeDoc> {
   const collection = col<EdgeDoc>(`${spaceId}_edges`);
   const existing = await collection.findOne({ spaceId, from, to, label } as never);
@@ -29,9 +30,9 @@ export async function upsertEdge(
   if (existing) {
     await collection.updateOne(
       { _id: (existing as EdgeDoc)._id } as never,
-      { $set: { ...(weight !== undefined ? { weight } : {}), seq } } as never,
+      { $set: { ...(weight !== undefined ? { weight } : {}), ...(type !== undefined ? { type } : {}), seq } } as never,
     );
-    return { ...(existing as EdgeDoc), seq, ...(weight !== undefined ? { weight } : {}) };
+    return { ...(existing as EdgeDoc), seq, ...(weight !== undefined ? { weight } : {}), ...(type !== undefined ? { type } : {}) };
   }
 
   const doc: EdgeDoc = {
@@ -40,6 +41,7 @@ export async function upsertEdge(
     from,
     to,
     label,
+    ...(type !== undefined ? { type } : {}),
     ...(weight !== undefined ? { weight } : {}),
     author: authorRef(),
     createdAt: now,

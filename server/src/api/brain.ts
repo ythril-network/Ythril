@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { requireSpaceAuth } from '../auth/middleware.js';
+import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { listMemories, deleteMemory, countMemories } from '../brain/memory.js';
 import { listEntities, deleteEntity } from '../brain/entities.js';
@@ -12,6 +12,7 @@ import { nextSeq } from '../util/seq.js';
 import { needsReindex, clearReindexFlag } from '../spaces/spaces.js';
 import { log } from '../util/log.js';
 import { checkQuota, QuotaError } from '../quota/quota.js';
+import { resolveMemberSpaces, resolveWriteTarget, findSpace } from '../spaces/proxy.js';
 import type { MemoryDoc } from '../config/types.js';
 
 export const brainRouter = Router();
@@ -20,13 +21,17 @@ export const brainRouter = Router();
 // These are the primary REST endpoints used by API clients and integration tests.
 
 // POST /api/brain/:spaceId/memories — create a memory
-brainRouter.post('/:spaceId/memories', globalRateLimit, requireSpaceAuth, async (req, res) => {
+brainRouter.post('/:spaceId/memories', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const cfg = getConfig();
   if (!cfg.spaces.some(s => s.id === spaceId)) {
     res.status(404).json({ error: `Space '${spaceId}' not found` });
     return;
   }
+  // Proxy space: resolve target space for write
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
+  if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+  const targetSpace = wt.target;
   const { fact, tags = [], entityIds = [] } = req.body ?? {};
   if (!fact || typeof fact !== 'string') {
     res.status(400).json({ error: '`fact` string required' });
@@ -61,11 +66,11 @@ brainRouter.post('/:spaceId/memories', globalRateLimit, requireSpaceAuth, async 
   } catch (err) {
     log.warn(`Embedding unavailable, storing without vector: ${err}`);
   }
-  const seq = await nextSeq(spaceId);
+  const seq = await nextSeq(targetSpace);
   const now = new Date().toISOString();
   const doc: MemoryDoc = {
     _id: uuidv4(),
-    spaceId,
+    spaceId: targetSpace,
     fact,
     embedding,
     tags: Array.isArray(tags) ? tags : [],
@@ -76,11 +81,21 @@ brainRouter.post('/:spaceId/memories', globalRateLimit, requireSpaceAuth, async 
     seq,
     embeddingModel,
   };
-  await col<MemoryDoc>(`${spaceId}_memories`).insertOne(doc as never);
+  await col<MemoryDoc>(`${targetSpace}_memories`).insertOne(doc as never);
   const body: Record<string, unknown> = { ...doc };
   if (quotaResult?.softBreached) body['storageWarning'] = true;
   res.status(201).json(body);
 });
+
+/** Build a MongoDB filter from `tag` and `entity` query params */
+function buildMemoryFilter(query: Record<string, unknown>): Record<string, unknown> {
+  const filter: Record<string, unknown> = {};
+  const tag = typeof query['tag'] === 'string' ? query['tag'] : undefined;
+  const entity = typeof query['entity'] === 'string' ? query['entity'] : undefined;
+  if (tag) filter['tags'] = { $regex: `^${tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' };
+  if (entity) filter['entityIds'] = entity;
+  return filter;
+}
 
 // GET /api/brain/:spaceId/memories — list memories
 brainRouter.get('/:spaceId/memories', globalRateLimit, requireSpaceAuth, async (req, res) => {
@@ -92,8 +107,10 @@ brainRouter.get('/:spaceId/memories', globalRateLimit, requireSpaceAuth, async (
   }
   const limit = Math.min(Number(req.query['limit'] ?? 100), 500);
   const skip = Number(req.query['skip'] ?? 0);
-  const docs = await listMemories(spaceId, {}, limit, skip);
-  res.json({ memories: docs, limit, skip });
+  const filter = buildMemoryFilter(req.query as Record<string, unknown>);
+  const memberIds = resolveMemberSpaces(spaceId);
+  const all = (await Promise.all(memberIds.map(mid => listMemories(mid, filter, limit, skip)))).flat();
+  res.json({ memories: all, limit, skip });
 });
 
 // GET /api/brain/:spaceId/memories/:id — get single memory
@@ -105,18 +122,23 @@ brainRouter.get('/:spaceId/memories/:id', globalRateLimit, requireSpaceAuth, asy
     res.status(404).json({ error: `Space '${spaceId}' not found` });
     return;
   }
-  const doc = await col<MemoryDoc>(`${spaceId}_memories`).findOne({ _id: id } as never) as MemoryDoc | null;
-  if (!doc) { res.status(404).json({ error: 'Memory not found' }); return; }
-  res.json(doc);
+  const memberIds = resolveMemberSpaces(spaceId);
+  for (const mid of memberIds) {
+    const doc = await col<MemoryDoc>(`${mid}_memories`).findOne({ _id: id } as never) as MemoryDoc | null;
+    if (doc) { res.json(doc); return; }
+  }
+  res.status(404).json({ error: 'Memory not found' });
 });
 
 // DELETE /api/brain/:spaceId/memories/:id — delete memory
-brainRouter.delete('/:spaceId/memories/:id', globalRateLimit, requireSpaceAuth, async (req, res) => {
+brainRouter.delete('/:spaceId/memories/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const id = req.params['id'] as string;
-  const ok = await deleteMemory(spaceId, id);
-  if (!ok) { res.status(404).json({ error: 'Memory not found' }); return; }
-  res.status(204).end();
+  const memberIds = resolveMemberSpaces(spaceId);
+  for (const mid of memberIds) {
+    if (await deleteMemory(mid, id)) { res.status(204).end(); return; }
+  }
+  res.status(404).json({ error: 'Memory not found' });
 });
 
 // GET /api/brain/spaces/:spaceId/stats
@@ -127,11 +149,15 @@ brainRouter.get('/spaces/:spaceId/stats', globalRateLimit, requireSpaceAuth, asy
     res.status(404).json({ error: `Space '${spaceId}' not found` });
     return;
   }
-  const [memories, entities, edges] = await Promise.all([
-    countMemories(spaceId),
-    col(`${spaceId}_entities`).countDocuments(),
-    col(`${spaceId}_edges`).countDocuments(),
-  ]);
+  const memberIds = resolveMemberSpaces(spaceId);
+  const counts = await Promise.all(memberIds.map(async mid => ({
+    memories: await countMemories(mid),
+    entities: await col(`${mid}_entities`).countDocuments(),
+    edges: await col(`${mid}_edges`).countDocuments(),
+  })));
+  const memories = counts.reduce((s, c) => s + c.memories, 0);
+  const entities = counts.reduce((s, c) => s + c.entities, 0);
+  const edges = counts.reduce((s, c) => s + c.edges, 0);
   res.json({ spaceId, memories, entities, edges });
 });
 
@@ -145,17 +171,21 @@ brainRouter.get('/spaces/:spaceId/memories', globalRateLimit, requireSpaceAuth, 
   }
   const limit = Math.min(Number(req.query['limit'] ?? 20), 100);
   const skip = Number(req.query['skip'] ?? 0);
-  const docs = await listMemories(spaceId, {}, limit, skip);
-  res.json({ memories: docs, limit, skip });
+  const filter = buildMemoryFilter(req.query as Record<string, unknown>);
+  const memberIds = resolveMemberSpaces(spaceId);
+  const all = (await Promise.all(memberIds.map(mid => listMemories(mid, filter, limit, skip)))).flat();
+  res.json({ memories: all, limit, skip });
 });
 
 // DELETE /api/brain/spaces/:spaceId/memories/:id
-brainRouter.delete('/spaces/:spaceId/memories/:id', globalRateLimit, requireSpaceAuth, async (req, res) => {
+brainRouter.delete('/spaces/:spaceId/memories/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const id = req.params['id'] as string;
-  const ok = await deleteMemory(spaceId, id);
-  if (!ok) { res.status(404).json({ error: 'Memory not found' }); return; }
-  res.status(204).end();
+  const memberIds = resolveMemberSpaces(spaceId);
+  for (const mid of memberIds) {
+    if (await deleteMemory(mid, id)) { res.status(204).end(); return; }
+  }
+  res.status(404).json({ error: 'Memory not found' });
 });
 
 // GET /api/brain/spaces/:spaceId/entities
@@ -168,17 +198,20 @@ brainRouter.get('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAuth, 
   }
   const limit = Math.min(Number(req.query['limit'] ?? 50), 200);
   const skip = Number(req.query['skip'] ?? 0);
-  const docs = await listEntities(spaceId, {}, limit, skip);
-  res.json({ entities: docs, limit, skip });
+  const memberIds = resolveMemberSpaces(spaceId);
+  const all = (await Promise.all(memberIds.map(mid => listEntities(mid, {}, limit, skip)))).flat();
+  res.json({ entities: all, limit, skip });
 });
 
 // DELETE /api/brain/spaces/:spaceId/entities/:id
-brainRouter.delete('/spaces/:spaceId/entities/:id', globalRateLimit, requireSpaceAuth, async (req, res) => {
+brainRouter.delete('/spaces/:spaceId/entities/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const id = req.params['id'] as string;
-  const ok = await deleteEntity(spaceId, id);
-  if (!ok) { res.status(404).json({ error: 'Entity not found' }); return; }
-  res.status(204).end();
+  const memberIds = resolveMemberSpaces(spaceId);
+  for (const mid of memberIds) {
+    if (await deleteEntity(mid, id)) { res.status(204).end(); return; }
+  }
+  res.status(404).json({ error: 'Entity not found' });
 });
 
 // GET /api/brain/spaces/:spaceId/edges
@@ -191,17 +224,20 @@ brainRouter.get('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, asy
   }
   const limit = Math.min(Number(req.query['limit'] ?? 50), 200);
   const skip = Number(req.query['skip'] ?? 0);
-  const docs = await listEdges(spaceId, {}, limit, skip);
-  res.json({ edges: docs, limit, skip });
+  const memberIds = resolveMemberSpaces(spaceId);
+  const all = (await Promise.all(memberIds.map(mid => listEdges(mid, {}, limit, skip)))).flat();
+  res.json({ edges: all, limit, skip });
 });
 
 // DELETE /api/brain/spaces/:spaceId/edges/:id
-brainRouter.delete('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAuth, async (req, res) => {
+brainRouter.delete('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const id = req.params['id'] as string;
-  const ok = await deleteEdge(spaceId, id);
-  if (!ok) { res.status(404).json({ error: 'Edge not found' }); return; }
-  res.status(204).end();
+  const memberIds = resolveMemberSpaces(spaceId);
+  for (const mid of memberIds) {
+    if (await deleteEdge(mid, id)) { res.status(204).end(); return; }
+  }
+  res.status(404).json({ error: 'Edge not found' });
 });
 
 // GET /api/brain/spaces/:spaceId/reindex-status
@@ -212,13 +248,15 @@ brainRouter.get('/spaces/:spaceId/reindex-status', globalRateLimit, requireSpace
     res.status(404).json({ error: `Space '${spaceId}' not found` });
     return;
   }
-  res.json({ spaceId, needsReindex: needsReindex(spaceId) });
+  const memberIds = resolveMemberSpaces(spaceId);
+  const needs = memberIds.some(mid => needsReindex(mid));
+  res.json({ spaceId, needsReindex: needs });
 });
 
 // POST /api/brain/spaces/:spaceId/reindex
 // Re-embeds all memories in a space using the currently configured model.
 // Long-running: may take minutes for large spaces. Progress is logged server-side.
-brainRouter.post('/spaces/:spaceId/reindex', globalRateLimit, requireSpaceAuth, async (req, res) => {
+brainRouter.post('/spaces/:spaceId/reindex', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const cfg = getConfig();
   if (!cfg.spaces.some(s => s.id === spaceId)) {
@@ -226,37 +264,42 @@ brainRouter.post('/spaces/:spaceId/reindex', globalRateLimit, requireSpaceAuth, 
     return;
   }
 
-  const BATCH = 50;
-  let skip = 0;
+  const memberIds = resolveMemberSpaces(spaceId);
   let reindexed = 0;
   let errors = 0;
 
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    const batch = await col<MemoryDoc>(`${spaceId}_memories`)
-      .find({}, { projection: { _id: 1, fact: 1 } })
-      .skip(skip)
-      .limit(BATCH)
-      .toArray();
+  for (const mid of memberIds) {
+    const BATCH = 50;
+    let skip = 0;
 
-    if (batch.length === 0) break;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const batch = await col<MemoryDoc>(`${mid}_memories`)
+        .find({}, { projection: { _id: 1, fact: 1 } })
+        .skip(skip)
+        .limit(BATCH)
+        .toArray();
 
-    for (const doc of batch) {
-      try {
-        const result = await embed(doc.fact);
-        await col<MemoryDoc>(`${spaceId}_memories`).updateOne(
-          { _id: doc._id },
-          { $set: { embedding: result.vector, embeddingModel: result.model } },
-        );
-        reindexed++;
-      } catch {
-        errors++;
+      if (batch.length === 0) break;
+
+      for (const doc of batch) {
+        try {
+          const result = await embed(doc.fact);
+          await col<MemoryDoc>(`${mid}_memories`).updateOne(
+            { _id: doc._id },
+            { $set: { embedding: result.vector, embeddingModel: result.model } },
+          );
+          reindexed++;
+        } catch {
+          errors++;
+        }
       }
+
+      skip += batch.length;
     }
 
-    skip += batch.length;
+    clearReindexFlag(mid);
   }
 
-  clearReindexFlag(spaceId);
   res.json({ spaceId, reindexed, errors });
 });

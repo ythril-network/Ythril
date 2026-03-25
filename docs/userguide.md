@@ -57,10 +57,9 @@ For the wire protocol see [sync-protocol.md](sync-protocol.md).
 17. [Leaving a network](#leaving-a-network)
 
 18. [Forking a network](#forking-a-network)
-
 19. [Triggering sync manually](#triggering-sync-manually)
-
-20. [Merkle integrity](#merkle-integrity)
+20. [Conflict resolution](#conflict-resolution)
+21. [Merkle integrity](#merkle-integrity)
 
 
 
@@ -221,7 +220,7 @@ Log in with your PAT at `http://localhost:3200`. The left navigation has four se
 
 |---------|--------------|
 
-| **Brain** | Store and search memories (semantic recall), manage entities and knowledge-graph edges |
+| **Brain** | Store and search memories (semantic recall), manage entities and knowledge-graph edges (with optional `type` classification) |
 
 | **Files** | Browse, upload, download, move, delete files within each space; resolve sync conflicts |
 
@@ -235,11 +234,13 @@ Every section is scoped to the spaces your token allows. A token with `spaces: [
 
 The token is stored in browser `localStorage` under the key `ythril_token`. Logging out clears it.
 
+### Knowledge-graph edges
 
+Edges connect two entities inside a space. Each edge has a `from` entity, a `to` entity, a `label` (the relationship name), an optional numeric `weight`, and an optional `type` string for classification (e.g. `causal`, `hierarchical`, `temporal`).
+
+The `type` field is visible in the **Brain → Edges** table in the UI and is accepted by both the REST API (`POST /api/brain/:spaceId/edges`) and the MCP `upsert_edge` tool. It syncs across networked brains like any other edge field.
 
 ---
-
-
 
 ## Token management
 
@@ -1174,6 +1175,69 @@ Content-Type: application/json
 
 
 Returns `200 { "status": "triggered" }` immediately; the cycle runs asynchronously. Useful during governance flows when you want to push a just-cast vote or pull a peer's open rounds without waiting for the scheduled interval.
+
+---
+
+## Conflict resolution
+
+When two instances modify the same file before syncing, the sync engine detects the hash mismatch and creates a **conflict record**. The incoming version is saved as a conflict copy alongside the original.
+
+### Viewing conflicts
+
+Open **Files → Conflicts** in the web UI, or call `GET /api/conflicts`.
+
+### Resolution actions
+
+Each conflict can be resolved with one of four actions:
+
+| Action | What happens |
+|--------|-------------|
+| **Keep local** | Deletes the conflict copy (incoming file). Your local file is unchanged. |
+| **Keep incoming** | Replaces your local file with the incoming copy. The conflict copy is removed. |
+| **Keep both** | Keeps both files as-is. Optionally rename the conflict copy via the `rename` parameter. |
+| **Save to space** | Copies the conflict copy to a different space, then removes it from the source. Requires `targetSpaceId`. |
+
+### API: resolve a single conflict
+
+```
+POST /api/conflicts/:id/resolve
+Authorization: Bearer <PAT>
+Content-Type: application/json
+
+{ "action": "keep-local" }
+```
+
+For `keep-both` with rename:
+```json
+{ "action": "keep-both", "rename": "notes-incoming.md" }
+```
+
+For `save-to-space`:
+```json
+{ "action": "save-to-space", "targetSpaceId": "archive" }
+```
+
+### API: bulk resolve
+
+```
+POST /api/conflicts/bulk-resolve
+Authorization: Bearer <PAT>
+Content-Type: application/json
+
+{
+  "ids": ["conflict-id-1", "conflict-id-2"],
+  "action": "keep-local"
+}
+```
+
+Returns `{ "resolved": 2, "failed": [] }`. Failed items include `{ "id": "...", "error": "..." }`.
+
+### UI workflow
+
+1. Navigate to **Files → Conflicts**.
+2. Select an action per conflict from the dropdown (Keep local · Keep incoming · Keep both · Save to space).
+3. Click **Resolve** per row, or select multiple and use the bulk action bar.
+4. The **Dismiss** button (✕) removes only the conflict record without touching files.
 
 
 

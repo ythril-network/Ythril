@@ -1,17 +1,20 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
 import { DatePipe, SlicePipe } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { ApiService, ConflictRecord } from '../../core/api.service';
 import { RouterLink } from '@angular/router';
+
+type ResolveAction = 'keep-local' | 'keep-incoming' | 'keep-both' | 'save-to-space';
 
 @Component({
   selector: 'app-conflicts',
   standalone: true,
-  imports: [DatePipe, SlicePipe, RouterLink],
+  imports: [DatePipe, SlicePipe, RouterLink, FormsModule],
   template: `
     <div class="page-header" style="display:flex; align-items:center; gap:12px;">
       <div>
         <h1 class="page-title">File Conflicts</h1>
-        <p class="page-subtitle">Files that diverged during sync. Download both versions, then dismiss.</p>
+        <p class="page-subtitle">Files that diverged during sync. Review and resolve each conflict.</p>
       </div>
       <span style="flex:1"></span>
       <a routerLink="/files" class="btn-secondary btn btn-sm">← Back to Files</a>
@@ -28,25 +31,51 @@ import { RouterLink } from '@angular/router';
     } @else {
       <div class="alert alert-warning" style="margin-bottom:16px;">
         {{ conflicts().length }} unresolved conflict{{ conflicts().length === 1 ? '' : 's' }}.
-        Each conflict preserves both versions — your local copy is unchanged.
-        Download the conflict copy if needed, then dismiss the record.
       </div>
+
+      <!-- Bulk action bar -->
+      @if (conflicts().length > 1) {
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px; padding:8px 12px; background:var(--bg-secondary); border-radius:8px;">
+          <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+            <input type="checkbox" [checked]="allSelected()" (change)="toggleSelectAll()"/>
+            <span style="font-size:13px">Select all</span>
+          </label>
+          <span style="flex:1"></span>
+          @if (selectedIds().length > 0) {
+            <select [(ngModel)]="bulkAction" style="font-size:13px; padding:4px 8px; border:1px solid var(--border-color); border-radius:4px; background:var(--bg-primary);">
+              <option value="keep-local">Keep local</option>
+              <option value="keep-incoming">Keep incoming</option>
+              <option value="keep-both">Keep both</option>
+            </select>
+            <button class="btn btn-sm btn-primary" (click)="bulkResolve()"
+                    [disabled]="bulkResolving()">
+              {{ bulkResolving() ? 'Resolving…' : 'Resolve ' + selectedIds().length + ' selected' }}
+            </button>
+          }
+        </div>
+      }
 
       <div class="table-wrapper">
         <table>
           <thead>
             <tr>
+              <th style="width:30px"></th>
               <th>Space</th>
-              <th>Your file (original)</th>
+              <th>Your file (local)</th>
               <th>Incoming copy (conflict)</th>
               <th>From peer</th>
               <th>Detected</th>
+              <th>Action</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             @for (c of conflicts(); track c.id) {
               <tr>
+                <td>
+                  <input type="checkbox" [checked]="selectedIds().includes(c.id)"
+                         (change)="toggleSelect(c.id)"/>
+                </td>
                 <td><span class="badge badge-blue mono">{{ c.spaceId }}</span></td>
                 <td class="mono" style="font-size:12px">{{ c.originalPath }}</td>
                 <td class="mono" style="font-size:12px; color:var(--text-muted)">{{ c.conflictPath }}</td>
@@ -58,26 +87,39 @@ import { RouterLink } from '@angular/router';
                 <td style="color:var(--text-muted); white-space:nowrap">
                   {{ c.detectedAt | date:'MMM d, y HH:mm' }}
                 </td>
+                <td>
+                  <select [(ngModel)]="conflictActions[c.id]"
+                          style="font-size:12px; padding:2px 6px; border:1px solid var(--border-color); border-radius:4px; background:var(--bg-primary);">
+                    <option value="keep-local">Keep local</option>
+                    <option value="keep-incoming">Keep incoming</option>
+                    <option value="keep-both">Keep both</option>
+                    <option value="save-to-space">Save to space…</option>
+                  </select>
+                  @if (conflictActions[c.id] === 'save-to-space') {
+                    <select [(ngModel)]="conflictTargetSpace[c.id]"
+                            style="margin-left:4px; font-size:12px; padding:2px 6px; border:1px solid var(--border-color); border-radius:4px; background:var(--bg-primary);">
+                      @for (s of spaces(); track s.id) {
+                        @if (s.id !== c.spaceId) {
+                          <option [value]="s.id">{{ s.label || s.id }}</option>
+                        }
+                      }
+                    </select>
+                  }
+                </td>
                 <td style="white-space:nowrap">
-                  <button class="btn-secondary btn btn-sm" (click)="dismiss(c)"
-                          [disabled]="dismissing() === c.id">
-                    {{ dismissing() === c.id ? '…' : 'Dismiss' }}
+                  <button class="btn-primary btn btn-sm" (click)="resolve(c)"
+                          [disabled]="resolving() === c.id">
+                    {{ resolving() === c.id ? '…' : 'Resolve' }}
                   </button>
+                  <button class="btn-secondary btn btn-sm" style="margin-left:4px"
+                          (click)="dismiss(c)" [disabled]="resolving() === c.id"
+                          title="Dismiss without file changes">✕</button>
                 </td>
               </tr>
             }
           </tbody>
         </table>
       </div>
-
-      @if (conflicts().length > 1) {
-        <div style="margin-top:16px; display:flex; justify-content:flex-end;">
-          <button class="btn-secondary btn btn-sm" (click)="dismissAll()"
-                  [disabled]="dismissingAll()">
-            {{ dismissingAll() ? 'Dismissing…' : 'Dismiss all' }}
-          </button>
-        </div>
-      }
     }
   `,
 })
@@ -86,45 +128,100 @@ export class ConflictsComponent implements OnInit {
 
   loading = signal(true);
   conflicts = signal<ConflictRecord[]>([]);
-  dismissing = signal<string | null>(null);
-  dismissingAll = signal(false);
+  resolving = signal<string | null>(null);
+  bulkResolving = signal(false);
+  selectedIds = signal<string[]>([]);
+  spaces = signal<{ id: string; label: string }[]>([]);
+
+  conflictActions: Record<string, ResolveAction> = {};
+  conflictTargetSpace: Record<string, string> = {};
+  bulkAction: ResolveAction = 'keep-local';
 
   ngOnInit(): void {
     this.load();
+    this.api.listSpaces().subscribe({
+      next: (r) => this.spaces.set(r.spaces || []),
+    });
+  }
+
+  allSelected(): boolean {
+    return this.conflicts().length > 0 && this.selectedIds().length === this.conflicts().length;
+  }
+
+  toggleSelectAll(): void {
+    if (this.allSelected()) {
+      this.selectedIds.set([]);
+    } else {
+      this.selectedIds.set(this.conflicts().map(c => c.id));
+    }
+  }
+
+  toggleSelect(id: string): void {
+    this.selectedIds.update(ids =>
+      ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]
+    );
   }
 
   private load(): void {
     this.loading.set(true);
     this.api.listConflicts().subscribe({
-      next: ({ conflicts }) => { this.conflicts.set(conflicts); this.loading.set(false); },
+      next: ({ conflicts }) => {
+        this.conflicts.set(conflicts);
+        for (const c of conflicts) {
+          if (!this.conflictActions[c.id]) this.conflictActions[c.id] = 'keep-local';
+        }
+        this.loading.set(false);
+      },
       error: () => this.loading.set(false),
     });
   }
 
-  dismiss(c: ConflictRecord): void {
-    this.dismissing.set(c.id);
-    this.api.resolveConflict(c.id).subscribe({
+  resolve(c: ConflictRecord): void {
+    const action = this.conflictActions[c.id] || 'keep-local';
+    const opts: { targetSpaceId?: string } = {};
+    if (action === 'save-to-space') {
+      opts.targetSpaceId = this.conflictTargetSpace[c.id];
+      if (!opts.targetSpaceId) { alert('Please select a target space.'); return; }
+    }
+    this.resolving.set(c.id);
+    this.api.resolveConflict(c.id, action, opts).subscribe({
       next: () => {
         this.conflicts.update(list => list.filter(x => x.id !== c.id));
-        this.dismissing.set(null);
+        this.selectedIds.update(ids => ids.filter(x => x !== c.id));
+        this.resolving.set(null);
       },
-      error: () => this.dismissing.set(null),
+      error: () => this.resolving.set(null),
     });
   }
 
-  dismissAll(): void {
-    if (!confirm(`Dismiss all ${this.conflicts().length} conflict records?`)) return;
-    this.dismissingAll.set(true);
-    const ids = this.conflicts().map(c => c.id);
-    let remaining = ids.length;
-    for (const id of ids) {
-      this.api.resolveConflict(id).subscribe({
-        next: () => {
-          this.conflicts.update(list => list.filter(x => x.id !== id));
-          if (--remaining === 0) this.dismissingAll.set(false);
-        },
-        error: () => { if (--remaining === 0) this.dismissingAll.set(false); },
-      });
-    }
+  dismiss(c: ConflictRecord): void {
+    this.resolving.set(c.id);
+    this.api.dismissConflict(c.id).subscribe({
+      next: () => {
+        this.conflicts.update(list => list.filter(x => x.id !== c.id));
+        this.selectedIds.update(ids => ids.filter(x => x !== c.id));
+        this.resolving.set(null);
+      },
+      error: () => this.resolving.set(null),
+    });
+  }
+
+  bulkResolve(): void {
+    const ids = this.selectedIds();
+    if (ids.length === 0) return;
+    if (!confirm(`Resolve ${ids.length} conflict${ids.length === 1 ? '' : 's'} with "${this.bulkAction}"?`)) return;
+    this.bulkResolving.set(true);
+    this.api.bulkResolveConflicts(ids, this.bulkAction).subscribe({
+      next: (r) => {
+        const resolvedSet = new Set(ids.filter(id => !r.failed.some(f => f.id === id)));
+        this.conflicts.update(list => list.filter(x => !resolvedSet.has(x.id)));
+        this.selectedIds.update(sel => sel.filter(x => !resolvedSet.has(x)));
+        this.bulkResolving.set(false);
+        if (r.failed.length > 0) {
+          alert(`${r.resolved} resolved, ${r.failed.length} failed:\n${r.failed.map(f => `${f.id}: ${f.error}`).join('\n')}`);
+        }
+      },
+      error: () => this.bulkResolving.set(false),
+    });
   }
 }

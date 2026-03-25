@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from 'express';
 import { findMatchingToken, touchToken } from './tokens.js';
 import { isMfaEnabled, verifyMfaCode } from './totp.js';
 import type { TokenRecord } from '../config/types.js';
+import { resolveMemberSpaces } from '../spaces/proxy.js';
 
 // Augment Express Request type
 declare global {
@@ -12,6 +13,18 @@ declare global {
       resolvedSpaceId?: string;
     }
   }
+}
+
+/**
+ * Middleware: rejects requests from read-only tokens.
+ * Must be placed after requireAuth / requireSpaceAuth on mutating routes.
+ */
+export function denyReadOnly(req: Request, res: Response, next: NextFunction): void {
+  if (req.authToken?.readOnly) {
+    res.status(403).json({ error: 'This token has read-only access' });
+    return;
+  }
+  next();
 }
 
 function extractBearer(req: Request): string | null {
@@ -72,9 +85,14 @@ export async function requireSpaceAuth(
   }
 
   const spaceId = req.params['spaceId'] as string | undefined;
-  if (record.spaces && spaceId && !record.spaces.includes(spaceId)) {
-    res.status(403).json({ error: `Token does not have access to space '${spaceId}'` });
-    return;
+  if (record.spaces && spaceId) {
+    // For proxy spaces, the token must have access to all member spaces
+    const memberIds = resolveMemberSpaces(spaceId);
+    const missing = memberIds.filter(sid => !record.spaces!.includes(sid));
+    if (missing.length > 0) {
+      res.status(403).json({ error: `Token does not have access to space '${spaceId}'` });
+      return;
+    }
   }
 
   const { hash: _h, ...safeRecord } = record;

@@ -103,6 +103,7 @@ export async function createToken(opts: {
   expiresAt?: string | null;
   spaces?: string[];
   admin?: boolean;
+  readOnly?: boolean;
 }): Promise<{ record: TokenRecord; plaintext: string }> {
   const plaintext = generateToken();
   const hash = await hashToken(plaintext);
@@ -116,6 +117,7 @@ export async function createToken(opts: {
     expiresAt: opts.expiresAt ?? null,
     spaces: opts.spaces,
     admin: opts.admin ?? false,
+    readOnly: opts.readOnly ?? false,
   };
   const config = getConfig();
   config.tokens.push(record);

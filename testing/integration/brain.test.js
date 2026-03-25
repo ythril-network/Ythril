@@ -206,6 +206,163 @@ describe('Brain â€” edges CRUD (/api/brain/spaces/:spaceId/edges)', () => {
   });
 });
 
+// ── Edge type field ─────────────────────────────────────────────────────────
+
+describe('Brain — edge type field', () => {
+  const RUN = Date.now();
+
+  before(() => {
+    tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+  });
+
+  it('Edge with type field persists and returns in listing', async () => {
+    const { post: syncPost } = await import('../sync/helpers.js');
+    const edgeId = `typed-edge-${RUN}`;
+    const entFrom = `typed-from-${RUN}`;
+    const entTo = `typed-to-${RUN}`;
+
+    // Seed entities
+    await syncPost(INSTANCES.a, token(), '/api/sync/entities?spaceId=general', {
+      _id: entFrom, spaceId: 'general', name: `TypedFrom-${RUN}`, type: 'concept', tags: [],
+      seq: Date.now(), author: { instanceId: 'test', instanceLabel: 'Test' },
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    });
+    await syncPost(INSTANCES.a, token(), '/api/sync/entities?spaceId=general', {
+      _id: entTo, spaceId: 'general', name: `TypedTo-${RUN}`, type: 'concept', tags: [],
+      seq: Date.now() + 1, author: { instanceId: 'test', instanceLabel: 'Test' },
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    });
+
+    // Seed edge with type via sync endpoint
+    await syncPost(INSTANCES.a, token(), '/api/sync/edges?spaceId=general', {
+      _id: edgeId, spaceId: 'general', from: entFrom, to: entTo, label: 'causes',
+      type: 'causal', weight: 0.9,
+      seq: Date.now() + 2, author: { instanceId: 'test', instanceLabel: 'Test' },
+      createdAt: new Date().toISOString(),
+    });
+
+    // Verify it appears in listing with type field
+    const r = await get(INSTANCES.a, token(), '/api/brain/spaces/general/edges?limit=500');
+    assert.equal(r.status, 200);
+    const edge = r.body.edges.find(e => e._id === edgeId);
+    assert.ok(edge, 'Typed edge should appear in listing');
+    assert.equal(edge.type, 'causal', 'type field should be preserved');
+    assert.equal(edge.label, 'causes');
+    assert.equal(edge.weight, 0.9);
+  });
+
+  it('Edge without type field is unaffected', async () => {
+    const { post: syncPost } = await import('../sync/helpers.js');
+    const edgeId = `untyped-edge-${RUN}`;
+    const entFrom = `untyped-from-${RUN}`;
+    const entTo = `untyped-to-${RUN}`;
+
+    await syncPost(INSTANCES.a, token(), '/api/sync/entities?spaceId=general', {
+      _id: entFrom, spaceId: 'general', name: `UntypedFrom-${RUN}`, type: 'concept', tags: [],
+      seq: Date.now() + 10, author: { instanceId: 'test', instanceLabel: 'Test' },
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    });
+    await syncPost(INSTANCES.a, token(), '/api/sync/entities?spaceId=general', {
+      _id: entTo, spaceId: 'general', name: `UntypedTo-${RUN}`, type: 'concept', tags: [],
+      seq: Date.now() + 11, author: { instanceId: 'test', instanceLabel: 'Test' },
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    });
+
+    await syncPost(INSTANCES.a, token(), '/api/sync/edges?spaceId=general', {
+      _id: edgeId, spaceId: 'general', from: entFrom, to: entTo, label: 'related',
+      seq: Date.now() + 12, author: { instanceId: 'test', instanceLabel: 'Test' },
+      createdAt: new Date().toISOString(),
+    });
+
+    const r = await get(INSTANCES.a, token(), '/api/brain/spaces/general/edges?limit=500');
+    assert.equal(r.status, 200);
+    const edge = r.body.edges.find(e => e._id === edgeId);
+    assert.ok(edge, 'Untyped edge should appear in listing');
+    assert.equal(edge.type, undefined, 'type should be absent when not set');
+    assert.equal(edge.label, 'related');
+  });
+});
+
+// ── Memory list filtering ───────────────────────────────────────────────────
+
+describe('Brain — memory list filtering', () => {
+  const RUN = Date.now();
+  let tokenA;
+
+  // Seed 5 memories with distinct tags and entityIds
+  before(async () => {
+    tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+
+    const seeds = [
+      { _id: `filt-${RUN}-1`, fact: 'Alpha fact', tags: ['physics', 'science'], entityIds: ['ent-x'] },
+      { _id: `filt-${RUN}-2`, fact: 'Beta fact', tags: ['biology', 'science'], entityIds: ['ent-y'] },
+      { _id: `filt-${RUN}-3`, fact: 'Gamma fact', tags: ['physics'], entityIds: ['ent-x', 'ent-y'] },
+      { _id: `filt-${RUN}-4`, fact: 'Delta fact', tags: ['history'], entityIds: [] },
+      { _id: `filt-${RUN}-5`, fact: 'Epsilon fact', tags: ['biology'], entityIds: ['ent-z'] },
+    ];
+
+    for (const s of seeds) {
+      await post(INSTANCES.a, tokenA, '/api/sync/memories?spaceId=general', {
+        ...s, spaceId: 'general', embedding: [],
+        seq: Date.now(), author: { instanceId: 'test', instanceLabel: 'Test' },
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
+      });
+    }
+  });
+
+  it('Filter by tag returns only matching memories', async () => {
+    const r = await get(INSTANCES.a, tokenA, '/api/brain/general/memories?tag=physics&limit=500');
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const ids = r.body.memories.map(m => m._id);
+    assert.ok(ids.includes(`filt-${RUN}-1`), 'Alpha (physics) should match');
+    assert.ok(ids.includes(`filt-${RUN}-3`), 'Gamma (physics) should match');
+    assert.ok(!ids.includes(`filt-${RUN}-2`), 'Beta (biology) should not match');
+    assert.ok(!ids.includes(`filt-${RUN}-4`), 'Delta (history) should not match');
+  });
+
+  it('Tag filter is case-insensitive', async () => {
+    const r = await get(INSTANCES.a, tokenA, '/api/brain/general/memories?tag=PHYSICS&limit=500');
+    assert.equal(r.status, 200);
+    const ids = r.body.memories.map(m => m._id);
+    assert.ok(ids.includes(`filt-${RUN}-1`), 'Should match physics despite uppercase query');
+  });
+
+  it('Filter by entity returns only linked memories', async () => {
+    const r = await get(INSTANCES.a, tokenA, '/api/brain/general/memories?entity=ent-y&limit=500');
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const ids = r.body.memories.map(m => m._id);
+    assert.ok(ids.includes(`filt-${RUN}-2`), 'Beta (ent-y) should match');
+    assert.ok(ids.includes(`filt-${RUN}-3`), 'Gamma (ent-x,ent-y) should match');
+    assert.ok(!ids.includes(`filt-${RUN}-1`), 'Alpha (ent-x only) should not match');
+    assert.ok(!ids.includes(`filt-${RUN}-4`), 'Delta (no entities) should not match');
+  });
+
+  it('Combine tag + entity returns intersection', async () => {
+    // tag=physics AND entity=ent-x → items 1 and 3
+    const r = await get(INSTANCES.a, tokenA, '/api/brain/general/memories?tag=physics&entity=ent-x&limit=500');
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const ids = r.body.memories.map(m => m._id);
+    assert.ok(ids.includes(`filt-${RUN}-1`), 'Alpha (physics + ent-x) should match');
+    assert.ok(ids.includes(`filt-${RUN}-3`), 'Gamma (physics + ent-x) should match');
+    assert.ok(!ids.includes(`filt-${RUN}-2`), 'Beta (biology + ent-y) should not match');
+  });
+
+  it('No filter returns all (at least our 5)', async () => {
+    const r = await get(INSTANCES.a, tokenA, '/api/brain/general/memories?limit=500');
+    assert.equal(r.status, 200);
+    const ids = r.body.memories.map(m => m._id);
+    for (let i = 1; i <= 5; i++) {
+      assert.ok(ids.includes(`filt-${RUN}-${i}`), `All seeded memories should appear (item ${i})`);
+    }
+  });
+
+  it('Filter with no matches returns empty array', async () => {
+    const r = await get(INSTANCES.a, tokenA, '/api/brain/general/memories?tag=nonexistent-tag-xyz&limit=500');
+    assert.equal(r.status, 200);
+    assert.equal(r.body.memories.length, 0, 'Should return empty array for non-matching filter');
+  });
+});
+
 // â”€â”€ Memory list pagination â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('Brain â€” memory list limit/skip pagination', () => {

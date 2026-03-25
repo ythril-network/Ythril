@@ -13,8 +13,10 @@ export const spacesRouter = Router();
 const CreateSpaceBody = z.object({
   id: z.string().min(1).max(40).regex(/^[a-z0-9-]+$/).optional(),
   label: z.string().min(1).max(200),
+  description: z.string().max(2000).optional(),
   folders: z.array(z.string()).optional(),
   minGiB: z.number().positive().optional(),
+  proxyFor: z.array(z.string().min(1).max(40)).min(1).optional(),
 });
 
 const DeleteSpaceBody = z.object({
@@ -24,8 +26,8 @@ const DeleteSpaceBody = z.object({
 // GET /api/spaces
 spacesRouter.get('/', globalRateLimit, requireAuth, async (_req, res) => {
   const cfg = getConfig();
-  const spaces = cfg.spaces.map(({ id, label, builtIn, folders, minGiB, flex }) => ({
-    id, label, builtIn, folders, minGiB, flex,
+  const spaces = cfg.spaces.map(({ id, label, builtIn, folders, minGiB, flex, description, proxyFor }) => ({
+    id, label, builtIn, folders, minGiB, flex, description, ...(proxyFor ? { proxyFor } : {}),
   }));
   // Include storage usage summary when quota is configured
   let storage: { usageGiB?: { files: number; brain: number; total: number }; limits?: typeof cfg.storage } | undefined;
@@ -47,10 +49,27 @@ spacesRouter.post('/', globalRateLimit, requireAdminMfa, async (req, res) => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-  const { id: rawId, label, folders, minGiB } = parsed.data;
+  const { id: rawId, label, description, folders, minGiB, proxyFor } = parsed.data;
   const id = rawId ?? slugify(label);
+
+  // Validate proxy members exist and are not themselves proxies
+  if (proxyFor) {
+    const cfg = getConfig();
+    for (const memberId of proxyFor) {
+      const member = cfg.spaces.find(s => s.id === memberId);
+      if (!member) {
+        res.status(400).json({ error: `Proxy member space '${memberId}' not found` });
+        return;
+      }
+      if (member.proxyFor) {
+        res.status(400).json({ error: `Proxy member '${memberId}' is itself a proxy space (nesting not allowed)` });
+        return;
+      }
+    }
+  }
+
   try {
-    const space = await createSpace({ id, label, folders, minGiB });
+    const space = await createSpace({ id, label, description, folders, minGiB, proxyFor });
     res.status(201).json({ space });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

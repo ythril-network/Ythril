@@ -40,6 +40,7 @@ export interface Memory {
   content?: string;
   fact?: string;
   tags?: string[];
+  entityIds?: string[];
   createdAt: string;
   seq: number;
   author?: { instanceId: string };
@@ -57,6 +58,7 @@ export interface Edge {
   from: string;
   to: string;
   label: string;
+  type?: string;
   weight?: number;
   createdAt: string;
 }
@@ -210,8 +212,10 @@ export class ApiService {
 
   // ── Brain — memories ──────────────────────────────────────────────────────
 
-  listMemories(spaceId: string, limit = 20, skip = 0): Observable<{ memories: Memory[]; limit: number; skip: number }> {
-    const params = new HttpParams().set('limit', limit).set('skip', skip);
+  listMemories(spaceId: string, limit = 20, skip = 0, filters?: { tag?: string; entity?: string }): Observable<{ memories: Memory[]; limit: number; skip: number }> {
+    let params = new HttpParams().set('limit', limit).set('skip', skip);
+    if (filters?.tag) params = params.set('tag', filters.tag);
+    if (filters?.entity) params = params.set('entity', filters.entity);
     return this.http.get<any>(`/api/brain/spaces/${spaceId}/memories`, { params });
   }
 
@@ -275,7 +279,15 @@ export class ApiService {
     return this.http.get<any>('/api/conflicts');
   }
 
-  resolveConflict(id: string): Observable<void> {
+  resolveConflict(id: string, action: string = 'keep-local', opts?: { rename?: string; targetSpaceId?: string }): Observable<{ status: string }> {
+    return this.http.post<{ status: string }>(`/api/conflicts/${id}/resolve`, { action, ...opts });
+  }
+
+  bulkResolveConflicts(ids: string[], action: string, opts?: { rename?: string; targetSpaceId?: string }): Observable<{ resolved: number; failed: { id: string; error: string }[] }> {
+    return this.http.post<any>('/api/conflicts/bulk-resolve', { ids, action, ...opts });
+  }
+
+  dismissConflict(id: string): Observable<void> {
     return this.http.delete<void>(`/api/conflicts/${id}`);
   }
 

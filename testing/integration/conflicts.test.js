@@ -129,7 +129,7 @@ describe('Conflicts API â€” CRUD', () => {
   });
 
   it('POST /api/conflicts/:id/resolve returns 404 for unknown id', async () => {
-    const r = await post(INSTANCES.a, tokenA, '/api/conflicts/nonexistent-conflict-id/resolve', {});
+    const r = await post(INSTANCES.a, tokenA, '/api/conflicts/nonexistent-conflict-id/resolve', { action: 'keep-local' });
     assert.equal(r.status, 404);
   });
 });
@@ -247,7 +247,7 @@ describe('Conflicts API â€” seeded via file sync hash mismatch', () => {
 
   it('POST /api/conflicts/:id/resolve returns 200 {status:resolved} and removes the record', async function() {
     if (!conflictId) return;
-    const r = await post(INSTANCES.a, tokenA, `/api/conflicts/${conflictId}/resolve`, {});
+    const r = await post(INSTANCES.a, tokenA, `/api/conflicts/${conflictId}/resolve`, { action: 'keep-local' });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.status, 'resolved');
 

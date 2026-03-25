@@ -10,6 +10,7 @@ import { globalRateLimit } from '../rate-limit/middleware.js';
 import { getConfig } from '../config/loader.js';
 import { log } from '../util/log.js';
 import { checkQuota, QuotaError } from '../quota/quota.js';
+import { resolveMemberSpaces, resolveWriteTarget, isProxySpace } from '../spaces/proxy.js';
 
 // Brain tools
 import { remember, recall, recallGlobal, queryBrain } from '../brain/memory.js';
@@ -28,16 +29,29 @@ import {
 // Session map: sessionId → transport
 const transports = new Map<string, SSEServerTransport>();
 
+const MUTATING_TOOLS = new Set([
+  'remember', 'upsert_entity', 'upsert_edge',
+  'write_file', 'delete_file', 'create_dir', 'move_file',
+  'sync_now',
+]);
+
 /** Create a MCP Server instance with all tools bound to the given space */
-function createMcpServer(spaceId: string, tokenSpaces?: string[]): Server {
+function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boolean): Server {
+  // Surface the space description as MCP instructions so AI clients know
+  // what this brain space is about *before* they make any tool calls.
+  const cfg = getConfig();
+  const spaceDesc = cfg.spaces.find(s => s.id === spaceId)?.description;
+  const instructions = spaceDesc
+    ? `Space "${spaceId}": ${spaceDesc}`
+    : undefined;
+
   const server = new Server(
     { name: 'ythril', version: '0.1.0' },
-    { capabilities: { tools: {} } },
+    { capabilities: { tools: {} }, ...(instructions ? { instructions } : {}) },
   );
 
   // ── tools/list ────────────────────────────────────────────────────────────
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [
+  const allTools = [
       {
         name: 'remember',
         description: 'Store a fact or memory in the knowledge graph with semantic embedding.',
@@ -55,6 +69,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[]): Server {
               items: { type: 'string' },
               description: 'Categorisation tags.',
             },
+            targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
           },
           required: ['fact'],
         },
@@ -114,6 +129,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[]): Server {
             name: { type: 'string', description: 'Entity name.' },
             type: { type: 'string', description: 'Entity type (person, place, concept, …).' },
             tags: { type: 'array', items: { type: 'string' } },
+            targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
           },
           required: ['name', 'type'],
         },
@@ -126,8 +142,8 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[]): Server {
           properties: {
             from: { type: 'string', description: 'Source entity ID.' },
             to: { type: 'string', description: 'Target entity ID.' },
-            label: { type: 'string', description: 'Relationship label (e.g. "works_at", "knows").' },
-            weight: { type: 'number', description: 'Optional edge weight (0–1).' },
+            label: { type: 'string', description: 'Relationship label (e.g. "works_at", "knows").' },            type: { type: 'string', description: 'Optional edge type (e.g. "causal", "attribution").' },            weight: { type: 'number', description: 'Optional edge weight (0–1).' },
+            targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
           },
           required: ['from', 'to', 'label'],
         },
@@ -151,6 +167,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[]): Server {
           properties: {
             path: { type: 'string', description: 'File path relative to the space root.' },
             content: { type: 'string', description: 'Text content to write.' },
+            targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
           },
           required: ['path', 'content'],
         },
@@ -176,6 +193,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[]): Server {
           type: 'object',
           properties: {
             path: { type: 'string', description: 'File path relative to the space root.' },
+            targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
           },
           required: ['path'],
         },
@@ -187,6 +205,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[]): Server {
           type: 'object',
           properties: {
             path: { type: 'string', description: 'Directory path relative to the space root.' },
+            targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
           },
           required: ['path'],
         },
@@ -199,6 +218,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[]): Server {
           properties: {
             src: { type: 'string', description: 'Source path.' },
             dst: { type: 'string', description: 'Destination path.' },
+            targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
           },
           required: ['src', 'dst'],
         },
@@ -226,13 +246,24 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[]): Server {
           required: [],
         },
       },
-    ],
+    ];
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: readOnly ? allTools.filter(t => !MUTATING_TOOLS.has(t.name)) : allTools,
   }));
 
   // ── tools/call ────────────────────────────────────────────────────────────
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
     const a = (args ?? {}) as Record<string, unknown>;
+
+    // Block mutating tools for read-only tokens
+    if (readOnly && MUTATING_TOOLS.has(name)) {
+      return {
+        content: [{ type: 'text' as const, text: 'Error: this token has read-only access' }],
+        isError: true,
+      };
+    }
 
     try {
       switch (name) {
@@ -243,17 +274,21 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[]): Server {
           const tags = Array.isArray(a['tags']) ? (a['tags'] as string[]) : [];
           const entityNames = Array.isArray(a['entities']) ? (a['entities'] as string[]) : [];
 
+          const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
+          if (!wt.ok) throw new Error(wt.error);
+          const ts = wt.target;
+
           // Quota check — throws QuotaError (caught below) on hard limit
           const remQuota = await checkQuota('brain');
 
           // Upsert entities and collect their IDs
           const entityIds: string[] = [];
           for (const eName of entityNames) {
-            const entity = await upsertEntity(spaceId, eName, 'entity', []);
+            const entity = await upsertEntity(ts, eName, 'entity', []);
             entityIds.push(entity._id);
           }
 
-          const mem = await remember(spaceId, fact, entityIds, tags);
+          const mem = await remember(ts, fact, entityIds, tags);
           const remText = `Stored memory (seq ${mem.seq}, ID ${mem._id}).`
             + (remQuota.softBreached ? `\n⚠️ Storage warning: ${remQuota.warning}` : '');
           return {
@@ -265,7 +300,11 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[]): Server {
           const query = String(a['query'] ?? '');
           if (!query.trim()) throw new Error('query must not be empty');
           const topK = typeof a['topK'] === 'number' ? a['topK'] : 10;
-          const results = await recall(spaceId, query, topK);
+          const memberIds = resolveMemberSpaces(spaceId);
+          const all = (await Promise.all(memberIds.map(mid => recall(mid, query, topK)))).flat();
+          // Sort by score descending and take topK
+          all.sort((x, y) => (y.score ?? 0) - (x.score ?? 0));
+          const results = all.slice(0, topK);
           return {
             content: [
               {
@@ -328,14 +367,17 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[]): Server {
               ? (a['projection'] as Record<string, unknown>)
               : undefined;
 
-          const docs = await queryBrain(
-            spaceId,
-            collName as 'memories' | 'entities' | 'edges',
-            filter,
-            projection,
-            limit,
-            maxTimeMS,
-          );
+          const memberIds = resolveMemberSpaces(spaceId);
+          const docs = (await Promise.all(memberIds.map(mid =>
+            queryBrain(
+              mid,
+              collName as 'memories' | 'entities' | 'edges',
+              filter,
+              projection,
+              limit,
+              maxTimeMS,
+            ),
+          ))).flat();
           return {
             content: [
               {
@@ -352,7 +394,9 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[]): Server {
           if (!eName.trim()) throw new Error('name must not be empty');
           if (!eType.trim()) throw new Error('type must not be empty');
           const tags = Array.isArray(a['tags']) ? (a['tags'] as string[]) : [];
-          const entity = await upsertEntity(spaceId, eName, eType, tags);
+          const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
+          if (!wt.ok) throw new Error(wt.error);
+          const entity = await upsertEntity(wt.target, eName, eType, tags);
           return {
             content: [{ type: 'text' as const, text: `Entity '${entity.name}' (${entity.type}) upserted (ID ${entity._id}).` }],
           };
@@ -366,7 +410,10 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[]): Server {
           if (!to) throw new Error('to must not be empty');
           if (!label) throw new Error('label must not be empty');
           const weight = typeof a['weight'] === 'number' ? a['weight'] : undefined;
-          const edge = await upsertEdge(spaceId, from, to, label, weight);
+          const edgeType = typeof a['type'] === 'string' ? a['type'] : undefined;
+          const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
+          if (!wt.ok) throw new Error(wt.error);
+          const edge = await upsertEdge(wt.target, from, to, label, weight, edgeType);
           return {
             content: [{ type: 'text' as const, text: `Edge '${label}' (${from} → ${to}) upserted (ID ${edge._id}).` }],
           };
@@ -376,7 +423,12 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[]): Server {
         case 'read_file': {
           const filePath = String(a['path'] ?? '');
           if (!filePath.trim()) throw new Error('path must not be empty');
-          const content = await readFile(spaceId, filePath);
+          const memberIds = resolveMemberSpaces(spaceId);
+          let content: string | null = null;
+          for (const mid of memberIds) {
+            try { content = await readFile(mid, filePath); break; } catch { /* try next */ }
+          }
+          if (content === null) throw new Error(`File not found: ${filePath}`);
           return { content: [{ type: 'text' as const, text: content }] };
         }
 
@@ -384,9 +436,11 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[]): Server {
           const filePath = String(a['path'] ?? '');
           const content = String(a['content'] ?? '');
           if (!filePath.trim()) throw new Error('path must not be empty');
+          const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
+          if (!wt.ok) throw new Error(wt.error);
           // Quota check — throws QuotaError (caught below) on hard limit
           const wfQuota = await checkQuota('files');
-          const { sha256 } = await writeFile(spaceId, filePath, content);
+          const { sha256 } = await writeFile(wt.target, filePath, content);
           const wfText = `Written (sha256: ${sha256}).`
             + (wfQuota.softBreached ? `\n⚠️ Storage warning: ${wfQuota.warning}` : '');
           return {
@@ -396,11 +450,21 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[]): Server {
 
         case 'list_dir': {
           const dirPath = String(a['path'] ?? '');
-          const entries = await listDir(spaceId, dirPath || '.');
+          const memberIds = resolveMemberSpaces(spaceId);
+          const seen = new Set<string>();
+          const allEntries: { name: string; type: 'file' | 'dir'; size?: number }[] = [];
+          for (const mid of memberIds) {
+            try {
+              const entries = await listDir(mid, dirPath || '.');
+              for (const e of entries) {
+                if (!seen.has(e.name)) { seen.add(e.name); allEntries.push(e); }
+              }
+            } catch { /* dir may not exist in this member */ }
+          }
           const text =
-            entries.length === 0
+            allEntries.length === 0
               ? '(empty directory)'
-              : entries
+              : allEntries
                   .map(e => `${e.type === 'dir' ? 'd' : 'f'}  ${e.name}${e.size != null ? `  (${e.size}B)` : ''}`)
                   .join('\n');
           return { content: [{ type: 'text' as const, text }] };
@@ -409,14 +473,18 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[]): Server {
         case 'delete_file': {
           const filePath = String(a['path'] ?? '');
           if (!filePath.trim()) throw new Error('path must not be empty');
-          await deleteFile(spaceId, filePath);
+          const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
+          if (!wt.ok) throw new Error(wt.error);
+          await deleteFile(wt.target, filePath);
           return { content: [{ type: 'text' as const, text: `Deleted '${filePath}'.` }] };
         }
 
         case 'create_dir': {
           const dirPath = String(a['path'] ?? '');
           if (!dirPath.trim()) throw new Error('path must not be empty');
-          await createDir(spaceId, dirPath);
+          const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
+          if (!wt.ok) throw new Error(wt.error);
+          await createDir(wt.target, dirPath);
           return { content: [{ type: 'text' as const, text: `Directory '${dirPath}' created.` }] };
         }
 
@@ -425,7 +493,9 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[]): Server {
           const dst = String(a['dst'] ?? '');
           if (!src.trim()) throw new Error('src must not be empty');
           if (!dst.trim()) throw new Error('dst must not be empty');
-          await moveFile(spaceId, src, dst);
+          const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
+          if (!wt.ok) throw new Error(wt.error);
+          await moveFile(wt.target, src, dst);
           return { content: [{ type: 'text' as const, text: `Moved '${src}' → '${dst}'.` }] };
         }
 
@@ -553,7 +623,7 @@ mcpRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, res) =
     log.debug(`MCP session ${transport.sessionId} closed (space: ${spaceId})`);
   });
 
-  const server = createMcpServer(spaceId, req.authToken?.spaces);
+  const server = createMcpServer(spaceId, req.authToken?.spaces, req.authToken?.readOnly);
   log.debug(`MCP session ${transport.sessionId} opened (space: ${spaceId})`);
   await server.connect(transport);
 });

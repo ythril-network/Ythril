@@ -21,7 +21,7 @@ import express, { Router } from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import fs from 'fs/promises';
 import path from 'path';
-import { requireSpaceAuth } from '../auth/middleware.js';
+import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { getConfig } from '../config/loader.js';
 import { log } from '../util/log.js';
@@ -38,6 +38,7 @@ import { resolveSafePath, spaceRoot } from '../files/sandbox.js';
 import { col } from '../db/mongo.js';
 import type { FileTombstoneDoc } from '../config/types.js';
 import { v4 as uuidv4 } from 'uuid';
+import { resolveMemberSpaces, resolveWriteTarget } from '../spaces/proxy.js';
 
 export const filesRouter = Router();
 
@@ -83,38 +84,66 @@ filesRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, res)
 
   const filePath = req.query['path'];
   const normalised = typeof filePath === 'string' && filePath.trim() ? filePath : '.';
+  const memberIds = resolveMemberSpaces(spaceId);
 
-  let absPath: string;
-  try {
-    absPath = resolveSafePath(spaceId, normalised);
-  } catch (err) {
-    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
-    return;
+  // Directory listing — aggregate across all member spaces
+  // Try to find the first member where the path resolves successfully
+  let foundMid: string | null = null;
+  let absPath = '';
+  let stat: Awaited<ReturnType<typeof fs.stat>> | null = null;
+
+  for (const mid of memberIds) {
+    try {
+      const p = resolveSafePath(mid, normalised);
+      const s = await fs.stat(p);
+      foundMid = mid;
+      absPath = p;
+      stat = s;
+      break;
+    } catch {
+      continue;
+    }
   }
 
-  let stat: Awaited<ReturnType<typeof fs.stat>>;
-  try {
-    stat = await fs.stat(absPath);
-  } catch {
+  if (!foundMid || !stat) {
+    // For directory listing at root, aggregate even if some members have no dir
+    if (normalised === '.') {
+      const allEntries: { name: string; type: 'file' | 'dir'; size?: number }[] = [];
+      const seen = new Set<string>();
+      for (const mid of memberIds) {
+        try {
+          const entries = await listDir(mid, normalised);
+          for (const e of entries) {
+            if (!seen.has(e.name)) { seen.add(e.name); allEntries.push(e); }
+          }
+        } catch { /* member may have no files dir */ }
+      }
+      res.json({ path: normalised, type: 'dir', entries: allEntries });
+      return;
+    }
     res.status(404).json({ error: 'Path not found' });
     return;
   }
 
   if (stat.isDirectory()) {
-    try {
-      const entries = await listDir(spaceId, normalised);
-      res.json({ path: normalised, type: 'dir', entries });
-    } catch (err) {
-      log.warn(`listDir error for space ${spaceId}, path ${normalised}: ${err}`);
-      res.status(500).json({ error: 'Failed to list directory' });
+    // Aggregate directory entries across all member spaces
+    const allEntries: { name: string; type: 'file' | 'dir'; size?: number }[] = [];
+    const seen = new Set<string>();
+    for (const mid of memberIds) {
+      try {
+        const entries = await listDir(mid, normalised);
+        for (const e of entries) {
+          if (!seen.has(e.name)) { seen.add(e.name); allEntries.push(e); }
+        }
+      } catch { /* dir may not exist in this member */ }
     }
+    res.json({ path: normalised, type: 'dir', entries: allEntries });
     return;
   }
 
-  // File download
+  // File download — serve from the first member that has it
   try {
-    const bytes = await readFileBytes(spaceId, normalised);
-    // Resolve Content-Type from extension (basic set)
+    const bytes = await readFileBytes(foundMid, normalised);
     const ext = path.extname(normalised).toLowerCase();
     const contentType = MIME_MAP[ext] ?? 'application/octet-stream';
     res
@@ -124,7 +153,7 @@ filesRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, res)
       .setHeader('X-Content-Type-Options', 'nosniff')
       .send(bytes);
   } catch (err) {
-    log.warn(`readFileBytes error for space ${spaceId}, path ${normalised}: ${err}`);
+    log.warn(`readFileBytes error for space ${foundMid}, path ${normalised}: ${err}`);
     res.status(500).json({ error: 'Failed to read file' });
   }
 });
@@ -134,6 +163,7 @@ filesRouter.post(
   '/:spaceId/mkdir',
   globalRateLimit,
   requireSpaceAuth,
+  denyReadOnly,
   async (req, res) => {
     const spaceId = req.params['spaceId'] as string;
     const cfg = getConfig();
@@ -142,18 +172,22 @@ filesRouter.post(
       return;
     }
 
+    const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
+    if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+    const targetSpace = wt.target;
+
     const dirPath = requireQueryPath(req, res);
     if (dirPath === null) return;
 
     try {
-      await createDir(spaceId, dirPath);
+      await createDir(targetSpace, dirPath);
       res.status(201).json({ created: dirPath });
     } catch (err) {
       if (err instanceof RangeError) {
         res.status(400).json({ error: err.message });
         return;
       }
-      log.warn(`createDir error for space ${spaceId}, path ${dirPath}: ${err}`);
+      log.warn(`createDir error for space ${targetSpace}, path ${dirPath}: ${err}`);
       res.status(500).json({ error: 'Failed to create directory' });
     }
   },
@@ -166,6 +200,7 @@ filesRouter.post(
   '/:spaceId',
   globalRateLimit,
   requireSpaceAuth,
+  denyReadOnly,
   enforceSizeLimit,
   // Raw-body capture for non-JSON content types
   (req: Request, res: Response, next: NextFunction): void => {
@@ -179,6 +214,10 @@ filesRouter.post(
       res.status(404).json({ error: `Space '${spaceId}' not found` });
       return;
     }
+
+    const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
+    if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+    const targetSpace = wt.target;
 
     const filePath = requireQueryPath(req, res);
     if (filePath === null) return;
@@ -219,11 +258,11 @@ filesRouter.post(
       }
 
       if (Buffer.isBuffer(req.body)) {
-        ({ sha256 } = await writeFileBytes(spaceId, filePath, req.body));
+        ({ sha256 } = await writeFileBytes(targetSpace, filePath, req.body));
       } else {
         const encoding = (req.body.encoding ?? 'utf8') as BufferEncoding;
         const buf = Buffer.from(req.body.content as string, encoding);
-        ({ sha256 } = await writeFileBytes(spaceId, filePath, buf));
+        ({ sha256 } = await writeFileBytes(targetSpace, filePath, buf));
       }
 
       const response: { path: string; sha256: string; storageWarning?: boolean } = { path: filePath, sha256 };
@@ -234,7 +273,7 @@ filesRouter.post(
         res.status(400).json({ error: err.message });
         return;
       }
-      log.warn(`writeFile error for space ${spaceId}, path ${filePath}: ${err}`);
+      log.warn(`writeFile error for space ${targetSpace}, path ${filePath}: ${err}`);
       res.status(500).json({ error: 'Failed to write file' });
     }
   },
@@ -242,7 +281,7 @@ filesRouter.post(
 
 // ── DELETE /api/files/:spaceId ────────────────────────────────────────────────
 // Deletes a file. Deleting a directory requires { confirm: true } in the JSON body.
-filesRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, res) => {
+filesRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const cfg = getConfig();
   if (!cfg.spaces.some(s => s.id === spaceId)) {
@@ -250,12 +289,16 @@ filesRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, r
     return;
   }
 
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
+  if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+  const targetSpace = wt.target;
+
   const filePath = requireQueryPath(req, res);
   if (filePath === null) return;
 
   let absPath: string;
   try {
-    absPath = resolveSafePath(spaceId, filePath);
+    absPath = resolveSafePath(targetSpace, filePath);
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
     return;
@@ -270,7 +313,6 @@ filesRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, r
   }
 
   if (stat.isDirectory()) {
-    // Require explicit confirmation before recursive delete
     if (!req.body || req.body.confirm !== true) {
       res.status(422).json({
         error:
@@ -278,53 +320,54 @@ filesRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, r
       });
       return;
     }
-    // Safety check: cannot delete the space root itself
-    if (absPath === spaceRoot(spaceId)) {
+    if (absPath === spaceRoot(targetSpace)) {
       res.status(400).json({ error: 'Cannot delete the space root directory.' });
       return;
     }
     try {
       await fs.rm(absPath, { recursive: true, force: false });
-      log.info(`Deleted directory ${absPath} (space: ${spaceId})`);
+      log.info(`Deleted directory ${absPath} (space: ${targetSpace})`);
       res.status(204).end();
     } catch (err) {
-      log.warn(`rm dir error for space ${spaceId}, path ${filePath}: ${err}`);
+      log.warn(`rm dir error for space ${targetSpace}, path ${filePath}: ${err}`);
       res.status(500).json({ error: 'Failed to delete directory' });
     }
     return;
   }
 
-  // Regular file
   try {
-    await deleteFile(spaceId, filePath);
-    // Write a file tombstone so peers can replicate the deletion on their next sync.
+    await deleteFile(targetSpace, filePath);
     const tombstone: FileTombstoneDoc = {
       _id: uuidv4(),
-      spaceId,
+      spaceId: targetSpace,
       path: filePath.replace(/\\/g, '/'),
       deletedAt: new Date().toISOString(),
     };
-    await col<FileTombstoneDoc>(`${spaceId}_file_tombstones`).insertOne(tombstone as never);
+    await col<FileTombstoneDoc>(`${targetSpace}_file_tombstones`).insertOne(tombstone as never);
     res.status(204).end();
   } catch (err) {
     if (err instanceof RangeError) {
       res.status(400).json({ error: err.message });
       return;
     }
-    log.warn(`deleteFile error for space ${spaceId}, path ${filePath}: ${err}`);
+    log.warn(`deleteFile error for space ${targetSpace}, path ${filePath}: ${err}`);
     res.status(500).json({ error: 'Failed to delete file' });
   }
 });
 
 // ── PATCH /api/files/:spaceId ─────────────────────────────────────────────────
 // Move/rename a file or directory. Body: { destination: string }
-filesRouter.patch('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, res) => {
+filesRouter.patch('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const cfg = getConfig();
   if (!cfg.spaces.some(s => s.id === spaceId)) {
     res.status(404).json({ error: `Space '${spaceId}' not found` });
     return;
   }
+
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
+  if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+  const targetSpace = wt.target;
 
   const srcPath = requireQueryPath(req, res);
   if (srcPath === null) return;
@@ -336,14 +379,14 @@ filesRouter.patch('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, re
   }
 
   try {
-    await moveFile(spaceId, srcPath, destination);
+    await moveFile(targetSpace, srcPath, destination);
     res.json({ from: srcPath, to: destination });
   } catch (err) {
     if (err instanceof RangeError) {
       res.status(400).json({ error: err.message });
       return;
     }
-    log.warn(`moveFile error for space ${spaceId}, ${srcPath} → ${destination}: ${err}`);
+    log.warn(`moveFile error for space ${targetSpace}, ${srcPath} → ${destination}: ${err}`);
     res.status(500).json({ error: 'Failed to move path' });
   }
 });

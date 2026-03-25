@@ -187,8 +187,10 @@ export async function ensureGeneralSpace(): Promise<void> {
 export async function createSpace(opts: {
   id: string;
   label: string;
+  description?: string;
   folders?: string[];
   minGiB?: number;
+  proxyFor?: string[];
 }): Promise<SpaceConfig> {
   const cfg = getConfig();
   if (cfg.spaces.some(s => s.id === opts.id)) {
@@ -200,10 +202,15 @@ export async function createSpace(opts: {
     builtIn: false,
     folders: opts.folders ?? [],
     minGiB: opts.minGiB,
+    description: opts.description,
+    ...(opts.proxyFor ? { proxyFor: opts.proxyFor } : {}),
   };
   cfg.spaces.push(space);
   saveConfig(cfg);
-  await initSpace(opts.id);
+  // Proxy spaces are virtual — no DB collections or file directory needed
+  if (!opts.proxyFor) {
+    await initSpace(opts.id);
+  }
   return space;
 }
 

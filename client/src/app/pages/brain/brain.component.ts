@@ -105,6 +105,45 @@ interface SpaceView {
     }
 
     .memory-meta time { font-size: 11px; color: var(--text-muted); }
+
+    .filter-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: var(--bg-surface);
+    }
+    .filter-bar-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .filter-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 10px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 500;
+      border: 1px solid var(--accent);
+      background: var(--accent-dim);
+      color: var(--accent);
+    }
+    .filter-chip button {
+      background: none;
+      border: none;
+      color: var(--accent);
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      padding: 0 2px;
+    }
+    .tag-clickable, .entity-clickable {
+      cursor: pointer;
+      transition: opacity var(--transition);
+    }
+    .tag-clickable:hover, .entity-clickable:hover { opacity: 0.7; }
   `],
   template: `
     <div class="page-header">
@@ -160,6 +199,20 @@ interface SpaceView {
 
         <!-- Memories -->
         @if (activeTab() === 'memories') {
+
+          @if (filterTag() || filterEntity()) {
+            <div class="filter-bar">
+              <span class="filter-bar-label">Filters</span>
+              @if (filterTag(); as tag) {
+                <span class="filter-chip">tag: {{ tag }} <button (click)="clearFilter('tag')">✕</button></span>
+              }
+              @if (filterEntity(); as ent) {
+                <span class="filter-chip">entity: {{ ent }} <button (click)="clearFilter('entity')">✕</button></span>
+              }
+              <button class="btn-secondary btn btn-sm" (click)="clearFilter('all')">Clear all</button>
+            </div>
+          }
+
           <div class="content-header">
             <span style="font-size:13px; color:var(--text-secondary);">
               Showing {{ memories().length }} memories (skip {{ skip() }})
@@ -174,7 +227,10 @@ interface SpaceView {
               <div class="memory-content">{{ mem.content ?? mem.fact }}</div>
               <div class="memory-meta">
                 @for (tag of (mem.tags ?? []); track tag) {
-                  <span class="tag">{{ tag }}</span>
+                  <span class="tag tag-clickable" (click)="applyFilter('tag', tag)">{{ tag }}</span>
+                }
+                @for (eid of (mem.entityIds ?? []); track eid) {
+                  <span class="badge badge-purple entity-clickable" (click)="applyFilter('entity', eid)">{{ eid }}</span>
                 }
                 <span style="flex:1"></span>
                 <time>{{ mem.createdAt | date:'MMM d, y HH:mm' }}</time>
@@ -230,7 +286,7 @@ interface SpaceView {
             <table>
               <thead>
                 <tr>
-                  <th>From</th><th>Relation</th><th>To</th><th>Weight</th><th>Created</th><th></th>
+                  <th>From</th><th>Relation</th><th>Type</th><th>To</th><th>Weight</th><th>Created</th><th></th>
                 </tr>
               </thead>
               <tbody>
@@ -238,13 +294,14 @@ interface SpaceView {
                   <tr>
                     <td class="mono" style="font-size:12px">{{ edge.from }}</td>
                     <td><span class="badge badge-blue">{{ edge.label }}</span></td>
+                    <td style="color:var(--text-muted); font-size:12px">{{ edge.type ?? '—' }}</td>
                     <td class="mono" style="font-size:12px">{{ edge.to }}</td>
                     <td style="color:var(--text-muted)">{{ edge.weight ?? '—' }}</td>
                     <td style="color:var(--text-muted)">{{ edge.createdAt | date:'MMM d, y' }}</td>
                     <td><button class="icon-btn danger" (click)="deleteEdge(edge._id)">✕</button></td>
                   </tr>
                 } @empty {
-                  <tr><td colspan="6">
+                  <tr><td colspan="7">
                     <div class="empty-state" style="padding:32px">
                       <div class="empty-state-icon">🕸️</div>
                       <h3>No edges</h3>
@@ -281,6 +338,8 @@ export class BrainComponent implements OnInit {
   entities = signal<Entity[]>([]);
   edges = signal<Edge[]>([]);
   skip = signal(0);
+  filterTag = signal('');
+  filterEntity = signal('');
 
   activeStats = computed(() =>
     this.spaces().find(sv => sv.space.id === this.activeSpaceId())?.stats,
@@ -302,6 +361,8 @@ export class BrainComponent implements OnInit {
   selectSpace(id: string): void {
     this.activeSpaceId.set(id);
     this.skip.set(0);
+    this.filterTag.set('');
+    this.filterEntity.set('');
     this.loadStats(id);
     this.loadCurrentTab(id);
   }
@@ -309,6 +370,8 @@ export class BrainComponent implements OnInit {
   setTab(tab: BrainTab): void {
     this.activeTab.set(tab);
     this.skip.set(0);
+    this.filterTag.set('');
+    this.filterEntity.set('');
     this.loadCurrentTab(this.activeSpaceId());
   }
 
@@ -337,12 +400,16 @@ export class BrainComponent implements OnInit {
     this.loading.set(true);
 
     switch (this.activeTab()) {
-      case 'memories':
-        this.api.listMemories(spaceId, this.pageSize, this.skip()).subscribe({
+      case 'memories': {
+        const filters: { tag?: string; entity?: string } = {};
+        if (this.filterTag()) filters.tag = this.filterTag();
+        if (this.filterEntity()) filters.entity = this.filterEntity();
+        this.api.listMemories(spaceId, this.pageSize, this.skip(), filters).subscribe({
           next: ({ memories }) => { this.memories.set(memories); this.loading.set(false); },
           error: () => this.loading.set(false),
         });
         break;
+      }
       case 'entities':
         this.api.listEntities(spaceId).subscribe({
           next: ({ entities }) => { this.entities.set(entities); this.loading.set(false); },
@@ -356,6 +423,20 @@ export class BrainComponent implements OnInit {
         });
         break;
     }
+  }
+
+  applyFilter(type: 'tag' | 'entity', value: string): void {
+    if (type === 'tag') this.filterTag.set(value);
+    else this.filterEntity.set(value);
+    this.skip.set(0);
+    this.loadCurrentTab(this.activeSpaceId());
+  }
+
+  clearFilter(which: 'tag' | 'entity' | 'all'): void {
+    if (which === 'tag' || which === 'all') this.filterTag.set('');
+    if (which === 'entity' || which === 'all') this.filterEntity.set('');
+    this.skip.set(0);
+    this.loadCurrentTab(this.activeSpaceId());
   }
 
   deleteMemory(id: string): void {

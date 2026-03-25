@@ -8,6 +8,7 @@ export interface TokenRecord {
   expiresAt: string | null;
   spaces?: string[];    // allowlist of space IDs; omit = all spaces
   admin: boolean;       // true = may access admin-gated routes
+  readOnly?: boolean;   // true = read-only access; all mutations blocked
 }
 
 export interface SpaceConfig {
@@ -17,6 +18,8 @@ export interface SpaceConfig {
   folders: string[];
   minGiB?: number;
   flex?: number;
+  description?: string; // shown to MCP clients as space-level instructions
+  proxyFor?: string[];  // virtual proxy space — aggregates reads, routes writes to member spaces
 }
 
 export interface EmbeddingConfig {
@@ -165,6 +168,7 @@ export interface EdgeDoc {
   from: string;
   to: string;
   label: string;
+  type?: string;
   weight?: number;
   author: AuthorRef;
   createdAt: string;
