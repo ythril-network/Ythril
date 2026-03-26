@@ -76,9 +76,9 @@ To delete all memories in a space, click **Wipe all** in the toolbar. A confirma
 
 ### Entities
 
-Entities are named concepts inside a space (e.g. "Kubernetes", "Team Alpha"). Each entity has a `name`, an optional `type` (e.g. `technology`, `person`), and optional `tags`.
+Entities are named concepts inside a space (e.g. "Kubernetes", "Team Alpha"). Each entity has a `name`, an optional `type` (e.g. `technology`, `person`), optional `tags`, and optional `properties` — arbitrary key-value pairs where each value is a string, number, or boolean (e.g. `{"wheels": 4, "color": "red"}`).
 
-Click **+ Add entity** in the Entities tab to create one from the UI. Enter a name, optional type, and optional comma-separated tags, then click **Save**. If an entity with the same `(name, type)` already exists, tags are merged.
+Click **+ Add entity** in the Entities tab to create one from the UI. Enter a name, optional type, optional comma-separated tags, and optional properties as a JSON object, then click **Save**. If an entity with the same `(name, type)` already exists, tags are merged and properties are shallow-merged (new keys added, existing keys overwritten).
 
 ### Edges
 
@@ -396,7 +396,7 @@ If a space has a `description`, it is sent to the MCP client as `instructions` d
 | `recall` | Semantic search within the current space |
 | `recall_global` | Semantic search across all accessible spaces |
 | `query` | Structured filter query (read-only) |
-| `upsert_entity` | Create or update a named entity |
+| `upsert_entity` | Create or update a named entity (with optional properties) |
 | `upsert_edge` | Create or update a directed relationship |
 | `read_file` | Read a file from the space |
 | `write_file` | Write a file to the space |

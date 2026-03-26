@@ -53,6 +53,8 @@ export interface Entity {
   _id: string;
   name: string;
   type?: string;
+  tags?: string[];
+  properties?: Record<string, string | number | boolean>;
   createdAt: string;
 }
 
@@ -272,7 +274,7 @@ export class ApiService {
     return this.http.delete<void>(`/api/brain/spaces/${spaceId}/entities/${id}`);
   }
 
-  createEntity(spaceId: string, body: { name: string; type?: string; tags?: string[] }): Observable<Entity> {
+  createEntity(spaceId: string, body: { name: string; type?: string; tags?: string[]; properties?: Record<string, string | number | boolean> }): Observable<Entity> {
     return this.http.post<Entity>(`/api/brain/spaces/${spaceId}/entities`, body);
   }
 

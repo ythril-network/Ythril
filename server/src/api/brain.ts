@@ -238,7 +238,7 @@ brainRouter.post('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAuth,
   }
   const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
-  const { name, type = '', tags = [] } = req.body ?? {};
+  const { name, type = '', tags = [], properties = {} } = req.body ?? {};
   if (!name || typeof name !== 'string') {
     res.status(400).json({ error: '`name` string required' });
     return;
@@ -251,7 +251,17 @@ brainRouter.post('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAuth,
     res.status(400).json({ error: '`tags` must be an array of strings' });
     return;
   }
-  const entity = await upsertEntity(wt.target, name.trim(), type.trim(), tags);
+  if (typeof properties !== 'object' || properties === null || Array.isArray(properties)) {
+    res.status(400).json({ error: '`properties` must be a plain object' });
+    return;
+  }
+  for (const [k, v] of Object.entries(properties)) {
+    if (typeof k !== 'string' || (typeof v !== 'string' && typeof v !== 'number' && typeof v !== 'boolean')) {
+      res.status(400).json({ error: '`properties` values must be string, number, or boolean' });
+      return;
+    }
+  }
+  const entity = await upsertEntity(wt.target, name.trim(), type.trim(), tags, properties);
   res.status(201).json(entity);
 });
 

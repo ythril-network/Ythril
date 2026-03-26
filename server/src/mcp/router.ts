@@ -129,6 +129,11 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             name: { type: 'string', description: 'Entity name.' },
             type: { type: 'string', description: 'Entity type (person, place, concept, …).' },
             tags: { type: 'array', items: { type: 'string' } },
+            properties: {
+              type: 'object',
+              description: 'Key-value properties (e.g. {"wheels": 4, "color": "red"}). Values must be string, number, or boolean.',
+              additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
+            },
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
           },
           required: ['name', 'type'],
@@ -394,9 +399,12 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           if (!eName.trim()) throw new Error('name must not be empty');
           if (!eType.trim()) throw new Error('type must not be empty');
           const tags = Array.isArray(a['tags']) ? (a['tags'] as string[]) : [];
+          const props = (a['properties'] != null && typeof a['properties'] === 'object' && !Array.isArray(a['properties']))
+            ? (a['properties'] as Record<string, string | number | boolean>)
+            : {};
           const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
           if (!wt.ok) throw new Error(wt.error);
-          const entity = await upsertEntity(wt.target, eName, eType, tags);
+          const entity = await upsertEntity(wt.target, eName, eType, tags, props);
           return {
             content: [{ type: 'text' as const, text: `Entity '${entity.name}' (${entity.type}) upserted (ID ${entity._id}).` }],
           };

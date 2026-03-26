@@ -488,13 +488,14 @@ POST /api/brain/spaces/:spaceId/entities
 {
   "name": "Kubernetes",
   "type": "technology",
-  "tags": ["infra", "containers"]
+  "tags": ["infra", "containers"],
+  "properties": { "cncf": true, "version": "1.32" }
 }
 ```
 
-**Response** `201`: Full entity doc. Upserts on `(spaceId, name, type)` — tags are merged (deduplicated union).
+**Response** `201`: Full entity doc. Upserts on `(spaceId, name, type)` — tags are merged (deduplicated union), properties are shallow-merged (new keys added, existing keys overwritten).
 
-**Constraints**: `name` required string; `type` optional string (defaults to empty); `tags` optional array of strings.
+**Constraints**: `name` required string; `type` optional string (defaults to empty); `tags` optional array of strings; `properties` optional object where each value must be a string, number, or boolean.
 
 ---
 
@@ -1889,7 +1890,7 @@ Content-Type: application/json
 | `recall` | Semantic search within the current space |
 | `recall_global` | Semantic search across all accessible spaces |
 | `query` | Structured MongoDB filter query (read-only) |
-| `upsert_entity` | Create or update a named entity |
+| `upsert_entity` | Create or update a named entity (with optional properties) |
 | `upsert_edge` | Create or update a directed relationship |
 | `read_file` | Read a text file from the space file store |
 | `write_file` | Write a text file to the space file store |

@@ -1,10 +1,13 @@
-﻿{
+{
   "name": "ythril",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "license": "AGPL-3.0-only",
   "private": true,
   "type": "module",
-  "workspaces": ["server", "client"],
+  "workspaces": [
+    "server",
+    "client"
+  ],
   "scripts": {
     "dev": "npm run dev --workspace=server",
     "build": "npm run build --workspace=server && npm run build:prod --workspace=client",

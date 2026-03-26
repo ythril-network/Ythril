@@ -10,7 +10,7 @@ function authorRef() {
 }
 
 /**
- * Upsert an entity by (name + type). If it exists, updates tags and seq.
+ * Upsert an entity by (name + type). If it exists, updates tags, properties, and seq.
  * Returns the upserted document.
  */
 export async function upsertEntity(
@@ -18,6 +18,7 @@ export async function upsertEntity(
   name: string,
   type: string,
   tags: string[] = [],
+  properties: Record<string, string | number | boolean> = {},
 ): Promise<EntityDoc> {
   const collection = col<EntityDoc>(`${spaceId}_entities`);
   const existing = await collection.findOne({ spaceId, name, type } as never);
@@ -27,11 +28,12 @@ export async function upsertEntity(
 
   if (existing) {
     const updatedTags = Array.from(new Set([...((existing as EntityDoc).tags ?? []), ...tags]));
+    const mergedProps = { ...((existing as EntityDoc).properties ?? {}), ...properties };
     await collection.updateOne(
       { _id: (existing as EntityDoc)._id } as never,
-      { $set: { tags: updatedTags, updatedAt: now, seq } } as never,
+      { $set: { tags: updatedTags, properties: mergedProps, updatedAt: now, seq } } as never,
     );
-    return { ...(existing as EntityDoc), tags: updatedTags, updatedAt: now, seq };
+    return { ...(existing as EntityDoc), tags: updatedTags, properties: mergedProps, updatedAt: now, seq };
   }
 
   const doc: EntityDoc = {
@@ -40,6 +42,7 @@ export async function upsertEntity(
     name,
     type,
     tags,
+    properties,
     author: authorRef(),
     createdAt: now,
     updatedAt: now,

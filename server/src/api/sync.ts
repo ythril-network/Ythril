@@ -78,6 +78,7 @@ const IncomingEntityDoc = z.object({
   name: z.string().min(1),
   type: z.string().min(1),
   tags: z.array(z.string()).max(100),
+  properties: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({}),
   author: AuthorRefSchema,
   createdAt: z.string(),
   updatedAt: z.string(),

@@ -152,6 +152,75 @@ describe('Brain â€” entities CRUD (/api/brain/spaces/:spaceId/entities)', (
   });
 });
 
+// -- Entity properties ----------------------------------------------------------
+
+describe('Brain -- entity properties', () => {
+  const RUN = Date.now();
+
+  it('Create entity with properties returns them in response', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/entities', {
+      name: `PropTest-${RUN}`,
+      type: 'concept',
+      tags: [],
+      properties: { wheels: 4, color: 'red', electric: true },
+    });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.deepStrictEqual(r.body.properties, { wheels: 4, color: 'red', electric: true });
+  });
+
+  it('Upsert merges properties with existing', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/entities', {
+      name: `PropTest-${RUN}`,
+      type: 'concept',
+      tags: [],
+      properties: { seats: 5 },
+    });
+    assert.equal(r.status, 201);
+    assert.equal(r.body.properties.wheels, 4, 'existing property preserved');
+    assert.equal(r.body.properties.seats, 5, 'new property merged');
+    assert.equal(r.body.properties.color, 'red', 'unchanged property preserved');
+  });
+
+  it('Upsert overrides same-key property', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/entities', {
+      name: `PropTest-${RUN}`,
+      type: 'concept',
+      properties: { color: 'blue' },
+    });
+    assert.equal(r.status, 201);
+    assert.equal(r.body.properties.color, 'blue', 'property overridden');
+    assert.equal(r.body.properties.wheels, 4, 'other property untouched');
+  });
+
+  it('Entity without properties defaults to empty object', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/entities', {
+      name: `NoPropTest-${RUN}`,
+      type: 'misc',
+    });
+    assert.equal(r.status, 201);
+    assert.deepStrictEqual(r.body.properties, {});
+  });
+
+  it('Invalid properties value type returns 400', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/entities', {
+      name: `BadProp-${RUN}`,
+      type: 'misc',
+      properties: { nested: { a: 1 } },
+    });
+    assert.equal(r.status, 400);
+  });
+
+  it('Properties appear in entity listing', async () => {
+    const r = await get(INSTANCES.a, token(), '/api/brain/spaces/general/entities?limit=100');
+    assert.equal(r.status, 200);
+    const ent = r.body.entities.find(e => e.name === `PropTest-${RUN}`);
+    assert.ok(ent, 'entity found');
+    assert.equal(ent.properties.wheels, 4);
+    assert.equal(ent.properties.color, 'blue');
+  });
+});
+
+
 // â”€â”€ Edges CRUD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('Brain â€” edges CRUD (/api/brain/spaces/:spaceId/edges)', () => {

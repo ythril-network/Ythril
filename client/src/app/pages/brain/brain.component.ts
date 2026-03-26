@@ -371,6 +371,10 @@ interface SpaceView {
                 <label>Tags (comma-separated)</label>
                 <input type="text" [(ngModel)]="entityForm.tags" name="tags" placeholder="infra, devops" />
               </div>
+              <div class="field" style="flex:1; min-width:180px;">
+                <label>Properties (JSON)</label>
+                <input type="text" [(ngModel)]="entityForm.properties" name="properties" placeholder='{"wheels": 4, "color": "red"}' />
+              </div>
               <button class="btn-primary btn btn-sm" type="submit" [disabled]="creatingEntity() || !entityForm.name.trim()">
                 @if (creatingEntity()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
                 Save
@@ -386,7 +390,7 @@ interface SpaceView {
             <table>
               <thead>
                 <tr>
-                  <th>Name</th><th>Type</th><th>Created</th><th></th>
+                  <th>Name</th><th>Type</th><th>Properties</th><th>Created</th><th></th>
                 </tr>
               </thead>
               <tbody>
@@ -396,11 +400,14 @@ interface SpaceView {
                     <td>
                       @if (ent.type) { <span class="badge badge-purple">{{ ent.type }}</span> }
                     </td>
+                    <td style="font-size:12px; color:var(--text-muted); max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" [title]="formatProps(ent.properties)">
+                      {{ formatProps(ent.properties) }}
+                    </td>
                     <td style="color:var(--text-muted)">{{ ent.createdAt | date:'MMM d, y' }}</td>
                     <td><button class="icon-btn danger" aria-label="Delete entity" (click)="deleteEntity(ent._id)">✕</button></td>
                   </tr>
                 } @empty {
-                  <tr><td colspan="4">
+                  <tr><td colspan="5">
                     <div class="empty-state" style="padding:32px">
                       <div class="empty-state-icon">🏷️</div>
                       <h3>No entities</h3>
@@ -524,7 +531,7 @@ export class BrainComponent implements OnInit {
   showEntityForm = signal(false);
   creatingEntity = signal(false);
   createEntityError = signal('');
-  entityForm = { name: '', type: '', tags: '' };
+  entityForm = { name: '', type: '', tags: '', properties: '' };
 
   // Create edge form
   showEdgeForm = signal(false);
@@ -688,14 +695,23 @@ export class BrainComponent implements OnInit {
     this.creatingEntity.set(true);
     this.createEntityError.set('');
     const tags = this.entityForm.tags.split(',').map(s => s.trim()).filter(Boolean);
-    const body: { name: string; type?: string; tags?: string[] } = { name: this.entityForm.name.trim() };
+    const body: { name: string; type?: string; tags?: string[]; properties?: Record<string, string | number | boolean> } = { name: this.entityForm.name.trim() };
     if (this.entityForm.type.trim()) body.type = this.entityForm.type.trim();
     if (tags.length) body.tags = tags;
+    if (this.entityForm.properties.trim()) {
+      try {
+        body.properties = JSON.parse(this.entityForm.properties.trim());
+      } catch {
+        this.creatingEntity.set(false);
+        this.createEntityError.set('Properties must be valid JSON');
+        return;
+      }
+    }
     this.api.createEntity(this.activeSpaceId(), body).subscribe({
       next: () => {
         this.creatingEntity.set(false);
         this.showEntityForm.set(false);
-        this.entityForm = { name: '', type: '', tags: '' };
+        this.entityForm = { name: '', type: '', tags: '', properties: '' };
         this.loadStats(this.activeSpaceId());
         this.loadCurrentTab(this.activeSpaceId());
       },
@@ -749,5 +765,10 @@ export class BrainComponent implements OnInit {
       next: () => this.edges.update(list => list.filter(e => e._id !== id)),
       error: () => alert('Failed to delete edge.'),
     });
+  }
+
+  formatProps(props?: Record<string, string | number | boolean>): string {
+    if (!props || Object.keys(props).length === 0) return '—';
+    return Object.entries(props).map(([k, v]) => `${k}: ${v}`).join(', ');
   }
 }

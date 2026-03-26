@@ -156,6 +156,7 @@ export interface EntityDoc {
   name: string;
   type: string;
   tags: string[];
+  properties: Record<string, string | number | boolean>;
   author: AuthorRef;
   createdAt: string;
   updatedAt: string;
