@@ -670,7 +670,8 @@ GET /api/brain/spaces/:spaceId/stats
   "spaceId": "general",
   "memories": 1042,
   "entities": 156,
-  "edges": 89
+  "edges": 89,
+  "chrono": 23
 }
 ```
 

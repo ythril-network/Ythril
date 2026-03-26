@@ -18,6 +18,7 @@ import { mcpRouter } from './mcp/router.js';
 import { globalRateLimit } from './rate-limit/middleware.js';
 import { configExists, reloadConfig } from './config/loader.js';
 import { requireAuth } from './auth/middleware.js';
+import { clearTokenCache } from './auth/tokens.js';
 import { log } from './util/log.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -94,6 +95,8 @@ export function createApp() {
   app.post('/api/admin/reload-config', globalRateLimit, requireAuth, (_req, res) => {
     try {
       reloadConfig();
+      // Flush the bcrypt verification cache so revoked tokens take effect immediately
+      clearTokenCache();
       res.json({ ok: true });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

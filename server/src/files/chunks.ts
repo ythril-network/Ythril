@@ -71,8 +71,12 @@ export async function storeChunk(
   let received = 0;
   for (const name of entries) {
     if (!name.endsWith('.bin')) continue;
-    const stat = await fs.stat(path.join(dir, name));
-    received += stat.size;
+    try {
+      const stat = await fs.stat(path.join(dir, name));
+      received += stat.size;
+    } catch {
+      // Chunk may have been removed by concurrent cleanup — skip it
+    }
   }
 
   return { received, complete: received >= total };

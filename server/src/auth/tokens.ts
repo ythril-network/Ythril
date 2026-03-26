@@ -46,6 +46,12 @@ export function invalidateTokenCache(plaintext: string): void {
   _tokenCache.delete(plaintext);
 }
 
+/** Clear the entire token verification cache.
+ *  Called on config reload so revoked tokens aren't honoured from cache. */
+export function clearTokenCache(): void {
+  _tokenCache.clear();
+}
+
 /** Find the matching TokenRecord for a plaintext token (null if none) */
 export async function findMatchingToken(
   plaintext: string,

@@ -71,7 +71,9 @@ async function dirSizeBytes(dirPath: string): Promise<number> {
     }
     for (const e of entries) {
       const full = path.join(p, e.name);
-      if (e.isDirectory()) {
+      if (e.isSymbolicLink()) {
+        continue; // Skip symlinks to prevent quota inflation via external targets
+      } else if (e.isDirectory()) {
         await walk(full);
       } else {
         try { total += (await fs.stat(full)).size; } catch { /* skip */ }
