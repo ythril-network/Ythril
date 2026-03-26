@@ -7,24 +7,26 @@
 ## Table of Contents
 
 1. [Getting Ythril](#getting-ythril)
-2. [Authentication](#authentication)
-3. [Error Format](#error-format)
-4. [Rate Limits](#rate-limits)
-5. [Brain API](#brain-api) — memories, entities, edges, search, stats
-6. [Files API](#files-api) — upload, download, move, delete
-7. [Spaces API](#spaces-api) — create, list, delete
-8. [Tokens API](#tokens-api) — create, list, regenerate, revoke
-9. [Networks API](#networks-api) — create, join, members, voting
-10. [Invite API](#invite-api) — RSA peer handshake
-11. [Notify API](#notify-api) — peer events and sync triggers
-12. [Sync API](#sync-api) — change-feed, batch upsert, Merkle
-13. [MFA API](#mfa-api) — TOTP setup and verification
-14. [Conflicts API](#conflicts-api) — view and resolve sync conflicts
-15. [Setup API](#setup-api) — first-run setup
-16. [Admin API](#admin-api) — config reload
-17. [MCP (Model Context Protocol)](#mcp-model-context-protocol) — AI tool integration
-18. [Storage Quotas](#storage-quotas)
-19. [Pagination](#pagination)
+2. [Hosting](#hosting)
+3. [Authentication](#authentication)
+4. [Error Format](#error-format)
+5. [Rate Limits](#rate-limits)
+6. [Brain API](#brain-api) — memories, entities, edges, search, stats
+7. [Files API](#files-api) — upload, download, chunked upload, move, delete
+8. [Spaces API](#spaces-api) — create, list, delete, proxy spaces
+9. [Tokens API](#tokens-api) — create, list, regenerate, revoke
+10. [Networks API](#networks-api) — create, join, members, voting, sync history, fork
+11. [Invite API](#invite-api) — RSA peer handshake
+12. [Notify API](#notify-api) — peer events and sync triggers
+13. [Sync API](#sync-api) — change-feed, batch upsert, Merkle
+14. [MFA API](#mfa-api) — TOTP setup and verification
+15. [Conflicts API](#conflicts-api) — view and resolve sync conflicts
+16. [Setup API](#setup-api) — first-run setup
+17. [Admin API](#admin-api) — config reload
+18. [About API](#about-api) — instance info and logs
+19. [MCP (Model Context Protocol)](#mcp-model-context-protocol) — AI tool integration
+20. [Storage Quotas](#storage-quotas)
+21. [Pagination](#pagination)
 
 ---
 
@@ -47,17 +49,13 @@ Tags follow semver: `:latest`, `:0.1.0`, `:0.1`, `:0`. All images are multi-arch
 docker compose up -d
 ```
 
-The included `docker-compose.yml` pulls the GHCR image and starts Ythril + MongoDB. On first run, a setup code is printed to the container logs:
+The included `docker-compose.yml` pulls the GHCR image and starts Ythril + MongoDB. On first run, open `http://localhost:3200` — you'll be redirected to the setup page.
 
-```bash
-docker compose logs ythril
-```
-
-Complete setup via:
+Enter an instance label and complete setup:
 
 ```
 POST http://localhost:3200/api/setup/json
-{ "code": "<code-from-logs>", "label": "My Ythril" }
+{ "label": "My Ythril" }
 ```
 
 This returns your admin token. Store it — it is shown once.
@@ -72,6 +70,90 @@ GET http://localhost:3200/health
 ### Base URL
 
 All API paths in this guide are relative to `http://<host>:3200`. In production behind a reverse proxy, substitute your public URL.
+
+---
+
+## Hosting
+
+### Containers
+
+The Docker Compose stack runs two containers:
+
+| Container | Role |
+|-----------|------|
+| `ythril` | Brain server — REST API, MCP endpoints, Angular web UI (port 3200) |
+| `ythril-mongo` | MongoDB Atlas Local with `mongot` sidecar for `$vectorSearch` |
+
+On first start, MongoDB needs to elect a replica set primary (up to ~3 minutes). The server prints the startup banner when ready.
+
+### Startup Output
+
+**First run:**
+
+```
+  ythril  ·  first-run setup required
+
+  Open http://localhost:3200 to get started
+```
+
+**Configured:**
+
+```
+  ythril  ✓ ready  ·  http://localhost:3200
+```
+
+### Debug Logging
+
+```bash
+DEBUG=1 docker compose up
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CONFIG_PATH` | `/config/config.json` | Path to config file inside container |
+| `DATA_ROOT` | `/data` | Root directory for file storage |
+| `MONGO_URI` | `mongodb://ythril-mongo:27017/?directConnection=true` | MongoDB connection string |
+| `NODE_ENV` | `production` | Node environment |
+| `PORT` | `3200` | HTTP listen port |
+| `DEBUG` | (unset) | Set to `1` for verbose logging |
+
+### Data Persistence
+
+All persistent data lives in named Docker volumes:
+
+| Volume | Contents |
+|--------|----------|
+| `ythril-data` | File storage (`/data/{spaceId}/`) |
+| `ythril-mongo-data` | Brain data: memories, entities, edges, tombstones |
+| `ythril-mongo-configdb` | MongoDB replica set keyfile |
+
+The `config/` directory is a host bind mount — `config.json` and `secrets.json` are plain files that survive any container lifecycle event.
+
+```bash
+docker compose down        # stops containers — data intact
+docker compose up -d       # reattaches volumes — picks up where it left off
+docker compose down -v     # ⚠ permanently deletes all named volumes
+```
+
+### Running Multiple Brains
+
+Each brain is an independent Compose stack. To run two on one machine:
+
+```bash
+# Brain A — default, port 3200
+docker compose up -d
+
+# Brain B — separate project, port 3201
+docker compose -p ythril-b -f docker-compose.brain-b.yml up -d
+```
+
+Keep `config/` bind mounts separate per brain. Each goes through first-run setup independently and knows nothing about the other until explicitly networked.
+
+### Recovery After Downtime
+
+Networked brains reconnect automatically. On the next sync cycle after coming back up, each brain requests everything after its last recorded watermark. Tombstones propagate deletions that happened during downtime. No manual reconnection step required.
 
 ---
 
@@ -213,6 +295,17 @@ GET /api/brain/:spaceId/memories/:id
 GET /api/brain/:spaceId/memories?limit=100&skip=0
 ```
 
+Optional filters:
+
+| Parameter | Description |
+|-----------|-------------|
+| `tag` | Filter by tag (case-insensitive) |
+| `entity` | Filter by linked entity ID |
+| `limit` | Results per page (default 100, max 500) |
+| `skip` | Offset for pagination |
+
+Both `tag` and `entity` can be combined (AND logic). Results are sorted newest-first.
+
 **Response** `200`:
 
 ```json
@@ -350,9 +443,18 @@ POST /api/brain/:spaceId/edges
   "from": "entity-id-1",
   "to": "entity-id-2",
   "label": "depends_on",
-  "weight": 0.9
+  "weight": 0.9,
+  "type": "causal"
 }
 ```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `from` | yes | Source entity ID |
+| `to` | yes | Target entity ID |
+| `label` | yes | Relationship label (e.g. `depends_on`, `related_to`) |
+| `weight` | no | Numeric weight (0–1). Defaults to none. |
+| `type` | no | Free-form edge type string (e.g. `causal`, `hierarchical`). |
 
 **Response** `201`:
 
@@ -363,6 +465,7 @@ POST /api/brain/:spaceId/edges
   "to": "entity-id-2",
   "label": "depends_on",
   "weight": 0.9,
+  "type": "causal",
   "seq": 8
 }
 ```
@@ -462,6 +565,49 @@ Content-Type: application/json
   "encoding": "base64"
 }
 ```
+
+---
+
+### Chunked Upload (Content-Range)
+
+For files larger than 10 MB, split into chunks and send with `Content-Range`:
+
+```
+POST /api/files/:spaceId?path=large-file.zip
+Content-Type: application/octet-stream
+Content-Range: bytes 0-5242879/15728640
+Authorization: Bearer ythril_…
+
+<5 MB of raw bytes>
+```
+
+Intermediate chunks return **202**:
+
+```json
+{ "path": "large-file.zip", "received": 5242880 }
+```
+
+The final chunk (where `end === total - 1`) returns **201** with the full file hash:
+
+```json
+{ "path": "large-file.zip", "sha256": "a1b2c3..." }
+```
+
+Duplicate ranges are silently accepted (idempotent). The `maxUploadBodyBytes` config limit applies per-chunk, not per-file.
+
+### Check Upload Progress
+
+```
+GET /api/files/:spaceId/upload-status?path=large-file.zip&total=15728640
+```
+
+**Response** `200`:
+
+```json
+{ "received": 5242880 }
+```
+
+Resume by sending the next chunk from the `received` offset. Stale chunk directories (older than 24 hours) are automatically cleaned up.
 
 ---
 
@@ -903,6 +1049,69 @@ Executes the full 3-step RSA handshake server-side. No plaintext tokens cross th
 
 ---
 
+### Sync History
+
+```
+GET /api/networks/:id/sync-history?limit=20
+```
+
+**Response** `200`:
+
+```json
+{
+  "history": [
+    {
+      "_id": "...",
+      "networkId": "...",
+      "triggeredAt": "2026-03-26T12:00:00.000Z",
+      "completedAt": "2026-03-26T12:00:02.500Z",
+      "status": "success",
+      "pulled": { "memories": 5, "entities": 2, "edges": 1, "files": 0 },
+      "pushed": { "memories": 3, "entities": 0, "edges": 0, "files": 1 },
+      "errors": []
+    }
+  ]
+}
+```
+
+`limit` defaults to 20, max 100. Ordered most-recent-first. The last 100 records per network are retained; older entries are pruned automatically.
+
+---
+
+### Fork a Network
+
+```
+POST /api/networks/:id/fork
+```
+
+```json
+{
+  "label": "My fork",
+  "type": "closed",
+  "votingDeadlineHours": 24,
+  "spaces": ["space-id-1"]
+}
+```
+
+Creates a new independent network from your local copy of the data.
+
+| Field | Required | Description |
+|---|---|---|
+| `label` | Yes | Name for the new network |
+| `type` | No | `closed` (default) or `club` |
+| `votingDeadlineHours` | No | Defaults to source value, or 24 |
+| `spaces` | Conditional | Required if ejected; optional if still a member |
+
+**Scenarios:**
+
+- **Still a member** — spaces and deadline inherited from source; can be overridden.
+- **Ejected** — source config is deleted on `member_removed`; `spaces` must be supplied explicitly.
+- **Unknown ID** — `404`.
+
+The fork gets a fresh UUID, no members, no pending rounds. You become the root.
+
+---
+
 ## Invite API
 
 Base path: `/api/invite` — unauthenticated endpoints (rate-limited).
@@ -1302,12 +1511,11 @@ POST /api/setup/json
 
 ```json
 {
-  "code": "6934-2185-2CE9-B010",
   "label": "My Ythril"
 }
 ```
 
-The `code` is printed to server logs on first run. Used exactly once.
+The `label` names this brain instance.
 
 **Response** `201`:
 
@@ -1336,6 +1544,52 @@ Re-reads `config.json` from disk. Useful after manual edits.
 ```json
 { "ok": true }
 ```
+
+---
+
+## About API
+
+Base path: `/api/about` — requires auth.
+
+### Instance Info
+
+```
+GET /api/about
+```
+
+**Response** `200`:
+
+```json
+{
+  "instanceId": "a1b2c3d4-...",
+  "instanceLabel": "My Brain",
+  "version": "0.1.0",
+  "uptime": "3d 14h 22m",
+  "mongoVersion": "7.0.15",
+  "diskInfo": { "total": 107374182400, "used": 53687091200, "available": 53687091200 }
+}
+```
+
+### Server Logs
+
+```
+GET /api/about/logs?lines=200
+```
+
+**Response** `200`:
+
+```json
+{
+  "lines": [
+    "[2026-03-26T08:00:00.000Z] [INFO ] Server started on port 3200",
+    "..."
+  ]
+}
+```
+
+| Parameter | Default | Max | Description |
+|-----------|---------|-----|-------------|
+| `lines` | 200 | 1000 | Number of recent log lines (from in-memory ring buffer) |
 
 ---
 

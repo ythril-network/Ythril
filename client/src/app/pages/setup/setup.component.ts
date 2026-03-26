@@ -16,7 +16,7 @@ import { CommonModule } from '@angular/common';
           <span class="auth-logo-dot"></span>
           ythril
         </div>
-        <p class="auth-subtitle">First-run setup — check your server logs for the setup code.</p>
+        <p class="auth-subtitle">First-run setup</p>
 
         @if (done()) {
           <div class="alert alert-success">
@@ -39,20 +39,6 @@ import { CommonModule } from '@angular/common';
           }
 
           <form (ngSubmit)="submit()" #f="ngForm">
-            <div class="field">
-              <label for="code">Setup code</label>
-              <input
-                id="code"
-                type="password"
-                name="code"
-                [(ngModel)]="form.code"
-                placeholder="XXXX-XXXX-XXXX-XXXX"
-                autocomplete="off"
-                required
-                [disabled]="loading()"
-              />
-            </div>
-
             <div class="field">
               <label for="label">Instance label</label>
               <input
@@ -122,7 +108,7 @@ export class SetupComponent {
   private router = inject(Router);
   private auth = inject(AuthService);
 
-  form = { code: '', label: '', settingsPassword: '', confirm: '' };
+  form = { label: '', settingsPassword: '', confirm: '' };
   loading = signal(false);
   error = signal('');
   done = signal(false);
@@ -131,7 +117,6 @@ export class SetupComponent {
 
   canSubmit(): boolean {
     return !!(
-      this.form.code.trim() &&
       this.form.label.trim() &&
       this.form.settingsPassword.length >= 8 &&
       this.form.settingsPassword === this.form.confirm
@@ -145,7 +130,6 @@ export class SetupComponent {
 
     this.http
       .post<{ plaintext: string }>('/api/setup/json', {
-        code: this.form.code.trim().toUpperCase(),
         label: this.form.label.trim(),
         settingsPassword: this.form.settingsPassword,
       })

@@ -1,23 +1,11 @@
 ﻿import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { randomBytes } from 'crypto';
 import { authRateLimit } from '../rate-limit/middleware.js';
 import { configExists, saveConfig, saveSecrets, loadSecrets, loadConfig } from '../config/loader.js';
 import { ensureGeneralSpace } from '../spaces/spaces.js';
 import { createToken } from '../auth/tokens.js';
 import { log } from '../util/log.js';
 import type { Config, SecretsFile } from '../config/types.js';
-
-/** Ephemeral setup code — held in memory, cleared after setup completes */
-let pendingSetupCode: string | null = null;
-
-/** Generate and store a setup code for first-run */
-export function generateSetupCode(): string {
-  const code = randomBytes(8).toString('hex').toUpperCase();
-  // Format as XXXX-XXXX-XXXX-XXXX (4 groups of 4 hex chars)
-  pendingSetupCode = `${code.slice(0, 4)}-${code.slice(4, 8)}-${code.slice(8, 12)}-${code.slice(12, 16)}`;
-  return pendingSetupCode;
-}
 
 export const setupRouter = Router();
 
@@ -61,11 +49,8 @@ setupRouter.get('/', authRateLimit, (_req, res) => {
 <body>
   <div class="card">
     <h1>ythril</h1>
-    <p class="sub">First-run setup — check the server logs for your setup code.</p>
+    <p class="sub">First-run setup</p>
     <form method="POST" action="/setup" id="setupForm">
-      <label>Setup code</label>
-      <input type="password" name="code" id="code" autocomplete="off" placeholder="XXXX-XXXX-XXXX-XXXX" required>
-      <div class="field-hint" id="codeHint"></div>
       <label>Brain label</label>
       <input type="text" name="label" id="label" placeholder="My Brain" maxlength="100" required>
       <div class="field-hint" id="labelHint"></div>
@@ -73,11 +58,8 @@ setupRouter.get('/', authRateLimit, (_req, res) => {
     </form>
   </div>
   <script>
-    const code  = document.getElementById('code');
     const label = document.getElementById('label');
     const btn   = document.getElementById('submitBtn');
-
-    const codeHint  = document.getElementById('codeHint');
     const labelHint = document.getElementById('labelHint');
 
     function setHint(el, input, msg, ok) {
@@ -88,25 +70,12 @@ setupRouter.get('/', authRateLimit, (_req, res) => {
 
     function validate() {
       let ok = true;
-
-      // Setup code — format check only (server validates the actual value)
-      const codeVal = code.value.trim();
-      if (codeVal && !/^[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}$/.test(codeVal)) {
-        setHint(codeHint, code, 'Format: XXXX-XXXX-XXXX-XXXX', false); ok = false;
-      } else if (!codeVal) {
-        setHint(codeHint, code, '', false); ok = false;
-      } else {
-        setHint(codeHint, code, '', true);
-      }
-
-      // Label
       if (!label.value.trim()) { setHint(labelHint, label, '', false); ok = false; }
       else { setHint(labelHint, label, '', true); }
-
       btn.disabled = !ok;
     }
 
-    [code, label].forEach(el => el.addEventListener('input', validate));
+    label.addEventListener('input', validate);
   </script>
 </body>
 </html>`);
@@ -119,16 +88,7 @@ setupRouter.post('/', authRateLimit, async (req, res) => {
     return;
   }
 
-  const code: string = req.body?.code ?? '';
   const label: string = (req.body?.label ?? '').trim();
-
-  if (!pendingSetupCode || code.trim().toUpperCase() !== pendingSetupCode.toUpperCase()) {
-    res.status(400).setHeader('Content-Type', 'text/html; charset=utf-8').send(`
-      <script>document.referrer && history.back();</script>
-      <p>Invalid setup code. Check your console and try again.</p>
-    `);
-    return;
-  }
 
   if (!label) {
     res.status(400).send(errorPage('Brain label is required'));
@@ -163,7 +123,6 @@ setupRouter.post('/', authRateLimit, async (req, res) => {
   const { record, plaintext } = await createToken({ name: 'Admin', admin: true, expiresAt: null });
   const { hash: _h, ...safeRecord } = record;
 
-  pendingSetupCode = null;
   log.info(`Setup complete. Brain ID: ${instanceId}`);
 
   // Show the token once — it will not be retrievable again
@@ -194,12 +153,8 @@ setupRouter.post('/json', authRateLimit, async (req, res) => {
     return;
   }
 
-  const { code, label } = req.body ?? {};
+  const { label } = req.body ?? {};
 
-  if (!pendingSetupCode || String(code ?? '').trim().toUpperCase() !== pendingSetupCode.toUpperCase()) {
-    res.status(400).json({ error: 'Invalid setup code' });
-    return;
-  }
   if (!label || typeof label !== 'string' || !label.trim()) {
     res.status(400).json({ error: 'Instance label is required' });
     return;
@@ -230,7 +185,6 @@ setupRouter.post('/json', authRateLimit, async (req, res) => {
   // Create the initial admin PAT so the Angular app can log in immediately
   const { record, plaintext } = await createToken({ name: 'Admin', admin: true, expiresAt: null });
 
-  pendingSetupCode = null;
   log.info(`Setup complete (JSON). Brain ID: ${instanceId}`);
 
   const { hash: _h, ...safeRecord } = record;

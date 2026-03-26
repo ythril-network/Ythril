@@ -3,16 +3,14 @@
  * Test setup script — run once after `docker compose -f docker-compose.test.yml up`.
  *
  * For each instance:
- *  1. Reads the setup code from Docker logs
- *  2. Completes setup via POST /api/setup/json (returns the first admin token directly)
- *  3. Stores the PAT in configs/<x>/token.txt
+ *  1. Completes setup via POST /api/setup/json (returns the first admin token directly)
+ *  2. Stores the PAT in configs/<x>/token.txt
  *
  * Pre-requisites:
  *  - All 6 containers are healthy
  *  - configs/a/, configs/b/, configs/c/ directories exist (or will be created)
  */
 
-import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -40,14 +38,6 @@ async function waitForHealth(url, timeout = 30_000) {
     await wait(1000);
   }
   throw new Error(`${url} did not become healthy in ${timeout}ms`);
-}
-
-async function getSetupCode(container) {
-  // The setup code is printed to logs on first run
-  const logs = execSync(`docker logs ${container} 2>&1`).toString();
-  const match = logs.match(/Setup code[:\s]+([A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4})/i);
-  if (!match) throw new Error(`Could not find setup code in logs for ${container}. Is it a first run?`);
-  return match[1];
 }
 
 async function setupInstance(inst) {
@@ -78,16 +68,11 @@ async function setupInstance(inst) {
     }
   }
 
-  // Get setup code from container logs
-  const code = await getSetupCode(inst.container);
-  console.log(`  Setup code: ${code}`);
-
   // Complete setup via JSON API — returns the first admin token directly
   const setupRes = await fetch(`${inst.url}/api/setup/json`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      code,
       label: `Test Instance ${inst.name.toUpperCase()}`,
       settingsPassword: 'testpassword123!',
     }),

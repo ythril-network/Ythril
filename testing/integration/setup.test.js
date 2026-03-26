@@ -26,7 +26,7 @@ describe('First-run setup gating', () => {
     const r = await fetch(`${INSTANCES.a}/setup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ code: 'FAKE-CODE', label: 'Attacker', settingsPassword: 'abc12345', settingsPasswordConfirm: 'abc12345' }),
+      body: new URLSearchParams({ label: 'Attacker', settingsPassword: 'abc12345', settingsPasswordConfirm: 'abc12345' }),
     });
     // After setup is complete, /setup POST must return 404.
     // If the auth rate limit is exhausted (e.g. when run after other auth-heavy

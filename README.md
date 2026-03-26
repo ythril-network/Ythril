@@ -1,140 +1,21 @@
 ﻿# Ythril
 
-Memory, file, and context infrastructure for MCP-enabled assistants.
+Ythril is a self-hosted brain server that gives MCP-enabled assistants persistent memory, file storage, and entity knowledge — organised into isolated spaces you fully control. Each space exposes its own MCP endpoint so any compatible client (Claude, Cursor, Windsurf, or anything that speaks MCP) can read and write context without a cloud intermediary. Spaces can be synced across multiple brains through policy-driven networks, letting you share selected knowledge with teammates or across your own devices while keeping everything else private. Authentication, input validation, storage quotas, and a zero-knowledge invite handshake are built in from day one. Run it with Docker Compose and you are up in under a minute.
 
-## What Is This
+## Getting Started
 
-Ythril is a sovereign brain and data server for MCP workflows.
+| Doc | Description |
+|-----|-------------|
+| [User Guide](docs/userguide.md) | End-user guide — managing your brain through the web UI and connecting MCP clients |
+| [Integration Guide](docs/integration-guide.md) | Hosting, configuration, full REST & MCP API reference |
 
-Each brain combines three things in one place:
-- memory and entity knowledge
-- file management inside isolated spaces
-- MCP tool access for assistants and clients
+For development setup, testing, and building from source see the [Contribution Guide](docs/contribution-guide.md).
 
-It works in single-brain mode for personal use, or in networked mode for shared spaces across trusted members. Networking is explicit and policy-driven: each brain decides what spaces to share, with whom, and in which direction. Local data ownership is a physical fact — no network governance can delete data from another member's machine.
-
-Common setups:
-
-- **Personal, multi-device** — run one brain on your server and another on your laptop. Both are yours. Sync selected spaces so your context, files, and memories follow you across devices without any cloud intermediary.
-- **Team knowledge base** — each engineer runs their own brain. A shared `eng-kb` space is synced across the team. Spaces for personal notes or client projects stay private. Assistants scoped to a token can only see what that token is allowed to read — useful for compartmentalising by team, project, or clearance level.
-- **Research collaboration** — a researcher shares a `papers` space with collaborators at other institutions. Each party keeps their own annotations and working notes in private spaces. The shared space carries only what everyone has agreed to pool. No central server; no one organisation owns the data.
-
-Think of it as the operational layer between your data, your models, and your day-to-day workflows.
-
-```mermaid
-flowchart LR
-	U[You] --> C[Client or Agent]
-	C --> L[LLM]
-	C -->|HTTP API| HAPI[File Manager\n& Settings]
-
-	subgraph Brain["🧠 Your Brain"]
-		subgraph S1[Space]
-			S1MCP[MCP\n/mcp/space1]
-			S1MCP --> S1Mem[Memories] --> S1MD[(data)]
-			S1MCP --> S1Files[Files] --> S1FD[(data)]
-		end
-
-		subgraph S2[Space]
-			S2MCP[MCP\n/mcp/space2]
-			S2MCP --> S2Mem[Memories] --> S2MD[(data)]
-			S2MCP --> S2Files[Files] --> S2FD[(data)]
-		end
-
-		HAPI --> S1Files
-		HAPI --> S2Files
-	end
-
-	L -->|/mcp/space1| S1MCP
-	L -->|/mcp/space2| S2MCP
-
-	subgraph OB["🧠 Other Brain\n(e.g. your laptop, a teammate)"]
-		subgraph OS[Space]
-			OSMCP[MCP]
-			OSMCP --> OSMem[Memories] --> OSMD[(data)]
-			OSMCP --> OSFiles[Files] --> OSFD[(data)]
-		end
-	end
-
-	S1 <-.->|optional sync| OS
-
-	classDef yourBrain fill:#1e3a5f,stroke:#4a90d9,color:#e8f4ff
-	classDef otherBrain fill:#2d1b4e,stroke:#9b6dd6,color:#f0e8ff
-	classDef space fill:#0d2b1a,stroke:#3a9e6a,color:#d4f5e4
-	classDef mcp fill:#1a2a1a,stroke:#5cb85c,color:#c8f0c8
-	classDef data fill:#1a1a2e,stroke:#6666aa,color:#d0d0f0
-	classDef client fill:#2e2a1a,stroke:#c8a040,color:#fff8e0
-	classDef http fill:#2a1a1a,stroke:#c84040,color:#ffe0e0
-
-	class Brain yourBrain
-	class OB otherBrain
-	class S1,S2,OS space
-	class S1MCP,S2MCP,OSMCP mcp
-	class S1MD,S1FD,S2MD,S2FD,OSMD,OSFD data
-	class U,C,L client
-	class HAPI http
-```
-
-## Philosophy
-
-- You own and control your data on your own brain.
-- You decide what to share, by space, per network.
-- Knowledge can be distributed across trusted brains without central lock-in.
-- Governance controls membership. What members do with data on their own machines is not — and cannot be — governed.
-
-## Installation
-
-### Quick Start with Docker
-
-Requirements:
-- Any Docker host (Docker Desktop is one option)
-
-Run:
-
-```bash
-docker compose up -d
-```
-
-This pulls the pre-built image from the registry and starts Ythril + MongoDB. Then open setup in your browser, enter the generated setup code, and complete the initial brain configuration.
-
-### Container Images
-
-Published images are available on two registries:
-
-| Registry | Image | Pull command |
-|----------|-------|-------------|
-| GitHub Container Registry | `ghcr.io/ythril-network/ythril` | `docker pull ghcr.io/ythril-network/ythril:latest` |
-| Docker Hub | `docker.io/ythril/ythril` | `docker pull ythril/ythril:latest` |
-
-Tags follow semver: `:latest`, `:0.1.0`, `:0.1`, `:0`.
-
-The `docker-compose.yml` in this repo defaults to the GHCR image. To use Docker Hub instead, change the `image:` line:
-
-```yaml
-services:
-  ythril:
-    image: ythril/ythril:latest   # Docker Hub
-```
-
-To build locally from source instead of pulling:
-
-```bash
-docker compose up -d --build
-```
-
-### Releasing a New Version
-
-Images are built and pushed automatically by GitHub Actions when a version tag is pushed:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-This triggers [`.github/workflows/publish.yml`](.github/workflows/publish.yml), which builds for `linux/amd64` and `linux/arm64` and pushes to both registries.
+---
 
 ## Brain Networks
 
-One brain can participate in multiple networks simultaneously, each scoped to different spaces and governed independently. It is always **spaces** that sync across brains — not the whole brain.
+Brains can form networks to sync selected spaces. Each network type defines its own governance and sync topology. See [Network Types](docs/network-types.md) for the full specification.
 
 **Standalone** — single brain, no sync, full local control.
 
@@ -145,7 +26,7 @@ flowchart LR
 	end
 ```
 
-**Closed / Democratic / Club** — symmetric space sync; all members exchange data in both directions. The three types share the same sync topology and differ only in governance: Closed requires unanimous vote to change membership, Democratic uses majority vote, Club lets the inviter approve joins unilaterally.
+**Closed / Democratic / Club** — symmetric sync between all members. They differ only in governance: Closed requires unanimous vote, Democratic uses majority vote, Club lets the inviter approve unilaterally.
 
 ```mermaid
 flowchart LR
@@ -164,7 +45,7 @@ flowchart LR
 	SB <--> SC
 ```
 
-**Braintree** — push-only from a root space down to subscriber spaces; intermediate nodes re-parent automatically if they go offline.
+**Braintree** — push-only from a root brain down to subscribers. Intermediate nodes re-parent automatically if they go offline.
 
 ```mermaid
 flowchart TD
@@ -190,157 +71,12 @@ flowchart TD
 	SA --> SD
 ```
 
-For full governance rules and sync behaviour, see [docs/network-types.md](docs/network-types.md).
-
-### Network MCP tools
-
-Two MCP tools are available per space endpoint (`/mcp/:spaceId`) for interacting with configured networks:
-
-| Tool | Parameters | Description |
-|------|-----------|-------------|
-| `list_peers` | — | Returns all registered sync peers as a flat array. Each entry includes `instanceId`, `label`, `url`, `direction`, `network`, `networkId`, `networkType`, `lastSyncAt`, `consecutiveFailures`, and `skipTlsVerify`. Credential fields (`tokenHash`, `inviteKeyHash`) are never included. |
-| `sync_now` | `peerId?: string` | Triggers a manual sync cycle. If `peerId` is omitted, all networks are synced. `peerId` is validated as an exact match against a registered member ID — it is never used as a URL or forwarded to any external call. Returns a sync summary with counts of synced documents and any errors. |
-
-## Security
-
-Ythril is designed for production use. Security controls are applied at every layer.
-
-### Authentication
-
-- All API and MCP endpoints require a Bearer PAT token (`Authorization: Bearer ythril_...`).
-- Tokens are bcrypt-hashed and never logged or stored in plaintext.
-- Tokens are scoped: a token with `spaces: ["health"]` is rejected on any endpoint targeting a different space — enforced at the routing middleware layer.
-- Token creation and setup endpoints are rate-limited to 10 req/min per IP.
-- Token `spaces` array is capped at 1000 elements (DoS guard).
-
-### Input validation
-
-- All JSON bodies are validated with Zod before reaching business logic.
-- Brain `fact` field is capped at 50,000 characters; `tags` items must all be strings (blocks NoSQL operator injection).
-- File paths are sandbox-validated (blocks `../`, URL-encoded traversal, null bytes, absolute paths, Unicode overlong sequences).
-- 10 MB body size limit enforced at the HTTP parser layer (express.json); returns 413 on overflow.
-
-### Network and invite security
-
-- The RSA invite handshake (`POST /api/invite/*`) performs a zero-knowledge token exchange: tokens are RSA-4096-OAEP-SHA256 encrypted and never travel in plaintext.
-- Each invite handshake session is single-use: replaying `apply` after the first call returns 409.
-- Handshake sessions expire after 1 hour; private keys are held in memory only and discarded immediately after `finalize`.
-- `handshakeId` lookups use bcrypt comparison for constant-time equivalence.
-
-### Storage quotas
-
-Optional soft and hard limits can be set per area (`files`, `brain`, `total`) in `config.json`. A soft breach lets the write through with a `storageWarning` flag; a hard breach rejects it with HTTP 507. Usage is measured at write time — no background cache. `GET /api/spaces` reports current usage when quotas are configured.
-
-### Config hot-reload
-
-`POST /api/admin/reload-config` re-reads `config.json` from disk and applies the new configuration without a container restart. Requires a Bearer PAT. This endpoint also corrects file permissions to `0600` if they were modified externally (e.g., via a Windows Docker bind mount).
-
-### Security tests
-
-A dedicated red-team test suite runs against live Docker containers and verifies all security controls. See [`tests/red-team-tests/README.md`](tests/red-team-tests/README.md).
-
 ---
 
-## Testing
+## License
 
-Ythril has a two-tier integration test suite — no mocking, all tests run against real Docker containers.
+Ythril is licensed under [AGPL-3.0](LICENSE). You can use, modify, and self-host it freely. If you provide a modified version as a network service, you must make the source available under AGPL. Commercial licensing is available for closed-source or proprietary deployments — contact `contact@ythril.net`.
 
-### Prerequisites
+## Contributing
 
-```sh
-docker compose up -d                          # start A (port 3200)
-docker compose -f docker-compose.test.yml up -d  # start B (3201) and C (3202)
-docker network connect ythril_ythril-test ythril  # connect A to test network
-```
-
-Token files must be provisioned at `tests/sync/configs/{a,b,c}/token.txt`.
-
-### Scenario tests
-
-Cover the full API surface: setup gating, file operations, token lifecycle, space management, brain operations, network CRUD, voting rounds, invite key rotation, and the RSA handshake.
-
-```sh
-node --test --test-reporter=spec \
-  tests/setup.test.js tests/files.test.js tests/auth.test.js \
-  tests/spaces.test.js tests/brain.test.js tests/networks.test.js \
-  tests/notify.test.js tests/votes.test.js tests/quota.test.js
-```
-
-### Red-team tests
-
-Attack simulations against the running containers covering auth bypass, path traversal, space boundary enforcement, MongoDB injection, payload size limits, invite replay, and brute-force token enumeration.
-
-```sh
-# All red-team tests (except brute-force)
-node --test --test-reporter=spec tests/red-team-tests/auth-bypass.test.js \
-  tests/red-team-tests/path-traversal.test.js \
-  tests/red-team-tests/space-boundary.test.js \
-  tests/red-team-tests/mongodb-injection.test.js \
-  tests/red-team-tests/oversized-payload.test.js \
-  tests/red-team-tests/invite-replay.test.js
-
-# Brute-force (run separately — exhausts instance B rate limit)
-node --test --test-reporter=spec tests/red-team-tests/token-brute-force.test.js
-```
-
-### Sync integration tests
-
-Cover multi-instance sync, conflict detection, gossip member exchange, vote propagation, and all four network governance types.
-
-```sh
-node --test --test-reporter=spec \
-  tests/sync/conflict.test.js tests/sync/closed-network.test.js \
-  tests/sync/braintree.test.js tests/sync/democratic.test.js \
-  tests/sync/gossip.test.js tests/sync/vote-propagation.test.js
-```
-
-All tests must pass before merging. A failing red-team test is treated as a security regression.
-
----
-
-## Documentation
-
-| Doc | Description |
-|-----|-------------|
-| [User Guide](docs/userguide.md) | End-user guide for the web UI |
-| [Integration Guide](docs/integration-guide.md) | Full API and MCP reference |
-| [Contribution Guide](docs/contribution-guide.md) | Dev setup, testing, building, and releasing |
-| [Network Types](docs/network-types.md) | Governance models and sync behaviour |
-| [Sync Protocol](docs/sync-protocol.md) | Sync engine internals |
-| [Dependencies](docs/dependencies.md) | Dependency inventory |
-
----
-
-## Contribution
-
-Contributions are welcome.
-
-1. Open an issue for bugs or proposals.
-2. Keep changes scoped and testable.
-3. Submit a pull request with a short rationale.
-
-Good first contributions:
-- Documentation clarifications
-- Setup and onboarding improvements
-- MCP tool UX and reliability fixes
-
-## License and Contact
-
-Ythril is licensed under AGPL-3.0. See [LICENSE](LICENSE).
-
-Minimal AGPL explanation:
-- You can use, modify, and self-host Ythril.
-- If you provide Ythril as a network service with your modifications, you must make the modified source available to users of that service under AGPL.
-- If you want closed-source SaaS/proprietary deployment, use a commercial license.
-
-Ythril's semantic recall feature depends on `mongot`, a proprietary sidecar bundled
-in the `mongodb/mongodb-atlas-local` Docker image. This binary is not distributed by
-Ythril and is pulled separately by Docker at deploy time. It does not affect Ythril's
-AGPL obligations. See [docs/dependencies.md](docs/dependencies.md) for the full
-analysis.
-
-Commercial licensing is available for closed-source SaaS or proprietary deployments.
-
-Contact:
-- GitHub issues: open an issue in this repository
-- Commercial inquiries: contact repository owner `contact@ythril.net`
+Contributions are welcome. Open an issue for bugs or proposals, keep changes scoped and testable, and submit a pull request with a short rationale. See the [Contribution Guide](docs/contribution-guide.md) for dev setup and testing instructions.

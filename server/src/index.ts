@@ -5,7 +5,6 @@ import { connectMongo, closeMongo } from './db/mongo.js';
 import { initAllSpaces } from './spaces/spaces.js';
 import { resetStaleWatermarksIfNeeded } from './util/seq.js';
 import { createApp } from './app.js';
-import { generateSetupCode } from './setup/routes.js';
 import { startSyncScheduler, stopSyncScheduler } from './sync/engine.js';
 import { cleanupStaleChunks } from './files/chunks.js';
 import { log } from './util/log.js';
@@ -27,11 +26,6 @@ const RESET  = isTTY ? '\x1b[0m'           : '';
 
 async function main(): Promise<void> {
   const isFirstRun = !configExists();
-
-  // Generate (and hold) setup code before any async work so it's in scope for
-  // the listen banner. The code is ephemeral — generateSetupCode() stores it in
-  // memory and clears it after the first successful POST /api/setup.
-  const setupCode = isFirstRun ? generateSetupCode() : null;
 
   if (!isFirstRun) {
     loadConfig();
@@ -100,8 +94,7 @@ async function main(): Promise<void> {
     if (isFirstRun) {
       console.log(`  ${BOLD}ythril${RESET}  ·  first-run setup required`);
       console.log('');
-      console.log(`  URL         ${url}`);
-      console.log(`  Setup code  ${ORANGE}${setupCode}${RESET}`);
+      console.log(`  Open ${url} to get started`);
       console.log('');
     } else {
       console.log(`  ${BOLD}ythril${RESET}  ${GREEN}✓ ready${RESET}  ·  ${url}`);
