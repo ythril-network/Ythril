@@ -91,10 +91,46 @@ Requirements:
 Run:
 
 ```bash
-docker compose up --build
+docker compose up -d
 ```
 
-Then open setup in your browser, enter the generated setup code, and complete the initial brain configuration.
+This pulls the pre-built image from the registry and starts Ythril + MongoDB. Then open setup in your browser, enter the generated setup code, and complete the initial brain configuration.
+
+### Container Images
+
+Published images are available on two registries:
+
+| Registry | Image | Pull command |
+|----------|-------|-------------|
+| GitHub Container Registry | `ghcr.io/ythril-network/ythril` | `docker pull ghcr.io/ythril-network/ythril:latest` |
+| Docker Hub | `docker.io/ythril/ythril` | `docker pull ythril/ythril:latest` |
+
+Tags follow semver: `:latest`, `:0.1.0`, `:0.1`, `:0`.
+
+The `docker-compose.yml` in this repo defaults to the GHCR image. To use Docker Hub instead, change the `image:` line:
+
+```yaml
+services:
+  ythril:
+    image: ythril/ythril:latest   # Docker Hub
+```
+
+To build locally from source instead of pulling:
+
+```bash
+docker compose up -d --build
+```
+
+### Releasing a New Version
+
+Images are built and pushed automatically by GitHub Actions when a version tag is pushed:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+This triggers [`.github/workflows/publish.yml`](.github/workflows/publish.yml), which builds for `linux/amd64` and `linux/arm64` and pushes to both registries.
 
 ## Brain Networks
 
@@ -259,6 +295,19 @@ node --test --test-reporter=spec \
 ```
 
 All tests must pass before merging. A failing red-team test is treated as a security regression.
+
+---
+
+## Documentation
+
+| Doc | Description |
+|-----|-------------|
+| [User Guide](docs/userguide.md) | End-user guide for the web UI |
+| [Integration Guide](docs/integration-guide.md) | Full API and MCP reference |
+| [Contribution Guide](docs/contribution-guide.md) | Dev setup, testing, building, and releasing |
+| [Network Types](docs/network-types.md) | Governance models and sync behaviour |
+| [Sync Protocol](docs/sync-protocol.md) | Sync engine internals |
+| [Dependencies](docs/dependencies.md) | Dependency inventory |
 
 ---
 

@@ -6,24 +6,72 @@
 
 ## Table of Contents
 
-1. [Authentication](#authentication)
-2. [Error Format](#error-format)
-3. [Rate Limits](#rate-limits)
-4. [Brain API](#brain-api) — memories, entities, edges, search, stats
-5. [Files API](#files-api) — upload, download, move, delete
-6. [Spaces API](#spaces-api) — create, list, delete
-7. [Tokens API](#tokens-api) — create, list, regenerate, revoke
-8. [Networks API](#networks-api) — create, join, members, voting
-9. [Invite API](#invite-api) — RSA peer handshake
-10. [Notify API](#notify-api) — peer events and sync triggers
-11. [Sync API](#sync-api) — change-feed, batch upsert, Merkle
-12. [MFA API](#mfa-api) — TOTP setup and verification
-13. [Conflicts API](#conflicts-api) — view and resolve sync conflicts
-14. [Setup API](#setup-api) — first-run setup
-15. [Admin API](#admin-api) — config reload
-16. [MCP (Model Context Protocol)](#mcp-model-context-protocol) — AI tool integration
-17. [Storage Quotas](#storage-quotas)
-18. [Pagination](#pagination)
+1. [Getting Ythril](#getting-ythril)
+2. [Authentication](#authentication)
+3. [Error Format](#error-format)
+4. [Rate Limits](#rate-limits)
+5. [Brain API](#brain-api) — memories, entities, edges, search, stats
+6. [Files API](#files-api) — upload, download, move, delete
+7. [Spaces API](#spaces-api) — create, list, delete
+8. [Tokens API](#tokens-api) — create, list, regenerate, revoke
+9. [Networks API](#networks-api) — create, join, members, voting
+10. [Invite API](#invite-api) — RSA peer handshake
+11. [Notify API](#notify-api) — peer events and sync triggers
+12. [Sync API](#sync-api) — change-feed, batch upsert, Merkle
+13. [MFA API](#mfa-api) — TOTP setup and verification
+14. [Conflicts API](#conflicts-api) — view and resolve sync conflicts
+15. [Setup API](#setup-api) — first-run setup
+16. [Admin API](#admin-api) — config reload
+17. [MCP (Model Context Protocol)](#mcp-model-context-protocol) — AI tool integration
+18. [Storage Quotas](#storage-quotas)
+19. [Pagination](#pagination)
+
+---
+
+## Getting Ythril
+
+### Container Images
+
+Published images are available on two registries:
+
+| Registry | Image | Pull command |
+|----------|-------|-------------|
+| GitHub Container Registry | `ghcr.io/ythril-network/ythril` | `docker pull ghcr.io/ythril-network/ythril:latest` |
+| Docker Hub | `docker.io/ythril/ythril` | `docker pull ythril/ythril:latest` |
+
+Tags follow semver: `:latest`, `:0.1.0`, `:0.1`, `:0`. All images are multi-arch (`linux/amd64`, `linux/arm64`).
+
+### Quick Start
+
+```bash
+docker compose up -d
+```
+
+The included `docker-compose.yml` pulls the GHCR image and starts Ythril + MongoDB. On first run, a setup code is printed to the container logs:
+
+```bash
+docker compose logs ythril
+```
+
+Complete setup via:
+
+```
+POST http://localhost:3200/api/setup/json
+{ "code": "<code-from-logs>", "label": "My Ythril" }
+```
+
+This returns your admin token. Store it — it is shown once.
+
+### Health Check
+
+```
+GET http://localhost:3200/health
+→ { "status": "ok", "ts": "2026-03-26T10:00:00.000Z" }
+```
+
+### Base URL
+
+All API paths in this guide are relative to `http://<host>:3200`. In production behind a reverse proxy, substitute your public URL.
 
 ---
 
