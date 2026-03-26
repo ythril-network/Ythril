@@ -19,9 +19,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS_DIR = path.join(__dirname, 'configs');
 
 const INSTANCES = [
-  { name: 'a', container: 'ythril-a', url: 'http://localhost:3200', port: 3200 },
-  { name: 'b', container: 'ythril-b', url: 'http://localhost:3201', port: 3201 },
-  { name: 'c', container: 'ythril-c', url: 'http://localhost:3202', port: 3202 },
+  { name: 'a', container: 'ythril-a', url: 'http://127.0.0.1:3200', port: 3200 },
+  { name: 'b', container: 'ythril-b', url: 'http://127.0.0.1:3201', port: 3201 },
+  { name: 'c', container: 'ythril-c', url: 'http://127.0.0.1:3202', port: 3202 },
 ];
 
 async function wait(ms) {

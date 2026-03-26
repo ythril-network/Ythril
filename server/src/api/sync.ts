@@ -244,6 +244,10 @@ syncRouter.post('/memories', syncRateLimit, requireAuth, async (req, res) => {
       res.status(200).json({ status: 'tombstoned' });
       return;
     }
+    // Clean up stale tombstone superseded by the incoming document
+    if (tombstone) {
+      await col<TombstoneDoc>(`${spaceId}_tombstones`).deleteOne({ _id: incoming._id } as never);
+    }
 
     const existing = await col<MemoryDoc>(`${spaceId}_memories`)
       .findOne({ _id: incoming._id } as never) as MemoryDoc | null;
@@ -360,6 +364,9 @@ syncRouter.post('/entities', syncRateLimit, requireAuth, async (req, res) => {
       res.status(200).json({ status: 'tombstoned' });
       return;
     }
+    if (tombstone) {
+      await col<TombstoneDoc>(`${spaceId}_tombstones`).deleteOne({ _id: incoming._id } as never);
+    }
 
     await col<EntityDoc>(`${spaceId}_entities`).updateOne(
       { _id: incoming._id } as never,
@@ -448,6 +455,9 @@ syncRouter.post('/edges', syncRateLimit, requireAuth, async (req, res) => {
       res.status(200).json({ status: 'tombstoned' });
       return;
     }
+    if (tombstone) {
+      await col<TombstoneDoc>(`${spaceId}_tombstones`).deleteOne({ _id: incoming._id } as never);
+    }
 
     const existing = await col<EdgeDoc>(`${spaceId}_edges`).findOne({ _id: incoming._id } as never) as EdgeDoc | null;
     if (!existing || incoming.seq > existing.seq) {
@@ -533,6 +543,9 @@ syncRouter.post('/chrono', syncRateLimit, requireAuth, async (req, res) => {
       res.status(200).json({ status: 'tombstoned' });
       return;
     }
+    if (tombstone) {
+      await col<TombstoneDoc>(`${spaceId}_tombstones`).deleteOne({ _id: incoming._id } as never);
+    }
 
     const existing = await col<ChronoEntry>(`${spaceId}_chrono`).findOne({ _id: incoming._id } as never) as ChronoEntry | null;
     if (!existing || incoming.seq > existing.seq) {
@@ -582,6 +595,7 @@ syncRouter.post('/batch-upsert', syncRateLimit, requireAuth, async (req, res) =>
       const tomb = await col<TombstoneDoc>(`${spaceId}_tombstones`)
         .findOne({ _id: incoming._id, type: 'memory' } as never) as TombstoneDoc | null;
       if (tomb && tomb.seq >= incoming.seq) { memStats.tombstoned++; continue; }
+      if (tomb) await col<TombstoneDoc>(`${spaceId}_tombstones`).deleteOne({ _id: incoming._id } as never);
 
       const existing = await col<MemoryDoc>(`${spaceId}_memories`)
         .findOne({ _id: incoming._id } as never) as MemoryDoc | null;
@@ -615,6 +629,7 @@ syncRouter.post('/batch-upsert', syncRateLimit, requireAuth, async (req, res) =>
       const tomb = await col<TombstoneDoc>(`${spaceId}_tombstones`)
         .findOne({ _id: incoming._id, type: 'entity' } as never) as TombstoneDoc | null;
       if (tomb && tomb.seq >= incoming.seq) { entStats.tombstoned++; continue; }
+      if (tomb) await col<TombstoneDoc>(`${spaceId}_tombstones`).deleteOne({ _id: incoming._id } as never);
 
       const existing = await col<EntityDoc>(`${spaceId}_entities`)
         .findOne({ _id: incoming._id } as never) as EntityDoc | null;
@@ -634,6 +649,7 @@ syncRouter.post('/batch-upsert', syncRateLimit, requireAuth, async (req, res) =>
       const tomb = await col<TombstoneDoc>(`${spaceId}_tombstones`)
         .findOne({ _id: incoming._id, type: 'edge' } as never) as TombstoneDoc | null;
       if (tomb && tomb.seq >= incoming.seq) { edgeStats.tombstoned++; continue; }
+      if (tomb) await col<TombstoneDoc>(`${spaceId}_tombstones`).deleteOne({ _id: incoming._id } as never);
 
       const existing = await col<EdgeDoc>(`${spaceId}_edges`)
         .findOne({ _id: incoming._id } as never) as EdgeDoc | null;
@@ -653,6 +669,7 @@ syncRouter.post('/batch-upsert', syncRateLimit, requireAuth, async (req, res) =>
       const tomb = await col<TombstoneDoc>(`${spaceId}_tombstones`)
         .findOne({ _id: incoming._id, type: 'chrono' } as never) as TombstoneDoc | null;
       if (tomb && tomb.seq >= incoming.seq) { chronoStats.tombstoned++; continue; }
+      if (tomb) await col<TombstoneDoc>(`${spaceId}_tombstones`).deleteOne({ _id: incoming._id } as never);
 
       const existing = await col<ChronoEntry>(`${spaceId}_chrono`)
         .findOne({ _id: incoming._id } as never) as ChronoEntry | null;

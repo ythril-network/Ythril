@@ -61,6 +61,7 @@ export const syncRateLimit = rateLimit({
     log.warn(`syncRateLimit hit: ${req.ip} on ${req.method} ${req.path}`);
     res.status(options.statusCode).json(options.message);
   },
+  skip: () => process.env['SKIP_SYNC_RATE_LIMIT'] === 'true',
 });
 
 /** 5 requests/minute per IP — destructive bulk operations (memory wipe) */

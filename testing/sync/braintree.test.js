@@ -11,7 +11,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import {
-  INSTANCES, post, get, del, triggerSync, createMemory, waitFor,
+  INSTANCES, post, postRetry429, get, del, triggerSync, createMemory, waitFor,
 } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -37,8 +37,8 @@ describe('Braintree topology (A -> B -> C)', () => {
     networkId = r.body.id;
 
     // Create peer tokens
-    const bPeer = await post(INSTANCES.b, tokenB, '/api/tokens', { name: 'bt-peer-a' });
-    const cPeer = await post(INSTANCES.c, tokenC, '/api/tokens', { name: 'bt-peer-b' });
+    const bPeer = await postRetry429(INSTANCES.b, tokenB, '/api/tokens', { name: 'bt-peer-a' });
+    const cPeer = await postRetry429(INSTANCES.c, tokenC, '/api/tokens', { name: 'bt-peer-b' });
     assert.equal(bPeer.status, 201);
     assert.equal(cPeer.status, 201);
 

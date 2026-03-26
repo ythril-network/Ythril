@@ -4,9 +4,9 @@
  */
 
 export const INSTANCES = {
-  a: 'http://localhost:3200',
-  b: 'http://localhost:3201',
-  c: 'http://localhost:3202',
+  a: 'http://127.0.0.1:3200',
+  b: 'http://127.0.0.1:3201',
+  c: 'http://127.0.0.1:3202',
 };
 
 /**
@@ -42,6 +42,27 @@ export async function post(baseUrl, token, path, data) {
     method: 'POST',
     body: JSON.stringify(data),
   });
+}
+
+/**
+ * POST with automatic retry on 429 (rate limit).
+ * Reads the standard Retry-After HTTP header (seconds); defaults to 5 s.
+ */
+export async function postRetry429(baseUrl, token, path, data, maxRetries = 3) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const resp = await req(baseUrl, token, path, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    if (resp.status !== 429) {
+      const body = await resp.json().catch(() => null);
+      return { status: resp.status, body };
+    }
+    const retryAfter = parseInt(resp.headers.get('retry-after') ?? '5', 10);
+    await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+  }
+  // final attempt — return whatever we get
+  return post(baseUrl, token, path, data);
 }
 
 /** DELETE */

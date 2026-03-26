@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, waitFor } from './helpers.js';
+import { INSTANCES, post, postRetry429, get, del, waitFor } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -65,7 +65,7 @@ describe('Democratic network (3-member voting)', () => {
   it('Veto blocks a join round immediately', async () => {
     // Re-fetch network state  
     const net = await get(INSTANCES.a, tokenA, `/api/networks/${networkId}`);
-    const cPeer = await post(INSTANCES.c, tokenC, '/api/tokens', { name: 'dem-peer-c' });
+    const cPeer = await postRetry429(INSTANCES.c, tokenC, '/api/tokens', { name: 'dem-peer-c' });
     assert.equal(cPeer.status, 201);
 
     const addC = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/members`, {

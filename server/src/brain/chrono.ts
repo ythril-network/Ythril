@@ -111,7 +111,11 @@ export async function deleteChrono(
     instanceId: getConfig().instanceId,
     seq,
   };
-  await col<TombstoneDoc>(`${spaceId}_tombstones`).insertOne(tombstone as never);
+  await col<TombstoneDoc>(`${spaceId}_tombstones`).replaceOne(
+    { _id: chronoId } as never,
+    tombstone as never,
+    { upsert: true },
+  );
   return true;
 }
 
@@ -137,7 +141,10 @@ export async function bulkDeleteChrono(spaceId: string): Promise<number> {
     });
   }
 
-  await col<TombstoneDoc>(`${spaceId}_tombstones`).insertMany(tombstones as never);
+  const ops = tombstones.map(t => ({
+    replaceOne: { filter: { _id: t._id }, replacement: t, upsert: true },
+  }));
+  await col<TombstoneDoc>(`${spaceId}_tombstones`).bulkWrite(ops as never);
   await coll.deleteMany({});
   return ids.length;
 }

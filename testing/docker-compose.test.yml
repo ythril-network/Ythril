@@ -39,6 +39,7 @@ services:
       NODE_ENV: test
       SKIP_AUTH_RATE_LIMIT: "true"
       SKIP_GLOBAL_RATE_LIMIT: "true"
+      SKIP_SYNC_RATE_LIMIT: "true"
     depends_on:
       ythril-mongo-a:
         condition: service_healthy
@@ -78,6 +79,7 @@ services:
       NODE_ENV: test
       SKIP_AUTH_RATE_LIMIT: "true"
       SKIP_GLOBAL_RATE_LIMIT: "true"
+      SKIP_SYNC_RATE_LIMIT: "true"
     depends_on:
       ythril-mongo-b:
         condition: service_healthy
