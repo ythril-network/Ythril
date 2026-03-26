@@ -274,3 +274,114 @@ describe('Error cases', () => {
     assert.equal(r.status, 401);
   });
 });
+
+// ── Chunked upload (Content-Range) ──────────────────────────────────────────
+
+import { createHash } from 'crypto';
+
+/** Upload a chunk with Content-Range header */
+async function uploadChunk(token, spaceId, filePath, buffer, start, end, total) {
+  const url = `${INSTANCES.a}/api/files/${spaceId}?path=${encodeURIComponent(filePath)}`;
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'Content-Range': `bytes ${start}-${end}/${total}`,
+      'Authorization': `Bearer ${token}`,
+    },
+    body: buffer,
+  });
+  return { status: r.status, body: await r.json().catch(() => null) };
+}
+
+/** Query upload-status */
+async function uploadStatus(token, spaceId, filePath, total) {
+  const url = `${INSTANCES.a}/api/files/${spaceId}/upload-status?path=${encodeURIComponent(filePath)}&total=${total}`;
+  const r = await fetch(url, {
+    headers: { 'Authorization': `Bearer ${token}` },
+  });
+  return { status: r.status, body: await r.json().catch(() => null) };
+}
+
+describe('Chunked upload (Content-Range)', () => {
+  const RUN = Date.now();
+  const CHUNK_SIZE = 5 * 1024; // 5 KB
+  const TOTAL_SIZE = 15 * 1024; // 15 KB, 3 chunks
+  let fullBuffer;
+  let fullSha256;
+
+  before(() => {
+    tokenA = fs.readFileSync(TOKEN_FILE_A, 'utf8').trim();
+    fullBuffer = Buffer.alloc(TOTAL_SIZE);
+    for (let i = 0; i < TOTAL_SIZE; i++) fullBuffer[i] = i % 256;
+    fullSha256 = createHash('sha256').update(fullBuffer).digest('hex');
+  });
+
+  it('Upload file in 3 chunks and verify final sha256', async () => {
+    const filePath = `chunked-${RUN}.bin`;
+
+    // Chunk 1: bytes 0-5119/15360
+    const c1 = await uploadChunk(tokenA, 'general', filePath, fullBuffer.subarray(0, CHUNK_SIZE), 0, CHUNK_SIZE - 1, TOTAL_SIZE);
+    assert.equal(c1.status, 202, `Chunk 1: ${JSON.stringify(c1.body)}`);
+    assert.ok(c1.body.received > 0, 'Should report received bytes');
+
+    // Chunk 2: bytes 5120-10239/15360
+    const c2 = await uploadChunk(tokenA, 'general', filePath, fullBuffer.subarray(CHUNK_SIZE, 2 * CHUNK_SIZE), CHUNK_SIZE, 2 * CHUNK_SIZE - 1, TOTAL_SIZE);
+    assert.equal(c2.status, 202, `Chunk 2: ${JSON.stringify(c2.body)}`);
+
+    // Chunk 3 (final): bytes 10240-15359/15360
+    const c3 = await uploadChunk(tokenA, 'general', filePath, fullBuffer.subarray(2 * CHUNK_SIZE, TOTAL_SIZE), 2 * CHUNK_SIZE, TOTAL_SIZE - 1, TOTAL_SIZE);
+    assert.equal(c3.status, 201, `Final chunk should return 201: ${JSON.stringify(c3.body)}`);
+    assert.equal(c3.body.sha256, fullSha256, 'Assembled file sha256 should match');
+  });
+
+  it('Upload-status returns received bytes for in-progress upload', async () => {
+    const filePath = `chunked-status-${RUN}.bin`;
+
+    // Upload first chunk only
+    await uploadChunk(tokenA, 'general', filePath, fullBuffer.subarray(0, CHUNK_SIZE), 0, CHUNK_SIZE - 1, TOTAL_SIZE);
+
+    const s = await uploadStatus(tokenA, 'general', filePath, TOTAL_SIZE);
+    assert.equal(s.status, 200, JSON.stringify(s.body));
+    assert.equal(s.body.received, CHUNK_SIZE, `Should report ${CHUNK_SIZE} received`);
+  });
+
+  it('Upload-status returns 0 for unknown upload', async () => {
+    const s = await uploadStatus(tokenA, 'general', `nonexistent-${RUN}.bin`, 999);
+    assert.equal(s.status, 200, JSON.stringify(s.body));
+    assert.equal(s.body.received, 0, 'Unknown upload should have 0 received');
+  });
+
+  it('Duplicate chunk (resume) is accepted without error', async () => {
+    const filePath = `chunked-resume-${RUN}.bin`;
+
+    // Send chunk 1 twice
+    await uploadChunk(tokenA, 'general', filePath, fullBuffer.subarray(0, CHUNK_SIZE), 0, CHUNK_SIZE - 1, TOTAL_SIZE);
+    const dup = await uploadChunk(tokenA, 'general', filePath, fullBuffer.subarray(0, CHUNK_SIZE), 0, CHUNK_SIZE - 1, TOTAL_SIZE);
+    assert.equal(dup.status, 202, `Duplicate should be accepted: ${JSON.stringify(dup.body)}`);
+
+    // Continue and finish
+    await uploadChunk(tokenA, 'general', filePath, fullBuffer.subarray(CHUNK_SIZE, 2 * CHUNK_SIZE), CHUNK_SIZE, 2 * CHUNK_SIZE - 1, TOTAL_SIZE);
+    const c3 = await uploadChunk(tokenA, 'general', filePath, fullBuffer.subarray(2 * CHUNK_SIZE, TOTAL_SIZE), 2 * CHUNK_SIZE, TOTAL_SIZE - 1, TOTAL_SIZE);
+    assert.equal(c3.status, 201, `Final: ${JSON.stringify(c3.body)}`);
+    assert.equal(c3.body.sha256, fullSha256, 'Resume upload sha256 should match');
+  });
+
+  it('Assembled file is downloadable with correct content', async () => {
+    const filePath = `chunked-${RUN}.bin`;
+    const url = `${INSTANCES.a}/api/files/general?path=${encodeURIComponent(filePath)}`;
+    const r = await fetch(url, { headers: { 'Authorization': `Bearer ${tokenA}` } });
+    assert.equal(r.status, 200);
+    const downloaded = Buffer.from(await r.arrayBuffer());
+    assert.equal(downloaded.length, TOTAL_SIZE, 'Downloaded size should match');
+    const dlSha = createHash('sha256').update(downloaded).digest('hex');
+    assert.equal(dlSha, fullSha256, 'Downloaded content should match original');
+  });
+
+  it('Non-chunked upload still works (regression)', async () => {
+    const buf = Buffer.from('still works without Content-Range', 'utf8');
+    const r = await uploadRaw(tokenA, 'general', `regression-${RUN}.txt`, buf);
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.ok(r.body.sha256);
+  });
+});

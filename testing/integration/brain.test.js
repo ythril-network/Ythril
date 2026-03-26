@@ -19,7 +19,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, delWithBody } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -72,14 +72,13 @@ describe('Brain â€” memories', () => {
   });
 
   it('Wipe all memories requires confirm:true in body', async () => {
-    // Attempt with wrong confirm value
-    const noConfirm = await del(INSTANCES.a, token(), '/api/brain/general/memories', {
-      body: JSON.stringify({ confirm: false }),
-      method: 'DELETE',
-    });
-    // Should not succeed without confirm:true
-    assert.ok(noConfirm.status >= 400 || noConfirm.status === 204,
-      'Must require confirm:true; got ' + noConfirm.status);
+    // No body → 400
+    const noBody = await del(INSTANCES.a, token(), '/api/brain/general/memories');
+    assert.equal(noBody.status, 400, `No body should 400, got ${noBody.status}`);
+
+    // confirm:false → 400
+    const noConfirm = await delWithBody(INSTANCES.a, token(), '/api/brain/general/memories', { confirm: false });
+    assert.equal(noConfirm.status, 400, `confirm:false should 400, got ${noConfirm.status}`);
   });
 
   it('Delete non-existent memory returns 404', async () => {
@@ -301,12 +300,14 @@ describe('Brain — memory list filtering', () => {
       { _id: `filt-${RUN}-5`, fact: 'Epsilon fact', tags: ['biology'], entityIds: ['ent-z'] },
     ];
 
+    let seqBase = Date.now();
     for (const s of seeds) {
-      await post(INSTANCES.a, tokenA, '/api/sync/memories?spaceId=general', {
+      const r = await post(INSTANCES.a, tokenA, '/api/sync/memories?spaceId=general', {
         ...s, spaceId: 'general', embedding: [],
-        seq: Date.now(), author: { instanceId: 'test', instanceLabel: 'Test' },
+        seq: seqBase++, author: { instanceId: 'test', instanceLabel: 'Test' },
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
       });
+      assert.equal(r.status, 200, `Seeding ${s._id}: ${JSON.stringify(r.body)}`);
     }
   });
 
@@ -352,7 +353,7 @@ describe('Brain — memory list filtering', () => {
     assert.equal(r.status, 200);
     const ids = r.body.memories.map(m => m._id);
     for (let i = 1; i <= 5; i++) {
-      assert.ok(ids.includes(`filt-${RUN}-${i}`), `All seeded memories should appear (item ${i})`);
+      assert.ok(ids.includes(`filt-${RUN}-${i}`), `Item ${i} (filt-${RUN}-${i}) missing from ${ids.length} results`);
     }
   });
 
@@ -455,5 +456,105 @@ describe('Brain â€” memory fact validation', () => {
       fact: 'a'.repeat(50_000),
     });
     assert.equal(r.status, 201, `Boundary-value fact should be accepted: ${JSON.stringify(r.body)}`);
+  });
+});
+
+// ── Bulk memory wipe ────────────────────────────────────────────────────────
+
+describe('Brain — bulk memory wipe', () => {
+  const RUN = Date.now();
+  const WIPE_SPACE = 'general';
+  let seededIds;
+  let seqBefore;
+
+  before(async () => {
+    tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+
+    // Seed 10 memories for the wipe test
+    seededIds = [];
+    let seqBase = Date.now();
+    for (let i = 0; i < 10; i++) {
+      const id = `wipe-${RUN}-${i}`;
+      seededIds.push(id);
+      const r = await post(INSTANCES.a, tokenA, '/api/sync/memories?spaceId=general', {
+        _id: id, spaceId: WIPE_SPACE, fact: `Wipe test memory ${i}`,
+        tags: ['wipe-test'], entityIds: [], embedding: [],
+        seq: seqBase++, author: { instanceId: 'test', instanceLabel: 'Test' },
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
+      });
+      assert.equal(r.status, 200, `Seed wipe-${i}: ${JSON.stringify(r.body)}`);
+    }
+
+    // Create one more memory via brain API to capture the current seq counter
+    const marker = await post(INSTANCES.a, tokenA, `/api/brain/${WIPE_SPACE}/memories`, {
+      fact: 'Seq marker for wipe test', tags: ['wipe-marker'],
+    });
+    assert.equal(marker.status, 201);
+    seqBefore = marker.body.seq;
+
+    // Verify they exist
+    const list = await get(INSTANCES.a, tokenA, `/api/brain/${WIPE_SPACE}/memories?limit=500`);
+    for (const id of seededIds) {
+      assert.ok(list.body.memories.some(m => m._id === id), `Seeded ${id} should exist`);
+    }
+  });
+
+  it('DELETE without body returns 400', async () => {
+    const r = await del(INSTANCES.a, tokenA, `/api/brain/${WIPE_SPACE}/memories`);
+    assert.equal(r.status, 400, `expected 400, got ${r.status}: ${JSON.stringify(r.body)}`);
+  });
+
+  it('DELETE with confirm:false returns 400', async () => {
+    const r = await delWithBody(INSTANCES.a, tokenA, `/api/brain/${WIPE_SPACE}/memories`, { confirm: false });
+    assert.equal(r.status, 400, `expected 400, got ${r.status}: ${JSON.stringify(r.body)}`);
+  });
+
+  it('DELETE with confirm:true returns {deleted: N}', async () => {
+    const r = await delWithBody(INSTANCES.a, tokenA, `/api/brain/${WIPE_SPACE}/memories`, { confirm: true });
+    assert.equal(r.status, 200, `expected 200, got ${r.status}: ${JSON.stringify(r.body)}`);
+    assert.ok(typeof r.body.deleted === 'number', 'deleted must be a number');
+    assert.ok(r.body.deleted >= 10, `Should have deleted at least 10, got ${r.body.deleted}`);
+  });
+
+  it('Memories are gone after wipe', async () => {
+    const list = await get(INSTANCES.a, tokenA, `/api/brain/${WIPE_SPACE}/memories?limit=500`);
+    assert.equal(list.status, 200);
+    for (const id of seededIds) {
+      const found = list.body.memories.some(m => m._id === id);
+      assert.ok(!found, `Wiped memory ${id} should be gone`);
+    }
+  });
+
+  it('Tombstones were written for wiped memories', async () => {
+    // Query only tombstones created after our seq watermark
+    const r = await get(INSTANCES.a, tokenA, `/api/sync/tombstones?spaceId=${WIPE_SPACE}&sinceSeq=${seqBefore}`);
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const tombIds = (r.body.memories ?? []).map(t => t._id);
+    for (const id of seededIds) {
+      assert.ok(tombIds.includes(id), `Tombstone for ${id} should exist (got ${tombIds.length} tombstones since seq ${seqBefore})`);
+    }
+  });
+
+  it('Long-form route works: DELETE /api/brain/spaces/:spaceId/memories', async () => {
+    // Seed a couple of memories first
+    let seqBase = Date.now();
+    for (let i = 0; i < 3; i++) {
+      await post(INSTANCES.a, tokenA, '/api/sync/memories?spaceId=general', {
+        _id: `wipe-long-${RUN}-${i}`, spaceId: WIPE_SPACE, fact: `Long-form wipe ${i}`,
+        tags: ['wipe-long'], entityIds: [], embedding: [],
+        seq: seqBase++, author: { instanceId: 'test', instanceLabel: 'Test' },
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
+      });
+    }
+
+    const r = await delWithBody(INSTANCES.a, tokenA, `/api/brain/spaces/${WIPE_SPACE}/memories`, { confirm: true });
+    assert.equal(r.status, 200, `Long-form wipe: ${JSON.stringify(r.body)}`);
+    assert.ok(typeof r.body.deleted === 'number');
+    assert.ok(r.body.deleted >= 3, `Should have deleted at least 3, got ${r.body.deleted}`);
+  });
+
+  it('Wipe on unknown space returns 404', async () => {
+    const r = await delWithBody(INSTANCES.a, tokenA, '/api/brain/no-such-space/memories', { confirm: true });
+    assert.equal(r.status, 404, `expected 404, got ${r.status}`);
   });
 });

@@ -7,6 +7,7 @@ import { resetStaleWatermarksIfNeeded } from './util/seq.js';
 import { createApp } from './app.js';
 import { generateSetupCode } from './setup/routes.js';
 import { startSyncScheduler, stopSyncScheduler } from './sync/engine.js';
+import { cleanupStaleChunks } from './files/chunks.js';
 import { log } from './util/log.js';
 
 // Enable debug logging when --debug flag is passed or DEBUG env is already set.
@@ -80,10 +81,18 @@ async function main(): Promise<void> {
     await initAllSpaces();
     await resetStaleWatermarksIfNeeded();
     startSyncScheduler();
+    cleanupStaleChunks().catch(() => {});
   }
 
   const app = createApp();
   const server = createServer(app);
+
+  // Periodic stale-chunk cleanup (every hour)
+  const chunkCleanupInterval = setInterval(
+    () => cleanupStaleChunks().catch(() => {}),
+    60 * 60 * 1000,
+  );
+  chunkCleanupInterval.unref(); // don't block shutdown
 
   server.listen(PORT, () => {
     const url = `http://localhost:${PORT}`;

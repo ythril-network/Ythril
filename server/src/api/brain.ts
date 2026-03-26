@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
-import { listMemories, deleteMemory, countMemories } from '../brain/memory.js';
+import { listMemories, deleteMemory, countMemories, bulkDeleteMemories } from '../brain/memory.js';
 import { listEntities, deleteEntity } from '../brain/entities.js';
 import { listEdges, deleteEdge } from '../brain/edges.js';
 import { embed } from '../brain/embedding.js';
@@ -12,7 +12,7 @@ import { nextSeq } from '../util/seq.js';
 import { needsReindex, clearReindexFlag } from '../spaces/spaces.js';
 import { log } from '../util/log.js';
 import { checkQuota, QuotaError } from '../quota/quota.js';
-import { resolveMemberSpaces, resolveWriteTarget, findSpace } from '../spaces/proxy.js';
+import { resolveMemberSpaces, resolveWriteTarget, findSpace, isProxySpace } from '../spaces/proxy.js';
 import type { MemoryDoc } from '../config/types.js';
 
 export const brainRouter = Router();
@@ -141,6 +141,26 @@ brainRouter.delete('/:spaceId/memories/:id', globalRateLimit, requireSpaceAuth, 
   res.status(404).json({ error: 'Memory not found' });
 });
 
+// DELETE /api/brain/:spaceId/memories — bulk wipe all memories
+brainRouter.delete('/:spaceId/memories', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
+  const spaceId = req.params['spaceId'] as string;
+  const cfg = getConfig();
+  if (!cfg.spaces.some(s => s.id === spaceId)) {
+    res.status(404).json({ error: `Space '${spaceId}' not found` });
+    return;
+  }
+  if (isProxySpace(spaceId)) {
+    res.status(400).json({ error: 'Bulk wipe not supported on proxy spaces — target member spaces individually' });
+    return;
+  }
+  if (req.body?.confirm !== true) {
+    res.status(400).json({ error: '`confirm: true` required in request body' });
+    return;
+  }
+  const deleted = await bulkDeleteMemories(spaceId);
+  res.json({ deleted });
+});
+
 // GET /api/brain/spaces/:spaceId/stats
 brainRouter.get('/spaces/:spaceId/stats', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
@@ -186,6 +206,26 @@ brainRouter.delete('/spaces/:spaceId/memories/:id', globalRateLimit, requireSpac
     if (await deleteMemory(mid, id)) { res.status(204).end(); return; }
   }
   res.status(404).json({ error: 'Memory not found' });
+});
+
+// DELETE /api/brain/spaces/:spaceId/memories — bulk wipe (long-form)
+brainRouter.delete('/spaces/:spaceId/memories', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
+  const spaceId = req.params['spaceId'] as string;
+  const cfg = getConfig();
+  if (!cfg.spaces.some(s => s.id === spaceId)) {
+    res.status(404).json({ error: `Space '${spaceId}' not found` });
+    return;
+  }
+  if (isProxySpace(spaceId)) {
+    res.status(400).json({ error: 'Bulk wipe not supported on proxy spaces — target member spaces individually' });
+    return;
+  }
+  if (req.body?.confirm !== true) {
+    res.status(400).json({ error: '`confirm: true` required in request body' });
+    return;
+  }
+  const deleted = await bulkDeleteMemories(spaceId);
+  res.json({ deleted });
 });
 
 // GET /api/brain/spaces/:spaceId/entities

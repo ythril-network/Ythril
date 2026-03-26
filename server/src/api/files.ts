@@ -33,6 +33,12 @@ import {
   createDir,
   moveFile,
 } from '../files/files.js';
+import {
+  parseContentRange,
+  storeChunk,
+  assembleChunks,
+  getUploadReceived,
+} from '../files/chunks.js';
 import { checkQuota, QuotaError } from '../quota/quota.js';
 import { resolveSafePath, spaceRoot } from '../files/sandbox.js';
 import { col } from '../db/mongo.js';
@@ -193,6 +199,25 @@ filesRouter.post(
   },
 );
 
+// ── GET /api/files/:spaceId/upload-status ─────────────────────────────────────
+// Returns bytes received for an in-progress chunked upload.
+filesRouter.get('/:spaceId/upload-status', globalRateLimit, requireSpaceAuth, async (req, res) => {
+  const spaceId = req.params['spaceId'] as string;
+  const cfg = getConfig();
+  if (!cfg.spaces.some(s => s.id === spaceId)) {
+    res.status(404).json({ error: `Space '${spaceId}' not found` });
+    return;
+  }
+  const filePath = req.query['path'];
+  const total = parseInt(req.query['total'] as string, 10);
+  if (typeof filePath !== 'string' || !filePath.trim() || isNaN(total) || total <= 0) {
+    res.status(400).json({ error: 'Required query params: path, total (positive integer)' });
+    return;
+  }
+  const received = await getUploadReceived(spaceId, filePath, total);
+  res.json({ received });
+});
+
 // ── POST /api/files/:spaceId ──────────────────────────────────────────────────
 // Write a file. Accepts raw bytes (any non-JSON Content-Type) or
 // JSON { content: string, encoding?: 'utf8' | 'base64' }.
@@ -222,6 +247,43 @@ filesRouter.post(
     const filePath = requireQueryPath(req, res);
     if (filePath === null) return;
 
+    // ── Chunked upload (Content-Range) ───────────────────────────────────
+    const range = parseContentRange(req.headers['content-range'] as string | undefined);
+    if (range) {
+      if (!Buffer.isBuffer(req.body)) {
+        res.status(400).json({ error: 'Chunked upload requires raw bytes (not JSON)' });
+        return;
+      }
+      const expectedLen = range.end - range.start + 1;
+      if (req.body.length !== expectedLen) {
+        res.status(400).json({ error: `Chunk size mismatch: Content-Range says ${expectedLen} bytes but body is ${req.body.length}` });
+        return;
+      }
+      try {
+        const { received, complete } = await storeChunk(
+          targetSpace, filePath, req.body, range.start, range.end, range.total,
+        );
+
+        if (complete) {
+          // Assemble final file
+          const absTarget = resolveSafePath(targetSpace, filePath);
+          const sha256 = await assembleChunks(targetSpace, filePath, range.total, absTarget);
+          res.status(201).json({ path: filePath, sha256 });
+        } else {
+          res.status(202).json({ path: filePath, received });
+        }
+      } catch (err) {
+        if (err instanceof RangeError) {
+          res.status(400).json({ error: (err as Error).message });
+          return;
+        }
+        log.warn(`Chunked upload error for space ${targetSpace}, path ${filePath}: ${err}`);
+        res.status(500).json({ error: 'Chunked upload failed' });
+      }
+      return;
+    }
+
+    // ── Single-request upload ────────────────────────────────────────────
     try {
       let sha256: string;
       let incomingBytes = 0;

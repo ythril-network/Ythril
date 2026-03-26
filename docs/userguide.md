@@ -50,7 +50,9 @@ For the wire protocol see [sync-protocol.md](sync-protocol.md).
 
 14. [Sync schedule](#sync-schedule)
 
-15. [Governance and voting](#governance-and-voting)
+15. [Sync history](#sync-history)
+
+16. [Governance and voting](#governance-and-voting)
 
 16. [Braintree networks](#braintree-networks)
 
@@ -60,6 +62,9 @@ For the wire protocol see [sync-protocol.md](sync-protocol.md).
 19. [Triggering sync manually](#triggering-sync-manually)
 20. [Conflict resolution](#conflict-resolution)
 21. [Merkle integrity](#merkle-integrity)
+22. [About page](#about-page)
+23. [File preview](#file-preview)
+24. [Directory tree sidebar](#directory-tree-sidebar)
 
 
 
@@ -239,6 +244,39 @@ The token is stored in browser `localStorage` under the key `ythril_token`. Logg
 Edges connect two entities inside a space. Each edge has a `from` entity, a `to` entity, a `label` (the relationship name), an optional numeric `weight`, and an optional `type` string for classification (e.g. `causal`, `hierarchical`, `temporal`).
 
 The `type` field is visible in the **Brain → Edges** table in the UI and is accepted by both the REST API (`POST /api/brain/:spaceId/edges`) and the MCP `upsert_edge` tool. It syncs across networked brains like any other edge field.
+
+### Memory filtering
+
+The **Brain → Memories** tab supports tag and entity filters. Click any tag pill or entity badge on a memory row to filter the list to only memories matching that value. Active filters appear as removable chips above the table — click the **×** to clear a filter, or use the **Clear all** button.
+
+Filters are also available via the REST API:
+
+```
+GET /api/brain/:spaceId/memories?tag=physics          memories tagged "physics" (case-insensitive)
+GET /api/brain/:spaceId/memories?entity=ent-abc123     memories linked to entity ID ent-abc123
+GET /api/brain/:spaceId/memories?tag=physics&entity=x  both filters combined (AND)
+```
+
+Memory lists are sorted newest-first (`createdAt` descending) and support `limit` / `skip` pagination.
+
+### Bulk memory wipe
+
+To permanently delete **all** memories in a space, use the bulk wipe endpoint:
+
+```
+DELETE /api/brain/:spaceId/memories
+Content-Type: application/json
+
+{ "confirm": true }
+```
+
+Response: `{ "deleted": 42 }`.
+
+A tombstone is written for each deleted memory so sync peers propagate the deletion. The long-form route `DELETE /api/brain/spaces/:spaceId/memories` is also supported.
+
+- Requires `confirm: true` in the body — requests without it return **400**.
+- Proxy spaces are rejected with **400** — target member spaces individually.
+- The **Brain → Memories** tab has a **Wipe all** button that shows a type-to-confirm dialog (type the space ID to proceed).
 
 ---
 
@@ -451,6 +489,40 @@ Space IDs must be alphanumeric plus hyphens, maximum 40 characters, and unique o
 ---
 
 
+
+## Chunked file uploads
+
+For files larger than 10 MB, the web UI automatically splits the upload into 5 MB chunks using the `Content-Range` header. Failed chunks are retried up to 3 times, and a progress bar shows overall completion.
+
+### REST API
+
+To upload a file in chunks, send multiple `POST /api/files/:spaceId?path=<path>` requests with raw bytes and a `Content-Range` header:
+
+```
+POST /api/files/general?path=large-file.zip
+Content-Type: application/octet-stream
+Content-Range: bytes 0-5242879/15728640
+Authorization: Bearer ythril_…
+
+<5 MB of raw bytes>
+```
+
+Intermediate chunks return **202** with `{ "path": "…", "received": 5242880 }`. The final chunk (where `end === total - 1`) returns **201** with `{ "path": "…", "sha256": "…" }` after assembling all parts.
+
+### Resuming interrupted uploads
+
+Query received bytes for an in-progress upload:
+
+```
+GET /api/files/:spaceId/upload-status?path=<path>&total=<total_bytes>
+→ { "received": 5242880 }
+```
+
+Resume by sending the next chunk from the `received` offset. Duplicate ranges are silently accepted (idempotent).
+
+### Cleanup
+
+Stale chunk directories (older than 24 hours) are automatically cleaned up on server startup and hourly thereafter. The `maxUploadBodyBytes` config limit applies per-chunk, not per-file.
 
 ## Storage quotas
 
@@ -875,6 +947,65 @@ Expand a network card and find the **Sync** section.
 Standard 5-field cron syntax: `minute hour day month weekday`.  
 
 6-field (seconds-precision): prepend a seconds field, e.g. `0 0 * * * *` (every minute at :00).
+
+
+
+---
+
+
+
+## Sync history
+
+
+
+Every sync cycle records a summary to the `_sync_history` MongoDB collection. The last 100 records per network are retained automatically; older entries are pruned on insert.
+
+
+
+### Web UI
+
+
+
+Expand a network card and click the **Sync History** heading. Each entry shows:
+
+- **Timestamp** — when the cycle completed.
+- **Status badge** — green (`success`), yellow (`partial`), or red (`failed`).
+- **Pulled / pushed counts** — total memories + entities + edges synced in each direction, plus file count.
+- **Errors** — an expandable list of error messages (if any).
+
+The history refreshes automatically when you click **Sync now** while the history panel is open.
+
+
+
+### REST API
+
+
+
+```
+GET /api/networks/<networkId>/sync-history?limit=20
+Authorization: Bearer <admin-token>
+```
+
+Response:
+
+```json
+{
+  "history": [
+    {
+      "_id": "...",
+      "networkId": "...",
+      "triggeredAt": "2025-06-01T12:00:00.000Z",
+      "completedAt": "2025-06-01T12:00:02.500Z",
+      "status": "success",
+      "pulled": { "memories": 5, "entities": 2, "edges": 1, "files": 0 },
+      "pushed": { "memories": 3, "entities": 0, "edges": 0, "files": 1 },
+      "errors": []
+    }
+  ]
+}
+```
+
+`limit` defaults to 20, maximum 100. Results are ordered most-recent-first.
 
 
 
@@ -1326,4 +1457,95 @@ Response:
 | `leafCount` | Number of leaf nodes (documents + files) that were hashed. |
 
 | `computedAt` | ISO timestamp when the root was last computed. |
+
+---
+
+## About page
+
+The **About** tab in Settings displays instance metadata, disk usage, and recent server logs.
+
+### Web UI
+
+| Field | Description |
+|-------|-------------|
+| Instance Label | The human-readable name configured during setup. |
+| Instance ID | UUID identifying this brain instance. |
+| Version | Server version (from `package.json`). |
+| Uptime | Time since the server process started (e.g. "3d 14h 22m"). |
+| MongoDB Version | Version reported by the connected MongoDB server. |
+| Disk Usage | Visual bar showing used / total bytes on the data root partition. |
+| Server Log | Last 200 lines of the in-memory log buffer, auto-refreshed every 15 seconds. |
+
+### REST API
+
+```
+GET /api/about
+Authorization: Bearer <PAT>
+```
+
+Response:
+
+```json
+{
+  "instanceId": "a1b2c3d4-...",
+  "instanceLabel": "My Brain",
+  "version": "0.1.0",
+  "uptime": "3d 14h 22m",
+  "mongoVersion": "7.0.15",
+  "diskInfo": { "total": 107374182400, "used": 53687091200, "available": 53687091200 }
+}
+```
+
+```
+GET /api/about/logs?lines=200
+Authorization: Bearer <PAT>
+```
+
+Response:
+
+```json
+{
+  "lines": [
+    "[2025-03-26T08:00:00.000Z] [INFO ] Server started on port 3200",
+    "..."
+  ]
+}
+```
+
+| Parameter | Default | Max | Description |
+|-----------|---------|-----|-------------|
+| `lines` | 200 | 1000 | Number of recent log lines to return. |
+
+---
+
+## File preview
+
+Clicking a file in the file manager opens a preview pane instead of downloading. The pane slides in from the right and supports several file types:
+
+| Type | Extensions | Rendering |
+|------|-----------|-----------|
+| Text | `.txt`, `.md`, `.json`, `.yaml`, `.yml`, `.ts`, `.js`, `.py`, `.sh`, `.csv`, `.xml`, `.html`, `.css`, `.log`, `.env`, `.toml` | Syntax-highlighted code view (highlight.js). |
+| Image | `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`, `.bmp` | Inline `<img>` tag scaled to fit. |
+| PDF | `.pdf` | Embedded `<iframe>` viewer. |
+| Other | Everything else | File metadata (name, size, modified) with a download button. |
+
+### Controls
+
+- **Download** button is always visible in the preview header.
+- **Close**: click the ✕ button, press Escape, or click the overlay backdrop.
+- **Navigate**: Arrow keys (↑/↓ or ←/→) cycle through files in the current directory while the preview is open.
+
+---
+
+## Directory tree sidebar
+
+The file manager includes a collapsible directory tree in the left sidebar.
+
+### Behaviour
+
+- **Toggle**: Click "Show tree" / "Hide tree" in the toolbar. The collapsed/expanded state persists across page reloads via localStorage.
+- **Lazy loading**: Only root-level directories are loaded initially. Subdirectories load on demand when you click to expand a node.
+- **Navigation**: Clicking a directory in the tree navigates the main file listing to that directory.
+- **Highlighting**: The currently active directory is highlighted in the tree.
+- **Auto-refresh**: The tree reloads when you switch spaces or create a new folder.
 

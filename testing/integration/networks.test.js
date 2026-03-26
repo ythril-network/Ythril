@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, reqJson } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, reqJson, triggerSync, waitFor } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -323,5 +323,128 @@ describe('RSA invite handshake', () => {
 
   after(async () => {
     if (networkId) await del(INSTANCES.a, tokenA, `/api/networks/${networkId}`).catch(() => {});
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// Sync History
+// ════════════════════════════════════════════════════════════════════════════
+
+describe('Sync history', () => {
+  let networkId;
+
+  before(async () => {
+    tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+    const r = await post(INSTANCES.a, tokenA, '/api/networks', {
+      label: 'History Test Net',
+      type: 'closed',
+      spaces: ['general'],
+      votingDeadlineHours: 1,
+    });
+    assert.equal(r.status, 201);
+    networkId = r.body.id;
+  });
+
+  it('returns empty array when no syncs have occurred', async () => {
+    const r = await get(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync-history`);
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.ok(Array.isArray(r.body.history), 'history must be an array');
+    assert.equal(r.body.history.length, 0);
+  });
+
+  it('records history after sync trigger', async () => {
+    await triggerSync(INSTANCES.a, tokenA, networkId);
+
+    // Poll until history has at least one entry (sync is async)
+    await waitFor(async () => {
+      const r = await get(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync-history`);
+      return r.status === 200 && r.body.history?.length > 0;
+    }, 10_000);
+
+    const r = await get(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync-history`);
+    assert.equal(r.status, 200);
+    assert.ok(r.body.history.length >= 1, 'Should have at least 1 history record');
+
+    const rec = r.body.history[0];
+    assert.ok(rec._id, 'Record must have _id');
+    assert.equal(rec.networkId, networkId);
+    assert.ok(rec.triggeredAt, 'triggeredAt required');
+    assert.ok(rec.completedAt, 'completedAt required');
+    assert.ok(['success', 'partial', 'failed'].includes(rec.status), `Unexpected status: ${rec.status}`);
+    assert.ok(typeof rec.pulled === 'object', 'pulled must be an object');
+    assert.ok(typeof rec.pushed === 'object', 'pushed must be an object');
+    for (const dir of [rec.pulled, rec.pushed]) {
+      assert.ok(typeof dir.memories === 'number');
+      assert.ok(typeof dir.entities === 'number');
+      assert.ok(typeof dir.edges === 'number');
+      assert.ok(typeof dir.files === 'number');
+    }
+  });
+
+  it('respects limit parameter', async () => {
+    // Trigger a second sync
+    await triggerSync(INSTANCES.a, tokenA, networkId);
+    await waitFor(async () => {
+      const r = await get(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync-history`);
+      return r.status === 200 && r.body.history?.length >= 2;
+    }, 10_000);
+
+    // Request only 1
+    const r = await get(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync-history?limit=1`);
+    assert.equal(r.status, 200);
+    assert.equal(r.body.history.length, 1, 'limit=1 should return exactly 1');
+  });
+
+  it('most recent is first', async () => {
+    const r = await get(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync-history`);
+    assert.ok(r.body.history.length >= 2);
+    const first = new Date(r.body.history[0].completedAt).getTime();
+    const second = new Date(r.body.history[1].completedAt).getTime();
+    assert.ok(first >= second, 'History should be most-recent-first');
+  });
+
+  it('unknown network returns 404', async () => {
+    const r = await get(INSTANCES.a, tokenA, '/api/networks/nonexistent-net-id/sync-history');
+    assert.equal(r.status, 404);
+  });
+
+  after(async () => {
+    if (networkId) await del(INSTANCES.a, tokenA, `/api/networks/${networkId}`).catch(() => {});
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// About endpoint
+// ════════════════════════════════════════════════════════════════════════════
+
+describe('About endpoint', () => {
+  before(() => {
+    tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+  });
+
+  it('GET /api/about returns instance info', async () => {
+    const r = await get(INSTANCES.a, tokenA, '/api/about');
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.ok(r.body.instanceId, 'instanceId required');
+    assert.ok(r.body.instanceLabel, 'instanceLabel required');
+    assert.ok(r.body.version, 'version required');
+    assert.ok(typeof r.body.uptime === 'string', 'uptime must be a string');
+    assert.ok(r.body.mongoVersion, 'mongoVersion required');
+    assert.ok(typeof r.body.diskInfo === 'object', 'diskInfo must be an object');
+    assert.ok(typeof r.body.diskInfo.total === 'number', 'diskInfo.total must be a number');
+    assert.ok(typeof r.body.diskInfo.used === 'number', 'diskInfo.used must be a number');
+    assert.ok(typeof r.body.diskInfo.available === 'number', 'diskInfo.available must be a number');
+  });
+
+  it('GET /api/about/logs returns log lines', async () => {
+    const r = await get(INSTANCES.a, tokenA, '/api/about/logs?lines=10');
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.ok(Array.isArray(r.body.lines), 'lines must be an array');
+    assert.ok(r.body.lines.length <= 10, 'Should respect limit');
+  });
+
+  it('GET /api/about requires auth', async () => {
+    const r = await get(INSTANCES.a, 'invalid-token', '/api/about');
+    assert.equal(r.status, 401);
   });
 });

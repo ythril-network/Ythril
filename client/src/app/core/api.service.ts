@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { HttpClient, HttpParams, HttpHeaders } from '@angular/common/http';
+import { Observable, Subject } from 'rxjs';
 
 // ── Shared types ─────────────────────────────────────────────────────────────
 
@@ -78,6 +78,11 @@ export interface FileEntry {
   modified: string;
 }
 
+export interface UploadProgress {
+  percent: number;
+  done: boolean;
+}
+
 export interface Network {
   id: string;
   label: string;
@@ -123,6 +128,26 @@ export interface ConflictRecord {
   detectedAt: string;
   peerInstanceId: string;
   peerInstanceLabel: string;
+}
+
+export interface SyncHistoryRecord {
+  _id: string;
+  networkId: string;
+  triggeredAt: string;
+  completedAt: string;
+  status: 'success' | 'partial' | 'failed';
+  pulled: { memories: number; entities: number; edges: number; files: number };
+  pushed: { memories: number; entities: number; edges: number; files: number };
+  errors?: string[];
+}
+
+export interface AboutInfo {
+  instanceId: string;
+  instanceLabel: string;
+  version: string;
+  uptime: string;
+  mongoVersion: string;
+  diskInfo: { total: number; used: number; available: number };
 }
 
 // ── API service ───────────────────────────────────────────────────────────────
@@ -223,6 +248,12 @@ export class ApiService {
     return this.http.delete<void>(`/api/brain/spaces/${spaceId}/memories/${id}`);
   }
 
+  wipeMemories(spaceId: string): Observable<{ deleted: number }> {
+    return this.http.delete<{ deleted: number }>(`/api/brain/spaces/${spaceId}/memories`, {
+      body: { confirm: true },
+    });
+  }
+
   // ── Brain — entities ──────────────────────────────────────────────────────
 
   listEntities(spaceId: string, limit = 50): Observable<{ entities: Entity[] }> {
@@ -269,6 +300,85 @@ export class ApiService {
     return this.http.post<void>(`/api/files/${spaceId}/upload`, formData, { params });
   }
 
+  /**
+   * Upload a file with automatic chunking for files > 10 MB.
+   * Emits progress events ({ percent, done }) for UI updates.
+   * Retries each chunk up to 3 times on failure.
+   */
+  uploadFileChunked(spaceId: string, dirPath: string, file: File): Observable<UploadProgress> {
+    const CHUNK_THRESHOLD = 10 * 1024 * 1024; // 10 MB
+    const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB
+    const MAX_RETRIES = 3;
+    const filePath = dirPath.endsWith('/') ? `${dirPath}${file.name}` : `${dirPath}/${file.name}`;
+
+    const subject = new Subject<UploadProgress>();
+
+    if (file.size <= CHUNK_THRESHOLD) {
+      // Small file: single upload
+      file.arrayBuffer().then(ab => {
+        const headers = new HttpHeaders({ 'Content-Type': 'application/octet-stream' });
+        const params = new HttpParams().set('path', filePath);
+        this.http.post<void>(`/api/files/${spaceId}`, ab, { headers, params }).subscribe({
+          next: () => {
+            subject.next({ percent: 100, done: true });
+            subject.complete();
+          },
+          error: err => subject.error(err),
+        });
+      });
+      return subject.asObservable();
+    }
+
+    // Chunked upload
+    const total = file.size;
+    let offset = 0;
+
+    const sendNextChunk = (): void => {
+      if (offset >= total) return;
+      const end = Math.min(offset + CHUNK_SIZE, total);
+      const slice = file.slice(offset, end);
+      const start = offset;
+      const byteEnd = end - 1;
+
+      slice.arrayBuffer().then(ab => {
+        const sendChunk = (retriesLeft: number): void => {
+          const headers = new HttpHeaders({
+            'Content-Type': 'application/octet-stream',
+            'Content-Range': `bytes ${start}-${byteEnd}/${total}`,
+          });
+          const params = new HttpParams().set('path', filePath);
+          this.http.post<any>(`/api/files/${spaceId}`, ab, { headers, params }).subscribe({
+            next: () => {
+              offset = end;
+              const percent = Math.round((offset / total) * 100);
+              if (offset >= total) {
+                subject.next({ percent: 100, done: true });
+                subject.complete();
+              } else {
+                subject.next({ percent, done: false });
+                sendNextChunk();
+              }
+            },
+            error: err => {
+              if (retriesLeft > 0) {
+                sendChunk(retriesLeft - 1);
+              } else {
+                subject.error(err);
+              }
+            },
+          });
+        };
+        sendChunk(MAX_RETRIES);
+      });
+    };
+
+    // Start uploading
+    subject.next({ percent: 0, done: false });
+    sendNextChunk();
+
+    return subject.asObservable();
+  }
+
   getFileDownloadUrl(spaceId: string, path: string): string {
     return `/api/files/${spaceId}/download?path=${encodeURIComponent(path)}`;
   }
@@ -299,6 +409,10 @@ export class ApiService {
 
   getNetwork(id: string): Observable<Network> {
     return this.http.get<Network>(`/api/networks/${id}`);
+  }
+
+  getSyncHistory(networkId: string, limit: number = 20): Observable<{ history: SyncHistoryRecord[] }> {
+    return this.http.get<{ history: SyncHistoryRecord[] }>(`/api/networks/${networkId}/sync-history?limit=${limit}`);
   }
 
   createNetwork(body: {
@@ -353,5 +467,15 @@ export class ApiService {
 
   listVotes(networkId: string): Observable<{ rounds: VoteRound[] }> {
     return this.http.get<any>(`/api/networks/${networkId}/votes`);
+  }
+
+  // ── About ───────────────────────────────────────────────────────────────
+
+  getAbout(): Observable<AboutInfo> {
+    return this.http.get<AboutInfo>('/api/about');
+  }
+
+  getAboutLogs(lines: number = 200): Observable<{ lines: string[] }> {
+    return this.http.get<{ lines: string[] }>(`/api/about/logs?lines=${lines}`);
   }
 }

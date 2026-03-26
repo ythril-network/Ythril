@@ -152,6 +152,7 @@ export async function listMemories(
   return col<MemoryDoc>(`${spaceId}_memories`)
     .find(filter as never)
     .project({ embedding: 0 })
+    .sort({ createdAt: -1 })
     .skip(skip)
     .limit(limit)
     .toArray();
@@ -160,6 +161,33 @@ export async function listMemories(
 /** Count memories in a space */
 export async function countMemories(spaceId: string): Promise<number> {
   return col<MemoryDoc>(`${spaceId}_memories`).countDocuments();
+}
+
+/** Bulk-delete all memories in a space, writing a tombstone per deleted doc. */
+export async function bulkDeleteMemories(spaceId: string): Promise<number> {
+  const coll = col<MemoryDoc>(`${spaceId}_memories`);
+  const ids = await coll.find({}, { projection: { _id: 1 } }).toArray();
+  if (ids.length === 0) return 0;
+
+  const now = new Date().toISOString();
+  const instanceId = getConfig().instanceId;
+  const tombstones: TombstoneDoc[] = [];
+
+  for (const doc of ids) {
+    const seq = await nextSeq(spaceId);
+    tombstones.push({
+      _id: doc._id,
+      type: 'memory',
+      spaceId,
+      deletedAt: now,
+      instanceId,
+      seq,
+    });
+  }
+
+  await col<TombstoneDoc>(`${spaceId}_tombstones`).insertMany(tombstones as never);
+  await coll.deleteMany({});
+  return ids.length;
 }
 
 // Allowed top-level query operators for the structured query tool

@@ -15,6 +15,7 @@ import { globalRateLimit } from '../rate-limit/middleware.js';
 import { getConfig, saveConfig, getSecrets, saveSecrets } from '../config/loader.js';
 import { createToken, revokeToken } from '../auth/tokens.js';
 import { concludeRoundIfReady, sendMemberRemovedNotify } from './sync.js';
+import { getSyncHistory } from '../sync/history.js';
 import { log } from '../util/log.js';
 import type { NetworkConfig, NetworkMember, VoteRound } from '../config/types.js';
 
@@ -119,7 +120,22 @@ networksRouter.get('/:id', globalRateLimit, requireAdmin, (req, res) => {
   res.json(safe);
 });
 
-// â”€â”€ POST /api/networks â€” create a new network â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── GET /api/networks/:id/sync-history ─────────────────────────────────────
+
+networksRouter.get('/:id/sync-history', globalRateLimit, requireAdmin, async (req, res) => {
+  try {
+    const cfg = getConfig();
+    const net = cfg.networks.find(n => n.id === req.params['id']);
+    if (!net) { res.status(404).json({ error: 'Network not found' }); return; }
+
+    const limit = Math.min(parseInt(req.query['limit'] as string, 10) || 20, 100);
+    const history = await getSyncHistory(net.id, limit);
+    res.json({ history });
+  } catch (err) {
+    log.error(`GET /api/networks/:id/sync-history: ${err}`);
+    res.status(500).json({ error: 'Internal error' });
+  }
+});
 
 networksRouter.post('/', globalRateLimit, requireAdmin, async (req, res) => {
   try {

@@ -18,6 +18,7 @@
 import { getConfig, saveConfig, getSecrets } from '../config/loader.js';
 import { col } from '../db/mongo.js';
 import { applyRemoteTombstone, listTombstones } from '../brain/tombstones.js';
+import { recordSyncResult, type SyncCounts } from './history.js';
 import { buildFileManifest } from '../files/manifest.js';
 import { log } from '../util/log.js';
 import { bumpSeq } from '../util/seq.js';
@@ -147,12 +148,25 @@ export async function runSyncForNetwork(networkId: string): Promise<{ synced: nu
   const net = cfg.networks.find(n => n.id === networkId);
   if (!net) throw new Error(`Network ${networkId} not found`);
 
+  const triggeredAt = new Date().toISOString();
+  const pulled: SyncCounts = { memories: 0, entities: 0, edges: 0, files: 0 };
+  const pushed: SyncCounts = { memories: 0, entities: 0, edges: 0, files: 0 };
+  const errorMessages: string[] = [];
+
   log.info(`Starting sync cycle for network '${net.label}' (${net.members.length} members)`);
   let synced = 0; let errors = 0;
 
   for (const member of net.members) {
     try {
-      await runSyncForMember(net, member);
+      const counts = await runSyncForMember(net, member);
+      pulled.memories += counts.pulled.memories;
+      pulled.entities += counts.pulled.entities;
+      pulled.edges += counts.pulled.edges;
+      pulled.files += counts.pulled.files;
+      pushed.memories += counts.pushed.memories;
+      pushed.entities += counts.pushed.entities;
+      pushed.edges += counts.pushed.edges;
+      pushed.files += counts.pushed.files;
       synced++;
       // Reset failure counter on success
       _persistFailureCount(net.id, member.instanceId, 0);
@@ -171,7 +185,9 @@ export async function runSyncForNetwork(networkId: string): Promise<{ synced: nu
         );
       }
     } catch (err) {
-      log.error(`Sync failed for member ${member.label} (${member.instanceId}): ${err}`);
+      const errMsg = `Sync failed for member ${member.label} (${member.instanceId}): ${err}`;
+      log.error(errMsg);
+      errorMessages.push(errMsg);
       errors++;
       const failures = _incrementFailureCount(net.id, member.instanceId);
       if (failures === STALE_FAILURE_THRESHOLD) {
@@ -191,6 +207,18 @@ export async function runSyncForNetwork(networkId: string): Promise<{ synced: nu
   }
 
   log.info(`Sync cycle complete for '${net.label}': ${synced} ok, ${errors} errors`);
+
+  // Persist sync history
+  const status = errors === 0 ? 'success' : synced === 0 && net.members.length > 0 ? 'failed' : 'partial';
+  recordSyncResult({
+    networkId,
+    triggeredAt,
+    completedAt: new Date().toISOString(),
+    status: status as 'success' | 'partial' | 'failed',
+    pulled,
+    pushed,
+    ...(errorMessages.length > 0 ? { errors: errorMessages } : {}),
+  }).catch(err => log.error(`Failed to record sync history: ${err}`));
 
   // ── Orphan detection (braintree only) ──────────────────────────────────
   // After the sync loop finishes, check if any member's parentInstanceId points to
@@ -266,12 +294,17 @@ export async function runSyncForPeer(
 }
 
 /** Sync a single member across all network spaces. */
-async function runSyncForMember(net: NetworkConfig, member: NetworkMember): Promise<void> {
+async function runSyncForMember(
+  net: NetworkConfig,
+  member: NetworkMember,
+): Promise<{ pulled: SyncCounts; pushed: SyncCounts }> {
+  const pulled: SyncCounts = { memories: 0, entities: 0, edges: 0, files: 0 };
+  const pushed: SyncCounts = { memories: 0, entities: 0, edges: 0, files: 0 };
   const secrets = getSecrets();
   const peerToken = secrets.peerTokens[member.instanceId];
   if (!peerToken) {
     log.warn(`No peer token for ${member.label} (${member.instanceId}) — skipping sync`);
-    return;
+    return { pulled, pushed };
   }
 
   const cfg = getConfig();
@@ -302,14 +335,17 @@ async function runSyncForMember(net: NetworkConfig, member: NetworkMember): Prom
     const shouldPush = member.direction === 'both' || member.direction === 'push';
 
     if (shouldPull) {
-      await pullFromPeer(member, spaceId, net.id, headers, fetchOpts, batchFetchOpts);
+      const pc = await pullFromPeer(member, spaceId, net.id, headers, fetchOpts, batchFetchOpts);
+      pulled.memories += pc.memories; pulled.entities += pc.entities; pulled.edges += pc.edges;
     }
     if (shouldPush) {
-      await pushToPeer(member, spaceId, net.id, headers, fetchOpts, batchFetchOpts);
+      const pc = await pushToPeer(member, spaceId, net.id, headers, fetchOpts, batchFetchOpts);
+      pushed.memories += pc.memories; pushed.entities += pc.entities; pushed.edges += pc.edges;
     }
 
     // Sync file manifest
-    await syncFiles(member, spaceId, net.id, headers, fetchOpts);
+    const fc = await syncFiles(member, spaceId, net.id, headers, fetchOpts);
+    pulled.files += fc.pulledFiles; pushed.files += fc.pushedFiles;
 
     // Merkle integrity check (opt-in: network.merkle === true)
     if (net.merkle) {
@@ -330,6 +366,8 @@ async function runSyncForMember(net: NetworkConfig, member: NetworkMember): Prom
   const freshNet = freshCfg.networks.find(n => n.id === net.id);
   const m = freshNet?.members.find(m => m.instanceId === member.instanceId);
   if (m) { m.lastSyncAt = new Date().toISOString(); saveConfig(freshCfg); }
+
+  return { pulled, pushed };
 }
 
 // ── Gossip: member list exchange ────────────────────────────────────────────
@@ -580,7 +618,8 @@ async function pullFromPeer(
   headers: Record<string, string>,
   opts: RequestInit,
   batchOpts: RequestInit,
-): Promise<void> {
+): Promise<{ memories: number; entities: number; edges: number }> {
+  let pulledMemories = 0, pulledEntities = 0, pulledEdges = 0;
   const cfg = getConfig();
   const freshNet = cfg.networks.find(n => n.id === networkId);
   const memberState = freshNet?.members.find(m => m.instanceId === member.instanceId);
@@ -620,6 +659,7 @@ async function pullFromPeer(
       if ('deletedAt' in item && item.deletedAt) continue; // already handled via tombstones above
       const doc = item as MemoryDoc;
       await upsertMemory(spaceId, doc);
+      pulledMemories++;
       if (doc.seq > overallMaxSeq) overallMaxSeq = doc.seq;
       // Only advance the pull watermark for docs authored by the peer.
       // Docs we pushed to the peer and are echoing back must not inflate our
@@ -644,6 +684,7 @@ async function pullFromPeer(
       if ('deletedAt' in item && item.deletedAt) continue;
       const ent = item as EntityDoc;
       await upsertEntity(spaceId, ent);
+      pulledEntities++;
       if (ent.seq > overallMaxSeq) overallMaxSeq = ent.seq;
     }
     cursor = nextCursor; page++;
@@ -660,6 +701,7 @@ async function pullFromPeer(
       if ('deletedAt' in item && item.deletedAt) continue;
       const edge = item as EdgeDoc;
       await upsertEdge(spaceId, edge);
+      pulledEdges++;
       if (edge.seq > overallMaxSeq) overallMaxSeq = edge.seq;
     }
     cursor = nextCursor; page++;
@@ -685,6 +727,8 @@ async function pullFromPeer(
       saveConfig(freshCfg);
     }
   }
+
+  return { memories: pulledMemories, entities: pulledEntities, edges: pulledEdges };
 }
 
 // ── Push (upload our changes to peer) ──────────────────────────────────────
@@ -696,7 +740,8 @@ async function pushToPeer(
   headers: Record<string, string>,
   opts: RequestInit,
   batchOpts: RequestInit,
-): Promise<void> {
+): Promise<{ memories: number; entities: number; edges: number }> {
+  let pushedMemories = 0, pushedEntities = 0, pushedEdges = 0;
   const cfg = getConfig();
   const freshNet = cfg.networks.find(n => n.id === networkId);
   const memberState = freshNet?.members.find(m => m.instanceId === member.instanceId);
@@ -741,7 +786,8 @@ async function pushToPeer(
   async function pushCollection<T extends MemoryDoc | EntityDoc | EdgeDoc>(
     collName: string,
     payloadKey: 'memories' | 'entities' | 'edges',
-  ): Promise<void> {
+  ): Promise<number> {
+    let pushed = 0;
     let seqCursor = lastSeqPushed;
     while (!pushFailed) {
       const batch = await col<T>(collName)
@@ -759,6 +805,7 @@ async function pushToPeer(
         pushFailed = true;
         break;
       }
+      pushed += batch.length;
       // Only advance the push watermark for docs authored by this instance.
       // Relayed docs (received from peers) must not inflate the watermark —
       // doing so would prevent future pushes of this instance's own content.
@@ -769,11 +816,12 @@ async function pushToPeer(
       seqCursor = (batch[batch.length - 1] as MemoryDoc).seq;
       if (batch.length < PUSH_BATCH_SIZE) break;
     }
+    return pushed;
   }
 
-  await pushCollection<MemoryDoc>(`${spaceId}_memories`, 'memories');
-  await pushCollection<EntityDoc>(`${spaceId}_entities`, 'entities');
-  await pushCollection<EdgeDoc>(`${spaceId}_edges`, 'edges');
+  pushedMemories = await pushCollection<MemoryDoc>(`${spaceId}_memories`, 'memories');
+  pushedEntities = await pushCollection<EntityDoc>(`${spaceId}_entities`, 'entities');
+  pushedEdges = await pushCollection<EdgeDoc>(`${spaceId}_edges`, 'edges');
 
   // Persist the push high-water mark so next sync only sends new/changed docs
   if (maxSeqPushed > lastSeqPushed) {
@@ -786,6 +834,8 @@ async function pushToPeer(
       saveConfig(freshCfg);
     }
   }
+
+  return { memories: pushedMemories, entities: pushedEntities, edges: pushedEdges };
 }
 
 // ── File sync ──────────────────────────────────────────────────────────────
@@ -796,7 +846,8 @@ async function syncFiles(
   networkId: string,
   headers: Record<string, string>,
   opts: RequestInit,
-): Promise<void> {
+): Promise<{ pulledFiles: number; pushedFiles: number }> {
+  let pulledFiles = 0, pushedFiles = 0;
   try {
     // ── 1. Apply peer's file tombstones (deletions) first ─────────────────
     // Fetch tombstones before the manifest so that files deleted on the peer
@@ -850,7 +901,7 @@ async function syncFiles(
 
     // ── 2. Fetch peer manifest and download new/changed files ─────────────
     const resp = await fetch(`${member.url}/api/sync/manifest?spaceId=${encodeURIComponent(spaceId)}&networkId=${encodeURIComponent(networkId)}`, opts);
-    if (!resp.ok) { log.warn(`File manifest from ${member.label}: ${resp.status}`); return; }
+    if (!resp.ok) { log.warn(`File manifest from ${member.label}: ${resp.status}`); return { pulledFiles, pushedFiles }; }
     const { manifest } = await resp.json() as { manifest: { path: string; sha256: string; size: number; modifiedAt: string }[] };
 
     // Build our manifest for comparison
@@ -874,6 +925,7 @@ async function syncFiles(
         const sha = createHash('sha256').update(buf).digest('hex');
         if (sha !== remote.sha256) { log.warn(`SHA mismatch for ${remote.path} from ${member.label}`); continue; }
 
+        pulledFiles++;
         if (!local) {
           // File is new locally — write directly to the original path
           const absPath = path.join(spaceRoot, remote.path);
@@ -947,6 +999,8 @@ async function syncFiles(
         );
         if (!pushResp.ok) {
           log.warn(`Push file '${localPath}' to ${member.label}: HTTP ${pushResp.status}`);
+        } else {
+          pushedFiles++;
         }
       } catch (err) {
         log.warn(`Push file '${localPath}' to ${member.label}: ${err}`);
@@ -955,6 +1009,7 @@ async function syncFiles(
   } catch (err) {
     log.warn(`syncFiles for ${member.label} space ${spaceId}: ${err}`);
   }
+  return { pulledFiles, pushedFiles };
 }
 
 // ── Local upsert helpers ────────────────────────────────────────────────────

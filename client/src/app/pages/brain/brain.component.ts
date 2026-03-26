@@ -144,6 +144,25 @@ interface SpaceView {
       transition: opacity var(--transition);
     }
     .tag-clickable:hover, .entity-clickable:hover { opacity: 0.7; }
+
+    .wipe-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+      padding: 10px 14px;
+      border: 1px solid var(--error);
+      border-radius: var(--radius-md);
+      background: color-mix(in srgb, var(--error) 6%, transparent);
+    }
+    .wipe-bar input {
+      padding: 4px 8px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      background: var(--bg-surface);
+      color: var(--text-primary);
+    }
   `],
   template: `
     <div class="page-header">
@@ -213,6 +232,27 @@ interface SpaceView {
             </div>
           }
 
+          @if (showWipeConfirm()) {
+            <div class="wipe-bar">
+              <span style="font-size:13px; color:var(--error); font-weight:500;">
+                Type <strong>{{ activeSpaceId() }}</strong> to confirm wipe of all {{ activeStats()?.memories ?? '?' }} memories:
+              </span>
+              <input
+                [value]="wipeInput()"
+                (input)="wipeInput.set($any($event.target).value)"
+                placeholder="space id"
+              />
+              <button
+                class="btn btn-danger btn-sm"
+                [disabled]="wipeInput() !== activeSpaceId() || wipingInProgress()"
+                (click)="executeWipe()"
+              >
+                {{ wipingInProgress() ? 'Wiping…' : 'Confirm wipe' }}
+              </button>
+              <button class="btn-secondary btn btn-sm" (click)="showWipeConfirm.set(false); wipeInput.set('')">Cancel</button>
+            </div>
+          }
+
           <div class="content-header">
             <span style="font-size:13px; color:var(--text-secondary);">
               Showing {{ memories().length }} memories (skip {{ skip() }})
@@ -220,6 +260,12 @@ interface SpaceView {
             <span style="flex:1"></span>
             <button class="btn-secondary btn btn-sm" [disabled]="skip() === 0" (click)="prevPage()">← Prev</button>
             <button class="btn-secondary btn btn-sm" [disabled]="memories().length < pageSize" (click)="nextPage()">Next →</button>
+            <button
+              class="btn btn-danger btn-sm"
+              [disabled]="!activeStats()?.memories"
+              (click)="showWipeConfirm.set(true)"
+              title="Wipe all memories in this space"
+            >Wipe all</button>
           </div>
 
           @for (mem of memories(); track mem._id) {
@@ -340,6 +386,9 @@ export class BrainComponent implements OnInit {
   skip = signal(0);
   filterTag = signal('');
   filterEntity = signal('');
+  showWipeConfirm = signal(false);
+  wipeInput = signal('');
+  wipingInProgress = signal(false);
 
   activeStats = computed(() =>
     this.spaces().find(sv => sv.space.id === this.activeSpaceId())?.stats,
@@ -437,6 +486,23 @@ export class BrainComponent implements OnInit {
     if (which === 'entity' || which === 'all') this.filterEntity.set('');
     this.skip.set(0);
     this.loadCurrentTab(this.activeSpaceId());
+  }
+
+  executeWipe(): void {
+    const spaceId = this.activeSpaceId();
+    if (this.wipeInput() !== spaceId) return;
+    this.wipingInProgress.set(true);
+    this.api.wipeMemories(spaceId).subscribe({
+      next: () => {
+        this.wipingInProgress.set(false);
+        this.showWipeConfirm.set(false);
+        this.wipeInput.set('');
+        this.memories.set([]);
+        this.loadStats(spaceId);
+        this.loadCurrentTab(spaceId);
+      },
+      error: () => this.wipingInProgress.set(false),
+    });
   }
 
   deleteMemory(id: string): void {

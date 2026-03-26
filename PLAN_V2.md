@@ -7,7 +7,7 @@ Items identified during the PLAN.md ↔ implementation audit. Each section is a 
 
 ---
 
-## V2-1 · Chunked Upload (Content-Range)
+## V2-1 · Chunked Upload (Content-Range)  ✅ DONE
 
 **Current state:** `POST /api/files/:spaceId` accepts a single-request upload only. `maxUploadBodyBytes` (default 5 GiB) caps the entire request.
 
@@ -52,7 +52,7 @@ Docs: Conflict resolution section added to `docs/userguide.md` (API + UI workflo
 
 ---
 
-## V2-3 · Bulk Memory Wipe
+## V2-3 · Bulk Memory Wipe  ✅ DONE
 
 **Current state:** Only `DELETE /api/brain/:spaceId/memories/:id` exists (single delete). No bulk wipe endpoint.
 
@@ -96,9 +96,11 @@ Client (`client/src/app/pages/brain/brain.component.ts`):
 
 **Acceptance:** Create 5 memories with different tags. Filter by tag → only matching memories shown. Filter by entity → only linked memories shown. Combine both → intersection.
 
+**Status: DONE** — `buildMemoryFilter()` in brain.ts, `listMemories()` sorted by createdAt desc, client filter bar with clickable tag/entity chips. 6 integration tests in brain.test.js.
+
 ---
 
-## V2-5 · Settings UI — About Section
+## V2-5 · Settings UI — About Section  ✅ DONE
 
 **Current state:** Settings has tabs for Tokens, Spaces, Storage, Networks, MFA. No "About" tab.
 
@@ -121,7 +123,7 @@ Client (`client/src/app/pages/settings/about.component.ts` — new):
 
 ---
 
-## V2-6 · Sync History Log
+## V2-6 · Sync History Log  ✅ DONE
 
 **Current state:** Sync result shows as a 4-second transient toast in the Networks UI. No persisted history.
 
@@ -164,7 +166,7 @@ Docs: Knowledge-graph edges subsection added to `docs/userguide.md`.
 
 ---
 
-## V2-8 · File Preview
+## V2-8 · File Preview  ✅ DONE
 
 **Current state:** File manager lists files with name, size, date. Clicking downloads. No inline preview.
 
@@ -186,7 +188,7 @@ Server: No changes needed — `GET /api/files/:spaceId?path=<path>` already serv
 
 ---
 
-## V2-9 · Directory Tree Sidebar
+## V2-9 · Directory Tree Sidebar  ✅ DONE
 
 **Current state:** File manager uses flat listing with breadcrumb navigation. No persistent tree view.
 

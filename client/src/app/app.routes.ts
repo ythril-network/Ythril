@@ -70,6 +70,11 @@ export const routes: Routes = [
             loadComponent: () =>
               import('./pages/settings/mfa.component').then(m => m.MfaComponent),
           },
+          {
+            path: 'about',
+            loadComponent: () =>
+              import('./pages/settings/about.component').then(m => m.AboutComponent),
+          },
         ],
       },
     ],

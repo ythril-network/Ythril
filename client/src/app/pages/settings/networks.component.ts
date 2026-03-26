@@ -1,7 +1,7 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { ApiService, InviteBundle, Network, VoteRound } from '../../core/api.service';
+import { ApiService, InviteBundle, Network, SyncHistoryRecord, VoteRound } from '../../core/api.service';
 
 @Component({
   selector: 'app-networks',
@@ -60,6 +60,30 @@ import { ApiService, InviteBundle, Network, VoteRound } from '../../core/api.ser
       margin-bottom: 8px;
       font-size: 13px;
     }
+
+    .history-row {
+      display: grid;
+      grid-template-columns: 140px 70px 1fr auto;
+      gap: 8px;
+      align-items: center;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border-muted);
+      font-size: 12px;
+    }
+
+    .history-row:last-child { border-bottom: none; }
+
+    .status-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .status-success { background: var(--green-bg, #e6f9e6); color: var(--green-fg, #1a7a1a); }
+    .status-partial { background: var(--yellow-bg, #fff8e1); color: var(--yellow-fg, #b5850a); }
+    .status-failed  { background: var(--red-bg, #fde8e8); color: var(--red-fg, #b91c1c); }
   `],
   template: `
     <!-- Create network -->
@@ -216,6 +240,46 @@ import { ApiService, InviteBundle, Network, VoteRound } from '../../core/api.ser
                 }
               </div>
 
+              <!-- Sync History -->
+              <div style="margin-bottom:16px;">
+                <div class="section-title" style="cursor:pointer;" (click)="toggleHistory(net.id)">
+                  Sync History {{ historyExpanded() === net.id ? '▲' : '▼' }}
+                </div>
+                @if (historyExpanded() === net.id) {
+                  @if (historyLoading()) {
+                    <div style="padding:8px 0; color:var(--text-muted); font-size:12px;">Loading…</div>
+                  } @else if (historyForNet(net.id).length === 0) {
+                    <div style="padding:8px 0; color:var(--text-muted); font-size:12px;">No sync history yet.</div>
+                  } @else {
+                    @for (rec of historyForNet(net.id); track rec._id) {
+                      <div class="history-row">
+                        <span style="color:var(--text-muted);">{{ rec.completedAt | date:'short' }}</span>
+                        <span class="status-badge" [ngClass]="'status-' + rec.status">{{ rec.status }}</span>
+                        <span>
+                          ↓ {{ rec.pulled.memories + rec.pulled.entities + rec.pulled.edges }}
+                          + {{ rec.pulled.files }} files &nbsp;
+                          ↑ {{ rec.pushed.memories + rec.pushed.entities + rec.pushed.edges }}
+                          + {{ rec.pushed.files }} files
+                        </span>
+                        @if (rec.errors?.length) {
+                          <button class="btn-ghost btn btn-sm" style="font-size:11px;"
+                            (click)="toggleHistoryErrors(rec._id)">
+                            {{ expandedError() === rec._id ? 'Hide errors' : rec.errors!.length + ' error(s)' }}
+                          </button>
+                        }
+                      </div>
+                      @if (expandedError() === rec._id && rec.errors) {
+                        <div style="padding:4px 0 8px 8px; font-size:11px; color:var(--red-fg, #b91c1c);">
+                          @for (e of rec.errors; track e) {
+                            <div>{{ e }}</div>
+                          }
+                        </div>
+                      }
+                    }
+                  }
+                }
+              </div>
+
               <!-- Members -->
               <div class="section-title">Members</div>
               @for (m of net.members; track m.instanceId) {
@@ -284,6 +348,12 @@ export class NetworksComponent implements OnInit {
   joinError = signal('');
   joinSuccess = signal('');
   removingMember: Record<string, boolean> = {};
+
+  // Sync history state
+  historyExpanded = signal('');
+  historyLoading = signal(false);
+  expandedError = signal('');
+  private historyByNetwork: Record<string, SyncHistoryRecord[]> = {};
 
   inviteBundle(id: string): InviteBundle | undefined { return this.inviteBundles[id]; }
   bundleJson(bundle: InviteBundle): string { return JSON.stringify(bundle, null, 2); }
@@ -432,11 +502,44 @@ export class NetworksComponent implements OnInit {
         this.syncResults[networkId] = r;
         this.networks.update(n => [...n]);
         setTimeout(() => { delete this.syncResults[networkId]; this.networks.update(n => [...n]); }, 4000);
+        // Auto-refresh history after sync completes (give it a moment)
+        if (this.historyExpanded() === networkId) {
+          setTimeout(() => this.loadHistory(networkId), 3000);
+        }
       },
       error: () => {
         this.syncResults[networkId] = { ok: false };
         this.networks.update(n => [...n]);
       },
+    });
+  }
+
+  toggleHistory(networkId: string): void {
+    if (this.historyExpanded() === networkId) {
+      this.historyExpanded.set('');
+    } else {
+      this.historyExpanded.set(networkId);
+      this.loadHistory(networkId);
+    }
+  }
+
+  historyForNet(networkId: string): SyncHistoryRecord[] {
+    return this.historyByNetwork[networkId] ?? [];
+  }
+
+  toggleHistoryErrors(recordId: string): void {
+    this.expandedError.update(v => v === recordId ? '' : recordId);
+  }
+
+  private loadHistory(networkId: string): void {
+    this.historyLoading.set(true);
+    this.api.getSyncHistory(networkId).subscribe({
+      next: ({ history }) => {
+        this.historyByNetwork[networkId] = history;
+        this.historyLoading.set(false);
+        this.networks.update(n => [...n]);
+      },
+      error: () => this.historyLoading.set(false),
     });
   }
 

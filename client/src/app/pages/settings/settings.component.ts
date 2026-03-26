@@ -16,6 +16,7 @@ import { RouterOutlet, RouterLink, RouterLinkActive } from '@angular/router';
       <a class="tab" routerLink="storage"  routerLinkActive="active">Storage</a>
       <a class="tab" routerLink="networks" routerLinkActive="active">Networks</a>
       <a class="tab" routerLink="mfa"      routerLinkActive="active">MFA</a>
+      <a class="tab" routerLink="about"    routerLinkActive="active">About</a>
     </div>
 
     <router-outlet />
