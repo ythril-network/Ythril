@@ -5,7 +5,7 @@ import { ensureSpaceFilesDir } from '../files/files.js';
 import { log } from '../util/log.js';
 import type { SpaceConfig, MemoryDoc } from '../config/types.js';
 
-const SPACE_COLLECTIONS = ['memories', 'entities', 'edges', 'tombstones', 'conflicts'] as const;
+const SPACE_COLLECTIONS = ['memories', 'entities', 'edges', 'chrono', 'tombstones', 'conflicts'] as const;
 
 // ── Embedding model mismatch tracking ──────────────────────────────────────
 const _reindexNeeded = new Set<string>();
@@ -42,6 +42,7 @@ export async function initSpace(spaceId: string): Promise<void> {
   const memoriesColl = db.collection(`${spaceId}_memories`);
   const entitiesColl = db.collection(`${spaceId}_entities`);
   const edgesColl = db.collection(`${spaceId}_edges`);
+  const chronoColl = db.collection(`${spaceId}_chrono`);
   const tombstonesColl = db.collection(`${spaceId}_tombstones`);
 
   await memoriesColl.createIndex({ spaceId: 1, seq: 1 });
@@ -51,6 +52,9 @@ export async function initSpace(spaceId: string): Promise<void> {
   await entitiesColl.createIndex({ spaceId: 1, seq: 1 });
   await edgesColl.createIndex({ spaceId: 1, from: 1, to: 1, label: 1 }, { unique: true });
   await edgesColl.createIndex({ spaceId: 1, seq: 1 });
+  await chronoColl.createIndex({ spaceId: 1, startsAt: 1 });
+  await chronoColl.createIndex({ spaceId: 1, status: 1 });
+  await chronoColl.createIndex({ spaceId: 1, seq: 1 });
   await tombstonesColl.createIndex({ spaceId: 1, seq: 1 });
   await db.collection(`${spaceId}_conflicts`).createIndex({ spaceId: 1, detectedAt: -1 });
 

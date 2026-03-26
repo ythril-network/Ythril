@@ -5,6 +5,7 @@ import { globalRateLimit, bulkWipeRateLimit } from '../rate-limit/middleware.js'
 import { listMemories, deleteMemory, countMemories, bulkDeleteMemories } from '../brain/memory.js';
 import { listEntities, deleteEntity, upsertEntity } from '../brain/entities.js';
 import { listEdges, deleteEdge, upsertEdge } from '../brain/edges.js';
+import { createChrono, updateChrono, listChrono, deleteChrono } from '../brain/chrono.js';
 import { embed } from '../brain/embedding.js';
 import { getConfig } from '../config/loader.js';
 import { col } from '../db/mongo.js';
@@ -13,7 +14,7 @@ import { needsReindex, clearReindexFlag } from '../spaces/spaces.js';
 import { log } from '../util/log.js';
 import { checkQuota, QuotaError } from '../quota/quota.js';
 import { resolveMemberSpaces, resolveWriteTarget, findSpace, isProxySpace } from '../spaces/proxy.js';
-import type { MemoryDoc } from '../config/types.js';
+import type { MemoryDoc, ChronoKind, ChronoStatus } from '../config/types.js';
 
 export const brainRouter = Router();
 
@@ -350,6 +351,118 @@ brainRouter.delete('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAu
     if (await deleteEdge(mid, id)) { res.status(204).end(); return; }
   }
   res.status(404).json({ error: 'Edge not found' });
+});
+
+// ── Chrono CRUD ───────────────────────────────────────────────────────────────
+
+const CHRONO_KINDS = new Set<ChronoKind>(['event', 'deadline', 'plan', 'prediction', 'milestone']);
+const CHRONO_STATUSES = new Set<ChronoStatus>(['upcoming', 'active', 'completed', 'overdue', 'cancelled']);
+
+// POST /api/brain/spaces/:spaceId/chrono — create a chrono entry
+brainRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
+  const spaceId = req.params['spaceId'] as string;
+  const cfg = getConfig();
+  if (!cfg.spaces.some(s => s.id === spaceId)) {
+    res.status(404).json({ error: `Space '${spaceId}' not found` });
+    return;
+  }
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
+  if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+
+  const { title, kind, startsAt, endsAt, status, confidence, tags, entityIds, memoryIds, description, recurrence } = req.body ?? {};
+  if (!title || typeof title !== 'string') {
+    res.status(400).json({ error: '`title` string required' }); return;
+  }
+  if (!kind || !CHRONO_KINDS.has(kind)) {
+    res.status(400).json({ error: '`kind` must be one of: event, deadline, plan, prediction, milestone' }); return;
+  }
+  if (!startsAt || typeof startsAt !== 'string') {
+    res.status(400).json({ error: '`startsAt` ISO8601 string required' }); return;
+  }
+  if (endsAt !== undefined && typeof endsAt !== 'string') {
+    res.status(400).json({ error: '`endsAt` must be an ISO8601 string' }); return;
+  }
+  if (status !== undefined && !CHRONO_STATUSES.has(status)) {
+    res.status(400).json({ error: '`status` must be one of: upcoming, active, completed, overdue, cancelled' }); return;
+  }
+  if (confidence !== undefined && (typeof confidence !== 'number' || confidence < 0 || confidence > 1)) {
+    res.status(400).json({ error: '`confidence` must be a number between 0 and 1' }); return;
+  }
+  if (tags !== undefined && (!Array.isArray(tags) || tags.some((t: unknown) => typeof t !== 'string'))) {
+    res.status(400).json({ error: '`tags` must be an array of strings' }); return;
+  }
+  if (entityIds !== undefined && (!Array.isArray(entityIds) || entityIds.some((t: unknown) => typeof t !== 'string'))) {
+    res.status(400).json({ error: '`entityIds` must be an array of strings' }); return;
+  }
+  if (memoryIds !== undefined && (!Array.isArray(memoryIds) || memoryIds.some((t: unknown) => typeof t !== 'string'))) {
+    res.status(400).json({ error: '`memoryIds` must be an array of strings' }); return;
+  }
+  if (description !== undefined && typeof description !== 'string') {
+    res.status(400).json({ error: '`description` must be a string' }); return;
+  }
+
+  const entry = await createChrono(wt.target, {
+    title: title.trim(), kind, startsAt, endsAt, status, confidence,
+    tags, entityIds, memoryIds, description, recurrence,
+  });
+  res.status(201).json(entry);
+});
+
+// POST /api/brain/spaces/:spaceId/chrono/:id — update a chrono entry
+brainRouter.post('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
+  const spaceId = req.params['spaceId'] as string;
+  const id = req.params['id'] as string;
+  const cfg = getConfig();
+  if (!cfg.spaces.some(s => s.id === spaceId)) {
+    res.status(404).json({ error: `Space '${spaceId}' not found` });
+    return;
+  }
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
+  if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+
+  const { title, kind, startsAt, endsAt, status, confidence, tags, entityIds, memoryIds, description, recurrence } = req.body ?? {};
+  if (status !== undefined && !CHRONO_STATUSES.has(status)) {
+    res.status(400).json({ error: '`status` must be one of: upcoming, active, completed, overdue, cancelled' }); return;
+  }
+  if (kind !== undefined && !CHRONO_KINDS.has(kind)) {
+    res.status(400).json({ error: '`kind` must be one of: event, deadline, plan, prediction, milestone' }); return;
+  }
+  if (confidence !== undefined && (typeof confidence !== 'number' || confidence < 0 || confidence > 1)) {
+    res.status(400).json({ error: '`confidence` must be a number between 0 and 1' }); return;
+  }
+
+  const updated = await updateChrono(wt.target, id, {
+    title, kind, startsAt, endsAt, status, confidence,
+    tags, entityIds, memoryIds, description, recurrence,
+  });
+  if (!updated) { res.status(404).json({ error: 'Chrono entry not found' }); return; }
+  res.json(updated);
+});
+
+// GET /api/brain/spaces/:spaceId/chrono
+brainRouter.get('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, async (req, res) => {
+  const spaceId = req.params['spaceId'] as string;
+  const cfg = getConfig();
+  if (!cfg.spaces.some(s => s.id === spaceId)) {
+    res.status(404).json({ error: `Space '${spaceId}' not found` });
+    return;
+  }
+  const limit = Math.min(Number(req.query['limit'] ?? 50), 200);
+  const skip = Number(req.query['skip'] ?? 0);
+  const memberIds = resolveMemberSpaces(spaceId);
+  const all = (await Promise.all(memberIds.map(mid => listChrono(mid, {}, limit, skip)))).flat();
+  res.json({ chrono: all, limit, skip });
+});
+
+// DELETE /api/brain/spaces/:spaceId/chrono/:id
+brainRouter.delete('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
+  const spaceId = req.params['spaceId'] as string;
+  const id = req.params['id'] as string;
+  const memberIds = resolveMemberSpaces(spaceId);
+  for (const mid of memberIds) {
+    if (await deleteChrono(mid, id)) { res.status(204).end(); return; }
+  }
+  res.status(404).json({ error: 'Chrono entry not found' });
 });
 
 // GET /api/brain/spaces/:spaceId/reindex-status

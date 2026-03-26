@@ -627,3 +627,128 @@ describe('Brain — bulk memory wipe', () => {
     assert.equal(r.status, 404, `expected 404, got ${r.status}`);
   });
 });
+
+// -- Chrono CRUD ---------------------------------------------------------------
+
+describe('Brain -- chrono CRUD (/api/brain/spaces/:spaceId/chrono)', () => {
+  const RUN = Date.now();
+  let chronoId;
+
+  it('Create chrono entry returns 201', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/chrono', {
+      title: `Meeting-${RUN}`,
+      kind: 'event',
+      startsAt: new Date().toISOString(),
+      tags: ['test'],
+    });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.ok(r.body._id, 'must have _id');
+    assert.equal(r.body.kind, 'event');
+    assert.ok(typeof r.body.seq === 'number', 'must have seq');
+    assert.deepStrictEqual(r.body.tags, ['test']);
+    assert.equal(r.body.status, 'upcoming');
+    chronoId = r.body._id;
+  });
+
+  it('List chrono returns {chrono:[...]}', async () => {
+    const r = await get(INSTANCES.a, token(), '/api/brain/spaces/general/chrono');
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.ok(Array.isArray(r.body.chrono), 'chrono must be an array');
+    const found = r.body.chrono.find(c => c._id === chronoId);
+    assert.ok(found, 'created entry should appear in listing');
+  });
+
+  it('List chrono returns 404 for unknown space', async () => {
+    const r = await get(INSTANCES.a, token(), '/api/brain/spaces/no-such-space/chrono');
+    assert.equal(r.status, 404);
+  });
+
+  it('List chrono returns 401 without auth', async () => {
+    const r = await fetch(`${INSTANCES.a}/api/brain/spaces/general/chrono`);
+    assert.equal(r.status, 401);
+  });
+
+  it('Update chrono entry returns 200', async () => {
+    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/general/chrono/${chronoId}`, {
+      status: 'completed',
+      description: 'All done',
+    });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.status, 'completed');
+    assert.equal(r.body.description, 'All done');
+  });
+
+  it('Update non-existent chrono entry returns 404', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/chrono/does-not-exist', {
+      status: 'completed',
+    });
+    assert.equal(r.status, 404);
+  });
+
+  it('Create chrono with optional fields', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/chrono', {
+      title: `Deadline-${RUN}`,
+      kind: 'deadline',
+      startsAt: new Date().toISOString(),
+      endsAt: new Date(Date.now() + 86400_000).toISOString(),
+      status: 'upcoming',
+      confidence: 0.8,
+      tags: ['important'],
+      entityIds: ['some-entity'],
+      memoryIds: ['some-memory'],
+      description: 'Submit report',
+    });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.equal(r.body.kind, 'deadline');
+    assert.equal(r.body.confidence, 0.8);
+    assert.ok(r.body.endsAt, 'endsAt should be set');
+    assert.deepStrictEqual(r.body.entityIds, ['some-entity']);
+    assert.deepStrictEqual(r.body.memoryIds, ['some-memory']);
+    assert.equal(r.body.description, 'Submit report');
+  });
+
+  it('Create chrono with invalid kind returns 400', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/chrono', {
+      title: 'Bad kind',
+      kind: 'invalid-kind',
+      startsAt: new Date().toISOString(),
+    });
+    assert.equal(r.status, 400);
+  });
+
+  it('Create chrono without title returns 400', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/chrono', {
+      kind: 'event',
+      startsAt: new Date().toISOString(),
+    });
+    assert.equal(r.status, 400);
+  });
+
+  it('Create chrono without startsAt returns 400', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/chrono', {
+      title: 'Missing date',
+      kind: 'event',
+    });
+    assert.equal(r.status, 400);
+  });
+
+  it('Create chrono with invalid confidence returns 400', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/chrono', {
+      title: 'Bad confidence',
+      kind: 'prediction',
+      startsAt: new Date().toISOString(),
+      confidence: 1.5,
+    });
+    assert.equal(r.status, 400);
+  });
+
+  it('Delete chrono entry returns 204', async () => {
+    const delR = await del(INSTANCES.a, token(), `/api/brain/spaces/general/chrono/${chronoId}`);
+    assert.equal(delR.status, 204, JSON.stringify(delR.body));
+  });
+
+  it('Delete non-existent chrono entry returns 404', async () => {
+    const r = await del(INSTANCES.a, token(), '/api/brain/spaces/general/chrono/does-not-exist');
+    assert.equal(r.status, 404);
+  });
+});

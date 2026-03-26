@@ -23,6 +23,7 @@ import type {
   MemoryDoc,
   EntityDoc,
   EdgeDoc,
+  ChronoEntry,
   TombstoneDoc,
   FileTombstoneDoc,
   NetworkMember,
@@ -95,6 +96,30 @@ const IncomingEdgeDoc = z.object({
   weight: z.number().optional(),
   author: AuthorRefSchema,
   createdAt: z.string(),
+  seq: z.number().int().nonnegative().max(MAX_SYNC_SEQ),
+});
+
+const IncomingChronoDoc = z.object({
+  _id: z.string().min(1),
+  spaceId: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string().optional(),
+  kind: z.enum(['event', 'deadline', 'plan', 'prediction', 'milestone']),
+  startsAt: z.string().min(1),
+  endsAt: z.string().optional(),
+  status: z.enum(['upcoming', 'active', 'completed', 'overdue', 'cancelled']),
+  confidence: z.number().min(0).max(1).optional(),
+  tags: z.array(z.string()).max(100).default([]),
+  entityIds: z.array(z.string()).max(500).default([]),
+  memoryIds: z.array(z.string()).max(500).default([]),
+  recurrence: z.object({
+    freq: z.enum(['daily', 'weekly', 'monthly', 'yearly']),
+    interval: z.number().int().positive(),
+    until: z.string().optional(),
+  }).optional(),
+  author: AuthorRefSchema,
+  createdAt: z.string(),
+  updatedAt: z.string(),
   seq: z.number().int().nonnegative().max(MAX_SYNC_SEQ),
 });
 
@@ -440,6 +465,91 @@ syncRouter.post('/edges', syncRateLimit, requireAuth, async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// CHRONO
+// ═══════════════════════════════════════════════════════════════════════════
+
+syncRouter.get('/chrono', syncRateLimit, requireAuth, async (req, res) => {
+  try {
+    const { spaceId, networkId, sinceSeq = '0', limit = '100', cursor, full: fullParam } = req.query as Record<string, string>;
+    if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
+    if (!spaceAllowed(spaceId, networkId, req.authToken?.spaces)) { res.status(403).json({ error: 'Forbidden' }); return; }
+
+    const sinceVal = cursor ? decodeCursor(cursor) : parseInt(sinceSeq, 10);
+    const pageSize = Math.min(parseInt(limit, 10) || 100, 500);
+    const returnFull = fullParam === 'true';
+
+    const rawDocs = returnFull
+      ? await col<ChronoEntry>(`${spaceId}_chrono`).find({ seq: { $gt: sinceVal } } as never).sort({ seq: 1 }).limit(pageSize + 1).toArray() as ChronoEntry[]
+      : await col<ChronoEntry>(`${spaceId}_chrono`).find({ seq: { $gt: sinceVal } } as never).sort({ seq: 1 }).limit(pageSize + 1).project({ _id: 1, seq: 1 }).toArray() as { _id: string; seq: number }[];
+
+    const hasMore = rawDocs.length > pageSize;
+    const items: typeof rawDocs = hasMore ? rawDocs.slice(0, pageSize) : rawDocs;
+    const nextCursor = hasMore ? encodeCursor((items[items.length - 1] as { seq: number }).seq) : null;
+
+    const pageMaxSeq = items.length > 0 ? (items[items.length - 1] as { seq: number }).seq : sinceVal;
+    const tombstones = await listTombstones(spaceId, sinceVal, pageSize);
+    const tombs = tombstones
+      .filter(t => t.type === 'chrono' && t.seq <= pageMaxSeq)
+      .map(t => ({ _id: t._id, seq: t.seq, deletedAt: t.deletedAt }));
+
+    res.json({ items: [...items, ...tombs].sort((a, b) => (a as { seq: number }).seq - (b as { seq: number }).seq), nextCursor });
+  } catch (err) {
+    log.error(`sync GET chrono: ${err}`);
+    res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+syncRouter.get('/chrono/:id', syncRateLimit, requireAuth, async (req, res) => {
+  try {
+    const { spaceId, networkId } = req.query as Record<string, string>;
+    if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
+    if (!spaceAllowed(spaceId, networkId, req.authToken?.spaces)) { res.status(403).json({ error: 'Forbidden' }); return; }
+
+    const doc = await col<ChronoEntry>(`${spaceId}_chrono`).findOne({ _id: req.params['id'] } as never);
+    if (!doc) { res.status(404).json({ error: 'Not found' }); return; }
+    res.json(doc);
+  } catch (err) {
+    res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+syncRouter.post('/chrono', syncRateLimit, requireAuth, async (req, res) => {
+  try {
+    const { spaceId, networkId } = req.query as Record<string, string>;
+    if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
+    if (!spaceAllowed(spaceId, networkId, req.authToken?.spaces)) { res.status(403).json({ error: 'Forbidden' }); return; }
+
+    const parsed = IncomingChronoDoc.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid chrono document' });
+      return;
+    }
+    const incoming = parsed.data as ChronoEntry;
+
+    const tombstone = await col<TombstoneDoc>(`${spaceId}_tombstones`)
+      .findOne({ _id: incoming._id, type: 'chrono' } as never) as TombstoneDoc | null;
+    if (tombstone && tombstone.seq >= incoming.seq) {
+      res.status(200).json({ status: 'tombstoned' });
+      return;
+    }
+
+    const existing = await col<ChronoEntry>(`${spaceId}_chrono`).findOne({ _id: incoming._id } as never) as ChronoEntry | null;
+    if (!existing || incoming.seq > existing.seq) {
+      await col<ChronoEntry>(`${spaceId}_chrono`).replaceOne(
+        { _id: incoming._id } as never,
+        incoming as never,
+        { upsert: true },
+      );
+    }
+
+    res.status(200).json({ status: 'ok' });
+  } catch (err) {
+    log.error(`sync POST chrono: ${err}`);
+    res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // BATCH UPSERT
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -455,13 +565,15 @@ syncRouter.post('/batch-upsert', syncRateLimit, requireAuth, async (req, res) =>
     if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
     if (!spaceAllowed(spaceId, networkId, req.authToken?.spaces)) { res.status(403).json({ error: 'Forbidden' }); return; }
 
-    const body = req.body as { memories?: unknown[]; entities?: unknown[]; edges?: unknown[] };
+    const body = req.body as { memories?: unknown[]; entities?: unknown[]; edges?: unknown[]; chrono?: unknown[] };
     const memories = (Array.isArray(body?.memories) ? body.memories.slice(0, 500) : [])
       .flatMap(m => { const r = IncomingMemoryDoc.safeParse(m); return r.success ? [r.data as MemoryDoc] : []; });
     const entities = (Array.isArray(body?.entities) ? body.entities.slice(0, 500) : [])
       .flatMap(e => { const r = IncomingEntityDoc.safeParse(e); return r.success ? [r.data as EntityDoc] : []; });
     const edges = (Array.isArray(body?.edges) ? body.edges.slice(0, 500) : [])
       .flatMap(e => { const r = IncomingEdgeDoc.safeParse(e); return r.success ? [r.data as EdgeDoc] : []; });
+    const chrono = (Array.isArray(body?.chrono) ? body.chrono.slice(0, 500) : [])
+      .flatMap(c => { const r = IncomingChronoDoc.safeParse(c); return r.success ? [r.data as ChronoEntry] : []; });
 
     // ── Memories ─────────────────────────────────────────────────────────
     const memStats = { inserted: 0, updated: 0, forked: 0, skipped: 0, tombstoned: 0 };
@@ -534,7 +646,26 @@ syncRouter.post('/batch-upsert', syncRateLimit, requireAuth, async (req, res) =>
       }
     }
 
-    res.status(200).json({ status: 'ok', memories: memStats, entities: entStats, edges: edgeStats });
+    // ── Chrono ─────────────────────────────────────────────────────────────────
+    const chronoStats = { upserted: 0, skipped: 0, tombstoned: 0 };
+    for (const incoming of chrono) {
+      const tomb = await col<TombstoneDoc>(`${spaceId}_tombstones`)
+        .findOne({ _id: incoming._id, type: 'chrono' } as never) as TombstoneDoc | null;
+      if (tomb && tomb.seq >= incoming.seq) { chronoStats.tombstoned++; continue; }
+
+      const existing = await col<ChronoEntry>(`${spaceId}_chrono`)
+        .findOne({ _id: incoming._id } as never) as ChronoEntry | null;
+      if (!existing || incoming.seq > existing.seq) {
+        await col<ChronoEntry>(`${spaceId}_chrono`).replaceOne(
+          { _id: incoming._id } as never, incoming as never, { upsert: true },
+        );
+        chronoStats.upserted++;
+      } else {
+        chronoStats.skipped++;
+      }
+    }
+
+    res.status(200).json({ status: 'ok', memories: memStats, entities: entStats, edges: edgeStats, chrono: chronoStats });
 
     // Bump the local seq counter so future local writes always get a seq higher
     // than any document received via push.  Fire-and-forget after the response.
@@ -542,6 +673,7 @@ syncRouter.post('/batch-upsert', syncRateLimit, requireAuth, async (req, res) =>
       ...memories.map(m => m.seq ?? 0),
       ...entities.map(e => e.seq ?? 0),
       ...edges.map(e => e.seq ?? 0),
+      ...chrono.map(c => c.seq ?? 0),
     ];
     const maxIncoming = Math.max(0, ...allSeqs);
     if (maxIncoming > 0) bumpSeq(spaceId, maxIncoming).catch(() => {});

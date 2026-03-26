@@ -12,17 +12,18 @@ For contributing and building from source see [contribution-guide.md](contributi
 1. [Logging in](#logging-in)
 2. [Brain — Memories](#brain--memories)
 3. [Brain — Entities & Edges](#brain--entities--edges)
-4. [Files](#files)
-5. [File preview](#file-preview)
-6. [Directory tree sidebar](#directory-tree-sidebar)
-7. [Conflict resolution](#conflict-resolution)
-8. [Settings — Spaces](#settings--spaces)
-9. [Settings — Tokens](#settings--tokens)
-10. [Settings — MFA](#settings--mfa)
-11. [Settings — Networks](#settings--networks)
-12. [Settings — Storage](#settings--storage)
-13. [Settings — About](#settings--about)
-14. [Connecting MCP clients](#connecting-mcp-clients)
+4. [Brain — Chrono](#brain--chrono)
+5. [Files](#files)
+6. [File preview](#file-preview)
+7. [Directory tree sidebar](#directory-tree-sidebar)
+8. [Conflict resolution](#conflict-resolution)
+9. [Settings — Spaces](#settings--spaces)
+10. [Settings — Tokens](#settings--tokens)
+11. [Settings — MFA](#settings--mfa)
+12. [Settings — Networks](#settings--networks)
+13. [Settings — Storage](#settings--storage)
+14. [Settings — About](#settings--about)
+15. [Connecting MCP clients](#connecting-mcp-clients)
 
 ---
 
@@ -85,6 +86,43 @@ Click **+ Add entity** in the Entities tab to create one from the UI. Enter a na
 Edges connect two entities. Each edge has a `from`, `to`, `label` (the relationship name), an optional numeric `weight`, and an optional `type` for classification (e.g. `causal`, `hierarchical`, `temporal`).
 
 Click **+ Add edge** in the Edges tab to create one from the UI. Enter the source entity, relationship label, target entity, and optional type/weight, then click **Save**. If an edge with the same `(from, to, label)` already exists, the weight and type are updated.
+
+---
+
+## Brain — Chrono
+
+The **Chrono** tab stores time-based entries: events, deadlines, plans, predictions, and milestones.
+
+### Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `title` | Yes | Short summary of the entry. |
+| `kind` | Yes | One of `event`, `deadline`, `plan`, `prediction`, `milestone`. |
+| `startsAt` | Yes | ISO 8601 start date/time. |
+| `endsAt` | No | ISO 8601 end date/time. |
+| `status` | No | `upcoming` (default), `active`, `completed`, `overdue`, `cancelled`. |
+| `confidence` | No | 0–1 confidence level (useful for predictions). |
+| `description` | No | Longer description text. |
+| `tags` | No | Categorisation tags (array of strings). |
+| `entityIds` | No | Related entity IDs (array). |
+| `memoryIds` | No | Related memory IDs (array). |
+
+### Creating from the UI
+
+Click **+ Add entry** in the Chrono tab. Fill in the title, select a kind, pick a start date/time, and optionally add a description, tags, etc. Click **Save**.
+
+### MCP tools
+
+- `create_chrono` — create a new entry.
+- `update_chrono` — update an existing entry (change status, dates, etc.).
+- `list_chrono` — list entries, optionally filtered by `status` or `kind`.
+
+The `query` tool also supports `collection: "chrono"` for advanced MongoDB filter queries.
+
+### Sync
+
+Chrono entries sync across brain networks using the same seq-based last-writer-wins protocol as entities and edges. Deleted entries create tombstones that propagate to peers.
 
 ---
 

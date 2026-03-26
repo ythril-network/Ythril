@@ -2,9 +2,9 @@ import { Component, inject, signal, computed, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { ApiService, Space, SpaceStats, Memory, Entity, Edge } from '../../core/api.service';
+import { ApiService, Space, SpaceStats, Memory, Entity, Edge, ChronoEntry, ChronoKind, ChronoStatus } from '../../core/api.service';
 
-type BrainTab = 'memories' | 'entities' | 'edges';
+type BrainTab = 'memories' | 'entities' | 'edges' | 'chrono';
 
 interface SpaceView {
   space: Space;
@@ -490,6 +490,81 @@ interface SpaceView {
           </div>
         }
 
+        <!-- Chrono -->
+        @if (activeTab() === 'chrono') {
+
+          <div style="margin-bottom:12px; display:flex; gap:8px;">
+            <button class="btn-primary btn btn-sm" (click)="showChronoForm.set(true)" [disabled]="showChronoForm()">+ Add entry</button>
+          </div>
+
+          @if (showChronoForm()) {
+            <form class="create-form" (ngSubmit)="createChrono()">
+              <div class="field" style="flex:2; min-width:200px;">
+                <label>Title</label>
+                <input type="text" [(ngModel)]="chronoForm.title" name="title" placeholder="Release v1.0" required />
+              </div>
+              <div class="field" style="width:140px;">
+                <label>Kind</label>
+                <select [(ngModel)]="chronoForm.kind" name="kind">
+                  @for (k of chronoKinds; track k) { <option [value]="k">{{ k }}</option> }
+                </select>
+              </div>
+              <div class="field" style="width:200px;">
+                <label>Starts at</label>
+                <input type="datetime-local" [(ngModel)]="chronoForm.startsAt" name="startsAt" required />
+              </div>
+              <div class="field" style="flex:1; min-width:140px;">
+                <label>Description (optional)</label>
+                <input type="text" [(ngModel)]="chronoForm.description" name="description" placeholder="Details…" />
+              </div>
+              <div class="field" style="flex:1; min-width:140px;">
+                <label>Tags (comma-separated)</label>
+                <input type="text" [(ngModel)]="chronoForm.tags" name="tags" placeholder="release, infra" />
+              </div>
+              <button class="btn-primary btn btn-sm" type="submit" [disabled]="creatingChrono() || !chronoForm.title.trim() || !chronoForm.startsAt">
+                @if (creatingChrono()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
+                Save
+              </button>
+              <button class="btn-secondary btn btn-sm" type="button" (click)="showChronoForm.set(false)">Cancel</button>
+            </form>
+          }
+
+          @if (createChronoError()) {
+            <div class="alert alert-error" style="margin-bottom:12px;">{{ createChronoError() }}</div>
+          }
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Title</th><th>Kind</th><th>Status</th><th>Starts</th><th>Ends</th><th>Tags</th><th></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (entry of chrono(); track entry._id) {
+                  <tr>
+                    <td>{{ entry.title }}</td>
+                    <td><span class="badge badge-blue">{{ entry.kind }}</span></td>
+                    <td><span class="badge" [class.badge-purple]="entry.status === 'upcoming'" [class.badge-blue]="entry.status === 'active'" style="font-size:11px">{{ entry.status }}</span></td>
+                    <td style="color:var(--text-muted); font-size:12px">{{ entry.startsAt | date:'MMM d, y HH:mm' }}</td>
+                    <td style="color:var(--text-muted); font-size:12px">{{ entry.endsAt ? (entry.endsAt | date:'MMM d, y HH:mm') : '—' }}</td>
+                    <td>
+                      @for (tag of entry.tags; track tag) { <span class="tag">{{ tag }}</span> }
+                    </td>
+                    <td><button class="icon-btn danger" aria-label="Delete chrono entry" (click)="deleteChrono(entry._id)">✕</button></td>
+                  </tr>
+                } @empty {
+                  <tr><td colspan="7">
+                    <div class="empty-state" style="padding:32px">
+                      <div class="empty-state-icon">⏱️</div>
+                      <h3>No chrono entries</h3>
+                    </div>
+                  </td></tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+
       }
     }
   `,
@@ -501,6 +576,7 @@ export class BrainComponent implements OnInit {
     { key: 'memories', label: 'Memories' },
     { key: 'entities', label: 'Entities' },
     { key: 'edges', label: 'Edges' },
+    { key: 'chrono', label: 'Chrono' },
   ];
 
   readonly pageSize = 20;
@@ -514,6 +590,7 @@ export class BrainComponent implements OnInit {
   memories = signal<Memory[]>([]);
   entities = signal<Entity[]>([]);
   edges = signal<Edge[]>([]);
+  chrono = signal<ChronoEntry[]>([]);
   skip = signal(0);
   filterTag = signal('');
   filterEntity = signal('');
@@ -538,6 +615,13 @@ export class BrainComponent implements OnInit {
   creatingEdge = signal(false);
   createEdgeError = signal('');
   edgeForm = { from: '', to: '', label: '', type: '', weight: null as number | null };
+
+  // Create chrono form
+  showChronoForm = signal(false);
+  creatingChrono = signal(false);
+  createChronoError = signal('');
+  chronoKinds: ChronoKind[] = ['event', 'deadline', 'plan', 'prediction', 'milestone'];
+  chronoForm = { title: '', kind: 'event' as ChronoKind, startsAt: '', description: '', tags: '' };
 
   activeStats = computed(() =>
     this.spaces().find(sv => sv.space.id === this.activeSpaceId())?.stats,
@@ -618,6 +702,12 @@ export class BrainComponent implements OnInit {
       case 'edges':
         this.api.listEdges(spaceId).subscribe({
           next: ({ edges }) => { this.edges.set(edges); this.loading.set(false); },
+          error: () => this.loading.set(false),
+        });
+        break;
+      case 'chrono':
+        this.api.listChrono(spaceId).subscribe({
+          next: ({ chrono }) => { this.chrono.set(chrono); this.loading.set(false); },
           error: () => this.loading.set(false),
         });
         break;
@@ -764,6 +854,40 @@ export class BrainComponent implements OnInit {
     this.api.deleteEdge(this.activeSpaceId(), id).subscribe({
       next: () => this.edges.update(list => list.filter(e => e._id !== id)),
       error: () => alert('Failed to delete edge.'),
+    });
+  }
+
+  createChrono(): void {
+    if (!this.chronoForm.title.trim() || !this.chronoForm.startsAt) return;
+    this.creatingChrono.set(true);
+    this.createChronoError.set('');
+    const tags = this.chronoForm.tags.split(',').map(s => s.trim()).filter(Boolean);
+    const body: { title: string; kind: ChronoKind; startsAt: string; description?: string; tags?: string[] } = {
+      title: this.chronoForm.title.trim(),
+      kind: this.chronoForm.kind,
+      startsAt: new Date(this.chronoForm.startsAt).toISOString(),
+    };
+    if (this.chronoForm.description.trim()) body.description = this.chronoForm.description.trim();
+    if (tags.length) body.tags = tags;
+    this.api.createChrono(this.activeSpaceId(), body).subscribe({
+      next: () => {
+        this.creatingChrono.set(false);
+        this.showChronoForm.set(false);
+        this.chronoForm = { title: '', kind: 'event', startsAt: '', description: '', tags: '' };
+        this.loadCurrentTab(this.activeSpaceId());
+      },
+      error: (err) => {
+        this.creatingChrono.set(false);
+        this.createChronoError.set(err.error?.error ?? 'Failed to create chrono entry');
+      },
+    });
+  }
+
+  deleteChrono(id: string): void {
+    if (!confirm('Delete this chrono entry?')) return;
+    this.api.deleteChrono(this.activeSpaceId(), id).subscribe({
+      next: () => this.chrono.update(list => list.filter(c => c._id !== id)),
+      error: () => alert('Failed to delete chrono entry.'),
     });
   }
 

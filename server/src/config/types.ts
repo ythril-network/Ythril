@@ -176,9 +176,36 @@ export interface EdgeDoc {
   seq: number;
 }
 
+export type ChronoKind = 'event' | 'deadline' | 'plan' | 'prediction' | 'milestone';
+export type ChronoStatus = 'upcoming' | 'active' | 'completed' | 'overdue' | 'cancelled';
+
+export interface ChronoEntry {
+  _id: string;
+  spaceId: string;
+  title: string;
+  description?: string;
+  kind: ChronoKind;
+  startsAt: string;
+  endsAt?: string;
+  status: ChronoStatus;
+  confidence?: number;
+  tags: string[];
+  entityIds: string[];
+  memoryIds: string[];
+  recurrence?: {
+    freq: 'daily' | 'weekly' | 'monthly' | 'yearly';
+    interval: number;
+    until?: string;
+  };
+  author: AuthorRef;
+  createdAt: string;
+  updatedAt: string;
+  seq: number;
+}
+
 export interface TombstoneDoc {
   _id: string;
-  type: 'memory' | 'entity' | 'edge';
+  type: 'memory' | 'entity' | 'edge' | 'chrono';
   spaceId: string;
   deletedAt: string;
   instanceId: string;

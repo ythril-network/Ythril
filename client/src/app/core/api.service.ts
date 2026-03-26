@@ -68,6 +68,29 @@ export interface Edge {
   createdAt: string;
 }
 
+export type ChronoKind = 'event' | 'deadline' | 'plan' | 'prediction' | 'milestone';
+export type ChronoStatus = 'upcoming' | 'active' | 'completed' | 'overdue' | 'cancelled';
+
+export interface ChronoEntry {
+  _id: string;
+  spaceId: string;
+  title: string;
+  description?: string;
+  kind: ChronoKind;
+  startsAt: string;
+  endsAt?: string;
+  status: ChronoStatus;
+  confidence?: number;
+  tags: string[];
+  entityIds: string[];
+  memoryIds: string[];
+  recurrence?: { freq: string; interval?: number; until?: string };
+  author: { instanceId: string; instanceLabel: string };
+  createdAt: string;
+  updatedAt: string;
+  seq: number;
+}
+
 export interface SpaceStats {
   spaceId: string;
   memories: number;
@@ -291,6 +314,25 @@ export class ApiService {
 
   createEdge(spaceId: string, body: { from: string; to: string; label: string; weight?: number; type?: string }): Observable<Edge> {
     return this.http.post<Edge>(`/api/brain/spaces/${spaceId}/edges`, body);
+  }
+
+  // ── Brain — chrono ──────────────────────────────────────────────────────
+
+  listChrono(spaceId: string, limit = 50, skip = 0): Observable<{ chrono: ChronoEntry[] }> {
+    const params = new HttpParams().set('limit', limit).set('skip', skip);
+    return this.http.get<any>(`/api/brain/spaces/${spaceId}/chrono`, { params });
+  }
+
+  createChrono(spaceId: string, body: { title: string; kind: ChronoKind; startsAt: string; endsAt?: string; status?: ChronoStatus; confidence?: number; tags?: string[]; entityIds?: string[]; memoryIds?: string[]; description?: string }): Observable<ChronoEntry> {
+    return this.http.post<ChronoEntry>(`/api/brain/spaces/${spaceId}/chrono`, body);
+  }
+
+  updateChrono(spaceId: string, id: string, body: Partial<{ title: string; kind: ChronoKind; startsAt: string; endsAt: string; status: ChronoStatus; confidence: number; tags: string[]; entityIds: string[]; memoryIds: string[]; description: string }>): Observable<ChronoEntry> {
+    return this.http.post<ChronoEntry>(`/api/brain/spaces/${spaceId}/chrono/${id}`, body);
+  }
+
+  deleteChrono(spaceId: string, id: string): Observable<void> {
+    return this.http.delete<void>(`/api/brain/spaces/${spaceId}/chrono/${id}`);
   }
 
   // ── Files ─────────────────────────────────────────────────────────────────

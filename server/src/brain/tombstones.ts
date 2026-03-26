@@ -35,6 +35,7 @@ export async function applyRemoteTombstone(tombstone: TombstoneDoc): Promise<voi
     memory: `${spaceId}_memories`,
     entity: `${spaceId}_entities`,
     edge: `${spaceId}_edges`,
+    chrono: `${spaceId}_chrono`,
   };
   const targetColl = collMap[type];
   if (targetColl) {

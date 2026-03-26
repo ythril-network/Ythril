@@ -50,6 +50,7 @@ GET /api/sync/tombstones?spaceId=&networkId=&sinceSeq={lastSeqReceived}     (1 r
 GET /api/sync/memories?spaceId=&...&full=true&limit=200                     (ceil(N/200) requests)
 GET /api/sync/entities?...                                                  (ceil(N/200) requests)
 GET /api/sync/edges?...                                                     (ceil(N/200) requests)
+GET /api/sync/chrono?...                                                    (ceil(N/200) requests)
 ```
 
 ### Why `?full=true`
@@ -93,15 +94,16 @@ If the peer has never been synced (`lastSeqPushed` = 0), the full history is sen
 
 ### `POST /batch-upsert`
 
-Accepts `{ memories?: MemoryDoc[], entities?: EntityDoc[], edges?: EdgeDoc[] }` in a single request. Up to 500 documents per type per request. The server applies the same conflict rules as the individual `POST /memories`, `POST /entities`, `POST /edges` endpoints:
+Accepts `{ memories?: MemoryDoc[], entities?: EntityDoc[], edges?: EdgeDoc[], chrono?: ChronoEntry[] }` in a single request. Up to 500 documents per type per request. The server applies the same conflict rules as the individual `POST /memories`, `POST /entities`, `POST /edges`, `POST /chrono` endpoints:
 
 | Type | Rule |
 |------|------|
 | Memories | `incoming.seq > existing.seq` → overwrite; equal seq + different fact → **fork** (new `_id`); else skip |
 | Entities | `incoming.seq > existing.seq` → overwrite (upsert); else skip |
 | Edges | same as entities |
+| Chrono | same as entities |
 
-Response: `{ status: 'ok', memories: {inserted,updated,forked,skipped,tombstoned}, entities: {upserted,skipped,tombstoned}, edges: {upserted,skipped,tombstoned} }`
+Response: `{ status: 'ok', memories: {inserted,updated,forked,skipped,tombstoned}, entities: {upserted,skipped,tombstoned}, edges: {upserted,skipped,tombstoned}, chrono: {upserted,skipped,tombstoned} }`
 
 ### `lastSeqPushed` update
 

@@ -16,6 +16,7 @@ import { resolveMemberSpaces, resolveWriteTarget, isProxySpace } from '../spaces
 import { remember, recall, recallGlobal, queryBrain } from '../brain/memory.js';
 import { upsertEntity, listEntities } from '../brain/entities.js';
 import { upsertEdge, listEdges } from '../brain/edges.js';
+import { createChrono, updateChrono, listChrono } from '../brain/chrono.js';
 // File tools
 import {
   readFile,
@@ -31,6 +32,7 @@ const transports = new Map<string, SSEServerTransport>();
 
 const MUTATING_TOOLS = new Set([
   'remember', 'upsert_entity', 'upsert_edge',
+  'create_chrono', 'update_chrono',
   'write_file', 'delete_file', 'create_dir', 'move_file',
   'sync_now',
 ]);
@@ -106,7 +108,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           properties: {
             collection: {
               type: 'string',
-              enum: ['memories', 'entities', 'edges'],
+              enum: ['memories', 'entities', 'edges', 'chrono'],
               description: 'Collection to query.',
             },
             filter: { type: 'object', description: 'MongoDB filter document.' },
@@ -151,6 +153,62 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
           },
           required: ['from', 'to', 'label'],
+        },
+      },
+      {
+        name: 'create_chrono',
+        description: 'Create a chronological entry (event, deadline, plan, prediction, or milestone) in the knowledge graph.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: 'Entry title.' },
+            kind: { type: 'string', enum: ['event', 'deadline', 'plan', 'prediction', 'milestone'], description: 'Entry kind.' },
+            startsAt: { type: 'string', description: 'ISO 8601 start date/time.' },
+            endsAt: { type: 'string', description: 'Optional ISO 8601 end date/time.' },
+            status: { type: 'string', enum: ['upcoming', 'active', 'completed', 'overdue', 'cancelled'], description: 'Status (default: upcoming).' },
+            confidence: { type: 'number', description: 'Confidence level 0–1 (for predictions).' },
+            tags: { type: 'array', items: { type: 'string' }, description: 'Categorisation tags.' },
+            entityIds: { type: 'array', items: { type: 'string' }, description: 'Related entity IDs.' },
+            memoryIds: { type: 'array', items: { type: 'string' }, description: 'Related memory IDs.' },
+            description: { type: 'string', description: 'Optional longer description.' },
+            targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+          },
+          required: ['title', 'kind', 'startsAt'],
+        },
+      },
+      {
+        name: 'update_chrono',
+        description: 'Update an existing chronological entry.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', description: 'Chrono entry ID.' },
+            title: { type: 'string', description: 'New title.' },
+            kind: { type: 'string', enum: ['event', 'deadline', 'plan', 'prediction', 'milestone'] },
+            startsAt: { type: 'string', description: 'New ISO 8601 start date/time.' },
+            endsAt: { type: 'string', description: 'New ISO 8601 end date/time.' },
+            status: { type: 'string', enum: ['upcoming', 'active', 'completed', 'overdue', 'cancelled'] },
+            confidence: { type: 'number', description: 'Confidence level 0–1.' },
+            tags: { type: 'array', items: { type: 'string' } },
+            entityIds: { type: 'array', items: { type: 'string' } },
+            memoryIds: { type: 'array', items: { type: 'string' } },
+            description: { type: 'string' },
+            targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+          },
+          required: ['id'],
+        },
+      },
+      {
+        name: 'list_chrono',
+        description: 'List chronological entries, optionally filtered by status or kind.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            status: { type: 'string', enum: ['upcoming', 'active', 'completed', 'overdue', 'cancelled'], description: 'Filter by status.' },
+            kind: { type: 'string', enum: ['event', 'deadline', 'plan', 'prediction', 'milestone'], description: 'Filter by kind.' },
+            limit: { type: 'number', description: 'Max results (default 20, max 100).' },
+          },
+          required: [],
         },
       },
       {
@@ -358,8 +416,8 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
 
         case 'query': {
           const collName = String(a['collection'] ?? '');
-          if (!['memories', 'entities', 'edges'].includes(collName)) {
-            throw new Error(`collection must be one of: memories, entities, edges`);
+          if (!['memories', 'entities', 'edges', 'chrono'].includes(collName)) {
+            throw new Error(`collection must be one of: memories, entities, edges, chrono`);
           }
           const filter =
             a['filter'] != null && typeof a['filter'] === 'object'
@@ -424,6 +482,79 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const edge = await upsertEdge(wt.target, from, to, label, weight, edgeType);
           return {
             content: [{ type: 'text' as const, text: `Edge '${label}' (${from} → ${to}) upserted (ID ${edge._id}).` }],
+          };
+        }
+
+        // ── Chrono ─────────────────────────────────────────────────────────
+        case 'create_chrono': {
+          const title = String(a['title'] ?? '').trim();
+          const kind = String(a['kind'] ?? '') as import('../config/types.js').ChronoKind;
+          const startsAt = String(a['startsAt'] ?? '');
+          if (!title) throw new Error('title must not be empty');
+          if (!['event', 'deadline', 'plan', 'prediction', 'milestone'].includes(kind)) throw new Error('kind must be event, deadline, plan, prediction, or milestone');
+          if (!startsAt) throw new Error('startsAt must not be empty');
+
+          const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
+          if (!wt.ok) throw new Error(wt.error);
+          const remQuota = await checkQuota('brain');
+
+          const entry = await createChrono(wt.target, {
+            title,
+            kind,
+            startsAt,
+            description: typeof a['description'] === 'string' ? a['description'] : undefined,
+            endsAt: typeof a['endsAt'] === 'string' ? a['endsAt'] : undefined,
+            status: typeof a['status'] === 'string' ? a['status'] as import('../config/types.js').ChronoStatus : undefined,
+            confidence: typeof a['confidence'] === 'number' ? a['confidence'] : undefined,
+            tags: Array.isArray(a['tags']) ? (a['tags'] as string[]) : undefined,
+            entityIds: Array.isArray(a['entityIds']) ? (a['entityIds'] as string[]) : undefined,
+            memoryIds: Array.isArray(a['memoryIds']) ? (a['memoryIds'] as string[]) : undefined,
+          });
+          const text = `Chrono entry '${entry.title}' (${entry.kind}) created (ID ${entry._id}, seq ${entry.seq}).`
+            + (remQuota.softBreached ? `\n⚠️ Storage warning: ${remQuota.warning}` : '');
+          return { content: [{ type: 'text' as const, text }] };
+        }
+
+        case 'update_chrono': {
+          const id = String(a['id'] ?? '').trim();
+          if (!id) throw new Error('id must not be empty');
+          const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
+          if (!wt.ok) throw new Error(wt.error);
+
+          const updates: Record<string, unknown> = {};
+          if (typeof a['title'] === 'string') updates['title'] = a['title'];
+          if (typeof a['kind'] === 'string') updates['kind'] = a['kind'];
+          if (typeof a['startsAt'] === 'string') updates['startsAt'] = a['startsAt'];
+          if (typeof a['endsAt'] === 'string') updates['endsAt'] = a['endsAt'];
+          if (typeof a['status'] === 'string') updates['status'] = a['status'];
+          if (typeof a['confidence'] === 'number') updates['confidence'] = a['confidence'];
+          if (typeof a['description'] === 'string') updates['description'] = a['description'];
+          if (Array.isArray(a['tags'])) updates['tags'] = a['tags'];
+          if (Array.isArray(a['entityIds'])) updates['entityIds'] = a['entityIds'];
+          if (Array.isArray(a['memoryIds'])) updates['memoryIds'] = a['memoryIds'];
+
+          const entry = await updateChrono(wt.target, id, updates as never);
+          if (!entry) throw new Error(`Chrono entry '${id}' not found`);
+          return { content: [{ type: 'text' as const, text: `Chrono entry '${entry.title}' updated (seq ${entry.seq}).` }] };
+        }
+
+        case 'list_chrono': {
+          const filter: Record<string, unknown> = {};
+          if (typeof a['status'] === 'string') filter['status'] = a['status'];
+          if (typeof a['kind'] === 'string') filter['kind'] = a['kind'];
+          const limit = typeof a['limit'] === 'number' ? Math.min(a['limit'], 100) : 20;
+
+          const memberIds = resolveMemberSpaces(spaceId);
+          const all = (await Promise.all(memberIds.map(mid => listChrono(mid, filter, limit)))).flat();
+          all.sort((x, y) => new Date(y.startsAt).getTime() - new Date(x.startsAt).getTime());
+          const results = all.slice(0, limit);
+          return {
+            content: [{
+              type: 'text' as const,
+              text: results.length === 0
+                ? 'No chrono entries found.'
+                : results.map((e, i) => `[${i + 1}] ${e.kind} | ${e.status} | ${e.startsAt} | ${e.title} (ID ${e._id})`).join('\n'),
+            }],
           };
         }
 

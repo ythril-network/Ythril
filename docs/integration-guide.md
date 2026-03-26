@@ -14,7 +14,7 @@
 3. [Authentication](#authentication)
 4. [Error Format](#error-format)
 5. [Rate Limits](#rate-limits)
-6. [Brain API](#brain-api) — memories, entities, edges, search, stats
+6. [Brain API](#brain-api) — memories, entities, edges, chrono, search, stats
 7. [Files API](#files-api) — upload, download, chunked upload, move, delete
 8. [Spaces API](#spaces-api) — create, list, delete, proxy spaces
 9. [Tokens API](#tokens-api) — create, list, regenerate, revoke
@@ -581,6 +581,76 @@ GET /api/brain/spaces/:spaceId/edges?limit=50&skip=0
 
 ```
 DELETE /api/brain/spaces/:spaceId/edges/:id
+```
+
+**Response** `204`.
+
+---
+
+### Create a Chrono Entry
+
+```
+POST /api/brain/spaces/:spaceId/chrono
+```
+
+**Body**:
+
+```json
+{
+  "title": "Release v1.0",
+  "kind": "milestone",
+  "startsAt": "2026-06-01T00:00:00Z",
+  "description": "First public release",
+  "status": "upcoming",
+  "confidence": 0.9,
+  "tags": ["release"],
+  "entityIds": [],
+  "memoryIds": []
+}
+```
+
+- `kind` — `event`, `deadline`, `plan`, `prediction`, `milestone`
+- `status` — `upcoming` (default), `active`, `completed`, `overdue`, `cancelled`
+- `confidence` — `0`–`1` (optional, useful for predictions)
+
+**Response** `201` — the created `ChronoEntry`.
+
+---
+
+### Update a Chrono Entry
+
+```
+POST /api/brain/spaces/:spaceId/chrono/:id
+```
+
+**Body**: partial object with any updatable fields (`title`, `kind`, `status`, `startsAt`, `endsAt`, `confidence`, `tags`, `entityIds`, `memoryIds`, `description`).
+
+**Response** `200` — the updated `ChronoEntry`.
+
+---
+
+### List Chrono Entries
+
+```
+GET /api/brain/spaces/:spaceId/chrono?limit=50&skip=0
+```
+
+**Response** `200`:
+
+```json
+{
+  "chrono": [ ... ],
+  "limit": 50,
+  "skip": 0
+}
+```
+
+---
+
+### Delete a Chrono Entry
+
+```
+DELETE /api/brain/spaces/:spaceId/chrono/:id
 ```
 
 **Response** `204`.
@@ -1494,6 +1564,10 @@ Same pattern as memories.
 
 Same pattern as memories.
 
+### GET /api/sync/chrono
+
+Same pattern as memories.
+
 ### GET /api/sync/tombstones
 
 ```
@@ -1862,7 +1936,7 @@ If a space has a `description`, it is sent to the MCP client as `instructions` d
 
 ### Read-Only Tokens
 
-When connecting with a `readOnly` token, mutating tools (`remember`, `upsert_entity`, `upsert_edge`, `write_file`, `delete_file`, `create_dir`, `move_file`, `sync_now`) are **hidden** from `tools/list` and rejected with an error if called directly. Read-only tools (`recall`, `recall_global`, `query`, `read_file`, `list_dir`, `list_peers`) work normally.
+When connecting with a `readOnly` token, mutating tools (`remember`, `upsert_entity`, `upsert_edge`, `create_chrono`, `update_chrono`, `write_file`, `delete_file`, `create_dir`, `move_file`, `sync_now`) are **hidden** from `tools/list` and rejected with an error if called directly. Read-only tools (`recall`, `recall_global`, `query`, `list_chrono`, `read_file`, `list_dir`, `list_peers`) work normally.
 
 ### Connecting
 
@@ -1892,6 +1966,9 @@ Content-Type: application/json
 | `query` | Structured MongoDB filter query (read-only) |
 | `upsert_entity` | Create or update a named entity (with optional properties) |
 | `upsert_edge` | Create or update a directed relationship |
+| `create_chrono` | Create a chrono entry (event, deadline, plan, prediction, milestone) |
+| `update_chrono` | Update an existing chrono entry |
+| `list_chrono` | List chrono entries, optionally filtered by status or kind |
 | `read_file` | Read a text file from the space file store |
 | `write_file` | Write a text file to the space file store |
 | `list_dir` | List directory contents |
