@@ -1823,6 +1823,71 @@ GET /health
 
 ---
 
+### Prometheus Metrics (unauthenticated)
+
+```
+GET /metrics
+```
+
+Exposes a [Prometheus-compatible](https://prometheus.io/docs/instrumenting/exposition_formats/) metrics endpoint for production monitoring. No authentication required — Prometheus scrapers work without Bearer tokens.
+
+**Response** `200` — `text/plain; version=0.0.4; charset=utf-8`:
+
+```
+# HELP ythril_http_requests_total Total HTTP requests by method, route pattern, and status code
+# TYPE ythril_http_requests_total counter
+ythril_http_requests_total{method="GET",route="/health",status_code="200"} 42
+...
+```
+
+**Metrics exposed:**
+
+| Metric | Type | Description |
+|---|---|---|
+| `ythril_http_requests_total` | counter | Total requests by method, route, status code |
+| `ythril_http_request_duration_seconds` | histogram | Request latency by method and route |
+| `ythril_http_request_size_bytes` | histogram | Request body size |
+| `ythril_http_response_size_bytes` | histogram | Response body size |
+| `ythril_memories_total` | gauge | Total memories by space |
+| `ythril_entities_total` | gauge | Total entities by space |
+| `ythril_edges_total` | gauge | Total edges by space |
+| `ythril_chrono_entries_total` | gauge | Total chrono entries by space |
+| `ythril_spaces_total` | gauge | Number of configured spaces |
+| `ythril_embedding_duration_seconds` | histogram | Time to compute a single embedding |
+| `ythril_embedding_queue_depth` | gauge | Pending embedding operations |
+| `ythril_reindex_in_progress` | gauge | 1 if a reindex is running, 0 otherwise |
+| `ythril_storage_used_bytes` | gauge | Storage used in bytes by area (brain, files, total) |
+| `ythril_storage_limit_bytes` | gauge | Configured storage limits by area and tier (soft, hard) |
+| `ythril_auth_attempts_total` | counter | Auth attempts by result (success, invalid) |
+| `ythril_tokens_active` | gauge | Number of active (non-expired) tokens |
+| `ythril_mcp_connections_active` | gauge | Current SSE connections |
+| `ythril_mcp_tool_calls_total` | counter | Tool invocations by tool name and space |
+| `ythril_sync_cycles_total` | counter | Sync cycles by network and status |
+| `ythril_sync_items_pulled_total` | counter | Items received by type |
+| `ythril_sync_items_pushed_total` | counter | Items sent by type |
+| `ythril_sync_duration_seconds` | histogram | Time per sync cycle |
+
+Default Node.js process metrics (`nodejs_*`, `process_*`) are also included via [prom-client](https://github.com/siimon/prom-client)'s `collectDefaultMetrics()`.
+
+**Kubernetes example** (Prometheus Operator `ServiceMonitor`):
+
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ythril
+spec:
+  selector:
+    matchLabels:
+      app: ythril
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+```
+
+---
+
 ### Check Setup Status (unauthenticated)
 
 ```

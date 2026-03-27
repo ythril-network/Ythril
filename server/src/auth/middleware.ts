@@ -3,6 +3,7 @@ import { findMatchingToken, touchToken } from './tokens.js';
 import { isMfaEnabled, verifyMfaCode } from './totp.js';
 import type { TokenRecord } from '../config/types.js';
 import { resolveMemberSpaces } from '../spaces/proxy.js';
+import { authAttemptsTotal } from '../metrics/registry.js';
 
 // Augment Express Request type
 declare global {
@@ -51,10 +52,12 @@ export async function requireAuth(
 
   const record = await findMatchingToken(plaintext);
   if (!record) {
+    authAttemptsTotal.inc({ result: 'invalid' });
     res.status(401).json({ error: 'Invalid or expired token' });
     return;
   }
 
+  authAttemptsTotal.inc({ result: 'success' });
   const { hash: _h, ...safeRecord } = record;
   req.authToken = safeRecord;
 
@@ -81,6 +84,7 @@ export async function requireSpaceAuth(
 
   const record = await findMatchingToken(plaintext);
   if (!record) {
+    authAttemptsTotal.inc({ result: 'invalid' });
     res.status(401).json({ error: 'Invalid or expired token' });
     return;
   }
@@ -96,6 +100,7 @@ export async function requireSpaceAuth(
     }
   }
 
+  authAttemptsTotal.inc({ result: 'success' });
   const { hash: _h, ...safeRecord } = record;
   req.authToken = safeRecord;
   req.resolvedSpaceId = spaceId;

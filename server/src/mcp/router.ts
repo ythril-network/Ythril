@@ -372,6 +372,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
     }
 
     try {
+      mcpToolCallsTotal.inc({ tool: name, space: spaceId });
       switch (name) {
         // ── Brain ──────────────────────────────────────────────────────────
         case 'remember': {
@@ -848,6 +849,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
 // ── Express router ───────────────────────────────────────────────────────────
 
 import { requireAuth } from '../auth/middleware.js';
+import { mcpConnectionsActive, mcpToolCallsTotal } from '../metrics/registry.js';
 
 export const mcpRouter = Router();
 
@@ -867,9 +869,11 @@ mcpRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, res) =
   const postEndpoint = `/mcp/${spaceId}/messages`;
   const transport = new SSEServerTransport(postEndpoint, res);
   transports.set(transport.sessionId, transport);
+  mcpConnectionsActive.inc();
 
   res.on('close', () => {
     transports.delete(transport.sessionId);
+    mcpConnectionsActive.dec();
     log.debug(`MCP session ${transport.sessionId} closed (space: ${spaceId})`);
   });
 

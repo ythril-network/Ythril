@@ -23,6 +23,12 @@ import { buildFileManifest } from '../files/manifest.js';
 import { log } from '../util/log.js';
 import { bumpSeq } from '../util/seq.js';
 import { concludeRoundIfReady, sendMemberRemovedNotify } from '../api/sync.js';
+import {
+  syncCyclesTotal,
+  syncItemsPulledTotal,
+  syncItemsPushedTotal,
+  syncDurationSeconds,
+} from '../metrics/registry.js';
 import type {
   NetworkConfig,
   NetworkMember,
@@ -156,6 +162,7 @@ export async function runSyncForNetwork(networkId: string): Promise<{ synced: nu
 
   log.info(`Starting sync cycle for network '${net.label}' (${net.members.length} members)`);
   let synced = 0; let errors = 0;
+  const syncTimer = syncDurationSeconds.startTimer({ network: networkId });
 
   for (const member of net.members) {
     try {
@@ -210,14 +217,25 @@ export async function runSyncForNetwork(networkId: string): Promise<{ synced: nu
   }
 
   log.info(`Sync cycle complete for '${net.label}': ${synced} ok, ${errors} errors`);
+  syncTimer();
+
+  // Calculate status once and share between Prometheus and sync history
+  const status: 'success' | 'partial' | 'failed' =
+    errors === 0 ? 'success' : synced === 0 && net.members.length > 0 ? 'failed' : 'partial';
+
+  // Record Prometheus metrics
+  syncCyclesTotal.inc({ network: networkId, status });
+  for (const type of ['memories', 'entities', 'edges', 'files', 'chrono'] as const) {
+    if (pulled[type] > 0) syncItemsPulledTotal.inc({ type }, pulled[type]);
+    if (pushed[type] > 0) syncItemsPushedTotal.inc({ type }, pushed[type]);
+  }
 
   // Persist sync history
-  const status = errors === 0 ? 'success' : synced === 0 && net.members.length > 0 ? 'failed' : 'partial';
   recordSyncResult({
     networkId,
     triggeredAt,
     completedAt: new Date().toISOString(),
-    status: status as 'success' | 'partial' | 'failed',
+    status,
     pulled,
     pushed,
     ...(errorMessages.length > 0 ? { errors: errorMessages } : {}),
