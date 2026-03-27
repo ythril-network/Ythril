@@ -5,6 +5,7 @@ import { validateOidcJwt, getOidcConfig } from './oidc.js';
 import type { TokenRecord } from '../config/types.js';
 import type { OidcTokenRecord } from './oidc.js';
 import { resolveMemberSpaces } from '../spaces/proxy.js';
+import { authAttemptsTotal } from '../metrics/registry.js';
 
 // Augment Express Request type
 declare global {
@@ -83,11 +84,15 @@ export async function requireAuth(
 
   const record = await resolveBearer(bearer);
   if (!record) {
+    authAttemptsTotal.inc({ result: 'invalid' });
     res.status(401).json({ error: 'Invalid or expired token' });
     return;
   }
 
-  req.authToken = record;
+  
+  authAttemptsTotal.inc({ result: 'success' });
+  const { hash: _h, ...safeRecord } = record;
+  req.authToken = safeRecord;
 
   // Update lastUsed asynchronously for PAT tokens — do not block request
   if (isPat(bearer) && 'id' in record) touchToken(record.id);
@@ -112,6 +117,7 @@ export async function requireSpaceAuth(
 
   const record = await resolveBearer(bearer);
   if (!record) {
+    authAttemptsTotal.inc({ result: 'invalid' });
     res.status(401).json({ error: 'Invalid or expired token' });
     return;
   }
@@ -128,6 +134,9 @@ export async function requireSpaceAuth(
   }
 
   req.authToken = record;
+  authAttemptsTotal.inc({ result: 'success' });
+  const { hash: _h, ...safeRecord } = record;
+  req.authToken = safeRecord;
   req.resolvedSpaceId = spaceId;
   if (isPat(bearer) && 'id' in record) touchToken(record.id);
   next();

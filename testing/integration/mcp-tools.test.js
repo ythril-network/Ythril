@@ -547,6 +547,133 @@ describe('MCP recall_global â€” full-access token, multi-space isolation', 
   });
 });
 
+
+describe('MCP brain tools — update_memory / delete_memory / get_stats', () => {
+  let session;
+  let storedMemoryId;
+  const factText = `MCP-update-delete-test-${Date.now()}`;
+
+  before(async () => {
+    tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+    session = await openMcpSession('general', tokenA);
+    // Create a memory via REST API so we have an ID to update/delete
+    const res = await post(INSTANCES.a, tokenA, '/api/brain/general/memories', {
+      fact: factText,
+      tags: ['mcp-update-test'],
+    });
+    storedMemoryId = res.body?._id;
+  });
+  after(() => session?.close());
+
+  it('get_stats returns counts with spaceId, memories, entities, edges, chrono', async () => {
+    const result = await session.callTool('get_stats', {});
+    assert.ok(!result?.isError, `get_stats returned isError: ${JSON.stringify(result)}`);
+    const text = result?.content?.[0]?.text ?? '';
+    const parsed = JSON.parse(text);
+    assert.ok(typeof parsed.spaceId === 'string', 'get_stats must return spaceId');
+    assert.ok(typeof parsed.memories === 'number', 'get_stats must return memories count');
+    assert.ok(typeof parsed.entities === 'number', 'get_stats must return entities count');
+    assert.ok(typeof parsed.edges === 'number', 'get_stats must return edges count');
+    assert.ok(typeof parsed.chrono === 'number', 'get_stats must return chrono count');
+    assert.ok(parsed.memories >= 0, 'memories count must be non-negative');
+  });
+
+  it('update_memory with no id returns isError', async () => {
+    const result = await session.callTool('update_memory', { id: '' });
+    assert.ok(result?.isError, 'Empty id must return isError');
+  });
+
+  it('update_memory with no fields to update returns isError', async () => {
+    if (!storedMemoryId) return;
+    const result = await session.callTool('update_memory', { id: storedMemoryId });
+    assert.ok(result?.isError, 'No update fields must return isError');
+  });
+
+  it('update_memory updates tags on an existing memory', async () => {
+    if (!storedMemoryId) return;
+    const result = await session.callTool('update_memory', {
+      id: storedMemoryId,
+      tags: ['mcp-updated-tag'],
+    });
+    assert.ok(!result?.isError, `update_memory returned isError: ${JSON.stringify(result)}`);
+    const text = result?.content?.[0]?.text ?? '';
+    assert.ok(text.includes('updated') || text.includes(storedMemoryId), `Expected updated confirmation: ${text}`);
+  });
+
+  it('update_memory on non-existent id returns isError', async () => {
+    const result = await session.callTool('update_memory', {
+      id: '00000000-0000-0000-0000-000000000000',
+      tags: ['irrelevant'],
+    });
+    assert.ok(result?.isError, 'Non-existent memory ID must return isError');
+  });
+
+  it('delete_memory with no id returns isError', async () => {
+    const result = await session.callTool('delete_memory', { id: '' });
+    assert.ok(result?.isError, 'Empty id must return isError');
+  });
+
+  it('delete_memory removes the memory', async () => {
+    if (!storedMemoryId) return;
+    const result = await session.callTool('delete_memory', { id: storedMemoryId });
+    assert.ok(!result?.isError, `delete_memory returned isError: ${JSON.stringify(result)}`);
+    const text = result?.content?.[0]?.text ?? '';
+    assert.ok(text.includes('deleted') || text.includes(storedMemoryId), `Expected deletion confirmation: ${text}`);
+  });
+
+  it('delete_memory on already-deleted id returns isError', async () => {
+    if (!storedMemoryId) return;
+    const result = await session.callTool('delete_memory', { id: storedMemoryId });
+    assert.ok(result?.isError, 'Double-delete must return isError');
+  });
+});
+
+describe('MCP security — read-only token cannot call mutating tools', () => {
+  let readOnlySession;
+  let readOnlyTokenPlaintext;
+  let readOnlyTokenId;
+
+  before(async () => {
+    tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+    const tokenRes = await post(INSTANCES.a, tokenA, '/api/tokens', {
+      name: `readonly-mcp-test-${Date.now()}`,
+      readOnly: true,
+    });
+    assert.equal(tokenRes.status, 201, `Create read-only token: ${JSON.stringify(tokenRes.body)}`);
+    readOnlyTokenPlaintext = tokenRes.body.plaintext;
+    readOnlyTokenId = tokenRes.body.id;
+    readOnlySession = await openMcpSession('general', readOnlyTokenPlaintext);
+  });
+  after(async () => {
+    readOnlySession?.close();
+    if (readOnlyTokenId) await del(INSTANCES.a, tokenA, `/api/tokens/${readOnlyTokenId}`).catch(() => {});
+  });
+
+  it('update_memory is rejected with read-only token', async () => {
+    const result = await readOnlySession.callTool('update_memory', {
+      id: '00000000-0000-0000-0000-000000000000',
+      tags: ['nope'],
+    });
+    assert.ok(result?.isError, 'update_memory must be rejected by read-only token');
+    const text = result?.content?.[0]?.text ?? '';
+    assert.ok(text.toLowerCase().includes('read-only'), `Expected read-only message: ${text}`);
+  });
+
+  it('delete_memory is rejected with read-only token', async () => {
+    const result = await readOnlySession.callTool('delete_memory', {
+      id: '00000000-0000-0000-0000-000000000000',
+    });
+    assert.ok(result?.isError, 'delete_memory must be rejected by read-only token');
+    const text = result?.content?.[0]?.text ?? '';
+    assert.ok(text.toLowerCase().includes('read-only'), `Expected read-only message: ${text}`);
+  });
+
+  it('get_stats works with read-only token', async () => {
+    const result = await readOnlySession.callTool('get_stats', {});
+    assert.ok(!result?.isError, `get_stats must work with read-only token: ${JSON.stringify(result)}`);
+  });
+});
+
 describe('MCP security â€” unauthenticated access', () => {
   it('GET /mcp/:spaceId without auth returns 401', async () => {
     const parsed = new URL(INSTANCES.a);

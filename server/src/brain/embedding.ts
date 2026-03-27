@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { getDataRoot, getEmbeddingConfig } from '../config/loader.js';
 import { log } from '../util/log.js';
+import { embeddingDurationSeconds, embeddingQueueDepth } from '../metrics/registry.js';
 
 export interface EmbeddingResult {
   vector: number[];
@@ -99,21 +100,28 @@ export async function embed(
 ): Promise<EmbeddingResult> {
   const cfg = getEmbeddingConfig();
 
-  if (cfg.baseUrl) {
-    // External HTTP endpoint configured — delegate entirely
-    return embedViaHttp(text, cfg);
-  }
+  embeddingQueueDepth.inc();
+  const end = embeddingDurationSeconds.startTimer();
+  try {
+    if (cfg.baseUrl) {
+      // External HTTP endpoint configured — delegate entirely
+      return await embedViaHttp(text, cfg);
+    }
 
-  const prefixed = TASK_PREFIX[task] + text;
-  const pipe = await getLocalPipeline(cfg.model);
-  const output = await pipe(prefixed, { pooling: 'mean', normalize: true });
-  const vector = Array.from(output.data as Float32Array) as number[];
+    const prefixed = TASK_PREFIX[task] + text;
+    const pipe = await getLocalPipeline(cfg.model);
+    const output = await pipe(prefixed, { pooling: 'mean', normalize: true });
+    const vector = Array.from(output.data as Float32Array) as number[];
 
-  if (vector.length !== cfg.dimensions) {
-    log.warn(
-      `Embedding dimensions mismatch: expected ${cfg.dimensions}, got ${vector.length}. ` +
-      `Update embedding.dimensions in config.json.`,
-    );
+    if (vector.length !== cfg.dimensions) {
+      log.warn(
+        `Embedding dimensions mismatch: expected ${cfg.dimensions}, got ${vector.length}. ` +
+        `Update embedding.dimensions in config.json.`,
+      );
+    }
+    return { vector, model: cfg.model, dimensions: vector.length };
+  } finally {
+    end();
+    embeddingQueueDepth.dec();
   }
-  return { vector, model: cfg.model, dimensions: vector.length };
 }

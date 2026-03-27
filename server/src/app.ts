@@ -14,6 +14,7 @@ import { inviteRouter } from './api/invite.js';
 import { mfaRouter } from './api/mfa.js';
 import { aboutRouter } from './api/about.js';
 import { oidcRouter } from './api/oidc.js';
+import { metricsRouter } from './api/metrics.js';
 import { setupRouter } from './setup/routes.js';
 import { mcpRouter } from './mcp/router.js';
 import { globalRateLimit } from './rate-limit/middleware.js';
@@ -22,6 +23,13 @@ import { requireAuth } from './auth/middleware.js';
 import { clearTokenCache } from './auth/tokens.js';
 import { clearOidcCache } from './auth/oidc.js';
 import { log } from './util/log.js';
+import { getReadiness } from './ready.js';
+import {
+  httpRequestsTotal,
+  httpRequestDurationSeconds,
+  httpRequestSizeBytes,
+  httpResponseSizeBytes,
+} from './metrics/registry.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** Path to the compiled Angular SPA — configurable via env for Docker flexibility */
@@ -55,6 +63,49 @@ export function createApp() {
   // ── Health ───────────────────────────────────────────────────────────────
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok', ts: new Date().toISOString() });
+  });
+
+  // ── Readiness ────────────────────────────────────────────────────────────
+  app.get('/ready', async (_req, res) => {
+    try {
+      const result = await getReadiness();
+      res.status(result.ready ? 200 : 503).json(result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(503).json({
+        ready: false,
+        checks: {
+          mongodb: { status: 'error', error: message },
+          vectorSearch: { status: 'error', error: 'check skipped' },
+        },
+      });
+    }
+  // ── Prometheus metrics ───────────────────────────────────────────────────
+  // Unauthenticated — same as /health — so Prometheus scrapers work without PATs.
+  app.use('/metrics', metricsRouter);
+
+  // ── HTTP request instrumentation ─────────────────────────────────────────
+  // Runs after /health and /metrics so those internal endpoints aren't tracked.
+  app.use((req, res, next) => {
+    const start = process.hrtime.bigint();
+    const reqSize = parseInt(req.headers['content-length'] ?? '0', 10) || 0;
+
+    res.on('finish', () => {
+      // Use the Express route pattern if matched; fall back to normalised path.
+      const route = (req.route?.path as string | undefined)
+        ?? req.path.replace(/\/[0-9a-f-]{8,}/gi, '/:id');
+      const method = req.method;
+      const statusCode = String(res.statusCode);
+      const durationSec = Number(process.hrtime.bigint() - start) / 1e9;
+      const resSize = parseInt(res.getHeader('content-length') as string ?? '0', 10) || 0;
+
+      httpRequestsTotal.inc({ method, route, status_code: statusCode });
+      httpRequestDurationSeconds.observe({ method, route }, durationSec);
+      if (reqSize > 0) httpRequestSizeBytes.observe({ method, route }, reqSize);
+      if (resSize > 0) httpResponseSizeBytes.observe({ method, route }, resSize);
+    });
+
+    next();
   });
 
   // ── Setup (first-run only) — JSON API ────────────────────────────────────

@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { col } from '../db/mongo.js';
+import { col, isVectorSearchAvailable } from '../db/mongo.js';
 import { nextSeq } from '../util/seq.js';
 import { embed } from './embedding.js';
 import { getConfig, getEmbeddingConfig } from '../config/loader.js';
@@ -50,12 +50,18 @@ export interface RecallResult {
   embeddingModel: string;
 }
 
-/** Semantic recall using $vectorSearch (Atlas Local) */
+/** Semantic recall using $vectorSearch (Atlas Local / Atlas / MongoDB 8.2+) */
 export async function recall(
   spaceId: string,
   query: string,
   topK = 10,
 ): Promise<RecallResult[]> {
+  if (!isVectorSearchAvailable()) {
+    throw new Error(
+      'Semantic recall is unavailable: $vectorSearch is not supported by the connected MongoDB. ' +
+      'Upgrade to MongoDB 8.2+, use Atlas Local, or connect to managed Atlas.',
+    );
+  }
   if (needsReindex(spaceId)) {
     const embCfg = getEmbeddingConfig();
     throw new Error(
@@ -116,6 +122,35 @@ export async function recallGlobal(
     }
   }
   return deduped.slice(0, topK);
+}
+
+/** Update an existing memory's fact, tags, or entityIds. Re-embeds if fact changes. */
+export async function updateMemory(
+  spaceId: string,
+  memoryId: string,
+  updates: { fact?: string; tags?: string[]; entityIds?: string[] },
+): Promise<MemoryDoc | null> {
+  const existing = await col<MemoryDoc>(`${spaceId}_memories`).findOne({ _id: memoryId, spaceId } as never) as MemoryDoc | null;
+  if (!existing) return null;
+
+  const seq = await nextSeq(spaceId);
+  const now = new Date().toISOString();
+  const $set: Record<string, unknown> = { updatedAt: now, seq };
+
+  if (updates.fact !== undefined) {
+    const embResult = await embed(updates.fact);
+    $set['fact'] = updates.fact;
+    $set['embedding'] = embResult.vector;
+    $set['embeddingModel'] = embResult.model;
+  }
+  if (updates.tags !== undefined) $set['tags'] = updates.tags;
+  if (updates.entityIds !== undefined) $set['entityIds'] = updates.entityIds;
+
+  await col<MemoryDoc>(`${spaceId}_memories`).updateOne(
+    { _id: memoryId } as never,
+    { $set } as never,
+  );
+  return { ...existing, ...($set as Partial<MemoryDoc>) } as MemoryDoc;
 }
 
 /** Delete a memory and record a tombstone */

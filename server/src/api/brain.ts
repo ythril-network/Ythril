@@ -15,6 +15,7 @@ import { log } from '../util/log.js';
 import { checkQuota, QuotaError } from '../quota/quota.js';
 import { resolveMemberSpaces, resolveWriteTarget, findSpace, isProxySpace } from '../spaces/proxy.js';
 import type { MemoryDoc, ChronoKind, ChronoStatus } from '../config/types.js';
+import { reindexInProgress } from '../metrics/registry.js';
 
 export const brainRouter = Router();
 
@@ -603,6 +604,8 @@ brainRouter.post('/spaces/:spaceId/reindex', globalRateLimit, requireSpaceAuth, 
   let reindexed = 0;
   let errors = 0;
 
+  reindexInProgress.set(1);
+  try {
   for (const mid of memberIds) {
     const BATCH = 50;
     let skip = 0;
@@ -634,6 +637,9 @@ brainRouter.post('/spaces/:spaceId/reindex', globalRateLimit, requireSpaceAuth, 
     }
 
     clearReindexFlag(mid);
+  }
+  } finally {
+    reindexInProgress.set(0);
   }
 
   res.json({ spaceId, reindexed, errors });

@@ -2,5 +2,6 @@
   "/api": { "target": "http://localhost:3200", "secure": false, "changeOrigin": true },
   "/mcp": { "target": "http://localhost:3200", "secure": false, "changeOrigin": true },
   "/setup": { "target": "http://localhost:3200", "secure": false, "changeOrigin": true },
-  "/health": { "target": "http://localhost:3200", "secure": false, "changeOrigin": true }
+  "/health": { "target": "http://localhost:3200", "secure": false, "changeOrigin": true },
+  "/ready": { "target": "http://localhost:3200", "secure": false, "changeOrigin": true }
 }

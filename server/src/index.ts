@@ -1,7 +1,7 @@
 ﻿import { createServer } from 'http';
 import os from 'os';
-import { configExists, loadConfig, loadSecrets } from './config/loader.js';
-import { connectMongo, closeMongo } from './db/mongo.js';
+import { configExists, loadConfig, loadSecrets, getMongoUri } from './config/loader.js';
+import { connectMongo, closeMongo, checkVectorSearchAvailability } from './db/mongo.js';
 import { initAllSpaces } from './spaces/spaces.js';
 import { resetStaleWatermarksIfNeeded } from './util/seq.js';
 import { createApp } from './app.js';
@@ -70,6 +70,20 @@ async function main(): Promise<void> {
   // Always connect to MongoDB — needed on first run so the setup route can
   // initialise the general space immediately after writing the config.
   await connectMongo();
+
+  // Validate $vectorSearch support and log the result.
+  {
+    const uri = getMongoUri();
+    const safeUri = uri.replace(/\/\/.*@/, '//[credentials]@');
+    log.debug(`Checking $vectorSearch support on ${safeUri}`);
+    const vsCheck = await checkVectorSearchAvailability();
+    if (vsCheck.available) {
+      console.log(`  ${GREEN}✓${RESET} $vectorSearch available (${vsCheck.details})`);
+    } else {
+      console.log(`  ${YELLOW}✗${RESET} $vectorSearch not available (${vsCheck.details}) — semantic search (recall) will be disabled`);
+      console.log(`    Upgrade to MongoDB 8.2+, use Atlas Local, or connect to managed Atlas`);
+    }
+  }
 
   if (!isFirstRun) {
     await initAllSpaces();

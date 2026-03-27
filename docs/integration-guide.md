@@ -85,9 +85,49 @@ The Docker Compose stack runs two containers:
 | Container | Role |
 |-----------|------|
 | `ythril` | Brain server — REST API, MCP endpoints, Angular web UI (port 3200) |
-| `ythril-mongo` | MongoDB Atlas Local with `mongot` sidecar for `$vectorSearch` |
+| `ythril-mongo` | MongoDB Atlas Local with `mongot` sidecar for `$vectorSearch` (default) |
 
 On first start, MongoDB needs to elect a replica set primary (up to ~3 minutes). The server prints the startup banner when ready.
+
+### MongoDB Flexibility
+
+Ythril requires a MongoDB instance that supports the `$vectorSearch` aggregation stage for semantic recall.  Any of the following work:
+
+| MongoDB flavour | `$vectorSearch` | Notes |
+|---|---|---|
+| `mongodb/mongodb-atlas-local` (default) | ✓ | Bundled in `docker-compose.yml`; zero-config for new deployments |
+| Managed MongoDB Atlas (M10+) | ✓ | Set `MONGO_URI` to your Atlas connection string |
+| MongoDB 8.2+ (community / enterprise) | ✓ | Native support — no `mongot` sidecar required |
+| MongoDB < 8.2 (vanilla) | ✗ | `recall` / `recall_global` tools disabled; all other features work |
+
+**Using an existing MongoDB 8.2+ cluster** — remove the `ythril-mongo` service from `docker-compose.yml` and point `MONGO_URI` at your cluster:
+
+```yaml
+environment:
+  MONGO_URI: mongodb://mongodb-0.example.com:27017/?directConnection=true
+```
+
+**Using managed Atlas** — provide the `mongodb+srv://` connection string:
+
+```yaml
+environment:
+  MONGO_URI: mongodb+srv://user:pass@cluster0.example.mongodb.net/?retryWrites=true
+```
+
+On startup, Ythril probes for `$vectorSearch` support and logs the result:
+
+```
+  ✓ $vectorSearch available (MongoDB 8.2.1)
+```
+
+or, if unavailable:
+
+```
+  ✗ $vectorSearch not available (MongoDB 7.0.0) — semantic search (recall) will be disabled
+    Upgrade to MongoDB 8.2+, use Atlas Local, or connect to managed Atlas
+```
+
+If `$vectorSearch` is unavailable, all non-search operations (storing memories, entities, edges, files, sync) continue to work normally.  Only the `recall` and `recall_global` MCP tools return an error until a supported MongoDB is connected.
 
 ### Startup Output
 
@@ -117,7 +157,7 @@ DEBUG=1 docker compose up
 |----------|---------|-------------|
 | `CONFIG_PATH` | `/config/config.json` | Path to config file inside container |
 | `DATA_ROOT` | `/data` | Root directory for file storage |
-| `MONGO_URI` | `mongodb://ythril-mongo:27017/?directConnection=true` | MongoDB connection string |
+| `MONGO_URI` | `mongodb://ythril-mongo:27017/?directConnection=true` | MongoDB connection string — any `$vectorSearch`-capable MongoDB works |
 | `NODE_ENV` | `production` | Node environment |
 | `PORT` | `3200` | HTTP listen port |
 | `DEBUG` | (unset) | Set to `1` for verbose logging |
@@ -1823,6 +1863,71 @@ GET /health
 
 ---
 
+### Prometheus Metrics (unauthenticated)
+
+```
+GET /metrics
+```
+
+Exposes a [Prometheus-compatible](https://prometheus.io/docs/instrumenting/exposition_formats/) metrics endpoint for production monitoring. No authentication required — Prometheus scrapers work without Bearer tokens.
+
+**Response** `200` — `text/plain; version=0.0.4; charset=utf-8`:
+
+```
+# HELP ythril_http_requests_total Total HTTP requests by method, route pattern, and status code
+# TYPE ythril_http_requests_total counter
+ythril_http_requests_total{method="GET",route="/health",status_code="200"} 42
+...
+```
+
+**Metrics exposed:**
+
+| Metric | Type | Description |
+|---|---|---|
+| `ythril_http_requests_total` | counter | Total requests by method, route, status code |
+| `ythril_http_request_duration_seconds` | histogram | Request latency by method and route |
+| `ythril_http_request_size_bytes` | histogram | Request body size |
+| `ythril_http_response_size_bytes` | histogram | Response body size |
+| `ythril_memories_total` | gauge | Total memories by space |
+| `ythril_entities_total` | gauge | Total entities by space |
+| `ythril_edges_total` | gauge | Total edges by space |
+| `ythril_chrono_entries_total` | gauge | Total chrono entries by space |
+| `ythril_spaces_total` | gauge | Number of configured spaces |
+| `ythril_embedding_duration_seconds` | histogram | Time to compute a single embedding |
+| `ythril_embedding_queue_depth` | gauge | Pending embedding operations |
+| `ythril_reindex_in_progress` | gauge | 1 if a reindex is running, 0 otherwise |
+| `ythril_storage_used_bytes` | gauge | Storage used in bytes by area (brain, files, total) |
+| `ythril_storage_limit_bytes` | gauge | Configured storage limits by area and tier (soft, hard) |
+| `ythril_auth_attempts_total` | counter | Auth attempts by result (success, invalid) |
+| `ythril_tokens_active` | gauge | Number of active (non-expired) tokens |
+| `ythril_mcp_connections_active` | gauge | Current SSE connections |
+| `ythril_mcp_tool_calls_total` | counter | Tool invocations by tool name and space |
+| `ythril_sync_cycles_total` | counter | Sync cycles by network and status |
+| `ythril_sync_items_pulled_total` | counter | Items received by type |
+| `ythril_sync_items_pushed_total` | counter | Items sent by type |
+| `ythril_sync_duration_seconds` | histogram | Time per sync cycle |
+
+Default Node.js process metrics (`nodejs_*`, `process_*`) are also included via [prom-client](https://github.com/siimon/prom-client)'s `collectDefaultMetrics()`.
+
+**Kubernetes example** (Prometheus Operator `ServiceMonitor`):
+
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ythril
+spec:
+  selector:
+    matchLabels:
+      app: ythril
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+```
+
+---
+
 ### Check Setup Status (unauthenticated)
 
 ```
@@ -1937,7 +2042,7 @@ If a space has a `description`, it is sent to the MCP client as `instructions` d
 
 ### Read-Only Tokens
 
-When connecting with a `readOnly` token, mutating tools (`remember`, `upsert_entity`, `upsert_edge`, `create_chrono`, `update_chrono`, `write_file`, `delete_file`, `create_dir`, `move_file`, `sync_now`) are **hidden** from `tools/list` and rejected with an error if called directly. Read-only tools (`recall`, `recall_global`, `query`, `list_chrono`, `read_file`, `list_dir`, `list_peers`) work normally.
+When connecting with a `readOnly` token, mutating tools (`remember`, `update_memory`, `delete_memory`, `upsert_entity`, `upsert_edge`, `create_chrono`, `update_chrono`, `write_file`, `delete_file`, `create_dir`, `move_file`, `sync_now`) are **hidden** from `tools/list` and rejected with an error if called directly. Read-only tools (`recall`, `recall_global`, `query`, `get_stats`, `list_chrono`, `read_file`, `list_dir`, `list_peers`) work normally.
 
 ### Connecting
 
@@ -1962,9 +2067,12 @@ Content-Type: application/json
 | Tool | Description |
 |---|---|
 | `remember` | Store a memory with optional tags and entity links |
+| `update_memory` | Update an existing memory's fact, tags, or entity links |
+| `delete_memory` | Delete a memory by ID |
 | `recall` | Semantic search within the current space |
 | `recall_global` | Semantic search across all accessible spaces |
 | `query` | Structured MongoDB filter query (read-only) |
+| `get_stats` | Return counts of memories, entities, edges, and chrono entries |
 | `upsert_entity` | Create or update a named entity (with optional properties) |
 | `upsert_edge` | Create or update a directed relationship |
 | `create_chrono` | Create a chrono entry (event, deadline, plan, prediction, milestone) |
@@ -2009,6 +2117,66 @@ Content-Type: application/json
   }
 }
 ```
+
+### Example: update_memory
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "update_memory",
+    "arguments": {
+      "id": "a1b2c3d4-...",
+      "fact": "Kubernetes pods are ephemeral by design (applies to all workload types)",
+      "tags": ["k8s", "architecture", "workloads"]
+    }
+  }
+}
+```
+
+All fields are optional — only provided fields are updated (partial update). If `fact` changes, re-embedding is triggered automatically. Requires a non-read-only token.
+
+### Example: delete_memory
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "delete_memory",
+    "arguments": {
+      "id": "a1b2c3d4-..."
+    }
+  }
+}
+```
+
+Returns confirmation with the deleted ID. Creates a tombstone for sync propagation. Requires a non-read-only token.
+
+### Example: get_stats
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "get_stats",
+    "arguments": {}
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "spaceId": "general",
+  "memories": 1042,
+  "entities": 156,
+  "edges": 89,
+  "chrono": 23
+}
+```
+
+Works with any valid token (including read-only). For proxy spaces, returns aggregated counts across all member spaces.
 
 ### Example: query
 
