@@ -13,7 +13,8 @@ import { checkQuota, QuotaError } from '../quota/quota.js';
 import { resolveMemberSpaces, resolveWriteTarget, isProxySpace } from '../spaces/proxy.js';
 
 // Brain tools
-import { remember, recall, recallGlobal, queryBrain } from '../brain/memory.js';
+import { remember, recall, recallGlobal, queryBrain, updateMemory, deleteMemory } from '../brain/memory.js';
+import { col } from '../db/mongo.js';
 import { upsertEntity, listEntities } from '../brain/entities.js';
 import { upsertEdge, listEdges } from '../brain/edges.js';
 import { createChrono, updateChrono, listChrono } from '../brain/chrono.js';
@@ -31,7 +32,8 @@ import {
 const transports = new Map<string, SSEServerTransport>();
 
 const MUTATING_TOOLS = new Set([
-  'remember', 'upsert_entity', 'upsert_edge',
+  'remember', 'update_memory', 'delete_memory',
+  'upsert_entity', 'upsert_edge',
   'create_chrono', 'update_chrono',
   'write_file', 'delete_file', 'create_dir', 'move_file',
   'sync_now',
@@ -103,6 +105,42 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             topK: { type: 'number', description: 'Max results per space before merging (default 5).' },
           },
           required: ['query'],
+        },
+      },
+      {
+        name: 'update_memory',
+        description: 'Update an existing memory\'s fact, tags, or entity links. Re-embeds automatically if fact changes.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', description: 'Memory ID to update.' },
+            fact: { type: 'string', description: 'New fact text (triggers re-embedding).' },
+            tags: { type: 'array', items: { type: 'string' }, description: 'New tags (replaces existing).' },
+            entityIds: { type: 'array', items: { type: 'string' }, description: 'New entity ID links (replaces existing).' },
+            targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+          },
+          required: ['id'],
+        },
+      },
+      {
+        name: 'delete_memory',
+        description: 'Delete a memory by ID. Creates a tombstone for sync propagation.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', description: 'Memory ID to delete.' },
+            targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+          },
+          required: ['id'],
+        },
+      },
+      {
+        name: 'get_stats',
+        description: 'Return counts of memories, entities, edges, and chrono entries for the current space.',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+          required: [],
         },
       },
       {
@@ -416,6 +454,74 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
                         .join('\n'),
               },
             ],
+          };
+        }
+
+        case 'update_memory': {
+          const id = String(a['id'] ?? '').trim();
+          if (!id) throw new Error('id must not be empty');
+
+          const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
+          if (!wt.ok) throw new Error(wt.error);
+
+          const updates: { fact?: string; tags?: string[]; entityIds?: string[] } = {};
+          if (typeof a['fact'] === 'string') {
+            if (!a['fact'].trim()) throw new Error('fact must not be empty');
+            updates.fact = a['fact'] as string;
+          }
+          if (Array.isArray(a['tags'])) updates.tags = a['tags'] as string[];
+          if (Array.isArray(a['entityIds'])) updates.entityIds = a['entityIds'] as string[];
+
+          if (Object.keys(updates).length === 0) throw new Error('At least one of fact, tags, or entityIds must be provided');
+
+          const memberIds = resolveMemberSpaces(wt.target);
+          // Search member spaces sequentially — consistent with REST endpoint behaviour.
+          let updated = null;
+          for (const mid of memberIds) {
+            updated = await updateMemory(mid, id, updates);
+            if (updated) break;
+          }
+          if (!updated) throw new Error(`Memory '${id}' not found`);
+          return {
+            content: [{ type: 'text' as const, text: `Memory updated (ID ${updated._id}, seq ${updated.seq}).` }],
+          };
+        }
+
+        case 'delete_memory': {
+          const id = String(a['id'] ?? '').trim();
+          if (!id) throw new Error('id must not be empty');
+
+          const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
+          if (!wt.ok) throw new Error(wt.error);
+
+          const memberIds = resolveMemberSpaces(wt.target);
+          let deleted = false;
+          for (const mid of memberIds) {
+            if (await deleteMemory(mid, id)) { deleted = true; break; }
+          }
+          if (!deleted) throw new Error(`Memory '${id}' not found`);
+          return {
+            content: [{ type: 'text' as const, text: `Memory deleted (ID ${id}).` }],
+          };
+        }
+
+        case 'get_stats': {
+          const memberIds = resolveMemberSpaces(spaceId);
+          const counts = await Promise.all(memberIds.map(async mid => ({
+            memories: await col(`${mid}_memories`).countDocuments(),
+            entities: await col(`${mid}_entities`).countDocuments(),
+            edges: await col(`${mid}_edges`).countDocuments(),
+            chrono: await col(`${mid}_chrono`).countDocuments(),
+          })));
+          const memories = counts.reduce((s, c) => s + c.memories, 0);
+          const entities = counts.reduce((s, c) => s + c.entities, 0);
+          const edges = counts.reduce((s, c) => s + c.edges, 0);
+          const chrono = counts.reduce((s, c) => s + c.chrono, 0);
+          return {
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify({ spaceId, memories, entities, edges, chrono }, null, 2),
+            }],
           };
         }
 

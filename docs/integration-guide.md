@@ -1937,7 +1937,7 @@ If a space has a `description`, it is sent to the MCP client as `instructions` d
 
 ### Read-Only Tokens
 
-When connecting with a `readOnly` token, mutating tools (`remember`, `upsert_entity`, `upsert_edge`, `create_chrono`, `update_chrono`, `write_file`, `delete_file`, `create_dir`, `move_file`, `sync_now`) are **hidden** from `tools/list` and rejected with an error if called directly. Read-only tools (`recall`, `recall_global`, `query`, `list_chrono`, `read_file`, `list_dir`, `list_peers`) work normally.
+When connecting with a `readOnly` token, mutating tools (`remember`, `update_memory`, `delete_memory`, `upsert_entity`, `upsert_edge`, `create_chrono`, `update_chrono`, `write_file`, `delete_file`, `create_dir`, `move_file`, `sync_now`) are **hidden** from `tools/list` and rejected with an error if called directly. Read-only tools (`recall`, `recall_global`, `query`, `get_stats`, `list_chrono`, `read_file`, `list_dir`, `list_peers`) work normally.
 
 ### Connecting
 
@@ -1962,9 +1962,12 @@ Content-Type: application/json
 | Tool | Description |
 |---|---|
 | `remember` | Store a memory with optional tags and entity links |
+| `update_memory` | Update an existing memory's fact, tags, or entity links |
+| `delete_memory` | Delete a memory by ID |
 | `recall` | Semantic search within the current space |
 | `recall_global` | Semantic search across all accessible spaces |
 | `query` | Structured MongoDB filter query (read-only) |
+| `get_stats` | Return counts of memories, entities, edges, and chrono entries |
 | `upsert_entity` | Create or update a named entity (with optional properties) |
 | `upsert_edge` | Create or update a directed relationship |
 | `create_chrono` | Create a chrono entry (event, deadline, plan, prediction, milestone) |
@@ -2009,6 +2012,66 @@ Content-Type: application/json
   }
 }
 ```
+
+### Example: update_memory
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "update_memory",
+    "arguments": {
+      "id": "a1b2c3d4-...",
+      "fact": "Kubernetes pods are ephemeral by design (applies to all workload types)",
+      "tags": ["k8s", "architecture", "workloads"]
+    }
+  }
+}
+```
+
+All fields are optional — only provided fields are updated (partial update). If `fact` changes, re-embedding is triggered automatically. Requires a non-read-only token.
+
+### Example: delete_memory
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "delete_memory",
+    "arguments": {
+      "id": "a1b2c3d4-..."
+    }
+  }
+}
+```
+
+Returns confirmation with the deleted ID. Creates a tombstone for sync propagation. Requires a non-read-only token.
+
+### Example: get_stats
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "get_stats",
+    "arguments": {}
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "spaceId": "general",
+  "memories": 1042,
+  "entities": 156,
+  "edges": 89,
+  "chrono": 23
+}
+```
+
+Works with any valid token (including read-only). For proxy spaces, returns aggregated counts across all member spaces.
 
 ### Example: query
 
