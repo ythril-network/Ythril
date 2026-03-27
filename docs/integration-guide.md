@@ -2092,3 +2092,82 @@ GET /api/sync/memories?spaceId=general&cursor=eyJzZXEiOjIwMH0&limit=200
 ```
 
 When `nextCursor` is `null`, all data has been consumed.
+
+
+---
+
+## OIDC (OpenID Connect) Authentication
+
+Ythril supports an optional OIDC provider as an **additional** authentication path alongside PATs. When enabled, browser users can sign in using their corporate identity (Keycloak, Entra ID, Okta, Auth0, …) without a separately managed PAT.
+
+### Configuration
+
+Add an `oidc` block to `config.json`:
+
+```json
+{
+  "oidc": {
+    "enabled": true,
+    "issuerUrl": "https://keycloak.example.com/realms/my-realm",
+    "clientId": "ythril",
+    "audience": "ythril",
+    "scopes": ["openid", "profile", "email"],
+    "claimMapping": {
+      "admin":    { "claim": "realm_access.roles", "value": "ythril-admin" },
+      "readOnly": { "claim": "realm_access.roles", "value": "ythril-readonly" },
+      "spaces":   { "claim": "ythril_spaces" }
+    }
+  }
+}
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `enabled` | Yes | Set `true` to activate OIDC. All other fields are ignored when `false`. |
+| `issuerUrl` | Yes | IdP realm URL. The well-known discovery document is fetched from `{issuerUrl}/.well-known/openid-configuration`. |
+| `clientId` | Yes | OAuth2 client ID registered at the IdP. |
+| `clientSecret` | No | Only required for confidential clients. Omit for public (PKCE) clients. |
+| `audience` | No | Expected `aud` claim. Defaults to `clientId`. |
+| `scopes` | No | Scopes to request. Defaults to `["openid", "profile", "email"]`. |
+| `claimMapping` | No | Maps IdP claims to Ythril permissions (see below). |
+
+### Claim Mapping
+
+`claimMapping` controls how JWT claims are translated to Ythril permissions:
+
+| Key | Description |
+|---|---|
+| `admin` | When the rule matches, the session has admin access. |
+| `readOnly` | When the rule matches, the session has read-only access. |
+| `spaces` | The claim value is used as the list of allowed space IDs (must be a JSON string array). |
+
+Each rule has:
+- `claim` — dot-notation path inside the JWT payload (e.g. `"realm_access.roles"`).
+- `value` (optional) — the claim must equal this value, or be an array containing it. When omitted, the claim simply needs to be truthy.
+
+### Bearer Token Dispatch
+
+| Bearer value | Validation path |
+|---|---|
+| Starts with `ythril_` | PAT — bcrypt verification (unchanged) |
+| Anything else | JWT — JWKS signature + `iss`/`aud`/`exp` verification, then claim mapping |
+
+PATs continue to work without any changes when OIDC is enabled.
+
+### Login Flow (Browser)
+
+1. User clicks **Sign in with SSO** on the login page.
+2. Browser fetches the IdP discovery document and redirects to the authorization endpoint.
+3. User authenticates at the IdP.
+4. IdP redirects back to `/oidc-callback?code=…&state=…`.
+5. The Angular app exchanges the authorization code for tokens directly at the IdP token endpoint (PKCE — no client secret in the browser).
+6. The resulting access token (JWT) is stored in `localStorage` and used for all subsequent API calls.
+
+### Keycloak Setup
+
+1. Create a new client in your realm with **Client authentication: OFF** (public client).
+2. Set **Valid redirect URIs** to `https://your-ythril-host/oidc-callback`.
+3. Add a mapper for `ythril_spaces` (if using space scoping): **User attribute → Token claim** mapping.
+4. Set `issuerUrl` to `https://keycloak.host/realms/<realm>`.
+
+After saving, run `POST /api/admin/reload-config` to apply the OIDC settings without a restart.

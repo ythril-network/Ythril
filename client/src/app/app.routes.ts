@@ -15,6 +15,13 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./pages/login/login.component').then(m => m.LoginComponent),
   },
+  {
+    path: 'oidc-callback',
+    loadComponent: () =>
+      import('./pages/oidc-callback/oidc-callback.component').then(
+        m => m.OidcCallbackComponent,
+      ),
+  },
 
   // Protected shell (all main app pages live inside)
   {

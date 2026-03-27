@@ -108,6 +108,50 @@ export interface NetworkConfig {
   };
 }
 
+// ── OIDC types ─────────────────────────────────────────────────────────────
+
+/** Maps a single IdP claim to an Ythril permission.
+ *  `claim` supports dot-notation for nested objects (e.g. "realm_access.roles"). */
+export interface OidcClaimRule {
+  /** Dot-notated path to the claim value in the JWT payload. */
+  claim: string;
+  /** When present, the claim must equal this value (or be an array containing it).
+   *  When absent, the claim merely needs to be truthy. */
+  value?: string;
+}
+
+export interface OidcClaimMapping {
+  /** When matched, the user is granted admin access. */
+  admin?: OidcClaimRule;
+  /** When matched, the user is restricted to read-only access. */
+  readOnly?: OidcClaimRule;
+  /** When matched, the claim value is treated as the list of allowed space IDs.
+   *  The claim itself must be a JSON array of strings. */
+  spaces?: OidcClaimRule;
+}
+
+export interface OidcConfig {
+  /** Set to true to enable OIDC authentication. Default: false. */
+  enabled: boolean;
+  /** Base URL of the IdP realm, e.g. https://keycloak.example.com/realms/my-realm.
+   *  The well-known discovery URL is derived by appending
+   *  /.well-known/openid-configuration */
+  issuerUrl: string;
+  /** OAuth2 client ID registered at the IdP. */
+  clientId: string;
+  /** OAuth2 client secret — only required for confidential clients.
+   *  Public (PKCE) clients should omit this field. */
+  clientSecret?: string;
+  /** Expected `aud` claim value in issued JWTs.
+   *  Defaults to `clientId` when omitted. */
+  audience?: string;
+  /** Scopes to request during the authorization code flow.
+   *  Defaults to ["openid", "profile", "email"]. */
+  scopes?: string[];
+  /** Maps IdP JWT claims to Ythril permission flags. */
+  claimMapping?: OidcClaimMapping;
+}
+
 export interface Config {
   instanceId: string;
   instanceLabel: string;
@@ -121,6 +165,8 @@ export interface Config {
   allowInsecurePlaintext?: boolean;
   setup?: { completed: true };
   mongo?: { uri?: string };
+  /** Optional OpenID Connect configuration for SSO login. */
+  oidc?: OidcConfig;
 }
 
 export interface SecretsFile {

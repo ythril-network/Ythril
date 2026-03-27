@@ -17,5 +17,17 @@
   },
   "ejectedFromNetworks": [],
   "maxUploadBodyBytes": 5368709120,
-  "allowInsecurePlaintext": false
+  "allowInsecurePlaintext": false,
+  "oidc": {
+    "enabled": false,
+    "issuerUrl": "https://keycloak.example.com/realms/my-realm",
+    "clientId": "ythril",
+    "audience": "ythril",
+    "scopes": ["openid", "profile", "email"],
+    "claimMapping": {
+      "admin": { "claim": "realm_access.roles", "value": "ythril-admin" },
+      "readOnly": { "claim": "realm_access.roles", "value": "ythril-readonly" },
+      "spaces": { "claim": "ythril_spaces" }
+    }
+  }
 }

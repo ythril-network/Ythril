@@ -33,6 +33,12 @@ Open `http://localhost:3200` (or your instance URL). Enter your admin PAT — th
 
 The token is stored in browser `localStorage` under `ythril_token`. Logging out clears it.
 
+### SSO / OIDC login
+
+When an administrator has configured an OIDC provider (see [OIDC Configuration](integration-guide.md#oidc-openid-connect-authentication)), a **Sign in with SSO** button appears on the login page below the PAT field. Clicking it redirects you to your organisation's identity provider. After authenticating there you are redirected back and logged in automatically — no PAT entry required.
+
+Both login methods coexist: PAT users are unaffected when OIDC is enabled.
+
 ### Navigation
 
 The left sidebar has three main sections:
