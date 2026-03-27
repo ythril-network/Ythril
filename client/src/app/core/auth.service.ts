@@ -69,7 +69,7 @@ export class AuthService {
       this.http.get<{ authorization_endpoint: string }>(discoveryUrl),
     );
 
-    // Generate PKCE code_verifier (128 random bytes → base64url)
+    // Generate PKCE code_verifier (96 random bytes → base64url, produces a 128-char verifier)
     const verifierBytes = crypto.getRandomValues(new Uint8Array(96));
     const codeVerifier = btoa(String.fromCharCode(...verifierBytes))
       .replace(/\+/g, '-')

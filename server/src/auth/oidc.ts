@@ -191,7 +191,7 @@ export async function validateOidcJwt(bearer: string): Promise<OidcTokenRecord |
       lastUsed: null,
       expiresAt,
       admin,
-      readOnly: readOnly || undefined,
+      readOnly: readOnly === true ? true : undefined,
       spaces,
       source: 'oidc',
     };
