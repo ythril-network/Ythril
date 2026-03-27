@@ -74,7 +74,7 @@ npm run dev
 cd client && npm start
 ```
 
-The Angular dev server proxies `/api`, `/mcp`, `/setup`, and `/health` to `localhost:3200` via `proxy.conf.json`.
+The Angular dev server proxies `/api`, `/mcp`, `/setup`, `/health`, and `/ready` to `localhost:3200` via `proxy.conf.json`.
 
 For development you still need a MongoDB instance. The easiest way is running just the database from the compose file:
 

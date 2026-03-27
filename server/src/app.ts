@@ -20,6 +20,7 @@ import { configExists, reloadConfig } from './config/loader.js';
 import { requireAuth } from './auth/middleware.js';
 import { clearTokenCache } from './auth/tokens.js';
 import { log } from './util/log.js';
+import { getReadiness } from './ready.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** Path to the compiled Angular SPA — configurable via env for Docker flexibility */
@@ -53,6 +54,23 @@ export function createApp() {
   // ── Health ───────────────────────────────────────────────────────────────
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok', ts: new Date().toISOString() });
+  });
+
+  // ── Readiness ────────────────────────────────────────────────────────────
+  app.get('/ready', async (_req, res) => {
+    try {
+      const result = await getReadiness();
+      res.status(result.ready ? 200 : 503).json(result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(503).json({
+        ready: false,
+        checks: {
+          mongodb: { status: 'error', error: message },
+          vectorSearch: { status: 'error', error: 'check skipped' },
+        },
+      });
+    }
   });
 
   // ── Setup (first-run only) — JSON API ────────────────────────────────────
