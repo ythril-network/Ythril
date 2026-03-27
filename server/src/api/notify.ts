@@ -79,6 +79,19 @@ notifyRouter.post('/', notifyRateLimit, requireAuth, (req, res) => {
     }
   }
 
+  // Verify the caller's token is authorised to claim this instanceId.
+  // Peer tokens created during the invite handshake carry a peerInstanceId field
+  // linking the PAT to the specific peer.  Admin tokens are exempt (admins
+  // already have full instance control).  Non-admin / non-peer tokens may only
+  // send events as the local instance (self-test pings).
+  if (instanceId !== cfg.instanceId) {
+    const authToken = req.authToken as { peerInstanceId?: string; admin?: boolean };
+    if (!authToken.admin && authToken.peerInstanceId !== instanceId) {
+      res.status(403).json({ error: 'Token is not authorised for the claimed instanceId' });
+      return;
+    }
+  }
+
   const entry: NotifyEvent = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     networkId,

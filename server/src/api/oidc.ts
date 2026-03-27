@@ -2,8 +2,7 @@
  * GET /api/auth/oidc-info
  *
  * Returns the public OIDC configuration needed by the Angular SPA to initiate
- * the Authorization Code + PKCE login flow.  Sensitive fields (clientSecret)
- * are never included in the response.
+ * the Authorization Code + PKCE login flow.
  *
  * When OIDC is disabled or not configured, returns { enabled: false }.
  */

@@ -1,6 +1,7 @@
 import { Routes } from '@angular/router';
 import { authGuard } from './core/auth.guard';
 import { setupGuard } from './core/setup.guard';
+import { oidcCallbackGuard } from './core/oidc-callback.guard';
 
 export const routes: Routes = [
   // Public routes
@@ -17,6 +18,7 @@ export const routes: Routes = [
   },
   {
     path: 'oidc-callback',
+    canActivate: [oidcCallbackGuard],
     loadComponent: () =>
       import('./pages/oidc-callback/oidc-callback.component').then(
         m => m.OidcCallbackComponent,

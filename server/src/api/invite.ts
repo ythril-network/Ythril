@@ -271,6 +271,7 @@ inviteRouter.post('/apply', authRateLimit, async (req, res) => {
     name: `peer:${instanceLabel} (handshake)`,
     expiresAt: null,
     spaces: net.spaces, // scoped to only the network's spaces
+    peerInstanceId: instanceId, // link this PAT to the peer that will present it
   });
 
   // Encrypt the token with B's public key — only B can decrypt it

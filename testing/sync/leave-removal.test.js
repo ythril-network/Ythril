@@ -54,6 +54,25 @@ function injectPeerToken(container, instanceId, token) {
   execSync(`docker exec ${container} node -e "${script}"`);
 }
 
+/** Tag a token record in the container's config.tokens[] with peerInstanceId.
+ *  In production, the invite handshake sets this automatically.  Tests that
+ *  shortcut the handshake via POST /api/tokens must call this so the
+ *  peerInstanceId verification in the notify handler passes. */
+function tagPeerToken(container, tokenPlaintext, peerInstanceId) {
+  const prefix = tokenPlaintext.slice(0, 8);
+  const script = [
+    `const fs=require('fs');`,
+    `const p='/config/config.json';`,
+    `const c=JSON.parse(fs.readFileSync(p,'utf8'));`,
+    `const t=c.tokens.find(t=>t.prefix==='${prefix}');`,
+    `if(!t){process.stderr.write('token not found');process.exit(1);}`,
+    `t.peerInstanceId='${peerInstanceId}';`,
+    `fs.writeFileSync(p,JSON.stringify(c,null,2),{mode:0o600});`,
+    `process.stdout.write('ok');`,
+  ].join('');
+  execSync(`docker exec ${container} node -e "${script}"`);
+}
+
 function readContainerConfig(container) {
   const out = execSync(
     `docker exec ${container} node -e "const fs=require('fs');` +
@@ -182,6 +201,15 @@ describe('Leave and removal flows', () => {
     const ptForB = await post(INSTANCES.a, tokenA, '/api/tokens', { name: `leave-test-peer-b-${Date.now()}` });
     assert.equal(ptForB.status, 201);
     peerTokenForB = ptForB.body.plaintext;
+
+    // Tag the token records with peerInstanceId so the notify handler's
+    // identity verification passes (in production the invite handshake does this).
+    tagPeerToken('ythril-b', peerTokenForA, instanceIdA);  // B's token for A
+    tagPeerToken('ythril-a', peerTokenForB, instanceIdB);  // A's token for B
+
+    // Reload config on both instances so the in-memory token records pick up peerInstanceId.
+    await post(INSTANCES.a, tokenA, '/api/admin/reload-config', {});
+    await post(INSTANCES.b, tokenB, '/api/admin/reload-config', {});
   });
 
   // ══════════════════════════════════════════════════════════════════════════

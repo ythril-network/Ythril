@@ -2294,7 +2294,6 @@ Add an `oidc` block to `config.json`:
 | `enabled` | Yes | Set `true` to activate OIDC. All other fields are ignored when `false`. |
 | `issuerUrl` | Yes | IdP realm URL. The well-known discovery document is fetched from `{issuerUrl}/.well-known/openid-configuration`. |
 | `clientId` | Yes | OAuth2 client ID registered at the IdP. |
-| `clientSecret` | No | Only required for confidential clients. Omit for public (PKCE) clients. |
 | `audience` | No | Expected `aud` claim. Defaults to `clientId`. |
 | `scopes` | No | Scopes to request. Defaults to `["openid", "profile", "email"]`. |
 | `claimMapping` | No | Maps IdP claims to Ythril permissions (see below). |
@@ -2339,3 +2338,103 @@ PATs continue to work without any changes when OIDC is enabled.
 4. Set `issuerUrl` to `https://keycloak.host/realms/<realm>`.
 
 After saving, run `POST /api/admin/reload-config` to apply the OIDC settings without a restart.
+
+### Entra ID (Azure AD) Setup
+
+1. In the Azure portal, go to **App registrations → New registration**.
+2. Set **Redirect URI** to `https://your-ythril-host/oidc-callback` (type: **SPA**).
+3. Under **Authentication**, ensure **Access tokens** and **ID tokens** are checked under Implicit grant and hybrid flows. Leave the **SPA** redirect URI in place — PKCE is used automatically.
+4. Note the **Application (client) ID** — this is your `clientId`.
+5. The `issuerUrl` is `https://login.microsoftonline.com/<tenant-id>/v2.0`.
+6. Set `audience` to the Application (client) ID (Entra sets `aud` to the client ID by default).
+7. To map roles, create **App roles** and assign users/groups. Use `claimMapping.admin.claim: "roles"` and `claimMapping.admin.value: "ythril-admin"`.
+8. For space scoping, add an optional claim or use directory extensions to emit a `ythril_spaces` claim.
+
+```json
+{
+  "oidc": {
+    "enabled": true,
+    "issuerUrl": "https://login.microsoftonline.com/YOUR_TENANT_ID/v2.0",
+    "clientId": "YOUR_CLIENT_ID",
+    "scopes": ["openid", "profile", "email"],
+    "claimMapping": {
+      "admin": { "claim": "roles", "value": "ythril-admin" },
+      "readOnly": { "claim": "roles", "value": "ythril-readonly" },
+      "spaces": { "claim": "ythril_spaces" }
+    }
+  }
+}
+```
+
+### Okta Setup
+
+1. In the Okta admin console, go to **Applications → Create App Integration → OIDC → Single-Page Application**.
+2. Set **Sign-in redirect URI** to `https://your-ythril-host/oidc-callback`.
+3. Under **Assignments**, assign the users or groups who should have access.
+4. Note the **Client ID** from the application's General tab.
+5. The `issuerUrl` is `https://your-org.okta.com` (or `https://your-org.okta.com/oauth2/default` if using a custom authorization server).
+6. To map admin/readOnly, create groups (e.g. `ythril-admin`, `ythril-readonly`) and configure a **Groups claim** in the authorization server: `claim name: groups`, `filter: Matches regex ythril-.*`.
+
+```json
+{
+  "oidc": {
+    "enabled": true,
+    "issuerUrl": "https://your-org.okta.com/oauth2/default",
+    "clientId": "YOUR_CLIENT_ID",
+    "scopes": ["openid", "profile", "email", "groups"],
+    "claimMapping": {
+      "admin": { "claim": "groups", "value": "ythril-admin" },
+      "readOnly": { "claim": "groups", "value": "ythril-readonly" },
+      "spaces": { "claim": "ythril_spaces" }
+    }
+  }
+}
+```
+
+### Auth0 Setup
+
+1. In the Auth0 dashboard, go to **Applications → Create Application → Single Page Application**.
+2. Set **Allowed Callback URLs** to `https://your-ythril-host/oidc-callback`.
+3. Note the **Client ID** and **Domain** from the application settings.
+4. The `issuerUrl` is `https://your-domain.auth0.com/`.
+5. Set `audience` to your Auth0 API identifier if you have created a custom API; otherwise omit it.
+6. To map roles, use **Auth0 Actions** (Login flow) to inject custom claims into the access token:
+
+```js
+// Auth0 Action — Login / Post Login
+exports.onExecutePostLogin = async (event, api) => {
+  const ns = 'https://ythril.example.com/';
+  api.accessToken.setCustomClaim(ns + 'roles', event.authorization?.roles ?? []);
+  api.accessToken.setCustomClaim(ns + 'spaces', event.user.app_metadata?.ythril_spaces ?? []);
+};
+```
+
+```json
+{
+  "oidc": {
+    "enabled": true,
+    "issuerUrl": "https://your-domain.auth0.com/",
+    "clientId": "YOUR_CLIENT_ID",
+    "audience": "YOUR_API_IDENTIFIER",
+    "scopes": ["openid", "profile", "email"],
+    "claimMapping": {
+      "admin": { "claim": "https://ythril.example.com/roles", "value": "ythril-admin" },
+      "readOnly": { "claim": "https://ythril.example.com/roles", "value": "ythril-readonly" },
+      "spaces": { "claim": "https://ythril.example.com/spaces" }
+    }
+  }
+}
+```
+
+> **Note:** Auth0 requires namespaced custom claims (a URL prefix). Replace `https://ythril.example.com/` with your own namespace.
+
+After saving any IdP configuration, run `POST /api/admin/reload-config` to apply the changes without a restart.
+
+### Security Notes and Limitations
+
+- **No server-side token revocation for OIDC.**  JWTs are validated statelessly (signature + `exp`).  Once issued by the IdP, a token is valid until it expires.  To revoke access, disable or remove the user at the IdP and set short token lifetimes (5–15 minutes recommended).
+- **No token refresh.**  When the access token expires, the next API call returns 401 and the browser redirects to the login page.  If the IdP session is still active, clicking **Sign in with SSO** again logs the user back in seamlessly.  Configure your IdP's access token lifetime to balance UX vs security.  A future release may add silent refresh via `prompt=none`.
+- **`admin` and `readOnly` cannot both match.**  If both claim rules match the same JWT, `admin: true` takes precedence and `readOnly` is ignored.  Design your IdP roles to be mutually exclusive.
+- **Spaces claim controls visibility.**  When a `spaces` claim is present in the JWT, the OIDC session can only see and modify those spaces.  If the claim is missing or not an array, the session has access to all spaces (same as a PAT with no `spaces` allowlist).  Users who cannot see expected spaces should check with their administrator that the IdP is emitting the correct claim values.
+- **Config validation.**  When `oidc.enabled` is `true`, `issuerUrl` and `clientId` are required.  The server validates the OIDC config block at startup and on `reload-config` — a malformed block will prevent the server from starting.
+- **Config reload required.**  Any change to the `oidc` block requires `POST /api/admin/reload-config` or a container restart to take effect.  The OIDC discovery document and JWKS key set are cached in memory and flushed on reload.

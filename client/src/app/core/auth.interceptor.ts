@@ -10,7 +10,10 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
 
   const token = auth.token();
   let out = req;
-  if (token) {
+  // Only attach the bearer to same-origin requests — never leak credentials to
+  // cross-origin endpoints (e.g. the OIDC IdP discovery/token endpoints).
+  const sameOrigin = req.url.startsWith('/') || req.url.startsWith(location.origin);
+  if (token && sameOrigin) {
     out = req.clone({ setHeaders: { Authorization: `Bearer ${token}` } });
   }
 

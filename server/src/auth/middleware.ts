@@ -89,10 +89,8 @@ export async function requireAuth(
     return;
   }
 
-  
   authAttemptsTotal.inc({ result: 'success' });
-  const { hash: _h, ...safeRecord } = record;
-  req.authToken = safeRecord;
+  req.authToken = record;
 
   // Update lastUsed asynchronously for PAT tokens — do not block request
   if (isPat(bearer) && 'id' in record) touchToken(record.id);
@@ -133,10 +131,8 @@ export async function requireSpaceAuth(
     }
   }
 
-  req.authToken = record;
   authAttemptsTotal.inc({ result: 'success' });
-  const { hash: _h, ...safeRecord } = record;
-  req.authToken = safeRecord;
+  req.authToken = record;
   req.resolvedSpaceId = spaceId;
   if (isPat(bearer) && 'id' in record) touchToken(record.id);
   next();

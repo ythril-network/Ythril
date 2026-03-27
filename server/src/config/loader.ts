@@ -43,6 +43,35 @@ function checkPermissions(filePath: string): void {
 
 // ── Config ─────────────────────────────────────────────────────────────────
 
+/** Fail-fast validation for the OIDC block — called on every config load/reload. */
+function validateOidcBlock(cfg: Config): void {
+  const oidc = cfg.oidc;
+  if (!oidc || !oidc.enabled) return; // disabled or absent — nothing to validate
+  if (!oidc.issuerUrl || typeof oidc.issuerUrl !== 'string') {
+    throw new Error('oidc.enabled is true but oidc.issuerUrl is missing or not a string');
+  }
+  if (!oidc.clientId || typeof oidc.clientId !== 'string') {
+    throw new Error('oidc.enabled is true but oidc.clientId is missing or not a string');
+  }
+  try {
+    const parsed = new URL(oidc.issuerUrl);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error('oidc.issuerUrl must use http or https');
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('oidc.')) throw err;
+    throw new Error(`oidc.issuerUrl is not a valid URL: ${oidc.issuerUrl}`);
+  }
+  if (oidc.audience !== undefined && typeof oidc.audience !== 'string') {
+    throw new Error('oidc.audience must be a string when provided');
+  }
+  if (oidc.scopes !== undefined) {
+    if (!Array.isArray(oidc.scopes) || oidc.scopes.some(s => typeof s !== 'string')) {
+      throw new Error('oidc.scopes must be an array of strings when provided');
+    }
+  }
+}
+
 export function configExists(): boolean {
   if (!fs.existsSync(CONFIG_PATH)) return false;
   try {
@@ -57,6 +86,7 @@ export function loadConfig(): Config {
   checkPermissions(CONFIG_PATH);
   const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
   _config = JSON.parse(raw) as Config;
+  validateOidcBlock(_config);
   return _config;
 }
 
@@ -80,6 +110,7 @@ export function reloadConfig(): Config {
     log.error(`reloadConfig: config.json has invalid JSON — keeping current config: ${err}`);
     throw new Error('config.json contains invalid JSON; current configuration unchanged');
   }
+  validateOidcBlock(parsed);
   saveConfig(parsed); // updates _config and fixes permissions
   return parsed;
 }

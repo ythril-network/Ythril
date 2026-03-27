@@ -4,6 +4,43 @@ All notable changes to Ythril are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-03-27
+
+### Added
+
+- **OpenID Connect (OIDC) authentication**: Authorization Code + PKCE flow via `jose` v6. Supports Keycloak, Entra ID, Okta, Auth0 and any OIDC-compliant IdP. Claim-based mapping for admin, readOnly, and spaces. Discovery document caching with 5-min TTL.
+- **OIDC callback route guard**: `/oidc-callback` requires `code`+`state` or `error` query params; otherwise redirects to `/login`.
+- **OIDC config validation**: `validateOidcBlock()` validates issuerUrl and clientId at config load/reload time.
+- **Notify identity verification**: `POST /api/notify` now verifies that the caller's token is authorised for the claimed `instanceId` via `peerInstanceId` on TokenRecord.
+
+### Fixed
+
+- **Bearer token leak to cross-origin** (CRITICAL): Auth interceptor no longer sends bearer tokens to cross-origin requests (e.g. IdP endpoints). Scoped to same-origin only.
+- **SSRF-hardened OIDC discovery**: Discovery document fetch validates URLs against IMDS, loopback, non-HTTP schemes, and embedded credentials. Issuer-match and `jwks_uri` validation per OIDC Discovery §4.3.
+- **Notify instanceId spoofing**: Non-admin tokens without a matching `peerInstanceId` can no longer forge events as arbitrary remote peers.
+- Removed stale `clientSecret` field from OIDC types and documentation.
+- Fixed pre-existing missing `});` in `/ready` handler (app.ts).
+- Cleaned redundant hash-stripping in auth middleware.
+
+### Changed
+
+- TokenRecord now carries optional `peerInstanceId` field, set automatically during invite handshake.
+
+## [0.4.0] — 2026-03-26
+
+### Changed
+
+- License changed from AGPL-3.0 to PolyForm Small Business License 1.0.0.
+
+## [0.3.0] — 2026-03-26
+
+### Added
+
+- **Readiness probe**: `GET /ready` endpoint with MongoDB and vectorSearch dependency checks.
+- **Prometheus metrics**: `GET /metrics` endpoint exposing HTTP request counters, response time histograms, and active connection gauges.
+- **Flexible MongoDB backend**: Support any `$vectorSearch`-capable MongoDB (Atlas, Atlas Local, MongoDB 8.2+).
+- **MCP tools**: `update_memory`, `delete_memory`, `get_stats`.
+
 ## [0.2.0] — 2026-03-26
 
 ### Added

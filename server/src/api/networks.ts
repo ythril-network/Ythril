@@ -345,6 +345,7 @@ networksRouter.post('/join-remote', globalRateLimit, requireAdmin, async (req, r
       name: `peer:${applyData.instanceLabel ?? 'remote'}`,
       expiresAt: null,
       spaces: networkSpaces.length > 0 ? networkSpaces : undefined,
+      peerInstanceId: applyData.instanceId, // link this PAT to the peer that will present it
     });
 
     // â”€â”€ Step B: finalize â€” send Brain A an encrypted token for it to call us â”€â”€

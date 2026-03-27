@@ -176,7 +176,39 @@ describe('Notify channel', () => {
     });
     assert.equal(r.status, 401, `Expected 401, got ${r.status}`);
   });
+  it('non-admin token without peerInstanceId is rejected for remote instanceId (403)', async () => {
+    // Ensure a member exists for the claimed instanceId (earlier tests may have
+    // removed MEMBER_ID via member_departed). Use a unique instanceId.
+    const peerId = `non-admin-peer-${Date.now()}`;
+    const addR = await post(INSTANCES.a, token, `/api/networks/${networkId}/members`, {
+      instanceId: peerId,
+      label: 'Non-Admin Test Peer',
+      url: 'http://non-admin-test-peer.internal:3200',
+      token: 'ythril_non_admin_test_peer_token',
+      direction: 'push',
+    });
+    assert.equal(addR.status, 201, `Add peer failed: ${JSON.stringify(addR.body)}`);
 
+    // Create a non-admin, space-scoped token — it has no peerInstanceId,
+    // so it must not be able to impersonate a remote peer.
+    const createR = await post(INSTANCES.a, token, '/api/tokens', {
+      name: `notify-non-admin-${Date.now()}`,
+      spaces: ['general'],
+    });
+    assert.equal(createR.status, 201, `Create token failed: ${JSON.stringify(createR.body)}`);
+    const nonAdminToken = createR.body.plaintext;
+
+    const r = await post(INSTANCES.a, nonAdminToken, '/api/notify', {
+      networkId,
+      instanceId: peerId,
+      event: 'ping',
+    });
+    assert.equal(r.status, 403, `Expected 403, got ${r.status}: ${JSON.stringify(r.body)}`);
+    assert.ok(
+      r.body.error?.includes('not authorised'),
+      `Error must mention authorisation: ${JSON.stringify(r.body)}`,
+    );
+  });
   // â”€â”€ GET /api/notify â€” event log â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   it('GET /api/notify returns event log with events array', async () => {

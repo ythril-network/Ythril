@@ -80,6 +80,8 @@ export function createApp() {
         },
       });
     }
+  });
+
   // ── Prometheus metrics ───────────────────────────────────────────────────
   // Unauthenticated — same as /health — so Prometheus scrapers work without PATs.
   app.use('/metrics', metricsRouter);

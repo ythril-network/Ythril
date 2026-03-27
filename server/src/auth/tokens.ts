@@ -110,6 +110,7 @@ export async function createToken(opts: {
   spaces?: string[];
   admin?: boolean;
   readOnly?: boolean;
+  peerInstanceId?: string;
 }): Promise<{ record: TokenRecord; plaintext: string }> {
   const plaintext = generateToken();
   const hash = await hashToken(plaintext);
@@ -124,6 +125,7 @@ export async function createToken(opts: {
     spaces: opts.spaces,
     admin: opts.admin ?? false,
     readOnly: opts.readOnly ?? false,
+    peerInstanceId: opts.peerInstanceId,
   };
   const config = getConfig();
   config.tokens.push(record);

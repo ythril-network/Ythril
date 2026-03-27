@@ -9,6 +9,7 @@ export interface TokenRecord {
   spaces?: string[];    // allowlist of space IDs; omit = all spaces
   admin: boolean;       // true = may access admin-gated routes
   readOnly?: boolean;   // true = read-only access; all mutations blocked
+  peerInstanceId?: string; // set on tokens created for network peers — links this PAT to the peer that uses it inbound
 }
 
 export interface SpaceConfig {
@@ -139,9 +140,6 @@ export interface OidcConfig {
   issuerUrl: string;
   /** OAuth2 client ID registered at the IdP. */
   clientId: string;
-  /** OAuth2 client secret — only required for confidential clients.
-   *  Public (PKCE) clients should omit this field. */
-  clientSecret?: string;
   /** Expected `aud` claim value in issued JWTs.
    *  Defaults to `clientId` when omitted. */
   audience?: string;

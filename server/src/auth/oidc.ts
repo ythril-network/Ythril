@@ -17,6 +17,35 @@ import { getConfig } from '../config/loader.js';
 import { log } from '../util/log.js';
 import type { OidcConfig, OidcClaimRule } from '../config/types.js';
 
+// ── OIDC URL validation ───────────────────────────────────────────────────
+// Unlike the full isSsrfSafeUrl check (designed for user-supplied peer URLs),
+// this allows private IPs and loopback because internal IdPs (e.g. Keycloak on
+// a corporate network) are a legitimate and common deployment pattern.  It
+// blocks cloud instance metadata endpoints — the primary SSRF exfiltration
+// target — and basic URL shape issues.
+
+function validateOidcUrl(raw: string, label: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error(`OIDC ${label} is not a valid URL: ${raw}`);
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`OIDC ${label} must use http or https`);
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error(`OIDC ${label} must not contain embedded credentials`);
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (/^169\.254\./.test(host) || host === 'metadata.google.internal') {
+    throw new Error(`OIDC ${label} must not target cloud metadata endpoints`);
+  }
+  if (host === '0.0.0.0') {
+    throw new Error(`OIDC ${label} must not target 0.0.0.0`);
+  }
+}
+
 // ── Lightweight synthetic token record ────────────────────────────────────
 // This mirrors the fields of TokenRecord (minus hash/prefix/bcrypt fields)
 // that the auth middleware reads from req.authToken.
@@ -74,12 +103,26 @@ export async function getDiscoveryDoc(issuerUrl: string): Promise<DiscoveryDoc> 
     return _discoveryDoc;
   }
 
+  validateOidcUrl(issuerUrl, 'issuerUrl');
   const url = issuerUrl.replace(/\/$/, '') + '/.well-known/openid-configuration';
   const res = await fetch(url);
   if (!res.ok) {
     throw new Error(`OIDC discovery failed: ${res.status} ${res.statusText} for ${url}`);
   }
   const doc = await res.json() as DiscoveryDoc;
+
+  // OIDC Discovery §4.3: issuer in the document MUST match the configured URL.
+  const normCfg = issuerUrl.replace(/\/$/, '');
+  const normDoc = doc.issuer.replace(/\/$/, '');
+  if (normDoc !== normCfg) {
+    throw new Error(
+      `OIDC discovery issuer (${doc.issuer}) does not match configured issuerUrl (${issuerUrl})`,
+    );
+  }
+
+  // Validate derived URLs before the server fetches them (defence-in-depth).
+  validateOidcUrl(doc.jwks_uri, 'jwks_uri');
+
   _discoveryDoc = doc;
   _discoveryIssuerUrl = issuerUrl;
   _discoveryFetchedAt = now;
