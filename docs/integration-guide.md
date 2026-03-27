@@ -85,9 +85,49 @@ The Docker Compose stack runs two containers:
 | Container | Role |
 |-----------|------|
 | `ythril` | Brain server — REST API, MCP endpoints, Angular web UI (port 3200) |
-| `ythril-mongo` | MongoDB Atlas Local with `mongot` sidecar for `$vectorSearch` |
+| `ythril-mongo` | MongoDB Atlas Local with `mongot` sidecar for `$vectorSearch` (default) |
 
 On first start, MongoDB needs to elect a replica set primary (up to ~3 minutes). The server prints the startup banner when ready.
+
+### MongoDB Flexibility
+
+Ythril requires a MongoDB instance that supports the `$vectorSearch` aggregation stage for semantic recall.  Any of the following work:
+
+| MongoDB flavour | `$vectorSearch` | Notes |
+|---|---|---|
+| `mongodb/mongodb-atlas-local` (default) | ✓ | Bundled in `docker-compose.yml`; zero-config for new deployments |
+| Managed MongoDB Atlas (M10+) | ✓ | Set `MONGO_URI` to your Atlas connection string |
+| MongoDB 8.2+ (community / enterprise) | ✓ | Native support — no `mongot` sidecar required |
+| MongoDB < 8.2 (vanilla) | ✗ | `recall` / `recall_global` tools disabled; all other features work |
+
+**Using an existing MongoDB 8.2+ cluster** — remove the `ythril-mongo` service from `docker-compose.yml` and point `MONGO_URI` at your cluster:
+
+```yaml
+environment:
+  MONGO_URI: mongodb://mongodb-0.example.com:27017/?directConnection=true
+```
+
+**Using managed Atlas** — provide the `mongodb+srv://` connection string:
+
+```yaml
+environment:
+  MONGO_URI: mongodb+srv://user:pass@cluster0.example.mongodb.net/?retryWrites=true
+```
+
+On startup, Ythril probes for `$vectorSearch` support and logs the result:
+
+```
+  ✓ $vectorSearch available (MongoDB 8.2.1)
+```
+
+or, if unavailable:
+
+```
+  ✗ $vectorSearch not available (MongoDB 7.0.0) — semantic search (recall) will be disabled
+    Upgrade to MongoDB 8.2+, use Atlas Local, or connect to managed Atlas
+```
+
+If `$vectorSearch` is unavailable, all non-search operations (storing memories, entities, edges, files, sync) continue to work normally.  Only the `recall` and `recall_global` MCP tools return an error until a supported MongoDB is connected.
 
 ### Startup Output
 
@@ -117,7 +157,7 @@ DEBUG=1 docker compose up
 |----------|---------|-------------|
 | `CONFIG_PATH` | `/config/config.json` | Path to config file inside container |
 | `DATA_ROOT` | `/data` | Root directory for file storage |
-| `MONGO_URI` | `mongodb://ythril-mongo:27017/?directConnection=true` | MongoDB connection string |
+| `MONGO_URI` | `mongodb://ythril-mongo:27017/?directConnection=true` | MongoDB connection string — any `$vectorSearch`-capable MongoDB works |
 | `NODE_ENV` | `production` | Node environment |
 | `PORT` | `3200` | HTTP listen port |
 | `DEBUG` | (unset) | Set to `1` for verbose logging |

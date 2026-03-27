@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { col } from '../db/mongo.js';
+import { col, isVectorSearchAvailable } from '../db/mongo.js';
 import { nextSeq } from '../util/seq.js';
 import { embed } from './embedding.js';
 import { getConfig, getEmbeddingConfig } from '../config/loader.js';
@@ -50,12 +50,18 @@ export interface RecallResult {
   embeddingModel: string;
 }
 
-/** Semantic recall using $vectorSearch (Atlas Local) */
+/** Semantic recall using $vectorSearch (Atlas Local / Atlas / MongoDB 8.2+) */
 export async function recall(
   spaceId: string,
   query: string,
   topK = 10,
 ): Promise<RecallResult[]> {
+  if (!isVectorSearchAvailable()) {
+    throw new Error(
+      'Semantic recall is unavailable: $vectorSearch is not supported by the connected MongoDB. ' +
+      'Upgrade to MongoDB 8.2+, use Atlas Local, or connect to managed Atlas.',
+    );
+  }
   if (needsReindex(spaceId)) {
     const embCfg = getEmbeddingConfig();
     throw new Error(
