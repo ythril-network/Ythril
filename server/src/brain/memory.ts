@@ -118,6 +118,35 @@ export async function recallGlobal(
   return deduped.slice(0, topK);
 }
 
+/** Update an existing memory's fact, tags, or entityIds. Re-embeds if fact changes. */
+export async function updateMemory(
+  spaceId: string,
+  memoryId: string,
+  updates: { fact?: string; tags?: string[]; entityIds?: string[] },
+): Promise<MemoryDoc | null> {
+  const existing = await col<MemoryDoc>(`${spaceId}_memories`).findOne({ _id: memoryId, spaceId } as never) as MemoryDoc | null;
+  if (!existing) return null;
+
+  const seq = await nextSeq(spaceId);
+  const now = new Date().toISOString();
+  const $set: Record<string, unknown> = { updatedAt: now, seq };
+
+  if (updates.fact !== undefined) {
+    const embResult = await embed(updates.fact);
+    $set['fact'] = updates.fact;
+    $set['embedding'] = embResult.vector;
+    $set['embeddingModel'] = embResult.model;
+  }
+  if (updates.tags !== undefined) $set['tags'] = updates.tags;
+  if (updates.entityIds !== undefined) $set['entityIds'] = updates.entityIds;
+
+  await col<MemoryDoc>(`${spaceId}_memories`).updateOne(
+    { _id: memoryId } as never,
+    { $set } as never,
+  );
+  return { ...existing, ...($set as Partial<MemoryDoc>) } as MemoryDoc;
+}
+
 /** Delete a memory and record a tombstone */
 export async function deleteMemory(
   spaceId: string,
