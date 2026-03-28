@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Space deletion purge**: `DELETE /api/spaces/:id` now drops all `{spaceId}_*` MongoDB collections, vector search indexes, `/data/files/{spaceId}/`, and `/data/.chunks/{spaceId}/`. Cleanup errors abort deletion (space stays in config for retry).
 - **Space deletion governance**: Networked spaces open a `space_deletion` vote round on every containing network instead of deleting immediately.
 - Tests: `space-deletion.test.js` (integration), `theme.test.js`, `config-loader.test.js`, `config-permissions.test.js`, `oidc-silent-refresh.test.js`, `theme-postmessage.test.js` (standalone).
+- **SSO auto-redirect**: Login page auto-redirects to OIDC provider when SSO is enabled. `?local` query param bypasses for local login. OIDC callback links to `/login?local` on error.
+- **Use case examples**: `docs/usecase-examples.md` — 26 practical deployment scenarios covering all network types, proxy spaces, multi-space/multi-network topologies, and MCP tool workflows.
+- **Features TODO**: Public knowledge spaces — open pub/sub networks for frictionless distribution.
 
 ### Fixed
 

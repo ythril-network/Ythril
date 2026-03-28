@@ -137,7 +137,12 @@ describe('GET /metrics — Prometheus endpoint', () => {
 
   it('includes ythril_sync_cycles_total counter', async () => {
     const { text } = await getMetrics();
-    assert.ok(hasMetric(text, 'ythril_sync_cycles_total'), 'ythril_sync_cycles_total not found');
+    // The counter may have no data points if no sync cycle has run yet, but
+    // it must at least be registered (HELP/TYPE lines present).
+    const registered = text.split('\n').some(l =>
+      l.startsWith('ythril_sync_cycles_total') || l.includes('ythril_sync_cycles_total'),
+    );
+    assert.ok(registered, 'ythril_sync_cycles_total not found (not even HELP/TYPE)');
   });
 
   it('ythril_auth_attempts_total increments after a successful auth request', async () => {
@@ -180,8 +185,11 @@ describe('GET /metrics — Prometheus endpoint', () => {
   it('HTTP counter increments after making a request', async () => {
     const before = await getMetrics();
 
-    // Make a request to /health which is tracked
-    await fetch(`${INSTANCES.a}/health`);
+    // Use an API route that is tracked by the HTTP middleware.
+    // /health and /metrics are excluded from the counter.
+    await fetch(`${INSTANCES.a}/api/about`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
 
     const after = await getMetrics();
 

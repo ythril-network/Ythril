@@ -26,7 +26,7 @@ import {
   createLocalJWKSet,
   jwtVerify,
 } from 'jose';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
@@ -232,10 +232,10 @@ describe('OIDC server module (compiled)', () => {
     process.env['CONFIG_PATH'] = TMP_CONFIG;
     writeFullConfig(makeOidcConfig());
 
-    loaderMod = await import(`${DIST_CONFIG}/loader.js`);
+    loaderMod = await import(pathToFileURL(path.join(DIST_CONFIG, 'loader.js')).href);
     loaderMod.loadConfig();
 
-    oidcMod = await import(`${DIST_AUTH}/oidc.js`);
+    oidcMod = await import(pathToFileURL(path.join(DIST_AUTH, 'oidc.js')).href);
 
     if (!privateKey) {
       const keys   = await generateKeyPair('RS256');

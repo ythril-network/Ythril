@@ -1,6 +1,6 @@
 {
   "name": "@ythril/client",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "license": "PolyForm-Small-Business-1.0.0",
   "private": true,
   "scripts": {

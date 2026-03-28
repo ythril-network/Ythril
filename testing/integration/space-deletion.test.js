@@ -50,20 +50,20 @@ describe('Space deletion — full cleanup', () => {
     assert.equal(memR.status, 201, `Memory write: ${JSON.stringify(memR.body)}`);
 
     // 3. Write an entity
-    const entR = await post(INSTANCES.a, token, `/api/brain/${spaceId}/entities`, {
+    const entR = await post(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/entities`, {
       name: 'DeletionTestEntity',
       type: 'concept',
     });
     assert.equal(entR.status, 201, `Entity write: ${JSON.stringify(entR.body)}`);
 
     // 4. Write an edge
-    const entR2 = await post(INSTANCES.a, token, `/api/brain/${spaceId}/entities`, {
+    const entR2 = await post(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/entities`, {
       name: 'DeletionTestEntity2',
       type: 'concept',
     });
     assert.equal(entR2.status, 201, `Entity2 write: ${JSON.stringify(entR2.body)}`);
 
-    const edgeR = await post(INSTANCES.a, token, `/api/brain/${spaceId}/edges`, {
+    const edgeR = await post(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/edges`, {
       from: 'DeletionTestEntity',
       to: 'DeletionTestEntity2',
       label: 'relates_to',
@@ -71,7 +71,7 @@ describe('Space deletion — full cleanup', () => {
     assert.equal(edgeR.status, 201, `Edge write: ${JSON.stringify(edgeR.body)}`);
 
     // 5. Verify data exists before deletion
-    const preList = await get(INSTANCES.a, token, `/api/brain/${spaceId}/memories`);
+    const preList = await get(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/memories`);
     assert.equal(preList.status, 200);
     assert.ok(preList.body.memories?.length > 0, 'Should have at least one memory before deletion');
 
@@ -88,10 +88,10 @@ describe('Space deletion — full cleanup', () => {
     );
 
     // 8. Brain endpoints should return 404 for the deleted space
-    const memCheck = await get(INSTANCES.a, token, `/api/brain/${spaceId}/memories`);
+    const memCheck = await get(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/memories`);
     assert.equal(memCheck.status, 404, `Brain memories for deleted space should 404, got ${memCheck.status}`);
 
-    const entCheck = await get(INSTANCES.a, token, `/api/brain/${spaceId}/entities`);
+    const entCheck = await get(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/entities`);
     assert.equal(entCheck.status, 404, `Brain entities for deleted space should 404, got ${entCheck.status}`);
   });
 
@@ -107,15 +107,15 @@ describe('Space deletion — full cleanup', () => {
 
     // 2. Upload a file
     const fileContent = 'This file should be deleted with the space.';
-    const uploadR = await reqJson(INSTANCES.a, token, `/api/files/${spaceId}/deletion-test.txt`, {
-      method: 'PUT',
+    const uploadR = await reqJson(INSTANCES.a, token, `/api/files/${spaceId}?path=deletion-test.txt`, {
+      method: 'POST',
       body: fileContent,
       headers: { 'Content-Type': 'text/plain' },
     });
     assert.ok(uploadR.status === 200 || uploadR.status === 201, `Upload: got ${uploadR.status}`);
 
     // 3. Verify file exists
-    const preRead = await reqJson(INSTANCES.a, token, `/api/files/${spaceId}/deletion-test.txt`);
+    const preRead = await reqJson(INSTANCES.a, token, `/api/files/${spaceId}?path=deletion-test.txt`);
     assert.equal(preRead.status, 200, 'File should exist before deletion');
 
     // 4. Delete the space
@@ -123,7 +123,7 @@ describe('Space deletion — full cleanup', () => {
     assert.equal(delR.status, 204);
 
     // 5. File endpoint should return 404
-    const postRead = await reqJson(INSTANCES.a, token, `/api/files/${spaceId}/deletion-test.txt`);
+    const postRead = await reqJson(INSTANCES.a, token, `/api/files/${spaceId}?path=deletion-test.txt`);
     assert.equal(postRead.status, 404, `File for deleted space should 404, got ${postRead.status}`);
   });
 
@@ -132,7 +132,7 @@ describe('Space deletion — full cleanup', () => {
 
     // Create and populate
     await post(INSTANCES.a, token, '/api/spaces', { id: spaceId, label: 'Recreate Test' });
-    await post(INSTANCES.a, token, `/api/brain/${spaceId}/memories`, {
+    await post(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/memories`, {
       fact: 'Orphan fact that must not survive',
       tags: ['orphan-test'],
     });
@@ -146,7 +146,7 @@ describe('Space deletion — full cleanup', () => {
     assert.equal(createR.status, 201, `Re-create: ${JSON.stringify(createR.body)}`);
 
     // Verify no orphaned data
-    const memR = await get(INSTANCES.a, token, `/api/brain/${spaceId}/memories`);
+    const memR = await get(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/memories`);
     assert.equal(memR.status, 200);
     assert.equal(
       memR.body.memories?.length ?? 0,
@@ -154,7 +154,7 @@ describe('Space deletion — full cleanup', () => {
       `Re-created space should have 0 memories, found ${memR.body.memories?.length}`,
     );
 
-    const entR = await get(INSTANCES.a, token, `/api/brain/${spaceId}/entities`);
+    const entR = await get(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/entities`);
     assert.equal(entR.status, 200);
     assert.equal(
       entR.body.entities?.length ?? 0,
@@ -191,7 +191,7 @@ describe('Space deletion — full cleanup', () => {
       spaces: [spaceId],
     });
     assert.equal(netR.status, 201, `Network create: ${JSON.stringify(netR.body)}`);
-    const networkId = netR.body.network?.id;
+    const networkId = netR.body.id;
 
     // Attempt to delete the networked space — should return 202 (vote round opened)
     const delR = await del(INSTANCES.a, token, `/api/spaces/${spaceId}`);
