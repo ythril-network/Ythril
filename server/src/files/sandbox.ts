@@ -7,8 +7,10 @@ import { getDataRoot } from '../config/loader.js';
  * Security hardening:
  * 1. URL-decode to prevent %2F / %00 traversal
  * 2. Unicode NFC normalization to prevent homoglyph traversal
- * 3. path.resolve against the space data root
- * 4. Strict prefix check — must remain under the space root
+ * 3. Null-byte rejection
+ * 4. Strip leading slashes (browser filenames often start with /)
+ * 5. path.resolve against the space data root
+ * 6. Strict prefix check — must remain under the space root
  *
  * @returns The absolute safe path
  * @throws RangeError if the path attempts to escape the space root
@@ -28,10 +30,16 @@ export function resolveSafePath(spaceId: string, userPath: string): string {
     throw new RangeError('Path contains null bytes');
   }
 
-  // 4. Resolve to absolute
-  const resolved = path.resolve(spaceRoot, normalized);
+  // 4. Strip leading slashes so browser-supplied filenames like
+  //    '/Screenshot 2024.png' are treated as relative.  An absolute path
+  //    passed directly to path.resolve() would silently discard spaceRoot,
+  //    causing the prefix check below to fire as a false-positive traversal.
+  const relative = normalized.replace(/^\/+/, '');
 
-  // 5. Prefix check — must start with spaceRoot + separator
+  // 5. Resolve to absolute
+  const resolved = path.resolve(spaceRoot, relative);
+
+  // 6. Prefix check — must start with spaceRoot + separator
   const boundary = spaceRoot.endsWith(path.sep) ? spaceRoot : spaceRoot + path.sep;
   if (!resolved.startsWith(boundary) && resolved !== spaceRoot) {
     throw new RangeError(`Path traversal attempt: '${userPath}'`);
