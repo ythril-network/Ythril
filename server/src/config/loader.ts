@@ -30,6 +30,23 @@ function checkPermissions(filePath: string): void {
         try { fs.chmodSync(filePath, 0o600); } catch { /* best-effort */ }
         return;
       }
+      // If this process owns the file (common in Kubernetes hostPath mounts where
+      // an init container writes the file as the same UID), auto-fix permissions
+      // and continue with a warning rather than exiting.
+      // process.getuid is not available on Windows, but we return early above for
+      // win32, so this guard handles any other exotic platform that lacks UID support.
+      // Use -1 as a sentinel: stat.uid is always >= 0, so the condition never matches.
+      const processUid = typeof process.getuid === 'function' ? process.getuid() : -1;
+      if (processUid !== -1 && stat.uid === processUid) {
+        try {
+          fs.chmodSync(filePath, 0o600);
+          log.warn(
+            `SECURITY: ${filePath} had loose permissions (mode ${mode.toString(8)}); ` +
+            `auto-fixed to 0600.`,
+          );
+          return;
+        } catch { /* fall through to hard exit if chmod fails */ }
+      }
       log.error(
         `SECURITY: ${filePath} is world/group-readable (mode ${mode.toString(8)}). ` +
         `Fix with: chmod 600 ${filePath}`,
@@ -85,7 +102,13 @@ export function configExists(): boolean {
 export function loadConfig(): Config {
   checkPermissions(CONFIG_PATH);
   const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
-  _config = JSON.parse(raw) as Config;
+  const parsed = JSON.parse(raw) as Config;
+  // Normalise arrays that may be absent in partial config files written before
+  // first-run setup completes (e.g. a config pre-seeded with only storage quotas).
+  parsed.spaces ??= [];
+  parsed.tokens ??= [];
+  parsed.networks ??= [];
+  _config = parsed;
   validateOidcBlock(_config);
   return _config;
 }
@@ -110,6 +133,10 @@ export function reloadConfig(): Config {
     log.error(`reloadConfig: config.json has invalid JSON — keeping current config: ${err}`);
     throw new Error('config.json contains invalid JSON; current configuration unchanged');
   }
+  // Normalise arrays that may be absent in partial config files.
+  parsed.spaces ??= [];
+  parsed.tokens ??= [];
+  parsed.networks ??= [];
   validateOidcBlock(parsed);
   saveConfig(parsed); // updates _config and fixes permissions
   return parsed;
