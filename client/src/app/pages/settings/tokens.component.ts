@@ -8,23 +8,65 @@ import { ApiService, TokenRecord } from '../../core/api.service';
   standalone: true,
   imports: [CommonModule, FormsModule],
   styles: [`
-    .token-value {
+    .new-token-banner {
+      background: rgba(63, 185, 80, 0.08);
+      border: 2px solid rgba(63, 185, 80, 0.5);
+      border-radius: var(--radius-md);
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .new-token-banner-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--success);
+      margin-bottom: 4px;
+    }
+    .new-token-banner-warn {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-bottom: 12px;
+    }
+    .token-copy-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
       background: var(--bg-primary);
       border: 1px solid var(--border);
       border-radius: var(--radius-sm);
       padding: 10px 14px;
+    }
+    .token-copy-value {
+      flex: 1;
       font-family: var(--font-mono);
       font-size: 13px;
       word-break: break-all;
-      margin: 8px 0 12px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
+      color: var(--text-primary);
     }
-    .token-value span { flex: 1; }
+    .btn-copy-prominent {
+      background: var(--success);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius-sm);
+      padding: 8px 18px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: opacity var(--transition);
+    }
+    .btn-copy-prominent:hover { opacity: 0.88; }
+    .scope-hint {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 3px;
+    }
     .badge-admin {
-      background: #4c4;
-      color: #000;
+      background: rgba(63, 185, 80, 0.15);
+      color: var(--success);
+      border: 1px solid rgba(63, 185, 80, 0.3);
       border-radius: 4px;
       padding: 1px 7px;
       font-size: 0.73rem;
@@ -32,89 +74,143 @@ import { ApiService, TokenRecord } from '../../core/api.service';
       letter-spacing: 0.02em;
     }
     .badge-readonly {
-      background: #fc6;
-      color: #000;
+      background: rgba(210, 153, 34, 0.15);
+      color: var(--warning);
+      border: 1px solid rgba(210, 153, 34, 0.3);
       border-radius: 4px;
       padding: 1px 7px;
       font-size: 0.73rem;
       font-weight: 600;
       letter-spacing: 0.02em;
     }
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 160px;
+      gap: 12px;
+      align-items: start;
+    }
+    .form-grid-bottom {
+      display: flex;
+      gap: 12px;
+      align-items: flex-end;
+      flex-wrap: wrap;
+      margin-top: 4px;
+    }
+    .checkbox-field {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding-bottom: 6px;
+    }
+    .checkbox-field label {
+      margin: 0;
+      font-size: 13px;
+      color: var(--text-secondary);
+      text-transform: none;
+      letter-spacing: 0;
+      font-weight: 400;
+    }
+    .token-status-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 5px;
+      flex-shrink: 0;
+    }
+    .dot-active { background: var(--success); }
+    .dot-expired { background: var(--error); }
+    .dot-never-used { background: var(--text-muted); }
   `],
   template: `
+    <!-- New token success banner -->
+    @if (newToken()) {
+      <div class="new-token-banner" role="alert">
+        <div class="new-token-banner-title">✓ Token created successfully</div>
+        <div class="new-token-banner-warn">⚠️ Copy this token now — it will <strong>not</strong> be shown again after you dismiss this.</div>
+        <div class="token-copy-row">
+          <span class="token-copy-value" aria-label="New token value">{{ newToken() }}</span>
+          <button class="btn-copy-prominent" aria-label="Copy new token" (click)="copyNew()">
+            @if (copied()) { ✓ Copied } @else { 📋 Copy token }
+          </button>
+        </div>
+        <button class="btn-secondary btn btn-sm" style="margin-top:12px;" (click)="clearNew()">I've copied it — dismiss</button>
+      </div>
+    }
+
+    <!-- Rotated token banner -->
+    @if (regenToken()) {
+      <div class="new-token-banner" role="alert">
+        <div class="new-token-banner-title">↺ Token rotated — new secret</div>
+        <div class="new-token-banner-warn">⚠️ The old secret is now invalid. Copy this one before dismissing.</div>
+        <div class="token-copy-row">
+          <span class="token-copy-value" aria-label="Rotated token value">{{ regenToken() }}</span>
+          <button class="btn-copy-prominent" aria-label="Copy rotated token" (click)="copyRegen()">
+            @if (copiedRegen()) { ✓ Copied } @else { 📋 Copy token }
+          </button>
+        </div>
+        <button class="btn-secondary btn btn-sm" style="margin-top:12px;" (click)="clearRegen()">I've copied it — dismiss</button>
+      </div>
+    }
+
+    <!-- Create token form -->
     <div class="card" style="margin-bottom: 24px;">
       <div class="card-header">
         <div>
           <div class="card-title">Create token</div>
-          <div class="card-subtitle">Tokens grant API and MCP access.</div>
+          <div class="card-subtitle">API tokens grant programmatic access to this brain. Keep them secret.</div>
         </div>
       </div>
 
-      @if (newToken()) {
-        <div class="alert alert-success">
-          Token created. Copy it now — it won't be shown again.
-        </div>
-        <div class="token-value">
-          <span>{{ newToken() }}</span>
-          <button class="btn-ghost btn btn-sm" aria-label="Copy new token" (click)="copyNew()">
-            {{ copied() ? '✓ Copied' : 'Copy' }}
-          </button>
-        </div>
-        <button class="btn-secondary btn btn-sm" (click)="clearNew()">Done</button>
-      } @else {
-        <form (ngSubmit)="createToken()" #f="ngForm" style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
-          <div class="field" style="flex:1; min-width:180px; margin-bottom:0;">
+      @if (createError()) {
+        <div class="alert alert-error" style="margin-bottom:16px;">{{ createError() }}</div>
+      }
+
+      <form (ngSubmit)="createToken()" #f="ngForm">
+        <div class="form-grid">
+          <div class="field" style="margin-bottom:0;">
             <label>Label</label>
             <input type="text" [(ngModel)]="newName" name="name" placeholder="My CLI token" maxlength="200" required />
           </div>
-          <div class="field" style="width:160px; margin-bottom:0;">
+          <div class="field" style="margin-bottom:0;">
             <label>Expires (optional)</label>
             <input type="date" [(ngModel)]="newExpiry" name="expiry" />
           </div>
+        </div>
+
+        <div class="field" style="margin-top:12px; margin-bottom:0;">
+          <label>Spaces (optional)</label>
+          <input type="text" [(ngModel)]="newSpaces" name="spaces" placeholder="Comma-separated space IDs, e.g. general, project-x — leave blank to allow all spaces" />
+          <div class="scope-hint">Leave blank to grant access to all spaces.</div>
+        </div>
+
+        <div class="form-grid-bottom" style="margin-top:12px;">
           @if (selfToken()?.admin) {
-            <div class="field" style="width:auto; margin-bottom:0; display:flex; align-items:center; gap:6px; padding-bottom:2px;">
+            <div class="checkbox-field">
               <input type="checkbox" [(ngModel)]="newAdmin" name="admin" id="newAdmin" style="width:16px;height:16px;margin:0;" />
-              <label for="newAdmin" style="margin:0; font-size:0.9rem; color:var(--text-muted);">Admin</label>
+              <label for="newAdmin">Admin</label>
+              <span class="scope-hint" style="margin-top:0; margin-left:2px;">— may manage tokens, spaces, networks</span>
             </div>
           }
-          <div class="field" style="width:auto; margin-bottom:0; display:flex; align-items:center; gap:6px; padding-bottom:2px;">
+          <div class="checkbox-field">
             <input type="checkbox" [(ngModel)]="newReadOnly" name="readOnly" id="newReadOnly" style="width:16px;height:16px;margin:0;" />
-            <label for="newReadOnly" style="margin:0; font-size:0.9rem; color:var(--text-muted);">Read-only</label>
+            <label for="newReadOnly">Read-only</label>
+            <span class="scope-hint" style="margin-top:0; margin-left:2px;">— blocks all write operations</span>
           </div>
-          <div class="field" style="flex:1; min-width:160px; margin-bottom:0;">
-            <label>Spaces (optional, comma-separated)</label>
-            <input type="text" [(ngModel)]="newSpaces" name="spaces" placeholder="All spaces" />
-          </div>
-          <button class="btn-primary btn" type="submit" [disabled]="creating() || !newName.trim()">
+          <button class="btn-primary btn" type="submit" style="margin-left:auto;" [disabled]="creating() || !newName.trim()">
             @if (creating()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
-            Create
+            Create token
           </button>
-        </form>
-      }
-
-      @if (createError()) {
-        <div class="alert alert-error" style="margin-top:12px;">{{ createError() }}</div>
-      }
+        </div>
+      </form>
     </div>
 
+    <!-- Token list -->
     <div class="card">
       <div class="card-header">
         <div class="card-title">Active tokens</div>
         <button class="btn-secondary btn btn-sm" (click)="load()">Refresh</button>
       </div>
-
-      @if (regenToken()) {
-        <div class="alert alert-success" style="margin:12px 0;">
-          Token rotated. Copy the new secret — it won't be shown again.
-        </div>
-        <div class="token-value">
-          <span>{{ regenToken() }}</span>
-          <button class="btn-ghost btn btn-sm" aria-label="Copy rotated token" (click)="copyRegen()">
-            {{ copiedRegen() ? '✓ Copied' : 'Copy' }}
-          </button>
-        </div>
-        <button class="btn-secondary btn btn-sm" style="margin-bottom:12px;" (click)="clearRegen()">Done</button>
-      }
 
       @if (loading()) {
         <div class="loading-overlay"><span class="spinner"></span></div>
@@ -130,25 +226,32 @@ import { ApiService, TokenRecord } from '../../core/api.service';
               @for (t of tokens(); track t.id) {
                 <tr>
                   <td style="font-weight:500;">
+                    <span class="token-status-dot" [class.dot-active]="!isExpired(t)" [class.dot-expired]="isExpired(t)"></span>
                     {{ t.name }}
                     @if (t.admin) { <span class="badge-admin" style="margin-left:6px;">admin</span> }
                     @if (t.readOnly) { <span class="badge-readonly" style="margin-left:6px;">read-only</span> }
-                    @if (t.id === selfToken()?.id) { <span style="margin-left:6px;font-size:0.75rem;color:var(--text-muted);">(you)</span> }
+                    @if (t.id === selfToken()?.id) { <span style="margin-left:6px;font-size:0.75rem;color:var(--text-muted);">(current session)</span> }
                   </td>
                   <td style="color:var(--text-muted)">{{ t.createdAt | date:'MMM d, y' }}</td>
-                  <td style="color:var(--text-muted)">{{ t.lastUsed ? (t.lastUsed | date:'MMM d, y') : '—' }}</td>
+                  <td style="color:var(--text-muted)">
+                    @if (t.lastUsed) {
+                      {{ t.lastUsed | date:'MMM d, y' }}
+                    } @else {
+                      <span style="font-style:italic;">Never used</span>
+                    }
+                  </td>
                   <td>
                     @if (t.expiresAt) {
                       <span class="badge" [class.badge-red]="isExpired(t)" [class.badge-gray]="!isExpired(t)">
-                        {{ t.expiresAt | date:'MMM d, y' }}
+                        {{ isExpired(t) ? 'Expired' : '' }} {{ t.expiresAt | date:'MMM d, y' }}
                       </span>
                     } @else {
-                      <span style="color:var(--text-muted)">Never</span>
+                      <span class="badge badge-green">No expiry</span>
                     }
                   </td>
                   <td>
                     @if (!t.spaces || t.spaces.length === 0) {
-                      <span class="badge badge-green">All</span>
+                      <span class="badge badge-green">All spaces</span>
                     } @else {
                       <span class="badge badge-gray">{{ t.spaces.join(', ') }}</span>
                     }
@@ -161,7 +264,7 @@ import { ApiService, TokenRecord } from '../../core/api.service';
               } @empty {
                 <tr><td colspan="6">
                   <div class="empty-state" style="padding:24px;">
-                    <h3>No tokens</h3>
+                    <h3>No tokens yet</h3>
                   </div>
                 </td></tr>
               }

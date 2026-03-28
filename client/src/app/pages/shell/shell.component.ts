@@ -184,6 +184,12 @@ import { ApiService } from '../../core/api.service';
         <a class="nav-link" routerLink="/settings/networks" routerLinkActive="active">
           <span class="nav-icon">🔗</span>Networks
         </a>
+        <a class="nav-link" routerLink="/settings/mfa" routerLinkActive="active">
+          <span class="nav-icon">🔐</span>MFA
+        </a>
+        <a class="nav-link" routerLink="/settings/about" routerLinkActive="active">
+          <span class="nav-icon">ℹ️</span>About
+        </a>
       </nav>
 
       <!-- Page content -->

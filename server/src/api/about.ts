@@ -53,14 +53,16 @@ aboutRouter.use(globalRateLimit, requireAuth);
 aboutRouter.get('/', async (_req, res) => {
   const cfg = loadConfig();
   const [mongoVer, diskInfo] = await Promise.all([mongoVersion(), getDiskInfo()]);
-  res.json({
+  const response: Record<string, unknown> = {
     instanceId: cfg.instanceId,
     instanceLabel: cfg.instanceLabel,
     version,
     uptime: formatUptime(process.uptime()),
     mongoVersion: mongoVer,
     diskInfo,
-  });
+  };
+  if (cfg.publicUrl) response.publicUrl = cfg.publicUrl;
+  res.json(response);
 });
 
 aboutRouter.get('/logs', (_req, res) => {

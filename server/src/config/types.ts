@@ -153,6 +153,7 @@ export interface OidcConfig {
 export interface Config {
   instanceId: string;
   instanceLabel: string;
+  publicUrl?: string;         // optional canonical public URL for this brain instance
   tokens: TokenRecord[];
   spaces: SpaceConfig[];
   networks: NetworkConfig[];
@@ -165,6 +166,11 @@ export interface Config {
   mongo?: { uri?: string };
   /** Optional OpenID Connect configuration for SSO login. */
   oidc?: OidcConfig;
+  /** Optional external theming configuration. */
+  theme?: {
+    /** URL to an external CSS stylesheet that overrides Ythril's default CSS custom properties. */
+    cssUrl?: string;
+  };
 }
 
 export interface SecretsFile {

@@ -2,7 +2,6 @@ import { Component, inject, signal, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService, InviteBundle, Network, SyncHistoryRecord, VoteRound } from '../../core/api.service';
-
 @Component({
   selector: 'app-networks',
   standalone: true,
@@ -91,7 +90,7 @@ import { ApiService, InviteBundle, Network, SyncHistoryRecord, VoteRound } from 
       <div class="card-header">
         <div>
           <div class="card-title">Create network</div>
-          <div class="card-subtitle">Networks sync brain data and files with peers.</div>
+          <div class="card-subtitle">A network syncs selected spaces between brain instances.</div>
         </div>
       </div>
 
@@ -137,7 +136,7 @@ import { ApiService, InviteBundle, Network, SyncHistoryRecord, VoteRound } from 
         <div>
           <div class="card-title">Join an existing network</div>
           <div class="card-subtitle">
-            Paste the invite bundle from the brain you want to join, then enter this brain's publicly reachable URL.
+            Paste the invite bundle from another brain to sync spaces with it.
           </div>
         </div>
       </div>
@@ -158,12 +157,19 @@ import { ApiService, InviteBundle, Network, SyncHistoryRecord, VoteRound } from 
       </div>
       <div class="field">
         <label>This brain's URL</label>
-        <input
-          type="url"
-          [(ngModel)]="joinMyUrl"
-          name="joinMyUrl"
-          placeholder="https://brain-b.example.com"
-        />
+        <div style="display:flex; gap:8px; align-items:center;">
+          <input
+            type="url"
+            [(ngModel)]="joinMyUrl"
+            name="joinMyUrl"
+            placeholder="https://brain-b.example.com"
+            style="flex:1;"
+            [attr.aria-description]="'URL the peer brain will use to reach this brain for sync. Auto-filled from current origin.'"
+          />
+          @if (joinMyUrlAutoFilled()) {
+            <span class="badge badge-gray" style="white-space:nowrap; font-size:11px;">auto-filled</span>
+          }
+        </div>
         <div class="field-hint">The URL the other brain will use to reach this brain for sync.</div>
       </div>
       <button
@@ -347,6 +353,7 @@ export class NetworksComponent implements OnInit {
   copiedInvite = signal('');
   joinBundle = '';
   joinMyUrl = '';
+  joinMyUrlAutoFilled = signal(false);
   joining = signal(false);
   joinError = signal('');
   joinSuccess = signal('');
@@ -362,7 +369,30 @@ export class NetworksComponent implements OnInit {
   bundleJson(bundle: InviteBundle): string { return JSON.stringify(bundle, null, 2); }
   syncResult(id: string): { ok: boolean } | undefined { return this.syncResults[id]; }
 
-  ngOnInit(): void { this.load(); }
+  ngOnInit(): void {
+    this.load();
+    // Auto-fill this brain's URL: prefer the server-configured publicUrl, fall
+    // back to the current browser origin (works for most single-brain deployments).
+    this.api.getAbout().subscribe({
+      next: (info) => {
+        // Prefer server-configured publicUrl; fall back to current browser origin.
+        // window.location.origin returns the string 'null' in sandboxed/restricted contexts.
+        const url = info.publicUrl || window.location.origin;
+        if (url && url !== 'null') {
+          this.joinMyUrl = url;
+          this.joinMyUrlAutoFilled.set(true);
+        }
+      },
+      error: () => {
+        // window.location.origin can be the string 'null' in sandboxed/file:// contexts
+        const origin = window.location.origin;
+        if (origin && origin !== 'null') {
+          this.joinMyUrl = origin;
+          this.joinMyUrlAutoFilled.set(true);
+        }
+      },
+    });
+  }
 
   load(): void {
     this.loading.set(true);
@@ -476,6 +506,7 @@ export class NetworksComponent implements OnInit {
         this.joinSuccess.set(`Joined network "${result.networkLabel}" successfully.`);
         this.joinBundle = '';
         this.joinMyUrl  = '';
+        this.joinMyUrlAutoFilled.set(false);
         this.load();
       },
       error: (err) => {

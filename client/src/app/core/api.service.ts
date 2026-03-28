@@ -175,6 +175,7 @@ export interface AboutInfo {
   uptime: string;
   mongoVersion: string;
   diskInfo: { total: number; used: number; available: number };
+  publicUrl?: string;
 }
 
 // ── API service ───────────────────────────────────────────────────────────────

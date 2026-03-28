@@ -186,6 +186,19 @@ interface SpaceView {
       color: var(--text-primary);
     }
     .create-form textarea { resize: vertical; }
+
+    .chrono-desc-preview {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+      white-space: pre-wrap;
+      max-width: 280px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
   `],
   template: `
     <div class="page-header">
@@ -503,25 +516,41 @@ interface SpaceView {
                 <label>Title</label>
                 <input type="text" [(ngModel)]="chronoForm.title" name="title" placeholder="Release v1.0" required />
               </div>
-              <div class="field" style="width:140px;">
+              <div class="field" style="width:160px;">
                 <label>Kind</label>
-                <select [(ngModel)]="chronoForm.kind" name="kind">
-                  @for (k of chronoKinds; track k) { <option [value]="k">{{ k }}</option> }
-                </select>
+                @if (chronoForm.kind !== '__custom__') {
+                  <select [(ngModel)]="chronoForm.kind" name="kind">
+                    @for (k of chronoKinds; track k) { <option [value]="k">{{ k }}</option> }
+                    <option value="__custom__">Custom…</option>
+                  </select>
+                } @else {
+                  <div style="display:flex; gap:4px;">
+                    <input type="text" [(ngModel)]="chronoForm.customKind" name="customKind" placeholder="my-kind" style="flex:1;" />
+                    <button type="button" class="btn-secondary btn btn-sm" style="padding:4px 8px;" (click)="chronoForm.kind = 'event'; chronoForm.customKind = ''" title="Back to presets">✕</button>
+                  </div>
+                }
               </div>
               <div class="field" style="width:200px;">
                 <label>Starts at</label>
                 <input type="datetime-local" [(ngModel)]="chronoForm.startsAt" name="startsAt" required />
               </div>
-              <div class="field" style="flex:1; min-width:140px;">
+              <div class="field" style="width:200px;">
+                <label>Ends at (optional)</label>
+                <input type="datetime-local" [(ngModel)]="chronoForm.endsAt" name="endsAt" />
+              </div>
+              <div class="field" style="flex:1; min-width:200px;">
                 <label>Description (optional)</label>
-                <input type="text" [(ngModel)]="chronoForm.description" name="description" placeholder="Details…" />
+                <textarea [(ngModel)]="chronoForm.description" name="description" placeholder="Add context or details…" rows="3" style="resize:vertical;"></textarea>
               </div>
               <div class="field" style="flex:1; min-width:140px;">
                 <label>Tags (comma-separated)</label>
                 <input type="text" [(ngModel)]="chronoForm.tags" name="tags" placeholder="release, infra" />
               </div>
-              <button class="btn-primary btn btn-sm" type="submit" [disabled]="creatingChrono() || !chronoForm.title.trim() || !chronoForm.startsAt">
+              <div class="field" style="flex:1; min-width:140px;">
+                <label>Entity IDs (comma-separated, optional)</label>
+                <input type="text" [(ngModel)]="chronoForm.entityIds" name="entityIds" placeholder="entity-id-1, entity-id-2" />
+              </div>
+              <button class="btn-primary btn btn-sm" type="submit" [disabled]="creatingChrono() || !chronoForm.title.trim() || !chronoForm.startsAt || (chronoForm.kind === '__custom__' && !chronoForm.customKind.trim())">
                 @if (creatingChrono()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
                 Save
               </button>
@@ -536,13 +565,18 @@ interface SpaceView {
             <table>
               <thead>
                 <tr>
-                  <th>Title</th><th>Kind</th><th>Status</th><th>Starts</th><th>Ends</th><th>Tags</th><th></th>
+                  <th>Title</th><th>Kind</th><th>Status</th><th>Starts</th><th>Ends</th><th>Tags</th><th>Entities</th><th></th>
                 </tr>
               </thead>
               <tbody>
                 @for (entry of chrono(); track entry._id) {
                   <tr>
-                    <td>{{ entry.title }}</td>
+                    <td>
+                      {{ entry.title }}
+                      @if (entry.description) {
+                        <div class="chrono-desc-preview" [title]="entry.description">{{ entry.description }}</div>
+                      }
+                    </td>
                     <td><span class="badge badge-blue">{{ entry.kind }}</span></td>
                     <td><span class="badge" [class.badge-purple]="entry.status === 'upcoming'" [class.badge-blue]="entry.status === 'active'" style="font-size:11px">{{ entry.status }}</span></td>
                     <td style="color:var(--text-muted); font-size:12px">{{ entry.startsAt | date:'MMM d, y HH:mm' }}</td>
@@ -550,10 +584,15 @@ interface SpaceView {
                     <td>
                       @for (tag of entry.tags; track tag) { <span class="tag">{{ tag }}</span> }
                     </td>
+                    <td style="font-size:11px; color:var(--text-muted);">
+                      @if (entry.entityIds.length) {
+                        {{ entry.entityIds.length }} linked
+                      } @else { — }
+                    </td>
                     <td><button class="icon-btn danger" aria-label="Delete chrono entry" (click)="deleteChrono(entry._id)">✕</button></td>
                   </tr>
                 } @empty {
-                  <tr><td colspan="7">
+                  <tr><td colspan="8">
                     <div class="empty-state" style="padding:32px">
                       <div class="empty-state-icon">⏱️</div>
                       <h3>No chrono entries</h3>
@@ -621,7 +660,7 @@ export class BrainComponent implements OnInit {
   creatingChrono = signal(false);
   createChronoError = signal('');
   chronoKinds: ChronoKind[] = ['event', 'deadline', 'plan', 'prediction', 'milestone'];
-  chronoForm = { title: '', kind: 'event' as ChronoKind, startsAt: '', description: '', tags: '' };
+  chronoForm = { title: '', kind: 'event' as ChronoKind | '__custom__', customKind: '', startsAt: '', endsAt: '', description: '', tags: '', entityIds: '' };
 
   activeStats = computed(() =>
     this.spaces().find(sv => sv.space.id === this.activeSpaceId())?.stats,
@@ -859,21 +898,30 @@ export class BrainComponent implements OnInit {
 
   createChrono(): void {
     if (!this.chronoForm.title.trim() || !this.chronoForm.startsAt) return;
+    const resolvedKind = this.chronoForm.kind === '__custom__'
+      // Custom kind: the server accepts free-text values beyond the predefined enum,
+      // which is the intentional behaviour requested in the feature spec.
+      ? (this.chronoForm.customKind.trim() as ChronoKind)
+      : this.chronoForm.kind as ChronoKind;
+    if (!resolvedKind) return;
     this.creatingChrono.set(true);
     this.createChronoError.set('');
     const tags = this.chronoForm.tags.split(',').map(s => s.trim()).filter(Boolean);
-    const body: { title: string; kind: ChronoKind; startsAt: string; description?: string; tags?: string[] } = {
+    const entityIds = this.chronoForm.entityIds.split(',').map(s => s.trim()).filter(Boolean);
+    const body: { title: string; kind: ChronoKind; startsAt: string; endsAt?: string; description?: string; tags?: string[]; entityIds?: string[] } = {
       title: this.chronoForm.title.trim(),
-      kind: this.chronoForm.kind,
+      kind: resolvedKind,
       startsAt: new Date(this.chronoForm.startsAt).toISOString(),
     };
+    if (this.chronoForm.endsAt) body.endsAt = new Date(this.chronoForm.endsAt).toISOString();
     if (this.chronoForm.description.trim()) body.description = this.chronoForm.description.trim();
     if (tags.length) body.tags = tags;
+    if (entityIds.length) body.entityIds = entityIds;
     this.api.createChrono(this.activeSpaceId(), body).subscribe({
       next: () => {
         this.creatingChrono.set(false);
         this.showChronoForm.set(false);
-        this.chronoForm = { title: '', kind: 'event', startsAt: '', description: '', tags: '' };
+        this.chronoForm = { title: '', kind: 'event', customKind: '', startsAt: '', endsAt: '', description: '', tags: '', entityIds: '' };
         this.loadCurrentTab(this.activeSpaceId());
       },
       error: (err) => {

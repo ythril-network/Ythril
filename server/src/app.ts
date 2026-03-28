@@ -15,6 +15,7 @@ import { mfaRouter } from './api/mfa.js';
 import { aboutRouter } from './api/about.js';
 import { oidcRouter } from './api/oidc.js';
 import { metricsRouter } from './api/metrics.js';
+import { themeRouter } from './api/theme.js';
 import { setupRouter } from './setup/routes.js';
 import { mcpRouter } from './mcp/router.js';
 import { globalRateLimit } from './rate-limit/middleware.js';
@@ -128,6 +129,7 @@ export function createApp() {
   });
 
   // ── API routes ───────────────────────────────────────────────────────────
+  app.use('/api/theme', themeRouter);   // public — no auth required
   app.use('/api/tokens', tokensRouter);
   app.use('/api/brain', brainRouter);
   app.use('/api/spaces', spacesRouter);
