@@ -220,7 +220,9 @@ export async function createSpace(opts: {
   return space;
 }
 
-/** Delete a space: drops all MongoDB collections, removes files, then removes from config */
+/** Delete a space: drops all MongoDB collections, removes files, then removes from config.
+ *  Data cleanup runs first — config is only updated after all cleanup succeeds.
+ *  If any cleanup step fails, the space remains in config so the operator can retry. */
 export async function removeSpace(spaceId: string): Promise<boolean> {
   const cfg = getConfig();
   const space = cfg.spaces.find(s => s.id === spaceId);
@@ -230,6 +232,7 @@ export async function removeSpace(spaceId: string): Promise<boolean> {
   // Only real (non-proxy) spaces have DB collections and files
   if (!space.proxyFor) {
     const db = getDb();
+    const errors: string[] = [];
 
     // 1. Drop vector search index on the memories collection (best-effort)
     const indexName = `${spaceId}_memories_embedding`;
@@ -242,17 +245,20 @@ export async function removeSpace(spaceId: string): Promise<boolean> {
       }
     } catch (err) {
       log.warn(`Could not drop vector search index ${indexName}: ${err}`);
+      // Vector index failure is non-fatal — the collection drop below will clean it up
     }
 
     // 2. Drop all MongoDB collections associated with this space
     const prefix = `${spaceId}_`;
-    const existingColls = await db.listCollections({ name: { $regex: `^${prefix}` } }).toArray();
-    for (const coll of existingColls) {
+    const existingColls = await db.listCollections().toArray();
+    for (const coll of existingColls.filter(c => c.name.startsWith(prefix))) {
       try {
         await db.collection(coll.name).drop();
         log.debug(`Dropped collection ${coll.name}`);
       } catch (err) {
-        log.warn(`Could not drop collection ${coll.name}: ${err}`);
+        const msg = `Could not drop collection ${coll.name}: ${err}`;
+        log.warn(msg);
+        errors.push(msg);
       }
     }
 
@@ -262,7 +268,9 @@ export async function removeSpace(spaceId: string): Promise<boolean> {
       await fs.rm(filesDir, { recursive: true, force: true });
       log.debug(`Deleted files directory ${filesDir}`);
     } catch (err) {
-      log.warn(`Could not delete files directory ${filesDir}: ${err}`);
+      const msg = `Could not delete files directory ${filesDir}: ${err}`;
+      log.warn(msg);
+      errors.push(msg);
     }
 
     // 4. Delete any stale chunked-upload directories for this space
@@ -271,11 +279,23 @@ export async function removeSpace(spaceId: string): Promise<boolean> {
       await fs.rm(chunksDir, { recursive: true, force: true });
       log.debug(`Deleted chunk uploads directory ${chunksDir}`);
     } catch (err) {
-      log.warn(`Could not delete chunk uploads directory ${chunksDir}: ${err}`);
+      const msg = `Could not delete chunk uploads directory ${chunksDir}: ${err}`;
+      log.warn(msg);
+      errors.push(msg);
+    }
+
+    // If any collection drops or file deletions failed, abort — leave the
+    // space in config so the operator can investigate and retry.
+    if (errors.length > 0) {
+      throw new Error(
+        `Space '${spaceId}' cleanup incomplete (${errors.length} error(s)). ` +
+        `Space was NOT removed from config. Fix the underlying issue and retry. ` +
+        `Errors: ${errors.join('; ')}`,
+      );
     }
   }
 
-  // 5. Remove the space from config
+  // 5. Remove the space from config — only reached when all cleanup succeeded
   cfg.spaces = cfg.spaces.filter(s => s.id !== spaceId);
   saveConfig(cfg);
   return true;

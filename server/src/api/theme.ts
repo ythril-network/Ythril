@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { globalRateLimit } from '../rate-limit/middleware.js';
-import { configExists, loadConfig } from '../config/loader.js';
+import { configExists, getConfig, loadConfig } from '../config/loader.js';
 
 export const themeRouter = Router();
 
@@ -15,6 +15,13 @@ themeRouter.get('/', (_req, res) => {
     res.json({ cssUrl: null });
     return;
   }
-  const cfg = loadConfig();
+  // Use the in-memory config when available (avoids sync disk read on every request);
+  // fall back to loadConfig() on first call before config is cached.
+  let cfg;
+  try {
+    cfg = getConfig();
+  } catch {
+    cfg = loadConfig();
+  }
   res.json({ cssUrl: cfg.theme?.cssUrl ?? null });
 });

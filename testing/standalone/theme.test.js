@@ -1,0 +1,103 @@
+/**
+ * Standalone tests: GET /api/theme — external theming endpoint
+ *
+ * Covers:
+ *  - Endpoint is accessible without authentication (pre-login)
+ *  - Returns { cssUrl: null } when no theme configured
+ *  - Returns { cssUrl: "..." } when theme.cssUrl is set in config
+ *  - Restores original config after test
+ *  - Security headers are present on theme responses
+ *
+ * Run: node --test testing/standalone/theme.test.js
+ */
+
+import { describe, it, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'url';
+import { INSTANCES, post } from '../sync/helpers.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const CANDIDATE_CONFIGS = [
+  path.join(__dirname, '..', 'sync', 'configs', 'a', 'config.json'),
+  path.join(__dirname, '..', '..', 'config', 'config.json'),
+];
+const CONFIG_FILE = CANDIDATE_CONFIGS.find(p => fs.existsSync(p)) ?? null;
+const TOKEN_FILE  = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
+
+let token;
+let originalConfig;
+
+function readConfig() {
+  return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+}
+
+function writeConfig(cfg) {
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2), 'utf8');
+}
+
+async function reloadConfig() {
+  const r = await post(INSTANCES.a, token, '/api/admin/reload-config', {});
+  assert.equal(r.status, 200, `reload-config failed: ${JSON.stringify(r.body)}`);
+}
+
+describe('GET /api/theme — external theming endpoint', () => {
+  before(() => {
+    if (!CONFIG_FILE) throw new Error('No config.json found for test or dev stack');
+    token = fs.readFileSync(TOKEN_FILE, 'utf8').trim();
+    originalConfig = readConfig();
+  });
+
+  after(async () => {
+    // Restore original config
+    if (originalConfig) {
+      writeConfig(originalConfig);
+      await reloadConfig();
+    }
+  });
+
+  it('is accessible without authentication (no Bearer token)', async () => {
+    const r = await fetch(`${INSTANCES.a}/api/theme`);
+    assert.equal(r.status, 200, `Expected 200 got ${r.status}`);
+  });
+
+  it('returns { cssUrl: null } when no theme is configured', async () => {
+    // Ensure no theme block in config
+    const cfg = readConfig();
+    delete cfg.theme;
+    writeConfig(cfg);
+    await reloadConfig();
+
+    const r = await fetch(`${INSTANCES.a}/api/theme`);
+    assert.equal(r.status, 200);
+    const body = await r.json();
+    assert.equal(body.cssUrl, null, 'cssUrl should be null when no theme configured');
+  });
+
+  it('returns { cssUrl: "https://..." } when theme.cssUrl is set', async () => {
+    const testUrl = 'https://cdn.example.com/ythril-theme.css';
+    const cfg = readConfig();
+    cfg.theme = { cssUrl: testUrl };
+    writeConfig(cfg);
+    await reloadConfig();
+
+    const r = await fetch(`${INSTANCES.a}/api/theme`);
+    assert.equal(r.status, 200);
+    const body = await r.json();
+    assert.equal(body.cssUrl, testUrl, `Expected cssUrl '${testUrl}', got '${body.cssUrl}'`);
+  });
+
+  it('response has security headers', async () => {
+    const r = await fetch(`${INSTANCES.a}/api/theme`);
+    assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
+    assert.ok(r.headers.get('x-request-id'), 'X-Request-Id should be present');
+  });
+
+  it('returns JSON content-type', async () => {
+    const r = await fetch(`${INSTANCES.a}/api/theme`);
+    const ct = r.headers.get('content-type') ?? '';
+    assert.ok(ct.includes('application/json'), `Expected JSON content-type, got: ${ct}`);
+  });
+});

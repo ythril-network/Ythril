@@ -134,7 +134,7 @@ All tests use Node.js built-in `node --test` — no extra test framework.
 npm run test:standalone
 ```
 
-Covers: config reload, log redaction, quota logic, rate-limit bucketing, secrets permissions.
+Covers: config reload, config loader normalisation, config file permissions, log redaction, metrics endpoint, OIDC contracts, OIDC silent refresh, quota logic, rate-limit bucketing, readiness probe, secrets permissions, theme API, theme postMessage tokens, vector search detection.
 
 ### Integration tests (single Docker instance)
 

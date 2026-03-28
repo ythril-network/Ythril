@@ -23,15 +23,22 @@ export class ThemeService {
   /** Call once at app startup (via APP_INITIALIZER). */
   init(): Promise<void> {
     return new Promise<void>((resolve) => {
+      let resolved = false;
+      const done = () => { if (!resolved) { resolved = true; resolve(); } };
+
+      // Timeout: don't block app bootstrap for more than 3 s if /api/theme is slow.
+      const timer = setTimeout(done, 3_000);
+
       // 1. Load static CSS override from server config
       this.http.get<{ cssUrl: string | null }>('/api/theme').subscribe({
         next: ({ cssUrl }) => {
+          clearTimeout(timer);
           if (cssUrl) {
             this.injectExternalStylesheet(cssUrl);
           }
-          resolve();
+          done();
         },
-        error: () => resolve(), // non-fatal — theme is optional
+        error: () => { clearTimeout(timer); done(); }, // non-fatal — theme is optional
       });
 
       // 2. Listen for runtime postMessage theme tokens
@@ -42,6 +49,18 @@ export class ThemeService {
   }
 
   private injectExternalStylesheet(cssUrl: string): void {
+    // Validate URL: only https: (or http: on localhost for dev) to prevent
+    // a compromised config from loading javascript: or data: URIs.
+    try {
+      const parsed = new URL(cssUrl);
+      const isLocalDev = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+      if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && isLocalDev)) {
+        return; // silently ignore non-HTTPS URLs
+      }
+    } catch {
+      return; // malformed URL — ignore
+    }
+
     const existing = this.doc.getElementById('ythril-theme-override');
     if (existing) {
       (existing as HTMLLinkElement).href = cssUrl;
@@ -55,6 +74,12 @@ export class ThemeService {
   }
 
   private handleThemeMessage(event: MessageEvent): void {
+    // Only accept theme messages from same-origin or the parent frame's origin.
+    // This prevents cross-origin pages from restyling the UI for phishing.
+    const win = this.doc.defaultView;
+    const selfOrigin = win?.location?.origin;
+    if (event.origin !== selfOrigin) return;
+
     const data = event.data;
     if (!data || typeof data !== 'object') return;
     if (data['type'] !== 'ythril:theme') return;

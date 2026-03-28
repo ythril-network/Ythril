@@ -90,3 +90,27 @@ stacks are required.
 A future Ythril version may introduce an alternative vector-search backend
 (e.g., plain MongoDB CE + mongot CE Preview, or a different vector store) to
 address this for users who need it.
+
+---
+
+## MongoDB 8.2+ (Community / Enterprise)
+
+MongoDB 8.2+ ships native `$vectorSearch` support without requiring the `mongot`
+sidecar. Ythril detects this at startup and uses it automatically.
+
+| MongoDB flavour | `$vectorSearch` | License | `mongot` needed |
+|---|---|---|---|
+| `mongodb/mongodb-atlas-local` (default) | ✓ | SSPL + proprietary (`mongot`) | Bundled |
+| Managed MongoDB Atlas (M10+) | ✓ | Managed service (ToS) | Managed |
+| MongoDB 8.2+ Community Edition | ✓ | SSPL | No |
+| MongoDB 8.2+ Enterprise | ✓ | Commercial | No |
+| MongoDB < 8.2 (vanilla) | ✗ | SSPL | N/A |
+
+When using MongoDB 8.2+ CE, the SSPL analysis above still applies — Ythril uses
+MongoDB as an internal component over a TCP socket, not as a service offering.
+The key difference is that **no proprietary `mongot` binary is involved**, making
+this the only fully SSPL-only (no proprietary) deployment option with full
+`$vectorSearch` support.
+
+See [integration-guide.md](integration-guide.md#mongodb-flexibility) for
+connection configuration.

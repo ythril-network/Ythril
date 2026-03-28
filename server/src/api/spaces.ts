@@ -113,7 +113,12 @@ spacesRouter.delete('/:id', globalRateLimit, requireAdminMfa, async (req, res) =
       });
       return;
     }
-    const ok = await removeSpace(id);
+    const ok = await removeSpace(id).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ error: msg });
+      return null;
+    });
+    if (ok === null) return; // error already sent
     if (!ok) { res.status(404).json({ error: `Space '${id}' not found` }); return; }
     res.status(204).end();
     return;

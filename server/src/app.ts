@@ -48,7 +48,10 @@ export function createApp() {
   // ── Security headers ─────────────────────────────────────────────────────
   app.use((_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'DENY');
+    // Use CSP frame-ancestors instead of X-Frame-Options: DENY.
+    // 'self' allows same-origin iframing (required for OIDC silent refresh
+    // and postMessage-based theming) while blocking cross-origin clickjacking.
+    res.setHeader('Content-Security-Policy', "frame-ancestors 'self'");
     res.setHeader('Referrer-Policy', 'no-referrer');
     next();
   });

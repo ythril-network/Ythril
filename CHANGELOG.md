@@ -4,6 +4,31 @@ All notable changes to Ythril are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] — 2026-03-28
+
+### Added
+
+- **External theming API**: Static CSS override via `theme.cssUrl` in config + runtime `postMessage` with `{ type: 'ythril:theme', tokens }` for portal embedding. Server endpoint `GET /api/theme` (public, no auth).
+- **ThemeService** (Angular): `APP_INITIALIZER`-based loader with 3 s timeout; postMessage listener restricted to `--`-prefixed CSS custom properties only.
+- **OIDC silent refresh**: Hidden-iframe token renewal with PKCE. Decodes JWT `exp` claim, schedules refresh 60 s before expiry, falls back to 401 interceptor on failure.
+- **Space deletion purge**: `DELETE /api/spaces/:id` now drops all `{spaceId}_*` MongoDB collections, vector search indexes, `/data/files/{spaceId}/`, and `/data/.chunks/{spaceId}/`. Cleanup errors abort deletion (space stays in config for retry).
+- **Space deletion governance**: Networked spaces open a `space_deletion` vote round on every containing network instead of deleting immediately.
+- Tests: `space-deletion.test.js` (integration), `theme.test.js`, `config-loader.test.js`, `config-permissions.test.js`, `oidc-silent-refresh.test.js`, `theme-postmessage.test.js` (standalone).
+
+### Fixed
+
+- **Theme postMessage origin check** (MEDIUM): `handleThemeMessage()` now validates `event.origin === self` — rejects cross-origin theming messages that could restyle the UI for phishing.
+- **`$regex` injection in `removeSpace()`** (LOW): Replaced `$regex` interpolation with `listCollections()` + `.startsWith()` filter.
+- **`cssUrl` injection** (LOW): `injectExternalStylesheet()` now validates URLs via `URL` constructor; rejects non-HTTPS (except localhost for dev).
+- **`removeSpace` partial-failure orphaned data**: Cleanup errors now throw — space remains in config so the operator can investigate and retry, instead of silently losing the config entry.
+- **Theme endpoint disk thrash**: `GET /api/theme` now uses in-memory `getConfig()` with `loadConfig()` fallback instead of reading config.json from disk on every request.
+- **`X-Frame-Options: DENY` vs iframe theming**: Replaced with `Content-Security-Policy: frame-ancestors 'self'` to allow same-origin iframing (OIDC silent refresh, theming) while blocking cross-origin clickjacking.
+- **Startup crash on missing arrays**: `loadConfig()` and `reloadConfig()` now normalise absent/null `spaces`, `tokens`, `networks` arrays via `??= []`.
+- **Config file permission auto-fix**: `checkPermissions()` auto-fixes loose permissions when the process owns the file (K8s hostPath mounts), with warning log instead of hard exit.
+- **Path traversal false-positive**: Leading slashes in browser-sourced filenames (`/Screenshot 2024.png`) are now stripped before `path.resolve()`, preventing spurious traversal rejections.
+- **OIDC silent refresh**: Fixed PKCE verifier isolation (closure, not sessionStorage which is iframe-isolated); added 30 s iframe timeout; state validation on postMessage.
+- **Theme init timeout**: `APP_INITIALIZER` no longer blocks app bootstrap indefinitely — resolves after 3 s if `/api/theme` is unresponsive.
+
 ## [0.5.0] — 2026-03-27
 
 ### Added

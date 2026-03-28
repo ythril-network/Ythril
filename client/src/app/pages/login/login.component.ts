@@ -17,71 +17,82 @@ import { CommonModule } from '@angular/common';
           <span class="auth-logo-dot"></span>
           ythril
         </div>
-        <p class="auth-subtitle">Sign in with your access token.</p>
 
-        @if (reason() === 'session_expired') {
-          <div class="alert alert-warning" style="margin-bottom: 20px;">
-            Your session expired. Please sign in again.
-          </div>
-        }
+        @if (ssoRedirecting()) {
+          <p class="auth-subtitle">
+            <span class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;margin-right:8px;"></span>
+            Redirecting to SSO…
+          </p>
+          <p style="margin-top: 20px; font-size: 12px; color: var(--text-muted); text-align: center;">
+            <a routerLink="/login" [queryParams]="{ local: true }">Use token instead</a>
+          </p>
+        } @else {
+          <p class="auth-subtitle">Sign in with your access token.</p>
 
-        @if (error()) {
-          <div class="alert alert-error">{{ error() }}</div>
-        }
+          @if (reason() === 'session_expired') {
+            <div class="alert alert-warning" style="margin-bottom: 20px;">
+              Your session expired. Please sign in again.
+            </div>
+          }
 
-        <form (ngSubmit)="login()" #f="ngForm">
-          <div class="field">
-            <label for="token">Access token</label>
-            <input
-              id="token"
-              type="password"
-              name="token"
-              [(ngModel)]="tokenInput"
-              placeholder="yt_…"
-              autocomplete="current-password"
-              required
+          @if (error()) {
+            <div class="alert alert-error">{{ error() }}</div>
+          }
+
+          <form (ngSubmit)="login()" #f="ngForm">
+            <div class="field">
+              <label for="token">Access token</label>
+              <input
+                id="token"
+                type="password"
+                name="token"
+                [(ngModel)]="tokenInput"
+                placeholder="yt_…"
+                autocomplete="current-password"
+                required
+                [disabled]="loading()"
+              />
+              <span class="field-hint">
+                Paste your API token. Created during setup or via Settings → Tokens.
+              </span>
+            </div>
+
+            <button
+              type="submit"
+              class="btn-primary btn"
+              style="width: 100%; justify-content: center; margin-top: 4px;"
+              [disabled]="loading() || !tokenInput"
+            >
+              @if (loading()) {
+                <span class="spinner" style="width:14px;height:14px;border-width:2px;"></span>
+                Verifying…
+              } @else {
+                Sign in
+              }
+            </button>
+          </form>
+
+          @if (oidcInfo()?.enabled) {
+            <div class="auth-divider">
+              <span>or</span>
+            </div>
+
+            <button
+              type="button"
+              class="btn btn-secondary"
+              style="width: 100%; justify-content: center;"
               [disabled]="loading()"
-            />
-            <span class="field-hint">
-              Paste your API token. Created during setup or via Settings → Tokens.
-            </span>
-          </div>
+              (click)="loginWithOidc()"
+            >
+              Sign in with SSO
+            </button>
+          }
 
-          <button
-            type="submit"
-            class="btn-primary btn"
-            style="width: 100%; justify-content: center; margin-top: 4px;"
-            [disabled]="loading() || !tokenInput"
-          >
-            @if (loading()) {
-              <span class="spinner" style="width:14px;height:14px;border-width:2px;"></span>
-              Verifying…
-            } @else {
-              Sign in
-            }
-          </button>
-        </form>
-
-        @if (oidcInfo()?.enabled) {
-          <div class="auth-divider">
-            <span>or</span>
-          </div>
-
-          <button
-            type="button"
-            class="btn btn-secondary"
-            style="width: 100%; justify-content: center;"
-            [disabled]="loading()"
-            (click)="loginWithOidc()"
-          >
-            Sign in with SSO
-          </button>
+          <p style="margin-top: 20px; font-size: 12px; color: var(--text-muted); text-align: center;">
+            No token yet?
+            <a routerLink="/setup">Run first-time setup</a>
+          </p>
         }
-
-        <p style="margin-top: 20px; font-size: 12px; color: var(--text-muted); text-align: center;">
-          No token yet?
-          <a routerLink="/setup">Run first-time setup</a>
-        </p>
       </div>
     </div>
   `,
@@ -116,9 +127,22 @@ export class LoginComponent implements OnInit {
   error = signal('');
   reason = signal(this.route.snapshot.queryParamMap.get('reason') ?? '');
   oidcInfo = signal<OidcInfo | null>(null);
+  ssoRedirecting = signal(false);
+
+  /** True when ?local is present — bypasses SSO auto-redirect. */
+  private localLogin = this.route.snapshot.queryParamMap.has('local');
 
   ngOnInit(): void {
-    this.auth.getOidcInfo().then(info => this.oidcInfo.set(info));
+    this.auth.getOidcInfo().then(info => {
+      this.oidcInfo.set(info);
+
+      // Auto-redirect to SSO when OIDC is enabled and the user didn't
+      // explicitly request the local token form (?local).
+      if (info.enabled && !this.localLogin) {
+        this.ssoRedirecting.set(true);
+        void this.loginWithOidc();
+      }
+    });
   }
 
   login(): void {
@@ -157,6 +181,7 @@ export class LoginComponent implements OnInit {
       // Browser will redirect to IdP — no further action needed here
     } catch (err) {
       this.loading.set(false);
+      this.ssoRedirecting.set(false);
       this.error.set(
         err instanceof Error ? err.message : 'Failed to start SSO login.',
       );

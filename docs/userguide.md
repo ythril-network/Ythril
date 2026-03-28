@@ -35,7 +35,9 @@ The token is stored in browser `localStorage` under `ythril_token`. Logging out 
 
 ### SSO / OIDC login
 
-When an administrator has configured an OIDC provider (see [OIDC Configuration](integration-guide.md#oidc-openid-connect-authentication)), a **Sign in with SSO** button appears on the login page below the PAT field. Clicking it redirects you to your organisation's identity provider. After authenticating there you are redirected back and logged in automatically — no PAT entry required.
+When an administrator has configured an OIDC provider (see [OIDC Configuration](integration-guide.md#oidc-openid-connect-authentication)), the login page **auto-redirects** to your organisation's identity provider — no extra click required. After authenticating there you are redirected back and logged in automatically.
+
+To bypass SSO and use a PAT instead, navigate to `/login?local`. This is useful for administrators, or when the identity provider is unavailable.
 
 Both login methods coexist: PAT users are unaffected when OIDC is enabled.
 
@@ -437,11 +439,17 @@ If a space has a `description`, it is sent to the MCP client as `instructions` d
 | Tool | Description |
 |------|-------------|
 | `remember` | Store a memory with optional tags and entity links |
+| `update_memory` | Update an existing memory's fact, tags, or entity links |
+| `delete_memory` | Delete a memory by ID |
 | `recall` | Semantic search within the current space |
 | `recall_global` | Semantic search across all accessible spaces |
 | `query` | Structured filter query (read-only) |
+| `get_stats` | Return counts of memories, entities, edges, and chrono entries |
 | `upsert_entity` | Create or update a named entity (with optional properties) |
 | `upsert_edge` | Create or update a directed relationship |
+| `create_chrono` | Create a chrono entry (event, deadline, plan, prediction, milestone) |
+| `update_chrono` | Update an existing chrono entry |
+| `list_chrono` | List chrono entries, optionally filtered by status or kind |
 | `read_file` | Read a file from the space |
 | `write_file` | Write a file to the space |
 | `list_dir` | List directory contents |
@@ -453,7 +461,7 @@ If a space has a `description`, it is sent to the MCP client as `instructions` d
 
 ### Read-only tokens
 
-When connected with a `readOnly` token, mutating tools are hidden from `tools/list` and rejected if called directly. Read-only tools (`recall`, `recall_global`, `query`, `read_file`, `list_dir`, `list_peers`) work normally.
+When connected with a `readOnly` token, mutating tools are hidden from `tools/list` and rejected if called directly. Read-only tools (`recall`, `recall_global`, `query`, `get_stats`, `list_chrono`, `read_file`, `list_dir`, `list_peers`) work normally.
 
 ### Proxy spaces
 

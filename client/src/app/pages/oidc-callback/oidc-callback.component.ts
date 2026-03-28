@@ -33,7 +33,7 @@ import { CommonModule } from '@angular/common';
         @if (error()) {
           <div class="alert alert-error">{{ error() }}</div>
           <p style="margin-top: 16px; text-align: center;">
-            <a href="/login">Back to login</a>
+            <a href="/login?local">Back to login</a>
           </p>
         } @else {
           <p class="auth-subtitle">

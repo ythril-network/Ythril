@@ -67,9 +67,9 @@ describe('Security headers', () => {
     assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
   });
 
-  it('X-Frame-Options: DENY is set', async () => {
+  it('Content-Security-Policy: frame-ancestors self is set', async () => {
     const r = await fetch(`${INSTANCES.a}/health`);
-    assert.equal(r.headers.get('x-frame-options'), 'DENY');
+    assert.equal(r.headers.get('content-security-policy'), "frame-ancestors 'self'");
   });
 
   it('Referrer-Policy: no-referrer is set', async () => {

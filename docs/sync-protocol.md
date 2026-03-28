@@ -217,6 +217,8 @@ All endpoints are under `/api/sync` and require a `Bearer` token that resolves t
 | `GET` | `/api/sync/entities/:id` | `spaceId`, `networkId` | Full `EntityDoc` |
 | `GET` | `/api/sync/edges` | same as memories | `{ items[], nextCursor }` |
 | `GET` | `/api/sync/edges/:id` | `spaceId`, `networkId` | Full `EdgeDoc` |
+| `GET` | `/api/sync/chrono` | same as memories | `{ items[], nextCursor }` |
+| `GET` | `/api/sync/chrono/:id` | `spaceId`, `networkId` | Full `ChronoEntry` |
 | `GET` | `/api/sync/tombstones` | `spaceId`, `networkId`, `sinceSeq` | `{ memories[], entities[], edges[] }` |
 | `GET` | `/api/sync/manifest` | `spaceId`, `networkId` | `{ manifest[{ path, sha256, size, modifiedAt }] }` |
 | `GET` | `/api/sync/info` | — | `{ instanceId, label, version }` |
@@ -231,7 +233,7 @@ All endpoints are under `/api/sync` and require a `Bearer` token that resolves t
 | `POST` | `/api/sync/memories` | `MemoryDoc` | `200 { status:'ok' }` |
 | `POST` | `/api/sync/entities` | `EntityDoc` | `200 { status:'ok' }` |
 | `POST` | `/api/sync/edges` | `EdgeDoc` | `200 { status:'ok' }` |
-| `POST` | `/api/sync/batch-upsert` | `{ memories?, entities?, edges? }` | `200 { status:'ok', memories:{…}, entities:{…}, edges:{…} }` |
+| `POST` | `/api/sync/batch-upsert` | `{ memories?, entities?, edges?, chrono? }` | `200 { status:'ok', memories:{…}, entities:{…}, edges:{…}, chrono:{…} }` |
 | `POST` | `/api/sync/tombstones` | `{ tombstones[] }` | `200 { applied: N }` |
 
 `POST /batch-upsert` is the primary push path used by the engine. The individual `POST /memories`, `/entities`, `/edges` endpoints remain for backwards compatibility and direct API usage.

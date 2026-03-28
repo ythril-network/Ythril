@@ -27,9 +27,10 @@
 16. [Setup API](#setup-api) — first-run setup
 17. [Admin API](#admin-api) — config reload
 18. [About API](#about-api) — instance info and logs
-19. [MCP (Model Context Protocol)](#mcp-model-context-protocol) — AI tool integration
-20. [Storage Quotas](#storage-quotas)
-21. [Pagination](#pagination)
+19. [Theme API](#theme-api) — external CSS theming
+20. [MCP (Model Context Protocol)](#mcp-model-context-protocol) — AI tool integration
+21. [Storage Quotas](#storage-quotas)
+22. [Pagination](#pagination)
 
 ---
 
@@ -174,6 +175,16 @@ All persistent data lives in named Docker volumes:
 
 The `config/` directory is a host bind mount — `config.json` and `secrets.json` are plain files that survive any container lifecycle event.
 
+### Config File Permissions
+
+On startup, Ythril checks that `config.json` and `secrets.json` are owner-read/write only (`0600`). If the files have looser permissions (e.g. `0644`, `0666`), the server automatically tightens them to `0600` and logs a `SECURITY:` warning:
+
+```
+SECURITY: config.json had mode 0644 — auto-fixed to 0600
+```
+
+If auto-fix fails (e.g. the process doesn't own the file), the server logs an error and exits. This is common with Docker bind mounts on WSL2, where host files appear world-writable inside the container — the auto-fix handles this case transparently.
+
 ```bash
 docker compose down        # stops containers — data intact
 docker compose up -d       # reattaches volumes — picks up where it left off
@@ -205,7 +216,7 @@ Ythril sets the following headers on every response:
 | Header | Value | Purpose |
 |---|---|---|
 | `X-Content-Type-Options` | `nosniff` | Prevents MIME-type sniffing |
-| `X-Frame-Options` | `DENY` | Blocks iframe embedding (clickjacking) |
+| `Content-Security-Policy` | `frame-ancestors 'self'` | Allows same-origin iframing (OIDC silent refresh, portal theming) while blocking cross-origin embedding |
 | `Referrer-Policy` | `no-referrer` | Strips referrer on outbound requests |
 | `X-Request-Id` | UUID | Unique per-request ID for tracing (logged server-side) |
 
@@ -1007,6 +1018,12 @@ Content-Type: application/json
 ```
 
 **Response** `204`. If the space participates in a network, deletion requires a governance vote.
+
+If cleanup partially fails (e.g. a collection drop or file deletion errors), the server returns `500` with error details. The space is **not** removed from config so the deletion can be retried. Check the response body for specifics:
+
+```json
+{ "error": "Space 'research' cleanup incomplete (2 error(s)). Space was NOT removed from config. ..." }
+```
 
 ---
 
@@ -2032,6 +2049,72 @@ GET /api/about/logs?lines=200
 
 ---
 
+## Theme API
+
+Base path: `/api/theme` — unauthenticated (public).
+
+The theme endpoint supports portal-style embedding where an outer shell injects branding into Ythril.
+
+### Get Theme
+
+```
+GET /api/theme
+```
+
+**Response** `200`:
+
+```json
+{ "cssUrl": null }
+```
+
+Or, when a theme is configured:
+
+```json
+{ "cssUrl": "https://cdn.example.com/brand.css" }
+```
+
+### Configuration
+
+Add a `theme` block to `config.json`:
+
+```json
+{
+  "theme": {
+    "cssUrl": "https://cdn.example.com/brand.css"
+  }
+}
+```
+
+The `cssUrl` must be a valid HTTPS URL (HTTP is allowed only for `localhost` during development). The URL is validated at runtime — invalid or non-HTTPS URLs are silently rejected.
+
+### How It Works
+
+1. **Static CSS** — on startup, the Angular SPA fetches `/api/theme`. If `cssUrl` is non-null, a `<link rel="stylesheet">` is injected into `<head>` before the app renders.
+2. **Runtime tokens via `postMessage`** — the embedding page can send CSS custom property overrides to the Ythril iframe:
+
+```js
+iframe.contentWindow.postMessage({
+  type: 'ythril:theme',
+  tokens: {
+    '--primary': '#0066cc',
+    '--background': '#f5f5f5'
+  }
+}, 'https://your-ythril-host');
+```
+
+Only `--`-prefixed CSS custom properties are accepted. Standard CSS properties (e.g. `color`, `background`) are silently filtered out to prevent injection.
+
+The `postMessage` handler validates `event.origin` — only same-origin messages are accepted.
+
+### Security
+
+- `cssUrl` is restricted to HTTPS (except `localhost` for development).
+- `postMessage` origin is checked against `self`.
+- Only CSS custom properties (`--*`) are applied from runtime tokens.
+- The `Content-Security-Policy: frame-ancestors 'self'` header allows same-origin iframing while blocking cross-origin embedding.
+
+---
+
 ## MCP (Model Context Protocol)
 
 Ythril exposes an MCP server via SSE for AI agent integration. Each connection is scoped to a single space.
@@ -2323,12 +2406,16 @@ PATs continue to work without any changes when OIDC is enabled.
 
 ### Login Flow (Browser)
 
-1. User clicks **Sign in with SSO** on the login page.
+When OIDC is enabled, the login page **auto-redirects** to the IdP — no manual click required.
+
+1. User navigates to `/login`. The SPA fetches `/api/auth/oidc-info` and detects OIDC is enabled.
 2. Browser fetches the IdP discovery document and redirects to the authorization endpoint.
 3. User authenticates at the IdP.
 4. IdP redirects back to `/oidc-callback?code=…&state=…`.
 5. The Angular app exchanges the authorization code for tokens directly at the IdP token endpoint (PKCE — no client secret in the browser).
 6. The resulting access token (JWT) is stored in `localStorage` and used for all subsequent API calls.
+
+To bypass SSO auto-redirect and use a PAT instead, navigate to `/login?local`.
 
 ### Keycloak Setup
 
@@ -2433,7 +2520,7 @@ After saving any IdP configuration, run `POST /api/admin/reload-config` to apply
 ### Security Notes and Limitations
 
 - **No server-side token revocation for OIDC.**  JWTs are validated statelessly (signature + `exp`).  Once issued by the IdP, a token is valid until it expires.  To revoke access, disable or remove the user at the IdP and set short token lifetimes (5–15 minutes recommended).
-- **Silent token refresh.**  The SPA automatically schedules a background token refresh 60 seconds before the access token expires.  A hidden iframe is created with `prompt=none`; if the IdP session is still valid the user stays logged in with no interruption.  If the IdP session has also expired (or the IdP does not support `prompt=none`) the next API call returns 401 and the browser is redirected to the login page.  Configure your IdP's access token lifetime to balance UX vs security (5–15 minutes is a reasonable default).
+- **Silent token refresh.**  The SPA automatically schedules a background token refresh 60 seconds before the access token expires.  A hidden iframe is created with `prompt=none`; if the IdP session is still valid the user stays logged in with no interruption.  If the IdP session has also expired (or the IdP does not support `prompt=none`) the next API call returns 401 and the browser is redirected to the login page.  Configure your IdP's access token lifetime to balance UX vs security (5–15 minutes is a reasonable default).  This mechanism requires `Content-Security-Policy: frame-ancestors 'self'`, which the server sets by default.
 - **`admin` and `readOnly` cannot both match.**  If both claim rules match the same JWT, `admin: true` takes precedence and `readOnly` is ignored.  Design your IdP roles to be mutually exclusive.
 - **Spaces claim controls visibility.**  When a `spaces` claim is present in the JWT, the OIDC session can only see and modify those spaces.  If the claim is missing or not an array, the session has access to all spaces (same as a PAT with no `spaces` allowlist).  Users who cannot see expected spaces should check with their administrator that the IdP is emitting the correct claim values.
 - **Config validation.**  When `oidc.enabled` is `true`, `issuerUrl` and `clientId` are required.  The server validates the OIDC config block at startup and on `reload-config` — a malformed block will prevent the server from starting.
