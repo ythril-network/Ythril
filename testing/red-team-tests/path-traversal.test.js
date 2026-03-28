@@ -133,4 +133,23 @@ describe('Valid relative paths within space are allowed', () => {
     assert.ok(status === 404 || status === 201 || status === 200,
       `Valid subdirectory path should not return 400, got ${status}`);
   });
+
+  it('Filename with leading slash (browser Content-Disposition) → not 400', async () => {
+    // Browsers often send the original filename with a leading / in the
+    // Content-Disposition header (e.g. '/Screenshot 2024-01-01.png').
+    // This must NOT be treated as a path traversal attempt.
+    const { status } = await getPath('%2FHearthstone%20Screenshot%2002-24-26%2023.37.34.png');
+    assert.ok(
+      status === 404 || status === 200 || status === 201,
+      `Filename with leading slash should not return 400, got ${status}`,
+    );
+  });
+
+  it('Filename with spaces (valid) → not 400', async () => {
+    const { status } = await getPath('My%20Documents%2Freport%202024.txt');
+    assert.ok(
+      status === 404 || status === 200 || status === 201,
+      `Filename with spaces should not return 400, got ${status}`,
+    );
+  });
 });

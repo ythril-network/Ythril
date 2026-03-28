@@ -12,7 +12,11 @@ import { CommonModule } from '@angular/common';
  *  2. Calls AuthService.exchangeOidcCode() to exchange the code for an
  *     access_token (PKCE — all server-side exchange happens at the IdP).
  *  3. Verifies the token is accepted by Ythril's own API (/api/tokens/me).
- *  4. Stores the token and navigates to the main app.
+ *  4. Stores the token (via loginOidc to enable silent refresh) and navigates.
+ *
+ * When loaded inside a hidden iframe for silent refresh the component detects
+ * the iframe context and posts the authorization code back to the parent window
+ * instead of completing the full login flow.
  */
 @Component({
   selector: 'app-oidc-callback',
@@ -60,6 +64,19 @@ export class OidcCallbackComponent implements OnInit {
     const errorParam = params.get('error');
     const errorDescription = params.get('error_description');
 
+    // ── Silent refresh: running inside a hidden iframe ──────────────────────
+    // When the parent window performs a silent refresh it creates a hidden
+    // iframe that navigates here.  Post the result back via postMessage so the
+    // parent can exchange the code without any visible navigation.
+    if (window.self !== window.top) {
+      window.parent.postMessage(
+        { type: 'oidc_silent_callback', code, state, error: errorParam ?? null },
+        location.origin,
+      );
+      return;
+    }
+
+    // ── Normal (top-level) callback ─────────────────────────────────────────
     if (errorParam) {
       this.error.set(errorDescription ?? errorParam);
       return;
@@ -71,7 +88,8 @@ export class OidcCallbackComponent implements OnInit {
     }
 
     try {
-      const accessToken = await this.auth.exchangeOidcCode(code, state);
+      const { accessToken, issuerUrl, clientId, scopes } =
+        await this.auth.exchangeOidcCode(code, state);
 
       // Verify the token is accepted by Ythril before storing it
       await new Promise<void>((resolve, reject) => {
@@ -82,7 +100,8 @@ export class OidcCallbackComponent implements OnInit {
           .subscribe({ next: () => resolve(), error: reject });
       });
 
-      this.auth.login(accessToken);
+      // loginOidc persists the OIDC session params and schedules silent refresh
+      this.auth.loginOidc(accessToken, issuerUrl, clientId, scopes);
       await this.router.navigate(['/']);
     } catch (err) {
       this.error.set(
