@@ -7,6 +7,30 @@ import { ApiService, Space } from '../../core/api.service';
   selector: 'app-spaces',
   standalone: true,
   imports: [CommonModule, FormsModule],
+  styles: [`
+    .spaces-toggle-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+    }
+    .space-toggle-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-size: 12px;
+      background: var(--bg-surface);
+      transition: background var(--transition), border-color var(--transition);
+      user-select: none;
+    }
+    .space-toggle-item:hover { background: var(--bg-elevated); }
+    .space-toggle-item input[type=checkbox] { width: 13px; height: 13px; margin: 0; flex-shrink: 0; }
+    .space-toggle-item .space-id { color: var(--text-muted); font-size: 11px; font-family: var(--font-mono); }
+  `],
   template: `
     <!-- Create space -->
     <div class="card" style="margin-bottom: 24px;">
@@ -38,9 +62,21 @@ import { ApiService, Space } from '../../core/api.service';
           <label>Description (optional)</label>
           <textarea [(ngModel)]="form.description" name="description" placeholder="Surfaced to MCP clients as space-level instructions" maxlength="2000" rows="2" style="resize:vertical;"></textarea>
         </div>
-        <div class="field" style="flex:1; min-width:200px; margin-bottom:0;">
-          <label>Proxy for (optional, comma-separated space IDs)</label>
-          <input type="text" [(ngModel)]="form.proxyFor" name="proxyFor" placeholder="eng-kb, research" />
+        <div class="field" style="flex-basis:100%; margin-bottom:0;">
+          <label>Proxy for (optional)</label>
+          @if (spaces().length > 0) {
+            <div class="spaces-toggle-list">
+              @for (s of spaces(); track s.id) {
+                <label class="space-toggle-item">
+                  <input type="checkbox" [checked]="isProxyForSelected(s.id)" (change)="toggleProxyFor(s.id)" />
+                  <span>{{ s.label }}</span>
+                  <span class="space-id">{{ s.id }}</span>
+                </label>
+              }
+            </div>
+          } @else {
+            <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">No existing spaces to select.</div>
+          }
         </div>
         <button class="btn-primary btn" type="submit" [disabled]="creating() || !form.label.trim()">
           @if (creating()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
@@ -106,7 +142,8 @@ export class SpacesComponent implements OnInit {
   loading = signal(true);
   creating = signal(false);
   createError = signal('');
-  form = { label: '', id: '', minGiB: null as number | null, description: '', proxyFor: '' };
+  form = { label: '', id: '', minGiB: null as number | null, description: '' };
+  proxyForSelected: string[] = [];
 
   ngOnInit(): void { this.load(); }
 
@@ -118,6 +155,18 @@ export class SpacesComponent implements OnInit {
     });
   }
 
+  isProxyForSelected(id: string): boolean {
+    return this.proxyForSelected.includes(id);
+  }
+
+  toggleProxyFor(id: string): void {
+    if (this.proxyForSelected.includes(id)) {
+      this.proxyForSelected = this.proxyForSelected.filter(s => s !== id);
+    } else {
+      this.proxyForSelected = [...this.proxyForSelected, id];
+    }
+  }
+
   createSpace(): void {
     if (!this.form.label.trim()) return;
     this.creating.set(true);
@@ -127,14 +176,14 @@ export class SpacesComponent implements OnInit {
     if (this.form.id.trim()) body.id = this.form.id.trim();
     if (this.form.minGiB) body.minGiB = this.form.minGiB;
     if (this.form.description.trim()) body.description = this.form.description.trim();
-    const proxyIds = this.form.proxyFor.split(',').map(s => s.trim()).filter(Boolean);
-    if (proxyIds.length) body.proxyFor = proxyIds;
+    if (this.proxyForSelected.length) body.proxyFor = [...this.proxyForSelected];
 
     this.api.createSpace(body).subscribe({
       next: ({ space }) => {
         this.creating.set(false);
         this.spaces.update(list => [...list, space]);
-        this.form = { label: '', id: '', minGiB: null, description: '', proxyFor: '' };
+        this.form = { label: '', id: '', minGiB: null, description: '' };
+        this.proxyForSelected = [];
       },
       error: (err) => {
         this.creating.set(false);

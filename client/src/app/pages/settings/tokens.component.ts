@@ -1,7 +1,7 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { ApiService, TokenRecord } from '../../core/api.service';
+import { ApiService, Space, TokenRecord } from '../../core/api.service';
 
 @Component({
   selector: 'app-tokens',
@@ -110,6 +110,74 @@ import { ApiService, TokenRecord } from '../../core/api.service';
       letter-spacing: 0;
       font-weight: 400;
     }
+    .spaces-toggle-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+    }
+    .space-toggle-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-size: 12px;
+      background: var(--bg-surface);
+      transition: background var(--transition), border-color var(--transition);
+      user-select: none;
+    }
+    .space-toggle-item:hover { background: var(--bg-elevated); }
+    .space-toggle-item input[type=checkbox] { width: 13px; height: 13px; margin: 0; flex-shrink: 0; }
+    .space-toggle-item .space-id { color: var(--text-muted); font-size: 11px; font-family: var(--font-mono); }
+    .permission-radio-group {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 6px;
+    }
+    .permission-radio-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      background: var(--bg-surface);
+      transition: background var(--transition), border-color var(--transition);
+      user-select: none;
+    }
+    .permission-radio-item:hover { background: var(--bg-elevated); }
+    .permission-radio-item input[type=radio] { width: 14px; height: 14px; margin: 0; flex-shrink: 0; }
+    .capability-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11px;
+      margin-top: 10px;
+      color: var(--text-secondary);
+    }
+    .capability-table th {
+      text-align: center;
+      font-weight: 600;
+      padding: 4px 6px;
+      border-bottom: 1px solid var(--border-muted);
+      white-space: nowrap;
+    }
+    .capability-table th:first-child { text-align: left; }
+    .capability-table td {
+      text-align: center;
+      padding: 4px 6px;
+      border-bottom: 1px solid var(--border-muted);
+    }
+    .capability-table td:first-child { text-align: left; font-weight: 500; color: var(--text-primary); }
+    .capability-table tr.active-row { background: var(--bg-elevated); }
+    .cap-yes { color: var(--success); }
+    .cap-no  { color: var(--text-muted); }
     .token-status-dot {
       display: inline-block;
       width: 8px;
@@ -180,23 +248,81 @@ import { ApiService, TokenRecord } from '../../core/api.service';
 
         <div class="field" style="margin-top:12px; margin-bottom:0;">
           <label>Spaces (optional)</label>
-          <input type="text" [(ngModel)]="newSpaces" name="spaces" placeholder="Comma-separated space IDs, e.g. general, project-x — leave blank to allow all spaces" />
-          <div class="scope-hint">Leave blank to grant access to all spaces.</div>
+          @if (spacesLoadFailed()) {
+            <div class="alert alert-error" style="margin-bottom:6px; font-size:12px;">⚠️ Could not load spaces — enter IDs manually.</div>
+            <input type="text" [(ngModel)]="newSpacesFallback" name="spaces" placeholder="Comma-separated space IDs, e.g. general, project-x" />
+          } @else if (availableSpaces().length === 0) {
+            <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">Loading spaces…</div>
+          } @else {
+            <div class="spaces-toggle-list">
+              @for (s of availableSpaces(); track s.id) {
+                <label class="space-toggle-item">
+                  <input type="checkbox" [checked]="isSpaceSelected(s.id)" (change)="toggleSpace(s.id)" />
+                  <span>{{ s.label }}</span>
+                  <span class="space-id">{{ s.id }}</span>
+                </label>
+              }
+            </div>
+          }
+          <div class="scope-hint">Leave blank / deselect all to grant access to all spaces.</div>
+        </div>
+
+        <div class="field" style="margin-top:12px; margin-bottom:0;">
+          <label>Permission level</label>
+          <div class="permission-radio-group">
+            <label class="permission-radio-item">
+              <input type="radio" name="permission" value="readOnly" [(ngModel)]="newPermission" />
+              Read-only
+            </label>
+            <label class="permission-radio-item">
+              <input type="radio" name="permission" value="standard" [(ngModel)]="newPermission" />
+              Standard
+            </label>
+            @if (selfToken()?.admin) {
+              <label class="permission-radio-item">
+                <input type="radio" name="permission" value="admin" [(ngModel)]="newPermission" />
+                Admin
+              </label>
+            }
+          </div>
+          <table class="capability-table" aria-label="Permission level capabilities">
+            <thead>
+              <tr>
+                <th scope="col">Level</th>
+                <th scope="col">Read brain</th>
+                <th scope="col">Recall</th>
+                <th scope="col">Write brain</th>
+                <th scope="col">Write files</th>
+                <th scope="col">Sync</th>
+                <th scope="col">Manage tokens</th>
+                <th scope="col">Manage spaces &amp; networks</th>
+                <th scope="col">Reload config</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr [class.active-row]="newPermission === 'readOnly'">
+                <td>Read-only</td>
+                <td class="cap-yes">✅</td><td class="cap-yes">✅</td>
+                <td class="cap-no">❌</td><td class="cap-no">❌</td><td class="cap-no">❌</td>
+                <td class="cap-no">❌</td><td class="cap-no">❌</td><td class="cap-no">❌</td>
+              </tr>
+              <tr [class.active-row]="newPermission === 'standard'">
+                <td>Standard</td>
+                <td class="cap-yes">✅</td><td class="cap-yes">✅</td>
+                <td class="cap-yes">✅</td><td class="cap-yes">✅</td><td class="cap-yes">✅</td>
+                <td class="cap-no">❌</td><td class="cap-no">❌</td><td class="cap-no">❌</td>
+              </tr>
+              <tr [class.active-row]="newPermission === 'admin'">
+                <td>Admin</td>
+                <td class="cap-yes">✅</td><td class="cap-yes">✅</td>
+                <td class="cap-yes">✅</td><td class="cap-yes">✅</td><td class="cap-yes">✅</td>
+                <td class="cap-yes">✅</td><td class="cap-yes">✅</td><td class="cap-yes">✅</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
 
         <div class="form-grid-bottom" style="margin-top:12px;">
-          @if (selfToken()?.admin) {
-            <div class="checkbox-field">
-              <input type="checkbox" [(ngModel)]="newAdmin" name="admin" id="newAdmin" style="width:16px;height:16px;margin:0;" />
-              <label for="newAdmin">Admin</label>
-              <span class="scope-hint" style="margin-top:0; margin-left:2px;">— may manage tokens, spaces, networks</span>
-            </div>
-          }
-          <div class="checkbox-field">
-            <input type="checkbox" [(ngModel)]="newReadOnly" name="readOnly" id="newReadOnly" style="width:16px;height:16px;margin:0;" />
-            <label for="newReadOnly">Read-only</label>
-            <span class="scope-hint" style="margin-top:0; margin-left:2px;">— blocks all write operations</span>
-          </div>
           <button class="btn-primary btn" type="submit" style="margin-left:auto;" [disabled]="creating() || !newName.trim()">
             @if (creating()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
             Create token
@@ -285,9 +411,11 @@ export class TokensComponent implements OnInit {
   createError = signal('');
   newName = '';
   newExpiry = '';
-  newAdmin = false;
-  newReadOnly = false;
-  newSpaces = '';
+  newPermission: 'readOnly' | 'standard' | 'admin' = 'standard';
+  newSelectedSpaces: string[] = [];
+  newSpacesFallback = '';
+  availableSpaces = signal<Space[]>([]);
+  spacesLoadFailed = signal(false);
   newToken = signal('');
   copied = signal(false);
   regenToken = signal('');
@@ -296,6 +424,10 @@ export class TokensComponent implements OnInit {
   ngOnInit(): void {
     this.api.getMe().subscribe({ next: (t) => this.selfToken.set(t), error: () => {} });
     this.load();
+    this.api.listSpaces().subscribe({
+      next: ({ spaces }) => this.availableSpaces.set(spaces),
+      error: () => this.spacesLoadFailed.set(true),
+    });
   }
 
   load(): void {
@@ -313,9 +445,15 @@ export class TokensComponent implements OnInit {
 
     const body: { name: string; expiresAt?: string; admin?: boolean; readOnly?: boolean; spaces?: string[] } = { name: this.newName.trim() };
     if (this.newExpiry) body.expiresAt = new Date(this.newExpiry).toISOString();
-    if (this.newAdmin) body.admin = true;
-    if (this.newReadOnly) body.readOnly = true;
-    const spaceIds = this.newSpaces.split(',').map(s => s.trim()).filter(Boolean);
+    if (this.newPermission === 'admin') body.admin = true;
+    if (this.newPermission === 'readOnly') body.readOnly = true;
+
+    let spaceIds: string[];
+    if (this.spacesLoadFailed()) {
+      spaceIds = this.newSpacesFallback.split(',').map(s => s.trim()).filter(Boolean);
+    } else {
+      spaceIds = [...this.newSelectedSpaces];
+    }
     if (spaceIds.length) body.spaces = spaceIds;
 
     this.api.createToken(body).subscribe({
@@ -325,15 +463,27 @@ export class TokensComponent implements OnInit {
         this.newToken.set(plaintext);
         this.newName = '';
         this.newExpiry = '';
-        this.newAdmin = false;
-        this.newReadOnly = false;
-        this.newSpaces = '';
+        this.newPermission = 'standard';
+        this.newSelectedSpaces = [];
+        this.newSpacesFallback = '';
       },
       error: (err) => {
         this.creating.set(false);
         this.createError.set(err.error?.error ?? 'Failed to create token');
       },
     });
+  }
+
+  isSpaceSelected(id: string): boolean {
+    return this.newSelectedSpaces.includes(id);
+  }
+
+  toggleSpace(id: string): void {
+    if (this.newSelectedSpaces.includes(id)) {
+      this.newSelectedSpaces = this.newSelectedSpaces.filter(s => s !== id);
+    } else {
+      this.newSelectedSpaces = [...this.newSelectedSpaces, id];
+    }
   }
 
   regenerate(t: TokenRecord): void {
