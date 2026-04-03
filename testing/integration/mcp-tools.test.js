@@ -628,6 +628,104 @@ describe('MCP brain tools — update_memory / delete_memory / get_stats', () => 
   });
 });
 
+describe('MCP chrono tools — list_chrono tags filter / query chrono collection', () => {
+  let session;
+  const RUN = Date.now();
+  const tagA = `mcp-chrono-tag-a-${RUN}`;
+  const tagB = `mcp-chrono-tag-b-${RUN}`;
+  let idTagA;
+  let idTagB;
+  let idNoTag;
+
+  before(async () => {
+    tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+    session = await openMcpSession('general', tokenA);
+
+    // Create three chrono entries: two with distinct tags, one untagged
+    const rA = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/chrono', {
+      title: `MCP-Tag-A-${RUN}`, kind: 'event',
+      startsAt: new Date().toISOString(), tags: [tagA],
+    });
+    idTagA = rA.body?._id;
+
+    const rB = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/chrono', {
+      title: `MCP-Tag-B-${RUN}`, kind: 'milestone',
+      startsAt: new Date().toISOString(), tags: [tagB],
+    });
+    idTagB = rB.body?._id;
+
+    const rN = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/chrono', {
+      title: `MCP-NoTag-${RUN}`, kind: 'plan',
+      startsAt: new Date().toISOString(), tags: [],
+    });
+    idNoTag = rN.body?._id;
+  });
+  after(async () => {
+    session?.close();
+    for (const id of [idTagA, idTagB, idNoTag]) {
+      if (id) await del(INSTANCES.a, tokenA, `/api/brain/spaces/general/chrono/${id}`).catch(() => {});
+    }
+  });
+
+  it('list_chrono without filters returns results without isError', async () => {
+    const result = await session.callTool('list_chrono', {});
+    assert.ok(!result?.isError, `list_chrono returned isError: ${JSON.stringify(result)}`);
+  });
+
+  it('list_chrono with tags filter returns only matching entries', async (t) => {
+    if (!idTagA) return t.skip('No idTagA — prior setup failed');
+    const result = await session.callTool('list_chrono', { tags: [tagA] });
+    assert.ok(!result?.isError, `list_chrono with tags returned isError: ${JSON.stringify(result)}`);
+    const text = result?.content?.[0]?.text ?? '';
+    assert.ok(text.includes(idTagA), `Expected entry tagged ${tagA} (id ${idTagA}) in results: ${text}`);
+    assert.ok(!text.includes(idTagB), `Entry tagged ${tagB} should NOT appear when filtering by ${tagA}: ${text}`);
+  });
+
+  it('list_chrono with multi-tag filter returns entries matching any tag', async (t) => {
+    if (!idTagA || !idTagB) return t.skip('Missing seeded entries');
+    const result = await session.callTool('list_chrono', { tags: [tagA, tagB] });
+    assert.ok(!result?.isError, `list_chrono multi-tag returned isError: ${JSON.stringify(result)}`);
+    const text = result?.content?.[0]?.text ?? '';
+    assert.ok(text.includes(idTagA), `Expected entry tagged ${tagA} in results: ${text}`);
+    assert.ok(text.includes(idTagB), `Expected entry tagged ${tagB} in results: ${text}`);
+  });
+
+  it('list_chrono with tags filter that matches nothing returns empty message', async () => {
+    const result = await session.callTool('list_chrono', { tags: [`no-such-tag-${RUN}`] });
+    assert.ok(!result?.isError, `list_chrono returned isError: ${JSON.stringify(result)}`);
+    const text = result?.content?.[0]?.text ?? '';
+    assert.ok(text === 'No chrono entries found.' || text.trim() === '', `Expected empty result, got: ${text}`);
+  });
+
+  it('query with collection "chrono" returns array without isError', async (t) => {
+    if (!idTagA) return t.skip('No seeded chrono entry');
+    const result = await session.callTool('query', {
+      collection: 'chrono',
+      filter: { _id: idTagA },
+    });
+    assert.ok(!result?.isError, `query chrono returned isError: ${JSON.stringify(result)}`);
+    const text = result?.content?.[0]?.text ?? '';
+    const parsed = JSON.parse(text);
+    assert.ok(Array.isArray(parsed), `query chrono result must be a JSON array, got: ${text}`);
+    assert.ok(parsed.length >= 1, `Expected at least one result for id ${idTagA}: ${text}`);
+    assert.equal(parsed[0]._id, idTagA, `Expected _id to match`);
+  });
+
+  it('query chrono with tag filter returns matching entries', async (t) => {
+    if (!idTagA) return t.skip('No seeded chrono entry');
+    const result = await session.callTool('query', {
+      collection: 'chrono',
+      filter: { tags: { $in: [tagA] } },
+    });
+    assert.ok(!result?.isError, `query chrono tag filter returned isError: ${JSON.stringify(result)}`);
+    const text = result?.content?.[0]?.text ?? '';
+    const parsed = JSON.parse(text);
+    assert.ok(Array.isArray(parsed), `result must be an array`);
+    assert.ok(parsed.some(e => e._id === idTagA), `Expected entry with tag ${tagA}`);
+    assert.ok(!parsed.some(e => e._id === idTagB), `Entry with only ${tagB} should not appear`);
+  });
+});
+
 describe('MCP security — read-only token cannot call mutating tools', () => {
   let readOnlySession;
   let readOnlyTokenPlaintext;

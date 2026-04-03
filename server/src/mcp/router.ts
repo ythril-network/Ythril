@@ -243,13 +243,15 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
       },
       {
         name: 'list_chrono',
-        description: 'List chronological entries, optionally filtered by status or kind.',
+        description: 'List chronological entries, optionally filtered by status, kind, or tags.',
         inputSchema: {
           type: 'object',
           properties: {
             status: { type: 'string', enum: ['upcoming', 'active', 'completed', 'overdue', 'cancelled'], description: 'Filter by status.' },
             kind: { type: 'string', enum: ['event', 'deadline', 'plan', 'prediction', 'milestone'], description: 'Filter by kind.' },
+            tags: { type: 'array', items: { type: 'string' }, description: 'Filter to entries that carry at least one of these tags.' },
             limit: { type: 'number', description: 'Max results (default 20, max 100).' },
+            skip: { type: 'number', description: 'Number of results to skip for pagination (default 0).' },
           },
           required: [],
         },
@@ -655,12 +657,16 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const filter: Record<string, unknown> = {};
           if (typeof a['status'] === 'string') filter['status'] = a['status'];
           if (typeof a['kind'] === 'string') filter['kind'] = a['kind'];
+          if (Array.isArray(a['tags']) && (a['tags'] as unknown[]).length > 0) {
+            filter['tags'] = { $in: a['tags'] };
+          }
           const limit = typeof a['limit'] === 'number' ? Math.min(a['limit'], 100) : 20;
+          const skip = typeof a['skip'] === 'number' ? Math.max(a['skip'], 0) : 0;
 
           const memberIds = resolveMemberSpaces(spaceId);
-          const all = (await Promise.all(memberIds.map(mid => listChrono(mid, filter, limit)))).flat();
+          const all = (await Promise.all(memberIds.map(mid => listChrono(mid, filter, skip + limit)))).flat();
           all.sort((x, y) => new Date(y.startsAt).getTime() - new Date(x.startsAt).getTime());
-          const results = all.slice(0, limit);
+          const results = all.slice(skip, skip + limit);
           return {
             content: [{
               type: 'text' as const,

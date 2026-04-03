@@ -539,7 +539,13 @@ brainRouter.get('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, as
   const filter: Record<string, unknown> = {};
   if (typeof req.query['status'] === 'string') filter['status'] = req.query['status'];
   if (typeof req.query['kind'] === 'string') filter['kind'] = req.query['kind'];
-  if (typeof req.query['tag'] === 'string') filter['tags'] = req.query['tag'];
+  if (Array.isArray(req.query['tags'])) {
+    filter['tags'] = { $in: req.query['tags'] };
+  } else if (typeof req.query['tags'] === 'string') {
+    filter['tags'] = req.query['tags'];
+  } else if (typeof req.query['tag'] === 'string') {
+    filter['tags'] = req.query['tag'];
+  }
   const memberIds = resolveMemberSpaces(spaceId);
   const all = (await Promise.all(memberIds.map(mid => listChrono(mid, filter, limit, skip)))).flat();
   res.json({ chrono: all, limit, skip });

@@ -124,7 +124,7 @@ Click **+ Add entry** in the Chrono tab. Fill in the title, select a kind, pick 
 
 - `create_chrono` — create a new entry.
 - `update_chrono` — update an existing entry (change status, dates, etc.).
-- `list_chrono` — list entries, optionally filtered by `status` or `kind`.
+- `list_chrono` — list entries, optionally filtered by `status`, `kind`, or `tags`.
 
 The `query` tool also supports `collection: "chrono"` for advanced MongoDB filter queries.
 
@@ -451,7 +451,7 @@ If a space has a `description`, it is sent to the MCP client as `instructions` d
 | `upsert_edge` | Create or update a directed relationship |
 | `create_chrono` | Create a chrono entry (event, deadline, plan, prediction, milestone) |
 | `update_chrono` | Update an existing chrono entry |
-| `list_chrono` | List chrono entries, optionally filtered by status or kind |
+| `list_chrono` | List chrono entries, optionally filtered by status, kind, or tags |
 | `read_file` | Read a file from the space |
 | `write_file` | Write a file to the space |
 | `list_dir` | List directory contents |

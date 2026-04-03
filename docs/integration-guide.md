@@ -2162,7 +2162,7 @@ Content-Type: application/json
 | `upsert_edge` | Create or update a directed relationship |
 | `create_chrono` | Create a chrono entry (event, deadline, plan, prediction, milestone) |
 | `update_chrono` | Update an existing chrono entry |
-| `list_chrono` | List chrono entries, optionally filtered by status or kind |
+| `list_chrono` | List chrono entries, optionally filtered by status, kind, or tags |
 | `read_file` | Read a text file from the space file store |
 | `write_file` | Write a text file to the space file store |
 | `list_dir` | List directory contents |
