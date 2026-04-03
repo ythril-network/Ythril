@@ -93,10 +93,12 @@ describe('Brain â€” memories', () => {
 });
 
 describe('Brain â€” stats', () => {
-  it('Stats endpoint returns counts', async () => {
+  it('Stats endpoint returns counts including files', async () => {
     const r = await get(INSTANCES.a, token(), '/api/brain/spaces/general/stats');
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.ok(typeof r.body.memories === 'number', 'memories count required');
+    assert.ok(typeof r.body.files === 'number', 'files count required');
+    assert.ok(r.body.files >= 0, 'files count must be non-negative');
   });
 });
 

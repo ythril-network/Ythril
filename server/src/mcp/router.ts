@@ -27,6 +27,7 @@ import {
   createDir,
   moveFile,
 } from '../files/files.js';
+import { upsertFileMeta, deleteFileMeta, renameFileMeta } from '../files/file-meta.js';
 
 // Session map: sessionId → transport
 const transports = new Map<string, SSEServerTransport>();
@@ -151,7 +152,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           properties: {
             collection: {
               type: 'string',
-              enum: ['memories', 'entities', 'edges', 'chrono'],
+              enum: ['memories', 'entities', 'edges', 'chrono', 'files'],
               description: 'Collection to query.',
             },
             filter: { type: 'object', description: 'MongoDB filter document.' },
@@ -273,6 +274,8 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           properties: {
             path: { type: 'string', description: 'File path relative to the space root.' },
             content: { type: 'string', description: 'Text content to write.' },
+            description: { type: 'string', description: 'Optional human-readable summary stored as file metadata.' },
+            tags: { type: 'array', items: { type: 'string' }, description: 'Optional tags for filtering and recall.' },
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
           },
           required: ['path', 'content'],
@@ -514,23 +517,25 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             entities: await col(`${mid}_entities`).countDocuments(),
             edges: await col(`${mid}_edges`).countDocuments(),
             chrono: await col(`${mid}_chrono`).countDocuments(),
+            files: await col(`${mid}_files`).countDocuments(),
           })));
           const memories = counts.reduce((s, c) => s + c.memories, 0);
           const entities = counts.reduce((s, c) => s + c.entities, 0);
           const edges = counts.reduce((s, c) => s + c.edges, 0);
           const chrono = counts.reduce((s, c) => s + c.chrono, 0);
+          const files = counts.reduce((s, c) => s + c.files, 0);
           return {
             content: [{
               type: 'text' as const,
-              text: JSON.stringify({ spaceId, memories, entities, edges, chrono }, null, 2),
+              text: JSON.stringify({ spaceId, memories, entities, edges, chrono, files }, null, 2),
             }],
           };
         }
 
         case 'query': {
           const collName = String(a['collection'] ?? '');
-          if (!['memories', 'entities', 'edges', 'chrono'].includes(collName)) {
-            throw new Error(`collection must be one of: memories, entities, edges, chrono`);
+          if (!['memories', 'entities', 'edges', 'chrono', 'files'].includes(collName)) {
+            throw new Error(`collection must be one of: memories, entities, edges, chrono, files`);
           }
           const filter =
             a['filter'] != null && typeof a['filter'] === 'object'
@@ -547,7 +552,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const docs = (await Promise.all(memberIds.map(mid =>
             queryBrain(
               mid,
-              collName as 'memories' | 'entities' | 'edges',
+              collName as 'memories' | 'entities' | 'edges' | 'chrono' | 'files',
               filter,
               projection,
               limit,
@@ -693,6 +698,11 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           // Quota check — throws QuotaError (caught below) on hard limit
           const wfQuota = await checkQuota('files');
           const { sha256 } = await writeFile(wt.target, filePath, content);
+          const sizeBytes = Buffer.byteLength(content, 'utf8');
+          const metaOpts: { description?: string; tags?: string[] } = {};
+          if (typeof a['description'] === 'string') metaOpts.description = a['description'];
+          if (Array.isArray(a['tags'])) metaOpts.tags = a['tags'] as string[];
+          await upsertFileMeta(wt.target, filePath, sizeBytes, metaOpts);
           const wfText = `Written (sha256: ${sha256}).`
             + (wfQuota.softBreached ? `\n⚠️ Storage warning: ${wfQuota.warning}` : '');
           return {
@@ -728,6 +738,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
           if (!wt.ok) throw new Error(wt.error);
           await deleteFile(wt.target, filePath);
+          await deleteFileMeta(wt.target, filePath);
           return { content: [{ type: 'text' as const, text: `Deleted '${filePath}'.` }] };
         }
 
@@ -748,6 +759,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
           if (!wt.ok) throw new Error(wt.error);
           await moveFile(wt.target, src, dst);
+          await renameFileMeta(wt.target, src, dst);
           return { content: [{ type: 'text' as const, text: `Moved '${src}' → '${dst}'.` }] };
         }
 

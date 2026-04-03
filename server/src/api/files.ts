@@ -43,6 +43,7 @@ import { checkQuota, QuotaError } from '../quota/quota.js';
 import { resolveSafePath, spaceRoot } from '../files/sandbox.js';
 import { col } from '../db/mongo.js';
 import type { FileTombstoneDoc } from '../config/types.js';
+import { upsertFileMeta, deleteFileMeta, renameFileMeta } from '../files/file-meta.js';
 import { v4 as uuidv4 } from 'uuid';
 import { resolveMemberSpaces, resolveWriteTarget } from '../spaces/proxy.js';
 
@@ -327,6 +328,14 @@ filesRouter.post(
         ({ sha256 } = await writeFileBytes(targetSpace, filePath, buf));
       }
 
+      // Persist file metadata to MongoDB
+      const metaOpts: { description?: string; tags?: string[] } = {};
+      if (typeof req.body?.description === 'string') metaOpts.description = req.body.description;
+      if (Array.isArray(req.body?.tags)) metaOpts.tags = req.body.tags as string[];
+      await upsertFileMeta(targetSpace, filePath, incomingBytes, metaOpts).catch(err => {
+        log.warn(`upsertFileMeta error for space ${targetSpace}, path ${filePath}: ${err}`);
+      });
+
       const response: { path: string; sha256: string; storageWarning?: boolean } = { path: filePath, sha256 };
       if (quotaResult.softBreached) response.storageWarning = true;
       res.status(201).json(response);
@@ -406,6 +415,9 @@ filesRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadOnly,
       deletedAt: new Date().toISOString(),
     };
     await col<FileTombstoneDoc>(`${targetSpace}_file_tombstones`).insertOne(tombstone as never);
+    await deleteFileMeta(targetSpace, filePath).catch(err => {
+      log.warn(`deleteFileMeta error for space ${targetSpace}, path ${filePath}: ${err}`);
+    });
     res.status(204).end();
   } catch (err) {
     if (err instanceof RangeError) {
@@ -442,6 +454,9 @@ filesRouter.patch('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadOnly, 
 
   try {
     await moveFile(targetSpace, srcPath, destination);
+    await renameFileMeta(targetSpace, srcPath, destination).catch(err => {
+      log.warn(`renameFileMeta error for space ${targetSpace}, ${srcPath} → ${destination}: ${err}`);
+    });
     res.json({ from: srcPath, to: destination });
   } catch (err) {
     if (err instanceof RangeError) {
