@@ -80,6 +80,7 @@ function edgeResult(overrides = {}) {
     from: 'ent-portal',
     to: 'ent-db',
     label: 'connects_to',
+    tags: ['infra'],
     createdAt: '2024-01-01T00:00:00.000Z',
     seq: 3,
     embeddingModel: 'all-MiniLM-L6-v2',
@@ -331,7 +332,8 @@ describe('types[] filter', () => {
 // ── tags filter applicability ──────────────────────────────────────────────────
 
 function tagsApply(knowledgeType) {
-  return knowledgeType === 'memory' || knowledgeType === 'entity' || knowledgeType === 'chrono' || knowledgeType === 'file';
+  // All collection types now have tags — the filter applies universally
+  return true;
 }
 
 describe('Tags filter applicability', () => {
@@ -339,7 +341,7 @@ describe('Tags filter applicability', () => {
   it('tags apply to entity', () => assert.ok(tagsApply('entity')));
   it('tags apply to chrono', () => assert.ok(tagsApply('chrono')));
   it('tags apply to file', () => assert.ok(tagsApply('file')));
-  it('tags do NOT apply to edge', () => assert.ok(!tagsApply('edge')));
+  it('tags apply to edge', () => assert.ok(tagsApply('edge')));
 });
 
 // ── Embedding text derivation ──────────────────────────────────────────────────
@@ -371,8 +373,10 @@ function entityEmbedText(name, type, tags = [], description, properties = {}) {
   return parts.join(' ');
 }
 
-function edgeEmbedText(from, label, to, type, description) {
-  const parts = [from, label, to];
+function edgeEmbedText(from, label, to, tags = [], type, description) {
+  const parts = [];
+  if (tags.length > 0) parts.push(tags.join(' '));
+  parts.push(from, label, to);
   if (type?.trim()) parts.push(type.trim());
   if (description?.trim()) parts.push(description.trim());
   return parts.join(' ');
@@ -468,28 +472,35 @@ describe('Embedding text derivation — entity', () => {
 });
 
 describe('Embedding text derivation — edge', () => {
-  it('from + label + to', () => {
+  it('from + label + to (no tags)', () => {
     assert.equal(edgeEmbedText('adr-0028', 'supersedes', 'adr-0029'), 'adr-0028 supersedes adr-0029');
+  });
+
+  it('tags are prepended before from+label+to', () => {
+    assert.equal(
+      edgeEmbedText('adr-0028', 'supersedes', 'adr-0029', ['security', 'adr']),
+      'security adr adr-0028 supersedes adr-0029',
+    );
   });
 
   it('includes type when present', () => {
     assert.equal(
-      edgeEmbedText('adr-0028', 'supersedes', 'adr-0029', 'causal'),
+      edgeEmbedText('adr-0028', 'supersedes', 'adr-0029', [], 'causal'),
       'adr-0028 supersedes adr-0029 causal',
     );
   });
 
   it('includes description when present', () => {
     assert.equal(
-      edgeEmbedText('adr-0028', 'supersedes', 'adr-0029', undefined, 'Harbor replaced registry:2'),
+      edgeEmbedText('adr-0028', 'supersedes', 'adr-0029', [], undefined, 'Harbor replaced registry:2'),
       'adr-0028 supersedes adr-0029 Harbor replaced registry:2',
     );
   });
 
   it('combines all fields', () => {
     assert.equal(
-      edgeEmbedText('adr-0028', 'supersedes', 'adr-0029', 'causal', 'Harbor replaced registry:2'),
-      'adr-0028 supersedes adr-0029 causal Harbor replaced registry:2',
+      edgeEmbedText('adr-0028', 'supersedes', 'adr-0029', ['security'], 'causal', 'Harbor replaced registry:2'),
+      'security adr-0028 supersedes adr-0029 causal Harbor replaced registry:2',
     );
   });
 });

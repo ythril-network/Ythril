@@ -232,6 +232,7 @@ export interface EdgeDoc {
   label: string;
   type?: string;
   weight?: number;
+  tags: string[];
   description?: string;
   properties?: Record<string, string | number | boolean>;
   author: AuthorRef;

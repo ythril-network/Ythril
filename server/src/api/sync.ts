@@ -97,6 +97,7 @@ const IncomingEdgeDoc = z.object({
   label: z.string(),
   type: z.string().optional(),
   weight: z.number().optional(),
+  tags: z.array(z.string()).max(100).default([]),
   description: z.string().optional(),
   properties: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
   author: AuthorRefSchema,

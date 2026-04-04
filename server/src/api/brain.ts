@@ -314,7 +314,7 @@ brainRouter.post('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, de
   }
   const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
-  const { from, to, label, weight, type, description, properties } = req.body ?? {};
+  const { from, to, label, weight, type, description, properties, tags } = req.body ?? {};
   if (!from || typeof from !== 'string') {
     res.status(400).json({ error: '`from` string required' });
     return;
@@ -339,13 +339,18 @@ brainRouter.post('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, de
     res.status(400).json({ error: '`description` must be a string' });
     return;
   }
+  if (tags !== undefined && (!Array.isArray(tags) || tags.some((t: unknown) => typeof t !== 'string'))) {
+    res.status(400).json({ error: '`tags` must be an array of strings' });
+    return;
+  }
   const safeProps: Record<string, string | number | boolean> | undefined =
     properties != null && typeof properties === 'object' && !Array.isArray(properties)
       ? (properties as Record<string, string | number | boolean>)
       : undefined;
+  const safeTags: string[] | undefined = Array.isArray(tags) ? tags : undefined;
   const edge = await upsertEdge(
     wt.target, from.trim(), to.trim(), label.trim(), weight, type?.trim(),
-    typeof description === 'string' ? description : undefined, safeProps,
+    typeof description === 'string' ? description : undefined, safeProps, safeTags,
   );
   res.status(201).json(edge);
 });
@@ -761,20 +766,23 @@ brainRouter.post('/spaces/:spaceId/reindex', globalRateLimit, requireSpaceAuth, 
       }
     }
 
-    // Re-embed edges (from + label + to + type + description)
+    // Re-embed edges (tags + from + label + to + type + description)
     {
       let skip = 0;
       // eslint-disable-next-line no-constant-condition
       while (true) {
         const batch = await col<EdgeDoc>(`${mid}_edges`)
-          .find({}, { projection: { _id: 1, from: 1, label: 1, to: 1, type: 1, description: 1 } })
+          .find({}, { projection: { _id: 1, from: 1, label: 1, to: 1, type: 1, tags: 1, description: 1 } })
           .skip(skip)
           .limit(BATCH)
           .toArray();
         if (batch.length === 0) break;
         for (const doc of batch) {
           try {
-            const parts: string[] = [doc.from, doc.label, doc.to];
+            const tags: string[] = Array.isArray(doc.tags) ? doc.tags : [];
+            const parts: string[] = [];
+            if (tags.length > 0) parts.push(tags.join(' '));
+            parts.push(doc.from, doc.label, doc.to);
             if (doc.type?.trim()) parts.push(doc.type.trim());
             if (doc.description?.trim()) parts.push(doc.description.trim());
             const result = await embed(parts.join(' '));

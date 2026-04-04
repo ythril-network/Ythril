@@ -10,15 +10,18 @@ function authorRef() {
   return { instanceId: cfg.instanceId, instanceLabel: cfg.instanceLabel };
 }
 
-/** Derive the text to embed for an edge (from + label + to + optional type + optional description). */
+/** Derive the text to embed for an edge (tags + from + label + to + optional type + optional description). */
 function edgeEmbedText(
   from: string,
   label: string,
   to: string,
+  tags: string[] = [],
   type?: string,
   description?: string,
 ): string {
-  const parts: string[] = [from, label, to];
+  const parts: string[] = [];
+  if (tags.length > 0) parts.push(tags.join(' '));
+  parts.push(from, label, to);
   if (type?.trim()) parts.push(type.trim());
   if (description?.trim()) parts.push(description.trim());
   return parts.join(' ');
@@ -37,6 +40,7 @@ export async function upsertEdge(
   type?: string,
   description?: string,
   properties?: Record<string, string | number | boolean>,
+  tags?: string[],
 ): Promise<EdgeDoc> {
   const collection = col<EdgeDoc>(`${spaceId}_edges`);
   const existing = await collection.findOne({ spaceId, from, to, label } as never);
@@ -46,19 +50,26 @@ export async function upsertEdge(
 
   const effectiveDesc = description ?? (existing as EdgeDoc | null)?.description;
   const effectiveType = type ?? (existing as EdgeDoc | null)?.type;
+  const effectiveTags = tags !== undefined
+    ? Array.from(new Set([...((existing as EdgeDoc | null)?.tags ?? []), ...tags]))
+    : ((existing as EdgeDoc | null)?.tags ?? []);
 
   // Embed the edge text (best-effort)
   let embeddingFields: { embedding?: number[]; embeddingModel?: string } = {};
   try {
-    const embResult = await embed(edgeEmbedText(from, label, to, effectiveType, effectiveDesc));
+    const embResult = await embed(edgeEmbedText(from, label, to, effectiveTags, effectiveType, effectiveDesc));
     embeddingFields = { embedding: embResult.vector, embeddingModel: embResult.model };
   } catch { /* embedding unavailable — edge stored without vector */ }
 
   if (existing) {
+    const mergedTags = tags !== undefined
+      ? Array.from(new Set([...((existing as EdgeDoc).tags ?? []), ...tags]))
+      : undefined;
     const $set: Record<string, unknown> = { updatedAt: now, seq, ...embeddingFields };
     if (weight !== undefined) $set['weight'] = weight;
     if (type !== undefined) $set['type'] = type;
     if (description !== undefined) $set['description'] = description;
+    if (mergedTags !== undefined) $set['tags'] = mergedTags;
     if (properties !== undefined) {
       const mergedProps = { ...((existing as EdgeDoc).properties ?? {}), ...properties };
       $set['properties'] = mergedProps;
@@ -74,6 +85,7 @@ export async function upsertEdge(
       ...(weight !== undefined ? { weight } : {}),
       ...(type !== undefined ? { type } : {}),
       ...(description !== undefined ? { description } : {}),
+      ...(mergedTags !== undefined ? { tags: mergedTags } : {}),
       ...(properties !== undefined ? { properties: { ...((existing as EdgeDoc).properties ?? {}), ...properties } } : {}),
       ...embeddingFields,
     };
@@ -85,6 +97,7 @@ export async function upsertEdge(
     from,
     to,
     label,
+    tags: tags ?? [],
     ...(type !== undefined ? { type } : {}),
     ...(weight !== undefined ? { weight } : {}),
     ...(description !== undefined ? { description } : {}),

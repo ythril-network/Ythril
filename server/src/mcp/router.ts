@@ -242,6 +242,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             from: { type: 'string', description: 'Source entity ID.' },
             to: { type: 'string', description: 'Target entity ID.' },
             label: { type: 'string', description: 'Relationship label (e.g. "works_at", "knows").' },            type: { type: 'string', description: 'Optional edge type (e.g. "causal", "attribution").' },            weight: { type: 'number', description: 'Optional edge weight (0–1).' },
+            tags: { type: 'array', items: { type: 'string' }, description: 'Categorisation tags.' },
             description: { type: 'string', description: 'Optional prose description of why this relationship exists.' },
             properties: {
               type: 'object',
@@ -694,12 +695,13 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const weight = typeof a['weight'] === 'number' ? a['weight'] : undefined;
           const edgeType = typeof a['type'] === 'string' ? a['type'] : undefined;
           const description = typeof a['description'] === 'string' ? a['description'] : undefined;
+          const edgeTags = Array.isArray(a['tags']) ? (a['tags'] as string[]) : undefined;
           const edgeProps = (a['properties'] != null && typeof a['properties'] === 'object' && !Array.isArray(a['properties']))
             ? (a['properties'] as Record<string, string | number | boolean>)
             : undefined;
           const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
           if (!wt.ok) throw new Error(wt.error);
-          const edge = await upsertEdge(wt.target, from, to, label, weight, edgeType, description, edgeProps);
+          const edge = await upsertEdge(wt.target, from, to, label, weight, edgeType, description, edgeProps, edgeTags);
           return {
             content: [{ type: 'text' as const, text: `Edge '${label}' (${from} → ${to}) upserted (ID ${edge._id}).` }],
           };

@@ -212,8 +212,8 @@ async function recallByType(
     },
   ];
 
-  // Tags filter applies to types that have tags
-  if (tags && tags.length > 0 && (knowledgeType === 'memory' || knowledgeType === 'entity' || knowledgeType === 'chrono' || knowledgeType === 'file')) {
+  // Tags filter applies to all types that have tags
+  if (tags && tags.length > 0) {
     pipeline.push({ $match: { tags: { $all: tags } } });
   }
 
@@ -227,7 +227,7 @@ async function recallByType(
   } else if (knowledgeType === 'entity') {
     typeProject = { name: 1, type: 1, tags: 1, description: 1, properties: 1 };
   } else if (knowledgeType === 'edge') {
-    typeProject = { from: 1, to: 1, label: 1, weight: 1, description: 1, properties: 1 };
+    typeProject = { from: 1, to: 1, label: 1, weight: 1, tags: 1, description: 1, properties: 1 };
   } else if (knowledgeType === 'chrono') {
     typeProject = { title: 1, description: 1, kind: 1, startsAt: 1, tags: 1, entityIds: 1, properties: 1 };
   } else if (knowledgeType === 'file') {
@@ -271,6 +271,7 @@ function mapToRecallResult(doc: Record<string, unknown>, knowledgeType: RecallKn
     base.to = doc['to'] as string | undefined;
     base.label = doc['label'] as string | undefined;
     base.weight = doc['weight'] as number | undefined;
+    base.tags = doc['tags'] as string[] | undefined;
     base.description = doc['description'] as string | undefined;
     base.properties = doc['properties'] as Record<string, string | number | boolean> | undefined;
   } else if (knowledgeType === 'chrono') {
