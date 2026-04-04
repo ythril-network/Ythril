@@ -38,16 +38,39 @@ export async function remember(
   return doc;
 }
 
+export type RecallKnowledgeType = 'memory' | 'entity' | 'edge' | 'chrono' | 'file';
+
 export interface RecallResult {
   _id: string;
   spaceId: string;
-  fact: string;
+  /** Discriminates the knowledge type of the result. */
+  type: RecallKnowledgeType;
   score: number;
-  tags: string[];
-  entityIds: string[];
-  createdAt: string;
-  seq: number;
-  embeddingModel: string;
+  createdAt?: string;
+  seq?: number;
+  embeddingModel?: string;
+  tags?: string[];
+  // memory-specific
+  fact?: string;
+  entityIds?: string[];
+  // entity-specific
+  name?: string;
+  /** Entity type string (named `entityType` to avoid conflict with the `type` discriminator). */
+  entityType?: string;
+  properties?: Record<string, string | number | boolean>;
+  // edge-specific
+  from?: string;
+  to?: string;
+  label?: string;
+  weight?: number;
+  // chrono-specific
+  title?: string;
+  description?: string;
+  kind?: string;
+  startsAt?: string;
+  // file-specific
+  path?: string;
+  sizeBytes?: number;
 }
 
 /** Semantic recall using $vectorSearch (Atlas Local / Atlas / MongoDB 8.2+) */
@@ -56,6 +79,7 @@ export async function recall(
   query: string,
   topK = 10,
   tags?: string[],
+  types?: RecallKnowledgeType[],
 ): Promise<RecallResult[]> {
   if (!isVectorSearchAvailable()) {
     throw new Error(
@@ -72,42 +96,133 @@ export async function recall(
   }
   const embResult = await embed(query, 'query');
   const embCfg = getEmbeddingConfig();
+  void embCfg; // used in index init, not here
+
+  const activeTypes: RecallKnowledgeType[] = (types && types.length > 0)
+    ? types
+    : ['memory', 'entity', 'edge', 'chrono', 'file'];
+
+  // Run vector searches in parallel for all active types
+  const perTypeK = Math.ceil(topK * 1.5);
+  const searches = activeTypes.map(t => recallByType(spaceId, t, embResult.vector, perTypeK, tags));
+  const allResults = (await Promise.all(searches)).flat();
+
+  // Sort by score descending, deduplicate by _id, take topK
+  allResults.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  const seen = new Set<string>();
+  const deduped: RecallResult[] = [];
+  for (const r of allResults) {
+    if (!seen.has(r._id)) {
+      seen.add(r._id);
+      deduped.push(r);
+    }
+  }
+  return deduped.slice(0, topK);
+}
+
+/** Maps knowledge types to their MongoDB collection suffixes. */
+const KNOWLEDGE_COLLECTION: Record<RecallKnowledgeType, string> = {
+  memory: 'memories',
+  entity: 'entities',
+  edge: 'edges',
+  chrono: 'chrono',
+  file: 'files',
+};
+
+/** Run $vectorSearch against a single collection and map results to RecallResult. */
+async function recallByType(
+  spaceId: string,
+  knowledgeType: RecallKnowledgeType,
+  queryVector: number[],
+  topK: number,
+  tags?: string[],
+): Promise<RecallResult[]> {
+  const collSuffix = KNOWLEDGE_COLLECTION[knowledgeType];
+  const collName = `${spaceId}_${collSuffix}`;
+  const indexName = `${spaceId}_${collSuffix}_embedding`;
 
   const pipeline: object[] = [
     {
       $vectorSearch: {
-        index: `${spaceId}_memories_embedding`,
+        index: indexName,
         path: 'embedding',
-        queryVector: embResult.vector,
+        queryVector,
         numCandidates: Math.min(topK * 15, 1000),
         limit: topK,
       },
     },
   ];
 
-  if (tags && tags.length > 0) {
+  // Tags filter applies to types that have tags
+  if (tags && tags.length > 0 && (knowledgeType === 'memory' || knowledgeType === 'entity' || knowledgeType === 'chrono' || knowledgeType === 'file')) {
     pipeline.push({ $match: { tags: { $all: tags } } });
   }
 
-  pipeline.push({
-    $project: {
-      _id: 1,
-      spaceId: 1,
-      fact: 1,
-      tags: 1,
-      entityIds: 1,
-      createdAt: 1,
-      seq: 1,
-      embeddingModel: 1,
-      score: { $meta: 'vectorSearchScore' },
-    },
-  });
+  pipeline.push({ $addFields: { _knowledgeType: knowledgeType, score: { $meta: 'vectorSearchScore' } } });
 
-  void embCfg; // used in index init, not here
-  const docs = await col<MemoryDoc>(`${spaceId}_memories`)
-    .aggregate<RecallResult>(pipeline)
-    .toArray();
-  return docs;
+  // Project type-specific fields, always exclude embedding vector
+  const commonProject = { _id: 1, spaceId: 1, _knowledgeType: 1, score: 1, createdAt: 1, seq: 1, embeddingModel: 1 };
+  let typeProject: Record<string, number> = {};
+  if (knowledgeType === 'memory') {
+    typeProject = { fact: 1, tags: 1, entityIds: 1 };
+  } else if (knowledgeType === 'entity') {
+    typeProject = { name: 1, type: 1, tags: 1, properties: 1 };
+  } else if (knowledgeType === 'edge') {
+    typeProject = { from: 1, to: 1, label: 1, weight: 1 };
+  } else if (knowledgeType === 'chrono') {
+    typeProject = { title: 1, description: 1, kind: 1, startsAt: 1, tags: 1, entityIds: 1 };
+  } else if (knowledgeType === 'file') {
+    typeProject = { path: 1, description: 1, tags: 1, sizeBytes: 1 };
+  }
+  pipeline.push({ $project: { ...commonProject, ...typeProject } });
+
+  try {
+    const docs = await col(collName).aggregate<Record<string, unknown>>(pipeline).toArray();
+    return docs.map(d => mapToRecallResult(d, knowledgeType));
+  } catch {
+    // If this collection has no vector index yet (e.g. old data), return empty
+    return [];
+  }
+}
+
+function mapToRecallResult(doc: Record<string, unknown>, knowledgeType: RecallKnowledgeType): RecallResult {
+  const base: RecallResult = {
+    _id: doc['_id'] as string,
+    spaceId: doc['spaceId'] as string,
+    type: knowledgeType,
+    score: doc['score'] as number,
+    createdAt: doc['createdAt'] as string | undefined,
+    seq: doc['seq'] as number | undefined,
+    embeddingModel: doc['embeddingModel'] as string | undefined,
+  };
+  if (knowledgeType === 'memory') {
+    base.fact = doc['fact'] as string | undefined;
+    base.tags = doc['tags'] as string[] | undefined;
+    base.entityIds = doc['entityIds'] as string[] | undefined;
+  } else if (knowledgeType === 'entity') {
+    base.name = doc['name'] as string | undefined;
+    base.entityType = doc['type'] as string | undefined;
+    base.tags = doc['tags'] as string[] | undefined;
+    base.properties = doc['properties'] as Record<string, string | number | boolean> | undefined;
+  } else if (knowledgeType === 'edge') {
+    base.from = doc['from'] as string | undefined;
+    base.to = doc['to'] as string | undefined;
+    base.label = doc['label'] as string | undefined;
+    base.weight = doc['weight'] as number | undefined;
+  } else if (knowledgeType === 'chrono') {
+    base.title = doc['title'] as string | undefined;
+    base.description = doc['description'] as string | undefined;
+    base.kind = doc['kind'] as string | undefined;
+    base.startsAt = doc['startsAt'] as string | undefined;
+    base.tags = doc['tags'] as string[] | undefined;
+    base.entityIds = doc['entityIds'] as string[] | undefined;
+  } else if (knowledgeType === 'file') {
+    base.path = doc['path'] as string | undefined;
+    base.description = doc['description'] as string | undefined;
+    base.tags = doc['tags'] as string[] | undefined;
+    base.sizeBytes = doc['sizeBytes'] as number | undefined;
+  }
+  return base;
 }
 
 /** Semantic recall across multiple spaces (parallel) */
@@ -116,8 +231,9 @@ export async function recallGlobal(
   query: string,
   topK = 10,
   tags?: string[],
+  types?: RecallKnowledgeType[],
 ): Promise<RecallResult[]> {
-  const results = await Promise.all(spaceIds.map(id => recall(id, query, topK, tags)));
+  const results = await Promise.all(spaceIds.map(id => recall(id, query, topK, tags, types)));
   const flat = results.flat();
   // Sort by score descending, deduplicate by _id
   const seen = new Set<string>();

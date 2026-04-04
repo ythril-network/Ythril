@@ -14,7 +14,7 @@ import { needsReindex, clearReindexFlag } from '../spaces/spaces.js';
 import { log } from '../util/log.js';
 import { checkQuota, QuotaError } from '../quota/quota.js';
 import { resolveMemberSpaces, resolveWriteTarget, findSpace, isProxySpace } from '../spaces/proxy.js';
-import type { MemoryDoc, ChronoKind, ChronoStatus } from '../config/types.js';
+import type { MemoryDoc, EntityDoc, EdgeDoc, ChronoEntry, FileMetaDoc, ChronoKind, ChronoStatus } from '../config/types.js';
 import { reindexInProgress } from '../metrics/registry.js';
 
 export const brainRouter = Router();
@@ -639,32 +639,132 @@ brainRouter.post('/spaces/:spaceId/reindex', globalRateLimit, requireSpaceAuth, 
   try {
   for (const mid of memberIds) {
     const BATCH = 50;
-    let skip = 0;
 
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      const batch = await col<MemoryDoc>(`${mid}_memories`)
-        .find({}, { projection: { _id: 1, fact: 1 } })
-        .skip(skip)
-        .limit(BATCH)
-        .toArray();
-
-      if (batch.length === 0) break;
-
-      for (const doc of batch) {
-        try {
-          const result = await embed(doc.fact);
-          await col<MemoryDoc>(`${mid}_memories`).updateOne(
-            { _id: doc._id },
-            { $set: { embedding: result.vector, embeddingModel: result.model } },
-          );
-          reindexed++;
-        } catch {
-          errors++;
+    // Re-embed memories
+    {
+      let skip = 0;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const batch = await col<MemoryDoc>(`${mid}_memories`)
+          .find({}, { projection: { _id: 1, fact: 1 } })
+          .skip(skip)
+          .limit(BATCH)
+          .toArray();
+        if (batch.length === 0) break;
+        for (const doc of batch) {
+          try {
+            const result = await embed(doc.fact);
+            await col<MemoryDoc>(`${mid}_memories`).updateOne(
+              { _id: doc._id },
+              { $set: { embedding: result.vector, embeddingModel: result.model } },
+            );
+            reindexed++;
+          } catch { errors++; }
         }
+        skip += batch.length;
       }
+    }
 
-      skip += batch.length;
+    // Re-embed entities (name + type)
+    {
+      let skip = 0;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const batch = await col<EntityDoc>(`${mid}_entities`)
+          .find({}, { projection: { _id: 1, name: 1, type: 1 } })
+          .skip(skip)
+          .limit(BATCH)
+          .toArray();
+        if (batch.length === 0) break;
+        for (const doc of batch) {
+          try {
+            const result = await embed(`${doc.name} ${doc.type}`);
+            await col<EntityDoc>(`${mid}_entities`).updateOne(
+              { _id: doc._id },
+              { $set: { embedding: result.vector, embeddingModel: result.model } },
+            );
+            reindexed++;
+          } catch { errors++; }
+        }
+        skip += batch.length;
+      }
+    }
+
+    // Re-embed edges (label)
+    {
+      let skip = 0;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const batch = await col<EdgeDoc>(`${mid}_edges`)
+          .find({}, { projection: { _id: 1, label: 1 } })
+          .skip(skip)
+          .limit(BATCH)
+          .toArray();
+        if (batch.length === 0) break;
+        for (const doc of batch) {
+          try {
+            const result = await embed(doc.label);
+            await col<EdgeDoc>(`${mid}_edges`).updateOne(
+              { _id: doc._id },
+              { $set: { embedding: result.vector, embeddingModel: result.model } },
+            );
+            reindexed++;
+          } catch { errors++; }
+        }
+        skip += batch.length;
+      }
+    }
+
+    // Re-embed chrono (title + description)
+    {
+      let skip = 0;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const batch = await col<ChronoEntry>(`${mid}_chrono`)
+          .find({}, { projection: { _id: 1, title: 1, description: 1 } })
+          .skip(skip)
+          .limit(BATCH)
+          .toArray();
+        if (batch.length === 0) break;
+        for (const doc of batch) {
+          try {
+            const text = doc.description ? `${doc.title} ${doc.description}` : doc.title;
+            const result = await embed(text);
+            await col<ChronoEntry>(`${mid}_chrono`).updateOne(
+              { _id: doc._id },
+              { $set: { embedding: result.vector, embeddingModel: result.model } },
+            );
+            reindexed++;
+          } catch { errors++; }
+        }
+        skip += batch.length;
+      }
+    }
+
+    // Re-embed files (description if present, otherwise path)
+    {
+      let skip = 0;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const batch = await col<FileMetaDoc>(`${mid}_files`)
+          .find({}, { projection: { _id: 1, path: 1, description: 1 } })
+          .skip(skip)
+          .limit(BATCH)
+          .toArray();
+        if (batch.length === 0) break;
+        for (const doc of batch) {
+          try {
+            const text = doc.description?.trim() ? doc.description : doc.path;
+            const result = await embed(text);
+            await col<FileMetaDoc>(`${mid}_files`).updateOne(
+              { _id: doc._id },
+              { $set: { embedding: result.vector, embeddingModel: result.model } },
+            );
+            reindexed++;
+          } catch { errors++; }
+        }
+        skip += batch.length;
+      }
     }
 
     clearReindexFlag(mid);

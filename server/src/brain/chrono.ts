@@ -1,12 +1,18 @@
 import { v4 as uuidv4 } from 'uuid';
 import { col } from '../db/mongo.js';
 import { nextSeq } from '../util/seq.js';
+import { embed } from './embedding.js';
 import { getConfig } from '../config/loader.js';
 import type { ChronoEntry, ChronoKind, ChronoStatus, TombstoneDoc } from '../config/types.js';
 
 function authorRef() {
   const cfg = getConfig();
   return { instanceId: cfg.instanceId, instanceLabel: cfg.instanceLabel };
+}
+
+/** Derive the text to embed for a chrono entry (title + optional description). */
+function chronoEmbedText(title: string, description?: string): string {
+  return description ? `${title} ${description}` : title;
 }
 
 export async function createChrono(
@@ -28,6 +34,13 @@ export async function createChrono(
   const seq = await nextSeq(spaceId);
   const now = new Date().toISOString();
 
+  // Embed title + description (best-effort)
+  let embeddingFields: { embedding?: number[]; embeddingModel?: string } = {};
+  try {
+    const embResult = await embed(chronoEmbedText(fields.title, fields.description));
+    embeddingFields = { embedding: embResult.vector, embeddingModel: embResult.model };
+  } catch { /* embedding unavailable — chrono stored without vector */ }
+
   const doc: ChronoEntry = {
     _id: uuidv4(),
     spaceId,
@@ -42,6 +55,7 @@ export async function createChrono(
     createdAt: now,
     updatedAt: now,
     seq,
+    ...embeddingFields,
   };
   if (fields.description !== undefined) doc.description = fields.description;
   if (fields.endsAt !== undefined) doc.endsAt = fields.endsAt;
@@ -65,6 +79,17 @@ export async function updateChrono(
   const $set: Record<string, unknown> = { updatedAt: now, seq };
   for (const [k, v] of Object.entries(updates)) {
     if (v !== undefined) $set[k] = v;
+  }
+
+  // Re-embed if title or description changes
+  if (updates.title !== undefined || updates.description !== undefined) {
+    const newTitle = updates.title ?? existing.title;
+    const newDesc = updates.description !== undefined ? updates.description : existing.description;
+    try {
+      const embResult = await embed(chronoEmbedText(newTitle, newDesc));
+      $set['embedding'] = embResult.vector;
+      $set['embeddingModel'] = embResult.model;
+    } catch { /* embedding unavailable — keep existing embedding */ }
   }
 
   await col<ChronoEntry>(`${spaceId}_chrono`).updateOne(

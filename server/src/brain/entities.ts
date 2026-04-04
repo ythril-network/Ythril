@@ -1,12 +1,18 @@
 import { v4 as uuidv4 } from 'uuid';
 import { col } from '../db/mongo.js';
 import { nextSeq } from '../util/seq.js';
+import { embed } from './embedding.js';
 import { getConfig } from '../config/loader.js';
 import type { EntityDoc, TombstoneDoc } from '../config/types.js';
 
 function authorRef() {
   const cfg = getConfig();
   return { instanceId: cfg.instanceId, instanceLabel: cfg.instanceLabel };
+}
+
+/** Derive the text to embed for an entity (name + type). */
+function entityEmbedText(name: string, type: string): string {
+  return `${name} ${type}`;
 }
 
 /**
@@ -26,14 +32,21 @@ export async function upsertEntity(
   const seq = await nextSeq(spaceId);
   const now = new Date().toISOString();
 
+  // Embed the entity text (best-effort — if embedding fails we still store the entity)
+  let embeddingFields: { embedding?: number[]; embeddingModel?: string } = {};
+  try {
+    const embResult = await embed(entityEmbedText(name, type));
+    embeddingFields = { embedding: embResult.vector, embeddingModel: embResult.model };
+  } catch { /* embedding unavailable — entity stored without vector */ }
+
   if (existing) {
     const updatedTags = Array.from(new Set([...((existing as EntityDoc).tags ?? []), ...tags]));
     const mergedProps = { ...((existing as EntityDoc).properties ?? {}), ...properties };
     await collection.updateOne(
       { _id: (existing as EntityDoc)._id } as never,
-      { $set: { tags: updatedTags, properties: mergedProps, updatedAt: now, seq } } as never,
+      { $set: { tags: updatedTags, properties: mergedProps, updatedAt: now, seq, ...embeddingFields } } as never,
     );
-    return { ...(existing as EntityDoc), tags: updatedTags, properties: mergedProps, updatedAt: now, seq };
+    return { ...(existing as EntityDoc), tags: updatedTags, properties: mergedProps, updatedAt: now, seq, ...embeddingFields };
   }
 
   const doc: EntityDoc = {
@@ -47,6 +60,7 @@ export async function upsertEntity(
     createdAt: now,
     updatedAt: now,
     seq,
+    ...embeddingFields,
   };
   await collection.insertOne(doc as never);
   return doc;

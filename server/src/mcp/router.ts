@@ -14,7 +14,7 @@ import { resolveMemberSpaces, resolveWriteTarget, isProxySpace } from '../spaces
 import { updateSpace } from '../spaces/spaces.js';
 
 // Brain tools
-import { remember, recall, recallGlobal, queryBrain, updateMemory, deleteMemory } from '../brain/memory.js';
+import { remember, recall, recallGlobal, queryBrain, updateMemory, deleteMemory, type RecallKnowledgeType, type RecallResult } from '../brain/memory.js';
 import { col } from '../db/mongo.js';
 import { upsertEntity, listEntities } from '../brain/entities.js';
 import { upsertEdge, listEdges } from '../brain/edges.js';
@@ -32,6 +32,24 @@ import { upsertFileMeta, deleteFileMeta, renameFileMeta } from '../files/file-me
 
 // Session map: sessionId → transport
 const transports = new Map<string, SSEServerTransport>();
+
+/** Format a RecallResult as a single human-readable summary line. */
+function formatRecallSummary(r: RecallResult): string {
+  switch (r.type) {
+    case 'memory':
+      return r.fact ?? '';
+    case 'entity':
+      return `${r.name ?? ''} (${r.entityType ?? ''})`;
+    case 'edge':
+      return `${r.from ?? ''} → ${r.label ?? ''} → ${r.to ?? ''}`;
+    case 'chrono':
+      return r.description ? `${r.title ?? ''}: ${r.description}` : (r.title ?? '');
+    case 'file':
+      return r.description ? `${r.path ?? ''}: ${r.description}` : (r.path ?? '');
+    default:
+      return '';
+  }
+}
 
 const MUTATING_TOOLS = new Set([
   'remember', 'update_memory', 'delete_memory',
@@ -87,26 +105,36 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
       },
       {
         name: 'recall',
-        description: 'Semantically search memories in this space.',
+        description: 'Semantically search all knowledge types (memories, entities, edges, chrono entries, files) in this space.',
         inputSchema: {
           type: 'object',
           properties: {
             query: { type: 'string', description: 'Natural language search query.' },
             topK: { type: 'number', description: 'Max results (default 10).' },
-            tags: { type: 'array', items: { type: 'string' }, description: 'Optional tag filter — only memories bearing ALL of these tags are returned.' },
+            tags: { type: 'array', items: { type: 'string' }, description: 'Optional tag filter — only results bearing ALL of these tags are returned (applies to memories, entities, chrono entries, and files).' },
+            types: {
+              type: 'array',
+              items: { type: 'string', enum: ['memory', 'entity', 'edge', 'chrono', 'file'] },
+              description: 'Optional knowledge-type filter — restrict results to one or more types. Omit to search all types.',
+            },
           },
           required: ['query'],
         },
       },
       {
         name: 'recall_global',
-        description: 'Semantically search memories across ALL accessible spaces in parallel.',
+        description: 'Semantically search all knowledge types (memories, entities, edges, chrono entries, files) across ALL accessible spaces in parallel.',
         inputSchema: {
           type: 'object',
           properties: {
             query: { type: 'string', description: 'Natural language search query.' },
             topK: { type: 'number', description: 'Max results per space before merging (default 5).' },
-            tags: { type: 'array', items: { type: 'string' }, description: 'Optional tag filter — only memories bearing ALL of these tags are returned.' },
+            tags: { type: 'array', items: { type: 'string' }, description: 'Optional tag filter — only results bearing ALL of these tags are returned (applies to memories, entities, chrono entries, and files).' },
+            types: {
+              type: 'array',
+              items: { type: 'string', enum: ['memory', 'entity', 'edge', 'chrono', 'file'] },
+              description: 'Optional knowledge-type filter — restrict results to one or more types. Omit to search all types.',
+            },
           },
           required: ['query'],
         },
@@ -429,8 +457,9 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           if (!query.trim()) throw new Error('query must not be empty');
           const topK = typeof a['topK'] === 'number' ? a['topK'] : 10;
           const tags = Array.isArray(a['tags']) ? (a['tags'] as unknown[]).filter((t): t is string => typeof t === 'string') : undefined;
+          const types = Array.isArray(a['types']) ? (a['types'] as unknown[]).filter((t): t is RecallKnowledgeType => typeof t === 'string') : undefined;
           const memberIds = resolveMemberSpaces(spaceId);
-          const all = (await Promise.all(memberIds.map(mid => recall(mid, query, topK, tags)))).flat();
+          const all = (await Promise.all(memberIds.map(mid => recall(mid, query, topK, tags, types)))).flat();
           // Sort by score descending and take topK
           all.sort((x, y) => (y.score ?? 0) - (x.score ?? 0));
           const results = all.slice(0, topK);
@@ -440,11 +469,11 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
                 type: 'text' as const,
                 text:
                   results.length === 0
-                    ? 'No memories found.'
+                    ? 'No results found.'
                     : results
                         .map(
                           (r, i) =>
-                            `[${i + 1}] (score: ${r.score?.toFixed(3) ?? 'n/a'}) ${r.fact}`,
+                            `[${i + 1}] [${r.type}] (score: ${r.score?.toFixed(3) ?? 'n/a'}) ${formatRecallSummary(r)}`,
                         )
                         .join('\n'),
               },
@@ -457,23 +486,24 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           if (!query.trim()) throw new Error('query must not be empty');
           const topK = typeof a['topK'] === 'number' ? a['topK'] : 5;
           const tags = Array.isArray(a['tags']) ? (a['tags'] as unknown[]).filter((t): t is string => typeof t === 'string') : undefined;
+          const types = Array.isArray(a['types']) ? (a['types'] as unknown[]).filter((t): t is RecallKnowledgeType => typeof t === 'string') : undefined;
           const cfg = getConfig();
           // Only search spaces allowed by the calling token (tokenSpaces undefined = all spaces).
           const spaceIds = cfg.spaces
             .filter(s => !tokenSpaces || tokenSpaces.includes(s.id))
             .map(s => s.id);
-          const results = await recallGlobal(spaceIds, query, topK, tags);
+          const results = await recallGlobal(spaceIds, query, topK, tags, types);
           return {
             content: [
               {
                 type: 'text' as const,
                 text:
                   results.length === 0
-                    ? 'No memories found across any space.'
+                    ? 'No results found across any space.'
                     : results
                         .map(
                           (r, i) =>
-                            `[${i + 1}] [${r.spaceId}] (score: ${r.score?.toFixed(3) ?? 'n/a'}) ${r.fact}`,
+                            `[${i + 1}] [${r.spaceId}] [${r.type}] (score: ${r.score?.toFixed(3) ?? 'n/a'}) ${formatRecallSummary(r)}`,
                         )
                         .join('\n'),
               },

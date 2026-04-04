@@ -211,6 +211,8 @@ export interface EntityDoc {
   createdAt: string;
   updatedAt: string;
   seq: number;
+  embedding?: number[];
+  embeddingModel?: string;
 }
 
 export interface EdgeDoc {
@@ -225,6 +227,8 @@ export interface EdgeDoc {
   createdAt: string;
   updatedAt: string;
   seq: number;
+  embedding?: number[];
+  embeddingModel?: string;
 }
 
 export type ChronoKind = 'event' | 'deadline' | 'plan' | 'prediction' | 'milestone';
@@ -252,6 +256,8 @@ export interface ChronoEntry {
   createdAt: string;
   updatedAt: string;
   seq: number;
+  embedding?: number[];
+  embeddingModel?: string;
 }
 
 export interface TombstoneDoc {
@@ -280,6 +286,8 @@ export interface FileMetaDoc {
   updatedAt: string;    // ISO8601 — last write timestamp
   sizeBytes: number;    // file size in bytes at last write
   author: AuthorRef;    // writer: instanceId + instanceLabel
+  embedding?: number[];
+  embeddingModel?: string;
 }
 
 export interface ConflictDoc {
