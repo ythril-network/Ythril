@@ -455,6 +455,24 @@ describe('About endpoint', () => {
     assert.ok(r.body.lines.length <= 10, 'Should respect limit');
   });
 
+  it('GET /api/about/logs returns 403 for a non-admin token', async () => {
+    const created = await post(INSTANCES.a, tokenA, '/api/tokens', { name: `non-admin-logs-${Date.now()}` });
+    assert.equal(created.status, 201, `Create non-admin token: ${JSON.stringify(created.body)}`);
+    const stdToken = created.body.plaintext;
+    const stdTokenId = created.body.token?.id;
+    try {
+      const r = await get(INSTANCES.a, stdToken, '/api/about/logs?lines=10');
+      assert.equal(r.status, 403, `Expected 403 for non-admin token, got ${r.status}`);
+    } finally {
+      if (stdTokenId) {
+        await fetch(`${INSTANCES.a}/api/tokens/${stdTokenId}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${tokenA}` },
+        }).catch(() => {});
+      }
+    }
+  });
+
   it('GET /api/about requires auth', async () => {
     const r = await get(INSTANCES.a, 'invalid-token', '/api/about');
     assert.equal(r.status, 401);

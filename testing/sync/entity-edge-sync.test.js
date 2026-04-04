@@ -77,16 +77,16 @@ describe('Entity/edge sync — cross-instance (A→B)', () => {
       name: entityName, type: 'concept', tags: ['sync-test'],
     });
     assert.equal(r.status, 201, `Create entity on A: ${JSON.stringify(r.body)}`);
+    const entityId = r.body._id;
 
-    // Trigger sync and wait for entity on B via GET /api/sync/entities
+    // Trigger sync and wait for entity on B via GET /api/sync/entities/:id
+    // (avoids pagination: the default list limit is 100, and accumulated test data can exceed that)
     let found = false;
     for (let attempt = 0; attempt < 8; attempt++) {
       await post(INSTANCES.a, tokenA, '/api/notify/trigger', { networkId });
       await new Promise(r => setTimeout(r, 2000));
-      const r2 = await reqJson(INSTANCES.b, tokenB, `/api/sync/entities?spaceId=general&full=true`);
-      if (r2.status === 200 && r2.body?.items?.some(e => e.name === entityName)) {
-        found = true; break;
-      }
+      const r2 = await reqJson(INSTANCES.b, tokenB, `/api/sync/entities/${entityId}?spaceId=general`);
+      if (r2.status === 200) { found = true; break; }
     }
     assert.ok(found, 'Entity did not propagate — sync peer tokens may not be wired');
   });
@@ -116,10 +116,8 @@ describe('Entity/edge sync — cross-instance (A→B)', () => {
     for (let attempt = 0; attempt < 8; attempt++) {
       await post(INSTANCES.a, tokenA, '/api/notify/trigger', { networkId });
       await new Promise(r => setTimeout(r, 2000));
-      const r2 = await reqJson(INSTANCES.b, tokenB, `/api/sync/edges?spaceId=general&full=true`);
-      if (r2.status === 200 && r2.body?.items?.some(e => e._id === edgeId)) {
-        found = true; break;
-      }
+      const r2 = await reqJson(INSTANCES.b, tokenB, `/api/sync/edges/${edgeId}?spaceId=general`);
+      if (r2.status === 200) { found = true; break; }
     }
     assert.ok(found, 'Edge did not propagate — sync peer tokens may not be wired');
   });

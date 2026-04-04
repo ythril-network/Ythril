@@ -206,7 +206,7 @@ describe('Space management', () => {
     assert.equal(r.status, 404, `Expected 404, got ${r.status}`);
   });
 
-  it('PATCH /api/spaces/:id with description exceeding 2000 chars returns 400', async () => {
+  it('PATCH /api/spaces/:id with description exceeding 4000 chars returns 400', async () => {
     const created = await post(INSTANCES.a, tokenA, '/api/spaces', {
       id: `patch-toolong-test-${RUN_ID}`,
       label: 'Patch Too Long',
@@ -216,7 +216,7 @@ describe('Space management', () => {
     createdSpaceIds.push(spaceId);
 
     const r = await patch(INSTANCES.a, tokenA, `/api/spaces/${spaceId}`, {
-      description: 'x'.repeat(2001),
+      description: 'x'.repeat(4001),
     });
     assert.equal(r.status, 400, `Expected 400, got ${r.status}`);
   });

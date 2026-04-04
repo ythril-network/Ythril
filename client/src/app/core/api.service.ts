@@ -367,11 +367,6 @@ export class ApiService {
     return this.http.patch<void>(`/api/files/${spaceId}`, { destination: to }, { params });
   }
 
-  uploadFile(spaceId: string, path: string, formData: FormData): Observable<void> {
-    const params = new HttpParams().set('path', path);
-    return this.http.post<void>(`/api/files/${spaceId}/upload`, formData, { params });
-  }
-
   /**
    * Upload a file with automatic chunking for files > 10 MB.
    * Emits progress events ({ percent, done }) for UI updates.

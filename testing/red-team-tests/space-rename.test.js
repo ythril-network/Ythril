@@ -81,6 +81,7 @@ describe('Space rename — authentication and authorisation', () => {
   });
 
   after(async () => {
+    // Clean up tokens only — scratch space is cleaned up by the second describe's after()
     for (const id of [standardTokenId, readOnlyTokenId]) {
       if (id) {
         await fetch(`${INSTANCES.a}/api/tokens/${id}`, {
@@ -88,14 +89,6 @@ describe('Space rename — authentication and authorisation', () => {
           headers: { Authorization: `Bearer ${adminToken}` },
         });
       }
-    }
-    // Clean up scratch space (may have been renamed — try both names)
-    for (const sid of [SCRATCH_SPACE, SCRATCH_SPACE + '-renamed']) {
-      await fetch(`${INSTANCES.a}/api/spaces/${sid}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ confirm: true }),
-      });
     }
   });
 
@@ -118,6 +111,26 @@ describe('Space rename — authentication and authorisation', () => {
 describe('Space rename — newId input validation', () => {
   before(async () => {
     adminToken = fs.readFileSync(TOKEN_FILE, 'utf8').trim();
+    // Re-create scratch space in case the first describe's after() ran before us
+    const sp = await post(INSTANCES.a, adminToken, '/api/spaces', {
+      id: SCRATCH_SPACE,
+      label: 'RT Rename Scratch',
+    });
+    assert.ok(
+      sp.status === 201 || sp.status === 409,
+      `Failed to (re-)create scratch space: ${JSON.stringify(sp.body)}`,
+    );
+  });
+
+  after(async () => {
+    // Clean up scratch space (may have been renamed by the valid-rename test)
+    for (const sid of [SCRATCH_SPACE, SCRATCH_SPACE + '-renamed']) {
+      await fetch(`${INSTANCES.a}/api/spaces/${sid}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: true }),
+      }).catch(() => {});
+    }
   });
 
   const INVALID_NEW_IDS = [

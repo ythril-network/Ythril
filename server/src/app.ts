@@ -20,7 +20,7 @@ import { setupRouter } from './setup/routes.js';
 import { mcpRouter } from './mcp/router.js';
 import { globalRateLimit } from './rate-limit/middleware.js';
 import { configExists, reloadConfig, getConfig, saveConfig } from './config/loader.js';
-import { requireAuth } from './auth/middleware.js';
+import { requireAuth, requireAdminMfa } from './auth/middleware.js';
 import { clearTokenCache } from './auth/tokens.js';
 import { clearOidcCache } from './auth/oidc.js';
 import { initSpace, ensureGeneralSpace } from './spaces/spaces.js';
@@ -154,7 +154,7 @@ export function createApp() {
   // Reload config.json from disk without a container restart.  Useful when the
   // operator edits config.json directly or when integration tests inject new
   // settings.  Requires a valid Bearer PAT (same auth as all other API routes).
-  app.post('/api/admin/reload-config', globalRateLimit, requireAuth, async (_req, res) => {
+  app.post('/api/admin/reload-config', globalRateLimit, requireAdminMfa, async (_req, res) => {
     try {
       const oldSpaceIds = new Set(getConfig().spaces.map(s => s.id));
       reloadConfig();

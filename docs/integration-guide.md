@@ -423,6 +423,17 @@ Base path: `/api/brain`
 
 > **Proxy spaces:** Read operations aggregate across all member spaces. Write operations require `?targetSpace=<member>` in the query string.
 
+### Route prefix variants
+
+Memory endpoints are available under two equivalent prefix forms:
+
+| Prefix | Example | Notes |
+|--------|---------|-------|
+| `/:spaceId/` | `GET /api/brain/general/memories` | Original form; supported for all memory operations |
+| `/spaces/:spaceId/` | `GET /api/brain/spaces/general/memories` | Preferred for new integrations; matches the prefix used by all other brain resource types (entities, edges, chrono, stats) |
+
+Both forms are fully supported and behave identically. The official web client uses `/spaces/:spaceId/` for list, delete, and bulk-wipe, and `/:spaceId/` for write.
+
 ### Write a Memory
 
 ```
@@ -518,6 +529,20 @@ Content-Type: application/json
 ```
 
 **Response** `200` `{ deleted: <count> }`. Rate-limited to 5 requests/minute.
+
+---
+
+### Alternative prefix: `/spaces/:spaceId/` memory routes
+
+The following routes are equivalent to the `/:spaceId/` forms above and use the same `/spaces/:spaceId/` prefix as entities, edges, and chrono:
+
+```
+GET    /api/brain/spaces/:spaceId/memories?limit=100&skip=0
+DELETE /api/brain/spaces/:spaceId/memories/:id
+DELETE /api/brain/spaces/:spaceId/memories
+```
+
+Responses and query parameters are identical to the `/:spaceId/` versions. Note that **write** (`POST`) uses only the `/:spaceId/` prefix.
 
 ---
 
@@ -972,7 +997,7 @@ POST /api/spaces
 |-------|----------|-------------|
 | `id` | no | Lowercase `^[a-z0-9-]+$`, max 40 chars. Auto-generated if omitted. |
 | `label` | yes | Human-readable display name, max 200 chars. |
-| `description` | no | Max 2000 chars. Surfaced to MCP clients as space-level instructions. |
+| `description` | no | Max 4000 chars. Surfaced to MCP clients as space-level instructions. |
 | `folders` | no | Pre-create these directories on disk at space creation time. |
 | `minGiB` | no | Reserve minimum storage (positive number in GiB). |
 
@@ -1071,7 +1096,7 @@ Update the `label` and/or `description` of an existing space. At least one field
 | Field | Required | Description |
 |-------|----------|-------------|
 | `label` | no (at least one) | New display name, max 200 chars. |
-| `description` | no (at least one) | New description, max 2000 chars. Surfaced to MCP clients as `instructions` during handshake. |
+| `description` | no (at least one) | New description, max 4000 chars. Surfaced to MCP clients as `instructions` during handshake. |
 
 **Response** `200`: the updated space object.
 
@@ -2069,9 +2094,10 @@ The `label` names this brain instance.
 ```
 POST /api/admin/reload-config
 Authorization: Bearer <admin-token>
+X-TOTP-Code: <code>   # required when MFA is enabled
 ```
 
-Re-reads `config.json` from disk. Useful after manual edits. Any spaces added to the config since the last load are automatically initialized (MongoDB collections, indexes, vector search index, and file directories created). The built-in `general` space is ensured to exist.
+**Requires admin token** (and TOTP code when MFA is enabled). Re-reads `config.json` from disk. Useful after manual edits. Any spaces added to the config since the last load are automatically initialized (MongoDB collections, indexes, vector search index, and file directories created). The built-in `general` space is ensured to exist.
 
 After reloading, the endpoint also runs a **token migration pass**: any tokens that lack a `prefix` field (legacy format) are removed from config and the cleaned config is persisted back to disk. This ensures that stale or manually-created tokens without a proper prefix do not survive a reload.
 
@@ -2085,12 +2111,13 @@ After reloading, the endpoint also runs a **token migration pass**: any tokens t
 
 ## About API
 
-Base path: `/api/about` — requires auth.
+Base path: `/api/about` — requires a valid Bearer token.
 
 ### Instance Info
 
 ```
 GET /api/about
+Authorization: Bearer <token>   # any valid token
 ```
 
 **Response** `200`:
@@ -2110,7 +2137,10 @@ GET /api/about
 
 ```
 GET /api/about/logs?lines=200
+Authorization: Bearer <admin-token>   # admin required
 ```
+
+Returns recent log lines from the in-memory ring buffer. **Requires an admin token** — logs may contain space IDs, peer URLs, and internal error details.
 
 **Response** `200`:
 

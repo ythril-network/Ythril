@@ -3,8 +3,8 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { globalRateLimit } from '../rate-limit/middleware.js';
-import { requireAuth } from '../auth/middleware.js';
-import { loadConfig } from '../config/loader.js';
+import { requireAuth, requireAdmin } from '../auth/middleware.js';
+import { getConfig } from '../config/loader.js';
 import { getMongo } from '../db/mongo.js';
 import { getLogLines } from '../util/log.js';
 
@@ -51,7 +51,7 @@ export const aboutRouter = Router();
 aboutRouter.use(globalRateLimit, requireAuth);
 
 aboutRouter.get('/', async (_req, res) => {
-  const cfg = loadConfig();
+  const cfg = getConfig();
   const [mongoVer, diskInfo] = await Promise.all([mongoVersion(), getDiskInfo()]);
   const response: Record<string, unknown> = {
     instanceId: cfg.instanceId,
@@ -65,7 +65,8 @@ aboutRouter.get('/', async (_req, res) => {
   res.json(response);
 });
 
-aboutRouter.get('/logs', (_req, res) => {
+// Admin-only: log lines may contain space names, peer URLs, and internal paths.
+aboutRouter.get('/logs', requireAdmin, (_req, res) => {
   const lines = Math.min(Math.max(1, Number(_req.query['lines']) || 200), 1000);
   res.json({ lines: getLogLines(lines) });
 });

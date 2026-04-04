@@ -4,6 +4,24 @@ All notable changes to Ythril are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] — 2026-04-04
+
+### Added
+
+- **MCP `recall`/`recall_global` `types` filter**: integration tests covering `types=['memory']`, `types=['entity']`, `types=['memory','entity','edge']`, unknown type strings (graceful no-op), and `recall_global` with type filter. All skip gracefully when the embedding server is not configured.
+- **Brain memory dual-prefix**: `GET`, `DELETE` and bulk-wipe memory routes are now accessible under both `/:spaceId/` (original) and `/spaces/:spaceId/` (preferred, consistent with entities/edges/chrono). Both forms are fully equivalent. Documentation updated in `integration-guide.md`.
+
+### Fixed
+
+- **`GET /api/about/logs` auth escalation** (MEDIUM): endpoint previously required only `requireAuth` (any valid token), allowing non-admin tokens to read log lines that may contain space IDs, peer URLs, and internal paths. Now requires `requireAdmin`.
+- **`POST /api/admin/reload-config` insufficient auth** (MEDIUM): endpoint previously required only `requireAuth`. Reloading config can add/remove spaces and triggers token migration — privileged operations. Now requires `requireAdminMfa` (admin token + TOTP when MFA is enabled), consistent with other admin-destructive endpoints.
+- **Space description limit**: raised from 2 000 to 4 000 characters (`PATCH /api/spaces/:id` Zod schema). MCP clients using the description as system instructions need the additional headroom for the default auto-generated tool listing.
+- **`uploadFile()` removed from `ApiService`**: the legacy single-request upload method was an unused dead stub — all uploads go through the chunked path. Removed to prevent accidental use that bypassed chunking for large files.
+
+### Changed
+
+- Documentation: `integration-guide.md` updated — reload-config MFA note, about/logs admin requirement, space description limit (2000 → 4000), brain memory dual-prefix section.
+
 ## [0.7.0] — 2026-03-30
 
 ### Added

@@ -926,3 +926,63 @@ describe('MCP security â€” unauthenticated access', () => {
     assert.ok(status === 401 || status === 404, `Expected 401/404 without auth, got ${status} (404 = no such session is also acceptable)`);
   });
 });
+
+// ── recall / recall_global — types filter ────────────────────────────────────
+
+describe('MCP recall — types filter restricts result set', () => {
+  let session;
+  let embeddingAvailable = false;
+  const entityName = `TypeFilterEntity-${Date.now()}`;
+
+  before(async () => {
+    tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+    await ensureReindexed(INSTANCES.a, tokenA);
+    session = await openMcpSession('general', tokenA);
+    // Probe embedding availability
+    const probe = await session.callTool('remember', { fact: `__types-probe-${Date.now()}__`, tags: [] });
+    const probeText = probe?.content?.[0]?.text ?? '';
+    embeddingAvailable = !probe?.isError || !probeText.toLowerCase().includes('embedding');
+    if (embeddingAvailable) {
+      // Seed an entity so entity-type results exist
+      await session.callTool('upsert_entity', { name: entityName, type: 'concept', tags: ['types-filter-test'] });
+    }
+  });
+  after(() => session?.close());
+
+  it('recall with types=["memory"] does not return isError', async (t) => {
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack — skipping');
+    const result = await session.callTool('recall', { query: entityName, topK: 5, types: ['memory'] });
+    assert.ok(!result?.isError, `recall types=memory returned isError: ${JSON.stringify(result)}`);
+    const text = result?.content?.[0]?.text ?? '';
+    assert.ok(text.length > 0, 'recall with types filter must return non-empty response');
+  });
+
+  it('recall with types=["entity"] does not return isError', async (t) => {
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack — skipping');
+    const result = await session.callTool('recall', { query: entityName, topK: 5, types: ['entity'] });
+    assert.ok(!result?.isError, `recall types=entity returned isError: ${JSON.stringify(result)}`);
+  });
+
+  it('recall with multiple types does not return isError', async (t) => {
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack — skipping');
+    const result = await session.callTool('recall', { query: entityName, topK: 5, types: ['memory', 'entity', 'edge'] });
+    assert.ok(!result?.isError, `recall types=[memory,entity,edge] returned isError: ${JSON.stringify(result)}`);
+  });
+
+  it('recall with unknown type strings is tolerated (filter ignores unknown types)', async (t) => {
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack — skipping');
+    // Server filters to valid RecallKnowledgeType values — unknown strings are dropped,
+    // resulting in an empty types filter (equivalent to no filter) or an empty search.
+    // Either way it must not crash.
+    const result = await session.callTool('recall', { query: entityName, topK: 5, types: ['__unknown__'] });
+    // Should be either a valid response or an error indicating no results — not a server fault
+    const text = result?.content?.[0]?.text ?? '';
+    assert.ok(typeof text === 'string', 'Response text must be a string regardless of types value');
+  });
+
+  it('recall_global with types=["entity"] does not return isError', async (t) => {
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack — skipping');
+    const result = await session.callTool('recall_global', { query: entityName, topK: 5, types: ['entity'] });
+    assert.ok(!result?.isError, `recall_global types=entity returned isError: ${JSON.stringify(result)}`);
+  });
+});

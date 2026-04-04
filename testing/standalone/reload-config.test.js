@@ -72,6 +72,45 @@ describe('POST /api/admin/reload-config — authentication', () => {
     const r = await post(INSTANCES.a, null, '/api/admin/reload-config', {});
     assert.equal(r.status, 401);
   });
+
+  it('returns 403 for a standard (non-admin) token', async () => {
+    // Create a non-admin token and verify it is rejected
+    const created = await post(INSTANCES.a, token, '/api/tokens', { name: `non-admin-reload-${Date.now()}` });
+    assert.equal(created.status, 201, `Create non-admin token: ${JSON.stringify(created.body)}`);
+    const stdToken = created.body.plaintext;
+    const stdTokenId = created.body.token?.id;
+    try {
+      const r = await post(INSTANCES.a, stdToken, '/api/admin/reload-config', {});
+      assert.equal(r.status, 403, `Expected 403 for non-admin token, got ${r.status}: ${JSON.stringify(r.body)}`);
+    } finally {
+      if (stdTokenId) await post(INSTANCES.a, token, `/api/tokens/${stdTokenId}`, {}).catch(() => {});
+      // Best-effort cleanup — use admin token to revoke
+      if (stdTokenId) {
+        await fetch(`${INSTANCES.a}/api/tokens/${stdTokenId}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` },
+        }).catch(() => {});
+      }
+    }
+  });
+
+  it('returns 403 for a read-only token', async () => {
+    const created = await post(INSTANCES.a, token, '/api/tokens', { name: `readonly-reload-${Date.now()}`, readOnly: true });
+    assert.equal(created.status, 201, `Create read-only token: ${JSON.stringify(created.body)}`);
+    const roToken = created.body.plaintext;
+    const roTokenId = created.body.token?.id;
+    try {
+      const r = await post(INSTANCES.a, roToken, '/api/admin/reload-config', {});
+      assert.equal(r.status, 403, `Expected 403 for read-only token, got ${r.status}: ${JSON.stringify(r.body)}`);
+    } finally {
+      if (roTokenId) {
+        await fetch(`${INSTANCES.a}/api/tokens/${roTokenId}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` },
+        }).catch(() => {});
+      }
+    }
+  });
 });
 
 describe('POST /api/admin/reload-config — quota changes take effect', () => {
@@ -156,6 +195,26 @@ describe('POST /api/admin/reload-config — space config changes take effect', (
     // NEW_SPACE_ID is still in config from the previous test (after runs sequentially);
     // restore to original which doesn't contain it.
     await applyConfig(originalConfig);
+
+    // On Docker Desktop (Windows/macOS), bind-mount writes from the host may propagate
+    // to the container with a brief delay.  If reloadConfig() read the stale file it will
+    // have written config_with_space back via saveConfig's atomic rename — re-trigger
+    // reload until the space is actually gone from the live /api/spaces list (max 3 s).
+    let spaceGone = false;
+    for (let attempt = 0; attempt < 15 && !spaceGone; attempt++) {
+      const check = await fetch(`${INSTANCES.a}/api/spaces`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await check.json();
+      if (!data.spaces?.find(s => s.id === NEW_SPACE_ID)) {
+        spaceGone = true;
+        break;
+      }
+      // Space still visible — re-trigger reload and wait for propagation
+      await post(INSTANCES.a, token, '/api/admin/reload-config', {});
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    assert.ok(spaceGone, `Space '${NEW_SPACE_ID}' should be gone from /api/spaces after reload`);
 
     const r = await post(INSTANCES.a, token, `/api/brain/${NEW_SPACE_ID}/memories`, {
       fact: 'should be rejected',

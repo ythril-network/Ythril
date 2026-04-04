@@ -29,7 +29,7 @@ const RenameSpaceBody = z.object({
 
 const UpdateSpaceBody = z.object({
   label: z.string().min(1).max(200).optional(),
-  description: z.string().max(2000).optional(),
+  description: z.string().max(4000).optional(),
 }).refine(d => d.label !== undefined || d.description !== undefined, {
   message: 'At least one of label or description must be provided',
 });

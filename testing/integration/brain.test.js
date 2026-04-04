@@ -14,7 +14,7 @@
  * Run: node --test testing/integration/brain.test.js
  */
 
-import { describe, it, before } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
@@ -213,7 +213,8 @@ describe('Brain -- entity properties', () => {
   });
 
   it('Properties appear in entity listing', async () => {
-    const r = await get(INSTANCES.a, token(), '/api/brain/spaces/general/entities?limit=100');
+    // Filter by name so the test isn't fragile when 100+ entities accumulate from prior runs
+    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/entities?name=${encodeURIComponent(`PropTest-${RUN}`)}`);
     assert.equal(r.status, 200);
     const ent = r.body.entities.find(e => e.name === `PropTest-${RUN}`);
     assert.ok(ent, 'entity found');

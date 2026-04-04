@@ -423,3 +423,83 @@ describe('GET /api/sync/memories — listing and cursor pagination', () => {
     assert.equal(r.status, 401);
   });
 });
+
+// ── POST /api/sync/chrono — IncomingChronoDoc recurrence validation ────────
+
+describe('POST /api/sync/chrono — recurrence field validation', () => {
+  function makeChronoDoc(overrides = {}) {
+    return {
+      _id: `chrono-recur-${RUN}-${Math.random().toString(36).slice(2)}`,
+      spaceId: 'general',
+      title: 'Weekly standup',
+      kind: 'plan',
+      startsAt: new Date().toISOString(),
+      status: 'upcoming',
+      tags: [],
+      entityIds: [],
+      memoryIds: [],
+      author: { instanceId: 'test', instanceLabel: 'Test' },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      seq: Date.now(),
+      ...overrides,
+    };
+  }
+
+  it('accepts a valid chrono doc with weekly recurrence', async () => {
+    const r = await post(INSTANCES.a, token, '/api/sync/chrono?spaceId=general', makeChronoDoc({
+      recurrence: { freq: 'weekly', interval: 1 },
+    }));
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.status, 'ok', JSON.stringify(r.body));
+  });
+
+  it('accepts valid recurrence with all allowed freq values', async () => {
+    for (const freq of ['daily', 'weekly', 'monthly', 'yearly']) {
+      const r = await post(INSTANCES.a, token, '/api/sync/chrono?spaceId=general', makeChronoDoc({
+        recurrence: { freq, interval: 2 },
+      }));
+      assert.equal(r.status, 200, `freq=${freq}: ${JSON.stringify(r.body)}`);
+    }
+  });
+
+  it('accepts recurrence with optional until field', async () => {
+    const r = await post(INSTANCES.a, token, '/api/sync/chrono?spaceId=general', makeChronoDoc({
+      recurrence: { freq: 'monthly', interval: 1, until: '2030-12-31T23:59:59Z' },
+    }));
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+  });
+
+  it('rejects recurrence with invalid freq value', async () => {
+    const r = await post(INSTANCES.a, token, '/api/sync/chrono?spaceId=general', makeChronoDoc({
+      recurrence: { freq: 'hourly', interval: 1 },
+    }));
+    assert.equal(r.status, 400, `Expected 400 for invalid freq, got ${r.status}: ${JSON.stringify(r.body)}`);
+  });
+
+  it('rejects recurrence with non-positive interval', async () => {
+    const r = await post(INSTANCES.a, token, '/api/sync/chrono?spaceId=general', makeChronoDoc({
+      recurrence: { freq: 'daily', interval: 0 },
+    }));
+    assert.equal(r.status, 400, `Expected 400 for interval=0, got ${r.status}: ${JSON.stringify(r.body)}`);
+  });
+
+  it('rejects chrono doc with invalid kind', async () => {
+    const r = await post(INSTANCES.a, token, '/api/sync/chrono?spaceId=general', makeChronoDoc({
+      kind: 'reminder',
+    }));
+    assert.equal(r.status, 400, `Expected 400 for invalid kind, got ${r.status}: ${JSON.stringify(r.body)}`);
+  });
+
+  it('rejects chrono doc with invalid status', async () => {
+    const r = await post(INSTANCES.a, token, '/api/sync/chrono?spaceId=general', makeChronoDoc({
+      status: 'deleted',
+    }));
+    assert.equal(r.status, 400, `Expected 400 for invalid status, got ${r.status}: ${JSON.stringify(r.body)}`);
+  });
+
+  it('accepts chrono doc without recurrence field', async () => {
+    const r = await post(INSTANCES.a, token, '/api/sync/chrono?spaceId=general', makeChronoDoc());
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+  });
+});

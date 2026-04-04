@@ -29,6 +29,8 @@ const CONFIGS = path.join(__dirname, 'configs');
 let tokenA, tokenB;
 let peerTokenForA;   // token B issued → A uses it to authenticate TO B
 let peerTokenForB;   // token A issued → B uses it to authenticate TO A
+let peerTokenForAId; // id of peerTokenForA record on B (for cleanup)
+let peerTokenForBId; // id of peerTokenForB record on A (for cleanup)
 let instanceIdA, instanceIdB;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -55,17 +57,18 @@ function injectPeerToken(container, instanceId, token) {
 }
 
 /** Tag a token record in the container's config.tokens[] with peerInstanceId.
+ *  Uses the token's UUID `id` (not the 8-char prefix) to avoid false matches when
+ *  many stale tokens from prior runs share the same prefix.
  *  In production, the invite handshake sets this automatically.  Tests that
  *  shortcut the handshake via POST /api/tokens must call this so the
  *  peerInstanceId verification in the notify handler passes. */
-function tagPeerToken(container, tokenPlaintext, peerInstanceId) {
-  const prefix = tokenPlaintext.slice(0, 8);
+function tagPeerToken(container, tokenId, peerInstanceId) {
   const script = [
     `const fs=require('fs');`,
     `const p='/config/config.json';`,
     `const c=JSON.parse(fs.readFileSync(p,'utf8'));`,
-    `const t=c.tokens.find(t=>t.prefix==='${prefix}');`,
-    `if(!t){process.stderr.write('token not found');process.exit(1);}`,
+    `const t=c.tokens.find(t=>t.id==='${tokenId}');`,
+    `if(!t){process.stderr.write('token not found: ${tokenId}');process.exit(1);}`,
     `t.peerInstanceId='${peerInstanceId}';`,
     `fs.writeFileSync(p,JSON.stringify(c,null,2),{mode:0o600});`,
     `process.stdout.write('ok');`,
@@ -197,19 +200,40 @@ describe('Leave and removal flows', () => {
     const ptForA = await post(INSTANCES.b, tokenB, '/api/tokens', { name: `leave-test-peer-a-${Date.now()}` });
     assert.equal(ptForA.status, 201);
     peerTokenForA = ptForA.body.plaintext;
+    peerTokenForAId = ptForA.body.token?.id;
 
     const ptForB = await post(INSTANCES.a, tokenA, '/api/tokens', { name: `leave-test-peer-b-${Date.now()}` });
     assert.equal(ptForB.status, 201);
     peerTokenForB = ptForB.body.plaintext;
+    peerTokenForBId = ptForB.body.token?.id;
 
     // Tag the token records with peerInstanceId so the notify handler's
     // identity verification passes (in production the invite handshake does this).
-    tagPeerToken('ythril-b', peerTokenForA, instanceIdA);  // B's token for A
-    tagPeerToken('ythril-a', peerTokenForB, instanceIdB);  // A's token for B
+    // Use token id (UUID) to find the record — avoids prefix collisions when stale
+    // tokens from prior runs accumulate (many tokens share the same 8-char prefix).
+    tagPeerToken('ythril-b', peerTokenForAId, instanceIdA);  // B's token for A
+    tagPeerToken('ythril-a', peerTokenForBId, instanceIdB);  // A's token for B
 
     // Reload config on both instances so the in-memory token records pick up peerInstanceId.
     await post(INSTANCES.a, tokenA, '/api/admin/reload-config', {});
     await post(INSTANCES.b, tokenB, '/api/admin/reload-config', {});
+  });
+
+  after(async () => {
+    // Clean up the shared peer tokens created in before(). Without this they
+    // accumulate across runs and eventually cause prefix collisions in tagPeerToken.
+    if (peerTokenForAId) {
+      await fetch(`${INSTANCES.b}/api/tokens/${peerTokenForAId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${tokenB}` },
+      }).catch(() => {});
+    }
+    if (peerTokenForBId) {
+      await fetch(`${INSTANCES.a}/api/tokens/${peerTokenForBId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${tokenA}` },
+      }).catch(() => {});
+    }
   });
 
   // ══════════════════════════════════════════════════════════════════════════

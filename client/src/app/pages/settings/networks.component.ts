@@ -409,7 +409,6 @@ export class NetworksComponent implements OnInit {
   private api = inject(ApiService);
 
   networks = signal<Network[]>([]);
-  availableSpaces = signal<Space[]>([]);
   loading = signal(true);
   creating = signal(false);
   createError = signal('');
