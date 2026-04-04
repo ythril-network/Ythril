@@ -327,26 +327,30 @@ export interface WipeResult {
  *
  *  Idempotent: wiping an already-empty space returns all-zero counts without error.
  *  Scoped strictly to the target space — no cross-space side effects.
+ *
+ *  The returned counts reflect the number of documents actually deleted.
+ *  Tombstones are also cleared (internal sync state) but not included in the result.
  */
 export async function wipeSpace(spaceId: string): Promise<WipeResult> {
   const cfg = getConfig();
   const space = cfg.spaces.find(s => s.id === spaceId);
   if (!space) throw new Error(`Space '${spaceId}' not found`);
 
-  const memories = await col(`${spaceId}_memories`).countDocuments();
-  const entities = await col(`${spaceId}_entities`).countDocuments();
-  const edges = await col(`${spaceId}_edges`).countDocuments();
-  const chrono = await col(`${spaceId}_chrono`).countDocuments();
-  const files = await col(`${spaceId}_files`).countDocuments();
+  // Guard: spaceId must match the safe pattern used during creation so it is
+  // safe to embed in a filesystem path (same constraint as removeSpace).
+  if (!/^[a-z0-9-]+$/.test(spaceId)) {
+    throw new Error(`Invalid spaceId '${spaceId}'`);
+  }
 
-  await Promise.all([
+  const [memRes, entRes, edgeRes, chronoRes, fileRes] = await Promise.all([
     col(`${spaceId}_memories`).deleteMany({}),
     col(`${spaceId}_entities`).deleteMany({}),
     col(`${spaceId}_edges`).deleteMany({}),
     col(`${spaceId}_chrono`).deleteMany({}),
     col(`${spaceId}_files`).deleteMany({}),
-    col(`${spaceId}_tombstones`).deleteMany({}),
   ]);
+  // Tombstones are internal sync state — clear them too but don't report the count
+  await col(`${spaceId}_tombstones`).deleteMany({});
 
   // Delete the physical files directory, then recreate it empty
   const filesDir = path.resolve(getDataRoot(), 'files', spaceId);
@@ -357,8 +361,15 @@ export async function wipeSpace(spaceId: string): Promise<WipeResult> {
     log.warn(`wipeSpace: could not clear files directory for '${spaceId}': ${err}`);
   }
 
-  log.info(`Wiped space '${spaceId}': ${memories} memories, ${entities} entities, ${edges} edges, ${chrono} chrono, ${files} files`);
-  return { memories, entities, edges, chrono, files };
+  const result: WipeResult = {
+    memories: memRes.deletedCount,
+    entities: entRes.deletedCount,
+    edges: edgeRes.deletedCount,
+    chrono: chronoRes.deletedCount,
+    files: fileRes.deletedCount,
+  };
+  log.info(`Wiped space '${spaceId}': ${result.memories} memories, ${result.entities} entities, ${result.edges} edges, ${result.chrono} chrono, ${result.files} files`);
+  return result;
 }
 
 /** Update mutable fields (label, description) of an existing space in config.

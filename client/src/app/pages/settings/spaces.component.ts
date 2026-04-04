@@ -124,7 +124,7 @@ import { ApiService, Network, Space, SpaceStats } from '../../core/api.service';
                   <td>
                     @if (s.builtIn) { <span class="badge badge-blue">built-in</span> }
                   </td>
-                   <td style="display:flex; gap:6px;">
+                  <td style="display:flex; gap:6px;">
                     <button class="icon-btn" aria-label="Edit space" (click)="openEdit(s)" title="Edit label/description">✎</button>
                     <button class="icon-btn danger" aria-label="Wipe space" (click)="openWipe(s)" title="Wipe all space data">⊘</button>
                     @if (!s.builtIn) {
