@@ -11,7 +11,7 @@ import { getConfig } from '../config/loader.js';
 import { log } from '../util/log.js';
 import { checkQuota, QuotaError } from '../quota/quota.js';
 import { resolveMemberSpaces, resolveWriteTarget, isProxySpace } from '../spaces/proxy.js';
-import { updateSpace } from '../spaces/spaces.js';
+import { updateSpace, wipeSpace, WIPE_COLLECTION_TYPES, type WipeCollectionType } from '../spaces/spaces.js';
 
 // Brain tools
 import { remember, recall, recallGlobal, queryBrain, updateMemory, deleteMemory, type RecallKnowledgeType, type RecallResult } from '../brain/memory.js';
@@ -56,7 +56,7 @@ const MUTATING_TOOLS = new Set([
   'upsert_entity', 'upsert_edge',
   'create_chrono', 'update_chrono',
   'write_file', 'delete_file', 'create_dir', 'move_file',
-  'sync_now', 'update_space',
+  'sync_now', 'update_space', 'wipe_space',
 ]);
 
 /** Create a MCP Server instance with all tools bound to the given space */
@@ -412,6 +412,21 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           properties: {
             label: { type: 'string', description: 'New display label for the space (max 200 chars).' },
             description: { type: 'string', description: 'New description for the space (max 2000 chars). Surfaced to MCP clients as space-level instructions.' },
+          },
+          required: [],
+        },
+      },
+      {
+        name: 'wipe_space',
+        description: 'Wipe data from the current space. By default wipes all collections (memories, entities, edges, chrono, files). Pass `types` to wipe only specific collections. The space itself and its configuration are preserved. Requires an admin token. Idempotent — wiping an empty space returns zero counts.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            types: {
+              type: 'array',
+              items: { type: 'string', enum: ['memories', 'entities', 'edges', 'chrono', 'files'] },
+              description: 'Optional subset of collection types to wipe. Omit to wipe all.',
+            },
           },
           required: [],
         },
@@ -982,6 +997,26 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           if (!updated) throw new Error(`Space '${spaceId}' not found`);
           return {
             content: [{ type: 'text' as const, text: `Space '${spaceId}' updated.` }],
+          };
+        }
+
+        case 'wipe_space': {
+          if (!isAdmin) {
+            return {
+              content: [{ type: 'text' as const, text: 'Error: wipe_space requires an admin token' }],
+              isError: true,
+            };
+          }
+          const rawTypes = Array.isArray(a['types']) ? (a['types'] as unknown[]) : undefined;
+          if (rawTypes !== undefined && rawTypes.some(t => typeof t !== 'string' || !WIPE_COLLECTION_TYPES.includes(t as WipeCollectionType))) {
+            throw new Error(`types must be an array of: ${WIPE_COLLECTION_TYPES.join(', ')}`);
+          }
+          const wipeTypes = rawTypes as WipeCollectionType[] | undefined;
+          const result = await wipeSpace(spaceId, wipeTypes);
+          const typesLabel = wipeTypes && wipeTypes.length > 0 ? wipeTypes.join(', ') : 'all';
+          const summary = `Wiped [${typesLabel}] in space '${spaceId}': ${result.memories} memories, ${result.entities} entities, ${result.edges} edges, ${result.chrono} chrono, ${result.files} files.`;
+          return {
+            content: [{ type: 'text' as const, text: summary }],
           };
         }
 

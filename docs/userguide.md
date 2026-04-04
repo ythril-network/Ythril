@@ -302,6 +302,14 @@ To create a proxy space from the UI, enter comma-separated space IDs in the **Pr
 
 Click the delete button on a space row and confirm by typing the space ID. On a networked brain this opens a vote round so peers can react before removal.
 
+### Wiping a space
+
+Click the ⊘ **Wipe space** button on a space row to erase all data from a space while keeping the space itself (its label, description, config, and settings are preserved).
+
+A confirmation dialog loads the current per-collection document counts (memories, entities, edges, chrono, files) before proceeding so you can confirm the scope of the operation. Click **Wipe space** to confirm.
+
+This is equivalent to `POST /api/admin/spaces/:spaceId/wipe` — see the [Integration Guide](integration-guide.md#wipe-space) for the API reference including partial-type wipes.
+
 ---
 
 ## Settings — Tokens

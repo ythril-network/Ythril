@@ -1,7 +1,7 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { ApiService, Network, Space } from '../../core/api.service';
+import { ApiService, Network, Space, SpaceStats } from '../../core/api.service';
 
 @Component({
   selector: 'app-spaces',
@@ -126,6 +126,7 @@ import { ApiService, Network, Space } from '../../core/api.service';
                   </td>
                   <td style="display:flex; gap:6px;">
                     <button class="icon-btn" aria-label="Edit space" (click)="openEdit(s)" title="Edit label/description">✎</button>
+                    <button class="icon-btn danger" aria-label="Wipe space" (click)="openWipe(s)" title="Wipe all space data">⊘</button>
                     @if (!s.builtIn) {
                       @if (renaming() === s.id) {
                         <form (ngSubmit)="submitRename(s)" style="display:inline-flex; gap:4px; align-items:center;">
@@ -183,6 +184,49 @@ import { ApiService, Network, Space } from '../../core/api.service';
         </div>
       </div>
     }
+
+    <!-- Wipe space confirmation modal -->
+    @if (wipeTarget()) {
+      <div class="modal-backdrop" (click)="closeWipe()">
+        <div class="modal" (click)="$event.stopPropagation()" style="min-width:360px; max-width:480px;">
+          <div class="modal-header">
+            <div class="card-title" style="color:var(--danger)">⚠ Wipe space</div>
+            <button class="icon-btn" (click)="closeWipe()">✕</button>
+          </div>
+          @if (wipeError()) {
+            <div class="alert alert-error" style="margin-bottom:12px;">{{ wipeError() }}</div>
+          }
+          <p style="margin-bottom:12px;">
+            This will permanently delete <strong>all data</strong> from
+            <strong>{{ wipeTarget()!.label }}</strong> (<code>{{ wipeTarget()!.id }}</code>).
+            The space itself and its configuration will be preserved.
+          </p>
+          @if (wipeStats()) {
+            <div style="background:var(--bg-elevated); border:1px solid var(--border); border-radius:var(--radius-sm); padding:12px; margin-bottom:16px; font-size:13px;">
+              <div style="font-weight:600; margin-bottom:8px; color:var(--text-muted);">Current counts</div>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px 16px;">
+                <span>Memories</span><span style="font-family:var(--font-mono); text-align:right;">{{ wipeStats()!.memories }}</span>
+                <span>Entities</span><span style="font-family:var(--font-mono); text-align:right;">{{ wipeStats()!.entities }}</span>
+                <span>Edges</span><span style="font-family:var(--font-mono); text-align:right;">{{ wipeStats()!.edges }}</span>
+                <span>Chrono</span><span style="font-family:var(--font-mono); text-align:right;">{{ wipeStats()!.chrono }}</span>
+                <span>Files</span><span style="font-family:var(--font-mono); text-align:right;">{{ wipeStats()!.files }}</span>
+              </div>
+            </div>
+          } @else if (wipeStatsLoading()) {
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:16px; color:var(--text-muted); font-size:13px;">
+              <span class="spinner" style="width:14px;height:14px;border-width:2px;"></span> Loading counts…
+            </div>
+          }
+          <div style="display:flex; gap:8px; justify-content:flex-end;">
+            <button type="button" class="btn btn-secondary" (click)="closeWipe()" [disabled]="wiping()">Cancel</button>
+            <button type="button" class="btn btn-danger" (click)="confirmWipe()" [disabled]="wiping()">
+              @if (wiping()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
+              Wipe space
+            </button>
+          </div>
+        </div>
+      </div>
+    }
   `,
 })
 export class SpacesComponent implements OnInit {
@@ -236,6 +280,12 @@ export class SpacesComponent implements OnInit {
   editForm = { label: '', description: '' };
   saving = signal(false);
   editError = signal('');
+
+  wipeTarget = signal<Space | null>(null);
+  wipeStats = signal<SpaceStats | null>(null);
+  wipeStatsLoading = signal(false);
+  wiping = signal(false);
+  wipeError = signal('');
 
   ngOnInit(): void { this.load(); }
 
@@ -370,6 +420,41 @@ export class SpacesComponent implements OnInit {
       },
       error: (err) => {
         alert(err.error?.error ?? 'Failed to rename space.');
+      },
+    });
+  }
+
+  openWipe(s: Space): void {
+    this.wipeTarget.set(s);
+    this.wipeStats.set(null);
+    this.wipeError.set('');
+    this.wipeStatsLoading.set(true);
+    this.api.getSpaceStats(s.id).subscribe({
+      next: (stats) => { this.wipeStats.set(stats); this.wipeStatsLoading.set(false); },
+      error: () => this.wipeStatsLoading.set(false),
+    });
+  }
+
+  closeWipe(): void {
+    if (this.wiping()) return;
+    this.wipeTarget.set(null);
+    this.wipeStats.set(null);
+    this.wipeError.set('');
+  }
+
+  confirmWipe(): void {
+    const target = this.wipeTarget();
+    if (!target) return;
+    this.wiping.set(true);
+    this.wipeError.set('');
+    this.api.wipeSpace(target.id).subscribe({
+      next: () => {
+        this.wiping.set(false);
+        this.closeWipe();
+      },
+      error: (err) => {
+        this.wiping.set(false);
+        this.wipeError.set(err.error?.error ?? 'Failed to wipe space');
       },
     });
   }

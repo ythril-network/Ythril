@@ -25,7 +25,7 @@
 14. [MFA API](#mfa-api) — TOTP setup and verification
 15. [Conflicts API](#conflicts-api) — view and resolve sync conflicts
 16. [Setup API](#setup-api) — first-run setup
-17. [Admin API](#admin-api) — config reload
+17. [Admin API](#admin-api) — config reload, space wipe
 18. [About API](#about-api) — instance info and logs
 19. [Theme API](#theme-api) — external CSS theming
 20. [MCP (Model Context Protocol)](#mcp-model-context-protocol) — AI tool integration
@@ -2114,6 +2114,96 @@ After reloading, the endpoint also runs a **token migration pass**: any tokens t
 ```json
 { "ok": true }
 ```
+
+---
+
+### Wipe Space
+
+Clear all data — or a specific subset of collection types — from a space, while
+preserving the space itself (label, description, config, OIDC mappings, and quota
+settings).
+
+```
+POST /api/admin/spaces/:spaceId/wipe
+Authorization: Bearer <admin-token>
+X-TOTP-Code: <code>   # required when MFA is enabled
+Content-Type: application/json
+```
+
+**Requires admin token** (and TOTP code when MFA is enabled).
+
+#### Request body
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `types` | `string[]` *(optional)* | Subset of collection types to wipe: `"memories"`, `"entities"`, `"edges"`, `"chrono"`, `"files"`. Omit (or send `{}`) to wipe **all** collections. |
+
+#### Full wipe (all collections)
+
+```json
+{}
+```
+
+or explicitly:
+
+```json
+{ "types": ["memories", "entities", "edges", "chrono", "files"] }
+```
+
+#### Partial wipe (specific types only)
+
+```json
+{ "types": ["memories"] }
+```
+
+```json
+{ "types": ["entities", "edges"] }
+```
+
+#### Response `200`
+
+```json
+{
+  "deleted": {
+    "memories": 12,
+    "entities": 8,
+    "edges": 5,
+    "chrono": 0,
+    "files": 3
+  }
+}
+```
+
+Each field in `deleted` is the number of documents actually removed from that
+collection.  On a partial wipe the unaffected fields will be `0`.
+
+#### Behaviour notes
+
+- **Idempotent** — wiping an already-empty space (or a type with no documents) returns `0` for that field; no error is raised.
+- **Tombstones** — internal sync-tombstone records are cleared for the wiped types so peers do not re-sync deleted data. For full wipes all tombstones are cleared.  For partial wipes only the matching type tombstones are removed.
+- **Files** — when `"files"` is included, both the MongoDB metadata collection and the physical files directory on disk are cleared. The directory is recreated empty so new uploads work immediately.
+- **Space preserved** — the space itself is not deleted. Its label, description, configuration, OIDC mappings, and quota settings remain unchanged.
+
+#### Error responses
+
+| Status | Meaning |
+|--------|---------|
+| `400` | `types` array contains an unrecognised collection type |
+| `401` | Missing or invalid Authorization header |
+| `403` | Token is not admin-scoped (or MFA code wrong/missing) |
+| `404` | Space not found |
+
+#### Admin UI
+
+In **Settings → Spaces**, every space row has a ⊘ **Wipe space** button.  Clicking it opens a confirmation dialog that shows the current per-collection document counts before proceeding.
+
+#### MCP tool
+
+```
+wipe_space(types?: string[])
+```
+
+Available in MCP-connected clients.  Requires an admin token on the MCP session.  When `types` is omitted all collections are wiped.  Returns a plain-text summary of deleted counts.
 
 ---
 
