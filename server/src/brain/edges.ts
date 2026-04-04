@@ -62,14 +62,12 @@ export async function upsertEdge(
   } catch { /* embedding unavailable — edge stored without vector */ }
 
   if (existing) {
-    const mergedTags = tags !== undefined
-      ? Array.from(new Set([...((existing as EdgeDoc).tags ?? []), ...tags]))
-      : undefined;
     const $set: Record<string, unknown> = { updatedAt: now, seq, ...embeddingFields };
     if (weight !== undefined) $set['weight'] = weight;
     if (type !== undefined) $set['type'] = type;
     if (description !== undefined) $set['description'] = description;
-    if (mergedTags !== undefined) $set['tags'] = mergedTags;
+    // When tags are provided, persist the merged result; otherwise leave existing tags unchanged
+    if (tags !== undefined) $set['tags'] = effectiveTags;
     if (properties !== undefined) {
       const mergedProps = { ...((existing as EdgeDoc).properties ?? {}), ...properties };
       $set['properties'] = mergedProps;
@@ -85,7 +83,7 @@ export async function upsertEdge(
       ...(weight !== undefined ? { weight } : {}),
       ...(type !== undefined ? { type } : {}),
       ...(description !== undefined ? { description } : {}),
-      ...(mergedTags !== undefined ? { tags: mergedTags } : {}),
+      ...(tags !== undefined ? { tags: effectiveTags } : {}),
       ...(properties !== undefined ? { properties: { ...((existing as EdgeDoc).properties ?? {}), ...properties } } : {}),
       ...embeddingFields,
     };
