@@ -27,21 +27,24 @@ function normPath(p: string): string {
   return p.replace(/\\/g, '/');
 }
 
-/** Derive the text to embed for a file (description if present, otherwise path). */
-function fileEmbedText(filePath: string, description?: string): string {
-  return description?.trim() ? description : filePath;
+/** Derive the text to embed for a file (path + tags + description). */
+function fileEmbedText(filePath: string, tags: string[] = [], description?: string): string {
+  const parts: string[] = [filePath];
+  if (tags.length > 0) parts.push(tags.join(' '));
+  if (description?.trim()) parts.push(description.trim());
+  return parts.join(' ');
 }
 
 /**
  * Create or update the metadata record for a file after a write.
  * On first write `createdAt` is set; subsequent writes update `updatedAt` and
- * `sizeBytes`.  `description` and `tags` are only updated when supplied.
+ * `sizeBytes`.  `description`, `tags`, and `properties` are only updated when supplied.
  */
 export async function upsertFileMeta(
   spaceId: string,
   filePath: string,
   sizeBytes: number,
-  opts: { description?: string; tags?: string[] } = {},
+  opts: { description?: string; tags?: string[]; properties?: Record<string, string | number | boolean> } = {},
 ): Promise<void> {
   const normalised = normPath(filePath);
   const now = new Date().toISOString();
@@ -50,11 +53,12 @@ export async function upsertFileMeta(
     { _id: normalised } as never,
   );
 
-  // Embed description (or path as fallback) — best-effort, never blocks write
+  // Embed path + tags + description — best-effort, never blocks write
   const descForEmbed = opts.description !== undefined ? opts.description : (existing as FileMetaDoc | null)?.description;
+  const tagsForEmbed = opts.tags !== undefined ? opts.tags : ((existing as FileMetaDoc | null)?.tags ?? []);
   let embeddingFields: { embedding?: number[]; embeddingModel?: string } = {};
   try {
-    const embResult = await embed(fileEmbedText(normalised, descForEmbed));
+    const embResult = await embed(fileEmbedText(normalised, tagsForEmbed, descForEmbed));
     embeddingFields = { embedding: embResult.vector, embeddingModel: embResult.model };
   } catch { /* embedding unavailable — file stored without vector */ }
 
@@ -62,6 +66,7 @@ export async function upsertFileMeta(
     const $set: Record<string, unknown> = { updatedAt: now, sizeBytes, ...embeddingFields };
     if (opts.description !== undefined) $set['description'] = opts.description;
     if (opts.tags !== undefined) $set['tags'] = opts.tags;
+    if (opts.properties !== undefined) $set['properties'] = opts.properties;
     await col<FileMetaDoc>(`${spaceId}_files`).updateOne(
       { _id: normalised } as never,
       { $set } as never,
@@ -73,6 +78,7 @@ export async function upsertFileMeta(
       path: normalised,
       ...(opts.description !== undefined ? { description: opts.description } : {}),
       tags: opts.tags ?? [],
+      ...(opts.properties !== undefined ? { properties: opts.properties } : {}),
       createdAt: now,
       updatedAt: now,
       sizeBytes,
