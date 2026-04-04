@@ -12,6 +12,7 @@ import { log } from '../util/log.js';
 import { checkQuota, QuotaError } from '../quota/quota.js';
 import { resolveMemberSpaces, resolveWriteTarget, isProxySpace } from '../spaces/proxy.js';
 import { updateSpace } from '../spaces/spaces.js';
+import { wipeSpace } from '../spaces/spaces.js';
 
 // Brain tools
 import { remember, recall, recallGlobal, queryBrain, updateMemory, deleteMemory, type RecallKnowledgeType, type RecallResult } from '../brain/memory.js';
@@ -56,7 +57,7 @@ const MUTATING_TOOLS = new Set([
   'upsert_entity', 'upsert_edge',
   'create_chrono', 'update_chrono',
   'write_file', 'delete_file', 'create_dir', 'move_file',
-  'sync_now', 'update_space',
+  'sync_now', 'update_space', 'wipe_space',
 ]);
 
 /** Create a MCP Server instance with all tools bound to the given space */
@@ -413,6 +414,15 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             label: { type: 'string', description: 'New display label for the space (max 200 chars).' },
             description: { type: 'string', description: 'New description for the space (max 2000 chars). Surfaced to MCP clients as space-level instructions.' },
           },
+          required: [],
+        },
+      },
+      {
+        name: 'wipe_space',
+        description: 'Wipe all data from the current space (memories, entities, edges, chrono entries, files). The space itself and its configuration are preserved. Requires an admin token. Idempotent — wiping an empty space returns zero counts.',
+        inputSchema: {
+          type: 'object',
+          properties: {},
           required: [],
         },
       },
@@ -982,6 +992,20 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           if (!updated) throw new Error(`Space '${spaceId}' not found`);
           return {
             content: [{ type: 'text' as const, text: `Space '${spaceId}' updated.` }],
+          };
+        }
+
+        case 'wipe_space': {
+          if (!isAdmin) {
+            return {
+              content: [{ type: 'text' as const, text: 'Error: wipe_space requires an admin token' }],
+              isError: true,
+            };
+          }
+          const result = await wipeSpace(spaceId);
+          const summary = `Wiped space '${spaceId}': ${result.memories} memories, ${result.entities} entities, ${result.edges} edges, ${result.chrono} chrono, ${result.files} files.`;
+          return {
+            content: [{ type: 'text' as const, text: summary }],
           };
         }
 

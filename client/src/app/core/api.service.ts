@@ -260,6 +260,10 @@ export class ApiService {
     return this.http.delete<void>(`/api/tokens/${id}`);
   }
 
+  wipeSpace(spaceId: string): Observable<{ deleted: { memories: number; entities: number; edges: number; chrono: number; files: number } }> {
+    return this.http.post<{ deleted: { memories: number; entities: number; edges: number; chrono: number; files: number } }>(`/api/admin/spaces/${spaceId}/wipe`, {});
+  }
+
   // ── MFA ───────────────────────────────────────────────────────────────────
 
   getMfaStatus(): Observable<{ enabled: boolean }> {

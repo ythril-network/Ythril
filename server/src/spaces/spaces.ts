@@ -313,6 +313,54 @@ export async function removeSpace(spaceId: string): Promise<boolean> {
   return true;
 }
 
+export interface WipeResult {
+  memories: number;
+  entities: number;
+  edges: number;
+  chrono: number;
+  files: number;
+}
+
+/** Wipe all data from a space — memories, entities, edges, chrono, file metadata,
+ *  and the physical files directory — while preserving the space itself (label,
+ *  description, config, OIDC mappings, quota settings).
+ *
+ *  Idempotent: wiping an already-empty space returns all-zero counts without error.
+ *  Scoped strictly to the target space — no cross-space side effects.
+ */
+export async function wipeSpace(spaceId: string): Promise<WipeResult> {
+  const cfg = getConfig();
+  const space = cfg.spaces.find(s => s.id === spaceId);
+  if (!space) throw new Error(`Space '${spaceId}' not found`);
+
+  const memories = await col(`${spaceId}_memories`).countDocuments();
+  const entities = await col(`${spaceId}_entities`).countDocuments();
+  const edges = await col(`${spaceId}_edges`).countDocuments();
+  const chrono = await col(`${spaceId}_chrono`).countDocuments();
+  const files = await col(`${spaceId}_files`).countDocuments();
+
+  await Promise.all([
+    col(`${spaceId}_memories`).deleteMany({}),
+    col(`${spaceId}_entities`).deleteMany({}),
+    col(`${spaceId}_edges`).deleteMany({}),
+    col(`${spaceId}_chrono`).deleteMany({}),
+    col(`${spaceId}_files`).deleteMany({}),
+    col(`${spaceId}_tombstones`).deleteMany({}),
+  ]);
+
+  // Delete the physical files directory, then recreate it empty
+  const filesDir = path.resolve(getDataRoot(), 'files', spaceId);
+  try {
+    await fs.rm(filesDir, { recursive: true, force: true });
+    await fs.mkdir(filesDir, { recursive: true });
+  } catch (err) {
+    log.warn(`wipeSpace: could not clear files directory for '${spaceId}': ${err}`);
+  }
+
+  log.info(`Wiped space '${spaceId}': ${memories} memories, ${entities} entities, ${edges} edges, ${chrono} chrono, ${files} files`);
+  return { memories, entities, edges, chrono, files };
+}
+
 /** Update mutable fields (label, description) of an existing space in config.
  *  Returns the updated SpaceConfig, or null if the space was not found. */
 export function updateSpace(
