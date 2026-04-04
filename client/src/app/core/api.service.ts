@@ -106,6 +106,14 @@ export interface SpaceStats {
   needsReindex?: boolean;
 }
 
+export interface WipeResult {
+  memories: number;
+  entities: number;
+  edges: number;
+  chrono: number;
+  files: number;
+}
+
 export interface FileEntry {
   name: string;
   size: number;
@@ -260,8 +268,8 @@ export class ApiService {
     return this.http.delete<void>(`/api/tokens/${id}`);
   }
 
-  wipeSpace(spaceId: string): Observable<{ deleted: { memories: number; entities: number; edges: number; chrono: number; files: number } }> {
-    return this.http.post<{ deleted: { memories: number; entities: number; edges: number; chrono: number; files: number } }>(`/api/admin/spaces/${spaceId}/wipe`, {});
+  wipeSpace(spaceId: string): Observable<{ deleted: WipeResult }> {
+    return this.http.post<{ deleted: WipeResult }>(`/api/admin/spaces/${spaceId}/wipe`, {});
   }
 
   // ── MFA ───────────────────────────────────────────────────────────────────

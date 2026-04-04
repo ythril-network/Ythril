@@ -369,11 +369,11 @@ export async function wipeSpace(spaceId: string): Promise<WipeResult> {
   }
 
   const result: WipeResult = {
-    memories: memRes.deletedCount,
-    entities: entRes.deletedCount,
-    edges: edgeRes.deletedCount,
-    chrono: chronoRes.deletedCount,
-    files: fileRes.deletedCount,
+    memories: memRes.deletedCount ?? 0,
+    entities: entRes.deletedCount ?? 0,
+    edges: edgeRes.deletedCount ?? 0,
+    chrono: chronoRes.deletedCount ?? 0,
+    files: fileRes.deletedCount ?? 0,
   };
   log.info(`Wiped space '${spaceId}': ${result.memories} memories, ${result.entities} entities, ${result.edges} edges, ${result.chrono} chrono, ${result.files} files`);
   return result;
