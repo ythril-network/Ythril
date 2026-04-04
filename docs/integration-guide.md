@@ -527,6 +527,18 @@ Content-Type: application/json
 
 Searches **all knowledge types** (memories, entities, edges, chrono entries, and files) using the built-in embedding model and MongoDB Atlas `$vectorSearch`. Results are ranked by vector similarity across all types and include a `type` discriminator field. No extra configuration needed.
 
+**What is vector-indexed:**
+
+| Data type | Embedded? | Fields included in embedding text | Returned by `recall`? |
+|-----------|:---------:|-----------------------------------|:---------------------:|
+| `memory` | ✅ | `fact` | ✅ |
+| `entity` | ✅ | `name` + `type` (e.g. `portal-backend service`) | ✅ |
+| `edge` | ✅ | `label` (e.g. `connects_to`) | ✅ |
+| `chrono` | ✅ | `title` + `description` (if set) | ✅ |
+| `file` | ✅ | `description` (if set), otherwise `path` | ✅ |
+
+> **Note:** Entity `description` is not a supported field — entities are identified by `name` + `type` only. The `tags` filter parameter does not apply to edges (edges have no tags).
+
 ---
 
 ### Upsert an Entity
@@ -2232,15 +2244,17 @@ Content-Type: application/json
 
 `recall` searches all knowledge types — **memories**, **entities**, **edges**, **chrono entries**, and **files** — using vector similarity.  Results include a `type` discriminator field (`memory`, `entity`, `edge`, `chrono`, `file`) so callers can distinguish the origin of each result.
 
-**Vector-indexed fields per type:**
+**What is vector-indexed:**
 
-| Type | Embedded text |
-|------|--------------|
-| `memory` | The memory `fact` text |
-| `entity` | `name` + `type` (e.g. `portal-backend service`) |
-| `edge` | The relationship `label` (e.g. `connects_to`) |
-| `chrono` | `title` + `description` (concatenated) |
-| `file` | `description` if set, otherwise the file `path` |
+| Data type | Embedded? | Fields included in embedding text | Returned by `recall`? |
+|-----------|:---------:|-----------------------------------|:---------------------:|
+| `memory` | ✅ | `fact` | ✅ |
+| `entity` | ✅ | `name` + `type` (e.g. `portal-backend service`) | ✅ |
+| `edge` | ✅ | `label` (e.g. `connects_to`) | ✅ |
+| `chrono` | ✅ | `title` + `description` (if set) | ✅ |
+| `file` | ✅ | `description` (if set), otherwise `path` | ✅ |
+
+> **Note:** Entity `description` is not a supported field — entities are identified by `name` + `type` only. The `tags` filter parameter does not apply to edges (edges have no tags).
 
 **Parameters:**
 
