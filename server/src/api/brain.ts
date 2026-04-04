@@ -177,12 +177,14 @@ brainRouter.get('/spaces/:spaceId/stats', globalRateLimit, requireSpaceAuth, asy
     entities: await col(`${mid}_entities`).countDocuments(),
     edges: await col(`${mid}_edges`).countDocuments(),
     chrono: await col(`${mid}_chrono`).countDocuments(),
+    files: await col(`${mid}_files`).countDocuments(),
   })));
   const memories = counts.reduce((s, c) => s + c.memories, 0);
   const entities = counts.reduce((s, c) => s + c.entities, 0);
   const edges = counts.reduce((s, c) => s + c.edges, 0);
   const chrono = counts.reduce((s, c) => s + c.chrono, 0);
-  res.json({ spaceId, memories, entities, edges, chrono });
+  const files = counts.reduce((s, c) => s + c.files, 0);
+  res.json({ spaceId, memories, entities, edges, chrono, files });
 });
 
 // GET /api/brain/spaces/:spaceId/memories
@@ -582,7 +584,30 @@ brainRouter.delete('/spaces/:spaceId/chrono', bulkWipeRateLimit, requireSpaceAut
   res.json({ deleted });
 });
 
-// GET /api/brain/spaces/:spaceId/reindex-status
+// GET /api/brain/spaces/:spaceId/files — list file metadata records
+brainRouter.get('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth, async (req, res) => {
+  const spaceId = req.params['spaceId'] as string;
+  const cfg = getConfig();
+  if (!cfg.spaces.some(s => s.id === spaceId)) {
+    res.status(404).json({ error: `Space '${spaceId}' not found` });
+    return;
+  }
+  const limit = Math.min(Number(req.query['limit'] ?? 50), 200);
+  const skip = Number(req.query['skip'] ?? 0);
+  const filter: Record<string, unknown> = {};
+  if (typeof req.query['tag'] === 'string') filter['tags'] = req.query['tag'];
+  if (typeof req.query['path'] === 'string') filter['path'] = req.query['path'];
+  const memberIds = resolveMemberSpaces(spaceId);
+  const all = (await Promise.all(memberIds.map(mid =>
+    col(`${mid}_files`)
+      .find(filter as never)
+      .sort({ updatedAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .toArray(),
+  ))).flat();
+  res.json({ files: all, limit, skip });
+});
 brainRouter.get('/spaces/:spaceId/reindex-status', globalRateLimit, requireSpaceAuth, (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const cfg = getConfig();

@@ -2182,15 +2182,15 @@ Content-Type: application/json
 | `delete_memory` | Delete a memory by ID |
 | `recall` | Semantic search within the current space |
 | `recall_global` | Semantic search across all accessible spaces |
-| `query` | Structured MongoDB filter query (read-only) |
-| `get_stats` | Return counts of memories, entities, edges, and chrono entries |
+| `query` | Structured MongoDB filter query (read-only) — supports `memories`, `entities`, `edges`, `chrono`, and `files` collections |
+| `get_stats` | Return counts of memories, entities, edges, chrono entries, and files |
 | `upsert_entity` | Create or update a named entity (with optional properties) |
 | `upsert_edge` | Create or update a directed relationship |
 | `create_chrono` | Create a chrono entry (event, deadline, plan, prediction, milestone) |
 | `update_chrono` | Update an existing chrono entry |
 | `list_chrono` | List chrono entries, optionally filtered by status, kind, or tags |
 | `read_file` | Read a text file from the space file store |
-| `write_file` | Write a text file to the space file store |
+| `write_file` | Write a text file to the space file store (optional `description` and `tags` stored as metadata) |
 | `list_dir` | List directory contents |
 | `delete_file` | Delete a file |
 | `create_dir` | Create a directory |

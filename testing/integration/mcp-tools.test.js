@@ -444,6 +444,124 @@ describe('MCP file tools â€” write_file / read_file / list_dir / create_dir
   });
 });
 
+describe('MCP file metadata — write_file persists metadata, query supports files collection', () => {
+  let session;
+  const dir = `mcp-meta-test-${Date.now()}`;
+
+  before(async () => {
+    tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+    session = await openMcpSession('general', tokenA);
+  });
+  after(() => session?.close());
+
+  it('write_file with description and tags stores metadata queryable via query tool', async () => {
+    const filePath = `${dir}/documented.txt`;
+    const writeResult = await session.callTool('write_file', {
+      path: filePath,
+      content: 'documented content',
+      description: 'A well-documented file',
+      tags: ['meta-test', 'documented'],
+    });
+    assert.ok(!writeResult?.isError, `write_file error: ${JSON.stringify(writeResult)}`);
+
+    // Query the files collection and verify the metadata record exists
+    const queryResult = await session.callTool('query', {
+      collection: 'files',
+      filter: { tags: 'meta-test' },
+    });
+    assert.ok(!queryResult?.isError, `query files error: ${JSON.stringify(queryResult)}`);
+    const docs = JSON.parse(queryResult?.content?.[0]?.text ?? '[]');
+    const found = docs.find(d => d.path === filePath || d._id === filePath);
+    assert.ok(found, `Expected metadata record for ${filePath} in: ${JSON.stringify(docs)}`);
+    assert.equal(found.description, 'A well-documented file', 'description must be stored');
+    assert.ok(Array.isArray(found.tags) && found.tags.includes('meta-test'), 'tags must be stored');
+    assert.ok(typeof found.sizeBytes === 'number' && found.sizeBytes > 0, 'sizeBytes must be set');
+    assert.ok(typeof found.createdAt === 'string', 'createdAt must be set');
+    assert.ok(typeof found.updatedAt === 'string', 'updatedAt must be set');
+    assert.ok(found.author && typeof found.author.instanceId === 'string', 'author must be set');
+  });
+
+  it('write_file without description/tags still creates metadata record', async () => {
+    const filePath = `${dir}/plain.txt`;
+    const writeResult = await session.callTool('write_file', {
+      path: filePath,
+      content: 'plain content',
+    });
+    assert.ok(!writeResult?.isError, `write_file error: ${JSON.stringify(writeResult)}`);
+
+    const queryResult = await session.callTool('query', {
+      collection: 'files',
+      filter: { _id: filePath },
+    });
+    assert.ok(!queryResult?.isError, `query files error: ${JSON.stringify(queryResult)}`);
+    const docs = JSON.parse(queryResult?.content?.[0]?.text ?? '[]');
+    assert.ok(docs.length > 0, `Expected metadata record for ${filePath}`);
+    assert.ok(typeof docs[0].sizeBytes === 'number', 'sizeBytes must be set');
+  });
+
+  it('query tool rejects unknown collection', async () => {
+    const result = await session.callTool('query', {
+      collection: 'unknown_coll',
+      filter: {},
+    });
+    assert.ok(result?.isError, 'Unknown collection must return isError');
+  });
+
+  it('get_stats files count increments after write_file', async () => {
+    const before = await session.callTool('get_stats', {});
+    const beforeCount = JSON.parse(before?.content?.[0]?.text ?? '{}').files ?? 0;
+
+    await session.callTool('write_file', {
+      path: `${dir}/count-test.txt`,
+      content: 'counting',
+    });
+
+    const after = await session.callTool('get_stats', {});
+    const afterCount = JSON.parse(after?.content?.[0]?.text ?? '{}').files ?? 0;
+    assert.ok(afterCount >= beforeCount + 1, `Expected files count to increment: before=${beforeCount}, after=${afterCount}`);
+  });
+
+  it('delete_file removes the metadata record', async () => {
+    const filePath = `${dir}/to-delete-meta.txt`;
+    await session.callTool('write_file', { path: filePath, content: 'bye' });
+
+    await session.callTool('delete_file', { path: filePath });
+
+    const queryResult = await session.callTool('query', {
+      collection: 'files',
+      filter: { _id: filePath },
+    });
+    assert.ok(!queryResult?.isError, `query files error: ${JSON.stringify(queryResult)}`);
+    const docs = JSON.parse(queryResult?.content?.[0]?.text ?? '[]');
+    assert.equal(docs.length, 0, `Metadata record must be deleted when file is deleted`);
+  });
+
+  it('move_file updates the path in metadata', async () => {
+    const srcPath = `${dir}/move-meta-src.txt`;
+    const dstPath = `${dir}/move-meta-dst.txt`;
+    await session.callTool('write_file', { path: srcPath, content: 'move me' });
+
+    await session.callTool('move_file', { src: srcPath, dst: dstPath });
+
+    // Old path metadata should be gone
+    const srcQuery = await session.callTool('query', {
+      collection: 'files',
+      filter: { _id: srcPath },
+    });
+    const srcDocs = JSON.parse(srcQuery?.content?.[0]?.text ?? '[]');
+    assert.equal(srcDocs.length, 0, 'Source path metadata must be removed after move');
+
+    // New path metadata should exist
+    const dstQuery = await session.callTool('query', {
+      collection: 'files',
+      filter: { _id: dstPath },
+    });
+    const dstDocs = JSON.parse(dstQuery?.content?.[0]?.text ?? '[]');
+    assert.ok(dstDocs.length > 0, 'Destination path metadata must exist after move');
+    assert.equal(dstDocs[0].path, dstPath, 'path field must be updated to destination');
+  });
+});
+
 describe('MCP recall_global â€” space-scoped token must only see its own spaces', () => {
   let sessionScoped;
   let scopedTokenPlaintext;
@@ -565,7 +683,7 @@ describe('MCP brain tools — update_memory / delete_memory / get_stats', () => 
   });
   after(() => session?.close());
 
-  it('get_stats returns counts with spaceId, memories, entities, edges, chrono', async () => {
+  it('get_stats returns counts with spaceId, memories, entities, edges, chrono, files', async () => {
     const result = await session.callTool('get_stats', {});
     assert.ok(!result?.isError, `get_stats returned isError: ${JSON.stringify(result)}`);
     const text = result?.content?.[0]?.text ?? '';
@@ -575,7 +693,9 @@ describe('MCP brain tools — update_memory / delete_memory / get_stats', () => 
     assert.ok(typeof parsed.entities === 'number', 'get_stats must return entities count');
     assert.ok(typeof parsed.edges === 'number', 'get_stats must return edges count');
     assert.ok(typeof parsed.chrono === 'number', 'get_stats must return chrono count');
+    assert.ok(typeof parsed.files === 'number', 'get_stats must return files count');
     assert.ok(parsed.memories >= 0, 'memories count must be non-negative');
+    assert.ok(parsed.files >= 0, 'files count must be non-negative');
   });
 
   it('update_memory with no id returns isError', async () => {
