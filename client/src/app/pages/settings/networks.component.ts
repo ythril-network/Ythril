@@ -1,7 +1,7 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { ApiService, InviteBundle, Network, SyncHistoryRecord, VoteRound } from '../../core/api.service';
+import { ApiService, InviteBundle, Network, Space, SyncHistoryRecord, VoteRound } from '../../core/api.service';
 @Component({
   selector: 'app-networks',
   standalone: true,
@@ -83,6 +83,28 @@ import { ApiService, InviteBundle, Network, SyncHistoryRecord, VoteRound } from 
     .status-success { background: var(--green-bg, #e6f9e6); color: var(--green-fg, #1a7a1a); }
     .status-partial { background: var(--yellow-bg, #fff8e1); color: var(--yellow-fg, #b5850a); }
     .status-failed  { background: var(--red-bg, #fde8e8); color: var(--red-fg, #b91c1c); }
+    .spaces-toggle-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+    }
+    .space-toggle-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-size: 12px;
+      background: var(--bg-surface);
+      transition: background var(--transition), border-color var(--transition);
+      user-select: none;
+    }
+    .space-toggle-item:hover { background: var(--bg-elevated); }
+    .space-toggle-item input[type=checkbox] { width: 13px; height: 13px; margin: 0; flex-shrink: 0; }
+    .space-toggle-item .space-id { color: var(--text-muted); font-size: 11px; font-family: var(--font-mono); }
   `],
   template: `
     <!-- Create network -->
@@ -112,8 +134,23 @@ import { ApiService, InviteBundle, Network, SyncHistoryRecord, VoteRound } from 
           </select>
         </div>
         <div class="field" style="margin-bottom:0;">
-          <label>Spaces (comma-separated IDs)</label>
-          <input type="text" [(ngModel)]="form.spaces" name="spaces" placeholder="general" />
+          <label>Spaces</label>
+          @if (spacesLoadFailed()) {
+            <div class="alert alert-error" style="margin-bottom:6px; font-size:12px;">⚠️ Could not load spaces — enter IDs manually.</div>
+            <input type="text" [(ngModel)]="networkSpacesFallback" name="spaces" placeholder="general" />
+          } @else if (availableSpaces().length === 0) {
+            <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">Loading spaces…</div>
+          } @else {
+            <div class="spaces-toggle-list">
+              @for (s of availableSpaces(); track s.id) {
+                <label class="space-toggle-item">
+                  <input type="checkbox" [checked]="isNetworkSpaceSelected(s.id)" (change)="toggleNetworkSpace(s.id)" />
+                  <span>{{ s.label }}</span>
+                  <span class="space-id">{{ s.id }}</span>
+                </label>
+              }
+            </div>
+          }
         </div>
         @if (form.type !== 'pubsub') {
           <div class="field" style="margin-bottom:0;">
@@ -352,8 +389,13 @@ export class NetworksComponent implements OnInit {
   createError = signal('');
   expanded = signal('');
 
-  form = { label: '', type: 'closed', spaces: 'general', votingDeadlineHours: 48 };
+  form = { label: '', type: 'closed', votingDeadlineHours: 48 };
   netSchedule: Record<string, string> = {};
+
+  availableSpaces = signal<Space[]>([]);
+  spacesLoadFailed = signal(false);
+  networkSelectedSpaces: string[] = [];
+  networkSpacesFallback = '';
 
   private inviteBundles: Record<string, InviteBundle> = {};
   private syncResults: Record<string, { ok: boolean }> = {};
@@ -380,6 +422,10 @@ export class NetworksComponent implements OnInit {
 
   ngOnInit(): void {
     this.load();
+    this.api.listSpaces().subscribe({
+      next: ({ spaces }) => this.availableSpaces.set(spaces),
+      error: () => this.spacesLoadFailed.set(true),
+    });
     // Auto-fill this brain's URL: prefer the server-configured publicUrl, fall
     // back to the current browser origin (works for most single-brain deployments).
     this.api.getAbout().subscribe({
@@ -424,7 +470,13 @@ export class NetworksComponent implements OnInit {
     if (!this.form.label.trim()) return;
     this.creating.set(true);
     this.createError.set('');
-    const spaces = this.form.spaces.split(',').map(s => s.trim()).filter(Boolean);
+
+    let spaces: string[];
+    if (this.spacesLoadFailed()) {
+      spaces = this.networkSpacesFallback.split(',').map(s => s.trim()).filter(Boolean);
+    } else {
+      spaces = [...this.networkSelectedSpaces];
+    }
 
     this.api.createNetwork({
       label: this.form.label.trim(),
@@ -435,13 +487,27 @@ export class NetworksComponent implements OnInit {
       next: (net) => {
         this.creating.set(false);
         this.networks.update(list => [...list, net]);
-        this.form = { label: '', type: 'closed', spaces: 'general', votingDeadlineHours: 48 };
+        this.form = { label: '', type: 'closed', votingDeadlineHours: 48 };
+        this.networkSelectedSpaces = [];
+        this.networkSpacesFallback = '';
       },
       error: (err) => {
         this.creating.set(false);
         this.createError.set(err.error?.error ?? 'Failed to create network');
       },
     });
+  }
+
+  isNetworkSpaceSelected(id: string): boolean {
+    return this.networkSelectedSpaces.includes(id);
+  }
+
+  toggleNetworkSpace(id: string): void {
+    if (this.networkSelectedSpaces.includes(id)) {
+      this.networkSelectedSpaces = this.networkSelectedSpaces.filter(s => s !== id);
+    } else {
+      this.networkSelectedSpaces = [...this.networkSelectedSpaces, id];
+    }
   }
 
   leaveNetwork(net: Network): void {
