@@ -525,7 +525,19 @@ Content-Type: application/json
 
 > **MCP-only.** This operation is exposed as the `recall` MCP tool, not as a REST endpoint. See the [MCP section](#mcp-model-context-protocol) for tool parameters.
 
-Uses the built-in embedding model and MongoDB Atlas `$vectorSearch`. No extra configuration needed.
+Searches **all knowledge types** (memories, entities, edges, chrono entries, and files) using the built-in embedding model and MongoDB Atlas `$vectorSearch`. Results are ranked by vector similarity across all types and include a `type` discriminator field. No extra configuration needed.
+
+**What is vector-indexed:**
+
+| Data type | Embedded? | Fields included in embedding text | Returned by `recall`? |
+|-----------|:---------:|-----------------------------------|:---------------------:|
+| `memory` | ✅ | `fact` | ✅ |
+| `entity` | ✅ | `name` + `type` (e.g. `portal-backend service`) | ✅ |
+| `edge` | ✅ | `label` (e.g. `connects_to`) | ✅ |
+| `chrono` | ✅ | `title` + `description` (if set) | ✅ |
+| `file` | ✅ | `description` (if set), otherwise `path` | ✅ |
+
+> **Note:** Entity `description` is not a supported field — entities are identified by `name` + `type` only. The `tags` filter parameter does not apply to edges (edges have no tags).
 
 ---
 
@@ -1038,6 +1050,32 @@ The rename atomically:
 | `404`  | Source space does not exist |
 | `409`  | `newId` already exists |
 | `500`  | Partial rename failure (collections may be in an inconsistent state) |
+
+---
+
+### Update a Space
+
+```
+PATCH /api/spaces/:id
+```
+
+Update the `label` and/or `description` of an existing space. At least one field must be provided. Requires an admin token (+ TOTP if MFA is enabled).
+
+```json
+{
+  "label": "Research Notes (Updated)",
+  "description": "Updated description surfaced to MCP clients as space-level instructions."
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `label` | no (at least one) | New display name, max 200 chars. |
+| `description` | no (at least one) | New description, max 2000 chars. Surfaced to MCP clients as `instructions` during handshake. |
+
+**Response** `200`: the updated space object.
+
+> **MCP tool:** `update_space` — accepts the same `label` and `description` arguments. Requires the MCP session token to have `admin: true`.
 
 ---
 
@@ -2194,17 +2232,17 @@ Content-Type: application/json
 | `remember` | Store a memory with optional tags and entity links |
 | `update_memory` | Update an existing memory's fact, tags, or entity links |
 | `delete_memory` | Delete a memory by ID |
-| `recall` | Semantic search within the current space |
-| `recall_global` | Semantic search across all accessible spaces |
-| `query` | Structured MongoDB filter query (read-only) |
-| `get_stats` | Return counts of memories, entities, edges, and chrono entries |
+| `recall` | Semantic search across all knowledge types (memories, entities, edges, chrono entries, files) within the current space |
+| `recall_global` | Semantic search across all knowledge types in all accessible spaces |
+| `query` | Structured MongoDB filter query (read-only) — supports `memories`, `entities`, `edges`, `chrono`, and `files` collections |
+| `get_stats` | Return counts of memories, entities, edges, chrono entries, and files |
 | `upsert_entity` | Create or update a named entity (with optional properties) |
 | `upsert_edge` | Create or update a directed relationship |
 | `create_chrono` | Create a chrono entry (event, deadline, plan, prediction, milestone) |
 | `update_chrono` | Update an existing chrono entry |
-| `list_chrono` | List chrono entries, optionally filtered by status or kind |
+| `list_chrono` | List chrono entries, optionally filtered by status, kind, or tags |
 | `read_file` | Read a text file from the space file store |
-| `write_file` | Write a text file to the space file store |
+| `write_file` | Write a text file to the space file store (optional `description` and `tags` stored as metadata) |
 | `list_dir` | List directory contents |
 | `delete_file` | Delete a file |
 | `create_dir` | Create a directory |
@@ -2237,11 +2275,37 @@ Content-Type: application/json
     "name": "recall",
     "arguments": {
       "query": "Traefik routing configuration",
-      "topK": 5
+      "topK": 5,
+      "tags": ["portal-backend"]
     }
   }
 }
 ```
+
+`recall` searches all knowledge types — **memories**, **entities**, **edges**, **chrono entries**, and **files** — using vector similarity.  Results include a `type` discriminator field (`memory`, `entity`, `edge`, `chrono`, `file`) so callers can distinguish the origin of each result.
+
+**What is vector-indexed:**
+
+| Data type | Embedded? | Fields included in embedding text | Returned by `recall`? |
+|-----------|:---------:|-----------------------------------|:---------------------:|
+| `memory` | ✅ | `fact` | ✅ |
+| `entity` | ✅ | `name` + `type` (e.g. `portal-backend service`) | ✅ |
+| `edge` | ✅ | `label` (e.g. `connects_to`) | ✅ |
+| `chrono` | ✅ | `title` + `description` (if set) | ✅ |
+| `file` | ✅ | `description` (if set), otherwise `path` | ✅ |
+
+> **Note:** Entity `description` is not a supported field — entities are identified by `name` + `type` only. The `tags` filter parameter does not apply to edges (edges have no tags).
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | `string` | ✅ | Natural language search query |
+| `topK` | `number` | — | Max results to return (default `10`) |
+| `tags` | `string[]` | — | Optional tag filter — only results bearing **all** of these tags are returned (applies to memories, entities, chrono entries, and files). Useful for scoping a semantic search to a specific service or ADR (e.g. `["portal-backend"]`) |
+| `types` | `string[]` | — | Optional knowledge-type filter — restrict results to one or more of `memory`, `entity`, `edge`, `chrono`, `file`. Omit to search all types. |
+
+`recall_global` accepts the same `tags` and `types` parameters and applies them across all searched spaces.
 
 ### Example: update_memory
 
@@ -2318,6 +2382,25 @@ Works with any valid token (including read-only). For proxy spaces, returns aggr
   }
 }
 ```
+
+**Valid `collection` values:**
+
+| Value | Contents |
+|-------|----------|
+| `memories` | Memory facts with tags, entity links, and embeddings |
+| `entities` | Named entities in the knowledge graph |
+| `edges` | Directed relationship edges between entities |
+| `chrono` | Chronological entries (events, deadlines, plans, predictions, milestones) |
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `collection` | `string` | ✅ | One of the four values above |
+| `filter` | `object` | ✅ | MongoDB filter document |
+| `projection` | `object` | — | Fields to include (`1`) or exclude (`0`) |
+| `limit` | `number` | — | Max documents (default `20`, max `100`) |
+| `maxTimeMS` | `number` | — | Query timeout in ms (max `30000`) |
 
 **Security**: The `query` tool rejects `$where`, `$function`, and deeply nested filters (>8 levels). Only safe read-only operators are allowed.
 

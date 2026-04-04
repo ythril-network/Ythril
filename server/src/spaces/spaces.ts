@@ -7,7 +7,11 @@ import { ensureSpaceFilesDir } from '../files/files.js';
 import { log } from '../util/log.js';
 import type { SpaceConfig, MemoryDoc } from '../config/types.js';
 
-const SPACE_COLLECTIONS = ['memories', 'entities', 'edges', 'chrono', 'tombstones', 'conflicts'] as const;
+const SPACE_COLLECTIONS = ['memories', 'entities', 'edges', 'chrono', 'tombstones', 'conflicts', 'files'] as const;
+
+// Collections that have vector search indexes for semantic recall
+const VECTOR_INDEXED_COLLECTIONS = ['memories', 'entities', 'edges', 'chrono', 'files'] as const;
+type VectorIndexedCollection = typeof VECTOR_INDEXED_COLLECTIONS[number];
 
 // ── Embedding model mismatch tracking ──────────────────────────────────────
 const _reindexNeeded = new Set<string>();
@@ -59,9 +63,14 @@ export async function initSpace(spaceId: string): Promise<void> {
   await chronoColl.createIndex({ spaceId: 1, seq: 1 });
   await tombstonesColl.createIndex({ spaceId: 1, seq: 1 });
   await db.collection(`${spaceId}_conflicts`).createIndex({ spaceId: 1, detectedAt: -1 });
+  const filesColl = db.collection(`${spaceId}_files`);
+  await filesColl.createIndex({ spaceId: 1, tags: 1 });
+  await filesColl.createIndex({ spaceId: 1, updatedAt: -1 });
 
-  // Vector search index (Atlas Local / Atlas)
-  await ensureVectorSearchIndex(spaceId, embCfg.dimensions, embCfg.similarity);
+  // Vector search indexes (Atlas Local / Atlas)
+  for (const suffix of VECTOR_INDEXED_COLLECTIONS) {
+    await ensureVectorSearchIndex(spaceId, suffix, embCfg.dimensions, embCfg.similarity);
+  }
 
   // Ensure files directory exists
   await ensureSpaceFilesDir(spaceId);
@@ -86,17 +95,18 @@ export async function initSpace(spaceId: string): Promise<void> {
 }
 
 /**
- * Create or validate the $vectorSearch index for a space's memories collection.
+ * Create or validate the $vectorSearch index for a space collection.
  * Polls for READY status up to 60 seconds.
  */
 async function ensureVectorSearchIndex(
   spaceId: string,
+  collectionSuffix: VectorIndexedCollection,
   numDimensions: number,
   similarity: string,
 ): Promise<void> {
   const db = getDb();
-  const coll = db.collection(`${spaceId}_memories`);
-  const indexName = `${spaceId}_memories_embedding`;
+  const coll = db.collection(`${spaceId}_${collectionSuffix}`);
+  const indexName = `${spaceId}_${collectionSuffix}_embedding`;
 
   // List existing search indexes
   let indexes: Array<{ name: string; status?: string; latestDefinition?: { fields?: Array<{ numDimensions?: number }> } }> = [];
@@ -234,18 +244,20 @@ export async function removeSpace(spaceId: string): Promise<boolean> {
     const db = getDb();
     const errors: string[] = [];
 
-    // 1. Drop vector search index on the memories collection (best-effort)
-    const indexName = `${spaceId}_memories_embedding`;
-    try {
-      const memoriesColl = db.collection(`${spaceId}_memories`);
-      const indexes = await memoriesColl.listSearchIndexes().toArray() as Array<{ name?: string }>;
-      if (indexes.some(i => i.name === indexName)) {
-        await memoriesColl.dropSearchIndex(indexName);
-        log.debug(`Dropped vector search index ${indexName}`);
+    // 1. Drop vector search indexes on all indexed collections (best-effort)
+    for (const suffix of VECTOR_INDEXED_COLLECTIONS) {
+      const indexName = `${spaceId}_${suffix}_embedding`;
+      try {
+        const coll = db.collection(`${spaceId}_${suffix}`);
+        const indexes = await coll.listSearchIndexes().toArray() as Array<{ name?: string }>;
+        if (indexes.some(i => i.name === indexName)) {
+          await coll.dropSearchIndex(indexName);
+          log.debug(`Dropped vector search index ${indexName}`);
+        }
+      } catch (err) {
+        log.warn(`Could not drop vector search index ${indexName}: ${err}`);
+        // Vector index failure is non-fatal — the collection drop below will clean it up
       }
-    } catch (err) {
-      log.warn(`Could not drop vector search index ${indexName}: ${err}`);
-      // Vector index failure is non-fatal — the collection drop below will clean it up
     }
 
     // 2. Drop all MongoDB collections associated with this space
@@ -299,6 +311,21 @@ export async function removeSpace(spaceId: string): Promise<boolean> {
   cfg.spaces = cfg.spaces.filter(s => s.id !== spaceId);
   saveConfig(cfg);
   return true;
+}
+
+/** Update mutable fields (label, description) of an existing space in config.
+ *  Returns the updated SpaceConfig, or null if the space was not found. */
+export function updateSpace(
+  spaceId: string,
+  updates: { label?: string; description?: string },
+): SpaceConfig | null {
+  const cfg = getConfig();
+  const space = cfg.spaces.find(s => s.id === spaceId);
+  if (!space) return null;
+  if (typeof updates.label === 'string') space.label = updates.label;
+  if (typeof updates.description === 'string') space.description = updates.description;
+  saveConfig(cfg);
+  return space;
 }
 
 /** Generate a URL-safe space ID from a label */

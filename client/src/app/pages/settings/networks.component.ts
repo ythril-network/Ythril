@@ -86,6 +86,28 @@ import { ApiService, InviteBundle, Network, Space, SyncHistoryRecord, VoteRound 
     .create-join-row { display: flex; gap: 24px; margin-bottom: 24px; }
     .create-join-row > .card { flex: 1; min-width: 0; margin-bottom: 0; }
     @media (max-width: 900px) { .create-join-row { flex-direction: column; } }
+    .spaces-toggle-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+    }
+    .space-toggle-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-size: 12px;
+      background: var(--bg-surface);
+      transition: background var(--transition), border-color var(--transition);
+      user-select: none;
+    }
+    .space-toggle-item:hover { background: var(--bg-elevated); }
+    .space-toggle-item input[type=checkbox] { width: 13px; height: 13px; margin: 0; flex-shrink: 0; }
+    .space-toggle-item .space-id { color: var(--text-muted); font-size: 11px; font-family: var(--font-mono); }
   `],
   template: `
     <div class="create-join-row">
@@ -117,14 +139,22 @@ import { ApiService, InviteBundle, Network, Space, SyncHistoryRecord, VoteRound 
         </div>
         <div class="field" style="margin-bottom:0;">
           <label>Spaces</label>
-          <div style="display:flex; flex-wrap:wrap; gap:8px 14px; padding:6px 0;">
-            @for (s of availableSpaces(); track s.id) {
-              <label style="display:flex; align-items:center; gap:5px; font-size:13px; color:var(--text-secondary); cursor:pointer; text-transform:none; letter-spacing:0; font-weight:400;">
-                <input type="checkbox" [checked]="!!selectedSpaces[s.id]" (change)="selectedSpaces[s.id] = !selectedSpaces[s.id]" style="width:15px; height:15px; margin:0;" />
-                {{ s.label }} <span style="font-size:11px; color:var(--text-muted);">({{ s.id }})</span>
-              </label>
-            }
-          </div>
+          @if (spacesLoadFailed()) {
+            <div class="alert alert-error" style="margin-bottom:6px; font-size:12px;">⚠️ Could not load spaces — enter IDs manually.</div>
+            <input type="text" [(ngModel)]="networkSpacesFallback" name="spaces" placeholder="general" />
+          } @else if (availableSpaces().length === 0) {
+            <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">Loading spaces…</div>
+          } @else {
+            <div class="spaces-toggle-list">
+              @for (s of availableSpaces(); track s.id) {
+                <label class="space-toggle-item">
+                  <input type="checkbox" [checked]="isNetworkSpaceSelected(s.id)" (change)="toggleNetworkSpace(s.id)" />
+                  <span>{{ s.label }}</span>
+                  <span class="space-id">{{ s.id }}</span>
+                </label>
+              }
+            </div>
+          }
         </div>
         @if (form.type !== 'pubsub') {
           <div class="field" style="margin-bottom:0;">
@@ -386,8 +416,12 @@ export class NetworksComponent implements OnInit {
   expanded = signal('');
 
   form = { label: '', type: 'closed', votingDeadlineHours: 48 };
-  selectedSpaces: Record<string, boolean> = { general: true };
   netSchedule: Record<string, string> = {};
+
+  availableSpaces = signal<Space[]>([]);
+  spacesLoadFailed = signal(false);
+  networkSelectedSpaces: string[] = [];
+  networkSpacesFallback = '';
 
   private inviteBundles: Record<string, InviteBundle> = {};
   private syncResults: Record<string, { ok: boolean }> = {};
@@ -420,7 +454,7 @@ export class NetworksComponent implements OnInit {
     this.load();
     this.api.listSpaces().subscribe({
       next: ({ spaces }) => this.availableSpaces.set(spaces),
-      error: () => {},
+      error: () => this.spacesLoadFailed.set(true),
     });
     // Auto-fill this brain's URL: prefer the server-configured publicUrl, fall
     // back to the current browser origin (works for most single-brain deployments).
@@ -466,7 +500,13 @@ export class NetworksComponent implements OnInit {
     if (!this.form.label.trim()) return;
     this.creating.set(true);
     this.createError.set('');
-    const spaces = Object.keys(this.selectedSpaces).filter(k => this.selectedSpaces[k]);
+
+    let spaces: string[];
+    if (this.spacesLoadFailed()) {
+      spaces = this.networkSpacesFallback.split(',').map(s => s.trim()).filter(Boolean);
+    } else {
+      spaces = [...this.networkSelectedSpaces];
+    }
 
     this.api.createNetwork({
       label: this.form.label.trim(),
@@ -478,13 +518,26 @@ export class NetworksComponent implements OnInit {
         this.creating.set(false);
         this.networks.update(list => [...list, net]);
         this.form = { label: '', type: 'closed', votingDeadlineHours: 48 };
-        this.selectedSpaces = { general: true };
+        this.networkSelectedSpaces = [];
+        this.networkSpacesFallback = '';
       },
       error: (err) => {
         this.creating.set(false);
         this.createError.set(err.error?.error ?? 'Failed to create network');
       },
     });
+  }
+
+  isNetworkSpaceSelected(id: string): boolean {
+    return this.networkSelectedSpaces.includes(id);
+  }
+
+  toggleNetworkSpace(id: string): void {
+    if (this.networkSelectedSpaces.includes(id)) {
+      this.networkSelectedSpaces = this.networkSelectedSpaces.filter(s => s !== id);
+    } else {
+      this.networkSelectedSpaces = [...this.networkSelectedSpaces, id];
+    }
   }
 
   leaveNetwork(net: Network): void {

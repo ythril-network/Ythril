@@ -11,9 +11,10 @@ import { getConfig } from '../config/loader.js';
 import { log } from '../util/log.js';
 import { checkQuota, QuotaError } from '../quota/quota.js';
 import { resolveMemberSpaces, resolveWriteTarget, isProxySpace } from '../spaces/proxy.js';
+import { updateSpace } from '../spaces/spaces.js';
 
 // Brain tools
-import { remember, recall, recallGlobal, queryBrain, updateMemory, deleteMemory } from '../brain/memory.js';
+import { remember, recall, recallGlobal, queryBrain, updateMemory, deleteMemory, type RecallKnowledgeType, type RecallResult } from '../brain/memory.js';
 import { col } from '../db/mongo.js';
 import { upsertEntity, listEntities } from '../brain/entities.js';
 import { upsertEdge, listEdges } from '../brain/edges.js';
@@ -27,20 +28,39 @@ import {
   createDir,
   moveFile,
 } from '../files/files.js';
+import { upsertFileMeta, deleteFileMeta, renameFileMeta } from '../files/file-meta.js';
 
 // Session map: sessionId → transport
 const transports = new Map<string, SSEServerTransport>();
+
+/** Format a RecallResult as a single human-readable summary line. */
+function formatRecallSummary(r: RecallResult): string {
+  switch (r.type) {
+    case 'memory':
+      return r.fact ?? '';
+    case 'entity':
+      return `${r.name ?? ''} (${r.entityType ?? ''})`;
+    case 'edge':
+      return `${r.from ?? ''} → ${r.label ?? ''} → ${r.to ?? ''}`;
+    case 'chrono':
+      return r.description ? `${r.title ?? ''}: ${r.description}` : (r.title ?? '');
+    case 'file':
+      return r.description ? `${r.path ?? ''}: ${r.description}` : (r.path ?? '');
+    default:
+      return '';
+  }
+}
 
 const MUTATING_TOOLS = new Set([
   'remember', 'update_memory', 'delete_memory',
   'upsert_entity', 'upsert_edge',
   'create_chrono', 'update_chrono',
   'write_file', 'delete_file', 'create_dir', 'move_file',
-  'sync_now',
+  'sync_now', 'update_space',
 ]);
 
 /** Create a MCP Server instance with all tools bound to the given space */
-function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boolean): Server {
+function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boolean, isAdmin?: boolean): Server {
   // Surface the space description as MCP instructions so AI clients know
   // what this brain space is about *before* they make any tool calls.
   const cfg = getConfig();
@@ -85,24 +105,36 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
       },
       {
         name: 'recall',
-        description: 'Semantically search memories in this space.',
+        description: 'Semantically search all knowledge types (memories, entities, edges, chrono entries, files) in this space.',
         inputSchema: {
           type: 'object',
           properties: {
             query: { type: 'string', description: 'Natural language search query.' },
             topK: { type: 'number', description: 'Max results (default 10).' },
+            tags: { type: 'array', items: { type: 'string' }, description: 'Optional tag filter — only results bearing ALL of these tags are returned (applies to memories, entities, chrono entries, and files).' },
+            types: {
+              type: 'array',
+              items: { type: 'string', enum: ['memory', 'entity', 'edge', 'chrono', 'file'] },
+              description: 'Optional knowledge-type filter — restrict results to one or more types. Omit to search all types.',
+            },
           },
           required: ['query'],
         },
       },
       {
         name: 'recall_global',
-        description: 'Semantically search memories across ALL accessible spaces in parallel.',
+        description: 'Semantically search all knowledge types (memories, entities, edges, chrono entries, files) across ALL accessible spaces in parallel.',
         inputSchema: {
           type: 'object',
           properties: {
             query: { type: 'string', description: 'Natural language search query.' },
             topK: { type: 'number', description: 'Max results per space before merging (default 5).' },
+            tags: { type: 'array', items: { type: 'string' }, description: 'Optional tag filter — only results bearing ALL of these tags are returned (applies to memories, entities, chrono entries, and files).' },
+            types: {
+              type: 'array',
+              items: { type: 'string', enum: ['memory', 'entity', 'edge', 'chrono', 'file'] },
+              description: 'Optional knowledge-type filter — restrict results to one or more types. Omit to search all types.',
+            },
           },
           required: ['query'],
         },
@@ -151,7 +183,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           properties: {
             collection: {
               type: 'string',
-              enum: ['memories', 'entities', 'edges', 'chrono'],
+              enum: ['memories', 'entities', 'edges', 'chrono', 'files'],
               description: 'Collection to query.',
             },
             filter: { type: 'object', description: 'MongoDB filter document.' },
@@ -243,13 +275,15 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
       },
       {
         name: 'list_chrono',
-        description: 'List chronological entries, optionally filtered by status or kind.',
+        description: 'List chronological entries, optionally filtered by status, kind, or tags.',
         inputSchema: {
           type: 'object',
           properties: {
             status: { type: 'string', enum: ['upcoming', 'active', 'completed', 'overdue', 'cancelled'], description: 'Filter by status.' },
             kind: { type: 'string', enum: ['event', 'deadline', 'plan', 'prediction', 'milestone'], description: 'Filter by kind.' },
+            tags: { type: 'array', items: { type: 'string' }, description: 'Filter to entries that carry at least one of these tags.' },
             limit: { type: 'number', description: 'Max results (default 20, max 100).' },
+            skip: { type: 'number', description: 'Number of results to skip for pagination (default 0).' },
           },
           required: [],
         },
@@ -273,6 +307,8 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           properties: {
             path: { type: 'string', description: 'File path relative to the space root.' },
             content: { type: 'string', description: 'Text content to write.' },
+            description: { type: 'string', description: 'Optional human-readable summary stored as file metadata.' },
+            tags: { type: 'array', items: { type: 'string' }, description: 'Optional tags for filtering and recall.' },
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
           },
           required: ['path', 'content'],
@@ -327,6 +363,18 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
           },
           required: ['src', 'dst'],
+        },
+      },
+      {
+        name: 'update_space',
+        description: 'Update the label or description of the current space. Requires an admin token.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            label: { type: 'string', description: 'New display label for the space (max 200 chars).' },
+            description: { type: 'string', description: 'New description for the space (max 2000 chars). Surfaced to MCP clients as space-level instructions.' },
+          },
+          required: [],
         },
       },
       {
@@ -408,8 +456,10 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const query = String(a['query'] ?? '');
           if (!query.trim()) throw new Error('query must not be empty');
           const topK = typeof a['topK'] === 'number' ? a['topK'] : 10;
+          const tags = Array.isArray(a['tags']) ? (a['tags'] as unknown[]).filter((t): t is string => typeof t === 'string') : undefined;
+          const types = Array.isArray(a['types']) ? (a['types'] as unknown[]).filter((t): t is RecallKnowledgeType => typeof t === 'string') : undefined;
           const memberIds = resolveMemberSpaces(spaceId);
-          const all = (await Promise.all(memberIds.map(mid => recall(mid, query, topK)))).flat();
+          const all = (await Promise.all(memberIds.map(mid => recall(mid, query, topK, tags, types)))).flat();
           // Sort by score descending and take topK
           all.sort((x, y) => (y.score ?? 0) - (x.score ?? 0));
           const results = all.slice(0, topK);
@@ -419,11 +469,11 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
                 type: 'text' as const,
                 text:
                   results.length === 0
-                    ? 'No memories found.'
+                    ? 'No results found.'
                     : results
                         .map(
                           (r, i) =>
-                            `[${i + 1}] (score: ${r.score?.toFixed(3) ?? 'n/a'}) ${r.fact}`,
+                            `[${i + 1}] [${r.type}] (score: ${r.score?.toFixed(3) ?? 'n/a'}) ${formatRecallSummary(r)}`,
                         )
                         .join('\n'),
               },
@@ -435,23 +485,25 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const query = String(a['query'] ?? '');
           if (!query.trim()) throw new Error('query must not be empty');
           const topK = typeof a['topK'] === 'number' ? a['topK'] : 5;
+          const tags = Array.isArray(a['tags']) ? (a['tags'] as unknown[]).filter((t): t is string => typeof t === 'string') : undefined;
+          const types = Array.isArray(a['types']) ? (a['types'] as unknown[]).filter((t): t is RecallKnowledgeType => typeof t === 'string') : undefined;
           const cfg = getConfig();
           // Only search spaces allowed by the calling token (tokenSpaces undefined = all spaces).
           const spaceIds = cfg.spaces
             .filter(s => !tokenSpaces || tokenSpaces.includes(s.id))
             .map(s => s.id);
-          const results = await recallGlobal(spaceIds, query, topK);
+          const results = await recallGlobal(spaceIds, query, topK, tags, types);
           return {
             content: [
               {
                 type: 'text' as const,
                 text:
                   results.length === 0
-                    ? 'No memories found across any space.'
+                    ? 'No results found across any space.'
                     : results
                         .map(
                           (r, i) =>
-                            `[${i + 1}] [${r.spaceId}] (score: ${r.score?.toFixed(3) ?? 'n/a'}) ${r.fact}`,
+                            `[${i + 1}] [${r.spaceId}] [${r.type}] (score: ${r.score?.toFixed(3) ?? 'n/a'}) ${formatRecallSummary(r)}`,
                         )
                         .join('\n'),
               },
@@ -514,23 +566,25 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             entities: await col(`${mid}_entities`).countDocuments(),
             edges: await col(`${mid}_edges`).countDocuments(),
             chrono: await col(`${mid}_chrono`).countDocuments(),
+            files: await col(`${mid}_files`).countDocuments(),
           })));
           const memories = counts.reduce((s, c) => s + c.memories, 0);
           const entities = counts.reduce((s, c) => s + c.entities, 0);
           const edges = counts.reduce((s, c) => s + c.edges, 0);
           const chrono = counts.reduce((s, c) => s + c.chrono, 0);
+          const files = counts.reduce((s, c) => s + c.files, 0);
           return {
             content: [{
               type: 'text' as const,
-              text: JSON.stringify({ spaceId, memories, entities, edges, chrono }, null, 2),
+              text: JSON.stringify({ spaceId, memories, entities, edges, chrono, files }, null, 2),
             }],
           };
         }
 
         case 'query': {
           const collName = String(a['collection'] ?? '');
-          if (!['memories', 'entities', 'edges', 'chrono'].includes(collName)) {
-            throw new Error(`collection must be one of: memories, entities, edges, chrono`);
+          if (!['memories', 'entities', 'edges', 'chrono', 'files'].includes(collName)) {
+            throw new Error(`collection must be one of: memories, entities, edges, chrono, files`);
           }
           const filter =
             a['filter'] != null && typeof a['filter'] === 'object'
@@ -547,7 +601,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const docs = (await Promise.all(memberIds.map(mid =>
             queryBrain(
               mid,
-              collName as 'memories' | 'entities' | 'edges',
+              collName as 'memories' | 'entities' | 'edges' | 'chrono' | 'files',
               filter,
               projection,
               limit,
@@ -655,12 +709,19 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const filter: Record<string, unknown> = {};
           if (typeof a['status'] === 'string') filter['status'] = a['status'];
           if (typeof a['kind'] === 'string') filter['kind'] = a['kind'];
+          if (Array.isArray(a['tags']) && (a['tags'] as unknown[]).length > 0) {
+            filter['tags'] = { $in: a['tags'] };
+          }
           const limit = typeof a['limit'] === 'number' ? Math.min(a['limit'], 100) : 20;
+          const skip = typeof a['skip'] === 'number' ? Math.max(a['skip'], 0) : 0;
 
           const memberIds = resolveMemberSpaces(spaceId);
-          const all = (await Promise.all(memberIds.map(mid => listChrono(mid, filter, limit)))).flat();
+          // Fetch skip+limit from each member so the combined list has enough entries
+          // after global sort/slice. For large skip values this over-fetches slightly,
+          // but chrono lists are expected to be small in practice.
+          const all = (await Promise.all(memberIds.map(mid => listChrono(mid, filter, skip + limit)))).flat();
           all.sort((x, y) => new Date(y.startsAt).getTime() - new Date(x.startsAt).getTime());
-          const results = all.slice(0, limit);
+          const results = all.slice(skip, skip + limit);
           return {
             content: [{
               type: 'text' as const,
@@ -693,6 +754,11 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           // Quota check — throws QuotaError (caught below) on hard limit
           const wfQuota = await checkQuota('files');
           const { sha256 } = await writeFile(wt.target, filePath, content);
+          const sizeBytes = Buffer.byteLength(content, 'utf8');
+          const metaOpts: { description?: string; tags?: string[] } = {};
+          if (typeof a['description'] === 'string') metaOpts.description = a['description'];
+          if (Array.isArray(a['tags'])) metaOpts.tags = a['tags'] as string[];
+          await upsertFileMeta(wt.target, filePath, sizeBytes, metaOpts);
           const wfText = `Written (sha256: ${sha256}).`
             + (wfQuota.softBreached ? `\n⚠️ Storage warning: ${wfQuota.warning}` : '');
           return {
@@ -728,6 +794,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
           if (!wt.ok) throw new Error(wt.error);
           await deleteFile(wt.target, filePath);
+          await deleteFileMeta(wt.target, filePath);
           return { content: [{ type: 'text' as const, text: `Deleted '${filePath}'.` }] };
         }
 
@@ -748,6 +815,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
           if (!wt.ok) throw new Error(wt.error);
           await moveFile(wt.target, src, dst);
+          await renameFileMeta(wt.target, src, dst);
           return { content: [{ type: 'text' as const, text: `Moved '${src}' → '${dst}'.` }] };
         }
 
@@ -828,6 +896,31 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           }
         }
 
+        case 'update_space': {
+          if (!isAdmin) {
+            return {
+              content: [{ type: 'text' as const, text: 'Error: update_space requires an admin token' }],
+              isError: true,
+            };
+          }
+          const newLabel = typeof a['label'] === 'string' ? a['label'].trim() : undefined;
+          const newDesc = typeof a['description'] === 'string' ? a['description'] : undefined;
+          if (newLabel === undefined && newDesc === undefined) {
+            throw new Error('At least one of label or description must be provided');
+          }
+          if (newLabel !== undefined && newLabel.length === 0) throw new Error('label must not be empty');
+          if (newDesc !== undefined && newDesc.length > 2000) throw new Error('description must not exceed 2000 characters');
+          if (newLabel !== undefined && newLabel.length > 200) throw new Error('label must not exceed 200 characters');
+          const updates: { label?: string; description?: string } = {};
+          if (newLabel !== undefined) updates.label = newLabel;
+          if (newDesc !== undefined) updates.description = newDesc;
+          const updated = updateSpace(spaceId, updates);
+          if (!updated) throw new Error(`Space '${spaceId}' not found`);
+          return {
+            content: [{ type: 'text' as const, text: `Space '${spaceId}' updated.` }],
+          };
+        }
+
         default:
           return {
             content: [{ type: 'text' as const, text: `Unknown tool: ${name}` }],
@@ -878,7 +971,7 @@ mcpRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, res) =
     log.debug(`MCP session ${transport.sessionId} closed (space: ${spaceId})`);
   });
 
-  const server = createMcpServer(spaceId, req.authToken?.spaces, req.authToken?.readOnly);
+  const server = createMcpServer(spaceId, req.authToken?.spaces, req.authToken?.readOnly, req.authToken?.admin);
   log.debug(`MCP session ${transport.sessionId} opened (space: ${spaceId})`);
   await server.connect(transport);
 });

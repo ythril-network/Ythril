@@ -14,7 +14,7 @@ import { needsReindex, clearReindexFlag } from '../spaces/spaces.js';
 import { log } from '../util/log.js';
 import { checkQuota, QuotaError } from '../quota/quota.js';
 import { resolveMemberSpaces, resolveWriteTarget, findSpace, isProxySpace } from '../spaces/proxy.js';
-import type { MemoryDoc, ChronoKind, ChronoStatus } from '../config/types.js';
+import type { MemoryDoc, EntityDoc, EdgeDoc, ChronoEntry, FileMetaDoc, ChronoKind, ChronoStatus } from '../config/types.js';
 import { reindexInProgress } from '../metrics/registry.js';
 
 export const brainRouter = Router();
@@ -177,12 +177,14 @@ brainRouter.get('/spaces/:spaceId/stats', globalRateLimit, requireSpaceAuth, asy
     entities: await col(`${mid}_entities`).countDocuments(),
     edges: await col(`${mid}_edges`).countDocuments(),
     chrono: await col(`${mid}_chrono`).countDocuments(),
+    files: await col(`${mid}_files`).countDocuments(),
   })));
   const memories = counts.reduce((s, c) => s + c.memories, 0);
   const entities = counts.reduce((s, c) => s + c.entities, 0);
   const edges = counts.reduce((s, c) => s + c.edges, 0);
   const chrono = counts.reduce((s, c) => s + c.chrono, 0);
-  res.json({ spaceId, memories, entities, edges, chrono });
+  const files = counts.reduce((s, c) => s + c.files, 0);
+  res.json({ spaceId, memories, entities, edges, chrono, files });
 });
 
 // GET /api/brain/spaces/:spaceId/memories
@@ -539,7 +541,13 @@ brainRouter.get('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, as
   const filter: Record<string, unknown> = {};
   if (typeof req.query['status'] === 'string') filter['status'] = req.query['status'];
   if (typeof req.query['kind'] === 'string') filter['kind'] = req.query['kind'];
-  if (typeof req.query['tag'] === 'string') filter['tags'] = req.query['tag'];
+  if (Array.isArray(req.query['tags'])) {
+    filter['tags'] = { $in: req.query['tags'] };
+  } else if (typeof req.query['tags'] === 'string') {
+    filter['tags'] = req.query['tags'];
+  } else if (typeof req.query['tag'] === 'string') {
+    filter['tags'] = req.query['tag'];
+  }
   const memberIds = resolveMemberSpaces(spaceId);
   const all = (await Promise.all(memberIds.map(mid => listChrono(mid, filter, limit, skip)))).flat();
   res.json({ chrono: all, limit, skip });
@@ -576,7 +584,30 @@ brainRouter.delete('/spaces/:spaceId/chrono', bulkWipeRateLimit, requireSpaceAut
   res.json({ deleted });
 });
 
-// GET /api/brain/spaces/:spaceId/reindex-status
+// GET /api/brain/spaces/:spaceId/files — list file metadata records
+brainRouter.get('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth, async (req, res) => {
+  const spaceId = req.params['spaceId'] as string;
+  const cfg = getConfig();
+  if (!cfg.spaces.some(s => s.id === spaceId)) {
+    res.status(404).json({ error: `Space '${spaceId}' not found` });
+    return;
+  }
+  const limit = Math.min(Number(req.query['limit'] ?? 50), 200);
+  const skip = Number(req.query['skip'] ?? 0);
+  const filter: Record<string, unknown> = {};
+  if (typeof req.query['tag'] === 'string') filter['tags'] = req.query['tag'];
+  if (typeof req.query['path'] === 'string') filter['path'] = req.query['path'];
+  const memberIds = resolveMemberSpaces(spaceId);
+  const all = (await Promise.all(memberIds.map(mid =>
+    col(`${mid}_files`)
+      .find(filter as never)
+      .sort({ updatedAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .toArray(),
+  ))).flat();
+  res.json({ files: all, limit, skip });
+});
 brainRouter.get('/spaces/:spaceId/reindex-status', globalRateLimit, requireSpaceAuth, (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const cfg = getConfig();
@@ -608,32 +639,132 @@ brainRouter.post('/spaces/:spaceId/reindex', globalRateLimit, requireSpaceAuth, 
   try {
   for (const mid of memberIds) {
     const BATCH = 50;
-    let skip = 0;
 
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      const batch = await col<MemoryDoc>(`${mid}_memories`)
-        .find({}, { projection: { _id: 1, fact: 1 } })
-        .skip(skip)
-        .limit(BATCH)
-        .toArray();
-
-      if (batch.length === 0) break;
-
-      for (const doc of batch) {
-        try {
-          const result = await embed(doc.fact);
-          await col<MemoryDoc>(`${mid}_memories`).updateOne(
-            { _id: doc._id },
-            { $set: { embedding: result.vector, embeddingModel: result.model } },
-          );
-          reindexed++;
-        } catch {
-          errors++;
+    // Re-embed memories
+    {
+      let skip = 0;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const batch = await col<MemoryDoc>(`${mid}_memories`)
+          .find({}, { projection: { _id: 1, fact: 1 } })
+          .skip(skip)
+          .limit(BATCH)
+          .toArray();
+        if (batch.length === 0) break;
+        for (const doc of batch) {
+          try {
+            const result = await embed(doc.fact);
+            await col<MemoryDoc>(`${mid}_memories`).updateOne(
+              { _id: doc._id },
+              { $set: { embedding: result.vector, embeddingModel: result.model } },
+            );
+            reindexed++;
+          } catch { errors++; }
         }
+        skip += batch.length;
       }
+    }
 
-      skip += batch.length;
+    // Re-embed entities (name + type)
+    {
+      let skip = 0;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const batch = await col<EntityDoc>(`${mid}_entities`)
+          .find({}, { projection: { _id: 1, name: 1, type: 1 } })
+          .skip(skip)
+          .limit(BATCH)
+          .toArray();
+        if (batch.length === 0) break;
+        for (const doc of batch) {
+          try {
+            const result = await embed(`${doc.name} ${doc.type}`);
+            await col<EntityDoc>(`${mid}_entities`).updateOne(
+              { _id: doc._id },
+              { $set: { embedding: result.vector, embeddingModel: result.model } },
+            );
+            reindexed++;
+          } catch { errors++; }
+        }
+        skip += batch.length;
+      }
+    }
+
+    // Re-embed edges (label)
+    {
+      let skip = 0;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const batch = await col<EdgeDoc>(`${mid}_edges`)
+          .find({}, { projection: { _id: 1, label: 1 } })
+          .skip(skip)
+          .limit(BATCH)
+          .toArray();
+        if (batch.length === 0) break;
+        for (const doc of batch) {
+          try {
+            const result = await embed(doc.label);
+            await col<EdgeDoc>(`${mid}_edges`).updateOne(
+              { _id: doc._id },
+              { $set: { embedding: result.vector, embeddingModel: result.model } },
+            );
+            reindexed++;
+          } catch { errors++; }
+        }
+        skip += batch.length;
+      }
+    }
+
+    // Re-embed chrono (title + description)
+    {
+      let skip = 0;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const batch = await col<ChronoEntry>(`${mid}_chrono`)
+          .find({}, { projection: { _id: 1, title: 1, description: 1 } })
+          .skip(skip)
+          .limit(BATCH)
+          .toArray();
+        if (batch.length === 0) break;
+        for (const doc of batch) {
+          try {
+            const text = doc.description ? `${doc.title} ${doc.description}` : doc.title;
+            const result = await embed(text);
+            await col<ChronoEntry>(`${mid}_chrono`).updateOne(
+              { _id: doc._id },
+              { $set: { embedding: result.vector, embeddingModel: result.model } },
+            );
+            reindexed++;
+          } catch { errors++; }
+        }
+        skip += batch.length;
+      }
+    }
+
+    // Re-embed files (description if present, otherwise path)
+    {
+      let skip = 0;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const batch = await col<FileMetaDoc>(`${mid}_files`)
+          .find({}, { projection: { _id: 1, path: 1, description: 1 } })
+          .skip(skip)
+          .limit(BATCH)
+          .toArray();
+        if (batch.length === 0) break;
+        for (const doc of batch) {
+          try {
+            const text = doc.description?.trim() ? doc.description : doc.path;
+            const result = await embed(text);
+            await col<FileMetaDoc>(`${mid}_files`).updateOne(
+              { _id: doc._id },
+              { $set: { embedding: result.vector, embeddingModel: result.model } },
+            );
+            reindexed++;
+          } catch { errors++; }
+        }
+        skip += batch.length;
+      }
     }
 
     clearReindexFlag(mid);

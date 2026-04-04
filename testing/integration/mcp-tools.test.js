@@ -444,6 +444,124 @@ describe('MCP file tools â€” write_file / read_file / list_dir / create_dir
   });
 });
 
+describe('MCP file metadata — write_file persists metadata, query supports files collection', () => {
+  let session;
+  const dir = `mcp-meta-test-${Date.now()}`;
+
+  before(async () => {
+    tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+    session = await openMcpSession('general', tokenA);
+  });
+  after(() => session?.close());
+
+  it('write_file with description and tags stores metadata queryable via query tool', async () => {
+    const filePath = `${dir}/documented.txt`;
+    const writeResult = await session.callTool('write_file', {
+      path: filePath,
+      content: 'documented content',
+      description: 'A well-documented file',
+      tags: ['meta-test', 'documented'],
+    });
+    assert.ok(!writeResult?.isError, `write_file error: ${JSON.stringify(writeResult)}`);
+
+    // Query the files collection and verify the metadata record exists
+    const queryResult = await session.callTool('query', {
+      collection: 'files',
+      filter: { tags: 'meta-test' },
+    });
+    assert.ok(!queryResult?.isError, `query files error: ${JSON.stringify(queryResult)}`);
+    const docs = JSON.parse(queryResult?.content?.[0]?.text ?? '[]');
+    const found = docs.find(d => d.path === filePath || d._id === filePath);
+    assert.ok(found, `Expected metadata record for ${filePath} in: ${JSON.stringify(docs)}`);
+    assert.equal(found.description, 'A well-documented file', 'description must be stored');
+    assert.ok(Array.isArray(found.tags) && found.tags.includes('meta-test'), 'tags must be stored');
+    assert.ok(typeof found.sizeBytes === 'number' && found.sizeBytes > 0, 'sizeBytes must be set');
+    assert.ok(typeof found.createdAt === 'string', 'createdAt must be set');
+    assert.ok(typeof found.updatedAt === 'string', 'updatedAt must be set');
+    assert.ok(found.author && typeof found.author.instanceId === 'string', 'author must be set');
+  });
+
+  it('write_file without description/tags still creates metadata record', async () => {
+    const filePath = `${dir}/plain.txt`;
+    const writeResult = await session.callTool('write_file', {
+      path: filePath,
+      content: 'plain content',
+    });
+    assert.ok(!writeResult?.isError, `write_file error: ${JSON.stringify(writeResult)}`);
+
+    const queryResult = await session.callTool('query', {
+      collection: 'files',
+      filter: { _id: filePath },
+    });
+    assert.ok(!queryResult?.isError, `query files error: ${JSON.stringify(queryResult)}`);
+    const docs = JSON.parse(queryResult?.content?.[0]?.text ?? '[]');
+    assert.ok(docs.length > 0, `Expected metadata record for ${filePath}`);
+    assert.ok(typeof docs[0].sizeBytes === 'number', 'sizeBytes must be set');
+  });
+
+  it('query tool rejects unknown collection', async () => {
+    const result = await session.callTool('query', {
+      collection: 'unknown_coll',
+      filter: {},
+    });
+    assert.ok(result?.isError, 'Unknown collection must return isError');
+  });
+
+  it('get_stats files count increments after write_file', async () => {
+    const before = await session.callTool('get_stats', {});
+    const beforeCount = JSON.parse(before?.content?.[0]?.text ?? '{}').files ?? 0;
+
+    await session.callTool('write_file', {
+      path: `${dir}/count-test.txt`,
+      content: 'counting',
+    });
+
+    const after = await session.callTool('get_stats', {});
+    const afterCount = JSON.parse(after?.content?.[0]?.text ?? '{}').files ?? 0;
+    assert.ok(afterCount >= beforeCount + 1, `Expected files count to increment: before=${beforeCount}, after=${afterCount}`);
+  });
+
+  it('delete_file removes the metadata record', async () => {
+    const filePath = `${dir}/to-delete-meta.txt`;
+    await session.callTool('write_file', { path: filePath, content: 'bye' });
+
+    await session.callTool('delete_file', { path: filePath });
+
+    const queryResult = await session.callTool('query', {
+      collection: 'files',
+      filter: { _id: filePath },
+    });
+    assert.ok(!queryResult?.isError, `query files error: ${JSON.stringify(queryResult)}`);
+    const docs = JSON.parse(queryResult?.content?.[0]?.text ?? '[]');
+    assert.equal(docs.length, 0, `Metadata record must be deleted when file is deleted`);
+  });
+
+  it('move_file updates the path in metadata', async () => {
+    const srcPath = `${dir}/move-meta-src.txt`;
+    const dstPath = `${dir}/move-meta-dst.txt`;
+    await session.callTool('write_file', { path: srcPath, content: 'move me' });
+
+    await session.callTool('move_file', { src: srcPath, dst: dstPath });
+
+    // Old path metadata should be gone
+    const srcQuery = await session.callTool('query', {
+      collection: 'files',
+      filter: { _id: srcPath },
+    });
+    const srcDocs = JSON.parse(srcQuery?.content?.[0]?.text ?? '[]');
+    assert.equal(srcDocs.length, 0, 'Source path metadata must be removed after move');
+
+    // New path metadata should exist
+    const dstQuery = await session.callTool('query', {
+      collection: 'files',
+      filter: { _id: dstPath },
+    });
+    const dstDocs = JSON.parse(dstQuery?.content?.[0]?.text ?? '[]');
+    assert.ok(dstDocs.length > 0, 'Destination path metadata must exist after move');
+    assert.equal(dstDocs[0].path, dstPath, 'path field must be updated to destination');
+  });
+});
+
 describe('MCP recall_global â€” space-scoped token must only see its own spaces', () => {
   let sessionScoped;
   let scopedTokenPlaintext;
@@ -565,7 +683,7 @@ describe('MCP brain tools — update_memory / delete_memory / get_stats', () => 
   });
   after(() => session?.close());
 
-  it('get_stats returns counts with spaceId, memories, entities, edges, chrono', async () => {
+  it('get_stats returns counts with spaceId, memories, entities, edges, chrono, files', async () => {
     const result = await session.callTool('get_stats', {});
     assert.ok(!result?.isError, `get_stats returned isError: ${JSON.stringify(result)}`);
     const text = result?.content?.[0]?.text ?? '';
@@ -575,7 +693,9 @@ describe('MCP brain tools — update_memory / delete_memory / get_stats', () => 
     assert.ok(typeof parsed.entities === 'number', 'get_stats must return entities count');
     assert.ok(typeof parsed.edges === 'number', 'get_stats must return edges count');
     assert.ok(typeof parsed.chrono === 'number', 'get_stats must return chrono count');
+    assert.ok(typeof parsed.files === 'number', 'get_stats must return files count');
     assert.ok(parsed.memories >= 0, 'memories count must be non-negative');
+    assert.ok(parsed.files >= 0, 'files count must be non-negative');
   });
 
   it('update_memory with no id returns isError', async () => {
@@ -625,6 +745,104 @@ describe('MCP brain tools — update_memory / delete_memory / get_stats', () => 
     if (!storedMemoryId) return t.skip('No storedMemoryId — prior test failed');
     const result = await session.callTool('delete_memory', { id: storedMemoryId });
     assert.ok(result?.isError, 'Double-delete must return isError');
+  });
+});
+
+describe('MCP chrono tools — list_chrono tags filter / query chrono collection', () => {
+  let session;
+  const RUN = Date.now();
+  const tagA = `mcp-chrono-tag-a-${RUN}`;
+  const tagB = `mcp-chrono-tag-b-${RUN}`;
+  let idTagA;
+  let idTagB;
+  let idNoTag;
+
+  before(async () => {
+    tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+    session = await openMcpSession('general', tokenA);
+
+    // Create three chrono entries: two with distinct tags, one untagged
+    const rA = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/chrono', {
+      title: `MCP-Tag-A-${RUN}`, kind: 'event',
+      startsAt: new Date().toISOString(), tags: [tagA],
+    });
+    idTagA = rA.body?._id;
+
+    const rB = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/chrono', {
+      title: `MCP-Tag-B-${RUN}`, kind: 'milestone',
+      startsAt: new Date().toISOString(), tags: [tagB],
+    });
+    idTagB = rB.body?._id;
+
+    const rN = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/chrono', {
+      title: `MCP-NoTag-${RUN}`, kind: 'plan',
+      startsAt: new Date().toISOString(), tags: [],
+    });
+    idNoTag = rN.body?._id;
+  });
+  after(async () => {
+    session?.close();
+    for (const id of [idTagA, idTagB, idNoTag]) {
+      if (id) await del(INSTANCES.a, tokenA, `/api/brain/spaces/general/chrono/${id}`).catch(() => {});
+    }
+  });
+
+  it('list_chrono without filters returns results without isError', async () => {
+    const result = await session.callTool('list_chrono', {});
+    assert.ok(!result?.isError, `list_chrono returned isError: ${JSON.stringify(result)}`);
+  });
+
+  it('list_chrono with tags filter returns only matching entries', async (t) => {
+    if (!idTagA) return t.skip('No idTagA — prior setup failed');
+    const result = await session.callTool('list_chrono', { tags: [tagA] });
+    assert.ok(!result?.isError, `list_chrono with tags returned isError: ${JSON.stringify(result)}`);
+    const text = result?.content?.[0]?.text ?? '';
+    assert.ok(text.includes(idTagA), `Expected entry tagged ${tagA} (id ${idTagA}) in results: ${text}`);
+    assert.ok(!text.includes(idTagB), `Entry tagged ${tagB} should NOT appear when filtering by ${tagA}: ${text}`);
+  });
+
+  it('list_chrono with multi-tag filter returns entries matching any tag', async (t) => {
+    if (!idTagA || !idTagB) return t.skip('Missing seeded entries');
+    const result = await session.callTool('list_chrono', { tags: [tagA, tagB] });
+    assert.ok(!result?.isError, `list_chrono multi-tag returned isError: ${JSON.stringify(result)}`);
+    const text = result?.content?.[0]?.text ?? '';
+    assert.ok(text.includes(idTagA), `Expected entry tagged ${tagA} in results: ${text}`);
+    assert.ok(text.includes(idTagB), `Expected entry tagged ${tagB} in results: ${text}`);
+  });
+
+  it('list_chrono with tags filter that matches nothing returns empty message', async () => {
+    const result = await session.callTool('list_chrono', { tags: [`no-such-tag-${RUN}`] });
+    assert.ok(!result?.isError, `list_chrono returned isError: ${JSON.stringify(result)}`);
+    const text = result?.content?.[0]?.text ?? '';
+    assert.ok(text === 'No chrono entries found.' || text.trim() === '', `Expected empty result, got: ${text}`);
+  });
+
+  it('query with collection "chrono" returns array without isError', async (t) => {
+    if (!idTagA) return t.skip('No seeded chrono entry');
+    const result = await session.callTool('query', {
+      collection: 'chrono',
+      filter: { _id: idTagA },
+    });
+    assert.ok(!result?.isError, `query chrono returned isError: ${JSON.stringify(result)}`);
+    const text = result?.content?.[0]?.text ?? '';
+    const parsed = JSON.parse(text);
+    assert.ok(Array.isArray(parsed), `query chrono result must be a JSON array, got: ${text}`);
+    assert.ok(parsed.length >= 1, `Expected at least one result for id ${idTagA}: ${text}`);
+    assert.equal(parsed[0]._id, idTagA, `Expected _id to match`);
+  });
+
+  it('query chrono with tag filter returns matching entries', async (t) => {
+    if (!idTagA) return t.skip('No seeded chrono entry');
+    const result = await session.callTool('query', {
+      collection: 'chrono',
+      filter: { tags: { $in: [tagA] } },
+    });
+    assert.ok(!result?.isError, `query chrono tag filter returned isError: ${JSON.stringify(result)}`);
+    const text = result?.content?.[0]?.text ?? '';
+    const parsed = JSON.parse(text);
+    assert.ok(Array.isArray(parsed), `result must be an array`);
+    assert.ok(parsed.some(e => e._id === idTagA), `Expected entry with tag ${tagA}`);
+    assert.ok(!parsed.some(e => e._id === idTagB), `Entry with only ${tagB} should not appear`);
   });
 });
 

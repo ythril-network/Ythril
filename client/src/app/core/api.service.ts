@@ -217,6 +217,10 @@ export class ApiService {
     return this.http.post<{ space: Space }>('/api/spaces', body);
   }
 
+  updateSpace(id: string, body: { label?: string; description?: string }): Observable<{ space: Space }> {
+    return this.http.patch<{ space: Space }>(`/api/spaces/${id}`, body);
+  }
+
   deleteSpace(id: string): Observable<void> {
     return this.http.delete<void>(`/api/spaces/${id}`, { body: { confirm: true } });
   }

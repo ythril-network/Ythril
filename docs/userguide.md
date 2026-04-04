@@ -124,7 +124,7 @@ Click **+ Add entry** in the Chrono tab. Fill in the title, select a kind, pick 
 
 - `create_chrono` — create a new entry.
 - `update_chrono` — update an existing entry (change status, dates, etc.).
-- `list_chrono` — list entries, optionally filtered by `status` or `kind`.
+- `list_chrono` — list entries, optionally filtered by `status`, `kind`, or `tags`.
 
 The `query` tool also supports `collection: "chrono"` for advanced MongoDB filter queries.
 
@@ -461,15 +461,15 @@ If a space has a `description`, it is sent to the MCP client as `instructions` d
 | `delete_memory` | Delete a memory by ID |
 | `recall` | Semantic search within the current space |
 | `recall_global` | Semantic search across all accessible spaces |
-| `query` | Structured filter query (read-only) |
-| `get_stats` | Return counts of memories, entities, edges, and chrono entries |
+| `query` | Structured filter query (read-only) — supports `memories`, `entities`, `edges`, `chrono`, and `files` collections |
+| `get_stats` | Return counts of memories, entities, edges, chrono entries, and files |
 | `upsert_entity` | Create or update a named entity (with optional properties) |
 | `upsert_edge` | Create or update a directed relationship |
 | `create_chrono` | Create a chrono entry (event, deadline, plan, prediction, milestone) |
 | `update_chrono` | Update an existing chrono entry |
-| `list_chrono` | List chrono entries, optionally filtered by status or kind |
+| `list_chrono` | List chrono entries, optionally filtered by status, kind, or tags |
 | `read_file` | Read a file from the space |
-| `write_file` | Write a file to the space |
+| `write_file` | Write a file to the space (optional `description` and `tags` stored as metadata) |
 | `list_dir` | List directory contents |
 | `delete_file` | Delete a file |
 | `create_dir` | Create a directory |

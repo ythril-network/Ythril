@@ -7,6 +7,30 @@ import { ApiService, Network, Space } from '../../core/api.service';
   selector: 'app-spaces',
   standalone: true,
   imports: [CommonModule, FormsModule],
+  styles: [`
+    .spaces-toggle-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+    }
+    .space-toggle-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-size: 12px;
+      background: var(--bg-surface);
+      transition: background var(--transition), border-color var(--transition);
+      user-select: none;
+    }
+    .space-toggle-item:hover { background: var(--bg-elevated); }
+    .space-toggle-item input[type=checkbox] { width: 13px; height: 13px; margin: 0; flex-shrink: 0; }
+    .space-toggle-item .space-id { color: var(--text-muted); font-size: 11px; font-family: var(--font-mono); }
+  `],
   template: `
     <!-- Create space -->
     <div class="card" style="margin-bottom: 24px;">
@@ -38,9 +62,21 @@ import { ApiService, Network, Space } from '../../core/api.service';
           <label>MCP Description (optional)</label>
           <textarea [(ngModel)]="form.description" name="description" placeholder="Instructions surfaced to MCP-connected AI clients for this space" maxlength="4000" rows="10" style="resize:vertical;"></textarea>
         </div>
-        <div class="field" style="flex:1; min-width:200px; margin-bottom:0;">
-          <label>Proxy for (optional, comma-separated space IDs)</label>
-          <input type="text" [(ngModel)]="form.proxyFor" name="proxyFor" placeholder="eng-kb, research" />
+        <div class="field" style="flex-basis:100%; margin-bottom:0;">
+          <label>Proxy for (optional)</label>
+          @if (spaces().length > 0) {
+            <div class="spaces-toggle-list">
+              @for (s of spaces(); track s.id) {
+                <label class="space-toggle-item">
+                  <input type="checkbox" [checked]="isProxyForSelected(s.id)" (change)="toggleProxyFor(s.id)" />
+                  <span>{{ s.label }}</span>
+                  <span class="space-id">{{ s.id }}</span>
+                </label>
+              }
+            </div>
+          } @else {
+            <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">No existing spaces to select.</div>
+          }
         </div>
         <button class="btn-primary btn" type="submit" [disabled]="creating() || !form.label.trim()">
           @if (creating()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
@@ -88,7 +124,8 @@ import { ApiService, Network, Space } from '../../core/api.service';
                   <td>
                     @if (s.builtIn) { <span class="badge badge-blue">built-in</span> }
                   </td>
-                  <td>
+                  <td style="display:flex; gap:6px;">
+                    <button class="icon-btn" aria-label="Edit space" (click)="openEdit(s)" title="Edit label/description">✎</button>
                     @if (!s.builtIn) {
                       @if (renaming() === s.id) {
                         <form (ngSubmit)="submitRename(s)" style="display:inline-flex; gap:4px; align-items:center;">
@@ -114,6 +151,38 @@ import { ApiService, Network, Space } from '../../core/api.service';
         </div>
       }
     </div>
+
+    <!-- Edit space modal -->
+    @if (editTarget()) {
+      <div class="modal-backdrop" (click)="closeEdit()">
+        <div class="modal" (click)="$event.stopPropagation()" style="min-width:360px; max-width:520px;">
+          <div class="modal-header">
+            <div class="card-title">Edit space</div>
+            <button class="icon-btn" (click)="closeEdit()">✕</button>
+          </div>
+          @if (editError()) {
+            <div class="alert alert-error" style="margin-bottom:12px;">{{ editError() }}</div>
+          }
+          <form (ngSubmit)="saveEdit()" style="display:flex; flex-direction:column; gap:12px;">
+            <div class="field" style="margin-bottom:0;">
+              <label>Label</label>
+              <input type="text" [(ngModel)]="editForm.label" name="editLabel" maxlength="200" required />
+            </div>
+            <div class="field" style="margin-bottom:0;">
+              <label>Description</label>
+              <textarea [(ngModel)]="editForm.description" name="editDescription" maxlength="2000" rows="3" style="resize:vertical;" placeholder="Surfaced to MCP clients as space-level instructions"></textarea>
+            </div>
+            <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:4px;">
+              <button type="button" class="btn btn-secondary" (click)="closeEdit()">Cancel</button>
+              <button type="submit" class="btn btn-primary" [disabled]="saving() || !editForm.label.trim()">
+                @if (saving()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
+                Save
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    }
   `,
 })
 export class SpacesComponent implements OnInit {
@@ -160,7 +229,13 @@ export class SpacesComponent implements OnInit {
     '  sync_now(peerId?)           — trigger immediate sync cycle',
   ].join('\n');
 
-  form = { label: '', id: '', minGiB: null as number | null, description: SpacesComponent.DEFAULT_MCP_DESC, proxyFor: '' };
+  form = { label: '', id: '', minGiB: null as number | null, description: SpacesComponent.DEFAULT_MCP_DESC };
+  proxyForSelected: string[] = [];
+
+  editTarget = signal<Space | null>(null);
+  editForm = { label: '', description: '' };
+  saving = signal(false);
+  editError = signal('');
 
   ngOnInit(): void { this.load(); }
 
@@ -180,6 +255,18 @@ export class SpacesComponent implements OnInit {
     });
   }
 
+  isProxyForSelected(id: string): boolean {
+    return this.proxyForSelected.includes(id);
+  }
+
+  toggleProxyFor(id: string): void {
+    if (this.proxyForSelected.includes(id)) {
+      this.proxyForSelected = this.proxyForSelected.filter(s => s !== id);
+    } else {
+      this.proxyForSelected = [...this.proxyForSelected, id];
+    }
+  }
+
   createSpace(): void {
     if (!this.form.label.trim()) return;
     this.creating.set(true);
@@ -189,18 +276,60 @@ export class SpacesComponent implements OnInit {
     if (this.form.id.trim()) body.id = this.form.id.trim();
     if (this.form.minGiB) body.minGiB = this.form.minGiB;
     if (this.form.description.trim()) body.description = this.form.description.trim();
-    const proxyIds = this.form.proxyFor.split(',').map(s => s.trim()).filter(Boolean);
-    if (proxyIds.length) body.proxyFor = proxyIds;
+    if (this.proxyForSelected.length) body.proxyFor = [...this.proxyForSelected];
 
     this.api.createSpace(body).subscribe({
       next: ({ space }) => {
         this.creating.set(false);
         this.spaces.update(list => [...list, space]);
-        this.form = { label: '', id: '', minGiB: null, description: SpacesComponent.DEFAULT_MCP_DESC, proxyFor: '' };
+        this.form = { label: '', id: '', minGiB: null, description: SpacesComponent.DEFAULT_MCP_DESC };
+        this.proxyForSelected = [];
       },
       error: (err) => {
         this.creating.set(false);
         this.createError.set(err.error?.error ?? 'Failed to create space');
+      },
+    });
+  }
+
+  openEdit(s: Space): void {
+    this.editTarget.set(s);
+    this.editForm = { label: s.label, description: s.description ?? '' };
+    this.editError.set('');
+  }
+
+  closeEdit(): void {
+    this.editTarget.set(null);
+    this.editError.set('');
+  }
+
+  saveEdit(): void {
+    const target = this.editTarget();
+    if (!target || !this.editForm.label.trim()) return;
+    this.saving.set(true);
+    this.editError.set('');
+
+    const body: { label?: string; description?: string } = {};
+    if (this.editForm.label.trim() !== target.label) body.label = this.editForm.label.trim();
+    const newDesc = this.editForm.description.trim();
+    const oldDesc = target.description ?? '';
+    if (newDesc !== oldDesc) body.description = newDesc;
+
+    if (Object.keys(body).length === 0) {
+      this.saving.set(false);
+      this.closeEdit();
+      return;
+    }
+
+    this.api.updateSpace(target.id, body).subscribe({
+      next: ({ space }) => {
+        this.saving.set(false);
+        this.spaces.update(list => list.map(s => s.id === space.id ? { ...s, ...space } : s));
+        this.closeEdit();
+      },
+      error: (err) => {
+        this.saving.set(false);
+        this.editError.set(err.error?.error ?? 'Failed to update space');
       },
     });
   }

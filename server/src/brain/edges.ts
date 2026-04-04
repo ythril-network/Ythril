@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { col } from '../db/mongo.js';
 import { nextSeq } from '../util/seq.js';
+import { embed } from './embedding.js';
 import { getConfig } from '../config/loader.js';
 import type { EdgeDoc, TombstoneDoc } from '../config/types.js';
 
@@ -27,12 +28,19 @@ export async function upsertEdge(
   const seq = await nextSeq(spaceId);
   const now = new Date().toISOString();
 
+  // Embed the edge label (best-effort)
+  let embeddingFields: { embedding?: number[]; embeddingModel?: string } = {};
+  try {
+    const embResult = await embed(label);
+    embeddingFields = { embedding: embResult.vector, embeddingModel: embResult.model };
+  } catch { /* embedding unavailable — edge stored without vector */ }
+
   if (existing) {
     await collection.updateOne(
       { _id: (existing as EdgeDoc)._id } as never,
-      { $set: { ...(weight !== undefined ? { weight } : {}), ...(type !== undefined ? { type } : {}), updatedAt: now, seq } } as never,
+      { $set: { ...(weight !== undefined ? { weight } : {}), ...(type !== undefined ? { type } : {}), updatedAt: now, seq, ...embeddingFields } } as never,
     );
-    return { ...(existing as EdgeDoc), seq, updatedAt: now, ...(weight !== undefined ? { weight } : {}), ...(type !== undefined ? { type } : {}) };
+    return { ...(existing as EdgeDoc), seq, updatedAt: now, ...(weight !== undefined ? { weight } : {}), ...(type !== undefined ? { type } : {}), ...embeddingFields };
   }
 
   const doc: EdgeDoc = {
@@ -47,6 +55,7 @@ export async function upsertEdge(
     createdAt: now,
     updatedAt: now,
     seq,
+    ...embeddingFields,
   };
   await collection.insertOne(doc as never);
   return doc;

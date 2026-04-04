@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { requireAuth, requireAdmin, requireAdminMfa } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { getConfig, saveConfig, getSecrets } from '../config/loader.js';
-import { createSpace, removeSpace, renameSpace, slugify } from '../spaces/spaces.js';
+import { createSpace, updateSpace, removeSpace, renameSpace, slugify } from '../spaces/spaces.js';
 import { measureUsage } from '../quota/quota.js';
 import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
@@ -25,6 +25,13 @@ const DeleteSpaceBody = z.object({
 
 const RenameSpaceBody = z.object({
   newId: z.string().min(1).max(40).regex(/^[a-z0-9-]+$/),
+});
+
+const UpdateSpaceBody = z.object({
+  label: z.string().min(1).max(200).optional(),
+  description: z.string().max(2000).optional(),
+}).refine(d => d.label !== undefined || d.description !== undefined, {
+  message: 'At least one of label or description must be provided',
 });
 
 // PATCH /api/spaces/:id/rename
@@ -109,6 +116,31 @@ spacesRouter.post('/', globalRateLimit, requireAdminMfa, async (req, res) => {
       res.status(500).json({ error: 'Failed to create space' });
     }
   }
+});
+
+// PATCH /api/spaces/:id
+spacesRouter.patch('/:id', globalRateLimit, requireAdminMfa, async (req, res) => {
+  const id = req.params['id'] as string;
+  const cfg = getConfig();
+
+  const space = cfg.spaces.find(s => s.id === id);
+  if (!space) {
+    res.status(404).json({ error: `Space '${id}' not found` });
+    return;
+  }
+
+  const parsed = UpdateSpaceBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const updated = updateSpace(id, parsed.data);
+  if (!updated) {
+    res.status(404).json({ error: `Space '${id}' not found` });
+    return;
+  }
+  res.json({ space: updated });
 });
 
 // DELETE /api/spaces/:id

@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, delWithBody } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, delWithBody, patch } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -147,4 +147,78 @@ describe('Space management', () => {
       'Space must not appear in list after confirmed deletion',
     );
   });
+  it('Update space description via PATCH /api/spaces/:id', async () => {
+    const created = await post(INSTANCES.a, tokenA, '/api/spaces', {
+      id: `patch-desc-test-${RUN_ID}`,
+      label: 'Patch Desc Test',
+      description: 'original description',
+    });
+    assert.equal(created.status, 201);
+    const spaceId = created.body.space?.id;
+    createdSpaceIds.push(spaceId);
+
+    const r = await patch(INSTANCES.a, tokenA, `/api/spaces/${spaceId}`, {
+      description: 'updated description',
+    });
+    assert.equal(r.status, 200, `Expected 200, got ${r.status}: ${JSON.stringify(r.body)}`);
+    assert.equal(r.body.space?.description, 'updated description');
+
+    // Verify the list endpoint reflects the change
+    const listR = await get(INSTANCES.a, tokenA, '/api/spaces');
+    const found = listR.body?.spaces?.find(s => s.id === spaceId);
+    assert.ok(found, 'Space should still appear in list');
+    assert.equal(found.description, 'updated description');
+  });
+
+  it('Update space label via PATCH /api/spaces/:id', async () => {
+    const created = await post(INSTANCES.a, tokenA, '/api/spaces', {
+      id: `patch-label-test-${RUN_ID}`,
+      label: 'Original Label',
+    });
+    assert.equal(created.status, 201);
+    const spaceId = created.body.space?.id;
+    createdSpaceIds.push(spaceId);
+
+    const r = await patch(INSTANCES.a, tokenA, `/api/spaces/${spaceId}`, {
+      label: 'Updated Label',
+    });
+    assert.equal(r.status, 200, `Expected 200, got ${r.status}: ${JSON.stringify(r.body)}`);
+    assert.equal(r.body.space?.label, 'Updated Label');
+  });
+
+  it('PATCH /api/spaces/:id with no fields returns 400', async () => {
+    const created = await post(INSTANCES.a, tokenA, '/api/spaces', {
+      id: `patch-nofields-test-${RUN_ID}`,
+      label: 'Patch No Fields',
+    });
+    assert.equal(created.status, 201);
+    const spaceId = created.body.space?.id;
+    createdSpaceIds.push(spaceId);
+
+    const r = await patch(INSTANCES.a, tokenA, `/api/spaces/${spaceId}`, {});
+    assert.equal(r.status, 400, `Expected 400, got ${r.status}`);
+  });
+
+  it('PATCH /api/spaces/:id on non-existent space returns 404', async () => {
+    const r = await patch(INSTANCES.a, tokenA, '/api/spaces/does-not-exist-space', {
+      description: 'something',
+    });
+    assert.equal(r.status, 404, `Expected 404, got ${r.status}`);
+  });
+
+  it('PATCH /api/spaces/:id with description exceeding 2000 chars returns 400', async () => {
+    const created = await post(INSTANCES.a, tokenA, '/api/spaces', {
+      id: `patch-toolong-test-${RUN_ID}`,
+      label: 'Patch Too Long',
+    });
+    assert.equal(created.status, 201);
+    const spaceId = created.body.space?.id;
+    createdSpaceIds.push(spaceId);
+
+    const r = await patch(INSTANCES.a, tokenA, `/api/spaces/${spaceId}`, {
+      description: 'x'.repeat(2001),
+    });
+    assert.equal(r.status, 400, `Expected 400, got ${r.status}`);
+  });
+
 });

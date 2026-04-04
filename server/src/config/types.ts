@@ -217,6 +217,8 @@ export interface EntityDoc {
   createdAt: string;
   updatedAt: string;
   seq: number;
+  embedding?: number[];
+  embeddingModel?: string;
 }
 
 export interface EdgeDoc {
@@ -231,6 +233,8 @@ export interface EdgeDoc {
   createdAt: string;
   updatedAt: string;
   seq: number;
+  embedding?: number[];
+  embeddingModel?: string;
 }
 
 export type ChronoKind = 'event' | 'deadline' | 'plan' | 'prediction' | 'milestone';
@@ -258,6 +262,8 @@ export interface ChronoEntry {
   createdAt: string;
   updatedAt: string;
   seq: number;
+  embedding?: number[];
+  embeddingModel?: string;
 }
 
 export interface TombstoneDoc {
@@ -274,6 +280,20 @@ export interface FileTombstoneDoc {
   spaceId: string;
   path: string;        // relative path (same convention as ManifestEntry.path)
   deletedAt: string;   // ISO8601 — used by peers to prune expired tombstones
+}
+
+export interface FileMetaDoc {
+  _id: string;          // space-relative path, normalised to forward slashes
+  spaceId: string;
+  path: string;         // same as _id — carried as a queryable field
+  description?: string; // human-readable summary (optional)
+  tags: string[];       // tags for filtering and recall scoping
+  createdAt: string;    // ISO8601 — first write timestamp
+  updatedAt: string;    // ISO8601 — last write timestamp
+  sizeBytes: number;    // file size in bytes at last write
+  author: AuthorRef;    // writer: instanceId + instanceLabel
+  embedding?: number[];
+  embeddingModel?: string;
 }
 
 export interface ConflictDoc {
