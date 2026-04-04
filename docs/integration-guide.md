@@ -2223,11 +2223,22 @@ Content-Type: application/json
     "name": "recall",
     "arguments": {
       "query": "Traefik routing configuration",
-      "topK": 5
+      "topK": 5,
+      "tags": ["portal-backend"]
     }
   }
 }
 ```
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | `string` | ✅ | Natural language search query |
+| `topK` | `number` | — | Max results to return (default `10`) |
+| `tags` | `string[]` | — | Optional tag filter — only memories bearing **all** of these tags are returned. Mirrors the REST `?tag=` parameter and is useful for scoping a semantic search to a specific service or ADR (e.g. `["portal-backend"]`) |
+
+`recall_global` accepts the same `tags` parameter and applies the filter across all searched spaces.
 
 ### Example: update_memory
 
@@ -2304,6 +2315,25 @@ Works with any valid token (including read-only). For proxy spaces, returns aggr
   }
 }
 ```
+
+**Valid `collection` values:**
+
+| Value | Contents |
+|-------|----------|
+| `memories` | Memory facts with tags, entity links, and embeddings |
+| `entities` | Named entities in the knowledge graph |
+| `edges` | Directed relationship edges between entities |
+| `chrono` | Chronological entries (events, deadlines, plans, predictions, milestones) |
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `collection` | `string` | ✅ | One of the four values above |
+| `filter` | `object` | ✅ | MongoDB filter document |
+| `projection` | `object` | — | Fields to include (`1`) or exclude (`0`) |
+| `limit` | `number` | — | Max documents (default `20`, max `100`) |
+| `maxTimeMS` | `number` | — | Query timeout in ms (max `30000`) |
 
 **Security**: The `query` tool rejects `$where`, `$function`, and deeply nested filters (>8 levels). Only safe read-only operators are allowed.
 

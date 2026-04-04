@@ -55,6 +55,7 @@ export async function recall(
   spaceId: string,
   query: string,
   topK = 10,
+  tags?: string[],
 ): Promise<RecallResult[]> {
   if (!isVectorSearchAvailable()) {
     throw new Error(
@@ -72,7 +73,7 @@ export async function recall(
   const embResult = await embed(query, 'query');
   const embCfg = getEmbeddingConfig();
 
-  const pipeline = [
+  const pipeline: object[] = [
     {
       $vectorSearch: {
         index: `${spaceId}_memories_embedding`,
@@ -82,20 +83,25 @@ export async function recall(
         limit: topK,
       },
     },
-    {
-      $project: {
-        _id: 1,
-        spaceId: 1,
-        fact: 1,
-        tags: 1,
-        entityIds: 1,
-        createdAt: 1,
-        seq: 1,
-        embeddingModel: 1,
-        score: { $meta: 'vectorSearchScore' },
-      },
-    },
   ];
+
+  if (tags && tags.length > 0) {
+    pipeline.push({ $match: { tags: { $all: tags } } });
+  }
+
+  pipeline.push({
+    $project: {
+      _id: 1,
+      spaceId: 1,
+      fact: 1,
+      tags: 1,
+      entityIds: 1,
+      createdAt: 1,
+      seq: 1,
+      embeddingModel: 1,
+      score: { $meta: 'vectorSearchScore' },
+    },
+  });
 
   void embCfg; // used in index init, not here
   const docs = await col<MemoryDoc>(`${spaceId}_memories`)
@@ -109,8 +115,9 @@ export async function recallGlobal(
   spaceIds: string[],
   query: string,
   topK = 10,
+  tags?: string[],
 ): Promise<RecallResult[]> {
-  const results = await Promise.all(spaceIds.map(id => recall(id, query, topK)));
+  const results = await Promise.all(spaceIds.map(id => recall(id, query, topK, tags)));
   const flat = results.flat();
   // Sort by score descending, deduplicate by _id
   const seen = new Set<string>();

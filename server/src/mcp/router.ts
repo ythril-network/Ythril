@@ -92,6 +92,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           properties: {
             query: { type: 'string', description: 'Natural language search query.' },
             topK: { type: 'number', description: 'Max results (default 10).' },
+            tags: { type: 'array', items: { type: 'string' }, description: 'Optional tag filter — only memories bearing ALL of these tags are returned.' },
           },
           required: ['query'],
         },
@@ -104,6 +105,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           properties: {
             query: { type: 'string', description: 'Natural language search query.' },
             topK: { type: 'number', description: 'Max results per space before merging (default 5).' },
+            tags: { type: 'array', items: { type: 'string' }, description: 'Optional tag filter — only memories bearing ALL of these tags are returned.' },
           },
           required: ['query'],
         },
@@ -423,8 +425,9 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const query = String(a['query'] ?? '');
           if (!query.trim()) throw new Error('query must not be empty');
           const topK = typeof a['topK'] === 'number' ? a['topK'] : 10;
+          const tags = Array.isArray(a['tags']) ? (a['tags'] as unknown[]).filter((t): t is string => typeof t === 'string') : undefined;
           const memberIds = resolveMemberSpaces(spaceId);
-          const all = (await Promise.all(memberIds.map(mid => recall(mid, query, topK)))).flat();
+          const all = (await Promise.all(memberIds.map(mid => recall(mid, query, topK, tags)))).flat();
           // Sort by score descending and take topK
           all.sort((x, y) => (y.score ?? 0) - (x.score ?? 0));
           const results = all.slice(0, topK);
@@ -450,12 +453,13 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const query = String(a['query'] ?? '');
           if (!query.trim()) throw new Error('query must not be empty');
           const topK = typeof a['topK'] === 'number' ? a['topK'] : 5;
+          const tags = Array.isArray(a['tags']) ? (a['tags'] as unknown[]).filter((t): t is string => typeof t === 'string') : undefined;
           const cfg = getConfig();
           // Only search spaces allowed by the calling token (tokenSpaces undefined = all spaces).
           const spaceIds = cfg.spaces
             .filter(s => !tokenSpaces || tokenSpaces.includes(s.id))
             .map(s => s.id);
-          const results = await recallGlobal(spaceIds, query, topK);
+          const results = await recallGlobal(spaceIds, query, topK, tags);
           return {
             content: [
               {
@@ -562,7 +566,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const docs = (await Promise.all(memberIds.map(mid =>
             queryBrain(
               mid,
-              collName as 'memories' | 'entities' | 'edges',
+              collName as 'memories' | 'entities' | 'edges' | 'chrono',
               filter,
               projection,
               limit,
