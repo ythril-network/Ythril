@@ -762,3 +762,55 @@ describe('Brain -- chrono CRUD (/api/brain/spaces/:spaceId/chrono)', () => {
     assert.equal(r.status, 404);
   });
 });
+
+describe('Brain -- chrono tags filter (/api/brain/spaces/:spaceId/chrono?tags=...)', () => {
+  const RUN = Date.now();
+  const tagA = `brain-chrono-tag-a-${RUN}`;
+  const tagB = `brain-chrono-tag-b-${RUN}`;
+  const ids = [];
+
+  before(async () => {
+    // Seed three chrono entries: two with distinct tags, one untagged
+    for (const [title, tags] of [
+      [`TagA-${RUN}`, [tagA]],
+      [`TagB-${RUN}`, [tagB]],
+      [`NoTag-${RUN}`, []],
+    ]) {
+      const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/chrono', {
+        title, kind: 'event', startsAt: new Date().toISOString(), tags,
+      });
+      if (r.body._id) ids.push(r.body._id);
+    }
+  });
+
+  after(async () => {
+    for (const id of ids) {
+      await del(INSTANCES.a, token(), `/api/brain/spaces/general/chrono/${id}`).catch(() => {});
+    }
+  });
+
+  it('Filter by single tag returns only matching entries', async () => {
+    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono?tags=${encodeURIComponent(tagA)}`);
+    assert.equal(r.status, 200);
+    assert.ok(Array.isArray(r.body.chrono), 'chrono must be an array');
+    const resultIds = r.body.chrono.map(c => c._id);
+    assert.ok(resultIds.includes(ids[0]), `Entry with tag ${tagA} should be in results`);
+    assert.ok(!resultIds.includes(ids[1]), `Entry with tag ${tagB} should NOT be in results`);
+  });
+
+  it('Filter by multiple tags returns entries matching any tag', async () => {
+    const qs = `tags=${encodeURIComponent(tagA)}&tags=${encodeURIComponent(tagB)}`;
+    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono?${qs}`);
+    assert.equal(r.status, 200);
+    const resultIds = r.body.chrono.map(c => c._id);
+    assert.ok(resultIds.includes(ids[0]), `Entry with tag ${tagA} should be in results`);
+    assert.ok(resultIds.includes(ids[1]), `Entry with tag ${tagB} should be in results`);
+  });
+
+  it('Filter by non-existent tag returns empty array', async () => {
+    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono?tags=no-such-tag-${RUN}`);
+    assert.equal(r.status, 200);
+    assert.deepStrictEqual(r.body.chrono, []);
+  });
+});
+
