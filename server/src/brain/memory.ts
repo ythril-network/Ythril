@@ -117,6 +117,14 @@ export async function recall(
   return deduped.slice(0, topK);
 }
 
+/** Maps knowledge types to their MongoDB collection suffixes. */
+const KNOWLEDGE_COLLECTION: Record<RecallKnowledgeType, string> = {
+  memory: 'memories',
+  entity: 'entities',
+  edge: 'edges',
+  chrono: 'chrono',
+};
+
 /** Run $vectorSearch against a single collection and map results to RecallResult. */
 async function recallByType(
   spaceId: string,
@@ -125,8 +133,9 @@ async function recallByType(
   topK: number,
   tags?: string[],
 ): Promise<RecallResult[]> {
-  const collName = `${spaceId}_${knowledgeType === 'memory' ? 'memories' : knowledgeType === 'entity' ? 'entities' : knowledgeType === 'edge' ? 'edges' : 'chrono'}`;
-  const indexName = `${spaceId}_${collName.slice(spaceId.length + 1)}_embedding`;
+  const collSuffix = KNOWLEDGE_COLLECTION[knowledgeType];
+  const collName = `${spaceId}_${collSuffix}`;
+  const indexName = `${spaceId}_${collSuffix}_embedding`;
 
   const pipeline: object[] = [
     {

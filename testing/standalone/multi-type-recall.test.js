@@ -309,7 +309,10 @@ describe('Tags filter applicability', () => {
 });
 
 // ── Embedding text derivation ──────────────────────────────────────────────────
-// Verify the text formulas used for embeddings match what is stored
+// These helpers intentionally duplicate the formulas from entities.ts and
+// chrono.ts. Standalone tests avoid importing production modules to stay
+// dependency-free and fast. If the production formulas change, these tests
+// will catch the divergence — they act as specification tests for the formula.
 
 function entityEmbedText(name, type) {
   return `${name} ${type}`;
