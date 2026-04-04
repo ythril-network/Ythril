@@ -198,6 +198,8 @@ export interface MemoryDoc {
   embedding: number[];
   tags: string[];
   entityIds: string[];
+  description?: string;
+  properties?: Record<string, string | number | boolean>;
   author: AuthorRef;
   createdAt: string;
   updatedAt: string;
@@ -212,6 +214,7 @@ export interface EntityDoc {
   name: string;
   type: string;
   tags: string[];
+  description?: string;
   properties: Record<string, string | number | boolean>;
   author: AuthorRef;
   createdAt: string;
@@ -229,6 +232,9 @@ export interface EdgeDoc {
   label: string;
   type?: string;
   weight?: number;
+  tags?: string[];
+  description?: string;
+  properties?: Record<string, string | number | boolean>;
   author: AuthorRef;
   createdAt: string;
   updatedAt: string;
@@ -253,6 +259,7 @@ export interface ChronoEntry {
   tags: string[];
   entityIds: string[];
   memoryIds: string[];
+  properties?: Record<string, string | number | boolean>;
   recurrence?: {
     freq: 'daily' | 'weekly' | 'monthly' | 'yearly';
     interval: number;
@@ -288,6 +295,7 @@ export interface FileMetaDoc {
   path: string;         // same as _id — carried as a queryable field
   description?: string; // human-readable summary (optional)
   tags: string[];       // tags for filtering and recall scoping
+  properties?: Record<string, string | number | boolean>; // structured metadata (optional)
   createdAt: string;    // ISO8601 — first write timestamp
   updatedAt: string;    // ISO8601 — last write timestamp
   sizeBytes: number;    // file size in bytes at last write

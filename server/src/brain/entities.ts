@@ -10,9 +10,22 @@ function authorRef() {
   return { instanceId: cfg.instanceId, instanceLabel: cfg.instanceLabel };
 }
 
-/** Derive the text to embed for an entity (name + type). */
-function entityEmbedText(name: string, type: string): string {
-  return `${name} ${type}`;
+/** Derive the text to embed for an entity (name + type + tags + description + properties). */
+function entityEmbedText(
+  name: string,
+  type: string,
+  tags: string[] = [],
+  description?: string,
+  properties: Record<string, string | number | boolean> = {},
+): string {
+  const parts: string[] = [name, type];
+  if (tags.length > 0) parts.push(tags.join(' '));
+  if (description?.trim()) parts.push(description.trim());
+  const propEntries = Object.entries(properties);
+  if (propEntries.length > 0) {
+    parts.push(propEntries.map(([k, v]) => `${k} ${String(v)}`).join(' '));
+  }
+  return parts.join(' ');
 }
 
 /**
@@ -25,6 +38,7 @@ export async function upsertEntity(
   type: string,
   tags: string[] = [],
   properties: Record<string, string | number | boolean> = {},
+  description?: string,
 ): Promise<EntityDoc> {
   const collection = col<EntityDoc>(`${spaceId}_entities`);
   const existing = await collection.findOne({ spaceId, name, type } as never);
@@ -35,18 +49,23 @@ export async function upsertEntity(
   // Embed the entity text (best-effort — if embedding fails we still store the entity)
   let embeddingFields: { embedding?: number[]; embeddingModel?: string } = {};
   try {
-    const embResult = await embed(entityEmbedText(name, type));
+    const mergedTags = existing ? Array.from(new Set([...((existing as EntityDoc).tags ?? []), ...tags])) : tags;
+    const mergedProps = existing ? { ...((existing as EntityDoc).properties ?? {}), ...properties } : properties;
+    const effectiveDesc = description ?? (existing as EntityDoc | null)?.description;
+    const embResult = await embed(entityEmbedText(name, type, mergedTags, effectiveDesc, mergedProps));
     embeddingFields = { embedding: embResult.vector, embeddingModel: embResult.model };
   } catch { /* embedding unavailable — entity stored without vector */ }
 
   if (existing) {
     const updatedTags = Array.from(new Set([...((existing as EntityDoc).tags ?? []), ...tags]));
     const mergedProps = { ...((existing as EntityDoc).properties ?? {}), ...properties };
+    const $set: Record<string, unknown> = { tags: updatedTags, properties: mergedProps, updatedAt: now, seq, ...embeddingFields };
+    if (description !== undefined) $set['description'] = description;
     await collection.updateOne(
       { _id: (existing as EntityDoc)._id } as never,
-      { $set: { tags: updatedTags, properties: mergedProps, updatedAt: now, seq, ...embeddingFields } } as never,
+      { $set } as never,
     );
-    return { ...(existing as EntityDoc), tags: updatedTags, properties: mergedProps, updatedAt: now, seq, ...embeddingFields };
+    return { ...(existing as EntityDoc), tags: updatedTags, properties: mergedProps, updatedAt: now, seq, ...embeddingFields, ...(description !== undefined ? { description } : {}) };
   }
 
   const doc: EntityDoc = {
@@ -62,6 +81,7 @@ export async function upsertEntity(
     seq,
     ...embeddingFields,
   };
+  if (description !== undefined) doc.description = description;
   await collection.insertOne(doc as never);
   return doc;
 }

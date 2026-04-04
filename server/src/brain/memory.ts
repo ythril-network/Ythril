@@ -4,11 +4,42 @@ import { nextSeq } from '../util/seq.js';
 import { embed } from './embedding.js';
 import { getConfig, getEmbeddingConfig } from '../config/loader.js';
 import { needsReindex } from '../spaces/spaces.js';
-import type { MemoryDoc, TombstoneDoc } from '../config/types.js';
+import type { MemoryDoc, EntityDoc, TombstoneDoc } from '../config/types.js';
 
 function authorRef() {
   const cfg = getConfig();
   return { instanceId: cfg.instanceId, instanceLabel: cfg.instanceLabel };
+}
+
+/** Derive the text to embed for a memory (tags + entity names + fact + description + properties). */
+function memoryEmbedText(
+  fact: string,
+  tags: string[] = [],
+  entityNames: string[] = [],
+  description?: string,
+  properties?: Record<string, string | number | boolean>,
+): string {
+  const parts: string[] = [];
+  if (tags.length > 0) parts.push(tags.join(' '));
+  if (entityNames.length > 0) parts.push(entityNames.join(' '));
+  parts.push(fact);
+  if (description?.trim()) parts.push(description.trim());
+  if (properties) {
+    const propEntries = Object.entries(properties);
+    if (propEntries.length > 0) {
+      parts.push(propEntries.map(([k, v]) => `${k} ${String(v)}`).join(' '));
+    }
+  }
+  return parts.join(' ');
+}
+
+/** Resolve entity IDs to their names from the database. */
+async function resolveEntityNames(spaceId: string, entityIds: string[]): Promise<string[]> {
+  if (entityIds.length === 0) return [];
+  const docs = await col<EntityDoc>(`${spaceId}_entities`)
+    .find({ _id: { $in: entityIds } } as never, { projection: { name: 1 } })
+    .toArray() as Array<{ name: string }>;
+  return docs.map(d => d.name);
 }
 
 /** Store a new memory with semantic embedding */
@@ -17,8 +48,12 @@ export async function remember(
   fact: string,
   entityIds: string[] = [],
   tags: string[] = [],
+  description?: string,
+  properties?: Record<string, string | number | boolean>,
+  entityNames?: string[],
 ): Promise<MemoryDoc> {
-  const embResult = await embed(fact);
+  const names = entityNames ?? await resolveEntityNames(spaceId, entityIds);
+  const embResult = await embed(memoryEmbedText(fact, tags, names, description, properties));
   const seq = await nextSeq(spaceId);
   const now = new Date().toISOString();
   const doc: MemoryDoc = {
@@ -34,6 +69,8 @@ export async function remember(
     seq,
     embeddingModel: embResult.model,
   };
+  if (description !== undefined) doc.description = description;
+  if (properties !== undefined) doc.properties = properties;
   await col<MemoryDoc>(`${spaceId}_memories`).insertOne(doc as never);
   return doc;
 }
@@ -50,6 +87,9 @@ export interface RecallResult {
   seq?: number;
   embeddingModel?: string;
   tags?: string[];
+  // shared optional fields
+  description?: string;
+  properties?: Record<string, string | number | boolean>;
   // memory-specific
   fact?: string;
   entityIds?: string[];
@@ -57,7 +97,6 @@ export interface RecallResult {
   name?: string;
   /** Entity type string (named `entityType` to avoid conflict with the `type` discriminator). */
   entityType?: string;
-  properties?: Record<string, string | number | boolean>;
   // edge-specific
   from?: string;
   to?: string;
@@ -65,7 +104,6 @@ export interface RecallResult {
   weight?: number;
   // chrono-specific
   title?: string;
-  description?: string;
   kind?: string;
   startsAt?: string;
   // file-specific
@@ -80,6 +118,7 @@ export async function recall(
   topK = 10,
   tags?: string[],
   types?: RecallKnowledgeType[],
+  minPerType?: Partial<Record<RecallKnowledgeType, number>>,
 ): Promise<RecallResult[]> {
   if (!isVectorSearchAvailable()) {
     throw new Error(
@@ -102,22 +141,42 @@ export async function recall(
     ? types
     : ['memory', 'entity', 'edge', 'chrono', 'file'];
 
-  // Run vector searches in parallel for all active types
+  // Phase 1: for each type with a minPerType floor > 0, guarantee that many results
+  const guaranteed: RecallResult[] = [];
+  const guaranteedIds = new Set<string>();
+  if (minPerType) {
+    const floorSearches = Object.entries(minPerType)
+      .filter(([t, floor]) => activeTypes.includes(t as RecallKnowledgeType) && (floor ?? 0) > 0)
+      .map(([t, floor]) =>
+        recallByType(spaceId, t as RecallKnowledgeType, embResult.vector, floor!, tags),
+      );
+    const floorResults = (await Promise.all(floorSearches)).flat();
+    for (const r of floorResults) {
+      if (!guaranteedIds.has(r._id)) {
+        guaranteedIds.add(r._id);
+        guaranteed.push(r);
+      }
+    }
+  }
+
+  // Phase 2: run the global unrestricted search for all active types
   const perTypeK = Math.ceil(topK * 1.5);
   const searches = activeTypes.map(t => recallByType(spaceId, t, embResult.vector, perTypeK, tags));
   const allResults = (await Promise.all(searches)).flat();
-
-  // Sort by score descending, deduplicate by _id, take topK
   allResults.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
-  const seen = new Set<string>();
-  const deduped: RecallResult[] = [];
+
+  // Fill remaining slots (topK - guaranteedCount) from global results, skipping already-guaranteed
+  const fillSlots = Math.max(0, topK - guaranteed.length);
+  const fill: RecallResult[] = [];
   for (const r of allResults) {
-    if (!seen.has(r._id)) {
-      seen.add(r._id);
-      deduped.push(r);
-    }
+    if (fill.length >= fillSlots) break;
+    if (!guaranteedIds.has(r._id)) fill.push(r);
   }
-  return deduped.slice(0, topK);
+
+  // Combine guaranteed + fill, sort by score, return
+  const final = [...guaranteed, ...fill];
+  final.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  return final;
 }
 
 /** Maps knowledge types to their MongoDB collection suffixes. */
@@ -153,8 +212,8 @@ async function recallByType(
     },
   ];
 
-  // Tags filter applies to types that have tags
-  if (tags && tags.length > 0 && (knowledgeType === 'memory' || knowledgeType === 'entity' || knowledgeType === 'chrono' || knowledgeType === 'file')) {
+  // Tags filter applies to all types that have tags
+  if (tags && tags.length > 0) {
     pipeline.push({ $match: { tags: { $all: tags } } });
   }
 
@@ -164,15 +223,15 @@ async function recallByType(
   const commonProject = { _id: 1, spaceId: 1, _knowledgeType: 1, score: 1, createdAt: 1, seq: 1, embeddingModel: 1 };
   let typeProject: Record<string, number> = {};
   if (knowledgeType === 'memory') {
-    typeProject = { fact: 1, tags: 1, entityIds: 1 };
+    typeProject = { fact: 1, tags: 1, entityIds: 1, description: 1, properties: 1 };
   } else if (knowledgeType === 'entity') {
-    typeProject = { name: 1, type: 1, tags: 1, properties: 1 };
+    typeProject = { name: 1, type: 1, tags: 1, description: 1, properties: 1 };
   } else if (knowledgeType === 'edge') {
-    typeProject = { from: 1, to: 1, label: 1, weight: 1 };
+    typeProject = { from: 1, to: 1, label: 1, weight: 1, tags: 1, description: 1, properties: 1 };
   } else if (knowledgeType === 'chrono') {
-    typeProject = { title: 1, description: 1, kind: 1, startsAt: 1, tags: 1, entityIds: 1 };
+    typeProject = { title: 1, description: 1, kind: 1, startsAt: 1, tags: 1, entityIds: 1, properties: 1 };
   } else if (knowledgeType === 'file') {
-    typeProject = { path: 1, description: 1, tags: 1, sizeBytes: 1 };
+    typeProject = { path: 1, description: 1, tags: 1, sizeBytes: 1, properties: 1 };
   }
   pipeline.push({ $project: { ...commonProject, ...typeProject } });
 
@@ -199,16 +258,22 @@ function mapToRecallResult(doc: Record<string, unknown>, knowledgeType: RecallKn
     base.fact = doc['fact'] as string | undefined;
     base.tags = doc['tags'] as string[] | undefined;
     base.entityIds = doc['entityIds'] as string[] | undefined;
+    base.description = doc['description'] as string | undefined;
+    base.properties = doc['properties'] as Record<string, string | number | boolean> | undefined;
   } else if (knowledgeType === 'entity') {
     base.name = doc['name'] as string | undefined;
     base.entityType = doc['type'] as string | undefined;
     base.tags = doc['tags'] as string[] | undefined;
+    base.description = doc['description'] as string | undefined;
     base.properties = doc['properties'] as Record<string, string | number | boolean> | undefined;
   } else if (knowledgeType === 'edge') {
     base.from = doc['from'] as string | undefined;
     base.to = doc['to'] as string | undefined;
     base.label = doc['label'] as string | undefined;
     base.weight = doc['weight'] as number | undefined;
+    base.tags = doc['tags'] as string[] | undefined;
+    base.description = doc['description'] as string | undefined;
+    base.properties = doc['properties'] as Record<string, string | number | boolean> | undefined;
   } else if (knowledgeType === 'chrono') {
     base.title = doc['title'] as string | undefined;
     base.description = doc['description'] as string | undefined;
@@ -216,11 +281,13 @@ function mapToRecallResult(doc: Record<string, unknown>, knowledgeType: RecallKn
     base.startsAt = doc['startsAt'] as string | undefined;
     base.tags = doc['tags'] as string[] | undefined;
     base.entityIds = doc['entityIds'] as string[] | undefined;
+    base.properties = doc['properties'] as Record<string, string | number | boolean> | undefined;
   } else if (knowledgeType === 'file') {
     base.path = doc['path'] as string | undefined;
     base.description = doc['description'] as string | undefined;
     base.tags = doc['tags'] as string[] | undefined;
     base.sizeBytes = doc['sizeBytes'] as number | undefined;
+    base.properties = doc['properties'] as Record<string, string | number | boolean> | undefined;
   }
   return base;
 }
@@ -232,8 +299,9 @@ export async function recallGlobal(
   topK = 10,
   tags?: string[],
   types?: RecallKnowledgeType[],
+  minPerType?: Partial<Record<RecallKnowledgeType, number>>,
 ): Promise<RecallResult[]> {
-  const results = await Promise.all(spaceIds.map(id => recall(id, query, topK, tags, types)));
+  const results = await Promise.all(spaceIds.map(id => recall(id, query, topK, tags, types, minPerType)));
   const flat = results.flat();
   // Sort by score descending, deduplicate by _id
   const seen = new Set<string>();
@@ -247,11 +315,11 @@ export async function recallGlobal(
   return deduped.slice(0, topK);
 }
 
-/** Update an existing memory's fact, tags, or entityIds. Re-embeds if fact changes. */
+/** Update an existing memory's fact, tags, entityIds, description, or properties. Re-embeds when content fields change. */
 export async function updateMemory(
   spaceId: string,
   memoryId: string,
-  updates: { fact?: string; tags?: string[]; entityIds?: string[] },
+  updates: { fact?: string; tags?: string[]; entityIds?: string[]; description?: string; properties?: Record<string, string | number | boolean> },
 ): Promise<MemoryDoc | null> {
   const existing = await col<MemoryDoc>(`${spaceId}_memories`).findOne({ _id: memoryId, spaceId } as never) as MemoryDoc | null;
   if (!existing) return null;
@@ -260,14 +328,32 @@ export async function updateMemory(
   const now = new Date().toISOString();
   const $set: Record<string, unknown> = { updatedAt: now, seq };
 
-  if (updates.fact !== undefined) {
-    const embResult = await embed(updates.fact);
-    $set['fact'] = updates.fact;
-    $set['embedding'] = embResult.vector;
-    $set['embeddingModel'] = embResult.model;
-  }
+  if (updates.fact !== undefined) $set['fact'] = updates.fact;
   if (updates.tags !== undefined) $set['tags'] = updates.tags;
   if (updates.entityIds !== undefined) $set['entityIds'] = updates.entityIds;
+  if (updates.description !== undefined) $set['description'] = updates.description;
+  if (updates.properties !== undefined) $set['properties'] = updates.properties;
+
+  // Re-embed whenever any content field changes
+  const contentChanged =
+    updates.fact !== undefined ||
+    updates.tags !== undefined ||
+    updates.entityIds !== undefined ||
+    updates.description !== undefined ||
+    updates.properties !== undefined;
+  if (contentChanged) {
+    const newFact = updates.fact ?? existing.fact;
+    const newTags = updates.tags ?? existing.tags;
+    const newEntityIds = updates.entityIds ?? existing.entityIds;
+    const newDesc = updates.description !== undefined ? updates.description : existing.description;
+    const newProps = updates.properties ?? existing.properties;
+    const entityNames = await resolveEntityNames(spaceId, newEntityIds);
+    try {
+      const embResult = await embed(memoryEmbedText(newFact, newTags, entityNames, newDesc, newProps));
+      $set['embedding'] = embResult.vector;
+      $set['embeddingModel'] = embResult.model;
+    } catch { /* embedding unavailable — keep existing embedding */ }
+  }
 
   await col<MemoryDoc>(`${spaceId}_memories`).updateOne(
     { _id: memoryId } as never,

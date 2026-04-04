@@ -10,9 +10,18 @@ function authorRef() {
   return { instanceId: cfg.instanceId, instanceLabel: cfg.instanceLabel };
 }
 
-/** Derive the text to embed for a chrono entry (title + optional description). */
-function chronoEmbedText(title: string, description?: string): string {
-  return description ? `${title} ${description}` : title;
+/** Derive the text to embed for a chrono entry (kind + status + title + description + tags). */
+function chronoEmbedText(
+  title: string,
+  kind: string,
+  status: string,
+  description?: string,
+  tags: string[] = [],
+): string {
+  const parts: string[] = [kind, status, title];
+  if (tags.length > 0) parts.push(tags.join(' '));
+  if (description?.trim()) parts.push(description.trim());
+  return parts.join(' ');
 }
 
 export async function createChrono(
@@ -28,16 +37,19 @@ export async function createChrono(
     tags?: string[];
     entityIds?: string[];
     memoryIds?: string[];
+    properties?: Record<string, string | number | boolean>;
     recurrence?: ChronoEntry['recurrence'];
   },
 ): Promise<ChronoEntry> {
   const seq = await nextSeq(spaceId);
   const now = new Date().toISOString();
+  const status = fields.status ?? 'upcoming';
+  const tags = fields.tags ?? [];
 
-  // Embed title + description (best-effort)
+  // Embed kind + status + title + description + tags (best-effort)
   let embeddingFields: { embedding?: number[]; embeddingModel?: string } = {};
   try {
-    const embResult = await embed(chronoEmbedText(fields.title, fields.description));
+    const embResult = await embed(chronoEmbedText(fields.title, fields.kind, status, fields.description, tags));
     embeddingFields = { embedding: embResult.vector, embeddingModel: embResult.model };
   } catch { /* embedding unavailable — chrono stored without vector */ }
 
@@ -47,8 +59,8 @@ export async function createChrono(
     title: fields.title,
     kind: fields.kind,
     startsAt: fields.startsAt,
-    status: fields.status ?? 'upcoming',
-    tags: fields.tags ?? [],
+    status,
+    tags,
     entityIds: fields.entityIds ?? [],
     memoryIds: fields.memoryIds ?? [],
     author: authorRef(),
@@ -60,6 +72,7 @@ export async function createChrono(
   if (fields.description !== undefined) doc.description = fields.description;
   if (fields.endsAt !== undefined) doc.endsAt = fields.endsAt;
   if (fields.confidence !== undefined) doc.confidence = fields.confidence;
+  if (fields.properties !== undefined) doc.properties = fields.properties;
   if (fields.recurrence !== undefined) doc.recurrence = fields.recurrence;
 
   await col<ChronoEntry>(`${spaceId}_chrono`).insertOne(doc as never);
@@ -69,7 +82,7 @@ export async function createChrono(
 export async function updateChrono(
   spaceId: string,
   id: string,
-  updates: Partial<Pick<ChronoEntry, 'title' | 'description' | 'kind' | 'startsAt' | 'endsAt' | 'status' | 'confidence' | 'tags' | 'entityIds' | 'memoryIds' | 'recurrence'>>,
+  updates: Partial<Pick<ChronoEntry, 'title' | 'description' | 'kind' | 'startsAt' | 'endsAt' | 'status' | 'confidence' | 'tags' | 'entityIds' | 'memoryIds' | 'properties' | 'recurrence'>>,
 ): Promise<ChronoEntry | null> {
   const existing = await col<ChronoEntry>(`${spaceId}_chrono`).findOne({ _id: id, spaceId } as never) as ChronoEntry | null;
   if (!existing) return null;
@@ -81,12 +94,21 @@ export async function updateChrono(
     if (v !== undefined) $set[k] = v;
   }
 
-  // Re-embed if title or description changes
-  if (updates.title !== undefined || updates.description !== undefined) {
+  // Re-embed if any embedding-relevant field changes
+  if (
+    updates.title !== undefined ||
+    updates.description !== undefined ||
+    updates.kind !== undefined ||
+    updates.status !== undefined ||
+    updates.tags !== undefined
+  ) {
     const newTitle = updates.title ?? existing.title;
+    const newKind = updates.kind ?? existing.kind;
+    const newStatus = updates.status ?? existing.status;
     const newDesc = updates.description !== undefined ? updates.description : existing.description;
+    const newTags = updates.tags ?? existing.tags;
     try {
-      const embResult = await embed(chronoEmbedText(newTitle, newDesc));
+      const embResult = await embed(chronoEmbedText(newTitle, newKind, newStatus, newDesc, newTags));
       $set['embedding'] = embResult.vector;
       $set['embeddingModel'] = embResult.model;
     } catch { /* embedding unavailable — keep existing embedding */ }

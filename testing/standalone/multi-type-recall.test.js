@@ -80,6 +80,7 @@ function edgeResult(overrides = {}) {
     from: 'ent-portal',
     to: 'ent-db',
     label: 'connects_to',
+    tags: ['infra'],
     createdAt: '2024-01-01T00:00:00.000Z',
     seq: 3,
     embeddingModel: 'all-MiniLM-L6-v2',
@@ -331,7 +332,8 @@ describe('types[] filter', () => {
 // ── tags filter applicability ──────────────────────────────────────────────────
 
 function tagsApply(knowledgeType) {
-  return knowledgeType === 'memory' || knowledgeType === 'entity' || knowledgeType === 'chrono' || knowledgeType === 'file';
+  // All collection types now have tags — the filter applies universally
+  return true;
 }
 
 describe('Tags filter applicability', () => {
@@ -339,55 +341,326 @@ describe('Tags filter applicability', () => {
   it('tags apply to entity', () => assert.ok(tagsApply('entity')));
   it('tags apply to chrono', () => assert.ok(tagsApply('chrono')));
   it('tags apply to file', () => assert.ok(tagsApply('file')));
-  it('tags do NOT apply to edge', () => assert.ok(!tagsApply('edge')));
+  it('tags apply to edge', () => assert.ok(tagsApply('edge')));
 });
 
 // ── Embedding text derivation ──────────────────────────────────────────────────
 // These helpers intentionally duplicate the formulas from entities.ts,
-// chrono.ts, and file-meta.ts. Standalone tests avoid importing production
-// modules to stay dependency-free and fast. If the production formulas change,
-// these tests will catch the divergence — they act as specification tests for
-// the formula.
+// edges.ts, chrono.ts, memory.ts, and file-meta.ts. Standalone tests avoid
+// importing production modules to stay dependency-free and fast. If the
+// production formulas change, these tests will catch the divergence — they
+// act as specification tests for the formula.
 
-function entityEmbedText(name, type) {
-  return `${name} ${type}`;
+function memoryEmbedText(fact, tags = [], entityNames = [], description, properties) {
+  const parts = [];
+  if (tags.length > 0) parts.push(tags.join(' '));
+  if (entityNames.length > 0) parts.push(entityNames.join(' '));
+  parts.push(fact);
+  if (description?.trim()) parts.push(description.trim());
+  if (properties) {
+    const propEntries = Object.entries(properties);
+    if (propEntries.length > 0) parts.push(propEntries.map(([k, v]) => `${k} ${String(v)}`).join(' '));
+  }
+  return parts.join(' ');
 }
 
-function chronoEmbedText(title, description) {
-  return description ? `${title} ${description}` : title;
+function entityEmbedText(name, type, tags = [], description, properties = {}) {
+  const parts = [name, type];
+  if (tags.length > 0) parts.push(tags.join(' '));
+  if (description?.trim()) parts.push(description.trim());
+  const propEntries = Object.entries(properties);
+  if (propEntries.length > 0) parts.push(propEntries.map(([k, v]) => `${k} ${String(v)}`).join(' '));
+  return parts.join(' ');
 }
 
-function fileEmbedText(filePath, description) {
-  return description?.trim() ? description : filePath;
+function edgeEmbedText(from, label, to, tags = [], type, description) {
+  const parts = [];
+  if (tags.length > 0) parts.push(tags.join(' '));
+  parts.push(from, label, to);
+  if (type?.trim()) parts.push(type.trim());
+  if (description?.trim()) parts.push(description.trim());
+  return parts.join(' ');
 }
 
-describe('Embedding text derivation', () => {
-  it('entity embed text is "name type"', () => {
+function chronoEmbedText(title, kind, status, description, tags = []) {
+  const parts = [kind, status, title];
+  if (tags.length > 0) parts.push(tags.join(' '));
+  if (description?.trim()) parts.push(description.trim());
+  return parts.join(' ');
+}
+
+function fileEmbedText(filePath, tags = [], description) {
+  const parts = [filePath];
+  if (tags.length > 0) parts.push(tags.join(' '));
+  if (description?.trim()) parts.push(description.trim());
+  return parts.join(' ');
+}
+
+describe('Embedding text derivation — memory', () => {
+  it('fact alone (no tags, no entities)', () => {
+    assert.equal(memoryEmbedText('Redis TTL is 30 minutes'), 'Redis TTL is 30 minutes');
+  });
+
+  it('tags are prepended before fact', () => {
+    assert.equal(
+      memoryEmbedText('Redis TTL is 30 minutes', ['infra', 'redis']),
+      'infra redis Redis TTL is 30 minutes',
+    );
+  });
+
+  it('entity names come after tags, before fact', () => {
+    assert.equal(
+      memoryEmbedText('Redis TTL is 30 minutes', ['infra'], ['portal-backend']),
+      'infra portal-backend Redis TTL is 30 minutes',
+    );
+  });
+
+  it('description is appended after fact', () => {
+    assert.equal(
+      memoryEmbedText('Redis TTL is 30 minutes', [], [], 'Session timeout value'),
+      'Redis TTL is 30 minutes Session timeout value',
+    );
+  });
+
+  it('properties are appended last', () => {
+    assert.equal(
+      memoryEmbedText('Redis TTL is 30 minutes', [], [], undefined, { aspect: 'cache', severity: 'low' }),
+      'Redis TTL is 30 minutes aspect cache severity low',
+    );
+  });
+
+  it('combines all fields in correct order', () => {
+    assert.equal(
+      memoryEmbedText('Redis TTL is 30 minutes', ['infra'], ['portal-backend'], 'Session timeout', { aspect: 'cache' }),
+      'infra portal-backend Redis TTL is 30 minutes Session timeout aspect cache',
+    );
+  });
+});
+
+describe('Embedding text derivation — entity', () => {
+  it('minimal: name and type', () => {
     assert.equal(entityEmbedText('portal-backend', 'service'), 'portal-backend service');
   });
 
-  it('chrono embed text is "title description" when description present', () => {
-    assert.equal(chronoEmbedText('Migration', 'Move to Go'), 'Migration Move to Go');
+  it('includes tags', () => {
+    assert.equal(
+      entityEmbedText('portal-backend', 'service', ['backend', 'go']),
+      'portal-backend service backend go',
+    );
   });
 
-  it('chrono embed text is just title when description is absent', () => {
-    assert.equal(chronoEmbedText('Migration', undefined), 'Migration');
+  it('includes description', () => {
+    assert.equal(
+      entityEmbedText('portal-backend', 'service', [], 'Main API gateway'),
+      'portal-backend service Main API gateway',
+    );
   });
 
-  it('chrono embed text is just title when description is empty string', () => {
-    assert.equal(chronoEmbedText('Migration', ''), 'Migration');
+  it('includes properties as key-value pairs', () => {
+    assert.equal(
+      entityEmbedText('portal-backend', 'service', [], undefined, { language: 'Go', port: 8080 }),
+      'portal-backend service language Go port 8080',
+    );
   });
 
-  it('file embed text is description when description is present', () => {
-    assert.equal(fileEmbedText('docs/README.md', 'Architecture overview'), 'Architecture overview');
+  it('combines all fields', () => {
+    assert.equal(
+      entityEmbedText('portal-backend', 'service', ['backend'], 'Main API', { language: 'Go' }),
+      'portal-backend service backend Main API language Go',
+    );
+  });
+});
+
+describe('Embedding text derivation — edge', () => {
+  it('from + label + to (no tags)', () => {
+    assert.equal(edgeEmbedText('adr-0028', 'supersedes', 'adr-0029'), 'adr-0028 supersedes adr-0029');
   });
 
-  it('file embed text falls back to path when description is absent', () => {
-    assert.equal(fileEmbedText('docs/README.md', undefined), 'docs/README.md');
+  it('tags are prepended before from+label+to', () => {
+    assert.equal(
+      edgeEmbedText('adr-0028', 'supersedes', 'adr-0029', ['security', 'adr']),
+      'security adr adr-0028 supersedes adr-0029',
+    );
   });
 
-  it('file embed text falls back to path when description is empty/whitespace', () => {
-    assert.equal(fileEmbedText('docs/README.md', '   '), 'docs/README.md');
+  it('includes type when present', () => {
+    assert.equal(
+      edgeEmbedText('adr-0028', 'supersedes', 'adr-0029', [], 'causal'),
+      'adr-0028 supersedes adr-0029 causal',
+    );
+  });
+
+  it('includes description when present', () => {
+    assert.equal(
+      edgeEmbedText('adr-0028', 'supersedes', 'adr-0029', [], undefined, 'Harbor replaced registry:2'),
+      'adr-0028 supersedes adr-0029 Harbor replaced registry:2',
+    );
+  });
+
+  it('combines all fields', () => {
+    assert.equal(
+      edgeEmbedText('adr-0028', 'supersedes', 'adr-0029', ['security'], 'causal', 'Harbor replaced registry:2'),
+      'security adr-0028 supersedes adr-0029 causal Harbor replaced registry:2',
+    );
+  });
+});
+
+describe('Embedding text derivation — chrono', () => {
+  it('kind + status + title', () => {
+    assert.equal(chronoEmbedText('Migration', 'milestone', 'upcoming'), 'milestone upcoming Migration');
+  });
+
+  it('includes tags', () => {
+    assert.equal(
+      chronoEmbedText('Migration', 'milestone', 'upcoming', undefined, ['infra', 'migration']),
+      'milestone upcoming Migration infra migration',
+    );
+  });
+
+  it('includes description', () => {
+    assert.equal(
+      chronoEmbedText('Migration', 'milestone', 'upcoming', 'Move to Go'),
+      'milestone upcoming Migration Move to Go',
+    );
+  });
+
+  it('combines all fields', () => {
+    assert.equal(
+      chronoEmbedText('Migration', 'milestone', 'completed', 'Move to Go', ['infra']),
+      'milestone completed Migration infra Move to Go',
+    );
+  });
+
+  it('ignores empty description', () => {
+    assert.equal(chronoEmbedText('Migration', 'event', 'upcoming', ''), 'event upcoming Migration');
+  });
+});
+
+describe('Embedding text derivation — file', () => {
+  it('always includes path', () => {
+    assert.equal(fileEmbedText('docs/README.md'), 'docs/README.md');
+  });
+
+  it('path + tags', () => {
+    assert.equal(
+      fileEmbedText('docs/README.md', ['docs', 'api']),
+      'docs/README.md docs api',
+    );
+  });
+
+  it('path + description', () => {
+    assert.equal(
+      fileEmbedText('docs/README.md', [], 'Architecture overview'),
+      'docs/README.md Architecture overview',
+    );
+  });
+
+  it('path + tags + description', () => {
+    assert.equal(
+      fileEmbedText('docs/README.md', ['docs'], 'Architecture overview'),
+      'docs/README.md docs Architecture overview',
+    );
+  });
+
+  it('ignores empty/whitespace description', () => {
+    assert.equal(fileEmbedText('docs/README.md', [], '   '), 'docs/README.md');
+  });
+});
+
+// ── minPerType logic ───────────────────────────────────────────────────────────
+// Mirrors the two-phase logic in memory.ts recall()
+
+function recallWithMinPerType(resultArraysByType, topK, minPerType) {
+  const activeTypes = Object.keys(resultArraysByType);
+
+  // Phase 1: collect guaranteed results
+  const guaranteed = [];
+  const guaranteedIds = new Set();
+  if (minPerType) {
+    for (const [type, floor] of Object.entries(minPerType)) {
+      if (!activeTypes.includes(type) || !floor) continue;
+      const typeResults = (resultArraysByType[type] ?? []).slice(0, floor);
+      for (const r of typeResults) {
+        if (!guaranteedIds.has(r._id)) {
+          guaranteedIds.add(r._id);
+          guaranteed.push(r);
+        }
+      }
+    }
+  }
+
+  // Phase 2: fill remaining slots from global results (sorted by score)
+  const allResults = Object.values(resultArraysByType).flat();
+  allResults.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+
+  const fillSlots = Math.max(0, topK - guaranteed.length);
+  const fill = [];
+  for (const r of allResults) {
+    if (fill.length >= fillSlots) break;
+    if (!guaranteedIds.has(r._id)) fill.push(r);
+  }
+
+  // Combine, sort by score
+  const final = [...guaranteed, ...fill];
+  final.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  return final;
+}
+
+describe('minPerType floor guarantee', () => {
+  const buildResults = () => ({
+    memory: [
+      memoryResult({ _id: 'mem-1', score: 0.5 }),
+      memoryResult({ _id: 'mem-2', score: 0.45 }),
+    ],
+    entity: [
+      entityResult({ _id: 'ent-1', score: 0.92 }),
+      entityResult({ _id: 'ent-2', score: 0.88 }),
+    ],
+    edge: [edgeResult({ _id: 'edge-1', score: 0.3 })],
+    chrono: [chronoResult({ _id: 'chrono-1', score: 0.6 })],
+    file: [fileResult({ _id: 'file-1', score: 0.55 })],
+  });
+
+  it('without minPerType returns pure score ranking', () => {
+    const results = recallWithMinPerType(buildResults(), 3, undefined);
+    assert.equal(results.length, 3);
+    assert.equal(results[0]._id, 'ent-1');   // score 0.92
+    assert.equal(results[1]._id, 'ent-2');   // score 0.88
+    assert.equal(results[2]._id, 'chrono-1'); // score 0.6
+  });
+
+  it('minPerType guarantees low-scoring edge appears in results', () => {
+    const results = recallWithMinPerType(buildResults(), 5, { edge: 1 });
+    const edgeResult = results.find(r => r.type === 'edge');
+    assert.ok(edgeResult, 'edge result must be present');
+    assert.equal(edgeResult._id, 'edge-1');
+  });
+
+  it('minPerType does not duplicate results', () => {
+    const results = recallWithMinPerType(buildResults(), 10, { entity: 2, edge: 1 });
+    const ids = results.map(r => r._id);
+    const unique = new Set(ids);
+    assert.equal(ids.length, unique.size, 'no duplicate _ids');
+  });
+
+  it('respects topK after guaranteeing floors', () => {
+    const results = recallWithMinPerType(buildResults(), 3, { entity: 2, edge: 1 });
+    assert.equal(results.length, 3);
+  });
+
+  it('floor larger than available results fills as many as possible', () => {
+    const results = recallWithMinPerType(buildResults(), 10, { edge: 5 });
+    const edgeResults = results.filter(r => r.type === 'edge');
+    assert.equal(edgeResults.length, 1, 'only 1 edge available, floor of 5 is capped');
+  });
+
+  it('empty minPerType object behaves like no minPerType', () => {
+    const withEmpty = recallWithMinPerType(buildResults(), 3, {});
+    const withUndefined = recallWithMinPerType(buildResults(), 3, undefined);
+    assert.deepEqual(
+      withEmpty.map(r => r._id),
+      withUndefined.map(r => r._id),
+    );
   });
 });
 

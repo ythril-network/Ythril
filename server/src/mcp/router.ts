@@ -98,6 +98,12 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
               items: { type: 'string' },
               description: 'Categorisation tags.',
             },
+            description: { type: 'string', description: 'Optional prose context or rationale for this memory.' },
+            properties: {
+              type: 'object',
+              description: 'Optional structured key-value metadata (filterable via query).',
+              additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
+            },
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
           },
           required: ['fact'],
@@ -117,6 +123,11 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
               items: { type: 'string', enum: ['memory', 'entity', 'edge', 'chrono', 'file'] },
               description: 'Optional knowledge-type filter — restrict results to one or more types. Omit to search all types.',
             },
+            minPerType: {
+              type: 'object',
+              description: 'Optional minimum result count per type. Guarantees at least that many results of each type if available (e.g. {"entity": 2, "edge": 1}). Omit to use pure score ranking.',
+              additionalProperties: { type: 'number' },
+            },
           },
           required: ['query'],
         },
@@ -134,6 +145,11 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
               type: 'array',
               items: { type: 'string', enum: ['memory', 'entity', 'edge', 'chrono', 'file'] },
               description: 'Optional knowledge-type filter — restrict results to one or more types. Omit to search all types.',
+            },
+            minPerType: {
+              type: 'object',
+              description: 'Optional minimum result count per type. Guarantees at least that many results of each type if available (e.g. {"entity": 2, "edge": 1}). Omit to use pure score ranking.',
+              additionalProperties: { type: 'number' },
             },
           },
           required: ['query'],
@@ -206,6 +222,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             name: { type: 'string', description: 'Entity name.' },
             type: { type: 'string', description: 'Entity type (person, place, concept, …).' },
             tags: { type: 'array', items: { type: 'string' } },
+            description: { type: 'string', description: 'Optional prose description or summary of this entity.' },
             properties: {
               type: 'object',
               description: 'Key-value properties (e.g. {"wheels": 4, "color": "red"}). Values must be string, number, or boolean.',
@@ -225,6 +242,13 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             from: { type: 'string', description: 'Source entity ID.' },
             to: { type: 'string', description: 'Target entity ID.' },
             label: { type: 'string', description: 'Relationship label (e.g. "works_at", "knows").' },            type: { type: 'string', description: 'Optional edge type (e.g. "causal", "attribution").' },            weight: { type: 'number', description: 'Optional edge weight (0–1).' },
+            tags: { type: 'array', items: { type: 'string' }, description: 'Categorisation tags.' },
+            description: { type: 'string', description: 'Optional prose description of why this relationship exists.' },
+            properties: {
+              type: 'object',
+              description: 'Optional structured key-value metadata for this edge.',
+              additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
+            },
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
           },
           required: ['from', 'to', 'label'],
@@ -246,6 +270,11 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             entityIds: { type: 'array', items: { type: 'string' }, description: 'Related entity IDs.' },
             memoryIds: { type: 'array', items: { type: 'string' }, description: 'Related memory IDs.' },
             description: { type: 'string', description: 'Optional longer description.' },
+            properties: {
+              type: 'object',
+              description: 'Optional structured key-value metadata for this entry.',
+              additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
+            },
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
           },
           required: ['title', 'kind', 'startsAt'],
@@ -268,6 +297,11 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             entityIds: { type: 'array', items: { type: 'string' } },
             memoryIds: { type: 'array', items: { type: 'string' } },
             description: { type: 'string' },
+            properties: {
+              type: 'object',
+              description: 'Optional structured key-value metadata for this entry.',
+              additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
+            },
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
           },
           required: ['id'],
@@ -309,6 +343,11 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             content: { type: 'string', description: 'Text content to write.' },
             description: { type: 'string', description: 'Optional human-readable summary stored as file metadata.' },
             tags: { type: 'array', items: { type: 'string' }, description: 'Optional tags for filtering and recall.' },
+            properties: {
+              type: 'object',
+              description: 'Optional structured key-value metadata for this file.',
+              additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
+            },
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
           },
           required: ['path', 'content'],
@@ -429,6 +468,10 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           if (fact.length > 50_000) throw new Error('fact must not exceed 50 000 characters');
           const tags = Array.isArray(a['tags']) ? (a['tags'] as string[]) : [];
           const entityNames = Array.isArray(a['entities']) ? (a['entities'] as string[]) : [];
+          const description = typeof a['description'] === 'string' ? a['description'] : undefined;
+          const props = (a['properties'] != null && typeof a['properties'] === 'object' && !Array.isArray(a['properties']))
+            ? (a['properties'] as Record<string, string | number | boolean>)
+            : undefined;
 
           const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
           if (!wt.ok) throw new Error(wt.error);
@@ -444,7 +487,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             entityIds.push(entity._id);
           }
 
-          const mem = await remember(ts, fact, entityIds, tags);
+          const mem = await remember(ts, fact, entityIds, tags, description, props, entityNames);
           const remText = `Stored memory (seq ${mem.seq}, ID ${mem._id}).`
             + (remQuota.softBreached ? `\n⚠️ Storage warning: ${remQuota.warning}` : '');
           return {
@@ -458,8 +501,11 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const topK = typeof a['topK'] === 'number' ? a['topK'] : 10;
           const tags = Array.isArray(a['tags']) ? (a['tags'] as unknown[]).filter((t): t is string => typeof t === 'string') : undefined;
           const types = Array.isArray(a['types']) ? (a['types'] as unknown[]).filter((t): t is RecallKnowledgeType => typeof t === 'string') : undefined;
+          const minPerType = (a['minPerType'] != null && typeof a['minPerType'] === 'object' && !Array.isArray(a['minPerType']))
+            ? (a['minPerType'] as Partial<Record<RecallKnowledgeType, number>>)
+            : undefined;
           const memberIds = resolveMemberSpaces(spaceId);
-          const all = (await Promise.all(memberIds.map(mid => recall(mid, query, topK, tags, types)))).flat();
+          const all = (await Promise.all(memberIds.map(mid => recall(mid, query, topK, tags, types, minPerType)))).flat();
           // Sort by score descending and take topK
           all.sort((x, y) => (y.score ?? 0) - (x.score ?? 0));
           const results = all.slice(0, topK);
@@ -487,12 +533,15 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const topK = typeof a['topK'] === 'number' ? a['topK'] : 5;
           const tags = Array.isArray(a['tags']) ? (a['tags'] as unknown[]).filter((t): t is string => typeof t === 'string') : undefined;
           const types = Array.isArray(a['types']) ? (a['types'] as unknown[]).filter((t): t is RecallKnowledgeType => typeof t === 'string') : undefined;
+          const minPerType = (a['minPerType'] != null && typeof a['minPerType'] === 'object' && !Array.isArray(a['minPerType']))
+            ? (a['minPerType'] as Partial<Record<RecallKnowledgeType, number>>)
+            : undefined;
           const cfg = getConfig();
           // Only search spaces allowed by the calling token (tokenSpaces undefined = all spaces).
           const spaceIds = cfg.spaces
             .filter(s => !tokenSpaces || tokenSpaces.includes(s.id))
             .map(s => s.id);
-          const results = await recallGlobal(spaceIds, query, topK, tags, types);
+          const results = await recallGlobal(spaceIds, query, topK, tags, types, minPerType);
           return {
             content: [
               {
@@ -627,9 +676,10 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const props = (a['properties'] != null && typeof a['properties'] === 'object' && !Array.isArray(a['properties']))
             ? (a['properties'] as Record<string, string | number | boolean>)
             : {};
+          const description = typeof a['description'] === 'string' ? a['description'] : undefined;
           const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
           if (!wt.ok) throw new Error(wt.error);
-          const entity = await upsertEntity(wt.target, eName, eType, tags, props);
+          const entity = await upsertEntity(wt.target, eName, eType, tags, props, description);
           return {
             content: [{ type: 'text' as const, text: `Entity '${entity.name}' (${entity.type}) upserted (ID ${entity._id}).` }],
           };
@@ -644,9 +694,14 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           if (!label) throw new Error('label must not be empty');
           const weight = typeof a['weight'] === 'number' ? a['weight'] : undefined;
           const edgeType = typeof a['type'] === 'string' ? a['type'] : undefined;
+          const description = typeof a['description'] === 'string' ? a['description'] : undefined;
+          const edgeTags = Array.isArray(a['tags']) ? (a['tags'] as string[]) : undefined;
+          const edgeProps = (a['properties'] != null && typeof a['properties'] === 'object' && !Array.isArray(a['properties']))
+            ? (a['properties'] as Record<string, string | number | boolean>)
+            : undefined;
           const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
           if (!wt.ok) throw new Error(wt.error);
-          const edge = await upsertEdge(wt.target, from, to, label, weight, edgeType);
+          const edge = await upsertEdge(wt.target, from, to, label, weight, edgeType, description, edgeProps, edgeTags);
           return {
             content: [{ type: 'text' as const, text: `Edge '${label}' (${from} → ${to}) upserted (ID ${edge._id}).` }],
           };
@@ -676,6 +731,9 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             tags: Array.isArray(a['tags']) ? (a['tags'] as string[]) : undefined,
             entityIds: Array.isArray(a['entityIds']) ? (a['entityIds'] as string[]) : undefined,
             memoryIds: Array.isArray(a['memoryIds']) ? (a['memoryIds'] as string[]) : undefined,
+            properties: (a['properties'] != null && typeof a['properties'] === 'object' && !Array.isArray(a['properties']))
+              ? (a['properties'] as Record<string, string | number | boolean>)
+              : undefined,
           });
           const text = `Chrono entry '${entry.title}' (${entry.kind}) created (ID ${entry._id}, seq ${entry.seq}).`
             + (remQuota.softBreached ? `\n⚠️ Storage warning: ${remQuota.warning}` : '');
@@ -699,6 +757,9 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           if (Array.isArray(a['tags'])) updates['tags'] = a['tags'];
           if (Array.isArray(a['entityIds'])) updates['entityIds'] = a['entityIds'];
           if (Array.isArray(a['memoryIds'])) updates['memoryIds'] = a['memoryIds'];
+          if (a['properties'] != null && typeof a['properties'] === 'object' && !Array.isArray(a['properties'])) {
+            updates['properties'] = a['properties'];
+          }
 
           const entry = await updateChrono(wt.target, id, updates as never);
           if (!entry) throw new Error(`Chrono entry '${id}' not found`);
@@ -755,9 +816,12 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const wfQuota = await checkQuota('files');
           const { sha256 } = await writeFile(wt.target, filePath, content);
           const sizeBytes = Buffer.byteLength(content, 'utf8');
-          const metaOpts: { description?: string; tags?: string[] } = {};
+          const metaOpts: { description?: string; tags?: string[]; properties?: Record<string, string | number | boolean> } = {};
           if (typeof a['description'] === 'string') metaOpts.description = a['description'];
           if (Array.isArray(a['tags'])) metaOpts.tags = a['tags'] as string[];
+          if (a['properties'] != null && typeof a['properties'] === 'object' && !Array.isArray(a['properties'])) {
+            metaOpts.properties = a['properties'] as Record<string, string | number | boolean>;
+          }
           await upsertFileMeta(wt.target, filePath, sizeBytes, metaOpts);
           const wfText = `Written (sha256: ${sha256}).`
             + (wfQuota.softBreached ? `\n⚠️ Storage warning: ${wfQuota.warning}` : '');

@@ -34,7 +34,7 @@ brainRouter.post('/:spaceId/memories', globalRateLimit, requireSpaceAuth, denyRe
   const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
   const targetSpace = wt.target;
-  const { fact, tags = [], entityIds = [] } = req.body ?? {};
+  const { fact, tags = [], entityIds = [], description, properties } = req.body ?? {};
   if (!fact || typeof fact !== 'string') {
     res.status(400).json({ error: '`fact` string required' });
     return;
@@ -58,11 +58,41 @@ brainRouter.post('/:spaceId/memories', globalRateLimit, requireSpaceAuth, denyRe
     }
     throw err;
   }
+  const safeDesc: string | undefined = typeof description === 'string' ? description : undefined;
+  const safeProps: Record<string, string | number | boolean> | undefined =
+    properties != null && typeof properties === 'object' && !Array.isArray(properties)
+      ? (properties as Record<string, string | number | boolean>)
+      : undefined;
+  const safeEntityIds: string[] = Array.isArray(entityIds) ? entityIds : [];
+  const safeTags: string[] = Array.isArray(tags) ? tags : [];
+
+  // Resolve entity names for richer embedding
+  let entityNames: string[] = [];
+  if (safeEntityIds.length > 0) {
+    try {
+      const entityDocs = await col<EntityDoc>(`${targetSpace}_entities`)
+        .find({ _id: { $in: safeEntityIds } } as never, { projection: { name: 1 } })
+        .toArray() as Array<{ name: string }>;
+      entityNames = entityDocs.map(e => e.name);
+    } catch { /* ignore — entity names are best-effort */ }
+  }
+
+  // Assemble embedding text from all content fields
+  const embedParts: string[] = [];
+  if (safeTags.length > 0) embedParts.push(safeTags.join(' '));
+  if (entityNames.length > 0) embedParts.push(entityNames.join(' '));
+  embedParts.push(fact);
+  if (safeDesc?.trim()) embedParts.push(safeDesc.trim());
+  if (safeProps) {
+    const propEntries = Object.entries(safeProps);
+    if (propEntries.length > 0) embedParts.push(propEntries.map(([k, v]) => `${k} ${String(v)}`).join(' '));
+  }
+
   // Attempt embedding; fall back to empty vector if server not configured/reachable
   let embedding: number[] = [];
   let embeddingModel = 'none';
   try {
-    const result = await embed(fact);
+    const result = await embed(embedParts.join(' '));
     embedding = result.vector;
     embeddingModel = result.model;
   } catch (err) {
@@ -75,14 +105,16 @@ brainRouter.post('/:spaceId/memories', globalRateLimit, requireSpaceAuth, denyRe
     spaceId: targetSpace,
     fact,
     embedding,
-    tags: Array.isArray(tags) ? tags : [],
-    entityIds: Array.isArray(entityIds) ? entityIds : [],
+    tags: safeTags,
+    entityIds: safeEntityIds,
     author: { instanceId: cfg.instanceId, instanceLabel: cfg.instanceLabel },
     createdAt: now,
     updatedAt: now,
     seq,
     embeddingModel,
   };
+  if (safeDesc !== undefined) doc.description = safeDesc;
+  if (safeProps !== undefined) doc.properties = safeProps;
   await col<MemoryDoc>(`${targetSpace}_memories`).insertOne(doc as never);
   const body: Record<string, unknown> = { ...doc };
   if (quotaResult?.softBreached) body['storageWarning'] = true;
@@ -244,7 +276,7 @@ brainRouter.post('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAuth,
   }
   const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
-  const { name, type = '', tags = [], properties = {} } = req.body ?? {};
+  const { name, type = '', tags = [], properties = {}, description } = req.body ?? {};
   if (!name || typeof name !== 'string') {
     res.status(400).json({ error: '`name` string required' });
     return;
@@ -267,7 +299,8 @@ brainRouter.post('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAuth,
       return;
     }
   }
-  const entity = await upsertEntity(wt.target, name.trim(), type.trim(), tags, properties);
+  const safeDesc: string | undefined = typeof description === 'string' ? description : undefined;
+  const entity = await upsertEntity(wt.target, name.trim(), type.trim(), tags, properties, safeDesc);
   res.status(201).json(entity);
 });
 
@@ -281,7 +314,7 @@ brainRouter.post('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, de
   }
   const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
-  const { from, to, label, weight, type } = req.body ?? {};
+  const { from, to, label, weight, type, description, properties, tags } = req.body ?? {};
   if (!from || typeof from !== 'string') {
     res.status(400).json({ error: '`from` string required' });
     return;
@@ -302,7 +335,23 @@ brainRouter.post('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, de
     res.status(400).json({ error: '`type` must be a string' });
     return;
   }
-  const edge = await upsertEdge(wt.target, from.trim(), to.trim(), label.trim(), weight, type?.trim());
+  if (description !== undefined && typeof description !== 'string') {
+    res.status(400).json({ error: '`description` must be a string' });
+    return;
+  }
+  if (tags !== undefined && (!Array.isArray(tags) || tags.some((t: unknown) => typeof t !== 'string'))) {
+    res.status(400).json({ error: '`tags` must be an array of strings' });
+    return;
+  }
+  const safeProps: Record<string, string | number | boolean> | undefined =
+    properties != null && typeof properties === 'object' && !Array.isArray(properties)
+      ? (properties as Record<string, string | number | boolean>)
+      : undefined;
+  const safeTags: string[] | undefined = Array.isArray(tags) ? tags : undefined;
+  const edge = await upsertEdge(
+    wt.target, from.trim(), to.trim(), label.trim(), weight, type?.trim(),
+    typeof description === 'string' ? description : undefined, safeProps, safeTags,
+  );
   res.status(201).json(edge);
 });
 
@@ -646,14 +695,33 @@ brainRouter.post('/spaces/:spaceId/reindex', globalRateLimit, requireSpaceAuth, 
       // eslint-disable-next-line no-constant-condition
       while (true) {
         const batch = await col<MemoryDoc>(`${mid}_memories`)
-          .find({}, { projection: { _id: 1, fact: 1 } })
+          .find({}, { projection: { _id: 1, fact: 1, tags: 1, entityIds: 1, description: 1, properties: 1 } })
           .skip(skip)
           .limit(BATCH)
           .toArray();
         if (batch.length === 0) break;
         for (const doc of batch) {
           try {
-            const result = await embed(doc.fact);
+            // Resolve entity IDs to names for richer embedding
+            const entityIds: string[] = Array.isArray(doc.entityIds) ? doc.entityIds : [];
+            const entityDocs = entityIds.length > 0
+              ? await col<EntityDoc>(`${mid}_entities`)
+                  .find({ _id: { $in: entityIds } } as never, { projection: { name: 1 } })
+                  .toArray() as Array<{ name: string }>
+              : [];
+            const entityNames = entityDocs.map(e => e.name);
+            const tags: string[] = Array.isArray(doc.tags) ? doc.tags : [];
+            const parts: string[] = [];
+            if (tags.length > 0) parts.push(tags.join(' '));
+            if (entityNames.length > 0) parts.push(entityNames.join(' '));
+            parts.push(doc.fact);
+            if (doc.description?.trim()) parts.push(doc.description.trim());
+            if (doc.properties) {
+              const propEntries = Object.entries(doc.properties);
+              if (propEntries.length > 0) parts.push(propEntries.map(([k, v]) => `${k} ${String(v)}`).join(' '));
+            }
+            const text = parts.join(' ');
+            const result = await embed(text);
             await col<MemoryDoc>(`${mid}_memories`).updateOne(
               { _id: doc._id },
               { $set: { embedding: result.vector, embeddingModel: result.model } },
@@ -665,20 +733,28 @@ brainRouter.post('/spaces/:spaceId/reindex', globalRateLimit, requireSpaceAuth, 
       }
     }
 
-    // Re-embed entities (name + type)
+    // Re-embed entities (name + type + tags + description + properties)
     {
       let skip = 0;
       // eslint-disable-next-line no-constant-condition
       while (true) {
         const batch = await col<EntityDoc>(`${mid}_entities`)
-          .find({}, { projection: { _id: 1, name: 1, type: 1 } })
+          .find({}, { projection: { _id: 1, name: 1, type: 1, tags: 1, description: 1, properties: 1 } })
           .skip(skip)
           .limit(BATCH)
           .toArray();
         if (batch.length === 0) break;
         for (const doc of batch) {
           try {
-            const result = await embed(`${doc.name} ${doc.type}`);
+            const tags: string[] = Array.isArray(doc.tags) ? doc.tags : [];
+            const parts: string[] = [doc.name, doc.type];
+            if (tags.length > 0) parts.push(tags.join(' '));
+            if (doc.description?.trim()) parts.push(doc.description.trim());
+            if (doc.properties) {
+              const propEntries = Object.entries(doc.properties);
+              if (propEntries.length > 0) parts.push(propEntries.map(([k, v]) => `${k} ${String(v)}`).join(' '));
+            }
+            const result = await embed(parts.join(' '));
             await col<EntityDoc>(`${mid}_entities`).updateOne(
               { _id: doc._id },
               { $set: { embedding: result.vector, embeddingModel: result.model } },
@@ -690,20 +766,26 @@ brainRouter.post('/spaces/:spaceId/reindex', globalRateLimit, requireSpaceAuth, 
       }
     }
 
-    // Re-embed edges (label)
+    // Re-embed edges (tags + from + label + to + type + description)
     {
       let skip = 0;
       // eslint-disable-next-line no-constant-condition
       while (true) {
         const batch = await col<EdgeDoc>(`${mid}_edges`)
-          .find({}, { projection: { _id: 1, label: 1 } })
+          .find({}, { projection: { _id: 1, from: 1, label: 1, to: 1, type: 1, tags: 1, description: 1 } })
           .skip(skip)
           .limit(BATCH)
           .toArray();
         if (batch.length === 0) break;
         for (const doc of batch) {
           try {
-            const result = await embed(doc.label);
+            const tags: string[] = Array.isArray(doc.tags) ? doc.tags : [];
+            const parts: string[] = [];
+            if (tags.length > 0) parts.push(tags.join(' '));
+            parts.push(doc.from, doc.label, doc.to);
+            if (doc.type?.trim()) parts.push(doc.type.trim());
+            if (doc.description?.trim()) parts.push(doc.description.trim());
+            const result = await embed(parts.join(' '));
             await col<EdgeDoc>(`${mid}_edges`).updateOne(
               { _id: doc._id },
               { $set: { embedding: result.vector, embeddingModel: result.model } },
@@ -715,21 +797,24 @@ brainRouter.post('/spaces/:spaceId/reindex', globalRateLimit, requireSpaceAuth, 
       }
     }
 
-    // Re-embed chrono (title + description)
+    // Re-embed chrono (kind + status + title + description + tags)
     {
       let skip = 0;
       // eslint-disable-next-line no-constant-condition
       while (true) {
         const batch = await col<ChronoEntry>(`${mid}_chrono`)
-          .find({}, { projection: { _id: 1, title: 1, description: 1 } })
+          .find({}, { projection: { _id: 1, title: 1, kind: 1, status: 1, description: 1, tags: 1 } })
           .skip(skip)
           .limit(BATCH)
           .toArray();
         if (batch.length === 0) break;
         for (const doc of batch) {
           try {
-            const text = doc.description ? `${doc.title} ${doc.description}` : doc.title;
-            const result = await embed(text);
+            const tags: string[] = Array.isArray(doc.tags) ? doc.tags : [];
+            const parts: string[] = [doc.kind, doc.status, doc.title];
+            if (tags.length > 0) parts.push(tags.join(' '));
+            if (doc.description?.trim()) parts.push(doc.description.trim());
+            const result = await embed(parts.join(' '));
             await col<ChronoEntry>(`${mid}_chrono`).updateOne(
               { _id: doc._id },
               { $set: { embedding: result.vector, embeddingModel: result.model } },
@@ -741,21 +826,24 @@ brainRouter.post('/spaces/:spaceId/reindex', globalRateLimit, requireSpaceAuth, 
       }
     }
 
-    // Re-embed files (description if present, otherwise path)
+    // Re-embed files (path + tags + description)
     {
       let skip = 0;
       // eslint-disable-next-line no-constant-condition
       while (true) {
         const batch = await col<FileMetaDoc>(`${mid}_files`)
-          .find({}, { projection: { _id: 1, path: 1, description: 1 } })
+          .find({}, { projection: { _id: 1, path: 1, tags: 1, description: 1 } })
           .skip(skip)
           .limit(BATCH)
           .toArray();
         if (batch.length === 0) break;
         for (const doc of batch) {
           try {
-            const text = doc.description?.trim() ? doc.description : doc.path;
-            const result = await embed(text);
+            const tags: string[] = Array.isArray(doc.tags) ? doc.tags : [];
+            const parts: string[] = [doc.path];
+            if (tags.length > 0) parts.push(tags.join(' '));
+            if (doc.description?.trim()) parts.push(doc.description.trim());
+            const result = await embed(parts.join(' '));
             await col<FileMetaDoc>(`${mid}_files`).updateOne(
               { _id: doc._id },
               { $set: { embedding: result.vector, embeddingModel: result.model } },
