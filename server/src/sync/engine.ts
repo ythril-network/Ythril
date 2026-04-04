@@ -65,6 +65,26 @@ const PUSH_BATCH_SIZE = 200;
 // prominent warning. The member is NOT auto-removed — that is a human decision.
 const STALE_FAILURE_THRESHOLD = 10;
 
+// ── Space ID resolution ────────────────────────────────────────────────────
+
+/** Resolve a remote (peer-side) space ID to its local equivalent.
+ *  Returns the mapped local ID from `net.spaceMap` if one exists, otherwise
+ *  returns `remoteId` unchanged (no aliasing). */
+export function remoteToLocal(net: NetworkConfig, remoteId: string): string {
+  return net.spaceMap?.[remoteId] ?? remoteId;
+}
+
+/** Resolve a local space ID to its remote (peer-side) equivalent.
+ *  Performs a reverse lookup on `net.spaceMap`. If no mapping exists the local
+ *  ID is returned unchanged. */
+export function localToRemote(net: NetworkConfig, localId: string): string {
+  if (!net.spaceMap) return localId;
+  for (const [remote, local] of Object.entries(net.spaceMap)) {
+    if (local === localId) return remote;
+  }
+  return localId;
+}
+
 // ── Cron scheduler ─────────────────────────────────────────────────────────
 
 const _scheduledTimers = new Map<string, ReturnType<typeof setInterval>>();
@@ -348,6 +368,19 @@ async function runSyncForMember(
   };
 
   for (const spaceId of net.spaces) {
+    // Resolve remote space ID for this local space — peers reference spaces by
+    // their original (remote) ID, which may differ from our local ID when
+    // spaceMap aliasing is active.
+    const remoteSpaceId = localToRemote(net, spaceId);
+
+    // Skip spaces that don't exist in local config — prevents orphan data and collection access
+    // for space IDs that were registered on the network but never created locally.
+    const cfg = getConfig();
+    if (!cfg.spaces.some(s => s.id === spaceId && !s.proxyFor)) {
+      log.warn(`Skipping sync for space '${spaceId}' in network '${net.label}': space not in local config`);
+      continue;
+    }
+
     // Push to this member if the direction allows it (push or both).
     // Pull from this member if bidirectional (both), or for non-directional networks.
     // Braintree/Pubsub with direction='push': parent/publisher pushes down, child/subscriber never pushes up.
@@ -356,23 +389,23 @@ async function runSyncForMember(
     const shouldPush = !isDirectional || member.direction === 'both' || member.direction === 'push';
 
     if (shouldPull) {
-      const pc = await pullFromPeer(member, spaceId, net.id, headers, fetchOpts, batchFetchOpts);
+      const pc = await pullFromPeer(member, spaceId, remoteSpaceId, net.id, headers, fetchOpts, batchFetchOpts);
       pulled.memories += pc.memories; pulled.entities += pc.entities; pulled.edges += pc.edges; pulled.chrono += pc.chrono;
     }
     if (shouldPush) {
-      const pc = await pushToPeer(member, spaceId, net.id, headers, fetchOpts, batchFetchOpts);
+      const pc = await pushToPeer(member, spaceId, remoteSpaceId, net.id, headers, fetchOpts, batchFetchOpts);
       pushed.memories += pc.memories; pushed.entities += pc.entities; pushed.edges += pc.edges; pushed.chrono += pc.chrono;
     }
 
     // Sync file manifest — respect direction guards like pull/push above
     if (shouldPull || shouldPush) {
-      const fc = await syncFiles(member, spaceId, net.id, headers, fetchOpts, shouldPull, shouldPush);
+      const fc = await syncFiles(member, spaceId, remoteSpaceId, net.id, headers, fetchOpts, shouldPull, shouldPush);
       pulled.files += fc.pulledFiles; pushed.files += fc.pushedFiles;
     }
 
     // Merkle integrity check (opt-in: network.merkle === true)
     if (net.merkle) {
-      await checkMerkleWithPeer(net, member, spaceId, fetchOpts);
+      await checkMerkleWithPeer(net, member, spaceId, remoteSpaceId, fetchOpts);
     }
   }
 
@@ -637,6 +670,7 @@ async function propagateVotesWithPeer(
 async function pullFromPeer(
   member: NetworkMember,
   spaceId: string,
+  remoteSpaceId: string,
   networkId: string,
   headers: Record<string, string>,
   opts: RequestInit,
@@ -650,7 +684,7 @@ async function pullFromPeer(
 
   // Pull tombstones first — so deletions apply before we potentially upsert deleted docs
   try {
-    const tombsUrl = `${member.url}/api/sync/tombstones?spaceId=${encodeURIComponent(spaceId)}&networkId=${encodeURIComponent(networkId)}&sinceSeq=${sinceSeq}`;
+    const tombsUrl = `${member.url}/api/sync/tombstones?spaceId=${encodeURIComponent(remoteSpaceId)}&networkId=${encodeURIComponent(networkId)}&sinceSeq=${sinceSeq}`;
     const resp = await fetch(tombsUrl, opts);
     if (resp.ok) {
       const data = await resp.json() as { memories?: TombstoneDoc[]; entities?: TombstoneDoc[]; edges?: TombstoneDoc[]; chrono?: TombstoneDoc[] };
@@ -669,7 +703,7 @@ async function pullFromPeer(
   let page = 0;
   do {
     const params = new URLSearchParams({
-      spaceId, networkId, sinceSeq: String(sinceSeq), limit: '200', full: 'true',
+      spaceId: remoteSpaceId, networkId, sinceSeq: String(sinceSeq), limit: '200', full: 'true',
       ...(cursor ? { cursor } : {}),
     });
     const resp = await fetch(`${member.url}/api/sync/memories?${params}`, batchOpts);
@@ -699,7 +733,7 @@ async function pullFromPeer(
   // Pull entities
   cursor = null; page = 0;
   do {
-    const params = new URLSearchParams({ spaceId, networkId, sinceSeq: String(sinceSeq), limit: '200', full: 'true', ...(cursor ? { cursor } : {}) });
+    const params = new URLSearchParams({ spaceId: remoteSpaceId, networkId, sinceSeq: String(sinceSeq), limit: '200', full: 'true', ...(cursor ? { cursor } : {}) });
     const resp = await fetch(`${member.url}/api/sync/entities?${params}`, batchOpts);
     if (!resp.ok) break;
     const { items, nextCursor } = await resp.json() as { items: (EntityDoc | { _id: string; seq: number; deletedAt: string })[]; nextCursor: string | null };
@@ -716,7 +750,7 @@ async function pullFromPeer(
   // Pull edges
   cursor = null; page = 0;
   do {
-    const params = new URLSearchParams({ spaceId, networkId, sinceSeq: String(sinceSeq), limit: '200', full: 'true', ...(cursor ? { cursor } : {}) });
+    const params = new URLSearchParams({ spaceId: remoteSpaceId, networkId, sinceSeq: String(sinceSeq), limit: '200', full: 'true', ...(cursor ? { cursor } : {}) });
     const resp = await fetch(`${member.url}/api/sync/edges?${params}`, batchOpts);
     if (!resp.ok) break;
     const { items, nextCursor } = await resp.json() as { items: (EdgeDoc | { _id: string; seq: number; deletedAt: string })[]; nextCursor: string | null };
@@ -733,7 +767,7 @@ async function pullFromPeer(
   // Pull chrono
   cursor = null; page = 0;
   do {
-    const params = new URLSearchParams({ spaceId, networkId, sinceSeq: String(sinceSeq), limit: '200', full: 'true', ...(cursor ? { cursor } : {}) });
+    const params = new URLSearchParams({ spaceId: remoteSpaceId, networkId, sinceSeq: String(sinceSeq), limit: '200', full: 'true', ...(cursor ? { cursor } : {}) });
     const resp = await fetch(`${member.url}/api/sync/chrono?${params}`, batchOpts);
     if (!resp.ok) break;
     const { items, nextCursor } = await resp.json() as { items: (ChronoEntry | { _id: string; seq: number; deletedAt: string })[]; nextCursor: string | null };
@@ -776,6 +810,7 @@ async function pullFromPeer(
 async function pushToPeer(
   member: NetworkMember,
   spaceId: string,
+  remoteSpaceId: string,
   networkId: string,
   headers: Record<string, string>,
   opts: RequestInit,
@@ -792,7 +827,7 @@ async function pushToPeer(
   // A hard cap would silently drop deletions after long offline periods.
   {
     let tsCursor: number = lastSeqPushed;
-    const tsEndpoint = `${member.url}/api/sync/tombstones?spaceId=${encodeURIComponent(spaceId)}&networkId=${encodeURIComponent(networkId)}`;
+    const tsEndpoint = `${member.url}/api/sync/tombstones?spaceId=${encodeURIComponent(remoteSpaceId)}&networkId=${encodeURIComponent(networkId)}`;
     while (true) {
       const page = await listTombstones(spaceId, tsCursor, 500);
       if (page.length === 0) break;
@@ -820,7 +855,7 @@ async function pushToPeer(
   let pushFailed = false;
 
   // Send in PUSH_BATCH_SIZE slices; stop early on persistent failure
-  const batchEndpoint = `${member.url}/api/sync/batch-upsert?spaceId=${encodeURIComponent(spaceId)}&networkId=${encodeURIComponent(networkId)}`;
+  const batchEndpoint = `${member.url}/api/sync/batch-upsert?spaceId=${encodeURIComponent(remoteSpaceId)}&networkId=${encodeURIComponent(networkId)}`;
 
   // Helper: stream one collection type to the peer in cursor-paginated batches.
   async function pushCollection<T extends MemoryDoc | EntityDoc | EdgeDoc | ChronoEntry>(
@@ -884,6 +919,7 @@ async function pushToPeer(
 async function syncFiles(
   member: NetworkMember,
   spaceId: string,
+  remoteSpaceId: string,
   networkId: string,
   headers: Record<string, string>,
   opts: RequestInit,
@@ -897,7 +933,7 @@ async function syncFiles(
     // are removed locally before the manifest comparison runs.
     if (doPull) try {
       const tsResp = await fetch(
-        `${member.url}/api/sync/file-tombstones?spaceId=${encodeURIComponent(spaceId)}&networkId=${encodeURIComponent(networkId)}`,
+        `${member.url}/api/sync/file-tombstones?spaceId=${encodeURIComponent(remoteSpaceId)}&networkId=${encodeURIComponent(networkId)}`,
         opts,
       );
       if (tsResp.ok) {
@@ -933,7 +969,7 @@ async function syncFiles(
           {
             ...opts,
             method: 'POST',
-            body: JSON.stringify({ spaceId, tombstones: ourTombstones }),
+            body: JSON.stringify({ spaceId: remoteSpaceId, tombstones: ourTombstones }),
           },
         );
         // Ignore response — best-effort; peer will log errors internally.
@@ -946,7 +982,7 @@ async function syncFiles(
     // Only fetch the peer manifest if we need to pull or push (manifest comparison
     // drives both directions). When neither direction needs manifest, skip entirely.
     if (!doPull && !doPush) return { pulledFiles, pushedFiles };
-    const resp = await fetch(`${member.url}/api/sync/manifest?spaceId=${encodeURIComponent(spaceId)}&networkId=${encodeURIComponent(networkId)}`, opts);
+    const resp = await fetch(`${member.url}/api/sync/manifest?spaceId=${encodeURIComponent(remoteSpaceId)}&networkId=${encodeURIComponent(networkId)}`, opts);
     if (!resp.ok) { log.warn(`File manifest from ${member.label}: ${resp.status}`); return { pulledFiles, pushedFiles }; }
     const { manifest } = await resp.json() as { manifest: { path: string; sha256: string; size: number; modifiedAt: string }[] };
 
@@ -963,7 +999,7 @@ async function syncFiles(
 
       try {
         const dl = await fetch(
-          `${member.url}/api/files/${encodeURIComponent(spaceId)}?path=${encodeURIComponent(remote.path)}`,
+          `${member.url}/api/files/${encodeURIComponent(remoteSpaceId)}?path=${encodeURIComponent(remote.path)}`,
           opts,
         );
         if (!dl.ok) { log.warn(`DL file ${remote.path} from ${member.label}: ${dl.status}`); continue; }
@@ -1032,7 +1068,7 @@ async function syncFiles(
         const absPath = path.join(spaceRoot, localPath);
         const bytes = await fs.readFile(absPath);
         const pushResp = await fetch(
-          `${member.url}/api/files/${encodeURIComponent(spaceId)}?path=${encodeURIComponent(localPath)}`,
+          `${member.url}/api/files/${encodeURIComponent(remoteSpaceId)}?path=${encodeURIComponent(localPath)}`,
           {
             method: 'POST',
             headers: {
@@ -1107,6 +1143,7 @@ async function checkMerkleWithPeer(
   net: NetworkConfig,
   member: NetworkMember,
   spaceId: string,
+  remoteSpaceId: string,
   opts: RequestInit,
 ): Promise<void> {
   try {
@@ -1114,7 +1151,7 @@ async function checkMerkleWithPeer(
     const [localResult, peerResp] = await Promise.all([
       computeMerkleRoot(spaceId),
       fetch(
-        `${member.url}/api/sync/merkle?spaceId=${encodeURIComponent(spaceId)}&networkId=${encodeURIComponent(net.id)}`,
+        `${member.url}/api/sync/merkle?spaceId=${encodeURIComponent(remoteSpaceId)}&networkId=${encodeURIComponent(net.id)}`,
         opts,
       ),
     ]);

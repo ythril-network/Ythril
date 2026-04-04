@@ -19,7 +19,7 @@ import { themeRouter } from './api/theme.js';
 import { setupRouter } from './setup/routes.js';
 import { mcpRouter } from './mcp/router.js';
 import { globalRateLimit } from './rate-limit/middleware.js';
-import { configExists, reloadConfig, getConfig } from './config/loader.js';
+import { configExists, reloadConfig, getConfig, saveConfig } from './config/loader.js';
 import { requireAuth } from './auth/middleware.js';
 import { clearTokenCache } from './auth/tokens.js';
 import { clearOidcCache } from './auth/oidc.js';
@@ -158,6 +158,19 @@ export function createApp() {
     try {
       const oldSpaceIds = new Set(getConfig().spaces.map(s => s.id));
       reloadConfig();
+      // Migration: strip prefix-less tokens (same as startup migration)
+      {
+        const cfg = getConfig();
+        const before = cfg.tokens.length;
+        cfg.tokens = cfg.tokens.filter(t => t.prefix);
+        if (cfg.tokens.length < before) {
+          log.warn(
+            `Removed ${before - cfg.tokens.length} token(s) that pre-date the ` +
+            'prefix field and cannot be verified. Affected PAT holders must create new tokens.',
+          );
+          saveConfig(cfg);
+        }
+      }
       // Flush caches so revoked tokens and updated OIDC config take effect immediately
       clearTokenCache();
       clearOidcCache();

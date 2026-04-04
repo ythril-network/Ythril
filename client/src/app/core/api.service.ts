@@ -115,6 +115,7 @@ export interface Network {
   label: string;
   type: 'closed' | 'democratic' | 'club' | 'braintree' | 'pubsub';
   spaces: string[];
+  spaceMap?: Record<string, string>;
   members: NetworkMember[];
   votingDeadlineHours?: number;
   syncSchedule?: string;
@@ -134,6 +135,7 @@ export interface InviteBundle {
   rsaPublicKeyPem: string;
   networkId: string;
   expiresAt: string;
+  spaces?: string[];
 }
 
 export interface VoteRound {
@@ -217,6 +219,10 @@ export class ApiService {
 
   deleteSpace(id: string): Observable<void> {
     return this.http.delete<void>(`/api/spaces/${id}`, { body: { confirm: true } });
+  }
+
+  renameSpace(oldId: string, newId: string): Observable<{ space: Space }> {
+    return this.http.patch<{ space: Space }>(`/api/spaces/${oldId}/rename`, { newId });
   }
 
   // ── Tokens ────────────────────────────────────────────────────────────────
@@ -500,7 +506,8 @@ export class ApiService {
     networkId: string;
     myUrl: string;
     expiresAt?: string;
-  }): Observable<{ status: string; networkId: string; networkLabel: string; networkType: string; spaces: string[]; instanceId?: string; instanceLabel?: string }> {
+    spaceMap?: Record<string, string>;
+  }): Observable<{ status: string; networkId: string; networkLabel: string; networkType: string; spaces: string[]; existingSpaces?: string[]; createdSpaces?: string[]; spaceMap?: Record<string, string>; instanceId?: string; instanceLabel?: string }> {
     return this.http.post<any>('/api/networks/join-remote', body);
   }
 

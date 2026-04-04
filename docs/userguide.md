@@ -217,10 +217,21 @@ A space is a fully isolated container for memories, entities, edges, and files. 
 
 Open **Settings → Spaces** and fill in:
 
-- **ID** — lowercase alphanumeric + hyphens, max 40 chars. Cannot be renamed after creation.
+- **ID** — lowercase alphanumeric + hyphens, max 40 chars.
 - **Label** — human-readable display name.
-- **Description** — optional. Surfaced to MCP clients as space-level instructions.
+- **MCP Description** — optional. Surfaced to MCP clients as space-level instructions.
 - **Min GiB** — optional. Reserve minimum storage for this space.
+
+### Renaming a space
+
+Click the pencil (✎) icon on a space row to rename its ID. Enter a new ID and press Enter or click the check mark. The rename:
+
+- Moves all MongoDB collections (`memories`, `entities`, `edges`, `chrono`, `tombstones`, etc.) to the new prefix.
+- Moves the file directory on disk from `/data/files/{old}` to `/data/files/{new}`.
+- Updates all network `spaces[]` arrays and adds a `spaceMap` entry (`old → new`) so peers continue to sync correctly.
+- Updates all token `spaces[]` scopes that referenced the old ID.
+
+The built-in `general` space cannot be renamed. Renaming to an existing space ID returns `409`.
 
 ### Proxy spaces
 
@@ -324,9 +335,14 @@ The invite expires after 24 hours. The bundle contains an RSA-4096 public key an
 1. Open **Settings → Networks → Join an existing network**.
 2. Paste the invite bundle JSON.
 3. Enter this brain's publicly reachable URL (e.g. `https://brain-b.example.com`).
-4. Click **Join network**.
+4. If the remote network includes spaces that already exist locally, a **collision resolution** dialog appears for each overlapping space. Choose:
+   - **Merge** — sync into the existing local space directly.
+   - **Alias** — create a new local space with a different ID. Enter the new name in the text field.
+5. Click **Join network**.
 
 The RSA handshake runs server-to-server. Sync tokens are exchanged encrypted — never visible in the UI.
+
+Space aliases are stored as a `spaceMap` on the network config (`remote-id → local-id`). The sync engine transparently translates between remote and local space IDs during pull and push.
 
 ### Managing members
 

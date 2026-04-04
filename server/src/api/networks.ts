@@ -14,6 +14,7 @@ import { requireAdmin } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { getConfig, saveConfig, getSecrets, saveSecrets } from '../config/loader.js';
 import { createToken, revokeToken } from '../auth/tokens.js';
+import { createSpace } from '../spaces/spaces.js';
 import { concludeRoundIfReady, sendMemberRemovedNotify } from './sync.js';
 import { getSyncHistory } from '../sync/history.js';
 import { log } from '../util/log.js';
@@ -79,6 +80,10 @@ const JoinRemoteBody = z.object({
   myUrl: z.string().url(),
   /** expiresAt from invite bundle — informational only */
   expiresAt: z.string().optional(),
+  /** Optional space aliasing: maps remote space IDs to desired local space IDs.
+   *  When the UI detects a collision, the user can choose a different local ID.
+   *  Any remote IDs not present in this map will keep their original ID. */
+  spaceMap: z.record(z.string(), z.string().min(1).max(40).regex(/^[a-z0-9-]+$/)).optional(),
 });
 
 const ReparentSelfBody = z.object({
@@ -271,7 +276,7 @@ networksRouter.post('/join-remote', globalRateLimit, requireAdmin, async (req, r
     const parsed = JoinRemoteBody.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
 
-    const { handshakeId, inviteUrl, rsaPublicKeyPem: aPubKeyPem, networkId, myUrl } = parsed.data;
+    const { handshakeId, inviteUrl, rsaPublicKeyPem: aPubKeyPem, networkId, myUrl, spaceMap: requestedSpaceMap } = parsed.data;
     const cfg = getConfig();
 
     // ── Step A: apply — call Brain A's /api/invite/apply ──────────────────────
@@ -340,11 +345,42 @@ networksRouter.post('/join-remote', globalRateLimit, requireAdmin, async (req, r
 
     // Create a PAT in this brain's token store scoped to network spaces.
     // Brain A will present this token when calling THIS brain's sync endpoints.
-    const networkSpaces = (applyData.spaces ?? []).filter(s => cfg.spaces.some(cs => cs.id === s));
+    const remoteSpaceIds: string[] = applyData.spaces ?? [];
+    const existingSpaces: string[] = [];
+    const createdSpaces: string[] = [];
+    const spaceMap: Record<string, string> = {};
+
+    for (const remoteId of remoteSpaceIds) {
+      // Check if the user chose a different local ID for this remote space
+      const localId = requestedSpaceMap?.[remoteId] ?? remoteId;
+
+      if (localId !== remoteId) {
+        // Record the alias — sync engine will use this to translate peer space IDs
+        spaceMap[remoteId] = localId;
+      }
+
+      if (cfg.spaces.some(cs => cs.id === localId)) {
+        existingSpaces.push(localId);
+      } else {
+        // Auto-create missing spaces so sync has valid targets.
+        // Label is capitalised version of the slug (e.g. "test" → "Test").
+        try {
+          await createSpace({ id: localId, label: localId.charAt(0).toUpperCase() + localId.slice(1) });
+          createdSpaces.push(localId);
+          log.info(`join-remote: auto-created space '${localId}'${localId !== remoteId ? ` (alias for remote '${remoteId}')` : ''} for network ${networkId}`);
+        } catch (err) {
+          res.status(500).json({ error: `Failed to create space '${localId}': ${err}` });
+          return;
+        }
+      }
+    }
+
+    // All remote spaces now have local counterparts — scope token to local IDs.
+    const allNetworkSpaces = [...existingSpaces, ...createdSpaces];
     const { record: tokenForARecord, plaintext: tokenForAPlaintext } = await createToken({
       name: `peer:${applyData.instanceLabel ?? 'remote'}`,
       expiresAt: null,
-      spaces: networkSpaces.length > 0 ? networkSpaces : undefined,
+      spaces: allNetworkSpaces.length > 0 ? allNetworkSpaces : undefined,
       peerInstanceId: applyData.instanceId, // link this PAT to the peer that will present it
     });
 
@@ -392,7 +428,8 @@ networksRouter.post('/join-remote', globalRateLimit, requireAdmin, async (req, r
         id: networkId,
         label: applyData.networkLabel ?? 'Remote network',
         type: (applyData.networkType as NetworkConfig['type']) ?? 'closed',
-        spaces: networkSpaces.length > 0 ? networkSpaces : (applyData.spaces ?? []),
+        spaces: allNetworkSpaces,
+        ...(Object.keys(spaceMap).length > 0 ? { spaceMap } : {}),
         votingDeadlineHours: 24,
         members: [],
         pendingRounds: [],
@@ -424,7 +461,10 @@ networksRouter.post('/join-remote', globalRateLimit, requireAdmin, async (req, r
       networkId,
       networkLabel: applyData.networkLabel,
       networkType: applyData.networkType,
-      spaces: applyData.spaces ?? [],
+      spaces: allNetworkSpaces,
+      existingSpaces,
+      createdSpaces,
+      ...(Object.keys(spaceMap).length > 0 ? { spaceMap } : {}),
       instanceId: applyData.instanceId,
       instanceLabel: applyData.instanceLabel,
     });

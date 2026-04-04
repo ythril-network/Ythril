@@ -11,12 +11,7 @@ type ResolveAction = 'keep-local' | 'keep-incoming' | 'keep-both' | 'save-to-spa
   standalone: true,
   imports: [DatePipe, SlicePipe, RouterLink, FormsModule],
   template: `
-    <div class="page-header" style="display:flex; align-items:center; gap:12px;">
-      <div>
-        <h1 class="page-title">File Conflicts</h1>
-        <p class="page-subtitle">Files that diverged during sync. Review and resolve each conflict.</p>
-      </div>
-      <span style="flex:1"></span>
+    <div style="display:flex; justify-content:flex-end; margin-bottom:12px;">
       <a routerLink="/files" class="btn-secondary btn btn-sm">← Back to Files</a>
     </div>
 

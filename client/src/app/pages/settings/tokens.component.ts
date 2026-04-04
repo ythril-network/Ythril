@@ -1,7 +1,7 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { ApiService, TokenRecord } from '../../core/api.service';
+import { ApiService, Space, TokenRecord } from '../../core/api.service';
 
 @Component({
   selector: 'app-tokens',
@@ -180,8 +180,15 @@ import { ApiService, TokenRecord } from '../../core/api.service';
 
         <div class="field" style="margin-top:12px; margin-bottom:0;">
           <label>Spaces (optional)</label>
-          <input type="text" [(ngModel)]="newSpaces" name="spaces" placeholder="Comma-separated space IDs, e.g. general, project-x — leave blank to allow all spaces" />
-          <div class="scope-hint">Leave blank to grant access to all spaces.</div>
+          <div style="display:flex; flex-wrap:wrap; gap:8px 14px; padding:6px 0;">
+            @for (s of availableSpaces(); track s.id) {
+              <label style="display:flex; align-items:center; gap:5px; font-size:13px; color:var(--text-secondary); cursor:pointer; text-transform:none; letter-spacing:0; font-weight:400;">
+                <input type="checkbox" [checked]="!!selectedSpaces[s.id]" (change)="selectedSpaces[s.id] = !selectedSpaces[s.id]" style="width:15px; height:15px; margin:0;" />
+                {{ s.label }} <span style="font-size:11px; color:var(--text-muted);">({{ s.id }})</span>
+              </label>
+            }
+          </div>
+          <div class="scope-hint">Leave all unchecked to grant access to all spaces.</div>
         </div>
 
         <div class="form-grid-bottom" style="margin-top:12px;">
@@ -280,6 +287,7 @@ export class TokensComponent implements OnInit {
 
   tokens = signal<TokenRecord[]>([]);
   selfToken = signal<TokenRecord | null>(null);
+  availableSpaces = signal<Space[]>([]);
   loading = signal(true);
   creating = signal(false);
   createError = signal('');
@@ -287,7 +295,7 @@ export class TokensComponent implements OnInit {
   newExpiry = '';
   newAdmin = false;
   newReadOnly = false;
-  newSpaces = '';
+  selectedSpaces: Record<string, boolean> = {};
   newToken = signal('');
   copied = signal(false);
   regenToken = signal('');
@@ -295,6 +303,10 @@ export class TokensComponent implements OnInit {
 
   ngOnInit(): void {
     this.api.getMe().subscribe({ next: (t) => this.selfToken.set(t), error: () => {} });
+    this.api.listSpaces().subscribe({
+      next: ({ spaces }) => this.availableSpaces.set(spaces),
+      error: () => {},
+    });
     this.load();
   }
 
@@ -315,7 +327,7 @@ export class TokensComponent implements OnInit {
     if (this.newExpiry) body.expiresAt = new Date(this.newExpiry).toISOString();
     if (this.newAdmin) body.admin = true;
     if (this.newReadOnly) body.readOnly = true;
-    const spaceIds = this.newSpaces.split(',').map(s => s.trim()).filter(Boolean);
+    const spaceIds = Object.keys(this.selectedSpaces).filter(k => this.selectedSpaces[k]);
     if (spaceIds.length) body.spaces = spaceIds;
 
     this.api.createToken(body).subscribe({
@@ -327,7 +339,7 @@ export class TokensComponent implements OnInit {
         this.newExpiry = '';
         this.newAdmin = false;
         this.newReadOnly = false;
-        this.newSpaces = '';
+        this.selectedSpaces = {};
       },
       error: (err) => {
         this.creating.set(false);

@@ -141,25 +141,14 @@ describe('Token lifecycle', () => {
 
 // â”€â”€ Startup migration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Validates that tokens lacking the `prefix` field (created before the field
-// was introduced) are automatically evicted when the server restarts, and that
-// the eviction does not affect tokens that do have a prefix.
+// was introduced) are automatically evicted when the config is reloaded, and
+// that the eviction does not affect tokens that do have a prefix.
 //
-// NOTE: this test restarts the ythril-a container, so it must run last.
+// Uses POST /api/admin/reload-config instead of docker restart so this test
+// does not kill the container while other test files run concurrently.
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-describe('Startup migration: prefix-less tokens are evicted', () => {
-  async function waitForHealth(url, timeoutMs = 30_000) {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      try {
-        const r = await fetch(`${url}/health`);
-        if (r.ok) return;
-      } catch { /* not ready */ }
-      await new Promise(r => setTimeout(r, 500));
-    }
-    throw new Error(`${url} did not become healthy within ${timeoutMs}ms`);
-  }
-
-  it('prefix-less token is rejected after restart; admin token survives', async () => {
+describe('Config-reload migration: prefix-less tokens are evicted', () => {
+  it('prefix-less token is rejected after reload; admin token survives', async () => {
     // 1. Create a fresh token â€” it will have a prefix field set by createToken()
     const create = await post(INSTANCES.a, tokenA, '/api/tokens', { name: 'legacy-sim-token' });
     assert.equal(create.status, 201);
@@ -170,28 +159,39 @@ describe('Startup migration: prefix-less tokens are evicted', () => {
     const before = await get(INSTANCES.a, legacyPlaintext, '/api/tokens/me');
     assert.equal(before.status, 200, 'Token must authenticate before simulation');
 
-    // 2. Strip the prefix field from the on-disk config to simulate a legacy record
-    execSync(
-      `docker exec ythril-a node -e ` +
-      `"const fs=require('fs'),p='/config/config.json',c=JSON.parse(fs.readFileSync(p,'utf8'));` +
-      `const t=c.tokens.find(t=>t.id==='${legacyId}');` +
-      `if(t)delete t.prefix;` +
-      `fs.writeFileSync(p,JSON.stringify(c,null,2),{mode:0o600});"`,
-    );
+    // 2–3. Strip the prefix and reload, with retry.
+    //    A concurrent test's saveConfig() can overwrite the file between the
+    //    docker exec and the reload, re-introducing the prefix from in-memory
+    //    config.  Retry up to 3 times (the window is tiny; one retry suffices).
+    let migrated = false;
+    for (let attempt = 0; attempt < 3 && !migrated; attempt++) {
+      // 2. Atomic strip: write to tmp then rename (avoids SyntaxError from
+      //    concurrent reads of a half-written file).
+      execSync(
+        `docker exec ythril-a node -e ` +
+        `"const fs=require('fs'),p='/config/config.json',c=JSON.parse(fs.readFileSync(p,'utf8'));` +
+        `const t=c.tokens.find(t=>t.id==='${legacyId}');` +
+        `if(t)delete t.prefix;` +
+        `const tmp=p+'.test-tmp';` +
+        `fs.writeFileSync(tmp,JSON.stringify(c,null,2),{mode:0o600});` +
+        `fs.renameSync(tmp,p);"`,
+      );
 
-    // 3. Restart to trigger the startup migration
-    execSync('docker restart ythril-a');
-    await waitForHealth(INSTANCES.a);
+      // 3. Reload config to trigger the migration
+      const reloadR = await post(INSTANCES.a, tokenA, '/api/admin/reload-config', {});
+      assert.equal(reloadR.status, 200, `Reload failed: ${JSON.stringify(reloadR.body)}`);
 
-    // 4. The legacy token must be rejected â€” migration pruned it
-    const afterLegacy = await get(INSTANCES.a, legacyPlaintext, '/api/tokens');
-    assert.equal(afterLegacy.status, 401, 'Prefix-less token must be rejected after migration');
+      // Check if the migration took effect
+      const probe = await get(INSTANCES.a, legacyPlaintext, '/api/tokens/me');
+      migrated = probe.status === 401;
+    }
+    assert.ok(migrated, 'Prefix-less token must be rejected after migration (failed after 3 attempts)');
 
-    // 5. The admin token (which has a prefix) must still work
-    const afterAdmin = await get(INSTANCES.a, tokenA, '/api/tokens');
+    // 4. The admin token (which has a prefix) must still work
+    const afterAdmin = await get(INSTANCES.a, tokenA, '/api/tokens/me');
     assert.equal(afterAdmin.status, 200, 'Admin token must still authenticate after migration');
 
-    // 6. The pruned token must not appear in the listing
+    // 5. The pruned token must not appear in the listing
     const list = await get(INSTANCES.a, tokenA, '/api/tokens');
     const listedIds = list.body.tokens.map(t => t.id);
     assert.ok(!listedIds.includes(legacyId), 'Evicted token must not appear in token list');

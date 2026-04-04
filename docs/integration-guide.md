@@ -1008,6 +1008,39 @@ The `targetSpace` must be one of the proxy's `proxyFor` members. Omitting it on 
 
 ---
 
+### Rename a Space
+
+```
+PATCH /api/spaces/:id/rename
+Content-Type: application/json
+Authorization: Bearer <admin-token>
+
+{ "newId": "new-space-name" }
+```
+
+`newId` must be lowercase alphanumeric + hyphens, 1-40 chars (`/^[a-z0-9-]+$/`).
+
+The rename atomically:
+- Moves all MongoDB collections (memories, entities, edges, chrono, tombstones, files, etc.) to the new prefix.
+- Moves the file directory from `/data/files/{old}` to `/data/files/{new}`.
+- Updates all network `spaces[]` arrays and adds a `spaceMap` entry so peers continue syncing.
+- Updates all token `spaces[]` scopes that referenced the old ID.
+
+**Response** `200`:
+
+```json
+{ "space": { "id": "new-space-name", "label": "My Space", ... } }
+```
+
+| Status | Meaning |
+|--------|---------|
+| `400`  | Invalid `newId` format or trying to rename the `general` space |
+| `404`  | Source space does not exist |
+| `409`  | `newId` already exists |
+| `500`  | Partial rename failure (collections may be in an inconsistent state) |
+
+---
+
 ### Delete a Space
 
 ```
@@ -1285,11 +1318,16 @@ POST /api/networks/join-remote
   "inviteUrl": "https://remote.example.com/api/invite/apply",
   "rsaPublicKeyPem": "-----BEGIN PUBLIC KEY-----\n...",
   "networkId": "net-uuid",
-  "myUrl": "https://me.example.com"
+  "myUrl": "https://me.example.com",
+  "spaceMap": {
+    "remote-space-id": "local-space-id"
+  }
 }
 ```
 
 Executes the full 3-step RSA handshake server-side. No plaintext tokens cross the wire.
+
+**`spaceMap`** (optional) — a `Record<string, string>` that maps remote space IDs to local space IDs. Use this when a remote space name collides with an existing local space and you want to alias it to a different local name instead of merging. If omitted, remote space IDs are used as-is (identity mapping). The map is persisted on the `NetworkConfig` and used by the sync engine to translate space IDs during pull and push.
 
 ---
 
@@ -1996,6 +2034,8 @@ Authorization: Bearer <admin-token>
 ```
 
 Re-reads `config.json` from disk. Useful after manual edits. Any spaces added to the config since the last load are automatically initialized (MongoDB collections, indexes, vector search index, and file directories created). The built-in `general` space is ensured to exist.
+
+After reloading, the endpoint also runs a **token migration pass**: any tokens that lack a `prefix` field (legacy format) are removed from config and the cleaned config is persisted back to disk. This ensures that stale or manually-created tokens without a proper prefix do not survive a reload.
 
 **Response** `200`:
 

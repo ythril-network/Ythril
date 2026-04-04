@@ -309,3 +309,130 @@ export function slugify(label: string): string {
     .replace(/^-+|-+$/g, '')
     .slice(0, 40) || uuidv4().slice(0, 8);
 }
+
+/** Rename a space: renames all MongoDB collections, moves file directory,
+ *  updates config references (networks, tokens, proxy spaces).
+ *  Returns the updated SpaceConfig on success. */
+export async function renameSpace(oldId: string, newId: string): Promise<SpaceConfig> {
+  const cfg = getConfig();
+  const space = cfg.spaces.find(s => s.id === oldId);
+  if (!space) throw new Error(`Space '${oldId}' not found`);
+  if (space.builtIn) throw new Error(`Cannot rename built-in space '${oldId}'`);
+  if (cfg.spaces.some(s => s.id === newId)) throw new Error(`Space '${newId}' already exists`);
+
+  const db = getDb();
+  const errors: string[] = [];
+
+  // 1. Rename MongoDB collections ({oldId}_* → {newId}_*)
+  const existingColls = await db.listCollections().toArray();
+  const prefix = `${oldId}_`;
+  for (const coll of existingColls.filter(c => c.name.startsWith(prefix))) {
+    const suffix = coll.name.slice(prefix.length);
+    const newName = `${newId}_${suffix}`;
+    try {
+      await db.collection(coll.name).rename(newName);
+      log.debug(`Renamed collection ${coll.name} → ${newName}`);
+    } catch (err) {
+      const msg = `Could not rename collection ${coll.name} → ${newName}: ${err}`;
+      log.warn(msg);
+      errors.push(msg);
+    }
+  }
+
+  // 2. Move the files directory
+  const dataRoot = getDataRoot();
+  const oldDir = path.resolve(dataRoot, 'files', oldId);
+  const newDir = path.resolve(dataRoot, 'files', newId);
+  try {
+    await fs.access(oldDir);
+    await fs.rename(oldDir, newDir);
+    log.debug(`Moved files directory ${oldDir} → ${newDir}`);
+  } catch (err) {
+    // If old dir doesn't exist, that's fine — space might have no files
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT') {
+      const msg = `Could not move files directory: ${err}`;
+      log.warn(msg);
+      errors.push(msg);
+    }
+  }
+
+  // 3. Move chunked-upload directory if it exists
+  const oldChunks = path.resolve(dataRoot, '.chunks', oldId);
+  const newChunks = path.resolve(dataRoot, '.chunks', newId);
+  try {
+    await fs.access(oldChunks);
+    await fs.rename(oldChunks, newChunks);
+  } catch { /* ignore — chunks dir may not exist */ }
+
+  if (errors.length > 0) {
+    throw new Error(
+      `Space '${oldId}' rename incomplete (${errors.length} error(s)). ` +
+      `Config was NOT updated. Fix the underlying issue and retry. ` +
+      `Errors: ${errors.join('; ')}`,
+    );
+  }
+
+  // 4. Update the space config entry
+  space.id = newId;
+
+  // 5. Update spaceId in all docs within renamed collections
+  //    (embedded spaceId field stays as-is — it's the space the doc was
+  //    originally written in, which is fine for provenance tracking.
+  //    Local lookups use collection names, not the embedded field.)
+
+  // 6. Update network references
+  for (const net of cfg.networks) {
+    const idx = net.spaces.indexOf(oldId);
+    if (idx !== -1) {
+      net.spaces[idx] = newId;
+      // Record in spaceMap so peers using the old ID can still sync.
+      // If a mapping already pointed at oldId, update its target.
+      if (!net.spaceMap) net.spaceMap = {};
+      // Check if there's an existing mapping where oldId is already the value (rare: chained renames)
+      for (const [remote, local] of Object.entries(net.spaceMap)) {
+        if (local === oldId) {
+          net.spaceMap[remote] = newId;
+        }
+      }
+      // Add direct mapping: oldId → newId (an old ID in peer spoke may reference this)
+      // Only add if oldId isn't already the target of another mapping AND
+      // doesn't conflict with an existing remote key that maps elsewhere.
+      if (!net.spaceMap[oldId] || net.spaceMap[oldId] === oldId) {
+        net.spaceMap[oldId] = newId;
+      }
+    }
+
+    // Update member watermark keys (lastSeqReceived / lastSeqPushed)
+    for (const member of net.members) {
+      if (member.lastSeqReceived?.[oldId] !== undefined) {
+        member.lastSeqReceived[newId] = member.lastSeqReceived[oldId]!;
+        delete member.lastSeqReceived[oldId];
+      }
+      if (member.lastSeqPushed?.[oldId] !== undefined) {
+        member.lastSeqPushed[newId] = member.lastSeqPushed[oldId]!;
+        delete member.lastSeqPushed[oldId];
+      }
+    }
+  }
+
+  // 7. Update token scopes
+  for (const tok of cfg.tokens) {
+    if (tok.spaces) {
+      const idx = tok.spaces.indexOf(oldId);
+      if (idx !== -1) tok.spaces[idx] = newId;
+    }
+  }
+
+  // 8. Update proxy space references
+  for (const s of cfg.spaces) {
+    if (s.proxyFor) {
+      const idx = s.proxyFor.indexOf(oldId);
+      if (idx !== -1) s.proxyFor[idx] = newId;
+    }
+  }
+
+  saveConfig(cfg);
+  log.info(`Renamed space '${oldId}' → '${newId}'`);
+  return space;
+}

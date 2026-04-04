@@ -133,6 +133,18 @@ async function main(): Promise<void> {
 
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('SIGINT', () => void shutdown('SIGINT'));
+
+  // Crash handlers — catch unhandled rejections/exceptions so they are logged
+  // instead of silently killing the process.
+  process.on('unhandledRejection', (reason, promise) => {
+    log.error(`Unhandled rejection at: ${promise}, reason: ${reason}`);
+    console.error('UNHANDLED REJECTION:', reason);
+  });
+  process.on('uncaughtException', (err) => {
+    log.error(`Uncaught exception: ${err.stack ?? err}`);
+    console.error('UNCAUGHT EXCEPTION:', err);
+    process.exit(1);
+  });
 }
 
 main().catch(err => {

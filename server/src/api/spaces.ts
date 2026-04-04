@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { requireAuth, requireAdmin, requireAdminMfa } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { getConfig, saveConfig, getSecrets } from '../config/loader.js';
-import { createSpace, removeSpace, slugify } from '../spaces/spaces.js';
+import { createSpace, removeSpace, renameSpace, slugify } from '../spaces/spaces.js';
 import { measureUsage } from '../quota/quota.js';
 import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
@@ -13,7 +13,7 @@ export const spacesRouter = Router();
 const CreateSpaceBody = z.object({
   id: z.string().min(1).max(40).regex(/^[a-z0-9-]+$/).optional(),
   label: z.string().min(1).max(200),
-  description: z.string().max(2000).optional(),
+  description: z.string().max(4000).optional(),
   folders: z.array(z.string()).optional(),
   minGiB: z.number().positive().optional(),
   proxyFor: z.array(z.string().min(1).max(40)).min(1).optional(),
@@ -21,6 +21,36 @@ const CreateSpaceBody = z.object({
 
 const DeleteSpaceBody = z.object({
   confirm: z.literal(true),
+});
+
+const RenameSpaceBody = z.object({
+  newId: z.string().min(1).max(40).regex(/^[a-z0-9-]+$/),
+});
+
+// PATCH /api/spaces/:id/rename
+spacesRouter.patch('/:id/rename', globalRateLimit, requireAdminMfa, async (req, res) => {
+  const oldId = req.params['id'] as string;
+  const parsed = RenameSpaceBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  try {
+    const space = await renameSpace(oldId, parsed.data.newId);
+    res.json({ space });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('not found')) {
+      res.status(404).json({ error: msg });
+    } else if (msg.includes('already exists')) {
+      res.status(409).json({ error: msg });
+    } else if (msg.includes('built-in')) {
+      res.status(400).json({ error: msg });
+    } else {
+      res.status(500).json({ error: msg });
+    }
+  }
 });
 
 // GET /api/spaces

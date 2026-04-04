@@ -53,6 +53,35 @@ Both are stored per member in the config file and persisted immediately after a 
 
 ---
 
+## Space ID remapping (`spaceMap`)
+
+When a brain joins a network, the remote peer's space IDs may collide with existing local spaces. The joining brain can resolve each collision by either **merging** into the existing space or **aliasing** to a new local name. Aliases are recorded as a `spaceMap` on the `NetworkConfig`:
+
+```json
+{
+  "spaceMap": {
+    "research": "research-acme"
+  }
+}
+```
+
+The sync engine uses two helpers to translate between remote and local space IDs:
+
+| Helper | Input | Output | Used during |
+|--------|-------|--------|-------------|
+| `remoteToLocal(remoteSpaceId)` | Remote space ID | Local space ID (or identity if no mapping) | Pull — storing fetched documents in the correct local collection |
+| `localToRemote(localSpaceId)` | Local space ID | Remote space ID (or identity if no mapping) | Push — querying the peer's API with the space ID it expects |
+
+**Watermark keys** use the **remote** space ID (the one the peer recognises). This ensures that `lastSeqReceived` and `lastSeqPushed` align with the peer's `seq` counters regardless of the local alias.
+
+**API calls** (`GET /api/sync/memories?spaceId=...`) always use the **remote** space ID so the peer returns the correct data.
+
+**Local storage** (collection names, file paths) uses the **local** space ID so documents land in the aliased collection.
+
+Spaces without an entry in `spaceMap` pass through unchanged (identity mapping). The `spaceMap` is also updated automatically when a local space is renamed — `renameSpace()` adds or updates the reverse mapping on every network that references the old space ID.
+
+---
+
 ## Pull phase
 
 ```

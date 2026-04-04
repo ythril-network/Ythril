@@ -213,6 +213,7 @@ inviteRouter.post('/generate', globalRateLimit, requireAuth, async (req, res) =>
     inviteUrl: `${req.protocol}://${req.get('host')}/api/invite/apply`,
     rsaPublicKeyPem: publicKey,
     expiresAt: new Date(expiresAt).toISOString(),
+    spaces: net.spaces,
   });
 });
 

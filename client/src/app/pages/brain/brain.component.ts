@@ -201,11 +201,6 @@ interface SpaceView {
     }
   `],
   template: `
-    <div class="page-header">
-      <h1 class="page-title">Brain</h1>
-      <p class="page-subtitle">Browse memories, entities, and knowledge graph edges.</p>
-    </div>
-
     @if (loadingSpaces()) {
       <div class="loading-overlay"><span class="spinner"></span> Loading spaces…</div>
     } @else if (spaces().length === 0) {

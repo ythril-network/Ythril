@@ -65,6 +65,14 @@ export async function postRetry429(baseUrl, token, path, data, maxRetries = 3) {
   return post(baseUrl, token, path, data);
 }
 
+/** PATCH with JSON body */
+export async function patch(baseUrl, token, path, data) {
+  return reqJson(baseUrl, token, path, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
 /** DELETE */
 export async function del(baseUrl, token, path) {
   return reqJson(baseUrl, token, path, { method: 'DELETE' });

@@ -90,6 +90,12 @@ export interface NetworkConfig {
   label: string;
   type: NetworkType;
   spaces: string[];          // space IDs scoped to this network
+  /** Maps remote (peer-side) space IDs to local space IDs.
+   *  Used when a local space was renamed after joining, or when the joiner chose
+   *  a different local ID to avoid a collision.  The sync engine uses this to
+   *  translate between peer space IDs on the wire and local collection/file IDs.
+   *  Key = remote space ID, Value = local space ID. */
+  spaceMap?: Record<string, string>;
   votingDeadlineHours: number;
   merkle?: boolean;
   members: NetworkMember[];

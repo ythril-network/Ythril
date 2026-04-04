@@ -1,7 +1,7 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { ApiService, InviteBundle, Network, SyncHistoryRecord, VoteRound } from '../../core/api.service';
+import { ApiService, InviteBundle, Network, Space, SyncHistoryRecord, VoteRound } from '../../core/api.service';
 @Component({
   selector: 'app-networks',
   standalone: true,
@@ -83,10 +83,14 @@ import { ApiService, InviteBundle, Network, SyncHistoryRecord, VoteRound } from 
     .status-success { background: var(--green-bg, #e6f9e6); color: var(--green-fg, #1a7a1a); }
     .status-partial { background: var(--yellow-bg, #fff8e1); color: var(--yellow-fg, #b5850a); }
     .status-failed  { background: var(--red-bg, #fde8e8); color: var(--red-fg, #b91c1c); }
+    .create-join-row { display: flex; gap: 24px; margin-bottom: 24px; }
+    .create-join-row > .card { flex: 1; min-width: 0; margin-bottom: 0; }
+    @media (max-width: 900px) { .create-join-row { flex-direction: column; } }
   `],
   template: `
+    <div class="create-join-row">
     <!-- Create network -->
-    <div class="card" style="margin-bottom: 24px;">
+    <div class="card">
       <div class="card-header">
         <div>
           <div class="card-title">Create network</div>
@@ -112,8 +116,15 @@ import { ApiService, InviteBundle, Network, SyncHistoryRecord, VoteRound } from 
           </select>
         </div>
         <div class="field" style="margin-bottom:0;">
-          <label>Spaces (comma-separated IDs)</label>
-          <input type="text" [(ngModel)]="form.spaces" name="spaces" placeholder="general" />
+          <label>Spaces</label>
+          <div style="display:flex; flex-wrap:wrap; gap:8px 14px; padding:6px 0;">
+            @for (s of availableSpaces(); track s.id) {
+              <label style="display:flex; align-items:center; gap:5px; font-size:13px; color:var(--text-secondary); cursor:pointer; text-transform:none; letter-spacing:0; font-weight:400;">
+                <input type="checkbox" [checked]="!!selectedSpaces[s.id]" (change)="selectedSpaces[s.id] = !selectedSpaces[s.id]" style="width:15px; height:15px; margin:0;" />
+                {{ s.label }} <span style="font-size:11px; color:var(--text-muted);">({{ s.id }})</span>
+              </label>
+            }
+          </div>
         </div>
         @if (form.type !== 'pubsub') {
           <div class="field" style="margin-bottom:0;">
@@ -134,7 +145,7 @@ import { ApiService, InviteBundle, Network, SyncHistoryRecord, VoteRound } from 
     </div>
 
     <!-- Join existing network -->
-    <div class="card" style="margin-bottom: 24px;">
+    <div class="card">
       <div class="card-header">
         <div>
           <div class="card-title">Join an existing network</div>
@@ -158,31 +169,52 @@ import { ApiService, InviteBundle, Network, SyncHistoryRecord, VoteRound } from 
           style="font-family:var(--font-mono); font-size:12px; resize:vertical;"
         ></textarea>
       </div>
-      <div class="field">
-        <label>This brain's URL</label>
-        <div style="display:flex; gap:8px; align-items:center;">
-          <input
-            type="url"
-            [(ngModel)]="joinMyUrl"
-            name="joinMyUrl"
-            placeholder="https://brain-b.example.com"
-            style="flex:1;"
-            [attr.aria-description]="'URL the peer brain will use to reach this brain for sync. Auto-filled from current origin.'"
-          />
-          @if (joinMyUrlAutoFilled()) {
-            <span class="badge badge-gray" style="white-space:nowrap; font-size:11px;">auto-filled</span>
+
+      @if (joinCollisionSpaces().length > 0) {
+        <div style="margin:0 0 12px; padding:12px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-elevated);">
+          <div style="font-weight:600; font-size:13px; margin-bottom:8px;">⚠ Space name collisions</div>
+          <p style="font-size:12px; color:var(--text-muted); margin:0 0 12px;">
+            The remote network includes spaces that already exist locally.
+            Choose to merge into the existing space or create a new local alias.
+          </p>
+          @for (remoteId of joinCollisionSpaces(); track remoteId) {
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+              <span class="badge badge-gray mono" style="min-width:80px;">{{ remoteId }}</span>
+              <select
+                [ngModel]="joinSpaceActions[remoteId]"
+                (ngModelChange)="onCollisionActionChange(remoteId, $event)"
+                [name]="'collision-' + remoteId"
+                style="width:140px;"
+              >
+                <option value="merge">Merge into existing</option>
+                <option value="alias">Create alias</option>
+              </select>
+              @if (joinSpaceActions[remoteId] === 'alias') {
+                <input
+                  type="text"
+                  [(ngModel)]="joinSpaceAliases[remoteId]"
+                  [name]="'alias-' + remoteId"
+                  placeholder="local-id"
+                  pattern="[a-z0-9-]+"
+                  maxlength="40"
+                  style="width:140px; padding:4px 8px; font-size:12px;"
+                  required
+                />
+              }
+            </div>
           }
         </div>
-        <div class="field-hint">The URL the other brain will use to reach this brain for sync.</div>
-      </div>
+      }
+
       <button
         class="btn-primary btn"
-        (click)="joinNetwork()"
+        (click)="joinCollisionSpaces().length > 0 ? confirmJoin() : joinNetwork()"
         [disabled]="joining() || !joinBundle.trim() || !joinMyUrl.trim()"
       >
         @if (joining()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
-        Join network
+        {{ joinCollisionSpaces().length > 0 ? 'Confirm and join' : 'Join network' }}
       </button>
+    </div>
     </div>
 
     <!-- Network list -->
@@ -347,12 +379,14 @@ export class NetworksComponent implements OnInit {
   private api = inject(ApiService);
 
   networks = signal<Network[]>([]);
+  availableSpaces = signal<Space[]>([]);
   loading = signal(true);
   creating = signal(false);
   createError = signal('');
   expanded = signal('');
 
-  form = { label: '', type: 'closed', spaces: 'general', votingDeadlineHours: 48 };
+  form = { label: '', type: 'closed', votingDeadlineHours: 48 };
+  selectedSpaces: Record<string, boolean> = { general: true };
   netSchedule: Record<string, string> = {};
 
   private inviteBundles: Record<string, InviteBundle> = {};
@@ -366,6 +400,10 @@ export class NetworksComponent implements OnInit {
   joining = signal(false);
   joinError = signal('');
   joinSuccess = signal('');
+  joinCollisionSpaces = signal<string[]>([]);
+  joinSpaceActions: Record<string, 'merge' | 'alias'> = {};
+  joinSpaceAliases: Record<string, string> = {};
+  private joinParsedBundle: any = null;
   removingMember: Record<string, boolean> = {};
 
   // Sync history state
@@ -380,6 +418,10 @@ export class NetworksComponent implements OnInit {
 
   ngOnInit(): void {
     this.load();
+    this.api.listSpaces().subscribe({
+      next: ({ spaces }) => this.availableSpaces.set(spaces),
+      error: () => {},
+    });
     // Auto-fill this brain's URL: prefer the server-configured publicUrl, fall
     // back to the current browser origin (works for most single-brain deployments).
     this.api.getAbout().subscribe({
@@ -424,7 +466,7 @@ export class NetworksComponent implements OnInit {
     if (!this.form.label.trim()) return;
     this.creating.set(true);
     this.createError.set('');
-    const spaces = this.form.spaces.split(',').map(s => s.trim()).filter(Boolean);
+    const spaces = Object.keys(this.selectedSpaces).filter(k => this.selectedSpaces[k]);
 
     this.api.createNetwork({
       label: this.form.label.trim(),
@@ -435,7 +477,8 @@ export class NetworksComponent implements OnInit {
       next: (net) => {
         this.creating.set(false);
         this.networks.update(list => [...list, net]);
-        this.form = { label: '', type: 'closed', spaces: 'general', votingDeadlineHours: 48 };
+        this.form = { label: '', type: 'closed', votingDeadlineHours: 48 };
+        this.selectedSpaces = { general: true };
       },
       error: (err) => {
         this.creating.set(false);
@@ -486,6 +529,7 @@ export class NetworksComponent implements OnInit {
   joinNetwork(): void {
     this.joinError.set('');
     this.joinSuccess.set('');
+    this.joinCollisionSpaces.set([]);
     let bundle: any;
     try {
       bundle = JSON.parse(this.joinBundle);
@@ -501,6 +545,70 @@ export class NetworksComponent implements OnInit {
       this.joinError.set('Enter this brain\'s publicly reachable URL.');
       return;
     }
+
+    // Detect space name collisions — show resolution UI if any overlap
+    if (bundle.spaces?.length) {
+      const localIds = new Set(this.availableSpaces().map(s => s.id));
+      const overlap = (bundle.spaces as string[]).filter((s: string) => localIds.has(s));
+      if (overlap.length > 0) {
+        this.joinParsedBundle = bundle;
+        this.joinSpaceActions = {};
+        this.joinSpaceAliases = {};
+        for (const id of overlap) {
+          this.joinSpaceActions[id] = 'merge';
+          this.joinSpaceAliases[id] = '';
+        }
+        this.joinCollisionSpaces.set(overlap);
+        return; // wait for user to resolve collisions
+      }
+    }
+
+    this.joinParsedBundle = bundle;
+    this.executeJoin();
+  }
+
+  onCollisionActionChange(remoteId: string, action: 'merge' | 'alias'): void {
+    this.joinSpaceActions[remoteId] = action;
+    if (action === 'alias' && !this.joinSpaceAliases[remoteId]) {
+      this.joinSpaceAliases[remoteId] = remoteId + '-local';
+    }
+  }
+
+  confirmJoin(): void {
+    // Validate alias inputs
+    for (const remoteId of this.joinCollisionSpaces()) {
+      if (this.joinSpaceActions[remoteId] === 'alias') {
+        const alias = this.joinSpaceAliases[remoteId]?.trim();
+        if (!alias) {
+          this.joinError.set(`Enter a local alias ID for space "${remoteId}".`);
+          return;
+        }
+        if (!/^[a-z0-9-]+$/.test(alias)) {
+          this.joinError.set(`Alias "${alias}" is invalid — use lowercase letters, numbers, and hyphens only.`);
+          return;
+        }
+        const localIds = new Set(this.availableSpaces().map(s => s.id));
+        if (localIds.has(alias)) {
+          this.joinError.set(`Alias "${alias}" already exists as a local space — choose a different name.`);
+          return;
+        }
+      }
+    }
+    this.executeJoin();
+  }
+
+  private executeJoin(): void {
+    const bundle = this.joinParsedBundle;
+    if (!bundle) return;
+
+    // Build spaceMap from collision resolutions
+    const spaceMap: Record<string, string> = {};
+    for (const remoteId of this.joinCollisionSpaces()) {
+      if (this.joinSpaceActions[remoteId] === 'alias') {
+        spaceMap[remoteId] = this.joinSpaceAliases[remoteId].trim();
+      }
+    }
+
     this.joining.set(true);
     this.api.joinRemote({
       handshakeId: bundle.handshakeId,
@@ -509,14 +617,35 @@ export class NetworksComponent implements OnInit {
       networkId:   bundle.networkId,
       myUrl:       this.joinMyUrl.trim(),
       expiresAt:   bundle.expiresAt,
+      ...(Object.keys(spaceMap).length > 0 ? { spaceMap } : {}),
     }).subscribe({
       next: (result) => {
         this.joining.set(false);
-        this.joinSuccess.set(`Joined network "${result.networkLabel}" successfully.`);
+        let msg = `Joined network "${result.networkLabel}" successfully.`;
+        if (result.createdSpaces?.length) {
+          msg += ` Created new spaces: ${result.createdSpaces.join(', ')}.`;
+        }
+        if (result.existingSpaces?.length) {
+          msg += ` ⚠️ Existing spaces merged into sync: ${result.existingSpaces.join(', ')} — data from the remote brain will be synced into these spaces.`;
+        }
+        if (result.spaceMap && Object.keys(result.spaceMap).length > 0) {
+          const aliases = Object.entries(result.spaceMap).map(([r, l]) => `${r} → ${l}`).join(', ');
+          msg += ` Aliases: ${aliases}.`;
+        }
+        this.joinSuccess.set(msg);
         this.joinBundle = '';
         this.joinMyUrl  = '';
         this.joinMyUrlAutoFilled.set(false);
+        this.joinParsedBundle = null;
+        this.joinCollisionSpaces.set([]);
+        this.joinSpaceActions = {};
+        this.joinSpaceAliases = {};
         this.load();
+        // Refresh spaces list to include newly created spaces
+        this.api.listSpaces().subscribe({
+          next: ({ spaces }) => this.availableSpaces.set(spaces),
+          error: () => {},
+        });
       },
       error: (err) => {
         this.joining.set(false);

@@ -253,11 +253,6 @@ function previewKind(name: string): PreviewKind {
     .tree-spinner { font-size: 10px; color: var(--text-muted); padding: 2px 8px 2px 28px; }
   `],
   template: `
-    <div class="page-header">
-      <h1 class="page-title">Files</h1>
-      <p class="page-subtitle">Browse and manage files across your spaces.</p>
-    </div>
-
     @if (loadingSpaces()) {
       <div class="loading-overlay"><span class="spinner"></span></div>
     } @else {

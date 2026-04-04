@@ -4,6 +4,25 @@ All notable changes to Ythril are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] — 2026-03-30
+
+### Added
+
+- **Space rename**: `PATCH /api/spaces/:id/rename` atomically renames a space — moves MongoDB collections, file directories, updates network `spaces[]` arrays and token scopes. Inline rename UI (pencil icon) in Settings → Spaces. The built-in `general` space cannot be renamed.
+- **Space ID remapping (`spaceMap`)**: `NetworkConfig.spaceMap` (`Record<string, string>`) maps remote space IDs to local space IDs. The sync engine translates between remote and local IDs transparently during pull and push via `remoteToLocal()` / `localToRemote()` helpers. Watermark keys use remote IDs; local storage uses local IDs.
+- **Join collision resolution UI**: When joining a network whose spaces collide with existing local spaces, a per-space dropdown lets the user choose **Merge** (sync into the existing space) or **Alias** (create a new local name). Alias names flow into the `spaceMap` on the network config.
+- **Reload-config token migration**: `POST /api/admin/reload-config` now evicts tokens that lack a `prefix` field (legacy format) and persists the cleaned config. Prevents stale tokens from surviving a reload.
+- **Process crash handlers**: `process.on('unhandledRejection')` and `process.on('uncaughtException')` in the server entry point. Unhandled rejections are logged but do not exit; uncaught exceptions log and exit with code 1.
+- Tests: `space-rename.test.js` (integration, 9 tests).
+
+### Fixed
+
+- **Auth test concurrent safety**: Replaced `docker restart` in `auth.test.js` with atomic config file write + `POST /api/admin/reload-config` + retry loop. Eliminates container restarts that caused socket errors when tests run concurrently.
+
+### Changed
+
+- Documentation updated: `userguide.md` (space rename, join collision resolution), `integration-guide.md` (rename endpoint, `spaceMap` on join-remote, reload-config migration), `sync-protocol.md` (space ID remapping section).
+
 ## [0.6.0] — 2026-03-29
 
 ### Added
