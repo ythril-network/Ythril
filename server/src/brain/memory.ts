@@ -38,7 +38,7 @@ export async function remember(
   return doc;
 }
 
-export type RecallKnowledgeType = 'memory' | 'entity' | 'edge' | 'chrono';
+export type RecallKnowledgeType = 'memory' | 'entity' | 'edge' | 'chrono' | 'file';
 
 export interface RecallResult {
   _id: string;
@@ -68,6 +68,9 @@ export interface RecallResult {
   description?: string;
   kind?: string;
   startsAt?: string;
+  // file-specific
+  path?: string;
+  sizeBytes?: number;
 }
 
 /** Semantic recall using $vectorSearch (Atlas Local / Atlas / MongoDB 8.2+) */
@@ -97,7 +100,7 @@ export async function recall(
 
   const activeTypes: RecallKnowledgeType[] = (types && types.length > 0)
     ? types
-    : ['memory', 'entity', 'edge', 'chrono'];
+    : ['memory', 'entity', 'edge', 'chrono', 'file'];
 
   // Run vector searches in parallel for all active types
   const perTypeK = Math.ceil(topK * 1.5);
@@ -123,6 +126,7 @@ const KNOWLEDGE_COLLECTION: Record<RecallKnowledgeType, string> = {
   entity: 'entities',
   edge: 'edges',
   chrono: 'chrono',
+  file: 'files',
 };
 
 /** Run $vectorSearch against a single collection and map results to RecallResult. */
@@ -150,7 +154,7 @@ async function recallByType(
   ];
 
   // Tags filter applies to types that have tags
-  if (tags && tags.length > 0 && (knowledgeType === 'memory' || knowledgeType === 'entity' || knowledgeType === 'chrono')) {
+  if (tags && tags.length > 0 && (knowledgeType === 'memory' || knowledgeType === 'entity' || knowledgeType === 'chrono' || knowledgeType === 'file')) {
     pipeline.push({ $match: { tags: { $all: tags } } });
   }
 
@@ -167,6 +171,8 @@ async function recallByType(
     typeProject = { from: 1, to: 1, label: 1, weight: 1 };
   } else if (knowledgeType === 'chrono') {
     typeProject = { title: 1, description: 1, kind: 1, startsAt: 1, tags: 1, entityIds: 1 };
+  } else if (knowledgeType === 'file') {
+    typeProject = { path: 1, description: 1, tags: 1, sizeBytes: 1 };
   }
   pipeline.push({ $project: { ...commonProject, ...typeProject } });
 
@@ -210,6 +216,11 @@ function mapToRecallResult(doc: Record<string, unknown>, knowledgeType: RecallKn
     base.startsAt = doc['startsAt'] as string | undefined;
     base.tags = doc['tags'] as string[] | undefined;
     base.entityIds = doc['entityIds'] as string[] | undefined;
+  } else if (knowledgeType === 'file') {
+    base.path = doc['path'] as string | undefined;
+    base.description = doc['description'] as string | undefined;
+    base.tags = doc['tags'] as string[] | undefined;
+    base.sizeBytes = doc['sizeBytes'] as number | undefined;
   }
   return base;
 }

@@ -525,7 +525,7 @@ Content-Type: application/json
 
 > **MCP-only.** This operation is exposed as the `recall` MCP tool, not as a REST endpoint. See the [MCP section](#mcp-model-context-protocol) for tool parameters.
 
-Searches **all knowledge types** (memories, entities, edges, and chrono entries) using the built-in embedding model and MongoDB Atlas `$vectorSearch`. Results are ranked by vector similarity across all types and include a `type` discriminator field. No extra configuration needed.
+Searches **all knowledge types** (memories, entities, edges, chrono entries, and files) using the built-in embedding model and MongoDB Atlas `$vectorSearch`. Results are ranked by vector similarity across all types and include a `type` discriminator field. No extra configuration needed.
 
 ---
 
@@ -2180,8 +2180,8 @@ Content-Type: application/json
 | `remember` | Store a memory with optional tags and entity links |
 | `update_memory` | Update an existing memory's fact, tags, or entity links |
 | `delete_memory` | Delete a memory by ID |
-| `recall` | Semantic search within the current space |
-| `recall_global` | Semantic search across all accessible spaces |
+| `recall` | Semantic search across all knowledge types (memories, entities, edges, chrono entries, files) within the current space |
+| `recall_global` | Semantic search across all knowledge types in all accessible spaces |
 | `query` | Structured MongoDB filter query (read-only) — supports `memories`, `entities`, `edges`, `chrono`, and `files` collections |
 | `get_stats` | Return counts of memories, entities, edges, chrono entries, and files |
 | `upsert_entity` | Create or update a named entity (with optional properties) |
@@ -2230,7 +2230,7 @@ Content-Type: application/json
 }
 ```
 
-`recall` searches all knowledge types — **memories**, **entities**, **edges**, and **chrono entries** — using vector similarity.  Results include a `type` discriminator field (`memory`, `entity`, `edge`, `chrono`) so callers can distinguish the origin of each result.
+`recall` searches all knowledge types — **memories**, **entities**, **edges**, **chrono entries**, and **files** — using vector similarity.  Results include a `type` discriminator field (`memory`, `entity`, `edge`, `chrono`, `file`) so callers can distinguish the origin of each result.
 
 **Vector-indexed fields per type:**
 
@@ -2240,6 +2240,7 @@ Content-Type: application/json
 | `entity` | `name` + `type` (e.g. `portal-backend service`) |
 | `edge` | The relationship `label` (e.g. `connects_to`) |
 | `chrono` | `title` + `description` (concatenated) |
+| `file` | `description` if set, otherwise the file `path` |
 
 **Parameters:**
 
@@ -2247,8 +2248,8 @@ Content-Type: application/json
 |-----------|------|----------|-------------|
 | `query` | `string` | ✅ | Natural language search query |
 | `topK` | `number` | — | Max results to return (default `10`) |
-| `tags` | `string[]` | — | Optional tag filter — only results bearing **all** of these tags are returned (applies to memories, entities, and chrono entries). Useful for scoping a semantic search to a specific service or ADR (e.g. `["portal-backend"]`) |
-| `types` | `string[]` | — | Optional knowledge-type filter — restrict results to one or more of `memory`, `entity`, `edge`, `chrono`. Omit to search all types. |
+| `tags` | `string[]` | — | Optional tag filter — only results bearing **all** of these tags are returned (applies to memories, entities, chrono entries, and files). Useful for scoping a semantic search to a specific service or ADR (e.g. `["portal-backend"]`) |
+| `types` | `string[]` | — | Optional knowledge-type filter — restrict results to one or more of `memory`, `entity`, `edge`, `chrono`, `file`. Omit to search all types. |
 
 `recall_global` accepts the same `tags` and `types` parameters and applies them across all searched spaces.
 

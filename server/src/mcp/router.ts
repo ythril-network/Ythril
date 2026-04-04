@@ -44,6 +44,8 @@ function formatRecallSummary(r: RecallResult): string {
       return `${r.from ?? ''} → ${r.label ?? ''} → ${r.to ?? ''}`;
     case 'chrono':
       return r.description ? `${r.title ?? ''}: ${r.description}` : (r.title ?? '');
+    case 'file':
+      return r.description ? `${r.path ?? ''}: ${r.description}` : (r.path ?? '');
     default:
       return '';
   }
@@ -103,16 +105,16 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
       },
       {
         name: 'recall',
-        description: 'Semantically search all knowledge types (memories, entities, edges, chrono entries) in this space.',
+        description: 'Semantically search all knowledge types (memories, entities, edges, chrono entries, files) in this space.',
         inputSchema: {
           type: 'object',
           properties: {
             query: { type: 'string', description: 'Natural language search query.' },
             topK: { type: 'number', description: 'Max results (default 10).' },
-            tags: { type: 'array', items: { type: 'string' }, description: 'Optional tag filter — only results bearing ALL of these tags are returned (applies to memories, entities, and chrono entries).' },
+            tags: { type: 'array', items: { type: 'string' }, description: 'Optional tag filter — only results bearing ALL of these tags are returned (applies to memories, entities, chrono entries, and files).' },
             types: {
               type: 'array',
-              items: { type: 'string', enum: ['memory', 'entity', 'edge', 'chrono'] },
+              items: { type: 'string', enum: ['memory', 'entity', 'edge', 'chrono', 'file'] },
               description: 'Optional knowledge-type filter — restrict results to one or more types. Omit to search all types.',
             },
           },
@@ -121,16 +123,16 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
       },
       {
         name: 'recall_global',
-        description: 'Semantically search all knowledge types (memories, entities, edges, chrono entries) across ALL accessible spaces in parallel.',
+        description: 'Semantically search all knowledge types (memories, entities, edges, chrono entries, files) across ALL accessible spaces in parallel.',
         inputSchema: {
           type: 'object',
           properties: {
             query: { type: 'string', description: 'Natural language search query.' },
             topK: { type: 'number', description: 'Max results per space before merging (default 5).' },
-            tags: { type: 'array', items: { type: 'string' }, description: 'Optional tag filter — only results bearing ALL of these tags are returned (applies to memories, entities, and chrono entries).' },
+            tags: { type: 'array', items: { type: 'string' }, description: 'Optional tag filter — only results bearing ALL of these tags are returned (applies to memories, entities, chrono entries, and files).' },
             types: {
               type: 'array',
-              items: { type: 'string', enum: ['memory', 'entity', 'edge', 'chrono'] },
+              items: { type: 'string', enum: ['memory', 'entity', 'edge', 'chrono', 'file'] },
               description: 'Optional knowledge-type filter — restrict results to one or more types. Omit to search all types.',
             },
           },

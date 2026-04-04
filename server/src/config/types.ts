@@ -286,6 +286,8 @@ export interface FileMetaDoc {
   updatedAt: string;    // ISO8601 — last write timestamp
   sizeBytes: number;    // file size in bytes at last write
   author: AuthorRef;    // writer: instanceId + instanceLabel
+  embedding?: number[];
+  embeddingModel?: string;
 }
 
 export interface ConflictDoc {

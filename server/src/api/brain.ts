@@ -14,7 +14,7 @@ import { needsReindex, clearReindexFlag } from '../spaces/spaces.js';
 import { log } from '../util/log.js';
 import { checkQuota, QuotaError } from '../quota/quota.js';
 import { resolveMemberSpaces, resolveWriteTarget, findSpace, isProxySpace } from '../spaces/proxy.js';
-import type { MemoryDoc, EntityDoc, EdgeDoc, ChronoEntry, ChronoKind, ChronoStatus } from '../config/types.js';
+import type { MemoryDoc, EntityDoc, EdgeDoc, ChronoEntry, FileMetaDoc, ChronoKind, ChronoStatus } from '../config/types.js';
 import { reindexInProgress } from '../metrics/registry.js';
 
 export const brainRouter = Router();
@@ -731,6 +731,32 @@ brainRouter.post('/spaces/:spaceId/reindex', globalRateLimit, requireSpaceAuth, 
             const text = doc.description ? `${doc.title} ${doc.description}` : doc.title;
             const result = await embed(text);
             await col<ChronoEntry>(`${mid}_chrono`).updateOne(
+              { _id: doc._id },
+              { $set: { embedding: result.vector, embeddingModel: result.model } },
+            );
+            reindexed++;
+          } catch { errors++; }
+        }
+        skip += batch.length;
+      }
+    }
+
+    // Re-embed files (description if present, otherwise path)
+    {
+      let skip = 0;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const batch = await col<FileMetaDoc>(`${mid}_files`)
+          .find({}, { projection: { _id: 1, path: 1, description: 1 } })
+          .skip(skip)
+          .limit(BATCH)
+          .toArray();
+        if (batch.length === 0) break;
+        for (const doc of batch) {
+          try {
+            const text = doc.description?.trim() ? doc.description : doc.path;
+            const result = await embed(text);
+            await col<FileMetaDoc>(`${mid}_files`).updateOne(
               { _id: doc._id },
               { $set: { embedding: result.vector, embeddingModel: result.model } },
             );

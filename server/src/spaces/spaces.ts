@@ -10,7 +10,7 @@ import type { SpaceConfig, MemoryDoc } from '../config/types.js';
 const SPACE_COLLECTIONS = ['memories', 'entities', 'edges', 'chrono', 'tombstones', 'conflicts', 'files'] as const;
 
 // Collections that have vector search indexes for semantic recall
-const VECTOR_INDEXED_COLLECTIONS = ['memories', 'entities', 'edges', 'chrono'] as const;
+const VECTOR_INDEXED_COLLECTIONS = ['memories', 'entities', 'edges', 'chrono', 'files'] as const;
 type VectorIndexedCollection = typeof VECTOR_INDEXED_COLLECTIONS[number];
 
 // ── Embedding model mismatch tracking ──────────────────────────────────────

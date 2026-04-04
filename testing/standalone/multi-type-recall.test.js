@@ -3,10 +3,10 @@
  *
  * Covers:
  *  - RecallResult type discriminator for each knowledge type
- *  - formatRecallSummary output for memory, entity, edge, chrono
+ *  - formatRecallSummary output for memory, entity, edge, chrono, file
  *  - types[] filter restricts which collections are searched
  *  - Deduplication and score-sorting across types
- *  - Tags filter applies only to types that have tags (memory, entity, chrono)
+ *  - Tags filter applies only to types that have tags (memory, entity, chrono, file)
  *
  * These tests use pure in-process logic and do NOT require a MongoDB instance.
  * Run with:
@@ -29,6 +29,8 @@ function formatRecallSummary(r) {
       return `${r.from ?? ''} → ${r.label ?? ''} → ${r.to ?? ''}`;
     case 'chrono':
       return r.description ? `${r.title ?? ''}: ${r.description}` : (r.title ?? '');
+    case 'file':
+      return r.description ? `${r.path ?? ''}: ${r.description}` : (r.path ?? '');
     default:
       return '';
   }
@@ -99,6 +101,22 @@ function chronoResult(overrides = {}) {
     entityIds: ['ent-portal'],
     createdAt: '2024-01-01T00:00:00.000Z',
     seq: 4,
+    embeddingModel: 'all-MiniLM-L6-v2',
+    ...overrides,
+  };
+}
+
+function fileResult(overrides = {}) {
+  return {
+    _id: 'docs/portal-backend/README.md',
+    spaceId: 'general',
+    type: 'file',
+    score: 0.78,
+    path: 'docs/portal-backend/README.md',
+    description: 'Architecture overview for the portal-backend service',
+    tags: ['docs', 'portal-backend'],
+    sizeBytes: 4096,
+    createdAt: '2024-01-01T00:00:00.000Z',
     embeddingModel: 'all-MiniLM-L6-v2',
     ...overrides,
   };
@@ -197,8 +215,16 @@ describe('RecallResult — type discriminator', () => {
     assert.ok('description' in r, 'chrono result must have description field');
   });
 
+  it('file result has type="file" and path/description fields', () => {
+    const r = fileResult();
+    assert.equal(r.type, 'file');
+    assert.ok('path' in r, 'file result must have path field');
+    assert.ok('description' in r, 'file result must have description field');
+    assert.ok('sizeBytes' in r, 'file result must have sizeBytes field');
+  });
+
   it('all result types have _id, spaceId, score fields', () => {
-    const results = [memoryResult(), entityResult(), edgeResult(), chronoResult()];
+    const results = [memoryResult(), entityResult(), edgeResult(), chronoResult(), fileResult()];
     for (const r of results) {
       assert.ok('_id' in r, `${r.type} result must have _id`);
       assert.ok('spaceId' in r, `${r.type} result must have spaceId`);
@@ -231,13 +257,15 @@ describe('Recall merge-and-sort logic', () => {
       [entityResult({ score: 0.85 })],
       [edgeResult({ score: 0.75 })],
       [chronoResult({ score: 0.8 })],
+      [fileResult({ score: 0.72 })],
     ]);
 
-    assert.equal(results.length, 4);
+    assert.equal(results.length, 5);
     assert.equal(results[0].type, 'memory');   // score 0.9
     assert.equal(results[1].type, 'entity');   // score 0.85
     assert.equal(results[2].type, 'chrono');   // score 0.8
     assert.equal(results[3].type, 'edge');     // score 0.75
+    assert.equal(results[4].type, 'file');     // score 0.72
   });
 
   it('deduplicates by _id across types', () => {
@@ -270,18 +298,18 @@ describe('Recall merge-and-sort logic', () => {
 function resolveActiveTypes(types) {
   return (types && types.length > 0)
     ? types
-    : ['memory', 'entity', 'edge', 'chrono'];
+    : ['memory', 'entity', 'edge', 'chrono', 'file'];
 }
 
 describe('types[] filter', () => {
-  it('defaults to all four types when types is undefined', () => {
+  it('defaults to all five types when types is undefined', () => {
     const active = resolveActiveTypes(undefined);
-    assert.deepEqual(active, ['memory', 'entity', 'edge', 'chrono']);
+    assert.deepEqual(active, ['memory', 'entity', 'edge', 'chrono', 'file']);
   });
 
-  it('defaults to all four types when types is empty array', () => {
+  it('defaults to all five types when types is empty array', () => {
     const active = resolveActiveTypes([]);
-    assert.deepEqual(active, ['memory', 'entity', 'edge', 'chrono']);
+    assert.deepEqual(active, ['memory', 'entity', 'edge', 'chrono', 'file']);
   });
 
   it('restricts to specified types', () => {
@@ -293,26 +321,33 @@ describe('types[] filter', () => {
     const active = resolveActiveTypes(['entity']);
     assert.deepEqual(active, ['entity']);
   });
+
+  it('accepts file as a valid type', () => {
+    const active = resolveActiveTypes(['file']);
+    assert.deepEqual(active, ['file']);
+  });
 });
 
 // ── tags filter applicability ──────────────────────────────────────────────────
 
 function tagsApply(knowledgeType) {
-  return knowledgeType === 'memory' || knowledgeType === 'entity' || knowledgeType === 'chrono';
+  return knowledgeType === 'memory' || knowledgeType === 'entity' || knowledgeType === 'chrono' || knowledgeType === 'file';
 }
 
 describe('Tags filter applicability', () => {
   it('tags apply to memory', () => assert.ok(tagsApply('memory')));
   it('tags apply to entity', () => assert.ok(tagsApply('entity')));
   it('tags apply to chrono', () => assert.ok(tagsApply('chrono')));
+  it('tags apply to file', () => assert.ok(tagsApply('file')));
   it('tags do NOT apply to edge', () => assert.ok(!tagsApply('edge')));
 });
 
 // ── Embedding text derivation ──────────────────────────────────────────────────
-// These helpers intentionally duplicate the formulas from entities.ts and
-// chrono.ts. Standalone tests avoid importing production modules to stay
-// dependency-free and fast. If the production formulas change, these tests
-// will catch the divergence — they act as specification tests for the formula.
+// These helpers intentionally duplicate the formulas from entities.ts,
+// chrono.ts, and file-meta.ts. Standalone tests avoid importing production
+// modules to stay dependency-free and fast. If the production formulas change,
+// these tests will catch the divergence — they act as specification tests for
+// the formula.
 
 function entityEmbedText(name, type) {
   return `${name} ${type}`;
@@ -320,6 +355,10 @@ function entityEmbedText(name, type) {
 
 function chronoEmbedText(title, description) {
   return description ? `${title} ${description}` : title;
+}
+
+function fileEmbedText(filePath, description) {
+  return description?.trim() ? description : filePath;
 }
 
 describe('Embedding text derivation', () => {
@@ -337,5 +376,40 @@ describe('Embedding text derivation', () => {
 
   it('chrono embed text is just title when description is empty string', () => {
     assert.equal(chronoEmbedText('Migration', ''), 'Migration');
+  });
+
+  it('file embed text is description when description is present', () => {
+    assert.equal(fileEmbedText('docs/README.md', 'Architecture overview'), 'Architecture overview');
+  });
+
+  it('file embed text falls back to path when description is absent', () => {
+    assert.equal(fileEmbedText('docs/README.md', undefined), 'docs/README.md');
+  });
+
+  it('file embed text falls back to path when description is empty/whitespace', () => {
+    assert.equal(fileEmbedText('docs/README.md', '   '), 'docs/README.md');
+  });
+});
+
+// ── formatRecallSummary — file ─────────────────────────────────────────────────
+
+describe('formatRecallSummary — file', () => {
+  it('returns "path: description" when description is present', () => {
+    const r = fileResult();
+    assert.equal(formatRecallSummary(r), 'docs/portal-backend/README.md: Architecture overview for the portal-backend service');
+  });
+
+  it('returns only path when description is absent', () => {
+    const r = fileResult({ description: undefined });
+    assert.equal(formatRecallSummary(r), 'docs/portal-backend/README.md');
+  });
+
+  it('returns only path when description is empty string (falsy)', () => {
+    const r = fileResult({ description: '' });
+    assert.equal(formatRecallSummary(r), 'docs/portal-backend/README.md');
+  });
+
+  it('handles missing path gracefully', () => {
+    assert.equal(formatRecallSummary({ type: 'file', path: undefined, description: undefined }), '');
   });
 });

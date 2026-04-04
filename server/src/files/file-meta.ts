@@ -13,6 +13,7 @@
  */
 
 import { col } from '../db/mongo.js';
+import { embed } from '../brain/embedding.js';
 import { getConfig } from '../config/loader.js';
 import type { FileMetaDoc, AuthorRef } from '../config/types.js';
 
@@ -24,6 +25,11 @@ function authorRef(): AuthorRef {
 /** Normalise a path to forward-slash convention (used as _id). */
 function normPath(p: string): string {
   return p.replace(/\\/g, '/');
+}
+
+/** Derive the text to embed for a file (description if present, otherwise path). */
+function fileEmbedText(filePath: string, description?: string): string {
+  return description?.trim() ? description : filePath;
 }
 
 /**
@@ -44,8 +50,16 @@ export async function upsertFileMeta(
     { _id: normalised } as never,
   );
 
+  // Embed description (or path as fallback) — best-effort, never blocks write
+  const descForEmbed = opts.description !== undefined ? opts.description : (existing as FileMetaDoc | null)?.description;
+  let embeddingFields: { embedding?: number[]; embeddingModel?: string } = {};
+  try {
+    const embResult = await embed(fileEmbedText(normalised, descForEmbed));
+    embeddingFields = { embedding: embResult.vector, embeddingModel: embResult.model };
+  } catch { /* embedding unavailable — file stored without vector */ }
+
   if (existing) {
-    const $set: Record<string, unknown> = { updatedAt: now, sizeBytes };
+    const $set: Record<string, unknown> = { updatedAt: now, sizeBytes, ...embeddingFields };
     if (opts.description !== undefined) $set['description'] = opts.description;
     if (opts.tags !== undefined) $set['tags'] = opts.tags;
     await col<FileMetaDoc>(`${spaceId}_files`).updateOne(
@@ -63,6 +77,7 @@ export async function upsertFileMeta(
       updatedAt: now,
       sizeBytes,
       author: authorRef(),
+      ...embeddingFields,
     };
     await col<FileMetaDoc>(`${spaceId}_files`).insertOne(doc as never);
   }
