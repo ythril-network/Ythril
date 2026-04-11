@@ -3,7 +3,9 @@ import { v4 as uuidv4 } from 'uuid';
 import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit, bulkWipeRateLimit } from '../rate-limit/middleware.js';
 import { listMemories, deleteMemory, countMemories, bulkDeleteMemories, updateMemory, queryBrain } from '../brain/memory.js';
-import { listEntities, deleteEntity, upsertEntity, getEntityById, updateEntityById, bulkDeleteEntities } from '../brain/entities.js';
+import { listEntities, deleteEntity, upsertEntity, getEntityById, updateEntityById, bulkDeleteEntities, findEntitiesByName } from '../brain/entities.js';
+/** Regex that matches a lowercase UUID v4 exactly. */
+const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 import { listEdges, deleteEdge, upsertEdge, getEdgeById, updateEdgeById, bulkDeleteEdges } from '../brain/edges.js';
 import { createChrono, updateChrono, getChronoById, listChrono, deleteChrono, bulkDeleteChrono, ChronoFilter } from '../brain/chrono.js';
 import { embed } from '../brain/embedding.js';
@@ -360,7 +362,13 @@ brainRouter.post('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAuth,
   }
   const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
-  const { name, type = '', tags = [], properties = {}, description } = req.body ?? {};
+  const { id, name, type = '', tags = [], properties = {}, description } = req.body ?? {};
+  if (id !== undefined) {
+    if (typeof id !== 'string' || !UUID_V4_RE.test(id)) {
+      res.status(400).json({ error: '`id` must be a valid UUID v4' });
+      return;
+    }
+  }
   if (!name || typeof name !== 'string') {
     res.status(400).json({ error: '`name` string required' });
     return;
@@ -384,7 +392,8 @@ brainRouter.post('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAuth,
     }
   }
   const safeDesc: string | undefined = typeof description === 'string' ? description : undefined;
-  const entity = await upsertEntity(wt.target, name.trim(), type.trim(), tags, properties, safeDesc);
+  const safeId: string | undefined = typeof id === 'string' ? id : undefined;
+  const entity = await upsertEntity(wt.target, name.trim(), type.trim(), tags, properties, safeDesc, safeId);
   res.status(201).json(entity);
 });
 
@@ -456,6 +465,24 @@ brainRouter.get('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAuth, 
   const memberIds = resolveMemberSpaces(spaceId);
   const all = (await Promise.all(memberIds.map(mid => listEntities(mid, filter, limit, skip)))).flat();
   res.json({ entities: all, limit, skip });
+});
+
+// GET /api/brain/spaces/:spaceId/entities/by-name?name=... — find entities by name (no type constraint)
+brainRouter.get('/spaces/:spaceId/entities/by-name', globalRateLimit, requireSpaceAuth, async (req, res) => {
+  const spaceId = req.params['spaceId'] as string;
+  const cfg = getConfig();
+  if (!cfg.spaces.some(s => s.id === spaceId)) {
+    res.status(404).json({ error: `Space '${spaceId}' not found` });
+    return;
+  }
+  const name = req.query['name'];
+  if (typeof name !== 'string' || !name.trim()) {
+    res.status(400).json({ error: '`name` query parameter required' });
+    return;
+  }
+  const memberIds = resolveMemberSpaces(spaceId);
+  const all = (await Promise.all(memberIds.map(mid => findEntitiesByName(mid, name.trim())))).flat();
+  res.json({ entities: all });
 });
 
 // GET /api/brain/spaces/:spaceId/entities/:id
