@@ -19,7 +19,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, delWithBody } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, delWithBody, patch } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -1132,3 +1132,272 @@ describe('Brain — chrono properties field', () => {
   });
 });
 
+
+// ── PATCH /memories/:id — description and properties update ─────────────────
+
+describe('Brain — PATCH memory updates description and properties', () => {
+  const RUN = Date.now();
+  let memId;
+
+  before(async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/general/memories', {
+      fact: `PatchMemFact-${RUN}`,
+      tags: ['patch-test'],
+      description: 'Initial description',
+      properties: { source: 'original', confidence: 0.5 },
+    });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    memId = r.body._id;
+  });
+
+  it('PATCH memory updates description field', async () => {
+    const r = await patch(INSTANCES.a, token(), `/api/brain/general/memories/${memId}`, {
+      description: 'Updated description',
+    });
+    assert.equal(r.status, 200, `Expected 200, got ${r.status}: ${JSON.stringify(r.body)}`);
+    assert.equal(r.body.description, 'Updated description', 'description must be updated');
+
+    const get2 = await get(INSTANCES.a, token(), `/api/brain/general/memories/${memId}`);
+    assert.equal(get2.status, 200);
+    assert.equal(get2.body.description, 'Updated description', 'description persisted to DB');
+  });
+
+  it('PATCH memory updates properties field', async () => {
+    const r = await patch(INSTANCES.a, token(), `/api/brain/general/memories/${memId}`, {
+      properties: { source: 'patched', extra: 'yes' },
+    });
+    assert.equal(r.status, 200, `Expected 200, got ${r.status}: ${JSON.stringify(r.body)}`);
+    assert.equal(r.body.properties?.source, 'patched', 'source property updated');
+
+    const get2 = await get(INSTANCES.a, token(), `/api/brain/general/memories/${memId}`);
+    assert.equal(get2.status, 200);
+    assert.equal(get2.body.properties?.source, 'patched', 'properties persisted to DB');
+    assert.equal(get2.body.properties?.extra, 'yes', 'new property persisted');
+  });
+
+  it('PATCH memory updates fact field', async () => {
+    const r = await patch(INSTANCES.a, token(), `/api/brain/general/memories/${memId}`, {
+      fact: `PatchMemFact-updated-${RUN}`,
+    });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.fact, `PatchMemFact-updated-${RUN}`);
+  });
+
+  it('PATCH memory with no fields returns 400', async () => {
+    const r = await patch(INSTANCES.a, token(), `/api/brain/general/memories/${memId}`, {});
+    assert.equal(r.status, 400, `Expected 400 for empty body`);
+  });
+
+  it('PATCH memory with unknown ID returns 404', async () => {
+    const r = await patch(INSTANCES.a, token(), `/api/brain/general/memories/nonexistent-id-${RUN}`, {
+      description: 'should not matter',
+    });
+    assert.equal(r.status, 404, `Expected 404 for unknown ID`);
+  });
+
+  after(async () => {
+    if (memId) await del(INSTANCES.a, token(), `/api/brain/general/memories/${memId}`).catch(() => {});
+  });
+});
+
+// ── PATCH /spaces/:spaceId/memories/:id — long-form path ──────────────────
+
+describe('Brain — PATCH memory long-form path persists description and properties', () => {
+  const RUN = Date.now();
+  let memId;
+
+  before(async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/general/memories', {
+      fact: `PatchMemLong-${RUN}`,
+      description: 'Initial',
+      properties: { v: 1 },
+    });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    memId = r.body._id;
+  });
+
+  it('PATCH long-form updates description and properties', async () => {
+    const r = await patch(INSTANCES.a, token(), `/api/brain/spaces/general/memories/${memId}`, {
+      description: 'Long-form updated',
+      properties: { v: 2 },
+    });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.description, 'Long-form updated');
+    assert.equal(r.body.properties?.v, 2);
+  });
+
+  after(async () => {
+    if (memId) await del(INSTANCES.a, token(), `/api/brain/general/memories/${memId}`).catch(() => {});
+  });
+});
+
+// ── PATCH /spaces/:spaceId/entities/:id ──────────────────────────────────────
+
+describe('Brain — PATCH entity by ID', () => {
+  const RUN = Date.now();
+  let entId;
+
+  before(async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/entities', {
+      name: `PatchEntityName-${RUN}`,
+      type: 'concept',
+      description: 'Original entity description',
+      properties: { tier: 'core' },
+    });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    entId = r.body._id;
+  });
+
+  it('PATCH entity updates description by ID', async () => {
+    const r = await patch(INSTANCES.a, token(), `/api/brain/spaces/general/entities/${entId}`, {
+      description: 'Updated entity description',
+    });
+    assert.equal(r.status, 200, `Expected 200, got ${r.status}: ${JSON.stringify(r.body)}`);
+    assert.equal(r.body.description, 'Updated entity description', 'description updated');
+
+    const getR = await get(INSTANCES.a, token(), `/api/brain/spaces/general/entities/${entId}`);
+    assert.equal(getR.body.description, 'Updated entity description', 'persisted to DB');
+  });
+
+  it('PATCH entity merges properties by ID', async () => {
+    const r = await patch(INSTANCES.a, token(), `/api/brain/spaces/general/entities/${entId}`, {
+      properties: { tier: 'premium', extra: 'yes' },
+    });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.properties?.tier, 'premium', 'property updated');
+    assert.equal(r.body.properties?.extra, 'yes', 'new property added');
+  });
+
+  it('PATCH entity with no fields returns 400', async () => {
+    const r = await patch(INSTANCES.a, token(), `/api/brain/spaces/general/entities/${entId}`, {});
+    assert.equal(r.status, 400, `Expected 400`);
+  });
+
+  it('PATCH entity with unknown ID returns 404', async () => {
+    const r = await patch(INSTANCES.a, token(), `/api/brain/spaces/general/entities/nonexistent-${RUN}`, {
+      description: 'nope',
+    });
+    assert.equal(r.status, 404, `Expected 404`);
+  });
+
+  after(async () => {
+    if (entId) await del(INSTANCES.a, token(), `/api/brain/spaces/general/entities/${entId}`).catch(() => {});
+  });
+});
+
+// ── PATCH /spaces/:spaceId/edges/:id ─────────────────────────────────────────
+
+describe('Brain — PATCH edge by ID', () => {
+  const RUN = Date.now();
+  let edgeId;
+  let fromId;
+  let toId;
+
+  before(async () => {
+    const fR = await post(INSTANCES.a, token(), '/api/brain/spaces/general/entities', {
+      name: `PatchEdgeFrom-${RUN}`, type: 'concept',
+    });
+    assert.equal(fR.status, 201);
+    fromId = fR.body._id;
+
+    const tR = await post(INSTANCES.a, token(), '/api/brain/spaces/general/entities', {
+      name: `PatchEdgeTo-${RUN}`, type: 'concept',
+    });
+    assert.equal(tR.status, 201);
+    toId = tR.body._id;
+
+    const eR = await post(INSTANCES.a, token(), '/api/brain/spaces/general/edges', {
+      from: fromId,
+      to: toId,
+      label: `patch-edge-${RUN}`,
+      description: 'Original edge description',
+      properties: { score: 0.5 },
+    });
+    assert.equal(eR.status, 201, JSON.stringify(eR.body));
+    edgeId = eR.body._id;
+  });
+
+  it('PATCH edge updates description by ID', async () => {
+    const r = await patch(INSTANCES.a, token(), `/api/brain/spaces/general/edges/${edgeId}`, {
+      description: 'Updated edge description',
+    });
+    assert.equal(r.status, 200, `Expected 200, got ${r.status}: ${JSON.stringify(r.body)}`);
+    assert.equal(r.body.description, 'Updated edge description', 'description updated');
+
+    const getR = await get(INSTANCES.a, token(), `/api/brain/spaces/general/edges/${edgeId}`);
+    assert.equal(getR.body.description, 'Updated edge description', 'persisted to DB');
+  });
+
+  it('PATCH edge merges properties by ID', async () => {
+    const r = await patch(INSTANCES.a, token(), `/api/brain/spaces/general/edges/${edgeId}`, {
+      properties: { score: 0.9, validated: true },
+    });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.properties?.score, 0.9, 'property updated');
+    assert.equal(r.body.properties?.validated, true, 'new property added');
+  });
+
+  it('PATCH edge with no fields returns 400', async () => {
+    const r = await patch(INSTANCES.a, token(), `/api/brain/spaces/general/edges/${edgeId}`, {});
+    assert.equal(r.status, 400, `Expected 400`);
+  });
+
+  it('PATCH edge with unknown ID returns 404', async () => {
+    const r = await patch(INSTANCES.a, token(), `/api/brain/spaces/general/edges/nonexistent-${RUN}`, {
+      description: 'nope',
+    });
+    assert.equal(r.status, 404, `Expected 404`);
+  });
+
+  after(async () => {
+    if (edgeId) await del(INSTANCES.a, token(), `/api/brain/spaces/general/edges/${edgeId}`).catch(() => {});
+    if (fromId) await del(INSTANCES.a, token(), `/api/brain/spaces/general/entities/${fromId}`).catch(() => {});
+    if (toId) await del(INSTANCES.a, token(), `/api/brain/spaces/general/entities/${toId}`).catch(() => {});
+  });
+});
+
+// ── PATCH /spaces/:spaceId/chrono/:id ────────────────────────────────────────
+
+describe('Brain — PATCH chrono by ID', () => {
+  const RUN = Date.now();
+  let chronoId;
+
+  before(async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/chrono', {
+      title: `PatchChrono-${RUN}`,
+      kind: 'milestone',
+      startsAt: new Date().toISOString(),
+      description: 'Original chrono description',
+      properties: { phase: 'alpha' },
+    });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    chronoId = r.body._id;
+  });
+
+  it('PATCH chrono updates description by ID', async () => {
+    const r = await patch(INSTANCES.a, token(), `/api/brain/spaces/general/chrono/${chronoId}`, {
+      description: 'Updated chrono description',
+    });
+    assert.equal(r.status, 200, `Expected 200, got ${r.status}: ${JSON.stringify(r.body)}`);
+    assert.equal(r.body.description, 'Updated chrono description', 'description updated');
+  });
+
+  it('PATCH chrono updates properties by ID', async () => {
+    const r = await patch(INSTANCES.a, token(), `/api/brain/spaces/general/chrono/${chronoId}`, {
+      properties: { phase: 'beta' },
+    });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.properties?.phase, 'beta', 'property updated');
+  });
+
+  it('PATCH chrono with unknown ID returns 404', async () => {
+    const r = await patch(INSTANCES.a, token(), `/api/brain/spaces/general/chrono/nonexistent-${RUN}`, {
+      description: 'nope',
+    });
+    assert.equal(r.status, 404, `Expected 404`);
+  });
+
+  after(async () => {
+    if (chronoId) await del(INSTANCES.a, token(), `/api/brain/spaces/general/chrono/${chronoId}`).catch(() => {});
+  });
+});

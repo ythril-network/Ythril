@@ -2,9 +2,9 @@ import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit, bulkWipeRateLimit } from '../rate-limit/middleware.js';
-import { listMemories, deleteMemory, countMemories, bulkDeleteMemories } from '../brain/memory.js';
-import { listEntities, deleteEntity, upsertEntity, getEntityById, bulkDeleteEntities } from '../brain/entities.js';
-import { listEdges, deleteEdge, upsertEdge, getEdgeById, bulkDeleteEdges } from '../brain/edges.js';
+import { listMemories, deleteMemory, countMemories, bulkDeleteMemories, updateMemory } from '../brain/memory.js';
+import { listEntities, deleteEntity, upsertEntity, getEntityById, updateEntityById, bulkDeleteEntities } from '../brain/entities.js';
+import { listEdges, deleteEdge, upsertEdge, getEdgeById, updateEdgeById, bulkDeleteEdges } from '../brain/edges.js';
 import { createChrono, updateChrono, getChronoById, listChrono, deleteChrono, bulkDeleteChrono } from '../brain/chrono.js';
 import { embed } from '../brain/embedding.js';
 import { getConfig } from '../config/loader.js';
@@ -175,6 +175,48 @@ brainRouter.delete('/:spaceId/memories/:id', globalRateLimit, requireSpaceAuth, 
   res.status(404).json({ error: 'Memory not found' });
 });
 
+// PATCH /api/brain/:spaceId/memories/:id — partial update a memory
+brainRouter.patch('/:spaceId/memories/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
+  const spaceId = req.params['spaceId'] as string;
+  const id = req.params['id'] as string;
+  const cfg = getConfig();
+  if (!cfg.spaces.some(s => s.id === spaceId)) {
+    res.status(404).json({ error: `Space '${spaceId}' not found` });
+    return;
+  }
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
+  if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+  const { fact, tags, entityIds, description, properties } = req.body ?? {};
+  const updates: { fact?: string; tags?: string[]; entityIds?: string[]; description?: string; properties?: Record<string, string | number | boolean> } = {};
+  if (fact !== undefined) {
+    if (typeof fact !== 'string' || !fact.trim()) { res.status(400).json({ error: '`fact` must be a non-empty string' }); return; }
+    updates.fact = fact;
+  }
+  if (tags !== undefined) {
+    if (!Array.isArray(tags) || tags.some((t: unknown) => typeof t !== 'string')) { res.status(400).json({ error: '`tags` must be an array of strings' }); return; }
+    updates.tags = tags;
+  }
+  if (entityIds !== undefined) {
+    if (!Array.isArray(entityIds) || entityIds.some((t: unknown) => typeof t !== 'string')) { res.status(400).json({ error: '`entityIds` must be an array of strings' }); return; }
+    updates.entityIds = entityIds;
+  }
+  if (description !== undefined) {
+    if (typeof description !== 'string') { res.status(400).json({ error: '`description` must be a string' }); return; }
+    updates.description = description;
+  }
+  if (properties !== undefined) {
+    if (typeof properties !== 'object' || properties === null || Array.isArray(properties)) { res.status(400).json({ error: '`properties` must be a plain object' }); return; }
+    updates.properties = properties as Record<string, string | number | boolean>;
+  }
+  if (Object.keys(updates).length === 0) { res.status(400).json({ error: 'At least one field must be provided' }); return; }
+  const memberIds = resolveMemberSpaces(wt.target);
+  for (const mid of memberIds) {
+    const updated = await updateMemory(mid, id, updates);
+    if (updated) { res.json(updated); return; }
+  }
+  res.status(404).json({ error: 'Memory not found' });
+});
+
 // DELETE /api/brain/:spaceId/memories — bulk wipe all memories
 brainRouter.delete('/:spaceId/memories', bulkWipeRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
@@ -242,6 +284,48 @@ brainRouter.delete('/spaces/:spaceId/memories/:id', globalRateLimit, requireSpac
   const memberIds = resolveMemberSpaces(spaceId);
   for (const mid of memberIds) {
     if (await deleteMemory(mid, id)) { res.status(204).end(); return; }
+  }
+  res.status(404).json({ error: 'Memory not found' });
+});
+
+// PATCH /api/brain/spaces/:spaceId/memories/:id — partial update a memory (long-form)
+brainRouter.patch('/spaces/:spaceId/memories/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
+  const spaceId = req.params['spaceId'] as string;
+  const id = req.params['id'] as string;
+  const cfg = getConfig();
+  if (!cfg.spaces.some(s => s.id === spaceId)) {
+    res.status(404).json({ error: `Space '${spaceId}' not found` });
+    return;
+  }
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
+  if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+  const { fact, tags, entityIds, description, properties } = req.body ?? {};
+  const updates: { fact?: string; tags?: string[]; entityIds?: string[]; description?: string; properties?: Record<string, string | number | boolean> } = {};
+  if (fact !== undefined) {
+    if (typeof fact !== 'string' || !fact.trim()) { res.status(400).json({ error: '`fact` must be a non-empty string' }); return; }
+    updates.fact = fact;
+  }
+  if (tags !== undefined) {
+    if (!Array.isArray(tags) || tags.some((t: unknown) => typeof t !== 'string')) { res.status(400).json({ error: '`tags` must be an array of strings' }); return; }
+    updates.tags = tags;
+  }
+  if (entityIds !== undefined) {
+    if (!Array.isArray(entityIds) || entityIds.some((t: unknown) => typeof t !== 'string')) { res.status(400).json({ error: '`entityIds` must be an array of strings' }); return; }
+    updates.entityIds = entityIds;
+  }
+  if (description !== undefined) {
+    if (typeof description !== 'string') { res.status(400).json({ error: '`description` must be a string' }); return; }
+    updates.description = description;
+  }
+  if (properties !== undefined) {
+    if (typeof properties !== 'object' || properties === null || Array.isArray(properties)) { res.status(400).json({ error: '`properties` must be a plain object' }); return; }
+    updates.properties = properties as Record<string, string | number | boolean>;
+  }
+  if (Object.keys(updates).length === 0) { res.status(400).json({ error: 'At least one field must be provided' }); return; }
+  const memberIds = resolveMemberSpaces(wt.target);
+  for (const mid of memberIds) {
+    const updated = await updateMemory(mid, id, updates);
+    if (updated) { res.json(updated); return; }
   }
   res.status(404).json({ error: 'Memory not found' });
 });
@@ -397,6 +481,48 @@ brainRouter.delete('/spaces/:spaceId/entities/:id', globalRateLimit, requireSpac
   res.status(404).json({ error: 'Entity not found' });
 });
 
+// PATCH /api/brain/spaces/:spaceId/entities/:id — partial update an entity by ID
+brainRouter.patch('/spaces/:spaceId/entities/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
+  const spaceId = req.params['spaceId'] as string;
+  const id = req.params['id'] as string;
+  const cfg = getConfig();
+  if (!cfg.spaces.some(s => s.id === spaceId)) {
+    res.status(404).json({ error: `Space '${spaceId}' not found` });
+    return;
+  }
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
+  if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+  const { name, type, description, tags, properties } = req.body ?? {};
+  const updates: { name?: string; type?: string; description?: string; tags?: string[]; properties?: Record<string, string | number | boolean> } = {};
+  if (name !== undefined) {
+    if (typeof name !== 'string' || !name.trim()) { res.status(400).json({ error: '`name` must be a non-empty string' }); return; }
+    updates.name = name.trim();
+  }
+  if (type !== undefined) {
+    if (typeof type !== 'string') { res.status(400).json({ error: '`type` must be a string' }); return; }
+    updates.type = type.trim();
+  }
+  if (description !== undefined) {
+    if (typeof description !== 'string') { res.status(400).json({ error: '`description` must be a string' }); return; }
+    updates.description = description;
+  }
+  if (tags !== undefined) {
+    if (!Array.isArray(tags) || tags.some((t: unknown) => typeof t !== 'string')) { res.status(400).json({ error: '`tags` must be an array of strings' }); return; }
+    updates.tags = tags;
+  }
+  if (properties !== undefined) {
+    if (typeof properties !== 'object' || properties === null || Array.isArray(properties)) { res.status(400).json({ error: '`properties` must be a plain object' }); return; }
+    updates.properties = properties as Record<string, string | number | boolean>;
+  }
+  if (Object.keys(updates).length === 0) { res.status(400).json({ error: 'At least one field must be provided' }); return; }
+  const memberIds = resolveMemberSpaces(wt.target);
+  for (const mid of memberIds) {
+    const updated = await updateEntityById(mid, id, updates);
+    if (updated) { res.json(updated); return; }
+  }
+  res.status(404).json({ error: 'Entity not found' });
+});
+
 // DELETE /api/brain/spaces/:spaceId/entities — bulk wipe all entities
 brainRouter.delete('/spaces/:spaceId/entities', bulkWipeRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
@@ -455,6 +581,52 @@ brainRouter.delete('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAu
   const memberIds = resolveMemberSpaces(spaceId);
   for (const mid of memberIds) {
     if (await deleteEdge(mid, id)) { res.status(204).end(); return; }
+  }
+  res.status(404).json({ error: 'Edge not found' });
+});
+
+// PATCH /api/brain/spaces/:spaceId/edges/:id — partial update an edge by ID
+brainRouter.patch('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
+  const spaceId = req.params['spaceId'] as string;
+  const id = req.params['id'] as string;
+  const cfg = getConfig();
+  if (!cfg.spaces.some(s => s.id === spaceId)) {
+    res.status(404).json({ error: `Space '${spaceId}' not found` });
+    return;
+  }
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
+  if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+  const { label, description, tags, properties, weight, type } = req.body ?? {};
+  const updates: { label?: string; description?: string; tags?: string[]; properties?: Record<string, string | number | boolean>; weight?: number; type?: string } = {};
+  if (label !== undefined) {
+    if (typeof label !== 'string' || !label.trim()) { res.status(400).json({ error: '`label` must be a non-empty string' }); return; }
+    updates.label = label.trim();
+  }
+  if (description !== undefined) {
+    if (typeof description !== 'string') { res.status(400).json({ error: '`description` must be a string' }); return; }
+    updates.description = description;
+  }
+  if (tags !== undefined) {
+    if (!Array.isArray(tags) || tags.some((t: unknown) => typeof t !== 'string')) { res.status(400).json({ error: '`tags` must be an array of strings' }); return; }
+    updates.tags = tags;
+  }
+  if (properties !== undefined) {
+    if (typeof properties !== 'object' || properties === null || Array.isArray(properties)) { res.status(400).json({ error: '`properties` must be a plain object' }); return; }
+    updates.properties = properties as Record<string, string | number | boolean>;
+  }
+  if (weight !== undefined) {
+    if (typeof weight !== 'number') { res.status(400).json({ error: '`weight` must be a number' }); return; }
+    updates.weight = weight;
+  }
+  if (type !== undefined) {
+    if (typeof type !== 'string') { res.status(400).json({ error: '`type` must be a string' }); return; }
+    updates.type = type.trim();
+  }
+  if (Object.keys(updates).length === 0) { res.status(400).json({ error: 'At least one field must be provided' }); return; }
+  const memberIds = resolveMemberSpaces(wt.target);
+  for (const mid of memberIds) {
+    const updated = await updateEdgeById(mid, id, updates);
+    if (updated) { res.json(updated); return; }
   }
   res.status(404).json({ error: 'Edge not found' });
 });
@@ -577,6 +749,47 @@ brainRouter.post('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceAut
   });
   if (!updated) { res.status(404).json({ error: 'Chrono entry not found' }); return; }
   res.json(updated);
+});
+
+// PATCH /api/brain/spaces/:spaceId/chrono/:id — partial update a chrono entry by ID
+brainRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
+  const spaceId = req.params['spaceId'] as string;
+  const id = req.params['id'] as string;
+  const cfg = getConfig();
+  if (!cfg.spaces.some(s => s.id === spaceId)) {
+    res.status(404).json({ error: `Space '${spaceId}' not found` });
+    return;
+  }
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
+  if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+
+  const { title, kind, startsAt, endsAt, status, confidence, tags, entityIds, memoryIds, description, properties, recurrence } = req.body ?? {};
+  if (status !== undefined && !CHRONO_STATUSES.has(status)) {
+    res.status(400).json({ error: '`status` must be one of: upcoming, active, completed, overdue, cancelled' }); return;
+  }
+  if (kind !== undefined && !CHRONO_KINDS.has(kind)) {
+    res.status(400).json({ error: '`kind` must be one of: event, deadline, plan, prediction, milestone' }); return;
+  }
+  if (confidence !== undefined && (typeof confidence !== 'number' || confidence < 0 || confidence > 1)) {
+    res.status(400).json({ error: '`confidence` must be a number between 0 and 1' }); return;
+  }
+  if (properties !== undefined && (typeof properties !== 'object' || properties === null || Array.isArray(properties))) {
+    res.status(400).json({ error: '`properties` must be a plain object' }); return;
+  }
+  const safeProps: Record<string, string | number | boolean> | undefined =
+    properties != null && typeof properties === 'object' && !Array.isArray(properties)
+      ? (properties as Record<string, string | number | boolean>)
+      : undefined;
+
+  const memberIds = resolveMemberSpaces(wt.target);
+  for (const mid of memberIds) {
+    const updated = await updateChrono(mid, id, {
+      title, kind, startsAt, endsAt, status, confidence,
+      tags, entityIds, memoryIds, description, properties: safeProps, recurrence,
+    });
+    if (updated) { res.json(updated); return; }
+  }
+  res.status(404).json({ error: 'Chrono entry not found' });
 });
 
 // GET /api/brain/spaces/:spaceId/chrono/:id
