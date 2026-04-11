@@ -29,8 +29,15 @@ function entityEmbedText(
 }
 
 /**
- * Upsert an entity by (name + type). If it exists, updates tags, properties, and seq.
- * Returns the upserted document.
+ * Create or update an entity.
+ *
+ * Identity semantics (Defect 2 fix):
+ *  - If `id` is supplied → look up by `_id`; update the document if found, or insert
+ *    a new document with that exact `_id` if not found (upsert by ID).
+ *  - If `id` is not supplied → always insert a new document with a freshly generated
+ *    UUID v4 as `_id`.  Name is a non-unique searchable label, not a primary key.
+ *
+ * Callers that need name-based lookup should use `findEntitiesByName`.
  */
 export async function upsertEntity(
   spaceId: string,
@@ -39,9 +46,14 @@ export async function upsertEntity(
   tags: string[] = [],
   properties: Record<string, string | number | boolean> = {},
   description?: string,
+  id?: string,
 ): Promise<EntityDoc> {
   const collection = col<EntityDoc>(`${spaceId}_entities`);
-  const existing = await collection.findOne({ spaceId, name, type } as never);
+
+  // When an id is provided, attempt to find the existing record by primary key.
+  const existing: EntityDoc | null = id
+    ? (await collection.findOne({ _id: id, spaceId } as never) as EntityDoc | null)
+    : null;
 
   const seq = await nextSeq(spaceId);
   const now = new Date().toISOString();
@@ -49,27 +61,27 @@ export async function upsertEntity(
   // Embed the entity text (best-effort — if embedding fails we still store the entity)
   let embeddingFields: { embedding?: number[]; embeddingModel?: string } = {};
   try {
-    const mergedTags = existing ? Array.from(new Set([...((existing as EntityDoc).tags ?? []), ...tags])) : tags;
-    const mergedProps = existing ? { ...((existing as EntityDoc).properties ?? {}), ...properties } : properties;
-    const effectiveDesc = description ?? (existing as EntityDoc | null)?.description;
+    const mergedTags = existing ? Array.from(new Set([...(existing.tags ?? []), ...tags])) : tags;
+    const mergedProps = existing ? { ...(existing.properties ?? {}), ...properties } : properties;
+    const effectiveDesc = description ?? existing?.description;
     const embResult = await embed(entityEmbedText(name, type, mergedTags, effectiveDesc, mergedProps));
     embeddingFields = { embedding: embResult.vector, embeddingModel: embResult.model };
   } catch { /* embedding unavailable — entity stored without vector */ }
 
   if (existing) {
-    const updatedTags = Array.from(new Set([...((existing as EntityDoc).tags ?? []), ...tags]));
-    const mergedProps = { ...((existing as EntityDoc).properties ?? {}), ...properties };
-    const $set: Record<string, unknown> = { tags: updatedTags, properties: mergedProps, updatedAt: now, seq, ...embeddingFields };
+    const updatedTags = Array.from(new Set([...(existing.tags ?? []), ...tags]));
+    const mergedProps = { ...(existing.properties ?? {}), ...properties };
+    const $set: Record<string, unknown> = { name, type, tags: updatedTags, properties: mergedProps, updatedAt: now, seq, ...embeddingFields };
     if (description !== undefined) $set['description'] = description;
     await collection.updateOne(
-      { _id: (existing as EntityDoc)._id } as never,
+      { _id: existing._id } as never,
       { $set } as never,
     );
-    return { ...(existing as EntityDoc), tags: updatedTags, properties: mergedProps, updatedAt: now, seq, ...embeddingFields, ...(description !== undefined ? { description } : {}) };
+    return { ...existing, name, type, tags: updatedTags, properties: mergedProps, updatedAt: now, seq, ...embeddingFields, ...(description !== undefined ? { description } : {}) };
   }
 
   const doc: EntityDoc = {
-    _id: uuidv4(),
+    _id: id ?? uuidv4(),
     spaceId,
     name,
     type,
@@ -84,6 +96,17 @@ export async function upsertEntity(
   if (description !== undefined) doc.description = description;
   await collection.insertOne(doc as never);
   return doc;
+}
+
+/**
+ * Find all entities in a space that match the given name (case-sensitive).
+ * Returns an empty array when no match is found.
+ * Name is a non-unique label, so multiple results are possible.
+ */
+export async function findEntitiesByName(spaceId: string, name: string): Promise<EntityDoc[]> {
+  return col<EntityDoc>(`${spaceId}_entities`)
+    .find({ spaceId, name } as never)
+    .toArray() as Promise<EntityDoc[]>;
 }
 
 /** Find an entity by exact ID */

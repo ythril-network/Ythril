@@ -3,8 +3,10 @@ import { v4 as uuidv4 } from 'uuid';
 import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit, bulkWipeRateLimit } from '../rate-limit/middleware.js';
 import { listMemories, deleteMemory, countMemories, bulkDeleteMemories, remember, updateMemory, queryBrain } from '../brain/memory.js';
-import { listEntities, deleteEntity, upsertEntity, getEntityById, updateEntityById, bulkDeleteEntities } from '../brain/entities.js';
+import { listEntities, deleteEntity, upsertEntity, getEntityById, updateEntityById, bulkDeleteEntities, findEntitiesByName } from '../brain/entities.js';
 import { listEdges, deleteEdge, upsertEdge, getEdgeById, updateEdgeById, bulkDeleteEdges, traverseGraph } from '../brain/edges.js';
+/** Regex that matches a UUID v4 (case-insensitive). */
+const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 import { createChrono, updateChrono, getChronoById, listChrono, deleteChrono, bulkDeleteChrono, ChronoFilter } from '../brain/chrono.js';
 import { embed } from '../brain/embedding.js';
 import { getConfig } from '../config/loader.js';
@@ -360,7 +362,13 @@ brainRouter.post('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAuth,
   }
   const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
-  const { name, type = '', tags = [], properties = {}, description } = req.body ?? {};
+  const { id, name, type = '', tags = [], properties = {}, description } = req.body ?? {};
+  if (id !== undefined) {
+    if (typeof id !== 'string' || !UUID_V4_RE.test(id)) {
+      res.status(400).json({ error: '`id` must be a valid UUID v4' });
+      return;
+    }
+  }
   if (!name || typeof name !== 'string') {
     res.status(400).json({ error: '`name` string required' });
     return;
@@ -384,7 +392,8 @@ brainRouter.post('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAuth,
     }
   }
   const safeDesc: string | undefined = typeof description === 'string' ? description : undefined;
-  const entity = await upsertEntity(wt.target, name.trim(), type.trim(), tags, properties, safeDesc);
+  const safeId: string | undefined = typeof id === 'string' ? id : undefined;
+  const entity = await upsertEntity(wt.target, name.trim(), type.trim(), tags, properties, safeDesc, safeId);
   res.status(201).json(entity);
 });
 
@@ -456,6 +465,24 @@ brainRouter.get('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAuth, 
   const memberIds = resolveMemberSpaces(spaceId);
   const all = (await Promise.all(memberIds.map(mid => listEntities(mid, filter, limit, skip)))).flat();
   res.json({ entities: all, limit, skip });
+});
+
+// GET /api/brain/spaces/:spaceId/entities/by-name?name=... — find entities by name (no type constraint)
+brainRouter.get('/spaces/:spaceId/entities/by-name', globalRateLimit, requireSpaceAuth, async (req, res) => {
+  const spaceId = req.params['spaceId'] as string;
+  const cfg = getConfig();
+  if (!cfg.spaces.some(s => s.id === spaceId)) {
+    res.status(404).json({ error: `Space '${spaceId}' not found` });
+    return;
+  }
+  const name = req.query['name'];
+  if (typeof name !== 'string' || !name.trim()) {
+    res.status(400).json({ error: '`name` query parameter required' });
+    return;
+  }
+  const memberIds = resolveMemberSpaces(spaceId);
+  const all = (await Promise.all(memberIds.map(mid => findEntitiesByName(mid, name.trim())))).flat();
+  res.json({ entities: all });
 });
 
 // GET /api/brain/spaces/:spaceId/entities/:id
@@ -1264,6 +1291,10 @@ brainRouter.post('/spaces/:spaceId/bulk', globalRateLimit, requireSpaceAuth, den
     if (!name) { errors.push({ type: 'entity', index: i, reason: 'missing required field: name' }); continue; }
     const type = typeof item['type'] === 'string' ? item['type'].trim() : '';
     if (!type) { errors.push({ type: 'entity', index: i, reason: 'missing required field: type' }); continue; }
+    const rawId = typeof item['id'] === 'string' ? item['id'].trim() : undefined;
+    if (rawId !== undefined && !UUID_V4_RE.test(rawId)) {
+      errors.push({ type: 'entity', index: i, reason: '`id` must be a valid UUID v4' }); continue;
+    }
     const tags: string[] = Array.isArray(item['tags']) ? (item['tags'] as unknown[]).filter((t): t is string => typeof t === 'string') : [];
     const description: string | undefined = typeof item['description'] === 'string' ? item['description'] : undefined;
     const properties: Record<string, string | number | boolean> =
@@ -1271,8 +1302,11 @@ brainRouter.post('/spaces/:spaceId/bulk', globalRateLimit, requireSpaceAuth, den
         ? (item['properties'] as Record<string, string | number | boolean>)
         : {};
     try {
-      const existing = await col<EntityDoc>(`${targetSpace}_entities`).findOne({ spaceId: targetSpace, name, type } as never);
-      await upsertEntity(targetSpace, name, type, tags, properties, description);
+      // Check for existing entity by ID (if supplied) to determine inserted vs updated
+      const existing = rawId
+        ? await col<EntityDoc>(`${targetSpace}_entities`).findOne({ _id: rawId, spaceId: targetSpace } as never)
+        : null;
+      await upsertEntity(targetSpace, name, type, tags, properties, description, rawId);
       if (existing) { updated.entities++; } else { inserted.entities++; }
     } catch (err) {
       errors.push({ type: 'entity', index: i, reason: err instanceof Error ? err.message : String(err) });

@@ -16,8 +16,11 @@ import { updateSpace, wipeSpace, WIPE_COLLECTION_TYPES, type WipeCollectionType 
 // Brain tools
 import { remember, recall, recallGlobal, queryBrain, updateMemory, deleteMemory, type RecallKnowledgeType, type RecallResult } from '../brain/memory.js';
 import { col } from '../db/mongo.js';
-import { upsertEntity, listEntities, updateEntityById } from '../brain/entities.js';
+import { upsertEntity, listEntities, updateEntityById, findEntitiesByName } from '../brain/entities.js';
 import { upsertEdge, listEdges, traverseGraph, updateEdgeById } from '../brain/edges.js';
+
+/** Regex that matches a UUID v4 (case-insensitive). */
+const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 import { createChrono, updateChrono, listChrono, ChronoFilter } from '../brain/chrono.js';
 // File tools
 import {
@@ -222,10 +225,11 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
       },
       {
         name: 'upsert_entity',
-        description: 'Create or update a named entity in the knowledge graph.',
+        description: 'Create or update a named entity in the knowledge graph. Identity is by `id` — if `id` is supplied the matching record is updated (or a new record with that ID is created); if `id` is omitted a new record is always inserted regardless of name.',
         inputSchema: {
           type: 'object',
           properties: {
+            id: { type: 'string', description: 'Optional UUID v4 — if provided, updates the entity with this ID (or inserts with this ID if it does not exist). If omitted, a new entity is always inserted.' },
             name: { type: 'string', description: 'Entity name.' },
             type: { type: 'string', description: 'Entity type (person, place, concept, …).' },
             tags: { type: 'array', items: { type: 'string' } },
@@ -238,6 +242,17 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
           },
           required: ['name', 'type'],
+        },
+      },
+      {
+        name: 'find_entities_by_name',
+        description: 'Find all entities in the space that match the given name (exact, case-sensitive). Returns a list — multiple entities may share a name. Prefer this over querying by name + type to avoid missing entities with unexpected types.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Exact entity name to look up.' },
+          },
+          required: ['name'],
         },
       },
       {
@@ -535,6 +550,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
               items: {
                 type: 'object',
                 properties: {
+                  id:          { type: 'string', description: 'Optional UUID v4 — if provided, updates the entity with this ID (or inserts with this ID). If omitted, a new entity is always inserted.' },
                   name:        { type: 'string', description: 'Entity name.' },
                   type:        { type: 'string', description: 'Entity type.' },
                   tags:        { type: 'array', items: { type: 'string' } },
@@ -652,16 +668,33 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           // Quota check — throws QuotaError (caught below) on hard limit
           const remQuota = await checkQuota('brain');
 
-          // Upsert entities and collect their IDs
+          // Resolve entity names to existing entity IDs (Defect 3 fix).
+          // Never auto-create ghost stubs — warn on unresolved names instead.
           const entityIds: string[] = [];
+          const unresolvedNames: string[] = [];
+          const multiMatchWarnings: string[] = [];
           for (const eName of entityNames) {
-            const entity = await upsertEntity(ts, eName, 'entity', []);
-            entityIds.push(entity._id);
+            const matches = await findEntitiesByName(ts, eName);
+            if (matches.length === 0) {
+              unresolvedNames.push(eName);
+            } else {
+              if (matches.length > 1) {
+                multiMatchWarnings.push(`'${eName}' matched ${matches.length} entities — linked to all`);
+              }
+              for (const m of matches) entityIds.push(m._id);
+            }
           }
 
-          const mem = await remember(ts, fact, entityIds, tags, description, props, entityNames);
+          const resolvedNames = entityNames.filter(n => !unresolvedNames.includes(n));
+          const mem = await remember(ts, fact, entityIds, tags, description, props, resolvedNames);
+          const warnings: string[] = [];
+          if (unresolvedNames.length > 0) {
+            warnings.push(`⚠️ Unresolved entity names (not linked — create them first): ${unresolvedNames.map(n => `'${n}'`).join(', ')}`);
+          }
+          for (const w of multiMatchWarnings) warnings.push(`⚠️ ${w}`);
           const remText = `Stored memory (seq ${mem.seq}, ID ${mem._id}).`
-            + (remQuota.softBreached ? `\n⚠️ Storage warning: ${remQuota.warning}` : '');
+            + (remQuota.softBreached ? `\n⚠️ Storage warning: ${remQuota.warning}` : '')
+            + (warnings.length > 0 ? `\n${warnings.join('\n')}` : '');
           return {
             content: [{ type: 'text' as const, text: remText }],
           };
@@ -853,11 +886,30 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             ? (a['properties'] as Record<string, string | number | boolean>)
             : {};
           const description = typeof a['description'] === 'string' ? a['description'] : undefined;
+          const rawId = typeof a['id'] === 'string' ? a['id'].trim() : undefined;
+          if (rawId !== undefined && !UUID_V4_RE.test(rawId)) throw new Error('id must be a valid UUID v4');
           const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
           if (!wt.ok) throw new Error(wt.error);
-          const entity = await upsertEntity(wt.target, eName, eType, tags, props, description);
+          const entity = await upsertEntity(wt.target, eName, eType, tags, props, description, rawId);
           return {
             content: [{ type: 'text' as const, text: `Entity '${entity.name}' (${entity.type}) upserted (ID ${entity._id}).` }],
+          };
+        }
+
+        case 'find_entities_by_name': {
+          const searchName = String(a['name'] ?? '').trim();
+          if (!searchName) throw new Error('name must not be empty');
+          const memberIds = resolveMemberSpaces(spaceId);
+          const all = (await Promise.all(memberIds.map(mid => findEntitiesByName(mid, searchName)))).flat();
+          if (all.length === 0) {
+            return { content: [{ type: 'text' as const, text: `No entities found with name '${searchName}'.` }] };
+          }
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `Found ${all.length} entit${all.length === 1 ? 'y' : 'ies'} with name '${searchName}':\n` +
+                all.map((e, i) => `[${i + 1}] ${e.name} (${e.type}) — ID ${e._id}`).join('\n'),
+            }],
           };
         }
 
@@ -1304,13 +1356,20 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             const eType = typeof item['type'] === 'string' ? item['type'].trim() : '';
             if (!eName) { errors.push({ type: 'entity', index: i, reason: 'missing required field: name' }); continue; }
             if (!eType) { errors.push({ type: 'entity', index: i, reason: 'missing required field: type' }); continue; }
+            const rawId = typeof item['id'] === 'string' ? item['id'].trim() : undefined;
+            if (rawId !== undefined && !UUID_V4_RE.test(rawId)) {
+              errors.push({ type: 'entity', index: i, reason: '`id` must be a valid UUID v4' }); continue;
+            }
             const tags = Array.isArray(item['tags']) ? (item['tags'] as unknown[]).filter((t): t is string => typeof t === 'string') : [];
             const description = typeof item['description'] === 'string' ? item['description'] : undefined;
             const props = (item['properties'] != null && typeof item['properties'] === 'object' && !Array.isArray(item['properties']))
               ? (item['properties'] as Record<string, string | number | boolean>) : {};
             try {
-              const existing = await col<import('../config/types.js').EntityDoc>(`${ts}_entities`).findOne({ spaceId: ts, name: eName, type: eType } as never);
-              await upsertEntity(ts, eName, eType, tags, props, description);
+              // Check for existing entity by ID (if supplied) to determine inserted vs updated
+              const existing = rawId
+                ? await col<import('../config/types.js').EntityDoc>(`${ts}_entities`).findOne({ _id: rawId, spaceId: ts } as never)
+                : null;
+              await upsertEntity(ts, eName, eType, tags, props, description, rawId);
               if (existing) { updated.entities++; } else { inserted.entities++; }
             } catch (err) {
               errors.push({ type: 'entity', index: i, reason: err instanceof Error ? err.message : String(err) });
