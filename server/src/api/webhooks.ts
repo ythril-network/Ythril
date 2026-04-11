@@ -8,8 +8,9 @@
 
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAdmin } from '../auth/middleware.js';
+import { requireAdminMfa } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
+import { isSsrfSafeUrl } from '../util/ssrf.js';
 import {
   listWebhooks,
   getWebhook,
@@ -25,13 +26,15 @@ import { log } from '../util/log.js';
 
 export const webhooksRouter = Router();
 
-// All routes require admin token
-webhooksRouter.use(globalRateLimit, requireAdmin);
+// All routes require admin token + MFA (matches other admin endpoints)
+webhooksRouter.use(globalRateLimit, requireAdminMfa);
 
 // ── Validation schemas ──────────────────────────────────────────────────────
 
 const CreateBody = z.object({
-  url: z.string().url().refine(u => u.startsWith('https://'), { message: 'Webhook URL must use HTTPS' }),
+  url: z.string().url()
+    .refine(u => u.startsWith('https://'), { message: 'Webhook URL must use HTTPS' })
+    .refine(u => isSsrfSafeUrl(u), { message: 'Webhook URL must not target private or reserved IP ranges' }),
   secret: z.string().min(8, 'Secret must be at least 8 characters'),
   spaces: z.array(z.string().min(1)).optional(),
   events: z.array(z.string().refine(e => ALL_WEBHOOK_EVENTS.has(e), { message: 'Invalid event type' })).optional(),
@@ -39,7 +42,10 @@ const CreateBody = z.object({
 });
 
 const UpdateBody = z.object({
-  url: z.string().url().refine(u => u.startsWith('https://'), { message: 'Webhook URL must use HTTPS' }).optional(),
+  url: z.string().url()
+    .refine(u => u.startsWith('https://'), { message: 'Webhook URL must use HTTPS' })
+    .refine(u => isSsrfSafeUrl(u), { message: 'Webhook URL must not target private or reserved IP ranges' })
+    .optional(),
   secret: z.string().min(8, 'Secret must be at least 8 characters').optional(),
   spaces: z.array(z.string().min(1)).optional(),
   events: z.array(z.string().refine(e => ALL_WEBHOOK_EVENTS.has(e), { message: 'Invalid event type' })).optional(),

@@ -215,6 +215,7 @@ export interface AuditConfig {
 export interface AuditLogEntry {
   _id: string;
   timestamp: string;       // ISO8601
+  _expireAt?: Date;        // BSON Date for TTL index — set at write time
   tokenId: string | null;
   tokenLabel: string | null;
   authMethod: 'pat' | 'oidc' | null;

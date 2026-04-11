@@ -23,8 +23,10 @@ For contributing and building from source see [contribution-guide.md](contributi
 12. [Settings — MFA](#settings--mfa)
 13. [Settings — Networks](#settings--networks)
 14. [Settings — Storage](#settings--storage)
-15. [Settings — About](#settings--about)
-16. [Connecting MCP clients](#connecting-mcp-clients)
+15. [Settings — Audit Log](#settings--audit-log)
+16. [Settings — Webhooks](#settings--webhooks)
+17. [Settings — About](#settings--about)
+18. [Connecting MCP clients](#connecting-mcp-clients)
 
 ---
 
@@ -529,6 +531,83 @@ Quota limits are configured in `config.json` — see [integration-guide.md](inte
 
 ---
 
+## Settings — Audit Log
+
+**Settings → Audit Log** (admin only) shows a searchable, filterable log of every authenticated API operation.
+
+### Filters
+
+| Filter | Description |
+|--------|-------------|
+| After / Before | Date-time range |
+| Operation | Dropdown of tracked operation types (e.g. `memory.create`, `auth.failed`) |
+| Space | Filter by space |
+| Status | HTTP status code (200, 201, 400, 401, 403, 404, 500) |
+| IP | Client IP address |
+
+### Table columns
+
+Timestamp, Token/User, Operation, Space, Status (colour-coded badge), IP, Duration. Click a row to see the full JSON entry.
+
+### Export
+
+Download the current filtered view as **JSON** or **CSV**.
+
+### Configuration
+
+The audit log is always enabled. Configure behaviour in `config.json`:
+
+```json
+{
+  "audit": {
+    "logReads": false,
+    "retentionDays": 90
+  }
+}
+```
+
+- `logReads: false` (default) — only write operations and auth failures are logged
+- `logReads: true` — read operations (recall, query, list, traverse, stats) are also logged
+- `retentionDays` — entries older than this are automatically purged
+
+---
+
+## Settings — Webhooks
+
+**Settings → Webhooks** (admin only) lets you subscribe external systems to real-time HTTP POST notifications when write events occur on Ythril spaces.
+
+### Creating a webhook
+
+1. Click **+ New Webhook**
+2. Enter a target **URL** (must be HTTPS, must not target private/reserved IPs)
+3. Enter a **secret** (minimum 8 characters) — used to sign payloads with HMAC-SHA256
+4. Optionally restrict to specific **spaces** and **event types**
+5. Click **Create**
+
+### Event types
+
+Webhooks fire on write events across 5 domains:
+
+| Domain | Events |
+|--------|--------|
+| Memory | `memory.created`, `memory.updated`, `memory.deleted` |
+| Entity | `entity.created`, `entity.updated`, `entity.deleted` |
+| Edge | `edge.created`, `edge.updated`, `edge.deleted` |
+| Chrono | `chrono.created`, `chrono.updated`, `chrono.deleted` |
+| File | `file.created`, `file.updated`, `file.deleted` |
+
+### Delivery guarantees
+
+- **At-least-once** delivery with up to 6 retries (10s → 30s → 1m → 5m → 30m → 1h)
+- Each delivery is signed with `X-Ythril-Signature: sha256=<HMAC-SHA256 hex digest>`
+- Delivery history is visible per webhook
+
+### Testing
+
+Use the **Test** button to send a `test.ping` event to verify connectivity.
+
+---
+
 ## Settings — About
 
 The **About** tab shows:
@@ -582,6 +661,7 @@ If a space has a `description`, it is sent to the MCP client as `instructions` d
 | `recall` | Semantic search within the current space. Optional `tags` and `types` filters narrow results; `minPerType` guarantees a minimum result count per knowledge type; `minScore` sets a similarity threshold |
 | `recall_global` | Semantic search across all accessible spaces. Same parameters as `recall` |
 | `query` | Structured filter query (read-only) — supports `memories`, `entities`, `edges`, `chrono`, and `files` collections |
+| `find_similar` | Find entries with high vector similarity to an existing entry by ID — uses stored embedding, no re-embedding |
 | `get_stats` | Return counts of memories, entities, edges, chrono entries, and files |
 | `get_space_meta` | Return the full space schema, purpose, usage notes, and stats |
 | `upsert_entity` | Create or update a named entity (`name`, `type`, `tags`, `description`, `properties`) |
@@ -607,7 +687,7 @@ If a space has a `description`, it is sent to the MCP client as `instructions` d
 
 ### Read-only tokens
 
-When connected with a `readOnly` token, mutating tools are hidden from `tools/list` and rejected if called directly. Read-only tools (`recall`, `recall_global`, `query`, `get_stats`, `get_space_meta`, `find_entities_by_name`, `list_chrono`, `read_file`, `list_dir`, `list_peers`, `traverse`) work normally.
+When connected with a `readOnly` token, mutating tools are hidden from `tools/list` and rejected if called directly. Read-only tools (`recall`, `recall_global`, `query`, `find_similar`, `get_stats`, `get_space_meta`, `find_entities_by_name`, `list_chrono`, `read_file`, `list_dir`, `list_peers`, `traverse`) work normally.
 
 ### Proxy spaces
 

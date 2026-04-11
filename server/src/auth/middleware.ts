@@ -161,6 +161,7 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
 
   const record = await resolveBearer(bearer);
   if (!record) {
+    logAuthFailure(req);
     res.status(401).json({ error: 'Invalid or expired token' });
     return;
   }
@@ -198,6 +199,7 @@ export async function requireAdminMfa(req: Request, res: Response, next: NextFun
 
   const record = await resolveBearer(bearer);
   if (!record) {
+    logAuthFailure(req);
     res.status(401).json({ error: 'Invalid or expired token' });
     return;
   }

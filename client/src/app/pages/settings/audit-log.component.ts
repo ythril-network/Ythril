@@ -386,7 +386,7 @@ export class AuditLogComponent implements OnInit {
     const headers = ['timestamp', 'tokenId', 'tokenLabel', 'authMethod', 'oidcSubject', 'ip', 'method', 'path', 'spaceId', 'operation', 'status', 'entryId', 'durationMs'];
     const rows = this.entries().map(e =>
       headers.map(h => {
-        const v = (e as Record<string, unknown>)[h];
+        const v = (e as unknown as Record<string, unknown>)[h];
         const s = v === null || v === undefined ? '' : String(v);
         return s.includes(',') || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s;
       }).join(',')

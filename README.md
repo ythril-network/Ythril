@@ -2,7 +2,7 @@
 
 **Self-hosted brain server for AI assistants.** Persistent memory, knowledge graphs, semantic search, file storage, and multi-brain sync — all behind a standard MCP interface, fully under your control.
 
-Ythril gives every MCP-compatible client (Claude, Cursor, Windsurf, VS Code Copilot, or anything that speaks the [Model Context Protocol](https://modelcontextprotocol.io)) a persistent, structured knowledge backend. Data is organised into **spaces** — isolated containers with their own memories, entities, edges, timelines, files, and schemas. Each space exposes its own MCP endpoint with 28 tools, a full REST API, and a web UI. Spaces can be synced across multiple brains through policy-driven networks with fine-grained governance. Run it with `docker compose up -d` and you are ready in under a minute.
+Ythril gives every MCP-compatible client (Claude, Cursor, Windsurf, VS Code Copilot, or anything that speaks the [Model Context Protocol](https://modelcontextprotocol.io)) a persistent, structured knowledge backend. Data is organised into **spaces** — isolated containers with their own memories, entities, edges, timelines, files, and schemas. Each space exposes its own MCP endpoint with 29 tools, a full REST API, and a web UI. Spaces can be synced across multiple brains through policy-driven networks with fine-grained governance. Run it with `docker compose up -d` and you are ready in under a minute.
 
 ---
 
@@ -40,13 +40,25 @@ A **proxy space** groups multiple real spaces into a single virtual endpoint. Re
 
 `GET /api/admin/spaces/:spaceId/export` dumps the entire knowledge base of a space (memories, entities, edges, chrono, file metadata) as a single JSON document. `POST /api/admin/spaces/:spaceId/import` upserts it back — useful for backup, migration, or seeding new brains.
 
-### 28 MCP Tools
+### Find Similar
+
+Given an existing entry's `_id`, find other entries with high vector similarity — no re-embedding step. The `find_similar` MCP tool and `POST /api/brain/spaces/:spaceId/find-similar` REST endpoint use the entry's **stored embedding vector** directly. Supports cross-space search, target-type filtering, score thresholds, and configurable result count. Ideal for deduplication, "more like this", and merge detection.
+
+### Audit Log
+
+Append-only, immutable access log of every authenticated API operation. The audit trail captures token identity, OIDC subject, operation name, target space, HTTP status, client IP, and request duration. Entries are automatically purged after a configurable retention period (default 90 days). The web UI (**Settings → Audit Log**) provides filterable search, detail views, and JSON/CSV export. Configure `logReads` to include or exclude read operations.
+
+### Webhooks
+
+Subscribe external systems to real-time HTTP POST notifications when write events occur. Supports 15 event types across memories, entities, edges, chrono, and files. Payloads are signed with HMAC-SHA256, delivered with at-least-once guarantees (6 retries with exponential backoff), and SSRF-protected to block private/reserved IP targets. Manage subscriptions through the REST API or the **Settings → Webhooks** UI.
+
+### 29 MCP Tools
 
 Every capability is exposed as an MCP tool that any LLM client can call:
 
 | Category | Tools |
 |----------|-------|
-| Memory | `remember`, `recall`, `recall_global`, `update_memory`, `delete_memory` |
+| Memory | `remember`, `recall`, `recall_global`, `update_memory`, `delete_memory`, `find_similar` |
 | Knowledge graph | `upsert_entity`, `update_entity`, `find_entities_by_name`, `upsert_edge`, `update_edge`, `traverse`, `query` |
 | Timeline | `create_chrono`, `update_chrono`, `list_chrono` |
 | Files | `read_file`, `write_file`, `list_dir`, `delete_file`, `create_dir`, `move_file` |

@@ -25,13 +25,14 @@
 14. [MFA API](#mfa-api) — TOTP setup and verification
 15. [Conflicts API](#conflicts-api) — view and resolve sync conflicts
 16. [Setup API](#setup-api) — first-run setup
-17. [Admin API](#admin-api) — config reload, space wipe
-18. [Webhooks API](#webhooks-api) — event subscriptions for space write events
-19. [About API](#about-api) — instance info and logs
-20. [Theme API](#theme-api) — external CSS theming
-21. [MCP (Model Context Protocol)](#mcp-model-context-protocol) — AI tool integration
-22. [Storage Quotas](#storage-quotas)
-23. [Pagination](#pagination)
+17. [Admin API](#admin-api) — config reload, export/import, space wipe
+18. [Audit Log API](#audit-log-api) — token and access audit trail
+19. [Webhooks API](#webhooks-api) — event subscriptions for space write events
+20. [About API](#about-api) — instance info and logs
+21. [Theme API](#theme-api) — external CSS theming
+22. [MCP (Model Context Protocol)](#mcp-model-context-protocol) — AI tool integration
+23. [Storage Quotas](#storage-quotas)
+24. [Pagination](#pagination)
 
 ---
 
@@ -2623,6 +2624,130 @@ Available in MCP-connected clients.  Requires an admin token on the MCP session.
 
 ---
 
+## Audit Log API
+
+Base path: `/api/admin/audit-log` — **requires admin token** on all endpoints.
+
+Ythril maintains an append-only, immutable audit log of every authenticated API operation. The log captures who performed what action, when, on which space, and the resulting HTTP status — providing a full access trail for compliance and security review.
+
+### Configuration
+
+Add an `audit` block to `config.json`:
+
+```json
+{
+  "audit": {
+    "logReads": false,
+    "retentionDays": 90
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `logReads` | `boolean` | `false` | When `true`, read operations (recall, query, list, traverse, stats) are also logged. By default only write operations and auth failures are recorded. |
+| `retentionDays` | `number` | `90` | Number of days before audit entries are automatically purged by MongoDB's TTL daemon. |
+
+### Tracked operations
+
+Audit entries are recorded for all write operations and (when `logReads` is enabled) read operations across the API surface:
+
+| Category | Operations |
+|----------|-----------|
+| Memory | `memory.create`, `memory.update`, `memory.delete`, `memory.list` |
+| Entity | `entity.create`, `entity.update`, `entity.delete`, `entity.list` |
+| Edge | `edge.create`, `edge.update`, `edge.delete`, `edge.list` |
+| Chrono | `chrono.create`, `chrono.update`, `chrono.delete`, `chrono.list` |
+| File | `file.create`, `file.update`, `file.delete`, `file.read`, `file.list` |
+| Space | `space.create`, `space.update`, `space.delete`, `space.wipe`, `space.list` |
+| Token | `token.create`, `token.delete` |
+| Webhook | `webhook.create`, `webhook.update`, `webhook.delete` |
+| Brain | `brain.recall`, `brain.recall_global`, `brain.query`, `brain.find_similar`, `brain.stats`, `brain.bulk_write`, `brain.traverse` |
+| Config | `config.reload` |
+| Auth | `auth.failed` (invalid or expired tokens on any endpoint) |
+
+### Query audit log
+
+```
+GET /api/admin/audit-log
+Authorization: Bearer <admin-token>
+```
+
+All query params are optional:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `after` | `string` | ISO-8601 timestamp — entries from this time onward |
+| `before` | `string` | ISO-8601 timestamp — entries up to this time |
+| `tokenId` | `string` | Filter by token ID |
+| `oidcSubject` | `string` | Filter by OIDC subject claim |
+| `spaceId` | `string` | Filter by space ID |
+| `operation` | `string` | Comma-separated operation names (e.g. `memory.create,entity.delete`) |
+| `status` | `number` | Filter by HTTP status code |
+| `ip` | `string` | Filter by client IP address |
+| `limit` | `number` | Results per page (1–1000, default 100) |
+| `offset` | `number` | Pagination offset (default 0) |
+
+**Response** `200`:
+
+```json
+{
+  "entries": [
+    {
+      "_id": "a1b2c3d4-...",
+      "timestamp": "2026-04-12T14:32:10.123Z",
+      "tokenId": "tok_abc123",
+      "tokenLabel": "mcp-bridge",
+      "authMethod": "pat",
+      "oidcSubject": null,
+      "ip": "192.168.1.10",
+      "method": "POST",
+      "path": "/api/brain/spaces/eng-kb/memories",
+      "spaceId": "eng-kb",
+      "operation": "memory.create",
+      "status": 201,
+      "entryId": "f7e6d5c4-...",
+      "durationMs": 12
+    }
+  ],
+  "total": 1847,
+  "hasMore": true
+}
+```
+
+### Audit entry fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `_id` | `string` | UUID v4 — unique entry identifier |
+| `timestamp` | `string` | ISO-8601 timestamp |
+| `tokenId` | `string \| null` | Token ID (null for auth failures) |
+| `tokenLabel` | `string \| null` | Human-readable token label |
+| `authMethod` | `"pat" \| "oidc" \| null` | Authentication method used |
+| `oidcSubject` | `string \| null` | OIDC subject claim when auth method is OIDC |
+| `ip` | `string` | Client IP address |
+| `method` | `string` | HTTP method (GET, POST, PUT, PATCH, DELETE) |
+| `path` | `string` | Request path |
+| `spaceId` | `string \| null` | Target space (null for non-space operations) |
+| `operation` | `string` | Structured event name (see tracked operations) |
+| `status` | `number` | HTTP status code of the response |
+| `entryId` | `string \| null` | Entry ID when the operation targets a specific document |
+| `durationMs` | `number` | Request duration in milliseconds |
+
+### Data retention
+
+Entries expire automatically after `retentionDays` (default 90). MongoDB's TTL daemon handles the purge — no manual cleanup required.
+
+### Admin UI
+
+**Settings → Audit Log** provides a searchable, filterable view of the audit trail with:
+- Date range, operation, space, status, and IP filters
+- Paginated table with colour-coded status badges
+- Click-to-detail modal for full entry JSON
+- JSON and CSV export
+
+---
+
 ## Webhooks API
 
 Base path: `/api/admin/webhooks` — **requires admin token** on all endpoints.
@@ -2996,6 +3121,7 @@ Content-Type: application/json
 | `recall` | Semantic search across all knowledge types (memories, entities, edges, chrono entries, files) within the current space |
 | `recall_global` | Semantic search across all knowledge types in all accessible spaces |
 | `query` | Structured MongoDB filter query (read-only) — supports `memories`, `entities`, `edges`, `chrono`, and `files` collections |
+| `find_similar` | Find entries with high vector similarity to an existing entry by ID — no re-embedding step |
 | `get_stats` | Return counts of memories, entities, edges, chrono entries, and files |
 | `get_space_meta` | Return the full space schema definition, purpose, usage notes, and stats |
 | `upsert_entity` | Create or update a named entity (with optional properties) |

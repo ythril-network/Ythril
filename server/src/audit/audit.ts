@@ -35,21 +35,27 @@ export async function initAuditCollection(): Promise<void> {
 
   const c = col();
 
-  // TTL index — entries expire automatically
+  // TTL index — entries expire automatically.
+  // Uses a dedicated _expireAt BSON Date field because `timestamp` is stored
+  // as an ISO-8601 string for display/query simplicity, but MongoDB requires
+  // a BSON Date for its TTL daemon to work.
   const retentionDays = getConfig().audit?.retentionDays ?? DEFAULT_RETENTION_DAYS;
   const expireAfterSeconds = retentionDays * 24 * 60 * 60;
+
+  // Drop legacy string-based TTL index if present (it had no effect).
+  try { await c.dropIndex('ttl_timestamp'); } catch { /* not present */ }
+
   try {
     await c.createIndex(
-      { timestamp: 1 },
-      { expireAfterSeconds, name: 'ttl_timestamp' },
+      { _expireAt: 1 },
+      { expireAfterSeconds, name: 'ttl_expireAt' },
     );
   } catch {
-    // Index already exists with different options — drop & recreate
     try {
-      await c.dropIndex('ttl_timestamp');
+      await c.dropIndex('ttl_expireAt');
       await c.createIndex(
-        { timestamp: 1 },
-        { expireAfterSeconds, name: 'ttl_timestamp' },
+        { _expireAt: 1 },
+        { expireAfterSeconds, name: 'ttl_expireAt' },
       );
     } catch (err) {
       log.warn(`Could not update audit TTL index: ${err}`);
@@ -87,6 +93,7 @@ export function logAuditEntry(input: AuditEntryInput): void {
   const entry: AuditLogEntry = {
     _id: uuidv4(),
     timestamp: new Date().toISOString(),
+    _expireAt: new Date(),
     tokenId: input.tokenId ?? null,
     tokenLabel: input.tokenLabel ?? null,
     authMethod: input.authMethod ?? null,
