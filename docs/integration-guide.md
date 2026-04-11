@@ -805,6 +805,50 @@ Re-computes all embeddings with the current model. Long-running — may take min
 
 ---
 
+### Bulk Write
+
+```
+POST /api/brain/spaces/:spaceId/bulk
+Content-Type: application/json
+```
+
+Batch-upsert memories, entities, edges, and/or chrono entries in a single HTTP call. All four arrays are optional. Processing order: **memories → entities → edges → chrono** — so edges that reference entities inserted in the same batch will resolve correctly.
+
+Each array is capped at 500 entries. Per-item validation failures are recorded in `errors` without aborting the remaining items.
+
+**Request body:**
+
+```json
+{
+  "memories":  [ { "fact": "Oceans cover 71% of the Earth's surface.", "tags": ["science"] } ],
+  "entities":  [ { "name": "Earth", "type": "planet", "tags": ["science"] } ],
+  "edges":     [ { "from": "<entity-id-A>", "to": "<entity-id-B>", "label": "orbits" } ],
+  "chrono":    [ { "title": "Launch day", "kind": "milestone", "startsAt": "2026-01-01T00:00:00Z" } ]
+}
+```
+
+Each item accepts the same fields as its corresponding individual endpoint (`POST /memories`, `POST /entities`, `POST /edges`, `POST /chrono`).
+
+**Response** `207`:
+
+```json
+{
+  "inserted": { "memories": 1, "entities": 1, "edges": 0, "chrono": 1 },
+  "updated":  { "memories": 0, "entities": 0, "edges": 1, "chrono": 0 },
+  "errors":   [
+    { "type": "edge", "index": 0, "reason": "missing required field: from" }
+  ]
+}
+```
+
+- `inserted` — count of new documents written per type.
+- `updated` — count of existing documents merged per type (entities and edges are upserted by their natural key).
+- `errors` — per-item failures (`type`, zero-based `index`, human-readable `reason`). Valid items are still written even when errors are present.
+
+**Proxy spaces:** add `?targetSpace=<member>` to route all writes to a specific member space.
+
+---
+
 ## Files API
 
 Base path: `/api/files`
@@ -2369,6 +2413,7 @@ Content-Type: application/json
 | `create_chrono` | Create a chrono entry (event, deadline, plan, prediction, milestone) |
 | `update_chrono` | Update an existing chrono entry |
 | `list_chrono` | List chrono entries, optionally filtered by status, kind, or tags |
+| `bulk_write` | Batch-upsert memories, entities, edges, and/or chrono entries in a single call |
 | `read_file` | Read a text file from the space file store |
 | `write_file` | Write a text file to the space file store (optional `description` and `tags` stored as metadata) |
 | `list_dir` | List directory contents |

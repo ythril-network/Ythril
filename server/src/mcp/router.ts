@@ -57,6 +57,7 @@ const MUTATING_TOOLS = new Set([
   'create_chrono', 'update_chrono',
   'write_file', 'delete_file', 'create_dir', 'move_file',
   'sync_now', 'update_space', 'wipe_space',
+  'bulk_write',
 ]);
 
 /** Create a MCP Server instance with all tools bound to the given space */
@@ -427,6 +428,86 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
               items: { type: 'string', enum: ['memories', 'entities', 'edges', 'chrono', 'files'] },
               description: 'Optional subset of collection types to wipe. Omit to wipe all.',
             },
+          },
+          required: [],
+        },
+      },
+      {
+        name: 'bulk_write',
+        description: 'Batch upsert memories, entities, edges, and/or chrono entries in a single call. Processing order: memories → entities → edges → chrono, so edges referencing newly created entities within the same batch resolve correctly. Each array is optional and capped at 500 entries. Per-item validation errors are reported in `errors` without aborting the rest of the batch.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            memories: {
+              type: 'array',
+              description: 'Memory entries to insert. Same fields as the `remember` tool.',
+              items: {
+                type: 'object',
+                properties: {
+                  fact:        { type: 'string', description: 'The fact or memory to store.' },
+                  tags:        { type: 'array', items: { type: 'string' }, description: 'Categorisation tags.' },
+                  entityIds:   { type: 'array', items: { type: 'string' }, description: 'Related entity IDs.' },
+                  description: { type: 'string', description: 'Optional prose context.' },
+                  properties:  { type: 'object', additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] } },
+                },
+                required: ['fact'],
+              },
+            },
+            entities: {
+              type: 'array',
+              description: 'Entity entries to upsert. Same fields as the `upsert_entity` tool.',
+              items: {
+                type: 'object',
+                properties: {
+                  name:        { type: 'string', description: 'Entity name.' },
+                  type:        { type: 'string', description: 'Entity type.' },
+                  tags:        { type: 'array', items: { type: 'string' } },
+                  description: { type: 'string' },
+                  properties:  { type: 'object', additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] } },
+                },
+                required: ['name', 'type'],
+              },
+            },
+            edges: {
+              type: 'array',
+              description: 'Edge entries to upsert. Same fields as the `upsert_edge` tool.',
+              items: {
+                type: 'object',
+                properties: {
+                  from:        { type: 'string', description: 'Source entity ID.' },
+                  to:          { type: 'string', description: 'Target entity ID.' },
+                  label:       { type: 'string', description: 'Relationship label.' },
+                  type:        { type: 'string' },
+                  weight:      { type: 'number' },
+                  description: { type: 'string' },
+                  tags:        { type: 'array', items: { type: 'string' } },
+                  properties:  { type: 'object', additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] } },
+                },
+                required: ['from', 'to', 'label'],
+              },
+            },
+            chrono: {
+              type: 'array',
+              description: 'Chrono entries to insert. Same fields as the `create_chrono` tool.',
+              items: {
+                type: 'object',
+                properties: {
+                  title:       { type: 'string' },
+                  kind:        { type: 'string', enum: ['event', 'deadline', 'plan', 'prediction', 'milestone'] },
+                  startsAt:    { type: 'string', description: 'ISO 8601 start date/time.' },
+                  endsAt:      { type: 'string' },
+                  status:      { type: 'string', enum: ['upcoming', 'active', 'completed', 'overdue', 'cancelled'] },
+                  confidence:  { type: 'number' },
+                  description: { type: 'string' },
+                  tags:        { type: 'array', items: { type: 'string' } },
+                  entityIds:   { type: 'array', items: { type: 'string' } },
+                  memoryIds:   { type: 'array', items: { type: 'string' } },
+                  properties:  { type: 'object', additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] } },
+                },
+                required: ['title', 'kind', 'startsAt'],
+              },
+            },
+            targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
           },
           required: [],
         },
@@ -1017,6 +1098,121 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const summary = `Wiped [${typesLabel}] in space '${spaceId}': ${result.memories} memories, ${result.entities} entities, ${result.edges} edges, ${result.chrono} chrono, ${result.files} files.`;
           return {
             content: [{ type: 'text' as const, text: summary }],
+          };
+        }
+
+        case 'bulk_write': {
+          const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
+          if (!wt.ok) throw new Error(wt.error);
+          const ts = wt.target;
+
+          const BULK_MAX = 500;
+          const rawMemories = Array.isArray(a['memories']) ? (a['memories'] as unknown[]).slice(0, BULK_MAX) : [];
+          const rawEntities = Array.isArray(a['entities']) ? (a['entities'] as unknown[]).slice(0, BULK_MAX) : [];
+          const rawEdges    = Array.isArray(a['edges'])    ? (a['edges']    as unknown[]).slice(0, BULK_MAX) : [];
+          const rawChrono   = Array.isArray(a['chrono'])   ? (a['chrono']   as unknown[]).slice(0, BULK_MAX) : [];
+
+          const inserted = { memories: 0, entities: 0, edges: 0, chrono: 0 };
+          const updated  = { memories: 0, entities: 0, edges: 0, chrono: 0 };
+          const errors: { type: string; index: number; reason: string }[] = [];
+
+          // memories
+          for (let i = 0; i < rawMemories.length; i++) {
+            const item = rawMemories[i] as Record<string, unknown>;
+            const fact = typeof item['fact'] === 'string' ? item['fact'].trim() : '';
+            if (!fact) { errors.push({ type: 'memory', index: i, reason: 'missing required field: fact' }); continue; }
+            const tags     = Array.isArray(item['tags'])      ? (item['tags']      as unknown[]).filter((t): t is string => typeof t === 'string') : [];
+            const entityIds = Array.isArray(item['entityIds']) ? (item['entityIds'] as unknown[]).filter((t): t is string => typeof t === 'string') : [];
+            const description = typeof item['description'] === 'string' ? item['description'] : undefined;
+            const props = (item['properties'] != null && typeof item['properties'] === 'object' && !Array.isArray(item['properties']))
+              ? (item['properties'] as Record<string, string | number | boolean>) : undefined;
+            try {
+              await remember(ts, fact, entityIds, tags, description, props);
+              inserted.memories++;
+            } catch (err) {
+              errors.push({ type: 'memory', index: i, reason: err instanceof Error ? err.message : String(err) });
+            }
+          }
+
+          // entities
+          for (let i = 0; i < rawEntities.length; i++) {
+            const item = rawEntities[i] as Record<string, unknown>;
+            const eName = typeof item['name'] === 'string' ? item['name'].trim() : '';
+            const eType = typeof item['type'] === 'string' ? item['type'].trim() : '';
+            if (!eName) { errors.push({ type: 'entity', index: i, reason: 'missing required field: name' }); continue; }
+            if (!eType) { errors.push({ type: 'entity', index: i, reason: 'missing required field: type' }); continue; }
+            const tags = Array.isArray(item['tags']) ? (item['tags'] as unknown[]).filter((t): t is string => typeof t === 'string') : [];
+            const description = typeof item['description'] === 'string' ? item['description'] : undefined;
+            const props = (item['properties'] != null && typeof item['properties'] === 'object' && !Array.isArray(item['properties']))
+              ? (item['properties'] as Record<string, string | number | boolean>) : {};
+            try {
+              const existing = await col<import('../config/types.js').EntityDoc>(`${ts}_entities`).findOne({ spaceId: ts, name: eName, type: eType } as never);
+              await upsertEntity(ts, eName, eType, tags, props, description);
+              if (existing) { updated.entities++; } else { inserted.entities++; }
+            } catch (err) {
+              errors.push({ type: 'entity', index: i, reason: err instanceof Error ? err.message : String(err) });
+            }
+          }
+
+          // edges
+          for (let i = 0; i < rawEdges.length; i++) {
+            const item = rawEdges[i] as Record<string, unknown>;
+            const from  = typeof item['from']  === 'string' ? item['from'].trim()  : '';
+            const to    = typeof item['to']    === 'string' ? item['to'].trim()    : '';
+            const label = typeof item['label'] === 'string' ? item['label'].trim() : '';
+            if (!from)  { errors.push({ type: 'edge', index: i, reason: 'missing required field: from' });  continue; }
+            if (!to)    { errors.push({ type: 'edge', index: i, reason: 'missing required field: to' });    continue; }
+            if (!label) { errors.push({ type: 'edge', index: i, reason: 'missing required field: label' }); continue; }
+            const weight      = typeof item['weight'] === 'number' ? item['weight'] : undefined;
+            const edgeType    = typeof item['type']   === 'string' ? item['type']   : undefined;
+            const description = typeof item['description'] === 'string' ? item['description'] : undefined;
+            const tags        = Array.isArray(item['tags']) ? (item['tags'] as unknown[]).filter((t): t is string => typeof t === 'string') : undefined;
+            const props       = (item['properties'] != null && typeof item['properties'] === 'object' && !Array.isArray(item['properties']))
+              ? (item['properties'] as Record<string, string | number | boolean>) : undefined;
+            try {
+              const existing = await col<import('../config/types.js').EdgeDoc>(`${ts}_edges`).findOne({ spaceId: ts, from, to, label } as never);
+              await upsertEdge(ts, from, to, label, weight, edgeType, description, props, tags);
+              if (existing) { updated.edges++; } else { inserted.edges++; }
+            } catch (err) {
+              errors.push({ type: 'edge', index: i, reason: err instanceof Error ? err.message : String(err) });
+            }
+          }
+
+          // chrono
+          const CHRONO_KINDS_BW = new Set(['event', 'deadline', 'plan', 'prediction', 'milestone']);
+          for (let i = 0; i < rawChrono.length; i++) {
+            const item = rawChrono[i] as Record<string, unknown>;
+            const title    = typeof item['title']    === 'string' ? item['title'].trim() : '';
+            const kind     = typeof item['kind']     === 'string' ? item['kind']         : '';
+            const startsAt = typeof item['startsAt'] === 'string' ? item['startsAt']     : '';
+            if (!title)   { errors.push({ type: 'chrono', index: i, reason: 'missing required field: title' });   continue; }
+            if (!CHRONO_KINDS_BW.has(kind)) { errors.push({ type: 'chrono', index: i, reason: '`kind` must be one of: event, deadline, plan, prediction, milestone' }); continue; }
+            if (!startsAt) { errors.push({ type: 'chrono', index: i, reason: 'missing required field: startsAt' }); continue; }
+            const endsAt      = typeof item['endsAt']      === 'string' ? item['endsAt']      : undefined;
+            const status      = typeof item['status']      === 'string' ? item['status']      : undefined;
+            const confidence  = typeof item['confidence']  === 'number' ? item['confidence']  : undefined;
+            const description = typeof item['description'] === 'string' ? item['description'] : undefined;
+            const tags        = Array.isArray(item['tags'])       ? (item['tags']       as unknown[]).filter((t): t is string => typeof t === 'string') : undefined;
+            const entityIds   = Array.isArray(item['entityIds'])  ? (item['entityIds']  as unknown[]).filter((t): t is string => typeof t === 'string') : undefined;
+            const memoryIds   = Array.isArray(item['memoryIds'])  ? (item['memoryIds']  as unknown[]).filter((t): t is string => typeof t === 'string') : undefined;
+            const props       = (item['properties'] != null && typeof item['properties'] === 'object' && !Array.isArray(item['properties']))
+              ? (item['properties'] as Record<string, string | number | boolean>) : undefined;
+            try {
+              await createChrono(ts, {
+                title, kind: kind as import('../config/types.js').ChronoKind, startsAt, endsAt,
+                status: status as import('../config/types.js').ChronoStatus | undefined,
+                confidence, description, tags, entityIds, memoryIds, properties: props,
+              });
+              inserted.chrono++;
+            } catch (err) {
+              errors.push({ type: 'chrono', index: i, reason: err instanceof Error ? err.message : String(err) });
+            }
+          }
+
+          const summary = `bulk_write complete — inserted: ${JSON.stringify(inserted)}, updated: ${JSON.stringify(updated)}, errors: ${errors.length}`;
+          return {
+            content: [{ type: 'text' as const, text: summary + (errors.length > 0 ? '\n' + JSON.stringify(errors, null, 2) : '') }],
+            isError: false,
           };
         }
 

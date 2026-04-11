@@ -1132,3 +1132,151 @@ describe('Brain — chrono properties field', () => {
   });
 });
 
+// ── Bulk write ─────────────────────────────────────────────────────────────
+
+describe('Brain — POST /api/brain/spaces/:spaceId/bulk', () => {
+  const RUN = Date.now();
+
+  it('Returns 207 with inserted/updated/errors shape', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/bulk', {
+      memories: [{ fact: `Bulk memory ${RUN}`, tags: ['bulk-test'] }],
+      entities: [{ name: `BulkEnt-${RUN}`, type: 'concept', tags: ['bulk-test'] }],
+    });
+    assert.equal(r.status, 207, JSON.stringify(r.body));
+    assert.ok(typeof r.body.inserted === 'object', 'inserted must be an object');
+    assert.ok(typeof r.body.updated === 'object', 'updated must be an object');
+    assert.ok(Array.isArray(r.body.errors), 'errors must be an array');
+    assert.equal(r.body.inserted.memories, 1, 'memory should be inserted');
+    assert.equal(r.body.inserted.entities, 1, 'entity should be inserted');
+    assert.equal(r.body.errors.length, 0, `Unexpected errors: ${JSON.stringify(r.body.errors)}`);
+  });
+
+  it('Second call for same entity counts as updated', async () => {
+    const name = `BulkUpsert-${RUN}`;
+    await post(INSTANCES.a, token(), '/api/brain/spaces/general/bulk', {
+      entities: [{ name, type: 'concept' }],
+    });
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/bulk', {
+      entities: [{ name, type: 'concept', description: 'updated' }],
+    });
+    assert.equal(r.status, 207, JSON.stringify(r.body));
+    assert.equal(r.body.updated.entities, 1, 'second upsert should be counted as updated');
+    assert.equal(r.body.inserted.entities, 0);
+  });
+
+  it('Processes edges referencing entities from same batch', async () => {
+    const entityName = `BulkEdgeEnt-${RUN}`;
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/bulk', {
+      entities: [{ name: `${entityName}-A`, type: 'concept' }, { name: `${entityName}-B`, type: 'concept' }],
+    });
+    assert.equal(r.status, 207, JSON.stringify(r.body));
+    assert.equal(r.body.inserted.entities, 2, JSON.stringify(r.body));
+
+    // Get the entity IDs
+    const listR = await get(INSTANCES.a, token(), `/api/brain/spaces/general/entities?name=${encodeURIComponent(`${entityName}-A`)}`);
+    const entA = listR.body.entities?.[0];
+    const listRB = await get(INSTANCES.a, token(), `/api/brain/spaces/general/entities?name=${encodeURIComponent(`${entityName}-B`)}`);
+    const entB = listRB.body.entities?.[0];
+    assert.ok(entA, 'entity A should be found');
+    assert.ok(entB, 'entity B should be found');
+
+    const edgeR = await post(INSTANCES.a, token(), '/api/brain/spaces/general/bulk', {
+      edges: [{ from: entA._id, to: entB._id, label: `bulk-rel-${RUN}` }],
+    });
+    assert.equal(edgeR.status, 207, JSON.stringify(edgeR.body));
+    assert.equal(edgeR.body.inserted.edges, 1, JSON.stringify(edgeR.body));
+    assert.equal(edgeR.body.errors.length, 0, JSON.stringify(edgeR.body.errors));
+  });
+
+  it('Inserts chrono entries', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/bulk', {
+      chrono: [
+        { title: `BulkEvent-${RUN}`, kind: 'event', startsAt: new Date().toISOString() },
+        { title: `BulkDeadline-${RUN}`, kind: 'deadline', startsAt: new Date().toISOString(), status: 'upcoming' },
+      ],
+    });
+    assert.equal(r.status, 207, JSON.stringify(r.body));
+    assert.equal(r.body.inserted.chrono, 2, JSON.stringify(r.body));
+    assert.equal(r.body.errors.length, 0, JSON.stringify(r.body.errors));
+  });
+
+  it('Per-item validation errors do not abort the batch', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/bulk', {
+      memories: [
+        { fact: `Valid bulk memory ${RUN} A` },
+        { tags: ['no-fact'] },          // missing fact → error
+        { fact: `Valid bulk memory ${RUN} B` },
+      ],
+    });
+    assert.equal(r.status, 207, JSON.stringify(r.body));
+    assert.equal(r.body.inserted.memories, 2, 'two valid memories should be inserted');
+    assert.equal(r.body.errors.length, 1, 'one error expected');
+    assert.equal(r.body.errors[0].type, 'memory');
+    assert.equal(r.body.errors[0].index, 1);
+    assert.ok(r.body.errors[0].reason, 'error reason should be set');
+  });
+
+  it('Entity missing name returns error entry', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/bulk', {
+      entities: [{ type: 'concept' }],
+    });
+    assert.equal(r.status, 207, JSON.stringify(r.body));
+    assert.equal(r.body.errors.length, 1);
+    assert.equal(r.body.errors[0].type, 'entity');
+    assert.ok(r.body.errors[0].reason.includes('name'), `Expected name in reason: ${r.body.errors[0].reason}`);
+  });
+
+  it('Edge missing required fields returns per-field errors', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/bulk', {
+      edges: [{ to: 'some-id', label: 'rel' }], // missing from
+    });
+    assert.equal(r.status, 207, JSON.stringify(r.body));
+    assert.equal(r.body.errors.length, 1);
+    assert.equal(r.body.errors[0].type, 'edge');
+    assert.ok(r.body.errors[0].reason.includes('from'));
+  });
+
+  it('Chrono with invalid kind returns error entry', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/bulk', {
+      chrono: [{ title: 'Bad kind', kind: 'invalid', startsAt: new Date().toISOString() }],
+    });
+    assert.equal(r.status, 207, JSON.stringify(r.body));
+    assert.equal(r.body.errors.length, 1);
+    assert.equal(r.body.errors[0].type, 'chrono');
+  });
+
+  it('Empty arrays is a no-op returning zero counts', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/bulk', {
+      memories: [], entities: [], edges: [], chrono: [],
+    });
+    assert.equal(r.status, 207, JSON.stringify(r.body));
+    assert.equal(r.body.inserted.memories, 0);
+    assert.equal(r.body.inserted.entities, 0);
+    assert.equal(r.body.inserted.edges, 0);
+    assert.equal(r.body.inserted.chrono, 0);
+    assert.equal(r.body.errors.length, 0);
+  });
+
+  it('Empty body (all arrays omitted) is a no-op', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/bulk', {});
+    assert.equal(r.status, 207, JSON.stringify(r.body));
+    assert.equal(r.body.inserted.memories + r.body.inserted.entities + r.body.inserted.edges + r.body.inserted.chrono, 0);
+  });
+
+  it('Returns 404 for unknown space', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/no-such-space/bulk', {
+      memories: [{ fact: 'test' }],
+    });
+    assert.equal(r.status, 404);
+  });
+
+  it('Returns 401 without auth', async () => {
+    const r = await fetch(`${INSTANCES.a}/api/brain/spaces/general/bulk`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ memories: [{ fact: 'test' }] }),
+    });
+    assert.equal(r.status, 401);
+  });
+});
+
