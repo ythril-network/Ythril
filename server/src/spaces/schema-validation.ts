@@ -223,10 +223,12 @@ function validateValue(field: string, value: unknown, schema: PropertySchema): S
 /**
  * Test a regex pattern against a value, guarding against ReDoS by using a
  * timeout-safe approach (simple length limit on pattern and value).
+ * Returns false (fail-safe) when inputs exceed size limits — the value will
+ * be reported as non-matching rather than silently allowed through.
  */
 function safeRegexTest(pattern: string, value: string): boolean {
-  // Guard against excessively long patterns or values that could cause ReDoS
-  if (pattern.length > 500 || value.length > 10_000) return true;
+  // Fail-safe: reject oversized inputs rather than silently allowing them
+  if (pattern.length > 500 || value.length > 10_000) return false;
   try {
     return new RegExp(pattern).test(value);
   } catch {

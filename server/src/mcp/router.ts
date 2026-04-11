@@ -889,8 +889,8 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const metaCfg = getConfig();
           const metaSpace = metaCfg.spaces.find(s => s.id === spaceId);
           const metaBlock = metaSpace?.meta ?? {};
-          const memberIds2 = resolveMemberSpaces(spaceId);
-          const counts2 = await Promise.all(memberIds2.map(async mid => ({
+          const metaMemberIds = resolveMemberSpaces(spaceId);
+          const metaCounts = await Promise.all(metaMemberIds.map(async mid => ({
             memories: await col(`${mid}_memories`).countDocuments(),
             entities: await col(`${mid}_entities`).countDocuments(),
             edges: await col(`${mid}_edges`).countDocuments(),
@@ -904,11 +904,11 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             spaceName: metaSpace?.label ?? spaceId,
             ...metaPublic,
             stats: {
-              memories: counts2.reduce((s, c) => s + c.memories, 0),
-              entities: counts2.reduce((s, c) => s + c.entities, 0),
-              edges: counts2.reduce((s, c) => s + c.edges, 0),
-              chrono: counts2.reduce((s, c) => s + c.chrono, 0),
-              files: counts2.reduce((s, c) => s + c.files, 0),
+              memories: metaCounts.reduce((s, c) => s + c.memories, 0),
+              entities: metaCounts.reduce((s, c) => s + c.entities, 0),
+              edges: metaCounts.reduce((s, c) => s + c.edges, 0),
+              chrono: metaCounts.reduce((s, c) => s + c.chrono, 0),
+              files: metaCounts.reduce((s, c) => s + c.files, 0),
             },
           };
           return {

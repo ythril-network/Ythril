@@ -24,7 +24,7 @@ import assert from 'node:assert/strict';
 // ── Replicated validation logic (matches server/src/spaces/schema-validation.ts) ──
 
 function safeRegexTest(pattern, value) {
-  if (pattern.length > 500 || value.length > 10_000) return true;
+  if (pattern.length > 500 || value.length > 10_000) return false;
   try {
     return new RegExp(pattern).test(value);
   } catch {
