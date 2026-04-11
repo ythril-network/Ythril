@@ -26,11 +26,12 @@
 15. [Conflicts API](#conflicts-api) — view and resolve sync conflicts
 16. [Setup API](#setup-api) — first-run setup
 17. [Admin API](#admin-api) — config reload, space wipe
-18. [About API](#about-api) — instance info and logs
-19. [Theme API](#theme-api) — external CSS theming
-20. [MCP (Model Context Protocol)](#mcp-model-context-protocol) — AI tool integration
-21. [Storage Quotas](#storage-quotas)
-22. [Pagination](#pagination)
+18. [Webhooks API](#webhooks-api) — event subscriptions for space write events
+19. [About API](#about-api) — instance info and logs
+20. [Theme API](#theme-api) — external CSS theming
+21. [MCP (Model Context Protocol)](#mcp-model-context-protocol) — AI tool integration
+22. [Storage Quotas](#storage-quotas)
+23. [Pagination](#pagination)
 
 ---
 
@@ -2560,6 +2561,221 @@ wipe_space(types?: string[])
 ```
 
 Available in MCP-connected clients.  Requires an admin token on the MCP session.  When `types` is omitted all collections are wiped.  Returns a plain-text summary of deleted counts.
+
+---
+
+## Webhooks API
+
+Base path: `/api/admin/webhooks` — **requires admin token** on all endpoints.
+
+Webhooks allow external systems to receive real-time HTTP POST notifications when write events occur on Ythril spaces. This replaces the need to poll for changes.
+
+### Event Types
+
+| Event | Fired when |
+|-------|-----------|
+| `memory.created` | A new memory is stored |
+| `memory.updated` | An existing memory is updated |
+| `memory.deleted` | A memory is deleted |
+| `entity.created` | A new entity is created |
+| `entity.updated` | An existing entity is updated (including upsert of existing) |
+| `entity.deleted` | An entity is deleted |
+| `edge.created` | A new edge is created |
+| `edge.updated` | An existing edge is updated |
+| `edge.deleted` | An edge is deleted |
+| `chrono.created` | A new chrono entry is created |
+| `chrono.updated` | A chrono entry is updated |
+| `chrono.deleted` | A chrono entry is deleted |
+| `file.created` | A file is written (new or overwrite) |
+| `file.updated` | A file is moved/renamed |
+| `file.deleted` | A file is deleted |
+| `test.ping` | Synthetic test event sent via the test endpoint |
+
+### Create Subscription
+
+```
+POST /api/admin/webhooks
+Authorization: Bearer <admin-token>
+Content-Type: application/json
+```
+
+```json
+{
+  "url": "https://n8n.example.com/webhook/ythril-events",
+  "secret": "whsec_your_shared_secret",
+  "spaces": ["dev-lessons", "dev-infrastructure"],
+  "events": ["memory.created", "entity.created"],
+  "enabled": true
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `url` | ✅ | HTTPS endpoint to receive POST requests |
+| `secret` | ✅ | Shared secret for HMAC-SHA256 signature (min 8 chars) |
+| `spaces` | — | Space ID filter; omit or empty = all spaces |
+| `events` | — | Event type filter; omit or empty = all events |
+| `enabled` | — | Default `true`; set `false` to pause without deleting |
+
+**Response** `201`:
+
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "url": "https://n8n.example.com/webhook/ythril-events",
+  "spaces": ["dev-lessons", "dev-infrastructure"],
+  "events": ["memory.created", "entity.created"],
+  "enabled": true,
+  "status": "active",
+  "consecutiveFailures": 0,
+  "createdAt": "2026-04-11T14:30:00.000Z",
+  "updatedAt": "2026-04-11T14:30:00.000Z"
+}
+```
+
+> **Security:** The `secret` is stored server-side for HMAC signing but is **never returned** in any GET response after creation.
+
+### List Subscriptions
+
+```
+GET /api/admin/webhooks
+Authorization: Bearer <admin-token>
+```
+
+**Response** `200`:
+
+```json
+{
+  "webhooks": [
+    {
+      "id": "...",
+      "url": "https://...",
+      "spaces": [],
+      "events": [],
+      "enabled": true,
+      "status": "active",
+      "consecutiveFailures": 0,
+      "createdAt": "...",
+      "updatedAt": "..."
+    }
+  ]
+}
+```
+
+### Get Subscription
+
+```
+GET /api/admin/webhooks/:id
+Authorization: Bearer <admin-token>
+```
+
+### Update Subscription
+
+```
+PATCH /api/admin/webhooks/:id
+Authorization: Bearer <admin-token>
+Content-Type: application/json
+```
+
+```json
+{
+  "url": "https://new-endpoint.example.com/hook",
+  "enabled": false
+}
+```
+
+All fields are optional. Only provided fields are updated.
+
+### Delete Subscription
+
+```
+DELETE /api/admin/webhooks/:id
+Authorization: Bearer <admin-token>
+```
+
+**Response** `204` — subscription and delivery logs removed.
+
+### Test Delivery
+
+```
+POST /api/admin/webhooks/:id/test
+Authorization: Bearer <admin-token>
+```
+
+Sends a synthetic `test.ping` event to the subscription's URL. Useful for verifying connectivity.
+
+### Delivery Log
+
+```
+GET /api/admin/webhooks/:id/deliveries
+Authorization: Bearer <admin-token>
+```
+
+Returns the last 100 deliveries for the subscription:
+
+```json
+{
+  "deliveries": [
+    {
+      "id": "...",
+      "webhookId": "...",
+      "event": "memory.created",
+      "spaceId": "general",
+      "timestamp": "2026-04-11T14:30:00.000Z",
+      "responseStatus": 200,
+      "latencyMs": 142,
+      "success": true
+    }
+  ]
+}
+```
+
+### Event Payload
+
+When an event fires, Ythril sends an HTTP POST to the webhook URL:
+
+```
+POST https://your-endpoint.example.com/hook
+Content-Type: application/json
+X-Ythril-Signature: sha256=<HMAC-SHA256 hex digest>
+X-Ythril-Event: entity.created
+X-Ythril-Delivery: <unique delivery UUID>
+```
+
+```json
+{
+  "event": "entity.created",
+  "timestamp": "2026-04-11T14:30:00.000Z",
+  "spaceId": "dev-infrastructure",
+  "spaceName": "Dev Infrastructure",
+  "entry": {
+    "_id": "...",
+    "name": "cilium",
+    "type": "infra-component"
+  },
+  "tokenId": "...",
+  "tokenLabel": "mcp-bridge"
+}
+```
+
+- `entry` contains the full document for created/updated events (excluding embeddings), just `{ _id }` for deleted events.
+- `tokenId` + `tokenLabel` identify which token performed the write.
+
+### Signature Verification
+
+Verify the `X-Ythril-Signature` header using your shared secret:
+
+```js
+const crypto = require('crypto');
+const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+const valid = signature === `sha256=${expected}`;
+```
+
+### Delivery Guarantees
+
+- **At-least-once delivery.** On HTTP 2xx the delivery is marked successful. On timeout (10 s) or non-2xx, Ythril retries with exponential backoff: 10 s → 30 s → 1 m → 5 m → 30 m → 1 h.
+- After all retries are exhausted, the subscription status changes to `failing`.
+- Re-enabling a failing subscription (`PATCH` with `enabled: true`) resets the failure counter.
 
 ---
 

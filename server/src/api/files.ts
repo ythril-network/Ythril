@@ -46,8 +46,21 @@ import type { FileTombstoneDoc } from '../config/types.js';
 import { upsertFileMeta, deleteFileMeta, deleteFileMetaByPrefix, renameFileMeta, renameFileMetaByPrefix } from '../files/file-meta.js';
 import { v4 as uuidv4 } from 'uuid';
 import { resolveMemberSpaces, resolveWriteTarget } from '../spaces/proxy.js';
+import { emitWebhookEvent } from '../webhooks/dispatcher.js';
 
 export const filesRouter = Router();
+
+// ── Webhook helper ──────────────────────────────────────────────────────────
+
+/** Extract token identification from the request for webhook payloads. */
+function webhookToken(req: Request): { tokenId?: string; tokenLabel?: string } {
+  const t = req.authToken;
+  if (!t) return {};
+  return {
+    tokenId: 'id' in t ? (t as { id: string }).id : undefined,
+    tokenLabel: t.name,
+  };
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -272,6 +285,7 @@ filesRouter.post(
           await upsertFileMeta(targetSpace, filePath, range.total).catch(err => {
             log.warn(`upsertFileMeta error for space ${targetSpace}, path ${filePath}: ${err}`);
           });
+          emitWebhookEvent({ event: 'file.created', spaceId: targetSpace, entry: { path: filePath, sha256 }, ...webhookToken(req) });
           res.status(201).json({ path: filePath, sha256 });
         } else {
           res.status(202).json({ path: filePath, received });
@@ -344,6 +358,7 @@ filesRouter.post(
 
       const response: { path: string; sha256: string; storageWarning?: boolean } = { path: filePath, sha256 };
       if (quotaResult.softBreached) response.storageWarning = true;
+      emitWebhookEvent({ event: 'file.created', spaceId: targetSpace, entry: { path: filePath, sha256 }, ...webhookToken(req) });
       res.status(201).json(response);
     } catch (err) {
       if (err instanceof RangeError) {
@@ -427,6 +442,7 @@ filesRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadOnly,
     await deleteFileMeta(targetSpace, filePath).catch(err => {
       log.warn(`deleteFileMeta error for space ${targetSpace}, path ${filePath}: ${err}`);
     });
+    emitWebhookEvent({ event: 'file.deleted', spaceId: targetSpace, entry: { path: filePath }, ...webhookToken(req) });
     res.status(204).end();
   } catch (err) {
     if (err instanceof RangeError) {
@@ -469,6 +485,7 @@ filesRouter.patch('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadOnly, 
     ]).catch(err => {
       log.warn(`renameFileMeta error for space ${targetSpace}, ${srcPath} → ${destination}: ${err}`);
     });
+    emitWebhookEvent({ event: 'file.updated', spaceId: targetSpace, entry: { path: destination, previousPath: srcPath }, ...webhookToken(req) });
     res.json({ from: srcPath, to: destination });
   } catch (err) {
     if (err instanceof RangeError) {

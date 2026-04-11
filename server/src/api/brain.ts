@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import type express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit, bulkWipeRateLimit } from '../rate-limit/middleware.js';
@@ -19,8 +20,21 @@ import { resolveMemberSpaces, resolveWriteTarget, findSpace, isProxySpace } from
 import { validateEntity, validateEdge, validateMemory, validateChrono, type SchemaViolation } from '../spaces/schema-validation.js';
 import type { MemoryDoc, EntityDoc, EdgeDoc, ChronoEntry, FileMetaDoc, ChronoKind, ChronoStatus, SpaceMeta } from '../config/types.js';
 import { reindexInProgress } from '../metrics/registry.js';
+import { emitWebhookEvent } from '../webhooks/dispatcher.js';
 
 export const brainRouter = Router();
+
+// ── Webhook helper ────────────────────────────────────────────────────────
+
+/** Extract token identification from the request for webhook payloads. */
+function webhookToken(req: express.Request): { tokenId?: string; tokenLabel?: string } {
+  const t = req.authToken;
+  if (!t) return {};
+  return {
+    tokenId: 'id' in t ? (t as { id: string }).id : undefined,
+    tokenLabel: t.name,
+  };
+}
 
 // ── Schema validation helpers ─────────────────────────────────────────────
 
@@ -156,6 +170,7 @@ brainRouter.post('/:spaceId/memories', globalRateLimit, requireSpaceAuth, denyRe
   if (safeDesc !== undefined) doc.description = safeDesc;
   if (safeProps !== undefined) doc.properties = safeProps;
   await col<MemoryDoc>(`${targetSpace}_memories`).insertOne(doc as never);
+  emitWebhookEvent({ event: 'memory.created', spaceId: targetSpace, entry: { ...doc, embedding: undefined }, ...webhookToken(req) });
   const body: Record<string, unknown> = { ...doc };
   if (quotaResult?.softBreached) body['storageWarning'] = true;
   if (validation.warnings.length > 0) body['warnings'] = validation.warnings;
@@ -211,7 +226,11 @@ brainRouter.delete('/:spaceId/memories/:id', globalRateLimit, requireSpaceAuth, 
   const id = req.params['id'] as string;
   const memberIds = resolveMemberSpaces(spaceId);
   for (const mid of memberIds) {
-    if (await deleteMemory(mid, id)) { res.status(204).end(); return; }
+    if (await deleteMemory(mid, id)) {
+      emitWebhookEvent({ event: 'memory.deleted', spaceId: mid, entry: { _id: id }, ...webhookToken(req) });
+      res.status(204).end();
+      return;
+    }
   }
   res.status(404).json({ error: 'Memory not found' });
 });
@@ -253,7 +272,11 @@ brainRouter.patch('/:spaceId/memories/:id', globalRateLimit, requireSpaceAuth, d
   const memberIds = resolveMemberSpaces(wt.target);
   for (const mid of memberIds) {
     const updated = await updateMemory(mid, id, updates);
-    if (updated) { res.json(updated); return; }
+    if (updated) {
+      emitWebhookEvent({ event: 'memory.updated', spaceId: mid, entry: { ...updated, embedding: undefined }, ...webhookToken(req) });
+      res.json(updated);
+      return;
+    }
   }
   res.status(404).json({ error: 'Memory not found' });
 });
@@ -324,7 +347,11 @@ brainRouter.delete('/spaces/:spaceId/memories/:id', globalRateLimit, requireSpac
   const id = req.params['id'] as string;
   const memberIds = resolveMemberSpaces(spaceId);
   for (const mid of memberIds) {
-    if (await deleteMemory(mid, id)) { res.status(204).end(); return; }
+    if (await deleteMemory(mid, id)) {
+      emitWebhookEvent({ event: 'memory.deleted', spaceId: mid, entry: { _id: id }, ...webhookToken(req) });
+      res.status(204).end();
+      return;
+    }
   }
   res.status(404).json({ error: 'Memory not found' });
 });
@@ -366,7 +393,11 @@ brainRouter.patch('/spaces/:spaceId/memories/:id', globalRateLimit, requireSpace
   const memberIds = resolveMemberSpaces(wt.target);
   for (const mid of memberIds) {
     const updated = await updateMemory(mid, id, updates);
-    if (updated) { res.json(updated); return; }
+    if (updated) {
+      emitWebhookEvent({ event: 'memory.updated', spaceId: mid, entry: { ...updated, embedding: undefined }, ...webhookToken(req) });
+      res.json(updated);
+      return;
+    }
   }
   res.status(404).json({ error: 'Memory not found' });
 });
@@ -444,6 +475,7 @@ brainRouter.post('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAuth,
 
   try {
     const { entity, warning } = await upsertEntity(wt.target, name.trim(), type.trim(), tags, properties, safeDesc, safeId);
+    emitWebhookEvent({ event: warning ? 'entity.updated' : 'entity.created', spaceId: wt.target, entry: { ...entity, embedding: undefined }, ...webhookToken(req) });
     const result: Record<string, unknown> = { ...entity };
     if (warning) result['warning'] = warning;
     if (validation.warnings.length > 0) result['warnings'] = validation.warnings;
@@ -511,6 +543,7 @@ brainRouter.post('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, de
     wt.target, from.trim(), to.trim(), label.trim(), weight, type?.trim(),
     typeof description === 'string' ? description : undefined, safeProps, safeTags,
   );
+  emitWebhookEvent({ event: 'edge.created', spaceId: wt.target, entry: { ...edge, embedding: undefined }, ...webhookToken(req) });
   const result: Record<string, unknown> = { ...edge };
   if (validation.warnings.length > 0) result['warnings'] = validation.warnings;
   res.status(201).json(result);
@@ -571,7 +604,11 @@ brainRouter.delete('/spaces/:spaceId/entities/:id', globalRateLimit, requireSpac
   const id = req.params['id'] as string;
   const memberIds = resolveMemberSpaces(spaceId);
   for (const mid of memberIds) {
-    if (await deleteEntity(mid, id)) { res.status(204).end(); return; }
+    if (await deleteEntity(mid, id)) {
+      emitWebhookEvent({ event: 'entity.deleted', spaceId: mid, entry: { _id: id }, ...webhookToken(req) });
+      res.status(204).end();
+      return;
+    }
   }
   res.status(404).json({ error: 'Entity not found' });
 });
@@ -613,7 +650,11 @@ brainRouter.patch('/spaces/:spaceId/entities/:id', globalRateLimit, requireSpace
   const memberIds = resolveMemberSpaces(wt.target);
   for (const mid of memberIds) {
     const updated = await updateEntityById(mid, id, updates);
-    if (updated) { res.json(updated); return; }
+    if (updated) {
+      emitWebhookEvent({ event: 'entity.updated', spaceId: mid, entry: { ...updated, embedding: undefined }, ...webhookToken(req) });
+      res.json(updated);
+      return;
+    }
   }
   res.status(404).json({ error: 'Entity not found' });
 });
@@ -675,7 +716,11 @@ brainRouter.delete('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAu
   const id = req.params['id'] as string;
   const memberIds = resolveMemberSpaces(spaceId);
   for (const mid of memberIds) {
-    if (await deleteEdge(mid, id)) { res.status(204).end(); return; }
+    if (await deleteEdge(mid, id)) {
+      emitWebhookEvent({ event: 'edge.deleted', spaceId: mid, entry: { _id: id }, ...webhookToken(req) });
+      res.status(204).end();
+      return;
+    }
   }
   res.status(404).json({ error: 'Edge not found' });
 });
@@ -721,7 +766,11 @@ brainRouter.patch('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAut
   const memberIds = resolveMemberSpaces(wt.target);
   for (const mid of memberIds) {
     const updated = await updateEdgeById(mid, id, updates);
-    if (updated) { res.json(updated); return; }
+    if (updated) {
+      emitWebhookEvent({ event: 'edge.updated', spaceId: mid, entry: { ...updated, embedding: undefined }, ...webhookToken(req) });
+      res.json(updated);
+      return;
+    }
   }
   res.status(404).json({ error: 'Edge not found' });
 });
@@ -850,6 +899,7 @@ brainRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, d
     title: title.trim(), kind, startsAt, endsAt, status, confidence,
     tags, entityIds, memoryIds, description, properties: safeProps, recurrence,
   });
+  emitWebhookEvent({ event: 'chrono.created', spaceId: wt.target, entry: { ...entry, embedding: undefined }, ...webhookToken(req) });
   const result: Record<string, unknown> = { ...entry };
   if (validation.warnings.length > 0) result['warnings'] = validation.warnings;
   res.status(201).json(result);
@@ -890,6 +940,7 @@ brainRouter.post('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceAut
     tags, entityIds, memoryIds, description, properties: safeProps, recurrence,
   });
   if (!updated) { res.status(404).json({ error: 'Chrono entry not found' }); return; }
+  emitWebhookEvent({ event: 'chrono.updated', spaceId: wt.target, entry: { ...updated, embedding: undefined }, ...webhookToken(req) });
   res.json(updated);
 });
 
@@ -929,7 +980,11 @@ brainRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceAu
       title, kind, startsAt, endsAt, status, confidence,
       tags, entityIds, memoryIds, description, properties: safeProps, recurrence,
     });
-    if (updated) { res.json(updated); return; }
+    if (updated) {
+      emitWebhookEvent({ event: 'chrono.updated', spaceId: mid, entry: { ...updated, embedding: undefined }, ...webhookToken(req) });
+      res.json(updated);
+      return;
+    }
   }
   res.status(404).json({ error: 'Chrono entry not found' });
 });
@@ -991,7 +1046,11 @@ brainRouter.delete('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
   const id = req.params['id'] as string;
   const memberIds = resolveMemberSpaces(spaceId);
   for (const mid of memberIds) {
-    if (await deleteChrono(mid, id)) { res.status(204).end(); return; }
+    if (await deleteChrono(mid, id)) {
+      emitWebhookEvent({ event: 'chrono.deleted', spaceId: mid, entry: { _id: id }, ...webhookToken(req) });
+      res.status(204).end();
+      return;
+    }
   }
   res.status(404).json({ error: 'Chrono entry not found' });
 });

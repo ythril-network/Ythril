@@ -21,6 +21,7 @@ import { auditRouter } from './api/audit.js';
 import { setupRouter } from './setup/routes.js';
 import { mcpRouter } from './mcp/router.js';
 import { auditMiddleware } from './audit/middleware.js';
+import { webhooksRouter } from './api/webhooks.js';
 import { globalRateLimit } from './rate-limit/middleware.js';
 import { configExists, reloadConfig, getConfig, saveConfig } from './config/loader.js';
 import { requireAuth, requireAdminMfa } from './auth/middleware.js';
@@ -165,6 +166,9 @@ export function createApp() {
 
   // ── MCP endpoints ────────────────────────────────────────────────────────
   app.use('/mcp', mcpRouter);
+
+  // ── Webhook management ─────────────────────────────────────────────────────
+  app.use('/api/admin/webhooks', webhooksRouter);
 
   // ── Admin: space wipe ─────────────────────────────────────────────────────
   // Wipes data from a space while preserving the space itself and its configuration.
