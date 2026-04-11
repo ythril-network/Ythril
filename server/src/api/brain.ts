@@ -3,7 +3,7 @@ import type express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit, bulkWipeRateLimit } from '../rate-limit/middleware.js';
-import { listMemories, deleteMemory, countMemories, bulkDeleteMemories, remember, updateMemory, queryBrain } from '../brain/memory.js';
+import { listMemories, deleteMemory, countMemories, bulkDeleteMemories, remember, updateMemory, queryBrain, findSimilar, type RecallKnowledgeType } from '../brain/memory.js';
 import { listEntities, deleteEntity, upsertEntity, getEntityById, updateEntityById, bulkDeleteEntities, findEntitiesByName } from '../brain/entities.js';
 import { listEdges, deleteEdge, upsertEdge, getEdgeById, updateEdgeById, bulkDeleteEdges, traverseGraph } from '../brain/edges.js';
 /** Regex that matches a UUID v4 (case-insensitive). */
@@ -1143,6 +1143,66 @@ brainRouter.post('/spaces/:spaceId/query', globalRateLimit, requireSpaceAuth, as
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(400).json({ error: msg });
+  }
+});
+
+// POST /api/brain/spaces/:spaceId/find-similar — vector similarity search by existing entry ID
+const VALID_ENTRY_TYPES = new Set(['memory', 'entity', 'edge', 'chrono', 'file']);
+
+brainRouter.post('/spaces/:spaceId/find-similar', globalRateLimit, requireSpaceAuth, async (req, res) => {
+  const spaceId = req.params['spaceId'] as string;
+  const cfg = getConfig();
+  if (!cfg.spaces.some(s => s.id === spaceId)) {
+    res.status(404).json({ error: `Space '${spaceId}' not found` });
+    return;
+  }
+
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const entryId = typeof body['entryId'] === 'string' ? body['entryId'].trim() : '';
+  const entryType = typeof body['entryType'] === 'string' ? body['entryType'].trim() : '';
+  const topK = typeof body['topK'] === 'number' ? Math.min(Math.max(body['topK'], 1), 100) : 10;
+  const minScore = typeof body['minScore'] === 'number' ? body['minScore'] : undefined;
+  const crossSpace = body['crossSpace'] === true;
+  const targetTypes = Array.isArray(body['targetTypes'])
+    ? (body['targetTypes'] as unknown[]).filter((t): t is RecallKnowledgeType => typeof t === 'string' && VALID_ENTRY_TYPES.has(t))
+    : undefined;
+
+  if (!entryId || !UUID_V4_RE.test(entryId)) {
+    res.status(400).json({ error: 'entryId must be a valid UUID v4' });
+    return;
+  }
+  if (!VALID_ENTRY_TYPES.has(entryType)) {
+    res.status(400).json({ error: `entryType must be one of: ${[...VALID_ENTRY_TYPES].join(', ')}` });
+    return;
+  }
+
+  // Determine cross-space search scope
+  let crossSpaceIds: string[] | undefined;
+  if (crossSpace) {
+    const tokenSpaces = req.authToken?.spaces;
+    crossSpaceIds = cfg.spaces
+      .filter(s => !tokenSpaces || tokenSpaces.includes(s.id))
+      .map(s => s.id);
+  }
+
+  try {
+    const result = await findSimilar(
+      spaceId,
+      entryId,
+      entryType as RecallKnowledgeType,
+      topK,
+      targetTypes,
+      minScore,
+      crossSpaceIds,
+    );
+    res.json(result);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('not found')) {
+      res.status(404).json({ error: msg });
+    } else {
+      res.status(400).json({ error: msg });
+    }
   }
 });
 

@@ -84,6 +84,7 @@ const ROUTE_RULES: RouteRule[] = [
   { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/recall/,      operation: 'brain.recall',         spaceGroup: 1, read: true },
   { method: 'POST',   pattern: /^\/api\/brain\/recall$/,                           operation: 'brain.recall_global',  read: true },
   { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/query$/,      operation: 'brain.query',          spaceGroup: 1, read: true },
+  { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/find-similar$/, operation: 'brain.find_similar', spaceGroup: 1, read: true },
   { method: 'GET',    pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/stats$/,      operation: 'brain.stats',          spaceGroup: 1, read: true },
 
   // ── Bulk write ───────────────────────────────────────────────────────────

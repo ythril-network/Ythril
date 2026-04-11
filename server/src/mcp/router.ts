@@ -14,7 +14,7 @@ import { resolveMemberSpaces, resolveWriteTarget, isProxySpace } from '../spaces
 import { updateSpace, wipeSpace, WIPE_COLLECTION_TYPES, type WipeCollectionType } from '../spaces/spaces.js';
 
 // Brain tools
-import { remember, recall, recallGlobal, queryBrain, updateMemory, deleteMemory, type RecallKnowledgeType, type RecallResult } from '../brain/memory.js';
+import { remember, recall, recallGlobal, findSimilar, queryBrain, updateMemory, deleteMemory, type RecallKnowledgeType, type RecallResult } from '../brain/memory.js';
 import { col } from '../db/mongo.js';
 import { upsertEntity, listEntities, updateEntityById, findEntitiesByName } from '../brain/entities.js';
 import { upsertEdge, listEdges, traverseGraph, updateEdgeById } from '../brain/edges.js';
@@ -184,6 +184,26 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             },
           },
           required: ['query'],
+        },
+      },
+      {
+        name: 'find_similar',
+        description: 'Find entries with high vector similarity to an existing entry. Use for deduplication, "more like this", and merge detection. Uses the entry\'s stored embedding — no re-embedding.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            entryId: { type: 'string', description: 'UUID of the source entry.' },
+            entryType: { type: 'string', enum: ['memory', 'entity', 'edge', 'chrono', 'file'], description: 'Knowledge type of the source entry.' },
+            targetTypes: {
+              type: 'array',
+              items: { type: 'string', enum: ['memory', 'entity', 'edge', 'chrono', 'file'] },
+              description: 'Which knowledge types to search in. Omit to search all types.',
+            },
+            topK: { type: 'number', description: 'Max results (default 10).' },
+            minScore: { type: 'number', description: 'Minimum cosine similarity threshold (0.0–1.0). Results below this are excluded.' },
+            crossSpace: { type: 'boolean', description: 'If true, search across all spaces the token can access. Default: false.' },
+          },
+          required: ['entryId', 'entryType'],
         },
       },
       {
@@ -814,6 +834,56 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
                         .join('\n'),
               },
             ],
+          };
+        }
+
+        case 'find_similar': {
+          const entryId = String(a['entryId'] ?? '').trim();
+          if (!entryId) throw new Error('entryId must not be empty');
+          if (!UUID_V4_RE.test(entryId)) throw new Error('entryId must be a valid UUID v4');
+          const entryType = String(a['entryType'] ?? '').trim();
+          const validTypes = new Set(['memory', 'entity', 'edge', 'chrono', 'file']);
+          if (!validTypes.has(entryType)) throw new Error(`entryType must be one of: ${[...validTypes].join(', ')}`);
+          const topK = typeof a['topK'] === 'number' ? Math.min(Math.max(a['topK'], 1), 100) : 10;
+          const minScore = typeof a['minScore'] === 'number' ? a['minScore'] : undefined;
+          const crossSpace = a['crossSpace'] === true;
+          const targetTypes = Array.isArray(a['targetTypes'])
+            ? (a['targetTypes'] as unknown[]).filter((t): t is RecallKnowledgeType => typeof t === 'string' && validTypes.has(t))
+            : undefined;
+
+          let crossSpaceIds: string[] | undefined;
+          if (crossSpace) {
+            const cfg = getConfig();
+            crossSpaceIds = cfg.spaces
+              .filter(s => !tokenSpaces || tokenSpaces.includes(s.id))
+              .map(s => s.id);
+          }
+
+          const memberIds = resolveMemberSpaces(spaceId);
+          const result = await findSimilar(
+            memberIds[0] ?? spaceId,
+            entryId,
+            entryType as RecallKnowledgeType,
+            topK,
+            targetTypes,
+            minScore,
+            crossSpaceIds,
+          );
+
+          const lines: string[] = [];
+          lines.push(`Source: [${result.source.type}] ${formatRecallSummary(result.source)} (ID: ${result.source._id})`);
+          if (result.results.length === 0) {
+            lines.push('No similar entries found.');
+          } else {
+            for (let i = 0; i < result.results.length; i++) {
+              const r = result.results[i]!;
+              const spaceLabel = crossSpace ? ` [${r.spaceId}]` : '';
+              lines.push(`[${i + 1}]${spaceLabel} [${r.type}] (score: ${r.score?.toFixed(3) ?? 'n/a'}) ${formatRecallSummary(r)}`);
+            }
+          }
+
+          return {
+            content: [{ type: 'text' as const, text: lines.join('\n') }],
           };
         }
 

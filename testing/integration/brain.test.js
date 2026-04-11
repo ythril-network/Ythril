@@ -2227,3 +2227,102 @@ describe('Brain — bulk write caps at 500 items per type', () => {
     assert.ok(total <= 500, `Total processed must be <= 500, got ${total}`);
   });
 });
+
+// ── Find-similar endpoint ────────────────────────────────────────────────────
+
+describe('Brain — find-similar', () => {
+  const RUN = Date.now();
+
+  before(() => {
+    tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+  });
+
+  it('POST /find-similar requires entryId and entryType', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/find-similar', {});
+    assert.equal(r.status, 400, JSON.stringify(r.body));
+  });
+
+  it('POST /find-similar rejects invalid entryType', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/find-similar', {
+      entryId: '00000000-0000-4000-a000-000000000001',
+      entryType: 'invalid',
+    });
+    assert.equal(r.status, 400, JSON.stringify(r.body));
+    assert.ok(r.body.error.includes('entryType'), r.body.error);
+  });
+
+  it('POST /find-similar rejects invalid entryId', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/find-similar', {
+      entryId: 'not-a-uuid',
+      entryType: 'memory',
+    });
+    assert.equal(r.status, 400, JSON.stringify(r.body));
+    assert.ok(r.body.error.includes('entryId'), r.body.error);
+  });
+
+  it('POST /find-similar 404 for non-existent entry', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/find-similar', {
+      entryId: '00000000-0000-4000-a000-000000000099',
+      entryType: 'memory',
+    });
+    assert.equal(r.status, 404, JSON.stringify(r.body));
+  });
+
+  it('POST /find-similar returns results for a valid memory', async () => {
+    // Write two similar memories
+    const w1 = await post(INSTANCES.a, token(), '/api/brain/general/memories', {
+      fact: `FindSimilar test: authentication and authorization ${RUN}`,
+      tags: ['find-similar-test'],
+    });
+    const w2 = await post(INSTANCES.a, token(), '/api/brain/general/memories', {
+      fact: `FindSimilar test: auth and authz security ${RUN}`,
+      tags: ['find-similar-test'],
+    });
+    assert.equal(w1.status, 201, JSON.stringify(w1.body));
+    assert.equal(w2.status, 201, JSON.stringify(w2.body));
+
+    const sourceId = w1.body._id ?? w1.body.id;
+
+    // Search for similar
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/find-similar', {
+      entryId: sourceId,
+      entryType: 'memory',
+      topK: 5,
+    });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.ok(r.body.source, 'Response must include source entry');
+    assert.equal(r.body.source._id, sourceId, 'Source _id must match');
+    assert.equal(r.body.source.score, 1.0, 'Source score must be 1.0');
+    assert.ok(Array.isArray(r.body.results), 'Results must be an array');
+    // The self-match should be excluded from results
+    const selfMatch = r.body.results.find(e => e._id === sourceId);
+    assert.equal(selfMatch, undefined, 'Self-match must be excluded from results');
+  });
+
+  it('POST /find-similar respects targetTypes filter', async () => {
+    const w = await post(INSTANCES.a, token(), '/api/brain/general/memories', {
+      fact: `FindSimilar targetTypes test ${RUN}`,
+    });
+    const sourceId = w.body._id ?? w.body.id;
+
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/find-similar', {
+      entryId: sourceId,
+      entryType: 'memory',
+      targetTypes: ['entity'],
+      topK: 5,
+    });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    // All results (if any) should be of type 'entity'
+    for (const result of r.body.results) {
+      assert.equal(result.type, 'entity', `Expected entity type but got ${result.type}`);
+    }
+  });
+
+  it('POST /find-similar on non-existent space returns 404', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/nonexistent-space/find-similar', {
+      entryId: '00000000-0000-4000-a000-000000000001',
+      entryType: 'memory',
+    });
+    assert.ok(r.status === 404 || r.status === 400, `Got ${r.status}`);
+  });
+});
