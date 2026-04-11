@@ -151,6 +151,10 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
               description: 'Optional minimum result count per type. Guarantees at least that many results of each type if available (e.g. {"entity": 2, "edge": 1}). Omit to use pure score ranking.',
               additionalProperties: { type: 'number' },
             },
+            minScore: {
+              type: 'number',
+              description: 'Minimum cosine similarity score (0.0–1.0). Results below this threshold are excluded.',
+            },
           },
           required: ['query'],
         },
@@ -173,6 +177,10 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
               type: 'object',
               description: 'Optional minimum result count per type. Guarantees at least that many results of each type if available (e.g. {"entity": 2, "edge": 1}). Omit to use pure score ranking.',
               additionalProperties: { type: 'number' },
+            },
+            minScore: {
+              type: 'number',
+              description: 'Minimum cosine similarity score (0.0–1.0). Results below this threshold are excluded.',
             },
           },
           required: ['query'],
@@ -751,8 +759,9 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const minPerType = (a['minPerType'] != null && typeof a['minPerType'] === 'object' && !Array.isArray(a['minPerType']))
             ? (a['minPerType'] as Partial<Record<RecallKnowledgeType, number>>)
             : undefined;
+          const minScore = typeof a['minScore'] === 'number' ? a['minScore'] : undefined;
           const memberIds = resolveMemberSpaces(spaceId);
-          const all = (await Promise.all(memberIds.map(mid => recall(mid, query, topK, tags, types, minPerType)))).flat();
+          const all = (await Promise.all(memberIds.map(mid => recall(mid, query, topK, tags, types, minPerType, minScore)))).flat();
           // Sort by score descending and take topK
           all.sort((x, y) => (y.score ?? 0) - (x.score ?? 0));
           const results = all.slice(0, topK);
@@ -783,12 +792,13 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const minPerType = (a['minPerType'] != null && typeof a['minPerType'] === 'object' && !Array.isArray(a['minPerType']))
             ? (a['minPerType'] as Partial<Record<RecallKnowledgeType, number>>)
             : undefined;
+          const minScore = typeof a['minScore'] === 'number' ? a['minScore'] : undefined;
           const cfg = getConfig();
           // Only search spaces allowed by the calling token (tokenSpaces undefined = all spaces).
           const spaceIds = cfg.spaces
             .filter(s => !tokenSpaces || tokenSpaces.includes(s.id))
             .map(s => s.id);
-          const results = await recallGlobal(spaceIds, query, topK, tags, types, minPerType);
+          const results = await recallGlobal(spaceIds, query, topK, tags, types, minPerType, minScore);
           return {
             content: [
               {

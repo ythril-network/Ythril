@@ -579,7 +579,7 @@ If a space has a `description`, it is sent to the MCP client as `instructions` d
 | `remember` | Store a memory with optional tags, entity links, `description`, and `properties` |
 | `update_memory` | Update an existing memory's fact, tags, or entity links |
 | `delete_memory` | Delete a memory by ID |
-| `recall` | Semantic search within the current space. Optional `tags` and `types` filters narrow results; `minPerType` guarantees a minimum result count per knowledge type |
+| `recall` | Semantic search within the current space. Optional `tags` and `types` filters narrow results; `minPerType` guarantees a minimum result count per knowledge type; `minScore` sets a similarity threshold |
 | `recall_global` | Semantic search across all accessible spaces. Same parameters as `recall` |
 | `query` | Structured filter query (read-only) — supports `memories`, `entities`, `edges`, `chrono`, and `files` collections |
 | `get_stats` | Return counts of memories, entities, edges, chrono entries, and files |

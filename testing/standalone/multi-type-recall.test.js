@@ -686,3 +686,65 @@ describe('formatRecallSummary — file', () => {
     assert.equal(formatRecallSummary({ type: 'file', path: undefined, description: undefined }), '');
   });
 });
+
+// ── minScore filtering (simulated) ─────────────────────────────────────────────
+// These tests validate the minScore filtering logic in isolation, the same
+// algorithm that recall() and recallGlobal() use as a post-query filter.
+
+function applyMinScore(results, minScore) {
+  if (minScore != null && minScore > 0) {
+    return results.filter(r => (r.score ?? 0) >= minScore);
+  }
+  return results;
+}
+
+describe('minScore filtering', () => {
+  const mixedResults = [
+    memoryResult({ _id: 'hi-1', score: 0.95 }),
+    entityResult({ _id: 'hi-2', score: 0.85 }),
+    edgeResult({ _id: 'mid-3', score: 0.60 }),
+    chronoResult({ _id: 'low-4', score: 0.30 }),
+    fileResult({ _id: 'low-5', score: 0.10 }),
+  ];
+
+  it('returns all results when minScore is undefined', () => {
+    const filtered = applyMinScore(mixedResults, undefined);
+    assert.equal(filtered.length, 5);
+  });
+
+  it('returns all results when minScore is 0', () => {
+    const filtered = applyMinScore(mixedResults, 0);
+    assert.equal(filtered.length, 5);
+  });
+
+  it('filters out results below minScore threshold', () => {
+    const filtered = applyMinScore(mixedResults, 0.7);
+    assert.equal(filtered.length, 2);
+    assert.ok(filtered.every(r => r.score >= 0.7));
+    assert.deepEqual(filtered.map(r => r._id), ['hi-1', 'hi-2']);
+  });
+
+  it('filters out all results when minScore is higher than all scores', () => {
+    const filtered = applyMinScore(mixedResults, 0.99);
+    assert.equal(filtered.length, 0);
+  });
+
+  it('includes results exactly at the minScore boundary', () => {
+    const filtered = applyMinScore(mixedResults, 0.60);
+    assert.equal(filtered.length, 3);
+    assert.ok(filtered.some(r => r._id === 'mid-3'));
+  });
+
+  it('works with minScore=1.0 (only perfect matches)', () => {
+    const withPerfect = [memoryResult({ _id: 'perfect', score: 1.0 }), ...mixedResults];
+    const filtered = applyMinScore(withPerfect, 1.0);
+    assert.equal(filtered.length, 1);
+    assert.equal(filtered[0]._id, 'perfect');
+  });
+
+  it('treats missing score as 0', () => {
+    const noScore = [memoryResult({ _id: 'noscore', score: undefined })];
+    const filtered = applyMinScore(noScore, 0.1);
+    assert.equal(filtered.length, 0);
+  });
+});

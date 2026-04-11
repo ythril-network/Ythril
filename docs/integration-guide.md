@@ -2797,8 +2797,9 @@ Content-Type: application/json
 | `tags` | `string[]` | — | Optional tag filter — only results bearing **all** of these tags are returned (applies to all knowledge types). Useful for scoping a semantic search to a specific service or ADR (e.g. `["portal-backend"]`) |
 | `types` | `string[]` | — | Optional knowledge-type filter — restrict results to one or more of `memory`, `entity`, `edge`, `chrono`, `file`. Omit to search all types. |
 | `minPerType` | `object` | — | Optional minimum result count per type. Guarantees at least that many results of each specified type if available (e.g. `{"entity": 2, "edge": 1}`). Uses two-phase search: guaranteed slots filled first, remaining slots filled by score. Omit to use pure score ranking. |
+| `minScore` | `number` | — | Minimum cosine similarity score (0.0–1.0). Results below this threshold are excluded. Applies before `topK` — so `topK=10, minScore=0.7` returns at most 10 results, all with score ≥ 0.7. |
 
-`recall_global` accepts the same `tags`, `types`, and `minPerType` parameters and applies them across all searched spaces.
+`recall_global` accepts the same `tags`, `types`, `minPerType`, and `minScore` parameters and applies them across all searched spaces.
 
 ### Example: update_memory
 

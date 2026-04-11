@@ -119,6 +119,7 @@ export async function recall(
   tags?: string[],
   types?: RecallKnowledgeType[],
   minPerType?: Partial<Record<RecallKnowledgeType, number>>,
+  minScore?: number,
 ): Promise<RecallResult[]> {
   if (!isVectorSearchAvailable()) {
     throw new Error(
@@ -173,9 +174,12 @@ export async function recall(
     if (!guaranteedIds.has(r._id)) fill.push(r);
   }
 
-  // Combine guaranteed + fill, sort by score, return
+  // Combine guaranteed + fill, sort by score, apply minScore filter, return
   const final = [...guaranteed, ...fill];
   final.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  if (minScore != null && minScore > 0) {
+    return final.filter(r => (r.score ?? 0) >= minScore);
+  }
   return final;
 }
 
@@ -300,8 +304,9 @@ export async function recallGlobal(
   tags?: string[],
   types?: RecallKnowledgeType[],
   minPerType?: Partial<Record<RecallKnowledgeType, number>>,
+  minScore?: number,
 ): Promise<RecallResult[]> {
-  const results = await Promise.all(spaceIds.map(id => recall(id, query, topK, tags, types, minPerType)));
+  const results = await Promise.all(spaceIds.map(id => recall(id, query, topK, tags, types, minPerType, minScore)));
   const flat = results.flat();
   // Sort by score descending, deduplicate by _id
   const seen = new Set<string>();

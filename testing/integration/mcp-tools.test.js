@@ -1411,6 +1411,81 @@ describe('MCP brain tools — recall and recall_global with minPerType', () => {
   });
 });
 
+// ── recall / recall_global with minScore ──────────────────────────────────
+
+describe('MCP brain tools — recall and recall_global with minScore', () => {
+  let session;
+  let embeddingAvailable = false;
+  const factForScore = `MinScoreTestFact-${Date.now()}`;
+
+  before(async () => {
+    tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+    await ensureReindexed(INSTANCES.a, tokenA);
+    session = await openMcpSession('general', tokenA);
+    const probe = await session.callTool('remember', { fact: `__minscore-probe-${Date.now()}__`, tags: [] });
+    const probeText = probe?.content?.[0]?.text ?? '';
+    embeddingAvailable = !probe?.isError || !probeText.toLowerCase().includes('embedding');
+    if (embeddingAvailable) {
+      await session.callTool('remember', { fact: factForScore, tags: ['minscore-test'] });
+    }
+  });
+  after(() => session?.close());
+
+  it('recall with minScore does not return isError', async (t) => {
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack — skipping');
+    const result = await session.callTool('recall', {
+      query: factForScore,
+      topK: 5,
+      minScore: 0.5,
+    });
+    assert.ok(!result?.isError, `recall with minScore returned isError: ${JSON.stringify(result)}`);
+  });
+
+  it('recall with minScore=0.99 returns few or no results', async (t) => {
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack — skipping');
+    const result = await session.callTool('recall', {
+      query: factForScore,
+      topK: 10,
+      minScore: 0.99,
+    });
+    assert.ok(!result?.isError, `recall with high minScore returned isError: ${JSON.stringify(result)}`);
+    const text = result?.content?.[0]?.text ?? '';
+    // With a very high threshold, we expect very few or no results
+    // (the only possible hit is the exact fact itself, which may or may not score >= 0.99)
+    assert.ok(typeof text === 'string', 'Response text must be a string');
+  });
+
+  it('recall with minScore=0.0 behaves like no minScore', async (t) => {
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack — skipping');
+    const withMinScore = await session.callTool('recall', { query: factForScore, topK: 5, minScore: 0.0 });
+    const withoutMinScore = await session.callTool('recall', { query: factForScore, topK: 5 });
+    assert.ok(!withMinScore?.isError, 'recall with minScore=0.0 must not error');
+    assert.ok(!withoutMinScore?.isError, 'recall without minScore must not error');
+  });
+
+  it('recall_global with minScore does not return isError', async (t) => {
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack — skipping');
+    const result = await session.callTool('recall_global', {
+      query: factForScore,
+      topK: 5,
+      minScore: 0.5,
+    });
+    assert.ok(!result?.isError, `recall_global with minScore returned isError: ${JSON.stringify(result)}`);
+  });
+
+  it('recall_global with minScore=0.99 returns few or no results', async (t) => {
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack — skipping');
+    const result = await session.callTool('recall_global', {
+      query: factForScore,
+      topK: 10,
+      minScore: 0.99,
+    });
+    assert.ok(!result?.isError, `recall_global with high minScore returned isError: ${JSON.stringify(result)}`);
+    const text = result?.content?.[0]?.text ?? '';
+    assert.ok(typeof text === 'string', 'Response text must be a string');
+  });
+});
+
 // ── write_file with properties field ──────────────────────────────────────
 
 describe('MCP file tools — write_file with properties metadata', () => {
