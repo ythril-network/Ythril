@@ -12,6 +12,51 @@ export interface TokenRecord {
   peerInstanceId?: string; // set on tokens created for network peers — links this PAT to the peer that uses it inbound
 }
 
+// ── Space meta / schema types ──────────────────────────────────────────────
+
+/** Subset of JSON Schema used for property value validation. */
+export interface PropertySchema {
+  type?: 'string' | 'number' | 'boolean';
+  enum?: (string | number | boolean)[];
+  minimum?: number;
+  maximum?: number;
+  pattern?: string;
+}
+
+/** Validation mode for write operations against a space's schema. */
+export type ValidationMode = 'off' | 'warn' | 'strict';
+
+/** Knowledge type keys used in requiredProperties / propertySchemas. */
+export type KnowledgeType = 'entity' | 'memory' | 'edge' | 'chrono';
+
+/** Structured schema and metadata for a space — all fields optional. */
+export interface SpaceMeta {
+  /** Version counter — auto-incremented on every meta change. */
+  version?: number;
+  /** Short directive injected into MCP instructions at handshake. Max 4 000 chars. */
+  purpose?: string;
+  /** Extended Markdown prose — naming conventions, examples, links. Shown in UI only. */
+  usageNotes?: string;
+  /** Validation enforcement level. Default: 'off'. */
+  validationMode?: ValidationMode;
+  /** Allowlist of valid entity `type` values. Empty = unrestricted. */
+  entityTypes?: string[];
+  /** Allowlist of valid edge `label` values. Empty = unrestricted. */
+  edgeLabels?: string[];
+  /** Per entity-type regex pattern for `name` validation. */
+  namingPatterns?: Record<string, string>;
+  /** Per knowledge type: array of property key names that must be present. */
+  requiredProperties?: Partial<Record<KnowledgeType, string[]>>;
+  /** Per knowledge type: map of property key → JSON Schema subset for value validation. */
+  propertySchemas?: Partial<Record<KnowledgeType, Record<string, PropertySchema>>>;
+  /** Non-enforced tag hints — surfaced in UI autocomplete and get_space_meta. */
+  tagSuggestions?: string[];
+  /** ISO8601 timestamp of the last meta update. */
+  updatedAt?: string;
+  /** History of previous meta versions (most recent first, capped). */
+  previousVersions?: Array<{ version: number; meta: Omit<SpaceMeta, 'previousVersions'>; updatedAt: string }>;
+}
+
 export interface SpaceConfig {
   id: string;
   label: string;
@@ -21,6 +66,7 @@ export interface SpaceConfig {
   flex?: number;
   description?: string; // shown to MCP clients as space-level instructions
   proxyFor?: string[];  // virtual proxy space — aggregates reads, routes writes to member spaces
+  meta?: SpaceMeta;     // structured schema and metadata — all fields optional
 }
 
 export interface EmbeddingConfig {
@@ -43,7 +89,7 @@ export interface StorageConfig {
 export type NetworkType = 'closed' | 'democratic' | 'club' | 'braintree' | 'pubsub';
 export type SyncDirection = 'both' | 'push' | 'pull';
 export type VoteValue = 'yes' | 'veto';
-export type VoteRoundType = 'join' | 'remove' | 'space_deletion';
+export type VoteRoundType = 'join' | 'remove' | 'space_deletion' | 'meta_change';
 
 export interface NetworkMember {
   instanceId: string;
@@ -81,7 +127,8 @@ export interface VoteRound {
   concluded?: boolean;
   passed?: boolean;          // true if concluded and the motion carried; false if vetoed/expired
   pendingMember?: NetworkMember;  // stored on join rounds; added to members when vote passes
-  spaceId?: string;              // populated for space_deletion rounds
+  spaceId?: string;              // populated for space_deletion and meta_change rounds
+  pendingMeta?: SpaceMeta;       // stored on meta_change rounds; applied when vote passes
   requiredVoters?: string[];     // braintree only: instanceIds that must ALL vote yes
 }
 

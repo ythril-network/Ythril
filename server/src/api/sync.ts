@@ -17,6 +17,7 @@ import { listTombstones, applyRemoteTombstone } from '../brain/tombstones.js';
 import { requireAuth } from '../auth/middleware.js';
 import { log } from '../util/log.js';
 import { nextSeq, bumpSeq } from '../util/seq.js';
+import { updateSpace } from '../spaces/spaces.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {
@@ -1181,6 +1182,10 @@ function concludeRoundIfReady(
     if (round.type === 'remove') {
       const idx = net.members.findIndex(m => m.instanceId === round.subjectInstanceId);
       if (idx >= 0) net.members.splice(idx, 1);
+    }
+    // On meta_change round pass: apply the pending meta to the space
+    if (round.type === 'meta_change' && round.spaceId && round.pendingMeta) {
+      updateSpace(round.spaceId, { meta: round.pendingMeta });
     }
     return true;
   }
