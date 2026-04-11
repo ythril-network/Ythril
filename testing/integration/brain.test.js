@@ -1274,5 +1274,21 @@ describe('Brain — graph traversal (/api/brain/spaces/:spaceId/traverse)', () =
     assert.deepEqual(r.body.edges, []);
     assert.equal(r.body.truncated, false);
   });
+
+  it('direction=both returns neighbours in either direction and start node never appears in results', async () => {
+    // A→B and A→D outbound; C→B is not in graph, but B→C is. Starting from B with both:
+    // outbound: C; inbound: A
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/traverse', {
+      startId: entB, direction: 'both', maxDepth: 1,
+    });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const nodeIds = r.body.nodes.map(n => n._id);
+    // A is an inbound neighbour of B (A→B depends_on)
+    assert.ok(nodeIds.includes(entA), 'A must appear as inbound neighbour of B in both direction');
+    // C is an outbound neighbour of B (B→C depends_on)
+    assert.ok(nodeIds.includes(entC), 'C must appear as outbound neighbour of B in both direction');
+    // Start node (B) must never appear in results
+    assert.ok(!nodeIds.includes(entB), 'Start node must not appear in traversal results');
+  });
 });
 

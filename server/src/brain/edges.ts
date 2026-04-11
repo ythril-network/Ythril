@@ -229,6 +229,7 @@ export async function traverseGraph(
   const visited = new Set<string>([startId]);
   // frontier: nodes whose outgoing edges we need to explore at the current depth
   let frontier: string[] = [startId];
+  let frontierSet = new Set<string>(frontier);
   let currentDepth = 0;
   const resultNodes: TraverseNode[] = [];
   const resultEdges: TraverseEdge[] = [];
@@ -264,8 +265,8 @@ export async function traverseGraph(
         neighborId = edge.from;
       } else {
         // For 'both', skip if both ends are in the current frontier (same-level connection)
-        if (frontier.includes(edge.from) && frontier.includes(edge.to)) continue;
-        neighborId = frontier.includes(edge.from) ? edge.to : edge.from;
+        if (frontierSet.has(edge.from) && frontierSet.has(edge.to)) continue;
+        neighborId = frontierSet.has(edge.from) ? edge.to : edge.from;
       }
       if (visited.has(neighborId)) continue;
       visited.add(neighborId);
@@ -303,6 +304,7 @@ export async function traverseGraph(
     }
 
     frontier = nextFrontier;
+    frontierSet = new Set<string>(frontier);
     currentDepth++;
   }
 
