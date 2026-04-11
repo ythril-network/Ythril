@@ -1291,6 +1291,10 @@ brainRouter.post('/spaces/:spaceId/bulk', globalRateLimit, requireSpaceAuth, den
     if (!name) { errors.push({ type: 'entity', index: i, reason: 'missing required field: name' }); continue; }
     const type = typeof item['type'] === 'string' ? item['type'].trim() : '';
     if (!type) { errors.push({ type: 'entity', index: i, reason: 'missing required field: type' }); continue; }
+    const rawId = typeof item['id'] === 'string' ? item['id'].trim() : undefined;
+    if (rawId !== undefined && !UUID_V4_RE.test(rawId)) {
+      errors.push({ type: 'entity', index: i, reason: '`id` must be a valid UUID v4' }); continue;
+    }
     const tags: string[] = Array.isArray(item['tags']) ? (item['tags'] as unknown[]).filter((t): t is string => typeof t === 'string') : [];
     const description: string | undefined = typeof item['description'] === 'string' ? item['description'] : undefined;
     const properties: Record<string, string | number | boolean> =
@@ -1298,8 +1302,11 @@ brainRouter.post('/spaces/:spaceId/bulk', globalRateLimit, requireSpaceAuth, den
         ? (item['properties'] as Record<string, string | number | boolean>)
         : {};
     try {
-      const existing = await col<EntityDoc>(`${targetSpace}_entities`).findOne({ spaceId: targetSpace, name, type } as never);
-      await upsertEntity(targetSpace, name, type, tags, properties, description);
+      // Check for existing entity by ID (if supplied) to determine inserted vs updated
+      const existing = rawId
+        ? await col<EntityDoc>(`${targetSpace}_entities`).findOne({ _id: rawId, spaceId: targetSpace } as never)
+        : null;
+      await upsertEntity(targetSpace, name, type, tags, properties, description, rawId);
       if (existing) { updated.entities++; } else { inserted.entities++; }
     } catch (err) {
       errors.push({ type: 'entity', index: i, reason: err instanceof Error ? err.message : String(err) });

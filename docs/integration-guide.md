@@ -576,6 +576,7 @@ POST /api/brain/spaces/:spaceId/entities
 
 ```json
 {
+  "id": "550e8400-e29b-41d4-a716-446655440000",
   "name": "Kubernetes",
   "type": "technology",
   "tags": ["infra", "containers"],
@@ -584,9 +585,31 @@ POST /api/brain/spaces/:spaceId/entities
 }
 ```
 
-**Response** `201`: Full entity doc. Upserts on `(spaceId, name, type)` — tags are merged (deduplicated union), properties are shallow-merged (new keys added, existing keys overwritten).
+**Response** `201`: Full entity doc.
 
-**Constraints**: `name` required string; `type` optional string (defaults to empty); `tags` optional array of strings; `description` optional string (included in embedding text); `properties` optional object where each value must be a string, number, or boolean.
+**Identity model**: If `id` is supplied (must be a valid UUID v4), the entity with that `_id` is updated; if no entity with that ID exists, a new one is created with that ID. If `id` is omitted, a new entity is always inserted with a freshly generated UUID v4. Name is a non-unique searchable label, not a primary key.
+
+Tags are merged (deduplicated union), properties are shallow-merged (new keys added, existing keys overwritten).
+
+**Constraints**: `name` required string; `type` optional string (defaults to empty); `id` optional UUID v4 (400 if invalid); `tags` optional array of strings; `description` optional string (included in embedding text); `properties` optional object where each value must be a string, number, or boolean.
+
+---
+
+### Find Entities by Name
+
+```
+GET /api/brain/spaces/:spaceId/entities/by-name?name=Kubernetes
+```
+
+**Response** `200`:
+
+```json
+{
+  "entities": [ ... ]
+}
+```
+
+Returns all entities with the exact name, regardless of type. Multiple entities may share a name (name is not a unique key).
 
 ---
 
@@ -916,8 +939,10 @@ Each item accepts the same fields as its corresponding individual endpoint (`POS
 ```
 
 - `inserted` — count of new documents written per type.
-- `updated` — count of existing documents merged per type (entities and edges are upserted by their natural key).
+- `updated` — count of existing documents merged per type (entities are upserted by `id` when supplied; edges are upserted by their natural key `(from, to, label)`).
 - `errors` — per-item failures (`type`, zero-based `index`, human-readable `reason`). Valid items are still written even when errors are present.
+
+Entity items in the `entities` array accept an optional `id` field (UUID v4). If `id` is supplied, the entity with that ID is updated (or created with that ID). If `id` is omitted, a new entity is always inserted. See [Upsert an Entity](#upsert-an-entity) for full identity semantics.
 
 **Proxy spaces:** add `?targetSpace=<member>` to route all writes to a specific member space.
 

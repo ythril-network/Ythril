@@ -550,6 +550,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
               items: {
                 type: 'object',
                 properties: {
+                  id:          { type: 'string', description: 'Optional UUID v4 — if provided, updates the entity with this ID (or inserts with this ID). If omitted, a new entity is always inserted.' },
                   name:        { type: 'string', description: 'Entity name.' },
                   type:        { type: 'string', description: 'Entity type.' },
                   tags:        { type: 'array', items: { type: 'string' } },
@@ -892,6 +893,23 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const entity = await upsertEntity(wt.target, eName, eType, tags, props, description, rawId);
           return {
             content: [{ type: 'text' as const, text: `Entity '${entity.name}' (${entity.type}) upserted (ID ${entity._id}).` }],
+          };
+        }
+
+        case 'find_entities_by_name': {
+          const searchName = String(a['name'] ?? '').trim();
+          if (!searchName) throw new Error('name must not be empty');
+          const memberIds = resolveMemberSpaces(spaceId);
+          const all = (await Promise.all(memberIds.map(mid => findEntitiesByName(mid, searchName)))).flat();
+          if (all.length === 0) {
+            return { content: [{ type: 'text' as const, text: `No entities found with name '${searchName}'.` }] };
+          }
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `Found ${all.length} entit${all.length === 1 ? 'y' : 'ies'} with name '${searchName}':\n` +
+                all.map((e, i) => `[${i + 1}] ${e.name} (${e.type}) — ID ${e._id}`).join('\n'),
+            }],
           };
         }
 
@@ -1338,13 +1356,20 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             const eType = typeof item['type'] === 'string' ? item['type'].trim() : '';
             if (!eName) { errors.push({ type: 'entity', index: i, reason: 'missing required field: name' }); continue; }
             if (!eType) { errors.push({ type: 'entity', index: i, reason: 'missing required field: type' }); continue; }
+            const rawId = typeof item['id'] === 'string' ? item['id'].trim() : undefined;
+            if (rawId !== undefined && !UUID_V4_RE.test(rawId)) {
+              errors.push({ type: 'entity', index: i, reason: '`id` must be a valid UUID v4' }); continue;
+            }
             const tags = Array.isArray(item['tags']) ? (item['tags'] as unknown[]).filter((t): t is string => typeof t === 'string') : [];
             const description = typeof item['description'] === 'string' ? item['description'] : undefined;
             const props = (item['properties'] != null && typeof item['properties'] === 'object' && !Array.isArray(item['properties']))
               ? (item['properties'] as Record<string, string | number | boolean>) : {};
             try {
-              const existing = await col<import('../config/types.js').EntityDoc>(`${ts}_entities`).findOne({ spaceId: ts, name: eName, type: eType } as never);
-              await upsertEntity(ts, eName, eType, tags, props, description);
+              // Check for existing entity by ID (if supplied) to determine inserted vs updated
+              const existing = rawId
+                ? await col<import('../config/types.js').EntityDoc>(`${ts}_entities`).findOne({ _id: rawId, spaceId: ts } as never)
+                : null;
+              await upsertEntity(ts, eName, eType, tags, props, description, rawId);
               if (existing) { updated.entities++; } else { inserted.entities++; }
             } catch (err) {
               errors.push({ type: 'entity', index: i, reason: err instanceof Error ? err.message : String(err) });
