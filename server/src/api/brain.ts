@@ -4,7 +4,7 @@ import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit, bulkWipeRateLimit } from '../rate-limit/middleware.js';
 import { listMemories, deleteMemory, countMemories, bulkDeleteMemories } from '../brain/memory.js';
 import { listEntities, deleteEntity, upsertEntity, getEntityById, bulkDeleteEntities } from '../brain/entities.js';
-import { listEdges, deleteEdge, upsertEdge, getEdgeById, bulkDeleteEdges } from '../brain/edges.js';
+import { listEdges, deleteEdge, upsertEdge, getEdgeById, bulkDeleteEdges, traverseGraph } from '../brain/edges.js';
 import { createChrono, updateChrono, getChronoById, listChrono, deleteChrono, bulkDeleteChrono } from '../brain/chrono.js';
 import { embed } from '../brain/embedding.js';
 import { getConfig } from '../config/loader.js';
@@ -477,6 +477,42 @@ brainRouter.delete('/spaces/:spaceId/edges', bulkWipeRateLimit, requireSpaceAuth
   }
   const deleted = await bulkDeleteEdges(spaceId);
   res.json({ deleted });
+});
+
+// POST /api/brain/spaces/:spaceId/traverse — graph traversal (BFS)
+brainRouter.post('/spaces/:spaceId/traverse', globalRateLimit, requireSpaceAuth, async (req, res) => {
+  const spaceId = req.params['spaceId'] as string;
+  const cfg = getConfig();
+  if (!cfg.spaces.some(s => s.id === spaceId)) {
+    res.status(404).json({ error: `Space '${spaceId}' not found` });
+    return;
+  }
+  const { startId, direction, edgeLabels, maxDepth, limit } = req.body ?? {};
+  if (!startId || typeof startId !== 'string') {
+    res.status(400).json({ error: '`startId` string required' });
+    return;
+  }
+  const validDirections = new Set(['outbound', 'inbound', 'both']);
+  const effectiveDirection: 'outbound' | 'inbound' | 'both' =
+    typeof direction === 'string' && validDirections.has(direction)
+      ? (direction as 'outbound' | 'inbound' | 'both')
+      : 'outbound';
+  const effectiveEdgeLabels: string[] | undefined =
+    Array.isArray(edgeLabels) && edgeLabels.every((l: unknown) => typeof l === 'string')
+      ? edgeLabels
+      : undefined;
+  if (edgeLabels !== undefined && !Array.isArray(edgeLabels)) {
+    res.status(400).json({ error: '`edgeLabels` must be an array of strings' });
+    return;
+  }
+  const rawDepth = typeof maxDepth === 'number' ? maxDepth : 3;
+  const effectiveDepth = Math.min(Math.max(1, rawDepth), 10);
+  const rawLimit = typeof limit === 'number' ? limit : 100;
+  const effectiveLimit = Math.min(Math.max(1, rawLimit), 1000);
+
+  const memberIds = resolveMemberSpaces(spaceId);
+  const result = await traverseGraph(memberIds, startId.trim(), effectiveDirection, effectiveEdgeLabels, effectiveDepth, effectiveLimit);
+  res.json(result);
 });
 
 // ── Chrono CRUD ───────────────────────────────────────────────────────────────

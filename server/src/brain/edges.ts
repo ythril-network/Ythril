@@ -3,7 +3,27 @@ import { col } from '../db/mongo.js';
 import { nextSeq } from '../util/seq.js';
 import { embed } from './embedding.js';
 import { getConfig } from '../config/loader.js';
-import type { EdgeDoc, TombstoneDoc } from '../config/types.js';
+import type { EdgeDoc, EntityDoc, TombstoneDoc } from '../config/types.js';
+
+export interface TraverseNode {
+  _id: string;
+  name: string;
+  type: string;
+  depth: number;
+}
+
+export interface TraverseEdge {
+  _id: string;
+  from: string;
+  to: string;
+  label: string;
+}
+
+export interface TraverseResult {
+  nodes: TraverseNode[];
+  edges: TraverseEdge[];
+  truncated: boolean;
+}
 
 function authorRef() {
   const cfg = getConfig();
@@ -186,4 +206,88 @@ export async function bulkDeleteEdges(spaceId: string): Promise<number> {
   await col<TombstoneDoc>(`${spaceId}_tombstones`).bulkWrite(ops as never);
   await coll.deleteMany({});
   return ids.length;
+}
+
+/**
+ * BFS graph traversal from a starting entity.
+ *
+ * @param memberIds  Space IDs to search for edges and entities (supports proxy spaces).
+ * @param startId    UUID of the starting entity.
+ * @param direction  Follow edges from the node (outbound), to the node (inbound), or both.
+ * @param edgeLabels If provided, only traverse edges with one of these labels.
+ * @param maxDepth   Maximum hop count from startId (hard cap enforced by caller).
+ * @param limit      Maximum total nodes to return.
+ */
+export async function traverseGraph(
+  memberIds: string[],
+  startId: string,
+  direction: 'outbound' | 'inbound' | 'both' = 'outbound',
+  edgeLabels?: string[],
+  maxDepth = 3,
+  limit = 100,
+): Promise<TraverseResult> {
+  const visited = new Set<string>([startId]);
+  const queue: Array<{ id: string; depth: number }> = [{ id: startId, depth: 0 }];
+  const resultNodes: TraverseNode[] = [];
+  const resultEdges: TraverseEdge[] = [];
+
+  while (queue.length > 0) {
+    const { id: currentId, depth } = queue.shift()!;
+    if (depth >= maxDepth) continue;
+
+    // Build edge query — search across all member spaces
+    const labelFilter = edgeLabels && edgeLabels.length > 0
+      ? { label: { $in: edgeLabels } }
+      : {};
+
+    const adjacentEdges: EdgeDoc[] = [];
+    for (const mid of memberIds) {
+      let q: Record<string, unknown>;
+      if (direction === 'outbound') {
+        q = { spaceId: mid, from: currentId, ...labelFilter };
+      } else if (direction === 'inbound') {
+        q = { spaceId: mid, to: currentId, ...labelFilter };
+      } else {
+        q = { spaceId: mid, $or: [{ from: currentId }, { to: currentId }], ...labelFilter };
+      }
+      const edges = await col<EdgeDoc>(`${mid}_edges`).find(q as never).toArray() as EdgeDoc[];
+      adjacentEdges.push(...edges);
+    }
+
+    for (const edge of adjacentEdges) {
+      // Determine the neighbor node ID for this edge
+      let neighborId: string;
+      if (direction === 'outbound') {
+        neighborId = edge.to;
+      } else if (direction === 'inbound') {
+        neighborId = edge.from;
+      } else {
+        neighborId = edge.from === currentId ? edge.to : edge.from;
+      }
+
+      if (visited.has(neighborId)) continue;
+      visited.add(neighborId);
+
+      // Look up entity across member spaces
+      let entity: EntityDoc | null = null;
+      for (const mid of memberIds) {
+        entity = await col<EntityDoc>(`${mid}_entities`).findOne({ _id: neighborId, spaceId: mid } as never) as EntityDoc | null;
+        if (entity) break;
+      }
+      if (!entity) continue;
+
+      resultEdges.push({ _id: edge._id, from: edge.from, to: edge.to, label: edge.label });
+      resultNodes.push({ _id: entity._id, name: entity.name, type: entity.type, depth: depth + 1 });
+
+      if (resultNodes.length >= limit) {
+        return { nodes: resultNodes, edges: resultEdges, truncated: true };
+      }
+
+      if (depth + 1 < maxDepth) {
+        queue.push({ id: neighborId, depth: depth + 1 });
+      }
+    }
+  }
+
+  return { nodes: resultNodes, edges: resultEdges, truncated: false };
 }

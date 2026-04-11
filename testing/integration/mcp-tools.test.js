@@ -349,6 +349,54 @@ describe('MCP brain tools â€” upsert_entity / upsert_edge', () => {
   });
 });
 
+describe('MCP brain tools — traverse', () => {
+  let session;
+  let entityAId;
+  let entityBId;
+
+  before(async () => {
+    tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+    session = await openMcpSession('general', tokenA);
+
+    // Create two entities and an edge for traversal testing
+    const rA = await session.callTool('upsert_entity', { name: `TraverseMCP-A-${Date.now()}`, type: 'service' });
+    const mA = (rA?.content?.[0]?.text ?? '').match(/ID ([a-f0-9-]{36})/i);
+    assert.ok(mA, `Could not extract entity A ID: ${rA?.content?.[0]?.text}`);
+    entityAId = mA[1];
+
+    const rB = await session.callTool('upsert_entity', { name: `TraverseMCP-B-${Date.now()}`, type: 'service' });
+    const mB = (rB?.content?.[0]?.text ?? '').match(/ID ([a-f0-9-]{36})/i);
+    assert.ok(mB, `Could not extract entity B ID: ${rB?.content?.[0]?.text}`);
+    entityBId = mB[1];
+
+    await session.callTool('upsert_edge', { from: entityAId, to: entityBId, label: 'depends_on' });
+  });
+  after(() => session?.close());
+
+  it('traverse with empty startId returns isError', async () => {
+    const result = await session.callTool('traverse', { startId: '' });
+    assert.ok(result?.isError, 'Empty startId must return isError');
+  });
+
+  it('traverse returns nodes and edges JSON', async () => {
+    const result = await session.callTool('traverse', { startId: entityAId, direction: 'outbound', maxDepth: 1 });
+    assert.ok(!result?.isError, `traverse returned isError: ${JSON.stringify(result)}`);
+    const text = result?.content?.[0]?.text ?? '';
+    const parsed = JSON.parse(text);
+    assert.ok(Array.isArray(parsed.nodes), 'nodes must be array');
+    assert.ok(Array.isArray(parsed.edges), 'edges must be array');
+    assert.equal(typeof parsed.truncated, 'boolean', 'truncated must be boolean');
+    const nodeIds = parsed.nodes.map(n => n._id);
+    assert.ok(nodeIds.includes(entityBId), 'Entity B must appear in outbound traversal from A');
+  });
+
+  it('traverse tool appears in tools/list', async () => {
+    const tools = await session.listTools();
+    const names = tools.map(t => t.name);
+    assert.ok(names.includes('traverse'), 'traverse must appear in tools list');
+  });
+});
+
 describe('MCP file tools â€” write_file / read_file / list_dir / create_dir / move_file / delete_file', () => {
   let session;
   const dir = `mcp-test-${Date.now()}`;
