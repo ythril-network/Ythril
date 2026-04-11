@@ -16,10 +16,39 @@ import { needsReindex, clearReindexFlag } from '../spaces/spaces.js';
 import { log } from '../util/log.js';
 import { checkQuota, QuotaError } from '../quota/quota.js';
 import { resolveMemberSpaces, resolveWriteTarget, findSpace, isProxySpace } from '../spaces/proxy.js';
-import type { MemoryDoc, EntityDoc, EdgeDoc, ChronoEntry, FileMetaDoc, ChronoKind, ChronoStatus } from '../config/types.js';
+import { validateEntity, validateEdge, validateMemory, validateChrono, type SchemaViolation } from '../spaces/schema-validation.js';
+import type { MemoryDoc, EntityDoc, EdgeDoc, ChronoEntry, FileMetaDoc, ChronoKind, ChronoStatus, SpaceMeta } from '../config/types.js';
 import { reindexInProgress } from '../metrics/registry.js';
 
 export const brainRouter = Router();
+
+// ── Schema validation helpers ─────────────────────────────────────────────
+
+/** Look up the meta block for a space from config. Returns undefined if none. */
+function getSpaceMeta(spaceId: string): SpaceMeta | undefined {
+  const cfg = getConfig();
+  return cfg.spaces.find(s => s.id === spaceId)?.meta;
+}
+
+/**
+ * Apply schema validation to a write operation.
+ * Returns { blocked: true, violations } when strict mode rejects the write.
+ * Returns { blocked: false, warnings } when warn mode lets the write through.
+ * Returns { blocked: false, warnings: [] } when validation is off or no meta.
+ */
+function applyValidation(
+  meta: SpaceMeta | undefined,
+  violations: SchemaViolation[],
+): { blocked: boolean; warnings: SchemaViolation[] } {
+  if (!meta || !meta.validationMode || meta.validationMode === 'off' || violations.length === 0) {
+    return { blocked: false, warnings: [] };
+  }
+  if (meta.validationMode === 'strict') {
+    return { blocked: true, warnings: violations };
+  }
+  // warn mode
+  return { blocked: false, warnings: violations };
+}
 
 // ── Short-form memory CRUD  (/:spaceId/memories) ──────────────────────────
 // These are the primary REST endpoints used by API clients and integration tests.
@@ -67,6 +96,15 @@ brainRouter.post('/:spaceId/memories', globalRateLimit, requireSpaceAuth, denyRe
       : undefined;
   const safeEntityIds: string[] = Array.isArray(entityIds) ? entityIds : [];
   const safeTags: string[] = Array.isArray(tags) ? tags : [];
+
+  // Schema validation
+  const meta = getSpaceMeta(wt.target);
+  const violations = validateMemory(meta ?? {}, { properties: safeProps });
+  const validation = applyValidation(meta, violations);
+  if (validation.blocked) {
+    res.status(400).json({ error: 'schema_violation', violations: validation.warnings });
+    return;
+  }
 
   // Resolve entity names for richer embedding
   let entityNames: string[] = [];
@@ -120,6 +158,7 @@ brainRouter.post('/:spaceId/memories', globalRateLimit, requireSpaceAuth, denyRe
   await col<MemoryDoc>(`${targetSpace}_memories`).insertOne(doc as never);
   const body: Record<string, unknown> = { ...doc };
   if (quotaResult?.softBreached) body['storageWarning'] = true;
+  if (validation.warnings.length > 0) body['warnings'] = validation.warnings;
   res.status(201).json(body);
 });
 
@@ -393,9 +432,22 @@ brainRouter.post('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAuth,
   }
   const safeDesc: string | undefined = typeof description === 'string' ? description : undefined;
   const safeId: string | undefined = typeof id === 'string' ? id : undefined;
+
+  // Schema validation
+  const meta = getSpaceMeta(wt.target);
+  const violations = validateEntity(meta ?? {}, { name: name.trim(), type: type.trim(), properties });
+  const validation = applyValidation(meta, violations);
+  if (validation.blocked) {
+    res.status(400).json({ error: 'schema_violation', violations: validation.warnings });
+    return;
+  }
+
   try {
     const { entity, warning } = await upsertEntity(wt.target, name.trim(), type.trim(), tags, properties, safeDesc, safeId);
-    res.status(201).json(warning ? { ...entity, warning } : entity);
+    const result: Record<string, unknown> = { ...entity };
+    if (warning) result['warning'] = warning;
+    if (validation.warnings.length > 0) result['warnings'] = validation.warnings;
+    res.status(201).json(result);
   } catch (err) {
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -445,11 +497,23 @@ brainRouter.post('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, de
       ? (properties as Record<string, string | number | boolean>)
       : undefined;
   const safeTags: string[] | undefined = Array.isArray(tags) ? tags : undefined;
+
+  // Schema validation
+  const meta = getSpaceMeta(wt.target);
+  const violations = validateEdge(meta ?? {}, { label: label.trim(), properties: safeProps });
+  const validation = applyValidation(meta, violations);
+  if (validation.blocked) {
+    res.status(400).json({ error: 'schema_violation', violations: validation.warnings });
+    return;
+  }
+
   const edge = await upsertEdge(
     wt.target, from.trim(), to.trim(), label.trim(), weight, type?.trim(),
     typeof description === 'string' ? description : undefined, safeProps, safeTags,
   );
-  res.status(201).json(edge);
+  const result: Record<string, unknown> = { ...edge };
+  if (validation.warnings.length > 0) result['warnings'] = validation.warnings;
+  res.status(201).json(result);
 });
 
 // GET /api/brain/spaces/:spaceId/entities
@@ -773,11 +837,22 @@ brainRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, d
       ? (properties as Record<string, string | number | boolean>)
       : undefined;
 
+  // Schema validation
+  const meta = getSpaceMeta(wt.target);
+  const violations = validateChrono(meta ?? {}, { properties: safeProps });
+  const validation = applyValidation(meta, violations);
+  if (validation.blocked) {
+    res.status(400).json({ error: 'schema_violation', violations: validation.warnings });
+    return;
+  }
+
   const entry = await createChrono(wt.target, {
     title: title.trim(), kind, startsAt, endsAt, status, confidence,
     tags, entityIds, memoryIds, description, properties: safeProps, recurrence,
   });
-  res.status(201).json(entry);
+  const result: Record<string, unknown> = { ...entry };
+  if (validation.warnings.length > 0) result['warnings'] = validation.warnings;
+  res.status(201).json(result);
 });
 
 // POST /api/brain/spaces/:spaceId/chrono/:id — update a chrono entry

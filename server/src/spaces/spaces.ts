@@ -5,7 +5,7 @@ import { getDb, col } from '../db/mongo.js';
 import { getConfig, saveConfig, getEmbeddingConfig, getDataRoot } from '../config/loader.js';
 import { ensureSpaceFilesDir } from '../files/files.js';
 import { log } from '../util/log.js';
-import type { SpaceConfig, MemoryDoc } from '../config/types.js';
+import type { SpaceConfig, SpaceMeta, MemoryDoc } from '../config/types.js';
 
 const SPACE_COLLECTIONS = ['memories', 'entities', 'edges', 'chrono', 'tombstones', 'conflicts', 'files'] as const;
 
@@ -420,17 +420,46 @@ export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): 
   return result;
 }
 
-/** Update mutable fields (label, description) of an existing space in config.
+/** Maximum number of previous meta versions kept for history. */
+const META_VERSION_CAP = 20;
+
+/** Update mutable fields (label, description, meta) of an existing space in config.
+ *  When `meta` is provided the version counter is auto-incremented and the
+ *  previous version is pushed to `previousVersions` (capped at META_VERSION_CAP).
  *  Returns the updated SpaceConfig, or null if the space was not found. */
 export function updateSpace(
   spaceId: string,
-  updates: { label?: string; description?: string },
+  updates: { label?: string; description?: string; meta?: SpaceMeta },
 ): SpaceConfig | null {
   const cfg = getConfig();
   const space = cfg.spaces.find(s => s.id === spaceId);
   if (!space) return null;
   if (typeof updates.label === 'string') space.label = updates.label;
   if (typeof updates.description === 'string') space.description = updates.description;
+
+  if (updates.meta !== undefined) {
+    const now = new Date().toISOString();
+    const prev = space.meta;
+    const prevVersion = prev?.version ?? 0;
+    const newVersion = prevVersion + 1;
+
+    // Preserve previous version history (capped)
+    const history = prev?.previousVersions ?? [];
+    if (prev) {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { previousVersions: _drop, ...snapshot } = prev;
+      history.unshift({ version: prevVersion, meta: snapshot, updatedAt: prev.updatedAt ?? now });
+      if (history.length > META_VERSION_CAP) history.length = META_VERSION_CAP;
+    }
+
+    space.meta = {
+      ...updates.meta,
+      version: newVersion,
+      updatedAt: now,
+      previousVersions: history.length > 0 ? history : undefined,
+    };
+  }
+
   saveConfig(cfg);
   return space;
 }
