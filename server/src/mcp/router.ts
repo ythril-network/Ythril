@@ -17,7 +17,7 @@ import { updateSpace, wipeSpace, WIPE_COLLECTION_TYPES, type WipeCollectionType 
 import { remember, recall, recallGlobal, queryBrain, updateMemory, deleteMemory, type RecallKnowledgeType, type RecallResult } from '../brain/memory.js';
 import { col } from '../db/mongo.js';
 import { upsertEntity, listEntities, updateEntityById } from '../brain/entities.js';
-import { upsertEdge, listEdges, updateEdgeById } from '../brain/edges.js';
+import { upsertEdge, listEdges, traverseGraph, updateEdgeById } from '../brain/edges.js';
 import { createChrono, updateChrono, listChrono, ChronoFilter } from '../brain/chrono.js';
 // File tools
 import {
@@ -258,6 +258,29 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
           },
           required: ['from', 'to', 'label'],
+        },
+      },
+      {
+        name: 'traverse',
+        description: 'Follow edges from a starting entity and return reachable nodes up to maxDepth hops. Useful for dependency analysis, impact assessment, and lineage queries.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            startId: { type: 'string', description: 'UUID of the starting entity.' },
+            direction: {
+              type: 'string',
+              enum: ['outbound', 'inbound', 'both'],
+              description: 'Follow edges from the node (outbound), to the node (inbound), or both directions. Default: outbound.',
+            },
+            edgeLabels: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Filter traversal to specific edge labels only. Omit to traverse all labels.',
+            },
+            maxDepth: { type: 'number', description: 'Maximum hops from startId (default 3, max 10).' },
+            limit: { type: 'number', description: 'Maximum total nodes returned (default 100).' },
+          },
+          required: ['startId'],
         },
       },
       {
@@ -776,6 +799,30 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const edge = await upsertEdge(wt.target, from, to, label, weight, edgeType, description, edgeProps, edgeTags);
           return {
             content: [{ type: 'text' as const, text: `Edge '${label}' (${from} → ${to}) upserted (ID ${edge._id}).` }],
+          };
+        }
+
+        case 'traverse': {
+          const startId = String(a['startId'] ?? '').trim();
+          if (!startId) throw new Error('startId must not be empty');
+          const directionRaw = typeof a['direction'] === 'string' ? a['direction'] : 'outbound';
+          const validDirections = new Set(['outbound', 'inbound', 'both']);
+          const direction: 'outbound' | 'inbound' | 'both' = validDirections.has(directionRaw)
+            ? (directionRaw as 'outbound' | 'inbound' | 'both')
+            : 'outbound';
+          const edgeLabels = Array.isArray(a['edgeLabels'])
+            ? (a['edgeLabels'] as unknown[]).filter((l): l is string => typeof l === 'string')
+            : undefined;
+          const maxDepth = typeof a['maxDepth'] === 'number' ? Math.min(Math.max(1, a['maxDepth']), 10) : 3;
+          const limit = typeof a['limit'] === 'number' ? Math.min(Math.max(1, a['limit']), 1000) : 100;
+
+          const memberIds = resolveMemberSpaces(spaceId);
+          const result = await traverseGraph(memberIds, startId, direction, edgeLabels, maxDepth, limit);
+          return {
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify(result, null, 2),
+            }],
           };
         }
 

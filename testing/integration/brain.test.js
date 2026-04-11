@@ -1189,6 +1189,166 @@ describe('Brain — chrono properties field', () => {
   });
 });
 
+// ── Graph traversal ─────────────────────────────────────────────────────────
+
+describe('Brain — graph traversal (/api/brain/spaces/:spaceId/traverse)', () => {
+  const RUN = Date.now();
+  // Entity IDs for a small graph: A → B → C (chain), A → D (branch)
+  const entA = `trav-A-${RUN}`;
+  const entB = `trav-B-${RUN}`;
+  const entC = `trav-C-${RUN}`;
+  const entD = `trav-D-${RUN}`;
+
+  before(async () => {
+    const { post: syncPost } = await import('../sync/helpers.js');
+    const now = new Date().toISOString();
+    let seq = Date.now();
+
+    for (const [id, name] of [[entA, 'A'], [entB, 'B'], [entC, 'C'], [entD, 'D']]) {
+      await syncPost(INSTANCES.a, token(), '/api/sync/entities?spaceId=general', {
+        _id: id, spaceId: 'general', name: `TravEnt-${name}-${RUN}`, type: 'service', tags: [],
+        seq: seq++, author: { instanceId: 'test', instanceLabel: 'Test' },
+        createdAt: now, updatedAt: now,
+      });
+    }
+    // A → B (depends_on), B → C (depends_on), A → D (references)
+    for (const [from, to, label] of [
+      [entA, entB, 'depends_on'],
+      [entB, entC, 'depends_on'],
+      [entA, entD, 'references'],
+    ]) {
+      await syncPost(INSTANCES.a, token(), '/api/sync/edges?spaceId=general', {
+        _id: `trav-edge-${from}-${to}-${RUN}`, spaceId: 'general',
+        from, to, label,
+        seq: seq++, author: { instanceId: 'test', instanceLabel: 'Test' },
+        createdAt: now, updatedAt: now,
+      });
+    }
+  });
+
+  it('Returns 400 when startId is missing', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/traverse', {});
+    assert.equal(r.status, 400, JSON.stringify(r.body));
+  });
+
+  it('Returns 404 for unknown space', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/no-such-space/traverse', { startId: entA });
+    assert.equal(r.status, 404, JSON.stringify(r.body));
+  });
+
+  it('Returns 401 without auth', async () => {
+    const r = await fetch(`${INSTANCES.a}/api/brain/spaces/general/traverse`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ startId: entA }),
+    });
+    assert.equal(r.status, 401);
+  });
+
+  it('Outbound depth=1 returns direct neighbours B and D', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/traverse', {
+      startId: entA, direction: 'outbound', maxDepth: 1,
+    });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.ok(Array.isArray(r.body.nodes), 'nodes must be array');
+    assert.ok(Array.isArray(r.body.edges), 'edges must be array');
+    assert.equal(typeof r.body.truncated, 'boolean', 'truncated must be boolean');
+    const nodeIds = r.body.nodes.map(n => n._id);
+    assert.ok(nodeIds.includes(entB), 'B must be in depth-1 neighbours');
+    assert.ok(nodeIds.includes(entD), 'D must be in depth-1 neighbours');
+    assert.ok(!nodeIds.includes(entA), 'start node must not appear in results');
+    assert.ok(!nodeIds.includes(entC), 'C must not appear at depth 1');
+    // All returned nodes must have depth=1
+    for (const n of r.body.nodes) assert.equal(n.depth, 1, `Node ${n._id} must have depth=1`);
+  });
+
+  it('Outbound depth=2 reaches C via B', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/traverse', {
+      startId: entA, direction: 'outbound', maxDepth: 2,
+    });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const nodeIds = r.body.nodes.map(n => n._id);
+    assert.ok(nodeIds.includes(entC), 'C must appear at depth 2');
+    const nodeC = r.body.nodes.find(n => n._id === entC);
+    assert.equal(nodeC.depth, 2, 'C must have depth=2');
+  });
+
+  it('edgeLabels filter restricts traversal to matching labels', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/traverse', {
+      startId: entA, direction: 'outbound', maxDepth: 1, edgeLabels: ['depends_on'],
+    });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const nodeIds = r.body.nodes.map(n => n._id);
+    assert.ok(nodeIds.includes(entB), 'B (depends_on) must appear');
+    assert.ok(!nodeIds.includes(entD), 'D (references) must not appear with depends_on filter');
+  });
+
+  it('Inbound traversal from C returns B then A', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/traverse', {
+      startId: entC, direction: 'inbound', maxDepth: 2,
+    });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const nodeIds = r.body.nodes.map(n => n._id);
+    assert.ok(nodeIds.includes(entB), 'B must appear in inbound traversal from C');
+    assert.ok(nodeIds.includes(entA), 'A must appear in inbound traversal from C at depth 2');
+  });
+
+  it('limit=1 returns only one node and sets truncated=true', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/traverse', {
+      startId: entA, direction: 'outbound', maxDepth: 3, limit: 1,
+    });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.nodes.length, 1, 'Only one node must be returned');
+    assert.equal(r.body.truncated, true, 'truncated must be true');
+  });
+
+  it('Response edges only include traversed edges (not all edges)', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/traverse', {
+      startId: entA, direction: 'outbound', maxDepth: 1, edgeLabels: ['depends_on'],
+    });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    // Only the A→B edge should appear (not A→D)
+    assert.equal(r.body.edges.length, 1, 'Only traversed edge should be returned');
+    const e = r.body.edges[0];
+    assert.equal(e.from, entA);
+    assert.equal(e.to, entB);
+    assert.equal(e.label, 'depends_on');
+  });
+
+  it('maxDepth is capped at 10 and does not error with large value', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/traverse', {
+      startId: entA, direction: 'outbound', maxDepth: 999,
+    });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+  });
+
+  it('Unknown startId returns empty nodes and edges', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/traverse', {
+      startId: 'nonexistent-entity-id-xyz',
+    });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.deepEqual(r.body.nodes, []);
+    assert.deepEqual(r.body.edges, []);
+    assert.equal(r.body.truncated, false);
+  });
+
+  it('direction=both returns neighbours in either direction and start node never appears in results', async () => {
+    // A→B and A→D outbound; C→B is not in graph, but B→C is. Starting from B with both:
+    // outbound: C; inbound: A
+    const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/traverse', {
+      startId: entB, direction: 'both', maxDepth: 1,
+    });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const nodeIds = r.body.nodes.map(n => n._id);
+    // A is an inbound neighbour of B (A→B depends_on)
+    assert.ok(nodeIds.includes(entA), 'A must appear as inbound neighbour of B in both direction');
+    // C is an outbound neighbour of B (B→C depends_on)
+    assert.ok(nodeIds.includes(entC), 'C must appear as outbound neighbour of B in both direction');
+    // Start node (B) must never appear in results
+    assert.ok(!nodeIds.includes(entB), 'Start node must not appear in traversal results');
+  });
+});
+
 
 // ── Brain — structured query endpoint ───────────────────────────────────────
 
