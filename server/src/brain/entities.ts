@@ -91,6 +91,57 @@ export async function getEntityById(spaceId: string, id: string): Promise<Entity
   return col<EntityDoc>(`${spaceId}_entities`).findOne({ _id: id, spaceId } as never) as Promise<EntityDoc | null>;
 }
 
+/** Update an existing entity by ID. Partial update — only supplied fields are changed. Re-embeds when any content field changes. */
+export async function updateEntityById(
+  spaceId: string,
+  id: string,
+  updates: { name?: string; type?: string; description?: string; tags?: string[]; properties?: Record<string, string | number | boolean> },
+): Promise<EntityDoc | null> {
+  const collection = col<EntityDoc>(`${spaceId}_entities`);
+  const existing = await collection.findOne({ _id: id, spaceId } as never) as EntityDoc | null;
+  if (!existing) return null;
+
+  const seq = await nextSeq(spaceId);
+  const now = new Date().toISOString();
+  const $set: Record<string, unknown> = { updatedAt: now, seq };
+
+  const newName = updates.name ?? existing.name;
+  const newType = updates.type ?? existing.type;
+  const newDesc = updates.description !== undefined ? updates.description : existing.description;
+  const newTags = updates.tags !== undefined
+    ? Array.from(new Set([...(existing.tags ?? []), ...updates.tags]))
+    : existing.tags ?? [];
+  const newProps = updates.properties !== undefined
+    ? { ...(existing.properties ?? {}), ...updates.properties }
+    : existing.properties ?? {};
+
+  if (updates.name !== undefined) $set['name'] = newName;
+  if (updates.type !== undefined) $set['type'] = newType;
+  if (updates.description !== undefined) $set['description'] = newDesc;
+  if (updates.tags !== undefined) $set['tags'] = newTags;
+  if (updates.properties !== undefined) $set['properties'] = newProps;
+
+  // Re-embed whenever any content field changes
+  try {
+    const embResult = await embed(entityEmbedText(newName, newType, newTags, newDesc, newProps));
+    $set['embedding'] = embResult.vector;
+    $set['embeddingModel'] = embResult.model;
+  } catch { /* embedding unavailable — keep existing embedding */ }
+
+  await collection.updateOne({ _id: id } as never, { $set } as never);
+  return {
+    ...existing,
+    name: newName,
+    type: newType,
+    tags: newTags,
+    properties: newProps,
+    updatedAt: now,
+    seq,
+    ...(updates.description !== undefined ? { description: newDesc } : {}),
+    ...('embedding' in $set ? { embedding: $set['embedding'] as number[], embeddingModel: $set['embeddingModel'] as string } : {}),
+  } as EntityDoc;
+}
+
 /** List entities with optional filter */
 export async function listEntities(
   spaceId: string,

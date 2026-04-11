@@ -106,6 +106,14 @@ export interface SpaceStats {
   needsReindex?: boolean;
 }
 
+export type QueryCollection = 'memories' | 'entities' | 'edges' | 'chrono' | 'files';
+
+export interface QueryResult {
+  results: Record<string, unknown>[];
+  collection: QueryCollection;
+  count: number;
+}
+
 export type WipeCollectionType = 'memories' | 'entities' | 'edges' | 'chrono' | 'files';
 
 export interface WipeResult {
@@ -303,6 +311,19 @@ export class ApiService {
 
   reindex(spaceId: string): Observable<Record<string, number>> {
     return this.http.post<Record<string, number>>(`/api/brain/spaces/${spaceId}/reindex`, {});
+  }
+
+  queryBrain(
+    spaceId: string,
+    body: {
+      collection: QueryCollection;
+      filter?: Record<string, unknown>;
+      projection?: Record<string, unknown>;
+      limit?: number;
+      maxTimeMS?: number;
+    },
+  ): Observable<QueryResult> {
+    return this.http.post<QueryResult>(`/api/brain/spaces/${spaceId}/query`, body);
   }
 
   // ── Brain — memories ──────────────────────────────────────────────────────
