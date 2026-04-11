@@ -158,6 +158,60 @@ export async function getEdgeById(spaceId: string, id: string): Promise<EdgeDoc 
   return col<EdgeDoc>(`${spaceId}_edges`).findOne({ _id: id, spaceId } as never) as Promise<EdgeDoc | null>;
 }
 
+/** Update an existing edge by ID. Partial update — only supplied fields are changed. Re-embeds when any content field changes. */
+export async function updateEdgeById(
+  spaceId: string,
+  id: string,
+  updates: { label?: string; description?: string; tags?: string[]; properties?: Record<string, string | number | boolean>; weight?: number; type?: string },
+): Promise<EdgeDoc | null> {
+  const collection = col<EdgeDoc>(`${spaceId}_edges`);
+  const existing = await collection.findOne({ _id: id, spaceId } as never) as EdgeDoc | null;
+  if (!existing) return null;
+
+  const seq = await nextSeq(spaceId);
+  const now = new Date().toISOString();
+  const $set: Record<string, unknown> = { updatedAt: now, seq };
+
+  const newLabel = updates.label ?? existing.label;
+  const newDesc = updates.description !== undefined ? updates.description : existing.description;
+  const newTags = updates.tags !== undefined
+    ? Array.from(new Set([...(existing.tags ?? []), ...updates.tags]))
+    : existing.tags ?? [];
+  const newProps = updates.properties !== undefined
+    ? { ...(existing.properties ?? {}), ...updates.properties }
+    : existing.properties;
+  const newType = updates.type !== undefined ? updates.type : existing.type;
+  const newWeight = updates.weight !== undefined ? updates.weight : existing.weight;
+
+  if (updates.label !== undefined) $set['label'] = newLabel;
+  if (updates.description !== undefined) $set['description'] = newDesc;
+  if (updates.tags !== undefined) $set['tags'] = newTags;
+  if (updates.properties !== undefined) $set['properties'] = newProps;
+  if (updates.type !== undefined) $set['type'] = newType;
+  if (updates.weight !== undefined) $set['weight'] = newWeight;
+
+  // Re-embed whenever any content field changes
+  try {
+    const embResult = await embed(edgeEmbedText(existing.from, newLabel, existing.to, newTags, newType, newDesc));
+    $set['embedding'] = embResult.vector;
+    $set['embeddingModel'] = embResult.model;
+  } catch { /* embedding unavailable — keep existing embedding */ }
+
+  await collection.updateOne({ _id: id } as never, { $set } as never);
+  return {
+    ...existing,
+    label: newLabel,
+    tags: newTags,
+    updatedAt: now,
+    seq,
+    ...(updates.description !== undefined ? { description: newDesc } : {}),
+    ...(updates.properties !== undefined ? { properties: newProps } : {}),
+    ...(updates.type !== undefined ? { type: newType } : {}),
+    ...(updates.weight !== undefined ? { weight: newWeight } : {}),
+    ...('embedding' in $set ? { embedding: $set['embedding'] as number[], embeddingModel: $set['embeddingModel'] as string } : {}),
+  } as EdgeDoc;
+}
+
 /** Bulk-delete all edges in a space, writing a tombstone per deleted doc. */
 export async function bulkDeleteEdges(spaceId: string): Promise<number> {
   const coll = col<EdgeDoc>(`${spaceId}_edges`);

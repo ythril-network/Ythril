@@ -549,7 +549,11 @@ hr, .divider {
   border-bottom: 2px solid transparent;
   transition: color var(--transition), border-color var(--transition);
   text-decoration: none;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  min-width: 110px;
+  justify-content: center;
+  white-space: nowrap;
 }
 
 .tab:hover { color: var(--text-primary); }

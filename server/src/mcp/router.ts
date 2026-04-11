@@ -16,8 +16,8 @@ import { updateSpace, wipeSpace, WIPE_COLLECTION_TYPES, type WipeCollectionType 
 // Brain tools
 import { remember, recall, recallGlobal, queryBrain, updateMemory, deleteMemory, type RecallKnowledgeType, type RecallResult } from '../brain/memory.js';
 import { col } from '../db/mongo.js';
-import { upsertEntity, listEntities } from '../brain/entities.js';
-import { upsertEdge, listEdges } from '../brain/edges.js';
+import { upsertEntity, listEntities, updateEntityById } from '../brain/entities.js';
+import { upsertEdge, listEdges, updateEdgeById } from '../brain/edges.js';
 import { createChrono, updateChrono, listChrono } from '../brain/chrono.js';
 // File tools
 import {
@@ -53,7 +53,7 @@ function formatRecallSummary(r: RecallResult): string {
 
 const MUTATING_TOOLS = new Set([
   'remember', 'update_memory', 'delete_memory',
-  'upsert_entity', 'upsert_edge',
+  'upsert_entity', 'update_entity', 'upsert_edge', 'update_edge',
   'create_chrono', 'update_chrono',
   'write_file', 'delete_file', 'create_dir', 'move_file',
   'sync_now', 'update_space', 'wipe_space',
@@ -157,7 +157,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
       },
       {
         name: 'update_memory',
-        description: 'Update an existing memory\'s fact, tags, or entity links. Re-embeds automatically if fact changes.',
+        description: 'Update an existing memory\'s fact, tags, entity links, description, or properties. Re-embeds automatically if any content field changes.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -165,6 +165,12 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             fact: { type: 'string', description: 'New fact text (triggers re-embedding).' },
             tags: { type: 'array', items: { type: 'string' }, description: 'New tags (replaces existing).' },
             entityIds: { type: 'array', items: { type: 'string' }, description: 'New entity ID links (replaces existing).' },
+            description: { type: 'string', description: 'New prose description or context.' },
+            properties: {
+              type: 'object',
+              description: 'Key-value properties to merge (e.g. {"source": "manual"}). Values must be string, number, or boolean.',
+              additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
+            },
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
           },
           required: ['id'],
@@ -252,6 +258,49 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
           },
           required: ['from', 'to', 'label'],
+        },
+      },
+      {
+        name: 'update_entity',
+        description: 'Update an existing entity by its ID. All fields are optional — only supplied fields are changed.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', description: 'Entity ID to update.' },
+            name: { type: 'string', description: 'New entity name.' },
+            type: { type: 'string', description: 'New entity type.' },
+            description: { type: 'string', description: 'New prose description or summary.' },
+            tags: { type: 'array', items: { type: 'string' }, description: 'Tags to merge with existing tags.' },
+            properties: {
+              type: 'object',
+              description: 'Key-value properties to merge with existing (e.g. {"wheels": 4}). Values must be string, number, or boolean.',
+              additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
+            },
+            targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+          },
+          required: ['id'],
+        },
+      },
+      {
+        name: 'update_edge',
+        description: 'Update an existing edge by its ID. All fields are optional — only supplied fields are changed.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', description: 'Edge ID to update.' },
+            label: { type: 'string', description: 'New relationship label.' },
+            type: { type: 'string', description: 'New edge type.' },
+            weight: { type: 'number', description: 'New edge weight (0–1).' },
+            description: { type: 'string', description: 'New prose description.' },
+            tags: { type: 'array', items: { type: 'string' }, description: 'Tags to merge with existing tags.' },
+            properties: {
+              type: 'object',
+              description: 'Key-value properties to merge with existing. Values must be string, number, or boolean.',
+              additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
+            },
+            targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+          },
+          required: ['id'],
         },
       },
       {
@@ -582,15 +631,19 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
           if (!wt.ok) throw new Error(wt.error);
 
-          const updates: { fact?: string; tags?: string[]; entityIds?: string[] } = {};
+          const updates: { fact?: string; tags?: string[]; entityIds?: string[]; description?: string; properties?: Record<string, string | number | boolean> } = {};
           if (typeof a['fact'] === 'string') {
             if (!a['fact'].trim()) throw new Error('fact must not be empty');
             updates.fact = a['fact'] as string;
           }
           if (Array.isArray(a['tags'])) updates.tags = a['tags'] as string[];
           if (Array.isArray(a['entityIds'])) updates.entityIds = a['entityIds'] as string[];
+          if (typeof a['description'] === 'string') updates.description = a['description'] as string;
+          if (a['properties'] !== null && typeof a['properties'] === 'object' && !Array.isArray(a['properties'])) {
+            updates.properties = a['properties'] as Record<string, string | number | boolean>;
+          }
 
-          if (Object.keys(updates).length === 0) throw new Error('At least one of fact, tags, or entityIds must be provided');
+          if (Object.keys(updates).length === 0) throw new Error('At least one of fact, tags, entityIds, description, or properties must be provided');
 
           const memberIds = resolveMemberSpaces(wt.target);
           // Search member spaces sequentially — consistent with REST endpoint behaviour.
@@ -719,6 +772,59 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const edge = await upsertEdge(wt.target, from, to, label, weight, edgeType, description, edgeProps, edgeTags);
           return {
             content: [{ type: 'text' as const, text: `Edge '${label}' (${from} → ${to}) upserted (ID ${edge._id}).` }],
+          };
+        }
+
+        case 'update_entity': {
+          const id = String(a['id'] ?? '').trim();
+          if (!id) throw new Error('id must not be empty');
+          const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
+          if (!wt.ok) throw new Error(wt.error);
+          const updates: { name?: string; type?: string; description?: string; tags?: string[]; properties?: Record<string, string | number | boolean> } = {};
+          if (typeof a['name'] === 'string') updates.name = a['name'].trim();
+          if (typeof a['type'] === 'string') updates.type = (a['type'] as string).trim();
+          if (typeof a['description'] === 'string') updates.description = a['description'] as string;
+          if (Array.isArray(a['tags'])) updates.tags = a['tags'] as string[];
+          if (a['properties'] != null && typeof a['properties'] === 'object' && !Array.isArray(a['properties'])) {
+            updates.properties = a['properties'] as Record<string, string | number | boolean>;
+          }
+          if (Object.keys(updates).length === 0) throw new Error('At least one of name, type, description, tags, or properties must be provided');
+          const memberIds = resolveMemberSpaces(wt.target);
+          let updatedEnt = null;
+          for (const mid of memberIds) {
+            updatedEnt = await updateEntityById(mid, id, updates);
+            if (updatedEnt) break;
+          }
+          if (!updatedEnt) throw new Error(`Entity '${id}' not found`);
+          return {
+            content: [{ type: 'text' as const, text: `Entity '${updatedEnt.name}' (${updatedEnt.type}) updated (ID ${updatedEnt._id}, seq ${updatedEnt.seq}).` }],
+          };
+        }
+
+        case 'update_edge': {
+          const id = String(a['id'] ?? '').trim();
+          if (!id) throw new Error('id must not be empty');
+          const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
+          if (!wt.ok) throw new Error(wt.error);
+          const updates: { label?: string; description?: string; tags?: string[]; properties?: Record<string, string | number | boolean>; weight?: number; type?: string } = {};
+          if (typeof a['label'] === 'string') updates.label = (a['label'] as string).trim();
+          if (typeof a['description'] === 'string') updates.description = a['description'] as string;
+          if (Array.isArray(a['tags'])) updates.tags = a['tags'] as string[];
+          if (a['properties'] != null && typeof a['properties'] === 'object' && !Array.isArray(a['properties'])) {
+            updates.properties = a['properties'] as Record<string, string | number | boolean>;
+          }
+          if (typeof a['weight'] === 'number') updates.weight = a['weight'] as number;
+          if (typeof a['type'] === 'string') updates.type = (a['type'] as string).trim();
+          if (Object.keys(updates).length === 0) throw new Error('At least one of label, description, tags, properties, weight, or type must be provided');
+          const memberIds = resolveMemberSpaces(wt.target);
+          let updatedEdge = null;
+          for (const mid of memberIds) {
+            updatedEdge = await updateEdgeById(mid, id, updates);
+            if (updatedEdge) break;
+          }
+          if (!updatedEdge) throw new Error(`Edge '${id}' not found`);
+          return {
+            content: [{ type: 'text' as const, text: `Edge '${updatedEdge.label}' updated (ID ${updatedEdge._id}, seq ${updatedEdge.seq}).` }],
           };
         }
 
