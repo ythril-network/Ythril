@@ -569,6 +569,65 @@ Searches **all knowledge types** (memories, entities, edges, chrono entries, and
 
 ---
 
+### Find Similar (Vector Similarity by Entry ID)
+
+```
+POST /api/brain/spaces/:spaceId/find-similar
+```
+
+Given an existing entry's `_id`, find other entries with high vector similarity. Unlike `recall` (which re-embeds a text query), `find_similar` uses the entry's **stored embedding vector** directly — no re-embedding step. Ideal for deduplication, "more like this", and merge detection.
+
+> **Also available as MCP tool:** `find_similar`
+
+**Request body:**
+
+```json
+{
+  "entryId": "<UUID of the source entry>",
+  "entryType": "memory",
+  "targetTypes": ["memory", "entity"],
+  "topK": 10,
+  "minScore": 0.7,
+  "crossSpace": false
+}
+```
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `entryId` | ✅ | — | UUID of the entry to use as the query vector |
+| `entryType` | ✅ | — | Knowledge type of the source entry (`memory`, `entity`, `edge`, `chrono`, `file`) |
+| `targetTypes` | — | all types | Which knowledge types to search in |
+| `topK` | — | `10` | Maximum results (1–100) |
+| `minScore` | — | `0.0` | Minimum cosine similarity threshold |
+| `crossSpace` | — | `false` | If `true`, search across all spaces the token can access |
+
+**Response** `200`:
+
+```json
+{
+  "source": { "_id": "...", "type": "entity", "name": "auth-service", "score": 1.0 },
+  "results": [
+    { "_id": "...", "type": "entity", "name": "auth-gateway", "spaceId": "dev-apps", "score": 0.91 },
+    { "_id": "...", "type": "memory", "fact": "Auth service uses PKCE...", "spaceId": "dev-apps", "score": 0.84 }
+  ]
+}
+```
+
+- `source` echoes the input entry with `score: 1.0` (self-match) — excluded from `results`
+- Results sorted by `score` descending
+- `spaceId` included on each result when `crossSpace: true`
+
+**Common use cases:**
+
+| Use case | Parameters |
+|----------|-----------|
+| Dedup scan | `entryType: "entity"`, `targetTypes: ["entity"]`, `minScore: 0.90` |
+| "More like this" | `topK: 5`, all target types |
+| Cross-space merge detection | `crossSpace: true`, `minScore: 0.85`, `targetTypes: ["entity"]` |
+| Memory consolidation | `entryType: "memory"`, `targetTypes: ["memory"]`, `minScore: 0.88` |
+
+---
+
 ### Upsert an Entity
 
 ```

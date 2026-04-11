@@ -320,6 +320,93 @@ export async function recallGlobal(
   return deduped.slice(0, topK);
 }
 
+/** Retrieve the stored embedding vector for an entry by its ID and knowledge type. */
+async function getEntryEmbedding(
+  spaceId: string,
+  entryId: string,
+  entryType: RecallKnowledgeType,
+): Promise<{ vector: number[]; doc: Record<string, unknown> } | null> {
+  const collSuffix = KNOWLEDGE_COLLECTION[entryType];
+  const collName = `${spaceId}_${collSuffix}`;
+  const doc = await col(collName).findOne(
+    { _id: entryId, spaceId } as never,
+    { projection: { embedding: 1, _id: 1, spaceId: 1, name: 1, fact: 1, label: 1, title: 1, path: 1, type: 1, description: 1 } as never },
+  ) as Record<string, unknown> | null;
+  if (!doc) return null;
+  const vector = doc['embedding'] as number[] | undefined;
+  if (!vector || !Array.isArray(vector) || vector.length === 0) return null;
+  return { vector, doc };
+}
+
+export interface FindSimilarResult {
+  source: RecallResult;
+  results: RecallResult[];
+}
+
+/**
+ * Find entries with high vector similarity to an existing entry.
+ * Uses the entry's stored embedding vector directly — no re-embedding.
+ */
+export async function findSimilar(
+  spaceId: string,
+  entryId: string,
+  entryType: RecallKnowledgeType,
+  topK = 10,
+  targetTypes?: RecallKnowledgeType[],
+  minScore?: number,
+  crossSpaceIds?: string[],
+): Promise<FindSimilarResult> {
+  if (!isVectorSearchAvailable()) {
+    throw new Error(
+      'Vector search is unavailable: $vectorSearch is not supported by the connected MongoDB. ' +
+      'Upgrade to MongoDB 8.2+, use Atlas Local, or connect to managed Atlas.',
+    );
+  }
+
+  // Fetch the source entry's stored embedding
+  const entry = await getEntryEmbedding(spaceId, entryId, entryType);
+  if (!entry) {
+    throw new Error(`Entry '${entryId}' not found in space '${spaceId}' (type: ${entryType}), or has no embedding.`);
+  }
+
+  const activeTypes: RecallKnowledgeType[] = (targetTypes && targetTypes.length > 0)
+    ? targetTypes
+    : ['memory', 'entity', 'edge', 'chrono', 'file'];
+
+  // Fetch topK+1 to account for self-match removal
+  const fetchK = topK + 1;
+
+  // Determine which spaces to search
+  const searchSpaces = crossSpaceIds && crossSpaceIds.length > 0 ? crossSpaceIds : [spaceId];
+
+  const allResults: RecallResult[] = [];
+  for (const sid of searchSpaces) {
+    if (needsReindex(sid)) continue; // skip spaces needing reindex
+    const searches = activeTypes.map(t => recallByType(sid, t, entry.vector, fetchK));
+    const spaceResults = (await Promise.all(searches)).flat();
+    allResults.push(...spaceResults);
+  }
+
+  // Sort by score descending, exclude self-match, deduplicate
+  allResults.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  const seen = new Set<string>();
+  const filtered: RecallResult[] = [];
+  for (const r of allResults) {
+    if (r._id === entryId) continue; // exclude self
+    if (seen.has(r._id)) continue;
+    seen.add(r._id);
+    if (minScore != null && minScore > 0 && (r.score ?? 0) < minScore) continue;
+    filtered.push(r);
+    if (filtered.length >= topK) break;
+  }
+
+  // Build source summary
+  const source = mapToRecallResult(entry.doc, entryType);
+  source.score = 1.0;
+
+  return { source, results: filtered };
+}
+
 /** Update an existing memory's fact, tags, entityIds, description, or properties. Re-embeds when content fields change. */
 export async function updateMemory(
   spaceId: string,
