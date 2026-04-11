@@ -1,6 +1,7 @@
 import { Component, inject, signal, OnInit, OnDestroy, HostListener, ElementRef, viewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { ActivatedRoute } from '@angular/router';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { ApiService, Space, FileEntry, UploadProgress } from '../../core/api.service';
 import hljs from 'highlight.js/lib/core';
@@ -459,6 +460,7 @@ function previewKind(name: string): PreviewKind {
 export class FileManagerComponent implements OnInit, OnDestroy {
   private api = inject(ApiService);
   private sanitizer = inject(DomSanitizer);
+  private route = inject(ActivatedRoute);
   private previewOverlayRef = viewChild<ElementRef<HTMLDivElement>>('previewOverlay');
 
   spaces = signal<Space[]>([]);
@@ -496,11 +498,17 @@ export class FileManagerComponent implements OnInit, OnDestroy {
   private _keyHandler = (e: KeyboardEvent) => this.onPreviewKey(e);
 
   ngOnInit(): void {
+    const requestedSpace = this.route.snapshot.queryParamMap.get('space') ?? '';
     this.api.listSpaces().subscribe({
       next: ({ spaces }) => {
         this.spaces.set(spaces);
         this.loadingSpaces.set(false);
-        if (spaces.length > 0) this.selectSpace(spaces[0].id);
+        if (spaces.length > 0) {
+          const target = requestedSpace
+            ? (spaces.find(s => s.id === requestedSpace) ?? spaces[0])
+            : spaces[0];
+          this.selectSpace(target.id);
+        }
       },
       error: () => this.loadingSpaces.set(false),
     });

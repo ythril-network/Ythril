@@ -20,7 +20,8 @@ interface SpaceView {
       display: flex;
       gap: 8px;
       margin-bottom: 24px;
-      flex-wrap: wrap;
+      overflow-x: auto;
+      padding-bottom: 4px;
     }
 
     .space-chip {
@@ -87,14 +88,22 @@ interface SpaceView {
 
     .tab-files-info {
       margin-left: auto;
-      cursor: default;
-      display: flex;
+      display: inline-flex;
       align-items: center;
       gap: 4px;
       padding: 8px 12px;
       font-size: 12px;
       color: var(--text-muted);
       border-bottom: 2px solid transparent;
+      text-decoration: none;
+      cursor: pointer;
+      transition: color var(--transition), border-color var(--transition);
+      white-space: nowrap;
+    }
+    .tab-files-info:hover {
+      color: var(--text-primary);
+      border-bottom-color: var(--border);
+      text-decoration: none;
     }
 
     .memory-item {
@@ -329,9 +338,9 @@ interface SpaceView {
           </button>
         }
         @if (activeStats(); as s) {
-          <span class="tab-files-info" title="Files stored in this space">
+          <a class="tab-files-info" routerLink="/files" [queryParams]="{space: activeSpaceId()}" title="Open file manager for this space">
             Files <span class="tab-count">{{ s.files }}</span>
-          </span>
+          </a>
         }
       </div>
 
