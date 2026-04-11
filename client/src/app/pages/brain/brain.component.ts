@@ -1016,7 +1016,7 @@ export class BrainComponent implements OnInit {
   queryFilterError = signal('');
   queryProjectionError = signal('');
 
- = computed(() =>
+  activeStats = computed(() =>
     this.spaces().find(sv => sv.space.id === this.activeSpaceId())?.stats,
   );
 
@@ -1344,11 +1344,11 @@ export class BrainComponent implements OnInit {
 
     if (this.queryForm.filter.trim()) {
       try { filter = JSON.parse(this.queryForm.filter.trim()); }
-      catch { this.queryFilterError.set('Invalid JSON — check your filter syntax'); return; }
+      catch (e) { this.queryFilterError.set(`Invalid JSON — ${e instanceof Error ? e.message : 'check your filter syntax'}`); return; }
     }
     if (this.queryForm.projection.trim()) {
       try { projection = JSON.parse(this.queryForm.projection.trim()); }
-      catch { this.queryProjectionError.set('Invalid JSON — check your projection syntax'); return; }
+      catch (e) { this.queryProjectionError.set(`Invalid JSON — ${e instanceof Error ? e.message : 'check your projection syntax'}`); return; }
     }
 
     this.queryRunning.set(true);
