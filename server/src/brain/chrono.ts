@@ -125,15 +125,69 @@ export async function getChronoById(spaceId: string, id: string): Promise<Chrono
   return col<ChronoEntry>(`${spaceId}_chrono`).findOne({ _id: id, spaceId } as never) as Promise<ChronoEntry | null>;
 }
 
+export interface ChronoFilter {
+  status?: string;
+  kind?: string;
+  /** ALL of these tags must be present (AND semantics). */
+  tags?: string[];
+  /** ANY of these tags must be present (OR semantics). */
+  tagsAny?: string[];
+  /** ISO 8601 — return entries with createdAt > after */
+  after?: string;
+  /** ISO 8601 — return entries with createdAt < before */
+  before?: string;
+  /** Case-insensitive substring match on title and description. */
+  search?: string;
+}
+
 export async function listChrono(
   spaceId: string,
-  filter: Record<string, unknown> = {},
+  filter: ChronoFilter = {},
   limit = 50,
   skip = 0,
 ): Promise<ChronoEntry[]> {
+  const query: Record<string, unknown> = { spaceId };
+
+  if (filter.status !== undefined) query['status'] = filter.status;
+  if (filter.kind !== undefined) query['kind'] = filter.kind;
+
+  // tags ALL (AND): every tag in the array must be present
+  if (filter.tags && filter.tags.length > 0) {
+    query['tags'] = { $all: filter.tags };
+  }
+
+  // tagsAny (OR): at least one tag in the array must be present
+  // If both tags and tagsAny are provided, combine with $and
+  if (filter.tagsAny && filter.tagsAny.length > 0) {
+    if (filter.tags && filter.tags.length > 0) {
+      // Already have an $all constraint on tags — wrap both with $and
+      query['$and'] = [
+        { tags: { $all: filter.tags } },
+        { tags: { $in: filter.tagsAny } },
+      ];
+      delete query['tags'];
+    } else {
+      query['tags'] = { $in: filter.tagsAny };
+    }
+  }
+
+  // Date range on createdAt
+  if (filter.after !== undefined || filter.before !== undefined) {
+    const range: Record<string, string> = {};
+    if (filter.after !== undefined) range['$gt'] = filter.after;
+    if (filter.before !== undefined) range['$lt'] = filter.before;
+    query['createdAt'] = range;
+  }
+
+  // Full-text substring search on title and/or description
+  if (filter.search && filter.search.trim()) {
+    const regex = { $regex: filter.search.trim(), $options: 'i' };
+    query['$or'] = [{ title: regex }, { description: regex }];
+  }
+
   return col<ChronoEntry>(`${spaceId}_chrono`)
-    .find({ ...filter, spaceId } as never)
-    .sort({ startsAt: -1 })
+    .find(query as never)
+    .sort({ createdAt: -1 })
     .skip(skip)
     .limit(limit)
     .toArray() as Promise<ChronoEntry[]>;

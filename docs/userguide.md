@@ -177,7 +177,7 @@ Each chrono row has an inline **✕ / Delete? / Yes / No** confirmation (no brow
 
 - `create_chrono` — create a new entry.
 - `update_chrono` — update an existing entry (change status, dates, etc.).
-- `list_chrono` — list entries, optionally filtered by `status`, `kind`, or `tags`.
+- `list_chrono` — list entries, optionally filtered by `status`, `kind`, `tags` (ALL), `tagsAny` (ANY), `after`, `before`, or `search`.
 
 The `query` tool also supports `collection: "chrono"` for advanced MongoDB filter queries.
 

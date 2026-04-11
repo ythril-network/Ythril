@@ -848,21 +848,26 @@ describe('Brain -- chrono CRUD (/api/brain/spaces/:spaceId/chrono)', () => {
   });
 });
 
-describe('Brain -- chrono tags filter (/api/brain/spaces/:spaceId/chrono?tags=...)', () => {
+describe('Brain -- chrono filter queries (/api/brain/spaces/:spaceId/chrono)', () => {
   const RUN = Date.now();
   const tagA = `brain-chrono-tag-a-${RUN}`;
   const tagB = `brain-chrono-tag-b-${RUN}`;
   const ids = [];
+  const pastTime = new Date(Date.now() - 60_000).toISOString();
+  const futureTime = new Date(Date.now() + 3_600_000).toISOString();
 
   before(async () => {
-    // Seed three chrono entries: two with distinct tags, one untagged
-    for (const [title, tags] of [
-      [`TagA-${RUN}`, [tagA]],
-      [`TagB-${RUN}`, [tagB]],
-      [`NoTag-${RUN}`, []],
+    // Seed chrono entries with various tags/descriptions
+    for (const [title, tags, description] of [
+      [`TagA-${RUN}`, [tagA], undefined],
+      [`TagB-${RUN}`, [tagB], undefined],
+      [`TagBoth-${RUN}`, [tagA, tagB], undefined],
+      [`NoTag-${RUN}`, [], undefined],
+      [`SearchMe-${RUN}`, [], 'find-this-special-description'],
     ]) {
       const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/chrono', {
         title, kind: 'event', startsAt: new Date().toISOString(), tags,
+        ...(description ? { description } : {}),
       });
       if (r.body._id) ids.push(r.body._id);
     }
@@ -874,28 +879,80 @@ describe('Brain -- chrono tags filter (/api/brain/spaces/:spaceId/chrono?tags=..
     }
   });
 
-  it('Filter by single tag returns only matching entries', async () => {
+  it('Filter by single tag (AND) returns only matching entries', async () => {
     const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono?tags=${encodeURIComponent(tagA)}`);
     assert.equal(r.status, 200);
     assert.ok(Array.isArray(r.body.chrono), 'chrono must be an array');
     const resultIds = r.body.chrono.map(c => c._id);
     assert.ok(resultIds.includes(ids[0]), `Entry with tag ${tagA} should be in results`);
-    assert.ok(!resultIds.includes(ids[1]), `Entry with tag ${tagB} should NOT be in results`);
+    assert.ok(resultIds.includes(ids[2]), `Entry with both tags should be in results`);
+    assert.ok(!resultIds.includes(ids[1]), `Entry with only ${tagB} should NOT be in results`);
   });
 
-  it('Filter by multiple tags returns entries matching any tag', async () => {
+  it('Filter by multiple tags (AND) returns only entries with all specified tags', async () => {
     const qs = `tags=${encodeURIComponent(tagA)}&tags=${encodeURIComponent(tagB)}`;
+    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono?${qs}`);
+    assert.equal(r.status, 200);
+    const resultIds = r.body.chrono.map(c => c._id);
+    assert.ok(resultIds.includes(ids[2]), `Entry with both tags should be in results`);
+    assert.ok(!resultIds.includes(ids[0]), `Entry with only ${tagA} should NOT appear for AND query`);
+    assert.ok(!resultIds.includes(ids[1]), `Entry with only ${tagB} should NOT appear for AND query`);
+  });
+
+  it('tagsAny filter (OR) returns entries matching any of the tags', async () => {
+    const qs = `tagsAny=${encodeURIComponent(tagA)}&tagsAny=${encodeURIComponent(tagB)}`;
     const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono?${qs}`);
     assert.equal(r.status, 200);
     const resultIds = r.body.chrono.map(c => c._id);
     assert.ok(resultIds.includes(ids[0]), `Entry with tag ${tagA} should be in results`);
     assert.ok(resultIds.includes(ids[1]), `Entry with tag ${tagB} should be in results`);
+    assert.ok(resultIds.includes(ids[2]), `Entry with both tags should be in results`);
+    assert.ok(!resultIds.includes(ids[3]), `Entry with no tags should NOT be in results`);
   });
 
   it('Filter by non-existent tag returns empty array', async () => {
     const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono?tags=no-such-tag-${RUN}`);
     assert.equal(r.status, 200);
     assert.deepStrictEqual(r.body.chrono, []);
+  });
+
+  it('after filter returns only entries created after the timestamp', async () => {
+    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono?after=${encodeURIComponent(pastTime)}`);
+    assert.equal(r.status, 200);
+    assert.ok(Array.isArray(r.body.chrono), 'chrono must be an array');
+    // Seeded entries were created after pastTime, so at least our seeded entries should appear
+    const resultIds = r.body.chrono.map(c => c._id);
+    assert.ok(resultIds.includes(ids[0]), 'Seeded entry should appear when after < createdAt');
+  });
+
+  it('before filter returns only entries created before the timestamp', async () => {
+    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono?before=${encodeURIComponent(futureTime)}`);
+    assert.equal(r.status, 200);
+    assert.ok(Array.isArray(r.body.chrono), 'chrono must be an array');
+    const resultIds = r.body.chrono.map(c => c._id);
+    assert.ok(resultIds.includes(ids[0]), 'Seeded entry should appear when before > createdAt');
+  });
+
+  it('after filter in the far future returns empty array', async () => {
+    const farFuture = new Date(Date.now() + 86_400_000 * 365).toISOString();
+    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono?after=${encodeURIComponent(farFuture)}`);
+    assert.equal(r.status, 200);
+    assert.deepStrictEqual(r.body.chrono, []);
+  });
+
+  it('search filter matches on title', async () => {
+    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono?search=${encodeURIComponent('TagA-' + RUN)}`);
+    assert.equal(r.status, 200);
+    const resultIds = r.body.chrono.map(c => c._id);
+    assert.ok(resultIds.includes(ids[0]), 'Entry with matching title should appear');
+    assert.ok(!resultIds.includes(ids[1]), 'Entry with non-matching title should not appear');
+  });
+
+  it('search filter matches on description (case-insensitive)', async () => {
+    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono?search=FIND-THIS-SPECIAL`);
+    assert.equal(r.status, 200);
+    const resultIds = r.body.chrono.map(c => c._id);
+    assert.ok(resultIds.includes(ids[4]), 'Entry with matching description should appear');
   });
 });
 

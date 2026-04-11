@@ -731,6 +731,29 @@ POST /api/brain/spaces/:spaceId/chrono/:id
 GET /api/brain/spaces/:spaceId/chrono?limit=50&skip=0
 ```
 
+**Query parameters**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `after` | ISO 8601 string | Return entries with `createdAt` > this timestamp |
+| `before` | ISO 8601 string | Return entries with `createdAt` < this timestamp |
+| `tags` | comma-separated strings | Return entries where `tags` contains **ALL** listed values (AND semantics) |
+| `tagsAny` | comma-separated strings | Return entries where `tags` contains **ANY** listed value (OR semantics) |
+| `search` | string | Case-insensitive substring match on `title` and `description` |
+| `status` | string | Filter by status (`upcoming`, `active`, `completed`, `overdue`, `cancelled`) |
+| `kind` | string | Filter by kind (`event`, `deadline`, `plan`, `prediction`, `milestone`) |
+| `limit` | number | Max entries to return (default 50, max 500) |
+| `skip` | number | Pagination offset (default 0) |
+
+**Example queries**
+
+```
+GET /api/brain/spaces/:id/chrono?after=2026-04-04T00:00:00Z
+GET /api/brain/spaces/:id/chrono?after=2026-01-01T00:00:00Z&before=2026-04-01T00:00:00Z&tags=incident
+GET /api/brain/spaces/:id/chrono?tagsAny=deploy,auth-service
+GET /api/brain/spaces/:id/chrono?search=migration
+```
+
 **Response** `200`:
 
 ```json
@@ -2368,7 +2391,7 @@ Content-Type: application/json
 | `upsert_edge` | Create or update a directed relationship |
 | `create_chrono` | Create a chrono entry (event, deadline, plan, prediction, milestone) |
 | `update_chrono` | Update an existing chrono entry |
-| `list_chrono` | List chrono entries, optionally filtered by status, kind, or tags |
+| `list_chrono` | List chrono entries, optionally filtered by status, kind, tags, date range, or text search |
 | `read_file` | Read a text file from the space file store |
 | `write_file` | Write a text file to the space file store (optional `description` and `tags` stored as metadata) |
 | `list_dir` | List directory contents |

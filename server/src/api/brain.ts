@@ -5,7 +5,7 @@ import { globalRateLimit, bulkWipeRateLimit } from '../rate-limit/middleware.js'
 import { listMemories, deleteMemory, countMemories, bulkDeleteMemories, updateMemory, queryBrain } from '../brain/memory.js';
 import { listEntities, deleteEntity, upsertEntity, getEntityById, updateEntityById, bulkDeleteEntities } from '../brain/entities.js';
 import { listEdges, deleteEdge, upsertEdge, getEdgeById, updateEdgeById, bulkDeleteEdges } from '../brain/edges.js';
-import { createChrono, updateChrono, getChronoById, listChrono, deleteChrono, bulkDeleteChrono } from '../brain/chrono.js';
+import { createChrono, updateChrono, getChronoById, listChrono, deleteChrono, bulkDeleteChrono, ChronoFilter } from '../brain/chrono.js';
 import { embed } from '../brain/embedding.js';
 import { getConfig } from '../config/loader.js';
 import { col } from '../db/mongo.js';
@@ -812,18 +812,32 @@ brainRouter.get('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, as
     res.status(404).json({ error: `Space '${spaceId}' not found` });
     return;
   }
-  const limit = Math.min(Number(req.query['limit'] ?? 50), 200);
+  const limit = Math.min(Number(req.query['limit'] ?? 50), 500);
   const skip = Number(req.query['skip'] ?? 0);
-  const filter: Record<string, unknown> = {};
-  if (typeof req.query['status'] === 'string') filter['status'] = req.query['status'];
-  if (typeof req.query['kind'] === 'string') filter['kind'] = req.query['kind'];
+  const filter: ChronoFilter = {};
+  if (typeof req.query['status'] === 'string') filter.status = req.query['status'];
+  if (typeof req.query['kind'] === 'string') filter.kind = req.query['kind'];
+
+  // tags — comma-separated or repeated — AND semantics
   if (Array.isArray(req.query['tags'])) {
-    filter['tags'] = { $in: req.query['tags'] };
+    filter.tags = (req.query['tags'] as string[]).flatMap(t => t.split(',').map(s => s.trim())).filter(Boolean);
   } else if (typeof req.query['tags'] === 'string') {
-    filter['tags'] = req.query['tags'];
+    filter.tags = req.query['tags'].split(',').map(s => s.trim()).filter(Boolean);
   } else if (typeof req.query['tag'] === 'string') {
-    filter['tags'] = req.query['tag'];
+    filter.tags = [req.query['tag']];
   }
+
+  // tagsAny — comma-separated or repeated — OR semantics
+  if (Array.isArray(req.query['tagsAny'])) {
+    filter.tagsAny = (req.query['tagsAny'] as string[]).flatMap(t => t.split(',').map(s => s.trim())).filter(Boolean);
+  } else if (typeof req.query['tagsAny'] === 'string') {
+    filter.tagsAny = req.query['tagsAny'].split(',').map(s => s.trim()).filter(Boolean);
+  }
+
+  if (typeof req.query['after'] === 'string') filter.after = req.query['after'];
+  if (typeof req.query['before'] === 'string') filter.before = req.query['before'];
+  if (typeof req.query['search'] === 'string') filter.search = req.query['search'];
+
   const memberIds = resolveMemberSpaces(spaceId);
   const all = (await Promise.all(memberIds.map(mid => listChrono(mid, filter, limit, skip)))).flat();
   res.json({ chrono: all, limit, skip });

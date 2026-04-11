@@ -18,7 +18,7 @@ import { remember, recall, recallGlobal, queryBrain, updateMemory, deleteMemory,
 import { col } from '../db/mongo.js';
 import { upsertEntity, listEntities, updateEntityById } from '../brain/entities.js';
 import { upsertEdge, listEdges, updateEdgeById } from '../brain/edges.js';
-import { createChrono, updateChrono, listChrono } from '../brain/chrono.js';
+import { createChrono, updateChrono, listChrono, ChronoFilter } from '../brain/chrono.js';
 // File tools
 import {
   readFile,
@@ -358,13 +358,17 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
       },
       {
         name: 'list_chrono',
-        description: 'List chronological entries, optionally filtered by status, kind, or tags.',
+        description: 'List chronological entries, optionally filtered by status, kind, tags, date range, or a text search.',
         inputSchema: {
           type: 'object',
           properties: {
             status: { type: 'string', enum: ['upcoming', 'active', 'completed', 'overdue', 'cancelled'], description: 'Filter by status.' },
             kind: { type: 'string', enum: ['event', 'deadline', 'plan', 'prediction', 'milestone'], description: 'Filter by kind.' },
-            tags: { type: 'array', items: { type: 'string' }, description: 'Filter to entries that carry at least one of these tags.' },
+            tags: { type: 'array', items: { type: 'string' }, description: 'Return entries containing ALL of these tags (AND semantics).' },
+            tagsAny: { type: 'array', items: { type: 'string' }, description: 'Return entries containing ANY of these tags (OR semantics).' },
+            after: { type: 'string', description: 'ISO 8601 timestamp — return entries created after this point in time.' },
+            before: { type: 'string', description: 'ISO 8601 timestamp — return entries created before this point in time.' },
+            search: { type: 'string', description: 'Case-insensitive substring match on title and description.' },
             limit: { type: 'number', description: 'Max results (default 20, max 100).' },
             skip: { type: 'number', description: 'Number of results to skip for pagination (default 0).' },
           },
@@ -888,12 +892,18 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
         }
 
         case 'list_chrono': {
-          const filter: Record<string, unknown> = {};
-          if (typeof a['status'] === 'string') filter['status'] = a['status'];
-          if (typeof a['kind'] === 'string') filter['kind'] = a['kind'];
+          const filter: ChronoFilter = {};
+          if (typeof a['status'] === 'string') filter.status = a['status'];
+          if (typeof a['kind'] === 'string') filter.kind = a['kind'];
           if (Array.isArray(a['tags']) && (a['tags'] as unknown[]).length > 0) {
-            filter['tags'] = { $in: a['tags'] };
+            filter.tags = a['tags'] as string[];
           }
+          if (Array.isArray(a['tagsAny']) && (a['tagsAny'] as unknown[]).length > 0) {
+            filter.tagsAny = a['tagsAny'] as string[];
+          }
+          if (typeof a['after'] === 'string') filter.after = a['after'];
+          if (typeof a['before'] === 'string') filter.before = a['before'];
+          if (typeof a['search'] === 'string') filter.search = a['search'];
           const limit = typeof a['limit'] === 'number' ? Math.min(a['limit'], 100) : 20;
           const skip = typeof a['skip'] === 'number' ? Math.max(a['skip'], 0) : 0;
 
@@ -902,7 +912,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           // after global sort/slice. For large skip values this over-fetches slightly,
           // but chrono lists are expected to be small in practice.
           const all = (await Promise.all(memberIds.map(mid => listChrono(mid, filter, skip + limit)))).flat();
-          all.sort((x, y) => new Date(y.startsAt).getTime() - new Date(x.startsAt).getTime());
+          all.sort((x, y) => new Date(y.createdAt).getTime() - new Date(x.createdAt).getTime());
           const results = all.slice(skip, skip + limit);
           return {
             content: [{
