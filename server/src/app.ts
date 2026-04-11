@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'url';
 import { tokensRouter } from './api/tokens.js';
@@ -24,6 +25,7 @@ import { requireAuth, requireAdminMfa } from './auth/middleware.js';
 import { clearTokenCache } from './auth/tokens.js';
 import { clearOidcCache } from './auth/oidc.js';
 import { initSpace, ensureGeneralSpace, wipeSpace, WIPE_COLLECTION_TYPES } from './spaces/spaces.js';
+import { col } from './db/mongo.js';
 import { log } from './util/log.js';
 import { getReadiness } from './ready.js';
 import {
@@ -32,6 +34,11 @@ import {
   httpRequestSizeBytes,
   httpResponseSizeBytes,
 } from './metrics/registry.js';
+
+// Server version — read once at startup from the package.json that sits two
+// directories up from the compiled output (server/dist → server → root).
+const _pkgPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'package.json');
+const _serverVersion: string = JSON.parse(fs.readFileSync(_pkgPath, 'utf8')).version;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** Path to the compiled Angular SPA — configurable via env for Docker flexibility */
@@ -178,6 +185,122 @@ export function createApp() {
       const msg = err instanceof Error ? err.message : String(err);
       res.status(500).json({ error: msg });
     }
+  });
+
+  // ── Admin: space export ───────────────────────────────────────────────────
+  // Returns a full JSON snapshot of the space — all memories, entities, edges,
+  // chrono entries, and file metadata (binary file content excluded by default).
+  // Vector embeddings are omitted from the export to keep the payload small;
+  // run POST /api/brain/spaces/:spaceId/reindex after import to rebuild them.
+  app.get('/api/admin/spaces/:spaceId/export', globalRateLimit, requireAdminMfa, async (req, res) => {
+    const spaceId = req.params['spaceId'] as string;
+    const cfg = getConfig();
+    const space = cfg.spaces.find(s => s.id === spaceId);
+    if (!space) {
+      res.status(404).json({ error: `Space '${spaceId}' not found` });
+      return;
+    }
+
+    try {
+      // Fetch all documents in parallel, stripping the embedding vector to keep the
+      // payload manageable. embeddingModel is retained so the import consumer knows
+      // what model was in use before the wipe.
+      const projection = { embedding: 0 } as never;
+      const [memories, entities, edges, chrono, files] = await Promise.all([
+        col(`${spaceId}_memories`).find({}, { projection }).toArray(),
+        col(`${spaceId}_entities`).find({}, { projection }).toArray(),
+        col(`${spaceId}_edges`).find({}, { projection }).toArray(),
+        col(`${spaceId}_chrono`).find({}, { projection }).toArray(),
+        col(`${spaceId}_files`).find({}, { projection }).toArray(),
+      ]);
+
+      res.json({
+        exportedAt: new Date().toISOString(),
+        spaceId,
+        spaceName: space.label,
+        version: _serverVersion,
+        memories,
+        entities,
+        edges,
+        chrono,
+        files,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ error: msg });
+    }
+  });
+
+  // ── Admin: space import ───────────────────────────────────────────────────
+  // Upserts all documents from an export payload into the target space.
+  // Existing documents with the same _id are replaced; new ones are inserted.
+  // Returns per-type counts: { inserted, updated, errors }.
+  app.post('/api/admin/spaces/:spaceId/import', globalRateLimit, requireAdminMfa, async (req, res) => {
+    const spaceId = req.params['spaceId'] as string;
+    const cfg = getConfig();
+    if (!cfg.spaces.some(s => s.id === spaceId)) {
+      res.status(404).json({ error: `Space '${spaceId}' not found` });
+      return;
+    }
+
+    const payload = req.body ?? {};
+    const IMPORT_TYPES = ['memories', 'entities', 'edges', 'chrono', 'files'] as const;
+    type ImportType = typeof IMPORT_TYPES[number];
+
+    // Validate that each supplied array is actually an array of objects.
+    for (const t of IMPORT_TYPES) {
+      if (payload[t] !== undefined) {
+        if (!Array.isArray(payload[t])) {
+          res.status(400).json({ error: `'${t}' must be an array` });
+          return;
+        }
+      }
+    }
+
+    const results: Record<ImportType, { inserted: number; updated: number; errors: number }> = {
+      memories: { inserted: 0, updated: 0, errors: 0 },
+      entities: { inserted: 0, updated: 0, errors: 0 },
+      edges: { inserted: 0, updated: 0, errors: 0 },
+      chrono: { inserted: 0, updated: 0, errors: 0 },
+      files: { inserted: 0, updated: 0, errors: 0 },
+    };
+
+    for (const t of IMPORT_TYPES) {
+      const docs: unknown[] = Array.isArray(payload[t]) ? payload[t] : [];
+      if (docs.length === 0) continue;
+
+      const collName = `${spaceId}_${t}`;
+      const result = results[t];
+
+      for (const doc of docs) {
+        if (!doc || typeof doc !== 'object' || !('_id' in doc) || typeof (doc as Record<string, unknown>)['_id'] !== 'string') {
+          result.errors++;
+          continue;
+        }
+        // Extract and coerce the _id to a plain string to prevent any operator injection.
+        const docId = String((doc as Record<string, unknown>)['_id']);
+        try {
+          const r = await col(collName).replaceOne(
+            { _id: docId } as never,
+            doc as never,
+            { upsert: true },
+          );
+          if (r.upsertedCount > 0) {
+            result.inserted++;
+          } else {
+            result.updated++;
+          }
+        } catch {
+          result.errors++;
+        }
+      }
+    }
+
+    log.info(
+      `Import into space '${spaceId}': ` +
+      IMPORT_TYPES.map(t => `${t}: +${results[t].inserted} ~${results[t].updated} !${results[t].errors}`).join(', '),
+    );
+    res.json({ spaceId, results });
   });
 
   // ── Admin: config reload ───────────────────────────────────────────────────────────────
