@@ -505,42 +505,90 @@ interface SpaceView {
             >Wipe all</button>
           </div>
 
-          @for (mem of memories(); track mem._id) {
-            <div class="memory-item">
-              <div class="memory-content">{{ mem.fact }}</div>
-              @if (mem.description) { <div class="memory-description">{{ mem.description }}</div> }
-              <div class="memory-meta">
-                @for (tag of (mem.tags ?? []); track tag) {
-                  <span class="tag tag-clickable" (click)="applyFilter('tag', tag)">{{ tag }}</span>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fact</th><th>Description</th><th>Tags</th><th>Properties</th><th>Created</th><th></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (mem of memories(); track mem._id) {
+                  @if (editingId() === mem._id) {
+                    <tr>
+                      <td colspan="6">
+                        <div class="create-form" style="border:none; padding:8px 0;">
+                          <div class="field" style="flex:2; min-width:200px; margin-bottom:0;">
+                            <label>Fact</label>
+                            <textarea [(ngModel)]="editMemory.fact" name="editFact" rows="2" style="width:100%;"></textarea>
+                          </div>
+                          <div class="field" style="flex:1; min-width:160px; margin-bottom:0;">
+                            <label>Description</label>
+                            <input type="text" [(ngModel)]="editMemory.description" name="editDesc" />
+                          </div>
+                          <div class="field" style="flex:1; min-width:140px; margin-bottom:0;">
+                            <label>Tags (comma-separated)</label>
+                            <input type="text" [(ngModel)]="editMemory.tags" name="editTags" />
+                          </div>
+                          <div class="field" style="flex:1; min-width:140px; margin-bottom:0;">
+                            <label>Properties (JSON)</label>
+                            <input type="text" [(ngModel)]="editMemory.properties" name="editProps" />
+                          </div>
+                          <div style="display:flex; gap:6px; align-items:flex-end;">
+                            <button class="btn btn-sm btn-primary" [disabled]="editSaving()" (click)="saveEditMemory(mem._id)">
+                              @if (editSaving()) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> } Save
+                            </button>
+                            <button class="btn btn-sm btn-secondary" (click)="cancelEdit()">Cancel</button>
+                          </div>
+                          @if (editError()) { <div style="font-size:12px; color:var(--error);">{{ editError() }}</div> }
+                        </div>
+                      </td>
+                    </tr>
+                  } @else {
+                    <tr>
+                      <td style="max-width:300px; white-space:normal; word-break:break-word;">{{ mem.fact }}</td>
+                      <td style="font-size:12px; color:var(--text-muted); max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" [title]="mem.description ?? ''">
+                        {{ mem.description || '—' }}
+                      </td>
+                      <td style="font-size:11px;">
+                        @for (tag of (mem.tags ?? []); track tag) { <span class="tag tag-clickable" (click)="applyFilter('tag', tag)">{{ tag }}</span> }
+                        @if (!(mem.tags?.length)) { <span style="color:var(--text-muted)">—</span> }
+                      </td>
+                      <td style="font-size:12px; color:var(--text-muted); max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" [title]="formatProps(mem.properties)">
+                        {{ formatProps(mem.properties) }}
+                      </td>
+                      <td style="color:var(--text-muted)">{{ mem.createdAt | date:'MMM d, y' }}</td>
+                      <td style="white-space:nowrap;">
+                        <button class="icon-btn" title="Edit memory" aria-label="Edit memory" (click)="startEditMemory(mem)">✎</button>
+                        @if (confirmDeleteId() === mem._id) {
+                          <span class="inline-confirm">
+                            Delete?
+                            <button class="btn btn-sm btn-danger" (click)="deleteMemory(mem._id)">Yes</button>
+                            <button class="btn btn-sm btn-secondary" (click)="cancelDelete()">No</button>
+                          </span>
+                        } @else {
+                          <button class="icon-btn danger" title="Delete memory" aria-label="Delete memory" (click)="requestDelete(mem._id)">✕</button>
+                        }
+                      </td>
+                    </tr>
+                  }
+                } @empty {
+                  <tr><td colspan="6">
+                    <div class="empty-state" style="padding:32px">
+                      <div class="empty-state-icon">🧠</div>
+                      <h3>No memories</h3>
+                      <p>Memories will appear here once written by an MCP client.</p>
+                    </div>
+                  </td></tr>
                 }
-                @for (eid of (mem.entityIds ?? []); track eid) {
-                  <span class="badge badge-purple entity-clickable" (click)="applyFilter('entity', eid)">{{ eid }}</span>
-                }
-                @if (mem.properties && formatProps(mem.properties) !== '—') {
-                  <span style="font-size:11px; color:var(--text-muted); font-family:monospace;" [title]="formatProps(mem.properties)">{{ formatProps(mem.properties) }}</span>
-                }
-                <span style="flex:1"></span>
-                <time>{{ mem.createdAt | date:'MMM d, y HH:mm' }}</time>
-                @if (confirmDeleteId() === mem._id) {
-                  <span class="inline-confirm">
-                    Delete?
-                    <button class="btn btn-sm btn-danger" (click)="deleteMemory(mem._id)">Yes</button>
-                    <button class="btn btn-sm btn-secondary" (click)="cancelDelete()">No</button>
-                  </span>
-                } @else {
-                  <button class="icon-btn danger" title="Delete memory" aria-label="Delete memory" (click)="requestDelete(mem._id)">✕</button>
-                }
-              </div>
-            </div>
-          }
-
-          @if (memories().length === 0) {
-            <div class="empty-state">
-              <div class="empty-state-icon">🧠</div>
-              <h3>No memories</h3>
-              <p>Memories will appear here once written by an MCP client.</p>
-            </div>
-          }
+              </tbody>
+            </table>
+          </div>
+          <div class="pagination">
+            <button class="btn btn-sm btn-secondary" [disabled]="skip() === 0" (click)="prevPage()">← Prev</button>
+            <span class="pager-info">{{ skip() + 1 }}–{{ skip() + memories().length }}</span>
+            <button class="btn btn-sm btn-secondary" [disabled]="memories().length < pageSize" (click)="nextPage()">Next →</button>
+          </div>
         }
 
         <!-- Entities -->
@@ -595,37 +643,78 @@ interface SpaceView {
             <table>
               <thead>
                 <tr>
-                  <th>Name</th><th>Type</th><th>Description</th><th>Properties</th><th>Created</th><th></th>
+                  <th>Name</th><th>Type</th><th>Description</th><th>Tags</th><th>Properties</th><th>Created</th><th></th>
                 </tr>
               </thead>
               <tbody>
                 @for (ent of entities(); track ent._id) {
-                  <tr>
-                    <td>{{ ent.name }}</td>
-                    <td>
-                      @if (ent.type) { <span class="badge badge-purple">{{ ent.type }}</span> }
-                    </td>
-                    <td style="font-size:12px; color:var(--text-muted); max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" [title]="ent.description ?? ''">
-                      {{ ent.description || '—' }}
-                    </td>
-                    <td style="font-size:12px; color:var(--text-muted); max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" [title]="formatProps(ent.properties)">
-                      {{ formatProps(ent.properties) }}
-                    </td>
-                    <td style="color:var(--text-muted)">{{ ent.createdAt | date:'MMM d, y' }}</td>
-                    <td>
-                      @if (confirmDeleteId() === ent._id) {
-                        <span class="inline-confirm">
-                          Delete?
-                          <button class="btn btn-sm btn-danger" (click)="deleteEntity(ent._id)">Yes</button>
-                          <button class="btn btn-sm btn-secondary" (click)="cancelDelete()">No</button>
-                        </span>
-                      } @else {
-                        <button class="icon-btn danger" aria-label="Delete entity" (click)="requestDelete(ent._id)">✕</button>
-                      }
-                    </td>
-                  </tr>
+                  @if (editingId() === ent._id) {
+                    <tr>
+                      <td colspan="7">
+                        <div class="create-form" style="border:none; padding:8px 0;">
+                          <div class="field" style="flex:1; min-width:120px; margin-bottom:0;">
+                            <label>Name</label>
+                            <input type="text" [(ngModel)]="editEntity.name" name="editEntName" />
+                          </div>
+                          <div class="field" style="width:120px; margin-bottom:0;">
+                            <label>Type</label>
+                            <input type="text" [(ngModel)]="editEntity.type" name="editEntType" />
+                          </div>
+                          <div class="field" style="flex:1; min-width:160px; margin-bottom:0;">
+                            <label>Description</label>
+                            <input type="text" [(ngModel)]="editEntity.description" name="editEntDesc" />
+                          </div>
+                          <div class="field" style="flex:1; min-width:140px; margin-bottom:0;">
+                            <label>Tags (comma-separated)</label>
+                            <input type="text" [(ngModel)]="editEntity.tags" name="editEntTags" />
+                          </div>
+                          <div class="field" style="flex:1; min-width:140px; margin-bottom:0;">
+                            <label>Properties (JSON)</label>
+                            <input type="text" [(ngModel)]="editEntity.properties" name="editEntProps" />
+                          </div>
+                          <div style="display:flex; gap:6px; align-items:flex-end;">
+                            <button class="btn btn-sm btn-primary" [disabled]="editSaving()" (click)="saveEditEntity(ent._id)">
+                              @if (editSaving()) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> } Save
+                            </button>
+                            <button class="btn btn-sm btn-secondary" (click)="cancelEdit()">Cancel</button>
+                          </div>
+                          @if (editError()) { <div style="font-size:12px; color:var(--error);">{{ editError() }}</div> }
+                        </div>
+                      </td>
+                    </tr>
+                  } @else {
+                    <tr>
+                      <td>{{ ent.name }}</td>
+                      <td>
+                        @if (ent.type) { <span class="badge badge-purple">{{ ent.type }}</span> }
+                      </td>
+                      <td style="font-size:12px; color:var(--text-muted); max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" [title]="ent.description ?? ''">
+                        {{ ent.description || '—' }}
+                      </td>
+                      <td style="font-size:11px;">
+                        @for (tag of (ent.tags ?? []); track tag) { <span class="tag">{{ tag }}</span> }
+                        @if (!(ent.tags?.length)) { <span style="color:var(--text-muted)">—</span> }
+                      </td>
+                      <td style="font-size:12px; color:var(--text-muted); max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" [title]="formatProps(ent.properties)">
+                        {{ formatProps(ent.properties) }}
+                      </td>
+                      <td style="color:var(--text-muted)">{{ ent.createdAt | date:'MMM d, y' }}</td>
+                      <td style="white-space:nowrap;">
+                        <button class="icon-btn" title="Edit entity" aria-label="Edit entity" (click)="startEditEntity(ent)">✎</button>
+                        @if (confirmDeleteId() === ent._id) {
+                          <span class="inline-confirm">
+                            Delete?
+                            <button class="btn btn-sm btn-danger" (click)="deleteEntity(ent._id)">Yes</button>
+                            <button class="btn btn-sm btn-secondary" (click)="cancelDelete()">No</button>
+                          </span>
+                        } @else {
+                          <button class="icon-btn danger" aria-label="Delete entity" (click)="requestDelete(ent._id)">✕</button>
+                        }
+                      </td>
+                    </tr>
+                  }
                 } @empty {
-                  <tr><td colspan="6">
+                  <tr><td colspan="7">
                     <div class="empty-state" style="padding:32px">
                       <div class="empty-state-icon">🏷️</div>
                       <h3>No entities</h3>
@@ -698,41 +787,80 @@ interface SpaceView {
             <table>
               <thead>
                 <tr>
-                  <th>From</th><th>Relation</th><th>Type</th><th>To</th><th>Tags</th><th>Weight</th><th>Created</th><th></th>
+                  <th>From</th><th>Relation</th><th>Type</th><th>To</th><th>Description</th><th>Tags</th><th>Weight</th><th>Created</th><th></th>
                 </tr>
               </thead>
               <tbody>
                 @for (edge of edges(); track edge._id) {
-                  <tr>
-                    <td class="mono" style="font-size:12px">{{ edge.from }}</td>
-                    <td>
-                      <span class="badge badge-blue">{{ edge.label }}</span>
-                      @if (edge.description) {
-                        <div style="font-size:11px; color:var(--text-muted); margin-top:2px;" [title]="edge.description">{{ edge.description }}</div>
-                      }
-                    </td>
-                    <td style="color:var(--text-muted); font-size:12px">{{ edge.type ?? '—' }}</td>
-                    <td class="mono" style="font-size:12px">{{ edge.to }}</td>
-                    <td style="font-size:11px;">
-                      @for (tag of (edge.tags ?? []); track tag) { <span class="tag">{{ tag }}</span> }
-                      @if (!(edge.tags?.length)) { <span style="color:var(--text-muted)">—</span> }
-                    </td>
-                    <td style="color:var(--text-muted)">{{ edge.weight ?? '—' }}</td>
-                    <td style="color:var(--text-muted)">{{ edge.createdAt | date:'MMM d, y' }}</td>
-                    <td>
-                      @if (confirmDeleteId() === edge._id) {
-                        <span class="inline-confirm">
-                          Delete?
-                          <button class="btn btn-sm btn-danger" (click)="deleteEdge(edge._id)">Yes</button>
-                          <button class="btn btn-sm btn-secondary" (click)="cancelDelete()">No</button>
-                        </span>
-                      } @else {
-                        <button class="icon-btn danger" aria-label="Delete edge" (click)="requestDelete(edge._id)">✕</button>
-                      }
-                    </td>
-                  </tr>
+                  @if (editingId() === edge._id) {
+                    <tr>
+                      <td colspan="9">
+                        <div class="create-form" style="border:none; padding:8px 0;">
+                          <div class="field" style="flex:1; min-width:120px; margin-bottom:0;">
+                            <label>Label (relation)</label>
+                            <input type="text" [(ngModel)]="editEdge.label" name="editEdgeLabel" />
+                          </div>
+                          <div class="field" style="width:100px; margin-bottom:0;">
+                            <label>Type</label>
+                            <input type="text" [(ngModel)]="editEdge.type" name="editEdgeType" />
+                          </div>
+                          <div class="field" style="width:80px; margin-bottom:0;">
+                            <label>Weight</label>
+                            <input type="number" [(ngModel)]="editEdge.weight" name="editEdgeWeight" step="0.1" />
+                          </div>
+                          <div class="field" style="flex:1; min-width:160px; margin-bottom:0;">
+                            <label>Description</label>
+                            <input type="text" [(ngModel)]="editEdge.description" name="editEdgeDesc" />
+                          </div>
+                          <div class="field" style="flex:1; min-width:140px; margin-bottom:0;">
+                            <label>Tags (comma-separated)</label>
+                            <input type="text" [(ngModel)]="editEdge.tags" name="editEdgeTags" />
+                          </div>
+                          <div class="field" style="flex:1; min-width:140px; margin-bottom:0;">
+                            <label>Properties (JSON)</label>
+                            <input type="text" [(ngModel)]="editEdge.properties" name="editEdgeProps" />
+                          </div>
+                          <div style="display:flex; gap:6px; align-items:flex-end;">
+                            <button class="btn btn-sm btn-primary" [disabled]="editSaving()" (click)="saveEditEdge(edge._id)">
+                              @if (editSaving()) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> } Save
+                            </button>
+                            <button class="btn btn-sm btn-secondary" (click)="cancelEdit()">Cancel</button>
+                          </div>
+                          @if (editError()) { <div style="font-size:12px; color:var(--error);">{{ editError() }}</div> }
+                        </div>
+                      </td>
+                    </tr>
+                  } @else {
+                    <tr>
+                      <td class="mono" style="font-size:12px">{{ edge.from }}</td>
+                      <td><span class="badge badge-blue">{{ edge.label }}</span></td>
+                      <td style="color:var(--text-muted); font-size:12px">{{ edge.type ?? '—' }}</td>
+                      <td class="mono" style="font-size:12px">{{ edge.to }}</td>
+                      <td style="font-size:12px; color:var(--text-muted); max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" [title]="edge.description ?? ''">
+                        {{ edge.description || '—' }}
+                      </td>
+                      <td style="font-size:11px;">
+                        @for (tag of (edge.tags ?? []); track tag) { <span class="tag">{{ tag }}</span> }
+                        @if (!(edge.tags?.length)) { <span style="color:var(--text-muted)">—</span> }
+                      </td>
+                      <td style="color:var(--text-muted)">{{ edge.weight ?? '—' }}</td>
+                      <td style="color:var(--text-muted)">{{ edge.createdAt | date:'MMM d, y' }}</td>
+                      <td style="white-space:nowrap;">
+                        <button class="icon-btn" title="Edit edge" aria-label="Edit edge" (click)="startEditEdge(edge)">✎</button>
+                        @if (confirmDeleteId() === edge._id) {
+                          <span class="inline-confirm">
+                            Delete?
+                            <button class="btn btn-sm btn-danger" (click)="deleteEdge(edge._id)">Yes</button>
+                            <button class="btn btn-sm btn-secondary" (click)="cancelDelete()">No</button>
+                          </span>
+                        } @else {
+                          <button class="icon-btn danger" aria-label="Delete edge" (click)="requestDelete(edge._id)">✕</button>
+                        }
+                      </td>
+                    </tr>
+                  }
                 } @empty {
-                  <tr><td colspan="8">
+                  <tr><td colspan="9">
                     <div class="empty-state" style="padding:32px">
                       <div class="empty-state-icon">🕸️</div>
                       <h3>No edges</h3>
@@ -824,44 +952,95 @@ interface SpaceView {
             <table>
               <thead>
                 <tr>
-                  <th>Title</th><th>Kind</th><th>Status</th><th>Starts</th><th>Ends</th><th>Tags</th><th>Entities</th><th></th>
+                  <th>Title</th><th>Description</th><th>Kind</th><th>Status</th><th>Starts</th><th>Ends</th><th>Tags</th><th>Entities</th><th></th>
                 </tr>
               </thead>
               <tbody>
                 @for (entry of chrono(); track entry._id) {
-                  <tr>
-                    <td>
-                      {{ entry.title }}
-                      @if (entry.description) {
-                        <div class="chrono-desc-preview" [title]="entry.description">{{ entry.description }}</div>
-                      }
-                    </td>
-                    <td><span class="badge badge-blue">{{ entry.kind }}</span></td>
-                    <td><span class="badge" [class.badge-purple]="entry.status === 'upcoming'" [class.badge-blue]="entry.status === 'active'" style="font-size:11px">{{ entry.status }}</span></td>
-                    <td style="color:var(--text-muted); font-size:12px">{{ entry.startsAt | date:'MMM d, y HH:mm' }}</td>
-                    <td style="color:var(--text-muted); font-size:12px">{{ entry.endsAt ? (entry.endsAt | date:'MMM d, y HH:mm') : '—' }}</td>
-                    <td>
-                      @for (tag of entry.tags; track tag) { <span class="tag">{{ tag }}</span> }
-                    </td>
-                    <td style="font-size:11px; color:var(--text-muted);">
-                      @if (entry.entityIds.length) {
-                        {{ entry.entityIds.length }} linked
-                      } @else { — }
-                    </td>
-                    <td>
-                      @if (confirmDeleteId() === entry._id) {
-                        <span class="inline-confirm">
-                          Delete?
-                          <button class="btn btn-sm btn-danger" (click)="deleteChrono(entry._id)">Yes</button>
-                          <button class="btn btn-sm btn-secondary" (click)="cancelDelete()">No</button>
-                        </span>
-                      } @else {
-                        <button class="icon-btn danger" aria-label="Delete chrono entry" (click)="requestDelete(entry._id)">✕</button>
-                      }
-                    </td>
-                  </tr>
+                  @if (editingId() === entry._id) {
+                    <tr>
+                      <td colspan="9">
+                        <div class="create-form" style="border:none; padding:8px 0;">
+                          <div class="field" style="flex:2; min-width:180px; margin-bottom:0;">
+                            <label>Title</label>
+                            <input type="text" [(ngModel)]="editChrono.title" name="editChronoTitle" />
+                          </div>
+                          <div class="field" style="width:130px; margin-bottom:0;">
+                            <label>Kind</label>
+                            <select [(ngModel)]="editChrono.kind" name="editChronoKind">
+                              @for (k of chronoKinds; track k) { <option [value]="k">{{ k }}</option> }
+                            </select>
+                          </div>
+                          <div class="field" style="width:130px; margin-bottom:0;">
+                            <label>Status</label>
+                            <select [(ngModel)]="editChrono.status" name="editChronoStatus">
+                              @for (s of chronoStatusOptions; track s) { <option [value]="s">{{ s }}</option> }
+                            </select>
+                          </div>
+                          <div class="field" style="width:190px; margin-bottom:0;">
+                            <label>Starts at</label>
+                            <input type="datetime-local" [(ngModel)]="editChrono.startsAt" name="editChronoStarts" />
+                          </div>
+                          <div class="field" style="width:190px; margin-bottom:0;">
+                            <label>Ends at</label>
+                            <input type="datetime-local" [(ngModel)]="editChrono.endsAt" name="editChronoEnds" />
+                          </div>
+                          <div class="field" style="flex:1; min-width:180px; margin-bottom:0;">
+                            <label>Description</label>
+                            <textarea [(ngModel)]="editChrono.description" name="editChronoDesc" rows="2" style="resize:vertical;"></textarea>
+                          </div>
+                          <div class="field" style="flex:1; min-width:140px; margin-bottom:0;">
+                            <label>Tags (comma-separated)</label>
+                            <input type="text" [(ngModel)]="editChrono.tags" name="editChronoTags" />
+                          </div>
+                          <div class="field" style="flex:1; min-width:140px; margin-bottom:0;">
+                            <label>Entity IDs (comma-separated)</label>
+                            <input type="text" [(ngModel)]="editChrono.entityIds" name="editChronoEntIds" />
+                          </div>
+                          <div style="display:flex; gap:6px; align-items:flex-end;">
+                            <button class="btn btn-sm btn-primary" [disabled]="editSaving()" (click)="saveEditChrono(entry._id)">
+                              @if (editSaving()) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> } Save
+                            </button>
+                            <button class="btn btn-sm btn-secondary" (click)="cancelEdit()">Cancel</button>
+                          </div>
+                          @if (editError()) { <div style="font-size:12px; color:var(--error);">{{ editError() }}</div> }
+                        </div>
+                      </td>
+                    </tr>
+                  } @else {
+                    <tr>
+                      <td>{{ entry.title }}</td>
+                      <td style="font-size:12px; color:var(--text-muted); max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" [title]="entry.description ?? ''">
+                        {{ entry.description || '—' }}
+                      </td>
+                      <td><span class="badge badge-blue">{{ entry.kind }}</span></td>
+                      <td><span class="badge" [class.badge-purple]="entry.status === 'upcoming'" [class.badge-blue]="entry.status === 'active'" style="font-size:11px">{{ entry.status }}</span></td>
+                      <td style="color:var(--text-muted); font-size:12px">{{ entry.startsAt | date:'MMM d, y HH:mm' }}</td>
+                      <td style="color:var(--text-muted); font-size:12px">{{ entry.endsAt ? (entry.endsAt | date:'MMM d, y HH:mm') : '—' }}</td>
+                      <td>
+                        @for (tag of entry.tags; track tag) { <span class="tag">{{ tag }}</span> }
+                      </td>
+                      <td style="font-size:11px; color:var(--text-muted);">
+                        @if (entry.entityIds.length) {
+                          {{ entry.entityIds.length }} linked
+                        } @else { — }
+                      </td>
+                      <td style="white-space:nowrap;">
+                        <button class="icon-btn" title="Edit chrono entry" aria-label="Edit chrono entry" (click)="startEditChrono(entry)">✎</button>
+                        @if (confirmDeleteId() === entry._id) {
+                          <span class="inline-confirm">
+                            Delete?
+                            <button class="btn btn-sm btn-danger" (click)="deleteChrono(entry._id)">Yes</button>
+                            <button class="btn btn-sm btn-secondary" (click)="cancelDelete()">No</button>
+                          </span>
+                        } @else {
+                          <button class="icon-btn danger" aria-label="Delete chrono entry" (click)="requestDelete(entry._id)">✕</button>
+                        }
+                      </td>
+                    </tr>
+                  }
                 } @empty {
-                  <tr><td colspan="8">
+                  <tr><td colspan="9">
                     <div class="empty-state" style="padding:32px">
                       <div class="empty-state-icon">⏱️</div>
                       <h3>No chrono entries</h3>
@@ -1169,6 +1348,15 @@ export class BrainComponent implements OnInit {
   // Inline delete confirmation (stores the ID pending confirmation)
   confirmDeleteId = signal('');
 
+  // Inline edit state
+  editingId = signal('');
+  editSaving = signal(false);
+  editError = signal('');
+  editMemory = { fact: '', tags: '', entityIds: '', description: '', properties: '' };
+  editEntity = { name: '', type: '', tags: '', description: '', properties: '' };
+  editEdge = { label: '', type: '', weight: null as number | null, tags: '', description: '', properties: '' };
+  editChrono = { title: '', kind: '' as string, status: '' as string, startsAt: '', endsAt: '', description: '', tags: '', entityIds: '' };
+
   // Create memory form
   showMemoryForm = signal(false);
   creatingMemory = signal(false);
@@ -1394,6 +1582,160 @@ export class BrainComponent implements OnInit {
 
   requestDelete(id: string): void { this.confirmDeleteId.set(id); }
   cancelDelete(): void { this.confirmDeleteId.set(''); }
+
+  // ── Inline edit methods ────────────────────────────────────────────────
+
+  startEditMemory(mem: Memory): void {
+    this.editingId.set(mem._id);
+    this.editError.set('');
+    this.editMemory = {
+      fact: mem.fact,
+      tags: (mem.tags ?? []).join(', '),
+      entityIds: (mem.entityIds ?? []).join(', '),
+      description: mem.description ?? '',
+      properties: mem.properties && Object.keys(mem.properties).length ? JSON.stringify(mem.properties) : '',
+    };
+  }
+
+  startEditEntity(ent: Entity): void {
+    this.editingId.set(ent._id);
+    this.editError.set('');
+    this.editEntity = {
+      name: ent.name,
+      type: ent.type ?? '',
+      tags: (ent.tags ?? []).join(', '),
+      description: ent.description ?? '',
+      properties: ent.properties && Object.keys(ent.properties).length ? JSON.stringify(ent.properties) : '',
+    };
+  }
+
+  startEditEdge(edge: Edge): void {
+    this.editingId.set(edge._id);
+    this.editError.set('');
+    this.editEdge = {
+      label: edge.label,
+      type: edge.type ?? '',
+      weight: edge.weight ?? null,
+      tags: (edge.tags ?? []).join(', '),
+      description: edge.description ?? '',
+      properties: edge.properties && Object.keys(edge.properties).length ? JSON.stringify(edge.properties) : '',
+    };
+  }
+
+  startEditChrono(entry: ChronoEntry): void {
+    this.editingId.set(entry._id);
+    this.editError.set('');
+    this.editChrono = {
+      title: entry.title,
+      kind: entry.kind,
+      status: entry.status,
+      startsAt: entry.startsAt ? entry.startsAt.slice(0, 16) : '',
+      endsAt: entry.endsAt ? entry.endsAt.slice(0, 16) : '',
+      description: entry.description ?? '',
+      tags: (entry.tags ?? []).join(', '),
+      entityIds: (entry.entityIds ?? []).join(', '),
+    };
+  }
+
+  cancelEdit(): void {
+    this.editingId.set('');
+    this.editError.set('');
+  }
+
+  saveEditMemory(id: string): void {
+    this.editSaving.set(true);
+    this.editError.set('');
+    let props: Record<string, string | number | boolean> | undefined;
+    if (this.editMemory.properties.trim()) {
+      try { props = JSON.parse(this.editMemory.properties.trim()); }
+      catch { this.editSaving.set(false); this.editError.set('Properties must be valid JSON'); return; }
+    }
+    this.api.updateMemory(this.activeSpaceId(), id, {
+      fact: this.editMemory.fact.trim(),
+      tags: this.editMemory.tags.split(',').map(s => s.trim()).filter(Boolean),
+      entityIds: this.editMemory.entityIds.split(',').map(s => s.trim()).filter(Boolean),
+      description: this.editMemory.description.trim(),
+      ...(props ? { properties: props } : {}),
+    }).subscribe({
+      next: (updated) => {
+        this.editSaving.set(false);
+        this.editingId.set('');
+        this.memories.update(list => list.map(m => m._id === id ? updated : m));
+      },
+      error: (err) => { this.editSaving.set(false); this.editError.set(err.error?.error ?? 'Failed to save'); },
+    });
+  }
+
+  saveEditEntity(id: string): void {
+    this.editSaving.set(true);
+    this.editError.set('');
+    let props: Record<string, string | number | boolean> | undefined;
+    if (this.editEntity.properties.trim()) {
+      try { props = JSON.parse(this.editEntity.properties.trim()); }
+      catch { this.editSaving.set(false); this.editError.set('Properties must be valid JSON'); return; }
+    }
+    this.api.updateEntity(this.activeSpaceId(), id, {
+      name: this.editEntity.name.trim(),
+      type: this.editEntity.type.trim(),
+      tags: this.editEntity.tags.split(',').map(s => s.trim()).filter(Boolean),
+      description: this.editEntity.description.trim(),
+      ...(props ? { properties: props } : {}),
+    }).subscribe({
+      next: (updated) => {
+        this.editSaving.set(false);
+        this.editingId.set('');
+        this.entities.update(list => list.map(e => e._id === id ? updated : e));
+      },
+      error: (err) => { this.editSaving.set(false); this.editError.set(err.error?.error ?? 'Failed to save'); },
+    });
+  }
+
+  saveEditEdge(id: string): void {
+    this.editSaving.set(true);
+    this.editError.set('');
+    let props: Record<string, string | number | boolean> | undefined;
+    if (this.editEdge.properties.trim()) {
+      try { props = JSON.parse(this.editEdge.properties.trim()); }
+      catch { this.editSaving.set(false); this.editError.set('Properties must be valid JSON'); return; }
+    }
+    this.api.updateEdge(this.activeSpaceId(), id, {
+      label: this.editEdge.label.trim(),
+      type: this.editEdge.type.trim(),
+      tags: this.editEdge.tags.split(',').map(s => s.trim()).filter(Boolean),
+      description: this.editEdge.description.trim(),
+      ...(this.editEdge.weight != null ? { weight: this.editEdge.weight } : {}),
+      ...(props ? { properties: props } : {}),
+    }).subscribe({
+      next: (updated) => {
+        this.editSaving.set(false);
+        this.editingId.set('');
+        this.edges.update(list => list.map(e => e._id === id ? updated : e));
+      },
+      error: (err) => { this.editSaving.set(false); this.editError.set(err.error?.error ?? 'Failed to save'); },
+    });
+  }
+
+  saveEditChrono(id: string): void {
+    this.editSaving.set(true);
+    this.editError.set('');
+    this.api.updateChrono(this.activeSpaceId(), id, {
+      title: this.editChrono.title.trim(),
+      kind: this.editChrono.kind as ChronoKind,
+      status: this.editChrono.status as ChronoStatus,
+      ...(this.editChrono.startsAt ? { startsAt: new Date(this.editChrono.startsAt).toISOString() } : {}),
+      ...(this.editChrono.endsAt ? { endsAt: new Date(this.editChrono.endsAt).toISOString() } : {}),
+      description: this.editChrono.description.trim(),
+      tags: this.editChrono.tags.split(',').map(s => s.trim()).filter(Boolean),
+      entityIds: this.editChrono.entityIds.split(',').map(s => s.trim()).filter(Boolean),
+    }).subscribe({
+      next: (updated) => {
+        this.editSaving.set(false);
+        this.editingId.set('');
+        this.chrono.update(list => list.map(c => c._id === id ? updated : c));
+      },
+      error: (err) => { this.editSaving.set(false); this.editError.set(err.error?.error ?? 'Failed to save'); },
+    });
+  }
 
   deleteMemory(id: string): void {
     this.confirmDeleteId.set('');
