@@ -24,6 +24,7 @@ export interface PropertySchema {
   minimum?: number;
   maximum?: number;
   pattern?: string;
+  mergeFn?: 'avg' | 'min' | 'max' | 'sum' | 'and' | 'or' | 'xor';
 }
 
 export interface SpaceMeta {

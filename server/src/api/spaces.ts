@@ -37,7 +37,20 @@ const PropertySchemaZ = z.object({
   minimum: z.number().optional(),
   maximum: z.number().optional(),
   pattern: z.string().max(500).optional(),
-}).strict();
+  mergeFn: z.enum(['avg', 'min', 'max', 'sum', 'and', 'or', 'xor']).optional(),
+}).strict().refine(data => {
+  if (!data.mergeFn) return true;
+  const numericFns = new Set(['avg', 'min', 'max', 'sum']);
+  const booleanFns = new Set(['and', 'or', 'xor']);
+  if (data.type === 'number') return numericFns.has(data.mergeFn);
+  if (data.type === 'boolean') return booleanFns.has(data.mergeFn);
+  // mergeFn requires a compatible type declaration
+  if (data.type === 'string') return false;
+  // No type declared but mergeFn given — allow if the fn could be valid for some type
+  return numericFns.has(data.mergeFn) || booleanFns.has(data.mergeFn);
+}, {
+  message: 'mergeFn is incompatible with the declared type (numeric fns require type "number", boolean fns require type "boolean")',
+});
 
 const RequiredPropertiesZ = z.object({
   entity: z.array(z.string().min(1).max(200)).optional(),

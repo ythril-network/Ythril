@@ -956,3 +956,44 @@ graph TD
 - Same space can participate in a pub/sub network for public distribution AND a democratic network for the internal authoring team — different governance, same content.
 - Scale to hundreds of subscribers without governance overhead. No vote rounds, no approval queues, no bottlenecks.
 
+---
+
+## Entity Merge — Deduplication & Aggregation
+
+**Use Case:** An MCP agent discovers two entities representing the same real-world concept (e.g. two "Docker" entities created by different team members) and consolidates them into a single authoritative entity.
+
+**Workflow:**
+
+1. **Discover duplicates** — agent uses `find_similar` to find high-similarity entities:
+   ```json
+   { "entryId": "<docker-entity-1-uuid>", "entryType": "entity", "minScore": 0.85 }
+   ```
+
+2. **Inspect the merge plan** — call `merge_entities` with an empty resolution map:
+   ```json
+   { "survivorId": "<docker-entity-1-uuid>", "absorbedId": "<docker-entity-2-uuid>", "resolutions": [] }
+   ```
+   The endpoint returns `409` with a `MergePlan` showing:
+   - Property conflicts (e.g. `score: 80 vs 95`, `active: true vs false`)
+   - Absorbed-only properties (auto-added, no resolution needed)
+   - Duplicate edge warnings (edges that become identical after relinking)
+
+3. **Resolve conflicts** — agent fills in resolutions (numeric via function, text via LLM judgment):
+   ```json
+   {
+     "survivorId": "<docker-entity-1-uuid>",
+     "absorbedId": "<docker-entity-2-uuid>",
+     "resolutions": [
+       { "key": "score", "resolution": "fn:avg" },
+       { "key": "active", "resolution": "fn:or" },
+       { "key": "description", "resolution": "custom", "customValue": "Docker container runtime — merged from team entries" }
+     ]
+   }
+   ```
+
+4. **Execute** — the endpoint merges atomically: relinks all edges/memories/chrono to the survivor, applies resolved properties, deletes the absorbed entity.
+
+**Aggregation variant:** Merge two metric entities using `fn:sum` on numeric fields to aggregate counts — same endpoint, same flow. Candidate selection is the caller's responsibility.
+
+**Schema-driven defaults:** When `propertySchemas` includes `mergeFn` (e.g. `"score": { "type": "number", "mergeFn": "avg" }`), the merge plan surfaces it as `suggestedFn` — the agent can accept or override per call.
+

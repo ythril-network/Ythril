@@ -591,7 +591,7 @@ Webhooks fire on write events across 5 domains:
 | Domain | Events |
 |--------|--------|
 | Memory | `memory.created`, `memory.updated`, `memory.deleted` |
-| Entity | `entity.created`, `entity.updated`, `entity.deleted` |
+| Entity | `entity.created`, `entity.updated`, `entity.deleted`, `entity.merged` |
 | Edge | `edge.created`, `edge.updated`, `edge.deleted` |
 | Chrono | `chrono.created`, `chrono.updated`, `chrono.deleted` |
 | File | `file.created`, `file.updated`, `file.deleted` |
@@ -666,6 +666,7 @@ If a space has a `description`, it is sent to the MCP client as `instructions` d
 | `get_space_meta` | Return the full space schema, purpose, usage notes, and stats |
 | `upsert_entity` | Create or update a named entity (`name`, `type`, `tags`, `description`, `properties`) |
 | `update_entity` | Update an existing entity by ID |
+| `merge_entities` | Merge two entities — relink references, resolve per-property conflicts, delete absorbed entity |
 | `find_entities_by_name` | Find all entities with an exact name match |
 | `upsert_edge` | Create or update a directed relationship (`label`, `type`, `weight`, `tags`, `description`, `properties`) |
 | `update_edge` | Update an existing edge by ID |

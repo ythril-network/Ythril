@@ -728,6 +728,94 @@ DELETE /api/brain/spaces/:spaceId/entities/:id
 
 ---
 
+### Merge Two Entities
+
+```
+POST /api/brain/spaces/:spaceId/entities/:survivorId/merge/:absorbedId
+Content-Type: application/json
+```
+
+Merge two entities into one. The **survivor** keeps its identity (ID, name, type, description); the **absorbed** entity is deleted after all references are relinked.
+
+**Request body** (optional):
+
+```json
+{
+  "resolutions": [
+    { "key": "score", "resolution": "fn:avg" },
+    { "key": "label", "resolution": "survivor" },
+    { "key": "category", "resolution": "custom", "customValue": "merged-category" }
+  ]
+}
+```
+
+**Behaviour:**
+
+| Scenario | Status | Response |
+|----------|--------|----------|
+| No property conflicts, or all conflicts resolved | `200` | Merged entity + relinking info |
+| Unresolved property conflicts remain | `409` | `MergePlan` with conflict details |
+| Survivor or absorbed entity not found | `404` | Error |
+| Invalid resolution | `400` | Error |
+
+**Response `200`** (merge executed):
+
+```json
+{
+  "merged": { "_id": "...", "name": "...", "properties": { ... }, ... },
+  "absorbedId": "absorbed-entity-uuid",
+  "relinked": true,
+  "duplicateEdgeWarnings": [
+    {
+      "survivorEdgeId": "edge-1-uuid",
+      "absorbedEdgeId": "edge-2-uuid",
+      "from": "survivor-uuid",
+      "to": "target-uuid",
+      "label": "depends_on"
+    }
+  ]
+}
+```
+
+**Response `409`** (unresolved conflicts — no mutation):
+
+```json
+{
+  "survivorId": "...",
+  "absorbedId": "...",
+  "propertyConflicts": [
+    {
+      "key": "score",
+      "type": "number",
+      "survivorValue": 80,
+      "absorbedValue": 100,
+      "suggestedFn": "avg",
+      "resolved": false
+    }
+  ],
+  "absorbedOnlyProperties": [
+    { "key": "extra", "value": "info" }
+  ],
+  "duplicateEdgeWarnings": []
+}
+```
+
+**Per-property resolution options:**
+
+| Property type | Valid resolutions |
+|---------------|-------------------|
+| `number` | `"survivor"`, `"absorbed"`, `"fn:avg"`, `"fn:min"`, `"fn:max"`, `"fn:sum"` |
+| `boolean` | `"survivor"`, `"absorbed"`, `"fn:and"`, `"fn:or"`, `"fn:xor"` |
+| `string` / other | `"survivor"`, `"absorbed"`, `"custom"` (with `customValue`) |
+
+**Relinking:** All edges, memories, and chrono entries referencing the absorbed entity are unconditionally rewritten to reference the survivor. Edges where `(from, to, label)` become identical after relinking appear in `duplicateEdgeWarnings[]` — the agent resolves them via `DELETE /api/spaces/:spaceId/edges/:id`.
+
+**`suggestedFn`:** When `propertySchemas` includes a `mergeFn` for a conflicting property, it appears as `suggestedFn` in the conflict. The agent may accept or override it.
+
+**Proxy spaces:** Not supported — target member spaces directly.
+
+---
+
 ### Upsert an Edge
 
 ```
@@ -1339,7 +1427,10 @@ Update space properties. Requires an admin token (+ TOTP if MFA is enabled). At 
     "requiredProperties": { "entity": ["status"] },
     "propertySchemas": {
       "entity": {
-        "status": { "type": "string", "enum": ["active", "deprecated", "planned"] }
+        "status": { "type": "string", "enum": ["active", "deprecated", "planned"] },
+        "score": { "type": "number", "minimum": 0, "maximum": 100, "mergeFn": "avg" },
+        "count": { "type": "number", "mergeFn": "sum" },
+        "active": { "type": "boolean", "mergeFn": "and" }
       }
     },
     "tagSuggestions": ["backend", "frontend", "infra"],
@@ -1462,7 +1553,7 @@ Each space can define a schema in its `meta` block that governs what data is acc
 | `edgeLabels` | edges | Allowlist of valid `label` values (max 200). |
 | `namingPatterns` | entities | Regex pattern per entity type for validating `name` (max 500 chars, ReDoS-protected). |
 | `requiredProperties` | entity, memory, edge, chrono | Array of required property keys per knowledge type. |
-| `propertySchemas` | entity, memory, edge, chrono | Property value constraints per knowledge type — `type` (string/number/boolean), `enum`, `minimum`/`maximum`, `pattern` (regex, ReDoS-protected). |
+| `propertySchemas` | entity, memory, edge, chrono | Property value constraints per knowledge type — `type` (string/number/boolean), `enum`, `minimum`/`maximum`, `pattern` (regex, ReDoS-protected), `mergeFn` (merge function for entity merges). |
 | `tagSuggestions` | all | Non-enforced tag hints shown in the UI (max 200). |
 | `strictLinkage` | edges, memories, chrono, entity delete | When `true`, all reference fields (`from`/`to`, `entityIds`, `memoryIds`) must be valid UUID v4 values, and entity deletion is blocked while inbound backlinks exist. Default: `false` (off). |
 
@@ -1472,6 +1563,16 @@ Schema validation runs on:
 - MCP tools: `remember`, `upsert_entity`, `upsert_edge`, `create_chrono`, `bulk_write`
 
 **Security:** Regex patterns in `namingPatterns` and `propertySchemas` are protected against ReDoS: patterns are limited to 500 characters, test values to 10K characters, and structural analysis rejects nested quantifiers and alternation-with-quantifier patterns.
+
+**`mergeFn` in propertySchemas:** Optional merge function for entity properties. Used as the default `suggestedFn` when merging entities via `POST /entities/:survivorId/merge/:absorbedId`. Valid values depend on the declared `type`:
+
+| Type | Valid `mergeFn` values |
+|------|----------------------|
+| `number` | `avg`, `min`, `max`, `sum` |
+| `boolean` | `and`, `or`, `xor` |
+| `string` | *(not supported — merge resolution is always explicit)* |
+
+Incompatible `mergeFn`/`type` combinations (e.g. `sum` on `boolean`) are rejected with `400` at schema save time.
 
 ---
 
@@ -3108,7 +3209,7 @@ When a space has a schema defined (via `meta`), a compact schema summary is appe
 
 ### Read-Only Tokens
 
-When connecting with a `readOnly` token, mutating tools (`remember`, `update_memory`, `delete_memory`, `upsert_entity`, `update_entity`, `upsert_edge`, `update_edge`, `create_chrono`, `update_chrono`, `bulk_write`, `write_file`, `delete_file`, `create_dir`, `move_file`, `sync_now`, `update_space`, `wipe_space`) are **hidden** from `tools/list` and rejected with an error if called directly. Read-only tools (`recall`, `recall_global`, `query`, `get_stats`, `get_space_meta`, `find_entities_by_name`, `list_chrono`, `read_file`, `list_dir`, `list_peers`, `traverse`) work normally.
+When connecting with a `readOnly` token, mutating tools (`remember`, `update_memory`, `delete_memory`, `upsert_entity`, `update_entity`, `merge_entities`, `upsert_edge`, `update_edge`, `create_chrono`, `update_chrono`, `bulk_write`, `write_file`, `delete_file`, `create_dir`, `move_file`, `sync_now`, `update_space`, `wipe_space`) are **hidden** from `tools/list` and rejected with an error if called directly. Read-only tools (`recall`, `recall_global`, `query`, `get_stats`, `get_space_meta`, `find_entities_by_name`, `list_chrono`, `read_file`, `list_dir`, `list_peers`, `traverse`) work normally.
 
 ### Connecting
 
@@ -3143,6 +3244,7 @@ Content-Type: application/json
 | `get_space_meta` | Return the full space schema definition, purpose, usage notes, and stats |
 | `upsert_entity` | Create or update a named entity (with optional properties) |
 | `update_entity` | Update an existing entity by ID (name, type, description, tags, properties) |
+| `merge_entities` | Merge two entities — relink all references and resolve per-property conflicts |
 | `find_entities_by_name` | Find all entities with an exact name match (returns list regardless of type) |
 | `upsert_edge` | Create or update a directed relationship |
 | `update_edge` | Update an existing edge by ID (label, type, weight, description, tags, properties) |
