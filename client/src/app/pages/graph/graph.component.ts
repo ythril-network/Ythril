@@ -793,7 +793,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
       this.api.getEntity(spaceId, id).pipe(
         catchError(() => of(null)),
       ).subscribe(ent => {
-        if (ent) this.selectRoot(ent);
+        if (ent) this.selectRoot(ent, true);
       });
     });
 
@@ -843,12 +843,15 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
     }
   }
 
-  selectRoot(entity: Entity): void {
+  selectRoot(entity: Entity, pushHistory = false): void {
     this.rootEntity.set(entity);
     this.searchQuery.set(entity.name);
     this.searchResults.set([]);
     this.searchFocused.set(false);
-    this.updateUrl(entity._id);
+    this.selectedNode.set(null);
+    this.nodeMemories.set([]);
+    this.nodeChrono.set([]);
+    this.updateUrl(entity._id, pushHistory);
     this.traverse(entity._id, this.depth(), this.direction());
   }
 
@@ -897,11 +900,22 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
 
     const elements: any[] = [];
 
+    // Add the root node (not included in traverse result)
+    const root = this.rootEntity();
+    if (root) {
+      elements.push({
+        group: 'nodes',
+        data: { id: root._id, label: root.name, type: root.type || 'default', depth: 0 },
+        classes: 'root',
+      });
+    }
+
     for (const n of this.graphNodes) {
+      // Skip if root was already added
+      if (n._id === rootId) continue;
       elements.push({
         group: 'nodes',
         data: { id: n._id, label: n.name, type: n.type || 'default', depth: n.depth },
-        classes: n._id === rootId ? 'root' : '',
       });
     }
 
@@ -1086,9 +1100,14 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
 
   // ── URL management ──────────────────────────────────────────────────────────
 
-  private updateUrl(entityId: string): void {
+  private updateUrl(entityId: string, push = false): void {
     const spaceId = this.activeSpaceId();
     const path = this.location.path().split('?')[0];
-    this.location.replaceState(path, `space=${spaceId}&entity=${entityId}`);
+    const qs = `space=${spaceId}&entity=${entityId}`;
+    if (push) {
+      this.location.go(path, qs);
+    } else {
+      this.location.replaceState(path, qs);
+    }
   }
 }

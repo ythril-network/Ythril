@@ -160,6 +160,9 @@ import { ApiService } from '../../core/api.service';
         <a class="nav-link" routerLink="/brain" routerLinkActive="active">
           <span class="nav-icon">🧠</span>Brain
         </a>
+        <a class="nav-link" routerLink="/graph" routerLinkActive="active">
+          <span class="nav-icon">🕸️</span>Graph
+        </a>
         <a class="nav-link" routerLink="/files" routerLinkActive="active"
            [routerLinkActiveOptions]="{ exact: true }">
           <span class="nav-icon">📁</span>Files
