@@ -193,7 +193,7 @@ export async function updateEntityById(
   if (updates.type !== undefined) $set['type'] = newType;
   if (updates.description !== undefined || (deleteFieldsPaths && !$unset['description'])) $set['description'] = newDesc;
   if (updates.tags !== undefined || (deleteFieldsPaths && !$unset['tags'])) $set['tags'] = newTags;
-  if (updates.properties !== undefined || (deleteFieldsPaths && deleteFieldsPaths.some(p => p.startsWith('properties')))) $set['properties'] = newProps;
+  if (updates.properties !== undefined || (deleteFieldsPaths && !$unset['properties'])) $set['properties'] = newProps;
 
   // Re-embed whenever any content field changes
   try {

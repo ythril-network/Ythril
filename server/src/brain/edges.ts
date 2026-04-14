@@ -202,7 +202,7 @@ export async function updateEdgeById(
     : existing.tags ?? [];
   let newProps: Record<string, string | number | boolean> | undefined = updates.properties !== undefined
     ? { ...(existing.properties ?? {}), ...updates.properties }
-    : existing.properties != null ? { ...existing.properties } : existing.properties;
+    : existing.properties != null ? { ...existing.properties } : {};
   let newType = updates.type !== undefined ? updates.type : existing.type;
   let newWeight: number | undefined = updates.weight !== undefined ? updates.weight : existing.weight;
 
@@ -245,7 +245,7 @@ export async function updateEdgeById(
   if (updates.label !== undefined) $set['label'] = newLabel;
   if (updates.description !== undefined || (deleteFieldsPaths && !$unset['description'])) $set['description'] = newDesc;
   if (updates.tags !== undefined || (deleteFieldsPaths && !$unset['tags'])) $set['tags'] = newTags;
-  if (updates.properties !== undefined || (deleteFieldsPaths && deleteFieldsPaths.some(p => p.startsWith('properties')))) $set['properties'] = newProps;
+  if (updates.properties !== undefined || (deleteFieldsPaths && !$unset['properties'])) $set['properties'] = newProps;
   if (updates.type !== undefined) $set['type'] = newType;
   if (updates.weight !== undefined || (deleteFieldsPaths && !$unset['weight'])) $set['weight'] = newWeight;
 
@@ -267,7 +267,7 @@ export async function updateEdgeById(
     updatedAt: now,
     seq,
     ...(updates.description !== undefined ? { description: newDesc } : {}),
-    ...(updates.properties !== undefined || (deleteFieldsPaths && deleteFieldsPaths.some(p => p.startsWith('properties'))) ? { properties: newProps } : {}),
+    ...(updates.properties !== undefined || (deleteFieldsPaths && !$unset['properties']) ? { properties: newProps } : {}),
     ...(updates.type !== undefined ? { type: newType } : {}),
     ...(updates.weight !== undefined ? { weight: newWeight } : {}),
     ...('embedding' in $set ? { embedding: $set['embedding'] as number[], embeddingModel: $set['embeddingModel'] as string } : {}),

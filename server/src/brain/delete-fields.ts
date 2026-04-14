@@ -81,9 +81,11 @@ export function applyDeleteFields(
     affected.add(firstSeg);
 
     if (segments.length === 1) {
-      // Top-level deletion
-      if (!PROTO_KEYS.has(firstSeg)) {
-        delete obj[firstSeg];
+      // Top-level deletion — skip dangerous proto keys
+      if (firstSeg !== '__proto__' && firstSeg !== 'constructor' && firstSeg !== 'prototype') {
+        if (Object.prototype.hasOwnProperty.call(obj, firstSeg)) {
+          delete obj[firstSeg];
+        }
       }
     } else {
       // Nested deletion — walk to the parent, then delete the leaf
@@ -91,7 +93,7 @@ export function applyDeleteFields(
       let safe = true;
       for (let i = 0; i < segments.length - 1; i++) {
         const seg = segments[i] ?? '';
-        if (PROTO_KEYS.has(seg)) { safe = false; break; }
+        if (seg === '__proto__' || seg === 'constructor' || seg === 'prototype') { safe = false; break; }
         if (current == null || typeof current !== 'object' || Array.isArray(current)) {
           current = undefined;
           break;
@@ -99,8 +101,11 @@ export function applyDeleteFields(
         current = (current as Record<string, unknown>)[seg];
       }
       const leafSeg = segments[segments.length - 1] ?? '';
-      if (safe && !PROTO_KEYS.has(leafSeg) && current != null && typeof current === 'object' && !Array.isArray(current)) {
-        delete (current as Record<string, unknown>)[leafSeg];
+      if (safe && leafSeg !== '__proto__' && leafSeg !== 'constructor' && leafSeg !== 'prototype'
+          && current != null && typeof current === 'object' && !Array.isArray(current)) {
+        if (Object.prototype.hasOwnProperty.call(current, leafSeg)) {
+          delete (current as Record<string, unknown>)[leafSeg];
+        }
       }
     }
   }

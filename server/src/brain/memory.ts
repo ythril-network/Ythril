@@ -438,7 +438,7 @@ export async function updateMemory(
       tags: updates.tags ?? existing.tags,
       entityIds: updates.entityIds ?? existing.entityIds,
       description: updates.description !== undefined ? updates.description : existing.description,
-      properties: updates.properties ?? (existing.properties != null ? { ...existing.properties } : existing.properties),
+      properties: updates.properties ?? (existing.properties != null ? { ...existing.properties } : {}),
     };
     applyDeleteFields(merged, deleteFieldsPaths);
 
