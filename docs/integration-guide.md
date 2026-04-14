@@ -1125,6 +1125,64 @@ Entity items in the `entities` array accept an optional `id` field (UUID v4). If
 
 ---
 
+### Partial Update with deleteFields
+
+All `PATCH` update endpoints — entities, edges, and memories — accept an optional `deleteFields` array of dot-notation paths. This allows callers to remove specific fields from a document in the same atomic operation as normal property/tag updates.
+
+```
+PATCH /api/brain/spaces/:spaceId/entities/:id
+PATCH /api/brain/spaces/:spaceId/edges/:id
+PATCH /api/brain/:spaceId/memories/:id
+PATCH /api/brain/spaces/:spaceId/memories/:id
+```
+
+**Example — delete a property key while adding a new one:**
+
+```json
+{
+  "properties": { "newKey": "value" },
+  "tags": ["current-tag"],
+  "deleteFields": [
+    "properties.oldKey",
+    "properties.anotherStaleKey",
+    "description"
+  ]
+}
+```
+
+**Path semantics:**
+
+| Path | Effect |
+|------|--------|
+| `"properties.oldKey"` | Deletes that key from the `properties` map |
+| `"description"` | Deletes the top-level `description` field |
+| `"properties"` | Deletes the entire `properties` map (only if the space schema allows it) |
+| `"weight"` | Deletes the `weight` field (edges only) |
+
+**Rules:**
+
+- `deleteFields` is applied **after** the normal merge — so you can add new properties and delete stale ones in the same request.
+- Paths targeting non-existent keys are silently ignored (no error).
+- System fields (`id`, `_id`, `name`, `type`, `spaceId`, `createdAt`, `updatedAt`) **cannot** be deleted. Attempting to do so returns `400`.
+- If the result after `deleteFields` + merge violates `requiredProperties` in the space schema (with `validationMode: "strict"`), the request is rejected with `422` listing the missing required keys. No partial mutation occurs.
+- `deleteFields` can be the **only** parameter in the request body (no other updates needed).
+- Omitting `deleteFields` retains the existing merge behaviour — no breaking change for existing clients.
+
+**Response** — same shape as a normal `PATCH` update (`200` with the updated document).
+
+**Error responses:**
+
+| Status | Condition |
+|--------|-----------|
+| `400` | `deleteFields` is not an array of strings, contains empty strings, or targets a system field |
+| `422` | Post-deletion state violates `requiredProperties` in strict validation mode |
+
+> **⚠️ Warning:** Fields deleted via `deleteFields` are **permanently removed**. Recovery requires audit logs or a backup. The explicit path list design is intentional — accidental data loss requires consciously naming each field to remove.
+
+**MCP tools:** `update_memory`, `update_entity`, and `update_edge` also accept a `deleteFields` array parameter with the same semantics.
+
+---
+
 ## Files API
 
 Base path: `/api/files`
@@ -3234,7 +3292,7 @@ Content-Type: application/json
 | Tool | Description |
 |---|---|
 | `remember` | Store a memory with optional tags and entity links |
-| `update_memory` | Update an existing memory's fact, tags, or entity links |
+| `update_memory` | Update an existing memory's fact, tags, entity links, or delete specific fields via `deleteFields` |
 | `delete_memory` | Delete a memory by ID |
 | `recall` | Semantic search across all knowledge types (memories, entities, edges, chrono entries, files) within the current space |
 | `recall_global` | Semantic search across all knowledge types in all accessible spaces |
@@ -3243,11 +3301,11 @@ Content-Type: application/json
 | `get_stats` | Return counts of memories, entities, edges, chrono entries, and files |
 | `get_space_meta` | Return the full space schema definition, purpose, usage notes, and stats |
 | `upsert_entity` | Create or update a named entity (with optional properties) |
-| `update_entity` | Update an existing entity by ID (name, type, description, tags, properties) |
+| `update_entity` | Update an existing entity by ID (name, type, description, tags, properties); supports `deleteFields` for field removal |
 | `merge_entities` | Merge two entities — relink all references and resolve per-property conflicts |
 | `find_entities_by_name` | Find all entities with an exact name match (returns list regardless of type) |
 | `upsert_edge` | Create or update a directed relationship |
-| `update_edge` | Update an existing edge by ID (label, type, weight, description, tags, properties) |
+| `update_edge` | Update an existing edge by ID (label, type, weight, description, tags, properties); supports `deleteFields` for field removal |
 | `traverse` | BFS graph traversal — follow edges from a starting entity up to `maxDepth` hops |
 | `create_chrono` | Create a chrono entry (event, deadline, plan, prediction, milestone) |
 | `update_chrono` | Update an existing chrono entry |
@@ -3338,6 +3396,24 @@ Content-Type: application/json
 ```
 
 All fields are optional — only provided fields are updated (partial update). If `fact` changes, re-embedding is triggered automatically. Requires a non-read-only token.
+
+To delete specific fields from a memory, entity, or edge, include a `deleteFields` array of dot-notation paths in the same request:
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "update_entity",
+    "arguments": {
+      "id": "550e8400-...",
+      "properties": { "newKey": "value" },
+      "deleteFields": ["properties.oldKey", "description"]
+    }
+  }
+}
+```
+
+System fields (`id`, `name`, `type`, `spaceId`, `createdAt`, `updatedAt`) cannot be listed in `deleteFields`. Deletions are permanent — recovery requires audit logs or a backup.
 
 ### Example: delete_memory
 

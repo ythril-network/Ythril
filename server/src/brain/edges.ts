@@ -3,6 +3,7 @@ import { col } from '../db/mongo.js';
 import { nextSeq } from '../util/seq.js';
 import { embed } from './embedding.js';
 import { getConfig } from '../config/loader.js';
+import { applyDeleteFields } from './delete-fields.js';
 import type { EdgeDoc, EntityDoc, TombstoneDoc } from '../config/types.js';
 
 export interface TraverseNode {
@@ -183,6 +184,7 @@ export async function updateEdgeById(
   spaceId: string,
   id: string,
   updates: { label?: string; description?: string; tags?: string[]; properties?: Record<string, string | number | boolean>; weight?: number; type?: string },
+  deleteFieldsPaths?: string[],
 ): Promise<EdgeDoc | null> {
   const collection = col<EdgeDoc>(`${spaceId}_edges`);
   const existing = await collection.findOne({ _id: id, spaceId } as never) as EdgeDoc | null;
@@ -191,24 +193,61 @@ export async function updateEdgeById(
   const seq = await nextSeq(spaceId);
   const now = new Date().toISOString();
   const $set: Record<string, unknown> = { updatedAt: now, seq };
+  const $unset: Record<string, unknown> = {};
 
   const newLabel = updates.label ?? existing.label;
-  const newDesc = updates.description !== undefined ? updates.description : existing.description;
-  const newTags = updates.tags !== undefined
+  let newDesc = updates.description !== undefined ? updates.description : existing.description;
+  let newTags = updates.tags !== undefined
     ? Array.from(new Set([...(existing.tags ?? []), ...updates.tags]))
     : existing.tags ?? [];
-  const newProps = updates.properties !== undefined
+  let newProps: Record<string, string | number | boolean> | undefined = updates.properties !== undefined
     ? { ...(existing.properties ?? {}), ...updates.properties }
-    : existing.properties;
-  const newType = updates.type !== undefined ? updates.type : existing.type;
-  const newWeight = updates.weight !== undefined ? updates.weight : existing.weight;
+    : existing.properties != null ? { ...existing.properties } : {};
+  let newType = updates.type !== undefined ? updates.type : existing.type;
+  let newWeight: number | undefined = updates.weight !== undefined ? updates.weight : existing.weight;
+
+  // Apply deleteFields after merge
+  if (deleteFieldsPaths && deleteFieldsPaths.length > 0) {
+    const merged: Record<string, unknown> = {
+      description: newDesc,
+      tags: newTags,
+      properties: newProps,
+      weight: newWeight,
+    };
+    applyDeleteFields(merged, deleteFieldsPaths);
+
+    if (!('description' in merged)) {
+      newDesc = undefined;
+      $unset['description'] = '';
+    } else {
+      newDesc = merged['description'] as string | undefined;
+    }
+    if (!('tags' in merged)) {
+      newTags = [];
+      $unset['tags'] = '';
+    } else {
+      newTags = merged['tags'] as string[];
+    }
+    if (!('properties' in merged)) {
+      newProps = undefined;
+      $unset['properties'] = '';
+    } else {
+      newProps = merged['properties'] as Record<string, string | number | boolean>;
+    }
+    if (!('weight' in merged)) {
+      newWeight = undefined;
+      $unset['weight'] = '';
+    } else {
+      newWeight = merged['weight'] as number;
+    }
+  }
 
   if (updates.label !== undefined) $set['label'] = newLabel;
-  if (updates.description !== undefined) $set['description'] = newDesc;
-  if (updates.tags !== undefined) $set['tags'] = newTags;
-  if (updates.properties !== undefined) $set['properties'] = newProps;
+  if (updates.description !== undefined || (deleteFieldsPaths && !$unset['description'])) $set['description'] = newDesc;
+  if (updates.tags !== undefined || (deleteFieldsPaths && !$unset['tags'])) $set['tags'] = newTags;
+  if (updates.properties !== undefined || (deleteFieldsPaths && !$unset['properties'])) $set['properties'] = newProps;
   if (updates.type !== undefined) $set['type'] = newType;
-  if (updates.weight !== undefined) $set['weight'] = newWeight;
+  if (updates.weight !== undefined || (deleteFieldsPaths && !$unset['weight'])) $set['weight'] = newWeight;
 
   // Re-embed whenever any content field changes
   try {
@@ -217,19 +256,29 @@ export async function updateEdgeById(
     $set['embeddingModel'] = embResult.model;
   } catch { /* embedding unavailable — keep existing embedding */ }
 
-  await collection.updateOne({ _id: id } as never, { $set } as never);
-  return {
+  const updateOp: Record<string, unknown> = { $set };
+  if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
+  await collection.updateOne({ _id: id } as never, updateOp as never);
+
+  const result = {
     ...existing,
     label: newLabel,
     tags: newTags,
     updatedAt: now,
     seq,
     ...(updates.description !== undefined ? { description: newDesc } : {}),
-    ...(updates.properties !== undefined ? { properties: newProps } : {}),
+    ...(updates.properties !== undefined || (deleteFieldsPaths && !$unset['properties']) ? { properties: newProps } : {}),
     ...(updates.type !== undefined ? { type: newType } : {}),
     ...(updates.weight !== undefined ? { weight: newWeight } : {}),
     ...('embedding' in $set ? { embedding: $set['embedding'] as number[], embeddingModel: $set['embeddingModel'] as string } : {}),
   } as EdgeDoc;
+
+  // Apply deleteFields to the returned doc for consistency
+  if (deleteFieldsPaths && deleteFieldsPaths.length > 0) {
+    applyDeleteFields(result as unknown as Record<string, unknown>, deleteFieldsPaths);
+  }
+
+  return result;
 }
 
 /** Bulk-delete all edges in a space, writing a tombstone per deleted doc. */

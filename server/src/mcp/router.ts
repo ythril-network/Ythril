@@ -19,6 +19,7 @@ import { col } from '../db/mongo.js';
 import { upsertEntity, listEntities, updateEntityById, findEntitiesByName } from '../brain/entities.js';
 import { upsertEdge, listEdges, traverseGraph, updateEdgeById } from '../brain/edges.js';
 import { computeMergePlan, applyResolutions, executeMerge, validateResolution, type PropertyResolution } from '../brain/merge.js';
+import { validateDeleteFields } from '../brain/delete-fields.js';
 
 /** Regex that matches a UUID v4 (case-insensitive). */
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -255,6 +256,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
               additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
             },
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+            deleteFields: { type: 'array', items: { type: 'string' }, description: 'Dot-notation paths to delete from the memory (e.g. ["properties.oldKey", "description"]). System fields (id, name, type, spaceId, createdAt, updatedAt) cannot be deleted. Deletions are permanent.' },
           },
           required: ['id'],
         },
@@ -407,6 +409,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
               additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
             },
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+            deleteFields: { type: 'array', items: { type: 'string' }, description: 'Dot-notation paths to delete from the entity (e.g. ["properties.oldKey", "description"]). System fields (id, name, type, spaceId, createdAt, updatedAt) cannot be deleted. Deletions are permanent.' },
           },
           required: ['id'],
         },
@@ -429,6 +432,7 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
               additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
             },
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+            deleteFields: { type: 'array', items: { type: 'string' }, description: 'Dot-notation paths to delete from the edge (e.g. ["properties.oldKey", "description"]). System fields (id, name, type, spaceId, createdAt, updatedAt) cannot be deleted. Deletions are permanent.' },
           },
           required: ['id'],
         },
@@ -1011,6 +1015,11 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
           if (!wt.ok) throw new Error(wt.error);
 
+          // Validate deleteFields
+          const dfResult = validateDeleteFields(a['deleteFields']);
+          if (!dfResult.ok) throw new Error(dfResult.error);
+          const dfPaths: string[] | undefined = Array.isArray(a['deleteFields']) && (a['deleteFields'] as string[]).length > 0 ? a['deleteFields'] as string[] : undefined;
+
           const updates: { fact?: string; tags?: string[]; entityIds?: string[]; description?: string; properties?: Record<string, string | number | boolean> } = {};
           if (typeof a['fact'] === 'string') {
             if (!a['fact'].trim()) throw new Error('fact must not be empty');
@@ -1023,13 +1032,13 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             updates.properties = a['properties'] as Record<string, string | number | boolean>;
           }
 
-          if (Object.keys(updates).length === 0) throw new Error('At least one of fact, tags, entityIds, description, or properties must be provided');
+          if (Object.keys(updates).length === 0 && !dfPaths) throw new Error('At least one of fact, tags, entityIds, description, properties, or deleteFields must be provided');
 
           const memberIds = resolveMemberSpaces(wt.target);
           // Search member spaces sequentially — consistent with REST endpoint behaviour.
           let updated = null;
           for (const mid of memberIds) {
-            updated = await updateMemory(mid, id, updates);
+            updated = await updateMemory(mid, id, updates, dfPaths);
             if (updated) break;
           }
           if (!updated) throw new Error(`Memory '${id}' not found`);
@@ -1266,6 +1275,10 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           if (!id) throw new Error('id must not be empty');
           const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
           if (!wt.ok) throw new Error(wt.error);
+          // Validate deleteFields
+          const dfResult = validateDeleteFields(a['deleteFields']);
+          if (!dfResult.ok) throw new Error(dfResult.error);
+          const dfPaths: string[] | undefined = Array.isArray(a['deleteFields']) && (a['deleteFields'] as string[]).length > 0 ? a['deleteFields'] as string[] : undefined;
           const updates: { name?: string; type?: string; description?: string; tags?: string[]; properties?: Record<string, string | number | boolean> } = {};
           if (typeof a['name'] === 'string') updates.name = a['name'].trim();
           if (typeof a['type'] === 'string') updates.type = (a['type'] as string).trim();
@@ -1274,11 +1287,11 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           if (a['properties'] != null && typeof a['properties'] === 'object' && !Array.isArray(a['properties'])) {
             updates.properties = a['properties'] as Record<string, string | number | boolean>;
           }
-          if (Object.keys(updates).length === 0) throw new Error('At least one of name, type, description, tags, or properties must be provided');
+          if (Object.keys(updates).length === 0 && !dfPaths) throw new Error('At least one of name, type, description, tags, properties, or deleteFields must be provided');
           const memberIds = resolveMemberSpaces(wt.target);
           let updatedEnt = null;
           for (const mid of memberIds) {
-            updatedEnt = await updateEntityById(mid, id, updates);
+            updatedEnt = await updateEntityById(mid, id, updates, dfPaths);
             if (updatedEnt) break;
           }
           if (!updatedEnt) throw new Error(`Entity '${id}' not found`);
@@ -1292,6 +1305,10 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           if (!id) throw new Error('id must not be empty');
           const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
           if (!wt.ok) throw new Error(wt.error);
+          // Validate deleteFields
+          const dfResult = validateDeleteFields(a['deleteFields']);
+          if (!dfResult.ok) throw new Error(dfResult.error);
+          const dfPaths: string[] | undefined = Array.isArray(a['deleteFields']) && (a['deleteFields'] as string[]).length > 0 ? a['deleteFields'] as string[] : undefined;
           const updates: { label?: string; description?: string; tags?: string[]; properties?: Record<string, string | number | boolean>; weight?: number; type?: string } = {};
           if (typeof a['label'] === 'string') updates.label = (a['label'] as string).trim();
           if (typeof a['description'] === 'string') updates.description = a['description'] as string;
@@ -1301,11 +1318,11 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           }
           if (typeof a['weight'] === 'number') updates.weight = a['weight'] as number;
           if (typeof a['type'] === 'string') updates.type = (a['type'] as string).trim();
-          if (Object.keys(updates).length === 0) throw new Error('At least one of label, description, tags, properties, weight, or type must be provided');
+          if (Object.keys(updates).length === 0 && !dfPaths) throw new Error('At least one of label, description, tags, properties, weight, type, or deleteFields must be provided');
           const memberIds = resolveMemberSpaces(wt.target);
           let updatedEdge = null;
           for (const mid of memberIds) {
-            updatedEdge = await updateEdgeById(mid, id, updates);
+            updatedEdge = await updateEdgeById(mid, id, updates, dfPaths);
             if (updatedEdge) break;
           }
           if (!updatedEdge) throw new Error(`Edge '${id}' not found`);

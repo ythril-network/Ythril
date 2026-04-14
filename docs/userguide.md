@@ -656,7 +656,7 @@ If a space has a `description`, it is sent to the MCP client as `instructions` d
 | Tool | Description |
 |------|-------------|
 | `remember` | Store a memory with optional tags, entity links, `description`, and `properties` |
-| `update_memory` | Update an existing memory's fact, tags, or entity links |
+| `update_memory` | Update an existing memory's fact, tags, entity links, or remove fields via `deleteFields` |
 | `delete_memory` | Delete a memory by ID |
 | `recall` | Semantic search within the current space. Optional `tags` and `types` filters narrow results; `minPerType` guarantees a minimum result count per knowledge type; `minScore` sets a similarity threshold |
 | `recall_global` | Semantic search across all accessible spaces. Same parameters as `recall` |
@@ -665,11 +665,11 @@ If a space has a `description`, it is sent to the MCP client as `instructions` d
 | `get_stats` | Return counts of memories, entities, edges, chrono entries, and files |
 | `get_space_meta` | Return the full space schema, purpose, usage notes, and stats |
 | `upsert_entity` | Create or update a named entity (`name`, `type`, `tags`, `description`, `properties`) |
-| `update_entity` | Update an existing entity by ID |
+| `update_entity` | Update an existing entity by ID; supports `deleteFields` for field removal |
 | `merge_entities` | Merge two entities — relink references, resolve per-property conflicts, delete absorbed entity |
 | `find_entities_by_name` | Find all entities with an exact name match |
 | `upsert_edge` | Create or update a directed relationship (`label`, `type`, `weight`, `tags`, `description`, `properties`) |
-| `update_edge` | Update an existing edge by ID |
+| `update_edge` | Update an existing edge by ID; supports `deleteFields` for field removal |
 | `traverse` | BFS graph traversal — follow edges from a starting entity up to N hops |
 | `create_chrono` | Create a chrono entry (event, deadline, plan, prediction, milestone) |
 | `update_chrono` | Update an existing chrono entry |

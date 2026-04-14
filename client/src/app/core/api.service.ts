@@ -444,7 +444,7 @@ export class ApiService {
     return this.http.post<Memory>(`/api/brain/${spaceId}/memories`, body);
   }
 
-  updateMemory(spaceId: string, id: string, body: Partial<{ fact: string; tags: string[]; entityIds: string[]; description: string; properties: Record<string, string | number | boolean> }>): Observable<Memory> {
+  updateMemory(spaceId: string, id: string, body: Partial<{ fact: string; tags: string[]; entityIds: string[]; description: string; properties: Record<string, string | number | boolean>; deleteFields: string[] }>): Observable<Memory> {
     return this.http.patch<Memory>(`/api/brain/spaces/${spaceId}/memories/${id}`, body);
   }
 
@@ -470,7 +470,7 @@ export class ApiService {
     return this.http.post<Entity>(`/api/brain/spaces/${spaceId}/entities`, body);
   }
 
-  updateEntity(spaceId: string, id: string, body: Partial<{ name: string; type: string; description: string; tags: string[]; properties: Record<string, string | number | boolean> }>): Observable<Entity> {
+  updateEntity(spaceId: string, id: string, body: Partial<{ name: string; type: string; description: string; tags: string[]; properties: Record<string, string | number | boolean>; deleteFields: string[] }>): Observable<Entity> {
     return this.http.patch<Entity>(`/api/brain/spaces/${spaceId}/entities/${id}`, body);
   }
 
@@ -489,7 +489,7 @@ export class ApiService {
     return this.http.post<Edge>(`/api/brain/spaces/${spaceId}/edges`, body);
   }
 
-  updateEdge(spaceId: string, id: string, body: Partial<{ label: string; description: string; tags: string[]; properties: Record<string, string | number | boolean>; weight: number; type: string }>): Observable<Edge> {
+  updateEdge(spaceId: string, id: string, body: Partial<{ label: string; description: string; tags: string[]; properties: Record<string, string | number | boolean>; weight: number; type: string; deleteFields: string[] }>): Observable<Edge> {
     return this.http.patch<Edge>(`/api/brain/spaces/${spaceId}/edges/${id}`, body);
   }
 
