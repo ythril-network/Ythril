@@ -3,6 +3,7 @@ import { col } from '../db/mongo.js';
 import { nextSeq } from '../util/seq.js';
 import { embed } from './embedding.js';
 import { getConfig } from '../config/loader.js';
+import { applyDeleteFields } from './delete-fields.js';
 import type { EntityDoc, EdgeDoc, MemoryDoc, ChronoEntry, TombstoneDoc } from '../config/types.js';
 
 /** A backlink entry describing an item that references a given entity. */
@@ -140,6 +141,7 @@ export async function updateEntityById(
   spaceId: string,
   id: string,
   updates: { name?: string; type?: string; description?: string; tags?: string[]; properties?: Record<string, string | number | boolean> },
+  deleteFieldsPaths?: string[],
 ): Promise<EntityDoc | null> {
   const collection = col<EntityDoc>(`${spaceId}_entities`);
   const existing = await collection.findOne({ _id: id, spaceId } as never) as EntityDoc | null;
@@ -148,22 +150,50 @@ export async function updateEntityById(
   const seq = await nextSeq(spaceId);
   const now = new Date().toISOString();
   const $set: Record<string, unknown> = { updatedAt: now, seq };
+  const $unset: Record<string, unknown> = {};
 
   const newName = updates.name ?? existing.name;
   const newType = updates.type ?? existing.type;
   const newDesc = updates.description !== undefined ? updates.description : existing.description;
-  const newTags = updates.tags !== undefined
+  let newTags = updates.tags !== undefined
     ? Array.from(new Set([...(existing.tags ?? []), ...updates.tags]))
     : existing.tags ?? [];
-  const newProps = updates.properties !== undefined
+  let newProps = updates.properties !== undefined
     ? { ...(existing.properties ?? {}), ...updates.properties }
-    : existing.properties ?? {};
+    : { ...(existing.properties ?? {}) };
+
+  // Apply deleteFields after merge
+  if (deleteFieldsPaths && deleteFieldsPaths.length > 0) {
+    const merged: Record<string, unknown> = {
+      description: newDesc,
+      tags: newTags,
+      properties: newProps,
+    };
+    applyDeleteFields(merged, deleteFieldsPaths);
+
+    // Reflect deletions back
+    if (!('description' in merged)) {
+      $unset['description'] = '';
+    }
+    if (!('tags' in merged)) {
+      newTags = [];
+      $unset['tags'] = '';
+    } else {
+      newTags = merged['tags'] as string[];
+    }
+    if (!('properties' in merged)) {
+      newProps = {} as Record<string, string | number | boolean>;
+      $unset['properties'] = '';
+    } else {
+      newProps = merged['properties'] as Record<string, string | number | boolean>;
+    }
+  }
 
   if (updates.name !== undefined) $set['name'] = newName;
   if (updates.type !== undefined) $set['type'] = newType;
-  if (updates.description !== undefined) $set['description'] = newDesc;
-  if (updates.tags !== undefined) $set['tags'] = newTags;
-  if (updates.properties !== undefined) $set['properties'] = newProps;
+  if (updates.description !== undefined || (deleteFieldsPaths && !$unset['description'])) $set['description'] = newDesc;
+  if (updates.tags !== undefined || (deleteFieldsPaths && !$unset['tags'])) $set['tags'] = newTags;
+  if (updates.properties !== undefined || (deleteFieldsPaths && deleteFieldsPaths.some(p => p.startsWith('properties')))) $set['properties'] = newProps;
 
   // Re-embed whenever any content field changes
   try {
@@ -172,8 +202,11 @@ export async function updateEntityById(
     $set['embeddingModel'] = embResult.model;
   } catch { /* embedding unavailable — keep existing embedding */ }
 
-  await collection.updateOne({ _id: id } as never, { $set } as never);
-  return {
+  const updateOp: Record<string, unknown> = { $set };
+  if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
+  await collection.updateOne({ _id: id } as never, updateOp as never);
+
+  const result = {
     ...existing,
     name: newName,
     type: newType,
@@ -184,6 +217,13 @@ export async function updateEntityById(
     ...(updates.description !== undefined ? { description: newDesc } : {}),
     ...('embedding' in $set ? { embedding: $set['embedding'] as number[], embeddingModel: $set['embeddingModel'] as string } : {}),
   } as EntityDoc;
+
+  // Apply deleteFields to the returned doc for consistency
+  if (deleteFieldsPaths && deleteFieldsPaths.length > 0) {
+    applyDeleteFields(result as unknown as Record<string, unknown>, deleteFieldsPaths);
+  }
+
+  return result;
 }
 
 /** List entities with optional filter */

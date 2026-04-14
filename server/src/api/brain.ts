@@ -8,6 +8,7 @@ import { listMemories, deleteMemory, countMemories, bulkDeleteMemories, remember
 import { listEntities, deleteEntity, upsertEntity, getEntityById, updateEntityById, bulkDeleteEntities, findEntitiesByName, findEntityBacklinks } from '../brain/entities.js';
 import { listEdges, deleteEdge, upsertEdge, getEdgeById, updateEdgeById, bulkDeleteEdges, traverseGraph } from '../brain/edges.js';
 import { computeMergePlan, applyResolutions, executeMerge, validateResolution, type PropertyResolution } from '../brain/merge.js';
+import { validateDeleteFields, applyDeleteFields as applyDeleteFieldsPaths } from '../brain/delete-fields.js';
 /** Regex that matches a UUID v4 (case-insensitive). */
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 import { createChrono, updateChrono, getChronoById, listChrono, deleteChrono, bulkDeleteChrono, ChronoFilter } from '../brain/chrono.js';
@@ -261,7 +262,11 @@ brainRouter.patch('/:spaceId/memories/:id', globalRateLimit, requireSpaceAuth, d
   }
   const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
-  const { fact, tags, entityIds, description, properties } = req.body ?? {};
+  const { fact, tags, entityIds, description, properties, deleteFields } = req.body ?? {};
+  // Validate deleteFields
+  const dfResult = validateDeleteFields(deleteFields);
+  if (!dfResult.ok) { res.status(400).json({ error: dfResult.error }); return; }
+  const dfPaths: string[] | undefined = Array.isArray(deleteFields) && deleteFields.length > 0 ? deleteFields : undefined;
   const updates: { fact?: string; tags?: string[]; entityIds?: string[]; description?: string; properties?: Record<string, string | number | boolean> } = {};
   if (fact !== undefined) {
     if (typeof fact !== 'string' || !fact.trim()) { res.status(400).json({ error: '`fact` must be a non-empty string' }); return; }
@@ -287,10 +292,27 @@ brainRouter.patch('/:spaceId/memories/:id', globalRateLimit, requireSpaceAuth, d
     if (typeof properties !== 'object' || properties === null || Array.isArray(properties)) { res.status(400).json({ error: '`properties` must be a plain object' }); return; }
     updates.properties = properties as Record<string, string | number | boolean>;
   }
-  if (Object.keys(updates).length === 0) { res.status(400).json({ error: 'At least one field must be provided' }); return; }
+  if (Object.keys(updates).length === 0 && !dfPaths) { res.status(400).json({ error: 'At least one field must be provided' }); return; }
   const memberIds = resolveMemberSpaces(wt.target);
   for (const mid of memberIds) {
-    const updated = await updateMemory(mid, id, updates);
+    // Schema validation after deleteFields + merge for memories
+    if (dfPaths) {
+      const existing = await listMemories(mid, { _id: id }, 1, 0);
+      if (existing.length === 0) continue;
+      const mem = existing[0]!;
+      const resultProps = updates.properties ?? (mem.properties != null ? { ...mem.properties } : {});
+      const sim: Record<string, unknown> = { properties: resultProps };
+      applyDeleteFieldsPaths(sim, dfPaths);
+      const simProps = (sim['properties'] ?? {}) as Record<string, unknown>;
+      const meta = getSpaceMeta(mid);
+      const violations = validateMemory(meta ?? {}, { properties: simProps });
+      const validation = applyValidation(meta, violations);
+      if (validation.blocked) {
+        res.status(422).json({ error: 'schema_violation', message: 'deleteFields + merge result violates required properties', violations: validation.warnings });
+        return;
+      }
+    }
+    const updated = await updateMemory(mid, id, updates, dfPaths);
     if (updated) {
       emitWebhookEvent({ event: 'memory.updated', spaceId: mid, entry: { ...updated, embedding: undefined }, ...webhookToken(req) });
       res.json(updated);
@@ -386,7 +408,11 @@ brainRouter.patch('/spaces/:spaceId/memories/:id', globalRateLimit, requireSpace
   }
   const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
-  const { fact, tags, entityIds, description, properties } = req.body ?? {};
+  const { fact, tags, entityIds, description, properties, deleteFields } = req.body ?? {};
+  // Validate deleteFields
+  const dfResult = validateDeleteFields(deleteFields);
+  if (!dfResult.ok) { res.status(400).json({ error: dfResult.error }); return; }
+  const dfPaths: string[] | undefined = Array.isArray(deleteFields) && deleteFields.length > 0 ? deleteFields : undefined;
   const updates: { fact?: string; tags?: string[]; entityIds?: string[]; description?: string; properties?: Record<string, string | number | boolean> } = {};
   if (fact !== undefined) {
     if (typeof fact !== 'string' || !fact.trim()) { res.status(400).json({ error: '`fact` must be a non-empty string' }); return; }
@@ -412,10 +438,27 @@ brainRouter.patch('/spaces/:spaceId/memories/:id', globalRateLimit, requireSpace
     if (typeof properties !== 'object' || properties === null || Array.isArray(properties)) { res.status(400).json({ error: '`properties` must be a plain object' }); return; }
     updates.properties = properties as Record<string, string | number | boolean>;
   }
-  if (Object.keys(updates).length === 0) { res.status(400).json({ error: 'At least one field must be provided' }); return; }
+  if (Object.keys(updates).length === 0 && !dfPaths) { res.status(400).json({ error: 'At least one field must be provided' }); return; }
   const memberIds = resolveMemberSpaces(wt.target);
   for (const mid of memberIds) {
-    const updated = await updateMemory(mid, id, updates);
+    // Schema validation after deleteFields + merge for memories
+    if (dfPaths) {
+      const existing = await listMemories(mid, { _id: id }, 1, 0);
+      if (existing.length === 0) continue;
+      const mem = existing[0]!;
+      const resultProps = updates.properties ?? (mem.properties != null ? { ...mem.properties } : {});
+      const sim: Record<string, unknown> = { properties: resultProps };
+      applyDeleteFieldsPaths(sim, dfPaths);
+      const simProps = (sim['properties'] ?? {}) as Record<string, unknown>;
+      const meta = getSpaceMeta(mid);
+      const violations = validateMemory(meta ?? {}, { properties: simProps });
+      const validation = applyValidation(meta, violations);
+      if (validation.blocked) {
+        res.status(422).json({ error: 'schema_violation', message: 'deleteFields + merge result violates required properties', violations: validation.warnings });
+        return;
+      }
+    }
+    const updated = await updateMemory(mid, id, updates, dfPaths);
     if (updated) {
       emitWebhookEvent({ event: 'memory.updated', spaceId: mid, entry: { ...updated, embedding: undefined }, ...webhookToken(req) });
       res.json(updated);
@@ -665,7 +708,11 @@ brainRouter.patch('/spaces/:spaceId/entities/:id', globalRateLimit, requireSpace
   }
   const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
-  const { name, type, description, tags, properties } = req.body ?? {};
+  const { name, type, description, tags, properties, deleteFields } = req.body ?? {};
+  // Validate deleteFields
+  const dfResult = validateDeleteFields(deleteFields);
+  if (!dfResult.ok) { res.status(400).json({ error: dfResult.error }); return; }
+  const dfPaths: string[] | undefined = Array.isArray(deleteFields) && deleteFields.length > 0 ? deleteFields : undefined;
   const updates: { name?: string; type?: string; description?: string; tags?: string[]; properties?: Record<string, string | number | boolean> } = {};
   if (name !== undefined) {
     if (typeof name !== 'string' || !name.trim()) { res.status(400).json({ error: '`name` must be a non-empty string' }); return; }
@@ -687,10 +734,36 @@ brainRouter.patch('/spaces/:spaceId/entities/:id', globalRateLimit, requireSpace
     if (typeof properties !== 'object' || properties === null || Array.isArray(properties)) { res.status(400).json({ error: '`properties` must be a plain object' }); return; }
     updates.properties = properties as Record<string, string | number | boolean>;
   }
-  if (Object.keys(updates).length === 0) { res.status(400).json({ error: 'At least one field must be provided' }); return; }
+  if (Object.keys(updates).length === 0 && !dfPaths) { res.status(400).json({ error: 'At least one field must be provided' }); return; }
   const memberIds = resolveMemberSpaces(wt.target);
   for (const mid of memberIds) {
-    const updated = await updateEntityById(mid, id, updates);
+    // Fetch existing entity to validate schema after deleteFields + merge
+    if (dfPaths) {
+      const existing = await getEntityById(mid, id);
+      if (!existing) continue;
+      // Build the resulting entity state to validate against schema
+      const resultName = updates.name ?? existing.name;
+      const resultType = updates.type ?? existing.type;
+      const resultTags = updates.tags !== undefined
+        ? Array.from(new Set([...(existing.tags ?? []), ...updates.tags]))
+        : existing.tags ?? [];
+      const resultProps = updates.properties !== undefined
+        ? { ...(existing.properties ?? {}), ...updates.properties }
+        : { ...(existing.properties ?? {}) };
+      // Build a simulation and apply deleteFields for schema check
+      const sim: Record<string, unknown> = { properties: resultProps, tags: resultTags, description: updates.description !== undefined ? updates.description : existing.description };
+      applyDeleteFieldsPaths(sim, dfPaths);
+      const simProps = (sim['properties'] ?? {}) as Record<string, unknown>;
+      // Schema validation after deleteFields + merge
+      const meta = getSpaceMeta(mid);
+      const violations = validateEntity(meta ?? {}, { name: resultName, type: resultType, properties: simProps, tags: sim['tags'] as string[] });
+      const validation = applyValidation(meta, violations);
+      if (validation.blocked) {
+        res.status(422).json({ error: 'schema_violation', message: 'deleteFields + merge result violates required properties', violations: validation.warnings });
+        return;
+      }
+    }
+    const updated = await updateEntityById(mid, id, updates, dfPaths);
     if (updated) {
       emitWebhookEvent({ event: 'entity.updated', spaceId: mid, entry: { ...updated, embedding: undefined }, ...webhookToken(req) });
       res.json(updated);
@@ -869,7 +942,11 @@ brainRouter.patch('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAut
   }
   const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
-  const { label, description, tags, properties, weight, type } = req.body ?? {};
+  const { label, description, tags, properties, weight, type, deleteFields } = req.body ?? {};
+  // Validate deleteFields
+  const dfResult = validateDeleteFields(deleteFields);
+  if (!dfResult.ok) { res.status(400).json({ error: dfResult.error }); return; }
+  const dfPaths: string[] | undefined = Array.isArray(deleteFields) && deleteFields.length > 0 ? deleteFields : undefined;
   const updates: { label?: string; description?: string; tags?: string[]; properties?: Record<string, string | number | boolean>; weight?: number; type?: string } = {};
   if (label !== undefined) {
     if (typeof label !== 'string' || !label.trim()) { res.status(400).json({ error: '`label` must be a non-empty string' }); return; }
@@ -895,10 +972,28 @@ brainRouter.patch('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAut
     if (typeof type !== 'string') { res.status(400).json({ error: '`type` must be a string' }); return; }
     updates.type = type.trim();
   }
-  if (Object.keys(updates).length === 0) { res.status(400).json({ error: 'At least one field must be provided' }); return; }
+  if (Object.keys(updates).length === 0 && !dfPaths) { res.status(400).json({ error: 'At least one field must be provided' }); return; }
   const memberIds = resolveMemberSpaces(wt.target);
   for (const mid of memberIds) {
-    const updated = await updateEdgeById(mid, id, updates);
+    // Schema validation after deleteFields + merge
+    if (dfPaths) {
+      const existing = await getEdgeById(mid, id);
+      if (!existing) continue;
+      const resultProps = updates.properties !== undefined
+        ? { ...(existing.properties ?? {}), ...updates.properties }
+        : { ...(existing.properties ?? {}) };
+      const sim: Record<string, unknown> = { properties: resultProps };
+      applyDeleteFieldsPaths(sim, dfPaths);
+      const simProps = (sim['properties'] ?? {}) as Record<string, unknown>;
+      const meta = getSpaceMeta(mid);
+      const violations = validateEdge(meta ?? {}, { label: updates.label ?? existing.label, properties: simProps });
+      const validation = applyValidation(meta, violations);
+      if (validation.blocked) {
+        res.status(422).json({ error: 'schema_violation', message: 'deleteFields + merge result violates required properties', violations: validation.warnings });
+        return;
+      }
+    }
+    const updated = await updateEdgeById(mid, id, updates, dfPaths);
     if (updated) {
       emitWebhookEvent({ event: 'edge.updated', spaceId: mid, entry: { ...updated, embedding: undefined }, ...webhookToken(req) });
       res.json(updated);

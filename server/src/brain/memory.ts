@@ -5,6 +5,7 @@ import { NotFoundError } from '../util/errors.js';
 import { embed } from './embedding.js';
 import { getConfig, getEmbeddingConfig } from '../config/loader.js';
 import { needsReindex } from '../spaces/spaces.js';
+import { applyDeleteFields } from './delete-fields.js';
 import type { MemoryDoc, EntityDoc, TombstoneDoc } from '../config/types.js';
 
 function authorRef() {
@@ -413,6 +414,7 @@ export async function updateMemory(
   spaceId: string,
   memoryId: string,
   updates: { fact?: string; tags?: string[]; entityIds?: string[]; description?: string; properties?: Record<string, string | number | boolean> },
+  deleteFieldsPaths?: string[],
 ): Promise<MemoryDoc | null> {
   const existing = await col<MemoryDoc>(`${spaceId}_memories`).findOne({ _id: memoryId, spaceId } as never) as MemoryDoc | null;
   if (!existing) return null;
@@ -420,6 +422,7 @@ export async function updateMemory(
   const seq = await nextSeq(spaceId);
   const now = new Date().toISOString();
   const $set: Record<string, unknown> = { updatedAt: now, seq };
+  const $unset: Record<string, unknown> = {};
 
   if (updates.fact !== undefined) $set['fact'] = updates.fact;
   if (updates.tags !== undefined) $set['tags'] = updates.tags;
@@ -427,19 +430,43 @@ export async function updateMemory(
   if (updates.description !== undefined) $set['description'] = updates.description;
   if (updates.properties !== undefined) $set['properties'] = updates.properties;
 
+  // Apply deleteFields after merge
+  if (deleteFieldsPaths && deleteFieldsPaths.length > 0) {
+    // Build a merged view for deleteFields application
+    const merged: Record<string, unknown> = {
+      fact: updates.fact ?? existing.fact,
+      tags: updates.tags ?? existing.tags,
+      entityIds: updates.entityIds ?? existing.entityIds,
+      description: updates.description !== undefined ? updates.description : existing.description,
+      properties: updates.properties ?? (existing.properties != null ? { ...existing.properties } : existing.properties),
+    };
+    applyDeleteFields(merged, deleteFieldsPaths);
+
+    // Reflect deletions into $set/$unset
+    for (const field of ['description', 'tags', 'entityIds', 'properties']) {
+      if (!(field in merged)) {
+        $unset[field] = '';
+        delete $set[field];
+      } else if (deleteFieldsPaths.some(p => p === field || p.startsWith(field + '.'))) {
+        $set[field] = merged[field];
+      }
+    }
+  }
+
   // Re-embed whenever any content field changes
   const contentChanged =
     updates.fact !== undefined ||
     updates.tags !== undefined ||
     updates.entityIds !== undefined ||
     updates.description !== undefined ||
-    updates.properties !== undefined;
+    updates.properties !== undefined ||
+    (deleteFieldsPaths && deleteFieldsPaths.length > 0);
   if (contentChanged) {
-    const newFact = updates.fact ?? existing.fact;
-    const newTags = updates.tags ?? existing.tags;
-    const newEntityIds = updates.entityIds ?? existing.entityIds;
-    const newDesc = updates.description !== undefined ? updates.description : existing.description;
-    const newProps = updates.properties ?? existing.properties;
+    const newFact = ($set['fact'] as string) ?? existing.fact;
+    const newTags = ($set['tags'] as string[]) ?? existing.tags;
+    const newEntityIds = ($set['entityIds'] as string[]) ?? existing.entityIds;
+    const newDesc = 'description' in $set ? ($set['description'] as string | undefined) : existing.description;
+    const newProps = ($set['properties'] as Record<string, string | number | boolean>) ?? existing.properties;
     const entityNames = await resolveEntityNames(spaceId, newEntityIds);
     try {
       const embResult = await embed(memoryEmbedText(newFact, newTags, entityNames, newDesc, newProps));
@@ -448,11 +475,21 @@ export async function updateMemory(
     } catch { /* embedding unavailable — keep existing embedding */ }
   }
 
+  const updateOp: Record<string, unknown> = { $set };
+  if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
   await col<MemoryDoc>(`${spaceId}_memories`).updateOne(
     { _id: memoryId } as never,
-    { $set } as never,
+    updateOp as never,
   );
-  return { ...existing, ...($set as Partial<MemoryDoc>) } as MemoryDoc;
+
+  const result = { ...existing, ...($set as Partial<MemoryDoc>) } as MemoryDoc;
+
+  // Apply deleteFields to the returned doc for consistency
+  if (deleteFieldsPaths && deleteFieldsPaths.length > 0) {
+    applyDeleteFields(result as unknown as Record<string, unknown>, deleteFieldsPaths);
+  }
+
+  return result;
 }
 
 /** Delete a memory and record a tombstone */
