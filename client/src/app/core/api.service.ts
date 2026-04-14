@@ -37,6 +37,7 @@ export interface SpaceMeta {
   requiredProperties?: Partial<Record<KnowledgeType, string[]>>;
   propertySchemas?: Partial<Record<KnowledgeType, Record<string, PropertySchema>>>;
   tagSuggestions?: string[];
+  strictLinkage?: boolean;
   updatedAt?: string;
 }
 

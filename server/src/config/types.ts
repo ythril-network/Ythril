@@ -51,6 +51,9 @@ export interface SpaceMeta {
   propertySchemas?: Partial<Record<KnowledgeType, Record<string, PropertySchema>>>;
   /** Non-enforced tag hints — surfaced in UI autocomplete and get_space_meta. */
   tagSuggestions?: string[];
+  /** When true, all reference fields (edge from/to, entityIds, memoryIds) must be
+   *  valid UUID v4 values, and entity deletion is blocked while inbound backlinks exist. */
+  strictLinkage?: boolean;
   /** ISO8601 timestamp of the last meta update. */
   updatedAt?: string;
   /** History of previous meta versions (most recent first, capped). */

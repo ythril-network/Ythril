@@ -65,6 +65,7 @@ const SpaceMetaBody = z.object({
   requiredProperties: RequiredPropertiesZ.optional(),
   propertySchemas: PropertySchemasZ.optional(),
   tagSuggestions: z.array(z.string().min(1).max(200)).max(200).optional(),
+  strictLinkage: z.boolean().optional(),
 }).strict();
 
 const UpdateSpaceBody = z.object({

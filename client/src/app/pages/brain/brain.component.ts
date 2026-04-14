@@ -1274,6 +1274,14 @@ interface SpaceView {
                   </div>
 
                   <div class="field" style="margin-bottom:8px;">
+                    <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                      <input type="checkbox" [(ngModel)]="metaForm.strictLinkage" name="metaStrictLinkage" />
+                      Strict linkage
+                      <span style="color:var(--text-muted);font-size:11px;" title="When enabled, all reference fields (edge from/to, entityIds, memoryIds) must use UUID IDs, and entity deletion is blocked while inbound backlinks exist.">ⓘ</span>
+                    </label>
+                  </div>
+
+                  <div class="field" style="margin-bottom:8px;">
                     <label>Purpose</label>
                     <textarea [(ngModel)]="metaForm.purpose" name="metaPurpose" maxlength="4000" rows="2" style="resize:vertical;" placeholder="Short directive injected into MCP instructions"></textarea>
                   </div>
@@ -1558,6 +1566,7 @@ export class BrainComponent implements OnInit {
   settingsError = signal('');
   metaForm = {
     validationMode: 'off' as ValidationMode,
+    strictLinkage: false,
     purpose: '',
     usageNotes: '',
     entityTypesStr: '',
@@ -2154,6 +2163,7 @@ export class BrainComponent implements OnInit {
       next: (meta) => {
         this.spaceMeta.set(meta);
         this.metaForm.validationMode = meta.validationMode ?? 'off';
+        this.metaForm.strictLinkage = meta.strictLinkage ?? false;
         this.metaForm.purpose = meta.purpose ?? '';
         this.metaForm.usageNotes = meta.usageNotes ?? '';
         this.metaForm.entityTypesStr = (meta.entityTypes ?? []).join(', ');
@@ -2211,6 +2221,7 @@ export class BrainComponent implements OnInit {
 
     const meta: Partial<SpaceMeta> = {
       validationMode: this.metaForm.validationMode,
+      strictLinkage: this.metaForm.strictLinkage,
       purpose: this.metaForm.purpose.trim() || undefined,
       usageNotes: this.metaForm.usageNotes.trim() || undefined,
       entityTypes: parseList(this.metaForm.entityTypesStr),
