@@ -200,11 +200,11 @@ export async function updateEdgeById(
   let newTags = updates.tags !== undefined
     ? Array.from(new Set([...(existing.tags ?? []), ...updates.tags]))
     : existing.tags ?? [];
-  let newProps = updates.properties !== undefined
+  let newProps: Record<string, string | number | boolean> | undefined = updates.properties !== undefined
     ? { ...(existing.properties ?? {}), ...updates.properties }
     : existing.properties != null ? { ...existing.properties } : existing.properties;
   let newType = updates.type !== undefined ? updates.type : existing.type;
-  let newWeight = updates.weight !== undefined ? updates.weight : existing.weight;
+  let newWeight: number | undefined = updates.weight !== undefined ? updates.weight : existing.weight;
 
   // Apply deleteFields after merge
   if (deleteFieldsPaths && deleteFieldsPaths.length > 0) {
@@ -229,13 +229,13 @@ export async function updateEdgeById(
       newTags = merged['tags'] as string[];
     }
     if (!('properties' in merged)) {
-      newProps = undefined as unknown as Record<string, string | number | boolean>;
+      newProps = undefined;
       $unset['properties'] = '';
     } else {
       newProps = merged['properties'] as Record<string, string | number | boolean>;
     }
     if (!('weight' in merged)) {
-      newWeight = undefined as unknown as number;
+      newWeight = undefined;
       $unset['weight'] = '';
     } else {
       newWeight = merged['weight'] as number;

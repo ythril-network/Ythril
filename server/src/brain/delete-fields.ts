@@ -12,6 +12,9 @@ const SYSTEM_FIELDS = new Set([
   'id', '_id', 'name', 'type', 'spaceId', 'createdAt', 'updatedAt',
 ]);
 
+/** Dangerous prototype keys that must never be traversed or deleted. */
+const PROTO_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 // ── Public API ──────────────────────────────────────────────────────────────
 
 /**
@@ -33,8 +36,15 @@ export function validateDeleteFields(
     if (typeof p !== 'string' || !p.trim()) {
       return { ok: false, error: '`deleteFields` entries must be non-empty strings' };
     }
+    const segments = p.split('.');
+    // Reject any segment that could cause prototype pollution
+    for (const seg of segments) {
+      if (PROTO_KEYS.has(seg)) {
+        return { ok: false, error: `Invalid deleteFields path segment '${seg}'` };
+      }
+    }
     // The top-level segment is what matters for system field protection
-    const topLevel = p.split('.')[0]!;
+    const topLevel = segments[0] ?? '';
     if (SYSTEM_FIELDS.has(topLevel)) {
       return {
         ok: false,
@@ -67,23 +77,30 @@ export function applyDeleteFields(
     const segments = path.split('.');
     if (segments.length === 0) continue;
 
-    affected.add(segments[0]!);
+    const firstSeg = segments[0] ?? '';
+    affected.add(firstSeg);
 
     if (segments.length === 1) {
       // Top-level deletion
-      delete obj[segments[0]!];
+      if (!PROTO_KEYS.has(firstSeg)) {
+        delete obj[firstSeg];
+      }
     } else {
       // Nested deletion — walk to the parent, then delete the leaf
       let current: unknown = obj;
+      let safe = true;
       for (let i = 0; i < segments.length - 1; i++) {
+        const seg = segments[i] ?? '';
+        if (PROTO_KEYS.has(seg)) { safe = false; break; }
         if (current == null || typeof current !== 'object' || Array.isArray(current)) {
           current = undefined;
           break;
         }
-        current = (current as Record<string, unknown>)[segments[i]!];
+        current = (current as Record<string, unknown>)[seg];
       }
-      if (current != null && typeof current === 'object' && !Array.isArray(current)) {
-        delete (current as Record<string, unknown>)[segments[segments.length - 1]!];
+      const leafSeg = segments[segments.length - 1] ?? '';
+      if (safe && !PROTO_KEYS.has(leafSeg) && current != null && typeof current === 'object' && !Array.isArray(current)) {
+        delete (current as Record<string, unknown>)[leafSeg];
       }
     }
   }

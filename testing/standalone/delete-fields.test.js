@@ -20,6 +20,8 @@ const SYSTEM_FIELDS = new Set([
   'id', '_id', 'name', 'type', 'spaceId', 'createdAt', 'updatedAt',
 ]);
 
+const PROTO_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 function validateDeleteFields(deleteFields) {
   if (deleteFields === undefined || deleteFields === null) return { ok: true };
   if (!Array.isArray(deleteFields)) {
@@ -29,7 +31,13 @@ function validateDeleteFields(deleteFields) {
     if (typeof p !== 'string' || !p.trim()) {
       return { ok: false, error: '`deleteFields` entries must be non-empty strings' };
     }
-    const topLevel = p.split('.')[0];
+    const segments = p.split('.');
+    for (const seg of segments) {
+      if (PROTO_KEYS.has(seg)) {
+        return { ok: false, error: `Invalid deleteFields path segment '${seg}'` };
+      }
+    }
+    const topLevel = segments[0] ?? '';
     if (SYSTEM_FIELDS.has(topLevel)) {
       return { ok: false, error: `Cannot delete system field '${topLevel}' via deleteFields` };
     }
@@ -42,20 +50,27 @@ function applyDeleteFields(obj, deleteFields) {
   for (const path of deleteFields) {
     const segments = path.split('.');
     if (segments.length === 0) continue;
-    affected.add(segments[0]);
+    const firstSeg = segments[0] ?? '';
+    affected.add(firstSeg);
     if (segments.length === 1) {
-      delete obj[segments[0]];
+      if (!PROTO_KEYS.has(firstSeg)) {
+        delete obj[firstSeg];
+      }
     } else {
       let current = obj;
+      let safe = true;
       for (let i = 0; i < segments.length - 1; i++) {
+        const seg = segments[i] ?? '';
+        if (PROTO_KEYS.has(seg)) { safe = false; break; }
         if (current == null || typeof current !== 'object' || Array.isArray(current)) {
           current = undefined;
           break;
         }
-        current = current[segments[i]];
+        current = current[seg];
       }
-      if (current != null && typeof current === 'object' && !Array.isArray(current)) {
-        delete current[segments[segments.length - 1]];
+      const leafSeg = segments[segments.length - 1] ?? '';
+      if (safe && !PROTO_KEYS.has(leafSeg) && current != null && typeof current === 'object' && !Array.isArray(current)) {
+        delete current[leafSeg];
       }
     }
   }
@@ -148,6 +163,30 @@ describe('validateDeleteFields', () => {
   it('allows nested paths under properties', () => {
     const r = validateDeleteFields(['properties.oldKey', 'properties.nested.deep']);
     assert.equal(r.ok, true);
+  });
+
+  it('rejects __proto__ in path segments', () => {
+    const r = validateDeleteFields(['__proto__']);
+    assert.equal(r.ok, false);
+    assert.ok(r.error.includes('__proto__'));
+  });
+
+  it('rejects __proto__ in nested path segments', () => {
+    const r = validateDeleteFields(['properties.__proto__.polluted']);
+    assert.equal(r.ok, false);
+    assert.ok(r.error.includes('__proto__'));
+  });
+
+  it('rejects constructor in path segments', () => {
+    const r = validateDeleteFields(['constructor.prototype']);
+    assert.equal(r.ok, false);
+    assert.ok(r.error.includes('constructor'));
+  });
+
+  it('rejects prototype in path segments', () => {
+    const r = validateDeleteFields(['prototype']);
+    assert.equal(r.ok, false);
+    assert.ok(r.error.includes('prototype'));
   });
 });
 
