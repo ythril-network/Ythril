@@ -7,6 +7,7 @@ import { NotFoundError } from '../util/errors.js';
 import { listMemories, deleteMemory, countMemories, bulkDeleteMemories, remember, updateMemory, queryBrain, findSimilar, recall, type RecallKnowledgeType } from '../brain/memory.js';
 import { listEntities, deleteEntity, upsertEntity, getEntityById, updateEntityById, bulkDeleteEntities, findEntitiesByName, findEntityBacklinks } from '../brain/entities.js';
 import { listEdges, deleteEdge, upsertEdge, getEdgeById, updateEdgeById, bulkDeleteEdges, traverseGraph } from '../brain/edges.js';
+import { computeMergePlan, applyResolutions, executeMerge, validateResolution, type PropertyResolution } from '../brain/merge.js';
 /** Regex that matches a UUID v4 (case-insensitive). */
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 import { createChrono, updateChrono, getChronoById, listChrono, deleteChrono, bulkDeleteChrono, ChronoFilter } from '../brain/chrono.js';
@@ -699,7 +700,99 @@ brainRouter.patch('/spaces/:spaceId/entities/:id', globalRateLimit, requireSpace
   res.status(404).json({ error: 'Entity not found' });
 });
 
-// DELETE /api/brain/spaces/:spaceId/entities — bulk wipe all entities
+// POST /api/brain/spaces/:spaceId/entities/:survivorId/merge/:absorbedId — merge two entities
+brainRouter.post('/spaces/:spaceId/entities/:survivorId/merge/:absorbedId', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
+  const spaceId = req.params['spaceId'] as string;
+  const survivorId = req.params['survivorId'] as string;
+  const absorbedId = req.params['absorbedId'] as string;
+
+  const cfg = getConfig();
+  if (!cfg.spaces.some(s => s.id === spaceId)) {
+    res.status(404).json({ error: `Space '${spaceId}' not found` });
+    return;
+  }
+
+  if (!UUID_V4_RE.test(survivorId)) {
+    res.status(400).json({ error: '`survivorId` must be a valid UUID v4' });
+    return;
+  }
+  if (!UUID_V4_RE.test(absorbedId)) {
+    res.status(400).json({ error: '`absorbedId` must be a valid UUID v4' });
+    return;
+  }
+  if (survivorId === absorbedId) {
+    res.status(400).json({ error: 'Cannot merge an entity with itself' });
+    return;
+  }
+
+  if (isProxySpace(spaceId)) {
+    res.status(400).json({ error: 'Entity merge not supported on proxy spaces — target member spaces directly' });
+    return;
+  }
+
+  // Parse resolution map from body (optional)
+  const resolutions: PropertyResolution[] = [];
+  const bodyResolutions = req.body?.resolutions;
+  if (bodyResolutions && Array.isArray(bodyResolutions)) {
+    for (const r of bodyResolutions) {
+      if (typeof r !== 'object' || !r || typeof r.key !== 'string' || typeof r.resolution !== 'string') {
+        res.status(400).json({ error: 'Each resolution must be an object with `key` (string) and `resolution` (string)' });
+        return;
+      }
+      resolutions.push({
+        key: r.key,
+        resolution: r.resolution,
+        ...(r.customValue !== undefined ? { customValue: r.customValue } : {}),
+      });
+    }
+  }
+
+  // Compute merge plan
+  const result = await computeMergePlan(spaceId, survivorId, absorbedId, resolutions);
+  if ('error' in result) {
+    res.status(result.status).json({ error: result.error });
+    return;
+  }
+
+  const { plan, fullyResolved, survivor, absorbed } = result;
+
+  // Validate all provided resolutions
+  for (const conflict of plan.propertyConflicts) {
+    if (!conflict.resolved) continue;
+    const err = validateResolution(conflict.resolution!, conflict.type, conflict.customValue !== undefined);
+    if (err) {
+      res.status(400).json({ error: `Invalid resolution for property '${conflict.key}': ${err}` });
+      return;
+    }
+  }
+
+  // If not fully resolved, return 409 with the plan
+  if (!fullyResolved) {
+    res.status(409).json(plan);
+    return;
+  }
+
+  // All conflicts resolved — execute merge atomically
+  const mergedProperties = applyResolutions(
+    survivor.properties ?? {},
+    absorbed.properties ?? {},
+    plan.propertyConflicts,
+    plan.absorbedOnlyProperties,
+  );
+
+  const mergedEntity = await executeMerge(spaceId, survivor, absorbed, mergedProperties);
+
+  // Emit webhook events
+  emitWebhookEvent({ event: 'entity.updated', spaceId, entry: { ...mergedEntity, embedding: undefined }, ...webhookToken(req) });
+  emitWebhookEvent({ event: 'entity.deleted', spaceId, entry: { _id: absorbed._id }, ...webhookToken(req) });
+
+  res.json({
+    merged: { ...mergedEntity, embedding: undefined },
+    absorbedId: absorbed._id,
+    relinked: true,
+    duplicateEdgeWarnings: plan.duplicateEdgeWarnings,
+  });
+});
 brainRouter.delete('/spaces/:spaceId/entities', bulkWipeRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const cfg = getConfig();

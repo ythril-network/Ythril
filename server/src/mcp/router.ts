@@ -18,6 +18,7 @@ import { remember, recall, recallGlobal, findSimilar, queryBrain, updateMemory, 
 import { col } from '../db/mongo.js';
 import { upsertEntity, listEntities, updateEntityById, findEntitiesByName } from '../brain/entities.js';
 import { upsertEdge, listEdges, traverseGraph, updateEdgeById } from '../brain/edges.js';
+import { computeMergePlan, applyResolutions, executeMerge, validateResolution, type PropertyResolution } from '../brain/merge.js';
 
 /** Regex that matches a UUID v4 (case-insensitive). */
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -63,7 +64,7 @@ function formatRecallSummary(r: RecallResult): string {
 
 const MUTATING_TOOLS = new Set([
   'remember', 'update_memory', 'delete_memory',
-  'upsert_entity', 'update_entity', 'upsert_edge', 'update_edge',
+  'upsert_entity', 'update_entity', 'merge_entities', 'upsert_edge', 'update_edge',
   'create_chrono', 'update_chrono',
   'write_file', 'delete_file', 'create_dir', 'move_file',
   'sync_now', 'update_space', 'wipe_space',
@@ -209,6 +210,32 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             crossSpace: { type: 'boolean', description: 'If true, search across all spaces the token can access. Default: false.' },
           },
           required: ['entryId', 'entryType'],
+        },
+      },
+      {
+        name: 'merge_entities',
+        description: 'Merge two entities into one. The survivor keeps its identity; the absorbed entity is deleted after relinking all references. Call with an empty or partial resolution map to get a conflict plan (409), or with a fully resolved map to execute. Numeric properties support fn:<avg|min|max|sum|first|last>, boolean properties support fn:<and|or|xor>, strings require "survivor", "absorbed", or "custom" with customValue.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            survivorId: { type: 'string', description: 'UUID of the entity to keep.' },
+            absorbedId: { type: 'string', description: 'UUID of the entity to absorb and delete.' },
+            resolutions: {
+              type: 'array',
+              description: 'Per-property conflict resolutions. Each entry: { key, resolution, customValue? }.',
+              items: {
+                type: 'object',
+                properties: {
+                  key: { type: 'string', description: 'Property key to resolve.' },
+                  resolution: { type: 'string', description: 'One of: "survivor", "absorbed", "custom", or "fn:<name>".' },
+                  customValue: { description: 'Required when resolution is "custom".' },
+                },
+                required: ['key', 'resolution'],
+              },
+            },
+            targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+          },
+          required: ['survivorId', 'absorbedId'],
         },
       },
       {
@@ -887,6 +914,91 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             }
           }
 
+          return {
+            content: [{ type: 'text' as const, text: lines.join('\n') }],
+          };
+        }
+
+        case 'merge_entities': {
+          const survivorId = String(a['survivorId'] ?? '').trim();
+          const absorbedId = String(a['absorbedId'] ?? '').trim();
+          if (!survivorId || !UUID_V4_RE.test(survivorId)) throw new Error('survivorId must be a valid UUID v4');
+          if (!absorbedId || !UUID_V4_RE.test(absorbedId)) throw new Error('absorbedId must be a valid UUID v4');
+          if (survivorId === absorbedId) throw new Error('Cannot merge an entity with itself');
+
+          const wt = resolveWriteTarget(spaceId, a['targetSpace'] as string | undefined);
+          if (!wt.ok) throw new Error(wt.error);
+
+          if (isProxySpace(spaceId)) throw new Error('Entity merge not supported on proxy spaces');
+
+          const resolutions: PropertyResolution[] = [];
+          if (Array.isArray(a['resolutions'])) {
+            for (const r of a['resolutions'] as Array<Record<string, unknown>>) {
+              if (typeof r?.key !== 'string' || typeof r?.resolution !== 'string') {
+                throw new Error('Each resolution must have key (string) and resolution (string)');
+              }
+              resolutions.push({
+                key: r.key,
+                resolution: r.resolution,
+                ...(r.customValue !== undefined ? { customValue: r.customValue } : {}),
+              });
+            }
+          }
+
+          const result = await computeMergePlan(wt.target, survivorId, absorbedId, resolutions);
+          if ('error' in result) throw new Error(result.error);
+
+          const { plan, fullyResolved, survivor, absorbed } = result;
+
+          // Validate resolutions
+          for (const c of plan.propertyConflicts) {
+            if (!c.resolved) continue;
+            const err = validateResolution(c.resolution!, c.type, c.customValue !== undefined);
+            if (err) throw new Error(`Invalid resolution for '${c.key}': ${err}`);
+          }
+
+          if (!fullyResolved) {
+            const lines: string[] = ['Merge plan — unresolved conflicts remain:'];
+            for (const c of plan.propertyConflicts) {
+              const status = c.resolved ? '✓' : '✗';
+              lines.push(`  ${status} ${c.key} (${c.type}): survivor=${JSON.stringify(c.survivorValue)}, absorbed=${JSON.stringify(c.absorbedValue)}${c.suggestedFn ? ` [suggested: fn:${c.suggestedFn}]` : ''}`);
+            }
+            if (plan.absorbedOnlyProperties.length > 0) {
+              lines.push('Absorbed-only properties (auto-added):');
+              for (const p of plan.absorbedOnlyProperties) {
+                lines.push(`  + ${p.key}=${JSON.stringify(p.value)}`);
+              }
+            }
+            if (plan.duplicateEdgeWarnings.length > 0) {
+              lines.push('Duplicate edge warnings:');
+              for (const w of plan.duplicateEdgeWarnings) {
+                lines.push(`  ⚠ (${w.from} → ${w.to} [${w.label}]) survivor edge: ${w.survivorEdgeId}, absorbed edge: ${w.absorbedEdgeId}`);
+              }
+            }
+            return {
+              content: [{ type: 'text' as const, text: lines.join('\n') }],
+              isError: true,
+            };
+          }
+
+          // Execute merge
+          const mergedProperties = applyResolutions(
+            survivor.properties ?? {},
+            absorbed.properties ?? {},
+            plan.propertyConflicts,
+            plan.absorbedOnlyProperties,
+          );
+
+          const mergedEntity = await executeMerge(wt.target, survivor, absorbed, mergedProperties);
+
+          const lines: string[] = [
+            `Entities merged successfully.`,
+            `Survivor: ${mergedEntity._id} (${mergedEntity.name})`,
+            `Absorbed: ${absorbed._id} (${absorbed.name}) — deleted`,
+          ];
+          if (plan.duplicateEdgeWarnings.length > 0) {
+            lines.push(`⚠ ${plan.duplicateEdgeWarnings.length} duplicate edge(s) detected after relinking — resolve via delete_edge.`);
+          }
           return {
             content: [{ type: 'text' as const, text: lines.join('\n') }],
           };

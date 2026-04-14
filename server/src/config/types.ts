@@ -14,6 +14,15 @@ export interface TokenRecord {
 
 // ── Space meta / schema types ──────────────────────────────────────────────
 
+/** Numeric merge functions available for `type: "number"` properties. */
+export type NumericMergeFn = 'avg' | 'min' | 'max' | 'sum' | 'first' | 'last';
+
+/** Boolean merge functions available for `type: "boolean"` properties. */
+export type BooleanMergeFn = 'and' | 'or' | 'xor';
+
+/** All merge functions (numeric + boolean). */
+export type MergeFn = NumericMergeFn | BooleanMergeFn;
+
 /** Subset of JSON Schema used for property value validation. */
 export interface PropertySchema {
   type?: 'string' | 'number' | 'boolean';
@@ -21,6 +30,10 @@ export interface PropertySchema {
   minimum?: number;
   maximum?: number;
   pattern?: string;
+  /** Merge function applied when two entities are merged and both have this property.
+   *  Numeric: avg, min, max, sum, first, last. Boolean: and, or, xor.
+   *  Must be compatible with the declared `type`. */
+  mergeFn?: MergeFn;
 }
 
 /** Validation mode for write operations against a space's schema. */

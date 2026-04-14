@@ -35,6 +35,7 @@ const ROUTE_RULES: RouteRule[] = [
   { method: 'GET',    pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/memories/,    operation: 'memory.list',    spaceGroup: 1, read: true },
 
   // ── Entity CRUD ──────────────────────────────────────────────────────────
+  { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/entities\/([^/]+)\/merge\/([^/]+)$/, operation: 'entity.merge', spaceGroup: 1, entryGroup: 2 },
   { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/entities$/,   operation: 'entity.create',  spaceGroup: 1 },
   { method: 'PATCH',  pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/entities\/([^/]+)$/, operation: 'entity.update', spaceGroup: 1, entryGroup: 2 },
   { method: 'DELETE', pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/entities\/([^/]+)$/, operation: 'entity.delete', spaceGroup: 1, entryGroup: 2 },
