@@ -163,6 +163,26 @@ export interface RecallResponse {
   count: number;
 }
 
+export interface TraverseNode {
+  _id: string;
+  name: string;
+  type: string;
+  depth: number;
+}
+
+export interface TraverseEdge {
+  _id: string;
+  from: string;
+  to: string;
+  label: string;
+}
+
+export interface TraverseResult {
+  nodes: TraverseNode[];
+  edges: TraverseEdge[];
+  truncated: boolean;
+}
+
 export interface WipeResult {
   memories: number;
   entities: number;
@@ -491,6 +511,33 @@ export class ApiService {
 
   updateEdge(spaceId: string, id: string, body: Partial<{ label: string; description: string; tags: string[]; properties: Record<string, string | number | boolean>; weight: number; type: string; deleteFields: string[] }>): Observable<Edge> {
     return this.http.patch<Edge>(`/api/brain/spaces/${spaceId}/edges/${id}`, body);
+  }
+
+  // ── Brain — graph traverse ────────────────────────────────────────────
+
+  searchEntitiesByName(spaceId: string, name: string): Observable<{ entities: Entity[] }> {
+    const params = new HttpParams().set('name', name);
+    return this.http.get<{ entities: Entity[] }>(`/api/brain/spaces/${spaceId}/entities/by-name`, { params });
+  }
+
+  getEntity(spaceId: string, id: string): Observable<Entity> {
+    return this.http.get<Entity>(`/api/brain/spaces/${spaceId}/entities/${id}`);
+  }
+
+  getEdge(spaceId: string, id: string): Observable<Edge> {
+    return this.http.get<Edge>(`/api/brain/spaces/${spaceId}/edges/${id}`);
+  }
+
+  getMemory(spaceId: string, id: string): Observable<Memory> {
+    return this.http.get<Memory>(`/api/brain/${spaceId}/memories/${id}`);
+  }
+
+  getChrono(spaceId: string, id: string): Observable<ChronoEntry> {
+    return this.http.get<ChronoEntry>(`/api/brain/spaces/${spaceId}/chrono/${id}`);
+  }
+
+  traverseGraph(spaceId: string, body: { startId: string; direction?: 'outbound' | 'inbound' | 'both'; maxDepth?: number; limit?: number }): Observable<TraverseResult> {
+    return this.http.post<TraverseResult>(`/api/brain/spaces/${spaceId}/traverse`, body);
   }
 
   // ── Brain — chrono ──────────────────────────────────────────────────────

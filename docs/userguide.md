@@ -14,19 +14,20 @@ For contributing and building from source see [contribution-guide.md](contributi
 3. [Brain — Entities & Edges](#brain--entities--edges)
 4. [Brain — Chrono](#brain--chrono)
 5. [Brain — Query](#brain--query)
-6. [Files](#files)
-7. [File preview](#file-preview)
-8. [Directory tree sidebar](#directory-tree-sidebar)
-9. [Conflict resolution](#conflict-resolution)
-10. [Settings — Spaces](#settings--spaces)
-11. [Settings — Tokens](#settings--tokens)
-12. [Settings — MFA](#settings--mfa)
-13. [Settings — Networks](#settings--networks)
-14. [Settings — Storage](#settings--storage)
-15. [Settings — Audit Log](#settings--audit-log)
-16. [Settings — Webhooks](#settings--webhooks)
-17. [Settings — About](#settings--about)
-18. [Connecting MCP clients](#connecting-mcp-clients)
+6. [Graph](#graph)
+7. [Files](#files)
+8. [File preview](#file-preview)
+9. [Directory tree sidebar](#directory-tree-sidebar)
+10. [Conflict resolution](#conflict-resolution)
+11. [Settings — Spaces](#settings--spaces)
+12. [Settings — Tokens](#settings--tokens)
+13. [Settings — MFA](#settings--mfa)
+14. [Settings — Networks](#settings--networks)
+15. [Settings — Storage](#settings--storage)
+16. [Settings — Audit Log](#settings--audit-log)
+17. [Settings — Webhooks](#settings--webhooks)
+18. [Settings — About](#settings--about)
+19. [Connecting MCP clients](#connecting-mcp-clients)
 
 ---
 
@@ -51,6 +52,7 @@ The left sidebar has three main sections:
 | Section | What it does |
 |---------|--------------|
 | **Brain** | Store and search memories, manage entities and knowledge-graph edges |
+| **Graph** | Visually explore the knowledge graph — search an entity and browse N hops deep |
 | **Files** | Browse, upload, download, move, and delete files |
 | **Settings** | Tokens, spaces, networks, MFA, storage, about |
 
@@ -205,6 +207,61 @@ Examples:
 - Chrono entries after a date: `{ "startsAt": { "$gte": "2026-01-01" } }`
 
 The same functionality is available as the `query` MCP tool and `POST /api/brain/spaces/:spaceId/query` REST endpoint.
+
+---
+
+## Graph
+
+The **Graph** view lets you visually explore the knowledge graph. Select an entity by name and browse its neighbourhood N hops deep.
+
+### Getting started
+
+1. Click **Graph** in the sidebar.
+2. Choose a space from the dropdown in the toolbar.
+3. Type an entity name in the search bar. An autocomplete dropdown shows matching entities.
+4. Click an entity to load its graph neighbourhood.
+
+### Toolbar controls
+
+| Control | Description |
+|---------|-------------|
+| **Space selector** | Switch between spaces. |
+| **Search** | Type-ahead entity search by name. |
+| **Depth slider** | Number of hops from the root node (1–10, default 3). |
+| **Direction pills** | `Out` = outbound edges only, `In` = inbound only, `Both` = both directions. |
+| **Hide labels** | Toggle edge label visibility on dense graphs. |
+| **⛶ Fit** | Fit the entire graph into the viewport. |
+| **↺ Reset** | Clear the graph and start over. |
+
+### Canvas
+
+Nodes are coloured by entity type using a deterministic palette. The **root node** (the entity you searched for) is larger and has an accent-coloured border.
+
+- **Single-click** a node to select it and open the detail panel below.
+- **Double-click** a node to re-root the graph at that node. The browser back button returns to the previous root.
+- **Click** an edge to open the edge record in a popup.
+- Each node and edge has a **👁** overlay icon. Click it to open the full record in a popup.
+
+When the node cap is reached (the traverse response returns `truncated: true`), a warning banner is overlaid at the top of the canvas: _"⚠ Result truncated — reduce depth or node limit to see full graph"_. The banner is dismissible.
+
+### Detail panel
+
+When a node is selected, a detail panel appears below the canvas. It shows:
+
+- **Header:** entity name, type badge, memory count, chrono count.
+- **Filters:** type radio group (All / Memory / Chrono) and a description text filter — both filter client-side without a re-fetch.
+- **Table:** unified sortable table with columns **Description · Tags · Properties · Created · 👁**. Click a column header to sort. Click the 👁 button to open the full record in a popup.
+
+### Entry popup
+
+The 👁 button (on table rows, canvas nodes, or canvas edges) opens a shared entry popup that displays all fields of the record.
+
+- **Scalar fields** (string, number, boolean) are shown as labelled form inputs.
+- **Object/array fields** are rendered as sub-tables.
+- A **Raw JSON** toggle switches to the full JSON view.
+- The `_id` field is always read-only.
+- If your token has write permission, the popup shows **Validate · Undo · Cancel · Save** buttons. Save PATCHes the record via the correct REST endpoint for the record type.
+- If your token is read-only, only a **Close** button is shown.
 
 ---
 
