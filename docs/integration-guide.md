@@ -470,7 +470,7 @@ POST /api/brain/:spaceId/memories
 }
 ```
 
-**Constraints**: `fact` max 50 000 chars. `tags` must be an array of strings. `description` optional string. `properties` optional object where each value must be a string, number, or boolean.
+**Constraints**: `fact` max 50 000 chars. `tags` must be an array of strings. `description` optional string. `properties` optional object where each value must be a string, number, or boolean. `entityIds` must contain valid UUID v4 values (entity IDs); passing names instead of IDs returns `400`.
 
 ---
 
@@ -711,7 +711,20 @@ Default limit: 50, max: 200.
 DELETE /api/brain/spaces/:spaceId/entities/:id
 ```
 
-**Response** `204`.
+**Response** `204` when no inbound references exist.
+
+**Response** `409 Conflict` when the entity still has inbound backlinks (edges, memories, or chrono entries that reference it). The caller must first delete or relink the backlinked items before the deletion is permitted. Response body:
+
+```json
+{
+  "error": "Cannot delete: entity has inbound references",
+  "backlinks": [
+    { "type": "edge", "_id": "e1b2c3d4-..." },
+    { "type": "memory", "_id": "m5f6a7b8-..." },
+    { "type": "chrono", "_id": "c9d0e1f2-..." }
+  ]
+}
+```
 
 ---
 
@@ -723,8 +736,8 @@ POST /api/brain/spaces/:spaceId/edges
 
 ```json
 {
-  "from": "kubernetes",
-  "to": "docker",
+  "from": "550e8400-e29b-41d4-a716-446655440000",
+  "to": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
   "label": "depends_on",
   "weight": 0.9,
   "type": "causal",
@@ -737,8 +750,8 @@ POST /api/brain/spaces/:spaceId/edges
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `from` | yes | Source entity ID |
-| `to` | yes | Target entity ID |
+| `from` | yes | Source entity UUID v4 (not a name). Returns `400` if not a valid UUID. |
+| `to` | yes | Target entity UUID v4 (not a name). Returns `400` if not a valid UUID. |
 | `label` | yes | Relationship label (e.g. `depends_on`, `related_to`) |
 | `weight` | no | Numeric weight (0–1). Defaults to none. |
 | `type` | no | Free-form edge type string (e.g. `causal`, `hierarchical`). |
@@ -854,6 +867,8 @@ POST /api/brain/spaces/:spaceId/chrono
 - `kind` — `event`, `deadline`, `plan`, `prediction`, `milestone`
 - `status` — `upcoming` (default), `active`, `completed`, `overdue`, `cancelled`
 - `confidence` — `0`–`1` (optional, useful for predictions)
+- `entityIds` — array of UUID v4 entity IDs (not names); returns `400` if any value is not a valid UUID
+- `memoryIds` — array of UUID v4 memory IDs (not names); returns `400` if any value is not a valid UUID
 
 **Response** `201` — the created `ChronoEntry`.
 

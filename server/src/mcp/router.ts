@@ -1087,7 +1087,9 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           const to = String(a['to'] ?? '');
           const label = String(a['label'] ?? '');
           if (!from) throw new Error('from must not be empty');
+          if (!UUID_V4_RE.test(from)) throw new Error('from must be a valid UUID v4 (entity ID), not a name');
           if (!to) throw new Error('to must not be empty');
+          if (!UUID_V4_RE.test(to)) throw new Error('to must be a valid UUID v4 (entity ID), not a name');
           if (!label) throw new Error('label must not be empty');
           const weight = typeof a['weight'] === 'number' ? a['weight'] : undefined;
           const edgeType = typeof a['type'] === 'string' ? a['type'] : undefined;
@@ -1218,6 +1220,18 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
 
           const remQuota = await checkQuota('brain');
 
+          // Validate entityIds and memoryIds are UUIDs
+          const chronoEntityIds = Array.isArray(a['entityIds']) ? (a['entityIds'] as string[]) : undefined;
+          const chronoMemoryIds = Array.isArray(a['memoryIds']) ? (a['memoryIds'] as string[]) : undefined;
+          if (chronoEntityIds) {
+            const invalidEIds = chronoEntityIds.filter(id => !UUID_V4_RE.test(id));
+            if (invalidEIds.length > 0) throw new Error(`entityIds must contain valid UUID v4 values (entity IDs), not names: ${invalidEIds.join(', ')}`);
+          }
+          if (chronoMemoryIds) {
+            const invalidMIds = chronoMemoryIds.filter(id => !UUID_V4_RE.test(id));
+            if (invalidMIds.length > 0) throw new Error(`memoryIds must contain valid UUID v4 values (memory IDs), not names: ${invalidMIds.join(', ')}`);
+          }
+
           const entry = await createChrono(wt.target, {
             title,
             kind,
@@ -1227,8 +1241,8 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             status: typeof a['status'] === 'string' ? a['status'] as import('../config/types.js').ChronoStatus : undefined,
             confidence: typeof a['confidence'] === 'number' ? a['confidence'] : undefined,
             tags: Array.isArray(a['tags']) ? (a['tags'] as string[]) : undefined,
-            entityIds: Array.isArray(a['entityIds']) ? (a['entityIds'] as string[]) : undefined,
-            memoryIds: Array.isArray(a['memoryIds']) ? (a['memoryIds'] as string[]) : undefined,
+            entityIds: chronoEntityIds,
+            memoryIds: chronoMemoryIds,
             properties: chronoProps,
           });
           let text = `Chrono entry '${entry.title}' (${entry.kind}) created (ID ${entry._id}, seq ${entry.seq}).`
@@ -1254,8 +1268,18 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
           if (typeof a['confidence'] === 'number') updates['confidence'] = a['confidence'];
           if (typeof a['description'] === 'string') updates['description'] = a['description'];
           if (Array.isArray(a['tags'])) updates['tags'] = a['tags'];
-          if (Array.isArray(a['entityIds'])) updates['entityIds'] = a['entityIds'];
-          if (Array.isArray(a['memoryIds'])) updates['memoryIds'] = a['memoryIds'];
+          if (Array.isArray(a['entityIds'])) {
+            const eIds = a['entityIds'] as string[];
+            const invalidEIds = eIds.filter(id => !UUID_V4_RE.test(id));
+            if (invalidEIds.length > 0) throw new Error(`entityIds must contain valid UUID v4 values (entity IDs), not names: ${invalidEIds.join(', ')}`);
+            updates['entityIds'] = eIds;
+          }
+          if (Array.isArray(a['memoryIds'])) {
+            const mIds = a['memoryIds'] as string[];
+            const invalidMIds = mIds.filter(id => !UUID_V4_RE.test(id));
+            if (invalidMIds.length > 0) throw new Error(`memoryIds must contain valid UUID v4 values (memory IDs), not names: ${invalidMIds.join(', ')}`);
+            updates['memoryIds'] = mIds;
+          }
           if (a['properties'] != null && typeof a['properties'] === 'object' && !Array.isArray(a['properties'])) {
             updates['properties'] = a['properties'];
           }
@@ -1598,7 +1622,9 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             const to    = typeof item['to']    === 'string' ? item['to'].trim()    : '';
             const label = typeof item['label'] === 'string' ? item['label'].trim() : '';
             if (!from)  { errors.push({ type: 'edge', index: i, reason: 'missing required field: from' });  continue; }
+            if (!UUID_V4_RE.test(from)) { errors.push({ type: 'edge', index: i, reason: '`from` must be a valid UUID v4 (entity ID), not a name' }); continue; }
             if (!to)    { errors.push({ type: 'edge', index: i, reason: 'missing required field: to' });    continue; }
+            if (!UUID_V4_RE.test(to)) { errors.push({ type: 'edge', index: i, reason: '`to` must be a valid UUID v4 (entity ID), not a name' }); continue; }
             if (!label) { errors.push({ type: 'edge', index: i, reason: 'missing required field: label' }); continue; }
             const weight      = typeof item['weight'] === 'number' ? item['weight'] : undefined;
             const edgeType    = typeof item['type']   === 'string' ? item['type']   : undefined;
@@ -1640,6 +1666,14 @@ function createMcpServer(spaceId: string, tokenSpaces?: string[], readOnly?: boo
             const tags        = Array.isArray(item['tags'])       ? (item['tags']       as unknown[]).filter((t): t is string => typeof t === 'string') : undefined;
             const entityIds   = Array.isArray(item['entityIds'])  ? (item['entityIds']  as unknown[]).filter((t): t is string => typeof t === 'string') : undefined;
             const memoryIds   = Array.isArray(item['memoryIds'])  ? (item['memoryIds']  as unknown[]).filter((t): t is string => typeof t === 'string') : undefined;
+            if (entityIds) {
+              const invalidEIds = entityIds.filter(id => !UUID_V4_RE.test(id));
+              if (invalidEIds.length > 0) { errors.push({ type: 'chrono', index: i, reason: '`entityIds` must contain valid UUID v4 values (entity IDs), not names' }); continue; }
+            }
+            if (memoryIds) {
+              const invalidMIds = memoryIds.filter(id => !UUID_V4_RE.test(id));
+              if (invalidMIds.length > 0) { errors.push({ type: 'chrono', index: i, reason: '`memoryIds` must contain valid UUID v4 values (memory IDs), not names' }); continue; }
+            }
             const props       = (item['properties'] != null && typeof item['properties'] === 'object' && !Array.isArray(item['properties']))
               ? (item['properties'] as Record<string, string | number | boolean>) : undefined;
             try {

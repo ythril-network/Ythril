@@ -3,7 +3,13 @@ import { col } from '../db/mongo.js';
 import { nextSeq } from '../util/seq.js';
 import { embed } from './embedding.js';
 import { getConfig } from '../config/loader.js';
-import type { EntityDoc, TombstoneDoc } from '../config/types.js';
+import type { EntityDoc, EdgeDoc, MemoryDoc, ChronoEntry, TombstoneDoc } from '../config/types.js';
+
+/** A backlink entry describing an item that references a given entity. */
+export interface BacklinkEntry {
+  type: 'edge' | 'memory' | 'chrono';
+  _id: string;
+}
 
 export interface UpsertResult {
   entity: EntityDoc;
@@ -250,4 +256,33 @@ export async function bulkDeleteEntities(spaceId: string): Promise<number> {
   await col<TombstoneDoc>(`${spaceId}_tombstones`).bulkWrite(ops as never);
   await coll.deleteMany({});
   return ids.length;
+}
+
+/**
+ * Find all items in a space that hold inbound references to the given entity ID.
+ * Checks edges (from/to), memories (entityIds), and chrono entries (entityIds).
+ * Returns a (possibly empty) list of backlink entries.
+ */
+export async function findEntityBacklinks(spaceId: string, entityId: string): Promise<BacklinkEntry[]> {
+  const backlinks: BacklinkEntry[] = [];
+
+  // Edges referencing this entity as from or to
+  const edges = await col<EdgeDoc>(`${spaceId}_edges`)
+    .find({ spaceId, $or: [{ from: entityId }, { to: entityId }] } as never, { projection: { _id: 1 } })
+    .toArray() as Array<{ _id: string }>;
+  for (const e of edges) backlinks.push({ type: 'edge', _id: e._id });
+
+  // Memories referencing this entity in entityIds
+  const memories = await col<MemoryDoc>(`${spaceId}_memories`)
+    .find({ spaceId, entityIds: entityId } as never, { projection: { _id: 1 } })
+    .toArray() as Array<{ _id: string }>;
+  for (const m of memories) backlinks.push({ type: 'memory', _id: m._id });
+
+  // Chrono entries referencing this entity in entityIds
+  const chronos = await col<ChronoEntry>(`${spaceId}_chrono`)
+    .find({ spaceId, entityIds: entityId } as never, { projection: { _id: 1 } })
+    .toArray() as Array<{ _id: string }>;
+  for (const c of chronos) backlinks.push({ type: 'chrono', _id: c._id });
+
+  return backlinks;
 }
