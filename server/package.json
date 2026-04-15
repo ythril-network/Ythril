@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "local-connector:dev": "tsx watch src/local-agent-connector/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "local-connector:start": "node dist/local-agent-connector/index.js"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",

@@ -133,14 +133,40 @@ import { ApiService, InviteBundle, Network, Space, SyncHistoryRecord, VoteRound 
       justify-content: space-between;
       margin-bottom: 16px;
     }
+    .wizard-note {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin: 0 0 10px;
+      line-height: 1.45;
+    }
+    .wizard-list {
+      margin: 0 0 12px;
+      padding-left: 18px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      line-height: 1.45;
+    }
+    .wizard-status {
+      margin: 8px 0 12px;
+      padding: 8px 10px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--bg-elevated);
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
   `],
   template: `
     <!-- Network list (shown first) -->
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
       <div class="card-title">Networks</div>
       <div style="display:flex; gap:8px;">
-        <button class="btn-primary btn btn-sm" (click)="showCreateDialog.set(true)">Create Network</button>
-        <button class="btn-secondary btn btn-sm" (click)="showJoinDialog.set(true)">Join Network</button>
+        @if (needsNetworkEnable()) {
+          <button class="btn-primary btn btn-sm" (click)="openEnableNetworksWizard()">Enable Networks</button>
+        } @else {
+          <button class="btn-primary btn btn-sm" (click)="showCreateDialog.set(true)">Create Network</button>
+          <button class="btn-secondary btn btn-sm" (click)="showJoinDialog.set(true)">Join Network</button>
+        }
       </div>
     </div>
 
@@ -450,6 +476,92 @@ import { ApiService, InviteBundle, Network, Space, SyncHistoryRecord, VoteRound 
         </div>
       </div>
     }
+
+    <!-- Enable Networks wizard -->
+    @if (showEnableNetworksWizard()) {
+      <div class="dialog-backdrop" (click)="showEnableNetworksWizard.set(false)">
+        <div class="dialog" (click)="$event.stopPropagation()">
+          <div class="dialog-header">
+            <div class="card-title">Enable Networks</div>
+            <button class="icon-btn" aria-label="Close dialog" (click)="showEnableNetworksWizard.set(false)">✕</button>
+          </div>
+
+          @if (enableWizardError()) { <div class="alert alert-error">{{ enableWizardError() }}</div> }
+
+          @if (enableWizardStep() === 1) {
+            <p class="wizard-note">
+              This instance currently resolves to a local/private URL. Network peers cannot join or sync with local/private URLs because peer URL validation blocks SSRF targets.
+            </p>
+            <p class="wizard-note">
+              The recommended path is exposing this instance with a stable public HTTPS hostname via Cloudflare Tunnel.
+            </p>
+            <ul class="wizard-list">
+              <li>Why: dynamic home IPs and CGNAT are handled automatically.</li>
+              <li>Risk model: the endpoint is internet-reachable, so keep strong tokens and monitor logs.</li>
+              <li>Result: use the public hostname as myUrl/instanceUrl in join flows.</li>
+            </ul>
+            <div style="display:flex; gap:8px; justify-content:flex-end;">
+              <button class="btn-secondary btn" type="button" (click)="showEnableNetworksWizard.set(false)">Cancel</button>
+              <button class="btn-primary btn" type="button" (click)="enableWizardStep.set(2)">Continue</button>
+            </div>
+          }
+
+          @if (enableWizardStep() === 2) {
+            @if (localAgentStatusMessage()) {
+              <div class="wizard-status">{{ localAgentStatusMessage() }}</div>
+            }
+            <p class="wizard-note">
+              You must use a hostname inside a DNS zone you control in Cloudflare (for example
+              <span class="mono">ythril-desktop.example.com</span>). Random domains you do not control will fail.
+            </p>
+            <div class="field">
+              <label>Public hostname (required)</label>
+              <input type="text" [(ngModel)]="enableHostname" name="enableHostname" placeholder="ythril-desktop.example.com" />
+            </div>
+            <div class="field">
+              <label>Operating system (auto-detected)</label>
+              <select [(ngModel)]="enableOs" name="enableOs">
+                <option value="windows">Windows</option>
+                <option value="linux">Linux</option>
+              </select>
+            </div>
+            <div class="field">
+              <label style="display:flex; align-items:center; gap:8px;">
+                <input type="checkbox" [(ngModel)]="enableAutostart" name="enableAutostart" />
+                Enable cloudflared autostart service
+              </label>
+            </div>
+            <div style="display:flex; gap:8px; justify-content:flex-end;">
+              <button class="btn-secondary btn" type="button" (click)="enableWizardStep.set(1)">Back</button>
+              <button class="btn-primary btn" type="button" (click)="prepareEnableWizardCommands()">Continue</button>
+            </div>
+          }
+
+          @if (enableWizardStep() === 3) {
+            <p class="wizard-note">Run the following commands on this host, then click "I finished setup".</p>
+            @if (localAgentStatusMessage()) {
+              <div class="wizard-status">{{ localAgentStatusMessage() }}</div>
+            }
+            @if (enableOs === 'windows') {
+              <div class="code-block" style="white-space:pre-wrap; word-break:break-word; font-size:11px;">{{ enableWindowsCommand() }}</div>
+            } @else {
+              <div class="code-block" style="white-space:pre-wrap; word-break:break-word; font-size:11px;">{{ enableLinuxCommand() }}</div>
+            }
+            <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:12px;">
+              @if (localAgentCanExecute()) {
+                <button class="btn-primary btn" type="button" [disabled]="enableAutoRunning()" (click)="runEnableNetworksAutomatically()">
+                  @if (enableAutoRunning()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
+                  Run automatically
+                </button>
+              }
+              <button class="btn-ghost btn" type="button" (click)="copyEnableWizardCommands()">Copy commands</button>
+              <button class="btn-secondary btn" type="button" (click)="enableWizardStep.set(2)">Back</button>
+              <button class="btn-primary btn" type="button" (click)="completeEnableWizard()">I finished setup</button>
+            </div>
+          }
+        </div>
+      </div>
+    }
   `,
 })
 export class NetworksComponent implements OnInit {
@@ -495,11 +607,25 @@ export class NetworksComponent implements OnInit {
   expandedError = signal('');
   private historyByNetwork: Record<string, SyncHistoryRecord[]> = {};
 
+  needsNetworkEnable = signal(false);
+  showEnableNetworksWizard = signal(false);
+  enableWizardStep = signal(1);
+  enableWizardError = signal('');
+  enableHostname = '';
+  enableOs: 'windows' | 'linux' = 'windows';
+  enableAutostart = true;
+  enableWindowsCommand = signal('');
+  enableLinuxCommand = signal('');
+  localAgentCanExecute = signal(false);
+  localAgentStatusMessage = signal('');
+  enableAutoRunning = signal(false);
+
   inviteBundle(id: string): InviteBundle | undefined { return this.inviteBundles[id]; }
   bundleJson(bundle: InviteBundle): string { return JSON.stringify(bundle, null, 2); }
   syncResult(id: string): { ok: boolean } | undefined { return this.syncResults[id]; }
 
   ngOnInit(): void {
+    this.enableOs = this.detectLocalOs();
     this.load();
     this.api.listSpaces().subscribe({
       next: ({ spaces }) => this.availableSpaces.set(spaces),
@@ -515,6 +641,7 @@ export class NetworksComponent implements OnInit {
         if (url && url !== 'null') {
           this.joinMyUrl = url;
           this.joinMyUrlAutoFilled.set(true);
+          this.needsNetworkEnable.set(this.isLocalOrPrivateUrl(url));
         }
       },
       error: () => {
@@ -523,9 +650,149 @@ export class NetworksComponent implements OnInit {
         if (origin && origin !== 'null') {
           this.joinMyUrl = origin;
           this.joinMyUrlAutoFilled.set(true);
+          this.needsNetworkEnable.set(this.isLocalOrPrivateUrl(origin));
         }
       },
     });
+  }
+
+  openEnableNetworksWizard(): void {
+    this.enableWizardError.set('');
+    this.enableWizardStep.set(1);
+    this.enableHostname = '';
+    this.enableWindowsCommand.set('');
+    this.enableLinuxCommand.set('');
+    this.localAgentCanExecute.set(false);
+    this.localAgentStatusMessage.set('Checking local connector...');
+    this.refreshLocalAgentStatus();
+    this.showEnableNetworksWizard.set(true);
+  }
+
+  prepareEnableWizardCommands(): void {
+    this.enableWizardError.set('');
+    const host = this.enableHostname.trim();
+    if (!/^(?=.{4,253}$)(?!-)([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,63}$/.test(host)) {
+      this.enableWizardError.set('Enter a valid public hostname (for example ythril-desktop.example.com).');
+      return;
+    }
+
+    this.enableWindowsCommand.set(this.buildWindowsCloudflareCommands(host));
+    this.enableLinuxCommand.set(this.buildLinuxCloudflareCommands(host));
+    this.enableWizardStep.set(3);
+  }
+
+  copyEnableWizardCommands(): void {
+    const text = this.enableOs === 'windows' ? this.enableWindowsCommand() : this.enableLinuxCommand();
+    if (!text) return;
+    navigator.clipboard.writeText(text).catch(() => {});
+  }
+
+  completeEnableWizard(): void {
+    const host = this.enableHostname.trim();
+    if (!host) return;
+    const url = `https://${host}`;
+    this.joinMyUrl = url;
+    this.joinMyUrlAutoFilled.set(true);
+    this.needsNetworkEnable.set(false);
+    this.showEnableNetworksWizard.set(false);
+  }
+
+  runEnableNetworksAutomatically(): void {
+    const host = this.enableHostname.trim();
+    if (!host) {
+      this.enableWizardError.set('Enter a public hostname first.');
+      return;
+    }
+    this.enableWizardError.set('');
+    this.enableAutoRunning.set(true);
+    this.api.executeEnableNetworksViaLocalAgent({
+      hostname: host,
+      os: this.enableOs,
+      autostart: this.enableAutostart,
+    }).subscribe({
+      next: (result) => {
+        this.enableAutoRunning.set(false);
+        this.localAgentStatusMessage.set(result.message ?? 'Automatic setup finished via local connector.');
+        const url = result.publicUrl || `https://${host}`;
+        this.joinMyUrl = url;
+        this.joinMyUrlAutoFilled.set(true);
+        this.needsNetworkEnable.set(false);
+      },
+      error: (err) => {
+        this.enableAutoRunning.set(false);
+        this.enableWizardError.set(err.error?.error ?? 'Automatic setup failed. Use manual commands as fallback.');
+      },
+    });
+  }
+
+  private refreshLocalAgentStatus(): void {
+    this.api.getLocalAgentStatus().subscribe({
+      next: (status) => {
+        this.localAgentCanExecute.set(status.canExecute);
+        this.localAgentStatusMessage.set(status.message ?? (status.canExecute ? 'Local connector is ready for one-click execution.' : 'Local connector not ready.'));
+      },
+      error: () => {
+        this.localAgentCanExecute.set(false);
+        this.localAgentStatusMessage.set('Local connector status check failed. Manual commands are still available.');
+      },
+    });
+  }
+
+  private buildWindowsCloudflareCommands(host: string): string {
+    const serviceBlock = this.enableAutostart
+      ? "cloudflared service install\nStart-Service cloudflared"
+      : "cloudflared tunnel run ythril-local";
+    return [
+      'winget install --id Cloudflare.cloudflared -e',
+      'cloudflared tunnel login',
+      'cloudflared tunnel create ythril-local',
+      `cloudflared tunnel route dns ythril-local ${host}`,
+      '$env:USERPROFILE',
+      '# create %USERPROFILE%\\.cloudflared\\config.yml with hostname and localhost:3200 origin',
+      serviceBlock,
+      `curl https://${host}/health`,
+    ].join('\n');
+  }
+
+  private buildLinuxCloudflareCommands(host: string): string {
+    const serviceBlock = this.enableAutostart
+      ? 'sudo cloudflared service install\nsudo systemctl enable --now cloudflared'
+      : 'cloudflared tunnel run ythril-local';
+    return [
+      'curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o /tmp/cloudflared.deb',
+      'sudo dpkg -i /tmp/cloudflared.deb',
+      'cloudflared tunnel login',
+      'cloudflared tunnel create ythril-local',
+      `cloudflared tunnel route dns ythril-local ${host}`,
+      '# create ~/.cloudflared/config.yml with hostname and localhost:3200 origin',
+      serviceBlock,
+      `curl https://${host}/health`,
+    ].join('\n');
+  }
+
+  private isLocalOrPrivateUrl(raw: string): boolean {
+    try {
+      const u = new URL(raw);
+      const host = u.hostname.toLowerCase();
+      if (host === 'localhost' || host === '::1') return true;
+      if (/^127\./.test(host)) return true;
+      if (/^10\./.test(host)) return true;
+      if (/^192\.168\./.test(host)) return true;
+      if (/^169\.254\./.test(host)) return true;
+      if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
+      if (/^f[cd][0-9a-f]{0,2}:/i.test(host)) return true;
+      if (/^fe[89ab][0-9a-f]:/i.test(host)) return true;
+      return false;
+    } catch {
+      return true;
+    }
+  }
+
+  private detectLocalOs(): 'windows' | 'linux' {
+    const ua = navigator.userAgent.toLowerCase();
+    const platform = (navigator.platform || '').toLowerCase();
+    if (ua.includes('windows') || platform.includes('win')) return 'windows';
+    return 'linux';
   }
 
   load(): void {

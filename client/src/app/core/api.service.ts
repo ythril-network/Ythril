@@ -274,6 +274,20 @@ export interface AboutInfo {
   publicUrl?: string;
 }
 
+export interface LocalAgentStatus {
+  configured: boolean;
+  reachable: boolean;
+  canExecute: boolean;
+  message?: string;
+}
+
+export interface LocalAgentEnableNetworksResult {
+  ok: boolean;
+  publicUrl?: string;
+  message?: string;
+  steps?: string[];
+}
+
 // ── Audit log types ──────────────────────────────────────────────────────────
 
 export interface AuditLogEntry {
@@ -766,6 +780,18 @@ export class ApiService {
 
   getAboutLogs(lines: number = 200): Observable<{ lines: string[] }> {
     return this.http.get<{ lines: string[] }>(`/api/about/logs?lines=${lines}`);
+  }
+
+  getLocalAgentStatus(): Observable<LocalAgentStatus> {
+    return this.http.get<LocalAgentStatus>('/api/admin/local-agent/status');
+  }
+
+  executeEnableNetworksViaLocalAgent(body: {
+    hostname: string;
+    os: 'windows' | 'linux';
+    autostart: boolean;
+  }): Observable<LocalAgentEnableNetworksResult> {
+    return this.http.post<LocalAgentEnableNetworksResult>('/api/admin/local-agent/enable-networks/execute', body);
   }
 
   // ── Audit Log ───────────────────────────────────────────────────────────

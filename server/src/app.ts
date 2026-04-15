@@ -22,6 +22,7 @@ import { setupRouter } from './setup/routes.js';
 import { mcpRouter } from './mcp/router.js';
 import { auditMiddleware } from './audit/middleware.js';
 import { webhooksRouter } from './api/webhooks.js';
+import { isLocalAgentFeatureEnabled, localAgentRouter } from './api/local-agent.js';
 import { globalRateLimit } from './rate-limit/middleware.js';
 import { configExists, reloadConfig, getConfig, saveConfig, loadSecrets } from './config/loader.js';
 import { requireAuth, requireAdminMfa } from './auth/middleware.js';
@@ -175,6 +176,9 @@ export function createApp() {
 
   // ── Webhook management ─────────────────────────────────────────────────────
   app.use('/api/admin/webhooks', webhooksRouter);
+  if (isLocalAgentFeatureEnabled()) {
+    app.use('/api/admin/local-agent', localAgentRouter);
+  }
 
   // ── Admin: space wipe ─────────────────────────────────────────────────────
   // Wipes data from a space while preserving the space itself and its configuration.

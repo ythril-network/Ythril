@@ -2086,6 +2086,47 @@ Executes the full 3-step RSA handshake server-side. No plaintext tokens cross th
 
 **`spaceMap`** (optional) — a `Record<string, string>` that maps remote space IDs to local space IDs. Use this when a remote space name collides with an existing local space and you want to alias it to a different local name instead of merging. If omitted, remote space IDs are used as-is (identity mapping). The map is persisted on the `NetworkConfig` and used by the sync engine to translate space IDs during pull and push.
 
+### Join Troubleshooting: private or local URLs rejected
+
+If join fails with a validation error like:
+
+```json
+[
+  {
+    "code": "custom",
+    "path": ["instanceUrl"],
+    "message": "Peer URL must use http(s) and must not target private IPs, loopback, ULA/link-local IPv6, cloud metadata endpoints, or include embedded credentials"
+  }
+]
+```
+
+the peer URL failed SSRF-safe validation.
+
+Blocked examples:
+
+- `http://localhost:3200`
+- `http://127.0.0.1:3200`
+- `http://192.168.1.50:3200`
+- `http://10.0.0.20:3200`
+- `http://[fd00::1]:3200`
+- URLs with embedded credentials like `https://user:pass@host.example.com`
+
+Allowed examples:
+
+- `https://brain-a.example.com`
+- `https://sync.mycompany.tld`
+
+What to do:
+
+1. Use a publicly reachable URL for the joining brain (`myUrl` / `instanceUrl`) and inviter `inviteUrl`.
+2. Ensure both brains can reach each other over that URL.
+3. Retry the join flow with updated URLs.
+
+Notes:
+
+- This validation is enforced for `Join via Invite Key`, `Join Remote`, and invite `apply` payloads.
+- There is no runtime toggle to allow private or loopback peer URLs in these endpoints.
+
 ---
 
 ### Sync History

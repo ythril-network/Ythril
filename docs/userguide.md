@@ -3,6 +3,7 @@
 > How to use the Ythril web interface and connect MCP clients.
 
 For hosting, deployment, and API reference see [integration-guide.md](integration-guide.md).
+For fastest workstation deployment steps see [workstation-mode-guide.md](workstation-mode-guide.md).
 For contributing and building from source see [contribution-guide.md](contribution-guide.md).
 
 ---
@@ -521,7 +522,34 @@ The invite expires after 24 hours. The bundle contains an RSA-4096 public key an
 
 The RSA handshake runs server-to-server. Sync tokens are exchanged encrypted — never visible in the UI.
 
+If join fails with a peer URL validation error (private IP, localhost, embedded credentials), see [Integration Guide — Join Troubleshooting: private or local URLs rejected](integration-guide.md#join-troubleshooting-private-or-local-urls-rejected).
+
 Space aliases are stored as a `spaceMap` on the network config (`remote-id → local-id`). The sync engine transparently translates between remote and local space IDs during pull and push.
+
+### Enable Networks wizard (localhost/private URL)
+
+If this brain is opened via `localhost` or another private URL, the Networks header shows **Enable Networks** instead of **Create Network** / **Join Network**.
+
+Why:
+
+- Peer URL validation blocks private/loopback targets for network join/sync endpoints.
+- A public HTTPS hostname is required for cross-instance networking.
+
+Wizard flow:
+
+1. Explains why a public URL is needed and what risks apply.
+2. Asks for a hostname you control in Cloudflare and auto-detects OS (`Windows` or `Linux`, editable).
+3. Generates platform-specific Cloudflare Tunnel command steps.
+4. Optional autostart command is included.
+5. After setup, use `https://<hostname>` as this brain's URL in join flows.
+
+Notes:
+
+- The hostname must be inside a DNS zone you control in Cloudflare.
+- Host-level install/service commands are never executed directly by browser code.
+- Optional: when a trusted local connector service is configured, the wizard can run the setup automatically through that connector.
+
+If you hit URL validation errors while joining, see [Integration Guide — Join Troubleshooting: private or local URLs rejected](integration-guide.md#join-troubleshooting-private-or-local-urls-rejected).
 
 ### Managing members
 

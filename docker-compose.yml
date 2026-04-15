@@ -17,6 +17,9 @@
       DATA_ROOT: /data
       MONGO_URI: mongodb://ythril-mongo:27017/?directConnection=true
       NODE_ENV: production
+      YTHRIL_LOCAL_AGENT_ENABLED: ${YTHRIL_LOCAL_AGENT_ENABLED:-}
+      YTHRIL_LOCAL_AGENT_URL: ${YTHRIL_LOCAL_AGENT_URL:-}
+      YTHRIL_LOCAL_AGENT_TOKEN: ${YTHRIL_LOCAL_AGENT_TOKEN:-}
       # Pass DEBUG=1 from the host shell to enable verbose logging:
       #   DEBUG=1 docker compose up
       DEBUG: ${DEBUG:-}

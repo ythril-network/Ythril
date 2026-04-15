@@ -106,7 +106,7 @@ docker compose up -d
 
 | I am... | Start here | Then read |
 |---------|------------|-----------|
-| User / operator | [User Guide](docs/userguide.md) | [Use Case Examples](docs/usecase-examples.md) |
+| User / operator | [Workstation Mode Guide](docs/workstation-mode-guide.md) | [User Guide](docs/userguide.md), [Use Case Examples](docs/usecase-examples.md) |
 | Integrator (API/MCP) | [Integration Guide](docs/integration-guide.md) | [Network Types](docs/network-types.md), [Sync Protocol](docs/sync-protocol.md) |
 | Developer / contributor | [Contribution Guide](docs/contribution-guide.md) | [Docker Build Protocol](docs/docker-build-protocol.md), [Dependencies](docs/dependencies.md) |
 
