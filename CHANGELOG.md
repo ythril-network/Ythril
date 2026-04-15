@@ -4,6 +4,27 @@ All notable changes to Ythril are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] — 2026-04-15
+
+### Added
+
+- **Entity-centric graph exploration UI**: New graph-first workflow to inspect entities with linked chrono and memory context in a single view, improving relationship discovery and triage for dense knowledge spaces.
+- **Entity merge API + MCP tool**: `POST /api/brain/spaces/:spaceId/entities/:survivorId/merge/:absorbedId` and `merge_entities` MCP tool with per-property conflict resolution, relinking, and duplicate-edge warning support.
+- **Field deletion in partial updates**: `deleteFields` dot-notation support added to PATCH update flows (memories/entities/edges) and corresponding MCP update tools, enabling safe cleanup of stale keys without full document rewrites.
+- **Strict linkage enforcement mode**: per-space `strictLinkage` opt-in enforcing UUID linkage semantics for references plus stronger entity-delete protections when backlinks exist.
+- **Test orchestration improvements**: full-suite runner with automatic cleanup path and explicit keep-artifacts mode (`test:all:keep`) to make CI/local runs deterministic while preserving debug workflows when needed.
+
+### Changed
+
+- **Version line promoted to 0.10.0**: post-v0.9.1 feature accumulation (graph UX, merge semantics, strict linkage, update model changes) consolidated into a minor release bump.
+- **Documentation parity sweep**: integration and developer documentation re-audited against current server/client implementation and recent commits, with endpoint coverage corrections and MCP/API alignment updates.
+- **Repository hygiene updates**: test command/path references normalized to the current `testing/` layout and compose invocation patterns aligned for reproducible local and CI execution.
+
+### Fixed
+
+- **UI settings/feedback correctness**: follow-up fixes across Brain/Settings UX including data table behavior, dialog consistency, and quota naming (`minGiB` → `maxGiB`) to reduce operator confusion.
+- **Audit and observability polish**: incremental fixes in audit-related UI/behavior and log-viewing workflows to improve reliability during investigations.
+
 ## [0.9.2] — 2026-04-15
 
 ### Changed

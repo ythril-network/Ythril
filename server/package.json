@@ -1,6 +1,6 @@
 {
   "name": "@ythril/server",
-  "version": "0.9.2",
+  "version": "0.10.0",
   "license": "PolyForm-Small-Business-1.0.0",
   "type": "module",
   "scripts": {
