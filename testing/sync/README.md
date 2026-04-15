@@ -58,6 +58,11 @@
   - wipe created data in teardown with explicit API cleanup.
 - Shared long-lived spaces (such as `general`) should not be used for bulk seeding tests unless teardown is guaranteed in the same file.
 
+## Full suite runner behavior
+
+- `npm run test:all` now performs mandatory post-run cleanup (`test:down:clean`) even when tests fail.
+- Use `npm run test:all:keep` only when you explicitly need the environment left running for debugging.
+
 ## Instance URLs
 
 | Instance | Port | Container name |
