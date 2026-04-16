@@ -4,6 +4,19 @@ All notable changes to Ythril are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.2] — 2026-04-16
+
+### Changed
+
+- **Enable Networks one-click bootstrap**: The wizard now bootstraps the local connector automatically so users no longer need to run the workstation setup command manually in normal cases.
+- **First-run cloudflare automation**: One-click setup now handles `cloudflared` install, Cloudflare login (when needed), tunnel ensure/create, and tunnel config writing in an idempotent flow.
+- **Safer DNS behavior**: DNS overwrite is now explicit user choice; overwrite remains off by default and can be opted in when replacing an existing hostname record is intentional.
+- **Wizard flow clarity**: Automatic path is now primary; manual command flow is shown only as fallback, reducing confusion for non-technical operators.
+
+### Fixed
+
+- **cloudflared runtime launch path**: User-mode tunnel startup now uses the resolved `cloudflared` executable path instead of a hardcoded command name, improving reliability on fresh Windows installs.
+
 ## [0.10.1] — 2026-04-16
 
 ### Added
