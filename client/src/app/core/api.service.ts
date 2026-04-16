@@ -11,6 +11,7 @@ export interface Space {
   builtIn?: boolean;
   folders?: string[];
   maxGiB?: number;
+  usageGiB?: number;
   description?: string;
   proxyFor?: string[];
   meta?: SpaceMeta;
@@ -365,7 +366,7 @@ export class ApiService {
     return this.http.post<{ space: Space }>('/api/spaces', body);
   }
 
-  updateSpace(id: string, body: { label?: string; description?: string; meta?: Partial<SpaceMeta> }): Observable<{ space: Space }> {
+  updateSpace(id: string, body: { label?: string; description?: string; maxGiB?: number; meta?: Partial<SpaceMeta> }): Observable<{ space: Space }> {
     return this.http.patch<{ space: Space }>(`/api/spaces/${id}`, body);
   }
 

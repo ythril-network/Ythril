@@ -1,9 +1,10 @@
 import { Router } from 'express';
+import path from 'path';
 import { requireAuth, requireAdmin, requireAdminMfa } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
-import { getConfig, saveConfig, getSecrets } from '../config/loader.js';
+import { getConfig, saveConfig, getSecrets, getDataRoot } from '../config/loader.js';
 import { createSpace, updateSpace, removeSpace, renameSpace, slugify } from '../spaces/spaces.js';
-import { measureUsage } from '../quota/quota.js';
+import { measureUsage, dirSizeBytes } from '../quota/quota.js';
 import { col } from '../db/mongo.js';
 import { resolveMemberSpaces } from '../spaces/proxy.js';
 import { z } from 'zod';
@@ -91,9 +92,10 @@ const RenameSpaceBody = z.object({
 const UpdateSpaceBody = z.object({
   label: z.string().min(1).max(200).optional(),
   description: z.string().max(4000).optional(),
+  maxGiB: z.number().positive().optional(),
   meta: SpaceMetaBody.optional(),
-}).refine(d => d.label !== undefined || d.description !== undefined || d.meta !== undefined, {
-  message: 'At least one of label, description, or meta must be provided',
+}).refine(d => d.label !== undefined || d.description !== undefined || d.meta !== undefined || d.maxGiB !== undefined, {
+  message: 'At least one of label, description, maxGiB, or meta must be provided',
 });
 
 // PATCH /api/spaces/:id/rename
@@ -125,8 +127,18 @@ spacesRouter.patch('/:id/rename', globalRateLimit, requireAdminMfa, async (req, 
 // GET /api/spaces
 spacesRouter.get('/', globalRateLimit, requireAuth, async (_req, res) => {
   const cfg = getConfig();
-  const spaces = cfg.spaces.map(({ id, label, builtIn, folders, maxGiB, flex, description, proxyFor, meta }) => ({
+  const dataRoot = getDataRoot();
+  const GiB = 1024 ** 3;
+
+  // Measure per-space file usage in parallel (non-blocking; falls back to 0 on error)
+  const usageResults = await Promise.allSettled(
+    cfg.spaces.map(s => dirSizeBytes(path.join(dataRoot, 'files', s.id))),
+  );
+  const usageGiBByIdx = usageResults.map(r => r.status === 'fulfilled' ? r.value / GiB : 0);
+
+  const spaces = cfg.spaces.map(({ id, label, builtIn, folders, maxGiB, flex, description, proxyFor, meta }, idx) => ({
     id, label, builtIn, folders, maxGiB, flex, description,
+    usageGiB: usageGiBByIdx[idx],
     ...(proxyFor ? { proxyFor } : {}),
     ...(meta ? { meta: { ...meta, previousVersions: undefined } } : {}),
   }));
@@ -227,10 +239,11 @@ spacesRouter.patch('/:id', globalRateLimit, requireAdminMfa, async (req, res) =>
         rounds.push({ networkId: net.id, networkLabel: net.label, roundId });
       }
 
-      // Apply non-meta updates immediately (label, description)
-      const nonMetaUpdates: { label?: string; description?: string } = {};
+      // Apply non-meta updates immediately (label, description, maxGiB)
+      const nonMetaUpdates: { label?: string; description?: string; maxGiB?: number } = {};
       if (parsed.data.label !== undefined) nonMetaUpdates.label = parsed.data.label;
       if (parsed.data.description !== undefined) nonMetaUpdates.description = parsed.data.description;
+      if (parsed.data.maxGiB !== undefined) nonMetaUpdates.maxGiB = parsed.data.maxGiB;
       if (Object.keys(nonMetaUpdates).length > 0) {
         updateSpace(id, nonMetaUpdates);
       } else {

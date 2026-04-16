@@ -59,7 +59,7 @@ export interface QuotaCheckResult {
 // ── Usage measurement ──────────────────────────────────────────────────────
 
 /** Recursively sum file sizes under a directory. Returns 0 if directory absent. */
-async function dirSizeBytes(dirPath: string): Promise<number> {
+export async function dirSizeBytes(dirPath: string): Promise<number> {
   let total = 0;
 
   async function walk(p: string): Promise<void> {
