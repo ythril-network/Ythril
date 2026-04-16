@@ -42,6 +42,12 @@ function isLoopbackHost(host: string): boolean {
   return h === '127.0.0.1' || h === '::1';
 }
 
+function isLoopbackClientIp(ip: string | undefined): boolean {
+  if (!ip) return false;
+  const v = ip.toLowerCase();
+  return v === '127.0.0.1' || v === '::1' || v === '::ffff:127.0.0.1';
+}
+
 function getAgentConfig(): { baseUrl: string | null; token: string | null } {
   if (!isLocalAgentFeatureEnabled()) {
     return { baseUrl: null, token: null };
@@ -118,6 +124,14 @@ localAgentRouter.post('/bootstrap', globalRateLimit, requireAdminMfa, async (req
   const parsed = BootstrapLocalAgentBody.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const allowRemoteBootstrap = envTrue('YTHRIL_LOCAL_AGENT_BOOTSTRAP_ALLOW_REMOTE');
+  if (!allowRemoteBootstrap && !isLoopbackClientIp(req.ip)) {
+    res.status(403).json({
+      error: 'Local connector bootstrap is loopback-only by default. Set YTHRIL_LOCAL_AGENT_BOOTSTRAP_ALLOW_REMOTE=true to override.',
+    });
     return;
   }
 
