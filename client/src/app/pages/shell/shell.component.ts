@@ -160,10 +160,6 @@ import { ApiService } from '../../core/api.service';
         <a class="nav-link" routerLink="/brain" routerLinkActive="active">
           <span class="nav-icon">🧠</span>Brain
         </a>
-        <a class="nav-link" routerLink="/files" routerLinkActive="active"
-           [routerLinkActiveOptions]="{ exact: true }">
-          <span class="nav-icon">📁</span>Files
-        </a>
         @if (conflictCount() > 0) {
           <a class="nav-link" routerLink="/files/conflicts" routerLinkActive="active">
             <span class="nav-icon">⚠️</span>Conflicts

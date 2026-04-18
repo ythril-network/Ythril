@@ -39,11 +39,6 @@ export const routes: Routes = [
           import('./pages/brain/brain.component').then(m => m.BrainComponent),
       },
       {
-        path: 'files',
-        loadComponent: () =>
-          import('./pages/files/file-manager.component').then(m => m.FileManagerComponent),
-      },
-      {
         path: 'files/conflicts',
         loadComponent: () =>
           import('./pages/files/conflicts.component').then(m => m.ConflictsComponent),

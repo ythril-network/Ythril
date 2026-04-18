@@ -259,7 +259,11 @@ export class EntitySearchComponent implements OnInit, OnDestroy, OnChanges {
   private closeTimer: ReturnType<typeof setTimeout> | null = null;
 
   displayValue(): string {
-    return this.mode === 'picker' ? this.value : this.query();
+    // picker mode: prefer parent-controlled value (single-select), fall back to
+    // internal query (multi-select where [value] is never bound) so the input
+    // reflects what the user typed AND clears to '' after pick().
+    if (this.mode === 'picker') return this.value || this.query();
+    return this.query();
   }
 
   ngOnInit(): void {

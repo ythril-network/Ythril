@@ -1,4 +1,4 @@
-import { Component, inject, signal, OnInit, OnDestroy, HostListener, ElementRef, viewChild } from '@angular/core';
+import { Component, inject, signal, OnInit, OnDestroy, HostListener, ElementRef, viewChild, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
@@ -259,7 +259,8 @@ function previewKind(name: string): PreviewKind {
       <div class="loading-overlay"><span class="spinner"></span></div>
     } @else {
 
-      <!-- Space selector -->
+      <!-- Space selector (hidden when embedded) -->
+      @if (!embeddedSpaceId) {
       <div class="space-selector">
         @for (s of spaces(); track s.id) {
           <button
@@ -270,6 +271,7 @@ function previewKind(name: string): PreviewKind {
           >{{ s.label }}</button>
         }
       </div>
+      }
 
       @if (activeSpaceId()) {
         <!-- Toolbar -->
@@ -465,6 +467,9 @@ export class FileManagerComponent implements OnInit, OnDestroy {
   private route = inject(ActivatedRoute);
   private previewOverlayRef = viewChild<ElementRef<HTMLDivElement>>('previewOverlay');
 
+  /** When set (embedded in brain), skip space loading and use this space. */
+  @Input() embeddedSpaceId = '';
+
   spaces = signal<Space[]>([]);
   activeSpaceId = signal('');
   currentPath = signal('/');
@@ -500,6 +505,12 @@ export class FileManagerComponent implements OnInit, OnDestroy {
   private _keyHandler = (e: KeyboardEvent) => this.onPreviewKey(e);
 
   ngOnInit(): void {
+    if (this.embeddedSpaceId) {
+      // Embedded in brain — use the provided space directly
+      this.loadingSpaces.set(false);
+      this.selectSpace(this.embeddedSpaceId);
+      return;
+    }
     const requestedSpace = this.route.snapshot.queryParamMap.get('space') ?? '';
     this.api.listSpaces().subscribe({
       next: ({ spaces }) => {

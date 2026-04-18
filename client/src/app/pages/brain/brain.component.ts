@@ -4,10 +4,14 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { ApiService, Space, SpaceStats, Memory, Entity, Edge, ChronoEntry, ChronoKind, ChronoStatus, QueryCollection, QueryResult, RecallResult, RecallKnowledgeType, SpaceMetaResponse, KnowledgeType } from '../../core/api.service';
 import { GraphComponent } from '../graph/graph.component';
+import { FileManagerComponent } from '../files/file-manager.component';
 import { EntitySearchComponent } from '../../shared/entity-search.component';
 import { PropertiesViewComponent } from '../../shared/properties-view.component';
+import { PropertiesEditorComponent } from '../../shared/properties-editor.component';
+import { TagInputComponent } from '../../shared/tag-input.component';
+import { catchError, of } from 'rxjs';
 
-type BrainTab = 'query' | 'graph' | 'entities' | 'edges' | 'memories' | 'chrono';
+type BrainTab = 'query' | 'graph' | 'files' | 'entities' | 'edges' | 'memories' | 'chrono';
 
 interface SpaceView {
   space: Space;
@@ -17,7 +21,7 @@ interface SpaceView {
 @Component({
   selector: 'app-brain',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, GraphComponent, EntitySearchComponent, PropertiesViewComponent],
+  imports: [CommonModule, FormsModule, RouterLink, GraphComponent, FileManagerComponent, EntitySearchComponent, PropertiesViewComponent, PropertiesEditorComponent, TagInputComponent],
   styles: [`
     .space-tabs {
       display: flex;
@@ -175,29 +179,10 @@ interface SpaceView {
     }
     .tag-clickable:hover, .entity-clickable:hover { opacity: 0.7; }
 
-    .wipe-bar {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 12px;
-      padding: 10px 14px;
-      border: 1px solid var(--error);
-      border-radius: var(--radius-md);
-      background: color-mix(in srgb, var(--error) 6%, transparent);
-    }
-    .wipe-bar input {
-      padding: 4px 8px;
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      font-size: 13px;
-      background: var(--bg-surface);
-      color: var(--text-primary);
-    }
-
     .create-form {
       display: flex;
       gap: 10px;
-      align-items: flex-end;
+      align-items: flex-start;
       flex-wrap: wrap;
       padding: 12px 14px;
       border: 1px solid var(--border);
@@ -248,28 +233,21 @@ interface SpaceView {
       margin-left: auto;
     }
 
-    .search-bar {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 10px;
-    }
-    .search-bar input {
+    .content-header input[type=search] {
+      flex: 1;
+      min-width: 180px;
+      max-width: 400px;
       padding: 5px 10px;
       border: 1px solid var(--border);
       border-radius: var(--radius-sm);
       font-size: 13px;
       background: var(--bg-surface);
       color: var(--text-primary);
-      min-width: 200px;
     }
-    .search-bar select {
-      padding: 5px 8px;
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      font-size: 13px;
-      background: var(--bg-surface);
-      color: var(--text-primary);
+    .content-header app-entity-search {
+      flex: 1;
+      min-width: 180px;
+      max-width: 520px;
     }
 
     .inline-confirm {
@@ -438,6 +416,57 @@ interface SpaceView {
       background: none; border: none; color: var(--accent); cursor: pointer;
       font-size: 13px; line-height: 1; padding: 0 1px; flex-shrink: 0;
     }
+    .entity-multi { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-height: 28px; padding: 2px 0; }
+    .chip-add {
+      font-size: 11px; padding: 2px 8px; background: transparent;
+      border: 1px dashed var(--border); border-radius: 10px;
+      color: var(--text-muted); cursor: pointer;
+    }
+    .chip-add:hover { border-color: var(--accent); color: var(--accent); }
+    .drawer-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,.45);
+      z-index: 200; display: flex; justify-content: flex-end;
+    }
+    .drawer {
+      width: min(480px, 100vw); background: var(--bg-primary); height: 100%;
+      overflow-y: auto; padding: 20px 24px;
+      box-shadow: -4px 0 24px rgba(0,0,0,.25);
+      display: flex; flex-direction: column;
+      animation: drawer-in .18s ease;
+    }
+    @keyframes drawer-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
+    .drawer-header {
+      display: flex; justify-content: space-between; align-items: flex-start;
+      margin-bottom: 20px; padding-bottom: 14px;
+      border-bottom: 1px solid var(--border); gap: 12px;
+    }
+    .drawer-title { font-size: 16px; font-weight: 600; color: var(--text-primary); word-break: break-word; }
+    .drawer-field { margin-bottom: 16px; }
+    .drawer-label {
+      font-size: 10px; font-weight: 600; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px;
+    }
+    .drawer-value { font-size: 13px; color: var(--text-primary); white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+    .drawer-muted { color: var(--text-muted); }
+    .drawer-hr { border: none; border-top: 1px solid var(--border-muted); margin: 16px 0; }
+    .drawer-readonly-value {
+      font-size: 13px; color: var(--text-muted); padding: 5px 8px;
+      border: 1px solid var(--border-muted); border-radius: var(--radius-sm);
+      background: var(--bg-surface); word-break: break-all; line-height: 1.4;
+    }
+    .drawer input[type=text], .drawer input[type=number], .drawer input[type=datetime-local],
+    .drawer textarea, .drawer select {
+      width: 100%; padding: 5px 8px; border: 1px solid var(--border);
+      border-radius: var(--radius-sm); font-size: 13px;
+      background: var(--bg-primary); color: var(--text-primary); box-sizing: border-box;
+    }
+    .drawer textarea { resize: vertical; }
+    .drawer select { cursor: pointer; }
+    .pill-group { display:flex; border:1px solid var(--border); border-radius:var(--radius-sm); overflow:hidden; flex-shrink:0; }
+    .pill-group button { padding:5px 10px; font-size:11px; background:transparent; border:none; border-right:1px solid var(--border); color:var(--text-secondary); cursor:pointer; white-space:nowrap; }
+    .pill-group button:last-child { border-right:none; }
+    .pill-group button.active { background:var(--accent-dim); color:var(--accent); }
+    .pill-group button:hover:not(.active) { background:var(--bg-surface); }
   `],
   template: `
     @if (loadingSpaces()) {
@@ -491,6 +520,12 @@ interface SpaceView {
         <button class="tab" [class.active]="activeTab() === 'graph'" (click)="setTab('graph')">
           🔭 Graph
         </button>
+        <button class="tab" [class.active]="activeTab() === 'files'" (click)="setTab('files')">
+          📁 Files
+          @if (activeStats(); as s) {
+            <span class="tab-count">{{ s.files }}</span>
+          }
+        </button>
         <span class="tab-spacer"></span>
         @for (tab of collectionTabs; track tab.key) {
           <button class="tab" [class.active]="activeTab() === tab.key" (click)="setTab(tab.key)">
@@ -501,11 +536,6 @@ interface SpaceView {
               }
             }
           </button>
-        }
-        @if (activeStats(); as s) {
-          <a class="tab-files-info" routerLink="/files" [queryParams]="{space: activeSpaceId()}" title="Open file manager for this space">
-            Files <span class="tab-count">{{ s.files }}</span>
-          </a>
         }
       </div>
 
@@ -519,8 +549,25 @@ interface SpaceView {
           <app-graph-view [embeddedSpaceId]="activeSpaceId()" />
         }
 
+        <!-- Files tab -->
+        @if (activeTab() === 'files') {
+          <app-file-manager [embeddedSpaceId]="activeSpaceId()" />
+        }
+
         <!-- Memories -->
         @if (activeTab() === 'memories') {
+
+          <div class="content-header">
+            <input type="search" placeholder="Search memories…"
+              [value]="memorySearch()"
+              (input)="onMemorySearch($any($event.target).value)"
+              aria-label="Search memories" />
+            <div class="pill-group" title="Search mode">
+              <button [class.active]="memorySearchMode() === 'text'" (click)="setMemorySearchMode('text')">A–Z</button>
+              <button [class.active]="memorySearchMode() === 'semantic'" (click)="setMemorySearchMode('semantic')">✦ Semantic</button>
+            </div>
+            <button class="btn-primary btn btn-sm" (click)="openMemoryForm()" [disabled]="showMemoryForm()">+ Add memory</button>
+          </div>
 
           <!-- Add memory form -->
           @if (showMemoryForm()) {
@@ -529,26 +576,21 @@ interface SpaceView {
                 <label>Fact</label>
                 <textarea [(ngModel)]="memoryForm.fact" name="fact" rows="2" required style="width:100%;"></textarea>
               </div>
-              <div class="field" style="flex:1; min-width:140px;">
-                <label>Tags (comma-separated)</label>
-                <input type="text" [(ngModel)]="memoryForm.tags" name="tags" />
+              <div class="field" style="flex:1; min-width:180px;">
+                <label>Tags</label>
+                <app-tag-input [(value)]="memoryForm.tags" [suggestions]="memoryTagSuggestions()" inputName="memFormTags" />
               </div>
               <div class="field" style="flex:1; min-width:140px;">
                 <label>Entities</label>
                 <div class="flyout-wrap">
-                  <button type="button" class="flyout-trigger" [class.has-value]="memoryForm.entityIds.trim()" (click)="openFlyout('create-memory-entityIds')">
-                    @let chips = entityChips(memoryForm.entityIds);
-                    @if (chips.length) { {{ chips.length }} linked } @else { <span style="color:var(--text-muted)">+ Link entities…</span> }
-                  </button>
+                  <div class="entity-multi">
+                    @for (chip of entityChips(memoryForm.entityIds); track chip.id) {
+                      <span class="chip" [title]="chip.id"><span class="chip-name">{{ chip.name }}</span><button type="button" class="chip-remove" (mousedown)="removeEntityId(memoryForm, chip.id)">✕</button></span>
+                    }
+                    <button type="button" class="chip-add" (click)="openFlyout('create-memory-entityIds')">+ Add…</button>
+                  </div>
                   @if (flyoutField() === 'create-memory-entityIds') {
                     <div class="flyout-panel">
-                      <div class="chip-list">
-                        @let openChips0 = entityChips(memoryForm.entityIds);
-                        @for (chip of openChips0; track chip.id) {
-                          <span class="chip" [title]="chip.id"><span class="chip-name">{{ chip.name }}</span><button type="button" class="chip-remove" (mousedown)="removeEntityId(memoryForm, chip.id)">✕</button></span>
-                        }
-                        @if (!openChips0.length) { <span style="font-size:11px; color:var(--text-muted)">No entities linked yet</span> }
-                      </div>
                       <app-entity-search
                         mode="picker"
                         [spaceId]="activeSpaceId()"
@@ -564,34 +606,16 @@ interface SpaceView {
                 </div>
               </div>
               <div class="field" style="flex:2; min-width:200px;">
-                <label>Description (optional)</label>
+                <label>Short Description</label>
                 <input type="text" [(ngModel)]="memoryForm.description" name="description" />
               </div>
-              <div class="field" style="flex:1; min-width:160px;">
+              <div class="field" style="flex:1; min-width:220px;">
                 <label>Properties</label>
-                <div class="flyout-wrap">
-                  <button type="button" class="flyout-trigger" [class.has-value]="memoryForm.properties.trim()" (click)="openFlyout('create-memory-properties')">
-                    @if (memoryForm.properties.trim()) {
-                      @if (jsonError(memoryForm.properties)) { <span style="color:var(--error)">⚠ Invalid JSON</span> }
-                      @else { <span>{{ jsonKeyCount(memoryForm.properties) }} key{{ jsonKeyCount(memoryForm.properties) === 1 ? '' : 's' }}</span> }
-                    } @else { <span style="color:var(--text-muted)">Add JSON properties…</span> }
-                  </button>
-                  @if (flyoutField() === 'create-memory-properties') {
-                    <div class="flyout-panel" style="min-width:280px;">
-                      <textarea class="query-textarea" [(ngModel)]="memoryForm.properties" name="memCreatePropsEdit"
-                        rows="6" placeholder='{"key": "value"}'></textarea>
-                      @if (jsonError(memoryForm.properties); as err) {
-                        <div style="font-size:11px; color:var(--error); margin-top:4px;">⚠ {{ err }}</div>
-                      } @else if (memoryForm.properties.trim()) {
-                        <div style="font-size:11px; color:var(--success,#4caf50); margin-top:4px;">✓ Valid JSON</div>
-                      }
-                      <div style="display:flex; gap:6px; justify-content:flex-end; margin-top:8px;">
-                        <button type="button" class="btn btn-sm btn-secondary" (click)="formatJson(memoryForm)">Format</button>
-                        <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">Done</button>
-                      </div>
-                    </div>
-                  }
-                </div>
+                <app-properties-editor
+                  [schema]="spaceMeta()?.propertySchemas?.['memory']"
+                  [required]="spaceMeta()?.requiredProperties?.['memory']"
+                  [(value)]="memoryForm.properties"
+                />
               </div>
               <button class="btn-primary btn btn-sm" type="submit" [disabled]="creatingMemory() || !memoryForm.fact.trim()">
                 @if (creatingMemory()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
@@ -618,48 +642,6 @@ interface SpaceView {
             </div>
           }
 
-          @if (showWipeConfirm()) {
-            <div class="wipe-bar">
-              <span style="font-size:13px; color:var(--error); font-weight:500;">
-                Type <strong>{{ activeSpaceId() }}</strong> to confirm wipe of all {{ activeStats()?.memories ?? '?' }} memories:
-              </span>
-              <input
-                [value]="wipeInput()"
-                (input)="wipeInput.set($any($event.target).value)"
-                placeholder="space id"
-                aria-label="Type space ID to confirm wipe"
-              />
-              <button
-                class="btn btn-danger btn-sm"
-                [disabled]="wipeInput() !== activeSpaceId() || wipingInProgress()"
-                (click)="executeWipe()"
-              >
-                {{ wipingInProgress() ? 'Wiping…' : 'Confirm wipe' }}
-              </button>
-              <button class="btn-secondary btn btn-sm" (click)="showWipeConfirm.set(false); wipeInput.set('')">Cancel</button>
-            </div>
-          }
-
-          <div class="content-header">
-            <span style="font-size:13px; color:var(--text-secondary);">
-              Showing {{ memories().length }} memories (skip {{ skip() }})
-            </span>
-            <span style="flex:1"></span>
-            <button class="btn-secondary btn btn-sm" [disabled]="skip() === 0" (click)="prevPage()">← Prev</button>
-            <button class="btn-secondary btn btn-sm" [disabled]="memories().length < pageSize" (click)="nextPage()">Next →</button>
-            <button
-              class="btn-primary btn btn-sm"
-              (click)="openMemoryForm()"
-              [disabled]="showMemoryForm()"
-            >+ Add memory</button>
-            <button
-              class="btn btn-danger btn-sm"
-              [disabled]="!activeStats()?.memories"
-              (click)="showWipeConfirm.set(true)"
-              title="Wipe all memories in this space"
-            >Wipe all</button>
-          </div>
-
           <div class="table-wrapper">
             <table>
               <thead>
@@ -668,7 +650,7 @@ interface SpaceView {
                 </tr>
               </thead>
               <tbody>
-                @for (mem of memories(); track mem._id) {
+                @for (mem of filteredMemories(); track mem._id) {
                   @if (editingId() === mem._id) {
                     <tr>
                       <td colspan="7">
@@ -678,29 +660,24 @@ interface SpaceView {
                             <textarea [(ngModel)]="editMemory.fact" name="editFact" rows="2" style="width:100%;"></textarea>
                           </div>
                           <div class="field" style="flex:1; min-width:160px; margin-bottom:0;">
-                            <label>Description</label>
+                            <label>Short Description</label>
                             <input type="text" [(ngModel)]="editMemory.description" name="editDesc" />
                           </div>
-                          <div class="field" style="flex:1; min-width:140px; margin-bottom:0;">
-                            <label>Tags (comma-separated)</label>
-                            <input type="text" [(ngModel)]="editMemory.tags" name="editTags" />
+                          <div class="field" style="flex:1; min-width:180px; margin-bottom:0;">
+                            <label>Tags</label>
+                            <app-tag-input [(value)]="editMemory.tags" [suggestions]="memoryTagSuggestions()" inputName="memEditTags" />
                           </div>
                           <div class="field" style="flex:1; min-width:140px; margin-bottom:0;">
                             <label>Entities</label>
                             <div class="flyout-wrap">
-                              <button type="button" class="flyout-trigger" [class.has-value]="editMemory.entityIds.trim()" (click)="openFlyout('edit-memory-entityIds')">
-                                @let chips = entityChips(editMemory.entityIds);
-                                @if (chips.length) { {{ chips.length }} linked } @else { <span style="color:var(--text-muted)">+ Link entities…</span> }
-                              </button>
+                              <div class="entity-multi">
+                                @for (chip of entityChips(editMemory.entityIds); track chip.id) {
+                                  <span class="chip" [title]="chip.id"><span class="chip-name">{{ chip.name }}</span><button type="button" class="chip-remove" (mousedown)="removeEntityId(editMemory, chip.id)">✕</button></span>
+                                }
+                                <button type="button" class="chip-add" (click)="openFlyout('edit-memory-entityIds')">+ Add…</button>
+                              </div>
                               @if (flyoutField() === 'edit-memory-entityIds') {
                                 <div class="flyout-panel">
-                                  <div class="chip-list">
-                                    @let openChips1 = entityChips(editMemory.entityIds);
-                                    @for (chip of openChips1; track chip.id) {
-                                      <span class="chip" [title]="chip.id"><span class="chip-name">{{ chip.name }}</span><button type="button" class="chip-remove" (mousedown)="removeEntityId(editMemory, chip.id)">✕</button></span>
-                                    }
-                                    @if (!openChips1.length) { <span style="font-size:11px; color:var(--text-muted)">No entities linked yet</span> }
-                                  </div>
                                   <app-entity-search
                                     mode="picker"
                                     [spaceId]="activeSpaceId()"
@@ -715,31 +692,13 @@ interface SpaceView {
                               }
                             </div>
                           </div>
-                          <div class="field" style="flex:1; min-width:140px; margin-bottom:0;">
+                          <div class="field" style="flex:1; min-width:220px; margin-bottom:0;">
                             <label>Properties</label>
-                            <div class="flyout-wrap">
-                              <button type="button" class="flyout-trigger" [class.has-value]="editMemory.properties.trim()" (click)="openFlyout('edit-memory-properties')">
-                                @if (editMemory.properties.trim()) {
-                                  @if (jsonError(editMemory.properties)) { <span style="color:var(--error)">⚠ Invalid JSON</span> }
-                                  @else { <span>{{ jsonKeyCount(editMemory.properties) }} key{{ jsonKeyCount(editMemory.properties) === 1 ? '' : 's' }}</span> }
-                                } @else { <span style="color:var(--text-muted)">Add JSON properties…</span> }
-                              </button>
-                              @if (flyoutField() === 'edit-memory-properties') {
-                                <div class="flyout-panel" style="min-width:280px;">
-                                  <textarea class="query-textarea" [(ngModel)]="editMemory.properties" name="memEditPropsEdit"
-                                    rows="6" placeholder='{"key": "value"}'></textarea>
-                                  @if (jsonError(editMemory.properties); as err) {
-                                    <div style="font-size:11px; color:var(--error); margin-top:4px;">⚠ {{ err }}</div>
-                                  } @else if (editMemory.properties.trim()) {
-                                    <div style="font-size:11px; color:var(--success,#4caf50); margin-top:4px;">✓ Valid JSON</div>
-                                  }
-                                  <div style="display:flex; gap:6px; justify-content:flex-end; margin-top:8px;">
-                                    <button type="button" class="btn btn-sm btn-secondary" (click)="formatJson(editMemory)">Format</button>
-                                    <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">Done</button>
-                                  </div>
-                                </div>
-                              }
-                            </div>
+                            <app-properties-editor
+                              [schema]="spaceMeta()?.propertySchemas?.['memory']"
+                              [required]="spaceMeta()?.requiredProperties?.['memory']"
+                              [(value)]="editMemory.properties"
+                            />
                           </div>
                           <div style="display:flex; gap:6px; align-items:flex-end;">
                             <button class="btn btn-sm btn-primary" [disabled]="editSaving()" (click)="saveEditMemory(mem._id)">
@@ -753,7 +712,7 @@ interface SpaceView {
                     </tr>
                   } @else {
                     <tr>
-                      <td style="max-width:300px; white-space:normal; word-break:break-word;">{{ mem.fact }}</td>
+                      <td style="max-width:300px; white-space:pre-wrap; word-break:break-word;">{{ mem.fact }}</td>
                       <td style="font-size:12px; color:var(--text-muted); max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" [title]="mem.description ?? ''">
                         {{ mem.description || '—' }}
                       </td>
@@ -767,6 +726,7 @@ interface SpaceView {
                       <td><app-properties-view [properties]="mem.properties" /></td>
                       <td style="color:var(--text-muted)">{{ mem.createdAt | date:'MMM d, y' }}</td>
                       <td style="white-space:nowrap;">
+                        <button class="icon-btn" title="View details" aria-label="View details" (click)="openDrawer('memory', mem)">⊙</button>
                         <button class="icon-btn" title="Edit memory" aria-label="Edit memory" (click)="startEditMemory(mem)">✎</button>
                         @if (confirmDeleteId() === mem._id) {
                           <span class="inline-confirm">
@@ -784,25 +744,41 @@ interface SpaceView {
                   <tr><td colspan="7">
                     <div class="empty-state" style="padding:32px">
                       <div class="empty-state-icon">🧠</div>
-                      <h3>No memories</h3>
-                      <p>Memories will appear here once written by an MCP client.</p>
+                      @if (memorySearch() && memories().length) {
+                        <h3>No matches</h3>
+                        <p>No memories on this page match &ldquo;{{ memorySearch() }}&rdquo;.</p>
+                      } @else {
+                        <h3>No memories</h3>
+                        <p>Memories will appear here once written by an MCP client.</p>
+                      }
                     </div>
                   </td></tr>
                 }
               </tbody>
             </table>
           </div>
-          <div class="pagination">
-            <button class="btn btn-sm btn-secondary" [disabled]="skip() === 0" (click)="prevPage()">← Prev</button>
-            <span class="pager-info">{{ skip() + 1 }}–{{ skip() + memories().length }}</span>
-            <button class="btn btn-sm btn-secondary" [disabled]="memories().length < pageSize" (click)="nextPage()">Next →</button>
-          </div>
+          @if (memorySearchMode() !== 'semantic') {
+            <div class="pagination">
+              <button class="btn btn-sm btn-secondary" [disabled]="skip() === 0" (click)="prevPage()">← Prev</button>
+              <span class="pager-info">{{ filteredMemories().length ? (skip() + 1) + '–' + (skip() + filteredMemories().length) : '–' }}</span>
+              <button class="btn btn-sm btn-secondary" [disabled]="memories().length < pageSize" (click)="nextPage()">Next →</button>
+            </div>
+          }
         }
 
         <!-- Entities -->
         @if (activeTab() === 'entities') {
 
-          <div style="margin-bottom:12px; display:flex; gap:8px;">
+          <div class="content-header">
+            <app-entity-search
+              mode="bar"
+              [spaceId]="activeSpaceId()"
+              placeholder="Search entities…"
+              defaultMode="semantic"
+              (queryChange)="onEntitySearchChange($event)"
+              (cleared)="onEntitySearchClear()"
+              (selected)="onEntitySearchPick($event)"
+            />
             <button class="btn-primary btn btn-sm" (click)="openEntityForm()" [disabled]="showEntityForm()">+ Add entity</button>
           </div>
 
@@ -816,39 +792,21 @@ interface SpaceView {
                 <label>Type (optional)</label>
                 <input type="text" [(ngModel)]="entityForm.type" name="type" />
               </div>
-              <div class="field" style="flex:1; min-width:140px;">
-                <label>Tags (comma-separated)</label>
-                <input type="text" [(ngModel)]="entityForm.tags" name="tags" />
+              <div class="field" style="flex:1; min-width:180px;">
+                <label>Tags</label>
+                <app-tag-input [(value)]="entityForm.tags" [suggestions]="entityTagSuggestions()" inputName="entFormTags" />
               </div>
               <div class="field" style="flex:1; min-width:200px;">
-                <label>Description (optional)</label>
+                <label>Short Description</label>
                 <input type="text" [(ngModel)]="entityForm.description" name="description" />
               </div>
-              <div class="field" style="flex:1; min-width:180px;">
+              <div class="field" style="flex:1; min-width:220px;">
                 <label>Properties</label>
-                <div class="flyout-wrap">
-                  <button type="button" class="flyout-trigger" [class.has-value]="entityForm.properties.trim()" (click)="openFlyout('create-entity-properties')">
-                    @if (entityForm.properties.trim()) {
-                      @if (jsonError(entityForm.properties)) { <span style="color:var(--error)">⚠ Invalid JSON</span> }
-                      @else { <span>{{ jsonKeyCount(entityForm.properties) }} key{{ jsonKeyCount(entityForm.properties) === 1 ? '' : 's' }}</span> }
-                    } @else { <span style="color:var(--text-muted)">Add JSON properties…</span> }
-                  </button>
-                  @if (flyoutField() === 'create-entity-properties') {
-                    <div class="flyout-panel" style="min-width:280px;">
-                      <textarea class="query-textarea" [(ngModel)]="entityForm.properties" name="entCreatePropsEdit"
-                        rows="6" placeholder='{"key": "value"}'></textarea>
-                      @if (jsonError(entityForm.properties); as err) {
-                        <div style="font-size:11px; color:var(--error); margin-top:4px;">⚠ {{ err }}</div>
-                      } @else if (entityForm.properties.trim()) {
-                        <div style="font-size:11px; color:var(--success,#4caf50); margin-top:4px;">✓ Valid JSON</div>
-                      }
-                      <div style="display:flex; gap:6px; justify-content:flex-end; margin-top:8px;">
-                        <button type="button" class="btn btn-sm btn-secondary" (click)="formatJson(entityForm)">Format</button>
-                        <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">Done</button>
-                      </div>
-                    </div>
-                  }
-                </div>
+                <app-properties-editor
+                  [schema]="spaceMeta()?.propertySchemas?.['entity']"
+                  [required]="spaceMeta()?.requiredProperties?.['entity']"
+                  [(value)]="entityForm.properties"
+                />
               </div>
               <button class="btn-primary btn btn-sm" type="submit" [disabled]="creatingEntity() || !entityForm.name.trim()">
                 @if (creatingEntity()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
@@ -861,18 +819,6 @@ interface SpaceView {
           @if (createEntityError()) {
             <div class="alert alert-error" style="margin-bottom:12px;">{{ createEntityError() }}</div>
           }
-
-          <div class="search-bar">
-            <app-entity-search
-              mode="bar"
-              [spaceId]="activeSpaceId()"
-              placeholder="Search entities…"
-              defaultMode="semantic"
-              (queryChange)="onEntitySearchChange($event)"
-              (cleared)="onEntitySearchClear()"
-              (selected)="onEntitySearchPick($event)"
-            />
-          </div>
 
           <div class="table-wrapper">
             <table>
@@ -893,41 +839,26 @@ interface SpaceView {
                           </div>
                           <div class="field" style="width:120px; margin-bottom:0;">
                             <label>Type</label>
-                            <input type="text" [(ngModel)]="editEntity.type" name="editEntType" />
+                            <div style="padding:4px 0;">
+                              @if (editEntity.type) { <span class="badge badge-purple">{{ editEntity.type }}</span> }
+                              @else { <span style="color:var(--text-muted); font-size:12px;">—</span> }
+                            </div>
                           </div>
                           <div class="field" style="flex:1; min-width:160px; margin-bottom:0;">
-                            <label>Description</label>
+                            <label>Short Description</label>
                             <input type="text" [(ngModel)]="editEntity.description" name="editEntDesc" />
                           </div>
-                          <div class="field" style="flex:1; min-width:140px; margin-bottom:0;">
-                            <label>Tags (comma-separated)</label>
-                            <input type="text" [(ngModel)]="editEntity.tags" name="editEntTags" />
+                          <div class="field" style="flex:1; min-width:180px; margin-bottom:0;">
+                            <label>Tags</label>
+                            <app-tag-input [(value)]="editEntity.tags" [suggestions]="entityTagSuggestions()" inputName="entEditTags" />
                           </div>
-                          <div class="field" style="flex:1; min-width:140px; margin-bottom:0;">
+                          <div class="field" style="flex:1; min-width:220px; margin-bottom:0;">
                             <label>Properties</label>
-                            <div class="flyout-wrap">
-                              <button type="button" class="flyout-trigger" [class.has-value]="editEntity.properties.trim()" (click)="openFlyout('edit-entity-properties')">
-                                @if (editEntity.properties.trim()) {
-                                  @if (jsonError(editEntity.properties)) { <span style="color:var(--error)">⚠ Invalid JSON</span> }
-                                  @else { <span>{{ jsonKeyCount(editEntity.properties) }} key{{ jsonKeyCount(editEntity.properties) === 1 ? '' : 's' }}</span> }
-                                } @else { <span style="color:var(--text-muted)">Add JSON properties…</span> }
-                              </button>
-                              @if (flyoutField() === 'edit-entity-properties') {
-                                <div class="flyout-panel" style="min-width:280px;">
-                                  <textarea class="query-textarea" [(ngModel)]="editEntity.properties" name="entEditPropsEdit"
-                                    rows="6" placeholder='{"key": "value"}'></textarea>
-                                  @if (jsonError(editEntity.properties); as err) {
-                                    <div style="font-size:11px; color:var(--error); margin-top:4px;">⚠ {{ err }}</div>
-                                  } @else if (editEntity.properties.trim()) {
-                                    <div style="font-size:11px; color:var(--success,#4caf50); margin-top:4px;">✓ Valid JSON</div>
-                                  }
-                                  <div style="display:flex; gap:6px; justify-content:flex-end; margin-top:8px;">
-                                    <button type="button" class="btn btn-sm btn-secondary" (click)="formatJson(editEntity)">Format</button>
-                                    <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">Done</button>
-                                  </div>
-                                </div>
-                              }
-                            </div>
+                            <app-properties-editor
+                              [schema]="spaceMeta()?.propertySchemas?.['entity']"
+                              [required]="spaceMeta()?.requiredProperties?.['entity']"
+                              [(value)]="editEntity.properties"
+                            />
                           </div>
                           <div style="display:flex; gap:6px; align-items:flex-end;">
                             <button class="btn btn-sm btn-primary" [disabled]="editSaving()" (click)="saveEditEntity(ent._id)">
@@ -955,6 +886,7 @@ interface SpaceView {
                       <td><app-properties-view [properties]="ent.properties" /></td>
                       <td style="color:var(--text-muted)">{{ ent.createdAt | date:'MMM d, y' }}</td>
                       <td style="white-space:nowrap;">
+                        <button class="icon-btn" title="View details" aria-label="View details" (click)="openDrawer('entity', ent)">⊙</button>
                         <button class="icon-btn" title="Edit entity" aria-label="Edit entity" (click)="startEditEntity(ent)">✎</button>
                         @if (confirmDeleteId() === ent._id) {
                           <span class="inline-confirm">
@@ -981,7 +913,7 @@ interface SpaceView {
           </div>
           <div class="pagination">
             <button class="btn btn-sm btn-secondary" [disabled]="entitySkip() === 0" (click)="prevEntityPage()">← Prev</button>
-            <span class="pager-info">{{ entitySkip() + 1 }}–{{ entitySkip() + entities().length }}</span>
+            <span class="pager-info">{{ entities().length ? (entitySkip() + 1) + '–' + (entitySkip() + entities().length) : '–' }}</span>
             <button class="btn btn-sm btn-secondary" [disabled]="entities().length < pageSize" (click)="nextEntityPage()">Next →</button>
           </div>
         }
@@ -989,7 +921,15 @@ interface SpaceView {
         <!-- Edges -->
         @if (activeTab() === 'edges') {
 
-          <div style="margin-bottom:12px; display:flex; gap:8px;">
+          <div class="content-header">
+            <input type="search" placeholder="Search edges…"
+              [value]="edgeSearch()"
+              (input)="onEdgeSearch($any($event.target).value)"
+              aria-label="Search edges" />
+            <div class="pill-group" title="Search mode">
+              <button [class.active]="edgeSearchMode() === 'text'" (click)="setEdgeSearchMode('text')">A–Z</button>
+              <button [class.active]="edgeSearchMode() === 'semantic'" (click)="setEdgeSearchMode('semantic')">✦ Semantic</button>
+            </div>
             <button class="btn-primary btn btn-sm" (click)="openEdgeForm()" [disabled]="showEdgeForm()">+ Add edge</button>
           </div>
 
@@ -1025,39 +965,21 @@ interface SpaceView {
                 <label>Weight</label>
                 <input type="number" [(ngModel)]="edgeForm.weight" name="weight" step="0.1" />
               </div>
-              <div class="field" style="flex:1; min-width:140px;">
-                <label>Tags (comma-separated)</label>
-                <input type="text" [(ngModel)]="edgeForm.tags" name="tags" />
+              <div class="field" style="flex:1; min-width:180px;">
+                <label>Tags</label>
+                <app-tag-input [(value)]="edgeForm.tags" [suggestions]="edgeTagSuggestions()" inputName="edgeFormTags" />
               </div>
               <div class="field" style="flex:2; min-width:200px;">
-                <label>Description (optional)</label>
+                <label>Short Description</label>
                 <input type="text" [(ngModel)]="edgeForm.description" name="description" />
               </div>
-              <div class="field" style="flex:1; min-width:160px;">
+              <div class="field" style="flex:1; min-width:220px;">
                 <label>Properties</label>
-                <div class="flyout-wrap">
-                  <button type="button" class="flyout-trigger" [class.has-value]="edgeForm.properties.trim()" (click)="openFlyout('create-edge-properties')">
-                    @if (edgeForm.properties.trim()) {
-                      @if (jsonError(edgeForm.properties)) { <span style="color:var(--error)">⚠ Invalid JSON</span> }
-                      @else { <span>{{ jsonKeyCount(edgeForm.properties) }} key{{ jsonKeyCount(edgeForm.properties) === 1 ? '' : 's' }}</span> }
-                    } @else { <span style="color:var(--text-muted)">Add JSON properties…</span> }
-                  </button>
-                  @if (flyoutField() === 'create-edge-properties') {
-                    <div class="flyout-panel" style="min-width:280px;">
-                      <textarea class="query-textarea" [(ngModel)]="edgeForm.properties" name="edgeCreatePropsEdit"
-                        rows="6" placeholder='{"key": "value"}'></textarea>
-                      @if (jsonError(edgeForm.properties); as err) {
-                        <div style="font-size:11px; color:var(--error); margin-top:4px;">⚠ {{ err }}</div>
-                      } @else if (edgeForm.properties.trim()) {
-                        <div style="font-size:11px; color:var(--success,#4caf50); margin-top:4px;">✓ Valid JSON</div>
-                      }
-                      <div style="display:flex; gap:6px; justify-content:flex-end; margin-top:8px;">
-                        <button type="button" class="btn btn-sm btn-secondary" (click)="formatJson(edgeForm)">Format</button>
-                        <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">Done</button>
-                      </div>
-                    </div>
-                  }
-                </div>
+                <app-properties-editor
+                  [schema]="spaceMeta()?.propertySchemas?.['edge']"
+                  [required]="spaceMeta()?.requiredProperties?.['edge']"
+                  [(value)]="edgeForm.properties"
+                />
               </div>
               <button class="btn-primary btn btn-sm" type="submit" [disabled]="creatingEdge() || !edgeForm.from.trim() || !edgeForm.to.trim() || !edgeForm.label.trim()">
                 @if (creatingEdge()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
@@ -1078,7 +1000,7 @@ interface SpaceView {
                 </tr>
               </thead>
               <tbody>
-                @for (edge of edges(); track edge._id) {
+                @for (edge of filteredEdges(); track edge._id) {
                   @if (editingId() === edge._id) {
                     <tr>
                       <td colspan="9">
@@ -1098,38 +1020,20 @@ interface SpaceView {
                             <input type="number" [(ngModel)]="editEdge.weight" name="editEdgeWeight" step="0.1" />
                           </div>
                           <div class="field" style="flex:1; min-width:160px; margin-bottom:0;">
-                            <label>Description</label>
+                            <label>Short Description</label>
                             <input type="text" [(ngModel)]="editEdge.description" name="editEdgeDesc" />
                           </div>
-                          <div class="field" style="flex:1; min-width:140px; margin-bottom:0;">
-                            <label>Tags (comma-separated)</label>
-                            <input type="text" [(ngModel)]="editEdge.tags" name="editEdgeTags" />
+                          <div class="field" style="flex:1; min-width:180px; margin-bottom:0;">
+                            <label>Tags</label>
+                            <app-tag-input [(value)]="editEdge.tags" [suggestions]="edgeTagSuggestions()" inputName="edgeEditTags" />
                           </div>
-                          <div class="field" style="flex:1; min-width:140px; margin-bottom:0;">
+                          <div class="field" style="flex:1; min-width:220px; margin-bottom:0;">
                             <label>Properties</label>
-                            <div class="flyout-wrap">
-                              <button type="button" class="flyout-trigger" [class.has-value]="editEdge.properties.trim()" (click)="openFlyout('edit-edge-properties')">
-                                @if (editEdge.properties.trim()) {
-                                  @if (jsonError(editEdge.properties)) { <span style="color:var(--error)">⚠ Invalid JSON</span> }
-                                  @else { <span>{{ jsonKeyCount(editEdge.properties) }} key{{ jsonKeyCount(editEdge.properties) === 1 ? '' : 's' }}</span> }
-                                } @else { <span style="color:var(--text-muted)">Add JSON properties…</span> }
-                              </button>
-                              @if (flyoutField() === 'edit-edge-properties') {
-                                <div class="flyout-panel" style="min-width:280px;">
-                                  <textarea class="query-textarea" [(ngModel)]="editEdge.properties" name="edgeEditPropsEdit"
-                                    rows="6" placeholder='{"key": "value"}'></textarea>
-                                  @if (jsonError(editEdge.properties); as err) {
-                                    <div style="font-size:11px; color:var(--error); margin-top:4px;">⚠ {{ err }}</div>
-                                  } @else if (editEdge.properties.trim()) {
-                                    <div style="font-size:11px; color:var(--success,#4caf50); margin-top:4px;">✓ Valid JSON</div>
-                                  }
-                                  <div style="display:flex; gap:6px; justify-content:flex-end; margin-top:8px;">
-                                    <button type="button" class="btn btn-sm btn-secondary" (click)="formatJson(editEdge)">Format</button>
-                                    <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">Done</button>
-                                  </div>
-                                </div>
-                              }
-                            </div>
+                            <app-properties-editor
+                              [schema]="spaceMeta()?.propertySchemas?.['edge']"
+                              [required]="spaceMeta()?.requiredProperties?.['edge']"
+                              [(value)]="editEdge.properties"
+                            />
                           </div>
                           <div style="display:flex; gap:6px; align-items:flex-end;">
                             <button class="btn btn-sm btn-primary" [disabled]="editSaving()" (click)="saveEditEdge(edge._id)">
@@ -1157,6 +1061,7 @@ interface SpaceView {
                       <td><app-properties-view [properties]="edge.properties" /></td>
                       <td style="color:var(--text-muted); white-space:nowrap;">{{ edge.createdAt | date:'MMM d, y' }}</td>
                       <td style="white-space:nowrap;">
+                        <button class="icon-btn" title="View details" aria-label="View details" (click)="openDrawer('edge', edge)">⊙</button>
                         <button class="icon-btn" title="Edit edge" aria-label="Edit edge" (click)="startEditEdge(edge)">✎</button>
                         @if (confirmDeleteId() === edge._id) {
                           <span class="inline-confirm">
@@ -1174,25 +1079,40 @@ interface SpaceView {
                   <tr><td colspan="9">
                     <div class="empty-state" style="padding:32px">
                       <div class="empty-state-icon">🕸️</div>
-                      <h3>No edges</h3>
+                      @if (edgeSearch() && edges().length) {
+                        <h3>No matches</h3>
+                        <p>No edges on this page match &ldquo;{{ edgeSearch() }}&rdquo;.</p>
+                      } @else {
+                        <h3>No edges</h3>
+                      }
                     </div>
                   </td></tr>
                 }
               </tbody>
             </table>
           </div>
-          <div class="pagination">
-            <button class="btn btn-sm btn-secondary" [disabled]="edgeSkip() === 0" (click)="prevEdgePage()">← Prev</button>
-            <span class="pager-info">{{ edgeSkip() + 1 }}–{{ edgeSkip() + edges().length }}</span>
-            <button class="btn btn-sm btn-secondary" [disabled]="edges().length < pageSize" (click)="nextEdgePage()">Next →</button>
-          </div>
+          @if (edgeSearchMode() !== 'semantic') {
+            <div class="pagination">
+              <button class="btn btn-sm btn-secondary" [disabled]="edgeSkip() === 0" (click)="prevEdgePage()">← Prev</button>
+              <span class="pager-info">{{ filteredEdges().length ? (edgeSkip() + 1) + '–' + (edgeSkip() + filteredEdges().length) : '–' }}</span>
+              <button class="btn btn-sm btn-secondary" [disabled]="edges().length < pageSize" (click)="nextEdgePage()">Next →</button>
+            </div>
+          }
         }
 
         <!-- Chrono -->
         @if (activeTab() === 'chrono') {
 
-          <div style="margin-bottom:12px; display:flex; gap:8px;">
-            <button class="btn-primary btn btn-sm" (click)="showChronoForm.set(true)" [disabled]="showChronoForm()">+ Add entry</button>
+          <div class="content-header">
+            <input type="search" placeholder="Search timeline…"
+              [value]="chronoSearch()"
+              (input)="onChronoSearch($any($event.target).value)"
+              aria-label="Search timeline" />
+            <div class="pill-group" title="Search mode">
+              <button [class.active]="chronoSearchMode() === 'text'" (click)="setChronoSearchMode('text')">A–Z</button>
+              <button [class.active]="chronoSearchMode() === 'semantic'" (click)="setChronoSearchMode('semantic')">✦ Semantic</button>
+            </div>
+            <button class="btn-primary btn btn-sm" (click)="openChronoForm()" [disabled]="showChronoForm()">+ Add entry</button>
           </div>
 
           @if (showChronoForm()) {
@@ -1224,29 +1144,24 @@ interface SpaceView {
                 <input type="datetime-local" [(ngModel)]="chronoForm.endsAt" name="endsAt" />
               </div>
               <div class="field" style="flex:1; min-width:200px;">
-                <label>Description (optional)</label>
+                <label>Short Description</label>
                 <textarea [(ngModel)]="chronoForm.description" name="description" rows="3" style="resize:vertical;"></textarea>
               </div>
-              <div class="field" style="flex:1; min-width:140px;">
-                <label>Tags (comma-separated)</label>
-                <input type="text" [(ngModel)]="chronoForm.tags" name="tags" />
+              <div class="field" style="flex:1; min-width:180px;">
+                <label>Tags</label>
+                <app-tag-input [(value)]="chronoForm.tags" [suggestions]="chronoTagSuggestions()" inputName="chronoFormTags" />
               </div>
               <div class="field" style="flex:1; min-width:140px;">
                 <label>Entities</label>
                 <div class="flyout-wrap">
-                  <button type="button" class="flyout-trigger" [class.has-value]="chronoForm.entityIds.trim()" (click)="openFlyout('create-chrono-entityIds')">
-                    @let chips = entityChips(chronoForm.entityIds);
-                    @if (chips.length) { {{ chips.length }} linked } @else { <span style="color:var(--text-muted)">+ Link entities…</span> }
-                  </button>
+                  <div class="entity-multi">
+                    @for (chip of entityChips(chronoForm.entityIds); track chip.id) {
+                      <span class="chip" [title]="chip.id"><span class="chip-name">{{ chip.name }}</span><button type="button" class="chip-remove" (mousedown)="removeEntityId(chronoForm, chip.id)">✕</button></span>
+                    }
+                    <button type="button" class="chip-add" (click)="openFlyout('create-chrono-entityIds')">+ Add…</button>
+                  </div>
                   @if (flyoutField() === 'create-chrono-entityIds') {
                     <div class="flyout-panel">
-                      <div class="chip-list">
-                        @let openChips2 = entityChips(chronoForm.entityIds);
-                        @for (chip of openChips2; track chip.id) {
-                          <span class="chip" [title]="chip.id"><span class="chip-name">{{ chip.name }}</span><button type="button" class="chip-remove" (mousedown)="removeEntityId(chronoForm, chip.id)">✕</button></span>
-                        }
-                        @if (!openChips2.length) { <span style="font-size:11px; color:var(--text-muted)">No entities linked yet</span> }
-                      </div>
                       <app-entity-search
                         mode="picker"
                         [spaceId]="activeSpaceId()"
@@ -1273,17 +1188,7 @@ interface SpaceView {
             <div class="alert alert-error" style="margin-bottom:12px;">{{ createChronoError() }}</div>
           }
 
-          <div class="search-bar">
-            <label style="font-size:12px; color:var(--text-muted);">Filter:</label>
-            <input type="search" placeholder="Tags…" [(ngModel)]="chronoFilterTag" (input)="applyChronoFilter()" style="min-width:140px;" aria-label="Filter by tag" />
-            <select [(ngModel)]="chronoFilterStatus" (change)="applyChronoFilter()" aria-label="Filter by status">
-              <option value="">All statuses</option>
-              @for (s of chronoStatusOptions; track s) { <option [value]="s">{{ s }}</option> }
-            </select>
-            @if (chronoFilterTag() || chronoFilterStatus()) {
-              <button class="btn btn-sm btn-secondary" (click)="chronoFilterTag.set(''); chronoFilterStatus.set(''); applyChronoFilter()">Clear</button>
-            }
-          </div>
+
 
           <div class="table-wrapper">
             <table>
@@ -1323,29 +1228,24 @@ interface SpaceView {
                             <input type="datetime-local" [(ngModel)]="editChrono.endsAt" name="editChronoEnds" />
                           </div>
                           <div class="field" style="flex:1; min-width:180px; margin-bottom:0;">
-                            <label>Description</label>
+                            <label>Short Description</label>
                             <textarea [(ngModel)]="editChrono.description" name="editChronoDesc" rows="2" style="resize:vertical;"></textarea>
                           </div>
-                          <div class="field" style="flex:1; min-width:140px; margin-bottom:0;">
-                            <label>Tags (comma-separated)</label>
-                            <input type="text" [(ngModel)]="editChrono.tags" name="editChronoTags" />
+                          <div class="field" style="flex:1; min-width:180px; margin-bottom:0;">
+                            <label>Tags</label>
+                            <app-tag-input [(value)]="editChrono.tags" [suggestions]="chronoTagSuggestions()" inputName="chronoEditTags" />
                           </div>
                           <div class="field" style="flex:1; min-width:140px; margin-bottom:0;">
                             <label>Entities</label>
                             <div class="flyout-wrap">
-                              <button type="button" class="flyout-trigger" [class.has-value]="editChrono.entityIds.trim()" (click)="openFlyout('edit-chrono-entityIds')">
-                                @let chips = entityChips(editChrono.entityIds);
-                                @if (chips.length) { {{ chips.length }} linked } @else { <span style="color:var(--text-muted)">+ Link entities…</span> }
-                              </button>
+                              <div class="entity-multi">
+                                @for (chip of entityChips(editChrono.entityIds); track chip.id) {
+                                  <span class="chip" [title]="chip.id"><span class="chip-name">{{ chip.name }}</span><button type="button" class="chip-remove" (mousedown)="removeEntityId(editChrono, chip.id)">✕</button></span>
+                                }
+                                <button type="button" class="chip-add" (click)="openFlyout('edit-chrono-entityIds')">+ Add…</button>
+                              </div>
                               @if (flyoutField() === 'edit-chrono-entityIds') {
                                 <div class="flyout-panel">
-                                  <div class="chip-list">
-                                    @let openChips3 = entityChips(editChrono.entityIds);
-                                    @for (chip of openChips3; track chip.id) {
-                                      <span class="chip" [title]="chip.id"><span class="chip-name">{{ chip.name }}</span><button type="button" class="chip-remove" (mousedown)="removeEntityId(editChrono, chip.id)">✕</button></span>
-                                    }
-                                    @if (!openChips3.length) { <span style="font-size:11px; color:var(--text-muted)">No entities linked yet</span> }
-                                  </div>
                                   <app-entity-search
                                     mode="picker"
                                     [spaceId]="activeSpaceId()"
@@ -1389,6 +1289,7 @@ interface SpaceView {
                         } @else { — }
                       </td>
                       <td style="white-space:nowrap;">
+                        <button class="icon-btn" title="View details" aria-label="View details" (click)="openDrawer('chrono', entry)">⊙</button>
                         <button class="icon-btn" title="Edit chrono entry" aria-label="Edit chrono entry" (click)="startEditChrono(entry)">✎</button>
                         @if (confirmDeleteId() === entry._id) {
                           <span class="inline-confirm">
@@ -1406,18 +1307,25 @@ interface SpaceView {
                   <tr><td colspan="9">
                     <div class="empty-state" style="padding:32px">
                       <div class="empty-state-icon">⏱️</div>
-                      <h3>No chrono entries</h3>
+                      @if (chronoSearch()) {
+                        <h3>No matches</h3>
+                        <p>No timeline entries match &ldquo;{{ chronoSearch() }}&rdquo;.</p>
+                      } @else {
+                        <h3>No chrono entries</h3>
+                      }
                     </div>
                   </td></tr>
                 }
               </tbody>
             </table>
           </div>
-          <div class="pagination">
-            <button class="btn btn-sm btn-secondary" [disabled]="chronoSkip() === 0" (click)="prevChronoPage()">← Prev</button>
-            <span class="pager-info">{{ chronoSkip() + 1 }}–{{ chronoSkip() + chrono().length }}</span>
-            <button class="btn btn-sm btn-secondary" [disabled]="chrono().length < pageSize" (click)="nextChronoPage()">Next →</button>
-          </div>
+          @if (chronoSearchMode() !== 'semantic') {
+            <div class="pagination">
+              <button class="btn btn-sm btn-secondary" [disabled]="chronoSkip() === 0" (click)="prevChronoPage()">← Prev</button>
+              <span class="pager-info">{{ chrono().length ? (chronoSkip() + 1) + '–' + (chronoSkip() + chrono().length) : '–' }}</span>
+              <button class="btn btn-sm btn-secondary" [disabled]="chrono().length < pageSize" (click)="nextChronoPage()">Next →</button>
+            </div>
+          }
         }
 
         <!-- Query -->
@@ -1564,19 +1472,286 @@ interface SpaceView {
         }
 
       }
+
+      <!-- Detail Drawer -->
+      @if (drawerRecord(); as dr) {
+        <div class="drawer-overlay" (click)="closeDrawer()">
+          <div class="drawer" (click)="$event.stopPropagation()" role="dialog" aria-label="Record details">
+            <div class="drawer-header">
+              <div style="flex:1; min-width:0;">
+                @if (dr.kind === 'memory') { <span class="badge badge-blue" style="margin-bottom:6px; display:inline-block;">memory</span> }
+                @if (dr.kind === 'entity') { <span class="badge badge-purple" style="margin-bottom:6px; display:inline-block;">entity</span> }
+                @if (dr.kind === 'edge') { <span class="badge badge-blue" style="margin-bottom:6px; display:inline-block;">edge</span> }
+                @if (dr.kind === 'chrono') { <span class="badge" style="margin-bottom:6px; display:inline-block;">chrono</span> }
+                <div class="drawer-title">
+                  @if (dr.kind === 'memory') { {{ drawerEditMemory.fact.length > 80 ? (drawerEditMemory.fact | slice:0:80) + '\u2026' : drawerEditMemory.fact }} }
+                  @if (dr.kind === 'entity') { {{ drawerEditEntity.name || dr.record.name }} }
+                  @if (dr.kind === 'edge') { {{ (dr.record.fromName || dr.record.from) + ' \u2192 ' + (dr.record.toName || dr.record.to) }} }
+                  @if (dr.kind === 'chrono') { {{ drawerEditChrono.title || dr.record.title }} }
+                </div>
+              </div>
+              <div style="display:flex; gap:8px; flex-shrink:0; align-items:flex-start; padding-top:2px;">
+                <button class="btn btn-sm btn-primary" [disabled]="drawerSaving()" (click)="saveDrawer()">
+                  @if (drawerSaving()) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> } Save
+                </button>
+                <button class="icon-btn" title="Close" aria-label="Close details" (click)="closeDrawer()">✕</button>
+              </div>
+            </div>
+            @if (drawerError()) {
+              <div class="alert alert-error" style="margin-bottom:16px; font-size:13px;">{{ drawerError() }}</div>
+            }
+
+            <form>
+              <!-- ── MEMORY ── -->
+              @if (dr.kind === 'memory') {
+                <div class="drawer-field">
+                  <div class="drawer-label">fact <span style="color:var(--error)">*</span></div>
+                  <textarea [(ngModel)]="drawerEditMemory.fact" name="drwMemFact" rows="4"></textarea>
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">description</div>
+                  <input type="text" [(ngModel)]="drawerEditMemory.description" name="drwMemDesc" />
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">tags</div>
+                  <app-tag-input [(value)]="drawerEditMemory.tags" [suggestions]="memoryTagSuggestions()" inputName="drwMemTags" />
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">entityIds</div>
+                  <div class="flyout-wrap">
+                    <div class="entity-multi">
+                      @for (chip of entityChips(drawerEditMemory.entityIds); track chip.id) {
+                        <span class="chip" [title]="chip.id"><span class="chip-name">{{ chip.name }}</span><button type="button" class="chip-remove" (mousedown)="removeEntityId(drawerEditMemory, chip.id)">✕</button></span>
+                      }
+                      <button type="button" class="chip-add" (click)="openFlyout('drawer-memory-entityIds')">+ Add…</button>
+                    </div>
+                    @if (flyoutField() === 'drawer-memory-entityIds') {
+                      <div class="flyout-panel">
+                        <app-entity-search mode="picker" [spaceId]="activeSpaceId()" placeholder="Search entities…" defaultMode="semantic" (selected)="pickEntity($event, 'multi', 'drawer-memory-entityIds')" />
+                        <div style="display:flex; justify-content:flex-end; margin-top:8px;">
+                          <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">Done</button>
+                        </div>
+                      </div>
+                    }
+                  </div>
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">properties</div>
+                  <app-properties-editor [schema]="spaceMeta()?.propertySchemas?.['memory']" [required]="spaceMeta()?.requiredProperties?.['memory']" [(value)]="drawerEditMemory.properties" />
+                </div>
+                <hr class="drawer-hr">
+                <div class="drawer-field">
+                  <div class="drawer-label">_id</div>
+                  <div class="drawer-readonly-value" style="font-family:var(--font-mono,monospace); font-size:11px;">{{ dr.record._id }}</div>
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">seq</div>
+                  <div class="drawer-readonly-value">{{ dr.record.seq }}</div>
+                </div>
+                @if (dr.record.author) {
+                  <div class="drawer-field">
+                    <div class="drawer-label">author.instanceId</div>
+                    <div class="drawer-readonly-value">{{ dr.record.author.instanceId }}</div>
+                  </div>
+                }
+                <div class="drawer-field" style="margin-bottom:0;">
+                  <div class="drawer-label">createdAt</div>
+                  <div class="drawer-readonly-value">{{ dr.record.createdAt | date:'yyyy-MM-dd HH:mm:ss' }}</div>
+                </div>
+              }
+
+              <!-- ── ENTITY ── -->
+              @if (dr.kind === 'entity') {
+                <div class="drawer-field">
+                  <div class="drawer-label">name <span style="color:var(--error)">*</span></div>
+                  <input type="text" [(ngModel)]="drawerEditEntity.name" name="drwEntName" />
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">type</div>
+                  <div style="padding:4px 0;">
+                    @if (drawerEditEntity.type) { <span class="badge badge-purple">{{ drawerEditEntity.type }}</span> }
+                    @else { <span style="color:var(--text-muted); font-size:12px;">—</span> }
+                  </div>
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">description</div>
+                  <input type="text" [(ngModel)]="drawerEditEntity.description" name="drwEntDesc" />
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">tags</div>
+                  <app-tag-input [(value)]="drawerEditEntity.tags" [suggestions]="entityTagSuggestions()" inputName="drwEntTags" />
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">properties</div>
+                  <app-properties-editor [schema]="spaceMeta()?.propertySchemas?.['entity']" [required]="spaceMeta()?.requiredProperties?.['entity']" [(value)]="drawerEditEntity.properties" />
+                </div>
+                <hr class="drawer-hr">
+                <div class="drawer-field">
+                  <div class="drawer-label">_id</div>
+                  <div class="drawer-readonly-value" style="font-family:var(--font-mono,monospace); font-size:11px;">{{ dr.record._id }}</div>
+                </div>
+                <div class="drawer-field" style="margin-bottom:0;">
+                  <div class="drawer-label">createdAt</div>
+                  <div class="drawer-readonly-value">{{ dr.record.createdAt | date:'yyyy-MM-dd HH:mm:ss' }}</div>
+                </div>
+              }
+
+              <!-- ── EDGE ── -->
+              @if (dr.kind === 'edge') {
+                <div class="drawer-field">
+                  <div class="drawer-label">from <span class="drawer-muted">(read-only)</span></div>
+                  <div class="drawer-readonly-value">{{ dr.record.fromName || dr.record.from }}<span style="font-size:11px;"> ({{ dr.record.from }})</span></div>
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">label <span style="color:var(--error)">*</span></div>
+                  <input type="text" [(ngModel)]="drawerEditEdge.label" name="drwEdgeLabel" />
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">to <span class="drawer-muted">(read-only)</span></div>
+                  <div class="drawer-readonly-value">{{ dr.record.toName || dr.record.to }}<span style="font-size:11px;"> ({{ dr.record.to }})</span></div>
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">type</div>
+                  <input type="text" [(ngModel)]="drawerEditEdge.type" name="drwEdgeType" />
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">weight</div>
+                  <input type="number" [(ngModel)]="drawerEditEdge.weight" name="drwEdgeWeight" step="0.1" />
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">description</div>
+                  <input type="text" [(ngModel)]="drawerEditEdge.description" name="drwEdgeDesc" />
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">tags</div>
+                  <app-tag-input [(value)]="drawerEditEdge.tags" [suggestions]="edgeTagSuggestions()" inputName="drwEdgeTags" />
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">properties</div>
+                  <app-properties-editor [schema]="spaceMeta()?.propertySchemas?.['edge']" [required]="spaceMeta()?.requiredProperties?.['edge']" [(value)]="drawerEditEdge.properties" />
+                </div>
+                <hr class="drawer-hr">
+                <div class="drawer-field">
+                  <div class="drawer-label">_id</div>
+                  <div class="drawer-readonly-value" style="font-family:var(--font-mono,monospace); font-size:11px;">{{ dr.record._id }}</div>
+                </div>
+                <div class="drawer-field" style="margin-bottom:0;">
+                  <div class="drawer-label">createdAt</div>
+                  <div class="drawer-readonly-value">{{ dr.record.createdAt | date:'yyyy-MM-dd HH:mm:ss' }}</div>
+                </div>
+              }
+
+              <!-- ── CHRONO ── -->
+              @if (dr.kind === 'chrono') {
+                <div class="drawer-field">
+                  <div class="drawer-label">title <span style="color:var(--error)">*</span></div>
+                  <input type="text" [(ngModel)]="drawerEditChrono.title" name="drwChronoTitle" />
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">kind <span style="color:var(--error)">*</span></div>
+                  @if (drawerEditChrono.kind !== '__custom__') {
+                    <select [(ngModel)]="drawerEditChrono.kind" name="drwChronoKind">
+                      @for (k of chronoKinds; track k) { <option [value]="k">{{ k }}</option> }
+                      <option value="__custom__">Custom…</option>
+                    </select>
+                  } @else {
+                    <div style="display:flex; gap:4px;">
+                      <input type="text" [(ngModel)]="drawerEditChrono.customKind" name="drwChronoCustomKind" style="flex:1;" />
+                      <button type="button" class="btn-secondary btn btn-sm" style="padding:4px 8px;" (click)="drawerEditChrono.kind = 'event'; drawerEditChrono.customKind = ''" title="Back to presets">✕</button>
+                    </div>
+                  }
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">status</div>
+                  <select [(ngModel)]="drawerEditChrono.status" name="drwChronoStatus">
+                    @for (s of chronoStatusOptions; track s) { <option [value]="s">{{ s }}</option> }
+                  </select>
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">startsAt <span style="color:var(--error)">*</span></div>
+                  <input type="datetime-local" [(ngModel)]="drawerEditChrono.startsAt" name="drwChronoStarts" />
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">endsAt</div>
+                  <input type="datetime-local" [(ngModel)]="drawerEditChrono.endsAt" name="drwChronoEnds" />
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">confidence <span class="drawer-muted">(0–1)</span></div>
+                  <input type="number" [(ngModel)]="drawerEditChrono.confidence" name="drwChronoConf" min="0" max="1" step="0.01" />
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">description</div>
+                  <textarea [(ngModel)]="drawerEditChrono.description" name="drwChronoDesc" rows="3"></textarea>
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">tags</div>
+                  <app-tag-input [(value)]="drawerEditChrono.tags" [suggestions]="chronoTagSuggestions()" inputName="drwChronoTags" />
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">entityIds</div>
+                  <div class="flyout-wrap">
+                    <div class="entity-multi">
+                      @for (chip of entityChips(drawerEditChrono.entityIds); track chip.id) {
+                        <span class="chip" [title]="chip.id"><span class="chip-name">{{ chip.name }}</span><button type="button" class="chip-remove" (mousedown)="removeEntityId(drawerEditChrono, chip.id)">✕</button></span>
+                      }
+                      <button type="button" class="chip-add" (click)="openFlyout('drawer-chrono-entityIds')">+ Add…</button>
+                    </div>
+                    @if (flyoutField() === 'drawer-chrono-entityIds') {
+                      <div class="flyout-panel">
+                        <app-entity-search mode="picker" [spaceId]="activeSpaceId()" placeholder="Search entities…" defaultMode="semantic" (selected)="pickEntity($event, 'multi', 'drawer-chrono-entityIds')" />
+                        <div style="display:flex; justify-content:flex-end; margin-top:8px;">
+                          <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">Done</button>
+                        </div>
+                      </div>
+                    }
+                  </div>
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">memoryIds <span class="drawer-muted">(comma-separated IDs)</span></div>
+                  <textarea [(ngModel)]="drawerEditChrono.memoryIds" name="drwChronoMemIds" rows="2" style="font-family:var(--font-mono,monospace); font-size:11px;"></textarea>
+                </div>
+                <hr class="drawer-hr">
+                <div class="drawer-field">
+                  <div class="drawer-label">spaceId</div>
+                  <div class="drawer-readonly-value">{{ dr.record.spaceId }}</div>
+                </div>
+                @if (dr.record.recurrence) {
+                  <div class="drawer-field">
+                    <div class="drawer-label">recurrence</div>
+                    <div class="drawer-readonly-value" style="font-family:var(--font-mono,monospace); font-size:11px;">{{ dr.record.recurrence | json }}</div>
+                  </div>
+                }
+                <div class="drawer-field">
+                  <div class="drawer-label">author</div>
+                  <div class="drawer-readonly-value">{{ dr.record.author?.instanceLabel }} ({{ dr.record.author?.instanceId }})</div>
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">seq</div>
+                  <div class="drawer-readonly-value">{{ dr.record.seq }}</div>
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">_id</div>
+                  <div class="drawer-readonly-value" style="font-family:var(--font-mono,monospace); font-size:11px;">{{ dr.record._id }}</div>
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">createdAt</div>
+                  <div class="drawer-readonly-value">{{ dr.record.createdAt | date:'yyyy-MM-dd HH:mm:ss' }}</div>
+                </div>
+                <div class="drawer-field" style="margin-bottom:0;">
+                  <div class="drawer-label">updatedAt</div>
+                  <div class="drawer-readonly-value">{{ dr.record.updatedAt | date:'yyyy-MM-dd HH:mm:ss' }}</div>
+                </div>
+              }
+            </form>
+
+          </div>
+        </div>
+      }
     }
   `,
 })
 export class BrainComponent implements OnInit {
   private api = inject(ApiService);
-
-  tabs: { key: BrainTab; label: string; statsKey?: keyof SpaceStats }[] = [
-    { key: 'query', label: '🔍 Query' },
-    { key: 'entities', label: 'Entities', statsKey: 'entities' },
-    { key: 'edges', label: 'Edges', statsKey: 'edges' },
-    { key: 'memories', label: 'Memories', statsKey: 'memories' },
-    { key: 'chrono', label: 'Chrono', statsKey: 'chrono' },
-  ];
 
   collectionTabs: { key: BrainTab; label: string; statsKey?: keyof SpaceStats }[] = [
     { key: 'entities', label: 'Entities', statsKey: 'entities' },
@@ -1598,25 +1773,64 @@ export class BrainComponent implements OnInit {
   edges = signal<Edge[]>([]);
   chrono = signal<ChronoEntry[]>([]);
 
+  memoryTagSuggestions = computed(() => [...new Set([
+    ...(this.spaceMeta()?.tagSuggestions ?? []),
+    ...this.memories().flatMap(m => m.tags ?? []),
+  ])]);
+  entityTagSuggestions = computed(() => [...new Set([
+    ...(this.spaceMeta()?.tagSuggestions ?? []),
+    ...this.entities().flatMap(e => e.tags ?? []),
+  ])]);
+  edgeTagSuggestions = computed(() => [...new Set([
+    ...(this.spaceMeta()?.tagSuggestions ?? []),
+    ...this.edges().flatMap(e => e.tags ?? []),
+  ])]);
+  chronoTagSuggestions = computed(() => [...new Set([
+    ...(this.spaceMeta()?.tagSuggestions ?? []),
+    ...this.chrono().flatMap(c => c.tags ?? []),
+  ])]);
+
+  filteredMemories = computed(() => {
+    if (this.memorySearchMode() === 'semantic') return this.memories();
+    const q = this.memorySearch().toLowerCase().trim();
+    if (!q) return this.memories();
+    return this.memories().filter(m => m.fact.toLowerCase().includes(q));
+  });
+
+  filteredEdges = computed(() => {
+    if (this.edgeSearchMode() === 'semantic') return this.edges();
+    const q = this.edgeSearch().toLowerCase().trim();
+    if (!q) return this.edges();
+    return this.edges().filter(e =>
+      e.label.toLowerCase().includes(q) ||
+      (e.fromName ?? '').toLowerCase().includes(q) ||
+      (e.toName ?? '').toLowerCase().includes(q)
+    );
+  });
+
   // Memories pagination + filter
   skip = signal(0);
   filterTag = signal('');
   filterEntity = signal('');
-  showWipeConfirm = signal(false);
-  wipeInput = signal('');
-  wipingInProgress = signal(false);
 
   // Entities pagination + search
   entitySkip = signal(0);
   entitySearch = signal('');
+  memorySearch = signal('');
+  edgeSearch = signal('');
+  chronoSearch = signal('');
+  memorySearchMode = signal<'text' | 'semantic'>('text');
+  edgeSearchMode = signal<'text' | 'semantic'>('text');
+  chronoSearchMode = signal<'text' | 'semantic'>('text');
+  private _memSemTimer: ReturnType<typeof setTimeout> | null = null;
+  private _edgeSemTimer: ReturnType<typeof setTimeout> | null = null;
+  private _chronoSemTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Edges pagination
   edgeSkip = signal(0);
 
-  // Chrono pagination + filter
+  // Chrono pagination
   chronoSkip = signal(0);
-  chronoFilterTag = signal('');
-  chronoFilterStatus = signal('');
 
   // Reindex
   needsReindex = signal(false);
@@ -1630,28 +1844,28 @@ export class BrainComponent implements OnInit {
   editingId = signal('');
   editSaving = signal(false);
   editError = signal('');
-  editMemory = { fact: '', tags: '', entityIds: '', description: '', properties: '' };
-  editEntity = { name: '', type: '', tags: '', description: '', properties: '' };
-  editEdge = { from: '', to: '', fromName: undefined as string | undefined, toName: undefined as string | undefined, label: '', weight: null as number | null, tags: '', description: '', properties: '' };
-  editChrono = { title: '', kind: '' as string, status: '' as string, startsAt: '', endsAt: '', description: '', tags: '', entityIds: '' };
+  editMemory = { fact: '', tags: [] as string[], entityIds: '', description: '', properties: {} as Record<string, string | number | boolean> };
+  editEntity = { name: '', type: '', tags: [] as string[], description: '', properties: {} as Record<string, string | number | boolean> };
+  editEdge = { from: '', to: '', fromName: undefined as string | undefined, toName: undefined as string | undefined, label: '', weight: null as number | null, tags: [] as string[], description: '', properties: {} as Record<string, string | number | boolean> };
+  editChrono = { title: '', kind: '' as string, status: '' as string, startsAt: '', endsAt: '', description: '', tags: [] as string[], entityIds: '' };
 
   // Create memory form
   showMemoryForm = signal(false);
   creatingMemory = signal(false);
   createMemoryError = signal('');
-  memoryForm = { fact: '', tags: '', entityIds: '', description: '', properties: '' };
+  memoryForm = { fact: '', tags: [] as string[], entityIds: '', description: '', properties: {} as Record<string, string | number | boolean> };
 
   // Create entity form
   showEntityForm = signal(false);
   creatingEntity = signal(false);
   createEntityError = signal('');
-  entityForm = { name: '', type: '', tags: '', description: '', properties: '' };
+  entityForm = { name: '', type: '', tags: [] as string[], description: '', properties: {} as Record<string, string | number | boolean> };
 
   // Create edge form
   showEdgeForm = signal(false);
   creatingEdge = signal(false);
   createEdgeError = signal('');
-  edgeForm = { from: '', fromDisplay: '', to: '', toDisplay: '', label: '', weight: null as number | null, tags: '', description: '', properties: '' };
+  edgeForm = { from: '', fromDisplay: '', to: '', toDisplay: '', label: '', weight: null as number | null, tags: [] as string[], description: '', properties: {} as Record<string, string | number | boolean> };
 
   // Create chrono form
   showChronoForm = signal(false);
@@ -1659,7 +1873,7 @@ export class BrainComponent implements OnInit {
   createChronoError = signal('');
   chronoKinds: ChronoKind[] = ['event', 'deadline', 'plan', 'prediction', 'milestone'];
   chronoStatusOptions: ChronoStatus[] = ['upcoming', 'active', 'completed', 'overdue', 'cancelled'];
-  chronoForm = { title: '', kind: 'event' as ChronoKind | '__custom__', customKind: '', startsAt: '', endsAt: '', description: '', tags: '', entityIds: '' };
+  chronoForm = { title: '', kind: 'event' as ChronoKind | '__custom__', customKind: '', startsAt: '', endsAt: '', description: '', tags: [] as string[], entityIds: '' };
 
   // Query panel
   queryMode = signal<'search' | 'advanced'>('search');
@@ -1715,8 +1929,12 @@ export class BrainComponent implements OnInit {
     this.filterTag.set('');
     this.filterEntity.set('');
     this.entitySearch.set('');
-    this.chronoFilterTag.set('');
-    this.chronoFilterStatus.set('');
+    this.memorySearch.set('');
+    this.edgeSearch.set('');
+    this.chronoSearch.set('');
+    this.memorySearchMode.set('text');
+    this.edgeSearchMode.set('text');
+    this.chronoSearchMode.set('text');
     this.confirmDeleteId.set('');
     this.reindexResult.set('');
     this.loadStats(id);
@@ -1732,6 +1950,12 @@ export class BrainComponent implements OnInit {
     this.chronoSkip.set(0);
     this.filterTag.set('');
     this.filterEntity.set('');
+    this.memorySearch.set('');
+    this.edgeSearch.set('');
+    this.chronoSearch.set('');
+    this.memorySearchMode.set('text');
+    this.edgeSearchMode.set('text');
+    this.chronoSearchMode.set('text');
     this.confirmDeleteId.set('');
     this.loadCurrentTab(this.activeSpaceId());
   }
@@ -1753,19 +1977,150 @@ export class BrainComponent implements OnInit {
   // ── Entity search bar handlers (brain entities tab) ──────────────────────
   onEntitySearchChange(q: string): void {
     this.entitySearch.set(q);
-    this.searchEntities();
+    this.entitySkip.set(0);
+    this.loadEntitiesSilent();
   }
   onEntitySearchClear(): void {
     this.entitySearch.set('');
-    this.searchEntities();
+    this.entitySkip.set(0);
+    this.loadEntitiesSilent();
   }
   onEntitySearchPick(ent: Entity): void {
-    // Semantic pick: filter list to show the picked entity by name
     this.entitySearch.set(ent.name);
-    this.searchEntities();
+    this.entitySkip.set(0);
+    this.loadEntitiesSilent();
   }
 
-  applyChronoFilter(): void { this.chronoSkip.set(0); this.loadCurrentTab(this.activeSpaceId()); }
+  loadEntitiesSilent(): void {
+    const spaceId = this.activeSpaceId();
+    if (!spaceId) return;
+    this.api.listEntities(spaceId, this.pageSize, this.entitySkip(), this.entitySearch() || undefined).subscribe({
+      next: ({ entities }) => this.entities.set(entities),
+      error: () => {},
+    });
+  }
+
+  // ── Memory / Edge / Chrono search with mode toggle ─────────────────────────
+  onMemorySearch(q: string): void {
+    this.memorySearch.set(q);
+    if (this.memorySearchMode() === 'semantic') {
+      if (this._memSemTimer) clearTimeout(this._memSemTimer);
+      if (!q.trim()) { this.memories.set([]); return; }
+      this._memSemTimer = setTimeout(() => this.runSemanticMemorySearch(), 300);
+    }
+  }
+  setMemorySearchMode(m: 'text' | 'semantic'): void {
+    this.memorySearchMode.set(m);
+    const q = this.memorySearch().trim();
+    if (!q) return;
+    if (m === 'semantic') this.runSemanticMemorySearch();
+    else { this.skip.set(0); this.loadCurrentTab(this.activeSpaceId()); }
+  }
+  runSemanticMemorySearch(): void {
+    const q = this.memorySearch().trim();
+    const spaceId = this.activeSpaceId();
+    if (!q || !spaceId) { this.memories.set([]); return; }
+    this.api.recallBrain(spaceId, { query: q, types: ['memory'], topK: 20 }).pipe(
+      catchError(() => of({ results: [], count: 0 })),
+    ).subscribe(res => {
+      this.memories.set(res.results.filter(r => r.type === 'memory').map(r => ({
+        _id: r['_id'] as string,
+        fact: (r['fact'] as string) ?? '',
+        tags: (r['tags'] as string[]) ?? [],
+        entityIds: (r['entityIds'] as string[]) ?? [],
+        description: r['description'] as string | undefined,
+        properties: (r['properties'] as Record<string, string | number | boolean>) ?? {},
+        createdAt: (r['createdAt'] as string) ?? '',
+        seq: (r['seq'] as number) ?? 0,
+        author: r['author'] as { instanceId: string } | undefined,
+      } as Memory)));
+    });
+  }
+
+  onEdgeSearch(q: string): void {
+    this.edgeSearch.set(q);
+    if (this.edgeSearchMode() === 'semantic') {
+      if (this._edgeSemTimer) clearTimeout(this._edgeSemTimer);
+      if (!q.trim()) { this.edges.set([]); return; }
+      this._edgeSemTimer = setTimeout(() => this.runSemanticEdgeSearch(), 300);
+    }
+  }
+  setEdgeSearchMode(m: 'text' | 'semantic'): void {
+    this.edgeSearchMode.set(m);
+    const q = this.edgeSearch().trim();
+    if (!q) return;
+    if (m === 'semantic') this.runSemanticEdgeSearch();
+    else { this.edgeSkip.set(0); this.loadCurrentTab(this.activeSpaceId()); }
+  }
+  runSemanticEdgeSearch(): void {
+    const q = this.edgeSearch().trim();
+    const spaceId = this.activeSpaceId();
+    if (!q || !spaceId) { this.edges.set([]); return; }
+    this.api.recallBrain(spaceId, { query: q, types: ['edge'], topK: 20 }).pipe(
+      catchError(() => of({ results: [], count: 0 })),
+    ).subscribe(res => {
+      this.edges.set(res.results.filter(r => r.type === 'edge').map(r => ({
+        _id: r['_id'] as string,
+        from: (r['from'] as string) ?? '',
+        fromName: r['fromName'] as string | undefined,
+        to: (r['to'] as string) ?? '',
+        toName: r['toName'] as string | undefined,
+        label: (r['label'] as string) ?? '',
+        weight: r['weight'] as number | undefined,
+        tags: (r['tags'] as string[]) ?? [],
+        description: r['description'] as string | undefined,
+        properties: (r['properties'] as Record<string, string | number | boolean>) ?? {},
+        createdAt: (r['createdAt'] as string) ?? '',
+      } as Edge)));
+    });
+  }
+
+  onChronoSearch(q: string): void {
+    this.chronoSearch.set(q);
+    if (this.chronoSearchMode() === 'semantic') {
+      if (this._chronoSemTimer) clearTimeout(this._chronoSemTimer);
+      if (!q.trim()) { this.chrono.set([]); return; }
+      this._chronoSemTimer = setTimeout(() => this.runSemanticChronoSearch(), 300);
+    } else {
+      this.applyChronoSearch();
+    }
+  }
+  setChronoSearchMode(m: 'text' | 'semantic'): void {
+    this.chronoSearchMode.set(m);
+    const q = this.chronoSearch().trim();
+    if (!q) return;
+    if (m === 'semantic') this.runSemanticChronoSearch();
+    else this.applyChronoSearch();
+  }
+  runSemanticChronoSearch(): void {
+    const q = this.chronoSearch().trim();
+    const spaceId = this.activeSpaceId();
+    if (!q || !spaceId) { this.chrono.set([]); return; }
+    this.api.recallBrain(spaceId, { query: q, types: ['chrono'], topK: 20 }).pipe(
+      catchError(() => of({ results: [], count: 0 })),
+    ).subscribe(res => {
+      this.chrono.set(res.results.filter(r => r.type === 'chrono').map(r => ({
+        _id: r['_id'] as string,
+        spaceId: (r['spaceId'] as string) ?? spaceId,
+        title: (r['title'] as string) ?? '',
+        description: r['description'] as string | undefined,
+        kind: ((r['kind'] as string) ?? 'event') as ChronoKind,
+        startsAt: (r['startsAt'] as string) ?? '',
+        endsAt: r['endsAt'] as string | undefined,
+        status: 'upcoming' as ChronoStatus,
+        confidence: r['confidence'] as number | undefined,
+        tags: (r['tags'] as string[]) ?? [],
+        entityIds: (r['entityIds'] as string[]) ?? [],
+        memoryIds: [],
+        author: (r['author'] as { instanceId: string; instanceLabel: string }) ?? { instanceId: '', instanceLabel: '' },
+        createdAt: (r['createdAt'] as string) ?? '',
+        updatedAt: (r['createdAt'] as string) ?? '',
+        seq: (r['seq'] as number) ?? 0,
+      } as ChronoEntry)));
+    });
+  }
+
+  applyChronoSearch(): void { this.chronoSkip.set(0); this.loadCurrentTab(this.activeSpaceId()); }
 
   private loadStats(spaceId: string): void {
     this.api.getSpaceStats(spaceId).subscribe({
@@ -1810,9 +2165,8 @@ export class BrainComponent implements OnInit {
         });
         break;
       case 'chrono': {
-        const cf: { tags?: string; status?: string } = {};
-        if (this.chronoFilterTag()) cf.tags = this.chronoFilterTag();
-        if (this.chronoFilterStatus()) cf.status = this.chronoFilterStatus();
+        const cf: { search?: string } = {};
+        if (this.chronoSearch()) cf.search = this.chronoSearch();
         this.api.listChrono(spaceId, this.pageSize, this.chronoSkip(), cf).subscribe({
           next: ({ chrono }) => { this.chrono.set(chrono); this.loading.set(false); },
           error: () => this.loading.set(false),
@@ -1825,6 +2179,10 @@ export class BrainComponent implements OnInit {
         break;
       case 'graph':
         // Graph tab is self-contained; no data pre-fetch needed
+        this.loading.set(false);
+        break;
+      case 'files':
+        // File manager handles its own loading
         this.loading.set(false);
         break;
     }
@@ -1844,23 +2202,6 @@ export class BrainComponent implements OnInit {
     this.loadCurrentTab(this.activeSpaceId());
   }
 
-  executeWipe(): void {
-    const spaceId = this.activeSpaceId();
-    if (this.wipeInput() !== spaceId) return;
-    this.wipingInProgress.set(true);
-    this.api.wipeMemories(spaceId).subscribe({
-      next: () => {
-        this.wipingInProgress.set(false);
-        this.showWipeConfirm.set(false);
-        this.wipeInput.set('');
-        this.memories.set([]);
-        this.loadStats(spaceId);
-        this.loadCurrentTab(spaceId);
-      },
-      error: () => this.wipingInProgress.set(false),
-    });
-  }
-
   requestDelete(id: string): void { this.confirmDeleteId.set(id); }
   cancelDelete(): void { this.confirmDeleteId.set(''); }
 
@@ -1871,10 +2212,10 @@ export class BrainComponent implements OnInit {
     this.editError.set('');
     this.editMemory = {
       fact: mem.fact,
-      tags: (mem.tags ?? []).join(', '),
+      tags: mem.tags ?? [],
       entityIds: (mem.entityIds ?? []).join(', '),
       description: mem.description ?? '',
-      properties: mem.properties && Object.keys(mem.properties).length ? JSON.stringify(mem.properties) : '',
+      properties: this.buildPropertiesObject('memory', mem.properties ?? {}),
     };
   }
 
@@ -1884,9 +2225,9 @@ export class BrainComponent implements OnInit {
     this.editEntity = {
       name: ent.name,
       type: ent.type ?? '',
-      tags: (ent.tags ?? []).join(', '),
+      tags: ent.tags ?? [],
       description: ent.description ?? '',
-      properties: ent.properties && Object.keys(ent.properties).length ? JSON.stringify(ent.properties) : '',
+      properties: this.buildPropertiesObject('entity', ent.properties ?? {}),
     };
   }
 
@@ -1900,9 +2241,9 @@ export class BrainComponent implements OnInit {
       toName: edge.toName,
       label: edge.label,
       weight: edge.weight ?? null,
-      tags: (edge.tags ?? []).join(', '),
+      tags: edge.tags ?? [],
       description: edge.description ?? '',
-      properties: edge.properties && Object.keys(edge.properties).length ? JSON.stringify(edge.properties) : '',
+      properties: this.buildPropertiesObject('edge', edge.properties ?? {}),
     };
   }
 
@@ -1916,7 +2257,7 @@ export class BrainComponent implements OnInit {
       startsAt: entry.startsAt ? this.toLocalDatetime(entry.startsAt) : '',
       endsAt: entry.endsAt ? this.toLocalDatetime(entry.endsAt) : '',
       description: entry.description ?? '',
-      tags: (entry.tags ?? []).join(', '),
+      tags: entry.tags ?? [],
       entityIds: (entry.entityIds ?? []).join(', '),
     };
   }
@@ -1929,17 +2270,13 @@ export class BrainComponent implements OnInit {
   saveEditMemory(id: string): void {
     this.editSaving.set(true);
     this.editError.set('');
-    let props: Record<string, string | number | boolean> | undefined;
-    if (this.editMemory.properties.trim()) {
-      try { props = JSON.parse(this.editMemory.properties.trim()); }
-      catch (e) { this.editSaving.set(false); this.editError.set(`Properties: ${e instanceof Error ? e.message : 'invalid JSON'}`); return; }
-    }
+    const memProps = this.editMemory.properties;
     this.api.updateMemory(this.activeSpaceId(), id, {
       fact: this.editMemory.fact.trim(),
-      tags: this.editMemory.tags.split(',').map(s => s.trim()).filter(Boolean),
+      tags: this.editMemory.tags,
       entityIds: this.editMemory.entityIds.split(',').map(s => s.trim()).filter(Boolean),
       description: this.editMemory.description.trim(),
-      ...(props ? { properties: props } : {}),
+      ...(Object.keys(memProps).length ? { properties: memProps } : {}),
     }).subscribe({
       next: (updated) => {
         this.editSaving.set(false);
@@ -1953,17 +2290,13 @@ export class BrainComponent implements OnInit {
   saveEditEntity(id: string): void {
     this.editSaving.set(true);
     this.editError.set('');
-    let props: Record<string, string | number | boolean> | undefined;
-    if (this.editEntity.properties.trim()) {
-      try { props = JSON.parse(this.editEntity.properties.trim()); }
-      catch (e) { this.editSaving.set(false); this.editError.set(`Properties: ${e instanceof Error ? e.message : 'invalid JSON'}`); return; }
-    }
+    const entProps = this.editEntity.properties;
     this.api.updateEntity(this.activeSpaceId(), id, {
       name: this.editEntity.name.trim(),
       type: this.editEntity.type.trim(),
-      tags: this.editEntity.tags.split(',').map(s => s.trim()).filter(Boolean),
+      tags: this.editEntity.tags,
       description: this.editEntity.description.trim(),
-      ...(props ? { properties: props } : {}),
+      ...(Object.keys(entProps).length ? { properties: entProps } : {}),
     }).subscribe({
       next: (updated) => {
         this.editSaving.set(false);
@@ -1977,17 +2310,13 @@ export class BrainComponent implements OnInit {
   saveEditEdge(id: string): void {
     this.editSaving.set(true);
     this.editError.set('');
-    let props: Record<string, string | number | boolean> | undefined;
-    if (this.editEdge.properties.trim()) {
-      try { props = JSON.parse(this.editEdge.properties.trim()); }
-      catch (e) { this.editSaving.set(false); this.editError.set(`Properties: ${e instanceof Error ? e.message : 'invalid JSON'}`); return; }
-    }
+    const edgeProps = this.editEdge.properties;
     this.api.updateEdge(this.activeSpaceId(), id, {
       label: this.editEdge.label.trim(),
-      tags: this.editEdge.tags.split(',').map(s => s.trim()).filter(Boolean),
+      tags: this.editEdge.tags,
       description: this.editEdge.description.trim(),
       ...(this.editEdge.weight != null ? { weight: this.editEdge.weight } : {}),
-      ...(props ? { properties: props } : {}),
+      ...(Object.keys(edgeProps).length ? { properties: edgeProps } : {}),
     }).subscribe({
       next: (updated) => {
         this.editSaving.set(false);
@@ -2008,7 +2337,7 @@ export class BrainComponent implements OnInit {
       ...(this.editChrono.startsAt ? { startsAt: new Date(this.editChrono.startsAt).toISOString() } : {}),
       ...(this.editChrono.endsAt ? { endsAt: new Date(this.editChrono.endsAt).toISOString() } : {}),
       description: this.editChrono.description.trim(),
-      tags: this.editChrono.tags.split(',').map(s => s.trim()).filter(Boolean),
+      tags: this.editChrono.tags,
       entityIds: this.editChrono.entityIds.split(',').map(s => s.trim()).filter(Boolean),
     }).subscribe({
       next: (updated) => {
@@ -2032,21 +2361,17 @@ export class BrainComponent implements OnInit {
     if (!this.memoryForm.fact.trim()) return;
     this.creatingMemory.set(true);
     this.createMemoryError.set('');
-    const tags = this.memoryForm.tags.split(',').map(s => s.trim()).filter(Boolean);
     const entityIds = this.memoryForm.entityIds.split(',').map(s => s.trim()).filter(Boolean);
     const body: Parameters<ApiService['createMemory']>[1] = { fact: this.memoryForm.fact.trim() };
-    if (tags.length) body.tags = tags;
+    if (this.memoryForm.tags.length) body.tags = this.memoryForm.tags;
     if (entityIds.length) body.entityIds = entityIds;
     if (this.memoryForm.description.trim()) body.description = this.memoryForm.description.trim();
-    if (this.memoryForm.properties.trim()) {
-      try { body.properties = JSON.parse(this.memoryForm.properties.trim()); }
-      catch { this.creatingMemory.set(false); this.createMemoryError.set('Properties must be valid JSON'); return; }
-    }
+    if (Object.keys(this.memoryForm.properties).length) body.properties = this.memoryForm.properties;
     this.api.createMemory(this.activeSpaceId(), body).subscribe({
       next: () => {
         this.creatingMemory.set(false);
         this.showMemoryForm.set(false);
-        this.memoryForm = { fact: '', tags: '', entityIds: '', description: '', properties: '' };
+        this.memoryForm = { fact: '', tags: [], entityIds: '', description: '', properties: {} as Record<string, string | number | boolean> };
         this.loadStats(this.activeSpaceId());
         this.loadCurrentTab(this.activeSpaceId());
       },
@@ -2058,20 +2383,16 @@ export class BrainComponent implements OnInit {
     if (!this.entityForm.name.trim()) return;
     this.creatingEntity.set(true);
     this.createEntityError.set('');
-    const tags = this.entityForm.tags.split(',').map(s => s.trim()).filter(Boolean);
     const body: Parameters<ApiService['createEntity']>[1] = { name: this.entityForm.name.trim() };
     if (this.entityForm.type.trim()) body.type = this.entityForm.type.trim();
-    if (tags.length) body.tags = tags;
+    if (this.entityForm.tags.length) body.tags = this.entityForm.tags;
     if (this.entityForm.description.trim()) body.description = this.entityForm.description.trim();
-    if (this.entityForm.properties.trim()) {
-      try { body.properties = JSON.parse(this.entityForm.properties.trim()); }
-      catch { this.creatingEntity.set(false); this.createEntityError.set('Properties must be valid JSON'); return; }
-    }
+    if (Object.keys(this.entityForm.properties).length) body.properties = this.entityForm.properties;
     this.api.createEntity(this.activeSpaceId(), body).subscribe({
       next: () => {
         this.creatingEntity.set(false);
         this.showEntityForm.set(false);
-        this.entityForm = { name: '', type: '', tags: '', description: '', properties: '' };
+        this.entityForm = { name: '', type: '', tags: [], description: '', properties: {} as Record<string, string | number | boolean> };
         this.loadStats(this.activeSpaceId());
         this.loadCurrentTab(this.activeSpaceId());
       },
@@ -2083,24 +2404,20 @@ export class BrainComponent implements OnInit {
     if (!this.edgeForm.from.trim() || !this.edgeForm.to.trim() || !this.edgeForm.label.trim()) return;
     this.creatingEdge.set(true);
     this.createEdgeError.set('');
-    const tags = this.edgeForm.tags.split(',').map(s => s.trim()).filter(Boolean);
     const body: Parameters<ApiService['createEdge']>[1] = {
       from: this.edgeForm.from.trim(),
       to: this.edgeForm.to.trim(),
       label: this.edgeForm.label.trim(),
     };
     if (this.edgeForm.weight != null) body.weight = this.edgeForm.weight;
-    if (tags.length) body.tags = tags;
+    if (this.edgeForm.tags.length) body.tags = this.edgeForm.tags;
     if (this.edgeForm.description.trim()) body.description = this.edgeForm.description.trim();
-    if (this.edgeForm.properties.trim()) {
-      try { body.properties = JSON.parse(this.edgeForm.properties.trim()); }
-      catch { this.creatingEdge.set(false); this.createEdgeError.set('Properties must be valid JSON'); return; }
-    }
+    if (Object.keys(this.edgeForm.properties).length) body.properties = this.edgeForm.properties;
     this.api.createEdge(this.activeSpaceId(), body).subscribe({
       next: () => {
         this.creatingEdge.set(false);
         this.showEdgeForm.set(false);
-        this.edgeForm = { from: '', fromDisplay: '', to: '', toDisplay: '', label: '', weight: null, tags: '', description: '', properties: '' };
+        this.edgeForm = { from: '', fromDisplay: '', to: '', toDisplay: '', label: '', weight: null, tags: [], description: '', properties: {} as Record<string, string | number | boolean> };
         this.loadStats(this.activeSpaceId());
         this.loadCurrentTab(this.activeSpaceId());
       },
@@ -2133,7 +2450,6 @@ export class BrainComponent implements OnInit {
     if (!resolvedKind) return;
     this.creatingChrono.set(true);
     this.createChronoError.set('');
-    const tags = this.chronoForm.tags.split(',').map(s => s.trim()).filter(Boolean);
     const entityIds = this.chronoForm.entityIds.split(',').map(s => s.trim()).filter(Boolean);
     const body: Parameters<ApiService['createChrono']>[1] = {
       title: this.chronoForm.title.trim(),
@@ -2142,13 +2458,13 @@ export class BrainComponent implements OnInit {
     };
     if (this.chronoForm.endsAt) body.endsAt = new Date(this.chronoForm.endsAt).toISOString();
     if (this.chronoForm.description.trim()) body.description = this.chronoForm.description.trim();
-    if (tags.length) body.tags = tags;
+    if (this.chronoForm.tags.length) body.tags = this.chronoForm.tags;
     if (entityIds.length) body.entityIds = entityIds;
     this.api.createChrono(this.activeSpaceId(), body).subscribe({
       next: () => {
         this.creatingChrono.set(false);
         this.showChronoForm.set(false);
-        this.chronoForm = { title: '', kind: 'event', customKind: '', startsAt: '', endsAt: '', description: '', tags: '', entityIds: '' };
+        this.chronoForm = { title: '', kind: 'event', customKind: '', startsAt: '', endsAt: '', description: '', tags: [], entityIds: '' };
         this.loadCurrentTab(this.activeSpaceId());
       },
       error: (err) => { this.creatingChrono.set(false); this.createChronoError.set(err.error?.error ?? 'Failed to create chrono entry'); },
@@ -2176,11 +2492,6 @@ export class BrainComponent implements OnInit {
       },
       error: () => { this.reindexing.set(false); this.reindexResult.set('Reindex failed — check server logs.'); },
     });
-  }
-
-  formatProps(props?: Record<string, string | number | boolean>): string {
-    if (!props || Object.keys(props).length === 0) return '—';
-    return Object.entries(props).map(([k, v]) => `${k}: ${v}`).join(', ');
   }
 
   /** Convert an ISO date string to the YYYY-MM-DDTHH:mm format required by datetime-local inputs */
@@ -2266,36 +2577,205 @@ export class BrainComponent implements OnInit {
   // ── Form openers with schema prefill ────────────────────────────────────
 
   openEntityForm(): void {
-    this.entityForm = { name: '', type: '', tags: '', description: '', properties: this.buildPropertiesTemplate('entity') };
+    this.entityForm = { name: '', type: '', tags: [], description: '', properties: this.buildPropertiesObject('entity') };
     this.showEntityForm.set(true);
   }
 
   openEdgeForm(): void {
-    this.edgeForm = { from: '', fromDisplay: '', to: '', toDisplay: '', label: '', weight: null, tags: '', description: '', properties: this.buildPropertiesTemplate('edge') };
+    this.edgeForm = { from: '', fromDisplay: '', to: '', toDisplay: '', label: '', weight: null, tags: [], description: '', properties: this.buildPropertiesObject('edge') };
     this.showEdgeForm.set(true);
   }
 
   openMemoryForm(): void {
-    this.memoryForm = { fact: '', tags: '', entityIds: '', description: '', properties: this.buildPropertiesTemplate('memory') };
+    this.memoryForm = { fact: '', tags: [], entityIds: '', description: '', properties: this.buildPropertiesObject('memory') };
     this.showMemoryForm.set(true);
   }
 
-  private buildPropertiesTemplate(type: KnowledgeType): string {
+  openChronoForm(): void {
+    this.chronoForm = { title: '', kind: 'event', customKind: '', startsAt: '', endsAt: '', description: '', tags: [], entityIds: '' };
+    this.showChronoForm.set(true);
+  }
+
+  private buildPropertiesObject(type: KnowledgeType, existing: Record<string, string | number | boolean> = {}): Record<string, string | number | boolean> {
     const schemas = this.spaceMeta()?.propertySchemas?.[type];
-    if (!schemas || Object.keys(schemas).length === 0) return '';
-    const template: Record<string, string | number | boolean> = {};
+    if (!schemas || Object.keys(schemas).length === 0) return existing;
+    const result = { ...existing };
     for (const [key, schema] of Object.entries(schemas)) {
+      if (key in result) continue;
       if (schema.enum?.length) {
-        template[key] = schema.enum[0] as string | number | boolean;
+        result[key] = schema.enum[0] as string | number | boolean;
       } else if (schema.type === 'number') {
-        template[key] = 0;
+        result[key] = 0;
       } else if (schema.type === 'boolean') {
-        template[key] = false;
+        result[key] = false;
       } else {
-        template[key] = '';
+        result[key] = '';
       }
     }
-    return JSON.stringify(template, null, 2);
+    return result;
+  }
+
+  // ── Detail drawer ──────────────────────────────────────────────────────
+
+  drawerRecord = signal<{ kind: 'memory' | 'entity' | 'edge' | 'chrono'; record: any } | null>(null);
+  drawerSaving = signal(false);
+  drawerError = signal('');
+
+  drawerEditMemory = { fact: '', tags: [] as string[], entityIds: '', description: '', properties: {} as Record<string, string | number | boolean> };
+  drawerEditEntity = { name: '', type: '', tags: [] as string[], description: '', properties: {} as Record<string, string | number | boolean> };
+  drawerEditEdge = { label: '', type: '', weight: null as number | null, tags: [] as string[], description: '', properties: {} as Record<string, string | number | boolean> };
+  drawerEditChrono = { title: '', kind: 'event' as string, customKind: '', status: 'upcoming' as string, startsAt: '', endsAt: '', description: '', tags: [] as string[], entityIds: '', confidence: null as number | null, memoryIds: '' };
+
+  openDrawer(kind: 'memory' | 'entity' | 'edge' | 'chrono', record: any): void {
+    this.drawerRecord.set({ kind, record });
+    this.drawerError.set('');
+    this.drawerSaving.set(false);
+    const ids: string[] = record.entityIds ?? [];
+    if (ids.length) this.resolveEntityNames(ids);
+    if (kind === 'memory') {
+      this.drawerEditMemory = {
+        fact: record.fact,
+        tags: [...(record.tags ?? [])],
+        entityIds: (record.entityIds ?? []).join(', '),
+        description: record.description ?? '',
+        properties: this.buildPropertiesObject('memory', record.properties ?? {}),
+      };
+    } else if (kind === 'entity') {
+      this.drawerEditEntity = {
+        name: record.name,
+        type: record.type ?? '',
+        tags: [...(record.tags ?? [])],
+        description: record.description ?? '',
+        properties: this.buildPropertiesObject('entity', record.properties ?? {}),
+      };
+    } else if (kind === 'edge') {
+      this.drawerEditEdge = {
+        label: record.label,
+        type: record.type ?? '',
+        weight: record.weight ?? null,
+        tags: [...(record.tags ?? [])],
+        description: record.description ?? '',
+        properties: this.buildPropertiesObject('edge', record.properties ?? {}),
+      };
+    } else if (kind === 'chrono') {
+      const isPredefined = this.chronoKinds.includes(record.kind);
+      this.drawerEditChrono = {
+        title: record.title,
+        kind: isPredefined ? record.kind : '__custom__',
+        customKind: isPredefined ? '' : record.kind,
+        status: record.status,
+        startsAt: record.startsAt ? this.toLocalDatetime(record.startsAt) : '',
+        endsAt: record.endsAt ? this.toLocalDatetime(record.endsAt) : '',
+        description: record.description ?? '',
+        tags: [...(record.tags ?? [])],
+        entityIds: (record.entityIds ?? []).join(', '),
+        confidence: record.confidence ?? null,
+        memoryIds: (record.memoryIds ?? []).join(', '),
+      };
+    }
+  }
+
+  closeDrawer(): void {
+    this.drawerRecord.set(null);
+    this.drawerError.set('');
+    this.closeFlyout();
+  }
+
+  saveDrawer(): void {
+    const dr = this.drawerRecord();
+    if (!dr) return;
+    this.drawerSaving.set(true);
+    this.drawerError.set('');
+    const id = dr.record._id;
+    const spaceId = this.activeSpaceId();
+    if (dr.kind === 'memory') {
+      const props = this.drawerEditMemory.properties;
+      this.api.updateMemory(spaceId, id, {
+        fact: this.drawerEditMemory.fact.trim(),
+        tags: this.drawerEditMemory.tags,
+        entityIds: this.drawerEditMemory.entityIds.split(',').map(s => s.trim()).filter(Boolean),
+        description: this.drawerEditMemory.description.trim(),
+        ...(Object.keys(props).length ? { properties: props } : {}),
+      }).subscribe({
+        next: (updated) => {
+          this.drawerSaving.set(false);
+          this.drawerRecord.set({ kind: 'memory', record: updated });
+          this.memories.update(list => list.map(m => m._id === id ? updated : m));
+        },
+        error: (err) => { this.drawerSaving.set(false); this.drawerError.set(err.error?.error ?? 'Failed to save'); },
+      });
+    } else if (dr.kind === 'entity') {
+      const props = this.drawerEditEntity.properties;
+      this.api.updateEntity(spaceId, id, {
+        name: this.drawerEditEntity.name.trim(),
+        type: this.drawerEditEntity.type.trim(),
+        tags: this.drawerEditEntity.tags,
+        description: this.drawerEditEntity.description.trim(),
+        ...(Object.keys(props).length ? { properties: props } : {}),
+      }).subscribe({
+        next: (updated) => {
+          this.drawerSaving.set(false);
+          this.drawerRecord.set({ kind: 'entity', record: updated });
+          this.entities.update(list => list.map(e => e._id === id ? updated : e));
+        },
+        error: (err) => { this.drawerSaving.set(false); this.drawerError.set(err.error?.error ?? 'Failed to save'); },
+      });
+    } else if (dr.kind === 'edge') {
+      const props = this.drawerEditEdge.properties;
+      this.api.updateEdge(spaceId, id, {
+        label: this.drawerEditEdge.label.trim(),
+        ...(this.drawerEditEdge.type.trim() ? { type: this.drawerEditEdge.type.trim() } : {}),
+        ...(this.drawerEditEdge.weight != null ? { weight: this.drawerEditEdge.weight } : {}),
+        tags: this.drawerEditEdge.tags,
+        description: this.drawerEditEdge.description.trim(),
+        ...(Object.keys(props).length ? { properties: props } : {}),
+      }).subscribe({
+        next: (updated) => {
+          this.drawerSaving.set(false);
+          this.drawerRecord.set({ kind: 'edge', record: updated });
+          this.edges.update(list => list.map(e => e._id === id ? updated : e));
+        },
+        error: (err) => { this.drawerSaving.set(false); this.drawerError.set(err.error?.error ?? 'Failed to save'); },
+      });
+    } else if (dr.kind === 'chrono') {
+      const resolvedKind = this.drawerEditChrono.kind === '__custom__'
+        ? (this.drawerEditChrono.customKind.trim() as ChronoKind)
+        : this.drawerEditChrono.kind as ChronoKind;
+      this.api.updateChrono(spaceId, id, {
+        title: this.drawerEditChrono.title.trim(),
+        kind: resolvedKind,
+        status: this.drawerEditChrono.status as ChronoStatus,
+        ...(this.drawerEditChrono.startsAt ? { startsAt: new Date(this.drawerEditChrono.startsAt).toISOString() } : {}),
+        ...(this.drawerEditChrono.endsAt ? { endsAt: new Date(this.drawerEditChrono.endsAt).toISOString() } : {}),
+        description: this.drawerEditChrono.description.trim(),
+        tags: this.drawerEditChrono.tags,
+        entityIds: this.drawerEditChrono.entityIds.split(',').map(s => s.trim()).filter(Boolean),
+        ...(this.drawerEditChrono.memoryIds.trim() ? { memoryIds: this.drawerEditChrono.memoryIds.split(',').map(s => s.trim()).filter(Boolean) } : {}),
+        ...(this.drawerEditChrono.confidence != null ? { confidence: this.drawerEditChrono.confidence } : {}),
+      }).subscribe({
+        next: (updated) => {
+          this.drawerSaving.set(false);
+          this.drawerRecord.set({ kind: 'chrono', record: updated });
+          this.chrono.update(list => list.map(c => c._id === id ? updated : c));
+        },
+        error: (err) => { this.drawerSaving.set(false); this.drawerError.set(err.error?.error ?? 'Failed to save'); },
+      });
+    }
+  }
+
+  private resolveEntityNames(ids: string[]): void {
+    const spaceId = this.activeSpaceId();
+    if (!spaceId) return;
+    const unknown = ids.filter(id => !this.entityNameCache()[id]);
+    if (!unknown.length) return;
+    this.api.getEntitiesByIds(spaceId, unknown).subscribe({
+      next: ({ entities }) => {
+        const patch: Record<string, string> = {};
+        for (const e of entities) patch[e._id] = e.name;
+        this.entityNameCache.update(c => ({ ...c, ...patch }));
+      },
+      error: () => {},
+    });
   }
 
   // ── Entity picker & flyouts ─────────────────────────────────────────────
@@ -2323,31 +2803,15 @@ export class BrainComponent implements OnInit {
       .map(id => ({ id, name: cache[id] ?? id }));
   }
 
-  jsonError(val: string): string {
-    if (!val.trim()) return '';
-    try { JSON.parse(val); return ''; }
-    catch (e) { return e instanceof Error ? e.message : 'Invalid JSON'; }
-  }
-
-  jsonKeyCount(val: string): number {
-    if (!val.trim()) return 0;
-    try { return Object.keys(JSON.parse(val)).length; }
-    catch { return 0; }
-  }
-
-  formatJson(target: { properties: string }): void {
-    if (!target.properties.trim()) return;
-    try { target.properties = JSON.stringify(JSON.parse(target.properties.trim()), null, 2); }
-    catch { }
-  }
-
   private resolveEntityNamesForFlyout(key: string): void {
     let ids = '';
     switch (key) {
       case 'create-memory-entityIds': ids = this.memoryForm.entityIds; break;
       case 'edit-memory-entityIds': ids = this.editMemory.entityIds; break;
+      case 'drawer-memory-entityIds': ids = this.drawerEditMemory.entityIds; break;
       case 'create-chrono-entityIds': ids = this.chronoForm.entityIds; break;
       case 'edit-chrono-entityIds': ids = this.editChrono.entityIds; break;
+      case 'drawer-chrono-entityIds': ids = this.drawerEditChrono.entityIds; break;
     }
     const spaceId = this.activeSpaceId();
     if (!spaceId) return;
@@ -2377,9 +2841,15 @@ export class BrainComponent implements OnInit {
       case 'edit-memory-entityIds':
         this.entityNameCache.update(c => ({ ...c, [ent._id]: ent.name }));
         this.editMemory.entityIds = this.appendEntityId(this.editMemory.entityIds, ent._id); break;
+      case 'drawer-memory-entityIds':
+        this.entityNameCache.update(c => ({ ...c, [ent._id]: ent.name }));
+        this.drawerEditMemory.entityIds = this.appendEntityId(this.drawerEditMemory.entityIds, ent._id); break;
       case 'edit-chrono-entityIds':
         this.entityNameCache.update(c => ({ ...c, [ent._id]: ent.name }));
         this.editChrono.entityIds = this.appendEntityId(this.editChrono.entityIds, ent._id); break;
+      case 'drawer-chrono-entityIds':
+        this.entityNameCache.update(c => ({ ...c, [ent._id]: ent.name }));
+        this.drawerEditChrono.entityIds = this.appendEntityId(this.drawerEditChrono.entityIds, ent._id); break;
     }
   }
 
