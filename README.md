@@ -18,7 +18,7 @@ Model structured knowledge with **entities** (named, typed, with properties), **
 
 ### Chrono Timeline
 
-Track events, deadlines, plans, predictions, and milestones with the **chrono** subsystem. Date-range filters, AND/OR tag queries, full-text search, kind/status filtering, and pagination come built in.
+Track events, deadlines, plans, predictions, and milestones with the **chrono** subsystem. Date-range filters, AND/OR tag queries, full-text search, type/status filtering, and pagination come built in.
 
 ### File Storage
 
@@ -26,7 +26,7 @@ Full file manager with **chunked upload** (5 MB pieces, progress tracking, autom
 
 ### Schema Validation
 
-Define allowed entity types, edge labels, naming patterns (regex), required properties, and property value schemas per space. Enforce them in **strict** mode (reject violations), **warn** mode (accept with warnings), or leave validation **off**. Schemas are evaluated on individual writes, bulk operations, and a dry-run `validate-schema` endpoint lets you audit existing data against a schema change before committing it.
+Define per-type schemas (`typeSchemas`) organised by knowledge type (`entity`, `edge`, `memory`, `chrono`) and type name. Each type entry can specify a naming pattern (regex), tag suggestions, and per-property schemas with `type` (string/number/boolean/date), `enum`, `minimum`/`maximum`, `pattern` (regex), `required`, `default`, and `mergeFn` constraints. Enforce them in **strict** mode (reject violations), **warn** mode (accept with warnings), or leave validation **off**. Schema files are auto-synced to the `schemas/` folder in the space file store on every save. Export and import the full schema as JSON from the Settings → Spaces → Schema tab or via the APIode (accept with warnings), or leave validation **off**. Schema files are auto-synced to the `schemas/` folder in the space file store on every save. Export and import the full schema as JSON from the Settings → Spaces → Schema tab or via the API.
 
 ### Bulk Operations
 

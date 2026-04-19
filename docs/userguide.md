@@ -153,7 +153,7 @@ The **Chrono** tab stores time-based entries: events, deadlines, plans, predicti
 | Field | Required | Description |
 |-------|----------|-------------|
 | `title` | Yes | Short summary of the entry. |
-| `kind` | Yes | One of `event`, `deadline`, `plan`, `prediction`, `milestone`. |
+| `type` | Yes | One of `event`, `deadline`, `plan`, `prediction`, `milestone`. |
 | `startsAt` | Yes | ISO 8601 start date/time. |
 | `endsAt` | No | ISO 8601 end date/time. |
 | `status` | No | `upcoming` (default), `active`, `completed`, `overdue`, `cancelled`. |
@@ -165,7 +165,7 @@ The **Chrono** tab stores time-based entries: events, deadlines, plans, predicti
 
 ### Creating from the UI
 
-Click **+ Add entry** in the Chrono tab. Fill in the title, select a kind (or type a custom kind), pick a start date/time, and optionally add a description, tags, and linked entities using the **entity picker flyout** (search by name, click to link, chips show linked items). Click **Save**.
+Click **+ Add entry** in the Chrono tab. Fill in the title, select a type (or type a custom type), pick a start date/time, and optionally add a description, tags, and linked entities using the **entity picker flyout** (search by name, click to link, chips show linked items). Click **Save**.
 
 ### Filtering
 
@@ -183,7 +183,7 @@ Each chrono row has an inline **✕ / Delete? / Yes / No** confirmation (no brow
 
 - `create_chrono` — create a new entry.
 - `update_chrono` — update an existing entry (change status, dates, etc.).
-- `list_chrono` — list entries, optionally filtered by `status`, `kind`, `tags` (ALL), `tagsAny` (ANY), `after`, `before`, or `search`.
+- `list_chrono` — list entries, optionally filtered by `status`, `type`, `tags` (ALL), `tagsAny` (ANY), `after`, `before`, or `search`.
 
 The `query` tool also supports `collection: "chrono"` for advanced MongoDB filter queries.
 
@@ -391,15 +391,16 @@ This is equivalent to `POST /api/admin/spaces/:spaceId/wipe` — see the [Integr
 
 ### Schema validation
 
-Each space can define a schema that governs what data is accepted. Open a space's settings to configure:
+Each space can define a schema that governs what data is accepted. Open a space's settings and switch to the **Schema** tab to configure:
 
 - **Validation mode** — `off` (default), `warn` (accept with warnings), or `strict` (reject violations).
-- **Entity types** — allowlist of valid entity `type` values (e.g. `service`, `team`, `concept`).
-- **Edge labels** — allowlist of valid edge `label` values (e.g. `depends_on`, `owns`).
-- **Naming patterns** — regex pattern per entity type to validate entity `name` (e.g. `service` names must match `^[a-z][a-z0-9-]+$`).
-- **Required properties** — per knowledge type (entity, memory, edge, chrono), list property keys that must be present on every write.
-- **Property schemas** — per knowledge type, define value constraints: `type` (string/number/boolean), `enum` (allowed values), `minimum`/`maximum` (numeric ranges), `pattern` (regex).
-- **Tag suggestions** — non-enforced hints shown in the UI to encourage consistent tagging.
+- **Type schemas** — a per-type schema tree (`typeSchemas`) organised by knowledge type (`entity`, `edge`, `memory`, `chrono`) and then by type name. Adding a type name under a knowledge type automatically creates its allowlist entry. For each named type you can configure:
+  - **Naming pattern** (entities only) — regex to validate entity `name` (e.g. `service` names must match `^[a-z][a-z0-9-]+$`).
+  - **Tag suggestions** — non-enforced tag hints for that specific type shown in the UI.
+  - **Property schemas** — per-property value constraints: `type` (string/number/boolean/date), `enum` (allowed values), `minimum`/`maximum` (numeric ranges), `pattern` (regex), `required` (must be present on every write), `default` (value inserted when absent), `mergeFn` (merge hint for entity merges).
+- **Global tag suggestions** — non-enforced hints shown in the UI across all knowledge types.
+
+**Schema export / import:** Use the **Export JSON** and **Import JSON** buttons at the top of the Schema tab to download or upload the full `typeSchemas` definition as a JSON file. Schemas are also auto-synced to `schemas/` in the space's file store on every save.
 
 When validation is `strict`, any write (individual or bulk) that violates the schema is rejected with a detailed error listing every violation. When `warn`, writes proceed but the response includes warnings. The `validate-schema` endpoint lets you dry-run a proposed schema change against existing data — see the [Integration Guide](integration-guide.md#validate-schema-dry-run).
 
@@ -758,7 +759,7 @@ If a space has a `description`, it is sent to the MCP client as `instructions` d
 | `traverse` | BFS graph traversal — follow edges from a starting entity up to N hops |
 | `create_chrono` | Create a chrono entry (event, deadline, plan, prediction, milestone) |
 | `update_chrono` | Update an existing chrono entry |
-| `list_chrono` | List chrono entries with filters for status, kind, tags, date range, and text search |
+| `list_chrono` | List chrono entries with filters for status, type, tags, date range, and text search |
 | `bulk_write` | Batch-upsert memories, entities, edges, and chrono entries in a single call |
 | `read_file` | Read a file from the space |
 | `write_file` | Write a file to the space (optional `description`, `tags`, and `properties` stored as metadata) |

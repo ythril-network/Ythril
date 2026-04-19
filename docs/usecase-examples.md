@@ -154,7 +154,7 @@ graph LR
 > **Club** governance lets the lead maintainer issue invite keys and approve joins unilaterally — no vote rounds needed. Fast onboarding when a new contributor earns trust, immediate removal if someone steps back.
 
 **Additional benefits:**
-- Release milestones as chrono entries (kind: `milestone`, `deadline`) keep the team aligned on timelines.
+- Release milestones as chrono entries (type: `milestone`, `deadline`) keep the team aligned on timelines.
 - Files sync design docs and diagrams alongside the knowledge graph.
 
 ---
@@ -265,7 +265,7 @@ graph LR
 **Wow factor:**
 - The LLM builds a knowledge graph *about you* over time — entities for your projects, edges for relationships, chrono entries for deadlines — and any future conversation can traverse it.
 - `recall_global` lets the LLM search across *all* your spaces at once: "What do I know about Kubernetes across my work KB, personal notes, and homelab docs?"
-- `create_chrono(kind: "prediction", confidence: 0.7)` → the LLM can track its own predictions and score itself over time.
+- `create_chrono(type: "prediction", confidence: 0.7)` → the LLM can track its own predictions and score itself over time.
 
 ---
 
@@ -296,7 +296,7 @@ graph LR
 
 **Wow factor:**
 - The knowledge graph connects **services → failure modes → fixes**: `upsert_edge("payment-service", "OOM", "fails_with")`, `upsert_edge("OOM", "maxItems=10000", "fixed_by")`. Next incident, the LLM walks the graph: "What has fixed OOM before?" — instant answer without digging through a wiki.
-- Chrono entries with `kind: "event"` timestamp every incident. `query(chrono, {entityIds: "payment-service", kind: "event"})` → "payment-service has had 4 incidents this quarter" — pattern detection for free.
+- Chrono entries with `type: "event"` timestamp every incident. `query(chrono, {entityIds: "payment-service", type: "event"})` → "payment-service has had 4 incidents this quarter" — pattern detection for free.
 - This syncs across the team. Engineer 1's 3am fix is in Engineer 2's brain by morning.
 
 ---
@@ -325,9 +325,9 @@ graph TD
 
 **Wow factor:**
 - `list_chrono({status: "overdue"})` — instant visibility into missed obligations across the org. No spreadsheet hunting.
-- `create_chrono({kind: "deadline", title: "DORA ICT risk assessment due", startsAt: "2026-06-30", entityIds: ["DORA", "ICT-risk"]})` → departments' LLMs can ask "What compliance deadlines do we have this quarter?" and get structured answers, not just documents.
+- `create_chrono({type: "deadline", title: "DORA ICT risk assessment due", startsAt: "2026-06-30", entityIds: ["DORA", "ICT-risk"]})` → departments' LLMs can ask "What compliance deadlines do we have this quarter?" and get structured answers, not just documents.
 - Braintree pushes mean the legal team publishes once and all departments receive. Departments **cannot** alter the authoritative deadline — temporal integrity by architecture.
-- `query(chrono, {kind: "prediction", confidence: {$gte: 0.5}})` → the legal team can even log risk predictions ("60% chance of regulatory change in Q3") and track them.
+- `query(chrono, {type: "prediction", confidence: {$gte: 0.5}})` → the legal team can even log risk predictions ("60% chance of regulatory change in Q3") and track them.
 
 ---
 
@@ -381,7 +381,7 @@ graph LR
 - `recall("Sarah Chen")` → every interaction, semantically ranked. Not a flat contact list — full conversational context.
 - `upsert_entity("Sarah Chen", "person", ["contact"], {company: "Acme Corp", role: "VP Platform"})` → structured data queryable with `query(entities, {properties.company: "Acme Corp"})` — "Who do I know at Acme Corp?"
 - `upsert_edge("Sarah Chen", "Acme Corp", "works_at")` + `upsert_edge("Sarah Chen", "KubeCon 2026", "met_at")` → graph traversal: "Who did I meet at KubeCon?" → follow edges → full context per person.
-- `create_chrono({kind: "deadline", title: "Follow up with Sarah Chen re: sync protocol", startsAt: "2026-06-01", entityIds: ["Sarah Chen"]})` → `list_chrono({status: "upcoming"})` → your LLM reminds you before the deadline.
+- `create_chrono({type: "deadline", title: "Follow up with Sarah Chen re: sync protocol", startsAt: "2026-06-01", entityIds: ["Sarah Chen"]})` → `list_chrono({status: "upcoming"})` → your LLM reminds you before the deadline.
 - Sync this space to your phone (closed network) and you have full context before every meeting, offline.
 
 ---
@@ -415,7 +415,7 @@ graph LR
 - Sales rep after a call: `remember("Acme Corp switched from Competitor X to Competitor Y because of pricing. Deal was $50k ARR.", entities: ["Acme Corp", "Competitor X", "Competitor Y"], tags: ["churn", "pricing"])`.
 - Product manager asks: `recall("Why are customers leaving Competitor X?")` → semantic search surfaces every relevant sales field note — no CRM required.
 - `query(edges, {to: "Competitor X", label: "churned_from"})` → structured view: who left Competitor X and why.
-- `create_chrono({kind: "event", title: "Competitor Y launched enterprise tier", startsAt: "2026-03-15", entityIds: ["Competitor Y"]})` → strategy team later queries: `query(chrono, {entityIds: "Competitor Y"})` → full competitor timeline. Fork-on-conflict preserves conflicting intelligence from different sources.
+- `create_chrono({type: "event", title: "Competitor Y launched enterprise tier", startsAt: "2026-03-15", entityIds: ["Competitor Y"]})` → strategy team later queries: `query(chrono, {entityIds: "Competitor Y"})` → full competitor timeline. Fork-on-conflict preserves conflicting intelligence from different sources.
 
 ---
 
@@ -469,7 +469,7 @@ graph LR
 - Read a paper → `remember("Smith et al. 2025 show that transformer attention degrades above 128k context. Tested on 3 benchmarks.", entities: ["Smith2025", "transformer-attention", "context-window"], tags: ["paper", "limitation"])` + `upsert_edge("Smith2025", "transformer-attention", "studies")` + `upsert_edge("Smith2025", "Jones2024", "contradicts")`.
 - Writing a paragraph → `recall("evidence for context window limitations")` → semantically ranked citations with full notes. Ask the LLM: "What papers support this claim?" — it walks the graph for `contradicts`, `supports`, `extends` edges.
 - `query(edges, {label: "contradicts"})` → instant map of all contradictions in your literature. `query(entities, {type: "paper", tags: {$in: ["unread"]}})` → reading backlog.
-- `create_chrono({kind: "deadline", title: "Submit to NeurIPS", startsAt: "2026-05-15"})` → time-aware research planning.
+- `create_chrono({type: "deadline", title: "Submit to NeurIPS", startsAt: "2026-05-15"})` → time-aware research planning.
 - Sync to a co-author via closed network → both researchers' graphs merge. Fork-on-conflict handles disagreements on interpretation — both views preserved.
 
 ---
@@ -605,7 +605,7 @@ graph TD
 - Partner asks: `recall("cloud migration cost overrun")` on the proxy → gets results from internal templates AND both client engagements, ranked by relevance, with `spaceId` showing which client each result came from.
 - Consultant on-site with Client Alpha has two spaces syncing to their laptop: `internal-kb` (club) and `client-alpha` (closed). Their LLM uses `recall_global` to search both. They get the firm's methodology templates alongside Alpha-specific context in one query.
 - Client Alpha's external instance syncs only `client-alpha` — they never see `internal-kb` or `client-beta`. Token-scoped, network-scoped, zero crossover.
-- `query(entities, {type: "deliverable", properties.status: "overdue"})` on the proxy → overdue deliverables across all clients. `list_chrono({status: "upcoming", kind: "deadline"})` → upcoming deadlines across all engagements.
+- `query(entities, {type: "deliverable", properties.status: "overdue"})` on the proxy → overdue deliverables across all clients. `list_chrono({status: "upcoming", type: "deadline"})` → upcoming deadlines across all engagements.
 - New client onboarded? Create space, create closed network, add to `proxyFor` on `partner-view`. The proxy starts including it immediately — no data migration, no restructuring.
 
 ---
@@ -652,7 +652,7 @@ graph TD
 
 **Three networks, three patterns, one hospital:**
 
-1. **`protocols` braintree** — Medical director pushes updated clinical protocols. Departments receive but cannot modify the authoritative source. `create_chrono({kind: "milestone", title: "Sepsis protocol v3 effective", startsAt: "2026-04-01"})` → every department's LLM knows when the new protocol takes effect.
+1. **`protocols` braintree** — Medical director pushes updated clinical protocols. Departments receive but cannot modify the authoritative source. `create_chrono({type: "milestone", title: "Sepsis protocol v3 effective", startsAt: "2026-04-01"})` → every department's LLM knows when the new protocol takes effect.
 
 2. **`knowledge` democratic** — Department heads share clinical learnings peer-to-peer. ED learns that a specific drug interaction is common → `remember(...)` → cardiology and radiology receive it on next sync. Majority+veto governance prevents a single department from pushing contested clinical claims.
 
@@ -700,8 +700,8 @@ graph LR
 - `remember("Roof repair $12k on rental property. Insurance claim filed ref #4821.", entities: ["rental-oak-st", "insurance"], tags: ["expense", "maintenance"])` into `property` space.
 - `recall("semiconductor exposure")` on the proxy → pulls trade history from `trading`, any related notes from `savings` (maybe a semiconductor ETF in your 401k), all ranked by relevance with `spaceId` attribution.
 - `query(entities, {type: "stock"})` on the proxy → every position across all accounts. `query(edges, {label: "thesis_for"})` → your investment thesis graph. "Why did I buy AMD again?" — instant recall.
-- `create_chrono({kind: "event", title: "NVDA earnings Q1 2026", startsAt: "2026-05-28", entityIds: ["NVDA"]})` → `list_chrono({status: "upcoming"})` → your LLM reminds you of catalysts tied to positions you actually hold.
-- `create_chrono({kind: "prediction", title: "AMD will outperform NVDA in inference workloads by Q4", confidence: 0.6, entityIds: ["AMD", "NVDA"]})` → track your own predictions. `query(chrono, {kind: "prediction", status: "expired"})` → "How good were my calls?"
+- `create_chrono({type: "event", title: "NVDA earnings Q1 2026", startsAt: "2026-05-28", entityIds: ["NVDA"]})` → `list_chrono({status: "upcoming"})` → your LLM reminds you of catalysts tied to positions you actually hold.
+- `create_chrono({type: "prediction", title: "AMD will outperform NVDA in inference workloads by Q4", confidence: 0.6, entityIds: ["AMD", "NVDA"]})` → track your own predictions. `query(chrono, {type: "prediction", status: "expired"})` → "How good were my calls?"
 - Everything stays on your hardware. Your brokerage data, trade theses, and spending patterns never touch a third-party API. Closed network sync to your laptop = offline access.
 
 ---
@@ -742,7 +742,7 @@ graph TD
 - FX analyst: `remember("EUR/USD broke 1.12 support on weak PMI. Next support at 1.095. ECB likely dovish June.", entities: ["EUR/USD", "ECB"], tags: ["technical", "macro"])`. Macro analyst: `remember("US PMI miss — manufacturing at 48.2, services at 51.1. Dollar weakening thesis intact.", entities: ["US-PMI", "USD"], tags: ["data", "leading-indicator"])`.
 - Desk head on the proxy: `recall("dollar weakening")` → gets the FX technical AND the macro data backing it, cross-correlated by semantic relevance. Two analysts, two spaces, one coherent picture.
 - `upsert_edge("EUR/USD", "ECB", "driven_by")` + `upsert_edge("ECB", "US-PMI", "reacts_to")` → the knowledge graph connects the causal chain across desks. `query(edges, {from: "ECB"})` → every factor the team has linked to ECB decisions.
-- `create_chrono({kind: "prediction", title: "EUR/USD hits 1.15 by August", confidence: 0.65, entityIds: ["EUR/USD"]})` → desk tracks analyst predictions over time. `query(chrono, {kind: "prediction", entityIds: "EUR/USD"})` → full prediction history with confidence scores.
+- `create_chrono({type: "prediction", title: "EUR/USD hits 1.15 by August", confidence: 0.65, entityIds: ["EUR/USD"]})` → desk tracks analyst predictions over time. `query(chrono, {type: "prediction", entityIds: "EUR/USD"})` → full prediction history with confidence scores.
 - Each desk is its own democratic network — analyst departure doesn't nuke the knowledge base. New analyst joins, syncs, instant full context.
 
 ---
@@ -827,7 +827,7 @@ graph LR
 
 **Wow factor:**
 - Parent A: `remember("Boiler annual service due in October. Last serviced by PlumbCo, invoice #8812.", entities: ["boiler", "PlumbCo"], tags: ["maintenance"])` → syncs to everyone. Next year, any family member's LLM: `recall("boiler service")` → full history.
-- `create_chrono({kind: "deadline", title: "Kid soccer tournament registration closes", startsAt: "2026-04-15", entityIds: ["soccer"]})` → `list_chrono({status: "upcoming"})` → the household LLM surfaces it to whoever asks.
+- `create_chrono({type: "deadline", title: "Kid soccer tournament registration closes", startsAt: "2026-04-15", entityIds: ["soccer"]})` → `list_chrono({status: "upcoming"})` → the household LLM surfaces it to whoever asks.
 - `upsert_entity("family-van", "vehicle", ["maintenance"], {mileage: 82000, nextService: "85000km"})` → `query(entities, {type: "vehicle"})` → "When is the van due for service?" Structured, not buried in a note.
 - Parent A's `private-a` space is **not in any network** — it never leaves the phone. Medical notes, financial planning, personal journal — truly private. The LLM on that phone can still `recall_global` across both `household` and `private-a` locally.
 - Kid's tablet has a space-scoped token for `household` (read/write) and `kids-school` (read/write). No access to parent private spaces — not by policy, by architecture.
@@ -871,7 +871,7 @@ graph TD
 - `remember("HVAC compressor failed 2026-03-15. Error code E-48. Tech replaced capacitor, $180.", entities: ["hvac-main", "E-48"], tags: ["failure", "repair"])` in `devices`. `remember("Energy spike 2026-03-14: 38 kWh consumed (vs 22 kWh avg). HVAC ran continuously.", entities: ["hvac-main"], tags: ["anomaly", "consumption"])` in `energy`.
 - `recall("why was energy high last week")` on the proxy → correlates the energy anomaly with the HVAC failure across two different spaces. Your LLM connects the dots: "The HVAC compressor was failing, causing it to run continuously the day before it died."
 - `upsert_entity("hvac-main", "device", ["climate"], {model: "Daikin RXB35", installed: "2022-06", warrantyEnd: "2027-06"})` → `query(entities, {type: "device", properties.warrantyEnd: {$lte: "2026-12"}})` → "Which devices have warranties expiring this year?"
-- `create_chrono({kind: "event", title: "Solar panels cleaned", startsAt: "2026-03-20", entityIds: ["solar-array"]})` + production data in `energy` space → correlate cleaning dates with production improvements over time.
+- `create_chrono({type: "event", title: "Solar panels cleaned", startsAt: "2026-03-20", entityIds: ["solar-array"]})` + production data in `energy` space → correlate cleaning dates with production improvements over time.
 - `remember("Set automation: if solar production > 4kW and battery > 80%, start dishwasher. Reason: minimize grid draw during peak tariff.", tags: ["automation", "solar", "tariff"])` in `automations` → six months later, `recall("why does the dishwasher run midday")` → instant answer with the original reasoning.
 - `query(edges, {label: "controls"})` → which automations control which devices. `query(edges, {from: "hvac-main"})` → everything linked to the HVAC: energy readings, failure history, automations, warranty info — across all three spaces via the proxy.
 - Phone sync means you can check energy production and device status from anywhere. Closed network = your smart home data never touches a cloud.

@@ -616,7 +616,7 @@ Searches **all knowledge types** (memories, entities, edges, chrono entries, and
 | `memory` | ✅ | `tags` + entity names + `fact` + `description` + `properties` | ✅ |
 | `entity` | ✅ | `name` + `type` + `tags` + `description` + `properties` | ✅ |
 | `edge` | ✅ | `tags` + `from` + `label` + `to` + `type` + `description` | ✅ |
-| `chrono` | ✅ | `kind` + `status` + `title` + `tags` + `description` | ✅ |
+| `chrono` | ✅ | `type` + `status` + `title` + `tags` + `description` | ✅ |
 | `file` | ✅ | `path` + `tags` + `description` | ✅ |
 
 ---
@@ -992,7 +992,7 @@ POST /api/brain/spaces/:spaceId/chrono
 ```json
 {
   "title": "Release v1.0",
-  "kind": "milestone",
+  "type": "milestone",
   "startsAt": "2026-06-01T00:00:00Z",
   "description": "First public release",
   "status": "upcoming",
@@ -1003,7 +1003,7 @@ POST /api/brain/spaces/:spaceId/chrono
 }
 ```
 
-- `kind` — `event`, `deadline`, `plan`, `prediction`, `milestone`
+- `type` — `event`, `deadline`, `plan`, `prediction`, `milestone`
 - `status` — `upcoming` (default), `active`, `completed`, `overdue`, `cancelled`
 - `confidence` — `0`–`1` (optional, useful for predictions)
 - `entityIds` — array of UUID v4 entity IDs (not names); returns `400` if any value is not a valid UUID and `strictLinkage` is enabled
@@ -1019,7 +1019,7 @@ POST /api/brain/spaces/:spaceId/chrono
 POST /api/brain/spaces/:spaceId/chrono/:id
 ```
 
-**Body**: partial object with any updatable fields (`title`, `kind`, `status`, `startsAt`, `endsAt`, `confidence`, `tags`, `entityIds`, `memoryIds`, `description`).
+**Body**: partial object with any updatable fields (`title`, `type`, `status`, `startsAt`, `endsAt`, `confidence`, `tags`, `entityIds`, `memoryIds`, `description`).
 
 **Response** `200` — the updated `ChronoEntry`.
 
@@ -1041,7 +1041,7 @@ GET /api/brain/spaces/:spaceId/chrono?limit=50&skip=0
 | `tagsAny` | comma-separated strings | Return entries where `tags` contains **ANY** listed value (OR semantics) |
 | `search` | string | Case-insensitive substring match on `title` and `description` |
 | `status` | string | Filter by status (`upcoming`, `active`, `completed`, `overdue`, `cancelled`) |
-| `kind` | string | Filter by kind (`event`, `deadline`, `plan`, `prediction`, `milestone`) |
+| `type` | string | Filter by type (`event`, `deadline`, `plan`, `prediction`, `milestone`) |
 | `limit` | number | Max entries to return (default 50, max 500) |
 | `skip` | number | Pagination offset (default 0) |
 
@@ -1146,7 +1146,7 @@ Each array is capped at 500 entries. Per-item validation failures are recorded i
   "memories":  [ { "fact": "Oceans cover 71% of the Earth's surface.", "tags": ["science"] } ],
   "entities":  [ { "name": "Earth", "type": "planet", "tags": ["science"] } ],
   "edges":     [ { "from": "<entity-id-A>", "to": "<entity-id-B>", "label": "orbits" } ],
-  "chrono":    [ { "title": "Launch day", "kind": "milestone", "startsAt": "2026-01-01T00:00:00Z" } ]
+  "chrono":    [ { "title": "Launch day", "type": "milestone", "startsAt": "2026-01-01T00:00:00Z" } ]
 }
 ```
 
@@ -1170,7 +1170,7 @@ Each item accepts the same fields as its corresponding individual endpoint (`POS
 
 Entity items in the `entities` array accept an optional `id` field (UUID v4). If `id` is supplied, the entity with that ID is updated (or created with that ID). If `id` is omitted, a new entity is always inserted. See [Upsert an Entity](#upsert-an-entity) for full identity semantics.
 
-**Schema validation:** When the target space has `validationMode` set to `strict` or `warn`, each item is validated against the space schema before writing. In strict mode, violating items are skipped and recorded in `errors` (e.g. `"schema_violation: type 'unknown' is not in entityTypes"`). In warn mode, violations are recorded as warnings but the item is written. See [Schema Validation](#schema-validation) for the full schema specification.
+**Schema validation:** When the target space has `validationMode` set to `strict` or `warn`, each item is validated against the space schema before writing. In strict mode, violating items are skipped and recorded in `errors` (e.g. `"schema_violation: type 'unknown' is not in typeSchemas.entity"`). In warn mode, violations are recorded as warnings but the item is written. See [Schema Validation](#schema-validation) for the full schema specification.
 
 **Proxy spaces:** add `?targetSpace=<member>` to route all writes to a specific member space.
 
@@ -1282,7 +1282,7 @@ PATCH /api/brain/spaces/:spaceId/memories/:id
 - Paths targeting non-existent keys are silently ignored (no error).
 - System fields (`id`, `_id`, `name`, `type`, `spaceId`, `createdAt`, `updatedAt`) **cannot** be deleted. Attempting to do so returns `400`.
 - Paths with empty segments (e.g. `"properties..key"`) are rejected with `400`.
-- If the result after `deleteFields` + merge violates `requiredProperties` in the space schema (with `validationMode: "strict"`), the request is rejected with `422` listing the missing required keys. No partial mutation occurs.
+- If the result after `deleteFields` + merge violates a `required: true` property schema in `typeSchemas` (with `validationMode: "strict"`), the request is rejected with `422` listing the missing required keys. No partial mutation occurs.
 - `deleteFields` can be the **only** parameter in the request body (no other updates needed).
 - Omitting `deleteFields` retains the existing merge behaviour — no breaking change for existing clients.
 - **Re-embedding:** deleting any content field (`properties`, `description`, `tags`, `fact`, `entityIds`) triggers re-embedding of the affected document. Bulk `deleteFields` updates may incur embedding service latency.
@@ -1294,7 +1294,7 @@ PATCH /api/brain/spaces/:spaceId/memories/:id
 | Status | Condition |
 |--------|-----------|
 | `400` | `deleteFields` is not an array of strings, contains empty strings, or targets a system field |
-| `422` | Post-deletion state violates `requiredProperties` in strict validation mode |
+| `422` | Post-deletion state violates a `required: true` property schema in strict validation mode |
 
 > **⚠️ Warning:** Fields deleted via `deleteFields` are **permanently removed**. Recovery requires audit logs or a backup. The explicit path list design is intentional — accidental data loss requires consciously naming each field to remove.
 
@@ -1598,16 +1598,31 @@ Update space properties. Requires an admin token (+ TOTP if MFA is enabled). At 
   "meta": {
     "purpose": "Team engineering knowledge base.",
     "validationMode": "strict",
-    "entityTypes": ["service", "team", "technology", "concept"],
-    "edgeLabels": ["depends_on", "owns", "related_to"],
-    "namingPatterns": { "service": "^[a-z][a-z0-9-]{1,60}$" },
-    "requiredProperties": { "entity": ["status"] },
-    "propertySchemas": {
+    "typeSchemas": {
       "entity": {
-        "status": { "type": "string", "enum": ["active", "deprecated", "planned"] },
-        "score": { "type": "number", "minimum": 0, "maximum": 100, "mergeFn": "avg" },
-        "count": { "type": "number", "mergeFn": "sum" },
-        "active": { "type": "boolean", "mergeFn": "and" }
+        "service": {
+          "namingPattern": "^[a-z][a-z0-9-]{1,60}$",
+          "tagSuggestions": ["backend", "frontend", "infra"],
+          "propertySchemas": {
+            "status": { "type": "string", "enum": ["active", "deprecated", "planned"], "required": true },
+            "score":  { "type": "number", "minimum": 0, "maximum": 100, "mergeFn": "avg" }
+          }
+        },
+        "team": {},
+        "technology": {},
+        "concept": {}
+      },
+      "edge": {
+        "depends_on": {},
+        "owns": {},
+        "related_to": {}
+      },
+      "memory": {
+        "default": {
+          "propertySchemas": {
+            "count": { "type": "number", "mergeFn": "sum" }
+          }
+        }
       }
     },
     "tagSuggestions": ["backend", "frontend", "infra"],
@@ -1652,12 +1667,21 @@ Returns the full schema definition for a space along with derived stats.
   "purpose": "Team engineering knowledge base.",
   "usageNotes": "Markdown-formatted usage guidance for the web UI.",
   "validationMode": "strict",
-  "entityTypes": ["service", "team", "technology"],
-  "edgeLabels": ["depends_on", "owns"],
-  "namingPatterns": { "service": "^[a-z][a-z0-9-]{1,60}$" },
-  "requiredProperties": { "entity": ["status"] },
-  "propertySchemas": {
-    "entity": { "status": { "type": "string", "enum": ["active", "deprecated"] } }
+  "typeSchemas": {
+    "entity": {
+      "service": {
+        "namingPattern": "^[a-z][a-z0-9-]{1,60}$",
+        "tagSuggestions": ["backend", "frontend"],
+        "propertySchemas": {
+          "status": { "type": "string", "enum": ["active", "deprecated"], "required": true }
+        }
+      },
+      "team": {}
+    },
+    "edge": {
+      "depends_on": {},
+      "owns": {}
+    }
   },
   "tagSuggestions": ["backend", "frontend"],
   "stats": { "memories": 142, "entities": 53, "edges": 87, "chrono": 12, "files": 31 }
@@ -1684,7 +1708,9 @@ Scans existing data against the current (or proposed) schema definition without 
 {
   "meta": {
     "validationMode": "strict",
-    "entityTypes": ["service", "person"]
+    "typeSchemas": {
+      "entity": { "service": {}, "person": {} }
+    }
   }
 }
 ```
@@ -1694,14 +1720,14 @@ Scans existing data against the current (or proposed) schema definition without 
 ```json
 {
   "spaceId": "eng-kb",
-  "meta": { "validationMode": "strict", "entityTypes": ["service", "person"], "..." : "..." },
+  "meta": { "validationMode": "strict", "typeSchemas": { "entity": { "service": {}, "person": {} } }, "..." : "..." },
   "totalViolations": 3,
   "violations": [
     {
       "collection": "entities",
       "_id": "550e8400-e29b-41d4-a716-446655440000",
       "violations": [
-        { "field": "type", "value": "concept", "reason": "type 'concept' is not in entityTypes" }
+        { "field": "type", "value": "concept", "reason": "type 'concept' is not in typeSchemas.entity" }
       ]
     }
   ]
@@ -1722,26 +1748,89 @@ Each space can define a schema in its `meta` block that governs what data is acc
 | `warn` | Violations are returned as `warnings` in the response but writes proceed. |
 | `strict` | Violations cause a `400` with `{ "error": "schema_violation", "violations": [...] }`. |
 
-**Schema fields:**
+**Schema structure — `typeSchemas`:**
 
-| Field | Applies to | Description |
-|-------|-----------|-------------|
-| `entityTypes` | entities | Allowlist of valid `type` values (max 200). |
-| `edgeLabels` | edges | Allowlist of valid `label` values (max 200). |
-| `namingPatterns` | entities | Regex pattern per entity type for validating `name` (max 500 chars, ReDoS-protected). |
-| `requiredProperties` | entity, memory, edge, chrono | Array of required property keys per knowledge type. |
-| `propertySchemas` | entity, memory, edge, chrono | Property value constraints per knowledge type — `type` (string/number/boolean), `enum`, `minimum`/`maximum`, `pattern` (regex, ReDoS-protected), `mergeFn` (merge function for entity merges). |
-| `tagSuggestions` | all | Non-enforced tag hints shown in the UI (max 200). |
-| `strictLinkage` | edges, memories, chrono, entity delete | When `true`, all reference fields (`from`/`to`, `entityIds`, `memoryIds`) must be valid UUID v4 values, and entity deletion is blocked while inbound backlinks exist. Default: `false` (off). |
+The schema is expressed as a single `typeSchemas` object on the space `meta`. It groups configuration by knowledge type (`entity`, `edge`, `memory`, `chrono`) and then by type name (e.g. `"service"`, `"depends_on"`). Each entry is a `TypeSchema` object:
+
+```typescript
+interface TypeSchema {
+  namingPattern?: string;                         // entity only — regex for name validation
+  tagSuggestions?: string[];                      // non-enforced tag hints for this type
+  propertySchemas?: Record<string, PropertySchema>;
+}
+interface PropertySchema {
+  type?: 'string' | 'number' | 'boolean' | 'date';
+  enum?: (string | number | boolean)[];
+  minimum?: number;
+  maximum?: number;
+  pattern?: string;    // regex, ReDoS-protected
+  mergeFn?: 'avg' | 'min' | 'max' | 'sum' | 'and' | 'or' | 'xor';  // entity merge hint
+  required?: boolean;  // if true, property must be present on every write
+  default?: string | number | boolean;  // value inserted when property is absent
+}
+```
+
+**`typeSchemas` example:**
+
+```json
+{
+  "typeSchemas": {
+    "entity": {
+      "service": {
+        "namingPattern": "^[a-z][a-z0-9-]{1,60}$",
+        "tagSuggestions": ["backend", "frontend"],
+        "propertySchemas": {
+          "status": { "type": "string", "enum": ["active", "deprecated"], "required": true },
+          "score":  { "type": "number", "minimum": 0, "maximum": 100, "mergeFn": "avg" }
+        }
+      },
+      "team": {}
+    },
+    "edge": {
+      "depends_on": {},
+      "owns": {}
+    },
+    "memory": {
+      "default": {
+        "propertySchemas": {
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1, "default": 1 }
+        }
+      }
+    },
+    "chrono": {
+      "milestone": {
+        "tagSuggestions": ["release", "launch"]
+      }
+    }
+  }
+}
+```
+
+What the schema enforces:
+- **Entity type allowlist** — the keys of `typeSchemas.entity` (e.g. `"service"`, `"team"`) define the allowed entity `type` values (max 200 per knowledge type).
+- **Edge label allowlist** — the keys of `typeSchemas.edge` define the allowed edge `label` values.
+- **Chrono type allowlist** — the keys of `typeSchemas.chrono` define the allowed `type` values.
+- **Memory type allowlist** — the keys of `typeSchemas.memory` define the allowed `type` values.
+- **Naming patterns** (`namingPattern`) — per entity type, a regex for validating `name` (max 500 chars, ReDoS-protected).
+- **Property value constraints** (`propertySchemas`) — per type, define `type` (string/number/boolean/date), `enum`, `minimum`/`maximum`, `pattern` (regex, ReDoS-protected), `required`, `default`, and `mergeFn`.
+- **Tag suggestions** (`tagSuggestions`) — non-enforced hints shown in the UI, per type or globally.
+
+**Top-level `meta` fields:**
+
+| Field | Description |
+|-------|-------------|
+| `typeSchemas` | Per-type schema definitions (see above). |
+| `tagSuggestions` | Global non-enforced tag hints shown in the UI for all knowledge types (max 200). |
+| `strictLinkage` | When `true`, all reference fields (`from`/`to`, `entityIds`, `memoryIds`) must be valid UUID v4 values, and entity deletion is blocked while inbound backlinks exist. Default: `false`. |
 
 Schema validation runs on:
 - Individual writes: `POST /entities`, `POST /edges`, `POST /memories`, `POST /chrono`
 - Bulk writes: `POST /bulk` (per-item; strict skips violating items, warn records warnings)
 - MCP tools: `remember`, `upsert_entity`, `upsert_edge`, `create_chrono`, `bulk_write`
 
-**Security:** Regex patterns in `namingPatterns` and `propertySchemas` are protected against ReDoS: patterns are limited to 500 characters, test values to 10K characters, and structural analysis rejects nested quantifiers and alternation-with-quantifier patterns.
+**Security:** Regex patterns in `namingPattern` and `propertySchemas.pattern` are protected against ReDoS: patterns are limited to 500 characters, test values to 10K characters, and structural analysis rejects nested quantifiers and alternation-with-quantifier patterns.
 
-**`mergeFn` in propertySchemas:** Optional merge function for entity properties. Used as the default `suggestedFn` when merging entities via `POST /entities/:survivorId/merge/:absorbedId`. Valid values depend on the declared `type`:
+**`mergeFn` in `propertySchemas`:** Optional merge function for entity properties. Used as the default `suggestedFn` when merging entities via `POST /entities/:survivorId/merge/:absorbedId`. Valid values depend on the declared `type`:
 
 | Type | Valid `mergeFn` values |
 |------|----------------------|
@@ -3045,7 +3134,7 @@ Dumps the entire knowledge base of a space as a single JSON document. Requires a
   "memories": [ { "_id": "...", "fact": "...", "tags": [], "...": "..." } ],
   "entities": [ { "_id": "...", "name": "...", "type": "...", "...": "..." } ],
   "edges":    [ { "_id": "...", "from": "...", "to": "...", "label": "...", "...": "..." } ],
-  "chrono":   [ { "_id": "...", "title": "...", "kind": "...", "...": "..." } ],
+  "chrono":   [ { "_id": "...", "title": "...", "type": "...", "...": "..." } ],
   "files":    [ { "_id": "...", "path": "...", "...": "..." } ]
 }
 ```
@@ -3713,7 +3802,7 @@ Content-Type: application/json
 | `traverse` | BFS graph traversal — follow edges from a starting entity up to `maxDepth` hops |
 | `create_chrono` | Create a chrono entry (event, deadline, plan, prediction, milestone) |
 | `update_chrono` | Update an existing chrono entry |
-| `list_chrono` | List chrono entries, optionally filtered by status, kind, tags, date range, or text search |
+| `list_chrono` | List chrono entries, optionally filtered by status, type, tags, date range, or text search |
 | `bulk_write` | Batch-upsert memories, entities, edges, and/or chrono entries in a single call (schema-validated) |
 | `read_file` | Read a text file from the space file store |
 | `write_file` | Write a text file to the space file store (optional `description` and `tags` stored as metadata) |
@@ -3767,7 +3856,7 @@ Content-Type: application/json
 | `memory` | ✅ | `tags` + entity names + `fact` + `description` + `properties` | ✅ |
 | `entity` | ✅ | `name` + `type` + `tags` + `description` + `properties` | ✅ |
 | `edge` | ✅ | `tags` + `from` + `label` + `to` + `type` + `description` | ✅ |
-| `chrono` | ✅ | `kind` + `status` + `title` + `tags` + `description` | ✅ |
+| `chrono` | ✅ | `type` + `status` + `title` + `tags` + `description` | ✅ |
 | `file` | ✅ | `path` + `tags` + `description` | ✅ |
 
 **Parameters:**
