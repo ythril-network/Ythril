@@ -381,10 +381,10 @@ import { ApiService, Space, TokenRecord } from '../../core/api.service';
                     @else if (t.readOnly) { <span class="badge-readonly">read-only</span> }
                     @else { <span class="badge badge-gray">standard</span> }
                   </td>
-                  <td style="color:var(--text-muted)">{{ t.createdAt | date:'MMM d, y' }}</td>
+                  <td style="color:var(--text-muted)">{{ t.createdAt | date:'dd.MM.yyyy' }}</td>
                   <td style="color:var(--text-muted)">
                     @if (t.lastUsed) {
-                      {{ t.lastUsed | date:'MMM d, y' }}
+                      {{ t.lastUsed | date:'dd.MM.yyyy' }}
                     } @else {
                       <span style="font-style:italic;">Never used</span>
                     }
@@ -392,7 +392,7 @@ import { ApiService, Space, TokenRecord } from '../../core/api.service';
                   <td>
                     @if (t.expiresAt) {
                       <span class="badge" [class.badge-red]="isExpired(t)" [class.badge-gray]="!isExpired(t)">
-                        {{ isExpired(t) ? 'Expired' : '' }} {{ t.expiresAt | date:'MMM d, y' }}
+                        {{ isExpired(t) ? 'Expired' : '' }} {{ t.expiresAt | date:'dd.MM.yyyy' }}
                       </span>
                     } @else {
                       <span class="badge badge-green">No expiry</span>

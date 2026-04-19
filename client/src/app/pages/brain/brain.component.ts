@@ -733,7 +733,7 @@ interface SpaceView {
                         } @else { <span style="color:var(--text-muted)">—</span> }
                       </td>
                       <td><app-properties-view [properties]="mem.properties" [schema]="memorySchema()" /></td>
-                      <td style="color:var(--text-muted)">{{ mem.createdAt | date:'MMM d, y' }}</td>
+                      <td style="color:var(--text-muted)">{{ mem.createdAt | date:'dd.MM.yyyy' }}</td>
                       <td style="white-space:nowrap;">
                         <button class="icon-btn" title="View details" aria-label="View details" (click)="openDrawer('memory', mem)">⊙</button>
                         @if (confirmDeleteId() === mem._id) {
@@ -905,7 +905,7 @@ interface SpaceView {
                         @if (!(ent.tags?.length)) { <span style="color:var(--text-muted)">—</span> }
                       </td>
                       <td><app-properties-view [properties]="ent.properties" [schema]="entitySchema(ent.type)" /></td>
-                      <td style="color:var(--text-muted)">{{ ent.createdAt | date:'MMM d, y' }}</td>
+                      <td style="color:var(--text-muted)">{{ ent.createdAt | date:'dd.MM.yyyy' }}</td>
                       <td style="white-space:nowrap;">
                         <button class="icon-btn" title="View details" aria-label="View details" (click)="openDrawer('entity', ent)">⊙</button>
                         @if (confirmDeleteId() === ent._id) {
@@ -1095,7 +1095,7 @@ interface SpaceView {
                         {{ edge.description || '—' }}
                       </td>
                       <td><app-properties-view [properties]="edge.properties" [schema]="edgeSchema(edge.label)" /></td>
-                      <td style="color:var(--text-muted); white-space:nowrap;">{{ edge.createdAt | date:'MMM d, y' }}</td>
+                      <td style="color:var(--text-muted); white-space:nowrap;">{{ edge.createdAt | date:'dd.MM.yyyy' }}</td>
                       <td style="white-space:nowrap;">
                         <button class="icon-btn" title="View details" aria-label="View details" (click)="openDrawer('edge', edge)">⊙</button>
                         @if (confirmDeleteId() === edge._id) {
@@ -1313,8 +1313,8 @@ interface SpaceView {
                       </td>
                       <td><span class="badge badge-blue">{{ entry.type }}</span></td>
                       <td><span class="badge" [class.badge-purple]="entry.status === 'upcoming'" [class.badge-blue]="entry.status === 'active'" style="font-size:11px">{{ entry.status }}</span></td>
-                      <td style="color:var(--text-muted); font-size:12px">{{ entry.startsAt | date:'MMM d, y HH:mm' }}</td>
-                      <td style="color:var(--text-muted); font-size:12px">{{ entry.endsAt ? (entry.endsAt | date:'MMM d, y HH:mm') : '—' }}</td>
+                      <td style="color:var(--text-muted); font-size:12px">{{ entry.startsAt | date:'dd.MM.yyyy HH:mm' }}</td>
+                      <td style="color:var(--text-muted); font-size:12px">{{ entry.endsAt ? (entry.endsAt | date:'dd.MM.yyyy HH:mm') : '—' }}</td>
                       <td>
                         @for (tag of entry.tags; track tag) { <span class="tag">{{ tag }}</span> }
                       </td>
@@ -1520,7 +1520,7 @@ interface SpaceView {
                           </div>
                         </td>
                         <td class="text-muted" style="white-space:nowrap;">{{ (fm.sizeBytes / 1024).toFixed(1) }} KB</td>
-                        <td class="text-muted" style="white-space:nowrap;">{{ fm.updatedAt | date:'short' }}</td>
+                        <td class="text-muted" style="white-space:nowrap;">{{ fm.updatedAt | date:'dd.MM.yyyy HH:mm' }}</td>
                         <td class="actions-cell">
                           @if (confirmDeleteId() === fm._id) {
                             <span class="delete-confirm">

@@ -106,7 +106,11 @@ export class PropertiesViewComponent {
   formatValue(key: string, val: unknown): string {
     if (this.schema?.[key]?.type === 'date' && typeof val === 'string' && val) {
       const d = new Date(val.length === 10 ? val + 'T12:00:00Z' : val);
-      if (!isNaN(d.getTime())) return d.toLocaleDateString(navigator.language);
+      if (!isNaN(d.getTime())) {
+        const day = String(d.getDate()).padStart(2, '0');
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        return `${day}.${month}.${d.getFullYear()}`;
+      }
     }
     return String(val ?? '');
   }

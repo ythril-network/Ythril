@@ -80,7 +80,7 @@ type ResolveAction = 'keep-local' | 'keep-incoming' | 'keep-both' | 'save-to-spa
                   </span>
                 </td>
                 <td style="color:var(--text-muted); white-space:nowrap">
-                  {{ c.detectedAt | date:'MMM d, y HH:mm' }}
+                  {{ c.detectedAt | date:'dd.MM.yyyy HH:mm' }}
                 </td>
                 <td>
                   <select [(ngModel)]="conflictActions[c.id]"

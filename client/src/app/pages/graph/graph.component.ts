@@ -571,7 +571,7 @@ interface DetailRow {
                     }
                   </td>
                   <td class="props-cell">{{ row.properties | json }}</td>
-                  <td>{{ row.createdAt | date:'short' }}</td>
+                  <td>{{ row.createdAt | date:'dd.MM.yyyy' }}</td>
                   <td><button class="icon-btn" (click)="openDetailPopup(row)">👁</button></td>
                 </tr>
               } @empty {

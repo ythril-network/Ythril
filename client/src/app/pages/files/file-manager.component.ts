@@ -369,7 +369,7 @@ function previewKind(name: string): PreviewKind {
                     <td style="color:var(--text-muted)">
                       {{ entry.isDirectory ? '—' : formatSize(entry.size) }}
                     </td>
-                    <td style="color:var(--text-muted)">{{ entry.modified | date:'MMM d, y HH:mm' }}</td>
+                    <td style="color:var(--text-muted)">{{ entry.modified | date:'dd.MM.yyyy HH:mm' }}</td>
                     <td style="display:flex; gap:6px; align-items:center;">
                       @if (entry.isFile) {
                         <button class="btn-ghost btn btn-sm" (click)="openPreview(entry)" aria-label="Preview file" title="Preview">👁</button>
@@ -453,7 +453,7 @@ function previewKind(name: string): PreviewKind {
                 <dl class="preview-meta">
                   <dt>Name</dt><dd>{{ pf.name }}</dd>
                   <dt>Size</dt><dd>{{ formatSize(pf.size) }}</dd>
-                  <dt>Modified</dt><dd>{{ pf.modified | date:'MMM d, y HH:mm' }}</dd>
+                  <dt>Modified</dt><dd>{{ pf.modified | date:'dd.MM.yyyy HH:mm' }}</dd>
                 </dl>
               }
             }

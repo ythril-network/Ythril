@@ -252,7 +252,7 @@ import { ApiService, InviteBundle, Network, Space, SyncHistoryRecord, VoteRound 
                   } @else {
                     @for (rec of historyForNet(net.id); track rec._id) {
                       <div class="history-row">
-                        <span style="color:var(--text-muted);">{{ rec.completedAt | date:'short' }}</span>
+                        <span style="color:var(--text-muted);">{{ rec.completedAt | date:'dd.MM.yyyy HH:mm' }}</span>
                         <span class="status-badge" [ngClass]="'status-' + rec.status">{{ rec.status }}</span>
                         <span>
                           ↓ {{ rec.pulled.memories + rec.pulled.entities + rec.pulled.edges }}
