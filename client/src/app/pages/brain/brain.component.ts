@@ -618,11 +618,7 @@ interface SpaceView {
               </div>
               <div class="field" style="flex:1; min-width:220px;">
                 <label>Properties</label>
-                <app-properties-editor
-                  [schema]="spaceMeta()?.propertySchemas?.['memory']"
-                  [required]="spaceMeta()?.requiredProperties?.['memory']"
-                  [(value)]="memoryForm.properties"
-                />
+                <app-properties-editor [schema]="memorySchema()" [required]="requiredProps(memorySchema())" [(value)]="memoryForm.properties" />
               </div>
               <button class="btn-primary btn btn-sm" type="submit" [disabled]="creatingMemory() || !memoryForm.fact.trim()">
                 @if (creatingMemory()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
@@ -702,8 +698,8 @@ interface SpaceView {
                           <div class="field" style="flex:1; min-width:220px; margin-bottom:0;">
                             <label>Properties</label>
                             <app-properties-editor
-                              [schema]="spaceMeta()?.propertySchemas?.['memory']"
-                              [required]="spaceMeta()?.requiredProperties?.['memory']"
+                              [schema]="memorySchema()"
+                              [required]="requiredProps(memorySchema())"
                               [(value)]="editMemory.properties"
                             />
                           </div>
@@ -736,7 +732,7 @@ interface SpaceView {
                           </div>
                         } @else { <span style="color:var(--text-muted)">—</span> }
                       </td>
-                      <td><app-properties-view [properties]="mem.properties" [schema]="spaceMeta()?.propertySchemas?.['memory']" /></td>
+                      <td><app-properties-view [properties]="mem.properties" [schema]="memorySchema()" /></td>
                       <td style="color:var(--text-muted)">{{ mem.createdAt | date:'MMM d, y' }}</td>
                       <td style="white-space:nowrap;">
                         <button class="icon-btn" title="View details" aria-label="View details" (click)="openDrawer('memory', mem)">⊙</button>
@@ -801,10 +797,10 @@ interface SpaceView {
                 <input type="text" [(ngModel)]="entityForm.name" name="name" required />
               </div>
               <div class="field" style="width:140px;">
-                <label>Type @if (spaceMeta()?.entityTypes?.length) { <span style="color:var(--error)">*</span> }</label>
-                @if (spaceMeta()?.entityTypes?.length) {
+                <label>Type @if (entityTypeNames().length) { <span style="color:var(--error)">*</span> }</label>
+                @if (entityTypeNames().length) {
                   <select [(ngModel)]="entityForm.type" name="type" required (ngModelChange)="onEntityTypeChange($event, 'create')">
-                    @for (t of spaceMeta()!.entityTypes!; track t) {
+                    @for (t of entityTypeNames(); track t) {
                       <option [value]="t">{{ t }}</option>
                     }
                   </select>
@@ -823,12 +819,12 @@ interface SpaceView {
               <div class="field" style="flex:1; min-width:220px;">
                 <label>Properties</label>
                 <app-properties-editor
-                  [schema]="spaceMeta()?.propertySchemas?.['entity']"
-                  [required]="spaceMeta()?.requiredProperties?.['entity']"
+                  [schema]="entitySchema(entityForm.type)"
+                  [required]="requiredProps(entitySchema(entityForm.type))"
                   [(value)]="entityForm.properties"
                 />
               </div>
-              <button class="btn-primary btn btn-sm" type="submit" [disabled]="creatingEntity() || !entityForm.name.trim() || (spaceMeta()?.entityTypes?.length ? !entityForm.type : false)">
+              <button class="btn-primary btn btn-sm" type="submit" [disabled]="creatingEntity() || !entityForm.name.trim() || (entityTypeNames().length ? !entityForm.type : false)">
                 @if (creatingEntity()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
                 Save
               </button>
@@ -858,10 +854,10 @@ interface SpaceView {
                             <input type="text" [(ngModel)]="editEntity.name" name="editEntName" />
                           </div>
                           <div class="field" style="width:120px; margin-bottom:0;">
-                            <label>Type @if (spaceMeta()?.entityTypes?.length) { <span style="color:var(--error)">*</span> }</label>
-                            @if (spaceMeta()?.entityTypes?.length) {
+                            <label>Type @if (entityTypeNames().length) { <span style="color:var(--error)">*</span> }</label>
+                            @if (entityTypeNames().length) {
                               <select [(ngModel)]="editEntity.type" name="editEntType" (ngModelChange)="onEntityTypeChange($event, 'inline')">
-                                @for (t of spaceMeta()!.entityTypes!; track t) {
+                                @for (t of entityTypeNames(); track t) {
                                   <option [value]="t">{{ t }}</option>
                                 }
                               </select>
@@ -880,8 +876,8 @@ interface SpaceView {
                           <div class="field" style="flex:1; min-width:220px; margin-bottom:0;">
                             <label>Properties</label>
                             <app-properties-editor
-                              [schema]="spaceMeta()?.propertySchemas?.['entity']"
-                              [required]="spaceMeta()?.requiredProperties?.['entity']"
+                              [schema]="entitySchema(editEntity.type)"
+                              [required]="requiredProps(entitySchema(editEntity.type))"
                               [(value)]="editEntity.properties"
                             />
                           </div>
@@ -908,7 +904,7 @@ interface SpaceView {
                         @for (tag of (ent.tags ?? []); track tag) { <span class="tag">{{ tag }}</span> }
                         @if (!(ent.tags?.length)) { <span style="color:var(--text-muted)">—</span> }
                       </td>
-                      <td><app-properties-view [properties]="ent.properties" [schema]="spaceMeta()?.propertySchemas?.['entity']" /></td>
+                      <td><app-properties-view [properties]="ent.properties" [schema]="entitySchema(ent.type)" /></td>
                       <td style="color:var(--text-muted)">{{ ent.createdAt | date:'MMM d, y' }}</td>
                       <td style="white-space:nowrap;">
                         <button class="icon-btn" title="View details" aria-label="View details" (click)="openDrawer('entity', ent)">⊙</button>
@@ -972,9 +968,9 @@ interface SpaceView {
               </div>
               <div class="field" style="flex:1; min-width:120px;">
                 <label>Label (relation) <span style="color:var(--error)">*</span></label>
-                @if (spaceMeta()?.edgeLabels?.length) {
+                @if (edgeLabelNames().length) {
                   <select [(ngModel)]="edgeForm.label" name="label" required>
-                    @for (l of spaceMeta()!.edgeLabels!; track l) {
+                    @for (l of edgeLabelNames(); track l) {
                       <option [value]="l">{{ l }}</option>
                     }
                   </select>
@@ -1008,8 +1004,8 @@ interface SpaceView {
               <div class="field" style="flex:1; min-width:220px;">
                 <label>Properties</label>
                 <app-properties-editor
-                  [schema]="spaceMeta()?.propertySchemas?.['edge']"
-                  [required]="spaceMeta()?.requiredProperties?.['edge']"
+                  [schema]="edgeSchema(edgeForm.label)"
+                  [required]="requiredProps(edgeSchema(edgeForm.label))"
                   [(value)]="edgeForm.properties"
                 />
               </div>
@@ -1045,9 +1041,9 @@ interface SpaceView {
                           </div>
                           <div class="field" style="flex:1; min-width:120px; margin-bottom:0;">
                             <label>Label (relation)</label>
-                            @if (spaceMeta()?.edgeLabels?.length) {
+                            @if (edgeLabelNames().length) {
                               <select [(ngModel)]="editEdge.label" name="editEdgeLabel">
-                                @for (l of spaceMeta()!.edgeLabels!; track l) {
+                                @for (l of edgeLabelNames(); track l) {
                                   <option [value]="l">{{ l }}</option>
                                 }
                               </select>
@@ -1070,8 +1066,8 @@ interface SpaceView {
                           <div class="field" style="flex:1; min-width:220px; margin-bottom:0;">
                             <label>Properties</label>
                             <app-properties-editor
-                              [schema]="spaceMeta()?.propertySchemas?.['edge']"
-                              [required]="spaceMeta()?.requiredProperties?.['edge']"
+                              [schema]="edgeSchema(editEdge.label)"
+                              [required]="requiredProps(edgeSchema(editEdge.label))"
                               [(value)]="editEdge.properties"
                             />
                           </div>
@@ -1098,7 +1094,7 @@ interface SpaceView {
                       <td style="font-size:12px; color:var(--text-muted); white-space:normal; word-break:break-word; min-width:140px; min-height:4.2em;">
                         {{ edge.description || '—' }}
                       </td>
-                      <td><app-properties-view [properties]="edge.properties" [schema]="spaceMeta()?.propertySchemas?.['edge']" /></td>
+                      <td><app-properties-view [properties]="edge.properties" [schema]="edgeSchema(edge.label)" /></td>
                       <td style="color:var(--text-muted); white-space:nowrap;">{{ edge.createdAt | date:'MMM d, y' }}</td>
                       <td style="white-space:nowrap;">
                         <button class="icon-btn" title="View details" aria-label="View details" (click)="openDrawer('edge', edge)">⊙</button>
@@ -1315,7 +1311,7 @@ interface SpaceView {
                       <td style="font-size:12px; color:var(--text-muted); max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" [title]="entry.description ?? ''">
                         {{ entry.description || '—' }}
                       </td>
-                      <td><span class="badge badge-blue">{{ entry.kind }}</span></td>
+                      <td><span class="badge badge-blue">{{ entry.type }}</span></td>
                       <td><span class="badge" [class.badge-purple]="entry.status === 'upcoming'" [class.badge-blue]="entry.status === 'active'" style="font-size:11px">{{ entry.status }}</span></td>
                       <td style="color:var(--text-muted); font-size:12px">{{ entry.startsAt | date:'MMM d, y HH:mm' }}</td>
                       <td style="color:var(--text-muted); font-size:12px">{{ entry.endsAt ? (entry.endsAt | date:'MMM d, y HH:mm') : '—' }}</td>
@@ -1759,7 +1755,7 @@ interface SpaceView {
                 </div>
                 <div class="drawer-field">
                   <div class="drawer-label">properties</div>
-                  <app-properties-editor [schema]="spaceMeta()?.propertySchemas?.['memory']" [required]="spaceMeta()?.requiredProperties?.['memory']" [(value)]="drawerEditMemory.properties" />
+                  <app-properties-editor [schema]="memorySchema()" [required]="requiredProps(memorySchema())" [(value)]="drawerEditMemory.properties" />
                 </div>
                 <hr class="drawer-hr">
                 <div class="drawer-field">
@@ -1789,10 +1785,10 @@ interface SpaceView {
                   <input type="text" [(ngModel)]="drawerEditEntity.name" name="drwEntName" />
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">type @if (spaceMeta()?.entityTypes?.length) { <span style="color:var(--error)">*</span> }</div>
-                  @if (spaceMeta()?.entityTypes?.length) {
+                  <div class="drawer-label">type @if (entityTypeNames().length) { <span style="color:var(--error)">*</span> }</div>
+                  @if (entityTypeNames().length) {
                     <select [(ngModel)]="drawerEditEntity.type" name="drwEntType" (ngModelChange)="onEntityTypeChange($event, 'drawer')">
-                      @for (t of spaceMeta()!.entityTypes!; track t) {
+                      @for (t of entityTypeNames(); track t) {
                         <option [value]="t">{{ t }}</option>
                       }
                     </select>
@@ -1810,7 +1806,7 @@ interface SpaceView {
                 </div>
                 <div class="drawer-field">
                   <div class="drawer-label">properties</div>
-                  <app-properties-editor [schema]="spaceMeta()?.propertySchemas?.['entity']" [required]="spaceMeta()?.requiredProperties?.['entity']" [(value)]="drawerEditEntity.properties" />
+                  <app-properties-editor [schema]="entitySchema(drawerEditEntity.type)" [required]="requiredProps(entitySchema(drawerEditEntity.type))" [(value)]="drawerEditEntity.properties" />
                 </div>
                 <hr class="drawer-hr">
                 <div class="drawer-field">
@@ -1831,9 +1827,9 @@ interface SpaceView {
                 </div>
                 <div class="drawer-field">
                   <div class="drawer-label">label <span style="color:var(--error)">*</span></div>
-                  @if (spaceMeta()?.edgeLabels?.length) {
+                  @if (edgeLabelNames().length) {
                     <select [(ngModel)]="drawerEditEdge.label" name="drwEdgeLabel">
-                      @for (l of spaceMeta()!.edgeLabels!; track l) {
+                      @for (l of edgeLabelNames(); track l) {
                         <option [value]="l">{{ l }}</option>
                       }
                     </select>
@@ -1863,7 +1859,7 @@ interface SpaceView {
                 </div>
                 <div class="drawer-field">
                   <div class="drawer-label">properties</div>
-                  <app-properties-editor [schema]="spaceMeta()?.propertySchemas?.['edge']" [required]="spaceMeta()?.requiredProperties?.['edge']" [(value)]="drawerEditEdge.properties" />
+                  <app-properties-editor [schema]="edgeSchema(drawerEditEdge.label)" [required]="requiredProps(edgeSchema(drawerEditEdge.label))" [(value)]="drawerEditEdge.properties" />
                 </div>
                 <hr class="drawer-hr">
                 <div class="drawer-field">

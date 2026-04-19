@@ -1,4 +1,4 @@
-﻿import { Component, inject, signal, OnInit } from '@angular/core';
+﻿import { Component, inject, signal, OnInit, ElementRef, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
@@ -235,6 +235,16 @@ interface TypeSchemaState {
 
             <!-- SCHEMA TAB -->
             @if (settingsTab() === 'schema') {
+              <!-- export / import toolbar -->
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
+                <button class="btn btn-secondary btn-sm" type="button" (click)="exportSchema()" title="Download all typeSchemas as JSON">↓ Export JSON</button>
+                <button class="btn btn-secondary btn-sm" type="button" (click)="triggerImportSchema()" title="Merge types from a JSON file">↑ Import JSON</button>
+                <input #schImportInput type="file" accept=".json,application/json" style="display:none" (change)="onImportSchemaFile($event)" />
+                @if (schImportError) {
+                  <span style="font-size:12px;color:var(--error);">{{ schImportError }}</span>
+                }
+                <span style="font-size:11px;color:var(--text-muted);margin-left:4px;">Schemas auto-sync to <code>schemas/</code> in the space files on save.</span>
+              </div>
               <!-- collection tabs -->
               <div class="sch-coll-tabs">
                 <button class="sch-coll-tab" [class.active]="schemaCollTab()==='entity'" (click)="schemaCollTab.set('entity')">
@@ -736,6 +746,9 @@ export class SpacesComponent implements OnInit {
   schNewTypeInputs:  Record<string, string> = { entity: '', memory: '', edge: '', chrono: '' };
   schExpandedType:   { kt: KnowledgeType; name: string } | null = null;
   schExpandedProp:   { kt: KnowledgeType; typeName: string; propKey: string } | null = null;
+  schImportError     = '';
+
+  @ViewChild('schImportInput') schImportInputRef?: ElementRef<HTMLInputElement>;
 
   // danger zone
   dangerRenameId    = '';
@@ -932,6 +945,84 @@ export class SpacesComponent implements OnInit {
     }
     if (Object.keys(typeSchemas).length) meta.typeSchemas = typeSchemas;
     return meta;
+  }
+
+  // ── Schema export / import ─────────────────────────────────────────────────
+
+  exportSchema(): void {
+    const space = this.settingsSpace();
+    if (!space) return;
+    const meta = this.buildMeta();
+    const payload = {
+      spaceId:     space.id,
+      spaceLabel:  space.label,
+      exportedAt:  new Date().toISOString(),
+      typeSchemas: meta.typeSchemas ?? {},
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `${space.id}_schemas.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  triggerImportSchema(): void {
+    this.schImportError = '';
+    this.schImportInputRef?.nativeElement.click();
+  }
+
+  onImportSchemaFile(event: Event): void {
+    const file = (event.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const raw = JSON.parse(reader.result as string);
+        // Accept either { typeSchemas: {...} } wrapper or bare typeSchemas object
+        const ts: unknown = raw?.typeSchemas ?? raw;
+        if (!ts || typeof ts !== 'object' || Array.isArray(ts)) {
+          this.schImportError = 'Invalid schema file — expected a typeSchemas object.';
+          return;
+        }
+        const KINDS: KnowledgeType[] = ['entity', 'edge', 'memory', 'chrono'];
+        const merged = { ...this.schTypeSchemas };
+        for (const kt of KINDS) {
+          const ktRaw = (ts as Record<string, unknown>)[kt];
+          if (!ktRaw || typeof ktRaw !== 'object' || Array.isArray(ktRaw)) continue;
+          const ktMap = ktRaw as Record<string, unknown>;
+          const existing = { ...(merged[kt] ?? {}) };
+          for (const [typeName, tsRaw] of Object.entries(ktMap)) {
+            const ts2 = tsRaw as Record<string, unknown>;
+            existing[typeName] = {
+              namingPattern:   typeof ts2['namingPattern'] === 'string' ? ts2['namingPattern'] : '',
+              tagSuggestions:  Array.isArray(ts2['tagSuggestions']) ? [...ts2['tagSuggestions'] as string[]] : [],
+              propertySchemas: (() => {
+                const ps = ts2['propertySchemas'];
+                if (!ps || typeof ps !== 'object' || Array.isArray(ps)) return [];
+                return Object.entries(ps as Record<string, unknown>).map(([k, v]) => ({
+                  key: k,
+                  s:   { ...(v as PropertySchema) },
+                  _enumInput: '',
+                }));
+              })(),
+              _newPropInput: '',
+              _newTagInput:  '',
+            };
+          }
+          merged[kt] = existing;
+        }
+        this.schTypeSchemas = merged;
+        this.schImportError = '';
+      } catch {
+        this.schImportError = 'Could not parse JSON file.';
+      } finally {
+        // Reset the input so the same file can be re-imported if needed
+        if (this.schImportInputRef) this.schImportInputRef.nativeElement.value = '';
+      }
+    };
+    reader.readAsText(file);
   }
 
   // ── typeSchemas helpers ────────────────────────────────────────────────────

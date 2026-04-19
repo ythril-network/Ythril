@@ -3,9 +3,34 @@ import fs from 'fs/promises';
 import path from 'path';
 import { getDb, col } from '../db/mongo.js';
 import { getConfig, saveConfig, getEmbeddingConfig, getDataRoot } from '../config/loader.js';
-import { ensureSpaceFilesDir } from '../files/files.js';
+import { ensureSpaceFilesDir, writeFile as writeSpaceFile } from '../files/files.js';
 import { log } from '../util/log.js';
-import type { SpaceConfig, SpaceMeta, MemoryDoc } from '../config/types.js';
+import type { SpaceConfig, SpaceMeta, MemoryDoc, KnowledgeType } from '../config/types.js';
+
+const SCHEMA_KTS: KnowledgeType[] = ['entity', 'edge', 'memory', 'chrono'];
+
+/**
+ * Write per-type schema JSON files into the space's `schemas/` folder.
+ * File name: `schemas/<spaceId>_<kt>_<typeName>.json`
+ * This is best-effort — errors are logged but never propagated.
+ */
+export async function syncSchemaFiles(spaceId: string, meta: SpaceMeta | undefined): Promise<void> {
+  if (!meta?.typeSchemas) return;
+  try {
+    for (const kt of SCHEMA_KTS) {
+      const ktMap = meta.typeSchemas[kt];
+      if (!ktMap) continue;
+      for (const [typeName, typeSchema] of Object.entries(ktMap)) {
+        const safeName = typeName.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120);
+        const filePath = `schemas/${spaceId}_${kt}_${safeName}.json`;
+        const content = JSON.stringify(typeSchema, null, 2);
+        await writeSpaceFile(spaceId, filePath, content);
+      }
+    }
+  } catch (err) {
+    log.warn(`syncSchemaFiles(${spaceId}): ${err}`);
+  }
+}
 
 const SPACE_COLLECTIONS = ['memories', 'entities', 'edges', 'chrono', 'tombstones', 'conflicts', 'files'] as const;
 
@@ -190,6 +215,8 @@ export async function initAllSpaces(): Promise<void> {
   for (const space of cfg.spaces) {
     log.debug(`Initialising space: ${space.id}`);
     await initSpace(space.id);
+    // Sync schema files on boot so the schemas/ folder stays current
+    await syncSchemaFiles(space.id, space.meta);
   }
 }
 
@@ -471,6 +498,8 @@ export function updateSpace(
   }
 
   saveConfig(cfg);
+  // Fire-and-forget schema file sync
+  syncSchemaFiles(spaceId, space.meta).catch(err => log.warn(`syncSchemaFiles: ${err}`));
   return space;
 }
 
