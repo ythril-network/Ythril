@@ -61,13 +61,18 @@ import {
     .dz-section.dz-red { border-color:var(--danger); }
     .dz-section-title { font-weight:600; margin-bottom:6px; font-size:14px; }
     .dz-section.dz-red .dz-section-title { color:var(--danger); }
-    /* ── schema: collection inner tabs ── */
+    /* ── schema: top-level collection tabs ── */
     .sch-coll-tabs { display:flex; border-bottom:2px solid var(--border); margin-bottom:0; overflow-x:auto; gap:0; flex-shrink:0; }
-    .sch-coll-tab { background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; padding:9px 18px; cursor:pointer; font-size:12px; font-family:var(--font); color:var(--text-muted); display:inline-flex; align-items:center; gap:6px; transition:color .15s; white-space:nowrap; }
+    .sch-coll-tab { background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; padding:10px 22px; cursor:pointer; font-size:13px; font-family:var(--font); color:var(--text-muted); display:inline-flex; align-items:center; gap:6px; transition:color .15s; white-space:nowrap; }
     .sch-coll-tab:hover { color:var(--text-primary); }
     .sch-coll-tab.active { color:var(--text-primary); border-bottom-color:var(--accent); font-weight:600; }
     .sch-cnt-badge { background:color-mix(in srgb,var(--accent) 15%,transparent); color:var(--accent); font-size:10px; font-weight:700; border-radius:10px; padding:1px 6px; min-width:18px; text-align:center; }
-    .sch-coll-body { padding:18px 0 0; }
+    .sch-coll-body { padding:20px 0 0; }
+    /* ── type-list table (entity types / edge labels) ── */
+    .type-table { width:100%; border-collapse:collapse; font-size:13px; margin-bottom:0; }
+    .type-table th { text-align:left; font-size:11px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em; padding:5px 10px; border-bottom:1px solid var(--border); background:var(--bg-elevated); }
+    .type-table td { padding:8px 10px; border-bottom:1px solid var(--border); vertical-align:middle; }
+    .type-table tr:hover td { background:var(--bg-elevated); }
     /* ── property rows ── */
     .prop-row { cursor:pointer; user-select:none; }
     .prop-row:hover td { background:var(--bg-elevated); }
@@ -81,6 +86,8 @@ import {
     .req-toggle { display:inline-flex; align-items:center; gap:6px; font-size:12px; cursor:pointer; color:var(--text-muted); background:none; border:1px solid var(--border); font-family:var(--font); padding:3px 10px; border-radius:var(--radius-sm); transition:all .15s; }
     .req-toggle:hover { background:var(--bg-elevated); color:var(--text-primary); border-color:color-mix(in srgb,var(--accent) 40%,transparent); }
     .req-toggle.is-req { color:var(--warning,#f59e0b); border-color:color-mix(in srgb,var(--warning,#f59e0b) 50%,transparent); background:color-mix(in srgb,var(--warning,#f59e0b) 8%,transparent); font-weight:600; }
+    /* ── schema sub-section headers ── */
+    .sch-sub { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; color:var(--text-muted); padding:14px 0 8px; margin-bottom:2px; }
   `],
   template: `
     <!-- CREATE DIALOG -->
@@ -222,224 +229,287 @@ import {
             @if (settingsTab() === 'schema') {
               <!-- collection tabs -->
               <div class="sch-coll-tabs">
-                <button class="sch-coll-tab" [class.active]="schemaCollTab()==='memory'" (click)="schemaCollTab.set('memory')">
-                  Memories @if (schPropSchemas['memory'].length) { <span class="sch-cnt-badge">{{ schPropSchemas['memory'].length }}</span> }
-                </button>
                 <button class="sch-coll-tab" [class.active]="schemaCollTab()==='entity'" (click)="schemaCollTab.set('entity')">
-                  Entities @if (schPropSchemas['entity'].length) { <span class="sch-cnt-badge">{{ schPropSchemas['entity'].length }}</span> }
+                  Entities
+                  @if (schEntityTypes.length) { <span class="sch-cnt-badge">{{ schEntityTypes.length }}</span> }
                 </button>
                 <button class="sch-coll-tab" [class.active]="schemaCollTab()==='edge'" (click)="schemaCollTab.set('edge')">
-                  Edges @if (schPropSchemas['edge'].length) { <span class="sch-cnt-badge">{{ schPropSchemas['edge'].length }}</span> }
+                  Edges
+                  @if (schEdgeLabels.length) { <span class="sch-cnt-badge">{{ schEdgeLabels.length }}</span> }
+                </button>
+                <button class="sch-coll-tab" [class.active]="schemaCollTab()==='memory'" (click)="schemaCollTab.set('memory')">
+                  Memories
+                  @if (schPropSchemas['memory'].length) { <span class="sch-cnt-badge">{{ schPropSchemas['memory'].length }}</span> }
                 </button>
                 <button class="sch-coll-tab" [class.active]="schemaCollTab()==='chrono'" (click)="schemaCollTab.set('chrono')">
-                  Chrono @if (schPropSchemas['chrono'].length) { <span class="sch-cnt-badge">{{ schPropSchemas['chrono'].length }}</span> }
+                  Chrono
+                  @if (schPropSchemas['chrono'].length) { <span class="sch-cnt-badge">{{ schPropSchemas['chrono'].length }}</span> }
                 </button>
-                <button class="sch-coll-tab" [class.active]="schemaCollTab()==='vocab'" (click)="schemaCollTab.set('vocab')">Vocabulary</button>
               </div>
               <div class="sch-coll-body">
 
-                <!-- ── VOCABULARY ── -->
-                @if (schemaCollTab() === 'vocab') {
-                  <div class="sch-section">
-                    <div class="sch-section-title">Entity Types</div>
-                    <div class="chip-wrap">
-                      @for (t of schEntityTypes; track t) {
-                        <span class="chip">{{ t }}<button type="button" class="chip-rm" (click)="removeEntityType(t)">×</button></span>
-                      }
-                      <input type="text" class="chip-field" [(ngModel)]="chipInputs['entityType']"
-                        [placeholder]="schEntityTypes.length ? '' : 'Add type + Enter'"
-                        (keydown)="onChipKey($event,'entityTypes','entityType')" />
-                    </div>
-                    <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Allowed entity types. Empty = any type accepted.</div>
-                  </div>
-                  @if (schEntityTypes.length > 0) {
-                    <div class="sch-section">
-                      <div class="sch-section-title">Naming Patterns <span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;">(regex per entity type)</span></div>
-                      <div style="display:grid;gap:8px;">
-                        @for (et of schEntityTypes; track et) {
-                          <div style="display:flex;align-items:center;gap:10px;">
-                            <span style="font-family:var(--font-mono);font-size:12px;color:var(--accent);min-width:140px;flex-shrink:0;">{{ et }}</span>
-                            <input type="text" [ngModel]="schNamingPatterns[et]"
-                              (ngModelChange)="updateNamingPattern(et,$event)"
-                              placeholder="^[A-Z].* (optional regex)" style="flex:1;" />
-                          </div>
-                        }
-                      </div>
-                    </div>
-                  }
-                  <div class="sch-section">
-                    <div class="sch-section-title">Edge Labels</div>
-                    <div class="chip-wrap">
-                      @for (t of schEdgeLabels; track t) {
-                        <span class="chip">{{ t }}<button type="button" class="chip-rm" (click)="schEdgeLabels=schEdgeLabels.filter(x=>x!==t)">×</button></span>
-                      }
-                      <input type="text" class="chip-field" [(ngModel)]="chipInputs['edgeLabel']"
-                        [placeholder]="schEdgeLabels.length ? '' : 'Add label + Enter'"
-                        (keydown)="onChipKey($event,'edgeLabels','edgeLabel')" />
-                    </div>
-                    <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Allowed relationship labels. Empty = any label accepted.</div>
-                  </div>
-                  <div class="sch-section">
-                    <div class="sch-section-title">Tag Suggestions</div>
-                    <div class="chip-wrap">
-                      @for (t of schTagSuggestions; track t) {
-                        <span class="chip">{{ t }}<button type="button" class="chip-rm" (click)="schTagSuggestions=schTagSuggestions.filter(x=>x!==t)">×</button></span>
-                      }
-                      <input type="text" class="chip-field" [(ngModel)]="chipInputs['tag']"
-                        [placeholder]="schTagSuggestions.length ? '' : 'Add tag + Enter'"
-                        (keydown)="onChipKey($event,'tags','tag')" />
-                    </div>
-                    <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Hints surfaced to clients. Any tag is still accepted.</div>
-                  </div>
-                }
+                <!-- ═══════════════════════════ ENTITIES ═══════════════════════════ -->
+                @if (schemaCollTab() === 'entity') {
 
-                <!-- ── COLLECTION TABS (memory / entity / edge / chrono) ── -->
-                @for (kt of KINDS; track kt) {
-                  @if (schemaCollTab() === kt) {
-                    <!-- required fields strip -->
-                    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid var(--border);">
-                      <span style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);white-space:nowrap;">Required</span>
-                      <div class="chip-wrap" style="flex:1;min-height:30px;">
-                        @for (p of schRequiredProps[kt]; track p) {
-                          <span class="chip">{{ p }}<button type="button" class="chip-rm" (click)="removeRequiredProp(kt,p)">×</button></span>
-                        }
-                        <input type="text" class="chip-field"
-                          [(ngModel)]="chipInputs['req'+kt]"
-                          [placeholder]="schRequiredProps[kt].length ? '' : 'field name + Enter'"
-                          (keydown)="onChipKey($event,'req_'+kt,'req'+kt)" />
-                      </div>
-                    </div>
-                    <!-- property schemas -->
-                    <table class="prop-table" style="margin-bottom:0;">
+                  <!-- Types section -->
+                  <div class="sch-sub">Types <span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);">— allowlist for entity.type field; empty = any value accepted</span></div>
+                  <div class="table-wrapper" style="margin-bottom:0;">
+                    <table class="type-table">
                       <thead>
                         <tr>
-                          <th style="width:190px;">Property</th>
-                          <th style="width:80px;">Type</th>
-                          <th>Constraints</th>
-                          <th style="width:68px;"></th>
+                          <th style="width:200px;">Type name</th>
+                          <th>Naming pattern <span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;">(regex for entity.name)</span></th>
+                          <th style="width:48px;"></th>
                         </tr>
                       </thead>
                       <tbody>
-                        @for (p of schPropSchemas[kt]; track p.key) {
-                          <tr class="prop-row" [class.prow-open]="isPropExpanded(kt,p.key)"
-                            (click)="togglePropExpand(kt,p.key)">
+                        @for (et of schEntityTypes; track et) {
+                          <tr>
+                            <td><span style="font-family:var(--font-mono);font-size:13px;color:var(--accent);">{{ et }}</span></td>
                             <td>
-                              <div style="display:flex;align-items:center;gap:7px;">
-                                <span style="font-family:var(--font-mono);font-size:12px;">{{ p.key }}</span>
-                                @if (isRequired(kt,p.key)) {
-                                  <span style="font-size:10px;background:color-mix(in srgb,var(--warning,#f59e0b) 16%,transparent);color:var(--warning,#f59e0b);border-radius:3px;padding:1px 5px;font-weight:700;">req</span>
-                                }
-                              </div>
+                              <input type="text" [ngModel]="schNamingPatterns[et]"
+                                (ngModelChange)="updateNamingPattern(et,$event)"
+                                placeholder="^[A-Z].* (optional)" style="width:100%;max-width:320px;" />
                             </td>
-                            <td><span class="badge badge-gray" style="font-size:11px;">{{ p.s.type ?? 'any' }}</span></td>
-                            <td style="font-size:11px;color:var(--text-muted);">
-                              @if (p.s.enum?.length) { <span class="badge badge-gray" style="font-size:10px;margin-right:3px;">enum {{ p.s.enum!.length }}</span> }
-                              @if (p.s.minimum!==undefined) { <span style="margin-right:4px;">min:{{ p.s.minimum }}</span> }
-                              @if (p.s.maximum!==undefined) { <span style="margin-right:4px;">max:{{ p.s.maximum }}</span> }
-                              @if (p.s.pattern) { <span style="margin-right:4px;">pattern</span> }
-                              @if (p.s.mergeFn) { <span class="badge badge-blue" style="font-size:10px;">{{ p.s.mergeFn }}</span> }
-                            </td>
-                            <td (click)="$event.stopPropagation()">
-                              <div style="display:flex;gap:4px;justify-content:flex-end;">
-                                <button class="btn btn-ghost btn-sm" type="button" (click)="togglePropExpand(kt,p.key)"
-                                  style="font-size:10px;padding:2px 8px;min-width:28px;">
-                                  {{ isPropExpanded(kt,p.key) ? '▲' : '▼' }}
-                                </button>
-                                <button class="icon-btn danger" type="button" (click)="removeProp(kt,p.key)" title="Remove">✕</button>
-                              </div>
+                            <td>
+                              <button class="icon-btn danger" type="button" (click)="removeEntityType(et)" title="Remove type">✕</button>
                             </td>
                           </tr>
-                          @if (isPropExpanded(kt,p.key)) {
-                            <tr class="prop-expand-row" (click)="$event.stopPropagation()">
-                              <td colspan="4" style="padding:0;">
-                                <div class="pdet">
-                                  <!-- header -->
-                                  <div class="pdet-head">
-                                    <span class="pdet-key">{{ p.key }}</span>
-                                    <label class="req-toggle" [class.is-req]="isRequired(kt,p.key)">
-                                      <input type="checkbox" [checked]="isRequired(kt,p.key)" (change)="toggleRequired(kt,p.key)" style="pointer-events:none;" />
-                                      Required
-                                    </label>
-                                    <button class="icon-btn danger" type="button" (click)="removeProp(kt,p.key)" title="Remove property">✕</button>
-                                  </div>
-                                  <!-- fields grid -->
-                                  <div class="pdet-fields">
-                                    <div class="field" style="margin:0;">
-                                      <label>Type</label>
-                                      <select [(ngModel)]="p.s.type">
-                                        <option [ngValue]="undefined">any</option>
-                                        <option value="string">string</option>
-                                        <option value="number">number</option>
-                                        <option value="boolean">boolean</option>
-                                      </select>
-                                    </div>
-                                    <div class="field" style="margin:0;">
-                                      <label>Merge function</label>
-                                      <select [(ngModel)]="p.s.mergeFn">
-                                        <option [ngValue]="undefined">—</option>
-                                        <option value="avg">avg</option><option value="min">min</option>
-                                        <option value="max">max</option><option value="sum">sum</option>
-                                        <option value="and">and</option><option value="or">or</option>
-                                        <option value="xor">xor</option>
-                                      </select>
-                                    </div>
-                                    @if (p.s.type==='string'||p.s.type===undefined) {
-                                      <div class="field" style="margin:0;">
-                                        <label>Pattern <span style="font-size:10px;font-weight:400;color:var(--text-muted);">(regex)</span></label>
-                                        <input type="text" [(ngModel)]="p.s.pattern" placeholder="^[A-Z].*" />
-                                      </div>
-                                    }
-                                    @if (p.s.type==='number'||p.s.type===undefined) {
-                                      <div class="field" style="margin:0;">
-                                        <label>Min</label>
-                                        <input type="number" [(ngModel)]="p.s.minimum" placeholder="—" />
-                                      </div>
-                                      <div class="field" style="margin:0;">
-                                        <label>Max</label>
-                                        <input type="number" [(ngModel)]="p.s.maximum" placeholder="—" />
-                                      </div>
-                                    }
-                                  </div>
-                                  <!-- enum values -->
-                                  @if (p.s.type !== 'boolean') {
-                                    <div class="pdet-full">
-                                      <div class="field" style="margin:0;">
-                                        <label>Enum values <span style="font-size:11px;font-weight:normal;color:var(--text-muted);">— restrict to exact set</span></label>
-                                        <div class="chip-wrap">
-                                          @for (ev of (p.s.enum??[]); track ev) {
-                                            <span class="chip">{{ ev }}<button type="button" class="chip-rm" (click)="removeEnumVal(kt,p.key,ev)">×</button></span>
-                                          }
-                                          <input type="text" class="chip-field" [(ngModel)]="p._enumInput"
-                                            placeholder="value + Enter" (keydown)="onEnumKey($event,kt,p.key)" />
-                                        </div>
-                                      </div>
-                                    </div>
-                                  }
-                                </div>
-                              </td>
-                            </tr>
-                          }
                         } @empty {
                           <tr>
-                            <td colspan="4" style="padding:28px 0;text-align:center;color:var(--text-muted);font-size:13px;font-style:italic;">
-                              No property schemas yet — add one below.
+                            <td colspan="3" style="padding:24px;text-align:center;color:var(--text-muted);font-size:13px;font-style:italic;">
+                              No entity types defined — all types accepted.
                             </td>
                           </tr>
                         }
                       </tbody>
                     </table>
-                    <!-- add property -->
-                    <div style="display:flex;gap:8px;align-items:center;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">
-                      <input type="text" [(ngModel)]="schPropInputs[kt]" placeholder="New property name"
-                        style="flex:1;max-width:220px;"
-                        (keydown.enter)="$event.preventDefault();addProp(kt)" />
-                      <button class="btn btn-secondary btn-sm" type="button"
-                        (click)="addProp(kt)" [disabled]="!schPropInputs[kt].trim()">+ Add</button>
-                    </div>
-                  }
+                  </div>
+                  <!-- add type -->
+                  <div style="display:flex;gap:8px;align-items:center;margin-top:8px;padding-top:8px;">
+                    <input type="text" [(ngModel)]="chipInputs['entityType']" placeholder="New type name"
+                      style="flex:1;max-width:200px;"
+                      (keydown.enter)="$event.preventDefault();addChip('entityTypes','entityType')" />
+                    <button class="btn btn-secondary btn-sm" type="button"
+                      (click)="addChip('entityTypes','entityType')" [disabled]="!chipInputs['entityType']?.trim()">+ Add type</button>
+                  </div>
+
+                  <!-- Properties section -->
+                  <div class="sch-sub" style="margin-top:28px;">Property schemas <span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);">— applied to all entities regardless of type</span></div>
+                  <ng-container *ngTemplateOutlet="propTable; context: { kt: 'entity' }"></ng-container>
+
+                  <!-- Tag suggestions -->
+                  <div class="sch-sub" style="margin-top:28px;">Tag suggestions</div>
+                  <div class="chip-wrap">
+                    @for (t of schTagSuggestions; track t) {
+                      <span class="chip">{{ t }}<button type="button" class="chip-rm" (click)="schTagSuggestions=schTagSuggestions.filter(x=>x!==t)">×</button></span>
+                    }
+                    <input type="text" class="chip-field" [(ngModel)]="chipInputs['tag']"
+                      [placeholder]="schTagSuggestions.length ? '' : 'Add suggestion + Enter'"
+                      (keydown)="onChipKey($event,'tags','tag')" />
+                  </div>
+                  <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Hints surfaced in UI autocomplete. Any tag is still accepted.</div>
+                }
+
+                <!-- ═══════════════════════════ EDGES ═══════════════════════════ -->
+                @if (schemaCollTab() === 'edge') {
+
+                  <!-- Labels section -->
+                  <div class="sch-sub">Labels <span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);">— allowlist for edge.label field; empty = any value accepted</span></div>
+                  <div class="table-wrapper" style="margin-bottom:0;">
+                    <table class="type-table">
+                      <thead>
+                        <tr>
+                          <th>Label</th>
+                          <th style="width:48px;"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        @for (el of schEdgeLabels; track el) {
+                          <tr>
+                            <td><span style="font-family:var(--font-mono);font-size:13px;color:var(--accent);">{{ el }}</span></td>
+                            <td>
+                              <button class="icon-btn danger" type="button" (click)="schEdgeLabels=schEdgeLabels.filter(x=>x!==el)" title="Remove label">✕</button>
+                            </td>
+                          </tr>
+                        } @empty {
+                          <tr>
+                            <td colspan="2" style="padding:24px;text-align:center;color:var(--text-muted);font-size:13px;font-style:italic;">
+                              No edge labels defined — all labels accepted.
+                            </td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                  </div>
+                  <!-- add label -->
+                  <div style="display:flex;gap:8px;align-items:center;margin-top:8px;padding-top:8px;">
+                    <input type="text" [(ngModel)]="chipInputs['edgeLabel']" placeholder="New label"
+                      style="flex:1;max-width:200px;"
+                      (keydown.enter)="$event.preventDefault();addChip('edgeLabels','edgeLabel')" />
+                    <button class="btn btn-secondary btn-sm" type="button"
+                      (click)="addChip('edgeLabels','edgeLabel')" [disabled]="!chipInputs['edgeLabel']?.trim()">+ Add label</button>
+                  </div>
+
+                  <!-- Properties section -->
+                  <div class="sch-sub" style="margin-top:28px;">Property schemas <span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);">— applied to all edges regardless of label</span></div>
+                  <ng-container *ngTemplateOutlet="propTable; context: { kt: 'edge' }"></ng-container>
+                }
+
+                <!-- ═══════════════════════════ MEMORIES ═══════════════════════════ -->
+                @if (schemaCollTab() === 'memory') {
+                  <ng-container *ngTemplateOutlet="propTable; context: { kt: 'memory' }"></ng-container>
+                }
+
+                <!-- ═══════════════════════════ CHRONO ═══════════════════════════ -->
+                @if (schemaCollTab() === 'chrono') {
+                  <ng-container *ngTemplateOutlet="propTable; context: { kt: 'chrono' }"></ng-container>
                 }
 
               </div><!-- sch-coll-body -->
+
+              <!-- ── shared property-schema table template ── -->
+              <ng-template #propTable let-kt="kt">
+                <!-- required fields -->
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--border);">
+                  <span style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);white-space:nowrap;">Required</span>
+                  <div class="chip-wrap" style="flex:1;min-height:30px;">
+                    @for (p of reqProps(kt); track p) {
+                      <span class="chip">{{ p }}<button type="button" class="chip-rm" (click)="removeRequiredProp(kt,p)">×</button></span>
+                    }
+                    <input type="text" class="chip-field"
+                      [(ngModel)]="chipInputs[reqChipKey(kt)]"
+                      [placeholder]="reqProps(kt).length ? '' : 'field name + Enter'"
+                      (keydown)="onChipKey($event,'req_'+kt,'req'+kt)" />
+                  </div>
+                </div>
+                <!-- property schemas table -->
+                <div class="table-wrapper" style="margin-bottom:0;">
+                  <table class="prop-table" style="margin-bottom:0;">
+                    <thead>
+                      <tr>
+                        <th style="width:190px;">Property</th>
+                        <th style="width:80px;">Type</th>
+                        <th>Constraints</th>
+                        <th style="width:68px;"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      @for (p of propEntries(kt); track p.key) {
+                        <tr class="prop-row" [class.prow-open]="isPropExpanded(kt,p.key)"
+                          (click)="togglePropExpand(kt,p.key)">
+                          <td>
+                            <div style="display:flex;align-items:center;gap:7px;">
+                              <span style="font-family:var(--font-mono);font-size:12px;">{{ p.key }}</span>
+                              @if (isRequired(kt,p.key)) {
+                                <span style="font-size:10px;background:color-mix(in srgb,var(--warning,#f59e0b) 16%,transparent);color:var(--warning,#f59e0b);border-radius:3px;padding:1px 5px;font-weight:700;">req</span>
+                              }
+                            </div>
+                          </td>
+                          <td><span class="badge badge-gray" style="font-size:11px;">{{ p.s.type ?? 'any' }}</span></td>
+                          <td style="font-size:11px;color:var(--text-muted);">
+                            @if (p.s.enum?.length) { <span class="badge badge-gray" style="font-size:10px;margin-right:3px;">enum {{ p.s.enum!.length }}</span> }
+                            @if (p.s.minimum!==undefined) { <span style="margin-right:4px;">min:{{ p.s.minimum }}</span> }
+                            @if (p.s.maximum!==undefined) { <span style="margin-right:4px;">max:{{ p.s.maximum }}</span> }
+                            @if (p.s.pattern) { <span style="margin-right:4px;">pattern</span> }
+                            @if (p.s.mergeFn) { <span class="badge badge-blue" style="font-size:10px;">{{ p.s.mergeFn }}</span> }
+                          </td>
+                          <td (click)="$event.stopPropagation()">
+                            <div style="display:flex;gap:4px;justify-content:flex-end;">
+                              <button class="btn btn-ghost btn-sm" type="button" (click)="togglePropExpand(kt,p.key)"
+                                style="font-size:10px;padding:2px 8px;min-width:28px;">
+                                {{ isPropExpanded(kt,p.key) ? '▲' : '▼' }}
+                              </button>
+                              <button class="icon-btn danger" type="button" (click)="removeProp(kt,p.key)" title="Remove">✕</button>
+                            </div>
+                          </td>
+                        </tr>
+                        @if (isPropExpanded(kt,p.key)) {
+                          <tr class="prop-expand-row" (click)="$event.stopPropagation()">
+                            <td colspan="4" style="padding:0;">
+                              <div class="pdet">
+                                <div class="pdet-head">
+                                  <span class="pdet-key">{{ p.key }}</span>
+                                  <label class="req-toggle" [class.is-req]="isRequired(kt,p.key)">
+                                    <input type="checkbox" [checked]="isRequired(kt,p.key)" (change)="toggleRequired(kt,p.key)" style="pointer-events:none;" />
+                                    Required
+                                  </label>
+                                  <button class="icon-btn danger" type="button" (click)="removeProp(kt,p.key)" title="Remove property">✕</button>
+                                </div>
+                                <div class="pdet-fields">
+                                  <div class="field" style="margin:0;">
+                                    <label>Type</label>
+                                    <select [(ngModel)]="p.s.type">
+                                      <option [ngValue]="undefined">any</option>
+                                      <option value="string">string</option>
+                                      <option value="number">number</option>
+                                      <option value="boolean">boolean</option>
+                                    </select>
+                                  </div>
+                                  <div class="field" style="margin:0;">
+                                    <label>Merge function</label>
+                                    <select [(ngModel)]="p.s.mergeFn">
+                                      <option [ngValue]="undefined">—</option>
+                                      <option value="avg">avg</option><option value="min">min</option>
+                                      <option value="max">max</option><option value="sum">sum</option>
+                                      <option value="and">and</option><option value="or">or</option>
+                                      <option value="xor">xor</option>
+                                    </select>
+                                  </div>
+                                  @if (p.s.type==='string'||p.s.type===undefined) {
+                                    <div class="field" style="margin:0;">
+                                      <label>Pattern <span style="font-size:10px;font-weight:400;color:var(--text-muted);">(regex)</span></label>
+                                      <input type="text" [(ngModel)]="p.s.pattern" placeholder="^[A-Z].*" />
+                                    </div>
+                                  }
+                                  @if (p.s.type==='number'||p.s.type===undefined) {
+                                    <div class="field" style="margin:0;">
+                                      <label>Min</label>
+                                      <input type="number" [(ngModel)]="p.s.minimum" placeholder="—" />
+                                    </div>
+                                    <div class="field" style="margin:0;">
+                                      <label>Max</label>
+                                      <input type="number" [(ngModel)]="p.s.maximum" placeholder="—" />
+                                    </div>
+                                  }
+                                </div>
+                                @if (p.s.type !== 'boolean') {
+                                  <div class="pdet-full">
+                                    <div class="field" style="margin:0;">
+                                      <label>Enum values <span style="font-size:11px;font-weight:normal;color:var(--text-muted);">— restrict to exact set</span></label>
+                                      <div class="chip-wrap">
+                                        @for (ev of (p.s.enum??[]); track ev) {
+                                          <span class="chip">{{ ev }}<button type="button" class="chip-rm" (click)="removeEnumVal(kt,p.key,ev)">×</button></span>
+                                        }
+                                        <input type="text" class="chip-field" [(ngModel)]="p._enumInput"
+                                          placeholder="value + Enter" (keydown)="onEnumKey($event,kt,p.key)" />
+                                      </div>
+                                    </div>
+                                  </div>
+                                }
+                              </div>
+                            </td>
+                          </tr>
+                        }
+                      } @empty {
+                        <tr>
+                          <td colspan="4" style="padding:28px 0;text-align:center;color:var(--text-muted);font-size:13px;font-style:italic;">
+                            No property schemas yet — add one below.
+                          </td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
+                <!-- add property -->
+                <div style="display:flex;gap:8px;align-items:center;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">
+                  <input type="text" [ngModel]="propInput(kt)" (ngModelChange)="setPropInput(kt,$event)" placeholder="New property name"
+                    style="flex:1;max-width:220px;"
+                    (keydown.enter)="$event.preventDefault();addProp(kt)" />
+                  <button class="btn btn-secondary btn-sm" type="button"
+                    (click)="addProp(kt)" [disabled]="!propInput(kt).trim()">+ Add property</button>
+                </div>
+              </ng-template>
             }
 
             <!-- DANGER ZONE TAB -->
@@ -659,7 +729,7 @@ export class SpacesComponent implements OnInit {
   settingsTab    = signal<'settings' | 'schema' | 'danger'>('settings');
   settingsSaving = signal(false);
   settingsError  = signal('');
-  schemaCollTab  = signal<KnowledgeType | 'vocab'>('memory');
+  schemaCollTab  = signal<KnowledgeType>('entity');
 
   stForm = { label: '', purpose: '', usageNotes: '', maxGiB: null as number | null };
 
@@ -767,7 +837,7 @@ export class SpacesComponent implements OnInit {
   openSettings(s: Space): void {
     this.settingsSpace.set(s);
     this.settingsTab.set('settings');
-    this.schemaCollTab.set('memory');
+    this.schemaCollTab.set('entity');
     this.settingsError.set('');
     this.settingsSaving.set(false);
     this.stForm = { label: s.label, purpose: s.meta?.purpose ?? '', usageNotes: s.meta?.usageNotes ?? '', maxGiB: s.maxGiB ?? null };
@@ -908,6 +978,13 @@ export class SpacesComponent implements OnInit {
   removeRequiredProp(kt: KnowledgeType, p: string): void {
     this.schRequiredProps = { ...this.schRequiredProps, [kt]: this.schRequiredProps[kt].filter(x => x !== p) };
   }
+
+  // typed template helpers (ng-template context vars come through as `any`)
+  reqProps(kt: KnowledgeType): string[] { return this.schRequiredProps[kt]; }
+  propEntries(kt: KnowledgeType): { key: string; s: PropertySchema; _enumInput: string }[] { return this.schPropSchemas[kt]; }
+  propInput(kt: KnowledgeType): string { return this.schPropInputs[kt]; }
+  setPropInput(kt: KnowledgeType, v: string): void { this.schPropInputs[kt] = v; }
+  reqChipKey(kt: KnowledgeType): string { return 'req' + kt; }
 
   isPropExpanded(kt: KnowledgeType, key: string): boolean { return this.schExpandedProp === `${kt}::${key}`; }
 
