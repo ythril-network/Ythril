@@ -1679,15 +1679,22 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
       name: 'cose',
       animate: true,
       animationDuration: 400,
-      nodeRepulsion: () => 12000,
-      idealEdgeLength: () => 200,
-      gravity: 0.15,
+      nodeRepulsion: () => 80000,
+      idealEdgeLength: () => 1000,
+      gravity: 0.08,
       padding: 40,
     } as any);
 
     layout.on('layoutstop', () => {
-      // Fit with large padding so graph is centered AND zoomed out
-      if (this.cy) this.cy.fit(undefined, 100);
+      if (this.cy) {
+        // Fit all nodes then zoom out so the full graph breathes
+        this.cy.fit(undefined, 60);
+        this.cy.zoom(this.cy.zoom() * 0.55);
+        // Pan so root node sits at viewport centre
+        const root = this.rootEntity();
+        const rootNode = root ? this.cy.getElementById(root._id) : null;
+        if (rootNode && rootNode.length) this.cy.center(rootNode);
+      }
       // Auto-select root node on first render
       const root = this.rootEntity();
       if (root && !this.selectedNode() && !this.selectedEdge()) {
