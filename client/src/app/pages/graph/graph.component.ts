@@ -1675,14 +1675,16 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
     }
 
     // Run layout
+    const maxDepth = Math.max(0, ...elements.filter((e: any) => e.group === 'nodes').map((e: any) => e.data.depth ?? 0));
     const layout = this.cy.layout({
-      name: 'cose',
+      name: 'concentric',
+      concentric: (node: any) => maxDepth + 1 - (node.data('depth') ?? 0),
+      levelWidth: () => 1,
+      spacingFactor: 2.2,
+      padding: 60,
+      avoidOverlap: true,
       animate: true,
       animationDuration: 400,
-      nodeRepulsion: () => 80000,
-      idealEdgeLength: () => 1000,
-      gravity: 0.08,
-      padding: 40,
     } as any);
 
     layout.on('layoutstop', () => {
