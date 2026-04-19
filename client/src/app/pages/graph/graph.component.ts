@@ -45,13 +45,6 @@ function typeColor(type: string): string {
 
 // ── Helper types ─────────────────────────────────────────────────────────────
 
-interface OverlayIcon {
-  id: string;
-  kind: 'node' | 'edge';
-  x: number;
-  y: number;
-}
-
 interface DetailRow {
   id: string;
   kind: 'memory' | 'chrono';
@@ -73,6 +66,7 @@ interface DetailRow {
       flex-direction: column;
       height: calc(100vh - 56px - 56px);
       min-height: 0;
+      gap: 8px;
     }
     :host.embedded {
       height: 70vh;
@@ -153,60 +147,38 @@ interface DetailRow {
     .search-wrapper {
       position: relative;
       flex: 1;
-      min-width: 180px;
-      max-width: 340px;
+      min-width: 200px;
+      max-width: 360px;
     }
-    .search-wrapper input { width: 100%; }
 
-    .autocomplete-dropdown {
-      position: absolute;
-      top: 100%;
-      left: 0;
-      right: 0;
-      background: var(--bg-elevated);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      margin-top: 4px;
-      max-height: 220px;
-      overflow-y: auto;
-      z-index: 50;
+    .toolbar-divider {
+      width: 1px;
+      height: 22px;
+      background: var(--border);
+      flex-shrink: 0;
     }
-    .autocomplete-dropdown button {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      width: 100%;
-      padding: 8px 12px;
-      background: transparent;
-      border: none;
-      color: var(--text-primary);
-      font-size: 13px;
-      cursor: pointer;
-      text-align: left;
-    }
-    .autocomplete-dropdown button:hover { background: var(--bg-overlay); }
-    .autocomplete-dropdown .ac-type {
-      font-size: 11px;
+    .toolbar-spacer { flex: 1; }
+    .toolbar-label {
+      font-size: 12px;
       color: var(--text-muted);
-      margin-left: auto;
+      white-space: nowrap;
     }
 
     .depth-control {
       display: flex;
       align-items: center;
       gap: 6px;
-      color: var(--text-secondary);
-      font-size: 13px;
-      white-space: nowrap;
     }
     .depth-control input[type="range"] {
       accent-color: var(--accent);
-      width: 90px;
+      width: 80px;
+      cursor: pointer;
     }
     .depth-value {
       font-family: var(--font-mono);
+      font-size: 12px;
       color: var(--text-primary);
-      min-width: 16px;
+      min-width: 14px;
       text-align: center;
     }
 
@@ -215,6 +187,7 @@ interface DetailRow {
       border: 1px solid var(--border);
       border-radius: var(--radius-sm);
       overflow: hidden;
+      flex-shrink: 0;
     }
     .pill-group button {
       padding: 5px 12px;
@@ -224,11 +197,16 @@ interface DetailRow {
       border: none;
       cursor: pointer;
       transition: background var(--transition), color var(--transition);
+      white-space: nowrap;
     }
     .pill-group button + button { border-left: 1px solid var(--border); }
     .pill-group button.active {
       background: var(--accent-dim);
       color: var(--accent);
+    }
+    .pill-group button:hover:not(.active) {
+      background: var(--bg-overlay);
+      color: var(--text-primary);
     }
 
     .toolbar-toggle {
@@ -248,14 +226,21 @@ interface DetailRow {
       border: 1px solid var(--border);
       border-radius: var(--radius-sm);
       color: var(--text-secondary);
-      font-size: 15px;
+      font-size: 14px;
       cursor: pointer;
       line-height: 1;
-      transition: border-color var(--transition), color var(--transition);
+      transition: border-color var(--transition), color var(--transition), background var(--transition);
     }
     .toolbar-btn:hover {
       border-color: var(--accent);
       color: var(--text-primary);
+      background: var(--accent-dim);
+    }
+    .graph-stats {
+      font-size: 12px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      font-family: var(--font-mono);
     }
 
     /* ── Canvas zone ──────────────────────────────────────────────────────── */
@@ -263,7 +248,7 @@ interface DetailRow {
     .canvas-zone {
       position: relative;
       flex: 1;
-      min-height: 300px;
+      min-height: 0;
       border: 1px solid var(--border);
       border-radius: var(--radius-md);
       background: var(--bg-primary);
@@ -311,114 +296,142 @@ interface DetailRow {
       align-items: center;
       justify-content: center;
       pointer-events: none;
+      gap: 8px;
     }
-    .canvas-empty .empty-state-icon { font-size: 48px; margin-bottom: 12px; }
+    .empty-icon {
+      font-size: 52px;
+      line-height: 1;
+      opacity: 0.2;
+    }
     .canvas-empty h3 {
       color: var(--text-muted);
-      font-weight: 400;
+      font-weight: 500;
       font-size: 15px;
+      margin: 0;
+    }
+    .canvas-empty p {
+      color: var(--text-muted);
+      font-size: 13px;
+      margin: 0;
+      opacity: 0.7;
     }
 
-    /* ── Overlay icons ────────────────────────────────────────────────────── */
-
-    .overlay-icons {
+    /* Loading overlay */
+    .loading-overlay {
       position: absolute;
       inset: 0;
-      pointer-events: none;
-      z-index: 10;
-    }
-    .eye-overlay {
-      position: absolute;
-      pointer-events: auto;
-      width: 22px;
-      height: 22px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 12px;
-      background: var(--bg-elevated);
-      border: 1px solid var(--border);
-      border-radius: 50%;
-      cursor: pointer;
-      padding: 0;
-      transform: translate(-50%, -50%);
-      transition: background var(--transition);
-      line-height: 1;
+      background: rgba(0,0,0,0.25);
+      z-index: 30;
+      backdrop-filter: blur(2px);
     }
-    .eye-overlay:hover { background: var(--accent-dim); }
+    .loading-spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid rgba(124, 106, 247, 0.25);
+      border-top-color: #7c6af7;
+      border-radius: 50%;
+      animation: graph-spin 0.75s linear infinite;
+    }
+    @keyframes graph-spin { to { transform: rotate(360deg); } }
 
-    /* ── Detail panel ─────────────────────────────────────────────────────── */
+    /* ── Overlay icons ────────────────────────────────────────────────────── */
+
+    /* ── Detail panel (overlaid at canvas bottom) ───────────────────────── */
 
     .detail-panel {
-      flex-shrink: 0;
-      max-height: 300px;
-      overflow-y: auto;
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      max-height: 46%;
+      min-height: 140px;
+      z-index: 15;
+      border-top: 1px solid var(--border);
+      border-radius: 0 0 var(--radius-md) var(--radius-md);
       background: var(--bg-surface);
-      margin-top: 8px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      box-shadow: 0 -4px 24px rgba(0,0,0,0.35);
     }
-
     .detail-header {
       display: flex;
       align-items: center;
-      gap: 10px;
+      justify-content: space-between;
       padding: 10px 16px;
       border-bottom: 1px solid var(--border);
-      position: sticky;
-      top: 0;
-      background: var(--bg-surface);
-      z-index: 2;
+      flex-shrink: 0;
+    }
+    .detail-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .detail-node-badge {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
     }
     .detail-header h3 {
       margin: 0;
-      font-size: 15px;
+      font-size: 14px;
+      font-weight: 600;
       color: var(--text-primary);
     }
-    .detail-stat {
-      font-size: 12px;
-      color: var(--text-muted);
+    .detail-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
     }
-    .detail-header .spacer { flex: 1; }
-
     .detail-filters {
       display: flex;
-      flex-wrap: wrap;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
       padding: 8px 16px;
       border-bottom: 1px solid var(--border);
-      font-size: 12px;
-      color: var(--text-secondary);
+      flex-shrink: 0;
     }
-    .detail-filters label {
-      display: flex;
+    .detail-filters .pill-group button {
+      padding: 4px 10px;
+      font-size: 11px;
+    }
+    .count-chip {
+      display: inline-flex;
       align-items: center;
-      gap: 4px;
-      cursor: pointer;
+      justify-content: center;
+      min-width: 16px;
+      height: 16px;
+      padding: 0 4px;
+      background: var(--bg-overlay);
+      border-radius: 8px;
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-left: 4px;
     }
-    .detail-filters input[type="radio"] { accent-color: var(--accent); }
+    .pill-group button.active .count-chip {
+      background: var(--accent-dim);
+      color: var(--accent);
+    }
     .detail-filters input[type="search"] {
+      margin-left: auto;
       background: var(--bg-elevated);
       border: 1px solid var(--border);
       border-radius: var(--radius-sm);
       color: var(--text-primary);
       font-size: 12px;
-      padding: 4px 8px;
+      padding: 4px 10px;
       outline: none;
-      margin-left: auto;
-      min-width: 160px;
+      min-width: 150px;
     }
     .detail-filters input[type="search"]:focus { border-color: var(--accent); }
 
-    .detail-panel .table-wrapper {
-      overflow-x: auto;
-    }
-    .detail-panel table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-    .detail-panel th {
+    .table-wrapper { overflow-y: auto; flex: 1; }
+    table { width: 100%; border-collapse: collapse; }
+    th {
       text-align: left;
       font-size: 11px;
       color: var(--text-muted);
@@ -426,27 +439,55 @@ interface DetailRow {
       border-bottom: 1px solid var(--border);
       white-space: nowrap;
       user-select: none;
+      position: sticky;
+      top: 0;
+      background: var(--bg-surface);
+      z-index: 1;
     }
-    .detail-panel th.sortable { cursor: pointer; }
-    .detail-panel th.sortable:hover { color: var(--text-secondary); }
-    .detail-panel td {
+    th.sortable { cursor: pointer; }
+    th.sortable:hover { color: var(--text-secondary); }
+    td {
       font-size: 13px;
       color: var(--text-primary);
       padding: 6px 12px;
       border-bottom: 1px solid var(--border);
-      max-width: 260px;
+      vertical-align: middle;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: var(--bg-elevated); }
+    .desc-cell {
+      max-width: 300px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .detail-panel tr:last-child td { border-bottom: none; }
-    .detail-panel .tag {
-      margin-right: 4px;
-    }
-    .detail-panel .props-cell {
+    .date-cell {
       font-family: var(--font-mono);
       font-size: 11px;
       color: var(--text-muted);
+      white-space: nowrap;
+    }
+    .tags-cell { white-space: nowrap; }
+    .empty-row {
+      text-align: center;
+      color: var(--text-muted);
+      padding: 20px 12px !important;
+      font-style: italic;
+    }
+    .tag {
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 10px;
+      font-size: 11px;
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+      border: 1px solid var(--border);
+      margin-right: 3px;
+    }
+    .tag-more {
+      color: var(--text-muted);
+      background: transparent;
+      border-color: transparent;
     }
 
     /* ── Popup wrapper: only render when we have a record ─────────────────── */
@@ -457,14 +498,7 @@ interface DetailRow {
     @if (!isEmbedded() && spaces().length > 0) {
       <div class="space-tabs">
         @for (s of spaces(); track s.id) {
-          <button
-            class="space-chip"
-            [class.active]="activeSpaceId() === s.id"
-            (click)="onSpaceChange(s.id)"
-          >
-            <span class="space-chip-label">{{ s.label }}</span>
-            <span class="space-chip-id">{{ s.id }}</span>
-          </button>
+          <button class="space-chip" [class.active]="activeSpaceId() === s.id" (click)="onSpaceChange(s.id)">{{ s.label }}</button>
         }
       </div>
     }
@@ -482,8 +516,10 @@ interface DetailRow {
         />
       </div>
 
+      <div class="toolbar-divider"></div>
+
       <div class="depth-control">
-        Depth
+        <span class="toolbar-label">Depth</span>
         <input type="range" min="1" max="10" [ngModel]="depth()" (ngModelChange)="onDepthChange($event)" />
         <span class="depth-value">{{ depth() }}</span>
       </div>
@@ -494,11 +530,15 @@ interface DetailRow {
         <button [class.active]="direction() === 'both'"    (click)="setDirection('both')">Both</button>
       </div>
 
-      <label class="toolbar-toggle">
-        <input type="checkbox" [ngModel]="hideLabels()" (ngModelChange)="onHideLabelsChange($event)" />
-        Hide labels
-      </label>
+      <div class="pill-group">
+        <button [class.active]="!hideLabels()" (click)="onHideLabelsChange(!hideLabels())" title="Toggle edge labels">Labels</button>
+      </div>
 
+      <div class="toolbar-spacer"></div>
+
+      @if (rootEntity()) {
+        <span class="graph-stats">{{ nodeCount() }} nodes · {{ edgeCount() }} edges</span>
+      }
       <button class="toolbar-btn" title="Fit to viewport" (click)="fitGraph()">⛶</button>
       <button class="toolbar-btn" title="Reset graph"     (click)="resetGraph()">↺</button>
     </div>
@@ -512,76 +552,79 @@ interface DetailRow {
         </div>
       }
 
-      @if (!rootEntity()) {
+      @if (loading()) {
+        <div class="loading-overlay"><div class="loading-spinner"></div></div>
+      }
+
+      @if (!rootEntity() && !loading()) {
         <div class="canvas-empty">
-          <div class="empty-state-icon">🔍</div>
-          <h3>Search for an entity above to start exploring</h3>
+          <div class="empty-icon">◎</div>
+          <h3>Search for an entity to start exploring</h3>
+          <p>Tap nodes to inspect · double-tap to re-root</p>
         </div>
       }
 
       <div #cyContainer class="cy-container" [style.visibility]="rootEntity() ? 'visible' : 'hidden'"></div>
 
-      <div class="overlay-icons">
-        @for (ov of overlays(); track ov.id) {
-          <button class="eye-overlay" [style.left.px]="ov.x" [style.top.px]="ov.y"
-                  (click)="onOverlayClick(ov)">👁</button>
-        }
-      </div>
-    </div>
 
     <!-- ═══ Detail panel ═════════════════════════════════════════════════ -->
-    @if (selectedNode()) {
-      <div class="detail-panel">
-        <div class="detail-header">
-          <h3>{{ selectedNode()!.name }}</h3>
-          <span class="badge">{{ selectedNode()!.type || 'entity' }}</span>
-          <span class="detail-stat">{{ nodeMemories().length }} memories</span>
-          <span class="detail-stat">{{ nodeChrono().length }} chrono</span>
-          <span class="spacer"></span>
-          <button class="btn btn-sm btn-ghost" (click)="openEntityPopup(selectedNode()!)">👁 View</button>
-          <button class="btn btn-sm btn-ghost" (click)="selectedNode.set(null)">▲ Collapse</button>
-        </div>
+      <!-- ── Detail panel (slides over canvas bottom) ──────────────────── -->
+      @if (selectedNode()) {
+        <div class="detail-panel">
+          <div class="detail-header">
+            <div class="detail-title">
+              <span class="detail-node-badge" [style.background]="nodeColor()"></span>
+              <h3>{{ selectedNode()!.name }}</h3>
+              <span class="badge">{{ selectedNode()!.type || 'entity' }}</span>
+            </div>
+            <div class="detail-header-actions">
+              <button class="btn btn-sm btn-ghost" (click)="openEntityPopup(selectedNode()!)">👁 View</button>
+              <button class="icon-btn" title="Close panel" (click)="selectedNode.set(null)">✕</button>
+            </div>
+          </div>
 
-        <div class="detail-filters">
-          <label><input type="radio" name="typeFilter" value="all"    [ngModel]="detailTypeFilter()" (ngModelChange)="detailTypeFilter.set($event)" /> All</label>
-          <label><input type="radio" name="typeFilter" value="memory" [ngModel]="detailTypeFilter()" (ngModelChange)="detailTypeFilter.set($event)" /> Memory</label>
-          <label><input type="radio" name="typeFilter" value="chrono" [ngModel]="detailTypeFilter()" (ngModelChange)="detailTypeFilter.set($event)" /> Chrono</label>
-          <input type="search" placeholder="🔍 Filter description…"
-                 [ngModel]="detailDescFilter()" (ngModelChange)="detailDescFilter.set($event)" />
-        </div>
+          <div class="detail-filters">
+            <div class="pill-group">
+              <button [class.active]="detailTypeFilter() === 'all'"    (click)="detailTypeFilter.set('all')">All <span class="count-chip">{{ allDetails().length }}</span></button>
+              <button [class.active]="detailTypeFilter() === 'memory'" (click)="detailTypeFilter.set('memory')">Memory <span class="count-chip">{{ nodeMemories().length }}</span></button>
+              <button [class.active]="detailTypeFilter() === 'chrono'" (click)="detailTypeFilter.set('chrono')">Chrono <span class="count-chip">{{ nodeChrono().length }}</span></button>
+            </div>
+            <input type="search" placeholder="Filter…"
+                   [ngModel]="detailDescFilter()" (ngModelChange)="detailDescFilter.set($event)" />
+          </div>
 
-        <div class="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th class="sortable" (click)="toggleSort('description')">Description {{ sortField() === 'description' ? (sortAsc() ? '▲' : '▼') : '' }}</th>
-                <th>Tags</th>
-                <th>Properties</th>
-                <th class="sortable" (click)="toggleSort('createdAt')">Created {{ sortField() === 'createdAt' ? (sortAsc() ? '▲' : '▼') : '' }}</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (row of filteredDetails(); track row.id) {
+          <div class="table-wrapper">
+            <table>
+              <thead>
                 <tr>
-                  <td [title]="row.description">{{ row.description }}</td>
-                  <td>
-                    @for (t of row.tags; track t) {
-                      <span class="tag">{{ t }}</span>
-                    }
-                  </td>
-                  <td class="props-cell">{{ row.properties | json }}</td>
-                  <td>{{ row.createdAt | date:'dd.MM.yyyy' }}</td>
-                  <td><button class="icon-btn" (click)="openDetailPopup(row)">👁</button></td>
+                  <th>Type</th>
+                  <th class="sortable" (click)="toggleSort('description')">Description {{ sortArrow('description') }}</th>
+                  <th>Tags</th>
+                  <th class="sortable" (click)="toggleSort('createdAt')">Created {{ sortArrow('createdAt') }}</th>
+                  <th></th>
                 </tr>
-              } @empty {
-                <tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:16px">No records</td></tr>
-              }
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                @for (row of filteredDetails(); track row.id) {
+                  <tr>
+                    <td><span class="badge" [class.badge-blue]="row.kind === 'memory'" [class.badge-purple]="row.kind === 'chrono'">{{ row.kind }}</span></td>
+                    <td class="desc-cell" [title]="row.description">{{ row.description }}</td>
+                    <td class="tags-cell">
+                      @for (t of row.tags.slice(0, 3); track t) { <span class="tag">{{ t }}</span> }
+                      @if (row.tags.length > 3) { <span class="tag tag-more">+{{ row.tags.length - 3 }}</span> }
+                    </td>
+                    <td class="date-cell">{{ row.createdAt | date:'dd.MM.yyyy' }}</td>
+                    <td><button class="icon-btn" (click)="openDetailPopup(row)" title="View record">👁</button></td>
+                  </tr>
+                } @empty {
+                  <tr><td colspan="5" class="empty-row">No records for this node</td></tr>
+                }
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
-    }
+      }
+    </div>
 
     <!-- ═══ Entry popup ══════════════════════════════════════════════════ -->
     @if (popupRecord()) {
@@ -637,7 +680,8 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
   sortField = signal<'description' | 'createdAt'>('createdAt');
   sortAsc = signal(false);
 
-  overlays = signal<OverlayIcon[]>([]);
+  nodeCount = signal(0);
+  edgeCount = signal(0);
 
   popupRecord = signal<Record<string, unknown> | null>(null);
   popupType = signal<'entity' | 'edge' | 'memory' | 'chrono'>('entity');
@@ -646,7 +690,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
   loading = signal(false);
 
   // ── Computed ────────────────────────────────────────────────────────────────
-  private allDetails = computed<DetailRow[]>(() => {
+  allDetails = computed<DetailRow[]>(() => {
     const mems: DetailRow[] = this.nodeMemories().map(m => ({
       id: m._id,
       kind: 'memory' as const,
@@ -685,10 +729,14 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
     return rows;
   });
 
+  nodeColor = computed(() => {
+    const n = this.selectedNode();
+    return n ? typeColor(n.type || 'default') : '#8b949e';
+  });
+
   // ── Private state ───────────────────────────────────────────────────────────
   private cy: any = null;
   private subs = new Subscription();
-  private overlayRAF = 0;
 
   // Currently rendered (depth-filtered) view
   private graphNodes: TraverseNode[] = [];
@@ -740,7 +788,6 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.subs.unsubscribe();
-    if (this.overlayRAF) cancelAnimationFrame(this.overlayRAF);
     if (this.cy) {
       this.cy.destroy();
       this.cy = null;
@@ -760,49 +807,81 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
         {
           selector: 'node',
           style: {
-            'width': 40,
-            'height': 40,
-            'background-color': (ele: any) => typeColor(ele.data('type') || 'default'),
+            'width': (ele: any) => { const d = +ele.data('depth'); return d === 0 ? 64 : Math.max(34, 48 - d * 3); },
+            'height': (ele: any) => { const d = +ele.data('depth'); return d === 0 ? 64 : Math.max(34, 48 - d * 3); },
+            'background-color': '#161b22',
+            'border-width': (ele: any) => +ele.data('depth') === 0 ? 4 : 3,
+            'border-color': (ele: any) => typeColor(ele.data('type') || 'default'),
             'label': 'data(label)',
-            'font-size': 11,
-            'color': '#e6edf3',
-            'text-outline-color': '#161b22',
-            'text-outline-width': 1,
+            'font-size': (ele: any) => +ele.data('depth') === 0 ? 13 : 11,
+            'font-weight': (ele: any) => +ele.data('depth') === 0 ? '600' : '400',
+            'color': '#c9d1d9',
+            'text-outline-color': '#0d1117',
+            'text-outline-width': 2,
             'text-valign': 'bottom',
-            'text-margin-y': 6,
-            'text-max-width': '100px',
+            'text-margin-y': 7,
+            'text-max-width': '110px',
             'text-wrap': 'ellipsis',
+            'opacity': (ele: any) => { const d = +ele.data('depth'); return d === 0 ? 1 : Math.max(0.55, 1 - d * 0.1); },
           } as any,
         },
         {
           selector: 'node.root',
           style: {
-            'width': 60,
-            'height': 60,
-            'border-width': 3,
             'border-color': '#7c6af7',
+            'border-width': 5,
+          } as any,
+        },
+        {
+          selector: 'node.hovered',
+          style: {
+            'border-color': '#58a6ff',
+            'border-width': 4,
+            'opacity': 1,
           } as any,
         },
         {
           selector: 'node:selected',
           style: {
-            'border-width': 2,
             'border-color': '#58a6ff',
+            'border-width': 4,
+            'opacity': 1,
           } as any,
         },
         {
           selector: 'edge',
           style: {
-            'width': 2,
-            'line-color': '#30363d',
+            'width': 1.5,
+            'line-color': '#3d444d',
             'target-arrow-shape': 'triangle',
-            'target-arrow-color': '#30363d',
+            'target-arrow-color': '#3d444d',
             'curve-style': 'bezier',
             'label': 'data(label)',
             'font-size': 10,
-            'color': '#8b949e',
+            'color': '#6e7681',
             'text-rotation': 'autorotate',
-            'text-margin-y': -10,
+            'text-margin-y': -8,
+            'text-background-color': '#0d1117',
+            'text-background-opacity': 0.7,
+            'text-background-padding': '2px',
+            'opacity': 0.75,
+          } as any,
+        },
+        {
+          selector: 'edge.hovered',
+          style: {
+            'line-color': '#58a6ff',
+            'target-arrow-color': '#58a6ff',
+            'opacity': 1,
+            'width': 2.5,
+          } as any,
+        },
+        {
+          selector: 'edge:selected',
+          style: {
+            'line-color': '#7c6af7',
+            'target-arrow-color': '#7c6af7',
+            'opacity': 1,
           } as any,
         },
         {
@@ -813,9 +892,9 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
         },
       ],
       layout: { name: 'grid' },
-      minZoom: 0.15,
-      maxZoom: 4,
-      wheelSensitivity: 0.3,
+      minZoom: 0.1,
+      maxZoom: 5,
+      wheelSensitivity: 0.25,
     });
 
     // Node tap → select + show detail panel
@@ -847,8 +926,11 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
       });
     });
 
-    // Update overlays on viewport changes
-    this.cy.on('render pan zoom resize', () => this.scheduleOverlayUpdate());
+    // Hover effects
+    this.cy.on('mouseover', 'node', (evt: any) => { evt.target.addClass('hovered'); });
+    this.cy.on('mouseout',  'node', (evt: any) => { evt.target.removeClass('hovered'); });
+    this.cy.on('mouseover', 'edge', (evt: any) => { evt.target.addClass('hovered'); });
+    this.cy.on('mouseout',  'edge', (evt: any) => { evt.target.removeClass('hovered'); });
 
     // Background tap → deselect node
     this.cy.on('tap', (evt: any) => {
@@ -1023,6 +1105,8 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
     }
 
     this.cy.add(elements);
+    this.nodeCount.set(elements.filter((e: any) => e.group === 'nodes').length);
+    this.edgeCount.set(elements.filter((e: any) => e.group === 'edges').length);
 
     // Apply hide-labels class to edges
     if (this.hideLabels()) {
@@ -1042,79 +1126,8 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
       padding: 40,
     } as any);
 
-    layout.on('layoutstop', () => {
-      this.fitGraph();
-      this.scheduleOverlayUpdate();
-    });
-
+    layout.on('layoutstop', () => this.fitGraph());
     layout.run();
-  }
-
-  // ── Overlay icon positioning ────────────────────────────────────────────────
-
-  private scheduleOverlayUpdate(): void {
-    if (this.overlayRAF) cancelAnimationFrame(this.overlayRAF);
-    this.overlayRAF = requestAnimationFrame(() => this.updateOverlays());
-  }
-
-  private updateOverlays(): void {
-    if (!this.cy || !this.rootEntity()) {
-      this.overlays.set([]);
-      return;
-    }
-
-    const icons: OverlayIcon[] = [];
-    const ext = this.cy.extent();
-
-    // Node overlays
-    this.cy.nodes().forEach((node: any) => {
-      const pos = node.renderedPosition();
-      const w = node.renderedWidth();
-      // Only add if visible in viewport
-      const modelPos = node.position();
-      if (modelPos.x >= ext.x1 && modelPos.x <= ext.x2 &&
-          modelPos.y >= ext.y1 && modelPos.y <= ext.y2) {
-        icons.push({
-          id: 'n_' + node.data('id'),
-          kind: 'node',
-          x: pos.x + w / 2 + 2,
-          y: pos.y - w / 2 - 2,
-        });
-      }
-    });
-
-    // Edge overlays
-    this.cy.edges().forEach((edge: any) => {
-      const sp = edge.source().renderedPosition();
-      const tp = edge.target().renderedPosition();
-      icons.push({
-        id: 'e_' + edge.data('id'),
-        kind: 'edge',
-        x: (sp.x + tp.x) / 2,
-        y: (sp.y + tp.y) / 2 - 14,
-      });
-    });
-
-    this.overlays.set(icons);
-  }
-
-  onOverlayClick(ov: OverlayIcon): void {
-    const spaceId = this.activeSpaceId();
-    if (!spaceId) return;
-    const realId = ov.id.substring(2); // strip 'n_' or 'e_' prefix
-
-    if (ov.kind === 'node') {
-      this.api.getEntity(spaceId, realId).pipe(
-        catchError(() => of(null)),
-      ).subscribe(ent => {
-        if (ent) {
-          this.popupRecord.set(ent as unknown as Record<string, unknown>);
-          this.popupType.set('entity');
-        }
-      });
-    } else {
-      this.openEdgePopup(realId);
-    }
   }
 
   // ── Detail panel helpers ────────────────────────────────────────────────────
@@ -1147,6 +1160,10 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
       this.sortField.set(field);
       this.sortAsc.set(true);
     }
+  }
+
+  sortArrow(field: 'description' | 'createdAt'): string {
+    return this.sortField() === field ? (this.sortAsc() ? '▲' : '▼') : '';
   }
 
   openEntityPopup(node: TraverseNode): void {
