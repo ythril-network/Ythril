@@ -236,8 +236,12 @@ networksRouter.delete('/:id', globalRateLimit, requireAdmin, async (req, res) =>
     }
   }));
 
-  cfg.networks.splice(idx, 1);
-  saveConfig(cfg);
+  // Re-fetch config after async peer notifications to avoid clobbering concurrent writes.
+  {
+    const c = getConfig();
+    const i = c.networks.findIndex(n => n.id === req.params['id']);
+    if (i >= 0) { c.networks.splice(i, 1); saveConfig(c); }
+  }
   log.info(`Deleted network id=${net.id}`);
 
   if (warnings.length) {
@@ -542,6 +546,15 @@ networksRouter.post('/:id/members', globalRateLimit, requireAdmin, async (req, r
 
     const tokenHash = await bcrypt.hash(token, BCRYPT_ROUNDS);
 
+    // Re-fetch config after async bcrypt to avoid clobbering concurrent writes.
+    const freshCfg = getConfig();
+    const freshNet = freshCfg.networks.find(n => n.id === req.params['id']);
+    if (!freshNet) { res.status(404).json({ error: 'Network not found' }); return; }
+    if (freshNet.members.some(m => m.instanceId === instanceId)) {
+      res.status(409).json({ error: 'Member already exists' });
+      return;
+    }
+
     const member: NetworkMember = {
       instanceId,
       label,
@@ -552,7 +565,7 @@ networksRouter.post('/:id/members', globalRateLimit, requireAdmin, async (req, r
       skipTlsVerify,
     };
 
-    if (net.type === 'closed' || net.type === 'democratic') {
+    if (freshNet.type === 'closed' || freshNet.type === 'democratic') {
       // Open a vote round for the new member
       const round: VoteRound = {
         roundId: uuidv4(),
@@ -560,35 +573,35 @@ networksRouter.post('/:id/members', globalRateLimit, requireAdmin, async (req, r
         subjectInstanceId: instanceId,
         subjectLabel: label,
         subjectUrl: url,
-        deadline: new Date(Date.now() + net.votingDeadlineHours * 3_600_000).toISOString(),
+        deadline: new Date(Date.now() + freshNet.votingDeadlineHours * 3_600_000).toISOString(),
         openedAt: new Date().toISOString(),
         votes: [],
         pendingMember: member,
       };
-      net.pendingRounds.push(round);
+      freshNet.pendingRounds.push(round);
       // Save the plaintext peer token so the sync engine can use it once the vote passes
       const secrets = getSecrets();
       secrets.peerTokens[instanceId] = token;
       saveSecrets(secrets);
-      saveConfig(cfg);
-      log.info(`Opened join vote round ${round.roundId} for ${label} in network ${net.id}`);
+      saveConfig(freshCfg);
+      log.info(`Opened join vote round ${round.roundId} for ${label} in network ${freshNet.id}`);
       res.status(202).json({ status: 'vote_pending', roundId: round.roundId });
       return;
     }
 
-    if (net.type === 'club' || net.type === 'pubsub') {
+    if (freshNet.type === 'club' || freshNet.type === 'pubsub') {
       // Club / Pubsub: direct add, no vote required.
       // Pubsub never allows 'both' — publisher stores subscribers as 'push',
       // subscriber stores publisher as 'pull'.  If 'both' is provided, default
       // to 'push' (the common publisher-side case); explicit 'pull' is respected
       // so the subscriber can manually add the publisher.
-      if (net.type === 'pubsub' && member.direction === 'both') member.direction = 'push';
-      net.members.push(member);
+      if (freshNet.type === 'pubsub' && member.direction === 'both') member.direction = 'push';
+      freshNet.members.push(member);
       const secrets = getSecrets();
       secrets.peerTokens[instanceId] = token;
       saveSecrets(secrets);
-      saveConfig(cfg);
-      log.info(`Added member ${label} (${instanceId}) to network ${net.id}`);
+      saveConfig(freshCfg);
+      log.info(`Added member ${label} (${instanceId}) to network ${freshNet.id}`);
       const { tokenHash: _th, skipTlsVerify: _sv, ...safeMember } = member;
       res.status(201).json(safeMember);
       return;
@@ -598,37 +611,37 @@ networksRouter.post('/:id/members', globalRateLimit, requireAdmin, async (req, r
     // The proposer (this instance) auto-votes yes.  If the path is only [self] (root case),
     // concludeRoundIfReady passes immediately and we add the member right away → 201.
     // Otherwise we return 202 and wait for all ancestors to vote via gossip propagation.
-    const requiredVoters = buildBraintreeAncestors(net, cfg.instanceId, cfg.instanceId);
+    const requiredVoters = buildBraintreeAncestors(freshNet, freshCfg.instanceId, freshCfg.instanceId);
     const round: VoteRound = {
       roundId: uuidv4(),
       type: 'join',
       subjectInstanceId: instanceId,
       subjectLabel: label,
       subjectUrl: url,
-      deadline: new Date(Date.now() + net.votingDeadlineHours * 3_600_000).toISOString(),
+      deadline: new Date(Date.now() + freshNet.votingDeadlineHours * 3_600_000).toISOString(),
       openedAt: new Date().toISOString(),
       votes: [],
       pendingMember: member,
       requiredVoters,
     };
-    net.pendingRounds.push(round);
+    freshNet.pendingRounds.push(round);
     // Auto-cast this instance's yes vote (proposer implicitly approves their own proposal)
-    round.votes.push({ instanceId: cfg.instanceId, vote: 'yes', castAt: new Date().toISOString() });
+    round.votes.push({ instanceId: freshCfg.instanceId, vote: 'yes', castAt: new Date().toISOString() });
     const secrets = getSecrets();
     secrets.peerTokens[instanceId] = token;
     saveSecrets(secrets);
-    const immediatePassed = concludeRoundIfReady(net, round);
+    const immediatePassed = concludeRoundIfReady(freshNet, round);
     if (immediatePassed) {
       // Root case: only self needed to vote → add member directly
-      net.members.push(member);
-      saveConfig(cfg);
-      log.info(`Braintree join immediate (root): added ${label} (${instanceId}) to network ${net.id}`);
+      freshNet.members.push(member);
+      saveConfig(freshCfg);
+      log.info(`Braintree join immediate (root): added ${label} (${instanceId}) to network ${freshNet.id}`);
       const { tokenHash: _th, skipTlsVerify: _sv, ...safeMember } = member;
       res.status(201).json(safeMember);
       return;
     }
-    saveConfig(cfg);
-    log.info(`Opened braintree join round ${round.roundId} for ${label} (${instanceId}) in network ${net.id}`);
+    saveConfig(freshCfg);
+    log.info(`Opened braintree join round ${round.roundId} for ${label} (${instanceId}) in network ${freshNet.id}`);
     res.status(202).json({ status: 'vote_pending', roundId: round.roundId });
   } catch (err) {
     log.error(`POST /api/networks/:id/members: ${err}`);
@@ -904,10 +917,15 @@ networksRouter.post('/:id/invite', globalRateLimit, requireAdmin, async (req, re
 
     const { randomBytes } = await import('crypto');
     const key = `ythril_invite_${randomBytes(32).toString('base64url')}`;
-    net.inviteKeyHash = await bcrypt.hash(key, BCRYPT_ROUNDS);
-    saveConfig(cfg);
+    const inviteKeyHash = await bcrypt.hash(key, BCRYPT_ROUNDS);
+    // Re-fetch config after async bcrypt to avoid clobbering concurrent writes.
+    const freshCfg = getConfig();
+    const freshNet = freshCfg.networks.find(n => n.id === req.params['id']);
+    if (!freshNet) { res.status(404).json({ error: 'Network not found' }); return; }
+    freshNet.inviteKeyHash = inviteKeyHash;
+    saveConfig(freshCfg);
 
-    log.info(`Generated new invite key for network ${net.id}${net.type === 'pubsub' ? ' (reusable)' : ' (shown once)'}`);
+    log.info(`Generated new invite key for network ${freshNet.id}${net.type === 'pubsub' ? ' (reusable)' : ' (shown once)'}`);
     res.json({
       inviteKey: key,
       networkId: net.id,
@@ -961,24 +979,32 @@ networksRouter.post('/:id/join', globalRateLimit, requireAdmin, async (req, res)
 
     const { instanceId, label, url, token, direction, parentInstanceId, skipTlsVerify } = parsed.data;
     const tokenHash = await bcrypt.hash(token, BCRYPT_ROUNDS);
+    // Re-fetch config after async bcrypt to avoid clobbering concurrent writes.
+    const freshCfg = getConfig();
+    const freshNet = freshCfg.networks.find(n => n.id === req.params['id']);
+    if (!freshNet) { res.status(404).json({ error: 'Network not found' }); return; }
+    if (freshNet.members.some(m => m.instanceId === instanceId)) {
+      res.status(409).json({ error: 'Member already exists' });
+      return;
+    }
     const member: NetworkMember = { instanceId, label, url, tokenHash, direction, parentInstanceId, skipTlsVerify };
 
-    if (net.type === 'closed' || net.type === 'democratic') {
+    if (freshNet.type === 'closed' || freshNet.type === 'democratic') {
       const round: VoteRound = {
         roundId: uuidv4(),
         type: 'join',
         subjectInstanceId: instanceId,
         subjectLabel: label,
         subjectUrl: url,
-        deadline: new Date(Date.now() + net.votingDeadlineHours * 3_600_000).toISOString(),
+        deadline: new Date(Date.now() + freshNet.votingDeadlineHours * 3_600_000).toISOString(),
         openedAt: new Date().toISOString(),
         votes: [],
-        inviteKeyHash: net.inviteKeyHash,
+        inviteKeyHash: net.inviteKeyHash,  // preserve the original validated hash in the round record
       };
-      net.pendingRounds.push(round);
+      freshNet.pendingRounds.push(round);
       // Revoke invite key after use to prevent replay
-      net.inviteKeyHash = undefined;
-      saveConfig(cfg);
+      freshNet.inviteKeyHash = undefined;
+      saveConfig(freshCfg);
       log.info(`Join via invite key opened vote round ${round.roundId} for ${label}`);
       res.status(202).json({ status: 'vote_pending', roundId: round.roundId });
       return;
@@ -986,19 +1012,19 @@ networksRouter.post('/:id/join', globalRateLimit, requireAdmin, async (req, res)
 
     // Club / Braintree / Pubsub — direct join via invite key
     // Pubsub subscribers are always push-only (publisher pushes to them).
-    if (net.type === 'pubsub') member.direction = 'push';
-    net.members.push(member);
+    if (freshNet.type === 'pubsub') member.direction = 'push';
+    freshNet.members.push(member);
     // Pubsub keys are reusable (publishable in docs, QR codes, etc.)
     // All other types consume the key after use to prevent replay.
-    if (net.type !== 'pubsub') net.inviteKeyHash = undefined;
-    saveConfig(cfg);
-    log.info(`Member ${label} joined network ${net.id} via invite key`);
+    if (freshNet.type !== 'pubsub') freshNet.inviteKeyHash = undefined;
+    saveConfig(freshCfg);
+    log.info(`Member ${label} joined network ${freshNet.id} via invite key`);
 
     // Return peer the member list and network metadata (enough to start syncing)
-    const safeMemberList = net.members
+    const safeMemberList = freshNet.members
       .filter(m => m.instanceId !== instanceId)
       .map(({ tokenHash: _th, skipTlsVerify: _sv, ...m }) => m);
-    res.status(200).json({ status: 'joined', members: safeMemberList, networkId: net.id });
+    res.status(200).json({ status: 'joined', members: safeMemberList, networkId: freshNet.id });
   } catch (err) {
     log.error(`POST /api/networks/:id/join: ${err}`);
     res.status(500).json({ error: 'Internal error' });

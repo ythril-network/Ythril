@@ -13,7 +13,7 @@ import { validateDeleteFields, applyDeleteFields as applyDeleteFieldsPaths } fro
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 import { createChrono, updateChrono, getChronoById, listChrono, deleteChrono, bulkDeleteChrono, ChronoFilter } from '../brain/chrono.js';
 import { embed } from '../brain/embedding.js';
-import { updateFileMeta } from '../files/file-meta.js';
+import { updateFileMeta, deleteFileMeta } from '../files/file-meta.js';
 import { getConfig } from '../config/loader.js';
 import { col } from '../db/mongo.js';
 import { nextSeq } from '../util/seq.js';
@@ -1385,7 +1385,7 @@ brainRouter.get('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth, asy
   const skip = Number(req.query['skip'] ?? 0);
   const filter: Record<string, unknown> = {};
   if (typeof req.query['tag'] === 'string') filter['tags'] = req.query['tag'];
-  if (typeof req.query['path'] === 'string') filter['path'] = req.query['path'];
+  if (typeof req.query['path'] === 'string') filter['path'] = req.query['path'].replace(/\\/g, '/').replace(/^\/+/, '');
   const memberIds = resolveMemberSpaces(spaceId);
   const all = (await Promise.all(memberIds.map(mid =>
     col(`${mid}_files`)
@@ -1396,6 +1396,26 @@ brainRouter.get('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth, asy
       .toArray(),
   ))).flat();
   res.json({ files: all, limit, skip });
+});
+
+// DELETE /api/brain/spaces/:spaceId/files — delete file metadata record by path (does NOT delete the file on disk)
+brainRouter.delete('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
+  const spaceId = req.params['spaceId'] as string;
+  const cfg = getConfig();
+  if (!cfg.spaces.some(s => s.id === spaceId)) {
+    res.status(404).json({ error: `Space '${spaceId}' not found` }); return;
+  }
+  const path = req.query['path'];
+  if (typeof path !== 'string' || !path.trim()) {
+    res.status(400).json({ error: '`path` query parameter required' }); return;
+  }
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
+  if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+  const memberIds = resolveMemberSpaces(wt.target);
+  for (const mid of memberIds) {
+    await deleteFileMeta(mid, path);
+  }
+  res.status(204).end();
 });
 
 // PATCH /api/brain/spaces/:spaceId/files — update file metadata by path (query param ?path=)

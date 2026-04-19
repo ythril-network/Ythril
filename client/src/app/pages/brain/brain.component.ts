@@ -2695,11 +2695,19 @@ export class BrainComponent implements OnInit {
   }
 
   deleteFileMeta(id: string): void {
-    // Filemeta records are auto-created on upload; deleting just removes the metadata record, not the file itself.
-    // We use the raw API since there's no dedicated deleteFileMeta client endpoint yet.
-    this.confirmDeleteId.set('');
-    // No client-side delete endpoint — only hide from view for now; refresh the list
-    this.fileMetas.update(list => list.filter(f => f._id !== id));
+    // Deleting just removes the metadata record, not the file itself.
+    const fm = this.fileMetas().find(f => f._id === id);
+    if (!fm) { this.confirmDeleteId.set(''); return; }
+    this.api.deleteFileMeta(this.activeSpaceId(), fm.path).subscribe({
+      next: () => {
+        this.confirmDeleteId.set('');
+        this.fileMetas.update(list => list.filter(f => f._id !== id));
+      },
+      error: () => {
+        this.confirmDeleteId.set('');
+        alert('Failed to delete file metadata record.');
+      },
+    });
   }
 
   // ── File Meta navigation helpers ─────────────────────────────────────────

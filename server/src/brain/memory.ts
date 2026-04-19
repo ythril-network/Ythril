@@ -497,6 +497,8 @@ export async function deleteMemory(
   spaceId: string,
   memoryId: string,
 ): Promise<boolean> {
+  const existing = await col<MemoryDoc>(`${spaceId}_memories`)
+    .findOne({ _id: memoryId, spaceId } as never, { projection: { seq: 1 } }) as { seq?: number } | null;
   const seq = await nextSeq(spaceId);
   const result = await col<MemoryDoc>(`${spaceId}_memories`).deleteOne({
     _id: memoryId,
@@ -511,6 +513,7 @@ export async function deleteMemory(
     deletedAt: new Date().toISOString(),
     instanceId: getConfig().instanceId,
     seq,
+    ...(existing?.seq !== undefined ? { originalSeq: existing.seq } : {}),
   };
   await col<TombstoneDoc>(`${spaceId}_tombstones`).replaceOne(
     { _id: memoryId } as never,
@@ -547,9 +550,9 @@ export async function bulkDeleteMemories(spaceId: string): Promise<number> {
   // Deterministic newest-first ordering keeps recently written docs near the
   // front of the generated tombstone seq range even under very large datasets.
   const ids = await coll
-    .find({}, { projection: { _id: 1, createdAt: 1 } })
+    .find({}, { projection: { _id: 1, createdAt: 1, seq: 1 } })
     .sort({ createdAt: -1, _id: -1 })
-    .toArray();
+    .toArray() as { _id: string; createdAt: string; seq?: number }[];
   if (ids.length === 0) return 0;
 
   const now = new Date().toISOString();
@@ -565,6 +568,7 @@ export async function bulkDeleteMemories(spaceId: string): Promise<number> {
       deletedAt: now,
       instanceId,
       seq,
+      ...(doc.seq !== undefined ? { originalSeq: doc.seq } : {}),
     });
   }
 

@@ -197,6 +197,8 @@ export async function deleteChrono(
   spaceId: string,
   chronoId: string,
 ): Promise<boolean> {
+  const existing = await col<ChronoEntry>(`${spaceId}_chrono`)
+    .findOne({ _id: chronoId, spaceId } as never, { projection: { seq: 1 } }) as { seq?: number } | null;
   const seq = await nextSeq(spaceId);
   const result = await col<ChronoEntry>(`${spaceId}_chrono`).deleteOne({
     _id: chronoId,
@@ -211,6 +213,7 @@ export async function deleteChrono(
     deletedAt: new Date().toISOString(),
     instanceId: getConfig().instanceId,
     seq,
+    ...(existing?.seq !== undefined ? { originalSeq: existing.seq } : {}),
   };
   await col<TombstoneDoc>(`${spaceId}_tombstones`).replaceOne(
     { _id: chronoId } as never,
@@ -223,7 +226,7 @@ export async function deleteChrono(
 /** Bulk-delete all chrono entries in a space, writing a tombstone per deleted doc. */
 export async function bulkDeleteChrono(spaceId: string): Promise<number> {
   const coll = col<ChronoEntry>(`${spaceId}_chrono`);
-  const ids = await coll.find({}, { projection: { _id: 1 } }).toArray();
+  const ids = await coll.find({}, { projection: { _id: 1, seq: 1 } }).toArray() as { _id: string; seq?: number }[];
   if (ids.length === 0) return 0;
 
   const now = new Date().toISOString();
@@ -239,6 +242,7 @@ export async function bulkDeleteChrono(spaceId: string): Promise<number> {
       deletedAt: now,
       instanceId,
       seq,
+      ...(doc.seq !== undefined ? { originalSeq: doc.seq } : {}),
     });
   }
 

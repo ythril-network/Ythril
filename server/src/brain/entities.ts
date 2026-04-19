@@ -245,6 +245,8 @@ export async function deleteEntity(
   spaceId: string,
   entityId: string,
 ): Promise<boolean> {
+  const existing = await col<EntityDoc>(`${spaceId}_entities`)
+    .findOne({ _id: entityId, spaceId } as never, { projection: { seq: 1 } }) as { seq?: number } | null;
   const seq = await nextSeq(spaceId);
   const result = await col<EntityDoc>(`${spaceId}_entities`).deleteOne({
     _id: entityId,
@@ -259,6 +261,7 @@ export async function deleteEntity(
     deletedAt: new Date().toISOString(),
     instanceId: getConfig().instanceId,
     seq,
+    ...(existing?.seq !== undefined ? { originalSeq: existing.seq } : {}),
   };
   await col<TombstoneDoc>(`${spaceId}_tombstones`).replaceOne(
     { _id: entityId } as never,
@@ -271,7 +274,7 @@ export async function deleteEntity(
 /** Bulk-delete all entities in a space, writing a tombstone per deleted doc. */
 export async function bulkDeleteEntities(spaceId: string): Promise<number> {
   const coll = col<EntityDoc>(`${spaceId}_entities`);
-  const ids = await coll.find({}, { projection: { _id: 1 } }).toArray();
+  const ids = await coll.find({}, { projection: { _id: 1, seq: 1 } }).toArray() as { _id: string; seq?: number }[];
   if (ids.length === 0) return 0;
 
   const now = new Date().toISOString();
@@ -287,6 +290,7 @@ export async function bulkDeleteEntities(spaceId: string): Promise<number> {
       deletedAt: now,
       instanceId,
       seq,
+      ...(doc.seq !== undefined ? { originalSeq: doc.seq } : {}),
     });
   }
 

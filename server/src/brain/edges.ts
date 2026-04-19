@@ -163,6 +163,8 @@ export async function listEdges(
 
 /** Delete an edge by ID and write tombstone */
 export async function deleteEdge(spaceId: string, edgeId: string): Promise<boolean> {
+  const existing = await col<EdgeDoc>(`${spaceId}_edges`)
+    .findOne({ _id: edgeId, spaceId } as never, { projection: { seq: 1 } }) as { seq?: number } | null;
   const seq = await nextSeq(spaceId);
   const result = await col<EdgeDoc>(`${spaceId}_edges`).deleteOne({
     _id: edgeId,
@@ -177,6 +179,7 @@ export async function deleteEdge(spaceId: string, edgeId: string): Promise<boole
     deletedAt: new Date().toISOString(),
     instanceId: getConfig().instanceId,
     seq,
+    ...(existing?.seq !== undefined ? { originalSeq: existing.seq } : {}),
   };
   await col<TombstoneDoc>(`${spaceId}_tombstones`).replaceOne(
     { _id: edgeId } as never,

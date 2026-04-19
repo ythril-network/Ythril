@@ -351,8 +351,16 @@ syncRouter.get('/memories', syncRateLimit, requireAuth, async (req, res) => {
     // from appearing on both the current page AND the next page (cursor duplicate bug).
     const pageMaxSeq = items.length > 0 ? (items[items.length - 1] as { seq: number }).seq : sinceVal;
     const tombstones = await listTombstones(spaceId, sinceVal, pageSize);
+    // Exclude tombstones for docs already returned on previous pages (originalSeq <= sinceVal)
+    // and tombstones for docs in the current page's items list (within-page dedup).
+    const itemIds = new Set(items.map(i => (i as { _id: string })._id));
     const tombs = tombstones
-      .filter(t => t.type === 'memory' && t.seq <= pageMaxSeq)
+      .filter(t =>
+        t.type === 'memory' &&
+        t.seq <= pageMaxSeq &&
+        !itemIds.has(t._id) &&
+        (t.originalSeq === undefined || t.originalSeq > sinceVal),
+      )
       .map(t => ({ _id: t._id, seq: t.seq, deletedAt: t.deletedAt }));
 
     res.json({ items: [...items, ...tombs].sort((a, b) => (a as { seq: number }).seq - (b as { seq: number }).seq), nextCursor });
@@ -492,8 +500,14 @@ syncRouter.get('/entities', syncRateLimit, requireAuth, async (req, res) => {
 
     const pageMaxSeq = items.length > 0 ? (items[items.length - 1] as { seq: number }).seq : sinceVal;
     const tombstones = await listTombstones(spaceId, sinceVal, pageSize);
+    const itemIds = new Set(items.map(i => (i as { _id: string })._id));
     const tombs = tombstones
-      .filter(t => t.type === 'entity' && t.seq <= pageMaxSeq)
+      .filter(t =>
+        t.type === 'entity' &&
+        t.seq <= pageMaxSeq &&
+        !itemIds.has(t._id) &&
+        (t.originalSeq === undefined || t.originalSeq > sinceVal),
+      )
       .map(t => ({ _id: t._id, seq: t.seq, deletedAt: t.deletedAt }));
 
     res.json({ items: [...items, ...tombs].sort((a, b) => (a as { seq: number }).seq - (b as { seq: number }).seq), nextCursor });
@@ -584,8 +598,14 @@ syncRouter.get('/edges', syncRateLimit, requireAuth, async (req, res) => {
 
     const pageMaxSeq = items.length > 0 ? (items[items.length - 1] as { seq: number }).seq : sinceVal;
     const tombstones = await listTombstones(spaceId, sinceVal, pageSize);
+    const itemIds = new Set(items.map(i => (i as { _id: string })._id));
     const tombs = tombstones
-      .filter(t => t.type === 'edge' && t.seq <= pageMaxSeq)
+      .filter(t =>
+        t.type === 'edge' &&
+        t.seq <= pageMaxSeq &&
+        !itemIds.has(t._id) &&
+        (t.originalSeq === undefined || t.originalSeq > sinceVal),
+      )
       .map(t => ({ _id: t._id, seq: t.seq, deletedAt: t.deletedAt }));
 
     res.json({ items: [...items, ...tombs].sort((a, b) => (a as { seq: number }).seq - (b as { seq: number }).seq), nextCursor });
@@ -677,8 +697,14 @@ syncRouter.get('/chrono', syncRateLimit, requireAuth, async (req, res) => {
 
     const pageMaxSeq = items.length > 0 ? (items[items.length - 1] as { seq: number }).seq : sinceVal;
     const tombstones = await listTombstones(spaceId, sinceVal, pageSize);
+    const itemIds = new Set(items.map(i => (i as { _id: string })._id));
     const tombs = tombstones
-      .filter(t => t.type === 'chrono' && t.seq <= pageMaxSeq)
+      .filter(t =>
+        t.type === 'chrono' &&
+        t.seq <= pageMaxSeq &&
+        !itemIds.has(t._id) &&
+        (t.originalSeq === undefined || t.originalSeq > sinceVal),
+      )
       .map(t => ({ _id: t._id, seq: t.seq, deletedAt: t.deletedAt }));
 
     res.json({ items: [...items, ...tombs].sort((a, b) => (a as { seq: number }).seq - (b as { seq: number }).seq), nextCursor });
@@ -934,6 +960,7 @@ syncRouter.post('/tombstones', syncRateLimit, requireAuth, async (req, res) => {
       deletedAt: z.string(),
       instanceId: z.string(),
       seq: z.number(),
+      originalSeq: z.number().optional(),
     }));
     const parsed = schema.safeParse(tombstones);
     if (!parsed.success) { res.status(400).json({ error: 'Invalid tombstone format' }); return; }

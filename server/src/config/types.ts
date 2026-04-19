@@ -373,6 +373,9 @@ export interface TombstoneDoc {
   deletedAt: string;
   instanceId: string;
   seq: number;
+  /** Seq of the document at the time it was deleted — used to filter tombstones
+   *  from pagination pages that already returned the live document. */
+  originalSeq?: number;
 }
 
 export interface FileTombstoneDoc {

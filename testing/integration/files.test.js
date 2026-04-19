@@ -378,6 +378,40 @@ describe('File metadata (MongoDB)', () => {
     assert.ok(q.body.files.some(f => f.path === filePath), 'Should find file by unique tag');
   });
 
+  it('GET /api/brain/.../files?path= with leading slash normalises correctly', async () => {
+    const filePath = `meta-normpath-${RUN}.txt`;
+    await uploadFile(tokenA, 'general', filePath, 'norm');
+
+    // Stored path has no leading slash; querying with leading slash must still match
+    const q = await listFileMeta(tokenA, 'general', `?path=${encodeURIComponent('/' + filePath)}`);
+    assert.equal(q.status, 200);
+    assert.ok(q.body.files.length > 0, 'Leading-slash query must find the metadata record');
+    assert.equal(q.body.files[0].path, filePath, 'Returned path must be the normalised (no-slash) form');
+  });
+
+  it('DELETE /api/brain/.../files removes metadata without deleting the file on disk', async () => {
+    const filePath = `meta-braindelete-${RUN}.txt`;
+    await uploadFile(tokenA, 'general', filePath, 'keep me on disk');
+
+    const q1 = await listFileMeta(tokenA, 'general', `?path=${encodeURIComponent(filePath)}`);
+    assert.ok(q1.body.files.length > 0, 'Must have metadata before brain-delete');
+
+    const delUrl = `${INSTANCES.a}/api/brain/spaces/general/files?path=${encodeURIComponent(filePath)}`;
+    const dr = await fetch(delUrl, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${tokenA}` },
+    });
+    assert.equal(dr.status, 204, `Expected 204, got ${dr.status}: ${await dr.text()}`);
+
+    const q2 = await listFileMeta(tokenA, 'general', `?path=${encodeURIComponent(filePath)}`);
+    assert.equal(q2.body.files.length, 0, 'Metadata must be gone after brain DELETE');
+
+    // File itself must still be downloadable
+    const dlUrl = `${INSTANCES.a}/api/files/general?path=${encodeURIComponent(filePath)}`;
+    const dlr = await fetch(dlUrl, { headers: { 'Authorization': `Bearer ${tokenA}` } });
+    assert.equal(dlr.status, 200, 'File on disk must still exist after metadata-only delete');
+  });
+
   it('Brain stats endpoint includes files count', async () => {
     const before = await getStats(tokenA, 'general');
     assert.equal(before.status, 200, JSON.stringify(before.body));

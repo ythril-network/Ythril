@@ -739,6 +739,11 @@ export class ApiService {
     return this.http.patch<FileMeta>(`/api/brain/spaces/${spaceId}/files`, body, { params });
   }
 
+  deleteFileMeta(spaceId: string, path: string): Observable<void> {
+    const params = new HttpParams().set('path', path);
+    return this.http.delete<void>(`/api/brain/spaces/${spaceId}/files`, { params });
+  }
+
   // ── File conflicts ────────────────────────────────────────────────────────
 
   listConflicts(): Observable<{ conflicts: ConflictRecord[] }> {
