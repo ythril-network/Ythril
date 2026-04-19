@@ -9,7 +9,11 @@ import { z } from 'zod';
 const PORT = Number(process.env['YTHRIL_CONNECTOR_PORT'] ?? 38123);
 const HOST = process.env['YTHRIL_CONNECTOR_BIND_HOST'] ?? '0.0.0.0';
 const TOKEN_FILE = process.env['YTHRIL_CONNECTOR_TOKEN_FILE'] ?? path.join(os.homedir(), '.ythril-local-connector', 'token');
-const ALLOW_SERVICE_INSTALL = (process.env['YTHRIL_CONNECTOR_ALLOW_SERVICE_INSTALL'] ?? '').trim().toLowerCase() === 'true';
+// On Windows workstations, service install is the correct default so the tunnel survives reboots
+// without a separate auto-start mechanism. Opt out by setting the env var to 'false'.
+const ALLOW_SERVICE_INSTALL = process.platform === 'win32'
+  ? (process.env['YTHRIL_CONNECTOR_ALLOW_SERVICE_INSTALL'] ?? 'true').trim().toLowerCase() !== 'false'
+  : (process.env['YTHRIL_CONNECTOR_ALLOW_SERVICE_INSTALL'] ?? '').trim().toLowerCase() === 'true';
 const DEFAULT_TUNNEL_NAME = process.env['YTHRIL_CONNECTOR_TUNNEL_NAME'] ?? 'ythril-local';
 const CLOUDFLARED_CERT_PATH = path.join(os.homedir(), '.cloudflared', 'cert.pem');
 const CONNECTOR_STATE_DIR = path.join(os.homedir(), '.ythril-local-connector');
@@ -246,13 +250,47 @@ async function maybeInstallService(targetOs: 'windows' | 'linux', autostart: boo
     return notes;
   }
 
-  await runCloudflared(['service', 'install']);
-  notes.push('cloudflared service installed.');
-
   if (targetOs === 'windows') {
-    await runCommand('powershell', ['-NoProfile', '-Command', 'Start-Service cloudflared']);
+    // Check whether the service already exists to keep this idempotent.
+    const { stdout: svcStatus } = await runCommand('powershell', [
+      '-NoProfile', '-Command',
+      'Get-Service cloudflared -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Status',
+    ]).catch(() => ({ stdout: '', stderr: '' }));
+
+    if (!svcStatus.trim()) {
+      // cloudflared service install requires admin — trigger UAC elevation via PowerShell.
+      // The operator will see a UAC dialog and must click Yes to proceed.
+      await runCommand('powershell', [
+        '-NoProfile', '-Command',
+        'Start-Process -FilePath cloudflared -ArgumentList @("service","install") -Verb RunAs -Wait',
+      ]);
+      notes.push('cloudflared Windows service installed.');
+    } else {
+      notes.push('cloudflared Windows service already installed.');
+    }
+
+    // cloudflared service runs as LocalSystem, which resolves ~ to the system profile
+    // (C:\Windows\System32\config\systemprofile), not the operator's home directory.
+    // Fix the binPath to explicitly pass --config pointing to the operator's config.yml
+    // so the service finds the tunnel credentials regardless of which user account runs it.
+    const configPath = path.join(cloudflaredDir(), 'config.yml');
+    const binPath = `"${cloudflaredCmd}" --config "${configPath}" tunnel run`;
+    const batLines = [
+      `sc.exe config cloudflared binPath= "${binPath.replace(/"/g, '\\"')}"`,
+    ];
+    const batFile = path.join(os.tmpdir(), 'ythril-cf-binpath.bat');
+    fs.writeFileSync(batFile, batLines.join('\r\n'), 'ascii');
+    await runCommand('powershell', [
+      '-NoProfile', '-Command',
+      `Start-Process cmd -Verb RunAs -ArgumentList '/c "","${batFile.replace(/"/g, '\\"')}"' -Wait`,
+    ]);
+    notes.push(`cloudflared service binPath updated to use --config ${configPath}.`);
+
+    await runCommand('powershell', ['-NoProfile', '-Command', 'Start-Service cloudflared -ErrorAction SilentlyContinue']);
     notes.push('cloudflared Windows service started.');
   } else {
+    await runCloudflared(['service', 'install']);
+    notes.push('cloudflared service installed.');
     try {
       await runCommand('systemctl', ['enable', '--now', 'cloudflared']);
       notes.push('cloudflared systemd service enabled and started.');

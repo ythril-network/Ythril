@@ -394,6 +394,12 @@ The acknowledgement checkbox is required precisely because these are real, persi
 
 On machines where `cert.pem` already exists and the tunnel is already created, the wizard is idempotent — clicking "Run automatically" again is safe and just re-validates/restarts the tunnel.
 
+### Tunnel persistence (Windows service)
+
+On Windows the wizard installs cloudflared as a Windows service automatically so the tunnel survives reboots without any manual intervention. When the wizard calls service install, a UAC elevation dialog will appear — click **Yes** to allow it.
+
+If service install is intentionally unwanted, set `YTHRIL_CONNECTOR_ALLOW_SERVICE_INSTALL=false` in the environment before starting the local connector. In that case the connector will start cloudflared as a background process instead, but it will not survive reboots automatically.
+
 Server note:
 
 - On real servers, keep the local connector disabled. `YTHRIL_LOCAL_AGENT_ENABLED` is unset by default.
