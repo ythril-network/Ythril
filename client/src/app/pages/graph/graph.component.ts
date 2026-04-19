@@ -1009,7 +1009,6 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
     this.cacheNodes = [];
     this.cacheEdges = [];
     this.cacheTruncated = false;
-    this.overlays.set([]);
     if (this.cy) {
       this.cy.elements().remove();
     }
