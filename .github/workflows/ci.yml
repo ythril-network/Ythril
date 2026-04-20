@@ -41,10 +41,8 @@ jobs:
           docker compose -p ythril-test -f testing/docker-compose.test.yml up -d --wait --wait-timeout 300
           node testing/sync/setup.js
           # config.json is created by the container's node user (uid 1000, mode 0600).
-          # chmod from inside the container so the owning uid can relax permissions for the runner.
-          for svc in ythril-a ythril-b ythril-c; do
-            docker exec $svc chmod a+r /config/config.json || true
-          done
+          # The runner (uid 1001) can't read it without sudo; gossip.test.js reads these files directly.
+          sudo chmod -R a+rX testing/sync/configs/
 
       - name: Run all tests
         run: npm run test:all:core
