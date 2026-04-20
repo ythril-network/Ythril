@@ -2,7 +2,7 @@
  * Integration tests: GET /metrics (Prometheus endpoint)
  *
  * Covers:
- *  - Endpoint is accessible without authentication (unauthenticated like /health)
+ *  - Endpoint requires authentication (returns 401 without a valid Bearer token)
  *  - Response uses Prometheus text/plain content-type
  *  - Default process metrics are present (nodejs_* gauges)
  *  - Ythril application metrics are present
@@ -26,7 +26,9 @@ const TOKEN_FILE = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt
 let token;
 
 async function getMetrics(instance = INSTANCES.a) {
-  const r = await fetch(`${instance}/metrics`);
+  // Uses the module-level `token` set in before() — always authenticates.
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  const r = await fetch(`${instance}/metrics`, { headers });
   return { status: r.status, contentType: r.headers.get('content-type'), text: await r.text() };
 }
 
@@ -51,9 +53,9 @@ describe('GET /metrics — Prometheus endpoint', () => {
     token = fs.readFileSync(TOKEN_FILE, 'utf8').trim();
   });
 
-  it('is accessible without authentication (no Bearer token)', async () => {
+  it('returns 401 without authentication (no Bearer token)', async () => {
     const r = await fetch(`${INSTANCES.a}/metrics`);
-    assert.equal(r.status, 200, `Expected 200 got ${r.status}`);
+    assert.equal(r.status, 401, `Expected 401 got ${r.status}`);
   });
 
   it('returns Prometheus text/plain content-type', async () => {

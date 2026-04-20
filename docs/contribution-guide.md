@@ -203,11 +203,11 @@ Published images are available on two registries:
 
 Every release produces four tags:
 
-| Tag | Example for `v0.2.1` |
+| Tag | Example for `v1.0.0` |
 |-----|-----------------------|
-| Full version | `0.2.1` |
-| Minor | `0.2` |
-| Major | `0` |
+| Full version | `1.0.0` |
+| Minor | `1.0` |
+| Major | `1` |
 | Latest | `latest` |
 
 ### Architectures
@@ -270,8 +270,8 @@ Images are built and pushed automatically by the CI workflow (`.github/workflows
 
    ```bash
    git add -A
-   git commit -m "release: v0.2.0"
-   git tag v0.2.0
+   git commit -m "release: v1.0.0"
+   git tag v1.0.0
    git push origin main --tags
    ```
 

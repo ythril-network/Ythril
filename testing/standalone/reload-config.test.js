@@ -159,7 +159,7 @@ describe('POST /api/admin/reload-config — quota changes take effect', () => {
     const r = await post(INSTANCES.a, token, '/api/brain/general/memories', {
       fact: `reload-config restore enforcement test ${Date.now()}`,
     });
-    assert.ok(r.status === 201 || r.status === 200,
+    assert.equal(r.status, 201,
       `Expected 201 after restoring config, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 });
@@ -191,7 +191,7 @@ describe('POST /api/admin/reload-config — space config changes take effect', (
     const r = await post(INSTANCES.a, token, `/api/brain/${NEW_SPACE_ID}/memories`, {
       fact: `testing new space after reload ${RUN}`,
     });
-    assert.ok(r.status === 201 || r.status === 200,
+    assert.equal(r.status, 201,
       `Expected 201 writing to new space after reload, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 

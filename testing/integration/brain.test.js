@@ -88,7 +88,7 @@ describe('Brain â€” memories', () => {
 
   it('Access memory in non-existent space returns 404', async () => {
     const r = await get(INSTANCES.a, token(), '/api/brain/nonexistent-space/memories');
-    assert.ok(r.status === 404 || r.status === 400, `Got ${r.status}`);
+    assert.equal(r.status, 404, `Got ${r.status}`);
   });
 });
 
@@ -108,7 +108,7 @@ describe('Brain â€” conflicts protection', () => {
       fact: 'Case sensitivity test',
     });
     // Space IDs are lowercase â€” GENERAL should 404
-    assert.ok(r.status === 404 || r.status === 400, `Got ${r.status}`);
+    assert.equal(r.status, 404, `Got ${r.status}`);
   });
 });
 
@@ -2345,6 +2345,6 @@ describe('Brain — find-similar', () => {
       entryId: '00000000-0000-4000-a000-000000000001',
       entryType: 'memory',
     });
-    assert.ok(r.status === 404 || r.status === 400, `Got ${r.status}`);
+    assert.equal(r.status, 404, `Got ${r.status}`);
   });
 });

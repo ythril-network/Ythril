@@ -107,7 +107,7 @@ export function createApp() {
   });
 
   // ── Prometheus metrics ───────────────────────────────────────────────────
-  // Unauthenticated — same as /health — so Prometheus scrapers work without PATs.
+  // Requires auth: Bearer METRICS_TOKEN (if configured) or a valid admin PAT.
   app.use('/metrics', metricsRouter);
 
   // ── HTTP request instrumentation ─────────────────────────────────────────

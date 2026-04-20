@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build test stack
+        run: docker compose -p ythril-test -f testing/docker-compose.test.yml build
+        # Single build (all services in one pass) is fine on CI — no VS Code to crash.
+
+      - name: Start test containers
+        run: |
+          docker compose -p ythril-test -f testing/docker-compose.test.yml up -d
+          node testing/sync/setup.js
+
+      - name: Run all tests
+        run: npm run test:all:core
+
+      - name: Tear down containers
+        if: always()
+        run: docker compose -p ythril-test -f testing/docker-compose.test.yml down -v --remove-orphans

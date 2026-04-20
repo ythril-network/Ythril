@@ -20,7 +20,7 @@ The `kind` field on chrono entries has been renamed to `type` to be consistent w
 - `POST /api/brain/spaces/:spaceId/chrono` — request body
 - `POST /api/brain/spaces/:spaceId/bulk` — `chrono[]` items in the bulk body
 - `GET /api/brain/spaces/:spaceId/chrono` — response documents
-- MCP tools: `add_chrono`, `bulk_write` (chrono items), `list_chrono` (filter param and response)
+- MCP tools: `create_chrono`, `bulk_write` (chrono items), `list_chrono` (filter param and response)
 
 **Migration — before:**
 ```json

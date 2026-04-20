@@ -51,7 +51,7 @@ Published images are available on two registries:
 | GitHub Container Registry | `ghcr.io/ythril-network/ythril` | `docker pull ghcr.io/ythril-network/ythril:latest` |
 | Docker Hub | `docker.io/ythril/ythril` | `docker pull ythril/ythril:latest` |
 
-Tags follow semver: `:latest`, `:0.1.0`, `:0.1`, `:0`. All images are multi-arch (`linux/amd64`, `linux/arm64`).
+Tags follow semver: `:latest`, `:1.0.0`, `:1.0`, `:1`. All images are multi-arch (`linux/amd64`, `linux/arm64`).
 
 ### Quick Start
 
@@ -186,6 +186,7 @@ DEBUG=1 docker compose up
 | `NODE_ENV` | `production` | Node environment |
 | `PORT` | `3200` | HTTP listen port |
 | `DEBUG` | (unset) | Set to `1` for verbose logging |
+| `METRICS_TOKEN` | (unset) | When set, `GET /metrics` requires this exact value as a Bearer token — the recommended path for Prometheus scrape configs. If unset, the endpoint falls back to requiring a valid admin PAT. |
 
 ### Data Persistence
 
@@ -240,7 +241,7 @@ Ythril sets the following headers on every response:
 | Header | Value | Purpose |
 |---|---|---|
 | `X-Content-Type-Options` | `nosniff` | Prevents MIME-type sniffing |
-| `Content-Security-Policy` | `frame-ancestors 'self'` | Allows same-origin iframing (OIDC silent refresh, portal theming) while blocking cross-origin embedding |
+| `Content-Security-Policy` | `frame-ancestors 'self'; object-src 'none'; base-uri 'self'` | Blocks cross-origin embedding, plugin injection, and base-tag hijacking |
 | `Referrer-Policy` | `no-referrer` | Strips referrer on outbound requests |
 | `X-Request-Id` | UUID | Unique per-request ID for tracing (logged server-side) |
 
@@ -467,6 +468,7 @@ POST /api/brain/:spaceId/memories
 ```json
 {
   "fact": "Kubernetes pods are ephemeral by design",
+  "type": "note",
   "tags": ["k8s", "architecture"],
   "entityIds": [],
   "description": "This means pod-local storage is lost on restart.",
@@ -481,6 +483,7 @@ POST /api/brain/:spaceId/memories
   "_id": "a1b2c3d4-...",
   "spaceId": "general",
   "fact": "Kubernetes pods are ephemeral by design",
+  "type": "note",
   "tags": ["k8s", "architecture"],
   "entityIds": [],
   "description": "This means pod-local storage is lost on restart.",
@@ -492,7 +495,7 @@ POST /api/brain/:spaceId/memories
 }
 ```
 
-**Constraints**: `fact` max 50 000 chars. `tags` must be an array of strings. `description` optional string. `properties` optional object where each value must be a string, number, or boolean. When the space has `strictLinkage` enabled, `entityIds` must contain valid UUID v4 values (entity IDs); passing names instead of IDs returns `400`.
+**Constraints**: `fact` max 50 000 chars. `type` optional string — stored on the document and validated against the space's `typeSchemas.memory` allowlist when set. `tags` must be an array of strings. `description` optional string. `properties` optional object where each value must be a string, number, or boolean. When the space has `strictLinkage` enabled, `entityIds` must contain valid UUID v4 values (entity IDs); passing names instead of IDs returns `400`.
 
 ---
 
@@ -2963,13 +2966,15 @@ Example:
 
 ---
 
-### Prometheus Metrics (unauthenticated)
+### Prometheus Metrics
 
 ```
 GET /metrics
 ```
 
-Exposes a [Prometheus-compatible](https://prometheus.io/docs/instrumenting/exposition_formats/) metrics endpoint for production monitoring. No authentication required — Prometheus scrapers work without Bearer tokens.
+Exposes a [Prometheus-compatible](https://prometheus.io/docs/instrumenting/exposition_formats/) metrics endpoint for production monitoring.
+
+**Authentication**: Set the `METRICS_TOKEN` environment variable (recommended) — Prometheus scrapers must send `Authorization: Bearer <METRICS_TOKEN>` in their scrape config. If `METRICS_TOKEN` is unset the endpoint falls back to requiring a valid admin PAT. Returns `401` without valid credentials.
 
 **Response** `200` — `text/plain; version=0.0.4; charset=utf-8`:
 
@@ -3024,6 +3029,10 @@ spec:
     - port: http
       path: /metrics
       interval: 30s
+      authorization:
+        credentials:
+          name: ythril-metrics-token   # Secret containing METRICS_TOKEN value
+          key: token
 ```
 
 ---
@@ -3130,7 +3139,7 @@ Dumps the entire knowledge base of a space as a single JSON document. Requires a
   "exportedAt": "2026-04-11T10:00:00.000Z",
   "spaceId": "eng-kb",
   "spaceName": "Engineering Knowledge Base",
-  "version": "0.9.0",
+  "version": "1.0.0",
   "memories": [ { "_id": "...", "fact": "...", "tags": [], "...": "..." } ],
   "entities": [ { "_id": "...", "name": "...", "type": "...", "...": "..." } ],
   "edges":    [ { "_id": "...", "from": "...", "to": "...", "label": "...", "...": "..." } ],
@@ -3631,7 +3640,7 @@ Authorization: Bearer <token>   # any valid token
 {
   "instanceId": "a1b2c3d4-...",
   "instanceLabel": "My Brain",
-  "version": "0.9.0",
+  "version": "1.0.0",
   "uptime": "3d 14h 22m",
   "mongoVersion": "7.0.15",
   "diskInfo": { "total": 107374182400, "used": 53687091200, "available": 53687091200 }
@@ -3744,7 +3753,7 @@ The `postMessage` handler validates `event.origin` — only same-origin messages
 - `cssUrl` is restricted to HTTPS (except `localhost` for development).
 - `postMessage` origin is checked against `self`.
 - Only CSS custom properties (`--*`) are applied from runtime tokens.
-- The `Content-Security-Policy: frame-ancestors 'self'` header allows same-origin iframing while blocking cross-origin embedding.
+- The `Content-Security-Policy: frame-ancestors 'self'; object-src 'none'; base-uri 'self'` header allows same-origin iframing, blocks cross-origin embedding, plugin injection, and base-tag hijacking.
 
 ---
 
@@ -4253,7 +4262,7 @@ After saving any IdP configuration, run `POST /api/admin/reload-config` to apply
 ### Security Notes and Limitations
 
 - **No server-side token revocation for OIDC.**  JWTs are validated statelessly (signature + `exp`).  Once issued by the IdP, a token is valid until it expires.  To revoke access, disable or remove the user at the IdP and set short token lifetimes (5–15 minutes recommended).
-- **Silent token refresh.**  The SPA automatically schedules a background token refresh 60 seconds before the access token expires.  A hidden iframe is created with `prompt=none`; if the IdP session is still valid the user stays logged in with no interruption.  If the IdP session has also expired (or the IdP does not support `prompt=none`) the next API call returns 401 and the browser is redirected to the login page.  Configure your IdP's access token lifetime to balance UX vs security (5–15 minutes is a reasonable default).  This mechanism requires `Content-Security-Policy: frame-ancestors 'self'`, which the server sets by default.
+- **Silent token refresh.**  The SPA automatically schedules a background token refresh 60 seconds before the access token expires.  A hidden iframe is created with `prompt=none`; if the IdP session is still valid the user stays logged in with no interruption.  If the IdP session has also expired (or the IdP does not support `prompt=none`) the next API call returns 401 and the browser is redirected to the login page.  Configure your IdP's access token lifetime to balance UX vs security (5–15 minutes is a reasonable default).  This mechanism requires `Content-Security-Policy: frame-ancestors 'self'` (included in the default `frame-ancestors 'self'; object-src 'none'; base-uri 'self'` policy set by the server).
 - **`admin` and `readOnly` cannot both match.**  If both claim rules match the same JWT, `admin: true` takes precedence and `readOnly` is ignored.  Design your IdP roles to be mutually exclusive.
 - **Spaces claim controls visibility.**  When a `spaces` claim is present in the JWT, the OIDC session can only see and modify those spaces.  If the claim is missing or not an array, the session has access to all spaces (same as a PAT with no `spaces` allowlist).  Users who cannot see expected spaces should check with their administrator that the IdP is emitting the correct claim values.
 - **Config validation.**  When `oidc.enabled` is `true`, `issuerUrl` and `clientId` are required.  The server validates the OIDC config block at startup and on `reload-config` — a malformed block will prevent the server from starting.
