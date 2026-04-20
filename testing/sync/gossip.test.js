@@ -60,6 +60,13 @@ function getInstanceId(container) {
   return out;
 }
 
+/** Read instanceLabel from a container's config.json */
+function getInstanceLabel(container) {
+  return execSync(
+    `docker exec ${container} node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('/config/config.json','utf8'));process.stdout.write(c.instanceLabel)"`,
+  ).toString().trim();
+}
+
 // ── suite ─────────────────────────────────────────────────────────────────────
 
 describe('Gossip: member list exchange', () => {
@@ -217,9 +224,8 @@ describe('Gossip: member list exchange', () => {
   // ── Engine gossip exchange (end-to-end) ─────────────────────────────────────
 
   it('After sync trigger, B\'s instanceLabel is propagated to A via gossip self-piggyback', async () => {
-    // Read B's real instanceLabel from its bind-mounted config file
-    const configB = JSON.parse(fs.readFileSync(path.join(CONFIGS, 'b', 'config.json'), 'utf8'));
-    const realLabelB = configB.instanceLabel;
+    // Read B's real instanceLabel from inside the container (avoids host-side permission issues)
+    const realLabelB = getInstanceLabel('ythril-b');
 
     // Plant a stale label for B in A's member record (via A's own gossip endpoint)
     const stale = await post(INSTANCES.a, tokenA, `/api/sync/networks/${networkId}/members`, {
@@ -244,9 +250,8 @@ describe('Gossip: member list exchange', () => {
   });
 
   it('After sync trigger, B sees A\'s current label via gossip self-push', async () => {
-    // Read A's actual instanceLabel from its bind-mounted config file
-    const configA = JSON.parse(fs.readFileSync(path.join(CONFIGS, 'a', 'config.json'), 'utf8'));
-    const realLabelA = configA.instanceLabel;
+    // Read A's actual instanceLabel from inside the container (avoids host-side permission issues)
+    const realLabelA = getInstanceLabel('ythril-a');
 
     // Plant a stale label for A in B's member record so there is a clear before/after signal
     const stale = await post(INSTANCES.b, tokenB, `/api/sync/networks/${networkId}/members`, {

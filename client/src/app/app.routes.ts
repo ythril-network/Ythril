@@ -50,6 +50,11 @@ export const routes: Routes = [
         children: [
           { path: '', redirectTo: 'tokens', pathMatch: 'full' },
           {
+            path: 'preferences',
+            loadComponent: () =>
+              import('./pages/settings/preferences.component').then(m => m.PreferencesComponent),
+          },
+          {
             path: 'tokens',
             loadComponent: () =>
               import('./pages/settings/tokens.component').then(m => m.TokensComponent),
@@ -68,11 +73,6 @@ export const routes: Routes = [
             path: 'networks',
             loadComponent: () =>
               import('./pages/settings/networks.component').then(m => m.NetworksComponent),
-          },
-          {
-            path: 'mfa',
-            loadComponent: () =>
-              import('./pages/settings/mfa.component').then(m => m.MfaComponent),
           },
           {
             path: 'audit-log',

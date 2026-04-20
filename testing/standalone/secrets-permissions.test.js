@@ -21,6 +21,7 @@
 
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
@@ -41,6 +42,18 @@ const CANDIDATE_CONFIGS = [
 const CONFIG_FILE = CANDIDATE_CONFIGS.find(p => fs.existsSync(p)) ?? null;
 const SECRETS_FILE = CONFIG_FILE ? path.join(path.dirname(CONFIG_FILE), 'secrets.json') : null;
 const TOKEN_FILE = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
+
+// On Linux CI the container's node user (uid 1000) owns secrets.json (mode 0600).
+// The runner (uid 1001) cannot open it for reading directly — use docker exec instead.
+// statSync (for mode checks) does not require read permission and works as-is.
+const USE_DOCKER_EXEC = process.platform !== 'win32' && CONFIG_FILE?.includes(path.join('sync', 'configs'));
+
+function readSecretsRaw() {
+  if (USE_DOCKER_EXEC) {
+    return execSync('docker exec ythril-a cat /config/secrets.json').toString('utf8');
+  }
+  return fs.readFileSync(SECRETS_FILE, 'utf8');
+}
 
 let token;
 
@@ -68,14 +81,14 @@ describe('secrets.json — existence', () => {
   });
 
   it('secrets.json is valid JSON', () => {
-    const raw = fs.readFileSync(SECRETS_FILE, 'utf8');
+    const raw = readSecretsRaw();
     assert.doesNotThrow(() => JSON.parse(raw), 'secrets.json must be valid JSON');
   });
 
   it('peerTokens values are non-empty strings (plaintext outgoing credentials)', () => {
     // peerTokens are plaintext by design — they are Bearer tokens sent to peer instances.
     // Protection is via file permissions (0600); see the POSIX suite below.
-    const obj = JSON.parse(fs.readFileSync(SECRETS_FILE, 'utf8'));
+    const obj = JSON.parse(readSecretsRaw());
     const peerTokens = obj.peerTokens ?? {};
     for (const [peer, val] of Object.entries(peerTokens)) {
       assert.ok(

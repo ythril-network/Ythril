@@ -526,7 +526,7 @@ interface SpaceView {
 
         <!-- Files tab -->
         @if (activeTab() === 'files') {
-          <app-file-manager [embeddedSpaceId]="activeSpaceId()" [navigatePath]="fileManagerNavPath()" (viewFileMeta)="openFileMetaEntry($event)" />
+          <app-file-manager [embeddedSpaceId]="activeSpaceId()" [navigatePath]="fileManagerNavPath()" (viewFileMeta)="openFileMetaEntry($event)" (fileDeleted)="loadStats(activeSpaceId())" />
         }
 
         <!-- Memories -->
@@ -2397,7 +2397,7 @@ export class BrainComponent implements OnInit {
 
   applyChronoSearch(): void { this.chronoSkip.set(0); this.loadCurrentTab(this.activeSpaceId()); }
 
-  private loadStats(spaceId: string): void {
+  loadStats(spaceId: string): void {
     this.api.getSpaceStats(spaceId).subscribe({
       next: (stats) => {
         this.spaces.update(list =>
@@ -2691,6 +2691,7 @@ export class BrainComponent implements OnInit {
       next: () => {
         this.confirmDeleteId.set('');
         this.fileMetas.update(list => list.filter(f => f._id !== id));
+        this.loadStats(this.activeSpaceId());
       },
       error: () => {
         this.confirmDeleteId.set('');
@@ -2703,7 +2704,7 @@ export class BrainComponent implements OnInit {
 
   /** Called from Files tab file preview: switch to Filemeta tab filtered by path. */
   openFileMetaEntry(path: string): void {
-    this.fileMetaSearch.set(path);
+    this.fileMetaSearch.set(path.replace(/^\/+/, ''));
     this.fileMetaSkip.set(0);
     this.activeTab.set('filemeta');
     this.loadCurrentTab(this.activeSpaceId());

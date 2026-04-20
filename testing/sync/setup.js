@@ -28,7 +28,7 @@ async function wait(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
-async function waitForHealth(url, timeout = 30_000) {
+async function waitForHealth(url, timeout = 120_000) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
     try {
@@ -100,20 +100,28 @@ async function main() {
   console.log('=================');
 
   const results = [];
+  let failed = false;
   for (const inst of INSTANCES) {
     try {
       const r = await setupInstance(inst);
       results.push({ ...inst, ...r });
     } catch (err) {
       console.error(`  ERROR for instance ${inst.name}: ${err.message}`);
+      failed = true;
     }
   }
 
   console.log('\nSetup summary:');
-  for (const r of results) {
-    const tok = path.join(CONFIGS_DIR, r.name, 'token.txt');
+  for (const inst of INSTANCES) {
+    const tok = path.join(CONFIGS_DIR, inst.name, 'token.txt');
     const exists = fs.existsSync(tok);
-    console.log(`  ${r.name}: ${r.url}  token=${exists ? '✓' : '✗ MISSING'}`);
+    console.log(`  ${inst.name}: ${inst.url}  token=${exists ? '✓' : '✗ MISSING'}`);
+    if (!exists) failed = true;
+  }
+
+  if (failed) {
+    console.error('\nSetup failed — one or more instances are not ready.');
+    process.exit(1);
   }
 
   console.log('\nRun tests with:');

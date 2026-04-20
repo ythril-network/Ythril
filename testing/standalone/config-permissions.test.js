@@ -14,6 +14,7 @@
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
@@ -30,15 +31,40 @@ const TOKEN_FILE  = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.tx
 
 const IS_POSIX = process.platform !== 'win32';
 
+// On Linux CI the container's node user (uid 1000) owns config.json (mode 0600).
+// The runner (uid 1001) cannot read, write, or chmod it directly — use docker exec.
+// statSync (for reading mode bits) works on host since bind-mount shares the inode.
+const USE_DOCKER_EXEC = IS_POSIX && CONFIG_FILE?.includes(path.join('sync', 'configs'));
+const CONTAINER_A = 'ythril-a';
+
 let token;
 let originalConfig;
 
 function readConfig() {
+  if (USE_DOCKER_EXEC) {
+    return JSON.parse(execSync(`docker exec ${CONTAINER_A} cat /config/config.json`).toString('utf8'));
+  }
   return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
 }
 
 function writeConfig(cfg) {
+  if (USE_DOCKER_EXEC) {
+    const json = JSON.stringify(cfg, null, 2);
+    execSync(
+      `docker exec -i ${CONTAINER_A} sh -c 'cat > /config/config.json && chmod 600 /config/config.json'`,
+      { input: json },
+    );
+    return;
+  }
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2), 'utf8');
+}
+
+function chmodConfig(mode) {
+  if (USE_DOCKER_EXEC) {
+    execSync(`docker exec ${CONTAINER_A} chmod ${mode.toString(8)} /config/config.json`);
+    return;
+  }
+  fs.chmodSync(CONFIG_FILE, mode);
 }
 
 async function reloadConfig() {
@@ -57,14 +83,14 @@ describe('Config file permission auto-fix', { skip: !IS_POSIX ? 'Skipped on Wind
     // Restore original config and permissions
     if (originalConfig) {
       writeConfig(originalConfig);
-      fs.chmodSync(CONFIG_FILE, 0o600);
+      chmodConfig(0o600);
       await reloadConfig();
     }
   });
 
   it('auto-fixes a config file with mode 0644 when owned by this process', async () => {
     // Set loose permissions
-    fs.chmodSync(CONFIG_FILE, 0o644);
+    chmodConfig(0o644);
 
     // Stat to confirm
     const before = fs.statSync(CONFIG_FILE).mode & 0o777;
@@ -85,7 +111,7 @@ describe('Config file permission auto-fix', { skip: !IS_POSIX ? 'Skipped on Wind
   });
 
   it('auto-fixes a config file with mode 0666', async () => {
-    fs.chmodSync(CONFIG_FILE, 0o666);
+    chmodConfig(0o666);
     const r = await reloadConfig();
     assert.equal(r.status, 200, 'Should auto-fix mode 0666');
 
@@ -94,7 +120,7 @@ describe('Config file permission auto-fix', { skip: !IS_POSIX ? 'Skipped on Wind
   });
 
   it('keeps 0600 permissions if they are already correct', async () => {
-    fs.chmodSync(CONFIG_FILE, 0o600);
+    chmodConfig(0o600);
     const r = await reloadConfig();
     assert.equal(r.status, 200);
 
@@ -104,7 +130,7 @@ describe('Config file permission auto-fix', { skip: !IS_POSIX ? 'Skipped on Wind
 
   it('server remains functional with all spaces accessible after auto-fix', async () => {
     // Set loose permissions, reload, then verify full functionality
-    fs.chmodSync(CONFIG_FILE, 0o640);
+    chmodConfig(0o640);
     await reloadConfig();
 
     const r = await get(INSTANCES.a, token, '/api/spaces');
