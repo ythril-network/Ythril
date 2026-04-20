@@ -19,6 +19,7 @@
 
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { execSync } from 'node:child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -177,6 +178,30 @@ describe('Delete file and directory', () => {
       headers: { 'Authorization': `Bearer ${tokenA}` },
     });
     assert.equal(r.status, 404);
+  });
+
+  it('DELETE orphaned meta (file removed externally) returns 204 and cleans up meta', async () => {
+    // Upload a file so both the disk copy and the meta record exist.
+    const filePath = 'orphan-test.txt';
+    await uploadFile(tokenA, 'general', filePath, 'orphan content');
+
+    // Remove the physical file directly from the container, leaving the meta record intact.
+    execSync(`docker exec ythril-a rm /data/files/general/${filePath}`);
+
+    // The DELETE endpoint must detect the orphan, clean up meta, and return 204.
+    const url = `${INSTANCES.a}/api/files/general?path=${encodeURIComponent(filePath)}`;
+    const r = await fetch(url, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${tokenA}` },
+    });
+    assert.equal(r.status, 204, `Expected 204 for orphaned meta, got ${r.status}`);
+
+    // Verify meta was cleaned up: a second DELETE must return 404 (no disk, no meta).
+    const r2 = await fetch(url, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${tokenA}` },
+    });
+    assert.equal(r2.status, 404, `Expected 404 after orphan cleanup, got ${r2.status}`);
   });
 
   it('DELETE directory without confirm returns 422', async () => {
