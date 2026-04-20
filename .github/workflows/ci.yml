@@ -40,6 +40,11 @@ jobs:
           chmod 777 testing/sync/configs/a testing/sync/configs/b testing/sync/configs/c
           docker compose -p ythril-test -f testing/docker-compose.test.yml up -d --wait --wait-timeout 300
           node testing/sync/setup.js
+          # config.json is created by the container's node user (uid 1000, mode 0600).
+          # chmod from inside the container so the owning uid can relax permissions for the runner.
+          for svc in ythril-a ythril-b ythril-c; do
+            docker exec $svc chmod a+r /config/config.json || true
+          done
 
       - name: Run all tests
         run: npm run test:all:core
