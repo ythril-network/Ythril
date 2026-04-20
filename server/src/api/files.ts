@@ -42,7 +42,7 @@ import {
 import { checkQuota, QuotaError } from '../quota/quota.js';
 import { resolveSafePath, spaceRoot } from '../files/sandbox.js';
 import { col } from '../db/mongo.js';
-import type { FileTombstoneDoc } from '../config/types.js';
+import type { FileTombstoneDoc, FileMetaDoc } from '../config/types.js';
 import { upsertFileMeta, deleteFileMeta, deleteFileMetaByPrefix, renameFileMeta, renameFileMetaByPrefix } from '../files/file-meta.js';
 import { v4 as uuidv4 } from 'uuid';
 import { resolveMemberSpaces, resolveWriteTarget } from '../spaces/proxy.js';
@@ -400,14 +400,23 @@ filesRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadOnly,
   try {
     stat = await fs.stat(absPath);
   } catch (statErr: unknown) {
-    // File is already gone from disk — clean up any orphaned meta record and
-    // return success so the UI can remove it.  Any other stat error is re-thrown.
     const code = (statErr as NodeJS.ErrnoException).code;
     if (code === 'ENOENT') {
-      await deleteFileMeta(targetSpace, filePath).catch(err => {
-        log.warn(`deleteFileMeta (orphan cleanup) error for space ${targetSpace}, path ${filePath}: ${err}`);
-      });
-      res.status(204).end();
+      // Check for an orphaned meta record (file deleted externally, meta still exists).
+      // If there is one, clean it up and return 204 so the UI can remove it.
+      // If there is none, the path was never known — return 404.
+      const normalisedPath = filePath.replace(/\\/g, '/').replace(/^\/+/, '');
+      const orphan = await col<FileMetaDoc>(`${targetSpace}_files`).findOne(
+        { _id: normalisedPath } as never,
+      );
+      if (orphan) {
+        await deleteFileMeta(targetSpace, filePath).catch(err => {
+          log.warn(`deleteFileMeta (orphan cleanup) error for space ${targetSpace}, path ${filePath}: ${err}`);
+        });
+        res.status(204).end();
+        return;
+      }
+      res.status(404).json({ error: 'Path not found' });
       return;
     }
     res.status(404).json({ error: 'Path not found' });
