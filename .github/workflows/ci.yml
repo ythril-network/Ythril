@@ -45,7 +45,11 @@ jobs:
           sudo chmod -R a+rX testing/sync/configs/
 
       - name: Run all tests
-        run: npm run test:all:core
+        run: |
+          # config.json is rewritten by containers during tests (mode 0600, uid 1000).
+          # Relax permissions immediately before the test runner reads them.
+          sudo chmod -R a+rX testing/sync/configs/
+          npm run test:all:core
 
       - name: Tear down containers
         if: always()
