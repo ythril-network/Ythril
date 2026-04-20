@@ -2,10 +2,12 @@ import { Component, inject, signal, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService, InviteBundle, Network, Space, SyncHistoryRecord, VoteRound } from '../../core/api.service';
+import { TranslocoPipe } from '@jsverse/transloco';
+import { TranslocoService } from '@jsverse/transloco';
 @Component({
   selector: 'app-networks',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, TranslocoPipe],
   styles: [`
     .network-card {
       background: var(--bg-surface);
@@ -159,13 +161,13 @@ import { ApiService, InviteBundle, Network, Space, SyncHistoryRecord, VoteRound 
   template: `
     <!-- Network list (shown first) -->
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-      <div class="card-title">Networks</div>
+      <div class="card-title">{{ 'networks.title' | transloco }}</div>
       <div style="display:flex; gap:8px;">
         @if (needsNetworkEnable()) {
-          <button class="btn-primary btn btn-sm" (click)="openEnableNetworksWizard()">Enable Networks</button>
+          <button class="btn-primary btn btn-sm" (click)="openEnableNetworksWizard()">{{ 'networks.enableButton' | transloco }}</button>
         } @else {
-          <button class="btn-primary btn btn-sm" (click)="showCreateDialog.set(true)">Create Network</button>
-          <button class="btn-secondary btn btn-sm" (click)="showJoinDialog.set(true)">Join Network</button>
+          <button class="btn-primary btn btn-sm" (click)="showCreateDialog.set(true)">{{ 'networks.createButton' | transloco }}</button>
+          <button class="btn-secondary btn btn-sm" (click)="showJoinDialog.set(true)">{{ 'networks.joinButton' | transloco }}</button>
         }
       </div>
     </div>
@@ -175,8 +177,8 @@ import { ApiService, InviteBundle, Network, Space, SyncHistoryRecord, VoteRound 
     } @else if (networks().length === 0) {
       <div class="empty-state">
         <div class="empty-state-icon">🔗</div>
-        <h3>No networks</h3>
-        <p>Create a network or join an existing one to start syncing with peers.</p>
+        <h3>{{ 'networks.empty.title' | transloco }}</h3>
+        <p>{{ 'networks.empty.body' | transloco }}</p>
       </div>
     } @else {
       @for (net of networks(); track net.id) {
@@ -184,7 +186,7 @@ import { ApiService, InviteBundle, Network, Space, SyncHistoryRecord, VoteRound 
           <div class="network-card-header" (click)="toggleNetwork(net.id)">
             <span class="network-name">{{ net.label }}</span>
             <span class="badge" [ngClass]="typeBadge(net.type)">{{ net.type }}</span>
-            <span class="badge badge-gray">{{ net.members.length }} member{{ net.members.length === 1 ? '' : 's' }}</span>
+            <span class="badge badge-gray">{{ net.members.length }} {{ net.members.length === 1 ? ('networks.memberBadge.singular' | transloco) : ('networks.memberBadge.plural' | transloco) }}</span>
             <span style="color:var(--text-muted); font-size:12px;">{{ expanded() === net.id ? '▲' : '▼' }}</span>
           </div>
 
@@ -193,48 +195,45 @@ import { ApiService, InviteBundle, Network, Space, SyncHistoryRecord, VoteRound 
 
               <!-- Invite bundle -->
               <div style="margin-bottom:16px; margin-top:12px;">
-                <div class="section-title">Invite</div>
+                <div class="section-title">{{ 'networks.network.invite.title' | transloco }}</div>
                 <p style="font-size:12px; color:var(--text-muted); margin:0 0 8px;">
                   @if (net.type === 'pubsub') {
-                    Generate a reusable invite bundle. Share it in documentation,
-                    QR codes, or anywhere — subscribers can join without approval.
-                    Regenerating a new bundle revokes the previous one.
+                    {{ 'networks.network.invite.pubsubDescription' | transloco }}
                   } @else {
-                    Generate a one-time invite bundle and share it with the brain you want to connect to.
-                    The invite expires after 24 hours.
+                    {{ 'networks.network.invite.description' | transloco }}
                   }
                 </p>
                 @if (inviteBundle(net.id); as bundle) {
                   <div class="code-block" style="margin-bottom:8px; font-size:11px; white-space:pre-wrap; word-break:break-all;">{{ bundleJson(bundle) }}</div>
                   <button class="btn-ghost btn btn-sm" (click)="copyInvite(net.id)">
-                    {{ copiedInvite() === net.id ? '✓ Copied' : 'Copy bundle' }}
+                    {{ copiedInvite() === net.id ? ('common.copied' | transloco) : ('networks.network.invite.copyBundle' | transloco) }}
                   </button>
                 } @else {
                   <button class="btn-secondary btn btn-sm" (click)="generateInvite(net.id)">
-                    Generate invite
+                    {{ 'networks.network.invite.generateButton' | transloco }}
                   </button>
                 }
               </div>
 
               <!-- Sync -->
               <div style="margin-bottom:16px;">
-                <div class="section-title">Sync</div>
+                <div class="section-title">{{ 'networks.network.sync.title' | transloco }}</div>
                 <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
                   <input
                     type="text"
                     [ngModel]="net.syncSchedule ?? ''"
                     (ngModelChange)="netSchedule[net.id] = $event"
                     [name]="'sched-' + net.id"
-                    placeholder="0 * * * * (cron) — leave empty for manual only"
-                    aria-label="Sync schedule (cron)"
+                    [placeholder]="'networks.network.sync.schedulePlaceholder' | transloco"
+                    [attr.aria-label]="'networks.network.sync.scheduleAriaLabel' | transloco"
                     style="flex:1; min-width:220px;"
                   />
-                  <button class="btn-secondary btn btn-sm" (click)="saveSchedule(net)">Save schedule</button>
-                  <button class="btn-secondary btn btn-sm" (click)="sync(net.id)">Sync now</button>
+                  <button class="btn-secondary btn btn-sm" (click)="saveSchedule(net)">{{ 'networks.network.sync.saveScheduleButton' | transloco }}</button>
+                  <button class="btn-secondary btn btn-sm" (click)="sync(net.id)">{{ 'networks.network.sync.syncNowButton' | transloco }}</button>
                 </div>
                 @if (syncResult(net.id); as r) {
                   <div class="alert" [class.alert-success]="r.ok" [class.alert-error]="!r.ok" style="margin-top:8px;">
-                    {{ r.ok ? 'Sync triggered' : 'Sync failed' }}
+                    {{ r.ok ? ('networks.network.sync.success' | transloco) : ('networks.network.sync.failed' | transloco) }}
                   </div>
                 }
               </div>
@@ -242,13 +241,13 @@ import { ApiService, InviteBundle, Network, Space, SyncHistoryRecord, VoteRound 
               <!-- Sync History -->
               <div style="margin-bottom:16px;">
                 <div class="section-title" style="cursor:pointer;" (click)="toggleHistory(net.id)">
-                  Sync History {{ historyExpanded() === net.id ? '▲' : '▼' }}
+                  {{ 'networks.network.syncHistory.title' | transloco }} {{ historyExpanded() === net.id ? '▲' : '▼' }}
                 </div>
                 @if (historyExpanded() === net.id) {
                   @if (historyLoading()) {
-                    <div style="padding:8px 0; color:var(--text-muted); font-size:12px;">Loading…</div>
+                    <div style="padding:8px 0; color:var(--text-muted); font-size:12px;">{{ 'networks.network.syncHistory.loading' | transloco }}</div>
                   } @else if (historyForNet(net.id).length === 0) {
-                    <div style="padding:8px 0; color:var(--text-muted); font-size:12px;">No sync history yet.</div>
+                    <div style="padding:8px 0; color:var(--text-muted); font-size:12px;">{{ 'networks.network.syncHistory.empty' | transloco }}</div>
                   } @else {
                     @for (rec of historyForNet(net.id); track rec._id) {
                       <div class="history-row">
@@ -263,7 +262,7 @@ import { ApiService, InviteBundle, Network, Space, SyncHistoryRecord, VoteRound 
                         @if (rec.errors?.length) {
                           <button class="btn-ghost btn btn-sm" style="font-size:11px;"
                             (click)="toggleHistoryErrors(rec._id)">
-                            {{ expandedError() === rec._id ? 'Hide errors' : rec.errors!.length + ' error(s)' }}
+                            {{ expandedError() === rec._id ? ('networks.network.syncHistory.hideErrors' | transloco) : (rec.errors!.length + ' ' + ('networks.network.syncHistory.errorCountSuffix' | transloco)) }}
                           </button>
                         }
                       </div>
@@ -280,7 +279,7 @@ import { ApiService, InviteBundle, Network, Space, SyncHistoryRecord, VoteRound 
               </div>
 
               <!-- Members -->
-              <div class="section-title">Members</div>
+              <div class="section-title">{{ 'networks.network.members.title' | transloco }}</div>
               @for (m of net.members; track m.instanceId) {
                 <div class="member-row">
                   <span class="mono badge badge-gray" style="font-size:11px;">{{ m.instanceId.slice(0, 8) }}</span>
@@ -294,8 +293,8 @@ import { ApiService, InviteBundle, Network, Space, SyncHistoryRecord, VoteRound 
                     style="padding:2px 8px;"
                     [disabled]="removingMember[net.id + ':' + m.instanceId]"
                     (click)="removeMember(net, m.instanceId, m.label)"
-                    title="Remove member"
-                    aria-label="Remove member"
+                    [attr.title]="'networks.network.members.removeTitle' | transloco"
+                    [attr.aria-label]="'networks.network.members.removeAriaLabel' | transloco"
                   >×</button>
                 </div>
               }
@@ -303,12 +302,12 @@ import { ApiService, InviteBundle, Network, Space, SyncHistoryRecord, VoteRound 
               <!-- Open votes -->
               @if (openVotes(net.id).length > 0) {
                 <div style="margin-top:16px;">
-                  <div class="section-title">Open votes</div>
+                  <div class="section-title">{{ 'networks.network.votes.title' | transloco }}</div>
                   @for (round of openVotes(net.id); track round.id) {
                     <div class="vote-row">
                       <span style="flex:1;">{{ round.type }}: {{ round.subject }}</span>
-                      <button class="btn-primary btn btn-sm" (click)="castVote(net.id, round.id, 'yes')">✓ Yes</button>
-                      <button class="btn-danger btn btn-sm" (click)="castVote(net.id, round.id, 'no')">✗ No</button>
+                      <button class="btn-primary btn btn-sm" (click)="castVote(net.id, round.id, 'yes')">{{ 'networks.network.votes.yes' | transloco }}</button>
+                      <button class="btn-danger btn btn-sm" (click)="castVote(net.id, round.id, 'no')">{{ 'networks.network.votes.no' | transloco }}</button>
                     </div>
                   }
                 </div>
@@ -316,7 +315,7 @@ import { ApiService, InviteBundle, Network, Space, SyncHistoryRecord, VoteRound 
 
               <!-- Leave -->
               <div style="margin-top:16px; padding-top:12px; border-top:1px solid var(--border-muted);">
-                <button class="btn-danger btn btn-sm" (click)="leaveNetwork(net)">Leave network</button>
+                <button class="btn-danger btn btn-sm" (click)="leaveNetwork(net)">{{ 'networks.network.leaveButton' | transloco }}</button>
               </div>
             </div>
           }
@@ -329,44 +328,44 @@ import { ApiService, InviteBundle, Network, Space, SyncHistoryRecord, VoteRound 
       <div class="dialog-backdrop" (click)="showCreateDialog.set(false)">
         <div class="dialog" (click)="$event.stopPropagation()">
           <div class="dialog-header">
-            <div class="card-title">Create network</div>
-            <button class="icon-btn" aria-label="Close dialog" (click)="showCreateDialog.set(false)">✕</button>
+            <div class="card-title">{{ 'networks.dialog.create.title' | transloco }}</div>
+            <button class="icon-btn" [attr.aria-label]="'common.close' | transloco" (click)="showCreateDialog.set(false)">✕</button>
           </div>
 
           @if (createError()) { <div class="alert alert-error">{{ createError() }}</div> }
 
           <form (ngSubmit)="createNetwork()" style="display:grid; grid-template-columns:1fr 1fr; gap:12px; align-items:end;">
             <div class="field" style="margin-bottom:0;">
-              <label>Network label</label>
-              <input type="text" [(ngModel)]="form.label" name="label" placeholder="Team Brain" required />
+              <label>{{ 'networks.dialog.create.label' | transloco }}</label>
+              <input type="text" [(ngModel)]="form.label" name="label" [placeholder]="'networks.dialog.create.labelPlaceholder' | transloco" required />
             </div>
             <div class="field" style="margin-bottom:0;">
-              <label>Type</label>
+              <label>{{ 'networks.dialog.create.type' | transloco }}</label>
               <select [(ngModel)]="form.type" name="type">
-                <option value="closed">Closed (invite only)</option>
-                <option value="democratic">Democratic (majority vote)</option>
-                <option value="club">Club (supermajority)</option>
-                <option value="braintree">Braintree (hierarchical)</option>
-                <option value="pubsub">Pub/Sub (publisher → subscribers)</option>
+                <option value="closed">{{ 'networks.type.closed' | transloco }}</option>
+                <option value="democratic">{{ 'networks.type.democratic' | transloco }}</option>
+                <option value="club">{{ 'networks.type.club' | transloco }}</option>
+                <option value="braintree">{{ 'networks.type.braintree' | transloco }}</option>
+                <option value="pubsub">{{ 'networks.type.pubsub' | transloco }}</option>
               </select>
             </div>
             <div class="field" style="margin-bottom:0; grid-column:span 2;">
-              <label>Spaces</label>
+              <label>{{ 'networks.dialog.create.spaces' | transloco }}</label>
               @if (spacesLoadFailed()) {
-                <div class="alert alert-error" style="margin-bottom:6px; font-size:12px;">⚠️ Could not load spaces — enter IDs manually.</div>
-                <input type="text" [(ngModel)]="networkSpacesFallback" name="spaces" placeholder="general" />
+                <div class="alert alert-error" style="margin-bottom:6px; font-size:12px;">{{ 'networks.dialog.create.spacesLoadFailed' | transloco }}</div>
+                <input type="text" [(ngModel)]="networkSpacesFallback" name="spaces" [placeholder]="'networks.dialog.create.spacesFallbackPlaceholder' | transloco" />
               } @else if (availableSpaces().length === 0) {
-                <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">Loading spaces…</div>
+                <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">{{ 'networks.dialog.create.loadingSpaces' | transloco }}</div>
               } @else {
                 <div class="table-wrapper" style="max-height:200px; overflow-y:auto; border:1px solid var(--border); border-radius:var(--radius-sm);">
                   <table style="margin:0;">
                     <thead>
                       <tr>
                         <th style="width:40px; text-align:center;">
-                          <input type="checkbox" [checked]="networkSelectAll" (change)="toggleNetworkSelectAll()" title="All spaces" />
+                          <input type="checkbox" [checked]="networkSelectAll" (change)="toggleNetworkSelectAll()" [attr.title]="'networks.dialog.create.allSpacesTitle' | transloco" />
                         </th>
-                        <th>Space</th>
-                        <th>ID</th>
+                        <th>{{ 'spaces.table.column.label' | transloco }}</th>
+                        <th>{{ 'spaces.table.column.id' | transloco }}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -386,15 +385,15 @@ import { ApiService, InviteBundle, Network, Space, SyncHistoryRecord, VoteRound 
             </div>
             @if (form.type !== 'pubsub') {
               <div class="field" style="margin-bottom:0; grid-column:span 2;">
-                <label>Voting deadline (hours)</label>
+                <label>{{ 'networks.dialog.create.votingDeadline' | transloco }}</label>
                 <input type="number" [(ngModel)]="form.votingDeadlineHours" name="deadline" min="1" max="72" />
               </div>
             }
             <div style="grid-column:span 2; display:flex; gap:8px; justify-content:flex-end;">
-              <button class="btn-secondary btn" type="button" (click)="showCreateDialog.set(false)">Cancel</button>
+              <button class="btn-secondary btn" type="button" (click)="showCreateDialog.set(false)">{{ 'common.cancel' | transloco }}</button>
               <button class="btn-primary btn" type="submit" [disabled]="creating() || !form.label.trim()">
                 @if (creating()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
-                Create network
+                {{ 'networks.dialog.create.submitButton' | transloco }}
               </button>
             </div>
           </form>
@@ -407,31 +406,30 @@ import { ApiService, InviteBundle, Network, Space, SyncHistoryRecord, VoteRound 
       <div class="dialog-backdrop" (click)="showJoinDialog.set(false)">
         <div class="dialog" (click)="$event.stopPropagation()">
           <div class="dialog-header">
-            <div class="card-title">Join an existing network</div>
-            <button class="icon-btn" aria-label="Close dialog" (click)="showJoinDialog.set(false)">✕</button>
+            <div class="card-title">{{ 'networks.dialog.join.title' | transloco }}</div>
+            <button class="icon-btn" [attr.aria-label]="'common.close' | transloco" (click)="showJoinDialog.set(false)">✕</button>
           </div>
 
           @if (joinError()) { <div class="alert alert-error">{{ joinError() }}</div> }
           @if (joinSuccess()) { <div class="alert alert-success">{{ joinSuccess() }}</div> }
 
           <div class="field">
-            <label>Invite bundle (JSON)</label>
+            <label>{{ 'networks.dialog.join.bundleLabel' | transloco }}</label>
             <textarea
               [(ngModel)]="joinBundle"
               name="joinBundle"
               rows="5"
-              placeholder='Paste the invite bundle generated by the other brain here...'
-              aria-label="Invite bundle JSON"
+              [placeholder]="'networks.dialog.join.bundlePlaceholder' | transloco"
+              [attr.aria-label]="'networks.dialog.join.bundleAriaLabel' | transloco"
               style="font-family:var(--font-mono); font-size:12px; resize:vertical;"
             ></textarea>
           </div>
 
           @if (joinCollisionSpaces().length > 0) {
             <div style="margin:0 0 12px; padding:12px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-elevated);">
-              <div style="font-weight:600; font-size:13px; margin-bottom:8px;">⚠ Space name collisions</div>
+              <div style="font-weight:600; font-size:13px; margin-bottom:8px;">{{ 'networks.dialog.join.collisions.title' | transloco }}</div>
               <p style="font-size:12px; color:var(--text-muted); margin:0 0 12px;">
-                The remote network includes spaces that already exist locally.
-                Choose to merge into the existing space or create a new local alias.
+                {{ 'networks.dialog.join.collisions.body' | transloco }}
               </p>
               @for (remoteId of joinCollisionSpaces(); track remoteId) {
                 <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
@@ -442,15 +440,15 @@ import { ApiService, InviteBundle, Network, Space, SyncHistoryRecord, VoteRound 
                     [name]="'collision-' + remoteId"
                     style="width:140px;"
                   >
-                    <option value="merge">Merge into existing</option>
-                    <option value="alias">Create alias</option>
+                    <option value="merge">{{ 'networks.dialog.join.collision.merge' | transloco }}</option>
+                    <option value="alias">{{ 'networks.dialog.join.collision.alias' | transloco }}</option>
                   </select>
                   @if (joinSpaceActions[remoteId] === 'alias') {
                     <input
                       type="text"
                       [(ngModel)]="joinSpaceAliases[remoteId]"
                       [name]="'alias-' + remoteId"
-                      placeholder="local-id"
+                      [placeholder]="'networks.dialog.join.aliasPlaceholder' | transloco"
                       pattern="[a-z0-9-]+"
                       maxlength="40"
                       style="width:140px; padding:4px 8px; font-size:12px;"
@@ -463,14 +461,14 @@ import { ApiService, InviteBundle, Network, Space, SyncHistoryRecord, VoteRound 
           }
 
           <div style="display:flex; gap:8px; justify-content:flex-end;">
-            <button class="btn-secondary btn" type="button" (click)="showJoinDialog.set(false)">Cancel</button>
+            <button class="btn-secondary btn" type="button" (click)="showJoinDialog.set(false)">{{ 'common.cancel' | transloco }}</button>
             <button
               class="btn-primary btn"
               (click)="joinCollisionSpaces().length > 0 ? confirmJoin() : joinNetwork()"
               [disabled]="joining() || !joinBundle.trim() || !joinMyUrl.trim()"
             >
               @if (joining()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
-              {{ joinCollisionSpaces().length > 0 ? 'Confirm and join' : 'Join network' }}
+              {{ joinCollisionSpaces().length > 0 ? ('networks.dialog.join.confirmJoinButton' | transloco) : ('networks.dialog.join.submitButton' | transloco) }}
             </button>
           </div>
         </div>
@@ -482,27 +480,27 @@ import { ApiService, InviteBundle, Network, Space, SyncHistoryRecord, VoteRound 
       <div class="dialog-backdrop" (click)="showEnableNetworksWizard.set(false)">
         <div class="dialog" (click)="$event.stopPropagation()">
           <div class="dialog-header">
-            <div class="card-title">Enable Networks</div>
-            <button class="icon-btn" aria-label="Close dialog" (click)="showEnableNetworksWizard.set(false)">✕</button>
+            <div class="card-title">{{ 'networks.wizard.title' | transloco }}</div>
+            <button class="icon-btn" [attr.aria-label]="'common.close' | transloco" (click)="showEnableNetworksWizard.set(false)">✕</button>
           </div>
 
           @if (enableWizardError()) { <div class="alert alert-error">{{ enableWizardError() }}</div> }
 
           @if (enableWizardStep() === 1) {
             <p class="wizard-note">
-              This instance currently resolves to a local/private URL. Network peers cannot join or sync with local/private URLs because peer URL validation blocks SSRF targets.
+              {{ 'networks.wizard.step1.p1' | transloco }}
             </p>
             <p class="wizard-note">
-              The recommended path is exposing this instance with a stable public HTTPS hostname via Cloudflare Tunnel.
+              {{ 'networks.wizard.step1.p2' | transloco }}
             </p>
             <ul class="wizard-list">
-              <li>Why: dynamic home IPs and CGNAT are handled automatically.</li>
-              <li>Risk model: the endpoint is internet-reachable, so keep strong tokens and monitor logs.</li>
-              <li>Result: use the public hostname as myUrl/instanceUrl in join flows.</li>
+              <li>{{ 'networks.wizard.step1.whyItem' | transloco }}</li>
+              <li>{{ 'networks.wizard.step1.riskItem' | transloco }}</li>
+              <li>{{ 'networks.wizard.step1.resultItem' | transloco }}</li>
             </ul>
             <div style="display:flex; gap:8px; justify-content:flex-end;">
-              <button class="btn-secondary btn" type="button" (click)="showEnableNetworksWizard.set(false)">Cancel</button>
-              <button class="btn-primary btn" type="button" (click)="enableWizardStep.set(2)">Continue</button>
+              <button class="btn-secondary btn" type="button" (click)="showEnableNetworksWizard.set(false)">{{ 'common.cancel' | transloco }}</button>
+              <button class="btn-primary btn" type="button" (click)="enableWizardStep.set(2)">{{ 'networks.wizard.continue' | transloco }}</button>
             </div>
           }
 
@@ -511,54 +509,53 @@ import { ApiService, InviteBundle, Network, Space, SyncHistoryRecord, VoteRound 
               <div class="wizard-status">{{ localAgentStatusMessage() }}</div>
             }
             <p class="wizard-note">
-              You must use a hostname inside a DNS zone you control in Cloudflare (for example
-              <span class="mono">ythril-desktop.example.com</span>). Random domains you do not control will fail.
+              {{ 'networks.wizard.step2.hostnameHint' | transloco }}
             </p>
             <div class="field">
-              <label>Public hostname (required)</label>
-              <input type="text" [(ngModel)]="enableHostname" name="enableHostname" placeholder="ythril-desktop.example.com" />
+              <label>{{ 'networks.wizard.step2.publicHostnameLabel' | transloco }}</label>
+              <input type="text" [(ngModel)]="enableHostname" name="enableHostname" [placeholder]="'networks.wizard.step2.publicHostnamePlaceholder' | transloco" />
             </div>
             <div class="field">
-              <label>Operating system (auto-detected)</label>
+              <label>{{ 'networks.wizard.step2.osLabel' | transloco }}</label>
               <select [(ngModel)]="enableOs" name="enableOs">
-                <option value="windows">Windows</option>
-                <option value="linux">Linux</option>
+                <option value="windows">{{ 'networks.wizard.step2.os.windows' | transloco }}</option>
+                <option value="linux">{{ 'networks.wizard.step2.os.linux' | transloco }}</option>
               </select>
             </div>
             <div class="field">
               <label style="display:flex; align-items:center; gap:8px;">
                 <input type="checkbox" [(ngModel)]="enableAutostart" name="enableAutostart" />
-                Enable cloudflared autostart service
+                {{ 'networks.wizard.step2.autostart' | transloco }}
               </label>
             </div>
             <div class="field">
               <label style="display:flex; align-items:center; gap:8px;">
                 <input type="checkbox" [(ngModel)]="enableOverwriteDns" name="enableOverwriteDns" />
-                Allow overwriting an existing DNS record for this hostname
+                {{ 'networks.wizard.step2.overwriteDns' | transloco }}
               </label>
               <div class="wizard-note" style="margin-top:6px;">
-                Keep this off to avoid unexpected DNS changes. Turn it on only if you intentionally want this wizard to replace an existing record.
+                {{ 'networks.wizard.step2.overwriteDnsHint' | transloco }}
               </div>
             </div>
             <div class="field">
               <label style="display:flex; align-items:flex-start; gap:8px;">
                 <input type="checkbox" [(ngModel)]="enableAcknowledgeCritical" name="enableAcknowledgeCritical" style="margin-top:2px;" />
-                <span>I understand this can install software, open Cloudflare login, create/update tunnel and DNS records, and start a background tunnel process/service on this machine.</span>
+                <span>{{ 'networks.wizard.step2.ackCritical' | transloco }}</span>
               </label>
             </div>
             <div style="display:flex; gap:8px; justify-content:flex-end;">
-              <button class="btn-secondary btn" type="button" (click)="enableWizardStep.set(1)">Back</button>
-              <button class="btn-primary btn" type="button" (click)="prepareEnableWizardCommands()">Continue</button>
+              <button class="btn-secondary btn" type="button" (click)="enableWizardStep.set(1)">{{ 'networks.wizard.back' | transloco }}</button>
+              <button class="btn-primary btn" type="button" (click)="prepareEnableWizardCommands()">{{ 'networks.wizard.continue' | transloco }}</button>
             </div>
           }
 
           @if (enableWizardStep() === 3) {
             @if (localAgentChecking()) {
-              <p class="wizard-note">Checking local connector status...</p>
+              <p class="wizard-note">{{ 'networks.wizard.step3.checkingStatus' | transloco }}</p>
             } @else if (localAgentCanExecute()) {
-              <p class="wizard-note">One-click mode is ready. Click <strong>Run automatically</strong>. Use manual commands only if automatic mode fails.</p>
+              <p class="wizard-note">{{ 'networks.wizard.step3.autoReady' | transloco }}</p>
             } @else {
-              <p class="wizard-note">Automatic mode is unavailable. Use manual commands on this host, then click <strong>I finished setup</strong>.</p>
+              <p class="wizard-note">{{ 'networks.wizard.step3.autoUnavailable' | transloco }}</p>
             }
             @if (localAgentStatusMessage()) {
               <div class="wizard-status">{{ localAgentStatusMessage() }}</div>
@@ -574,15 +571,15 @@ import { ApiService, InviteBundle, Network, Space, SyncHistoryRecord, VoteRound 
               @if (localAgentCanExecute()) {
                 <button class="btn-primary btn" type="button" [disabled]="enableAutoRunning() || !enableAcknowledgeCritical" (click)="runEnableNetworksAutomatically()">
                   @if (enableAutoRunning()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
-                  Run automatically
+                  {{ 'networks.wizard.step3.runAutomatically' | transloco }}
                 </button>
               }
               @if (!localAgentCanExecute() && !localAgentChecking()) {
-                <button class="btn-ghost btn" type="button" (click)="copyEnableWizardCommands()">Copy commands</button>
+                <button class="btn-ghost btn" type="button" (click)="copyEnableWizardCommands()">{{ 'networks.wizard.step3.copyCommands' | transloco }}</button>
               }
-              <button class="btn-secondary btn" type="button" (click)="enableWizardStep.set(2)">Back</button>
+              <button class="btn-secondary btn" type="button" (click)="enableWizardStep.set(2)">{{ 'networks.wizard.back' | transloco }}</button>
               @if (!localAgentCanExecute() && !localAgentChecking()) {
-                <button class="btn-primary btn" type="button" (click)="completeEnableWizard()">I finished setup</button>
+                <button class="btn-primary btn" type="button" (click)="completeEnableWizard()">{{ 'networks.wizard.step3.finishedSetup' | transloco }}</button>
               }
             </div>
           }
@@ -593,6 +590,7 @@ import { ApiService, InviteBundle, Network, Space, SyncHistoryRecord, VoteRound 
 })
 export class NetworksComponent implements OnInit {
   private api = inject(ApiService);
+  private transloco = inject(TranslocoService);
 
   networks = signal<Network[]>([]);
   loading = signal(true);
@@ -704,13 +702,13 @@ export class NetworksComponent implements OnInit {
     this.enableWizardError.set('');
     const host = this.enableHostname.trim();
     if (!/^(?=.{4,253}$)(?!-)([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,63}$/.test(host)) {
-      this.enableWizardError.set('Enter a valid public hostname (for example ythril-desktop.example.com).');
+      this.enableWizardError.set(this.transloco.translate('networks.wizard.error.invalidHostname'));
       return;
     }
 
     this.enableWindowsCommand.set(this.buildWindowsCloudflareCommands(host));
     this.enableLinuxCommand.set(this.buildLinuxCloudflareCommands(host));
-    this.localAgentStatusMessage.set('Checking local connector...');
+    this.localAgentStatusMessage.set(this.transloco.translate('networks.wizard.status.checkingConnector'));
     this.localAgentChecking.set(true);
     this.bootstrapLocalAgent();
     this.enableWizardStep.set(3);
@@ -725,7 +723,7 @@ export class NetworksComponent implements OnInit {
   completeEnableWizard(): void {
     const host = this.enableHostname.trim();
     if (!host) return;
-    if (!confirm(`Did you verify that https://${host}/health returns status ok from another machine/browser?`)) return;
+    if (!confirm(this.transloco.translate('networks.wizard.confirm.verifyHealth', { host }))) return;
     const url = `https://${host}`;
     this.joinMyUrl = url;
     this.joinMyUrlAutoFilled.set(true);
@@ -736,22 +734,22 @@ export class NetworksComponent implements OnInit {
   runEnableNetworksAutomatically(): void {
     const host = this.enableHostname.trim();
     if (!host) {
-      this.enableWizardError.set('Enter a public hostname first.');
+      this.enableWizardError.set(this.transloco.translate('networks.wizard.error.enterHostnameFirst'));
       return;
     }
     if (!this.enableAcknowledgeCritical) {
-      this.enableWizardError.set('Please acknowledge critical system changes before running automatically.');
+      this.enableWizardError.set(this.transloco.translate('networks.wizard.error.acknowledgeCritical'));
       return;
     }
     this.enableWizardError.set('');
     this.enableAutoRunning.set(true);
     if (!this.localAgentCanExecute()) {
-      this.localAgentStatusMessage.set('Bootstrapping local connector...');
+      this.localAgentStatusMessage.set(this.transloco.translate('networks.wizard.status.bootstrappingConnector'));
       this.api.bootstrapLocalAgent({ os: this.enableOs }).subscribe({
         next: () => this.executeEnableNetworks(host),
         error: (err) => {
           this.enableAutoRunning.set(false);
-          this.enableWizardError.set(err.error?.error ?? 'Automatic bootstrap failed. Use manual commands as fallback.');
+          this.enableWizardError.set(err.error?.error ?? this.transloco.translate('networks.wizard.error.bootstrapFailed'));
         },
       });
       return;
@@ -770,7 +768,7 @@ export class NetworksComponent implements OnInit {
     }).subscribe({
       next: (result) => {
         this.enableAutoRunning.set(false);
-        this.localAgentStatusMessage.set(result.message ?? 'Automatic setup finished via local connector.');
+        this.localAgentStatusMessage.set(result.message ?? this.transloco.translate('networks.wizard.status.autoSetupFinished'));
         const url = result.publicUrl || `https://${host}`;
         this.joinMyUrl = url;
         this.joinMyUrlAutoFilled.set(true);
@@ -778,7 +776,7 @@ export class NetworksComponent implements OnInit {
       },
       error: (err) => {
         this.enableAutoRunning.set(false);
-        this.enableWizardError.set(err.error?.error ?? 'Automatic setup failed. Use manual commands as fallback.');
+        this.enableWizardError.set(err.error?.error ?? this.transloco.translate('networks.wizard.error.autoSetupFailed'));
       },
     });
   }
@@ -791,7 +789,7 @@ export class NetworksComponent implements OnInit {
         if (status.canExecute) {
           this.localAgentCanExecute.set(true);
           this.localAgentChecking.set(false);
-          this.localAgentStatusMessage.set(status.message ?? 'Local connector is ready for one-click execution.');
+          this.localAgentStatusMessage.set(status.message ?? this.transloco.translate('networks.wizard.status.connectorReady'));
         } else {
           // Connector not ready — try to spawn it via bootstrap.
           this.triggerBootstrap();
@@ -802,17 +800,17 @@ export class NetworksComponent implements OnInit {
   }
 
   private triggerBootstrap(): void {
-    this.localAgentStatusMessage.set('Starting local connector...');
+    this.localAgentStatusMessage.set(this.transloco.translate('networks.wizard.status.startingConnector'));
     this.api.bootstrapLocalAgent({ os: this.enableOs }).subscribe({
       next: (result) => {
-        this.localAgentStatusMessage.set(result.message ?? 'Local connector started.');
+        this.localAgentStatusMessage.set(result.message ?? this.transloco.translate('networks.wizard.status.connectorStarted'));
         this.refreshLocalAgentStatus();
       },
       error: (err) => {
         this.localAgentCanExecute.set(false);
         this.localAgentChecking.set(false);
         const detail = err?.error?.error ?? err?.message ?? `HTTP ${err?.status ?? 'unknown'}`;
-        this.localAgentStatusMessage.set(`Could not start the local connector (${detail}). Manual commands are still available.`);
+        this.localAgentStatusMessage.set(this.transloco.translate('networks.wizard.status.connectorStartFailed', { detail }));
       },
     });
   }
@@ -822,12 +820,12 @@ export class NetworksComponent implements OnInit {
       next: (status) => {
         this.localAgentCanExecute.set(status.canExecute);
         this.localAgentChecking.set(false);
-        this.localAgentStatusMessage.set(status.message ?? (status.canExecute ? 'Local connector is ready for one-click execution.' : 'Manual commands are available below.'));
+        this.localAgentStatusMessage.set(status.message ?? (status.canExecute ? this.transloco.translate('networks.wizard.status.connectorReady') : this.transloco.translate('networks.wizard.status.manualAvailable')));
       },
       error: () => {
         this.localAgentCanExecute.set(false);
         this.localAgentChecking.set(false);
-        this.localAgentStatusMessage.set('Could not reach the local connector status endpoint. Manual commands are still available.');
+        this.localAgentStatusMessage.set(this.transloco.translate('networks.wizard.status.statusEndpointUnreachable'));
       },
     });
   }
@@ -940,7 +938,7 @@ export class NetworksComponent implements OnInit {
       },
       error: (err) => {
         this.creating.set(false);
-        this.createError.set(err.error?.error ?? 'Failed to create network');
+        this.createError.set(err.error?.error ?? this.transloco.translate('networks.error.createFailed'));
       },
     });
   }
@@ -968,10 +966,10 @@ export class NetworksComponent implements OnInit {
   }
 
   leaveNetwork(net: Network): void {
-    if (!confirm(`Leave network "${net.label}"? You will stop syncing with its members.`)) return;
+    if (!confirm(this.transloco.translate('networks.confirm.leave', { label: net.label }))) return;
     this.api.leaveNetwork(net.id).subscribe({
       next: () => this.networks.update(list => list.filter(n => n.id !== net.id)),
-      error: (err) => alert(err.error?.error ?? 'Failed to leave network.'),
+      error: (err) => alert(err.error?.error ?? this.transloco.translate('networks.error.leaveFailed')),
     });
   }
 
@@ -981,7 +979,7 @@ export class NetworksComponent implements OnInit {
         this.inviteBundles[networkId] = bundle;
         this.networks.update(n => [...n]);
       },
-      error: (err) => alert(err.error?.error ?? 'Failed to generate invite.'),
+      error: (err) => alert(err.error?.error ?? this.transloco.translate('networks.error.generateInviteFailed')),
     });
   }
 
@@ -1002,7 +1000,7 @@ export class NetworksComponent implements OnInit {
           list.map(n => n.id === net.id ? { ...n, syncSchedule: schedule || undefined } : n)
         );
       },
-      error: (err) => alert(err.error?.error ?? 'Failed to save schedule'),
+      error: (err) => alert(err.error?.error ?? this.transloco.translate('networks.error.saveScheduleFailed')),
     });
   }
 
@@ -1014,15 +1012,15 @@ export class NetworksComponent implements OnInit {
     try {
       bundle = JSON.parse(this.joinBundle);
     } catch {
-      this.joinError.set('Invalid invite bundle — must be valid JSON.');
+      this.joinError.set(this.transloco.translate('networks.dialog.join.error.invalidJson'));
       return;
     }
     if (!bundle.handshakeId || !bundle.inviteUrl || !bundle.rsaPublicKeyPem || !bundle.networkId) {
-      this.joinError.set('Incomplete invite bundle — missing required fields.');
+      this.joinError.set(this.transloco.translate('networks.dialog.join.error.incompleteBundle'));
       return;
     }
     if (!this.joinMyUrl.trim()) {
-      this.joinError.set('Enter this brain\'s publicly reachable URL.');
+      this.joinError.set(this.transloco.translate('networks.dialog.join.error.missingMyUrl'));
       return;
     }
 
@@ -1060,16 +1058,16 @@ export class NetworksComponent implements OnInit {
       if (this.joinSpaceActions[remoteId] === 'alias') {
         const alias = this.joinSpaceAliases[remoteId]?.trim();
         if (!alias) {
-          this.joinError.set(`Enter a local alias ID for space "${remoteId}".`);
+          this.joinError.set(this.transloco.translate('networks.dialog.join.error.aliasRequired', { remoteId }));
           return;
         }
         if (!/^[a-z0-9-]+$/.test(alias)) {
-          this.joinError.set(`Alias "${alias}" is invalid — use lowercase letters, numbers, and hyphens only.`);
+          this.joinError.set(this.transloco.translate('networks.dialog.join.error.aliasInvalid', { alias }));
           return;
         }
         const localIds = new Set(this.availableSpaces().map(s => s.id));
         if (localIds.has(alias)) {
-          this.joinError.set(`Alias "${alias}" already exists as a local space — choose a different name.`);
+          this.joinError.set(this.transloco.translate('networks.dialog.join.error.aliasExists', { alias }));
           return;
         }
       }
@@ -1101,16 +1099,16 @@ export class NetworksComponent implements OnInit {
     }).subscribe({
       next: (result) => {
         this.joining.set(false);
-        let msg = `Joined network "${result.networkLabel}" successfully.`;
+        let msg = this.transloco.translate('networks.dialog.join.success.joined', { networkLabel: result.networkLabel });
         if (result.createdSpaces?.length) {
-          msg += ` Created new spaces: ${result.createdSpaces.join(', ')}.`;
+          msg += ` ${this.transloco.translate('networks.dialog.join.success.createdSpaces', { spaces: result.createdSpaces.join(', ') })}`;
         }
         if (result.existingSpaces?.length) {
-          msg += ` ⚠️ Existing spaces merged into sync: ${result.existingSpaces.join(', ')} — data from the remote brain will be synced into these spaces.`;
+          msg += ` ${this.transloco.translate('networks.dialog.join.success.existingSpaces', { spaces: result.existingSpaces.join(', ') })}`;
         }
         if (result.spaceMap && Object.keys(result.spaceMap).length > 0) {
           const aliases = Object.entries(result.spaceMap).map(([r, l]) => `${r} → ${l}`).join(', ');
-          msg += ` Aliases: ${aliases}.`;
+          msg += ` ${this.transloco.translate('networks.dialog.join.success.aliases', { aliases })}`;
         }
         this.joinSuccess.set(msg);
         this.joinBundle = '';
@@ -1129,13 +1127,13 @@ export class NetworksComponent implements OnInit {
       },
       error: (err) => {
         this.joining.set(false);
-        this.joinError.set(err.error?.error ?? 'Failed to join network.');
+        this.joinError.set(err.error?.error ?? this.transloco.translate('networks.error.joinFailed'));
       },
     });
   }
 
   removeMember(net: Network, instanceId: string, label: string): void {
-    if (!confirm(`Remove "${label}" from network "${net.label}"?\n\nThis will stop syncing with that peer.`)) return;
+    if (!confirm(this.transloco.translate('networks.confirm.removeMember', { label, networkLabel: net.label }))) return;
     const key = `${net.id}:${instanceId}`;
     this.removingMember[key] = true;
     this.api.removeMember(net.id, instanceId).subscribe({
@@ -1145,7 +1143,7 @@ export class NetworksComponent implements OnInit {
       },
       error: (err) => {
         delete this.removingMember[key];
-        alert(err.error?.error ?? 'Failed to remove member');
+        alert(err.error?.error ?? this.transloco.translate('networks.error.removeMemberFailed'));
       },
     });
   }
@@ -1214,7 +1212,7 @@ export class NetworksComponent implements OnInit {
   castVote(networkId: string, roundId: string, vote: 'yes' | 'no'): void {
     this.api.castVote(networkId, roundId, vote).subscribe({
       next: () => this.loadVotes(networkId),
-      error: (err) => alert(err.error?.error ?? 'Failed to cast vote.'),
+      error: (err) => alert(err.error?.error ?? this.transloco.translate('networks.error.castVoteFailed')),
     });
   }
 

@@ -1,9 +1,11 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
 import { ApiService, type AboutInfo } from '../../core/api.service';
+import { TranslocoPipe } from '@jsverse/transloco';
 
 @Component({
   selector: 'app-about',
   standalone: true,
+  imports: [TranslocoPipe],
   styles: `
     .about-grid {
       display: grid;
@@ -45,27 +47,27 @@ import { ApiService, type AboutInfo } from '../../core/api.service';
   `,
   template: `
     @if (loading()) {
-      <p>Loading…</p>
+      <p>{{ 'common.loading' | transloco }}</p>
     } @else if (error()) {
       <p class="error-msg">{{ error() }}</p>
     } @else if (info(); as i) {
       <div class="about-grid">
-        <span class="about-label">Instance Label</span>
+        <span class="about-label">{{ 'about.instanceLabel' | transloco }}</span>
         <span class="about-value">{{ i.instanceLabel }}</span>
 
-        <span class="about-label">Instance ID</span>
+        <span class="about-label">{{ 'about.instanceId' | transloco }}</span>
         <span class="about-value mono">{{ i.instanceId }}</span>
 
-        <span class="about-label">Version</span>
+        <span class="about-label">{{ 'about.version' | transloco }}</span>
         <span class="about-value mono">{{ i.version }}</span>
 
-        <span class="about-label">Uptime</span>
+        <span class="about-label">{{ 'about.uptime' | transloco }}</span>
         <span class="about-value">{{ i.uptime }}</span>
 
-        <span class="about-label">MongoDB Version</span>
+        <span class="about-label">{{ 'about.mongoVersion' | transloco }}</span>
         <span class="about-value mono">{{ i.mongoVersion }}</span>
 
-        <span class="about-label">Disk Usage</span>
+        <span class="about-label">{{ 'about.diskUsage' | transloco }}</span>
         <span class="about-value">
           <div class="disk-bar-container">
             <div class="disk-bar-fill"

@@ -824,25 +824,25 @@ describe('MCP chrono tools — list_chrono tags filter / query chrono collection
 
     // Create four chrono entries: two with distinct tags, one with both, one untagged
     const rA = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/chrono', {
-      title: `MCP-Tag-A-${RUN}`, kind: 'event',
+      title: `MCP-Tag-A-${RUN}`, type: 'event',
       startsAt: new Date().toISOString(), tags: [tagA],
     });
     idTagA = rA.body?._id;
 
     const rB = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/chrono', {
-      title: `MCP-Tag-B-${RUN}`, kind: 'milestone',
+      title: `MCP-Tag-B-${RUN}`, type: 'milestone',
       startsAt: new Date().toISOString(), tags: [tagB],
     });
     idTagB = rB.body?._id;
 
     const rBoth = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/chrono', {
-      title: `MCP-Tag-Both-${RUN}`, kind: 'plan',
+      title: `MCP-Tag-Both-${RUN}`, type: 'plan',
       startsAt: new Date().toISOString(), tags: [tagA, tagB],
     });
     idBoth = rBoth.body?._id;
 
     const rN = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/chrono', {
-      title: `MCP-NoTag-${RUN}`, kind: 'plan',
+      title: `MCP-NoTag-${RUN}`, type: 'plan',
       startsAt: new Date().toISOString(), tags: [],
     });
     idNoTag = rN.body?._id;
@@ -1203,7 +1203,7 @@ describe('MCP brain tools — bulk_write', () => {
         { from: entName1, to: entName2, label: `bulk-edge-${RUN}` },
       ],
       chrono: [
-        { title: `BulkChrono-${RUN}`, kind: 'event', startsAt: new Date().toISOString() },
+        { title: `BulkChrono-${RUN}`, type: 'event', startsAt: new Date().toISOString() },
       ],
     });
     assert.ok(!result?.isError, `bulk_write returned isError: ${JSON.stringify(result)}`);
@@ -1253,16 +1253,16 @@ describe('MCP brain tools — bulk_write', () => {
     assert.ok(text.includes('errors: 0'), `Expected 0 errors: ${text}`);
   });
 
-  it('bulk_write chrono with invalid kind returns error entry', async () => {
+  it('bulk_write chrono with invalid type returns error entry', async () => {
     const result = await session.callTool('bulk_write', {
       chrono: [
-        { title: 'Bad Kind', kind: 'invalid_kind', startsAt: new Date().toISOString() },
+        { title: 'Bad Type', type: 'invalid_type', startsAt: new Date().toISOString() },
       ],
     });
     assert.ok(!result?.isError, `bulk_write should not be isError: ${JSON.stringify(result)}`);
     const text = result?.content?.[0]?.text ?? '';
-    assert.ok(text.includes('errors: 1'), `Expected 1 error for invalid kind: ${text}`);
-    assert.ok(text.includes('kind'), `Error should mention kind: ${text}`);
+    assert.ok(text.includes('errors: 1'), `Expected 1 error for invalid type: ${text}`);
+    assert.ok(text.includes('type'), `Error should mention type: ${text}`);
   });
 });
 

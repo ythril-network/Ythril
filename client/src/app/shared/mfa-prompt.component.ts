@@ -10,11 +10,12 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MfaService, MfaChallenge } from '../core/mfa.service';
 import { Subscription } from 'rxjs';
+import { TranslocoPipe } from '@jsverse/transloco';
 
 @Component({
   selector: 'app-mfa-prompt',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, TranslocoPipe],
   styles: [`
     .overlay {
       position: fixed; inset: 0;
@@ -48,15 +49,15 @@ import { Subscription } from 'rxjs';
     @if (active()) {
       <div class="overlay" (click)="cancel()">
         <div class="dialog" (click)="$event.stopPropagation()">
-          <h2>Two-factor authentication</h2>
-          <p>Enter the 6-digit code from your authenticator app to continue.</p>
+          <h2>{{ 'mfaPrompt.title' | transloco }}</h2>
+          <p>{{ 'mfaPrompt.body' | transloco }}</p>
           <input
             #codeInput
             type="text"
             inputmode="numeric"
             autocomplete="one-time-code"
             maxlength="6"
-            placeholder="000000"
+            [placeholder]="'mfaPrompt.codePlaceholder' | transloco"
             [(ngModel)]="code"
             (keyup.enter)="submit()"
             autofocus
@@ -65,8 +66,8 @@ import { Subscription } from 'rxjs';
             <p class="error">{{ error() }}</p>
           }
           <div class="actions">
-            <button class="btn btn-secondary btn-sm" (click)="cancel()">Cancel</button>
-            <button class="btn btn-primary btn-sm" (click)="submit()" [disabled]="code.length < 6">Verify</button>
+            <button class="btn btn-secondary btn-sm" (click)="cancel()">{{ 'common.cancel' | transloco }}</button>
+            <button class="btn btn-primary btn-sm" (click)="submit()" [disabled]="code.length < 6">{{ 'mfaPrompt.verifyButton' | transloco }}</button>
           </div>
         </div>
       </div>

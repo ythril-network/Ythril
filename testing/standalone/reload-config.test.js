@@ -48,6 +48,10 @@ function writeConfig(cfg) {
 
 async function applyConfig(cfg) {
   writeConfig(cfg);
+  // Wait for Docker Desktop bind-mount propagation before triggering reload.
+  // Without this delay the container may still read the pre-write file and
+  // saveConfig() will write the stale version back, overwriting our change.
+  await new Promise(resolve => setTimeout(resolve, 600));
   const r = await post(INSTANCES.a, token, '/api/admin/reload-config', {});
   assert.equal(r.status, 200, `reload-config failed: ${JSON.stringify(r.body)}`);
   assert.equal(r.body.ok, true);
@@ -201,7 +205,7 @@ describe('POST /api/admin/reload-config — space config changes take effect', (
     // have written config_with_space back via saveConfig's atomic rename — re-trigger
     // reload until the space is actually gone from the live /api/spaces list (max 3 s).
     let spaceGone = false;
-    for (let attempt = 0; attempt < 15 && !spaceGone; attempt++) {
+    for (let attempt = 0; attempt < 20 && !spaceGone; attempt++) {
       const check = await fetch(`${INSTANCES.a}/api/spaces`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -210,9 +214,12 @@ describe('POST /api/admin/reload-config — space config changes take effect', (
         spaceGone = true;
         break;
       }
-      // Space still visible — re-trigger reload and wait for propagation
+      // Space still visible — re-write config (in case saveConfig() overwrote it),
+      // wait for bind-mount propagation, then re-trigger reload.
+      writeConfig(originalConfig);
+      await new Promise(resolve => setTimeout(resolve, 600));
       await post(INSTANCES.a, token, '/api/admin/reload-config', {});
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, 400));
     }
     assert.ok(spaceGone, `Space '${NEW_SPACE_ID}' should be gone from /api/spaces after reload`);
 

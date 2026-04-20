@@ -1,23 +1,24 @@
 import { Component, Input, Output, EventEmitter, signal, computed, ElementRef, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { TranslocoPipe } from '@jsverse/transloco';
 
 @Component({
   selector: 'app-tag-input',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, TranslocoPipe],
   template: `
     <div class="tag-input-wrap" (click)="focusInput()">
       @for (tag of value; track tag) {
         <span class="tag-pill">
           {{ tag }}
-          <button type="button" class="tag-remove" (click)="remove(tag); $event.stopPropagation()" aria-label="Remove tag">×</button>
+          <button type="button" class="tag-remove" (click)="remove(tag); $event.stopPropagation()" [attr.aria-label]="'tagInput.removeAriaLabel' | transloco">×</button>
         </span>
       }
       <div class="tag-input-inner" style="position:relative; flex:1; min-width:80px;">
         <input #inp
           type="text"
           class="tag-text-input"
-          [placeholder]="value.length ? '' : placeholder"
+          [placeholder]="value.length ? '' : (placeholder | transloco)"
           [(ngModel)]="query"
           [name]="inputName"
           (input)="onInput()"
@@ -112,7 +113,7 @@ export class TagInputComponent {
   @Input() value: string[] = [];
   @Output() valueChange = new EventEmitter<string[]>();
   @Input() suggestions: string[] = [];
-  @Input() placeholder = 'Add tag…';
+  @Input() placeholder = 'tagInput.placeholder';
   @Input() inputName = 'tagInput';
 
   @ViewChild('inp') inp!: ElementRef<HTMLInputElement>;

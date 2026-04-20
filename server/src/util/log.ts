@@ -3,6 +3,7 @@
 // Supports SSE subscribers for real-time log streaming.
 
 const REDACTED = 'Bearer [redacted]';
+const REDACTED_TOKEN = '[redacted]';
 const MAX_RING = 1000;
 const _ring: string[] = [];
 
@@ -10,7 +11,10 @@ type LogSubscriber = (line: string) => void;
 const _subscribers = new Set<LogSubscriber>();
 
 function redact(msg: string): string {
-  return msg.replace(/Bearer\s+[A-Za-z0-9_.\-]+/gi, REDACTED);
+  return msg
+    .replace(/Bearer\s+[A-Za-z0-9_.\-]+/gi, REDACTED)
+    // Redact ?token= / &token= query params used for SSE and MCP EventSource auth.
+    .replace(/([?&]token=)[A-Za-z0-9_.\-]+/gi, `$1${REDACTED_TOKEN}`);
 }
 
 function fmt(level: string, msg: string, meta?: unknown): string {

@@ -39,6 +39,8 @@ function writeConfig(cfg) {
 }
 
 async function reloadConfig() {
+  // Wait for Docker Desktop bind-mount propagation before triggering reload.
+  await new Promise(resolve => setTimeout(resolve, 600));
   const r = await post(INSTANCES.a, token, '/api/admin/reload-config', {});
   assert.equal(r.status, 200, `reload-config failed: ${JSON.stringify(r.body)}`);
 }
@@ -83,9 +85,20 @@ describe('GET /api/theme — external theming endpoint', () => {
     writeConfig(cfg);
     await reloadConfig();
 
-    const r = await fetch(`${INSTANCES.a}/api/theme`);
-    assert.equal(r.status, 200);
-    const body = await r.json();
+    // Retry in case bind-mount propagation is still in progress after the
+    // initial reload (saveConfig() in the server may have written back the
+    // stale version on the first attempt).
+    let body;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const r = await fetch(`${INSTANCES.a}/api/theme`);
+      assert.equal(r.status, 200);
+      body = await r.json();
+      if (body.cssUrl === testUrl) break;
+      writeConfig(cfg);
+      await new Promise(resolve => setTimeout(resolve, 600));
+      await post(INSTANCES.a, token, '/api/admin/reload-config', {});
+      await new Promise(resolve => setTimeout(resolve, 400));
+    }
     assert.equal(body.cssUrl, testUrl, `Expected cssUrl '${testUrl}', got '${body.cssUrl}'`);
   });
 

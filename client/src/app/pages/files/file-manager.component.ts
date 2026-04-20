@@ -6,6 +6,7 @@ import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { ApiService, Space, FileEntry, UploadProgress } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
 import { PhIconComponent } from '../../shared/ph-icon.component';
+import { TranslocoPipe } from '@jsverse/transloco';
 import hljs from 'highlight.js/lib/core';
 import javascript from 'highlight.js/lib/languages/javascript';
 import typescript from 'highlight.js/lib/languages/typescript';
@@ -71,7 +72,7 @@ function previewKind(name: string): PreviewKind {
 @Component({
   selector: 'app-file-manager',
   standalone: true,
-  imports: [CommonModule, FormsModule, PhIconComponent],
+  imports: [CommonModule, FormsModule, PhIconComponent, TranslocoPipe],
   styles: [`
     .toolbar {
       display: flex;
@@ -290,24 +291,24 @@ function previewKind(name: string): PreviewKind {
 
           <!-- New folder -->
           @if (!showNewFolder()) {
-            <button class="btn-secondary btn btn-sm" (click)="showNewFolder.set(true)">+ New folder</button>
+            <button class="btn-secondary btn btn-sm" (click)="showNewFolder.set(true)">{{ 'files.newFolder' | transloco }}</button>
           } @else {
             <form class="rename-form" (ngSubmit)="createFolder()">
-              <input type="text" [(ngModel)]="newFolderName" name="fn" placeholder="Folder name" aria-label="New folder name" style="width:160px" />
-              <button class="btn-primary btn btn-sm" type="submit">Create</button>
-              <button class="btn-ghost btn btn-sm" type="button" (click)="showNewFolder.set(false)">Cancel</button>
+              <input type="text" [(ngModel)]="newFolderName" name="fn" [placeholder]="'files.newFolderPlaceholder' | transloco" [attr.aria-label]="'files.newFolderAriaLabel' | transloco" style="width:160px" />
+              <button class="btn-primary btn btn-sm" type="submit">{{ 'files.createFolder' | transloco }}</button>
+              <button class="btn-ghost btn btn-sm" type="button" (click)="showNewFolder.set(false)">{{ 'common.cancel' | transloco }}</button>
             </form>
           }
 
           <!-- Upload -->
           <label class="btn-secondary btn btn-sm" style="cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
-            <ph-icon name="upload" [size]="14"/> Upload
+            <ph-icon name="upload" [size]="14"/> {{ 'files.upload' | transloco }}
             <input type="file" multiple hidden (change)="onFileInput($event)" />
           </label>
 
           <button class="sidebar-toggle" (click)="toggleSidebar()">
-            @if (sidebarOpen()) { <ph-icon name="caret-left" [size]="12"/> Hide tree }
-            @else { <ph-icon name="caret-right" [size]="12"/> Show tree }
+            @if (sidebarOpen()) { <ph-icon name="caret-left" [size]="12"/> {{ 'files.sidebar.hideTree' | transloco }} }
+            @else { <ph-icon name="caret-right" [size]="12"/> {{ 'files.sidebar.showTree' | transloco }} }
           </button>
         </div>
 
@@ -315,7 +316,7 @@ function previewKind(name: string): PreviewKind {
         @if (uploading()) {
           <div class="alert alert-info" style="display:flex; align-items:center; gap:12px;">
             <span class="spinner"></span>
-            <span>Uploading… {{ uploadPercent() }}%</span>
+            <span>{{ 'files.uploading' | transloco }} {{ uploadPercent() }}%</span>
             <div style="flex:1; height:6px; background:var(--border); border-radius:3px; overflow:hidden;">
               <div [style.width.%]="uploadPercent()" style="height:100%; background:var(--accent); transition:width 0.2s;"></div>
             </div>
@@ -343,10 +344,10 @@ function previewKind(name: string): PreviewKind {
               <thead>
                 <tr>
                   <th style="width:24px"></th>
-                  <th>Name</th>
-                  <th>Size</th>
-                  <th>Modified</th>
-                  <th>Actions</th>
+                  <th>{{ 'files.table.name' | transloco }}</th>
+                  <th>{{ 'files.table.size' | transloco }}</th>
+                  <th>{{ 'files.table.modified' | transloco }}</th>
+                  <th>{{ 'files.table.actions' | transloco }}</th>
                 </tr>
               </thead>
               <tbody>
@@ -356,9 +357,9 @@ function previewKind(name: string): PreviewKind {
                     <td>
                       @if (renamingEntry() === entry.name) {
                         <form class="rename-form" (ngSubmit)="confirmRename(entry)">
-                          <input type="text" [(ngModel)]="renameValue" name="rn" aria-label="Rename entry" style="width:200px" />
-                          <button class="btn-primary btn btn-sm" type="submit">Save</button>
-                          <button class="btn-ghost btn btn-sm" type="button" (click)="renamingEntry.set('')">Cancel</button>
+                          <input type="text" [(ngModel)]="renameValue" name="rn" [attr.aria-label]="'files.renameEntryAriaLabel' | transloco" style="width:200px" />
+                          <button class="btn-primary btn btn-sm" type="submit">{{ 'common.save' | transloco }}</button>
+                          <button class="btn-ghost btn btn-sm" type="button" (click)="renamingEntry.set('')">{{ 'common.cancel' | transloco }}</button>
                         </form>
                       } @else {
                         <button
@@ -374,24 +375,24 @@ function previewKind(name: string): PreviewKind {
                     <td style="color:var(--text-muted)">{{ entry.modified | date:'dd.MM.yyyy HH:mm' }}</td>
                     <td style="display:flex; gap:6px; align-items:center;">
                       @if (entry.isFile) {
-                        <button class="btn-ghost btn btn-sm" (click)="openPreview(entry)" aria-label="Preview file" title="Preview"><ph-icon name="eye" [size]="16"/></button>
+                        <button class="btn-ghost btn btn-sm" (click)="openPreview(entry)" [attr.aria-label]="'files.previewAriaLabel' | transloco" [attr.title]="'files.previewTitle' | transloco"><ph-icon name="eye" [size]="16"/></button>
                         <a
                           class="btn-ghost btn btn-sm"
                           [href]="downloadUrl(entry)"
                           download
-                          aria-label="Download file"
+                          [attr.aria-label]="'files.downloadAriaLabel' | transloco"
                         ><ph-icon name="download-simple" [size]="16"/></a>
                       }
-                      <button class="btn-ghost btn btn-sm" (click)="startRename(entry)">Rename</button>
-                      <button class="icon-btn danger" (click)="deleteEntry(entry)" aria-label="Delete entry"><ph-icon name="x" [size]="16"/></button>
+                      <button class="btn-ghost btn btn-sm" (click)="startRename(entry)">{{ 'files.rename' | transloco }}</button>
+                      <button class="icon-btn danger" (click)="deleteEntry(entry)" [attr.aria-label]="'files.deleteEntryAriaLabel' | transloco"><ph-icon name="x" [size]="16"/></button>
                     </td>
                   </tr>
                 } @empty {
                   <tr><td colspan="5">
                     <div class="empty-state" style="padding:32px">
                       <div class="empty-state-icon"><ph-icon name="folder-open" [size]="48"/></div>
-                      <h3>Empty folder</h3>
-                      <p>Upload files or create a folder.</p>
+                      <h3>{{ 'files.emptyFolder.title' | transloco }}</h3>
+                      <p>{{ 'files.emptyFolder.body' | transloco }}</p>
                     </div>
                   </td></tr>
                 }
@@ -414,7 +415,7 @@ function previewKind(name: string): PreviewKind {
           <span><ph-icon name="folder" [size]="14"/> {{ node.name }}</span>
         </div>
         @if (node.loading) {
-          <div class="tree-spinner">Loading…</div>
+          <div class="tree-spinner">{{ 'files.tree.loading' | transloco }}</div>
         }
         @if (node.expanded && node.children) {
           <div class="tree-children">
@@ -430,11 +431,11 @@ function previewKind(name: string): PreviewKind {
         <div class="preview-pane" (click)="$event.stopPropagation()">
           <div class="preview-header">
             <span class="file-title" [title]="pf.name">{{ pf.name }}</span>
-            <a class="btn-secondary btn btn-sm" [href]="downloadUrl(pf)" download style="display:inline-flex;align-items:center;gap:4px"><ph-icon name="download-simple" [size]="14"/> Download</a>
+            <a class="btn-secondary btn btn-sm" [href]="downloadUrl(pf)" download style="display:inline-flex;align-items:center;gap:4px"><ph-icon name="download-simple" [size]="14"/> {{ 'files.download' | transloco }}</a>
             @if (embeddedSpaceId) {
-              <button class="btn btn-sm btn-secondary" title="View Brain metadata for this file" (click)="viewFileMeta.emit(previewFilePath(pf))" style="display:inline-flex;align-items:center;gap:4px"><ph-icon name="tag" [size]="14"/> Metadata</button>
+              <button class="btn btn-sm btn-secondary" [attr.title]="'files.viewMetadataTitle' | transloco" (click)="viewFileMeta.emit(previewFilePath(pf))" style="display:inline-flex;align-items:center;gap:4px"><ph-icon name="tag" [size]="14"/> {{ 'files.viewMetadata' | transloco }}</button>
             }
-            <button class="icon-btn" (click)="closePreview()" aria-label="Close preview"><ph-icon name="x" [size]="16"/></button>
+            <button class="icon-btn" (click)="closePreview()" [attr.aria-label]="'files.closePreviewAriaLabel' | transloco"><ph-icon name="x" [size]="16"/></button>
           </div>
           <div class="preview-body">
             @switch (previewKind()) {
@@ -453,9 +454,9 @@ function previewKind(name: string): PreviewKind {
               }
               @default {
                 <dl class="preview-meta">
-                  <dt>Name</dt><dd>{{ pf.name }}</dd>
-                  <dt>Size</dt><dd>{{ formatSize(pf.size) }}</dd>
-                  <dt>Modified</dt><dd>{{ pf.modified | date:'dd.MM.yyyy HH:mm' }}</dd>
+                  <dt>{{ 'files.preview.name' | transloco }}</dt><dd>{{ pf.name }}</dd>
+                  <dt>{{ 'files.preview.size' | transloco }}</dt><dd>{{ formatSize(pf.size) }}</dd>
+                  <dt>{{ 'files.preview.modified' | transloco }}</dt><dd>{{ pf.modified | date:'dd.MM.yyyy HH:mm' }}</dd>
                 </dl>
               }
             }

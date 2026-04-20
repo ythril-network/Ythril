@@ -5,6 +5,8 @@ import {
   ApiService, Network, Space, SpaceMeta, SpaceStats,
   KnowledgeType, PropertySchema, TypeSchema, ValidationMode,
 } from '../../core/api.service';
+import { TranslocoPipe } from '@jsverse/transloco';
+import { TranslocoService } from '@jsverse/transloco';
 
 interface TypeSchemaState {
   namingPattern:   string;
@@ -17,7 +19,7 @@ interface TypeSchemaState {
 @Component({
   selector: 'app-spaces',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, TranslocoPipe],
   styles: [`
     /* chip inputs */
     .chip-wrap {
@@ -103,38 +105,38 @@ interface TypeSchemaState {
       <div class="dialog-backdrop" (click)="showCreateDialog.set(false)">
         <div class="dialog" (click)="$event.stopPropagation()">
           <div class="dialog-header">
-            <div class="card-title">Create space</div>
+            <div class="card-title">{{ 'spaces.create.title' | transloco }}</div>
             <button class="icon-btn" (click)="showCreateDialog.set(false)">✕</button>
           </div>
           @if (createError()) { <div class="alert alert-error">{{ createError() }}</div> }
           <form (ngSubmit)="createSpace()" style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;">
             <div class="field" style="flex:1;min-width:140px;margin-bottom:0;">
-              <label>Display Name</label>
-              <input type="text" [(ngModel)]="form.label" name="label" placeholder="My Space" maxlength="200" required />
+              <label>{{ 'spaces.create.label' | transloco }}</label>
+              <input type="text" [(ngModel)]="form.label" name="label" [placeholder]="'spaces.create.labelPlaceholder' | transloco" maxlength="200" required />
             </div>
             <div class="field" style="width:140px;margin-bottom:0;">
-              <label>ID (optional)</label>
-              <input type="text" [(ngModel)]="form.id" name="id" placeholder="my-space" pattern="[a-z0-9-]+" />
+              <label>{{ 'spaces.create.id' | transloco }}</label>
+              <input type="text" [(ngModel)]="form.id" name="id" [placeholder]="'spaces.create.idPlaceholder' | transloco" pattern="[a-z0-9-]+" />
             </div>
             <div class="field" style="width:120px;margin-bottom:0;">
-              <label>Max GiB</label>
+              <label>{{ 'spaces.create.maxGiB' | transloco }}</label>
               <input type="number" [(ngModel)]="form.maxGiB" name="maxGiB" min="0" step="0.1" placeholder="—" />
             </div>
             <div style="display:flex;gap:12px;flex-basis:100%;">
               <div class="field" style="flex:1;margin-bottom:0;">
-                <label>Purpose</label>
-                <textarea [(ngModel)]="form.purpose" name="purpose" maxlength="4000" rows="5" style="resize:vertical;" placeholder="Describe what this space is for…"></textarea>
+                <label>{{ 'spaces.create.purpose' | transloco }}</label>
+                <textarea [(ngModel)]="form.purpose" name="purpose" maxlength="4000" rows="5" style="resize:vertical;" [placeholder]="'spaces.create.purposePlaceholder' | transloco"></textarea>
               </div>
               <div class="field" style="flex:1;margin-bottom:0;">
-                <label>Proxy for (optional)</label>
+                <label>{{ 'spaces.create.proxyFor' | transloco }}</label>
                 @if (spaces().length > 0) {
                   <div class="table-wrapper" style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);">
                     <table style="margin:0;">
-                      <thead><tr><th style="width:40px;"></th><th>Space</th><th>ID</th></tr></thead>
+                      <thead><tr><th style="width:40px;"></th><th>{{ 'spaces.table.column.label' | transloco }}</th><th>{{ 'spaces.table.column.id' | transloco }}</th></tr></thead>
                       <tbody>
                         <tr style="cursor:pointer;background:var(--bg-elevated);" (click)="toggleProxyForAll()">
                           <td style="text-align:center;"><input type="checkbox" [checked]="proxyForAll" (click)="$event.stopPropagation()" (change)="toggleProxyForAll()" /></td>
-                          <td colspan="2" style="font-style:italic;color:var(--text-muted);">All (including spaces added later)</td>
+                          <td colspan="2" style="font-style:italic;color:var(--text-muted);">{{ 'spaces.create.proxyForAll' | transloco }}</td>
                         </tr>
                         @for (s of spaces(); track s.id) {
                           <tr style="cursor:pointer;" [class.text-muted]="proxyForAll" (click)="!proxyForAll && toggleProxyFor(s.id)">
@@ -147,27 +149,27 @@ interface TypeSchemaState {
                     </table>
                   </div>
                 } @else {
-                  <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">No existing spaces.</div>
+                  <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">{{ 'spaces.create.noExistingSpaces' | transloco }}</div>
                 }
               </div>
             </div>
             <div style="display:flex;gap:12px;flex-basis:100%;align-items:flex-start;">
               <div class="field" style="margin-bottom:0;">
-                <label>Validation mode</label>
+                <label>{{ 'spaces.create.validationMode' | transloco }}</label>
                 <select [(ngModel)]="form.validationMode" name="validationMode" style="width:140px;">
-                  <option value="off">Off</option><option value="warn">Warn</option><option value="strict">Strict</option>
+                  <option value="off">{{ 'spaces.create.validation.off' | transloco }}</option><option value="warn">{{ 'spaces.create.validation.warn' | transloco }}</option><option value="strict">{{ 'spaces.create.validation.strict' | transloco }}</option>
                 </select>
               </div>
               <div class="field" style="margin-bottom:0;padding-top:22px;">
                 <label style="display:flex;align-items:center;gap:8px;font-weight:normal;cursor:pointer;">
-                  <input type="checkbox" [(ngModel)]="form.strictLinkage" name="strictLinkage" />Strict linkage
+                  <input type="checkbox" [(ngModel)]="form.strictLinkage" name="strictLinkage" />{{ 'spaces.create.strictLinkage' | transloco }}
                 </label>
               </div>
             </div>
             <div style="display:flex;gap:8px;flex-basis:100%;">
-              <button class="btn btn-secondary" type="button" (click)="showCreateDialog.set(false)">Cancel</button>
+              <button class="btn btn-secondary" type="button" (click)="showCreateDialog.set(false)">{{ 'common.cancel' | transloco }}</button>
               <button class="btn btn-primary" type="submit" style="margin-left:auto;" [disabled]="creating()||!form.label.trim()">
-                @if (creating()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }Create
+                @if (creating()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }{{ 'spaces.create.submitButton' | transloco }}
               </button>
             </div>
           </form>
@@ -187,9 +189,9 @@ interface TypeSchemaState {
             <button class="icon-btn" (click)="closeSettings()">✕</button>
           </div>
           <div class="sp-tabs">
-            <button class="sp-tab" [class.active]="settingsTab()==='settings'" (click)="settingsTab.set('settings')">Settings</button>
-            <button class="sp-tab" [class.active]="settingsTab()==='schema'"   (click)="settingsTab.set('schema')">Schema</button>
-            <button class="sp-tab danger-tab" [class.active]="settingsTab()==='danger'" (click)="settingsTab.set('danger')">Danger Zone</button>
+            <button class="sp-tab" [class.active]="settingsTab()==='settings'" (click)="settingsTab.set('settings')">{{ 'spaces.popup.tab.settings' | transloco }}</button>
+            <button class="sp-tab" [class.active]="settingsTab()==='schema'"   (click)="settingsTab.set('schema')">{{ 'spaces.popup.tab.schema' | transloco }}</button>
+            <button class="sp-tab danger-tab" [class.active]="settingsTab()==='danger'" (click)="settingsTab.set('danger')">{{ 'spaces.popup.tab.dangerZone' | transloco }}</button>
           </div>
           <div class="sp-body">
 
@@ -197,36 +199,36 @@ interface TypeSchemaState {
             @if (settingsTab() === 'settings') {
               <div style="max-width:720px;">
                 <div class="field">
-                  <label>Display Name</label>
+                  <label>{{ 'spaces.settings.label' | transloco }}</label>
                   <input type="text" [(ngModel)]="stForm.label" maxlength="200" />
                 </div>
                 <div class="field">
-                  <label>Purpose <span style="font-size:11px;color:var(--text-muted);font-weight:normal;">— surfaced to MCP clients at the SSE handshake</span></label>
+                  <label>{{ 'spaces.settings.purpose' | transloco }} <span style="font-size:11px;color:var(--text-muted);font-weight:normal;">{{ 'spaces.settings.purposeHint' | transloco }}</span></label>
                   <textarea [(ngModel)]="stForm.purpose" rows="6" maxlength="4000" style="resize:vertical;"></textarea>
                 </div>
                 <div class="field">
-                  <label>Usage Notes <span style="font-size:11px;color:var(--text-muted);font-weight:normal;">— additional guidance for LLM clients</span></label>
+                  <label>{{ 'spaces.settings.usageNotes' | transloco }} <span style="font-size:11px;color:var(--text-muted);font-weight:normal;">{{ 'spaces.settings.usageNotesHint' | transloco }}</span></label>
                   <textarea [(ngModel)]="stForm.usageNotes" rows="3" maxlength="2000" style="resize:vertical;"></textarea>
                 </div>
                 <div class="field" style="max-width:220px;">
-                  <label>Max Storage (GiB)</label>
-                  <input type="number" [(ngModel)]="stForm.maxGiB" min="0" step="0.1" placeholder="Unlimited" />
-                  <div style="font-size:11px;color:var(--text-muted);margin-top:3px;">Leave blank or 0 for no limit</div>
+                  <label>{{ 'spaces.settings.maxStorage' | transloco }}</label>
+                  <input type="number" [(ngModel)]="stForm.maxGiB" min="0" step="0.1" [placeholder]="'spaces.settings.unlimitedPlaceholder' | transloco" />
+                  <div style="font-size:11px;color:var(--text-muted);margin-top:3px;">{{ 'spaces.settings.maxStorageHint' | transloco }}</div>
                 </div>
                 <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;">
                   <div class="field" style="margin:0;">
-                    <label>Validation mode</label>
+                    <label>{{ 'spaces.settings.validationMode' | transloco }}</label>
                     <select [(ngModel)]="schValidation" style="width:220px;">
-                      <option value="off">Off — unrestricted writes</option>
-                      <option value="warn">Warn — log violations only</option>
-                      <option value="strict">Strict — reject violations</option>
+                      <option value="off">{{ 'spaces.settings.validation.off' | transloco }}</option>
+                      <option value="warn">{{ 'spaces.settings.validation.warn' | transloco }}</option>
+                      <option value="strict">{{ 'spaces.settings.validation.strict' | transloco }}</option>
                     </select>
                   </div>
                   <div class="field" style="margin:0;padding-top:22px;">
                     <label style="display:flex;align-items:center;gap:8px;font-weight:normal;cursor:pointer;">
                       <input type="checkbox" [(ngModel)]="schStrictLinkage" />
-                      Strict linkage
-                      <span style="font-size:11px;color:var(--text-muted);font-weight:normal;">— enforce UUID refs; block entity deletion while linked</span>
+                      {{ 'spaces.settings.strictLinkage' | transloco }}
+                      <span style="font-size:11px;color:var(--text-muted);font-weight:normal;">{{ 'spaces.settings.strictLinkageHint' | transloco }}</span>
                     </label>
                   </div>
                 </div>
@@ -237,46 +239,46 @@ interface TypeSchemaState {
             @if (settingsTab() === 'schema') {
               <!-- export / import toolbar -->
               <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
-                <button class="btn btn-secondary btn-sm" type="button" (click)="exportSchema()" title="Download all typeSchemas as JSON">↓ Export JSON</button>
-                <button class="btn btn-secondary btn-sm" type="button" (click)="triggerImportSchema()" title="Merge types from a JSON file">↑ Import JSON</button>
+                <button class="btn btn-secondary btn-sm" type="button" (click)="exportSchema()" [attr.title]="'spaces.schema.exportTitle' | transloco">{{ 'spaces.schema.exportJsonButton' | transloco }}</button>
+                <button class="btn btn-secondary btn-sm" type="button" (click)="triggerImportSchema()" [attr.title]="'spaces.schema.importTitle' | transloco">{{ 'spaces.schema.importJsonButton' | transloco }}</button>
                 <input #schImportInput type="file" accept=".json,application/json" style="display:none" (change)="onImportSchemaFile($event)" />
                 @if (schImportError) {
                   <span style="font-size:12px;color:var(--error);">{{ schImportError }}</span>
                 }
-                <span style="font-size:11px;color:var(--text-muted);margin-left:4px;">Schemas auto-sync to <code>schemas/</code> in the space files on save.</span>
+                <span style="font-size:11px;color:var(--text-muted);margin-left:4px;">{{ 'spaces.schema.autoSyncHint' | transloco }}</span>
               </div>
               <!-- collection tabs -->
               <div class="sch-coll-tabs">
                 <button class="sch-coll-tab" [class.active]="schemaCollTab()==='entity'" (click)="schemaCollTab.set('entity')">
-                  Entities
+                  {{ 'spaces.schema.tab.entities' | transloco }}
                   @if (typeCount('entity')) { <span class="sch-cnt-badge">{{ typeCount('entity') }}</span> }
                 </button>
                 <button class="sch-coll-tab" [class.active]="schemaCollTab()==='edge'" (click)="schemaCollTab.set('edge')">
-                  Edges
+                  {{ 'spaces.schema.tab.edges' | transloco }}
                   @if (typeCount('edge')) { <span class="sch-cnt-badge">{{ typeCount('edge') }}</span> }
                 </button>
                 <button class="sch-coll-tab" [class.active]="schemaCollTab()==='memory'" (click)="schemaCollTab.set('memory')">
-                  Memories
+                  {{ 'spaces.schema.tab.memories' | transloco }}
                   @if (typeCount('memory')) { <span class="sch-cnt-badge">{{ typeCount('memory') }}</span> }
                 </button>
                 <button class="sch-coll-tab" [class.active]="schemaCollTab()==='chrono'" (click)="schemaCollTab.set('chrono')">
-                  Chrono
+                  {{ 'spaces.schema.tab.chrono' | transloco }}
                   @if (typeCount('chrono')) { <span class="sch-cnt-badge">{{ typeCount('chrono') }}</span> }
                 </button>
               </div>
               <div class="sch-coll-body">
 
                 @if (schemaCollTab() === 'entity') {
-                  <div class="sch-sub">Types <span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);">— allowlist for entity.type; empty = any value accepted</span></div>
+                  <div class="sch-sub">{{ 'spaces.schema.subtitle.types' | transloco }} <span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);">{{ 'spaces.schema.entityTypeHint' | transloco }}</span></div>
                 }
                 @if (schemaCollTab() === 'edge') {
-                  <div class="sch-sub">Labels <span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);">— allowlist for edge.label; empty = any value accepted</span></div>
+                  <div class="sch-sub">{{ 'spaces.schema.subtitle.labels' | transloco }} <span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);">{{ 'spaces.schema.edgeLabelHint' | transloco }}</span></div>
                 }
                 @if (schemaCollTab() === 'memory') {
-                  <div class="sch-sub">Types <span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);">— allowlist for memory.type; empty = any value accepted</span></div>
+                  <div class="sch-sub">{{ 'spaces.schema.subtitle.types' | transloco }} <span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);">{{ 'spaces.schema.memoryTypeHint' | transloco }}</span></div>
                 }
                 @if (schemaCollTab() === 'chrono') {
-                  <div class="sch-sub">Types <span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);">— allowlist for chrono.type; empty = any value accepted</span></div>
+                  <div class="sch-sub">{{ 'spaces.schema.subtitle.types' | transloco }} <span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);">{{ 'spaces.schema.chronoTypeHint' | transloco }}</span></div>
                 }
 
                 <!-- type list -->
@@ -284,13 +286,13 @@ interface TypeSchemaState {
 
                 <!-- Global tag suggestions (entity tab) -->
                 @if (schemaCollTab() === 'entity') {
-                  <div class="sch-sub" style="margin-top:28px;">Global tag suggestions <span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);">— hints for all knowledge types; any tag is still accepted</span></div>
+                  <div class="sch-sub" style="margin-top:28px;">{{ 'spaces.schema.globalTagSuggestions' | transloco }} <span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);">{{ 'spaces.schema.globalTagSuggestionsHint' | transloco }}</span></div>
                   <div class="chip-wrap">
                     @for (t of schTagSuggestions; track t) {
                       <span class="chip">{{ t }}<button type="button" class="chip-rm" (click)="schTagSuggestions=schTagSuggestions.filter(x=>x!==t)">×</button></span>
                     }
                     <input type="text" class="chip-field" [(ngModel)]="schNewTagInput"
-                      [placeholder]="schTagSuggestions.length ? '' : 'Add suggestion + Enter'"
+                      [placeholder]="schTagSuggestions.length ? '' : ('spaces.schema.addTagSuggestionPlaceholder' | transloco)"
                       (keydown.enter)="$event.preventDefault();addGlobalTag()" />
                   </div>
                 }
@@ -303,7 +305,7 @@ interface TypeSchemaState {
                   <table class="type-table">
                     <thead>
                       <tr>
-                        <th>{{ kt === 'edge' ? 'Label' : 'Type name' }}</th>
+                        <th>{{ kt === 'edge' ? ('spaces.schema.typeTable.labelColumn' | transloco) : ('spaces.schema.typeTable.typeName' | transloco) }}</th>
                         <th style="width:48px;"></th>
                       </tr>
                     </thead>
@@ -328,7 +330,7 @@ interface TypeSchemaState {
                             <div style="display:flex;gap:4px;justify-content:flex-end;">
                               <button class="btn btn-ghost btn-sm" type="button" (click)="toggleTypeExpand(kt,name)"
                                 style="font-size:10px;padding:2px 8px;min-width:28px;">{{ isTypeExpanded(kt,name) ? '▲' : '▼' }}</button>
-                              <button class="icon-btn danger" type="button" (click)="removeType(kt,name)" title="Remove">✕</button>
+                              <button class="icon-btn danger" type="button" (click)="removeType(kt,name)" [attr.title]="'common.remove' | transloco">✕</button>
                             </div>
                           </td>
                         </tr>
@@ -340,34 +342,34 @@ interface TypeSchemaState {
                                 @if (kt === 'entity') {
                                   <div class="pdet-fields" style="margin-bottom:12px;">
                                     <div class="field" style="margin:0;">
-                                      <label>Naming pattern <span style="font-size:10px;font-weight:400;color:var(--text-muted);">(regex for entity.name)</span></label>
-                                      <input type="text" [(ngModel)]="typeState(kt,name).namingPattern" placeholder="^[A-Z].* (optional)" style="max-width:320px;" />
+                                      <label>{{ 'spaces.schema.namingPattern' | transloco }} <span style="font-size:10px;font-weight:400;color:var(--text-muted);">{{ 'spaces.schema.namingPatternHint' | transloco }}</span></label>
+                                      <input type="text" [(ngModel)]="typeState(kt,name).namingPattern" [placeholder]="'spaces.schema.namingPatternPlaceholder' | transloco" style="max-width:320px;" />
                                     </div>
                                   </div>
                                 }
                                 <!-- Tag suggestions per type -->
                                 <div class="pdet-full" style="margin-bottom:12px;">
                                   <div class="field" style="margin:0;">
-                                    <label>Tag suggestions <span style="font-size:10px;font-weight:400;color:var(--text-muted);">— hints for this type; any tag still accepted</span></label>
+                                    <label>{{ 'spaces.schema.tagSuggestions' | transloco }} <span style="font-size:10px;font-weight:400;color:var(--text-muted);">{{ 'spaces.schema.tagSuggestionsHint' | transloco }}</span></label>
                                     <div class="chip-wrap">
                                       @for (tag of typeState(kt,name).tagSuggestions; track tag) {
                                         <span class="chip">{{ tag }}<button type="button" class="chip-rm" (click)="typeState(kt,name).tagSuggestions=typeState(kt,name).tagSuggestions.filter(x=>x!==tag)">×</button></span>
                                       }
                                       <input type="text" class="chip-field" [(ngModel)]="typeState(kt,name)._newTagInput"
-                                        [placeholder]="typeState(kt,name).tagSuggestions.length ? '' : 'Add tag + Enter'"
+                                        [placeholder]="typeState(kt,name).tagSuggestions.length ? '' : ('spaces.schema.addTagPlaceholder' | transloco)"
                                         (keydown.enter)="$event.preventDefault();addTypeTag(kt,name)" />
                                     </div>
                                   </div>
                                 </div>
                                 <!-- Property schemas -->
-                                <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;">Property schemas</div>
+                                <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;">{{ 'spaces.schema.propertySchemas' | transloco }}</div>
                                 <div class="table-wrapper" style="margin-bottom:0;">
                                   <table class="prop-table" style="margin-bottom:0;">
                                     <thead>
                                       <tr>
-                                        <th style="width:160px;">Property</th>
-                                        <th style="width:80px;">Type</th>
-                                        <th>Constraints</th>
+                                        <th style="width:160px;">{{ 'spaces.schema.propTable.property' | transloco }}</th>
+                                        <th style="width:80px;">{{ 'spaces.schema.propTable.type' | transloco }}</th>
+                                        <th>{{ 'spaces.schema.propTable.constraints' | transloco }}</th>
                                         <th style="width:68px;"></th>
                                       </tr>
                                     </thead>
@@ -396,7 +398,7 @@ interface TypeSchemaState {
                                             <div style="display:flex;gap:4px;justify-content:flex-end;">
                                               <button class="btn btn-ghost btn-sm" type="button" (click)="togglePropExpand(kt,name,p.key)"
                                                 style="font-size:10px;padding:2px 8px;min-width:28px;">{{ isPropExpanded(kt,name,p.key) ? '▲' : '▼' }}</button>
-                                              <button class="icon-btn danger" type="button" (click)="removeProp(kt,name,p.key)" title="Remove">✕</button>
+                                              <button class="icon-btn danger" type="button" (click)="removeProp(kt,name,p.key)" [attr.title]="'common.remove' | transloco">✕</button>
                                             </div>
                                           </td>
                                         </tr>
@@ -408,13 +410,13 @@ interface TypeSchemaState {
                                                   <span class="pdet-key">{{ p.key }}</span>
                                                   <label class="req-toggle" [class.is-req]="p.s.required">
                                                     <input type="checkbox" [checked]="p.s.required" (change)="p.s.required = !p.s.required" style="pointer-events:none;" />
-                                                    Required
+                                                    {{ 'spaces.schema.propDetail.required' | transloco }}
                                                   </label>
-                                                  <button class="icon-btn danger" type="button" (click)="removeProp(kt,name,p.key)" title="Remove property">✕</button>
+                                                  <button class="icon-btn danger" type="button" (click)="removeProp(kt,name,p.key)" [attr.title]="'spaces.schema.removePropertyTitle' | transloco">✕</button>
                                                 </div>
                                                 <div class="pdet-fields">
                                                   <div class="field" style="margin:0;">
-                                                    <label>Type</label>
+                                                    <label>{{ 'spaces.schema.propDetail.type' | transloco }}</label>
                                                     <select [(ngModel)]="p.s.type">
                                                       <option [ngValue]="undefined">any</option>
                                                       <option value="string">string</option>
@@ -424,11 +426,11 @@ interface TypeSchemaState {
                                                     </select>
                                                   </div>
                                                   <div class="field" style="margin:0;">
-                                                    <label>Default</label>
+                                                    <label>{{ 'spaces.schema.propDetail.default' | transloco }}</label>
                                                     <input type="text" [(ngModel)]="p.s.default" placeholder="—" />
                                                   </div>
                                                   <div class="field" style="margin:0;">
-                                                    <label>Merge function</label>
+                                                    <label>{{ 'spaces.schema.propDetail.mergeFn' | transloco }}</label>
                                                     <select [(ngModel)]="p.s.mergeFn">
                                                       <option [ngValue]="undefined">—</option>
                                                       <option value="avg">avg</option><option value="min">min</option>
@@ -439,17 +441,17 @@ interface TypeSchemaState {
                                                   </div>
                                                   @if (p.s.type==='string'||p.s.type===undefined) {
                                                     <div class="field" style="margin:0;">
-                                                      <label>Pattern <span style="font-size:10px;font-weight:400;color:var(--text-muted);">(regex)</span></label>
+                                                      <label>{{ 'spaces.schema.propDetail.pattern' | transloco }} <span style="font-size:10px;font-weight:400;color:var(--text-muted);">{{ 'spaces.schema.propDetail.patternHint' | transloco }}</span></label>
                                                       <input type="text" [(ngModel)]="p.s.pattern" placeholder="^[A-Z].*" />
                                                     </div>
                                                   }
                                                   @if (p.s.type==='number'||p.s.type===undefined) {
                                                     <div class="field" style="margin:0;">
-                                                      <label>Min</label>
+                                                      <label>{{ 'spaces.schema.propDetail.min' | transloco }}</label>
                                                       <input type="number" [(ngModel)]="p.s.minimum" placeholder="—" />
                                                     </div>
                                                     <div class="field" style="margin:0;">
-                                                      <label>Max</label>
+                                                      <label>{{ 'spaces.schema.propDetail.max' | transloco }}</label>
                                                       <input type="number" [(ngModel)]="p.s.maximum" placeholder="—" />
                                                     </div>
                                                   }
@@ -457,13 +459,13 @@ interface TypeSchemaState {
                                                 @if (p.s.type !== 'boolean') {
                                                   <div class="pdet-full">
                                                     <div class="field" style="margin:0;">
-                                                      <label>Enum values <span style="font-size:11px;font-weight:normal;color:var(--text-muted);">— restrict to exact set</span></label>
+                                                      <label>{{ 'spaces.schema.propDetail.enumValues' | transloco }} <span style="font-size:11px;font-weight:normal;color:var(--text-muted);">{{ 'spaces.schema.propDetail.enumHint' | transloco }}</span></label>
                                                       <div class="chip-wrap">
                                                         @for (ev of (p.s.enum??[]); track ev) {
                                                           <span class="chip">{{ ev }}<button type="button" class="chip-rm" (click)="removeEnumVal(kt,name,p.key,ev)">×</button></span>
                                                         }
                                                         <input type="text" class="chip-field" [(ngModel)]="p._enumInput"
-                                                          placeholder="value + Enter" (keydown)="onEnumKey($event,kt,name,p.key)" />
+                                                          [placeholder]="'spaces.schema.propDetail.enumPlaceholder' | transloco" (keydown)="onEnumKey($event,kt,name,p.key)" />
                                                       </div>
                                                     </div>
                                                   </div>
@@ -475,7 +477,7 @@ interface TypeSchemaState {
                                       } @empty {
                                         <tr>
                                           <td colspan="4" style="padding:28px 0;text-align:center;color:var(--text-muted);font-size:13px;font-style:italic;">
-                                            No property schemas yet — add one below.
+                                            {{ 'spaces.schema.noProps' | transloco }}
                                           </td>
                                         </tr>
                                       }
@@ -484,11 +486,11 @@ interface TypeSchemaState {
                                 </div>
                                 <!-- add property -->
                                 <div style="display:flex;gap:8px;align-items:center;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">
-                                  <input type="text" [(ngModel)]="typeState(kt,name)._newPropInput" placeholder="New property name"
+                                  <input type="text" [(ngModel)]="typeState(kt,name)._newPropInput" [placeholder]="'spaces.schema.newPropNamePlaceholder' | transloco"
                                     style="flex:1;max-width:220px;"
                                     (keydown.enter)="$event.preventDefault();addProp(kt,name)" />
                                   <button class="btn btn-secondary btn-sm" type="button"
-                                    (click)="addProp(kt,name)" [disabled]="!typeState(kt,name)._newPropInput.trim()">+ Add property</button>
+                                    (click)="addProp(kt,name)" [disabled]="!typeState(kt,name)._newPropInput.trim()">{{ 'spaces.schema.addPropertyButton' | transloco }}</button>
                                 </div>
                               </div>
                             </td>
@@ -497,7 +499,7 @@ interface TypeSchemaState {
                       } @empty {
                         <tr>
                           <td colspan="2" style="padding:24px;text-align:center;color:var(--text-muted);font-size:13px;font-style:italic;">
-                            No {{ kt === 'edge' ? 'labels' : 'types' }} defined — all {{ kt === 'edge' ? 'labels' : 'types' }} accepted.
+                            {{ kt === 'edge' ? ('spaces.schema.noEdgeLabels' | transloco) : ('spaces.schema.noTypes' | transloco) }}
                           </td>
                         </tr>
                       }
@@ -506,11 +508,11 @@ interface TypeSchemaState {
                 </div>
                 <!-- add type/label -->
                 <div style="display:flex;gap:8px;align-items:center;margin-top:8px;padding-top:8px;">
-                  <input type="text" [(ngModel)]="schNewTypeInputs[kt]" [placeholder]="kt === 'edge' ? 'New label' : 'New type name'"
+                  <input type="text" [(ngModel)]="schNewTypeInputs[kt]" [placeholder]="kt === 'edge' ? ('spaces.schema.newLabelPlaceholder' | transloco) : ('spaces.schema.newTypeNamePlaceholder' | transloco)"
                     style="flex:1;max-width:200px;"
                     (keydown.enter)="$event.preventDefault();addType(kt)" />
                   <button class="btn btn-secondary btn-sm" type="button"
-                    (click)="addType(kt)" [disabled]="!schNewTypeInputs[kt]?.trim()">+ Add {{ kt === 'edge' ? 'label' : 'type' }}</button>
+                    (click)="addType(kt)" [disabled]="!schNewTypeInputs[kt]?.trim()">{{ kt === 'edge' ? ('spaces.schema.addLabelButton' | transloco) : ('spaces.schema.addTypeButton' | transloco) }}</button>
                 </div>
               </ng-template>
             }
@@ -518,26 +520,26 @@ interface TypeSchemaState {
             <!-- DANGER ZONE TAB -->
             @if (settingsTab() === 'danger') {
               <div class="dz-section">
-                <div class="dz-section-title">Edit Space ID</div>
-                <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">Changes the internal identifier used by tokens, networks, files, and MCP clients. All references updated atomically.</p>
+                <div class="dz-section-title">{{ 'spaces.dangerZone.renameTitle' | transloco }}</div>
+                <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">{{ 'spaces.dangerZone.renameDescription' | transloco }}</p>
                 <form (ngSubmit)="submitDangerRename()" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
                   <div class="field" style="margin:0;flex:1;max-width:280px;">
-                    <label>New ID</label>
+                    <label>{{ 'spaces.dangerZone.newId' | transloco }}</label>
                     <input type="text" [(ngModel)]="dangerRenameId" name="dangerRenameId" pattern="[a-z0-9-]+" maxlength="40" [placeholder]="settingsSpace()!.id" />
                   </div>
                   <button class="btn btn-secondary" type="submit" [disabled]="dangerRenaming()||!dangerRenameId.trim()||dangerRenameId.trim()===settingsSpace()!.id">
-                    @if (dangerRenaming()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }Rename
+                    @if (dangerRenaming()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }{{ 'spaces.dangerZone.renameButton' | transloco }}
                   </button>
                 </form>
                 @if (dangerRenameError()) { <div class="alert alert-error" style="margin-top:8px;">{{ dangerRenameError() }}</div> }
               </div>
 
               <div class="dz-section">
-                <div class="dz-section-title">Wipe Space Data</div>
-                <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">Permanently deletes all brain data and files. Space configuration and ID are preserved.</p>
+                <div class="dz-section-title">{{ 'spaces.dangerZone.wipeTitle' | transloco }}</div>
+                <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">{{ 'spaces.dangerZone.wipeDescription' | transloco }}</p>
                 @if (dangerWipeLoading()) {
                   <div style="display:flex;gap:8px;align-items:center;color:var(--text-muted);font-size:13px;margin-bottom:12px;">
-                    <span class="spinner" style="width:14px;height:14px;border-width:2px;"></span> Loading counts…
+                    <span class="spinner" style="width:14px;height:14px;border-width:2px;"></span> {{ 'spaces.dangerZone.loadingCounts' | transloco }}
                   </div>
                 } @else if (dangerWipeStats()) {
                   <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:16px;">
@@ -551,22 +553,22 @@ interface TypeSchemaState {
                 }
                 @if (dangerWipeError()) { <div class="alert alert-error" style="margin-bottom:8px;">{{ dangerWipeError() }}</div> }
                 <button class="btn btn-danger" type="button" (click)="confirmDangerWipe()" [disabled]="dangerWiping()">
-                  @if (dangerWiping()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }Wipe all data
+                  @if (dangerWiping()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }{{ 'spaces.dangerZone.wipeButton' | transloco }}
                 </button>
               </div>
 
               @let spaceNets = networksForSpace(settingsSpace()!.id);
               @if (spaceNets.length > 0) {
                 <div class="dz-section">
-                  <div class="dz-section-title">Leave Networks</div>
-                  <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">Leaves the sync ring for each selected network.</p>
+                  <div class="dz-section-title">{{ 'spaces.dangerZone.leaveNetworksTitle' | transloco }}</div>
+                  <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">{{ 'spaces.dangerZone.leaveNetworksDescription' | transloco }}</p>
                   @for (n of spaceNets; track n.id) {
                     <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);">
                       <div>
                         <span style="font-weight:500;">{{ n.label }}</span>
                         <span class="badge badge-gray" style="margin-left:8px;font-size:11px;">{{ n.id }}</span>
                       </div>
-                      <button class="btn btn-secondary btn-sm" type="button" (click)="leaveNetworkDanger(n.id)">Leave</button>
+                      <button class="btn btn-secondary btn-sm" type="button" (click)="leaveNetworkDanger(n.id)">{{ 'spaces.dangerZone.leaveButton' | transloco }}</button>
                     </div>
                   }
                 </div>
@@ -574,11 +576,11 @@ interface TypeSchemaState {
 
               @if (!settingsSpace()!.builtIn) {
                 <div class="dz-section dz-red">
-                  <div class="dz-section-title">Delete Space</div>
-                  <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">Permanently destroys this space along with all brain data and stored files. Cannot be undone.</p>
+                  <div class="dz-section-title">{{ 'spaces.dangerZone.deleteTitle' | transloco }}</div>
+                  <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">{{ 'spaces.dangerZone.deleteDescription' | transloco }}</p>
                   @if (dangerDeleteError()) { <div class="alert alert-error" style="margin-bottom:8px;">{{ dangerDeleteError() }}</div> }
                   <button class="btn btn-danger" type="button" (click)="confirmDangerDelete()" [disabled]="dangerDeleting()">
-                    @if (dangerDeleting()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }Delete space permanently
+                    @if (dangerDeleting()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }{{ 'spaces.dangerZone.deleteButton' | transloco }}
                   </button>
                 </div>
               }
@@ -590,9 +592,9 @@ interface TypeSchemaState {
               @if (settingsError()) {
                 <div class="alert alert-error" style="flex:1;margin:0;padding:6px 12px;font-size:13px;">{{ settingsError() }}</div>
               }
-              <button class="btn btn-secondary" type="button" (click)="closeSettings()">Cancel</button>
+              <button class="btn btn-secondary" type="button" (click)="closeSettings()">{{ 'common.cancel' | transloco }}</button>
               <button class="btn btn-primary" type="button" (click)="saveSettings()" [disabled]="settingsSaving()">
-                @if (settingsSaving()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }Save changes
+                @if (settingsSaving()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }{{ 'spaces.popup.footer.saveChanges' | transloco }}
               </button>
             </div>
           }
@@ -603,10 +605,10 @@ interface TypeSchemaState {
     <!-- SPACES TABLE -->
     <div class="card">
       <div class="card-header">
-        <div class="card-title">Spaces</div>
+        <div class="card-title">{{ 'spaces.table.title' | transloco }}</div>
         <div style="display:flex;gap:8px;">
-          <button class="btn-primary btn btn-sm" (click)="showCreateDialog.set(true)">Create New Space</button>
-          <button class="btn-secondary btn btn-sm" (click)="load()">Refresh</button>
+          <button class="btn-primary btn btn-sm" (click)="showCreateDialog.set(true)">{{ 'spaces.table.createButton' | transloco }}</button>
+          <button class="btn-secondary btn btn-sm" (click)="load()">{{ 'spaces.table.refreshButton' | transloco }}</button>
         </div>
       </div>
       @if (loading()) {
@@ -615,7 +617,7 @@ interface TypeSchemaState {
         <div class="table-wrapper">
           <table>
             <thead>
-              <tr><th>Label</th><th>ID</th><th>Storage</th><th>Networks</th><th>Proxy</th><th></th></tr>
+              <tr><th>{{ 'spaces.table.column.label' | transloco }}</th><th>{{ 'spaces.table.column.id' | transloco }}</th><th>{{ 'spaces.table.column.storage' | transloco }}</th><th>{{ 'spaces.table.column.networks' | transloco }}</th><th>{{ 'spaces.table.column.proxy' | transloco }}</th><th></th></tr>
             </thead>
             <tbody>
               @for (s of spaces(); track s.id) {
@@ -640,17 +642,17 @@ interface TypeSchemaState {
                   </td>
                   <td>
                     @if (s.proxyFor?.[0]==='*') {
-                      <span class="badge badge-blue" style="font-style:italic;">All spaces</span>
+                      <span class="badge badge-blue" style="font-style:italic;">{{ 'spaces.badge.allSpaces' | transloco }}</span>
                     } @else if (s.proxyFor?.length) {
                       @for (pid of s.proxyFor; track pid) {
                         <span class="badge badge-blue" style="margin-right:4px;font-size:11px;">{{ pid }}</span>
                       }
                     } @else { <span style="color:var(--text-muted)">—</span> }
                   </td>
-                  <td><button class="icon-btn" title="Configure space" (click)="openSettings(s)">⚙</button></td>
+                  <td><button class="icon-btn" [attr.title]="'spaces.table.configureTitle' | transloco" (click)="openSettings(s)">⚙</button></td>
                 </tr>
               } @empty {
-                <tr><td colspan="6"><div class="empty-state" style="padding:24px;"><h3>No spaces</h3></div></td></tr>
+                <tr><td colspan="6"><div class="empty-state" style="padding:24px;"><h3>{{ 'spaces.table.empty' | transloco }}</h3></div></td></tr>
               }
             </tbody>
           </table>
@@ -661,6 +663,7 @@ interface TypeSchemaState {
 })
 export class SpacesComponent implements OnInit {
   private api = inject(ApiService);
+  private transloco = inject(TranslocoService);
 
   readonly KINDS: KnowledgeType[] = ['entity', 'memory', 'edge', 'chrono'];
   readonly KIND_LABELS: Record<KnowledgeType, string> = {
@@ -830,7 +833,7 @@ export class SpacesComponent implements OnInit {
         this.proxyForSelected = [];
         this.proxyForAll = false;
       },
-      error: (err) => { this.creating.set(false); this.createError.set(err.error?.error ?? 'Failed to create space'); },
+      error: (err) => { this.creating.set(false); this.createError.set(err.error?.error ?? this.transloco.translate('spaces.error.createFailed')); },
     });
   }
 
@@ -900,7 +903,7 @@ export class SpacesComponent implements OnInit {
         this.spaces.update(list => list.map(s => s.id === space.id ? { ...s, ...space } : s));
         this.settingsSpace.set({ ...target, ...space });
       },
-      error: (err) => { this.settingsSaving.set(false); this.settingsError.set(err.error?.error ?? 'Failed to save'); },
+      error: (err) => { this.settingsSaving.set(false); this.settingsError.set(err.error?.error ?? this.transloco.translate('spaces.error.saveFailed')); },
     });
   }
 
@@ -983,7 +986,7 @@ export class SpacesComponent implements OnInit {
         // Accept either { typeSchemas: {...} } wrapper or bare typeSchemas object
         const ts: unknown = raw?.typeSchemas ?? raw;
         if (!ts || typeof ts !== 'object' || Array.isArray(ts)) {
-          this.schImportError = 'Invalid schema file — expected a typeSchemas object.';
+          this.schImportError = this.transloco.translate('spaces.schema.import.invalidFile');
           return;
         }
         const KINDS: KnowledgeType[] = ['entity', 'edge', 'memory', 'chrono'];
@@ -1016,7 +1019,7 @@ export class SpacesComponent implements OnInit {
         this.schTypeSchemas = merged;
         this.schImportError = '';
       } catch {
-        this.schImportError = 'Could not parse JSON file.';
+        this.schImportError = this.transloco.translate('spaces.schema.import.parseFailed');
       } finally {
         // Reset the input so the same file can be re-imported if needed
         if (this.schImportInputRef) this.schImportInputRef.nativeElement.value = '';
@@ -1117,11 +1120,11 @@ export class SpacesComponent implements OnInit {
     const s = this.dangerWipeStats();
     if (!s) return [];
     return [
-      { label: 'Memories', value: s.memories },
-      { label: 'Entities', value: s.entities },
-      { label: 'Edges',    value: s.edges    },
-      { label: 'Chrono',   value: s.chrono   },
-      { label: 'Files',    value: s.files    },
+      { label: this.transloco.translate('spaces.stats.memories'), value: s.memories },
+      { label: this.transloco.translate('spaces.stats.entities'), value: s.entities },
+      { label: this.transloco.translate('spaces.stats.edges'),    value: s.edges    },
+      { label: this.transloco.translate('spaces.stats.chrono'),   value: s.chrono   },
+      { label: this.transloco.translate('spaces.stats.files'),    value: s.files    },
     ];
   }
 
@@ -1129,7 +1132,7 @@ export class SpacesComponent implements OnInit {
     const target = this.settingsSpace();
     const newId  = this.dangerRenameId.trim();
     if (!target || !newId || newId === target.id) return;
-    if (!confirm(`Rename space "${target.label}" from "${target.id}" to "${newId}"? All references will be updated.`)) return;
+    if (!confirm(this.transloco.translate('spaces.dangerZone.confirmRename', { label: target.label, id: target.id, newId }))) return;
     this.dangerRenaming.set(true);
     this.dangerRenameError.set('');
     this.api.renameSpace(target.id, newId).subscribe({
@@ -1140,14 +1143,14 @@ export class SpacesComponent implements OnInit {
         this.dangerRenameId = space.id;
         this.api.listNetworks().subscribe({ next: ({ networks }) => this.networks.set(networks), error: () => {} });
       },
-      error: (err) => { this.dangerRenaming.set(false); this.dangerRenameError.set(err.error?.error ?? 'Failed to rename'); },
+      error: (err) => { this.dangerRenaming.set(false); this.dangerRenameError.set(err.error?.error ?? this.transloco.translate('spaces.error.renameFailed')); },
     });
   }
 
   confirmDangerWipe(): void {
     const target = this.settingsSpace();
     if (!target) return;
-    if (!confirm(`Wipe ALL data from "${target.label}"? This cannot be undone.`)) return;
+    if (!confirm(this.transloco.translate('spaces.dangerZone.confirmWipe', { label: target.label }))) return;
     this.dangerWiping.set(true);
     this.dangerWipeError.set('');
     this.api.wipeSpace(target.id).subscribe({
@@ -1160,14 +1163,14 @@ export class SpacesComponent implements OnInit {
           error: () => this.dangerWipeLoading.set(false),
         });
       },
-      error: (err) => { this.dangerWiping.set(false); this.dangerWipeError.set(err.error?.error ?? 'Failed to wipe'); },
+      error: (err) => { this.dangerWiping.set(false); this.dangerWipeError.set(err.error?.error ?? this.transloco.translate('spaces.error.wipeFailed')); },
     });
   }
 
   confirmDangerDelete(): void {
     const target = this.settingsSpace();
     if (!target) return;
-    if (!confirm(`Delete space "${target.label}" (${target.id}) permanently? All data will be destroyed.`)) return;
+    if (!confirm(this.transloco.translate('spaces.dangerZone.confirmDelete', { label: target.label, id: target.id }))) return;
     this.dangerDeleting.set(true);
     this.dangerDeleteError.set('');
     this.api.deleteSpace(target.id).subscribe({
@@ -1176,15 +1179,15 @@ export class SpacesComponent implements OnInit {
         this.spaces.update(list => list.filter(s => s.id !== target.id));
         this.closeSettings();
       },
-      error: (err) => { this.dangerDeleting.set(false); this.dangerDeleteError.set(err.error?.error ?? 'Failed to delete'); },
+      error: (err) => { this.dangerDeleting.set(false); this.dangerDeleteError.set(err.error?.error ?? this.transloco.translate('spaces.error.deleteFailed')); },
     });
   }
 
   leaveNetworkDanger(networkId: string): void {
-    if (!confirm('Leave this network? This instance will stop syncing with its peers.')) return;
+    if (!confirm(this.transloco.translate('spaces.dangerZone.confirmLeaveNetwork'))) return;
     this.api.leaveNetwork(networkId).subscribe({
       next: () => this.api.listNetworks().subscribe({ next: ({ networks }) => this.networks.set(networks), error: () => {} }),
-      error: () => alert('Failed to leave network.'),
+      error: () => alert(this.transloco.translate('spaces.error.leaveNetworkFailed')),
     });
   }
 }

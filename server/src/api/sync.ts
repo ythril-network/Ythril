@@ -16,7 +16,7 @@ import { warmEmbeddingModel } from '../brain/embedding.js';
 import { syncRateLimit } from '../rate-limit/middleware.js';
 import { getConfig, getSecrets, getDataRoot, loadConfig, saveConfig } from '../config/loader.js';
 import { listTombstones, applyRemoteTombstone } from '../brain/tombstones.js';
-import { requireAuth } from '../auth/middleware.js';
+import { requireAuth, denyReadOnly } from '../auth/middleware.js';
 import { log } from '../util/log.js';
 import { nextSeq, bumpSeq } from '../util/seq.js';
 import { updateSpace } from '../spaces/spaces.js';
@@ -394,7 +394,7 @@ syncRouter.get('/memories/:id', syncRateLimit, requireAuth, async (req, res) => 
  * Upsert a memory received from a peer.
  * Conflict rule: higher seq wins; equal seq forks.
  */
-syncRouter.post('/memories', syncRateLimit, requireAuth, async (req, res) => {
+syncRouter.post('/memories', syncRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
     const { spaceId, networkId } = req.query as Record<string, string>;
     if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
@@ -531,7 +531,7 @@ syncRouter.get('/entities/:id', syncRateLimit, requireAuth, async (req, res) => 
   }
 });
 
-syncRouter.post('/entities', syncRateLimit, requireAuth, async (req, res) => {
+syncRouter.post('/entities', syncRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
     const { spaceId, networkId } = req.query as Record<string, string>;
     if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
@@ -629,7 +629,7 @@ syncRouter.get('/edges/:id', syncRateLimit, requireAuth, async (req, res) => {
   }
 });
 
-syncRouter.post('/edges', syncRateLimit, requireAuth, async (req, res) => {
+syncRouter.post('/edges', syncRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
     const { spaceId, networkId } = req.query as Record<string, string>;
     if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
@@ -728,7 +728,7 @@ syncRouter.get('/chrono/:id', syncRateLimit, requireAuth, async (req, res) => {
   }
 });
 
-syncRouter.post('/chrono', syncRateLimit, requireAuth, async (req, res) => {
+syncRouter.post('/chrono', syncRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
     const { spaceId, networkId } = req.query as Record<string, string>;
     if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
@@ -782,7 +782,7 @@ syncRouter.post('/chrono', syncRateLimit, requireAuth, async (req, res) => {
  * request.  Same conflict rules as the individual POST endpoints.
  * Limits: 500 docs per type per request to cap payload size.
  */
-syncRouter.post('/batch-upsert', syncRateLimit, requireAuth, async (req, res) => {
+syncRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
     const { spaceId, networkId } = req.query as Record<string, string>;
     if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
@@ -943,7 +943,7 @@ syncRouter.get('/tombstones', syncRateLimit, requireAuth, async (req, res) => {
 });
 
 /** POST /api/sync/tombstones â€” apply tombstones received from a peer */
-syncRouter.post('/tombstones', syncRateLimit, requireAuth, async (req, res) => {
+syncRouter.post('/tombstones', syncRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
     const { spaceId, networkId } = req.query as Record<string, string>;
     if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
@@ -1034,7 +1034,7 @@ syncRouter.get('/file-tombstones', syncRateLimit, requireAuth, async (req, res) 
  * filesystem and the tombstone to be recorded in our MongoDB so we can
  * re-propagate it to further peers.
  */
-syncRouter.post('/file-tombstones', syncRateLimit, requireAuth, async (req, res) => {
+syncRouter.post('/file-tombstones', syncRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
     const { spaceId, tombstones } = req.body as { spaceId?: string; tombstones?: unknown[] };
     const { networkId } = req.query as Record<string, string>;
@@ -1152,7 +1152,7 @@ syncRouter.get('/networks/:networkId/members', syncRateLimit, requireAuth, async
  * Peer announces its own member record or relays records it knows about.
  * Only a member may update its own record (gossip poisoning protection).
  */
-syncRouter.post('/networks/:networkId/members', syncRateLimit, requireAuth, async (req, res) => {
+syncRouter.post('/networks/:networkId/members', syncRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
     const cfg = getConfig();
     const net = cfg.networks.find(n => n.id === req.params['networkId']);
@@ -1165,8 +1165,14 @@ syncRouter.post('/networks/:networkId/members', syncRateLimit, requireAuth, asyn
     }
 
     // Gossip poisoning protection: only accept record for the member the caller represents.
-    // We identify the caller by the token they used (its author instanceId).
-    // For Now, we validate that the URL hostname matches expected.
+    // A token with peerInstanceId may only update its own member record; tokens without
+    // peerInstanceId (admin/local) may update any record.
+    const callerPeerId = (req.authToken as Record<string, unknown>)?.['peerInstanceId'] as string | undefined;
+    if (callerPeerId && callerPeerId !== incoming.instanceId) {
+      res.status(403).json({ error: 'Token is not authorized to update this member record' });
+      return;
+    }
+
     const existing = net.members.find(m => m.instanceId === incoming.instanceId);
     if (!existing) {
       // Unknown member â€” relay is informational; don't auto-add
@@ -1235,11 +1241,19 @@ syncRouter.get('/networks/:networkId/votes', syncRateLimit, requireAuth, async (
  * POST /api/sync/networks/:networkId/votes/:roundId
  * Peer submits or relays a vote: { vote: 'yes' | 'veto', instanceId }
  */
-syncRouter.post('/networks/:networkId/votes/:roundId', syncRateLimit, requireAuth, async (req, res) => {
+syncRouter.post('/networks/:networkId/votes/:roundId', syncRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
     const body = req.body as { vote: string; instanceId: string };
     if (!body?.vote || !body?.instanceId || !['yes', 'veto'].includes(body.vote)) {
       res.status(400).json({ error: 'vote (yes|veto) and instanceId required' });
+      return;
+    }
+
+    // Vote forgery prevention: a peer token may only cast votes on behalf of its own instanceId.
+    // Tokens without peerInstanceId (admin/local) may relay votes on behalf of any instanceId.
+    const callerPeerId = (req.authToken as Record<string, unknown>)?.['peerInstanceId'] as string | undefined;
+    if (callerPeerId && callerPeerId !== body.instanceId) {
+      res.status(403).json({ error: 'Token is not authorized to cast votes on behalf of this instanceId' });
       return;
     }
 

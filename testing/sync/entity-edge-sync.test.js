@@ -371,7 +371,7 @@ describe('Sync API — new optional fields accepted by Zod schemas', () => {
       _id: `sync-chrono-props-${RUN}`,
       spaceId: 'general',
       title: `SyncChronoProps-${RUN}`,
-      kind: 'milestone',
+      type: 'milestone',
       startsAt: new Date().toISOString(),
       status: 'upcoming',
       tags: ['sync-schema-test'],

@@ -69,7 +69,9 @@ export function createApp() {
     // Use CSP frame-ancestors instead of X-Frame-Options: DENY.
     // 'self' allows same-origin iframing (required for OIDC silent refresh
     // and postMessage-based theming) while blocking cross-origin clickjacking.
-    res.setHeader('Content-Security-Policy', "frame-ancestors 'self'");
+    // object-src 'none' disables Flash/plugin content (OWASP baseline).
+    // base-uri 'self' prevents <base href> injection in any XSS context.
+    res.setHeader('Content-Security-Policy', "frame-ancestors 'self'; object-src 'none'; base-uri 'self'");
     res.setHeader('Referrer-Policy', 'no-referrer');
     next();
   });

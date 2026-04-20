@@ -432,7 +432,7 @@ describe('POST /api/sync/chrono — recurrence field validation', () => {
       _id: `chrono-recur-${RUN}-${Math.random().toString(36).slice(2)}`,
       spaceId: 'general',
       title: 'Weekly standup',
-      kind: 'plan',
+      type: 'plan',
       startsAt: new Date().toISOString(),
       status: 'upcoming',
       tags: [],
@@ -484,9 +484,9 @@ describe('POST /api/sync/chrono — recurrence field validation', () => {
     assert.equal(r.status, 400, `Expected 400 for interval=0, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 
-  it('rejects chrono doc with invalid kind', async () => {
+  it('rejects chrono doc with invalid type', async () => {
     const r = await post(INSTANCES.a, token, '/api/sync/chrono?spaceId=general', makeChronoDoc({
-      kind: 'reminder',
+      type: 'reminder',
     }));
     assert.equal(r.status, 400, `Expected 400 for invalid kind, got ${r.status}: ${JSON.stringify(r.body)}`);
   });

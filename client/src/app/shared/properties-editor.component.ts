@@ -1,6 +1,7 @@
 import { Component, Input, Output, EventEmitter, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { PropertySchema } from '../core/api.service';
+import { TranslocoPipe } from '@jsverse/transloco';
 
 interface PropRow {
   key: string;
@@ -11,12 +12,12 @@ interface PropRow {
 @Component({
   selector: 'app-properties-editor',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, TranslocoPipe],
   template: `
     <div class="prop-editor">
       @for (row of rows; track $index; let i = $index) {
         <div class="prop-row">
-          <input class="prop-key" type="text" placeholder="key"
+          <input class="prop-key" type="text" [placeholder]="'propertiesEditor.keyPlaceholder' | transloco"
             [(ngModel)]="row.key" [name]="'propKey' + i"
             [readOnly]="!row.removable && !!schema?.[row.key]"
             (ngModelChange)="emit()" />
@@ -39,16 +40,16 @@ interface PropRow {
               [name]="'propVal' + i" (ngModelChange)="emit()" />
           } @else {
             <input class="prop-val" type="text" [(ngModel)]="row.val"
-              placeholder="value" [name]="'propVal' + i" (ngModelChange)="emit()" />
+              [placeholder]="'propertiesEditor.valuePlaceholder' | transloco" [name]="'propVal' + i" (ngModelChange)="emit()" />
           }
           @if (row.removable) {
-            <button type="button" class="prop-remove" title="Remove" (click)="removeRow(i)">×</button>
+            <button type="button" class="prop-remove" [attr.title]="'propertiesEditor.removeTitle' | transloco" (click)="removeRow(i)">×</button>
           } @else {
-            <span class="prop-req">req</span>
+            <span class="prop-req">{{ 'propertiesEditor.requiredBadge' | transloco }}</span>
           }
         </div>
       }
-      <button type="button" class="btn btn-sm btn-secondary prop-add" (click)="addRow()">+ Add</button>
+      <button type="button" class="btn btn-sm btn-secondary prop-add" (click)="addRow()">{{ 'propertiesEditor.addButton' | transloco }}</button>
     </div>
   `,
   styles: [`

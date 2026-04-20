@@ -114,15 +114,19 @@ export function loadConfig(): Config {
 }
 
 /**
- * Read config.json from disk and re-save it through saveConfig().
- *
- * This is the correct "reload" primitive when the file may have been written
- * by an external process (e.g. the Windows Docker host) that cannot set POSIX
- * permissions.  saveConfig() fixes permissions via chmodSync(0o600) after the
- * atomic rename, so the file ends up with the correct mode.
+ * Read config.json from disk and update the in-memory config.
  *
  * Unlike loadConfig(), this function does NOT call checkPermissions() first —
- * it tolerates a temporarily mis-permissioned file and corrects it.
+ * it tolerates a temporarily mis-permissioned file and corrects it via
+ * chmodSync only (without rewriting the file contents).
+ *
+ * IMPORTANT: we must NOT call saveConfig() here.  On Docker Desktop
+ * (Windows / macOS) the host-side bind-mount write may not have propagated to
+ * the container yet by the time the reload request arrives.  If we read the
+ * stale container view and then rewrite the file, we permanently overwrite the
+ * operator's change.  Instead we only fix the permission bits in-place and
+ * update _config in memory.  A subsequent reload (or the test retry loop) will
+ * converge once the bind-mount delivers the latest version.
  */
 export function reloadConfig(): Config {
   const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
@@ -138,7 +142,10 @@ export function reloadConfig(): Config {
   parsed.tokens ??= [];
   parsed.networks ??= [];
   validateOidcBlock(parsed);
-  saveConfig(parsed); // updates _config and fixes permissions
+  _config = parsed;
+  // Fix permission bits without rewriting content — avoids overwriting a
+  // host-side edit that hasn't propagated through the bind-mount yet.
+  try { fs.chmodSync(CONFIG_PATH, 0o600); } catch { /* non-POSIX host — ignore */ }
   return parsed;
 }
 

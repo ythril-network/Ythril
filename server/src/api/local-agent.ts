@@ -19,14 +19,23 @@ const BootstrapLocalAgentBody = z.object({
 });
 
 const ExecuteEnableNetworksBody = z.object({
-  hostname: z.string().min(4).max(253),
+  // RFC 952 / RFC 1123: labels of [a-z0-9] separated by dots/hyphens; no leading/trailing hyphens.
+  hostname: z.string().min(4).max(253).regex(
+    /^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$/,
+    'hostname must contain only letters, digits, hyphens, underscores, and dots',
+  ),
   os: z.enum(['windows', 'linux']),
   autostart: z.boolean().default(true),
   overwriteDns: z.boolean().default(false),
   acknowledgeCriticalChanges: z.literal(true),
   // Optional: override the local origin the tunnel forwards to. Derived from the
   // server's PORT env var when not supplied by the client.
-  localOrigin: z.string().url().optional(),
+  // Restrict to http/https to prevent javascript:, data:, file:// injection into
+  // the local-agent-connector configuration.
+  localOrigin: z.string().url().refine(
+    u => u.startsWith('http://') || u.startsWith('https://'),
+    { message: 'localOrigin must use http or https scheme' },
+  ).optional(),
 });
 
 function envTrue(name: string): boolean {

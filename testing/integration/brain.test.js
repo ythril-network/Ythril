@@ -749,13 +749,13 @@ describe('Brain -- chrono CRUD (/api/brain/spaces/:spaceId/chrono)', () => {
   it('Create chrono entry returns 201', async () => {
     const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/chrono', {
       title: `Meeting-${RUN}`,
-      kind: 'event',
+      type: 'event',
       startsAt: new Date().toISOString(),
       tags: ['test'],
     });
     assert.equal(r.status, 201, JSON.stringify(r.body));
     assert.ok(r.body._id, 'must have _id');
-    assert.equal(r.body.kind, 'event');
+    assert.equal(r.body.type, 'event');
     assert.ok(typeof r.body.seq === 'number', 'must have seq');
     assert.deepStrictEqual(r.body.tags, ['test']);
     assert.equal(r.body.status, 'upcoming');
@@ -800,7 +800,7 @@ describe('Brain -- chrono CRUD (/api/brain/spaces/:spaceId/chrono)', () => {
   it('Create chrono with optional fields', async () => {
     const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/chrono', {
       title: `Deadline-${RUN}`,
-      kind: 'deadline',
+      type: 'deadline',
       startsAt: new Date().toISOString(),
       endsAt: new Date(Date.now() + 86400_000).toISOString(),
       status: 'upcoming',
@@ -811,7 +811,7 @@ describe('Brain -- chrono CRUD (/api/brain/spaces/:spaceId/chrono)', () => {
       description: 'Submit report',
     });
     assert.equal(r.status, 201, JSON.stringify(r.body));
-    assert.equal(r.body.kind, 'deadline');
+    assert.equal(r.body.type, 'deadline');
     assert.equal(r.body.confidence, 0.8);
     assert.ok(r.body.endsAt, 'endsAt should be set');
     assert.deepStrictEqual(r.body.entityIds, ['some-entity']);
@@ -822,7 +822,7 @@ describe('Brain -- chrono CRUD (/api/brain/spaces/:spaceId/chrono)', () => {
   it('Create chrono with invalid kind returns 400', async () => {
     const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/chrono', {
       title: 'Bad kind',
-      kind: 'invalid-kind',
+      type: 'invalid-kind',
       startsAt: new Date().toISOString(),
     });
     assert.equal(r.status, 400);
@@ -830,7 +830,7 @@ describe('Brain -- chrono CRUD (/api/brain/spaces/:spaceId/chrono)', () => {
 
   it('Create chrono without title returns 400', async () => {
     const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/chrono', {
-      kind: 'event',
+      type: 'event',
       startsAt: new Date().toISOString(),
     });
     assert.equal(r.status, 400);
@@ -839,7 +839,7 @@ describe('Brain -- chrono CRUD (/api/brain/spaces/:spaceId/chrono)', () => {
   it('Create chrono without startsAt returns 400', async () => {
     const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/chrono', {
       title: 'Missing date',
-      kind: 'event',
+      type: 'event',
     });
     assert.equal(r.status, 400);
   });
@@ -847,7 +847,7 @@ describe('Brain -- chrono CRUD (/api/brain/spaces/:spaceId/chrono)', () => {
   it('Create chrono with invalid confidence returns 400', async () => {
     const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/chrono', {
       title: 'Bad confidence',
-      kind: 'prediction',
+      type: 'prediction',
       startsAt: new Date().toISOString(),
       confidence: 1.5,
     });
@@ -883,7 +883,7 @@ describe('Brain -- chrono filter queries (/api/brain/spaces/:spaceId/chrono)', (
       [`SearchMe-${RUN}`, [], 'find-this-special-description'],
     ]) {
       const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/chrono', {
-        title, kind: 'event', startsAt: new Date().toISOString(), tags,
+        title, type: 'event', startsAt: new Date().toISOString(), tags,
         ...(description ? { description } : {}),
       });
       if (r.body._id) ids.push(r.body._id);
@@ -1183,7 +1183,7 @@ describe('Brain — chrono properties field', () => {
   before(async () => {
     const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/chrono', {
       title: `ChronoPropTest-${RUN}`,
-      kind: 'milestone',
+      type: 'milestone',
       startsAt: new Date().toISOString(),
       properties: { phase: 'alpha', priority: 1, critical: true },
     });
@@ -1273,8 +1273,8 @@ describe('Brain — POST /api/brain/spaces/:spaceId/bulk', () => {
   it('Inserts chrono entries', async () => {
     const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/bulk', {
       chrono: [
-        { title: `BulkEvent-${RUN}`, kind: 'event', startsAt: new Date().toISOString() },
-        { title: `BulkDeadline-${RUN}`, kind: 'deadline', startsAt: new Date().toISOString(), status: 'upcoming' },
+        { title: `BulkEvent-${RUN}`, type: 'event', startsAt: new Date().toISOString() },
+        { title: `BulkDeadline-${RUN}`, type: 'deadline', startsAt: new Date().toISOString(), status: 'upcoming' },
       ],
     });
     assert.equal(r.status, 207, JSON.stringify(r.body));
@@ -1320,7 +1320,7 @@ describe('Brain — POST /api/brain/spaces/:spaceId/bulk', () => {
 
   it('Chrono with invalid kind returns error entry', async () => {
     const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/bulk', {
-      chrono: [{ title: 'Bad kind', kind: 'invalid', startsAt: new Date().toISOString() }],
+      chrono: [{ title: 'Bad kind', type: 'invalid', startsAt: new Date().toISOString() }],
     });
     assert.equal(r.status, 207, JSON.stringify(r.body));
     assert.equal(r.body.errors.length, 1);
@@ -1908,7 +1908,7 @@ describe('Brain — PATCH chrono by ID', () => {
   before(async () => {
     const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/chrono', {
       title: `PatchChrono-${RUN}`,
-      kind: 'milestone',
+      type: 'milestone',
       startsAt: new Date().toISOString(),
       description: 'Original chrono description',
       properties: { phase: 'alpha' },
@@ -2123,7 +2123,7 @@ describe('Brain — read-only token blocked on REST write endpoints', () => {
     testEdgeId = edgeR.body._id;
 
     const chronoR = await post(INSTANCES.a, token(), '/api/brain/spaces/general/chrono', {
-      title: `ROTest-chrono-${RUN}`, kind: 'event', startsAt: new Date().toISOString(),
+      title: `ROTest-chrono-${RUN}`, type: 'event', startsAt: new Date().toISOString(),
     });
     testChronoId = chronoR.body._id;
   });
@@ -2181,7 +2181,7 @@ describe('Brain — read-only token blocked on REST write endpoints', () => {
 
   it('POST /chrono blocked with read-only token (403)', async () => {
     const r = await post(INSTANCES.a, readOnlyToken, '/api/brain/spaces/general/chrono', {
-      title: 'Blocked', kind: 'event', startsAt: new Date().toISOString(),
+      title: 'Blocked', type: 'event', startsAt: new Date().toISOString(),
     });
     assert.equal(r.status, 403, `Expected 403, got ${r.status}`);
   });

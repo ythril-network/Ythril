@@ -40,11 +40,12 @@ import { FormsModule } from '@angular/forms';
 import { Subject, Subscription, of } from 'rxjs';
 import { debounceTime, distinctUntilChanged, switchMap, catchError, map } from 'rxjs/operators';
 import { ApiService, Entity, RecallResult } from '../core/api.service';
+import { TranslocoPipe } from '@jsverse/transloco';
 
 @Component({
   selector: 'app-entity-search',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, TranslocoPipe],
   styles: [`
     :host { display: block; position: relative; }
 
@@ -189,22 +190,22 @@ import { ApiService, Entity, RecallResult } from '../core/api.service';
     <div class="search-row">
       <input
         [type]="mode === 'picker' ? 'text' : 'search'"
-        [placeholder]="placeholder"
+        [placeholder]="placeholder | transloco"
         [ngModel]="displayValue()"
         (ngModelChange)="onInput($event)"
         (focus)="focused.set(true)"
         (blur)="schedulClose()"
         (keyup.enter)="selectFirst()"
-        [attr.aria-label]="placeholder"
+        [attr.aria-label]="placeholder | transloco"
         autocomplete="off"
       />
       @if (mode === 'bar') {
-        <div class="pill-group" title="Search mode">
-          <button [class.active]="searchMode() === 'name'"     (click)="setMode('name')">A–Z</button>
-          <button [class.active]="searchMode() === 'semantic'" (click)="setMode('semantic')">✦ Semantic</button>
+        <div class="pill-group" [attr.title]="'common.searchMode.tooltip' | transloco">
+          <button [class.active]="searchMode() === 'name'"     (click)="setMode('name')">{{ 'common.sortAZ' | transloco }}</button>
+          <button [class.active]="searchMode() === 'semantic'" (click)="setMode('semantic')">{{ 'entitySearch.semantic' | transloco }}</button>
         </div>
         @if (displayValue()) {
-          <button class="btn-clear" (click)="clear()">Clear</button>
+          <button class="btn-clear" (click)="clear()">{{ 'entitySearch.clearButton' | transloco }}</button>
         }
       }
     </div>
@@ -214,7 +215,7 @@ import { ApiService, Entity, RecallResult } from '../core/api.service';
         @if (loading()) {
           <div class="spinner-wrap"><div class="spinner"></div></div>
         } @else if (results().length === 0) {
-          <div class="dropdown-empty">No results</div>
+          <div class="dropdown-empty">{{ 'entitySearch.noResults' | transloco }}</div>
         } @else {
           @for (ent of results(); track ent._id) {
             <div class="dropdown-item" (mousedown)="pick(ent)">
@@ -236,7 +237,7 @@ import { ApiService, Entity, RecallResult } from '../core/api.service';
 export class EntitySearchComponent implements OnInit, OnDestroy, OnChanges {
   @Input() spaceId = '';
   @Input() mode: 'bar' | 'picker' = 'bar';
-  @Input() placeholder = 'Search entity…';
+  @Input() placeholder = 'entitySearch.defaultPlaceholder';
   @Input() defaultMode: 'name' | 'semantic' = 'semantic';
   /** Controlled display value for picker mode (parent sets this after pick). */
   @Input() value = '';

@@ -53,7 +53,7 @@ async function setMeta(meta) {
 
 // ── Helper: reset meta to off ──────────────────────────────────────────────
 async function resetMeta() {
-  await setMeta({ validationMode: 'off', entityTypes: [], edgeLabels: [], requiredProperties: {}, propertySchemas: {}, namingPatterns: {} });
+  await setMeta({ validationMode: 'off', typeSchemas: {} });
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -63,20 +63,32 @@ describe('Schema validation — strict mode', () => {
   before(async () => {
     await setMeta({
       validationMode: 'strict',
-      entityTypes: ['service', 'person'],
-      edgeLabels: ['depends_on', 'owns'],
-      namingPatterns: { service: '^[A-Z]' },
-      requiredProperties: {
-        entity: ['team'],
-        memory: ['source'],
-        edge: ['confidence'],
-        chrono: ['priority'],
-      },
-      propertySchemas: {
-        entity: { team: { type: 'string', enum: ['alpha', 'beta'] } },
-        memory: { source: { type: 'string' } },
-        edge: { confidence: { type: 'number', minimum: 0, maximum: 1 } },
-        chrono: { priority: { type: 'string', enum: ['low', 'medium', 'high'] } },
+      typeSchemas: {
+        entity: {
+          service: {
+            namingPattern: '^[A-Z]',
+            propertySchemas: { team: { type: 'string', enum: ['alpha', 'beta'], required: true } },
+          },
+          person: {
+            propertySchemas: { team: { type: 'string', enum: ['alpha', 'beta'], required: true } },
+          },
+        },
+        edge: {
+          depends_on: {
+            propertySchemas: { confidence: { type: 'number', minimum: 0, maximum: 1, required: true } },
+          },
+          owns: {},
+        },
+        memory: {
+          note: {
+            propertySchemas: { source: { type: 'string', required: true } },
+          },
+        },
+        chrono: {
+          event: {
+            propertySchemas: { priority: { type: 'string', enum: ['low', 'medium', 'high'], required: true } },
+          },
+        },
       },
     });
   });
@@ -137,6 +149,7 @@ describe('Schema validation — strict mode', () => {
   it('rejects memory with missing required property', async () => {
     const r = await post(INSTANCES.a, token(), `/api/brain/${TEST_SPACE}/memories`, {
       fact: `Schema strict test ${RUN}`,
+      type: 'note',
     });
     assert.equal(r.status, 400);
     assert.equal(r.body.error, 'schema_violation');
@@ -146,6 +159,7 @@ describe('Schema validation — strict mode', () => {
   it('accepts valid memory', async () => {
     const r = await post(INSTANCES.a, token(), `/api/brain/${TEST_SPACE}/memories`, {
       fact: `Schema strict test ${RUN} valid`,
+      type: 'note',
       properties: { source: 'test-suite' },
     });
     assert.equal(r.status, 201, `Expected 201, got ${r.status}: ${JSON.stringify(r.body)}`);
@@ -177,7 +191,7 @@ describe('Schema validation — strict mode', () => {
   it('rejects chrono with missing required property', async () => {
     const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${TEST_SPACE}/chrono`, {
       title: `Schema strict chrono ${RUN}`,
-      kind: 'event',
+      type: 'event',
       startsAt: new Date().toISOString(),
     });
     assert.equal(r.status, 400);
@@ -188,7 +202,7 @@ describe('Schema validation — strict mode', () => {
   it('accepts valid chrono', async () => {
     const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${TEST_SPACE}/chrono`, {
       title: `Schema strict chrono ${RUN} valid`,
-      kind: 'event',
+      type: 'event',
       startsAt: new Date().toISOString(),
       properties: { priority: 'high' },
     });
@@ -203,9 +217,14 @@ describe('Schema validation — warn mode', () => {
   before(async () => {
     await setMeta({
       validationMode: 'warn',
-      entityTypes: ['service', 'person'],
-      requiredProperties: { entity: ['team'] },
-      propertySchemas: { entity: { team: { type: 'string' } } },
+      typeSchemas: {
+        entity: {
+          service: {},
+          person: {
+            propertySchemas: { team: { type: 'string', required: true } },
+          },
+        },
+      },
     });
   });
 
@@ -239,19 +258,27 @@ describe('Schema validation — bulk write strict mode', () => {
   before(async () => {
     await setMeta({
       validationMode: 'strict',
-      entityTypes: ['service'],
-      edgeLabels: ['depends_on'],
-      requiredProperties: {
-        memory: ['source'],
-        entity: ['team'],
-        edge: ['confidence'],
-        chrono: ['priority'],
-      },
-      propertySchemas: {
-        entity: { team: { type: 'string' } },
-        memory: { source: { type: 'string' } },
-        edge: { confidence: { type: 'number' } },
-        chrono: { priority: { type: 'string' } },
+      typeSchemas: {
+        entity: {
+          service: {
+            propertySchemas: { team: { type: 'string', required: true } },
+          },
+        },
+        edge: {
+          depends_on: {
+            propertySchemas: { confidence: { type: 'number', required: true } },
+          },
+        },
+        memory: {
+          note: {
+            propertySchemas: { source: { type: 'string', required: true } },
+          },
+        },
+        chrono: {
+          event: {
+            propertySchemas: { priority: { type: 'string', required: true } },
+          },
+        },
       },
     });
   });
@@ -261,9 +288,9 @@ describe('Schema validation — bulk write strict mode', () => {
   it('skips memories that violate schema, inserts valid ones', async () => {
     const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${TEST_SPACE}/bulk`, {
       memories: [
-        { fact: `Bulk valid ${RUN}`, properties: { source: 'test' } },
-        { fact: `Bulk invalid ${RUN}` },  // missing required 'source'
-        { fact: `Bulk valid2 ${RUN}`, properties: { source: 'test2' } },
+        { fact: `Bulk valid ${RUN}`, type: 'note', properties: { source: 'test' } },
+        { fact: `Bulk invalid ${RUN}`, type: 'note' },  // missing required 'source'
+        { fact: `Bulk valid2 ${RUN}`, type: 'note', properties: { source: 'test2' } },
       ],
     });
     assert.equal(r.status, 207, JSON.stringify(r.body));
@@ -299,8 +326,8 @@ describe('Schema validation — bulk write strict mode', () => {
   it('skips chrono that violate schema', async () => {
     const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${TEST_SPACE}/bulk`, {
       chrono: [
-        { title: `BulkGood-${RUN}`, kind: 'event', startsAt: new Date().toISOString(), properties: { priority: 'high' } },
-        { title: `BulkBad-${RUN}`, kind: 'event', startsAt: new Date().toISOString() },  // missing priority
+        { title: `BulkGood-${RUN}`, type: 'event', startsAt: new Date().toISOString(), properties: { priority: 'high' } },
+        { title: `BulkBad-${RUN}`, type: 'event', startsAt: new Date().toISOString() },  // missing priority
       ],
     });
     assert.equal(r.status, 207, JSON.stringify(r.body));
@@ -316,9 +343,13 @@ describe('Schema validation — bulk write warn mode', () => {
   before(async () => {
     await setMeta({
       validationMode: 'warn',
-      entityTypes: ['service'],
-      requiredProperties: { entity: ['team'] },
-      propertySchemas: { entity: { team: { type: 'string' } } },
+      typeSchemas: {
+        entity: {
+          service: {
+            propertySchemas: { team: { type: 'string', required: true } },
+          },
+        },
+      },
     });
   });
 
@@ -345,7 +376,7 @@ describe('Schema validation — GET /api/spaces/:id/meta', () => {
   before(async () => {
     await setMeta({
       validationMode: 'strict',
-      entityTypes: ['service'],
+      typeSchemas: { entity: { service: {} } },
       purpose: 'Integration test schema',
     });
   });
@@ -357,7 +388,7 @@ describe('Schema validation — GET /api/spaces/:id/meta', () => {
     assert.equal(r.status, 200, `Expected 200, got ${r.status}: ${JSON.stringify(r.body)}`);
     // Response is flat: {spaceId, spaceName, ...metaPublic, stats}
     assert.equal(r.body.validationMode, 'strict');
-    assert.ok(Array.isArray(r.body.entityTypes));
+    assert.ok(typeof r.body.typeSchemas === 'object', 'Response should have typeSchemas');
     assert.ok(typeof r.body.stats === 'object', 'Response should have stats');
     // previousVersions should be stripped from public response
     assert.equal(r.body.previousVersions, undefined, 'previousVersions should be stripped');
@@ -371,9 +402,12 @@ describe('Schema validation — POST validate-schema dry-run', () => {
   before(async () => {
     await setMeta({
       validationMode: 'strict',
-      entityTypes: ['service', 'person'],
-      requiredProperties: { entity: ['team'] },
-      propertySchemas: { entity: { team: { type: 'string' } } },
+      typeSchemas: {
+        entity: {
+          service: { propertySchemas: { team: { type: 'string', required: true } } },
+          person: { propertySchemas: { team: { type: 'string', required: true } } },
+        },
+      },
     });
     // Insert a valid entity
     await post(INSTANCES.a, token(), `/api/brain/spaces/${TEST_SPACE}/entities`, {
@@ -401,8 +435,11 @@ describe('Schema validation — off mode passes everything', () => {
   before(async () => {
     await setMeta({
       validationMode: 'off',
-      entityTypes: ['service'],  // even with restrictive schema...
-      requiredProperties: { entity: ['team'] },
+      typeSchemas: {
+        entity: {
+          service: { propertySchemas: { team: { type: 'string', required: true } } },
+        },
+      },
     });
   });
 

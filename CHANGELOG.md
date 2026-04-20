@@ -4,6 +4,141 @@ All notable changes to Ythril are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] — 2026-04-20
+
+### ⚠ Breaking Changes
+
+Two breaking API changes are present in this release. Clients, tests, and scripts that were written against the 0.9.x/0.10.x schema API or the chrono API must be updated before upgrading.
+
+---
+
+#### 1. `ChronoEntry.kind` renamed to `type`
+
+The `kind` field on chrono entries has been renamed to `type` to be consistent with all other knowledge types in the API (`memory.type`, `entity.type`, `edge.type`).
+
+**Affected endpoints:**
+- `POST /api/brain/spaces/:spaceId/chrono` — request body
+- `POST /api/brain/spaces/:spaceId/bulk` — `chrono[]` items in the bulk body
+- `GET /api/brain/spaces/:spaceId/chrono` — response documents
+- MCP tools: `add_chrono`, `bulk_write` (chrono items), `list_chrono` (filter param and response)
+
+**Migration — before:**
+```json
+{ "title": "Sprint review", "kind": "event", "startsAt": "2026-05-01T10:00:00Z" }
+```
+
+**Migration — after:**
+```json
+{ "title": "Sprint review", "type": "event", "startsAt": "2026-05-01T10:00:00Z" }
+```
+
+Valid values are unchanged: `event`, `deadline`, `plan`, `prediction`, `milestone`.
+
+The TypeScript type alias `ChronoKind` remains exported as a deprecated alias for `ChronoType` to ease library migration, but will be removed in a future release.
+
+---
+
+#### 2. Space schema meta format replaced by `typeSchemas`
+
+The flat schema fields on `SpaceMeta` (`entityTypes`, `edgeLabels`, `namingPatterns`, `requiredProperties`, `propertySchemas`) have been replaced by a single nested `typeSchemas` object. The old flat fields are no longer accepted — `PATCH /api/spaces/:id` uses a strict Zod schema and will return 400 `unrecognized_key` for any old field names.
+
+**Affected endpoints:**
+- `PATCH /api/spaces/:id` — `meta` field in request body
+- `GET /api/spaces/:id/meta` — response shape (no `entityTypes` array in response)
+- `POST /api/spaces/:id/validate-schema` — schema in `meta` payload
+- MCP tools: `update_space` (meta argument), `get_space_meta` (response)
+
+**Migration — before (flat format):**
+```json
+{
+  "validationMode": "strict",
+  "entityTypes": ["service", "person"],
+  "edgeLabels": ["depends_on", "owns"],
+  "namingPatterns": { "service": "^[A-Z]" },
+  "requiredProperties": {
+    "entity": ["team"],
+    "memory": ["source"],
+    "edge": ["confidence"],
+    "chrono": ["priority"]
+  },
+  "propertySchemas": {
+    "entity": { "team": { "type": "string", "enum": ["alpha", "beta"] } },
+    "memory": { "source": { "type": "string" } },
+    "edge": { "confidence": { "type": "number", "minimum": 0, "maximum": 1 } },
+    "chrono": { "priority": { "type": "string", "enum": ["low", "medium", "high"] } }
+  }
+}
+```
+
+**Migration — after (`typeSchemas` format):**
+```json
+{
+  "validationMode": "strict",
+  "typeSchemas": {
+    "entity": {
+      "service": {
+        "namingPattern": "^[A-Z]",
+        "propertySchemas": {
+          "team": { "type": "string", "enum": ["alpha", "beta"], "required": true }
+        }
+      },
+      "person": {
+        "propertySchemas": {
+          "team": { "type": "string", "enum": ["alpha", "beta"], "required": true }
+        }
+      }
+    },
+    "edge": {
+      "depends_on": {
+        "propertySchemas": {
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1, "required": true }
+        }
+      },
+      "owns": {}
+    },
+    "memory": {
+      "note": {
+        "propertySchemas": {
+          "source": { "type": "string", "required": true }
+        }
+      }
+    },
+    "chrono": {
+      "event": {
+        "propertySchemas": {
+          "priority": { "type": "string", "enum": ["low", "medium", "high"], "required": true }
+        }
+      }
+    }
+  }
+}
+```
+
+Key differences:
+- `entityTypes` and `edgeLabels` are gone — allowed types/labels are now inferred from the keys of `typeSchemas.entity` and `typeSchemas.edge`
+- `namingPatterns` (global map) → `typeSchemas.entity.<typeName>.namingPattern` (per-type inline string)
+- `requiredProperties` (list per knowledge-type) → `required: true` flag inline on each `propertySchemas` entry
+- `propertySchemas` (nested `entity/memory/edge/chrono`) → `typeSchemas.<knowledgeType>.<typeName>.propertySchemas`
+- To clear a schema entirely, send `{ "typeSchemas": {} }` — the old empty-list pattern (`"entityTypes": []`) is no longer accepted
+- `GET /api/spaces/:id/meta` no longer returns `entityTypes` — check `typeSchemas` instead
+
+**Memory and chrono schema validation now require `type` field:**
+Schema validation for memories and chrono entries is only triggered when the document carries a `type` field matching a key in `typeSchemas.memory` / `typeSchemas.chrono` respectively. Documents without a `type` are not validated (allowing untyped legacy data to coexist). To enforce validation, define the types you care about in `typeSchemas` and always include `type` in write payloads.
+
+---
+
+### Security
+
+- **Sync write routes require non-read-only tokens**: All `POST` routes under `/api/sync/` now enforce `denyReadOnly`, matching the same constraint on the brain and admin APIs. Previously a read-only token could push gossip, bulk-upsert documents, and trigger reindexes. Any sync client using a scoped read-only token for writes must be issued a full-access token.
+- **Sync member URL hijacking fixed**: `POST /api/sync/networks/:networkId/members` now verifies that the requesting `peerInstanceId` matches the member record being submitted. A peer could previously register a URL pointing to any host on behalf of any other member.
+- **Sync vote forgery fixed**: `POST /api/sync/networks/:networkId/votes/:roundId` now verifies that `instanceId` in the vote payload matches the authenticated `peerInstanceId`. A peer could previously cast votes on behalf of other members in a vote round.
+- **CSP hardened**: Content-Security-Policy response header now includes `object-src 'none'; base-uri 'self'` in addition to the existing directives, blocking plugin/embed injection and base-tag hijacking.
+
+### Fixed
+
+- **Memory `type` field now stored and validated**: `POST /api/brain/:spaceId/memories` and `POST /api/brain/spaces/:spaceId/memories` previously ignored the `type` field in the request body — it was neither stored nor passed to schema validation. `type` is now extracted, stored on the document, and forwarded to `validateMemory` so `typeSchemas.memory` rules are enforced correctly.
+- **Bulk write memory `type` not passed to validator**: In `POST /api/brain/spaces/:spaceId/bulk`, each memory item's `type` was extracted but not forwarded to `validateMemory`, meaning required-property rules defined under `typeSchemas.memory.<typeName>` were silently skipped. All three memory items would be inserted regardless of schema violations. Now `type` is passed to both the validator and the `remember()` call.
+
 ## [0.10.3] — 2026-04-18
 
 ### Changed

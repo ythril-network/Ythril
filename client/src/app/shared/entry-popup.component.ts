@@ -11,6 +11,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { throwError } from 'rxjs';
 import { ApiService } from '../core/api.service';
+import { TranslocoPipe } from '@jsverse/transloco';
 
 type RecordType = 'entity' | 'edge' | 'memory' | 'chrono';
 
@@ -23,7 +24,7 @@ interface FieldEntry {
 @Component({
   selector: 'app-entry-popup',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, TranslocoPipe],
   styles: [
     `
       .popup-backdrop {
@@ -221,7 +222,7 @@ interface FieldEntry {
           <!-- Header -->
           <div class="popup-header">
             <h2>
-              {{ recordId() || 'Record' }}
+              {{ recordId() || ('entryPopup.defaultTitle' | transloco) }}
             </h2>
             <span class="badge">{{ recordType }}</span>
           </div>
@@ -234,7 +235,7 @@ interface FieldEntry {
                 [checked]="showRaw()"
                 (change)="showRaw.set(!showRaw())"
               />
-              Raw JSON
+              {{ 'entryPopup.rawJson' | transloco }}
             </label>
           </div>
 
@@ -303,8 +304,8 @@ interface FieldEntry {
                         <table class="sub-table">
                           <thead>
                             <tr>
-                              <th>Key</th>
-                              <th>Value</th>
+                              <th>{{ 'entryPopup.key' | transloco }}</th>
+                              <th>{{ 'propertiesEditor.valuePlaceholder' | transloco }}</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -325,7 +326,7 @@ interface FieldEntry {
                           <thead>
                             <tr>
                               <th>#</th>
-                              <th>Value</th>
+                              <th>{{ 'entryPopup.value' | transloco }}</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -351,26 +352,26 @@ interface FieldEntry {
           <!-- Footer -->
           <div class="popup-footer">
             @if (saving()) {
-              <span class="badge">Saving…</span>
+              <span class="badge">{{ 'entryPopup.saving' | transloco }}</span>
             }
             <div class="spacer"></div>
             @if (canEdit) {
               <button class="btn btn-secondary btn-sm" (click)="validate()">
-                Validate
+                {{ 'common.confirm' | transloco }}
               </button>
               <button class="btn btn-ghost btn-sm" (click)="undo()">
-                Undo
+                {{ 'common.reset' | transloco }}
               </button>
-              <button class="btn btn-sm" (click)="cancel()">Cancel</button>
+              <button class="btn btn-sm" (click)="cancel()">{{ 'common.cancel' | transloco }}</button>
               <button
                 class="btn btn-primary btn-sm"
                 (click)="save()"
                 [disabled]="saving()"
               >
-                Save
+                {{ 'common.save' | transloco }}
               </button>
             } @else {
-              <button class="btn btn-sm" (click)="cancel()">Close</button>
+              <button class="btn btn-sm" (click)="cancel()">{{ 'common.close' | transloco }}</button>
             }
           </div>
         </div>

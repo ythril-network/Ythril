@@ -3,12 +3,12 @@ import { RouterOutlet, RouterLink, RouterLinkActive, Router } from '@angular/rou
 import { AuthService } from '../../core/auth.service';
 import { ApiService } from '../../core/api.service';
 import { PhIconComponent } from '../../shared/ph-icon.component';
-import { TranslocoService } from '@jsverse/transloco';
+import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 
 @Component({
   selector: 'app-shell',
   standalone: true,
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, PhIconComponent],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, PhIconComponent, TranslocoPipe],
   styles: [`
     :host { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 
@@ -163,7 +163,7 @@ import { TranslocoService } from '@jsverse/transloco';
     <header class="topbar">
       <a class="topbar-logo" routerLink="/">
         <span class="topbar-logo-dot"></span>
-        ythril
+        {{ 'app.logo' | transloco }}
       </a>
       <span class="topbar-spacer"></span>
       <select class="lang-select" [value]="activeLang()" (change)="setLang($any($event.target).value)">
@@ -171,44 +171,44 @@ import { TranslocoService } from '@jsverse/transloco';
         <option value="de">DE</option>
         <option value="pl">PL</option>
       </select>
-      <button class="topbar-logout" (click)="logout()">Sign out</button>
+      <button class="topbar-logout" (click)="logout()">{{ 'nav.signOut' | transloco }}</button>
     </header>
 
     <div class="layout">
       <!-- Sidebar navigation -->
       <nav class="sidebar">
-        <span class="nav-section-label">Workspace</span>
+        <span class="nav-section-label">{{ 'nav.section.workspace' | transloco }}</span>
         <a class="nav-link" routerLink="/brain" routerLinkActive="active">
-          <span class="nav-icon"><ph-icon name="brain" [size]="16"/></span>Brain
+          <span class="nav-icon"><ph-icon name="brain" [size]="16"/></span>{{ 'nav.brain' | transloco }}
         </a>
         @if (conflictCount() > 0) {
           <a class="nav-link" routerLink="/files/conflicts" routerLinkActive="active">
-            <span class="nav-icon"><ph-icon name="warning" [size]="16"/></span>Conflicts
+            <span class="nav-icon"><ph-icon name="warning" [size]="16"/></span>{{ 'nav.conflicts' | transloco }}
             <span class="nav-badge">{{ conflictCount() }}</span>
           </a>
         }
 
-        <span class="nav-section-label">Admin</span>
+        <span class="nav-section-label">{{ 'nav.section.admin' | transloco }}</span>
         <a class="nav-link" routerLink="/settings/tokens" routerLinkActive="active">
-          <span class="nav-icon"><ph-icon name="key" [size]="16"/></span>Tokens
+          <span class="nav-icon"><ph-icon name="key" [size]="16"/></span>{{ 'nav.tokens' | transloco }}
         </a>
         <a class="nav-link" routerLink="/settings/spaces" routerLinkActive="active">
-          <span class="nav-icon"><ph-icon name="package" [size]="16"/></span>Spaces
+          <span class="nav-icon"><ph-icon name="package" [size]="16"/></span>{{ 'nav.spaces' | transloco }}
         </a>
         <a class="nav-link" routerLink="/settings/storage" routerLinkActive="active">
-          <span class="nav-icon"><ph-icon name="chart-bar" [size]="16"/></span>Metrics
+          <span class="nav-icon"><ph-icon name="chart-bar" [size]="16"/></span>{{ 'nav.metrics' | transloco }}
         </a>
         <a class="nav-link" routerLink="/settings/networks" routerLinkActive="active">
-          <span class="nav-icon"><ph-icon name="link" [size]="16"/></span>Networks
+          <span class="nav-icon"><ph-icon name="link" [size]="16"/></span>{{ 'nav.networks' | transloco }}
         </a>
         <a class="nav-link" routerLink="/settings/mfa" routerLinkActive="active">
-          <span class="nav-icon"><ph-icon name="lock" [size]="16"/></span>MFA
+          <span class="nav-icon"><ph-icon name="lock" [size]="16"/></span>{{ 'nav.mfa' | transloco }}
         </a>
         <a class="nav-link" routerLink="/settings/audit-log" routerLinkActive="active">
-          <span class="nav-icon"><ph-icon name="list-bullets" [size]="16"/></span>Logs
+          <span class="nav-icon"><ph-icon name="list-bullets" [size]="16"/></span>{{ 'nav.logs' | transloco }}
         </a>
         <a class="nav-link" routerLink="/settings/about" routerLinkActive="active">
-          <span class="nav-icon"><ph-icon name="info" [size]="16"/></span>About
+          <span class="nav-icon"><ph-icon name="info" [size]="16"/></span>{{ 'nav.about' | transloco }}
         </a>
       </nav>
 

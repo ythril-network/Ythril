@@ -5,33 +5,34 @@ import { HttpClient } from '@angular/common/http';
 import { AuthService } from '../../core/auth.service';
 import type { OidcInfo } from '../../core/auth.service';
 import { CommonModule } from '@angular/common';
+import { TranslocoPipe } from '@jsverse/transloco';
 
 @Component({
   selector: 'app-login',
   standalone: true,
-  imports: [FormsModule, CommonModule, RouterLink],
+  imports: [FormsModule, CommonModule, RouterLink, TranslocoPipe],
   template: `
     <div class="auth-page">
       <div class="auth-card">
         <div class="auth-logo">
           <span class="auth-logo-dot"></span>
-          ythril
+          {{ 'app.logo' | transloco }}
         </div>
 
         @if (ssoRedirecting()) {
           <p class="auth-subtitle">
             <span class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;margin-right:8px;"></span>
-            Redirecting to SSO…
+            {{ 'login.ssoRedirecting' | transloco }}
           </p>
           <p style="margin-top: 20px; font-size: 12px; color: var(--text-muted); text-align: center;">
-            <a routerLink="/login" [queryParams]="{ local: true }">Use token instead</a>
+            <a routerLink="/login" [queryParams]="{ local: true }">{{ 'login.useTokenInstead' | transloco }}</a>
           </p>
         } @else {
-          <p class="auth-subtitle">Sign in with your access token.</p>
+          <p class="auth-subtitle">{{ 'login.subtitle' | transloco }}</p>
 
           @if (reason() === 'session_expired') {
             <div class="alert alert-warning" style="margin-bottom: 20px;">
-              Your session expired. Please sign in again.
+              {{ 'login.sessionExpired' | transloco }}
             </div>
           }
 
@@ -41,19 +42,19 @@ import { CommonModule } from '@angular/common';
 
           <form (ngSubmit)="login()" #f="ngForm">
             <div class="field">
-              <label for="token">Access token</label>
+              <label for="token">{{ 'login.tokenLabel' | transloco }}</label>
               <input
                 id="token"
                 type="password"
                 name="token"
                 [(ngModel)]="tokenInput"
-                placeholder="yt_…"
+                [placeholder]="'login.tokenPlaceholder' | transloco"
                 autocomplete="current-password"
                 required
                 [disabled]="loading()"
               />
               <span class="field-hint">
-                Paste your API token. Created during setup or via Settings → Tokens.
+                {{ 'login.tokenHint' | transloco }}
               </span>
             </div>
 
@@ -65,16 +66,16 @@ import { CommonModule } from '@angular/common';
             >
               @if (loading()) {
                 <span class="spinner" style="width:14px;height:14px;border-width:2px;"></span>
-                Verifying…
+                {{ 'login.verifying' | transloco }}
               } @else {
-                Sign in
+                {{ 'login.signIn' | transloco }}
               }
             </button>
           </form>
 
           @if (oidcInfo()?.enabled) {
             <div class="auth-divider">
-              <span>or</span>
+              <span>{{ 'login.orDivider' | transloco }}</span>
             </div>
 
             <button
@@ -84,13 +85,13 @@ import { CommonModule } from '@angular/common';
               [disabled]="loading()"
               (click)="loginWithOidc()"
             >
-              Sign in with SSO
+              {{ 'login.signInWithSso' | transloco }}
             </button>
           }
 
           <p style="margin-top: 20px; font-size: 12px; color: var(--text-muted); text-align: center;">
-            No token yet?
-            <a routerLink="/setup">Run first-time setup</a>
+            {{ 'login.noToken' | transloco }}
+            <a routerLink="/setup">{{ 'login.runSetup' | transloco }}</a>
           </p>
         }
       </div>

@@ -69,7 +69,7 @@ describe('Security headers', () => {
 
   it('Content-Security-Policy: frame-ancestors self is set', async () => {
     const r = await fetch(`${INSTANCES.a}/health`);
-    assert.equal(r.headers.get('content-security-policy'), "frame-ancestors 'self'");
+    assert.equal(r.headers.get('content-security-policy'), "frame-ancestors 'self'; object-src 'none'; base-uri 'self'");
   });
 
   it('Referrer-Policy: no-referrer is set', async () => {

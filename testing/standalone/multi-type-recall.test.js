@@ -96,7 +96,7 @@ function chronoResult(overrides = {}) {
     score: 0.8,
     title: 'portal-backend migration',
     description: 'Migrate portal-backend from Node.js to Go',
-    kind: 'milestone',
+    chronoType: 'milestone',
     startsAt: '2024-06-01T00:00:00.000Z',
     tags: ['migration'],
     entityIds: ['ent-portal'],

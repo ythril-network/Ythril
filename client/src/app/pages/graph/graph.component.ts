@@ -35,6 +35,7 @@ import { EntitySearchComponent } from '../../shared/entity-search.component';
 import { PropertiesViewComponent } from '../../shared/properties-view.component';
 import { TagInputComponent } from '../../shared/tag-input.component';
 import { PropertiesEditorComponent } from '../../shared/properties-editor.component';
+import { TranslocoPipe } from '@jsverse/transloco';
 
 // ── Helper types ─────────────────────────────────────────────────────────────
 
@@ -51,7 +52,7 @@ interface DetailRow {
 @Component({
   selector: 'app-graph-view',
   standalone: true,
-  imports: [CommonModule, FormsModule, EntryPopupComponent, EntitySearchComponent, PropertiesViewComponent, TagInputComponent, PropertiesEditorComponent, PhIconComponent],
+  imports: [CommonModule, FormsModule, EntryPopupComponent, EntitySearchComponent, PropertiesViewComponent, TagInputComponent, PropertiesEditorComponent, PhIconComponent, TranslocoPipe],
   host: { '[class.embedded]': 'isEmbedded()' },
   styles: [`
     :host {
@@ -627,7 +628,7 @@ interface DetailRow {
         <app-entity-search
           mode="bar"
           [spaceId]="activeSpaceId()"
-          placeholder="Search entity…"
+          placeholder="entitySearch.defaultPlaceholder"
           defaultMode="semantic"
           (selected)="selectRoot($event)"
           (queryChange)="onSearchQueryChange($event)"
@@ -637,28 +638,28 @@ interface DetailRow {
       <div class="toolbar-divider"></div>
 
       <div class="depth-control">
-        <span class="toolbar-label">Depth</span>
+        <span class="toolbar-label">{{ 'graph.toolbar.depth' | transloco }}</span>
         <input type="range" min="1" max="10" [ngModel]="depth()" (ngModelChange)="onDepthChange($event)" />
         <span class="depth-value">{{ depth() }}</span>
       </div>
 
       <div class="pill-group">
-        <button [class.active]="direction() === 'outbound'" (click)="setDirection('outbound')">Out</button>
-        <button [class.active]="direction() === 'inbound'" (click)="setDirection('inbound')">In</button>
-        <button [class.active]="direction() === 'both'"    (click)="setDirection('both')">Both</button>
+        <button [class.active]="direction() === 'outbound'" (click)="setDirection('outbound')">{{ 'graph.toolbar.direction.out' | transloco }}</button>
+        <button [class.active]="direction() === 'inbound'" (click)="setDirection('inbound')">{{ 'graph.toolbar.direction.in' | transloco }}</button>
+        <button [class.active]="direction() === 'both'"    (click)="setDirection('both')">{{ 'graph.toolbar.direction.both' | transloco }}</button>
       </div>
 
       <div class="pill-group">
-        <button [class.active]="!hideLabels()" (click)="onHideLabelsChange(!hideLabels())" title="Toggle edge labels">Labels</button>
+        <button [class.active]="!hideLabels()" (click)="onHideLabelsChange(!hideLabels())" [attr.title]="'graph.toolbar.toggleLabels' | transloco">{{ 'graph.toolbar.labels' | transloco }}</button>
       </div>
 
       <div class="toolbar-spacer"></div>
 
       @if (rootEntity()) {
-        <span class="graph-stats">{{ nodeCount() }} nodes · {{ edgeCount() }} edges</span>
+        <span class="graph-stats">{{ 'graph.stats.nodesEdges' | transloco: { nodes: nodeCount(), edges: edgeCount() } }}</span>
       }
-      <button class="toolbar-btn" title="Fit to viewport" (click)="fitGraph()"><ph-icon name="corners-out" [size]="16"/></button>
-      <button class="toolbar-btn" title="Reset graph"     (click)="resetGraph()"><ph-icon name="arrows-clockwise" [size]="16"/></button>
+      <button class="toolbar-btn" [attr.title]="'graph.toolbar.fitViewport' | transloco" (click)="fitGraph()"><ph-icon name="corners-out" [size]="16"/></button>
+      <button class="toolbar-btn" [attr.title]="'graph.toolbar.resetGraph' | transloco"     (click)="resetGraph()"><ph-icon name="arrows-clockwise" [size]="16"/></button>
     </div>
 
     <!-- ═══ Canvas row (canvas + optional side panel) ══════════════════════ -->
@@ -668,7 +669,7 @@ interface DetailRow {
       <div class="canvas-zone">
         @if (truncated()) {
           <div class="truncation-banner">
-            ⚠ Result truncated — reduce depth or node limit to see full graph
+            {{ 'graph.truncated' | transloco }}
             <button (click)="truncated.set(false)"><ph-icon name="x" [size]="14"/></button>
           </div>
         }
@@ -680,8 +681,8 @@ interface DetailRow {
         @if (!rootEntity() && !loading()) {
           <div class="canvas-empty">
             <div class="empty-icon"><ph-icon name="circle-dashed" [size]="52"/></div>
-            <h3>Search for an entity to start exploring</h3>
-            <p>Tap nodes to inspect · double-tap to re-root</p>
+            <h3>{{ 'graph.empty.title' | transloco }}</h3>
+            <p>{{ 'graph.empty.subtitle' | transloco }}</p>
           </div>
         }
 
@@ -699,7 +700,7 @@ interface DetailRow {
             </div>
             <div class="side-panel-header-actions">
               <button class="btn btn-sm btn-ghost" style="display:inline-flex;align-items:center" (click)="openEntityPopup(selectedNode()!)"><ph-icon name="eye" [size]="14"/></button>
-              <button class="icon-btn" title="Close" (click)="selectedNode.set(null)"><ph-icon name="x" [size]="16"/></button>
+              <button class="icon-btn" [attr.title]="'common.close' | transloco" (click)="selectedNode.set(null)"><ph-icon name="x" [size]="16"/></button>
             </div>
           </div>
           <div class="side-panel-body">
@@ -708,24 +709,24 @@ interface DetailRow {
             <div class="record-card">
               @if (selectedEntityRecord()) {
                 <div class="drawer-field">
-                  <div class="drawer-label">name</div>
+                  <div class="drawer-label">{{ 'brain.entities.table.name' | transloco }}</div>
                   <div class="drawer-value">{{ selectedEntityRecord()!.name }}</div>
                 </div>
                 @if (selectedEntityRecord()!.type) {
                   <div class="drawer-field">
-                    <div class="drawer-label">type</div>
+                    <div class="drawer-label">{{ 'common.form.type' | transloco }}</div>
                     <div class="drawer-value">{{ selectedEntityRecord()!.type }}</div>
                   </div>
                 }
                 @if (selectedEntityRecord()!.description) {
                   <div class="drawer-field">
-                    <div class="drawer-label">description</div>
+                    <div class="drawer-label">{{ 'common.form.description' | transloco }}</div>
                     <div class="drawer-value">{{ selectedEntityRecord()!.description }}</div>
                   </div>
                 }
                 @if (selectedEntityRecord()!.tags?.length) {
                   <div class="drawer-field">
-                    <div class="drawer-label">tags</div>
+                    <div class="drawer-label">{{ 'common.form.tags' | transloco }}</div>
                     <div>
                       @for (t of selectedEntityRecord()!.tags!; track t) {
                         <span class="drawer-tag">{{ t }}</span>
@@ -735,7 +736,7 @@ interface DetailRow {
                 }
                 @if (selectedEntityRecord()!.properties && objectKeys(selectedEntityRecord()!.properties!).length) {
                   <div class="drawer-field">
-                    <div class="drawer-label">properties</div>
+                    <div class="drawer-label">{{ 'common.form.properties' | transloco }}</div>
                     <app-properties-view [properties]="selectedEntityRecord()!.properties!" />
                   </div>
                 }
@@ -745,11 +746,11 @@ interface DetailRow {
                   <div class="drawer-readonly-value" style="font-family:var(--font-mono,monospace);font-size:10px;">{{ selectedEntityRecord()!._id }}</div>
                 </div>
                 <div class="drawer-field" style="margin-bottom:0;">
-                  <div class="drawer-label">createdAt</div>
+                  <div class="drawer-label">{{ 'common.createdAt' | transloco }}</div>
                   <div class="drawer-readonly-value">{{ selectedEntityRecord()!.createdAt | date:'dd.MM.yyyy HH:mm' }}</div>
                 </div>
               } @else {
-                <div style="font-size:12px;color:var(--text-muted);padding:8px 0;">Loading…</div>
+                <div style="font-size:12px;color:var(--text-muted);padding:8px 0;">{{ 'common.loading' | transloco }}</div>
               }
             </div>
 
@@ -757,7 +758,7 @@ interface DetailRow {
             <div class="lists-pane">
               <div class="list-section">
                 <div class="list-section-header">
-                  Memories <span class="count-chip">{{ nodeMemories().length }}</span>
+                  {{ 'graph.panel.memories' | transloco }} <span class="count-chip">{{ nodeMemories().length }}</span>
                 </div>
                 <div class="list-body">
                   @for (m of nodeMemories(); track m._id) {
@@ -766,13 +767,13 @@ interface DetailRow {
                       <span class="list-row-date">{{ m.createdAt | date:'dd.MM.yy' }}</span>
                     </div>
                   } @empty {
-                    <div class="list-empty">No memories</div>
+                    <div class="list-empty">{{ 'graph.panel.noMemories' | transloco }}</div>
                   }
                 </div>
               </div>
               <div class="list-section">
                 <div class="list-section-header">
-                  Chrono <span class="count-chip">{{ nodeChrono().length }}</span>
+                  {{ 'graph.panel.chrono' | transloco }} <span class="count-chip">{{ nodeChrono().length }}</span>
                 </div>
                 <div class="list-body">
                   @for (c of nodeChrono(); track c._id) {
@@ -781,7 +782,7 @@ interface DetailRow {
                       <span class="list-row-date">{{ c.startsAt | date:'dd.MM.yy' }}</span>
                     </div>
                   } @empty {
-                    <div class="list-empty">No chrono entries</div>
+                    <div class="list-empty">{{ 'graph.panel.noChronoEntries' | transloco }}</div>
                   }
                 </div>
               </div>
@@ -798,13 +799,13 @@ interface DetailRow {
             <div class="side-panel-title">
               <span class="side-dot" [style.background]="panelColor()"></span>
               <h3>{{ selectedEdge()!.label || 'edge' }}</h3>
-              <span class="badge">edge</span>
+              <span class="badge">{{ 'graph.drawer.badge.edge' | transloco }}</span>
             </div>
             <div class="side-panel-header-actions">
               @if (selectedEdgeRecord()) {
                 <button class="btn btn-sm btn-ghost" style="display:inline-flex;align-items:center" (click)="popupRecord.set(asRecord(selectedEdgeRecord()!)); popupType.set('edge')"><ph-icon name="eye" [size]="14"/></button>
               }
-              <button class="icon-btn" title="Close" (click)="selectedEdge.set(null); selectedEdgeRecord.set(null)"><ph-icon name="x" [size]="16"/></button>
+              <button class="icon-btn" [attr.title]="'common.close' | transloco" (click)="selectedEdge.set(null); selectedEdgeRecord.set(null)"><ph-icon name="x" [size]="16"/></button>
             </div>
           </div>
           <div class="side-panel-body">
@@ -813,30 +814,30 @@ interface DetailRow {
             <div class="record-card">
               @if (selectedEdgeRecord()) {
                 <div class="drawer-field">
-                  <div class="drawer-label">label</div>
+                  <div class="drawer-label">{{ 'brain.edges.table.relation' | transloco }}</div>
                   <div class="drawer-value">{{ selectedEdgeRecord()!.label }}</div>
                 </div>
                 @if (selectedEdgeRecord()!.type) {
                   <div class="drawer-field">
-                    <div class="drawer-label">type</div>
+                    <div class="drawer-label">{{ 'common.form.type' | transloco }}</div>
                     <div class="drawer-value">{{ selectedEdgeRecord()!.type }}</div>
                   </div>
                 }
                 @if (selectedEdgeRecord()!.description) {
                   <div class="drawer-field">
-                    <div class="drawer-label">description</div>
+                    <div class="drawer-label">{{ 'common.form.description' | transloco }}</div>
                     <div class="drawer-value">{{ selectedEdgeRecord()!.description }}</div>
                   </div>
                 }
                 @if (selectedEdgeRecord()!.weight !== undefined && selectedEdgeRecord()!.weight !== null) {
                   <div class="drawer-field">
-                    <div class="drawer-label">weight</div>
+                    <div class="drawer-label">{{ 'common.form.weight' | transloco }}</div>
                     <div class="drawer-value">{{ selectedEdgeRecord()!.weight }}</div>
                   </div>
                 }
                 @if (selectedEdgeRecord()!.tags?.length) {
                   <div class="drawer-field">
-                    <div class="drawer-label">tags</div>
+                    <div class="drawer-label">{{ 'common.form.tags' | transloco }}</div>
                     <div>
                       @for (t of selectedEdgeRecord()!.tags!; track t) {
                         <span class="drawer-tag">{{ t }}</span>
@@ -846,17 +847,17 @@ interface DetailRow {
                 }
                 @if (selectedEdgeRecord()!.properties && objectKeys(selectedEdgeRecord()!.properties!).length) {
                   <div class="drawer-field">
-                    <div class="drawer-label">properties</div>
+                    <div class="drawer-label">{{ 'common.form.properties' | transloco }}</div>
                     <app-properties-view [properties]="selectedEdgeRecord()!.properties!" />
                   </div>
                 }
                 <hr class="drawer-hr">
                 <div class="drawer-field">
-                  <div class="drawer-label">from</div>
+                  <div class="drawer-label">{{ 'common.form.from' | transloco }}</div>
                   <div class="drawer-readonly-value">{{ selectedEdgeRecord()!.fromName || selectedEdge()!.from }}</div>
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">to</div>
+                  <div class="drawer-label">{{ 'common.form.to' | transloco }}</div>
                   <div class="drawer-readonly-value">{{ selectedEdgeRecord()!.toName || selectedEdge()!.to }}</div>
                 </div>
                 <div class="drawer-field" style="margin-bottom:0;">
@@ -864,7 +865,7 @@ interface DetailRow {
                   <div class="drawer-readonly-value" style="font-family:var(--font-mono,monospace);font-size:10px;">{{ selectedEdgeRecord()!._id }}</div>
                 </div>
               } @else {
-                <div style="font-size:12px;color:var(--text-muted);padding:8px 0;">Loading…</div>
+                <div style="font-size:12px;color:var(--text-muted);padding:8px 0;">{{ 'common.loading' | transloco }}</div>
               }
             </div>
 
@@ -872,7 +873,7 @@ interface DetailRow {
             <div class="lists-pane">
               <div class="list-section">
                 <div class="list-section-header">
-                  Memories <span class="count-chip">{{ nodeMemories().length }}</span>
+                  {{ 'graph.panel.memories' | transloco }} <span class="count-chip">{{ nodeMemories().length }}</span>
                 </div>
                 <div class="list-body">
                   @for (m of nodeMemories(); track m._id) {
@@ -881,13 +882,13 @@ interface DetailRow {
                       <span class="list-row-date">{{ m.createdAt | date:'dd.MM.yy' }}</span>
                     </div>
                   } @empty {
-                    <div class="list-empty">No linked memories</div>
+                    <div class="list-empty">{{ 'graph.panel.noLinkedMemories' | transloco }}</div>
                   }
                 </div>
               </div>
               <div class="list-section">
                 <div class="list-section-header">
-                  Chrono <span class="count-chip">{{ nodeChrono().length }}</span>
+                  {{ 'graph.panel.chrono' | transloco }} <span class="count-chip">{{ nodeChrono().length }}</span>
                 </div>
                 <div class="list-body">
                   @for (c of nodeChrono(); track c._id) {
@@ -896,7 +897,7 @@ interface DetailRow {
                       <span class="list-row-date">{{ c.startsAt | date:'dd.MM.yy' }}</span>
                     </div>
                   } @empty {
-                    <div class="list-empty">No linked chrono</div>
+                    <div class="list-empty">{{ 'graph.panel.noLinkedChrono' | transloco }}</div>
                   }
                 </div>
               </div>
@@ -926,8 +927,8 @@ interface DetailRow {
         <div class="bdrawer-modal" (click)="$event.stopPropagation()" role="dialog">
           <div class="bdrawer-header">
             <div style="flex:1; min-width:0;">
-              @if (dr.kind === 'memory') { <span class="badge badge-blue" style="margin-bottom:6px; display:inline-block;">memory</span> }
-              @if (dr.kind === 'chrono') { <span class="badge" style="margin-bottom:6px; display:inline-block;">chrono</span> }
+              @if (dr.kind === 'memory') { <span class="badge badge-blue" style="margin-bottom:6px; display:inline-block;">{{ 'graph.drawer.badge.memory' | transloco }}</span> }
+              @if (dr.kind === 'chrono') { <span class="badge" style="margin-bottom:6px; display:inline-block;">{{ 'graph.drawer.badge.chrono' | transloco }}</span> }
               <div class="bdrawer-title">
                 @if (dr.kind === 'memory') { {{ drawerEditMemory.fact.length > 80 ? (drawerEditMemory.fact | slice:0:80) + '…' : drawerEditMemory.fact }} }
                 @if (dr.kind === 'chrono') { {{ drawerEditChrono.title || dr.record.title }} }
@@ -935,9 +936,9 @@ interface DetailRow {
             </div>
             <div style="display:flex; gap:8px; flex-shrink:0; align-items:flex-start; padding-top:2px;">
               <button class="btn btn-sm btn-primary" [disabled]="drawerSaving()" (click)="saveBrainDrawer()">
-                @if (drawerSaving()) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> } Save
+                @if (drawerSaving()) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> } {{ 'common.save' | transloco }}
               </button>
-              <button class="icon-btn" title="Close" (click)="closeBrainDrawer()"><ph-icon name="x" [size]="16"/></button>
+              <button class="icon-btn" [attr.title]="'common.close' | transloco" (click)="closeBrainDrawer()"><ph-icon name="x" [size]="16"/></button>
             </div>
           </div>
 
@@ -950,19 +951,19 @@ interface DetailRow {
               <!-- ── MEMORY ── -->
               @if (dr.kind === 'memory') {
                 <div class="bdrawer-field">
-                  <div class="bdrawer-label">fact <span style="color:var(--error)">*</span></div>
+                  <div class="bdrawer-label">{{ 'common.form.fact' | transloco }} <span style="color:var(--error)">*</span></div>
                   <textarea [(ngModel)]="drawerEditMemory.fact" name="drwMemFact" rows="4"></textarea>
                 </div>
                 <div class="bdrawer-field">
-                  <div class="bdrawer-label">description</div>
+                  <div class="bdrawer-label">{{ 'common.form.description' | transloco }}</div>
                   <input type="text" [(ngModel)]="drawerEditMemory.description" name="drwMemDesc" />
                 </div>
                 <div class="bdrawer-field">
-                  <div class="bdrawer-label">tags</div>
+                  <div class="bdrawer-label">{{ 'common.form.tags' | transloco }}</div>
                   <app-tag-input [(value)]="drawerEditMemory.tags" [suggestions]="[]" inputName="drwMemTags" />
                 </div>
                 <div class="bdrawer-field">
-                  <div class="bdrawer-label">entityIds</div>
+                  <div class="bdrawer-label">{{ 'common.entityIds' | transloco }}</div>
                   <div class="flyout-wrap">
                     <div class="entity-multi">
                       @for (chip of entityChips(drawerEditMemory.entityIds); track chip.id) {
@@ -971,21 +972,21 @@ interface DetailRow {
                           <button type="button" class="chip-remove" (mousedown)="removeEntityId(drawerEditMemory, chip.id)"><ph-icon name="x" [size]="12"/></button>
                         </span>
                       }
-                      <button type="button" class="chip-add" (click)="openFlyout('drawer-memory-entityIds')">+ Add…</button>
+                      <button type="button" class="chip-add" (click)="openFlyout('drawer-memory-entityIds')">{{ 'common.addMore' | transloco }}</button>
                     </div>
                     @if (flyoutField() === 'drawer-memory-entityIds') {
                       <div class="flyout-panel">
-                        <app-entity-search mode="picker" [spaceId]="activeSpaceId()" placeholder="Search entities…" defaultMode="semantic"
+                        <app-entity-search mode="picker" [spaceId]="activeSpaceId()" placeholder="common.searchEntitiesPlaceholder" defaultMode="semantic"
                           (selected)="pickDrawerEntity($event, 'drawer-memory-entityIds')" />
                         <div style="display:flex; justify-content:flex-end; margin-top:8px;">
-                          <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">Done</button>
+                          <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">{{ 'common.done' | transloco }}</button>
                         </div>
                       </div>
                     }
                   </div>
                 </div>
                 <div class="bdrawer-field">
-                  <div class="bdrawer-label">properties</div>
+                  <div class="bdrawer-label">{{ 'common.form.properties' | transloco }}</div>
                   <app-properties-editor [(value)]="drawerEditMemory.properties" />
                 </div>
                 <hr class="bdrawer-hr">
@@ -994,11 +995,11 @@ interface DetailRow {
                   <div class="bdrawer-readonly">{{ dr.record._id }}</div>
                 </div>
                 <div class="bdrawer-field">
-                  <div class="bdrawer-label">seq</div>
+                  <div class="bdrawer-label">{{ 'common.seq' | transloco }}</div>
                   <div class="bdrawer-readonly">{{ dr.record.seq }}</div>
                 </div>
                 <div class="bdrawer-field" style="margin-bottom:0;">
-                  <div class="bdrawer-label">createdAt</div>
+                  <div class="bdrawer-label">{{ 'common.createdAt' | transloco }}</div>
                   <div class="bdrawer-readonly">{{ dr.record.createdAt | date:'yyyy-MM-dd HH:mm:ss' }}</div>
                 </div>
               }
@@ -1006,15 +1007,15 @@ interface DetailRow {
               <!-- ── CHRONO ── -->
               @if (dr.kind === 'chrono') {
                 <div class="bdrawer-field">
-                  <div class="bdrawer-label">title <span style="color:var(--error)">*</span></div>
+                  <div class="bdrawer-label">{{ 'common.form.title' | transloco }} <span style="color:var(--error)">*</span></div>
                   <input type="text" [(ngModel)]="drawerEditChrono.title" name="drwChronoTitle" />
                 </div>
                 <div class="bdrawer-field">
-                  <div class="bdrawer-label">type <span style="color:var(--error)">*</span></div>
+                  <div class="bdrawer-label">{{ 'common.form.kind' | transloco }} <span style="color:var(--error)">*</span></div>
                   @if (drawerEditChrono.kind !== '__custom__') {
                     <select [(ngModel)]="drawerEditChrono.kind" name="drwChronoKind">
                       @for (k of chronoKinds; track k) { <option [value]="k">{{ k }}</option> }
-                      <option value="__custom__">Custom…</option>
+                      <option value="__custom__">{{ 'brain.chrono.form.customKind' | transloco }}</option>
                     </select>
                   } @else {
                     <div style="display:flex; gap:4px;">
@@ -1024,29 +1025,29 @@ interface DetailRow {
                   }
                 </div>
                 <div class="bdrawer-field">
-                  <div class="bdrawer-label">status</div>
+                  <div class="bdrawer-label">{{ 'brain.chrono.table.status' | transloco }}</div>
                   <select [(ngModel)]="drawerEditChrono.status" name="drwChronoStatus">
                     @for (s of chronoStatusOptions; track s) { <option [value]="s">{{ s }}</option> }
                   </select>
                 </div>
                 <div class="bdrawer-field">
-                  <div class="bdrawer-label">startsAt <span style="color:var(--error)">*</span></div>
+                  <div class="bdrawer-label">{{ 'common.form.startsAt' | transloco }} <span style="color:var(--error)">*</span></div>
                   <input type="datetime-local" [(ngModel)]="drawerEditChrono.startsAt" name="drwChronoStarts" />
                 </div>
                 <div class="bdrawer-field">
-                  <div class="bdrawer-label">endsAt</div>
+                  <div class="bdrawer-label">{{ 'common.form.endsAt' | transloco }}</div>
                   <input type="datetime-local" [(ngModel)]="drawerEditChrono.endsAt" name="drwChronoEnds" />
                 </div>
                 <div class="bdrawer-field">
-                  <div class="bdrawer-label">description</div>
+                  <div class="bdrawer-label">{{ 'common.form.description' | transloco }}</div>
                   <textarea [(ngModel)]="drawerEditChrono.description" name="drwChronoDesc" rows="3"></textarea>
                 </div>
                 <div class="bdrawer-field">
-                  <div class="bdrawer-label">tags</div>
+                  <div class="bdrawer-label">{{ 'common.form.tags' | transloco }}</div>
                   <app-tag-input [(value)]="drawerEditChrono.tags" [suggestions]="[]" inputName="drwChronoTags" />
                 </div>
                 <div class="bdrawer-field">
-                  <div class="bdrawer-label">entityIds</div>
+                  <div class="bdrawer-label">{{ 'common.entityIds' | transloco }}</div>
                   <div class="flyout-wrap">
                     <div class="entity-multi">
                       @for (chip of entityChips(drawerEditChrono.entityIds); track chip.id) {
@@ -1055,21 +1056,21 @@ interface DetailRow {
                           <button type="button" class="chip-remove" (mousedown)="removeEntityId(drawerEditChrono, chip.id)"><ph-icon name="x" [size]="12"/></button>
                         </span>
                       }
-                      <button type="button" class="chip-add" (click)="openFlyout('drawer-chrono-entityIds')">+ Add…</button>
+                      <button type="button" class="chip-add" (click)="openFlyout('drawer-chrono-entityIds')">{{ 'common.addMore' | transloco }}</button>
                     </div>
                     @if (flyoutField() === 'drawer-chrono-entityIds') {
                       <div class="flyout-panel">
-                        <app-entity-search mode="picker" [spaceId]="activeSpaceId()" placeholder="Search entities…" defaultMode="semantic"
+                        <app-entity-search mode="picker" [spaceId]="activeSpaceId()" placeholder="common.searchEntitiesPlaceholder" defaultMode="semantic"
                           (selected)="pickDrawerEntity($event, 'drawer-chrono-entityIds')" />
                         <div style="display:flex; justify-content:flex-end; margin-top:8px;">
-                          <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">Done</button>
+                          <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">{{ 'common.done' | transloco }}</button>
                         </div>
                       </div>
                     }
                   </div>
                 </div>
                 <div class="bdrawer-field">
-                  <div class="bdrawer-label">memoryIds <span class="bdrawer-muted">(comma-separated IDs)</span></div>
+                  <div class="bdrawer-label">{{ 'common.memoryIds' | transloco }} <span class="bdrawer-muted">{{ 'common.commaSeparatedIds' | transloco }}</span></div>
                   <textarea [(ngModel)]="drawerEditChrono.memoryIds" name="drwChronoMemIds" rows="2" style="font-family:var(--font-mono,monospace); font-size:11px;"></textarea>
                 </div>
                 <hr class="bdrawer-hr">
@@ -1078,15 +1079,15 @@ interface DetailRow {
                   <div class="bdrawer-readonly">{{ dr.record._id }}</div>
                 </div>
                 <div class="bdrawer-field">
-                  <div class="bdrawer-label">seq</div>
+                  <div class="bdrawer-label">{{ 'common.seq' | transloco }}</div>
                   <div class="bdrawer-readonly">{{ dr.record.seq }}</div>
                 </div>
                 <div class="bdrawer-field">
-                  <div class="bdrawer-label">createdAt</div>
+                  <div class="bdrawer-label">{{ 'common.createdAt' | transloco }}</div>
                   <div class="bdrawer-readonly">{{ dr.record.createdAt | date:'yyyy-MM-dd HH:mm:ss' }}</div>
                 </div>
                 <div class="bdrawer-field" style="margin-bottom:0;">
-                  <div class="bdrawer-label">updatedAt</div>
+                  <div class="bdrawer-label">{{ 'common.updatedAt' | transloco }}</div>
                   <div class="bdrawer-readonly">{{ dr.record.updatedAt | date:'yyyy-MM-dd HH:mm:ss' }}</div>
                 </div>
               }

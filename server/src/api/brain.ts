@@ -89,7 +89,7 @@ brainRouter.post('/:spaceId/memories', globalRateLimit, requireSpaceAuth, denyRe
   const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
   const targetSpace = wt.target;
-  const { fact, tags = [], entityIds = [], description, properties } = req.body ?? {};
+  const { fact, tags = [], entityIds = [], description, properties, type: memoryType } = req.body ?? {};
   if (!fact || typeof fact !== 'string') {
     res.status(400).json({ error: '`fact` string required' });
     return;
@@ -130,8 +130,9 @@ brainRouter.post('/:spaceId/memories', globalRateLimit, requireSpaceAuth, denyRe
   const safeTags: string[] = Array.isArray(tags) ? tags : [];
 
   // Schema validation
+  const safeMemoryType: string | undefined = typeof memoryType === 'string' ? memoryType : undefined;
   const meta = getSpaceMeta(wt.target);
-  const violations = validateMemory(meta ?? {}, { properties: safeProps });
+  const violations = validateMemory(meta ?? {}, { type: safeMemoryType, properties: safeProps });
   const validation = applyValidation(meta, violations);
   if (validation.blocked) {
     res.status(400).json({ error: 'schema_violation', violations: validation.warnings });
@@ -187,6 +188,7 @@ brainRouter.post('/:spaceId/memories', globalRateLimit, requireSpaceAuth, denyRe
   };
   if (safeDesc !== undefined) doc.description = safeDesc;
   if (safeProps !== undefined) doc.properties = safeProps;
+  if (safeMemoryType !== undefined) doc.type = safeMemoryType;
   await col<MemoryDoc>(`${targetSpace}_memories`).insertOne(doc as never);
   emitWebhookEvent({ event: 'memory.created', spaceId: targetSpace, entry: { ...doc, embedding: undefined }, ...webhookToken(req) });
   const body: Record<string, unknown> = { ...doc };
@@ -1872,6 +1874,7 @@ brainRouter.post('/spaces/:spaceId/bulk', globalRateLimit, requireSpaceAuth, den
     const tags: string[] = Array.isArray(item['tags']) ? (item['tags'] as unknown[]).filter((t): t is string => typeof t === 'string') : [];
     const entityIds: string[] = Array.isArray(item['entityIds']) ? (item['entityIds'] as unknown[]).filter((t): t is string => typeof t === 'string') : [];
     const description: string | undefined = typeof item['description'] === 'string' ? item['description'] : undefined;
+    const itemMemoryType: string | undefined = typeof item['type'] === 'string' ? item['type'] : undefined;
     const properties: Record<string, string | number | boolean> | undefined =
       item['properties'] != null && typeof item['properties'] === 'object' && !Array.isArray(item['properties'])
         ? (item['properties'] as Record<string, string | number | boolean>)
@@ -1879,13 +1882,13 @@ brainRouter.post('/spaces/:spaceId/bulk', globalRateLimit, requireSpaceAuth, den
     try {
       // Schema validation per memory
       if (bulkValidation !== 'off' && bulkMeta) {
-        const sv = validateMemory(bulkMeta, { properties });
+        const sv = validateMemory(bulkMeta, { type: itemMemoryType, properties });
         if (sv.length > 0) {
           if (bulkValidation === 'strict') { errors.push({ type: 'memory', index: i, reason: `schema_violation: ${sv.map(v => v.reason).join('; ')}` }); continue; }
           for (const v of sv) errors.push({ type: 'memory', index: i, reason: `schema_warning: ${v.field} — ${v.reason}` });
         }
       }
-      await remember(targetSpace, fact, entityIds, tags, description, properties);
+      await remember(targetSpace, fact, entityIds, tags, description, properties, undefined, itemMemoryType);
       inserted.memories++;
     } catch (err) {
       errors.push({ type: 'memory', index: i, reason: err instanceof Error ? err.message : String(err) });

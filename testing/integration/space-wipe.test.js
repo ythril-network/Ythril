@@ -57,7 +57,7 @@ describe('Space wipe — full wipe', () => {
     const edgeR = await post(INSTANCES.a, adminToken, `/api/brain/spaces/${spaceId}/edges`, { from: 'WipeEnt', to: 'WipeEnt2', label: 'related' });
     assert.equal(edgeR.status, 201, `Edge: ${JSON.stringify(edgeR.body)}`);
 
-    const chronoR = await post(INSTANCES.a, adminToken, `/api/brain/spaces/${spaceId}/chrono`, { title: 'Chrono to wipe', kind: 'event', startsAt: new Date().toISOString() });
+    const chronoR = await post(INSTANCES.a, adminToken, `/api/brain/spaces/${spaceId}/chrono`, { title: 'Chrono to wipe', type: 'event', startsAt: new Date().toISOString() });
     assert.equal(chronoR.status, 201, `Chrono: ${JSON.stringify(chronoR.body)}`);
 
     const fileR = await reqJson(INSTANCES.a, adminToken, `/api/files/${spaceId}?path=wipe-test.txt`, {
@@ -154,7 +154,7 @@ describe('Space wipe — partial wipe (by type)', () => {
     // Seed one of each type
     await post(INSTANCES.a, adminTok, `/api/brain/${spaceId}/memories`, { fact: 'Mem to wipe', tags: [] });
     await post(INSTANCES.a, adminTok, `/api/brain/spaces/${spaceId}/entities`, { name: 'SurvivingEnt', type: 'concept' });
-    await post(INSTANCES.a, adminTok, `/api/brain/spaces/${spaceId}/chrono`, { title: 'Surviving chrono', kind: 'event', startsAt: new Date().toISOString() });
+    await post(INSTANCES.a, adminTok, `/api/brain/spaces/${spaceId}/chrono`, { title: 'Surviving chrono', type: 'event', startsAt: new Date().toISOString() });
 
     const preMem = await get(INSTANCES.a, adminTok, `/api/brain/spaces/${spaceId}/stats`);
     assert.ok(preMem.body.memories >= 1);
@@ -240,7 +240,7 @@ describe('Space wipe — partial wipe (by type)', () => {
 
     await post(INSTANCES.a, adminTok, `/api/brain/${spaceId}/memories`, { fact: 'Memory to wipe', tags: [] });
     await post(INSTANCES.a, adminTok, `/api/brain/spaces/${spaceId}/entities`, { name: 'EntToWipe', type: 'concept' });
-    await post(INSTANCES.a, adminTok, `/api/brain/spaces/${spaceId}/chrono`, { title: 'Surviving chrono', kind: 'event', startsAt: new Date().toISOString() });
+    await post(INSTANCES.a, adminTok, `/api/brain/spaces/${spaceId}/chrono`, { title: 'Surviving chrono', type: 'event', startsAt: new Date().toISOString() });
 
     // Wipe memories + entities, leave chrono
     const wipeR = await post(INSTANCES.a, adminTok, `/api/admin/spaces/${spaceId}/wipe`, { types: ['memories', 'entities'] });

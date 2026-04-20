@@ -2,11 +2,12 @@ import { Component, inject, signal, OnInit, OnDestroy, effect } from '@angular/c
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService, type AuditLogEntry, type AuditLogParams, type Space } from '../../core/api.service';
+import { TranslocoPipe } from '@jsverse/transloco';
 
 @Component({
   selector: 'app-audit-log',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, TranslocoPipe],
   styles: [`
     .audit-toolbar {
       display: flex;
@@ -148,30 +149,30 @@ import { ApiService, type AuditLogEntry, type AuditLogParams, type Space } from 
     .error-msg { color: var(--error); margin: 12px 0; }
   `],
   template: `
-    <h2>Logs</h2>
+    <h2>{{ 'auditLog.title' | transloco }}</h2>
 
     <!-- Sub-tabs -->
     <div style="display:flex; gap:8px; margin-bottom:16px;">
-      <button class="btn btn-sm" [class.btn-primary]="activeLogTab() === 'audit'" [class.btn-secondary]="activeLogTab() !== 'audit'" (click)="activeLogTab.set('audit')">Audit Log</button>
-      <button class="btn btn-sm" [class.btn-primary]="activeLogTab() === 'server'" [class.btn-secondary]="activeLogTab() !== 'server'" (click)="activeLogTab.set('server')">Server Log</button>
+      <button class="btn btn-sm" [class.btn-primary]="activeLogTab() === 'audit'" [class.btn-secondary]="activeLogTab() !== 'audit'" (click)="activeLogTab.set('audit')">{{ 'auditLog.tab.audit' | transloco }}</button>
+      <button class="btn btn-sm" [class.btn-primary]="activeLogTab() === 'server'" [class.btn-secondary]="activeLogTab() !== 'server'" (click)="activeLogTab.set('server')">{{ 'auditLog.tab.server' | transloco }}</button>
     </div>
 
     @if (activeLogTab() === 'server') {
       <div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">
-        <button class="btn btn-sm btn-secondary" (click)="loadServerLogs()">Refresh</button>
+        <button class="btn btn-sm btn-secondary" (click)="loadServerLogs()">{{ 'auditLog.server.refreshButton' | transloco }}</button>
         <span style="flex:1;"></span>
-        <span style="font-size:12px; color:var(--text-muted);">{{ serverLogLines().length }} lines@if (serverLogStreaming()) { &nbsp;· live }</span>
+        <span style="font-size:12px; color:var(--text-muted);">{{ serverLogLines().length }} {{ 'auditLog.server.lines' | transloco }}@if (serverLogStreaming()) { &nbsp;· {{ 'auditLog.server.live' | transloco }} }</span>
       </div>
 
       @if (serverLogLoading()) {
         <div class="empty" style="padding:24px;">
-          <span class="spinner"></span> Loading…
+          <span class="spinner"></span> {{ 'common.loading' | transloco }}
         </div>
       } @else if (serverLogLines().length === 0) {
         <div class="empty" style="padding:40px;">
           <div style="font-size:24px;">📋</div>
-          <h3>Server Log</h3>
-          <p style="color:var(--text-muted);">No log output yet.</p>
+          <h3>{{ 'auditLog.server.empty.title' | transloco }}</h3>
+          <p style="color:var(--text-muted);">{{ 'auditLog.server.empty.body' | transloco }}</p>
         </div>
       } @else {
         <div style="background:var(--bg-primary); border:1px solid var(--border); border-radius:var(--radius-sm); overflow:auto; max-height:70vh; font-family:var(--font-mono); font-size:12px; line-height:1.6; padding:12px; white-space:pre-wrap; word-break:break-all;" #serverLogContainer>
@@ -187,35 +188,35 @@ import { ApiService, type AuditLogEntry, type AuditLogParams, type Space } from 
     <!-- Filters -->
     <div class="audit-toolbar">
       <label>
-        After
+        {{ 'auditLog.filter.after' | transloco }}
         <input type="datetime-local" [(ngModel)]="filterAfter" />
       </label>
       <label>
-        Before
+        {{ 'auditLog.filter.before' | transloco }}
         <input type="datetime-local" [(ngModel)]="filterBefore" />
       </label>
       <label>
-        Operation
+        {{ 'auditLog.filter.operation' | transloco }}
         <select [(ngModel)]="filterOperation">
-          <option value="">All</option>
+          <option value="">{{ 'common.all' | transloco }}</option>
           @for (op of operations; track op) {
             <option [value]="op">{{ op }}</option>
           }
         </select>
       </label>
       <label>
-        Space
+        {{ 'auditLog.filter.space' | transloco }}
         <select [(ngModel)]="filterSpaceId">
-          <option value="">All</option>
+          <option value="">{{ 'common.all' | transloco }}</option>
           @for (s of spaces(); track s.id) {
             <option [value]="s.id">{{ s.label }} ({{ s.id }})</option>
           }
         </select>
       </label>
       <label>
-        Status
+        {{ 'auditLog.filter.status' | transloco }}
         <select [(ngModel)]="filterStatus">
-          <option value="">All</option>
+          <option value="">{{ 'common.all' | transloco }}</option>
           <option value="200">200</option>
           <option value="201">201</option>
           <option value="204">204</option>
@@ -227,21 +228,21 @@ import { ApiService, type AuditLogEntry, type AuditLogParams, type Space } from 
         </select>
       </label>
       <label>
-        IP
-        <input type="text" [(ngModel)]="filterIp" placeholder="e.g. 10.42.0.15" style="width:120px" />
+        {{ 'auditLog.filter.ip' | transloco }}
+        <input type="text" [(ngModel)]="filterIp" [placeholder]="'auditLog.filter.ipPlaceholder' | transloco" style="width:120px" />
       </label>
-      <button (click)="applyFilters()">Search</button>
-      <button (click)="resetFilters()">Reset</button>
+      <button (click)="applyFilters()">{{ 'auditLog.filter.searchButton' | transloco }}</button>
+      <button (click)="resetFilters()">{{ 'auditLog.filter.resetButton' | transloco }}</button>
     </div>
 
     <!-- Export -->
     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
       <div class="export-btns">
-        <button (click)="exportJson()">Export JSON</button>
-        <button (click)="exportCsv()">Export CSV</button>
+        <button (click)="exportJson()">{{ 'auditLog.exportJson' | transloco }}</button>
+        <button (click)="exportCsv()">{{ 'auditLog.exportCsv' | transloco }}</button>
       </div>
       @if (retentionDays() > 0) {
-        <span style="font-size:12px; color:var(--text-muted);">Retention: {{ retentionDays() }} days</span>
+        <span style="font-size:12px; color:var(--text-muted);">{{ 'auditLog.retention' | transloco: { days: retentionDays() } }}</span>
       }
     </div>
 
@@ -250,20 +251,20 @@ import { ApiService, type AuditLogEntry, type AuditLogParams, type Space } from 
     }
 
     @if (loading()) {
-      <p>Loading…</p>
+      <p>{{ 'common.loading' | transloco }}</p>
     } @else if (entries().length === 0) {
-      <div class="empty">No audit log entries found.</div>
+      <div class="empty">{{ 'auditLog.empty' | transloco }}</div>
     } @else {
       <table class="audit-table">
         <thead>
           <tr>
-            <th>Timestamp</th>
-            <th>Token / User</th>
-            <th>Operation</th>
-            <th>Space</th>
-            <th>Status</th>
-            <th>IP</th>
-            <th>Duration</th>
+            <th>{{ 'auditLog.table.timestamp' | transloco }}</th>
+            <th>{{ 'auditLog.table.tokenUser' | transloco }}</th>
+            <th>{{ 'auditLog.table.operation' | transloco }}</th>
+            <th>{{ 'auditLog.table.space' | transloco }}</th>
+            <th>{{ 'auditLog.table.status' | transloco }}</th>
+            <th>{{ 'auditLog.table.ip' | transloco }}</th>
+            <th>{{ 'auditLog.table.duration' | transloco }}</th>
             <th></th>
           </tr>
         </thead>
@@ -282,17 +283,17 @@ import { ApiService, type AuditLogEntry, type AuditLogParams, type Space } from 
               </td>
               <td class="mono">{{ e.ip }}</td>
               <td>{{ e.durationMs }}ms</td>
-              <td><button class="detail-close" style="padding:2px 8px;font-size:11px" (click)="showDetail(e)">Detail</button></td>
+              <td><button class="detail-close" style="padding:2px 8px;font-size:11px" (click)="showDetail(e)">{{ 'auditLog.table.detailButton' | transloco }}</button></td>
             </tr>
           }
         </tbody>
       </table>
 
       <div class="pagination">
-        <span>{{ total() }} entries total</span>
+        <span>{{ 'auditLog.pagination.total' | transloco: { count: total() } }}</span>
         <div class="pagination-btns">
-          <button [disabled]="offset() === 0" (click)="prevPage()">← Previous</button>
-          <button [disabled]="!hasMore()" (click)="nextPage()">Next →</button>
+          <button [disabled]="offset() === 0" (click)="prevPage()">{{ 'auditLog.pagination.prev' | transloco }}</button>
+          <button [disabled]="!hasMore()" (click)="nextPage()">{{ 'auditLog.pagination.next' | transloco }}</button>
         </div>
       </div>
     }
@@ -301,9 +302,9 @@ import { ApiService, type AuditLogEntry, type AuditLogParams, type Space } from 
     @if (selectedEntry()) {
       <div class="detail-overlay" (click)="selectedEntry.set(null)">
         <div class="detail-panel" (click)="$event.stopPropagation()">
-          <h3>Audit Entry Detail</h3>
+          <h3>{{ 'auditLog.detail.title' | transloco }}</h3>
           <pre>{{ selectedEntry() | json }}</pre>
-          <button class="detail-close" (click)="selectedEntry.set(null)">Close</button>
+          <button class="detail-close" (click)="selectedEntry.set(null)">{{ 'auditLog.detail.closeButton' | transloco }}</button>
         </div>
       </div>
     }

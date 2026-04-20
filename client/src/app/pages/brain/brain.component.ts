@@ -1,7 +1,6 @@
 import { Component, inject, signal, computed, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
 import { ApiService, Space, SpaceStats, Memory, Entity, Edge, ChronoEntry, ChronoType, ChronoStatus, QueryCollection, QueryResult, RecallResult, RecallKnowledgeType, SpaceMetaResponse, KnowledgeType, PropertySchema, FileMeta } from '../../core/api.service';
 import { GraphComponent } from '../graph/graph.component';
 import { FileManagerComponent } from '../files/file-manager.component';
@@ -11,6 +10,7 @@ import { PropertiesEditorComponent } from '../../shared/properties-editor.compon
 import { TagInputComponent } from '../../shared/tag-input.component';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { catchError, of } from 'rxjs';
+import { TranslocoPipe } from '@jsverse/transloco';
 
 type BrainTab = 'query' | 'graph' | 'files' | 'entities' | 'edges' | 'memories' | 'chrono' | 'filemeta';
 
@@ -22,7 +22,7 @@ interface SpaceView {
 @Component({
   selector: 'app-brain',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, GraphComponent, FileManagerComponent, EntitySearchComponent, PropertiesViewComponent, PropertiesEditorComponent, TagInputComponent, PhIconComponent],
+  imports: [CommonModule, FormsModule, GraphComponent, FileManagerComponent, EntitySearchComponent, PropertiesViewComponent, PropertiesEditorComponent, TagInputComponent, PhIconComponent, TranslocoPipe],
   styles: [`
     .space-tabs {
       display: flex;
@@ -116,39 +116,6 @@ interface SpaceView {
 
     .memory-item {
       padding: 14px 16px;
-      border: 1px solid var(--border-muted);
-      border-radius: var(--radius-md);
-      margin-bottom: 8px;
-      background: var(--bg-surface);
-      transition: border-color var(--transition);
-    }
-
-    .memory-item:hover { border-color: var(--border); }
-
-    .memory-content {
-      font-size: 13px;
-      color: var(--text-primary);
-      line-height: 1.6;
-      margin-bottom: 8px;
-    }
-
-    .memory-meta {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      flex-wrap: wrap;
-    }
-
-    .memory-meta time { font-size: 11px; color: var(--text-muted); }
-
-    .filter-bar {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin-bottom: 12px;
-      padding: 8px 12px;
-      border: 1px solid var(--border);
       border-radius: var(--radius-md);
       background: var(--bg-surface);
     }
@@ -478,12 +445,12 @@ interface SpaceView {
   `],
   template: `
     @if (loadingSpaces()) {
-      <div class="loading-overlay"><span class="spinner"></span> Loading spaces…</div>
+      <div class="loading-overlay"><span class="spinner"></span> {{ 'brain.loadingSpaces' | transloco }}</div>
     } @else if (spaces().length === 0) {
       <div class="empty-state">
         <div class="empty-state-icon"><ph-icon name="package" [size]="48"/></div>
-        <h3>No spaces yet</h3>
-        <p>Create a space in <a routerLink="/settings/spaces">Settings → Spaces</a>.</p>
+        <h3>{{ 'brain.emptySpaces.title' | transloco }}</h3>
+        <p>{{ 'brain.emptySpaces.body' | transloco }}</p>
       </div>
     } @else {
 
@@ -500,7 +467,7 @@ interface SpaceView {
             <span class="space-chip-label">{{ sv.space.label }}</span>
             <span class="space-chip-id">{{ sv.space.id }}</span>
             @if (sv.stats) {
-              <span class="space-chip-count">{{ spaceTotal(sv.stats) }} records</span>
+              <span class="space-chip-count">{{ spaceTotal(sv.stats) }} {{ 'brain.spaceChip.records' | transloco }}</span>
             }
           </button>
         }
@@ -508,10 +475,10 @@ interface SpaceView {
 
       @if (needsReindex()) {
         <div class="reindex-banner">
-          <span><ph-icon name="warning" [size]="16" style="display:inline-flex;vertical-align:middle;margin-right:4px;"/> Embeddings are stale — the embedding model has changed and this space needs reindexing.</span>
+          <span><ph-icon name="warning" [size]="16" style="display:inline-flex;vertical-align:middle;margin-right:4px;"/> {{ 'brain.reindex.stale' | transloco }}</span>
           <button class="btn btn-sm btn-primary" [disabled]="reindexing()" (click)="runReindex()">
             @if (reindexing()) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> }
-            Reindex now
+            {{ 'brain.reindex.button' | transloco }}
           </button>
           @if (reindexResult()) { <span class="reindex-result">{{ reindexResult() }}</span> }
         </div>
@@ -523,13 +490,13 @@ interface SpaceView {
       <!-- Sub-tabs: Query on left, collections on right -->
       <div class="tabs">
         <button class="tab" [class.active]="activeTab() === 'query'" (click)="setTab('query')">
-          <ph-icon name="magnifying-glass" [size]="15" style="display:inline-flex;vertical-align:middle;margin-right:4px;"/> Query
+          <ph-icon name="magnifying-glass" [size]="15" style="display:inline-flex;vertical-align:middle;margin-right:4px;"/> {{ 'brain.tab.query' | transloco }}
         </button>
         <button class="tab" [class.active]="activeTab() === 'graph'" (click)="setTab('graph')">
-          <ph-icon name="binoculars" [size]="15" style="display:inline-flex;vertical-align:middle;margin-right:4px;"/> Graph
+          <ph-icon name="binoculars" [size]="15" style="display:inline-flex;vertical-align:middle;margin-right:4px;"/> {{ 'brain.tab.graph' | transloco }}
         </button>
         <button class="tab" [class.active]="activeTab() === 'files'" (click)="setTab('files')">
-          <ph-icon name="folder" [size]="15" style="display:inline-flex;vertical-align:middle;margin-right:4px;"/> Files
+          <ph-icon name="folder" [size]="15" style="display:inline-flex;vertical-align:middle;margin-right:4px;"/> {{ 'brain.tab.files' | transloco }}
           @if (activeStats(); as s) {
             <span class="tab-count">{{ s.files }}</span>
           }
@@ -566,66 +533,67 @@ interface SpaceView {
         @if (activeTab() === 'memories') {
 
           <div class="content-header">
-            <input type="search" placeholder="Search memories…"
+            <input type="search"
+              [placeholder]="'brain.memories.searchPlaceholder' | transloco"
               [value]="memorySearch()"
               (input)="onMemorySearch($any($event.target).value)"
-              aria-label="Search memories" />
-            <div class="pill-group" title="Search mode">
-              <button [class.active]="memorySearchMode() === 'text'" (click)="setMemorySearchMode('text')">A–Z</button>
-              <button [class.active]="memorySearchMode() === 'semantic'" (click)="setMemorySearchMode('semantic')"><ph-icon name="star-four" [size]="14" style="display:inline-flex;vertical-align:middle;margin-right:3px;"/> Semantic</button>
+              [attr.aria-label]="'brain.memories.searchPlaceholder' | transloco" />
+            <div class="pill-group" [attr.title]="'common.searchMode.tooltip' | transloco">
+              <button [class.active]="memorySearchMode() === 'text'" (click)="setMemorySearchMode('text')">{{ 'common.sortAZ' | transloco }}</button>
+              <button [class.active]="memorySearchMode() === 'semantic'" (click)="setMemorySearchMode('semantic')"><ph-icon name="star-four" [size]="14" style="display:inline-flex;vertical-align:middle;margin-right:3px;"/> {{ 'common.semantic' | transloco }}</button>
             </div>
-            <button class="btn-primary btn btn-sm" (click)="openMemoryForm()" [disabled]="showMemoryForm()">+ Add memory</button>
+            <button class="btn-primary btn btn-sm" (click)="openMemoryForm()" [disabled]="showMemoryForm()">{{ 'brain.memories.addButton' | transloco }}</button>
           </div>
 
           <!-- Add memory form -->
           @if (showMemoryForm()) {
             <form class="create-form" (ngSubmit)="createMemory()">
               <div class="field" style="flex:2; min-width:200px;">
-                <label>Fact</label>
+                <label>{{ 'common.form.fact' | transloco }}</label>
                 <textarea [(ngModel)]="memoryForm.fact" name="fact" rows="2" required style="width:100%;"></textarea>
               </div>
               <div class="field" style="flex:1; min-width:180px;">
-                <label>Tags</label>
+                <label>{{ 'common.form.tags' | transloco }}</label>
                 <app-tag-input [(value)]="memoryForm.tags" [suggestions]="memoryTagSuggestions()" inputName="memFormTags" />
               </div>
               <div class="field" style="flex:1; min-width:140px;">
-                <label>Entities</label>
+                <label>{{ 'common.form.entities' | transloco }}</label>
                 <div class="flyout-wrap">
                   <div class="entity-multi">
                     @for (chip of entityChips(memoryForm.entityIds); track chip.id) {
                       <span class="chip" [title]="chip.id"><span class="chip-name">{{ chip.name }}</span><button type="button" class="chip-remove" (mousedown)="removeEntityId(memoryForm, chip.id)"><ph-icon name="x" [size]="12"/></button></span>
                     }
-                    <button type="button" class="chip-add" (click)="openFlyout('create-memory-entityIds')">+ Add…</button>
+                    <button type="button" class="chip-add" (click)="openFlyout('create-memory-entityIds')">{{ 'common.addMore' | transloco }}</button>
                   </div>
                   @if (flyoutField() === 'create-memory-entityIds') {
                     <div class="flyout-panel">
                       <app-entity-search
                         mode="picker"
                         [spaceId]="activeSpaceId()"
-                        placeholder="Search entities…"
+                        placeholder="common.searchEntitiesPlaceholder"
                         defaultMode="semantic"
                         (selected)="pickEntity($event, 'multi', 'create-memory-entityIds')"
                       />
                       <div style="display:flex; justify-content:flex-end; margin-top:8px;">
-                        <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">Done</button>
+                        <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">{{ 'common.done' | transloco }}</button>
                       </div>
                     </div>
                   }
                 </div>
               </div>
               <div class="field" style="flex:2; min-width:200px;">
-                <label>Short Description</label>
+                <label>{{ 'common.form.description' | transloco }}</label>
                 <input type="text" [(ngModel)]="memoryForm.description" name="description" />
               </div>
               <div class="field" style="flex:1; min-width:220px;">
-                <label>Properties</label>
+                <label>{{ 'common.form.properties' | transloco }}</label>
                 <app-properties-editor [schema]="memorySchema()" [required]="requiredProps(memorySchema())" [(value)]="memoryForm.properties" />
               </div>
               <button class="btn-primary btn btn-sm" type="submit" [disabled]="creatingMemory() || !memoryForm.fact.trim()">
                 @if (creatingMemory()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
-                Save
+                {{ 'common.save' | transloco }}
               </button>
-              <button class="btn-secondary btn btn-sm" type="button" (click)="showMemoryForm.set(false)">Cancel</button>
+              <button class="btn-secondary btn btn-sm" type="button" (click)="showMemoryForm.set(false)">{{ 'common.cancel' | transloco }}</button>
             </form>
           }
 
@@ -635,14 +603,14 @@ interface SpaceView {
 
           @if (filterTag() || filterEntity()) {
             <div class="filter-bar">
-              <span class="filter-bar-label">Filters</span>
+              <span class="filter-bar-label">{{ 'common.filters' | transloco }}</span>
               @if (filterTag(); as tag) {
-                <span class="filter-chip">tag: {{ tag }} <button aria-label="Clear tag filter" (click)="clearFilter('tag')"><ph-icon name="x" [size]="12"/></button></span>
+                <span class="filter-chip">{{ 'brain.filter.tagPrefix' | transloco }} {{ tag }} <button [attr.aria-label]="'brain.filter.clearTagAriaLabel' | transloco" (click)="clearFilter('tag')"><ph-icon name="x" [size]="12"/></button></span>
               }
               @if (filterEntity(); as ent) {
-                <span class="filter-chip">entity: {{ ent }} <button aria-label="Clear entity filter" (click)="clearFilter('entity')"><ph-icon name="x" [size]="12"/></button></span>
+                <span class="filter-chip">{{ 'brain.filter.entityPrefix' | transloco }} {{ ent }} <button [attr.aria-label]="'brain.filter.clearEntityAriaLabel' | transloco" (click)="clearFilter('entity')"><ph-icon name="x" [size]="12"/></button></span>
               }
-              <button class="btn-secondary btn btn-sm" (click)="clearFilter('all')">Clear all</button>
+              <button class="btn-secondary btn btn-sm" (click)="clearFilter('all')">{{ 'common.clearAll' | transloco }}</button>
             </div>
           }
 
@@ -650,7 +618,7 @@ interface SpaceView {
             <table>
               <thead>
                 <tr>
-                  <th>Fact</th><th>Description</th><th>Tags</th><th>Entities</th><th>Properties</th><th>Created</th><th></th>
+                  <th>{{ 'brain.memories.table.fact' | transloco }}</th><th>{{ 'brain.memories.table.description' | transloco }}</th><th>{{ 'brain.memories.table.tags' | transloco }}</th><th>{{ 'brain.memories.table.entities' | transloco }}</th><th>{{ 'brain.memories.table.properties' | transloco }}</th><th>{{ 'brain.memories.table.created' | transloco }}</th><th></th>
                 </tr>
               </thead>
               <tbody>
@@ -660,44 +628,44 @@ interface SpaceView {
                       <td colspan="7">
                         <div class="create-form" style="border:none; padding:8px 0;">
                           <div class="field" style="flex:2; min-width:200px; margin-bottom:0;">
-                            <label>Fact</label>
+                            <label>{{ 'common.form.fact' | transloco }}</label>
                             <textarea [(ngModel)]="editMemory.fact" name="editFact" rows="2" style="width:100%;"></textarea>
                           </div>
                           <div class="field" style="flex:1; min-width:160px; margin-bottom:0;">
-                            <label>Short Description</label>
+                            <label>{{ 'common.form.description' | transloco }}</label>
                             <input type="text" [(ngModel)]="editMemory.description" name="editDesc" />
                           </div>
                           <div class="field" style="flex:1; min-width:180px; margin-bottom:0;">
-                            <label>Tags</label>
+                            <label>{{ 'common.form.tags' | transloco }}</label>
                             <app-tag-input [(value)]="editMemory.tags" [suggestions]="memoryTagSuggestions()" inputName="memEditTags" />
                           </div>
                           <div class="field" style="flex:1; min-width:140px; margin-bottom:0;">
-                            <label>Entities</label>
+                            <label>{{ 'common.form.entities' | transloco }}</label>
                             <div class="flyout-wrap">
                               <div class="entity-multi">
                                 @for (chip of entityChips(editMemory.entityIds); track chip.id) {
                                   <span class="chip" [title]="chip.id"><span class="chip-name">{{ chip.name }}</span><button type="button" class="chip-remove" (mousedown)="removeEntityId(editMemory, chip.id)"><ph-icon name="x" [size]="12"/></button></span>
                                 }
-                                <button type="button" class="chip-add" (click)="openFlyout('edit-memory-entityIds')">+ Add…</button>
+                                <button type="button" class="chip-add" (click)="openFlyout('edit-memory-entityIds')">{{ 'common.addMore' | transloco }}</button>
                               </div>
                               @if (flyoutField() === 'edit-memory-entityIds') {
                                 <div class="flyout-panel">
                                   <app-entity-search
                                     mode="picker"
                                     [spaceId]="activeSpaceId()"
-                                    placeholder="Search entities…"
+                                    placeholder="common.searchEntitiesPlaceholder"
                                     defaultMode="semantic"
                                     (selected)="pickEntity($event, 'multi', 'edit-memory-entityIds')"
                                   />
                                   <div style="display:flex; justify-content:flex-end; margin-top:8px;">
-                                    <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">Done</button>
+                                    <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">{{ 'common.done' | transloco }}</button>
                                   </div>
                                 </div>
                               }
                             </div>
                           </div>
                           <div class="field" style="flex:1; min-width:220px; margin-bottom:0;">
-                            <label>Properties</label>
+                            <label>{{ 'common.form.properties' | transloco }}</label>
                             <app-properties-editor
                               [schema]="memorySchema()"
                               [required]="requiredProps(memorySchema())"
@@ -706,9 +674,9 @@ interface SpaceView {
                           </div>
                           <div style="display:flex; gap:6px; align-items:flex-end;">
                             <button class="btn btn-sm btn-primary" [disabled]="editSaving()" (click)="saveEditMemory(mem._id)">
-                              @if (editSaving()) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> } Save
+                              @if (editSaving()) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> } {{ 'common.save' | transloco }}
                             </button>
-                            <button class="btn btn-sm btn-secondary" (click)="cancelEdit()">Cancel</button>
+                            <button class="btn btn-sm btn-secondary" (click)="cancelEdit()">{{ 'common.cancel' | transloco }}</button>
                           </div>
                           @if (editError()) { <div style="font-size:12px; color:var(--error);">{{ editError() }}</div> }
                         </div>
@@ -736,15 +704,15 @@ interface SpaceView {
                       <td><app-properties-view [properties]="mem.properties" [schema]="memorySchema()" /></td>
                       <td style="color:var(--text-muted)">{{ mem.createdAt | date:'dd.MM.yyyy' }}</td>
                       <td style="white-space:nowrap;">
-                        <button class="icon-btn" title="View details" aria-label="View details" (click)="openDrawer('memory', mem)"><ph-icon name="eye" [size]="16"/></button>
+                        <button class="icon-btn" [attr.title]="'common.viewDetails' | transloco" [attr.aria-label]="'common.viewDetails' | transloco" (click)="openDrawer('memory', mem)"><ph-icon name="eye" [size]="16"/></button>
                         @if (confirmDeleteId() === mem._id) {
                           <span class="inline-confirm">
-                            Delete?
-                            <button class="btn btn-sm btn-danger" (click)="deleteMemory(mem._id)">Yes</button>
-                            <button class="btn btn-sm btn-secondary" (click)="cancelDelete()">No</button>
+                            {{ 'common.deleteConfirm' | transloco }}
+                            <button class="btn btn-sm btn-danger" (click)="deleteMemory(mem._id)">{{ 'common.yes' | transloco }}</button>
+                            <button class="btn btn-sm btn-secondary" (click)="cancelDelete()">{{ 'common.no' | transloco }}</button>
                           </span>
                         } @else {
-                          <button class="icon-btn danger" title="Delete memory" aria-label="Delete memory" (click)="requestDelete(mem._id)"><ph-icon name="x" [size]="16"/></button>
+                          <button class="icon-btn danger" [attr.title]="'brain.memories.deleteTitle' | transloco" [attr.aria-label]="'brain.memories.deleteAriaLabel' | transloco" (click)="requestDelete(mem._id)"><ph-icon name="x" [size]="16"/></button>
                         }
                       </td>
                     </tr>
@@ -754,11 +722,11 @@ interface SpaceView {
                     <div class="empty-state" style="padding:32px">
                       <div class="empty-state-icon"><ph-icon name="brain" [size]="48"/></div>
                       @if (memorySearch() && memories().length) {
-                        <h3>No matches</h3>
-                        <p>No memories on this page match &ldquo;{{ memorySearch() }}&rdquo;.</p>
+                        <h3>{{ 'common.noMatches' | transloco }}</h3>
+                        <p>{{ 'brain.memories.empty.noMatchQuery' | transloco: { query: memorySearch() } }}</p>
                       } @else {
-                        <h3>No memories</h3>
-                        <p>Memories will appear here once written by an MCP client.</p>
+                        <h3>{{ 'brain.memories.empty.title' | transloco }}</h3>
+                        <p>{{ 'brain.memories.empty.body' | transloco }}</p>
                       }
                     </div>
                   </td></tr>
@@ -768,9 +736,9 @@ interface SpaceView {
           </div>
           @if (memorySearchMode() !== 'semantic') {
             <div class="pagination">
-              <button class="btn btn-sm btn-secondary" [disabled]="skip() === 0" (click)="prevPage()"><ph-icon name="arrow-left" [size]="14" style="display:inline-flex;vertical-align:middle;"/> Prev</button>
+              <button class="btn btn-sm btn-secondary" [disabled]="skip() === 0" (click)="prevPage()"><ph-icon name="arrow-left" [size]="14" style="display:inline-flex;vertical-align:middle;"/> {{ 'common.prev' | transloco }}</button>
               <span class="pager-info">{{ filteredMemories().length ? (skip() + 1) + '–' + (skip() + filteredMemories().length) : '–' }}</span>
-              <button class="btn btn-sm btn-secondary" [disabled]="memories().length < pageSize" (click)="nextPage()">Next <ph-icon name="arrow-right" [size]="14" style="display:inline-flex;vertical-align:middle;"/></button>
+              <button class="btn btn-sm btn-secondary" [disabled]="memories().length < pageSize" (click)="nextPage()">{{ 'common.next' | transloco }} <ph-icon name="arrow-right" [size]="14" style="display:inline-flex;vertical-align:middle;"/></button>
             </div>
           }
         }
@@ -782,19 +750,19 @@ interface SpaceView {
             <app-entity-search
               mode="bar"
               [spaceId]="activeSpaceId()"
-              placeholder="Search entities…"
+              placeholder="common.searchEntitiesPlaceholder"
               defaultMode="semantic"
               (queryChange)="onEntitySearchChange($event)"
               (cleared)="onEntitySearchClear()"
               (selected)="onEntitySearchPick($event)"
             />
-            <button class="btn-primary btn btn-sm" (click)="openEntityForm()" [disabled]="showEntityForm()">+ Add entity</button>
+            <button class="btn-primary btn btn-sm" (click)="openEntityForm()" [disabled]="showEntityForm()">{{ 'brain.entities.addButton' | transloco }}</button>
           </div>
 
           @if (showEntityForm()) {
             <form class="create-form" (ngSubmit)="createEntity()">
               <div class="field" style="flex:1; min-width:140px;">
-                <label>Name</label>
+                <label>{{ 'brain.entities.table.name' | transloco }}</label>
                 <input type="text" [(ngModel)]="entityForm.name" name="name" required />
               </div>
               <div class="field" style="width:140px;">
@@ -806,19 +774,19 @@ interface SpaceView {
                     }
                   </select>
                 } @else {
-                  <input type="text" [(ngModel)]="entityForm.type" name="type" placeholder="optional" />
+                  <input type="text" [(ngModel)]="entityForm.type" name="type" [placeholder]="'brain.entities.form.typePlaceholder' | transloco" />
                 }
               </div>
               <div class="field" style="flex:1; min-width:180px;">
-                <label>Tags</label>
+                <label>{{ 'brain.entities.table.tags' | transloco }}</label>
                 <app-tag-input [(value)]="entityForm.tags" [suggestions]="entityTagSuggestions()" inputName="entFormTags" />
               </div>
               <div class="field" style="flex:1; min-width:200px;">
-                <label>Short Description</label>
+                <label>{{ 'brain.entities.table.description' | transloco }}</label>
                 <input type="text" [(ngModel)]="entityForm.description" name="description" />
               </div>
               <div class="field" style="flex:1; min-width:220px;">
-                <label>Properties</label>
+                <label>{{ 'brain.entities.table.properties' | transloco }}</label>
                 <app-properties-editor
                   [schema]="entitySchema(entityForm.type)"
                   [required]="requiredProps(entitySchema(entityForm.type))"
@@ -827,9 +795,9 @@ interface SpaceView {
               </div>
               <button class="btn-primary btn btn-sm" type="submit" [disabled]="creatingEntity() || !entityForm.name.trim() || (entityTypeNames().length ? !entityForm.type : false)">
                 @if (creatingEntity()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
-                Save
+                {{ 'common.save' | transloco }}
               </button>
-              <button class="btn-secondary btn btn-sm" type="button" (click)="showEntityForm.set(false)">Cancel</button>
+              <button class="btn-secondary btn btn-sm" type="button" (click)="showEntityForm.set(false)">{{ 'common.cancel' | transloco }}</button>
             </form>
           }
 
@@ -841,7 +809,7 @@ interface SpaceView {
             <table>
               <thead>
                 <tr>
-                  <th>Name</th><th>Type</th><th>Description</th><th>Tags</th><th>Properties</th><th>Created</th><th></th>
+                  <th>{{ 'brain.entities.table.name' | transloco }}</th><th>{{ 'brain.entities.table.type' | transloco }}</th><th>{{ 'brain.entities.table.description' | transloco }}</th><th>{{ 'brain.entities.table.tags' | transloco }}</th><th>{{ 'brain.entities.table.properties' | transloco }}</th><th>{{ 'brain.entities.table.created' | transloco }}</th><th></th>
                 </tr>
               </thead>
               <tbody>
@@ -851,7 +819,7 @@ interface SpaceView {
                       <td colspan="7">
                         <div class="create-form" style="border:none; padding:8px 0;">
                           <div class="field" style="flex:1; min-width:120px; margin-bottom:0;">
-                            <label>Name</label>
+                            <label>{{ 'brain.entities.table.name' | transloco }}</label>
                             <input type="text" [(ngModel)]="editEntity.name" name="editEntName" />
                           </div>
                           <div class="field" style="width:120px; margin-bottom:0;">
@@ -867,15 +835,15 @@ interface SpaceView {
                             }
                           </div>
                           <div class="field" style="flex:1; min-width:160px; margin-bottom:0;">
-                            <label>Short Description</label>
+                            <label>{{ 'brain.entities.table.description' | transloco }}</label>
                             <input type="text" [(ngModel)]="editEntity.description" name="editEntDesc" />
                           </div>
                           <div class="field" style="flex:1; min-width:180px; margin-bottom:0;">
-                            <label>Tags</label>
+                            <label>{{ 'brain.entities.table.tags' | transloco }}</label>
                             <app-tag-input [(value)]="editEntity.tags" [suggestions]="entityTagSuggestions()" inputName="entEditTags" />
                           </div>
                           <div class="field" style="flex:1; min-width:220px; margin-bottom:0;">
-                            <label>Properties</label>
+                            <label>{{ 'brain.entities.table.properties' | transloco }}</label>
                             <app-properties-editor
                               [schema]="entitySchema(editEntity.type)"
                               [required]="requiredProps(entitySchema(editEntity.type))"
@@ -886,7 +854,7 @@ interface SpaceView {
                             <button class="btn btn-sm btn-primary" [disabled]="editSaving()" (click)="saveEditEntity(ent._id)">
                               @if (editSaving()) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> } Save
                             </button>
-                            <button class="btn btn-sm btn-secondary" (click)="cancelEdit()">Cancel</button>
+                            <button class="btn btn-sm btn-secondary" (click)="cancelEdit()">{{ 'common.cancel' | transloco }}</button>
                           </div>
                           @if (editError()) { <div style="font-size:12px; color:var(--error);">{{ editError() }}</div> }
                         </div>
@@ -908,15 +876,15 @@ interface SpaceView {
                       <td><app-properties-view [properties]="ent.properties" [schema]="entitySchema(ent.type)" /></td>
                       <td style="color:var(--text-muted)">{{ ent.createdAt | date:'dd.MM.yyyy' }}</td>
                       <td style="white-space:nowrap;">
-                        <button class="icon-btn" title="View details" aria-label="View details" (click)="openDrawer('entity', ent)"><ph-icon name="eye" [size]="16"/></button>
+                        <button class="icon-btn" [attr.title]="'common.viewDetails' | transloco" [attr.aria-label]="'common.viewDetails' | transloco" (click)="openDrawer('entity', ent)"><ph-icon name="eye" [size]="16"/></button>
                         @if (confirmDeleteId() === ent._id) {
                           <span class="inline-confirm">
                             Delete?
-                            <button class="btn btn-sm btn-danger" (click)="deleteEntity(ent._id)">Yes</button>
-                            <button class="btn btn-sm btn-secondary" (click)="cancelDelete()">No</button>
+                            <button class="btn btn-sm btn-danger" (click)="deleteEntity(ent._id)">{{ 'common.yes' | transloco }}</button>
+                            <button class="btn btn-sm btn-secondary" (click)="cancelDelete()">{{ 'common.no' | transloco }}</button>
                           </span>
                         } @else {
-                          <button class="icon-btn danger" aria-label="Delete entity" (click)="requestDelete(ent._id)"><ph-icon name="x" [size]="16"/></button>
+                          <button class="icon-btn danger" [attr.aria-label]="'brain.entities.deleteAriaLabel' | transloco" (click)="requestDelete(ent._id)"><ph-icon name="x" [size]="16"/></button>
                         }
                       </td>
                     </tr>
@@ -925,7 +893,7 @@ interface SpaceView {
                   <tr><td colspan="7">
                     <div class="empty-state" style="padding:32px">
                       <div class="empty-state-icon"><ph-icon name="tag" [size]="48"/></div>
-                      <h3>No entities</h3>
+                      <h3>{{ 'brain.entities.empty.title' | transloco }}</h3>
                     </div>
                   </td></tr>
                 }
@@ -933,9 +901,9 @@ interface SpaceView {
             </table>
           </div>
           <div class="pagination">
-            <button class="btn btn-sm btn-secondary" [disabled]="entitySkip() === 0" (click)="prevEntityPage()"><ph-icon name="arrow-left" [size]="14" style="display:inline-flex;vertical-align:middle;"/> Prev</button>
+            <button class="btn btn-sm btn-secondary" [disabled]="entitySkip() === 0" (click)="prevEntityPage()"><ph-icon name="arrow-left" [size]="14" style="display:inline-flex;vertical-align:middle;"/> {{ 'common.prev' | transloco }}</button>
             <span class="pager-info">{{ entities().length ? (entitySkip() + 1) + '–' + (entitySkip() + entities().length) : '–' }}</span>
-            <button class="btn btn-sm btn-secondary" [disabled]="entities().length < pageSize" (click)="nextEntityPage()">Next <ph-icon name="arrow-right" [size]="14" style="display:inline-flex;vertical-align:middle;"/></button>
+            <button class="btn btn-sm btn-secondary" [disabled]="entities().length < pageSize" (click)="nextEntityPage()">{{ 'common.next' | transloco }} <ph-icon name="arrow-right" [size]="14" style="display:inline-flex;vertical-align:middle;"/></button>
           </div>
         }
 
@@ -943,32 +911,32 @@ interface SpaceView {
         @if (activeTab() === 'edges') {
 
           <div class="content-header">
-            <input type="search" placeholder="Search edges…"
+            <input type="search" [placeholder]="'brain.edges.searchPlaceholder' | transloco"
               [value]="edgeSearch()"
               (input)="onEdgeSearch($any($event.target).value)"
-              aria-label="Search edges" />
-            <div class="pill-group" title="Search mode">
-              <button [class.active]="edgeSearchMode() === 'text'" (click)="setEdgeSearchMode('text')">A–Z</button>
-              <button [class.active]="edgeSearchMode() === 'semantic'" (click)="setEdgeSearchMode('semantic')"><ph-icon name="star-four" [size]="14" style="display:inline-flex;vertical-align:middle;margin-right:3px;"/> Semantic</button>
+              [attr.aria-label]="'brain.edges.searchPlaceholder' | transloco" />
+            <div class="pill-group" [attr.title]="'common.searchMode.tooltip' | transloco">
+              <button [class.active]="edgeSearchMode() === 'text'" (click)="setEdgeSearchMode('text')">{{ 'common.sortAZ' | transloco }}</button>
+              <button [class.active]="edgeSearchMode() === 'semantic'" (click)="setEdgeSearchMode('semantic')"><ph-icon name="star-four" [size]="14" style="display:inline-flex;vertical-align:middle;margin-right:3px;"/> {{ 'common.semantic' | transloco }}</button>
             </div>
-            <button class="btn-primary btn btn-sm" (click)="openEdgeForm()" [disabled]="showEdgeForm()">+ Add edge</button>
+            <button class="btn-primary btn btn-sm" (click)="openEdgeForm()" [disabled]="showEdgeForm()">{{ 'brain.edges.addButton' | transloco }}</button>
           </div>
 
           @if (showEdgeForm()) {
             <form class="create-form" (ngSubmit)="createEdge()">
               <div class="field" style="flex:1; min-width:120px;">
-                <label>From</label>
+                <label>{{ 'common.form.from' | transloco }}</label>
                 <app-entity-search
                   mode="picker"
                   [spaceId]="activeSpaceId()"
-                  placeholder="Search entity…"
+                  placeholder="common.searchEntitiesPlaceholder"
                   defaultMode="semantic"
                   [value]="edgeForm.fromDisplay"
                   (selected)="pickEntity($event, 'single', 'create-edge-from')"
                 />
               </div>
               <div class="field" style="flex:1; min-width:120px;">
-                <label>Label (relation) <span style="color:var(--error)">*</span></label>
+                <label>{{ 'brain.edges.form.relation' | transloco }} <span style="color:var(--error)">*</span></label>
                 @if (edgeLabelNames().length) {
                   <select [(ngModel)]="edgeForm.label" name="label" required>
                     @for (l of edgeLabelNames(); track l) {
@@ -980,30 +948,30 @@ interface SpaceView {
                 }
               </div>
               <div class="field" style="flex:1; min-width:120px;">
-                <label>To</label>
+                <label>{{ 'common.form.to' | transloco }}</label>
                 <app-entity-search
                   mode="picker"
                   [spaceId]="activeSpaceId()"
-                  placeholder="Search entity…"
+                  placeholder="common.searchEntitiesPlaceholder"
                   defaultMode="semantic"
                   [value]="edgeForm.toDisplay"
                   (selected)="pickEntity($event, 'single', 'create-edge-to')"
                 />
               </div>
               <div class="field" style="width:80px;">
-                <label>Weight</label>
+                <label>{{ 'common.form.weight' | transloco }}</label>
                 <input type="number" [(ngModel)]="edgeForm.weight" name="weight" step="0.1" />
               </div>
               <div class="field" style="flex:1; min-width:180px;">
-                <label>Tags</label>
+                <label>{{ 'brain.edges.table.tags' | transloco }}</label>
                 <app-tag-input [(value)]="edgeForm.tags" [suggestions]="edgeTagSuggestions()" inputName="edgeFormTags" />
               </div>
               <div class="field" style="flex:2; min-width:200px;">
-                <label>Short Description</label>
+                <label>{{ 'brain.edges.table.description' | transloco }}</label>
                 <input type="text" [(ngModel)]="edgeForm.description" name="description" />
               </div>
               <div class="field" style="flex:1; min-width:220px;">
-                <label>Properties</label>
+                <label>{{ 'brain.edges.table.properties' | transloco }}</label>
                 <app-properties-editor
                   [schema]="edgeSchema(edgeForm.label)"
                   [required]="requiredProps(edgeSchema(edgeForm.label))"
@@ -1012,9 +980,9 @@ interface SpaceView {
               </div>
               <button class="btn-primary btn btn-sm" type="submit" [disabled]="creatingEdge() || !edgeForm.from.trim() || !edgeForm.to.trim() || !edgeForm.label.trim()">
                 @if (creatingEdge()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
-                Save
+                {{ 'common.save' | transloco }}
               </button>
-              <button class="btn-secondary btn btn-sm" type="button" (click)="showEdgeForm.set(false)">Cancel</button>
+              <button class="btn-secondary btn btn-sm" type="button" (click)="showEdgeForm.set(false)">{{ 'common.cancel' | transloco }}</button>
             </form>
           }
 
@@ -1025,7 +993,7 @@ interface SpaceView {
             <table>
               <thead>
                 <tr>
-                  <th>From</th><th>Relation</th><th>To</th><th>Weight</th><th>Tags</th><th>Description</th><th>Properties</th><th>Created</th><th></th>
+                  <th>{{ 'brain.edges.table.from' | transloco }}</th><th>{{ 'brain.edges.table.relation' | transloco }}</th><th>{{ 'brain.edges.table.to' | transloco }}</th><th>{{ 'brain.edges.table.weight' | transloco }}</th><th>{{ 'brain.edges.table.tags' | transloco }}</th><th>{{ 'brain.edges.table.description' | transloco }}</th><th>{{ 'brain.edges.table.properties' | transloco }}</th><th>{{ 'brain.edges.table.created' | transloco }}</th><th></th>
                 </tr>
               </thead>
               <tbody>
@@ -1035,13 +1003,13 @@ interface SpaceView {
                       <td colspan="9">
                         <div class="create-form" style="border:none; padding:8px 0;">
                           <div class="field" style="min-width:200px; margin-bottom:0;">
-                            <label style="font-size:11px; color:var(--text-muted);">Editing edge</label>
+                            <label style="font-size:11px; color:var(--text-muted);">{{ 'brain.edges.form.editingLabel' | transloco }}</label>
                             <div style="font-size:12px; padding:6px 8px; background:var(--bg-secondary); border-radius:4px; color:var(--text-muted);">
                               {{ editEdge.fromName || editEdge.from }} → {{ editEdge.toName || editEdge.to }}
                             </div>
                           </div>
                           <div class="field" style="flex:1; min-width:120px; margin-bottom:0;">
-                            <label>Label (relation)</label>
+                            <label>{{ 'brain.edges.form.relation' | transloco }}</label>
                             @if (edgeLabelNames().length) {
                               <select [(ngModel)]="editEdge.label" name="editEdgeLabel">
                                 @for (l of edgeLabelNames(); track l) {
@@ -1053,19 +1021,19 @@ interface SpaceView {
                             }
                           </div>
                           <div class="field" style="width:80px; margin-bottom:0;">
-                            <label>Weight</label>
+                            <label>{{ 'common.form.weight' | transloco }}</label>
                             <input type="number" [(ngModel)]="editEdge.weight" name="editEdgeWeight" step="0.1" />
                           </div>
                           <div class="field" style="flex:1; min-width:160px; margin-bottom:0;">
-                            <label>Short Description</label>
+                            <label>{{ 'brain.edges.table.description' | transloco }}</label>
                             <input type="text" [(ngModel)]="editEdge.description" name="editEdgeDesc" />
                           </div>
                           <div class="field" style="flex:1; min-width:180px; margin-bottom:0;">
-                            <label>Tags</label>
+                            <label>{{ 'brain.edges.table.tags' | transloco }}</label>
                             <app-tag-input [(value)]="editEdge.tags" [suggestions]="edgeTagSuggestions()" inputName="edgeEditTags" />
                           </div>
                           <div class="field" style="flex:1; min-width:220px; margin-bottom:0;">
-                            <label>Properties</label>
+                            <label>{{ 'brain.edges.table.properties' | transloco }}</label>
                             <app-properties-editor
                               [schema]="edgeSchema(editEdge.label)"
                               [required]="requiredProps(edgeSchema(editEdge.label))"
@@ -1074,9 +1042,9 @@ interface SpaceView {
                           </div>
                           <div style="display:flex; gap:6px; align-items:flex-end;">
                             <button class="btn btn-sm btn-primary" [disabled]="editSaving()" (click)="saveEditEdge(edge._id)">
-                              @if (editSaving()) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> } Save
+                              @if (editSaving()) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> } {{ 'common.save' | transloco }}
                             </button>
-                            <button class="btn btn-sm btn-secondary" (click)="cancelEdit()">Cancel</button>
+                            <button class="btn btn-sm btn-secondary" (click)="cancelEdit()">{{ 'common.cancel' | transloco }}</button>
                           </div>
                           @if (editError()) { <div style="font-size:12px; color:var(--error);">{{ editError() }}</div> }
                         </div>
@@ -1098,15 +1066,15 @@ interface SpaceView {
                       <td><app-properties-view [properties]="edge.properties" [schema]="edgeSchema(edge.label)" /></td>
                       <td style="color:var(--text-muted); white-space:nowrap;">{{ edge.createdAt | date:'dd.MM.yyyy' }}</td>
                       <td style="white-space:nowrap;">
-                        <button class="icon-btn" title="View details" aria-label="View details" (click)="openDrawer('edge', edge)"><ph-icon name="eye" [size]="16"/></button>
+                        <button class="icon-btn" [attr.title]="'common.viewDetails' | transloco" [attr.aria-label]="'common.viewDetails' | transloco" (click)="openDrawer('edge', edge)"><ph-icon name="eye" [size]="16"/></button>
                         @if (confirmDeleteId() === edge._id) {
                           <span class="inline-confirm">
-                            Delete?
-                            <button class="btn btn-sm btn-danger" (click)="deleteEdge(edge._id)">Yes</button>
-                            <button class="btn btn-sm btn-secondary" (click)="cancelDelete()">No</button>
+                            {{ 'common.deleteConfirm' | transloco }}
+                            <button class="btn btn-sm btn-danger" (click)="deleteEdge(edge._id)">{{ 'common.yes' | transloco }}</button>
+                            <button class="btn btn-sm btn-secondary" (click)="cancelDelete()">{{ 'common.no' | transloco }}</button>
                           </span>
                         } @else {
-                          <button class="icon-btn danger" aria-label="Delete edge" (click)="requestDelete(edge._id)"><ph-icon name="x" [size]="16"/></button>
+                          <button class="icon-btn danger" [attr.aria-label]="'brain.edges.deleteAriaLabel' | transloco" (click)="requestDelete(edge._id)"><ph-icon name="x" [size]="16"/></button>
                         }
                       </td>
                     </tr>
@@ -1116,10 +1084,10 @@ interface SpaceView {
                     <div class="empty-state" style="padding:32px">
                       <div class="empty-state-icon"><ph-icon name="graph" [size]="48"/></div>
                       @if (edgeSearch() && edges().length) {
-                        <h3>No matches</h3>
-                        <p>No edges on this page match &ldquo;{{ edgeSearch() }}&rdquo;.</p>
+                        <h3>{{ 'common.noMatches' | transloco }}</h3>
+                        <p>{{ 'brain.edges.empty.noMatchQuery' | transloco: { query: edgeSearch() } }}</p>
                       } @else {
-                        <h3>No edges</h3>
+                        <h3>{{ 'brain.edges.empty.title' | transloco }}</h3>
                       }
                     </div>
                   </td></tr>
@@ -1129,9 +1097,9 @@ interface SpaceView {
           </div>
           @if (edgeSearchMode() !== 'semantic') {
             <div class="pagination">
-              <button class="btn btn-sm btn-secondary" [disabled]="edgeSkip() === 0" (click)="prevEdgePage()"><ph-icon name="arrow-left" [size]="14" style="display:inline-flex;vertical-align:middle;"/> Prev</button>
+              <button class="btn btn-sm btn-secondary" [disabled]="edgeSkip() === 0" (click)="prevEdgePage()"><ph-icon name="arrow-left" [size]="14" style="display:inline-flex;vertical-align:middle;"/> {{ 'common.prev' | transloco }}</button>
               <span class="pager-info">{{ filteredEdges().length ? (edgeSkip() + 1) + '–' + (edgeSkip() + filteredEdges().length) : '–' }}</span>
-              <button class="btn btn-sm btn-secondary" [disabled]="edges().length < pageSize" (click)="nextEdgePage()">Next <ph-icon name="arrow-right" [size]="14" style="display:inline-flex;vertical-align:middle;"/></button>
+              <button class="btn btn-sm btn-secondary" [disabled]="edges().length < pageSize" (click)="nextEdgePage()">{{ 'common.next' | transloco }} <ph-icon name="arrow-right" [size]="14" style="display:inline-flex;vertical-align:middle;"/></button>
             </div>
           }
         }
@@ -1140,73 +1108,73 @@ interface SpaceView {
         @if (activeTab() === 'chrono') {
 
           <div class="content-header">
-            <input type="search" placeholder="Search timeline…"
+            <input type="search" [placeholder]="'brain.chrono.searchPlaceholder' | transloco"
               [value]="chronoSearch()"
               (input)="onChronoSearch($any($event.target).value)"
-              aria-label="Search timeline" />
-            <div class="pill-group" title="Search mode">
-              <button [class.active]="chronoSearchMode() === 'text'" (click)="setChronoSearchMode('text')">A–Z</button>
-              <button [class.active]="chronoSearchMode() === 'semantic'" (click)="setChronoSearchMode('semantic')"><ph-icon name="star-four" [size]="14" style="display:inline-flex;vertical-align:middle;margin-right:3px;"/> Semantic</button>
+              [attr.aria-label]="'brain.chrono.searchPlaceholder' | transloco" />
+            <div class="pill-group" [attr.title]="'common.searchMode.tooltip' | transloco">
+              <button [class.active]="chronoSearchMode() === 'text'" (click)="setChronoSearchMode('text')">{{ 'common.sortAZ' | transloco }}</button>
+              <button [class.active]="chronoSearchMode() === 'semantic'" (click)="setChronoSearchMode('semantic')"><ph-icon name="star-four" [size]="14" style="display:inline-flex;vertical-align:middle;margin-right:3px;"/> {{ 'common.semantic' | transloco }}</button>
             </div>
-            <button class="btn-primary btn btn-sm" (click)="openChronoForm()" [disabled]="showChronoForm()">+ Add entry</button>
+            <button class="btn-primary btn btn-sm" (click)="openChronoForm()" [disabled]="showChronoForm()">{{ 'brain.chrono.addButton' | transloco }}</button>
           </div>
 
           @if (showChronoForm()) {
             <form class="create-form" (ngSubmit)="createChrono()">
               <div class="field" style="flex:2; min-width:200px;">
-                <label>Title</label>
+                <label>{{ 'common.form.title' | transloco }}</label>
                 <input type="text" [(ngModel)]="chronoForm.title" name="title" required />
               </div>
               <div class="field" style="width:160px;">
-                <label>Kind</label>
+                <label>{{ 'brain.chrono.form.kind' | transloco }}</label>
                 @if (chronoForm.kind !== '__custom__') {
                   <select [(ngModel)]="chronoForm.kind" name="kind">
                     @for (k of chronoKinds; track k) { <option [value]="k">{{ k }}</option> }
-                    <option value="__custom__">Custom…</option>
+                    <option value="__custom__">{{ 'brain.chrono.form.customKind' | transloco }}</option>
                   </select>
                 } @else {
                   <div style="display:flex; gap:4px;">
                     <input type="text" [(ngModel)]="chronoForm.customKind" name="customKind" style="flex:1;" />
-                    <button type="button" class="btn-secondary btn btn-sm" style="padding:4px 8px;" (click)="chronoForm.kind = 'event'; chronoForm.customKind = ''" title="Back to presets"><ph-icon name="x" [size]="14"/></button>
+                    <button type="button" class="btn-secondary btn btn-sm" style="padding:4px 8px;" (click)="chronoForm.kind = 'event'; chronoForm.customKind = ''" [attr.title]="'brain.chrono.form.backToPresets' | transloco"><ph-icon name="x" [size]="14"/></button>
                   </div>
                 }
               </div>
               <div class="field" style="width:200px;">
-                <label>Starts at</label>
+                <label>{{ 'brain.chrono.form.startsAt' | transloco }}</label>
                 <input type="datetime-local" [(ngModel)]="chronoForm.startsAt" name="startsAt" required />
               </div>
               <div class="field" style="width:200px;">
-                <label>Ends at (optional)</label>
+                <label>{{ 'brain.chrono.form.endsAt' | transloco }}</label>
                 <input type="datetime-local" [(ngModel)]="chronoForm.endsAt" name="endsAt" />
               </div>
               <div class="field" style="flex:1; min-width:200px;">
-                <label>Short Description</label>
+                <label>{{ 'brain.chrono.table.description' | transloco }}</label>
                 <textarea [(ngModel)]="chronoForm.description" name="description" rows="3" style="resize:vertical;"></textarea>
               </div>
               <div class="field" style="flex:1; min-width:180px;">
-                <label>Tags</label>
+                <label>{{ 'brain.chrono.table.tags' | transloco }}</label>
                 <app-tag-input [(value)]="chronoForm.tags" [suggestions]="chronoTagSuggestions()" inputName="chronoFormTags" />
               </div>
               <div class="field" style="flex:1; min-width:140px;">
-                <label>Entities</label>
+                <label>{{ 'brain.chrono.table.entities' | transloco }}</label>
                 <div class="flyout-wrap">
                   <div class="entity-multi">
                     @for (chip of entityChips(chronoForm.entityIds); track chip.id) {
                       <span class="chip" [title]="chip.id"><span class="chip-name">{{ chip.name }}</span><button type="button" class="chip-remove" (mousedown)="removeEntityId(chronoForm, chip.id)"><ph-icon name="x" [size]="12"/></button></span>
                     }
-                    <button type="button" class="chip-add" (click)="openFlyout('create-chrono-entityIds')">+ Add…</button>
+                    <button type="button" class="chip-add" (click)="openFlyout('create-chrono-entityIds')">{{ 'common.addMore' | transloco }}</button>
                   </div>
                   @if (flyoutField() === 'create-chrono-entityIds') {
                     <div class="flyout-panel">
                       <app-entity-search
                         mode="picker"
                         [spaceId]="activeSpaceId()"
-                        placeholder="Search entities…"
+                        placeholder="common.searchEntitiesPlaceholder"
                         defaultMode="semantic"
                         (selected)="pickEntity($event, 'multi', 'create-chrono-entityIds')"
                       />
                       <div style="display:flex; justify-content:flex-end; margin-top:8px;">
-                        <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">Done</button>
+                        <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">{{ 'common.done' | transloco }}</button>
                       </div>
                     </div>
                   }
@@ -1214,9 +1182,9 @@ interface SpaceView {
               </div>
               <button class="btn-primary btn btn-sm" type="submit" [disabled]="creatingChrono() || !chronoForm.title.trim() || !chronoForm.startsAt || (chronoForm.kind === '__custom__' && !chronoForm.customKind.trim())">
                 @if (creatingChrono()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
-                Save
+                {{ 'common.save' | transloco }}
               </button>
-              <button class="btn-secondary btn btn-sm" type="button" (click)="showChronoForm.set(false)">Cancel</button>
+              <button class="btn-secondary btn btn-sm" type="button" (click)="showChronoForm.set(false)">{{ 'common.cancel' | transloco }}</button>
             </form>
           }
 
@@ -1230,7 +1198,7 @@ interface SpaceView {
             <table>
               <thead>
                 <tr>
-                  <th>Title</th><th>Description</th><th>Kind</th><th>Status</th><th>Starts</th><th>Ends</th><th>Tags</th><th>Entities</th><th></th>
+                  <th>{{ 'brain.chrono.table.title' | transloco }}</th><th>{{ 'brain.chrono.table.description' | transloco }}</th><th>{{ 'brain.chrono.table.kind' | transloco }}</th><th>{{ 'brain.chrono.table.status' | transloco }}</th><th>{{ 'brain.chrono.table.starts' | transloco }}</th><th>{{ 'brain.chrono.table.ends' | transloco }}</th><th>{{ 'brain.chrono.table.tags' | transloco }}</th><th>{{ 'brain.chrono.table.entities' | transloco }}</th><th></th>
                 </tr>
               </thead>
               <tbody>
@@ -1240,57 +1208,57 @@ interface SpaceView {
                       <td colspan="9">
                         <div class="create-form" style="border:none; padding:8px 0;">
                           <div class="field" style="flex:2; min-width:180px; margin-bottom:0;">
-                            <label>Title</label>
+                            <label>{{ 'common.form.title' | transloco }}</label>
                             <input type="text" [(ngModel)]="editChrono.title" name="editChronoTitle" />
                           </div>
                           <div class="field" style="width:130px; margin-bottom:0;">
-                            <label>Kind</label>
+                            <label>{{ 'brain.chrono.form.kind' | transloco }}</label>
                             <select [(ngModel)]="editChrono.kind" name="editChronoKind">
                               @for (k of chronoKinds; track k) { <option [value]="k">{{ k }}</option> }
                             </select>
                           </div>
                           <div class="field" style="width:130px; margin-bottom:0;">
-                            <label>Status</label>
+                            <label>{{ 'brain.chrono.table.status' | transloco }}</label>
                             <select [(ngModel)]="editChrono.status" name="editChronoStatus">
                               @for (s of chronoStatusOptions; track s) { <option [value]="s">{{ s }}</option> }
                             </select>
                           </div>
                           <div class="field" style="width:190px; margin-bottom:0;">
-                            <label>Starts at</label>
+                            <label>{{ 'brain.chrono.form.startsAt' | transloco }}</label>
                             <input type="datetime-local" [(ngModel)]="editChrono.startsAt" name="editChronoStarts" />
                           </div>
                           <div class="field" style="width:190px; margin-bottom:0;">
-                            <label>Ends at</label>
+                            <label>{{ 'common.form.endsAt' | transloco }}</label>
                             <input type="datetime-local" [(ngModel)]="editChrono.endsAt" name="editChronoEnds" />
                           </div>
                           <div class="field" style="flex:1; min-width:180px; margin-bottom:0;">
-                            <label>Short Description</label>
+                            <label>{{ 'brain.chrono.table.description' | transloco }}</label>
                             <textarea [(ngModel)]="editChrono.description" name="editChronoDesc" rows="2" style="resize:vertical;"></textarea>
                           </div>
                           <div class="field" style="flex:1; min-width:180px; margin-bottom:0;">
-                            <label>Tags</label>
+                            <label>{{ 'brain.chrono.table.tags' | transloco }}</label>
                             <app-tag-input [(value)]="editChrono.tags" [suggestions]="chronoTagSuggestions()" inputName="chronoEditTags" />
                           </div>
                           <div class="field" style="flex:1; min-width:140px; margin-bottom:0;">
-                            <label>Entities</label>
+                            <label>{{ 'brain.chrono.table.entities' | transloco }}</label>
                             <div class="flyout-wrap">
                               <div class="entity-multi">
                                 @for (chip of entityChips(editChrono.entityIds); track chip.id) {
                                   <span class="chip" [title]="chip.id"><span class="chip-name">{{ chip.name }}</span><button type="button" class="chip-remove" (mousedown)="removeEntityId(editChrono, chip.id)"><ph-icon name="x" [size]="12"/></button></span>
                                 }
-                                <button type="button" class="chip-add" (click)="openFlyout('edit-chrono-entityIds')">+ Add…</button>
+                                <button type="button" class="chip-add" (click)="openFlyout('edit-chrono-entityIds')">{{ 'common.addMore' | transloco }}</button>
                               </div>
                               @if (flyoutField() === 'edit-chrono-entityIds') {
                                 <div class="flyout-panel">
                                   <app-entity-search
                                     mode="picker"
                                     [spaceId]="activeSpaceId()"
-                                    placeholder="Search entities…"
+                                    placeholder="common.searchEntitiesPlaceholder"
                                     defaultMode="semantic"
                                     (selected)="pickEntity($event, 'multi', 'edit-chrono-entityIds')"
                                   />
                                   <div style="display:flex; justify-content:flex-end; margin-top:8px;">
-                                    <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">Done</button>
+                                    <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">{{ 'common.done' | transloco }}</button>
                                   </div>
                                 </div>
                               }
@@ -1298,9 +1266,9 @@ interface SpaceView {
                           </div>
                           <div style="display:flex; gap:6px; align-items:flex-end;">
                             <button class="btn btn-sm btn-primary" [disabled]="editSaving()" (click)="saveEditChrono(entry._id)">
-                              @if (editSaving()) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> } Save
+                              @if (editSaving()) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> } {{ 'common.save' | transloco }}
                             </button>
-                            <button class="btn btn-sm btn-secondary" (click)="cancelEdit()">Cancel</button>
+                            <button class="btn btn-sm btn-secondary" (click)="cancelEdit()">{{ 'common.cancel' | transloco }}</button>
                           </div>
                           @if (editError()) { <div style="font-size:12px; color:var(--error);">{{ editError() }}</div> }
                         </div>
@@ -1329,15 +1297,15 @@ interface SpaceView {
                         } @else { <span style="color:var(--text-muted)">—</span> }
                       </td>
                       <td style="white-space:nowrap;">
-                        <button class="icon-btn" title="View details" aria-label="View details" (click)="openDrawer('chrono', entry)"><ph-icon name="eye" [size]="16"/></button>
+                        <button class="icon-btn" [attr.title]="'common.viewDetails' | transloco" [attr.aria-label]="'common.viewDetails' | transloco" (click)="openDrawer('chrono', entry)"><ph-icon name="eye" [size]="16"/></button>
                         @if (confirmDeleteId() === entry._id) {
                           <span class="inline-confirm">
-                            Delete?
-                            <button class="btn btn-sm btn-danger" (click)="deleteChrono(entry._id)">Yes</button>
-                            <button class="btn btn-sm btn-secondary" (click)="cancelDelete()">No</button>
+                            {{ 'common.deleteConfirm' | transloco }}
+                            <button class="btn btn-sm btn-danger" (click)="deleteChrono(entry._id)">{{ 'common.yes' | transloco }}</button>
+                            <button class="btn btn-sm btn-secondary" (click)="cancelDelete()">{{ 'common.no' | transloco }}</button>
                           </span>
                         } @else {
-                          <button class="icon-btn danger" aria-label="Delete chrono entry" (click)="requestDelete(entry._id)"><ph-icon name="x" [size]="16"/></button>
+                          <button class="icon-btn danger" [attr.aria-label]="'brain.chrono.deleteAriaLabel' | transloco" (click)="requestDelete(entry._id)"><ph-icon name="x" [size]="16"/></button>
                         }
                       </td>
                     </tr>
@@ -1347,10 +1315,10 @@ interface SpaceView {
                     <div class="empty-state" style="padding:32px">
                       <div class="empty-state-icon"><ph-icon name="timer" [size]="48"/></div>
                       @if (chronoSearch()) {
-                        <h3>No matches</h3>
-                        <p>No timeline entries match &ldquo;{{ chronoSearch() }}&rdquo;.</p>
+                        <h3>{{ 'common.noMatches' | transloco }}</h3>
+                        <p>{{ 'brain.chrono.empty.noMatchQuery' | transloco }}</p>
                       } @else {
-                        <h3>No chrono entries</h3>
+                        <h3>{{ 'brain.chrono.empty.title' | transloco }}</h3>
                       }
                     </div>
                   </td></tr>
@@ -1360,9 +1328,9 @@ interface SpaceView {
           </div>
           @if (chronoSearchMode() !== 'semantic') {
             <div class="pagination">
-              <button class="btn btn-sm btn-secondary" [disabled]="chronoSkip() === 0" (click)="prevChronoPage()"><ph-icon name="arrow-left" [size]="14" style="display:inline-flex;vertical-align:middle;"/> Prev</button>
+              <button class="btn btn-sm btn-secondary" [disabled]="chronoSkip() === 0" (click)="prevChronoPage()"><ph-icon name="arrow-left" [size]="14" style="display:inline-flex;vertical-align:middle;"/> {{ 'common.prev' | transloco }}</button>
               <span class="pager-info">{{ chrono().length ? (chronoSkip() + 1) + '–' + (chronoSkip() + chrono().length) : '–' }}</span>
-              <button class="btn btn-sm btn-secondary" [disabled]="chrono().length < pageSize" (click)="nextChronoPage()">Next <ph-icon name="arrow-right" [size]="14" style="display:inline-flex;vertical-align:middle;"/></button>
+              <button class="btn btn-sm btn-secondary" [disabled]="chrono().length < pageSize" (click)="nextChronoPage()">{{ 'common.next' | transloco }} <ph-icon name="arrow-right" [size]="14" style="display:inline-flex;vertical-align:middle;"/></button>
             </div>
           }
         }
@@ -1370,26 +1338,26 @@ interface SpaceView {
         <!-- File Meta -->
         @if (activeTab() === 'filemeta') {
           <div class="content-header">
-            <input type="search" [value]="fileMetaSearch()" (input)="onFileMetaSearch($any($event.target).value)" placeholder="Filter by path…" aria-label="Filter file metadata by path" />
+            <input type="search" [value]="fileMetaSearch()" (input)="onFileMetaSearch($any($event.target).value)" [placeholder]="'brain.fileMeta.filterPlaceholder' | transloco" [attr.aria-label]="'brain.fileMeta.filterAriaLabel' | transloco" />
           </div>
           @if (loading()) {
             <div class="empty-state"><span class="spinner"></span></div>
           } @else if (!fileMetas().length) {
-            <div class="empty-state">No file metadata records found.</div>
+            <div class="empty-state">{{ 'brain.fileMeta.empty' | transloco }}</div>
           } @else {
             <div class="table-wrapper">
               <table>
                 <thead>
                   <tr>
-                    <th>Path</th>
-                    <th>Description</th>
-                    <th>Tags</th>
-                    <th>Entities</th>
-                    <th>Memories</th>
-                    <th>Chrono</th>
-                    <th>Size</th>
-                    <th>Updated</th>
-                    <th>Actions</th>
+                    <th>{{ 'brain.fileMeta.table.path' | transloco }}</th>
+                    <th>{{ 'brain.fileMeta.table.description' | transloco }}</th>
+                    <th>{{ 'brain.fileMeta.table.tags' | transloco }}</th>
+                    <th>{{ 'brain.fileMeta.table.entities' | transloco }}</th>
+                    <th>{{ 'brain.fileMeta.table.memories' | transloco }}</th>
+                    <th>{{ 'brain.fileMeta.table.chrono' | transloco }}</th>
+                    <th>{{ 'brain.fileMeta.table.size' | transloco }}</th>
+                    <th>{{ 'brain.fileMeta.table.updated' | transloco }}</th>
+                    <th>{{ 'brain.fileMeta.table.actions' | transloco }}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1399,75 +1367,75 @@ interface SpaceView {
                         <form class="edit-form" (ngSubmit)="saveEditFileMeta(fm._id)" #fmEditForm="ngForm">
                           <div class="edit-form-fields">
                             <div class="field" style="flex:2; min-width:180px; margin-bottom:0;">
-                              <label>Description</label>
+                              <label>{{ 'brain.fileMeta.table.description' | transloco }}</label>
                               <input type="text" [(ngModel)]="editFileMeta.description" name="fmEditDesc" />
                             </div>
                             <div class="field" style="flex:1; min-width:140px; margin-bottom:0;">
-                              <label>Tags</label>
+                              <label>{{ 'brain.fileMeta.table.tags' | transloco }}</label>
                               <app-tag-input [(value)]="editFileMeta.tags" inputName="fmEditTags" />
                             </div>
                             <div class="field" style="flex:1; min-width:140px; margin-bottom:0;">
-                              <label>Entities</label>
+                              <label>{{ 'brain.fileMeta.table.entities' | transloco }}</label>
                               <div class="flyout-wrap">
                                 <div class="entity-multi">
                                   @for (chip of entityChips(editFileMeta.entityIds); track chip.id) {
                                     <span class="chip" [title]="chip.id"><span class="chip-name">{{ chip.name }}</span><button type="button" class="chip-remove" (mousedown)="removeEntityId(editFileMeta, chip.id)"><ph-icon name="x" [size]="12"/></button></span>
                                   }
-                                  <button type="button" class="chip-add" (click)="openFlyout('edit-filemeta-entityIds')">+ Add…</button>
+                                  <button type="button" class="chip-add" (click)="openFlyout('edit-filemeta-entityIds')">{{ 'common.addMore' | transloco }}</button>
                                 </div>
                                 @if (flyoutField() === 'edit-filemeta-entityIds') {
                                   <div class="flyout-panel">
-                                    <app-entity-search mode="picker" [spaceId]="activeSpaceId()" placeholder="Search entities…" defaultMode="semantic" (selected)="pickEntity($event, 'multi', 'edit-filemeta-entityIds')" />
+                                    <app-entity-search mode="picker" [spaceId]="activeSpaceId()" placeholder="common.searchEntitiesPlaceholder" defaultMode="semantic" (selected)="pickEntity($event, 'multi', 'edit-filemeta-entityIds')" />
                                     <div style="display:flex; justify-content:flex-end; margin-top:8px;">
-                                      <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">Done</button>
+                                      <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">{{ 'common.done' | transloco }}</button>
                                     </div>
                                   </div>
                                 }
                               </div>
                             </div>
                             <div class="field" style="flex:1; min-width:140px; margin-bottom:0;">
-                              <label>Memories</label>
+                              <label>{{ 'brain.fileMeta.table.memories' | transloco }}</label>
                               <div class="flyout-wrap">
                                 <div class="entity-multi">
                                   @for (id of editFileMeta.memoryIds; track id) {
                                     <span class="chip" [title]="id"><span class="chip-name">{{ fmMemoryTitle(id) }}</span><button type="button" class="chip-remove" (mousedown)="removeFmMemoryId(editFileMeta, id)"><ph-icon name="x" [size]="12"/></button></span>
                                   }
-                                  <button type="button" class="chip-add" (click)="openFlyout('edit-filemeta-memoryIds')">+ Add…</button>
+                                  <button type="button" class="chip-add" (click)="openFlyout('edit-filemeta-memoryIds')">{{ 'common.addMore' | transloco }}</button>
                                 </div>
                                 @if (flyoutField() === 'edit-filemeta-memoryIds') {
                                   <div class="flyout-panel">
-                                    <input type="text" [value]="fmMemPickerQuery()" (input)="onFmMemPickerInput($any($event.target).value)" placeholder="Search memories…" style="width:100%; margin-bottom:6px;" />
+                                    <input type="text" [value]="fmMemPickerQuery()" (input)="onFmMemPickerInput($any($event.target).value)" [placeholder]="'brain.fileMeta.picker.searchMemories' | transloco" style="width:100%; margin-bottom:6px;" />
                                     @for (mem of fmMemPickerResults(); track mem._id) {
                                       <div class="flyout-result" (click)="addFmMemoryId(editFileMeta, mem._id); closeFlyout()" style="cursor:pointer; padding:4px 6px; border-radius:4px;">
                                         {{ mem.fact.slice(0, 60) }}{{ mem.fact.length > 60 ? '…' : '' }}
                                       </div>
                                     }
                                     <div style="display:flex; justify-content:flex-end; margin-top:8px;">
-                                      <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">Done</button>
+                                      <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">{{ 'common.done' | transloco }}</button>
                                     </div>
                                   </div>
                                 }
                               </div>
                             </div>
                             <div class="field" style="flex:1; min-width:140px; margin-bottom:0;">
-                              <label>Chrono</label>
+                              <label>{{ 'brain.fileMeta.table.chrono' | transloco }}</label>
                               <div class="flyout-wrap">
                                 <div class="entity-multi">
                                   @for (id of editFileMeta.chronoIds; track id) {
                                     <span class="chip" [title]="id"><span class="chip-name">{{ fmChronoTitle(id) }}</span><button type="button" class="chip-remove" (mousedown)="removeFmChronoId(editFileMeta, id)"><ph-icon name="x" [size]="12"/></button></span>
                                   }
-                                  <button type="button" class="chip-add" (click)="openFlyout('edit-filemeta-chronoIds')">+ Add…</button>
+                                  <button type="button" class="chip-add" (click)="openFlyout('edit-filemeta-chronoIds')">{{ 'common.addMore' | transloco }}</button>
                                 </div>
                                 @if (flyoutField() === 'edit-filemeta-chronoIds') {
                                   <div class="flyout-panel">
-                                    <input type="text" [value]="fmChronoPickerQuery()" (input)="onFmChronoPickerInput($any($event.target).value)" placeholder="Search chrono…" style="width:100%; margin-bottom:6px;" />
+                                    <input type="text" [value]="fmChronoPickerQuery()" (input)="onFmChronoPickerInput($any($event.target).value)" [placeholder]="'brain.fileMeta.picker.searchChrono' | transloco" style="width:100%; margin-bottom:6px;" />
                                     @for (c of fmChronoPickerResults(); track c._id) {
                                       <div class="flyout-result" (click)="addFmChronoId(editFileMeta, c._id); closeFlyout()" style="cursor:pointer; padding:4px 6px; border-radius:4px;">
                                         {{ c.title.slice(0, 60) }}{{ c.title.length > 60 ? '…' : '' }}
                                       </div>
                                     }
                                     <div style="display:flex; justify-content:flex-end; margin-top:8px;">
-                                      <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">Done</button>
+                                      <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">{{ 'common.done' | transloco }}</button>
                                     </div>
                                   </div>
                                 }
@@ -1480,16 +1448,16 @@ interface SpaceView {
                           <div class="edit-form-actions">
                             <button class="btn btn-sm btn-primary" type="submit" [disabled]="editSaving()">
                               @if (editSaving()) { <span class="spinner" style="width:10px;height:10px;border-width:2px;"></span> }
-                              Save
+                              {{ 'common.save' | transloco }}
                             </button>
-                            <button class="btn btn-sm btn-secondary" type="button" (click)="cancelEdit()">Cancel</button>
+                            <button class="btn btn-sm btn-secondary" type="button" (click)="cancelEdit()">{{ 'common.cancel' | transloco }}</button>
                           </div>
                         </form>
                       </td></tr>
                     } @else {
                       <tr>
                         <td>
-                          <button class="link-btn" title="Open in Files tab" (click)="openFileInManager(fm.path)">{{ fm.path }}</button>
+                          <button class="link-btn" [attr.title]="'brain.fileMeta.openInFilesTabTitle' | transloco" (click)="openFileInManager(fm.path)">{{ fm.path }}</button>
                         </td>
                         <td class="text-muted" style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ fm.description || '–' }}</td>
                         <td>
@@ -1525,12 +1493,12 @@ interface SpaceView {
                         <td class="actions-cell">
                           @if (confirmDeleteId() === fm._id) {
                             <span class="delete-confirm">
-                              <button class="btn btn-xs btn-danger" (click)="deleteFileMeta(fm._id)">Confirm</button>
-                              <button class="btn btn-xs btn-secondary" (click)="cancelDelete()">Cancel</button>
+                              <button class="btn btn-xs btn-danger" (click)="deleteFileMeta(fm._id)">{{ 'common.confirm' | transloco }}</button>
+                              <button class="btn btn-xs btn-secondary" (click)="cancelDelete()">{{ 'common.cancel' | transloco }}</button>
                             </span>
                           } @else {
-                            <button class="icon-btn" title="Edit file metadata" aria-label="Edit file metadata" (click)="startEditFileMeta(fm)"><ph-icon name="pencil-simple" [size]="16"/></button>
-                            <button class="icon-btn icon-btn-danger" title="Remove metadata record" aria-label="Remove metadata record" (click)="requestDelete(fm._id)"><ph-icon name="trash" [size]="16"/></button>
+                            <button class="icon-btn" [attr.title]="'brain.fileMeta.editTitle' | transloco" [attr.aria-label]="'brain.fileMeta.editAriaLabel' | transloco" (click)="startEditFileMeta(fm)"><ph-icon name="pencil-simple" [size]="16"/></button>
+                            <button class="icon-btn icon-btn-danger" [attr.title]="'brain.fileMeta.removeTitle' | transloco" [attr.aria-label]="'brain.fileMeta.removeAriaLabel' | transloco" (click)="requestDelete(fm._id)"><ph-icon name="trash" [size]="16"/></button>
                           }
                         </td>
                       </tr>
@@ -1540,9 +1508,9 @@ interface SpaceView {
               </table>
             </div>
             <div class="pagination">
-              <button class="btn btn-sm btn-secondary" [disabled]="fileMetaSkip() === 0" (click)="prevFileMetaPage()"><ph-icon name="arrow-left" [size]="14" style="display:inline-flex;vertical-align:middle;"/> Prev</button>
+              <button class="btn btn-sm btn-secondary" [disabled]="fileMetaSkip() === 0" (click)="prevFileMetaPage()"><ph-icon name="arrow-left" [size]="14" style="display:inline-flex;vertical-align:middle;"/> {{ 'common.prev' | transloco }}</button>
               <span class="pager-info">{{ fileMetas().length ? (fileMetaSkip() + 1) + '–' + (fileMetaSkip() + fileMetas().length) : '–' }}</span>
-              <button class="btn btn-sm btn-secondary" [disabled]="fileMetas().length < pageSize" (click)="nextFileMetaPage()">Next <ph-icon name="arrow-right" [size]="14" style="display:inline-flex;vertical-align:middle;"/></button>
+              <button class="btn btn-sm btn-secondary" [disabled]="fileMetas().length < pageSize" (click)="nextFileMetaPage()">{{ 'common.next' | transloco }} <ph-icon name="arrow-right" [size]="14" style="display:inline-flex;vertical-align:middle;"/></button>
             </div>
           }
         }
@@ -1552,42 +1520,42 @@ interface SpaceView {
           <div class="query-panel">
             <!-- Mode switcher -->
             <div style="display:flex; gap:8px; margin-bottom:12px;">
-              <button class="btn btn-sm" [class.btn-primary]="queryMode() === 'search'" [class.btn-secondary]="queryMode() !== 'search'" (click)="queryMode.set('search')">Semantic Search</button>
-              <button class="btn btn-sm" [class.btn-primary]="queryMode() === 'advanced'" [class.btn-secondary]="queryMode() !== 'advanced'" (click)="queryMode.set('advanced')">Advanced Query</button>
+              <button class="btn btn-sm" [class.btn-primary]="queryMode() === 'search'" [class.btn-secondary]="queryMode() !== 'search'" (click)="queryMode.set('search')">{{ 'brain.query.mode.semanticSearch' | transloco }}</button>
+              <button class="btn btn-sm" [class.btn-primary]="queryMode() === 'advanced'" [class.btn-secondary]="queryMode() !== 'advanced'" (click)="queryMode.set('advanced')">{{ 'brain.query.mode.advancedQuery' | transloco }}</button>
             </div>
 
             <!-- Semantic Search mode -->
             @if (queryMode() === 'search') {
               <div class="query-form">
                 <div class="field" style="margin-bottom:0;">
-                  <label>Search your knowledge base</label>
+                  <label>{{ 'brain.query.search.label' | transloco }}</label>
                   <input
                     type="text"
                     [(ngModel)]="recallForm.query"
                     name="recallQuery"
-                    placeholder="What do you want to find?"
+                    [placeholder]="'brain.query.search.placeholder' | transloco"
                     style="width:100%; font-size:14px; padding:8px 12px;"
                     (keydown.enter)="runRecall()"
-                    aria-label="Semantic search query"
+                    [attr.aria-label]="'brain.query.search.label' | transloco"
                   />
                 </div>
                 <div class="query-form-row" style="margin-top:8px;">
                   <div class="field" style="min-width:100px; margin:0;">
-                    <label>Top K <span style="color:var(--text-muted);font-size:11px;" title="Maximum number of results to return"><ph-icon name="info" [size]="11" style="display:inline-flex;vertical-align:middle;"/></span></label>
+                    <label>{{ 'brain.query.topK' | transloco }} <span style="color:var(--text-muted);font-size:11px;" [attr.title]="'brain.query.topK.tooltip' | transloco"><ph-icon name="info" [size]="11" style="display:inline-flex;vertical-align:middle;"/></span></label>
                     <input type="number" [(ngModel)]="recallForm.topK" name="recallTopK" min="1" max="100" style="width:80px;" />
                   </div>
                   <div class="field" style="min-width:120px; margin:0;">
-                    <label>Min score <span style="color:var(--text-muted);font-size:11px;" title="Minimum similarity score (0–1). Higher = more relevant."><ph-icon name="info" [size]="11" style="display:inline-flex;vertical-align:middle;"/></span></label>
+                    <label>{{ 'brain.query.minScore' | transloco }} <span style="color:var(--text-muted);font-size:11px;" [attr.title]="'brain.query.minScore.tooltip' | transloco"><ph-icon name="info" [size]="11" style="display:inline-flex;vertical-align:middle;"/></span></label>
                     <input type="number" [(ngModel)]="recallForm.minScore" name="recallMinScore" min="0" max="1" step="0.05" style="width:80px;" />
                   </div>
                 </div>
                 <div style="display:flex; align-items:center; gap:10px; margin-top:8px;">
                   <button class="btn btn-sm btn-primary" [disabled]="recallRunning() || !recallForm.query.trim()" (click)="runRecall()">
                     @if (recallRunning()) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> }
-                    Search
+                    {{ 'brain.query.searchButton' | transloco }}
                   </button>
                   @if (recallResults().length) {
-                    <button class="btn btn-sm btn-secondary" (click)="clearRecall()">Clear results</button>
+                    <button class="btn btn-sm btn-secondary" (click)="clearRecall()">{{ 'brain.query.clearResults' | transloco }}</button>
                   }
                   @if (recallError()) {
                     <span style="font-size:12px; color:var(--error);">{{ recallError() }}</span>
@@ -1597,14 +1565,14 @@ interface SpaceView {
 
               @if (recallResults().length) {
                 <div class="query-results-header" style="margin-top:12px;">
-                  <strong>{{ recallResults().length }}</strong> result{{ recallResults().length === 1 ? '' : 's' }}
+                  <strong>{{ recallResults().length }}</strong> {{ 'brain.query.resultsCount' | transloco: { count: recallResults().length } }}
                 </div>
                 @for (r of recallResults(); track $index) {
                   <div class="query-result-card" style="margin-top:6px;">
                     <div style="display:flex; gap:8px; margin-bottom:4px; align-items:center;">
                       <span class="badge badge-purple" style="font-size:10px;">{{ r.type }}</span>
                       @if (r.score != null) {
-                        <span style="font-size:11px; color:var(--text-muted);">score: {{ r.score.toFixed(3) }}</span>
+                        <span style="font-size:11px; color:var(--text-muted);">{{ 'common.score' | transloco }}: {{ r.score.toFixed(3) }}</span>
                       }
                     </div>
                     <div style="white-space:pre-wrap; word-break:break-all;">{{ formatQueryDoc(r) }}</div>
@@ -1618,43 +1586,43 @@ interface SpaceView {
               <div class="query-form">
                 <div class="query-form-row">
                   <div class="field" style="min-width:160px;">
-                    <label>Collection</label>
-                    <select [(ngModel)]="queryForm.collection" name="queryCollection" aria-label="Collection">
+                    <label>{{ 'brain.query.collection' | transloco }}</label>
+                    <select [(ngModel)]="queryForm.collection" name="queryCollection" [attr.aria-label]="'brain.query.collection' | transloco">
                       @for (c of queryCollections; track c) { <option [value]="c">{{ c }}</option> }
                     </select>
                   </div>
                   <div class="field" style="min-width:80px;">
-                    <label>Limit</label>
+                    <label>{{ 'brain.query.limit' | transloco }}</label>
                     <input type="number" [(ngModel)]="queryForm.limit" name="queryLimit" min="1" max="100" style="width:80px;" />
                   </div>
                   <div class="field" style="min-width:100px;">
-                    <label>maxTimeMS</label>
+                    <label>{{ 'brain.query.maxTimeMs' | transloco }}</label>
                     <input type="number" [(ngModel)]="queryForm.maxTimeMS" name="queryMaxTimeMS" min="100" max="30000" style="width:100px;" />
                   </div>
                 </div>
                 <div class="field">
-                  <label>Filter <span style="color:var(--text-muted);font-size:11px;">(JSON — supports $eq $in $regex $and $or $elemMatch etc.)</span></label>
+                  <label>{{ 'brain.query.filter' | transloco }} <span style="color:var(--text-muted);font-size:11px;">{{ 'brain.query.filterHint' | transloco }}</span></label>
                   <textarea
                     class="query-textarea"
                     [class.error]="queryFilterError()"
                     [(ngModel)]="queryForm.filter"
                     name="queryFilter"
                     rows="3"
-                    placeholder='{"tags": {"$in": ["my-tag"]}} or {"name": {"$regex": "auth", "$options": "i"}}'
+                    [placeholder]="'brain.query.filterPlaceholder' | transloco"
                   ></textarea>
                   @if (queryFilterError()) {
                     <div style="font-size:11px; color:var(--error); margin-top:3px;">{{ queryFilterError() }}</div>
                   }
                 </div>
                 <div class="field">
-                  <label>Projection <span style="color:var(--text-muted);font-size:11px;">(optional JSON — e.g. {{ '{' }}"fact":1,"tags":1{{ '}' }})</span></label>
+                  <label>{{ 'brain.query.projection' | transloco }} <span style="color:var(--text-muted);font-size:11px;">{{ 'brain.query.projectionHint' | transloco }}</span></label>
                   <textarea
                     class="query-textarea"
                     [class.error]="queryProjectionError()"
                     [(ngModel)]="queryForm.projection"
                     name="queryProjection"
                     rows="2"
-                    placeholder='{"fact": 1, "tags": 1}'
+                    [placeholder]="'brain.query.projectionPlaceholder' | transloco"
                   ></textarea>
                   @if (queryProjectionError()) {
                     <div style="font-size:11px; color:var(--error); margin-top:3px;">{{ queryProjectionError() }}</div>
@@ -1663,10 +1631,10 @@ interface SpaceView {
                 <div style="display:flex; align-items:center; gap:10px;">
                   <button class="btn btn-sm btn-primary" [disabled]="queryRunning()" (click)="runQuery()">
                     @if (queryRunning()) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> }
-                    Run Query
+                    {{ 'brain.query.runQuery' | transloco }}
                   </button>
                   @if (queryResult()) {
-                    <button class="btn btn-sm btn-secondary" (click)="clearQuery()">Clear results</button>
+                    <button class="btn btn-sm btn-secondary" (click)="clearQuery()">{{ 'brain.query.clearResults' | transloco }}</button>
                   }
                   @if (queryError()) {
                     <span style="font-size:12px; color:var(--error);">{{ queryError() }}</span>
@@ -1676,10 +1644,10 @@ interface SpaceView {
 
               @if (queryResult(); as res) {
                 <div class="query-results-header">
-                  <strong>{{ res.count }}</strong> result{{ res.count === 1 ? '' : 's' }} from <code>{{ res.collection }}</code>
+                  <strong>{{ res.count }}</strong> {{ 'brain.query.resultsFrom' | transloco: { count: res.count, collection: res.collection } }}
                 </div>
                 @if (res.results.length === 0) {
-                  <div class="query-empty">No documents matched the filter.</div>
+                  <div class="query-empty">{{ 'brain.query.noDocuments' | transloco }}</div>
                 } @else {
                   @for (doc of res.results; track $index) {
                     <div class="query-result-card">{{ formatQueryDoc(doc) }}</div>
@@ -1695,13 +1663,13 @@ interface SpaceView {
       <!-- Detail Drawer -->
       @if (drawerRecord(); as dr) {
         <div class="drawer-overlay" (click)="closeDrawer()">
-          <div class="drawer" (click)="$event.stopPropagation()" role="dialog" aria-label="Record details">
+          <div class="drawer" (click)="$event.stopPropagation()" role="dialog" [attr.aria-label]="'brain.drawer.recordDetailsAriaLabel' | transloco">
             <div class="drawer-header">
               <div style="flex:1; min-width:0;">
-                @if (dr.kind === 'memory') { <span class="badge badge-blue" style="margin-bottom:6px; display:inline-block;">memory</span> }
-                @if (dr.kind === 'entity') { <span class="badge badge-purple" style="margin-bottom:6px; display:inline-block;">entity</span> }
-                @if (dr.kind === 'edge') { <span class="badge badge-blue" style="margin-bottom:6px; display:inline-block;">edge</span> }
-                @if (dr.kind === 'chrono') { <span class="badge" style="margin-bottom:6px; display:inline-block;">chrono</span> }
+                @if (dr.kind === 'memory') { <span class="badge badge-blue" style="margin-bottom:6px; display:inline-block;">{{ 'brain.drawer.badge.memory' | transloco }}</span> }
+                @if (dr.kind === 'entity') { <span class="badge badge-purple" style="margin-bottom:6px; display:inline-block;">{{ 'brain.drawer.badge.entity' | transloco }}</span> }
+                @if (dr.kind === 'edge') { <span class="badge badge-blue" style="margin-bottom:6px; display:inline-block;">{{ 'brain.drawer.badge.edge' | transloco }}</span> }
+                @if (dr.kind === 'chrono') { <span class="badge" style="margin-bottom:6px; display:inline-block;">{{ 'brain.drawer.badge.chrono' | transloco }}</span> }
                 <div class="drawer-title">
                   @if (dr.kind === 'memory') { {{ drawerEditMemory.fact.length > 80 ? (drawerEditMemory.fact | slice:0:80) + '\u2026' : drawerEditMemory.fact }} }
                   @if (dr.kind === 'entity') { {{ drawerEditEntity.name || dr.record.name }} }
@@ -1711,9 +1679,9 @@ interface SpaceView {
               </div>
               <div style="display:flex; gap:8px; flex-shrink:0; align-items:flex-start; padding-top:2px;">
                 <button class="btn btn-sm btn-primary" [disabled]="drawerSaving()" (click)="saveDrawer()">
-                  @if (drawerSaving()) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> } Save
+                  @if (drawerSaving()) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> } {{ 'common.save' | transloco }}
                 </button>
-                <button class="icon-btn" title="Close" aria-label="Close details" (click)="closeDrawer()"><ph-icon name="x" [size]="16"/></button>
+                <button class="icon-btn" [attr.title]="'common.close' | transloco" [attr.aria-label]="'brain.drawer.closeDetailsAriaLabel' | transloco" (click)="closeDrawer()"><ph-icon name="x" [size]="16"/></button>
               </div>
             </div>
             @if (drawerError()) {
@@ -1724,38 +1692,38 @@ interface SpaceView {
               <!-- ── MEMORY ── -->
               @if (dr.kind === 'memory') {
                 <div class="drawer-field">
-                  <div class="drawer-label">fact <span style="color:var(--error)">*</span></div>
+                  <div class="drawer-label">{{ 'common.form.fact' | transloco }} <span style="color:var(--error)">*</span></div>
                   <textarea [(ngModel)]="drawerEditMemory.fact" name="drwMemFact" rows="4"></textarea>
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">description</div>
+                  <div class="drawer-label">{{ 'common.form.description' | transloco }}</div>
                   <input type="text" [(ngModel)]="drawerEditMemory.description" name="drwMemDesc" />
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">tags</div>
+                  <div class="drawer-label">{{ 'common.form.tags' | transloco }}</div>
                   <app-tag-input [(value)]="drawerEditMemory.tags" [suggestions]="memoryTagSuggestions()" inputName="drwMemTags" />
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">entityIds</div>
+                  <div class="drawer-label">{{ 'common.entityIds' | transloco }}</div>
                   <div class="flyout-wrap">
                     <div class="entity-multi">
                       @for (chip of entityChips(drawerEditMemory.entityIds); track chip.id) {
                         <span class="chip" [title]="chip.id"><span class="chip-name">{{ chip.name }}</span><button type="button" class="chip-remove" (mousedown)="removeEntityId(drawerEditMemory, chip.id)"><ph-icon name="x" [size]="12"/></button></span>
                       }
-                      <button type="button" class="chip-add" (click)="openFlyout('drawer-memory-entityIds')">+ Add…</button>
+                      <button type="button" class="chip-add" (click)="openFlyout('drawer-memory-entityIds')">{{ 'common.addMore' | transloco }}</button>
                     </div>
                     @if (flyoutField() === 'drawer-memory-entityIds') {
                       <div class="flyout-panel">
-                        <app-entity-search mode="picker" [spaceId]="activeSpaceId()" placeholder="Search entities…" defaultMode="semantic" (selected)="pickEntity($event, 'multi', 'drawer-memory-entityIds')" />
+                        <app-entity-search mode="picker" [spaceId]="activeSpaceId()" placeholder="common.searchEntitiesPlaceholder" defaultMode="semantic" (selected)="pickEntity($event, 'multi', 'drawer-memory-entityIds')" />
                         <div style="display:flex; justify-content:flex-end; margin-top:8px;">
-                          <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">Done</button>
+                          <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">{{ 'common.done' | transloco }}</button>
                         </div>
                       </div>
                     }
                   </div>
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">properties</div>
+                  <div class="drawer-label">{{ 'common.form.properties' | transloco }}</div>
                   <app-properties-editor [schema]="memorySchema()" [required]="requiredProps(memorySchema())" [(value)]="drawerEditMemory.properties" />
                 </div>
                 <hr class="drawer-hr">
@@ -1764,17 +1732,17 @@ interface SpaceView {
                   <div class="drawer-readonly-value" style="font-family:var(--font-mono,monospace); font-size:11px;">{{ dr.record._id }}</div>
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">seq</div>
+                  <div class="drawer-label">{{ 'common.seq' | transloco }}</div>
                   <div class="drawer-readonly-value">{{ dr.record.seq }}</div>
                 </div>
                 @if (dr.record.author) {
                   <div class="drawer-field">
-                    <div class="drawer-label">author.instanceId</div>
+                    <div class="drawer-label">{{ 'common.authorInstanceId' | transloco }}</div>
                     <div class="drawer-readonly-value">{{ dr.record.author.instanceId }}</div>
                   </div>
                 }
                 <div class="drawer-field" style="margin-bottom:0;">
-                  <div class="drawer-label">createdAt</div>
+                  <div class="drawer-label">{{ 'common.createdAt' | transloco }}</div>
                   <div class="drawer-readonly-value">{{ dr.record.createdAt | date:'yyyy-MM-dd HH:mm:ss' }}</div>
                 </div>
               }
@@ -1782,11 +1750,11 @@ interface SpaceView {
               <!-- ── ENTITY ── -->
               @if (dr.kind === 'entity') {
                 <div class="drawer-field">
-                  <div class="drawer-label">name <span style="color:var(--error)">*</span></div>
+                  <div class="drawer-label">{{ 'brain.entities.table.name' | transloco }} <span style="color:var(--error)">*</span></div>
                   <input type="text" [(ngModel)]="drawerEditEntity.name" name="drwEntName" />
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">type @if (entityTypeNames().length) { <span style="color:var(--error)">*</span> }</div>
+                  <div class="drawer-label">{{ 'common.form.type' | transloco }} @if (entityTypeNames().length) { <span style="color:var(--error)">*</span> }</div>
                   @if (entityTypeNames().length) {
                     <select [(ngModel)]="drawerEditEntity.type" name="drwEntType" (ngModelChange)="onEntityTypeChange($event, 'drawer')">
                       @for (t of entityTypeNames(); track t) {
@@ -1798,15 +1766,15 @@ interface SpaceView {
                   }
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">description</div>
+                  <div class="drawer-label">{{ 'common.form.description' | transloco }}</div>
                   <input type="text" [(ngModel)]="drawerEditEntity.description" name="drwEntDesc" />
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">tags</div>
+                  <div class="drawer-label">{{ 'common.form.tags' | transloco }}</div>
                   <app-tag-input [(value)]="drawerEditEntity.tags" [suggestions]="entityTagSuggestions()" inputName="drwEntTags" />
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">properties</div>
+                  <div class="drawer-label">{{ 'common.form.properties' | transloco }}</div>
                   <app-properties-editor [schema]="entitySchema(drawerEditEntity.type)" [required]="requiredProps(entitySchema(drawerEditEntity.type))" [(value)]="drawerEditEntity.properties" />
                 </div>
                 <hr class="drawer-hr">
@@ -1815,7 +1783,7 @@ interface SpaceView {
                   <div class="drawer-readonly-value" style="font-family:var(--font-mono,monospace); font-size:11px;">{{ dr.record._id }}</div>
                 </div>
                 <div class="drawer-field" style="margin-bottom:0;">
-                  <div class="drawer-label">createdAt</div>
+                  <div class="drawer-label">{{ 'common.createdAt' | transloco }}</div>
                   <div class="drawer-readonly-value">{{ dr.record.createdAt | date:'yyyy-MM-dd HH:mm:ss' }}</div>
                 </div>
               }
@@ -1823,11 +1791,11 @@ interface SpaceView {
               <!-- ── EDGE ── -->
               @if (dr.kind === 'edge') {
                 <div class="drawer-field">
-                  <div class="drawer-label">from <span class="drawer-muted">(read-only)</span></div>
+                  <div class="drawer-label">{{ 'common.form.from' | transloco }} <span class="drawer-muted">{{ 'common.readOnly' | transloco }}</span></div>
                   <div class="drawer-readonly-value">{{ dr.record.fromName || dr.record.from }}<span style="font-size:11px;"> ({{ dr.record.from }})</span></div>
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">label <span style="color:var(--error)">*</span></div>
+                  <div class="drawer-label">{{ 'brain.edges.table.relation' | transloco }} <span style="color:var(--error)">*</span></div>
                   @if (edgeLabelNames().length) {
                     <select [(ngModel)]="drawerEditEdge.label" name="drwEdgeLabel">
                       @for (l of edgeLabelNames(); track l) {
@@ -1839,27 +1807,27 @@ interface SpaceView {
                   }
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">to <span class="drawer-muted">(read-only)</span></div>
+                  <div class="drawer-label">{{ 'common.form.to' | transloco }} <span class="drawer-muted">{{ 'common.readOnly' | transloco }}</span></div>
                   <div class="drawer-readonly-value">{{ dr.record.toName || dr.record.to }}<span style="font-size:11px;"> ({{ dr.record.to }})</span></div>
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">type</div>
+                  <div class="drawer-label">{{ 'common.form.type' | transloco }}</div>
                   <input type="text" [(ngModel)]="drawerEditEdge.type" name="drwEdgeType" />
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">weight</div>
+                  <div class="drawer-label">{{ 'common.form.weight' | transloco }}</div>
                   <input type="number" [(ngModel)]="drawerEditEdge.weight" name="drwEdgeWeight" step="0.1" />
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">description</div>
+                  <div class="drawer-label">{{ 'common.form.description' | transloco }}</div>
                   <input type="text" [(ngModel)]="drawerEditEdge.description" name="drwEdgeDesc" />
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">tags</div>
+                  <div class="drawer-label">{{ 'common.form.tags' | transloco }}</div>
                   <app-tag-input [(value)]="drawerEditEdge.tags" [suggestions]="edgeTagSuggestions()" inputName="drwEdgeTags" />
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">properties</div>
+                  <div class="drawer-label">{{ 'common.form.properties' | transloco }}</div>
                   <app-properties-editor [schema]="edgeSchema(drawerEditEdge.label)" [required]="requiredProps(edgeSchema(drawerEditEdge.label))" [(value)]="drawerEditEdge.properties" />
                 </div>
                 <hr class="drawer-hr">
@@ -1868,7 +1836,7 @@ interface SpaceView {
                   <div class="drawer-readonly-value" style="font-family:var(--font-mono,monospace); font-size:11px;">{{ dr.record._id }}</div>
                 </div>
                 <div class="drawer-field" style="margin-bottom:0;">
-                  <div class="drawer-label">createdAt</div>
+                  <div class="drawer-label">{{ 'common.createdAt' | transloco }}</div>
                   <div class="drawer-readonly-value">{{ dr.record.createdAt | date:'yyyy-MM-dd HH:mm:ss' }}</div>
                 </div>
               }
@@ -1876,89 +1844,89 @@ interface SpaceView {
               <!-- ── CHRONO ── -->
               @if (dr.kind === 'chrono') {
                 <div class="drawer-field">
-                  <div class="drawer-label">title <span style="color:var(--error)">*</span></div>
+                  <div class="drawer-label">{{ 'common.form.title' | transloco }} <span style="color:var(--error)">*</span></div>
                   <input type="text" [(ngModel)]="drawerEditChrono.title" name="drwChronoTitle" />
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">kind <span style="color:var(--error)">*</span></div>
+                  <div class="drawer-label">{{ 'common.form.kind' | transloco }} <span style="color:var(--error)">*</span></div>
                   @if (drawerEditChrono.kind !== '__custom__') {
                     <select [(ngModel)]="drawerEditChrono.kind" name="drwChronoKind">
                       @for (k of chronoKinds; track k) { <option [value]="k">{{ k }}</option> }
-                      <option value="__custom__">Custom…</option>
+                      <option value="__custom__">{{ 'brain.chrono.form.customKind' | transloco }}</option>
                     </select>
                   } @else {
                     <div style="display:flex; gap:4px;">
                       <input type="text" [(ngModel)]="drawerEditChrono.customKind" name="drwChronoCustomKind" style="flex:1;" />
-                      <button type="button" class="btn-secondary btn btn-sm" style="padding:4px 8px;" (click)="drawerEditChrono.kind = 'event'; drawerEditChrono.customKind = ''" title="Back to presets"><ph-icon name="x" [size]="14"/></button>
+                      <button type="button" class="btn-secondary btn btn-sm" style="padding:4px 8px;" (click)="drawerEditChrono.kind = 'event'; drawerEditChrono.customKind = ''" [attr.title]="'brain.chrono.form.backToPresets' | transloco"><ph-icon name="x" [size]="14"/></button>
                     </div>
                   }
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">status</div>
+                  <div class="drawer-label">{{ 'brain.chrono.table.status' | transloco }}</div>
                   <select [(ngModel)]="drawerEditChrono.status" name="drwChronoStatus">
                     @for (s of chronoStatusOptions; track s) { <option [value]="s">{{ s }}</option> }
                   </select>
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">startsAt <span style="color:var(--error)">*</span></div>
+                  <div class="drawer-label">{{ 'common.form.startsAt' | transloco }} <span style="color:var(--error)">*</span></div>
                   <input type="datetime-local" [(ngModel)]="drawerEditChrono.startsAt" name="drwChronoStarts" />
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">endsAt</div>
+                  <div class="drawer-label">{{ 'common.form.endsAt' | transloco }}</div>
                   <input type="datetime-local" [(ngModel)]="drawerEditChrono.endsAt" name="drwChronoEnds" />
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">confidence <span class="drawer-muted">(0–1)</span></div>
+                  <div class="drawer-label">{{ 'common.confidence' | transloco }} <span class="drawer-muted">(0-1)</span></div>
                   <input type="number" [(ngModel)]="drawerEditChrono.confidence" name="drwChronoConf" min="0" max="1" step="0.01" />
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">description</div>
+                  <div class="drawer-label">{{ 'common.form.description' | transloco }}</div>
                   <textarea [(ngModel)]="drawerEditChrono.description" name="drwChronoDesc" rows="3"></textarea>
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">tags</div>
+                  <div class="drawer-label">{{ 'common.form.tags' | transloco }}</div>
                   <app-tag-input [(value)]="drawerEditChrono.tags" [suggestions]="chronoTagSuggestions()" inputName="drwChronoTags" />
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">entityIds</div>
+                  <div class="drawer-label">{{ 'common.entityIds' | transloco }}</div>
                   <div class="flyout-wrap">
                     <div class="entity-multi">
                       @for (chip of entityChips(drawerEditChrono.entityIds); track chip.id) {
                         <span class="chip" [title]="chip.id"><span class="chip-name">{{ chip.name }}</span><button type="button" class="chip-remove" (mousedown)="removeEntityId(drawerEditChrono, chip.id)"><ph-icon name="x" [size]="12"/></button></span>
                       }
-                      <button type="button" class="chip-add" (click)="openFlyout('drawer-chrono-entityIds')">+ Add…</button>
+                      <button type="button" class="chip-add" (click)="openFlyout('drawer-chrono-entityIds')">{{ 'common.addMore' | transloco }}</button>
                     </div>
                     @if (flyoutField() === 'drawer-chrono-entityIds') {
                       <div class="flyout-panel">
-                        <app-entity-search mode="picker" [spaceId]="activeSpaceId()" placeholder="Search entities…" defaultMode="semantic" (selected)="pickEntity($event, 'multi', 'drawer-chrono-entityIds')" />
+                        <app-entity-search mode="picker" [spaceId]="activeSpaceId()" placeholder="common.searchEntitiesPlaceholder" defaultMode="semantic" (selected)="pickEntity($event, 'multi', 'drawer-chrono-entityIds')" />
                         <div style="display:flex; justify-content:flex-end; margin-top:8px;">
-                          <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">Done</button>
+                          <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">{{ 'common.done' | transloco }}</button>
                         </div>
                       </div>
                     }
                   </div>
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">memoryIds <span class="drawer-muted">(comma-separated IDs)</span></div>
+                  <div class="drawer-label">{{ 'common.memoryIds' | transloco }} <span class="drawer-muted">{{ 'common.commaSeparatedIds' | transloco }}</span></div>
                   <textarea [(ngModel)]="drawerEditChrono.memoryIds" name="drwChronoMemIds" rows="2" style="font-family:var(--font-mono,monospace); font-size:11px;"></textarea>
                 </div>
                 <hr class="drawer-hr">
                 <div class="drawer-field">
-                  <div class="drawer-label">spaceId</div>
+                  <div class="drawer-label">{{ 'common.spaceId' | transloco }}</div>
                   <div class="drawer-readonly-value">{{ dr.record.spaceId }}</div>
                 </div>
                 @if (dr.record.recurrence) {
                   <div class="drawer-field">
-                    <div class="drawer-label">recurrence</div>
+                    <div class="drawer-label">{{ 'common.recurrence' | transloco }}</div>
                     <div class="drawer-readonly-value" style="font-family:var(--font-mono,monospace); font-size:11px;">{{ dr.record.recurrence | json }}</div>
                   </div>
                 }
                 <div class="drawer-field">
-                  <div class="drawer-label">author</div>
+                  <div class="drawer-label">{{ 'common.author' | transloco }}</div>
                   <div class="drawer-readonly-value">{{ dr.record.author?.instanceLabel }} ({{ dr.record.author?.instanceId }})</div>
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">seq</div>
+                  <div class="drawer-label">{{ 'common.seq' | transloco }}</div>
                   <div class="drawer-readonly-value">{{ dr.record.seq }}</div>
                 </div>
                 <div class="drawer-field">
@@ -1966,11 +1934,11 @@ interface SpaceView {
                   <div class="drawer-readonly-value" style="font-family:var(--font-mono,monospace); font-size:11px;">{{ dr.record._id }}</div>
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">createdAt</div>
+                  <div class="drawer-label">{{ 'common.createdAt' | transloco }}</div>
                   <div class="drawer-readonly-value">{{ dr.record.createdAt | date:'yyyy-MM-dd HH:mm:ss' }}</div>
                 </div>
                 <div class="drawer-field" style="margin-bottom:0;">
-                  <div class="drawer-label">updatedAt</div>
+                  <div class="drawer-label">{{ 'common.updatedAt' | transloco }}</div>
                   <div class="drawer-readonly-value">{{ dr.record.updatedAt | date:'yyyy-MM-dd HH:mm:ss' }}</div>
                 </div>
               }

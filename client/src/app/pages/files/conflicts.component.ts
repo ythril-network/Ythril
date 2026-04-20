@@ -4,16 +4,17 @@ import { FormsModule } from '@angular/forms';
 import { ApiService, ConflictRecord } from '../../core/api.service';
 import { RouterLink } from '@angular/router';
 import { PhIconComponent } from '../../shared/ph-icon.component';
+import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 
 type ResolveAction = 'keep-local' | 'keep-incoming' | 'keep-both' | 'save-to-space';
 
 @Component({
   selector: 'app-conflicts',
   standalone: true,
-  imports: [DatePipe, SlicePipe, RouterLink, FormsModule, PhIconComponent],
+  imports: [DatePipe, SlicePipe, RouterLink, FormsModule, PhIconComponent, TranslocoPipe],
   template: `
     <div style="display:flex; justify-content:flex-end; margin-bottom:12px;">
-      <a routerLink="/files" class="btn-secondary btn btn-sm"><ph-icon name="arrow-left" [size]="14"/> Back to Files</a>
+      <a routerLink="/files" class="btn-secondary btn btn-sm"><ph-icon name="arrow-left" [size]="14"/> {{ 'conflicts.backToFiles' | transloco }}</a>
     </div>
 
     @if (loading()) {
@@ -21,12 +22,12 @@ type ResolveAction = 'keep-local' | 'keep-incoming' | 'keep-both' | 'save-to-spa
     } @else if (conflicts().length === 0) {
       <div class="empty-state">
         <div class="empty-state-icon"><ph-icon name="check-circle" [size]="48"/></div>
-        <h3>No conflicts</h3>
-        <p>All synced files are in agreement.</p>
+          <h3>{{ 'conflicts.empty.title' | transloco }}</h3>
+          <p>{{ 'conflicts.empty.body' | transloco }}</p>
       </div>
     } @else {
       <div class="alert alert-warning" style="margin-bottom:16px;">
-        {{ conflicts().length }} unresolved conflict{{ conflicts().length === 1 ? '' : 's' }}.
+        {{ 'conflicts.unresolvedCount' | transloco: { count: conflicts().length } }}
       </div>
 
       <!-- Bulk action bar -->
@@ -34,18 +35,18 @@ type ResolveAction = 'keep-local' | 'keep-incoming' | 'keep-both' | 'save-to-spa
         <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px; padding:8px 12px; background:var(--bg-secondary); border-radius:8px;">
           <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
             <input type="checkbox" [checked]="allSelected()" (change)="toggleSelectAll()"/>
-            <span style="font-size:13px">Select all</span>
+            <span style="font-size:13px">{{ 'conflicts.selectAll' | transloco }}</span>
           </label>
           <span style="flex:1"></span>
           @if (selectedIds().length > 0) {
-            <select [(ngModel)]="bulkAction" aria-label="Bulk action" style="font-size:13px; padding:4px 8px; border:1px solid var(--border-color); border-radius:4px; background:var(--bg-primary);">
-              <option value="keep-local">Keep local</option>
-              <option value="keep-incoming">Keep incoming</option>
-              <option value="keep-both">Keep both</option>
+            <select [(ngModel)]="bulkAction" [attr.aria-label]="'conflicts.bulkActionAriaLabel' | transloco" style="font-size:13px; padding:4px 8px; border:1px solid var(--border-color); border-radius:4px; background:var(--bg-primary);">
+              <option value="keep-local">{{ 'conflicts.action.keepLocal' | transloco }}</option>
+              <option value="keep-incoming">{{ 'conflicts.action.keepIncoming' | transloco }}</option>
+              <option value="keep-both">{{ 'conflicts.action.keepBoth' | transloco }}</option>
             </select>
             <button class="btn btn-sm btn-primary" (click)="bulkResolve()"
                     [disabled]="bulkResolving()">
-              {{ bulkResolving() ? 'Resolving…' : 'Resolve ' + selectedIds().length + ' selected' }}
+              {{ bulkResolving() ? ('conflicts.resolving' | transloco) : ('conflicts.resolveSelected' | transloco: { count: selectedIds().length }) }}
             </button>
           }
         </div>
@@ -56,12 +57,12 @@ type ResolveAction = 'keep-local' | 'keep-incoming' | 'keep-both' | 'save-to-spa
           <thead>
             <tr>
               <th style="width:30px"></th>
-              <th>Space</th>
-              <th>Your file (local)</th>
-              <th>Incoming copy (conflict)</th>
-              <th>From peer</th>
-              <th>Detected</th>
-              <th>Action</th>
+              <th>{{ 'conflicts.table.space' | transloco }}</th>
+              <th>{{ 'conflicts.table.localFile' | transloco }}</th>
+              <th>{{ 'conflicts.table.incomingFile' | transloco }}</th>
+              <th>{{ 'conflicts.table.fromPeer' | transloco }}</th>
+              <th>{{ 'conflicts.table.detected' | transloco }}</th>
+              <th>{{ 'conflicts.table.action' | transloco }}</th>
               <th></th>
             </tr>
           </thead>
@@ -85,16 +86,16 @@ type ResolveAction = 'keep-local' | 'keep-incoming' | 'keep-both' | 'save-to-spa
                 </td>
                 <td>
                   <select [(ngModel)]="conflictActions[c.id]"
-                          aria-label="Resolve action"
+                          [attr.aria-label]="'conflicts.resolveActionAriaLabel' | transloco"
                           style="font-size:12px; padding:2px 6px; border:1px solid var(--border-color); border-radius:4px; background:var(--bg-primary);">
-                    <option value="keep-local">Keep local</option>
-                    <option value="keep-incoming">Keep incoming</option>
-                    <option value="keep-both">Keep both</option>
-                    <option value="save-to-space">Save to space…</option>
+                    <option value="keep-local">{{ 'conflicts.action.keepLocal' | transloco }}</option>
+                    <option value="keep-incoming">{{ 'conflicts.action.keepIncoming' | transloco }}</option>
+                    <option value="keep-both">{{ 'conflicts.action.keepBoth' | transloco }}</option>
+                    <option value="save-to-space">{{ 'conflicts.action.saveToSpace' | transloco }}</option>
                   </select>
                   @if (conflictActions[c.id] === 'save-to-space') {
                     <select [(ngModel)]="conflictTargetSpace[c.id]"
-                            aria-label="Target space"
+                            [attr.aria-label]="'conflicts.targetSpaceAriaLabel' | transloco"
                             style="margin-left:4px; font-size:12px; padding:2px 6px; border:1px solid var(--border-color); border-radius:4px; background:var(--bg-primary);">
                       @for (s of spaces(); track s.id) {
                         @if (s.id !== c.spaceId) {
@@ -107,11 +108,11 @@ type ResolveAction = 'keep-local' | 'keep-incoming' | 'keep-both' | 'save-to-spa
                 <td style="white-space:nowrap">
                   <button class="btn-primary btn btn-sm" (click)="resolve(c)"
                           [disabled]="resolving() === c.id">
-                    {{ resolving() === c.id ? '…' : 'Resolve' }}
+                    {{ resolving() === c.id ? ('conflicts.resolving' | transloco) : ('conflicts.resolveButton' | transloco) }}
                   </button>
                   <button class="btn-secondary btn btn-sm" style="margin-left:4px"
                           (click)="dismiss(c)" [disabled]="resolving() === c.id"
-                          title="Dismiss without file changes" aria-label="Dismiss conflict"><ph-icon name="x" [size]="16"/></button>
+                      [attr.title]="'conflicts.dismissTitle' | transloco" [attr.aria-label]="'conflicts.dismissAriaLabel' | transloco"><ph-icon name="x" [size]="16"/></button>
                 </td>
               </tr>
             }
@@ -123,6 +124,7 @@ type ResolveAction = 'keep-local' | 'keep-incoming' | 'keep-both' | 'save-to-spa
 })
 export class ConflictsComponent implements OnInit {
   private api = inject(ApiService);
+  private transloco = inject(TranslocoService);
 
   loading = signal(true);
   conflicts = signal<ConflictRecord[]>([]);
@@ -180,7 +182,10 @@ export class ConflictsComponent implements OnInit {
     const opts: { targetSpaceId?: string } = {};
     if (action === 'save-to-space') {
       opts.targetSpaceId = this.conflictTargetSpace[c.id];
-      if (!opts.targetSpaceId) { alert('Please select a target space.'); return; }
+      if (!opts.targetSpaceId) {
+        alert(this.transloco.translate('conflicts.error.selectTargetSpace'));
+        return;
+      }
     }
     this.resolving.set(c.id);
     this.api.resolveConflict(c.id, action, opts).subscribe({
@@ -208,7 +213,11 @@ export class ConflictsComponent implements OnInit {
   bulkResolve(): void {
     const ids = this.selectedIds();
     if (ids.length === 0) return;
-    if (!confirm(`Resolve ${ids.length} conflict${ids.length === 1 ? '' : 's'} with "${this.bulkAction}"?`)) return;
+    const confirmMsg = this.transloco.translate('conflicts.confirm.bulkResolve', {
+      count: ids.length,
+      action: this.bulkAction,
+    });
+    if (!confirm(confirmMsg)) return;
     this.bulkResolving.set(true);
     this.api.bulkResolveConflicts(ids, this.bulkAction).subscribe({
       next: (r) => {
@@ -217,7 +226,12 @@ export class ConflictsComponent implements OnInit {
         this.selectedIds.update(sel => sel.filter(x => !resolvedSet.has(x)));
         this.bulkResolving.set(false);
         if (r.failed.length > 0) {
-          alert(`${r.resolved} resolved, ${r.failed.length} failed:\n${r.failed.map(f => `${f.id}: ${f.error}`).join('\n')}`);
+          const details = r.failed.map(f => `${f.id}: ${f.error}`).join('\n');
+          const summary = this.transloco.translate('conflicts.error.bulkResolveFailedSummary', {
+            resolved: r.resolved,
+            failed: r.failed.length,
+          });
+          alert(`${summary}\n${details}`);
         }
       },
       error: () => this.bulkResolving.set(false),

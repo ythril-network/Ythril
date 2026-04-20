@@ -1,6 +1,7 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ApiService } from '../../core/api.service';
+import { TranslocoPipe } from '@jsverse/transloco';
 
 interface StorageData {
   usageGiB: { files: number; brain: number; total: number };
@@ -10,7 +11,7 @@ interface StorageData {
 @Component({
   selector: 'app-storage',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, TranslocoPipe],
   styles: [`
     .usage-bar-track {
       height: 8px;
@@ -43,37 +44,37 @@ interface StorageData {
   `],
   template: `
     <div class="page-header" style="margin-bottom:16px;">
-      <div class="card-title">Metrics</div>
+      <div class="card-title">{{ 'metrics.title' | transloco }}</div>
     </div>
 
-    <button class="btn-secondary btn btn-sm" style="margin-bottom:20px;" (click)="load()">Refresh</button>
+    <button class="btn-secondary btn btn-sm" style="margin-bottom:20px;" (click)="load()">{{ 'metrics.refreshButton' | transloco }}</button>
 
     @if (loading()) {
       <div class="loading-overlay"><span class="spinner"></span></div>
     } @else if (!data()) {
-      <div class="alert alert-error">Could not load storage data. Ensure the server is reachable.</div>
+      <div class="alert alert-error">{{ 'metrics.error.load' | transloco }}</div>
     } @else {
       <div class="stat-grid">
         <div class="stat-card">
-          <div class="stat-label">Total used</div>
+          <div class="stat-label">{{ 'metrics.stat.totalUsed' | transloco }}</div>
           <div class="stat-value">{{ fmt(data()!.usageGiB.total) }}</div>
-          <div class="stat-sub">GiB</div>
+          <div class="stat-sub">{{ 'metrics.stat.unit' | transloco }}</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">Brain (MongoDB)</div>
+          <div class="stat-label">{{ 'metrics.stat.brain' | transloco }}</div>
           <div class="stat-value">{{ fmt(data()!.usageGiB.brain) }}</div>
-          <div class="stat-sub">GiB</div>
+          <div class="stat-sub">{{ 'metrics.stat.unit' | transloco }}</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">Files</div>
+          <div class="stat-label">{{ 'metrics.stat.files' | transloco }}</div>
           <div class="stat-value">{{ fmt(data()!.usageGiB.files) }}</div>
-          <div class="stat-sub">GiB</div>
+          <div class="stat-sub">{{ 'metrics.stat.unit' | transloco }}</div>
         </div>
         @if (data()!.limits?.totalLimitGiB) {
           <div class="stat-card">
-            <div class="stat-label">Limit</div>
+            <div class="stat-label">{{ 'metrics.stat.limit' | transloco }}</div>
             <div class="stat-value">{{ data()!.limits!.totalLimitGiB }}</div>
-            <div class="stat-sub">GiB</div>
+            <div class="stat-sub">{{ 'metrics.stat.unit' | transloco }}</div>
           </div>
         }
       </div>
@@ -82,7 +83,7 @@ interface StorageData {
         @let pct = usagePct();
         <div class="card" style="margin-bottom:20px;">
           <div class="row">
-            <span class="label">Usage</span>
+            <span class="label">{{ 'metrics.bar.usage' | transloco }}</span>
             <span class="value">{{ pct.toFixed(1) }}%</span>
           </div>
           <div class="usage-bar-track">
@@ -101,11 +102,11 @@ interface StorageData {
 
       @if (pct >= 95) {
         <div class="alert alert-error">
-          Storage is nearly full. Clean up files or increase the limit.
+          {{ 'metrics.alert.full' | transloco }}
         </div>
       } @else if (pct >= (data()?.limits?.warnAtPercent ?? 80)) {
         <div class="alert alert-warning">
-          Storage is above the warning threshold.
+          {{ 'metrics.alert.warning' | transloco }}
         </div>
       }
     }

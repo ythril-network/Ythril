@@ -43,7 +43,7 @@ import { v4 as uuidv4 } from 'uuid';
 import bcrypt from 'bcrypt';
 import crypto from 'node:crypto';
 import { z } from 'zod';
-import { requireAuth } from '../auth/middleware.js';
+import { requireAdmin } from '../auth/middleware.js';
 import { authRateLimit, globalRateLimit } from '../rate-limit/middleware.js';
 import { getConfig, saveConfig, getSecrets, saveSecrets } from '../config/loader.js';
 import { createToken } from '../auth/tokens.js';
@@ -157,7 +157,10 @@ async function findSession(handshakeId: string): Promise<[string, HandshakeSessi
 // ── POST /api/invite/generate ─────────────────────────────────────────────────
 // Authenticated members generate an invite handshake session for a network.
 
-inviteRouter.post('/generate', globalRateLimit, requireAuth, async (req, res) => {
+// Restricted to admin tokens: generating an invite auto-creates a full-access
+// peer PAT for the joining instance (scoped to the network's spaces). Allowing
+// non-admin or read-only tokens to trigger this would be a privilege escalation.
+inviteRouter.post('/generate', globalRateLimit, requireAdmin, async (req, res) => {
   const parsed = GenerateBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
 
@@ -207,10 +210,13 @@ inviteRouter.post('/generate', globalRateLimit, requireAuth, async (req, res) =>
     reparentInstanceId ? ` [reparent target: ${reparentInstanceId}]` : ''
   }`);
 
+  // Use the operator-configured publicUrl when available to prevent Host header
+  // injection (a crafted Host header could point the inviteUrl at an attacker's server).
+  const baseUrl = (cfg.publicUrl ?? `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
   res.status(201).json({
     handshakeId,
     networkId,
-    inviteUrl: `${req.protocol}://${req.get('host')}/api/invite/apply`,
+    inviteUrl: `${baseUrl}/api/invite/apply`,
     rsaPublicKeyPem: publicKey,
     expiresAt: new Date(expiresAt).toISOString(),
     spaces: net.spaces,

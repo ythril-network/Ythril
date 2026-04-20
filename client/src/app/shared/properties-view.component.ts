@@ -1,11 +1,12 @@
 import { Component, Input, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { PropertySchema } from '../core/api.service';
+import { TranslocoPipe } from '@jsverse/transloco';
 
 @Component({
   selector: 'app-properties-view',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, TranslocoPipe],
   styles: [`
     .props-none { color: var(--text-muted); font-size: 12px; }
     .props-wrap { font-size: 11px; }
@@ -69,8 +70,8 @@ import { PropertySchema } from '../core/api.service';
     } @else {
       <div class="props-wrap">
         <div class="props-toggle">
-          <button [class.active]="mode() === 'table'" (click)="mode.set('table')">Table</button>
-          <button [class.active]="mode() === 'json'" (click)="mode.set('json')">JSON</button>
+          <button [class.active]="mode() === 'table'" (click)="mode.set('table')">{{ 'propertiesView.tableButton' | transloco }}</button>
+          <button [class.active]="mode() === 'json'" (click)="mode.set('json')">{{ 'propertiesView.jsonButton' | transloco }}</button>
         </div>
         @if (mode() === 'table') {
           <table class="props-table">

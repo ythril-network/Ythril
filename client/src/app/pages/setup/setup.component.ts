@@ -4,33 +4,34 @@ import { Router } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
 import { AuthService } from '../../core/auth.service';
 import { CommonModule } from '@angular/common';
+import { TranslocoPipe } from '@jsverse/transloco';
 
 @Component({
   selector: 'app-setup',
   standalone: true,
-  imports: [FormsModule, CommonModule],
+  imports: [FormsModule, CommonModule, TranslocoPipe],
   template: `
     <div class="auth-page">
       <div class="auth-card" style="max-width: 460px;">
         <div class="auth-logo">
           <span class="auth-logo-dot"></span>
-          ythril
+          {{ 'app.logo' | transloco }}
         </div>
-        <p class="auth-subtitle">First-run setup</p>
+        <p class="auth-subtitle">{{ 'setup.subtitle' | transloco }}</p>
 
         @if (done()) {
           <div class="alert alert-success">
-            Setup complete! Your admin token is shown below.
-            <strong>Copy it now — it won't be shown again.</strong>
+            {{ 'setup.done.message' | transloco }}
+            <strong>{{ 'setup.done.warning' | transloco }}</strong>
           </div>
           <div class="code-block" style="margin-bottom: 16px; display: flex; align-items: center; gap: 8px;">
             <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ firstToken() }}</span>
             <button class="btn-ghost btn btn-sm" type="button" (click)="copyToken()">
-              {{ copied() ? '✓ Copied' : 'Copy' }}
+              {{ copied() ? ('common.copied' | transloco) : ('common.copy' | transloco) }}
             </button>
           </div>
           <button class="btn-primary btn" style="width:100%; justify-content:center;" (click)="proceed()">
-            Continue to sign in
+            {{ 'setup.done.continue' | transloco }}
           </button>
         } @else {
 
@@ -40,13 +41,13 @@ import { CommonModule } from '@angular/common';
 
           <form (ngSubmit)="submit()" #f="ngForm">
             <div class="field">
-              <label for="label">Instance label</label>
+              <label for="label">{{ 'setup.form.instanceLabel' | transloco }}</label>
               <input
                 id="label"
                 type="text"
                 name="label"
                 [(ngModel)]="form.label"
-                placeholder="My Brain"
+                [placeholder]="'setup.form.instanceLabelPlaceholder' | transloco"
                 maxlength="100"
                 required
                 [disabled]="loading()"
@@ -54,7 +55,7 @@ import { CommonModule } from '@angular/common';
             </div>
 
             <div class="field">
-              <label for="pw">Settings password</label>
+              <label for="pw">{{ 'setup.form.settingsPassword' | transloco }}</label>
               <input
                 id="pw"
                 type="password"
@@ -65,11 +66,11 @@ import { CommonModule } from '@angular/common';
                 required
                 [disabled]="loading()"
               />
-              <span class="field-hint">Minimum 8 characters. Used for future admin access.</span>
+              <span class="field-hint">{{ 'setup.form.settingsPasswordHint' | transloco }}</span>
             </div>
 
             <div class="field">
-              <label for="pw2">Confirm password</label>
+              <label for="pw2">{{ 'setup.form.confirmPassword' | transloco }}</label>
               <input
                 id="pw2"
                 type="password"
@@ -81,7 +82,7 @@ import { CommonModule } from '@angular/common';
                 [disabled]="loading()"
               />
               @if (form.confirm && form.confirm !== form.settingsPassword) {
-                <span class="field-hint error">Passwords do not match</span>
+                <span class="field-hint error">{{ 'setup.form.passwordMismatch' | transloco }}</span>
               }
             </div>
 
@@ -93,9 +94,9 @@ import { CommonModule } from '@angular/common';
             >
               @if (loading()) {
                 <span class="spinner" style="width:14px;height:14px;border-width:2px;"></span>
-                Setting up…
+                {{ 'setup.submitting' | transloco }}
               } @else {
-                Complete setup
+                {{ 'setup.submit' | transloco }}
               }
             </button>
           </form>

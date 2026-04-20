@@ -3,6 +3,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { AuthService } from '../../core/auth.service';
 import { HttpClient } from '@angular/common/http';
 import { CommonModule } from '@angular/common';
+import { TranslocoPipe } from '@jsverse/transloco';
 
 /**
  * Handles the redirect back from the IdP after the user authenticates.
@@ -21,24 +22,24 @@ import { CommonModule } from '@angular/common';
 @Component({
   selector: 'app-oidc-callback',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, TranslocoPipe],
   template: `
     <div class="auth-page">
       <div class="auth-card">
         <div class="auth-logo">
           <span class="auth-logo-dot"></span>
-          ythril
+          {{ 'app.logo' | transloco }}
         </div>
 
         @if (error()) {
           <div class="alert alert-error">{{ error() }}</div>
           <p style="margin-top: 16px; text-align: center;">
-            <a href="/login?local">Back to login</a>
+            <a href="/login?local">{{ 'oidcCallback.backToLogin' | transloco }}</a>
           </p>
         } @else {
           <p class="auth-subtitle">
             <span class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;margin-right:8px;"></span>
-            Completing sign-in…
+            {{ 'oidcCallback.completingSignIn' | transloco }}
           </p>
         }
       </div>

@@ -11,8 +11,8 @@
   --text-secondary: #8b949e;
   --text-muted:     #6e7681;
 
-  --accent:       #a0ff80;
-  --accent-hover: #ceff80;
+  --accent:       #ceff80;
+  --accent-hover: #a0ff80;
   --accent-dim:   rgba(124, 106, 247, 0.15);
   --accent-text:  #0d1117;
 
@@ -28,7 +28,7 @@
   /* ── Semantic aliases ─────────────────────────────────────────────── */
   --danger:             var(--error);
   --danger-dim:         var(--error-dim);
-  --text-on-accent:     #ffffff;
+  --text-on-accent:     #333333;
   --text:               var(--text-primary);     /* compat alias */
 
   /* ── Extended backgrounds ─────────────────────────────────────────── */

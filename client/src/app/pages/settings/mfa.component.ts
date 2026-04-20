@@ -3,13 +3,15 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service';
 import QRCode from 'qrcode';
+import { TranslocoPipe } from '@jsverse/transloco';
+import { TranslocoService } from '@jsverse/transloco';
 
 type MfaState = 'idle' | 'enrolling' | 'disabling';
 
 @Component({
   selector: 'app-mfa',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, TranslocoPipe],
   styles: [`
     .qr-wrap { display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
     .secret-box {
@@ -33,10 +35,9 @@ type MfaState = 'idle' | 'enrolling' | 'disabling';
     <div class="card">
       <div class="card-header">
         <div>
-          <div class="card-title">Two-factor authentication (MFA)</div>
+          <div class="card-title">{{ 'mfa.title' | transloco }}</div>
           <div class="card-subtitle">
-            When enabled, admin mutations (create/revoke tokens, create/delete spaces)
-            require a one-time code from an authenticator app.
+            {{ 'mfa.subtitle' | transloco }}
           </div>
         </div>
       </div>
@@ -47,41 +48,40 @@ type MfaState = 'idle' | 'enrolling' | 'disabling';
 
         <div class="status-row">
           @if (enabled()) {
-            <span class="badge badge-green">Enabled</span>
-            <button class="btn btn-secondary btn-sm" (click)="startDisable()">Disable MFA</button>
+            <span class="badge badge-green">{{ 'mfa.status.enabled' | transloco }}</span>
+            <button class="btn btn-secondary btn-sm" (click)="startDisable()">{{ 'mfa.disableButton' | transloco }}</button>
           } @else {
-            <span class="badge badge-gray">Disabled</span>
-            <button class="btn btn-primary btn-sm" (click)="startEnroll()">Enable MFA</button>
+            <span class="badge badge-gray">{{ 'mfa.status.disabled' | transloco }}</span>
+            <button class="btn btn-primary btn-sm" (click)="startEnroll()">{{ 'mfa.enableButton' | transloco }}</button>
           }
         </div>
 
       } @else if (state() === 'enrolling') {
 
         <p style="font-size:0.88rem;color:var(--text-muted);margin:0 0 1rem;">
-          Scan the QR code with your authenticator app (Google Authenticator, Authy, 1Password, etc.),
-          then enter a code to confirm enrollment.
+          {{ 'mfa.enroll.instructions' | transloco }}
         </p>
         <div class="qr-wrap">
           @if (qrUrl()) {
-            <img [src]="qrUrl()" alt="TOTP QR code" width="200" height="200" />
+            <img [src]="qrUrl()" [attr.alt]="'mfa.enroll.qrAlt' | transloco" width="200" height="200" />
           }
           <div>
-            <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:4px;">Manual entry key:</div>
+            <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:4px;">{{ 'mfa.enroll.manualKey' | transloco }}</div>
             <div class="secret-box">{{ secret() }}</div>
           </div>
           <div>
-            <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:6px;">Enter a code to confirm:</div>
+            <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:6px;">{{ 'mfa.enroll.enterCode' | transloco }}</div>
             <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
               <input class="code-input" type="text" inputmode="numeric"
-                     autocomplete="one-time-code" maxlength="6" placeholder="000000"
-                     aria-label="TOTP confirmation code"
+                autocomplete="one-time-code" maxlength="6" [placeholder]="'mfa.enroll.codePlaceholder' | transloco"
+                     [attr.aria-label]="'mfa.enroll.codeAriaLabel' | transloco"
                      [(ngModel)]="confirmCode" (keyup.enter)="confirmEnroll()" />
               <button class="btn btn-primary btn-sm" (click)="confirmEnroll()"
                       [disabled]="confirming() || confirmCode.length < 6">
                 @if (confirming()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
-                Confirm
+                {{ 'mfa.enroll.confirmButton' | transloco }}
               </button>
-              <button class="btn btn-secondary btn-sm" (click)="cancel()">Cancel</button>
+              <button class="btn btn-secondary btn-sm" (click)="cancel()">{{ 'common.cancel' | transloco }}</button>
             </div>
           </div>
         </div>
@@ -92,14 +92,13 @@ type MfaState = 'idle' | 'enrolling' | 'disabling';
       } @else if (state() === 'disabling') {
 
         <div class="alert alert-error" style="margin-bottom:12px;">
-          Disabling MFA removes the TOTP requirement for admin mutations.
-          The secret will be permanently deleted from secrets.json.
+          {{ 'mfa.disable.warning' | transloco }}
         </div>
         <div style="display:flex;gap:10px;">
-          <button class="btn btn-secondary btn-sm" (click)="cancel()">Cancel</button>
+          <button class="btn btn-secondary btn-sm" (click)="cancel()">{{ 'common.cancel' | transloco }}</button>
           <button class="btn btn-primary btn-sm danger" (click)="confirmDisable()" [disabled]="disabling()">
             @if (disabling()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
-            Yes, disable MFA
+            {{ 'mfa.disable.confirmButton' | transloco }}
           </button>
         </div>
 
@@ -113,6 +112,7 @@ type MfaState = 'idle' | 'enrolling' | 'disabling';
 })
 export class MfaComponent implements OnInit {
   private api = inject(ApiService);
+  private transloco = inject(TranslocoService);
 
   loading = signal(true);
   enabled = signal(false);
@@ -151,7 +151,7 @@ export class MfaComponent implements OnInit {
         this.enrollError.set('');
         this.state.set('enrolling');
       },
-      error: (err) => this.enrollError.set(err.error?.error ?? 'Failed to start MFA setup.'),
+      error: (err) => this.enrollError.set(err.error?.error ?? this.transloco.translate('mfa.error.setupFailed')),
     });
   }
 
@@ -165,14 +165,14 @@ export class MfaComponent implements OnInit {
         if (valid) {
           this.enabled.set(true);
           this.state.set('idle');
-          this.successMsg.set('MFA enabled. All admin mutations now require a TOTP code.');
+          this.successMsg.set(this.transloco.translate('mfa.success.enabled'));
         } else {
-          this.enrollError.set('Invalid code — check your authenticator app and try again.');
+          this.enrollError.set(this.transloco.translate('mfa.error.invalidCode'));
         }
       },
       error: () => {
         this.confirming.set(false);
-        this.enrollError.set('Could not verify code. Try again.');
+        this.enrollError.set(this.transloco.translate('mfa.error.verifyFailed'));
       },
     });
   }
@@ -189,7 +189,7 @@ export class MfaComponent implements OnInit {
         this.disabling.set(false);
         this.enabled.set(false);
         this.state.set('idle');
-        this.successMsg.set('MFA disabled.');
+        this.successMsg.set(this.transloco.translate('mfa.success.disabled'));
       },
       error: () => this.disabling.set(false),
     });

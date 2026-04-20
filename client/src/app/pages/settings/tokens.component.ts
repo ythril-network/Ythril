@@ -2,11 +2,13 @@ import { Component, inject, signal, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService, Space, TokenRecord } from '../../core/api.service';
+import { TranslocoPipe } from '@jsverse/transloco';
+import { TranslocoService } from '@jsverse/transloco';
 
 @Component({
   selector: 'app-tokens',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, TranslocoPipe],
   styles: [`
     .new-token-banner {
       background: var(--success-dim);
@@ -228,30 +230,30 @@ import { ApiService, Space, TokenRecord } from '../../core/api.service';
     <!-- New token success banner -->
     @if (newToken()) {
       <div class="new-token-banner" role="alert">
-        <div class="new-token-banner-title">✓ Token created successfully</div>
-        <div class="new-token-banner-warn">⚠️ Copy this token now — it will <strong>not</strong> be shown again after you dismiss this.</div>
+        <div class="new-token-banner-title">{{ 'tokens.created.title' | transloco }}</div>
+        <div class="new-token-banner-warn">{{ 'tokens.created.warning' | transloco }}</div>
         <div class="token-copy-row">
-          <span class="token-copy-value" aria-label="New token value">{{ newToken() }}</span>
-          <button class="btn-copy-prominent" aria-label="Copy new token" (click)="copyNew()">
-            @if (copied()) { ✓ Copied } @else { 📋 Copy token }
+          <span class="token-copy-value" [attr.aria-label]="'tokens.created.newTokenValueAria' | transloco">{{ newToken() }}</span>
+          <button class="btn-copy-prominent" [attr.aria-label]="'tokens.created.copyNewAria' | transloco" (click)="copyNew()">
+            @if (copied()) { {{ 'common.copied' | transloco }} } @else { {{ 'tokens.created.copyButton' | transloco }} }
           </button>
         </div>
-        <button class="btn-secondary btn btn-sm" style="margin-top:12px;" (click)="clearNew()">I've copied it — dismiss</button>
+        <button class="btn-secondary btn btn-sm" style="margin-top:12px;" (click)="clearNew()">{{ 'tokens.created.dismissButton' | transloco }}</button>
       </div>
     }
 
     <!-- Rotated token banner -->
     @if (regenToken()) {
       <div class="new-token-banner" role="alert">
-        <div class="new-token-banner-title">↺ Token rotated — new secret</div>
-        <div class="new-token-banner-warn">⚠️ The old secret is now invalid. Copy this one before dismissing.</div>
+        <div class="new-token-banner-title">{{ 'tokens.rotated.title' | transloco }}</div>
+        <div class="new-token-banner-warn">{{ 'tokens.rotated.warning' | transloco }}</div>
         <div class="token-copy-row">
-          <span class="token-copy-value" aria-label="Rotated token value">{{ regenToken() }}</span>
-          <button class="btn-copy-prominent" aria-label="Copy rotated token" (click)="copyRegen()">
-            @if (copiedRegen()) { ✓ Copied } @else { 📋 Copy token }
+          <span class="token-copy-value" [attr.aria-label]="'tokens.rotated.tokenValueAria' | transloco">{{ regenToken() }}</span>
+          <button class="btn-copy-prominent" [attr.aria-label]="'tokens.rotated.copyAria' | transloco" (click)="copyRegen()">
+            @if (copiedRegen()) { {{ 'common.copied' | transloco }} } @else { {{ 'tokens.created.copyButton' | transloco }} }
           </button>
         </div>
-        <button class="btn-secondary btn btn-sm" style="margin-top:12px;" (click)="clearRegen()">I've copied it — dismiss</button>
+        <button class="btn-secondary btn btn-sm" style="margin-top:12px;" (click)="clearRegen()">{{ 'tokens.created.dismissButton' | transloco }}</button>
       </div>
     }
 
@@ -260,8 +262,8 @@ import { ApiService, Space, TokenRecord } from '../../core/api.service';
       <div class="dialog-backdrop" (click)="showCreateDialog.set(false)">
         <div class="dialog" (click)="$event.stopPropagation()">
           <div class="dialog-header">
-            <div class="card-title">Create token</div>
-            <button class="icon-btn" aria-label="Close dialog" (click)="showCreateDialog.set(false)">✕</button>
+            <div class="card-title">{{ 'tokens.create.title' | transloco }}</div>
+            <button class="icon-btn" [attr.aria-label]="'common.close' | transloco" (click)="showCreateDialog.set(false)">✕</button>
           </div>
 
           @if (createError()) {
@@ -271,32 +273,32 @@ import { ApiService, Space, TokenRecord } from '../../core/api.service';
           <form (ngSubmit)="createToken()" #f="ngForm">
             <div class="form-grid">
               <div class="field" style="margin-bottom:0;">
-                <label>Label</label>
-                <input type="text" [(ngModel)]="newName" name="name" placeholder="My CLI token" maxlength="200" required />
+                <label>{{ 'tokens.create.label' | transloco }}</label>
+                <input type="text" [(ngModel)]="newName" name="name" [placeholder]="'tokens.create.labelPlaceholder' | transloco" maxlength="200" required />
               </div>
               <div class="field" style="margin-bottom:0;">
-                <label>Expires (optional)</label>
+                <label>{{ 'tokens.create.expires' | transloco }}</label>
                 <input type="date" class="styled-input" [(ngModel)]="newExpiry" name="expiry" />
               </div>
             </div>
 
             <div class="field" style="margin-top:12px; margin-bottom:0;">
-              <label>Spaces (optional)</label>
+              <label>{{ 'tokens.create.spaces' | transloco }}</label>
               @if (spacesLoadFailed()) {
-                <div class="alert alert-error" style="margin-bottom:6px; font-size:12px;">⚠️ Could not load spaces — enter IDs manually.</div>
-                <input type="text" [(ngModel)]="newSpacesFallback" name="spaces" placeholder="Comma-separated space IDs, e.g. general, project-x" />
+                <div class="alert alert-error" style="margin-bottom:6px; font-size:12px;">{{ 'tokens.create.spacesLoadFailed' | transloco }}</div>
+                <input type="text" [(ngModel)]="newSpacesFallback" name="spaces" [placeholder]="'tokens.create.spacesFallbackPlaceholder' | transloco" />
               } @else if (availableSpaces().length === 0) {
-                <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">Loading spaces…</div>
+                <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">{{ 'tokens.create.loadingSpaces' | transloco }}</div>
               } @else {
                 <div class="table-wrapper" style="max-height:200px; overflow-y:auto; border:1px solid var(--border); border-radius:var(--radius-sm);">
                   <table style="margin:0;">
                     <thead>
                       <tr>
                         <th style="width:40px; text-align:center;">
-                          <input type="checkbox" [checked]="newSelectedSpaces.length === 0" (change)="selectAllSpaces()" title="Grant access to all spaces (deselect all)" />
+                          <input type="checkbox" [checked]="newSelectedSpaces.length === 0" (change)="selectAllSpaces()" [attr.title]="'tokens.create.allSpacesTitle' | transloco" />
                         </th>
-                        <th>Space <span style="font-size:10px; color:var(--text-muted); font-weight:400;">— check none for full access</span></th>
-                        <th>ID</th>
+                        <th>{{ 'auditLog.filter.space' | transloco }} <span style="font-size:10px; color:var(--text-muted); font-weight:400;">— {{ 'tokens.create.spacesCheckNoneHint' | transloco }}</span></th>
+                        <th>{{ 'spaces.table.column.id' | transloco }}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -313,34 +315,34 @@ import { ApiService, Space, TokenRecord } from '../../core/api.service';
                   </table>
                 </div>
               }
-              <div class="scope-hint">Leave blank / deselect all to grant access to all spaces.</div>
+              <div class="scope-hint">{{ 'tokens.create.spacesHint' | transloco }}</div>
             </div>
 
             <div class="field" style="margin-top:12px; margin-bottom:0;">
-              <label>Permission level</label>
+              <label>{{ 'tokens.create.permission' | transloco }}</label>
               <div class="permission-radio-group">
                 <label class="permission-radio-item">
                   <input type="radio" name="permission" value="readOnly" [(ngModel)]="newPermission" />
-                  Read-only
+                  {{ 'tokens.permission.readOnly' | transloco }}
                 </label>
                 <label class="permission-radio-item">
                   <input type="radio" name="permission" value="standard" [(ngModel)]="newPermission" />
-                  Standard
+                  {{ 'tokens.permission.standard' | transloco }}
                 </label>
                 @if (selfToken()?.admin) {
                   <label class="permission-radio-item">
                     <input type="radio" name="permission" value="admin" [(ngModel)]="newPermission" />
-                    Admin
+                    {{ 'tokens.permission.admin' | transloco }}
                   </label>
                 }
               </div>
             </div>
 
             <div class="form-grid-bottom" style="margin-top:12px;">
-              <button class="btn-secondary btn" type="button" (click)="showCreateDialog.set(false)">Cancel</button>
+              <button class="btn-secondary btn" type="button" (click)="showCreateDialog.set(false)">{{ 'common.cancel' | transloco }}</button>
               <button class="btn-primary btn" type="submit" style="margin-left:auto;" [disabled]="creating() || !newName.trim()">
                 @if (creating()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
-                Create token
+                {{ 'tokens.create.submitButton' | transloco }}
               </button>
             </div>
           </form>
@@ -351,10 +353,10 @@ import { ApiService, Space, TokenRecord } from '../../core/api.service';
     <!-- Token list -->
     <div class="card">
       <div class="card-header">
-        <div class="card-title">Active tokens</div>
+        <div class="card-title">{{ 'tokens.list.title' | transloco }}</div>
         <div style="display:flex; gap:8px;">
-          <button class="btn-primary btn btn-sm" (click)="showCreateDialog.set(true)">Create Token</button>
-          <button class="btn-secondary btn btn-sm" (click)="load()">Refresh</button>
+          <button class="btn-primary btn btn-sm" (click)="showCreateDialog.set(true)">{{ 'tokens.list.createButton' | transloco }}</button>
+          <button class="btn-secondary btn btn-sm" (click)="load()">{{ 'tokens.list.refreshButton' | transloco }}</button>
         </div>
       </div>
 
@@ -365,7 +367,7 @@ import { ApiService, Space, TokenRecord } from '../../core/api.service';
           <table>
             <thead>
               <tr>
-                <th>Label</th><th>Permission</th><th>Created</th><th>Last used</th><th>Expires</th><th>Spaces</th><th></th>
+                <th>{{ 'tokens.table.label' | transloco }}</th><th>{{ 'tokens.table.permission' | transloco }}</th><th>{{ 'tokens.table.created' | transloco }}</th><th>{{ 'tokens.table.lastUsed' | transloco }}</th><th>{{ 'tokens.table.expires' | transloco }}</th><th>{{ 'tokens.table.spaces' | transloco }}</th><th></th>
               </tr>
             </thead>
             <tbody>
@@ -374,46 +376,46 @@ import { ApiService, Space, TokenRecord } from '../../core/api.service';
                   <td style="font-weight:500;">
                     <span class="token-status-dot" [class.dot-active]="!isExpired(t)" [class.dot-expired]="isExpired(t)"></span>
                     {{ t.name }}
-                    @if (t.id === selfToken()?.id) { <span style="margin-left:6px;font-size:0.75rem;color:var(--text-muted);">(current session)</span> }
+                    @if (t.id === selfToken()?.id) { <span style="margin-left:6px;font-size:0.75rem;color:var(--text-muted);">{{ 'tokens.table.currentSession' | transloco }}</span> }
                   </td>
                   <td>
-                    @if (t.admin) { <span class="badge-admin">admin</span> }
-                    @else if (t.readOnly) { <span class="badge-readonly">read-only</span> }
-                    @else { <span class="badge badge-gray">standard</span> }
+                    @if (t.admin) { <span class="badge-admin">{{ 'tokens.badge.admin' | transloco }}</span> }
+                    @else if (t.readOnly) { <span class="badge-readonly">{{ 'tokens.badge.readOnly' | transloco }}</span> }
+                    @else { <span class="badge badge-gray">{{ 'tokens.badge.standard' | transloco }}</span> }
                   </td>
                   <td style="color:var(--text-muted)">{{ t.createdAt | date:'dd.MM.yyyy' }}</td>
                   <td style="color:var(--text-muted)">
                     @if (t.lastUsed) {
                       {{ t.lastUsed | date:'dd.MM.yyyy' }}
                     } @else {
-                      <span style="font-style:italic;">Never used</span>
+                      <span style="font-style:italic;">{{ 'tokens.table.neverUsed' | transloco }}</span>
                     }
                   </td>
                   <td>
                     @if (t.expiresAt) {
                       <span class="badge" [class.badge-red]="isExpired(t)" [class.badge-gray]="!isExpired(t)">
-                        {{ isExpired(t) ? 'Expired' : '' }} {{ t.expiresAt | date:'dd.MM.yyyy' }}
+                        {{ isExpired(t) ? ('tokens.table.expired' | transloco) : '' }} {{ t.expiresAt | date:'dd.MM.yyyy' }}
                       </span>
                     } @else {
-                      <span class="badge badge-green">No expiry</span>
+                      <span class="badge badge-green">{{ 'tokens.table.noExpiry' | transloco }}</span>
                     }
                   </td>
                   <td>
                     @if (!t.spaces || t.spaces.length === 0) {
-                      <span class="badge badge-green">All spaces</span>
+                      <span class="badge badge-green">{{ 'tokens.badge.allSpaces' | transloco }}</span>
                     } @else {
                       <span class="badge badge-gray">{{ t.spaces.join(', ') }}</span>
                     }
                   </td>
                   <td style="white-space:nowrap; display:flex; gap:6px; align-items:center;">
-                    <button class="icon-btn" title="Rotate secret" aria-label="Rotate token secret" (click)="regenerate(t)" style="font-size:14px;">↺</button>
-                    <button class="icon-btn danger" title="Revoke" aria-label="Revoke token" (click)="revoke(t)">✕</button>
+                    <button class="icon-btn" [attr.title]="'tokens.action.rotateTitle' | transloco" [attr.aria-label]="'tokens.action.rotateAriaLabel' | transloco" (click)="regenerate(t)" style="font-size:14px;">↺</button>
+                    <button class="icon-btn danger" [attr.title]="'tokens.action.revokeTitle' | transloco" [attr.aria-label]="'tokens.action.revokeAriaLabel' | transloco" (click)="revoke(t)">✕</button>
                   </td>
                 </tr>
               } @empty {
                 <tr><td colspan="7">
                   <div class="empty-state" style="padding:24px;">
-                    <h3>No tokens yet</h3>
+                    <h3>{{ 'tokens.empty.title' | transloco }}</h3>
                   </div>
                 </td></tr>
               }
@@ -426,6 +428,7 @@ import { ApiService, Space, TokenRecord } from '../../core/api.service';
 })
 export class TokensComponent implements OnInit {
   private api = inject(ApiService);
+  private transloco = inject(TranslocoService);
 
   tokens = signal<TokenRecord[]>([]);
   selfToken = signal<TokenRecord | null>(null);
@@ -494,7 +497,7 @@ export class TokensComponent implements OnInit {
       },
       error: (err) => {
         this.creating.set(false);
-        this.createError.set(err.error?.error ?? 'Failed to create token');
+        this.createError.set(err.error?.error ?? this.transloco.translate('tokens.error.createFailed'));
       },
     });
   }
@@ -516,19 +519,19 @@ export class TokensComponent implements OnInit {
   }
 
   regenerate(t: TokenRecord): void {
-    if (!confirm(`Rotate secret for "${t.name}"?\n\nThe current token will stop working immediately. Copy the new secret before closing this dialog.`)) return;
+    if (!confirm(this.transloco.translate('tokens.confirm.rotate', { name: t.name }))) return;
     this.clearRegen();
     this.api.regenerateToken(t.id).subscribe({
       next: ({ plaintext }) => this.regenToken.set(plaintext),
-      error: () => alert('Failed to regenerate token.'),
+      error: () => alert(this.transloco.translate('tokens.error.rotateFailed')),
     });
   }
 
   revoke(t: TokenRecord): void {
-    if (!confirm(`Revoke token "${t.name}"? This cannot be undone.`)) return;
+    if (!confirm(this.transloco.translate('tokens.confirm.revoke', { name: t.name }))) return;
     this.api.revokeToken(t.id).subscribe({
       next: () => this.tokens.update(list => list.filter(x => x.id !== t.id)),
-      error: () => alert('Failed to revoke token.'),
+      error: () => alert(this.transloco.translate('tokens.error.revokeFailed')),
     });
   }
 

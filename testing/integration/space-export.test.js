@@ -84,7 +84,7 @@ describe('Space export — basic export', () => {
     assert.equal(edgeR.status, 201);
 
     const chronoR = await post(INSTANCES.a, adminToken, `/api/brain/spaces/${spaceId}/chrono`, {
-      title: 'Export Chrono', kind: 'event', startsAt: new Date().toISOString(),
+      title: 'Export Chrono', type: 'event', startsAt: new Date().toISOString(),
     });
     assert.equal(chronoR.status, 201);
 
@@ -305,7 +305,7 @@ describe('Space export/import — round-trip (export → wipe → import)', () =
 
     const now = new Date().toISOString();
     const chronoR = await post(INSTANCES.a, tok, `/api/brain/spaces/${spaceId}/chrono`, {
-      title: 'RT Event', kind: 'event', startsAt: now,
+      title: 'RT Event', type: 'event', startsAt: now,
     });
     assert.equal(chronoR.status, 201);
 
