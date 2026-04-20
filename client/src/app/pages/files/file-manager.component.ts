@@ -478,6 +478,7 @@ export class FileManagerComponent implements OnInit, OnDestroy {
 
   /** Emits the file path when user clicks "View Brain Metadata" in the preview pane. */
   @Output() viewFileMeta = new EventEmitter<string>();
+  @Output() fileDeleted = new EventEmitter<void>();
 
   /** Navigate to the given directory when changed from parent (used by Brain filemeta→Files link). */
   @Input() set navigatePath(p: string) {
@@ -687,7 +688,7 @@ export class FileManagerComponent implements OnInit, OnDestroy {
     if (!confirm(`Delete "${entry.name}"?`)) return;
     const path = this.join(this.currentPath(), entry.name);
     this.api.deleteFile(this.activeSpaceId(), path).subscribe({
-      next: () => this.loadDir(this.currentPath()),
+      next: () => { this.loadDir(this.currentPath()); this.fileDeleted.emit(); },
       error: () => alert('Failed to delete file.'),
     });
   }

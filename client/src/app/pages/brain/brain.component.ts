@@ -526,7 +526,7 @@ interface SpaceView {
 
         <!-- Files tab -->
         @if (activeTab() === 'files') {
-          <app-file-manager [embeddedSpaceId]="activeSpaceId()" [navigatePath]="fileManagerNavPath()" (viewFileMeta)="openFileMetaEntry($event)" />
+          <app-file-manager [embeddedSpaceId]="activeSpaceId()" [navigatePath]="fileManagerNavPath()" (viewFileMeta)="openFileMetaEntry($event)" (fileDeleted)="loadStats(activeSpaceId())" />
         }
 
         <!-- Memories -->
@@ -2691,6 +2691,7 @@ export class BrainComponent implements OnInit {
       next: () => {
         this.confirmDeleteId.set('');
         this.fileMetas.update(list => list.filter(f => f._id !== id));
+        this.loadStats(this.activeSpaceId());
       },
       error: () => {
         this.confirmDeleteId.set('');
