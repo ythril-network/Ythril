@@ -9,9 +9,14 @@
   "nav.metrics": "Metryka",
   "nav.networks": "Sieci",
   "nav.mfa": "MFA",
+  "nav.settings": "Ustawienia",
   "nav.logs": "Dzienniki",
   "nav.about": "O",
   "nav.signOut": "Wyloguj się",
+
+  "prefs.language.title": "Język",
+  "prefs.language.subtitle": "Wybierz język interfejsu.",
+
   "common.save": "Ratować",
   "common.cancel": "Anulować",
   "common.confirm": "Potwierdzać",

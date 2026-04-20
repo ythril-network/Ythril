@@ -396,10 +396,20 @@ filesRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadOnly,
     return;
   }
 
-  let stat: Awaited<ReturnType<typeof fs.stat>>;
+  let stat: Awaited<ReturnType<typeof fs.stat>> | null;
   try {
     stat = await fs.stat(absPath);
-  } catch {
+  } catch (statErr: unknown) {
+    // File is already gone from disk — clean up any orphaned meta record and
+    // return success so the UI can remove it.  Any other stat error is re-thrown.
+    const code = (statErr as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') {
+      await deleteFileMeta(targetSpace, filePath).catch(err => {
+        log.warn(`deleteFileMeta (orphan cleanup) error for space ${targetSpace}, path ${filePath}: ${err}`);
+      });
+      res.status(204).end();
+      return;
+    }
     res.status(404).json({ error: 'Path not found' });
     return;
   }

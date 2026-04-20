@@ -10,9 +10,13 @@
   "nav.metrics": "Metrics",
   "nav.networks": "Networks",
   "nav.mfa": "MFA",
+  "nav.settings": "Settings",
   "nav.logs": "Logs",
   "nav.about": "About",
   "nav.signOut": "Sign out",
+
+  "prefs.language.title": "Language",
+  "prefs.language.subtitle": "Choose the interface language.",
 
   "common.save": "Save",
   "common.cancel": "Cancel",

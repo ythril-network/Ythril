@@ -2703,7 +2703,7 @@ export class BrainComponent implements OnInit {
 
   /** Called from Files tab file preview: switch to Filemeta tab filtered by path. */
   openFileMetaEntry(path: string): void {
-    this.fileMetaSearch.set(path);
+    this.fileMetaSearch.set(path.replace(/^\/+/, ''));
     this.fileMetaSkip.set(0);
     this.activeTab.set('filemeta');
     this.loadCurrentTab(this.activeSpaceId());
