@@ -2127,7 +2127,9 @@ function createGlobalMcpServer(tokenSpaces?: string[], readOnly?: boolean, isAdm
           space: requiredSpaceSchema,
           from: { type: 'string', description: 'Source entity ID.' },
           to: { type: 'string', description: 'Target entity ID.' },
-          label: { type: 'string', description: 'Relationship label (e.g. "works_at", "knows").' },            type: { type: 'string', description: 'Optional edge type (e.g. "causal", "attribution").' },            weight: { type: 'number', description: 'Optional edge weight (0–1).' },
+          label: { type: 'string', description: 'Relationship label (e.g. "works_at", "knows").' },
+          type: { type: 'string', description: 'Optional edge type (e.g. "causal", "attribution").' },
+          weight: { type: 'number', description: 'Optional edge weight (0–1).' },
           tags: { type: 'array', items: { type: 'string' }, description: 'Categorisation tags.' },
           description: { type: 'string', description: 'Optional prose description of why this relationship exists.' },
           properties: {
