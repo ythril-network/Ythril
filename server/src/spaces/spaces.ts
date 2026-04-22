@@ -506,6 +506,29 @@ export function updateSpace(
   return space;
 }
 
+/** Reorder spaces in config to match the provided ordered list of IDs.
+ *  IDs not present in the list are appended at the end (preserving relative order).
+ *  Returns the reordered list of SpaceConfigs, or null if any provided ID is unknown. */
+export function reorderSpaces(orderedIds: string[]): SpaceConfig[] | null {
+  const cfg = getConfig();
+  const idSet = new Set(orderedIds);
+  // Validate all provided IDs exist
+  for (const id of orderedIds) {
+    if (!cfg.spaces.some(s => s.id === id)) return null;
+  }
+  // Build new order: provided IDs first (in given order), then any remaining spaces
+  const reordered: SpaceConfig[] = [];
+  for (const id of orderedIds) {
+    reordered.push(cfg.spaces.find(s => s.id === id)!);
+  }
+  for (const space of cfg.spaces) {
+    if (!idSet.has(space.id)) reordered.push(space);
+  }
+  cfg.spaces = reordered;
+  saveConfig(cfg);
+  return reordered;
+}
+
 /** Generate a URL-safe space ID from a label */
 export function slugify(label: string): string {
   return label
