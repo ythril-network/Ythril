@@ -1,4 +1,4 @@
-import {
+﻿import {
   Component,
   OnInit,
   AfterViewInit,
@@ -37,7 +37,7 @@ import { TagInputComponent } from '../../shared/tag-input.component';
 import { PropertiesEditorComponent } from '../../shared/properties-editor.component';
 import { TranslocoPipe } from '@jsverse/transloco';
 
-// ── Helper types ─────────────────────────────────────────────────────────────
+// â”€â”€ Helper types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 interface DetailRow {
   id: string;
@@ -67,7 +67,7 @@ interface DetailRow {
       min-height: 400px;
     }
 
-    /* ── Space chips (matches brain style) ─────────────────────────────────── */
+    /* â”€â”€ Space chips (matches brain style) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .space-tabs {
       display: flex;
       gap: 8px;
@@ -103,7 +103,7 @@ interface DetailRow {
     .space-chip-id { font-size: 10px; color: var(--text-muted); }
     .space-chip.active .space-chip-id { color: var(--accent); opacity: 0.7; }
 
-    /* ── Toolbar ───────────────────────────────────────────────────────────── */
+    /* â”€â”€ Toolbar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
     .graph-toolbar {
       display: flex;
@@ -237,7 +237,7 @@ interface DetailRow {
       font-family: var(--font-mono);
     }
 
-    /* ── Canvas zone ──────────────────────────────────────────────────────── */
+    /* â”€â”€ Canvas zone â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
     .canvas-row {
       display: flex;
@@ -338,7 +338,7 @@ interface DetailRow {
     }
     @keyframes graph-spin { to { transform: rotate(360deg); } }
 
-    /* ── Side panel (shown when node or edge selected) ───────────────────── */
+    /* â”€â”€ Side panel (shown when node or edge selected) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
     .side-panel {
       width: 560px;
@@ -522,7 +522,7 @@ interface DetailRow {
       padding: 16px 12px;
     }
 
-    /* ── Shared badge, button helpers ──────────────────────────────────────── */
+    /* â”€â”€ Shared badge, button helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .tag {
       display: inline-block;
       padding: 1px 7px;
@@ -534,7 +534,7 @@ interface DetailRow {
       margin-right: 3px;
     }
 
-    /* ── Brain-style record drawer modal ───────────────────────────────────── */
+    /* â”€â”€ Brain-style record drawer modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .bdrawer-overlay {
       position: fixed; inset: 0;
       background: var(--bg-scrim);
@@ -613,7 +613,7 @@ interface DetailRow {
     }
   `],
   template: `
-    <!-- ═══ Space selector ══════════════════════════════════════════════════ -->
+    <!-- â•â•â• Space selector â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
     @if (!isEmbedded() && spaces().length > 0) {
       <div class="space-tabs">
         @for (s of spaces(); track s.id) {
@@ -622,7 +622,7 @@ interface DetailRow {
       </div>
     }
 
-    <!-- ═══ Toolbar ════════════════════════════════════════════════════════ -->
+    <!-- â•â•â• Toolbar â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
     <div class="graph-toolbar">
       <div class="search-wrapper">
         <app-entity-search
@@ -662,10 +662,10 @@ interface DetailRow {
       <button class="toolbar-btn" [attr.title]="'graph.toolbar.resetGraph' | transloco"     (click)="resetGraph()"><ph-icon name="arrows-clockwise" [size]="16"/></button>
     </div>
 
-    <!-- ═══ Canvas row (canvas + optional side panel) ══════════════════════ -->
+    <!-- â•â•â• Canvas row (canvas + optional side panel) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
     <div class="canvas-row">
 
-      <!-- ── Canvas zone ────────────────────────────────────────────────── -->
+      <!-- â”€â”€ Canvas zone â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
       <div class="canvas-zone">
         @if (truncated()) {
           <div class="truncation-banner">
@@ -689,7 +689,7 @@ interface DetailRow {
         <div #cyContainer class="cy-container" [style.visibility]="rootEntity() ? 'visible' : 'hidden'"></div>
       </div>
 
-      <!-- ── Side panel (node selected) ────────────────────────────────── -->
+      <!-- â”€â”€ Side panel (node selected) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
       @if (selectedNode()) {
         <div class="side-panel">
           <div class="side-panel-header">
@@ -763,7 +763,7 @@ interface DetailRow {
                 <div class="list-body">
                   @for (m of nodeMemories(); track m._id) {
                     <div class="list-row" (click)="openDetailPopup({ id: m._id, kind: 'memory', description: m.fact || m.description || '', tags: m.tags ?? [], properties: {}, createdAt: m.createdAt, raw: asRecord(m) })">
-                      <span class="list-row-text" [title]="m.fact || m.description">{{ m.fact || m.description || '—' }}</span>
+                      <span class="list-row-text" [title]="m.fact || m.description">{{ m.fact || m.description || 'â€”' }}</span>
                       <span class="list-row-date">{{ m.createdAt | date:'dd.MM.yy' }}</span>
                     </div>
                   } @empty {
@@ -778,7 +778,7 @@ interface DetailRow {
                 <div class="list-body">
                   @for (c of nodeChrono(); track c._id) {
                     <div class="list-row" (click)="openDetailPopup({ id: c._id, kind: 'chrono', description: c.title || c.description || '', tags: c.tags, properties: {}, createdAt: c.createdAt, raw: asRecord(c) })">
-                      <span class="list-row-text" [title]="c.title || c.description">{{ c.title || c.description || '—' }}</span>
+                      <span class="list-row-text" [title]="c.title || c.description">{{ c.title || c.description || 'â€”' }}</span>
                       <span class="list-row-date">{{ c.startsAt | date:'dd.MM.yy' }}</span>
                     </div>
                   } @empty {
@@ -792,7 +792,7 @@ interface DetailRow {
         </div>
       }
 
-      <!-- ── Side panel (edge selected) ────────────────────────────────── -->
+      <!-- â”€â”€ Side panel (edge selected) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
       @if (selectedEdge()) {
         <div class="side-panel">
           <div class="side-panel-header">
@@ -878,7 +878,7 @@ interface DetailRow {
                 <div class="list-body">
                   @for (m of nodeMemories(); track m._id) {
                     <div class="list-row" (click)="openDetailPopup({ id: m._id, kind: 'memory', description: m.fact || m.description || '', tags: m.tags ?? [], properties: {}, createdAt: m.createdAt, raw: asRecord(m) })">
-                      <span class="list-row-text" [title]="m.fact || m.description">{{ m.fact || m.description || '—' }}</span>
+                      <span class="list-row-text" [title]="m.fact || m.description">{{ m.fact || m.description || 'â€”' }}</span>
                       <span class="list-row-date">{{ m.createdAt | date:'dd.MM.yy' }}</span>
                     </div>
                   } @empty {
@@ -893,7 +893,7 @@ interface DetailRow {
                 <div class="list-body">
                   @for (c of nodeChrono(); track c._id) {
                     <div class="list-row" (click)="openDetailPopup({ id: c._id, kind: 'chrono', description: c.title || c.description || '', tags: c.tags, properties: {}, createdAt: c.createdAt, raw: asRecord(c) })">
-                      <span class="list-row-text" [title]="c.title || c.description">{{ c.title || c.description || '—' }}</span>
+                      <span class="list-row-text" [title]="c.title || c.description">{{ c.title || c.description || 'â€”' }}</span>
                       <span class="list-row-date">{{ c.startsAt | date:'dd.MM.yy' }}</span>
                     </div>
                   } @empty {
@@ -909,7 +909,7 @@ interface DetailRow {
 
     </div><!-- /canvas-row -->
 
-    <!-- ═══ Entry popup (entity / edge) ═══════════════════════════════════ -->
+    <!-- â•â•â• Entry popup (entity / edge) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
     @if (popupRecord()) {
       <app-entry-popup
         [record]="popupRecord()"
@@ -921,7 +921,7 @@ interface DetailRow {
       />
     }
 
-    <!-- ═══ Brain-style drawer modal (memory / chrono) ════════════════════ -->
+    <!-- â•â•â• Brain-style drawer modal (memory / chrono) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
     @if (drawerRecord(); as dr) {
       <div class="bdrawer-overlay" (click)="closeBrainDrawer()">
         <div class="bdrawer-modal" (click)="$event.stopPropagation()" role="dialog">
@@ -930,7 +930,7 @@ interface DetailRow {
               @if (dr.kind === 'memory') { <span class="badge badge-blue" style="margin-bottom:6px; display:inline-block;">{{ 'graph.drawer.badge.memory' | transloco }}</span> }
               @if (dr.kind === 'chrono') { <span class="badge" style="margin-bottom:6px; display:inline-block;">{{ 'graph.drawer.badge.chrono' | transloco }}</span> }
               <div class="bdrawer-title">
-                @if (dr.kind === 'memory') { {{ drawerEditMemory.fact.length > 80 ? (drawerEditMemory.fact | slice:0:80) + '…' : drawerEditMemory.fact }} }
+                @if (dr.kind === 'memory') { {{ drawerEditMemory.fact.length > 80 ? (drawerEditMemory.fact | slice:0:80) + 'â€¦' : drawerEditMemory.fact }} }
                 @if (dr.kind === 'chrono') { {{ drawerEditChrono.title || dr.record.title }} }
               </div>
             </div>
@@ -948,7 +948,7 @@ interface DetailRow {
             }
             <form>
 
-              <!-- ── MEMORY ── -->
+              <!-- â”€â”€ MEMORY â”€â”€ -->
               @if (dr.kind === 'memory') {
                 <div class="bdrawer-field">
                   <div class="bdrawer-label">{{ 'common.form.fact' | transloco }} <span style="color:var(--error)">*</span></div>
@@ -976,7 +976,7 @@ interface DetailRow {
                     </div>
                     @if (flyoutField() === 'drawer-memory-entityIds') {
                       <div class="flyout-panel">
-                        <app-entity-search mode="picker" [spaceId]="activeSpaceId()" placeholder="common.searchEntitiesPlaceholder" defaultMode="semantic"
+                        <app-entity-search mode="picker" [spaceId]="activeSpaceId()" placeholder="common.searchEntitiesPlaceholder"
                           (selected)="pickDrawerEntity($event, 'drawer-memory-entityIds')" />
                         <div style="display:flex; justify-content:flex-end; margin-top:8px;">
                           <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">{{ 'common.done' | transloco }}</button>
@@ -1004,7 +1004,7 @@ interface DetailRow {
                 </div>
               }
 
-              <!-- ── CHRONO ── -->
+              <!-- â”€â”€ CHRONO â”€â”€ -->
               @if (dr.kind === 'chrono') {
                 <div class="bdrawer-field">
                   <div class="bdrawer-label">{{ 'common.form.title' | transloco }} <span style="color:var(--error)">*</span></div>
@@ -1060,7 +1060,7 @@ interface DetailRow {
                     </div>
                     @if (flyoutField() === 'drawer-chrono-entityIds') {
                       <div class="flyout-panel">
-                        <app-entity-search mode="picker" [spaceId]="activeSpaceId()" placeholder="common.searchEntitiesPlaceholder" defaultMode="semantic"
+                        <app-entity-search mode="picker" [spaceId]="activeSpaceId()" placeholder="common.searchEntitiesPlaceholder"
                           (selected)="pickDrawerEntity($event, 'drawer-chrono-entityIds')" />
                         <div style="display:flex; justify-content:flex-end; margin-top:8px;">
                           <button type="button" class="btn btn-sm btn-secondary" (click)="closeFlyout()">{{ 'common.done' | transloco }}</button>
@@ -1099,15 +1099,15 @@ interface DetailRow {
   `,
 })
 export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
-  // ── DI ──────────────────────────────────────────────────────────────────────
+  // â”€â”€ DI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   private api = inject(ApiService);
   private location = inject(Location);
   private route = inject(ActivatedRoute);
 
-  // ── Element refs ────────────────────────────────────────────────────────────
+  // â”€â”€ Element refs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   cyContainer = viewChild<ElementRef<HTMLDivElement>>('cyContainer');
 
-  // ── Embedded input ──────────────────────────────────────────────────────────
+  // â”€â”€ Embedded input â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   @Input() set embeddedSpaceId(v: string | undefined) {
     if (v !== undefined) {
       this.isEmbedded.set(true);
@@ -1117,7 +1117,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
     }
   }
 
-  // ── State signals ───────────────────────────────────────────────────────────
+  // â”€â”€ State signals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   isEmbedded = signal(false);
 
   spaces = signal<Space[]>([]);
@@ -1149,7 +1149,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
   popupType = signal<'entity' | 'edge' | 'memory' | 'chrono'>('entity');
   canEdit = signal(false);
 
-  // ── Brain-style drawer for memory / chrono ──────────────────────────────
+  // â”€â”€ Brain-style drawer for memory / chrono â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   drawerRecord = signal<{ kind: 'memory' | 'chrono'; record: any } | null>(null);
   drawerSaving = signal(false);
   drawerError = signal('');
@@ -1162,7 +1162,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
 
   loading = signal(false);
 
-  // ── Computed ────────────────────────────────────────────────────────────────
+  // â”€â”€ Computed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   allDetails = computed<DetailRow[]>(() => {
     const mems: DetailRow[] = this.nodeMemories().map(m => ({
       id: m._id,
@@ -1223,11 +1223,11 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
     return this.graphFallback;
   });
 
-  // ── Private state ───────────────────────────────────────────────────────────
+  // â”€â”€ Private state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   private cy: any = null;
   private subs = new Subscription();
 
-  // ── Graph theme (read from CSS vars at init — allows enterprise overrides) ───
+  // â”€â”€ Graph theme (read from CSS vars at init â€” allows enterprise overrides) â”€â”€â”€
   private graphTypeColors: string[] = [];
   private graphNodeBg    = '#0d1117';
   private graphNodeText  = '#c9d1d9';
@@ -1268,7 +1268,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
   private graphNodes: TraverseNode[] = [];
   private graphEdges: TraverseEdge[] = [];
 
-  // Full-depth traversal cache — avoids re-fetching shallower depths
+  // Full-depth traversal cache â€” avoids re-fetching shallower depths
   private cacheStartId: string | null = null;
   private cacheDirection: 'outbound' | 'inbound' | 'both' | null = null;
   private cacheMaxDepth = 0;
@@ -1276,7 +1276,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
   private cacheEdges: TraverseEdge[] = [];
   private cacheTruncated = false;
 
-  // ── Lifecycle ───────────────────────────────────────────────────────────────
+  // â”€â”€ Lifecycle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   ngOnInit(): void {
     // Load spaces only in standalone mode; in embedded mode the space is injected via @Input
@@ -1321,13 +1321,13 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
     }
   }
 
-  // ── Cytoscape init ──────────────────────────────────────────────────────────
+  // â”€â”€ Cytoscape init â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   private initCytoscape(): void {
     const container = this.cyContainer()?.nativeElement;
     if (!container) return;
 
-    // Glass shine SVG — radial highlight in upper-left quadrant
+    // Glass shine SVG â€” radial highlight in upper-left quadrant
     const glassShineSvg = (color: string) => {
       const c = encodeURIComponent(color);
       return `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100'><defs><radialGradient id='base' cx='50%25' cy='50%25' r='50%25'><stop offset='0%25' stop-color='${c}' stop-opacity='0.28'/><stop offset='100%25' stop-color='${c}' stop-opacity='0.06'/></radialGradient><radialGradient id='shine' cx='30%25' cy='22%25' r='50%25'><stop offset='0%25' stop-color='white' stop-opacity='0.55'/><stop offset='45%25' stop-color='white' stop-opacity='0.12'/><stop offset='100%25' stop-color='white' stop-opacity='0'/></radialGradient><radialGradient id='rim' cx='50%25' cy='50%25' r='50%25'><stop offset='68%25' stop-color='${c}' stop-opacity='0'/><stop offset='100%25' stop-color='${c}' stop-opacity='0.7'/></radialGradient><radialGradient id='bot' cx='58%25' cy='80%25' r='38%25'><stop offset='0%25' stop-color='${c}' stop-opacity='0.18'/><stop offset='100%25' stop-color='${c}' stop-opacity='0'/></radialGradient></defs><circle cx='50' cy='50' r='49' fill='url(%23base)'/><circle cx='50' cy='50' r='49' fill='url(%23rim)'/><circle cx='50' cy='50' r='49' fill='url(%23bot)'/><circle cx='50' cy='50' r='49' fill='url(%23shine)'/></svg>`;
@@ -1458,7 +1458,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
       wheelSensitivity: 0.25,
     });
 
-    // Node tap → select + show detail panel
+    // Node tap â†’ select + show detail panel
     this.cy.on('tap', 'node', (evt: any) => {
       const node = evt.target;
       const id = node.data('id');
@@ -1479,7 +1479,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
       }
     });
 
-    // Edge tap → show edge side panel
+    // Edge tap â†’ show edge side panel
     this.cy.on('tap', 'edge', (evt: any) => {
       const edgeId = evt.target.data('id');
       const te = this.graphEdges.find(e => e._id === edgeId);
@@ -1490,7 +1490,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
       }
     });
 
-    // Double-tap node → re-root
+    // Double-tap node â†’ re-root
     this.cy.on('dbltap', 'node', (evt: any) => {
       const id = evt.target.data('id');
       const spaceId = this.activeSpaceId();
@@ -1508,7 +1508,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
     this.cy.on('mouseover', 'edge', (evt: any) => { evt.target.addClass('hovered'); });
     this.cy.on('mouseout',  'edge', (evt: any) => { evt.target.removeClass('hovered'); });
 
-    // Background tap → deselect
+    // Background tap â†’ deselect
     this.cy.on('tap', (evt: any) => {
       if (evt.target === this.cy) {
         this.selectedNode.set(null);
@@ -1518,7 +1518,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
-  // ── Toolbar handlers ────────────────────────────────────────────────────────
+  // â”€â”€ Toolbar handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   onSearchQueryChange(q: string): void {
     this.searchQuery.set(q);
@@ -1598,7 +1598,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
     }
   }
 
-  // ── Graph traversal ─────────────────────────────────────────────────────────
+  // â”€â”€ Graph traversal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   private traverse(startId: string, maxDepth: number, direction: 'outbound' | 'inbound' | 'both'): void {
     const spaceId = this.activeSpaceId();
@@ -1611,7 +1611,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
 
     const sameRoot = this.cacheStartId === startId && this.cacheDirection === direction;
 
-    // Depth decrease (or same depth): serve from cache — no network request needed
+    // Depth decrease (or same depth): serve from cache â€” no network request needed
     if (sameRoot && maxDepth <= this.cacheMaxDepth) {
       this.applyDepthFilter(startId, maxDepth);
       return;
@@ -1701,7 +1701,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
       this.cy.edges().removeClass('hide-labels');
     }
 
-    // Run layout — breadthfirst keeps each node next to its direct edge-partner
+    // Run layout â€” breadthfirst keeps each node next to its direct edge-partner
     const layout = this.cy.layout({
       name: 'breadthfirst',
       roots: `#${rootId}`,
@@ -1738,7 +1738,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
     layout.run();
   }
 
-  // ── Detail panel helpers ────────────────────────────────────────────────────
+  // â”€â”€ Detail panel helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   private loadNodeDetails(entityId: string): void {
     const spaceId = this.activeSpaceId();
@@ -1776,7 +1776,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   sortArrow(field: 'description' | 'createdAt'): string {
-    return this.sortField() === field ? (this.sortAsc() ? '▲' : '▼') : '';
+    return this.sortField() === field ? (this.sortAsc() ? 'â–²' : 'â–¼') : '';
   }
 
   openEntityPopup(node: TraverseNode): void {
@@ -2012,7 +2012,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
     }
   }
 
-  // ── URL management ──────────────────────────────────────────────────────────
+  // â”€â”€ URL management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   private updateUrl(entityId: string, push = false): void {
     const spaceId = this.activeSpaceId();
     const path = this.location.path().split('?')[0];
@@ -2024,3 +2024,4 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
     }
   }
 }
+

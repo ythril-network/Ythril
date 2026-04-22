@@ -355,10 +355,12 @@ A space is a fully isolated container for memories, entities, edges, and files. 
 
 Open **Settings → Spaces** and fill in:
 
-- **ID** — lowercase alphanumeric + hyphens, max 40 chars.
-- **Label** — human-readable display name.
-- **MCP Description** — optional. Surfaced to MCP clients as space-level instructions.
-- **Min GiB** — optional. Reserve minimum storage for this space.
+- **Display Name** — human-readable label shown in the UI and included in MCP server instructions.
+- **ID** — optional. Lowercase alphanumeric + hyphens, max 40 chars. Auto-generated from the display name if left blank.
+- **Max GiB** — optional. Maximum storage quota (0 or blank = unlimited).
+- **Purpose** — optional, max 4000 chars. Describe what the space is for and how to use it. Accessible to MCP clients via `get_space_meta`.
+- **Validation mode** — set schema enforcement at creation time: `off` (default), `warn`, or `strict`.
+- **Strict linkage** — when checked, enforces UUID v4 references and blocks entity deletion while inbound links exist.
 
 ### Renaming a space
 
@@ -389,6 +391,15 @@ A confirmation dialog loads the current per-collection document counts (memories
 
 This is equivalent to `POST /api/admin/spaces/:spaceId/wipe` — see the [Integration Guide](integration-guide.md#wipe-space) for the API reference including partial-type wipes.
 
+### Space settings
+
+Open any space row and click **Settings** (or the gear icon) to edit the space's general settings:
+
+- **Display Name** — update the human-readable label.
+- **Purpose** — short description (max 4000 chars) accessible to MCP clients via `get_space_meta`.
+- **Usage Notes** — optional extended guidance for LLM clients (max 50 000 chars, Markdown supported). Also accessible via `get_space_meta`.
+- **Max Storage (GiB)** — update the quota limit (blank = unlimited).
+
 ### Schema validation
 
 Each space can define a schema that governs what data is accepted. Open a space's settings and switch to the **Schema** tab to configure:
@@ -399,6 +410,7 @@ Each space can define a schema that governs what data is accepted. Open a space'
   - **Tag suggestions** — non-enforced tag hints for that specific type shown in the UI.
   - **Property schemas** — per-property value constraints: `type` (string/number/boolean/date), `enum` (allowed values), `minimum`/`maximum` (numeric ranges), `pattern` (regex), `required` (must be present on every write), `default` (value inserted when absent), `mergeFn` (merge hint for entity merges).
 - **Global tag suggestions** — non-enforced hints shown in the UI across all knowledge types.
+- **Strict linkage** — when enabled, all reference fields (`from`/`to` on edges, `entityIds`/`memoryIds` on chrono and memories) must be valid UUID v4 values, and entity deletion is blocked while inbound edges or memories reference it.
 
 **Schema export / import:** Use the **Export JSON** and **Import JSON** buttons at the top of the Schema tab to download or upload the full `typeSchemas` definition as a JSON file. Schemas are also auto-synced to `schemas/` in the space's file store on every save.
 
@@ -738,7 +750,7 @@ The **About** tab shows:
 
 ## Connecting MCP clients
 
-Each space exposes an MCP (Model Context Protocol) endpoint at `/mcp/{spaceId}`. Connect your AI assistant to give it direct access to your brain's memories, files, and knowledge graph.
+Ythril exposes a single global MCP endpoint at `/mcp`. Connect your AI assistant to give it access to all spaces your token permits — each tool takes a `space` parameter.
 
 ### Configuration
 
@@ -747,8 +759,8 @@ Add to your MCP client config (Claude Desktop, Cursor, Windsurf, VS Code, etc.):
 ```json
 {
   "mcpServers": {
-    "ythril-general": {
-      "url": "http://localhost:3200/mcp/general",
+    "ythril": {
+      "url": "http://localhost:3200/mcp",
       "headers": {
         "Authorization": "Bearer ythril_yourTokenHere"
       }
@@ -757,11 +769,11 @@ Add to your MCP client config (Claude Desktop, Cursor, Windsurf, VS Code, etc.):
 }
 ```
 
-Replace `general` with any space ID. Add multiple entries to give the agent access to multiple spaces. A single token works for all entries if it has access to all listed spaces.
+One entry is sufficient — all spaces the token can access are available as a `space` tool parameter. A space-scoped token automatically restricts tools to its allowed spaces.
 
-### Space descriptions and schema as instructions
+### Server instructions
 
-If a space has a `description`, it is sent to the MCP client as `instructions` during the handshake. This tells the AI agent what the space contains before it calls any tools. When a space has a schema defined (via `meta`), a compact summary of allowed types, labels, naming patterns, and required properties is appended — so the LLM knows the rules before its first write.
+On connect, the server sends instructions listing all accessible space IDs and noting that each tool requires a `space` parameter. Call `list_spaces` to discover spaces and their descriptions. Call `get_space_meta` on a specific space to get its full schema, allowed types, naming patterns, and usage notes.
 
 ### Available tools
 
@@ -770,8 +782,7 @@ If a space has a `description`, it is sent to the MCP client as `instructions` d
 | `remember` | Store a memory with optional tags, entity links, `description`, and `properties` |
 | `update_memory` | Update an existing memory's fact, tags, entity links, or remove fields via `deleteFields` |
 | `delete_memory` | Delete a memory by ID |
-| `recall` | Semantic search within the current space. Optional `tags` and `types` filters narrow results; `minPerType` guarantees a minimum result count per knowledge type; `minScore` sets a similarity threshold |
-| `recall_global` | Semantic search across all accessible spaces. Same parameters as `recall` |
+| `recall` | Semantic search across all knowledge types. Requires `space`; omit to search across all accessible spaces. Optional `tags`, `types`, `minPerType`, and `minScore` filters |
 | `query` | Structured filter query (read-only) — supports `memories`, `entities`, `edges`, `chrono`, and `files` collections |
 | `find_similar` | Find entries with high vector similarity to an existing entry by ID — uses stored embedding, no re-embedding |
 | `get_stats` | Return counts of memories, entities, edges, chrono entries, and files |

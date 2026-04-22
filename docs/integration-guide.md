@@ -1096,7 +1096,8 @@ GET /api/brain/spaces/:spaceId/stats
   "memories": 1042,
   "entities": 156,
   "edges": 89,
-  "chrono": 23
+  "chrono": 23,
+  "files": 31
 }
 ```
 
@@ -1640,7 +1641,7 @@ Update space properties. Requires an admin token (+ TOTP if MFA is enabled). At 
 | Field | Required | Description |
 |-------|----------|-------------|
 | `label` | no | New display name, max 200 chars. |
-| `description` | no | New description, max 4000 chars. Surfaced to MCP clients as `instructions` during handshake. |
+| `description` | no | Space description, max 4000 chars. Included in `list_spaces` MCP tool responses and `GET /api/spaces`. |
 | `meta` | no | Space schema definition (see [Schema Validation](#schema-validation) below). |
 
 **Response** `200`: the updated space object.
@@ -1914,6 +1915,8 @@ What the schema enforces:
 | `typeSchemas` | Per-type schema definitions (see above). |
 | `tagSuggestions` | Global non-enforced tag hints shown in the UI for all knowledge types (max 200). |
 | `strictLinkage` | When `true`, all reference fields (`from`/`to`, `entityIds`, `memoryIds`) must be valid UUID v4 values, and entity deletion is blocked while inbound backlinks exist. Default: `false`. |
+| `purpose` | Short description of the space (max 4000 chars). Returned by `get_space_meta`. |
+| `usageNotes` | Extended Markdown-formatted guidance for LLM clients (max 50 000 chars). Returned by `get_space_meta`. |
 
 Schema validation runs on:
 - Individual writes: `POST /entities`, `POST /edges`, `POST /memories`, `POST /chrono`
@@ -3965,22 +3968,20 @@ The `postMessage` handler validates `event.origin` — only same-origin messages
 
 ## MCP (Model Context Protocol)
 
-Ythril exposes an MCP server via SSE for AI agent integration. Each connection is scoped to a single space.
+Ythril exposes a single global MCP server via SSE. Each tool accepts a `space` parameter — the connection is not scoped to a single space.
 
-### Space Instructions
+### Server Instructions
 
-If a space has a `description`, it is sent to the MCP client as `instructions` during the server handshake. This tells the AI agent what the brain space contains before it calls any tools — no need for the agent to "discover" the space's purpose by reading data first.
-
-When a space has a schema defined (via `meta`), a compact schema summary is appended to the instructions. This includes allowed entity types, edge labels, naming patterns, required properties, and property constraints — so the LLM knows the schema rules before its first write.
+On connect, the server sends global instructions listing all available space IDs and noting that each tool requires a `space` parameter (except `recall` and `list_chrono`, where `space` is optional and enables cross-space results when omitted; and `list_peers`/`sync_now` which are global). Call `list_spaces` to get space IDs and descriptions. Call `get_space_meta` with a specific space to get its full schema, purpose, and usage notes.
 
 ### Read-Only Tokens
 
-When connecting with a `readOnly` token, mutating tools (`remember`, `update_memory`, `delete_memory`, `upsert_entity`, `update_entity`, `merge_entities`, `upsert_edge`, `update_edge`, `create_chrono`, `update_chrono`, `bulk_write`, `write_file`, `delete_file`, `create_dir`, `move_file`, `sync_now`, `update_space`, `wipe_space`) are **hidden** from `tools/list` and rejected with an error if called directly. Read-only tools (`recall`, `recall_global`, `query`, `get_stats`, `get_space_meta`, `find_entities_by_name`, `list_chrono`, `read_file`, `list_dir`, `list_peers`, `traverse`) work normally.
+When connecting with a `readOnly` token, mutating tools (`remember`, `update_memory`, `delete_memory`, `upsert_entity`, `update_entity`, `merge_entities`, `upsert_edge`, `update_edge`, `create_chrono`, `update_chrono`, `bulk_write`, `write_file`, `delete_file`, `create_dir`, `move_file`, `sync_now`, `update_space`, `wipe_space`) are **hidden** from `tools/list` and rejected with an error if called directly. Read-only tools (`recall`, `query`, `get_stats`, `get_space_meta`, `find_entities_by_name`, `list_chrono`, `read_file`, `list_dir`, `list_peers`, `traverse`) work normally.
 
 ### Connecting
 
 ```
-GET /mcp/:spaceId
+GET /mcp
 Authorization: Bearer <token>
 Accept: text/event-stream
 ```
@@ -3990,7 +3991,7 @@ Returns an SSE stream with a `sessionId`.
 ### Sending Tool Calls
 
 ```
-POST /mcp/:spaceId/messages?sessionId=<sessionId>
+POST /mcp/messages?sessionId=<sessionId>
 Authorization: Bearer <token>
 Content-Type: application/json
 ```
@@ -4002,8 +4003,7 @@ Content-Type: application/json
 | `remember` | Store a memory with optional tags and entity links |
 | `update_memory` | Update an existing memory's fact, tags, entity links, or delete specific fields via `deleteFields` |
 | `delete_memory` | Delete a memory by ID |
-| `recall` | Semantic search across all knowledge types (memories, entities, edges, chrono entries, files) within the current space |
-| `recall_global` | Semantic search across all knowledge types in all accessible spaces |
+| `recall` | Semantic search across all knowledge types (memories, entities, edges, chrono entries, files). Searches the specified `space`; omit `space` to search across all accessible spaces |
 | `query` | Structured MongoDB filter query (read-only) — supports `memories`, `entities`, `edges`, `chrono`, and `files` collections |
 | `find_similar` | Find entries with high vector similarity to an existing entry by ID — no re-embedding step |
 | `get_stats` | Return counts of memories, entities, edges, chrono entries, and files |
@@ -4038,6 +4038,7 @@ Content-Type: application/json
   "params": {
     "name": "remember",
     "arguments": {
+      "space": "general",
       "fact": "Traefik v3 requires CRD patches for allowSlashesInPath",
       "tags": ["traefik", "gotcha"],
       "entities": ["Traefik"]
@@ -4054,6 +4055,7 @@ Content-Type: application/json
   "params": {
     "name": "recall",
     "arguments": {
+      "space": "general",
       "query": "Traefik routing configuration",
       "topK": 5,
       "tags": ["portal-backend"]
@@ -4062,7 +4064,7 @@ Content-Type: application/json
 }
 ```
 
-`recall` searches all knowledge types — **memories**, **entities**, **edges**, **chrono entries**, and **files** — using vector similarity.  Results include a `type` discriminator field (`memory`, `entity`, `edge`, `chrono`, `file`) so callers can distinguish the origin of each result.
+Omit `space` to search across all accessible spaces. `recall` searches all knowledge types — **memories**, **entities**, **edges**, **chrono entries**, and **files** — using vector similarity.  Results include a `type` discriminator field (`memory`, `entity`, `edge`, `chrono`, `file`) so callers can distinguish the origin of each result.
 
 **What is vector-indexed:**
 
@@ -4078,6 +4080,7 @@ Content-Type: application/json
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
+| `space` | `string` | — | Space ID to search in. Omit to search across all accessible spaces. |
 | `query` | `string` | ✅ | Natural language search query |
 | `topK` | `number` | — | Max results to return (default `10`) |
 | `tags` | `string[]` | — | Optional tag filter — only results bearing **all** of these tags are returned (applies to all knowledge types). Useful for scoping a semantic search to a specific service or ADR (e.g. `["portal-backend"]`) |
@@ -4085,7 +4088,7 @@ Content-Type: application/json
 | `minPerType` | `object` | — | Optional minimum result count per type. Guarantees at least that many results of each specified type if available (e.g. `{"entity": 2, "edge": 1}`). Uses two-phase search: guaranteed slots filled first, remaining slots filled by score. Omit to use pure score ranking. |
 | `minScore` | `number` | — | Minimum cosine similarity score (0.0–1.0). Results below this threshold are excluded. Applies before `topK` — so `topK=10, minScore=0.7` returns at most 10 results, all with score ≥ 0.7. |
 
-`recall_global` accepts the same `tags`, `types`, `minPerType`, and `minScore` parameters and applies them across all searched spaces.
+When `space` is omitted, `recall` searches across all accessible spaces — the same as the former `recall_global` behaviour.
 
 ### Example: update_memory
 
@@ -4095,6 +4098,7 @@ Content-Type: application/json
   "params": {
     "name": "update_memory",
     "arguments": {
+      "space": "general",
       "id": "a1b2c3d4-...",
       "fact": "Kubernetes pods are ephemeral by design (applies to all workload types)",
       "tags": ["k8s", "architecture", "workloads"]
@@ -4131,6 +4135,7 @@ System fields (`id`, `name`, `type`, `spaceId`, `createdAt`, `updatedAt`) cannot
   "params": {
     "name": "delete_memory",
     "arguments": {
+      "space": "general",
       "id": "a1b2c3d4-..."
     }
   }
@@ -4146,7 +4151,9 @@ Returns confirmation with the deleted ID. Creates a tombstone for sync propagati
   "method": "tools/call",
   "params": {
     "name": "get_stats",
-    "arguments": {}
+    "arguments": {
+      "space": "general"
+    }
   }
 }
 ```
@@ -4159,7 +4166,8 @@ Response:
   "memories": 1042,
   "entities": 156,
   "edges": 89,
-  "chrono": 23
+  "chrono": 23,
+  "files": 31
 }
 ```
 
@@ -4173,6 +4181,7 @@ Works with any valid token (including read-only). For proxy spaces, returns aggr
   "params": {
     "name": "query",
     "arguments": {
+      "space": "general",
       "collection": "memories",
       "filter": { "tags": "traefik" },
       "limit": 20
@@ -4210,7 +4219,7 @@ For AI agents (Claude, Cursor, etc.), add to your MCP config:
 {
   "mcpServers": {
     "ythril": {
-      "url": "http://localhost:3200/mcp/general",
+      "url": "http://localhost:3200/mcp",
       "headers": {
         "Authorization": "Bearer ythril_yourTokenHere"
       }

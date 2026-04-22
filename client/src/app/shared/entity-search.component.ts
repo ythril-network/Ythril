@@ -199,14 +199,12 @@ import { TranslocoPipe } from '@jsverse/transloco';
         [attr.aria-label]="placeholder | transloco"
         autocomplete="off"
       />
-      @if (mode === 'bar') {
-        <div class="pill-group" [attr.title]="'common.searchMode.tooltip' | transloco">
-          <button [class.active]="searchMode() === 'name'"     (click)="setMode('name')">{{ 'common.sortAZ' | transloco }}</button>
-          <button [class.active]="searchMode() === 'semantic'" (click)="setMode('semantic')">{{ 'entitySearch.semantic' | transloco }}</button>
-        </div>
-        @if (displayValue()) {
-          <button class="btn-clear" (click)="clear()">{{ 'entitySearch.clearButton' | transloco }}</button>
-        }
+      <div class="pill-group" [attr.title]="'common.searchMode.tooltip' | transloco">
+        <button [class.active]="searchMode() === 'name'"     (click)="setMode('name')">{{ 'common.sortAZ' | transloco }}</button>
+        <button [class.active]="searchMode() === 'semantic'" (click)="setMode('semantic')">{{ 'entitySearch.semantic' | transloco }}</button>
+      </div>
+      @if (mode === 'bar' && displayValue()) {
+        <button class="btn-clear" (click)="clear()">{{ 'entitySearch.clearButton' | transloco }}</button>
       }
     </div>
 
@@ -238,7 +236,7 @@ export class EntitySearchComponent implements OnInit, OnDestroy, OnChanges {
   @Input() spaceId = '';
   @Input() mode: 'bar' | 'picker' = 'bar';
   @Input() placeholder = 'entitySearch.defaultPlaceholder';
-  @Input() defaultMode: 'name' | 'semantic' = 'semantic';
+  @Input() defaultMode: 'name' | 'semantic' = 'name';
   /** Controlled display value for picker mode (parent sets this after pick). */
   @Input() value = '';
   @Input() debounceMs = 280;
