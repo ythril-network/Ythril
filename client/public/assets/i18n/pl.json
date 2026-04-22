@@ -744,7 +744,8 @@
 
   "schemaLib.export.title": "Pobierz wpis jako JSON",
   "schemaLib.import.fileTitle": "Importuj wpisy z pliku JSON",
-  "schemaLib.import.fileButton": "↑ Importuj z pliku",
+  "schemaLib.import.fileButton": "Importuj z pliku",
+  "schemaLib.field.nameAutoLabel": "Identyfikator:",
   "schemaLib.import.noneImported": "W pliku nie znaleziono prawidłowych wpisów biblioteki.",
   "schemaLib.import.parseFailed": "Nie można przetworzyć pliku JSON.",
 
@@ -759,12 +760,10 @@
   "spaces.schema.saveToLibraryTitle": "Zapisz ten schemat typu w bibliotece instancji",
   "spaces.schema.importFromLibraryButton": "Z biblioteki",
   "spaces.schema.importFromLibraryTitle": "Importuj z biblioteki schematów instancji",
-  "spaces.schema.libSave.prompt": "Nazwa wpisu biblioteki (np. service-v1):",
-  "spaces.schema.libSave.invalidName": "Nieprawidłowa nazwa. Użyj małych liter, cyfr, myślników i podkreśleń.",
-  "spaces.schema.libSave.success": "Zapisano w bibliotece jako «{{name}}».",
+  "spaces.schema.importFromFileButton": "Z pliku",
   "spaces.schema.libSave.failed": "Nie można zapisać do biblioteki.",
   "spaces.schema.libPicker.title": "Importuj z biblioteki schematów",
   "spaces.schema.libPicker.empty": "Brak wpisów biblioteki dla tego typu wiedzy.",
-  "spaces.schema.libPicker.importInline": "Importuj inline",
-  "spaces.schema.libPicker.importRef": "Użyj $ref"
+  "spaces.schema.libPicker.importRef": "Użyj tego schematu",
+  "spaces.schema.libRef.linkedHint": "Powiązany ze schematem biblioteki \"{{name}}\" — edytuj w Bibliotece schematów"
 }

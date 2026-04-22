@@ -152,13 +152,11 @@ function formStateToSchema(f: LibraryFormState): Omit<TypeSchema, '$ref'> {
     <div class="header-row">
       <h2>{{ 'schemaLib.title' | transloco }}</h2>
       <div class="header-actions">
-        <button class="btn btn-secondary btn-sm" type="button" (click)="triggerImportFile()" [attr.title]="'schemaLib.import.fileTitle' | transloco">{{ 'schemaLib.import.fileButton' | transloco }}</button>
+        <button class="btn btn-secondary btn-sm" type="button" (click)="triggerImportFile()" [attr.title]="'schemaLib.import.fileTitle' | transloco"><ph-icon name="download-simple" [size]="13" style="margin-right:5px;vertical-align:-2px;"/>{{ 'schemaLib.import.fileButton' | transloco }}</button>
         <input #importFileInput type="file" accept=".json" style="display:none" (change)="onImportFile($event)" />
         <button class="btn btn-primary btn-sm" type="button" (click)="openCreate()">{{ 'schemaLib.createButton' | transloco }}</button>
       </div>
     </div>
-
-    <p class="ref-hint">{{ 'schemaLib.refHint.prefix' | transloco }} <code>&#123; "$ref": "library:&lt;name&gt;" &#125;</code> {{ 'schemaLib.refHint.suffix' | transloco }}</p>
 
     <div class="search-row">
       <input type="search" [ngModel]="searchQuery()" (ngModelChange)="searchQuery.set($event)" [placeholder]="'schemaLib.searchPlaceholder' | transloco" />
@@ -203,7 +201,7 @@ function formStateToSchema(f: LibraryFormState): Omit<TypeSchema, '$ref'> {
                   <button class="btn btn-secondary btn-sm" (click)="confirmDeleteName.set('')">{{ 'common.no' | transloco }}</button>
                 </span>
               } @else {
-                <button class="btn btn-ghost btn-sm danger" type="button" (click)="confirmDeleteName.set(entry.name)">{{ 'common.delete' | transloco }}</button>
+                <button class="btn btn-ghost btn-sm danger" type="button" (click)="confirmDeleteName.set(entry.name)" [attr.title]="'common.remove' | transloco"><ph-icon name="trash" [size]="13"/></button>
               }
             </div>
           </div>
@@ -223,17 +221,10 @@ function formStateToSchema(f: LibraryFormState): Omit<TypeSchema, '$ref'> {
           <!-- Entry metadata -->
           <div class="sch-grid" style="margin-bottom:16px;">
             <div class="field">
-              <label>{{ 'schemaLib.field.name' | transloco }}</label>
-              <input type="text" [(ngModel)]="form.name" [disabled]="!!editingName()" [placeholder]="'schemaLib.field.namePlaceholder' | transloco" (input)="slugifyName()" />
-              <span style="font-size:11px;color:var(--text-muted);">{{ 'schemaLib.field.nameHint' | transloco }}</span>
-            </div>
-            <div class="field">
               <label>{{ 'schemaLib.field.typeName' | transloco }}</label>
-              <input type="text" [(ngModel)]="form.typeName" [placeholder]="'schemaLib.field.typeNamePlaceholder' | transloco" />
+              <input type="text" [ngModel]="form.typeName" (ngModelChange)="autoSlugFromTypeName($event)" [placeholder]="'schemaLib.field.typeNamePlaceholder' | transloco" />
+              <span style="font-size:11px;color:var(--text-muted);">{{ 'schemaLib.field.nameAutoLabel' | transloco }} <span style="font-family:var(--font-mono);">{{ form.name || '—' }}</span></span>
             </div>
-          </div>
-
-          <div class="sch-grid" style="margin-bottom:16px;">
             <div class="field">
               <label>{{ 'schemaLib.field.knowledgeType' | transloco }}</label>
               <select [(ngModel)]="form.knowledgeType" style="width:100%;">
@@ -243,10 +234,11 @@ function formStateToSchema(f: LibraryFormState): Omit<TypeSchema, '$ref'> {
                 <option value="chrono">chrono</option>
               </select>
             </div>
-            <div class="field">
-              <label>{{ 'schemaLib.field.description' | transloco }}</label>
-              <input type="text" [(ngModel)]="form.description" [placeholder]="'schemaLib.field.descriptionPlaceholder' | transloco" />
-            </div>
+          </div>
+
+          <div class="field" style="margin-bottom:16px;">
+            <label>{{ 'schemaLib.field.description' | transloco }}</label>
+            <input type="text" [(ngModel)]="form.description" [placeholder]="'schemaLib.field.descriptionPlaceholder' | transloco" />
           </div>
 
           <!-- Schema editor — matches spaces.component.ts per-type expand panel -->
@@ -482,6 +474,13 @@ export class SchemaLibraryComponent implements OnInit {
   slugifyName(): void {
     if (!this.editingName()) {
       this.form.name = this.form.name.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/^[^a-z0-9]+/, '').slice(0, 200);
+    }
+  }
+
+  autoSlugFromTypeName(val: string): void {
+    this.form.typeName = val;
+    if (!this.editingName()) {
+      this.form.name = val.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/^[^a-z0-9]+/, '').slice(0, 200);
     }
   }
 

@@ -745,7 +745,8 @@
 
   "schemaLib.export.title": "Eintrag als JSON herunterladen",
   "schemaLib.import.fileTitle": "Einträge aus JSON-Datei importieren",
-  "schemaLib.import.fileButton": "↑ Aus Datei importieren",
+  "schemaLib.import.fileButton": "Aus Datei importieren",
+  "schemaLib.field.nameAutoLabel": "Bezeichner:",
   "schemaLib.import.noneImported": "Keine gültigen Bibliothekseinträge in der Datei gefunden.",
   "schemaLib.import.parseFailed": "JSON-Datei konnte nicht geparst werden.",
 
@@ -760,12 +761,10 @@
   "spaces.schema.saveToLibraryTitle": "Dieses Typschema in der Instanzbibliothek speichern",
   "spaces.schema.importFromLibraryButton": "Aus Bib.",
   "spaces.schema.importFromLibraryTitle": "Aus der Instanz-Schema-Bibliothek importieren",
-  "spaces.schema.libSave.prompt": "Name des Bibliothekseintrags (z.B. service-v1):",
-  "spaces.schema.libSave.invalidName": "Ungültiger Name. Verwende Kleinbuchstaben, Zahlen, Bindestriche und Unterstriche.",
-  "spaces.schema.libSave.success": "In der Bibliothek als «{{name}}» gespeichert.",
+  "spaces.schema.importFromFileButton": "Aus Datei",
   "spaces.schema.libSave.failed": "Konnte nicht in der Bibliothek gespeichert werden.",
   "spaces.schema.libPicker.title": "Aus Schema-Bibliothek importieren",
   "spaces.schema.libPicker.empty": "Noch keine Bibliothekseinträge für diesen Wissenstyp.",
-  "spaces.schema.libPicker.importInline": "Inline importieren",
-  "spaces.schema.libPicker.importRef": "$ref verwenden"
+  "spaces.schema.libPicker.importRef": "Schema verwenden",
+  "spaces.schema.libRef.linkedHint": "Verknüpft mit Bibliotheksschema \"{{name}}\" — in Schema-Bibliothek bearbeiten"
 }

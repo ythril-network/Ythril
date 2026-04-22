@@ -363,6 +363,13 @@ interface TypeSchemaState {
                           <tr class="prop-expand-row" (click)="$event.stopPropagation()">
                             <td colspan="2" style="padding:0;">
                               <div class="pdet">
+                                @if (typeLibRef(kt,name); as libRef) {
+                                  <!-- Linked library schema — non-editable -->
+                                  <div style="display:flex;align-items:center;gap:10px;padding:4px 0;color:var(--text-secondary);font-size:13px;">
+                                    <ph-icon name="bookmarks" [size]="16" style="color:var(--accent);flex-shrink:0;"/>
+                                    <span>{{ 'spaces.schema.libRef.linkedHint' | transloco: {name: libRef} }}</span>
+                                  </div>
+                                } @else {
                                 <!-- Naming pattern (entity only) -->
                                 @if (kt === 'entity') {
                                   <div class="pdet-fields" style="margin-bottom:12px;">
@@ -517,6 +524,7 @@ interface TypeSchemaState {
                                   <button class="btn btn-secondary btn-sm" type="button"
                                     (click)="addProp(kt,name)" [disabled]="!typeState(kt,name)._newPropInput.trim()">{{ 'spaces.schema.addPropertyButton' | transloco }}</button>
                                 </div>
+                                } <!-- end @else (not a lib-ref type) -->
                               </div>
                             </td>
                           </tr>
@@ -538,9 +546,12 @@ interface TypeSchemaState {
                     (keydown.enter)="$event.preventDefault();addType(kt)" />
                   <button class="btn btn-secondary btn-sm" type="button"
                     (click)="addType(kt)" [disabled]="!schNewTypeInputs[kt]?.trim()">{{ kt === 'edge' ? ('spaces.schema.addLabelButton' | transloco) : ('spaces.schema.addTypeButton' | transloco) }}</button>
-                  <button class="btn btn-ghost btn-sm" type="button"
+                  <button class="btn btn-secondary btn-sm" type="button"
+                    (click)="triggerImportTypeSchemaNew(kt)"
+                    [attr.title]="'spaces.schema.importFromFileButton' | transloco"><ph-icon name="download-simple" [size]="13" style="margin-right:4px;vertical-align:-2px;"/>{{ 'spaces.schema.importFromFileButton' | transloco }}</button>
+                  <button class="btn btn-secondary btn-sm" type="button"
                     (click)="triggerImportFromLibraryNew(kt)"
-                    style="font-size:10px;padding:2px 6px;" [attr.title]="'spaces.schema.importFromLibraryTitle' | transloco">{{ 'spaces.schema.importFromLibraryButton' | transloco }}</button>
+                    [attr.title]="'spaces.schema.importFromLibraryTitle' | transloco"><ph-icon name="bookmarks" [size]="13" style="margin-right:4px;vertical-align:-2px;"/>{{ 'spaces.schema.importFromLibraryButton' | transloco }}</button>
                 </div>
               </ng-template>
             }
@@ -652,8 +663,7 @@ interface TypeSchemaState {
                     @if (entry.description) { <div style="font-size:11px;color:var(--text-secondary);">{{ entry.description }}</div> }
                   </div>
                   <div style="display:flex;gap:6px;flex-shrink:0;">
-                    <button class="btn btn-secondary btn-sm" type="button" (click)="importFromLibraryInline(entry)">{{ 'spaces.schema.libPicker.importInline' | transloco }}</button>
-                    <button class="btn btn-ghost btn-sm" type="button" (click)="importFromLibraryRef(entry)">{{ 'spaces.schema.libPicker.importRef' | transloco }}</button>
+                    <button class="btn btn-secondary btn-sm" type="button" (click)="importFromLibraryRef(entry)">{{ 'spaces.schema.libPicker.importRef' | transloco }}</button>
                   </div>
                 </div>
               }
@@ -1177,9 +1187,16 @@ export class SpacesComponent implements OnInit {
     URL.revokeObjectURL(url);
   }
 
-  /** Open the file picker for per-type schema import. */
+  /** Open the file picker for per-type schema import (existing type replacement). */
   triggerImportTypeSchema(kt: KnowledgeType, name: string): void {
     this._typeImportTarget = { kt, name };
+    this.schImportError = '';
+    this.schTypeImportInputRef?.nativeElement.click();
+  }
+
+  /** Open the file picker to import a type schema as a new type (name derived from file). */
+  triggerImportTypeSchemaNew(kt: KnowledgeType): void {
+    this._typeImportTarget = { kt, name: '' };
     this.schImportError = '';
     this.schTypeImportInputRef?.nativeElement.click();
   }
@@ -1188,7 +1205,7 @@ export class SpacesComponent implements OnInit {
   onImportTypeSchemaFile(event: Event): void {
     const file = (event.target as HTMLInputElement).files?.[0];
     if (!file || !this._typeImportTarget) return;
-    const { kt, name } = this._typeImportTarget;
+    const { kt } = this._typeImportTarget;
     const reader = new FileReader();
     reader.onload = () => {
       try {
@@ -1196,6 +1213,12 @@ export class SpacesComponent implements OnInit {
         // Accept either a full snippet { knowledgeType, typeName, schema } or a bare TypeSchema object
         const schemaRaw: unknown = raw?.schema ?? raw;
         if (!schemaRaw || typeof schemaRaw !== 'object' || Array.isArray(schemaRaw)) {
+          this.schImportError = this.transloco.translate('spaces.schema.import.invalidTypeFile');
+          return;
+        }
+        // Determine target type name: from _typeImportTarget.name (existing), or file's typeName (new)
+        const name: string = this._typeImportTarget?.name || (typeof raw?.typeName === 'string' ? raw.typeName.trim() : '');
+        if (!name) {
           this.schImportError = this.transloco.translate('spaces.schema.import.invalidTypeFile');
           return;
         }
@@ -1401,16 +1424,9 @@ export class SpacesComponent implements OnInit {
 
   saveTypeToLibrary(kt: KnowledgeType, name: string): void {
     const state = this.typeState(kt, name);
-    const promptName = prompt(
-      this.transloco.translate('spaces.schema.libSave.prompt'),
-      `${name}-v1`,
-    );
-    if (!promptName) return;
-    const entryName = promptName.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/^[^a-z0-9]+/, '');
-    if (!entryName) {
-      alert(this.transloco.translate('spaces.schema.libSave.invalidName'));
-      return;
-    }
+    // Auto-derive entry name from the type name (slug)
+    const entryName = name.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/^[^a-z0-9]+/, '').slice(0, 200);
+    if (!entryName) return;
 
     const schema: TypeSchema = {};
     if (kt === 'entity' && state.namingPattern.trim()) schema.namingPattern = state.namingPattern.trim();
@@ -1434,8 +1450,24 @@ export class SpacesComponent implements OnInit {
 
     const body = { knowledgeType: kt, typeName: name, schema: schema as Omit<TypeSchema, '$ref'> };
     this.api.upsertSchemaLibraryEntry(entryName, body).subscribe({
-      next: () => alert(this.transloco.translate('spaces.schema.libSave.success', { name: entryName })),
-      error: (err) => alert(err?.error?.error ?? this.transloco.translate('spaces.schema.libSave.failed')),
+      next: () => {
+        // Convert the in-space type to a $ref pointing at the new library entry
+        const refState: TypeSchemaState & { _libRef?: string } = {
+          namingPattern:   '',
+          tagSuggestions:  [],
+          propertySchemas: [],
+          _newPropInput:   '',
+          _newTagInput:    '',
+          _libRef:         entryName,
+        };
+        this.schTypeSchemas = {
+          ...this.schTypeSchemas,
+          [kt]: { ...(this.schTypeSchemas[kt] ?? {}), [name]: refState },
+        };
+      },
+      error: (err) => {
+        this.schImportError = err?.error?.error ?? this.transloco.translate('spaces.schema.libSave.failed');
+      },
     });
   }
 

@@ -772,7 +772,8 @@
 
   "schemaLib.export.title": "Download entry as JSON",
   "schemaLib.import.fileTitle": "Import entries from JSON file",
-  "schemaLib.import.fileButton": "↑ Import from file",
+  "schemaLib.import.fileButton": "Import from file",
+  "schemaLib.field.nameAutoLabel": "Identifier:",
   "schemaLib.import.noneImported": "No valid library entries found in the file.",
   "schemaLib.import.parseFailed": "Could not parse the JSON file.",
 
@@ -787,12 +788,10 @@
   "spaces.schema.saveToLibraryTitle": "Save this type schema to the instance library",
   "spaces.schema.importFromLibraryButton": "From Lib",
   "spaces.schema.importFromLibraryTitle": "Import from the instance schema library",
-  "spaces.schema.libSave.prompt": "Library entry name (e.g. service-v1):",
-  "spaces.schema.libSave.invalidName": "Invalid name. Use lowercase letters, numbers, dashes and underscores.",
-  "spaces.schema.libSave.success": "Saved to library as «{{name}}».",
+  "spaces.schema.importFromFileButton": "From File",
   "spaces.schema.libSave.failed": "Could not save to library.",
   "spaces.schema.libPicker.title": "Import from Schema Library",
   "spaces.schema.libPicker.empty": "No library entries for this knowledge type yet.",
-  "spaces.schema.libPicker.importInline": "Import inline",
-  "spaces.schema.libPicker.importRef": "Use $ref"
+  "spaces.schema.libPicker.importRef": "Use this schema",
+  "spaces.schema.libRef.linkedHint": "Linked to library schema \"{{name}}\" — edit in Schema Library to change"
 }
