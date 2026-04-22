@@ -73,6 +73,14 @@ export async function patch(baseUrl, token, path, data) {
   });
 }
 
+/** PUT with JSON body */
+export async function put(baseUrl, token, path, data) {
+  return reqJson(baseUrl, token, path, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
 /** DELETE */
 export async function del(baseUrl, token, path) {
   return reqJson(baseUrl, token, path, { method: 'DELETE' });
