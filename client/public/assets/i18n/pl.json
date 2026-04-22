@@ -426,6 +426,7 @@
   "spaces.table.column.proxy": "Pełnomocnik",
   "spaces.table.empty": "Brak spacji",
   "spaces.table.configureTitle": "Skonfiguruj przestrzeń",
+  "spaces.table.dragHandleTitle": "Przeciągnij, aby zmienić kolejność",
   "spaces.badge.allSpaces": "Wszystkie spacje",
   "spaces.create.title": "Stwórz przestrzeń",
   "spaces.create.label": "Nazwa wyświetlana",

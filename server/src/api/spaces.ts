@@ -3,7 +3,7 @@ import path from 'path';
 import { requireAuth, requireAdmin, requireAdminMfa } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { getConfig, saveConfig, getSecrets, getDataRoot } from '../config/loader.js';
-import { createSpace, updateSpace, removeSpace, renameSpace, slugify } from '../spaces/spaces.js';
+import { createSpace, updateSpace, removeSpace, renameSpace, reorderSpaces, slugify } from '../spaces/spaces.js';
 import { measureUsage, dirSizeBytes } from '../quota/quota.js';
 import { col } from '../db/mongo.js';
 import { resolveMemberSpaces } from '../spaces/proxy.js';
@@ -93,6 +93,10 @@ const UpdateSpaceBody = z.object({
   message: 'At least one of label, description, maxGiB, or meta must be provided',
 });
 
+const ReorderSpacesBody = z.object({
+  ids: z.array(z.string().min(1).max(40)).min(1),
+});
+
 // PATCH /api/spaces/:id/rename
 spacesRouter.patch('/:id/rename', globalRateLimit, requireAdminMfa, async (req, res) => {
   const oldId = req.params['id'] as string;
@@ -117,6 +121,24 @@ spacesRouter.patch('/:id/rename', globalRateLimit, requireAdminMfa, async (req, 
       res.status(500).json({ error: msg });
     }
   }
+});
+
+// POST /api/spaces/reorder
+spacesRouter.post('/reorder', globalRateLimit, requireAdminMfa, (req, res) => {
+  const parsed = ReorderSpacesBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const reordered = reorderSpaces(parsed.data.ids);
+  if (!reordered) {
+    res.status(400).json({ error: 'One or more space IDs not found' });
+    return;
+  }
+  res.json({ spaces: reordered.map(({ id, label, builtIn, folders, maxGiB, flex, description, proxyFor }) => ({
+    id, label, builtIn, folders, maxGiB, flex, description,
+    ...(proxyFor ? { proxyFor } : {}),
+  })) });
 });
 
 // GET /api/spaces

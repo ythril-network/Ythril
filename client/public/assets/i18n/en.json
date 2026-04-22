@@ -444,6 +444,7 @@
   "spaces.table.column.proxy": "Proxy",
   "spaces.table.empty": "No spaces",
   "spaces.table.configureTitle": "Configure space",
+  "spaces.table.dragHandleTitle": "Drag to reorder",
   "spaces.badge.allSpaces": "All spaces",
   "spaces.create.title": "Create space",
   "spaces.create.label": "Display Name",

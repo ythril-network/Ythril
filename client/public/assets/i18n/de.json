@@ -426,6 +426,7 @@
   "spaces.table.column.proxy": "Stellvertreter",
   "spaces.table.empty": "Keine Leerzeichen",
   "spaces.table.configureTitle": "Platz konfigurieren",
+  "spaces.table.dragHandleTitle": "Ziehen zum Neuanordnen",
   "spaces.badge.allSpaces": "Alle Räume",
   "spaces.create.title": "Platz schaffen",
   "spaces.create.label": "Anzeigename",

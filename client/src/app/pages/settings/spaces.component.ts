@@ -8,6 +8,7 @@ import {
 } from '../../core/api.service';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { TranslocoService } from '@jsverse/transloco';
+import { CdkDragDrop, DragDropModule, moveItemInArray } from '@angular/cdk/drag-drop';
 
 interface TypeSchemaState {
   namingPattern:   string;
@@ -20,7 +21,7 @@ interface TypeSchemaState {
 @Component({
   selector: 'app-spaces',
   standalone: true,
-  imports: [CommonModule, FormsModule, TranslocoPipe],
+  imports: [CommonModule, FormsModule, TranslocoPipe, DragDropModule],
   styles: [`
     /* chip inputs */
     .chip-wrap {
@@ -42,6 +43,12 @@ interface TypeSchemaState {
     .st-bar-fill.ok     { background:var(--success); }
     .st-bar-fill.warn   { background:var(--warning); }
     .st-bar-fill.danger { background:var(--danger); }
+    /* drag handle */
+    .drag-handle { cursor:grab; color:var(--text-muted); padding:0 4px; user-select:none; font-size:16px; line-height:1; }
+    .drag-handle:hover { color:var(--text-primary); }
+    .cdk-drag-preview { background:var(--bg-primary); border:1px solid var(--accent); border-radius:var(--radius-sm); box-shadow:var(--shadow-lg); opacity:0.95; }
+    .cdk-drag-placeholder { opacity:0.3; }
+    .cdk-drag-animating { transition:transform 250ms cubic-bezier(0,0,0.2,1); }
     /* create dialog */
     .dialog-backdrop { position:fixed; inset:0; background:var(--bg-scrim); display:flex; align-items:center; justify-content:center; z-index:100; }
     .dialog { background:var(--bg-primary); border:1px solid var(--border); border-radius:var(--radius-lg); padding:24px; width:90%; max-width:960px; max-height:90vh; overflow-y:auto; }
@@ -618,12 +625,13 @@ interface TypeSchemaState {
         <div class="table-wrapper">
           <table>
             <thead>
-              <tr><th>{{ 'spaces.table.column.label' | transloco }}</th><th>{{ 'spaces.table.column.id' | transloco }}</th><th>{{ 'spaces.table.column.storage' | transloco }}</th><th>{{ 'spaces.table.column.networks' | transloco }}</th><th>{{ 'spaces.table.column.proxy' | transloco }}</th><th></th></tr>
+              <tr><th style="width:32px;"></th><th>{{ 'spaces.table.column.label' | transloco }}</th><th>{{ 'spaces.table.column.id' | transloco }}</th><th>{{ 'spaces.table.column.storage' | transloco }}</th><th>{{ 'spaces.table.column.networks' | transloco }}</th><th>{{ 'spaces.table.column.proxy' | transloco }}</th><th></th></tr>
             </thead>
-            <tbody>
+            <tbody cdkDropList (cdkDropListDropped)="onSpaceDrop($event)">
               @for (s of spaces(); track s.id) {
                 @let bar = storageInfo(s);
-                <tr>
+                <tr cdkDrag cdkDragLockAxis="y">
+                  <td><span class="drag-handle" cdkDragHandle [attr.title]="'spaces.table.dragHandleTitle' | transloco">⠿</span></td>
                   <td style="font-weight:500;">{{ s.label }}</td>
                   <td><span class="badge badge-gray mono">{{ s.id }}</span></td>
                   <td style="min-width:140px;">
@@ -653,7 +661,7 @@ interface TypeSchemaState {
                   <td><button class="icon-btn" [attr.title]="'spaces.table.configureTitle' | transloco" (click)="openSettings(s)">⚙</button></td>
                 </tr>
               } @empty {
-                <tr><td colspan="6"><div class="empty-state" style="padding:24px;"><h3>{{ 'spaces.table.empty' | transloco }}</h3></div></td></tr>
+                <tr><td colspan="7"><div class="empty-state" style="padding:24px;"><h3>{{ 'spaces.table.empty' | transloco }}</h3></div></td></tr>
               }
             </tbody>
           </table>
@@ -777,6 +785,14 @@ export class SpacesComponent implements OnInit {
       next: ({ networks }) => this.networks.set(networks),
       error: () => {},
     });
+  }
+
+  onSpaceDrop(event: CdkDragDrop<Space[]>): void {
+    if (event.previousIndex === event.currentIndex) return;
+    const list = [...this.spaces()];
+    moveItemInArray(list, event.previousIndex, event.currentIndex);
+    this.spaces.set(list);
+    this.api.reorderSpaces(list.map(s => s.id)).subscribe({ error: () => this.load() });
   }
 
   networksForSpace(spaceId: string): Network[] {

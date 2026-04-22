@@ -401,6 +401,10 @@ export class ApiService {
     return this.http.patch<{ space: Space }>(`/api/spaces/${id}`, body);
   }
 
+  reorderSpaces(ids: string[]): Observable<{ spaces: Space[] }> {
+    return this.http.post<{ spaces: Space[] }>('/api/spaces/reorder', { ids });
+  }
+
   getSpaceMeta(id: string): Observable<SpaceMetaResponse> {
     return this.http.get<SpaceMetaResponse>(`/api/spaces/${id}/meta`);
   }
