@@ -54,14 +54,14 @@ function patch(baseUrl, token, urlPath, data) {
 
 // ── MCP session helper (same pattern as mcp-tools.test.js) ──────────────────
 
-async function openMcpSession(spaceId, authToken, instance = BASE, timeoutMs = 15_000) {
+async function openMcpSession(authToken, instance = BASE, timeoutMs = 15_000) {
   const parsed = new URL(instance);
   const host = parsed.hostname;
   const port = parseInt(parsed.port || '80', 10);
 
   return new Promise((resolve, reject) => {
     const req = http.request(
-      { host, port, path: `/mcp/${spaceId}`, method: 'GET',
+      { host, port, path: '/mcp', method: 'GET',
         headers: { Authorization: `Bearer ${authToken}`, Accept: 'text/event-stream' } },
       (res) => {
         if (res.statusCode !== 200) {
@@ -109,7 +109,7 @@ async function openMcpSession(spaceId, authToken, instance = BASE, timeoutMs = 1
             waiters.push(msg => { clearTimeout(timer); res2(msg); });
             const pd = JSON.stringify(body);
             const pr = http.request(
-              { host, port, path: `/mcp/${spaceId}/messages?sessionId=${sessionId}`, method: 'POST',
+              { host, port, path: `/mcp/messages?sessionId=${sessionId}`, method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(pd), Authorization: `Bearer ${authToken}` } },
               pres => { let t = ''; pres.setEncoding('utf8'); pres.on('data', c => { t += c; }); pres.on('end', () => { if (pres.statusCode !== 202 && pres.statusCode !== 200) { clearTimeout(timer); rej2(new Error(`POST ${pres.statusCode} ${t}`)); } }); },
             );
@@ -450,7 +450,7 @@ describe('Proxy spaces', () => {
         content: 'MCP test file in alpha', encoding: 'utf8',
       });
 
-      session = await openMcpSession(PROXY, tokenA);
+      session = await openMcpSession(tokenA);
     });
     after(() => session?.close());
 
@@ -463,13 +463,14 @@ describe('Proxy spaces', () => {
     });
 
     it('remember without targetSpace returns error for proxy', async () => {
-      const result = await session.callTool('remember', { fact: 'Should fail without target' });
+      const result = await session.callTool('remember', { space: PROXY, fact: 'Should fail without target' });
       assert.ok(result.isError || result.content?.[0]?.text?.includes('targetSpace'),
         `Expected error about targetSpace, got: ${JSON.stringify(result)}`);
     });
 
     it('remember with targetSpace works', async () => {
       const result = await session.callTool('remember', {
+        space: PROXY,
         fact: 'MCP proxy write to alpha',
         targetSpace: SPACE_A,
       });
@@ -480,7 +481,7 @@ describe('Proxy spaces', () => {
     it('recall aggregates across member spaces (or errors if index not ready)', async () => {
       // Vector search indexes may not be ready on newly-created spaces.
       // This test verifies the aggregation path runs without crashing.
-      const result = await session.callTool('recall', { query: 'quantum physics machine learning', topK: 20 });
+      const result = await session.callTool('recall', { space: PROXY, query: 'quantum physics machine learning', topK: 20 });
       // Either succeeds with results, or returns a reindex/index error (both acceptable)
       const text = result.content?.[0]?.text ?? '';
       assert.ok(text.length > 0, 'Should return some response text');
@@ -489,7 +490,7 @@ describe('Proxy spaces', () => {
     it('query tool aggregates across member spaces', async () => {
       // Use query (MongoDB find, no vector index needed) to verify aggregation
       const result = await session.callTool('query', {
-        collection: 'memories', filter: { tags: 'mcp-test' }, limit: 50,
+        space: PROXY, collection: 'memories', filter: { tags: 'mcp-test' }, limit: 50,
       });
       assert.ok(!result.isError, JSON.stringify(result));
       const docs = JSON.parse(result.content?.[0]?.text ?? '[]');
@@ -497,13 +498,13 @@ describe('Proxy spaces', () => {
     });
 
     it('read_file finds files across member spaces', async () => {
-      const result = await session.callTool('read_file', { path: 'mcp-test.txt' });
+      const result = await session.callTool('read_file', { space: PROXY, path: 'mcp-test.txt' });
       assert.ok(!result.isError, JSON.stringify(result));
       assert.equal(result.content?.[0]?.text, 'MCP test file in alpha');
     });
 
     it('list_dir aggregates across member spaces', async () => {
-      const result = await session.callTool('list_dir', { path: '' });
+      const result = await session.callTool('list_dir', { space: PROXY, path: '' });
       assert.ok(!result.isError, JSON.stringify(result));
       const text = result.content?.[0]?.text ?? '';
       // Should see files from both member spaces
@@ -512,42 +513,42 @@ describe('Proxy spaces', () => {
     });
 
     it('write_file without targetSpace returns error for proxy', async () => {
-      const result = await session.callTool('write_file', { path: 'fail.txt', content: 'x' });
+      const result = await session.callTool('write_file', { space: PROXY, path: 'fail.txt', content: 'x' });
       assert.ok(result.isError || result.content?.[0]?.text?.includes('targetSpace'),
         `Expected targetSpace error, got: ${JSON.stringify(result)}`);
     });
 
     it('write_file with targetSpace works', async () => {
       const result = await session.callTool('write_file', {
-        path: 'mcp-written.txt', content: 'written via MCP proxy', targetSpace: SPACE_B,
+        space: PROXY, path: 'mcp-written.txt', content: 'written via MCP proxy', targetSpace: SPACE_B,
       });
       assert.ok(!result.isError, JSON.stringify(result));
       assert.ok(result.content?.[0]?.text?.includes('Written'));
     });
 
     it('upsert_entity without targetSpace returns error for proxy', async () => {
-      const result = await session.callTool('upsert_entity', { name: 'Fail', type: 'test' });
+      const result = await session.callTool('upsert_entity', { space: PROXY, name: 'Fail', type: 'test' });
       assert.ok(result.isError || result.content?.[0]?.text?.includes('targetSpace'),
         `Expected targetSpace error, got: ${JSON.stringify(result)}`);
     });
 
     it('upsert_entity with targetSpace works', async () => {
       const result = await session.callTool('upsert_entity', {
-        name: 'McpEntity', type: 'test', targetSpace: SPACE_A,
+        space: PROXY, name: 'McpEntity', type: 'test', targetSpace: SPACE_A,
       });
       assert.ok(!result.isError, JSON.stringify(result));
       assert.ok(result.content?.[0]?.text?.includes('upserted'));
     });
 
     it('delete_file without targetSpace returns error for proxy', async () => {
-      const result = await session.callTool('delete_file', { path: 'mcp-written.txt' });
+      const result = await session.callTool('delete_file', { space: PROXY, path: 'mcp-written.txt' });
       assert.ok(result.isError || result.content?.[0]?.text?.includes('targetSpace'),
         `Expected targetSpace error, got: ${JSON.stringify(result)}`);
     });
 
     it('delete_file with targetSpace works', async () => {
       const result = await session.callTool('delete_file', {
-        path: 'mcp-written.txt', targetSpace: SPACE_B,
+        space: PROXY, path: 'mcp-written.txt', targetSpace: SPACE_B,
       });
       assert.ok(!result.isError, JSON.stringify(result));
       assert.ok(result.content?.[0]?.text?.includes('Deleted'));
