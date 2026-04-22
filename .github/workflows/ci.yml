@@ -41,6 +41,7 @@ jobs:
       - name: Start test containers
         run: |
           # Ensure config bind-mount dirs are writable by the node user (uid 1000) inside the container
+          mkdir -p testing/sync/configs/a testing/sync/configs/b testing/sync/configs/c
           chmod 777 testing/sync/configs/a testing/sync/configs/b testing/sync/configs/c
           docker compose -p ythril-test -f testing/docker-compose.test.yml up -d --wait --wait-timeout 300
           node testing/sync/setup.js
