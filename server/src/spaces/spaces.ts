@@ -465,14 +465,17 @@ const META_VERSION_CAP = 20;
  *  Returns the updated SpaceConfig, or null if the space was not found. */
 export function updateSpace(
   spaceId: string,
-  updates: { label?: string; description?: string; maxGiB?: number; meta?: SpaceMeta },
+  updates: { label?: string; description?: string; maxGiB?: number | null; meta?: SpaceMeta },
 ): SpaceConfig | null {
   const cfg = getConfig();
   const space = cfg.spaces.find(s => s.id === spaceId);
   if (!space) return null;
   if (typeof updates.label === 'string') space.label = updates.label;
   if (typeof updates.description === 'string') space.description = updates.description;
-  if (typeof updates.maxGiB === 'number') space.maxGiB = updates.maxGiB > 0 ? updates.maxGiB : undefined;
+  if (updates.maxGiB !== undefined) {
+    // null or non-positive clears the cap (unlimited); positive number sets the cap
+    space.maxGiB = updates.maxGiB !== null && updates.maxGiB > 0 ? updates.maxGiB : undefined;
+  }
 
   if (updates.meta !== undefined) {
     const now = new Date().toISOString();

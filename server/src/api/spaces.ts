@@ -87,7 +87,7 @@ const RenameSpaceBody = z.object({
 const UpdateSpaceBody = z.object({
   label: z.string().min(1).max(200).optional(),
   description: z.string().max(4000).optional(),
-  maxGiB: z.number().positive().optional(),
+  maxGiB: z.number().positive().nullable().optional(),
   meta: SpaceMetaBody.optional(),
 }).refine(d => d.label !== undefined || d.description !== undefined || d.meta !== undefined || d.maxGiB !== undefined, {
   message: 'At least one of label, description, maxGiB, or meta must be provided',
@@ -235,7 +235,7 @@ spacesRouter.patch('/:id', globalRateLimit, requireAdminMfa, async (req, res) =>
       }
 
       // Apply non-meta updates immediately (label, description, maxGiB)
-      const nonMetaUpdates: { label?: string; description?: string; maxGiB?: number } = {};
+      const nonMetaUpdates: { label?: string; description?: string; maxGiB?: number | null } = {};
       if (parsed.data.label !== undefined) nonMetaUpdates.label = parsed.data.label;
       if (parsed.data.description !== undefined) nonMetaUpdates.description = parsed.data.description;
       if (parsed.data.maxGiB !== undefined) nonMetaUpdates.maxGiB = parsed.data.maxGiB;

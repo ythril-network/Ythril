@@ -897,7 +897,7 @@ export class SpacesComponent implements OnInit {
     this.settingsError.set('');
     this.api.updateSpace(target.id, {
       label:  this.stForm.label.trim() || target.label,
-      maxGiB: this.stForm.maxGiB ?? 0,
+      maxGiB: this.stForm.maxGiB,
       meta:   this.buildMeta(),
     }).subscribe({
       next: ({ space }) => {
