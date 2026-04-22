@@ -1,4 +1,4 @@
-﻿import { MongoClient, type Db, type Collection } from 'mongodb';
+﻿import { MongoClient, type Db, type Collection, type Document, type Filter, type UpdateFilter, type OptionalUnlessRequiredId, type AnyBulkWriteOperation } from 'mongodb';
 import { getMongoUri } from '../config/loader.js';
 import { log } from '../util/log.js';
 
@@ -108,6 +108,39 @@ export function getDb(): Db {
 
 export function col<T extends object>(name: string): Collection<T> {
   return getDb().collection<T>(name);
+}
+
+/**
+ * Cast a plain object to MongoDB's `Filter<T>` without `as never`.
+ * Used at call sites where MongoDB's strict Filter generic typing conflicts with
+ * TypeScript document interfaces that don't carry an index signature.
+ * The cast is semantically correct: the object IS intended as a filter for T.
+ */
+export function mFilter<T extends object>(f: Record<string, unknown>): Filter<T> {
+  return f as unknown as Filter<T>;
+}
+
+/**
+ * Cast a document value to `OptionalUnlessRequiredId<T>` for insertOne / replaceOne
+ * without `as never`. Semantically correct: d is the document being inserted.
+ */
+export function mDoc<T extends object>(d: T | Record<string, unknown>): OptionalUnlessRequiredId<T> {
+  return d as unknown as OptionalUnlessRequiredId<T>;
+}
+
+/**
+ * Cast a plain update-operator object to MongoDB's `UpdateFilter<T>` without `as never`.
+ * Semantically correct: u is an update descriptor (`{ $set: {...} }` etc.) for T.
+ */
+export function mUpdate<T extends object>(u: Record<string, unknown>): UpdateFilter<T> {
+  return u as unknown as UpdateFilter<T>;
+}
+
+/**
+ * Cast a bulk-write operations array to `AnyBulkWriteOperation<T>[]` without `as never`.
+ */
+export function mBulk<T extends object>(ops: unknown[]): AnyBulkWriteOperation<T>[] {
+  return ops as unknown as AnyBulkWriteOperation<T>[];
 }
 
 // Graceful shutdown

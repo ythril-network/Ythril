@@ -326,7 +326,7 @@ describe('$ref resolution — space references a library entry', () => {
 
   it('a write that satisfies the referenced schema succeeds', async () => {
     // owner is required per the library schema; svc- prefix required by namingPattern
-    const r = await post(INSTANCES.a, token(), `/api/brain/${TEST_SPACE}/entities`, {
+    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${TEST_SPACE}/entities`, {
       name: 'svc-auth',
       type: 'service',
       properties: { owner: 'platform-team' },
@@ -336,7 +336,7 @@ describe('$ref resolution — space references a library entry', () => {
   });
 
   it('a write that violates the referenced schema is rejected in strict mode', async () => {
-    const r = await post(INSTANCES.a, token(), `/api/brain/${TEST_SPACE}/entities`, {
+    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${TEST_SPACE}/entities`, {
       name: 'svc-missing-owner',
       type: 'service',
       // owner is required but omitted
@@ -359,8 +359,8 @@ describe('$ref resolution — space references a library entry', () => {
     });
 
     // Now the same write (without owner) should succeed
-    const r = await post(INSTANCES.a, token(), `/api/brain/${TEST_SPACE}/entities`, {
-      name: 'svc-no-owner',
+    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${TEST_SPACE}/entities`, {
+      name: 'svc-noowner',
       type: 'service',
     });
     assert.ok([200, 201].includes(r.status), `After library update, write should succeed: ${JSON.stringify(r.body)}`);
@@ -394,7 +394,7 @@ describe('$ref to non-existent library entry', () => {
   });
 
   it('write with unresolvable $ref uses empty schema (no constraints) and allows any value', async () => {
-    const r = await post(INSTANCES.a, token(), `/api/brain/${missingRefSpace}/entities`, {
+    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${missingRefSpace}/entities`, {
       name: 'anything',
       type: 'service',
     });

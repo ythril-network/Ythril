@@ -29,8 +29,8 @@ import { configExists, reloadConfig, getConfig, saveConfig, loadSecrets } from '
 import { requireAuth, requireAdminMfa } from './auth/middleware.js';
 import { clearTokenCache } from './auth/tokens.js';
 import { clearOidcCache } from './auth/oidc.js';
-import { initSpace, ensureGeneralSpace, wipeSpace, WIPE_COLLECTION_TYPES } from './spaces/spaces.js';
-import { col } from './db/mongo.js';
+import { initSpace, ensureGeneralSpace, wipeSpace, WIPE_COLLECTION_TYPES, type WipeCollectionType } from './spaces/spaces.js';
+import { col, mFilter, mDoc } from './db/mongo.js';
 import { log } from './util/log.js';
 import { getReadiness } from './ready.js';
 import {
@@ -196,7 +196,7 @@ export function createApp() {
     // Optional `types` body parameter — validate each value.
     const rawTypes = req.body?.types;
     if (rawTypes !== undefined) {
-      if (!Array.isArray(rawTypes) || rawTypes.some((t: unknown) => !WIPE_COLLECTION_TYPES.includes(t as never))) {
+      if (!Array.isArray(rawTypes) || rawTypes.some((t: unknown) => !WIPE_COLLECTION_TYPES.includes(t as WipeCollectionType))) {
         res.status(400).json({
           error: `'types' must be an array of: ${WIPE_COLLECTION_TYPES.join(', ')}`,
         });
@@ -230,7 +230,7 @@ export function createApp() {
       // Fetch all documents in parallel, stripping the embedding vector to keep the
       // payload manageable. embeddingModel is retained so the import consumer knows
       // what model was in use before the wipe.
-      const projection = { embedding: 0 } as never;
+      const projection = { embedding: 0 };
       const [memories, entities, edges, chrono, files] = await Promise.all([
         col(`${spaceId}_memories`).find({}, { projection }).toArray(),
         col(`${spaceId}_entities`).find({}, { projection }).toArray(),
@@ -306,8 +306,8 @@ export function createApp() {
         const docId = String((doc as Record<string, unknown>)['_id']);
         try {
           const r = await col(collName).replaceOne(
-            { _id: docId } as never,
-            doc as never,
+            mFilter({ _id: docId }),
+            mDoc(doc as Record<string, unknown>),
             { upsert: true },
           );
           if (r.upsertedCount > 0) {

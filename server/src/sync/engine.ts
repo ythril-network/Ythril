@@ -16,7 +16,7 @@
  */
 
 import { getConfig, saveConfig, getSecrets } from '../config/loader.js';
-import { col } from '../db/mongo.js';
+import { col, mFilter, mDoc } from '../db/mongo.js';
 import { applyRemoteTombstone, listTombstones } from '../brain/tombstones.js';
 import { recordSyncResult, type SyncCounts } from './history.js';
 import { buildFileManifest } from '../files/manifest.js';
@@ -137,8 +137,7 @@ export function scheduleSyncForNetwork(networkId: string, schedule?: string): vo
 // Parse cron-style schedule patterns: "* /N minutes", "every Nm", "every Nh"
 // (space deliberately added above to avoid TS parsing as block comment end)
 function parseSyncSchedule(s: string): number | null {
-  // Build pattern using constructor to avoid TS lexer confusion with "*/"
-  const cronPattern = new RegExp(String.raw`\*/(\d+)\s*(min(?:utes?)?|h(?:ours?)?)`, 'i');
+  const cronPattern = /\*\/(\d+)\s*(min(?:utes?)?|h(?:ours?)?)/i;
   const m = cronPattern.exec(s) ?? /every\s+(\d+)\s*(m(?:in)?|h(?:r?)?)/i.exec(s);
   if (!m) return null;
   const n = parseInt(m[1]!, 10);
@@ -149,25 +148,18 @@ function parseSyncSchedule(s: string): number | null {
 
 // ── Per-network sync ────────────────────────────────────────────────────────
 
-/** Increment the consecutive failure counter for a member and persist it. Returns new count. */
-function _incrementFailureCount(networkId: string, instanceId: string): number {
+/** Set or increment the consecutive failure counter for a member and persist it.
+ *  Pass `'increment'` to add 1 and return the new count; pass a number to set
+ *  the counter to that value (use 0 to reset on success). */
+function _setFailureCount(networkId: string, instanceId: string, value: number | 'increment'): number {
   const cfg = getConfig();
   const net = cfg.networks.find(n => n.id === networkId);
   const member = net?.members.find(m => m.instanceId === instanceId);
-  if (!member) return 1;
-  member.consecutiveFailures = (member.consecutiveFailures ?? 0) + 1;
+  if (!member) return typeof value === 'number' ? value : 1;
+  const newValue = value === 'increment' ? (member.consecutiveFailures ?? 0) + 1 : value;
+  member.consecutiveFailures = newValue;
   saveConfig(cfg);
-  return member.consecutiveFailures;
-}
-
-/** Reset (or set) the consecutive failure counter for a member and persist it. */
-function _persistFailureCount(networkId: string, instanceId: string, value: number): void {
-  const cfg = getConfig();
-  const net = cfg.networks.find(n => n.id === networkId);
-  const member = net?.members.find(m => m.instanceId === instanceId);
-  if (!member) return;
-  member.consecutiveFailures = value;
-  saveConfig(cfg);
+  return newValue;
 }
 
 // ── Per-network sync dedup lock ─────────────────────────────────────────────
@@ -182,7 +174,10 @@ const _syncRerunRequested = new Set<string>();
 export async function runSyncForNetwork(networkId: string): Promise<{ synced: number; errors: number }> {
   const inflight = _syncRunning.get(networkId);
   if (inflight) {
-    // A cycle is already running — request a rerun instead of piling on.
+    // A cycle is already running — schedule one more cycle after it finishes and
+    // return the CURRENT inflight promise (resolves when THIS cycle ends, not the
+    // next one).  Callers that need to wait for the rerun must call again after
+    // this promise resolves.
     _syncRerunRequested.add(networkId);
     log.debug(`Sync cycle already running for network ${networkId} — queuing rerun`);
     return inflight;
@@ -232,7 +227,7 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
       pushed.chrono += counts.pushed.chrono;
       synced++;
       // Reset failure counter on success
-      _persistFailureCount(net.id, member.instanceId, 0);
+      _setFailureCount(net.id, member.instanceId, 0);
 
       // If any members were temporarily re-parented away from this peer while it was
       // offline, now is the right moment to surface the choice to the admin.
@@ -252,7 +247,7 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
       log.error(errMsg);
       errorMessages.push(errMsg);
       errors++;
-      const failures = _incrementFailureCount(net.id, member.instanceId);
+      const failures = _setFailureCount(net.id, member.instanceId, 'increment');
       if (failures === STALE_FAILURE_THRESHOLD) {
         const hasChildren = net.type === 'braintree' && (member.children?.length ?? 0) > 0;
         log.warn(
@@ -357,11 +352,11 @@ export async function runSyncForPeer(
     try {
       await runSyncForMember(net, member);
       networksSynced++;
-      _persistFailureCount(net.id, member.instanceId, 0);
+      _setFailureCount(net.id, member.instanceId, 0);
     } catch (err) {
       log.error(`sync_now failed for peer ${member.label} (${member.instanceId}) in network '${net.label}': ${err}`);
       errors++;
-      _incrementFailureCount(net.id, member.instanceId);
+      _setFailureCount(net.id, member.instanceId, 'increment');
     }
   }
   return { networksSynced, errors, notFound: false };
@@ -416,16 +411,16 @@ async function runSyncForMember(
     const localWarm = Promise.all(
       net.spaces.flatMap(sid => [
         col<MemoryDoc>(`${sid}_memories`)
-          .findOne({} as never, { projection: { _id: 1 } })
+          .findOne(mFilter({}), { projection: { _id: 1 } })
           .catch(() => {}),
         col<EntityDoc>(`${sid}_entities`)
-          .findOne({} as never, { projection: { _id: 1 } })
+          .findOne(mFilter({}), { projection: { _id: 1 } })
           .catch(() => {}),
         col<EdgeDoc>(`${sid}_edges`)
-          .findOne({} as never, { projection: { _id: 1 } })
+          .findOne(mFilter({}), { projection: { _id: 1 } })
           .catch(() => {}),
         col<ChronoEntry>(`${sid}_chrono`)
-          .findOne({} as never, { projection: { _id: 1 } })
+          .findOne(mFilter({}), { projection: { _id: 1 } })
           .catch(() => {}),
       ]),
     );
@@ -433,11 +428,17 @@ async function runSyncForMember(
     await Promise.all([peerWarm, localWarm]);
   }
 
+  // Pre-build reverse spaceMap (local → remote) for O(1) lookup per space
+  // instead of the O(n) linear scan inside localToRemote().
+  const reverseSpaceMap = new Map(
+    Object.entries(net.spaceMap ?? {}).map(([remote, local]) => [local, remote]),
+  );
+
   for (const spaceId of net.spaces) {
     // Resolve remote space ID for this local space — peers reference spaces by
     // their original (remote) ID, which may differ from our local ID when
     // spaceMap aliasing is active.
-    const remoteSpaceId = localToRemote(net, spaceId);
+    const remoteSpaceId = reverseSpaceMap.get(spaceId) ?? spaceId;
 
     // Skip spaces that don't exist in local config — prevents orphan data and collection access
     // for space IDs that were registered on the network but never created locally.
@@ -897,7 +898,7 @@ async function pushToPeer(
     let seqCursor = lastSeqPushed;
     while (true) {
       const batch = await col<T>(collName)
-        .find({ seq: { $gt: seqCursor }, ...ownedFilter } as never)
+        .find(mFilter<T>({ seq: { $gt: seqCursor }, ...ownedFilter }))
         .sort({ seq: 1 })
         .limit(PUSH_BATCH_SIZE)
         .toArray() as T[];
@@ -995,7 +996,7 @@ async function syncFiles(
     // Files we deleted locally must be propagated to the peer so they disappear there too.
     if (doPush) try {
       const ourTombstones = await col<FileTombstoneDoc>(`${spaceId}_file_tombstones`)
-        .find({ spaceId } as never)
+        .find(mFilter<FileTombstoneDoc>({ spaceId }))
         .toArray();
       if (ourTombstones.length > 0) {
         await fetch(
@@ -1074,7 +1075,7 @@ async function syncFiles(
             peerInstanceLabel: member.label,
             detectedAt: new Date().toISOString(),
           };
-          await col<ConflictDoc>(`${spaceId}_conflicts`).insertOne(conflictDoc as never);
+          await col<ConflictDoc>(`${spaceId}_conflicts`).insertOne(mDoc<ConflictDoc>(conflictDoc));
 
           log.warn(
             `FILE_CONFLICT: '${remote.path}' from peer '${member.label}' differs from local copy. ` +
@@ -1134,30 +1135,30 @@ async function syncFiles(
 // ── Local upsert helpers ────────────────────────────────────────────────────
 
 async function upsertMemory(spaceId: string, incoming: MemoryDoc): Promise<void> {
-  const existing = await col<MemoryDoc>(`${spaceId}_memories`).findOne({ _id: incoming._id } as never) as MemoryDoc | null;
+  const existing = await col<MemoryDoc>(`${spaceId}_memories`).findOne(mFilter<MemoryDoc>({ _id: incoming._id })) as MemoryDoc | null;
   if (!existing || incoming.seq > existing.seq) {
-    await col<MemoryDoc>(`${spaceId}_memories`).replaceOne({ _id: incoming._id } as never, incoming as never, { upsert: true });
+    await col<MemoryDoc>(`${spaceId}_memories`).replaceOne(mFilter<MemoryDoc>({ _id: incoming._id }), mDoc<MemoryDoc>(incoming), { upsert: true });
   }
 }
 
 async function upsertEntity(spaceId: string, incoming: EntityDoc): Promise<void> {
-  const existing = await col<EntityDoc>(`${spaceId}_entities`).findOne({ _id: incoming._id } as never) as EntityDoc | null;
+  const existing = await col<EntityDoc>(`${spaceId}_entities`).findOne(mFilter<EntityDoc>({ _id: incoming._id })) as EntityDoc | null;
   if (!existing || incoming.seq > existing.seq) {
-    await col<EntityDoc>(`${spaceId}_entities`).replaceOne({ _id: incoming._id } as never, incoming as never, { upsert: true });
+    await col<EntityDoc>(`${spaceId}_entities`).replaceOne(mFilter<EntityDoc>({ _id: incoming._id }), mDoc<EntityDoc>(incoming), { upsert: true });
   }
 }
 
 async function upsertEdge(spaceId: string, incoming: EdgeDoc): Promise<void> {
-  const existing = await col<EdgeDoc>(`${spaceId}_edges`).findOne({ _id: incoming._id } as never) as EdgeDoc | null;
+  const existing = await col<EdgeDoc>(`${spaceId}_edges`).findOne(mFilter<EdgeDoc>({ _id: incoming._id })) as EdgeDoc | null;
   if (!existing || incoming.seq > existing.seq) {
-    await col<EdgeDoc>(`${spaceId}_edges`).replaceOne({ _id: incoming._id } as never, incoming as never, { upsert: true });
+    await col<EdgeDoc>(`${spaceId}_edges`).replaceOne(mFilter<EdgeDoc>({ _id: incoming._id }), mDoc<EdgeDoc>(incoming), { upsert: true });
   }
 }
 
 async function upsertChrono(spaceId: string, incoming: ChronoEntry): Promise<void> {
-  const existing = await col<ChronoEntry>(`${spaceId}_chrono`).findOne({ _id: incoming._id } as never) as ChronoEntry | null;
+  const existing = await col<ChronoEntry>(`${spaceId}_chrono`).findOne(mFilter<ChronoEntry>({ _id: incoming._id })) as ChronoEntry | null;
   if (!existing || incoming.seq > existing.seq) {
-    await col<ChronoEntry>(`${spaceId}_chrono`).replaceOne({ _id: incoming._id } as never, incoming as never, { upsert: true });
+    await col<ChronoEntry>(`${spaceId}_chrono`).replaceOne(mFilter<ChronoEntry>({ _id: incoming._id }), mDoc<ChronoEntry>(incoming), { upsert: true });
   }
 }
 

@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { col } from '../db/mongo.js';
+import { col, mFilter, mDoc, mUpdate, mBulk } from '../db/mongo.js';
 import { nextSeq } from '../util/seq.js';
 import { embed } from './embedding.js';
 import { getConfig } from '../config/loader.js';
@@ -75,7 +75,7 @@ export async function createChrono(
   if (fields.properties !== undefined) doc.properties = fields.properties;
   if (fields.recurrence !== undefined) doc.recurrence = fields.recurrence;
 
-  await col<ChronoEntry>(`${spaceId}_chrono`).insertOne(doc as never);
+  await col<ChronoEntry>(`${spaceId}_chrono`).insertOne(mDoc<ChronoEntry>(doc));
   return doc;
 }
 
@@ -84,7 +84,7 @@ export async function updateChrono(
   id: string,
   updates: Partial<Pick<ChronoEntry, 'title' | 'description' | 'type' | 'startsAt' | 'endsAt' | 'status' | 'confidence' | 'tags' | 'entityIds' | 'memoryIds' | 'properties' | 'recurrence'>>,
 ): Promise<ChronoEntry | null> {
-  const existing = await col<ChronoEntry>(`${spaceId}_chrono`).findOne({ _id: id, spaceId } as never) as ChronoEntry | null;
+  const existing = await col<ChronoEntry>(`${spaceId}_chrono`).findOne(mFilter<ChronoEntry>({ _id: id, spaceId })) as ChronoEntry | null;
   if (!existing) return null;
 
   const seq = await nextSeq(spaceId);
@@ -115,14 +115,14 @@ export async function updateChrono(
   }
 
   await col<ChronoEntry>(`${spaceId}_chrono`).updateOne(
-    { _id: id } as never,
-    { $set } as never,
+    mFilter<ChronoEntry>({ _id: id }),
+    mUpdate<ChronoEntry>({ $set }),
   );
   return { ...existing, ...($set as Partial<ChronoEntry>) } as ChronoEntry;
 }
 
 export async function getChronoById(spaceId: string, id: string): Promise<ChronoEntry | null> {
-  return col<ChronoEntry>(`${spaceId}_chrono`).findOne({ _id: id, spaceId } as never) as Promise<ChronoEntry | null>;
+  return col<ChronoEntry>(`${spaceId}_chrono`).findOne(mFilter<ChronoEntry>({ _id: id, spaceId })) as Promise<ChronoEntry | null>;
 }
 
 export interface ChronoFilter {
@@ -186,7 +186,7 @@ export async function listChrono(
   }
 
   return col<ChronoEntry>(`${spaceId}_chrono`)
-    .find(query as never)
+    .find(mFilter<ChronoEntry>(query))
     .sort({ createdAt: -1 })
     .skip(skip)
     .limit(limit)
@@ -198,12 +198,12 @@ export async function deleteChrono(
   chronoId: string,
 ): Promise<boolean> {
   const existing = await col<ChronoEntry>(`${spaceId}_chrono`)
-    .findOne({ _id: chronoId, spaceId } as never, { projection: { seq: 1 } }) as { seq?: number } | null;
+    .findOne(mFilter<ChronoEntry>({ _id: chronoId, spaceId }), { projection: { seq: 1 } }) as { seq?: number } | null;
   const seq = await nextSeq(spaceId);
   const result = await col<ChronoEntry>(`${spaceId}_chrono`).deleteOne({
     _id: chronoId,
     spaceId,
-  } as never);
+  });
   if (result.deletedCount === 0) return false;
 
   const tombstone: TombstoneDoc = {
@@ -216,8 +216,8 @@ export async function deleteChrono(
     ...(existing?.seq !== undefined ? { originalSeq: existing.seq } : {}),
   };
   await col<TombstoneDoc>(`${spaceId}_tombstones`).replaceOne(
-    { _id: chronoId } as never,
-    tombstone as never,
+    mFilter<TombstoneDoc>({ _id: chronoId }),
+    mDoc<TombstoneDoc>(tombstone),
     { upsert: true },
   );
   return true;
@@ -249,7 +249,7 @@ export async function bulkDeleteChrono(spaceId: string): Promise<number> {
   const ops = tombstones.map(t => ({
     replaceOne: { filter: { _id: t._id }, replacement: t, upsert: true },
   }));
-  await col<TombstoneDoc>(`${spaceId}_tombstones`).bulkWrite(ops as never);
+  await col<TombstoneDoc>(`${spaceId}_tombstones`).bulkWrite(mBulk<TombstoneDoc>(ops));
   await coll.deleteMany({});
   return ids.length;
 }

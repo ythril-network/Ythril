@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { col } from '../db/mongo.js';
+import { col, mFilter, mDoc, mUpdate, mBulk } from '../db/mongo.js';
 import { nextSeq } from '../util/seq.js';
 import { embed } from './embedding.js';
 import { getConfig } from '../config/loader.js';
@@ -74,7 +74,7 @@ export async function upsertEdge(
   tags?: string[],
 ): Promise<EdgeDoc> {
   const collection = col<EdgeDoc>(`${spaceId}_edges`);
-  const existing = await collection.findOne({ spaceId, from, to, label } as never);
+  const existing = await collection.findOne(mFilter<EdgeDoc>({ spaceId, from, to, label }));
 
   const seq = await nextSeq(spaceId);
   const now = new Date().toISOString();
@@ -105,8 +105,8 @@ export async function upsertEdge(
       $set['properties'] = mergedProps;
     }
     await collection.updateOne(
-      { _id: (existing as EdgeDoc)._id } as never,
-      { $set } as never,
+      mFilter<EdgeDoc>({ _id: (existing as EdgeDoc)._id }),
+      mUpdate<EdgeDoc>({ $set }),
     );
     return {
       ...(existing as EdgeDoc),
@@ -138,7 +138,7 @@ export async function upsertEdge(
     seq,
     ...embeddingFields,
   };
-  await collection.insertOne(doc as never);
+  await collection.insertOne(mDoc<EdgeDoc>(doc));
   return doc;
 }
 
@@ -154,7 +154,7 @@ export async function listEdges(
   if (filter.to) q['to'] = filter.to;
   if (filter.label) q['label'] = filter.label;
   return col<EdgeDoc>(`${spaceId}_edges`)
-    .find(q as never)
+    .find(mFilter<EdgeDoc>(q))
     .sort({ seq: -1, createdAt: -1, _id: -1 })
     .skip(skip)
     .limit(limit)
@@ -164,12 +164,12 @@ export async function listEdges(
 /** Delete an edge by ID and write tombstone */
 export async function deleteEdge(spaceId: string, edgeId: string): Promise<boolean> {
   const existing = await col<EdgeDoc>(`${spaceId}_edges`)
-    .findOne({ _id: edgeId, spaceId } as never, { projection: { seq: 1 } }) as { seq?: number } | null;
+    .findOne(mFilter<EdgeDoc>({ _id: edgeId, spaceId }), { projection: { seq: 1 } }) as { seq?: number } | null;
   const seq = await nextSeq(spaceId);
   const result = await col<EdgeDoc>(`${spaceId}_edges`).deleteOne({
     _id: edgeId,
     spaceId,
-  } as never);
+  });
   if (result.deletedCount === 0) return false;
 
   const tombstone: TombstoneDoc = {
@@ -182,8 +182,8 @@ export async function deleteEdge(spaceId: string, edgeId: string): Promise<boole
     ...(existing?.seq !== undefined ? { originalSeq: existing.seq } : {}),
   };
   await col<TombstoneDoc>(`${spaceId}_tombstones`).replaceOne(
-    { _id: edgeId } as never,
-    tombstone as never,
+    mFilter<TombstoneDoc>({ _id: edgeId }),
+    mDoc<TombstoneDoc>(tombstone),
     { upsert: true },
   );
   return true;
@@ -191,7 +191,7 @@ export async function deleteEdge(spaceId: string, edgeId: string): Promise<boole
 
 /** Find an edge by exact ID */
 export async function getEdgeById(spaceId: string, id: string): Promise<EdgeDoc | null> {
-  return col<EdgeDoc>(`${spaceId}_edges`).findOne({ _id: id, spaceId } as never) as Promise<EdgeDoc | null>;
+  return col<EdgeDoc>(`${spaceId}_edges`).findOne(mFilter<EdgeDoc>({ _id: id, spaceId })) as Promise<EdgeDoc | null>;
 }
 
 /** Update an existing edge by ID. Partial update — only supplied fields are changed. Re-embeds when any content field changes. */
@@ -202,7 +202,7 @@ export async function updateEdgeById(
   deleteFieldsPaths?: string[],
 ): Promise<EdgeDoc | null> {
   const collection = col<EdgeDoc>(`${spaceId}_edges`);
-  const existing = await collection.findOne({ _id: id, spaceId } as never) as EdgeDoc | null;
+  const existing = await collection.findOne(mFilter<EdgeDoc>({ _id: id, spaceId })) as EdgeDoc | null;
   if (!existing) return null;
 
   const seq = await nextSeq(spaceId);
@@ -274,7 +274,7 @@ export async function updateEdgeById(
 
   const updateOp: Record<string, unknown> = { $set };
   if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
-  await collection.updateOne({ _id: id } as never, updateOp as never);
+  await collection.updateOne(mFilter<EdgeDoc>({ _id: id }), mUpdate<EdgeDoc>(updateOp));
 
   const result = {
     ...existing,
@@ -322,7 +322,7 @@ export async function bulkDeleteEdges(spaceId: string): Promise<number> {
   const ops = tombstones.map(t => ({
     replaceOne: { filter: { _id: t._id }, replacement: t, upsert: true },
   }));
-  await col<TombstoneDoc>(`${spaceId}_tombstones`).bulkWrite(ops as never);
+  await col<TombstoneDoc>(`${spaceId}_tombstones`).bulkWrite(mBulk<TombstoneDoc>(ops));
   await coll.deleteMany({});
   return ids.length;
 }
@@ -369,7 +369,7 @@ export async function traverseGraph(
       } else {
         q = { spaceId: mid, $or: [{ from: { $in: frontier } }, { to: { $in: frontier } }], ...labelFilter };
       }
-      const edges = await col<EdgeDoc>(`${mid}_edges`).find(q as never).toArray() as EdgeDoc[];
+      const edges = await col<EdgeDoc>(`${mid}_edges`).find(mFilter<EdgeDoc>(q)).toArray() as EdgeDoc[];
       adjacentEdges.push(...edges);
     }
 
@@ -399,7 +399,7 @@ export async function traverseGraph(
     const entityMap = new Map<string, EntityDoc>();
     for (const mid of memberIds) {
       const entities = await col<EntityDoc>(`${mid}_entities`)
-        .find({ _id: { $in: newNeighborIds }, spaceId: mid } as never)
+        .find(mFilter<EntityDoc>({ _id: { $in: newNeighborIds }, spaceId: mid }))
         .toArray() as EntityDoc[];
       for (const e of entities) entityMap.set(e._id, e);
     }

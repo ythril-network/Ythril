@@ -9,7 +9,7 @@
  * IDs in the same space.  Candidate discovery is the caller's responsibility.
  */
 
-import { col, getMongo } from '../db/mongo.js';
+import { col, getMongo, mFilter, mDoc, mUpdate } from '../db/mongo.js';
 import { nextSeq } from '../util/seq.js';
 import { embed } from './embedding.js';
 import { getEntityById } from './entities.js';
@@ -206,12 +206,12 @@ async function detectDuplicateEdges(
 
   // All edges currently referencing the absorbed entity
   const absorbedEdges = await edgeColl
-    .find({ spaceId, $or: [{ from: absorbedId }, { to: absorbedId }] } as never)
+    .find(mFilter<EdgeDoc>({ spaceId, $or: [{ from: absorbedId }, { to: absorbedId }] }))
     .toArray() as EdgeDoc[];
 
   // All edges currently referencing the survivor entity
   const survivorEdges = await edgeColl
-    .find({ spaceId, $or: [{ from: survivorId }, { to: survivorId }] } as never)
+    .find(mFilter<EdgeDoc>({ spaceId, $or: [{ from: survivorId }, { to: survivorId }] }))
     .toArray() as EdgeDoc[];
 
   const warnings: DuplicateEdgeWarning[] = [];
@@ -338,12 +338,12 @@ export async function executeMerge(
 
       // Collect all absorbed edges (from=absorbed OR to=absorbed).
       const absorbedEdges = await edgeColl
-        .find({ spaceId, $or: [{ from: absorbed._id }, { to: absorbed._id }] } as never, { session })
+        .find(mFilter<EdgeDoc>({ spaceId, $or: [{ from: absorbed._id }, { to: absorbed._id }] }), { session })
         .toArray() as EdgeDoc[];
 
       // Build a set of existing survivor edge keys for collision detection.
       const survivorEdges = await edgeColl
-        .find({ spaceId, $or: [{ from: survivor._id }, { to: survivor._id }] } as never, { session })
+        .find(mFilter<EdgeDoc>({ spaceId, $or: [{ from: survivor._id }, { to: survivor._id }] }), { session })
         .toArray() as EdgeDoc[];
       const survivorKeys = new Set(survivorEdges.map(e => `${e.from}|${e.to}|${e.label}`));
 
@@ -356,11 +356,11 @@ export async function executeMerge(
         const postKey = `${newFrom}|${newTo}|${edge.label}`;
         if (survivorKeys.has(postKey)) {
           // This absorbed edge would collide — delete it as a duplicate.
-          await edgeColl.deleteOne({ _id: edge._id } as never, { session });
+          await edgeColl.deleteOne(mFilter<EdgeDoc>({ _id: edge._id }), { session });
           const tombSeq = await nextSeq(spaceId);
           await col<TombstoneDoc>(`${spaceId}_tombstones`).replaceOne(
-            { _id: edge._id } as never,
-            { _id: edge._id, type: 'edge', spaceId, deletedAt: now, instanceId: getConfig().instanceId, seq: tombSeq } as never,
+            mFilter<TombstoneDoc>({ _id: edge._id }),
+            mDoc<TombstoneDoc>({ _id: edge._id, type: 'edge', spaceId, deletedAt: now, instanceId: getConfig().instanceId, seq: tombSeq }),
             { upsert: true, session },
           );
           deletedDuplicateEdgeIds.push(edge._id);
@@ -380,8 +380,8 @@ export async function executeMerge(
         const edgeSeq = await nextSeq(spaceId);
         (updates as Record<string, unknown>)['seq'] = edgeSeq;
         await edgeColl.updateOne(
-          { _id: edge._id } as never,
-          { $set: updates } as never,
+          mFilter<EdgeDoc>({ _id: edge._id }),
+          mUpdate<EdgeDoc>({ $set: updates }),
           { session },
         );
       }
@@ -389,15 +389,15 @@ export async function executeMerge(
       // ── 2. Relink memories ─────────────────────────────────────────────
       const memoryColl = col<MemoryDoc>(`${spaceId}_memories`);
       const affectedMemories = await memoryColl
-        .find({ spaceId, entityIds: absorbed._id } as never, { session })
+        .find(mFilter<MemoryDoc>({ spaceId, entityIds: absorbed._id }), { session })
         .toArray() as MemoryDoc[];
       for (const mem of affectedMemories) {
         const newEntityIds = mem.entityIds.map(id => id === absorbed._id ? survivor._id : id);
         const dedupedIds = [...new Set(newEntityIds)];
         const memSeq = await nextSeq(spaceId);
         await memoryColl.updateOne(
-          { _id: mem._id } as never,
-          { $set: { entityIds: dedupedIds, updatedAt: now, seq: memSeq } } as never,
+          mFilter<MemoryDoc>({ _id: mem._id }),
+          mUpdate<MemoryDoc>({ $set: { entityIds: dedupedIds, updatedAt: now, seq: memSeq } }),
           { session },
         );
       }
@@ -405,15 +405,15 @@ export async function executeMerge(
       // ── 3. Relink chrono entries ───────────────────────────────────────
       const chronoColl = col<ChronoEntry>(`${spaceId}_chrono`);
       const affectedChronos = await chronoColl
-        .find({ spaceId, entityIds: absorbed._id } as never, { session })
+        .find(mFilter<ChronoEntry>({ spaceId, entityIds: absorbed._id }), { session })
         .toArray() as ChronoEntry[];
       for (const ch of affectedChronos) {
         const newEntityIds = ch.entityIds.map(id => id === absorbed._id ? survivor._id : id);
         const dedupedIds = [...new Set(newEntityIds)];
         const chSeq = await nextSeq(spaceId);
         await chronoColl.updateOne(
-          { _id: ch._id } as never,
-          { $set: { entityIds: dedupedIds, updatedAt: now, seq: chSeq } } as never,
+          mFilter<ChronoEntry>({ _id: ch._id }),
+          mUpdate<ChronoEntry>({ $set: { entityIds: dedupedIds, updatedAt: now, seq: chSeq } }),
           { session },
         );
       }
@@ -431,17 +431,17 @@ export async function executeMerge(
       } catch { /* embedding unavailable — keep existing embedding */ }
 
       await entityColl.updateOne(
-        { _id: survivor._id } as never,
-        { $set: { properties: mergedProperties, tags: mergedTags, updatedAt: now, seq, ...embeddingFields } } as never,
+        mFilter<EntityDoc>({ _id: survivor._id }),
+        mUpdate<EntityDoc>({ $set: { properties: mergedProperties, tags: mergedTags, updatedAt: now, seq, ...embeddingFields } }),
         { session },
       );
 
       // ── 5. Delete absorbed entity + write tombstone ────────────────────
       const absorbedSeq = await nextSeq(spaceId);
-      await entityColl.deleteOne({ _id: absorbed._id, spaceId } as never, { session });
+      await entityColl.deleteOne(mFilter<EntityDoc>({ _id: absorbed._id, spaceId }), { session });
       await col<TombstoneDoc>(`${spaceId}_tombstones`).replaceOne(
-        { _id: absorbed._id } as never,
-        { _id: absorbed._id, type: 'entity', spaceId, deletedAt: now, instanceId: getConfig().instanceId, seq: absorbedSeq } as never,
+        mFilter<TombstoneDoc>({ _id: absorbed._id }),
+        mDoc<TombstoneDoc>({ _id: absorbed._id, type: 'entity', spaceId, deletedAt: now, instanceId: getConfig().instanceId, seq: absorbedSeq }),
         { upsert: true, session },
       );
 

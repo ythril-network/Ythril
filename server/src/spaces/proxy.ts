@@ -78,3 +78,8 @@ export function resolveWriteTarget(
 
   return { ok: true, target: targetSpace };
 }
+
+/** Returns true if strict linkage enforcement is enabled for a space. */
+export function isStrictLinkage(spaceId: string): boolean {
+  return findSpace(spaceId)?.meta?.strictLinkage === true;
+}

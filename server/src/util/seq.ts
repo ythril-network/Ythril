@@ -1,4 +1,4 @@
-import { col } from '../db/mongo.js';
+import { col, mFilter, mUpdate } from '../db/mongo.js';
 import { getConfig, saveConfig } from '../config/loader.js';
 import { log } from './log.js';
 import type { SpaceCounterDoc } from '../config/types.js';
@@ -26,8 +26,8 @@ export async function nextSeq(spaceId: string): Promise<number> {
  */
 export async function bumpSeq(spaceId: string, minSeq: number): Promise<void> {
   await col<SpaceCounterDoc>('ythril_counters').updateOne(
-    { _id: spaceId },
-    { $max: { seq: minSeq } } as never,
+    mFilter<SpaceCounterDoc>({ _id: spaceId }),
+    mUpdate<SpaceCounterDoc>({ $max: { seq: minSeq } }),
     { upsert: true },
   );
 }

@@ -17,7 +17,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { col } from '../db/mongo.js';
+import { col, mFilter } from '../db/mongo.js';
 import { buildFileManifest } from '../files/manifest.js';
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
@@ -77,7 +77,7 @@ export async function computeMerkleRoot(spaceId: string): Promise<MerkleResult> 
   for (const collType of ['memories', 'entities', 'edges', 'chrono'] as const) {
     const collName = `${spaceId}_${collType}`;
     const docs = await col<{ _id: string; seq: number }>(collName)
-      .find({} as never)
+      .find(mFilter({}))
       .project({ _id: 1, seq: 1 })
       .toArray() as { _id: string; seq: number }[];
 

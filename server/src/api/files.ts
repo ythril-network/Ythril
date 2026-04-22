@@ -41,7 +41,7 @@ import {
 } from '../files/chunks.js';
 import { checkQuota, QuotaError } from '../quota/quota.js';
 import { resolveSafePath, spaceRoot } from '../files/sandbox.js';
-import { col } from '../db/mongo.js';
+import { col, mFilter, mDoc } from '../db/mongo.js';
 import type { FileTombstoneDoc, FileMetaDoc } from '../config/types.js';
 import { upsertFileMeta, deleteFileMeta, deleteFileMetaByPrefix, renameFileMeta, renameFileMetaByPrefix } from '../files/file-meta.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -407,7 +407,7 @@ filesRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadOnly,
       // If there is none, the path was never known — return 404.
       const normalisedPath = filePath.replace(/\\/g, '/').replace(/^\/+/, '');
       const orphan = await col<FileMetaDoc>(`${targetSpace}_files`).findOne(
-        { _id: normalisedPath } as never,
+        mFilter<FileMetaDoc>({ _id: normalisedPath }),
       );
       if (orphan) {
         await deleteFileMeta(targetSpace, filePath).catch(err => {
@@ -457,7 +457,7 @@ filesRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadOnly,
       path: filePath.replace(/\\/g, '/'),
       deletedAt: new Date().toISOString(),
     };
-    await col<FileTombstoneDoc>(`${targetSpace}_file_tombstones`).insertOne(tombstone as never);
+    await col<FileTombstoneDoc>(`${targetSpace}_file_tombstones`).insertOne(mDoc<FileTombstoneDoc>(tombstone));
     await deleteFileMeta(targetSpace, filePath).catch(err => {
       log.warn(`deleteFileMeta error for space ${targetSpace}, path ${filePath}: ${err}`);
     });

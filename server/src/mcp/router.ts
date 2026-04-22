@@ -9,12 +9,12 @@ import { globalRateLimit } from '../rate-limit/middleware.js';
 import { getConfig } from '../config/loader.js';
 import { log } from '../util/log.js';
 import { checkQuota, QuotaError } from '../quota/quota.js';
-import { resolveMemberSpaces, resolveWriteTarget, isProxySpace } from '../spaces/proxy.js';
+import { resolveMemberSpaces, resolveWriteTarget, isProxySpace, isStrictLinkage } from '../spaces/proxy.js';
 import { updateSpace, wipeSpace, WIPE_COLLECTION_TYPES, type WipeCollectionType } from '../spaces/spaces.js';
 
 // Brain tools
 import { remember, recall, recallGlobal, findSimilar, queryBrain, updateMemory, deleteMemory, type RecallKnowledgeType, type RecallResult } from '../brain/memory.js';
-import { col } from '../db/mongo.js';
+import { col, mFilter } from '../db/mongo.js';
 import { upsertEntity, updateEntityById, findEntitiesByName } from '../brain/entities.js';
 import { upsertEdge, traverseGraph, updateEdgeById } from '../brain/edges.js';
 import { computeMergePlan, applyResolutions, executeMerge, validateResolution, type PropertyResolution } from '../brain/merge.js';
@@ -23,10 +23,7 @@ import { validateDeleteFields } from '../brain/delete-fields.js';
 /** Regex that matches a UUID v4 (case-insensitive). */
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-/** Check whether strict linkage enforcement is enabled for a space. */
-function isStrictLinkage(spaceId: string): boolean {
-  return getConfig().spaces.find(s => s.id === spaceId)?.meta?.strictLinkage === true;
-}
+
 import { createChrono, updateChrono, listChrono, ChronoFilter } from '../brain/chrono.js';
 // File tools
 import {
@@ -47,17 +44,15 @@ const transports = new Map<string, SSEServerTransport>();
 function formatRecallSummary(r: RecallResult): string {
   switch (r.type) {
     case 'memory':
-      return r.fact ?? '';
+      return r.fact;
     case 'entity':
-      return `${r.name ?? ''} (${r.entityType ?? ''})`;
+      return `${r.name} (${r.entityType})`;
     case 'edge':
-      return `${r.from ?? ''} → ${r.label ?? ''} → ${r.to ?? ''}`;
+      return `${r.from} → ${r.label} → ${r.to}`;
     case 'chrono':
-      return r.description ? `${r.title ?? ''}: ${r.description}` : (r.title ?? '');
+      return r.description ? `${r.title}: ${r.description}` : r.title;
     case 'file':
-      return r.description ? `${r.path ?? ''}: ${r.description}` : (r.path ?? '');
-    default:
-      return '';
+      return r.description ? `${r.path}: ${r.description}` : r.path;
   }
 }
 
@@ -1431,7 +1426,7 @@ function createGlobalMcpServer(tokenSpaces?: string[], readOnly?: boolean, isAdm
             updates['properties'] = a['properties'];
           }
 
-          const entry = await updateChrono(wt.target, id, updates as never);
+          const entry = await updateChrono(wt.target, id, updates as Parameters<typeof updateChrono>[2]);
           if (!entry) throw new Error(`Chrono entry '${id}' not found`);
           return { content: [{ type: 'text' as const, text: `Chrono entry '${entry.title}' updated (seq ${entry.seq}).` }] };
         }
@@ -1753,7 +1748,7 @@ function createGlobalMcpServer(tokenSpaces?: string[], readOnly?: boolean, isAdm
               }
               // Check for existing entity by ID (if supplied) to determine inserted vs updated
               const existing = rawId
-                ? await col<import('../config/types.js').EntityDoc>(`${ts}_entities`).findOne({ _id: rawId, spaceId: ts } as never)
+                ? await col<import('../config/types.js').EntityDoc>(`${ts}_entities`).findOne(mFilter({ _id: rawId, spaceId: ts }))
                 : null;
               const result = await upsertEntity(ts, eName, eType, tags, props, description, rawId);
               if (existing) { updated.entities++; } else { inserted.entities++; }
@@ -1789,7 +1784,7 @@ function createGlobalMcpServer(tokenSpaces?: string[], readOnly?: boolean, isAdm
                   for (const v of sv) errors.push({ type: 'edge', index: i, reason: `schema_warning: ${v.field} — ${v.reason}` });
                 }
               }
-              const existing = await col<import('../config/types.js').EdgeDoc>(`${ts}_edges`).findOne({ spaceId: ts, from, to, label } as never);
+              const existing = await col<import('../config/types.js').EdgeDoc>(`${ts}_edges`).findOne(mFilter({ spaceId: ts, from, to, label }));
               await upsertEdge(ts, from, to, label, weight, edgeType, description, props, tags);
               if (existing) { updated.edges++; } else { inserted.edges++; }
             } catch (err) {

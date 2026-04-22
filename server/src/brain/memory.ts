@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { col, isVectorSearchAvailable } from '../db/mongo.js';
+import { col, isVectorSearchAvailable, mFilter, mDoc, mUpdate, mBulk } from '../db/mongo.js';
 import { nextSeq } from '../util/seq.js';
 import { NotFoundError } from '../util/errors.js';
 import { embed } from './embedding.js';
@@ -39,7 +39,7 @@ function memoryEmbedText(
 async function resolveEntityNames(spaceId: string, entityIds: string[]): Promise<string[]> {
   if (entityIds.length === 0) return [];
   const docs = await col<EntityDoc>(`${spaceId}_entities`)
-    .find({ _id: { $in: entityIds } } as never, { projection: { name: 1 } })
+    .find(mFilter<EntityDoc>({ _id: { $in: entityIds } }), { projection: { name: 1 } })
     .toArray() as Array<{ name: string }>;
   return docs.map(d => d.name);
 }
@@ -75,47 +75,64 @@ export async function remember(
   if (type !== undefined) doc.type = type;
   if (description !== undefined) doc.description = description;
   if (properties !== undefined) doc.properties = properties;
-  await col<MemoryDoc>(`${spaceId}_memories`).insertOne(doc as never);
+  await col<MemoryDoc>(`${spaceId}_memories`).insertOne(mDoc<MemoryDoc>(doc));
   return doc;
 }
 
 export type RecallKnowledgeType = 'memory' | 'entity' | 'edge' | 'chrono' | 'file';
 
-export interface RecallResult {
+/** Fields shared by every knowledge-type recall result. */
+interface RecallBase {
   _id: string;
   spaceId: string;
-  /** Discriminates the knowledge type of the result. */
-  type: RecallKnowledgeType;
   score: number;
   createdAt?: string;
   seq?: number;
   embeddingModel?: string;
   tags?: string[];
-  // shared optional fields
   description?: string;
   properties?: Record<string, string | number | boolean>;
-  // memory-specific
-  fact?: string;
+}
+
+export interface RecallMemory extends RecallBase {
+  type: 'memory';
+  fact: string;
   entityIds?: string[];
-  // entity-specific
-  name?: string;
-  /** Entity type string (named `entityType` to avoid conflict with the `type` discriminator). */
-  entityType?: string;
-  // edge-specific
-  from?: string;
-  to?: string;
-  label?: string;
+}
+
+export interface RecallEntity extends RecallBase {
+  type: 'entity';
+  name: string;
+  /** Entity type (named `entityType` to avoid conflict with the `type` discriminator). */
+  entityType: string;
+}
+
+export interface RecallEdge extends RecallBase {
+  type: 'edge';
+  from: string;
+  to: string;
+  label: string;
   weight?: number;
-  // chrono-specific
-  title?: string;
-  /** Chrono entry type (event/deadline/plan/prediction/milestone). Named `chronoType` to
+}
+
+export interface RecallChrono extends RecallBase {
+  type: 'chrono';
+  title: string;
+  /** Chrono type (event/deadline/plan/prediction/milestone). Named `chronoType` to
    *  avoid conflict with the `type` discriminator field. */
-  chronoType?: string;
-  startsAt?: string;
-  // file-specific
-  path?: string;
+  chronoType: string;
+  startsAt: string;
+  entityIds?: string[];
+}
+
+export interface RecallFile extends RecallBase {
+  type: 'file';
+  path: string;
   sizeBytes?: number;
 }
+
+/** Discriminated union of all knowledge-type recall results. Narrow by `result.type`. */
+export type RecallResult = RecallMemory | RecallEntity | RecallEdge | RecallChrono | RecallFile;
 
 /** Semantic recall using $vectorSearch (Atlas Local / Atlas / MongoDB 8.2+) */
 export async function recall(
@@ -141,8 +158,6 @@ export async function recall(
     );
   }
   const embResult = await embed(query, 'query');
-  const embCfg = getEmbeddingConfig();
-  void embCfg; // used in index init, not here
 
   const activeTypes: RecallKnowledgeType[] = (types && types.length > 0)
     ? types
@@ -255,51 +270,29 @@ async function recallByType(
 }
 
 function mapToRecallResult(doc: Record<string, unknown>, knowledgeType: RecallKnowledgeType): RecallResult {
-  const base: RecallResult = {
+  const base: RecallBase = {
     _id: doc['_id'] as string,
     spaceId: doc['spaceId'] as string,
-    type: knowledgeType,
     score: doc['score'] as number,
     createdAt: doc['createdAt'] as string | undefined,
     seq: doc['seq'] as number | undefined,
     embeddingModel: doc['embeddingModel'] as string | undefined,
+    tags: doc['tags'] as string[] | undefined,
+    description: doc['description'] as string | undefined,
+    properties: doc['properties'] as Record<string, string | number | boolean> | undefined,
   };
-  if (knowledgeType === 'memory') {
-    base.fact = doc['fact'] as string | undefined;
-    base.tags = doc['tags'] as string[] | undefined;
-    base.entityIds = doc['entityIds'] as string[] | undefined;
-    base.description = doc['description'] as string | undefined;
-    base.properties = doc['properties'] as Record<string, string | number | boolean> | undefined;
-  } else if (knowledgeType === 'entity') {
-    base.name = doc['name'] as string | undefined;
-    base.entityType = doc['type'] as string | undefined;
-    base.tags = doc['tags'] as string[] | undefined;
-    base.description = doc['description'] as string | undefined;
-    base.properties = doc['properties'] as Record<string, string | number | boolean> | undefined;
-  } else if (knowledgeType === 'edge') {
-    base.from = doc['from'] as string | undefined;
-    base.to = doc['to'] as string | undefined;
-    base.label = doc['label'] as string | undefined;
-    base.weight = doc['weight'] as number | undefined;
-    base.tags = doc['tags'] as string[] | undefined;
-    base.description = doc['description'] as string | undefined;
-    base.properties = doc['properties'] as Record<string, string | number | boolean> | undefined;
-  } else if (knowledgeType === 'chrono') {
-    base.title = doc['title'] as string | undefined;
-    base.description = doc['description'] as string | undefined;
-    base.chronoType = doc['type'] as string | undefined;
-    base.startsAt = doc['startsAt'] as string | undefined;
-    base.tags = doc['tags'] as string[] | undefined;
-    base.entityIds = doc['entityIds'] as string[] | undefined;
-    base.properties = doc['properties'] as Record<string, string | number | boolean> | undefined;
-  } else if (knowledgeType === 'file') {
-    base.path = doc['path'] as string | undefined;
-    base.description = doc['description'] as string | undefined;
-    base.tags = doc['tags'] as string[] | undefined;
-    base.sizeBytes = doc['sizeBytes'] as number | undefined;
-    base.properties = doc['properties'] as Record<string, string | number | boolean> | undefined;
+  switch (knowledgeType) {
+    case 'memory':
+      return { ...base, type: 'memory', fact: doc['fact'] as string, entityIds: doc['entityIds'] as string[] | undefined };
+    case 'entity':
+      return { ...base, type: 'entity', name: doc['name'] as string, entityType: doc['type'] as string };
+    case 'edge':
+      return { ...base, type: 'edge', from: doc['from'] as string, to: doc['to'] as string, label: doc['label'] as string, weight: doc['weight'] as number | undefined };
+    case 'chrono':
+      return { ...base, type: 'chrono', title: doc['title'] as string, chronoType: doc['type'] as string, startsAt: doc['startsAt'] as string, entityIds: doc['entityIds'] as string[] | undefined };
+    case 'file':
+      return { ...base, type: 'file', path: doc['path'] as string, sizeBytes: doc['sizeBytes'] as number | undefined };
   }
-  return base;
 }
 
 /** Semantic recall across multiple spaces (parallel) */
@@ -335,8 +328,8 @@ async function getEntryEmbedding(
   const collSuffix = KNOWLEDGE_COLLECTION[entryType];
   const collName = `${spaceId}_${collSuffix}`;
   const doc = await col(collName).findOne(
-    { _id: entryId, spaceId } as never,
-    { projection: { embedding: 1, _id: 1, spaceId: 1, name: 1, fact: 1, label: 1, title: 1, path: 1, type: 1, description: 1 } as never },
+    mFilter({ _id: entryId, spaceId }),
+    { projection: { embedding: 1, _id: 1, spaceId: 1, name: 1, fact: 1, label: 1, title: 1, path: 1, type: 1, description: 1 } },
   ) as Record<string, unknown> | null;
   if (!doc) return null;
   const vector = doc['embedding'] as number[] | undefined;
@@ -420,7 +413,7 @@ export async function updateMemory(
   updates: { fact?: string; tags?: string[]; entityIds?: string[]; description?: string; properties?: Record<string, string | number | boolean>; type?: string },
   deleteFieldsPaths?: string[],
 ): Promise<MemoryDoc | null> {
-  const existing = await col<MemoryDoc>(`${spaceId}_memories`).findOne({ _id: memoryId, spaceId } as never) as MemoryDoc | null;
+  const existing = await col<MemoryDoc>(`${spaceId}_memories`).findOne(mFilter<MemoryDoc>({ _id: memoryId, spaceId })) as MemoryDoc | null;
   if (!existing) return null;
 
   const seq = await nextSeq(spaceId);
@@ -483,8 +476,8 @@ export async function updateMemory(
   const updateOp: Record<string, unknown> = { $set };
   if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
   await col<MemoryDoc>(`${spaceId}_memories`).updateOne(
-    { _id: memoryId } as never,
-    updateOp as never,
+    mFilter<MemoryDoc>({ _id: memoryId }),
+    mUpdate<MemoryDoc>(updateOp),
   );
 
   const result = { ...existing, ...($set as Partial<MemoryDoc>) } as MemoryDoc;
@@ -503,7 +496,7 @@ export async function deleteMemory(
   memoryId: string,
 ): Promise<boolean> {
   const existing = await col<MemoryDoc>(`${spaceId}_memories`)
-    .findOne({ _id: memoryId, spaceId } as never, { projection: { seq: 1 } }) as { seq?: number } | null;
+    .findOne(mFilter<MemoryDoc>({ _id: memoryId, spaceId }), { projection: { seq: 1 } }) as { seq?: number } | null;
   const seq = await nextSeq(spaceId);
   const result = await col<MemoryDoc>(`${spaceId}_memories`).deleteOne({
     _id: memoryId,
@@ -521,8 +514,8 @@ export async function deleteMemory(
     ...(existing?.seq !== undefined ? { originalSeq: existing.seq } : {}),
   };
   await col<TombstoneDoc>(`${spaceId}_tombstones`).replaceOne(
-    { _id: memoryId } as never,
-    tombstone as never,
+    mFilter<TombstoneDoc>({ _id: memoryId }),
+    mDoc<TombstoneDoc>(tombstone),
     { upsert: true },
   );
   return true;
@@ -536,7 +529,7 @@ export async function listMemories(
   skip = 0,
 ) {
   return col<MemoryDoc>(`${spaceId}_memories`)
-    .find(filter as never)
+    .find(mFilter<MemoryDoc>(filter))
     .project({ embedding: 0 })
     .sort({ createdAt: -1 })
     .skip(skip)
@@ -580,7 +573,7 @@ export async function bulkDeleteMemories(spaceId: string): Promise<number> {
   const ops = tombstones.map(t => ({
     replaceOne: { filter: { _id: t._id }, replacement: t, upsert: true },
   }));
-  await col<TombstoneDoc>(`${spaceId}_tombstones`).bulkWrite(ops as never);
+  await col<TombstoneDoc>(`${spaceId}_tombstones`).bulkWrite(mBulk<TombstoneDoc>(ops));
   await coll.deleteMany({});
   return ids.length;
 }
@@ -650,6 +643,6 @@ export async function queryBrain(
     cursor = cursor.project(projection as Record<string, never>);
   }
   // Always exclude embedding vectors from query results
-  cursor = cursor.project({ embedding: 0 } as never);
+  cursor = cursor.project({ embedding: 0 });
   return cursor.toArray();
 }
