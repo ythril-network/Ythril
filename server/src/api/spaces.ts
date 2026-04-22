@@ -340,6 +340,139 @@ spacesRouter.get('/:id/meta', globalRateLimit, requireAuth, async (req, res) => 
   });
 });
 
+// ── Granular type schema CRUD ─────────────────────────────────────────────────
+
+const VALID_KNOWLEDGE_TYPES = new Set(['entity', 'memory', 'edge', 'chrono']);
+const MAX_TYPES_PER_KIND = 200;
+
+// GET /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName
+spacesRouter.get('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLimit, requireAuth, (req, res) => {
+  const { id, knowledgeType, typeName } = req.params as { id: string; knowledgeType: string; typeName: string };
+
+  if (!VALID_KNOWLEDGE_TYPES.has(knowledgeType)) {
+    res.status(400).json({ error: `Invalid knowledgeType '${knowledgeType}'. Must be one of: entity, memory, edge, chrono` });
+    return;
+  }
+
+  const cfg = getConfig();
+  const space = cfg.spaces.find(s => s.id === id);
+  if (!space) {
+    res.status(404).json({ error: `Space '${id}' not found` });
+    return;
+  }
+
+  const kt = knowledgeType as 'entity' | 'memory' | 'edge' | 'chrono';
+  const typeMap = space.meta?.typeSchemas?.[kt] ?? {};
+  if (!(typeName in typeMap)) {
+    res.status(404).json({ error: `Type '${typeName}' not found in typeSchemas.${kt}` });
+    return;
+  }
+
+  res.json({ knowledgeType: kt, typeName, schema: typeMap[typeName] ?? {} });
+});
+
+// PUT /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName — upsert a single type definition
+spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLimit, requireAdminMfa, (req, res) => {
+  const { id, knowledgeType, typeName } = req.params as { id: string; knowledgeType: string; typeName: string };
+
+  if (!VALID_KNOWLEDGE_TYPES.has(knowledgeType)) {
+    res.status(400).json({ error: `Invalid knowledgeType '${knowledgeType}'. Must be one of: entity, memory, edge, chrono` });
+    return;
+  }
+
+  const parsed = TypeSchemaZ.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const cfg = getConfig();
+  const space = cfg.spaces.find(s => s.id === id);
+  if (!space) {
+    res.status(404).json({ error: `Space '${id}' not found` });
+    return;
+  }
+
+  const kt = knowledgeType as 'entity' | 'memory' | 'edge' | 'chrono';
+  const existingMeta: SpaceMeta = space.meta ?? {};
+  const existingKtMap: Record<string, import('../config/types.js').TypeSchema> = { ...(existingMeta.typeSchemas?.[kt] ?? {}) };
+
+  // Enforce max 200 types per knowledge type (only for new types)
+  const isNew = !(typeName in existingKtMap);
+  if (isNew && Object.keys(existingKtMap).length >= MAX_TYPES_PER_KIND) {
+    res.status(400).json({
+      error: `Max ${MAX_TYPES_PER_KIND} type definitions per knowledge type reached for '${kt}'. Remove unused types before adding new ones.`,
+    });
+    return;
+  }
+
+  // Merge the new type definition into the existing map
+  existingKtMap[typeName] = parsed.data;
+
+  const updatedMeta: SpaceMeta = {
+    ...existingMeta,
+    typeSchemas: {
+      ...existingMeta.typeSchemas,
+      [kt]: existingKtMap,
+    },
+  };
+
+  const updated = updateSpace(id, { meta: updatedMeta });
+  if (!updated) {
+    res.status(404).json({ error: `Space '${id}' not found` });
+    return;
+  }
+
+  res.json({ knowledgeType: kt, typeName, schema: parsed.data });
+});
+
+// DELETE /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName — remove a single type definition
+spacesRouter.delete('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLimit, requireAdminMfa, (req, res) => {
+  const { id, knowledgeType, typeName } = req.params as { id: string; knowledgeType: string; typeName: string };
+
+  if (!VALID_KNOWLEDGE_TYPES.has(knowledgeType)) {
+    res.status(400).json({ error: `Invalid knowledgeType '${knowledgeType}'. Must be one of: entity, memory, edge, chrono` });
+    return;
+  }
+
+  const cfg = getConfig();
+  const space = cfg.spaces.find(s => s.id === id);
+  if (!space) {
+    res.status(404).json({ error: `Space '${id}' not found` });
+    return;
+  }
+
+  const kt = knowledgeType as 'entity' | 'memory' | 'edge' | 'chrono';
+  const existingMeta: SpaceMeta = space.meta ?? {};
+  const existingKtMap = existingMeta.typeSchemas?.[kt] ?? {};
+
+  if (!(typeName in existingKtMap)) {
+    res.status(404).json({ error: `Type '${typeName}' not found in typeSchemas.${kt}` });
+    return;
+  }
+
+  // Build updated map without the deleted type
+  const updatedKtMap: Record<string, import('../config/types.js').TypeSchema> = {};
+  for (const [k, v] of Object.entries(existingKtMap)) {
+    if (k !== typeName) updatedKtMap[k] = v;
+  }
+
+  const updatedTypeSchemas = { ...existingMeta.typeSchemas, [kt]: updatedKtMap };
+
+  const updatedMeta: SpaceMeta = {
+    ...existingMeta,
+    typeSchemas: updatedTypeSchemas,
+  };
+
+  const updated = updateSpace(id, { meta: updatedMeta });
+  if (!updated) {
+    res.status(404).json({ error: `Space '${id}' not found` });
+    return;
+  }
+
+  res.status(204).end();
+});
+
 // POST /api/spaces/:id/validate-schema — dry-run validation of existing data
 spacesRouter.post('/:id/validate-schema', globalRateLimit, requireAdminMfa, async (req, res) => {
   const id = req.params['id'] as string;

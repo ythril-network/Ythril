@@ -409,6 +409,26 @@ export class ApiService {
     return this.http.get<SpaceMetaResponse>(`/api/spaces/${id}/meta`);
   }
 
+  /** GET a single type definition from the space's typeSchemas. */
+  getTypeSchema(spaceId: string, knowledgeType: KnowledgeType, typeName: string): Observable<{ knowledgeType: KnowledgeType; typeName: string; schema: TypeSchema }> {
+    return this.http.get<{ knowledgeType: KnowledgeType; typeName: string; schema: TypeSchema }>(
+      `/api/spaces/${spaceId}/meta/typeSchemas/${knowledgeType}/${typeName}`,
+    );
+  }
+
+  /** PUT (upsert) a single type definition into the space's typeSchemas. */
+  upsertTypeSchema(spaceId: string, knowledgeType: KnowledgeType, typeName: string, schema: TypeSchema): Observable<{ knowledgeType: KnowledgeType; typeName: string; schema: TypeSchema }> {
+    return this.http.put<{ knowledgeType: KnowledgeType; typeName: string; schema: TypeSchema }>(
+      `/api/spaces/${spaceId}/meta/typeSchemas/${knowledgeType}/${typeName}`,
+      schema,
+    );
+  }
+
+  /** DELETE a single type definition from the space's typeSchemas. */
+  deleteTypeSchema(spaceId: string, knowledgeType: KnowledgeType, typeName: string): Observable<void> {
+    return this.http.delete<void>(`/api/spaces/${spaceId}/meta/typeSchemas/${knowledgeType}/${typeName}`);
+  }
+
   deleteSpace(id: string): Observable<void> {
     return this.http.delete<void>(`/api/spaces/${id}`, { body: { confirm: true } });
   }

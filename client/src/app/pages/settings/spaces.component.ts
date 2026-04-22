@@ -257,6 +257,7 @@ interface TypeSchemaState {
                 <button class="btn btn-secondary btn-sm" type="button" (click)="exportSchema()" [attr.title]="'spaces.schema.exportTitle' | transloco">{{ 'spaces.schema.exportJsonButton' | transloco }}</button>
                 <button class="btn btn-secondary btn-sm" type="button" (click)="triggerImportSchema()" [attr.title]="'spaces.schema.importTitle' | transloco">{{ 'spaces.schema.importJsonButton' | transloco }}</button>
                 <input #schImportInput type="file" accept=".json,application/json" style="display:none" (change)="onImportSchemaFile($event)" />
+                <input #schTypeImportInput type="file" accept=".json,application/json" style="display:none" (change)="onImportTypeSchemaFile($event)" />
                 @if (schImportError) {
                   <span style="font-size:12px;color:var(--error);">{{ schImportError }}</span>
                 }
@@ -343,6 +344,10 @@ interface TypeSchemaState {
                           </td>
                           <td (click)="$event.stopPropagation()">
                             <div style="display:flex;gap:4px;justify-content:flex-end;">
+                              <button class="btn btn-ghost btn-sm" type="button" (click)="exportTypeSchema(kt,name)"
+                                style="font-size:10px;padding:2px 6px;" [attr.title]="'spaces.schema.exportTypeTitle' | transloco">↓</button>
+                              <button class="btn btn-ghost btn-sm" type="button" (click)="triggerImportTypeSchema(kt,name)"
+                                style="font-size:10px;padding:2px 6px;" [attr.title]="'spaces.schema.importTypeTitle' | transloco">↑</button>
                               <button class="btn btn-ghost btn-sm" type="button" (click)="toggleTypeExpand(kt,name)"
                                 style="font-size:10px;padding:2px 8px;min-width:28px;">{{ isTypeExpanded(kt,name) ? '▲' : '▼' }}</button>
                               <button class="icon-btn danger" type="button" (click)="removeType(kt,name)" [attr.title]="'common.remove' | transloco">✕</button>
@@ -787,6 +792,10 @@ export class SpacesComponent implements OnInit {
   schImportError     = '';
 
   @ViewChild('schImportInput') schImportInputRef?: ElementRef<HTMLInputElement>;
+  @ViewChild('schTypeImportInput') schTypeImportInputRef?: ElementRef<HTMLInputElement>;
+
+  /** Tracks the kt/typeName target for per-type import. */
+  private _typeImportTarget: { kt: KnowledgeType; name: string } | null = null;
 
   // danger zone
   dangerRenameId    = '';
@@ -1070,6 +1079,97 @@ export class SpacesComponent implements OnInit {
       } finally {
         // Reset the input so the same file can be re-imported if needed
         if (this.schImportInputRef) this.schImportInputRef.nativeElement.value = '';
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  // ── Per-type export / import ───────────────────────────────────────────────
+
+  /** Download a single type definition as a JSON snippet. */
+  exportTypeSchema(kt: KnowledgeType, name: string): void {
+    const space = this.settingsSpace();
+    if (!space) return;
+    const state = this.typeState(kt, name);
+    const schema: TypeSchema = {};
+    const trimmedPattern = state.namingPattern.trim();
+    if (kt === 'entity' && trimmedPattern) schema.namingPattern = trimmedPattern;
+    if (state.tagSuggestions.length) schema.tagSuggestions = [...state.tagSuggestions];
+    if (state.propertySchemas.length) {
+      const ps: Record<string, PropertySchema> = {};
+      for (const { key, s } of state.propertySchemas) {
+        const entry: PropertySchema = {};
+        if (s.type)            entry.type    = s.type;
+        if (s.enum?.length)    entry.enum    = [...s.enum];
+        if (s.minimum != null) entry.minimum = s.minimum;
+        if (s.maximum != null) entry.maximum = s.maximum;
+        const trimmedProp = s.pattern?.trim();
+        if (trimmedProp)       entry.pattern = trimmedProp;
+        if (s.mergeFn)         entry.mergeFn = s.mergeFn;
+        if (s.required)        entry.required = s.required;
+        if (s.default != null) entry.default  = s.default;
+        ps[key] = entry;
+      }
+      schema.propertySchemas = ps;
+    }
+    const payload = { knowledgeType: kt, typeName: name, schema };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `${space.id}_${kt}_${name}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  /** Open the file picker for per-type schema import. */
+  triggerImportTypeSchema(kt: KnowledgeType, name: string): void {
+    this._typeImportTarget = { kt, name };
+    this.schImportError = '';
+    this.schTypeImportInputRef?.nativeElement.click();
+  }
+
+  /** Handle the file chosen for per-type import. */
+  onImportTypeSchemaFile(event: Event): void {
+    const file = (event.target as HTMLInputElement).files?.[0];
+    if (!file || !this._typeImportTarget) return;
+    const { kt, name } = this._typeImportTarget;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const raw = JSON.parse(reader.result as string);
+        // Accept either a full snippet { knowledgeType, typeName, schema } or a bare TypeSchema object
+        const schemaRaw: unknown = raw?.schema ?? raw;
+        if (!schemaRaw || typeof schemaRaw !== 'object' || Array.isArray(schemaRaw)) {
+          this.schImportError = this.transloco.translate('spaces.schema.import.invalidTypeFile');
+          return;
+        }
+        const ts2 = schemaRaw as Record<string, unknown>;
+        const imported: TypeSchemaState = {
+          namingPattern:   typeof ts2['namingPattern'] === 'string' ? ts2['namingPattern'] : '',
+          tagSuggestions:  Array.isArray(ts2['tagSuggestions']) ? [...ts2['tagSuggestions'] as string[]] : [],
+          propertySchemas: (() => {
+            const ps = ts2['propertySchemas'];
+            if (!ps || typeof ps !== 'object' || Array.isArray(ps)) return [];
+            return Object.entries(ps as Record<string, unknown>).map(([k, v]) => ({
+              key: k,
+              s:   { ...(v as PropertySchema) },
+              _enumInput: '',
+            }));
+          })(),
+          _newPropInput: '',
+          _newTagInput:  '',
+        };
+        this.schTypeSchemas = {
+          ...this.schTypeSchemas,
+          [kt]: { ...(this.schTypeSchemas[kt] ?? {}), [name]: imported },
+        };
+        this.schImportError = '';
+      } catch {
+        this.schImportError = this.transloco.translate('spaces.schema.import.parseFailed');
+      } finally {
+        if (this.schTypeImportInputRef) this.schTypeImportInputRef.nativeElement.value = '';
+        this._typeImportTarget = null;
       }
     };
     reader.readAsText(file);

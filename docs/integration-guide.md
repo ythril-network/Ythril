@@ -1695,6 +1695,92 @@ Returns the full schema definition for a space along with derived stats.
 
 ---
 
+### Get Single Type Definition
+
+```
+GET /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName
+Authorization: Bearer <token>
+```
+
+Returns a single type definition from the space's `typeSchemas`. `:knowledgeType` must be one of `entity`, `memory`, `edge`, `chrono`.
+
+**Response** `200`:
+
+```json
+{
+  "knowledgeType": "entity",
+  "typeName": "service",
+  "schema": {
+    "namingPattern": "^[a-z][a-z0-9-]{1,60}$",
+    "tagSuggestions": ["backend", "frontend"],
+    "propertySchemas": {
+      "status": { "type": "string", "enum": ["active", "deprecated"], "required": true }
+    }
+  }
+}
+```
+
+Returns `404` when the space or the requested type name does not exist. Returns `400` for an invalid `:knowledgeType`.
+
+---
+
+### Upsert Single Type Definition
+
+```
+PUT /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName
+Content-Type: application/json
+Authorization: Bearer <admin-token>
+```
+
+Adds or updates a single type definition in the space's `typeSchemas`. All other type definitions (including those of other knowledge types) are left unchanged. The request body is a `TypeSchema` object.
+
+**Request body**:
+
+```json
+{
+  "namingPattern": "^[a-z][a-z0-9-]{1,60}$",
+  "tagSuggestions": ["backend", "frontend"],
+  "propertySchemas": {
+    "status": { "type": "string", "enum": ["active", "deprecated"], "required": true }
+  }
+}
+```
+
+An empty object `{}` is valid and registers the type name as allowed (no extra constraints).
+
+**Response** `200`:
+
+```json
+{
+  "knowledgeType": "entity",
+  "typeName": "service",
+  "schema": { "..." : "..." }
+}
+```
+
+**Constraints:**
+- `:knowledgeType` must be one of `entity`, `memory`, `edge`, `chrono`.
+- The body is validated with the same `TypeSchema` Zod rules as the full `PATCH /api/spaces/:id` endpoint (property schema `mergeFn`/`type` compatibility, field max lengths, etc.).
+- At most 200 type definitions per knowledge type. Adding a 201st type returns `400`.
+- The meta version counter is incremented and the previous version is pushed to history (same as full PATCH).
+
+---
+
+### Delete Single Type Definition
+
+```
+DELETE /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName
+Authorization: Bearer <admin-token>
+```
+
+Removes a single type definition from the space's `typeSchemas`. All other types are left unchanged.
+
+**Response** `204` (no body) on success.
+
+Returns `404` when the space or type name does not exist. Returns `400` for an invalid `:knowledgeType`.
+
+---
+
 ### Validate Schema (Dry Run)
 
 ```
