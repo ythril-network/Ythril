@@ -76,7 +76,7 @@ const SPACE_REQUIRED_TOOLS = new Set([
   'remember', 'update_memory', 'delete_memory', 'get_stats', 'get_space_meta',
   'query', 'upsert_entity', 'find_entities_by_name', 'upsert_edge',
   'traverse', 'update_entity', 'update_edge', 'merge_entities',
-  'create_chrono', 'update_chrono', 'list_chrono',
+  'create_chrono', 'update_chrono',
   'read_file', 'write_file', 'list_dir', 'delete_file', 'create_dir', 'move_file',
   'update_space', 'wipe_space', 'bulk_write', 'find_similar',
 ]);
@@ -89,7 +89,7 @@ function createGlobalMcpServer(tokenSpaces?: string[], readOnly?: boolean, isAdm
   const spacesLine = accessibleSpaces.length > 0
     ? accessibleSpaces.map(s => s.id + (s.label ? ` ("${s.label.replace(/[\x00-\x1f]/g, '').slice(0, 200)}")` : '')).join(', ')
     : '(none accessible)';
-  const instructions = `Ythril knowledge graph — global mode.\nAvailable spaces: ${spacesLine}.\nEach tool requires a "space" parameter (except recall, where it is optional and enables cross-space search when omitted; and list_peers/sync_now which are global). Call list_spaces for details.`;
+  const instructions = `Ythril knowledge graph — global mode.\nAvailable spaces: ${spacesLine}.\nEach tool requires a "space" parameter (except recall and list_chrono, where it is optional and enables cross-space results when omitted; and list_peers/sync_now which are global). Call list_spaces for details.`;
 
   const server = new Server(
     { name: 'ythril', version: '0.1.0' },
@@ -482,11 +482,11 @@ function createGlobalMcpServer(tokenSpaces?: string[], readOnly?: boolean, isAdm
     },
     {
       name: 'list_chrono',
-      description: 'List chronological entries, optionally filtered by status, type, tags, date range, or a text search.',
+      description: 'List chronological entries, optionally filtered by status, type, tags, date range, or a text search. Omit space to list across all accessible spaces.',
       inputSchema: {
         type: 'object',
         properties: {
-          space: requiredSpaceSchema,
+          space: optionalSpaceSchema,
           status: { type: 'string', enum: ['upcoming', 'active', 'completed', 'overdue', 'cancelled'], description: 'Filter by status.' },
           type: { type: 'string', enum: ['event', 'deadline', 'plan', 'prediction', 'milestone'], description: 'Filter by type.' },
           tags: { type: 'array', items: { type: 'string' }, description: 'Return entries containing ALL of these tags (AND semantics).' },
@@ -497,7 +497,7 @@ function createGlobalMcpServer(tokenSpaces?: string[], readOnly?: boolean, isAdm
           limit: { type: 'number', description: 'Max results (default 20, max 100).' },
           skip: { type: 'number', description: 'Number of results to skip for pagination (default 0).' },
         },
-        required: ['space'],
+        required: [],
       },
     },
     {
@@ -1448,7 +1448,7 @@ function createGlobalMcpServer(tokenSpaces?: string[], readOnly?: boolean, isAdm
           const limit = typeof a['limit'] === 'number' ? Math.min(a['limit'], 100) : 20;
           const skip = typeof a['skip'] === 'number' ? Math.max(a['skip'], 0) : 0;
 
-          const memberIds = resolveMemberSpaces(callSpace);
+          const memberIds = callSpace ? resolveMemberSpaces(callSpace) : accessibleSpaceIds;
           // Fetch skip+limit from each member so the combined list has enough entries
           // after global sort/slice. For large skip values this over-fetches slightly,
           // but chrono lists are expected to be small in practice.
