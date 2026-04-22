@@ -1,4 +1,4 @@
-﻿import { Component, inject, signal, OnInit, ElementRef, ViewChild } from '@angular/core';
+﻿import { Component, inject, signal, computed, OnInit, ElementRef, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { finalize } from 'rxjs';
@@ -46,9 +46,16 @@ interface TypeSchemaState {
     /* drag handle */
     .drag-handle { cursor:grab; color:var(--text-muted); padding:0 4px; user-select:none; font-size:16px; line-height:1; }
     .drag-handle:hover { color:var(--text-primary); }
+    .drag-handle-disabled { cursor:default; opacity:0.3; }
+    .drag-handle-disabled:hover { color:var(--text-muted); }
     .cdk-drag-preview { background:var(--bg-primary); border:1px solid var(--accent); border-radius:var(--radius-sm); box-shadow:var(--shadow-lg); opacity:0.95; }
     .cdk-drag-placeholder { opacity:0.3; }
     .cdk-drag-animating { transition:transform 250ms cubic-bezier(0,0,0.2,1); }
+    /* sort buttons */
+    .sort-group { display:flex; gap:2px; border:1px solid var(--border); border-radius:var(--radius-sm); overflow:hidden; }
+    .sort-btn { background:none; border:none; padding:3px 8px; font-size:12px; cursor:pointer; color:var(--text-muted); font-family:var(--font); transition:background .15s,color .15s; white-space:nowrap; }
+    .sort-btn:hover { background:var(--bg-surface); color:var(--text-primary); }
+    .sort-btn.active { background:var(--accent-dim); color:var(--accent); font-weight:600; }
     /* create dialog */
     .dialog-backdrop { position:fixed; inset:0; background:var(--bg-scrim); display:flex; align-items:center; justify-content:center; z-index:100; }
     .dialog { background:var(--bg-primary); border:1px solid var(--border); border-radius:var(--radius-lg); padding:24px; width:90%; max-width:960px; max-height:90vh; overflow-y:auto; }
@@ -614,7 +621,14 @@ interface TypeSchemaState {
     <div class="card">
       <div class="card-header">
         <div class="card-title">{{ 'spaces.table.title' | transloco }}</div>
-        <div style="display:flex;gap:8px;">
+        <div style="display:flex;gap:8px;align-items:center;">
+          <div class="sort-group" [attr.aria-label]="'spaces.table.sortLabel' | transloco">
+            <button class="sort-btn" [class.active]="sortMode()==='custom'" (click)="sortMode.set('custom')" [attr.title]="'spaces.table.sort.custom' | transloco">⠿</button>
+            <button class="sort-btn" [class.active]="sortMode()==='az'" (click)="sortMode.set('az')" [attr.title]="'spaces.table.sort.az' | transloco">A→Z</button>
+            <button class="sort-btn" [class.active]="sortMode()==='za'" (click)="sortMode.set('za')" [attr.title]="'spaces.table.sort.za' | transloco">Z→A</button>
+            <button class="sort-btn" [class.active]="sortMode()==='usage-desc'" (click)="sortMode.set('usage-desc')" [attr.title]="'spaces.table.sort.usageDesc' | transloco">↓ GiB</button>
+            <button class="sort-btn" [class.active]="sortMode()==='usage-asc'" (click)="sortMode.set('usage-asc')" [attr.title]="'spaces.table.sort.usageAsc' | transloco">↑ GiB</button>
+          </div>
           <button class="btn-primary btn btn-sm" (click)="showCreateDialog.set(true)">{{ 'spaces.table.createButton' | transloco }}</button>
           <button class="btn-secondary btn btn-sm" (click)="load()">{{ 'spaces.table.refreshButton' | transloco }}</button>
         </div>
@@ -628,10 +642,10 @@ interface TypeSchemaState {
               <tr><th style="width:32px;"></th><th>{{ 'spaces.table.column.label' | transloco }}</th><th>{{ 'spaces.table.column.id' | transloco }}</th><th>{{ 'spaces.table.column.storage' | transloco }}</th><th>{{ 'spaces.table.column.networks' | transloco }}</th><th>{{ 'spaces.table.column.proxy' | transloco }}</th><th></th></tr>
             </thead>
             <tbody cdkDropList (cdkDropListDropped)="onSpaceDrop($event)">
-              @for (s of spaces(); track s.id) {
+              @for (s of sortedSpaces(); track s.id) {
                 @let bar = storageInfo(s);
-                <tr cdkDrag cdkDragLockAxis="y">
-                  <td><span class="drag-handle" cdkDragHandle [attr.title]="'spaces.table.dragHandleTitle' | transloco">⠿</span></td>
+                <tr cdkDrag cdkDragLockAxis="y" [cdkDragDisabled]="sortMode() !== 'custom'">
+                  <td><span class="drag-handle" cdkDragHandle [class.drag-handle-disabled]="sortMode() !== 'custom'" [attr.title]="'spaces.table.dragHandleTitle' | transloco">⠿</span></td>
                   <td style="font-weight:500;">{{ s.label }}</td>
                   <td><span class="badge badge-gray mono">{{ s.id }}</span></td>
                   <td style="min-width:140px;">
@@ -682,6 +696,18 @@ export class SpacesComponent implements OnInit {
   spaces   = signal<Space[]>([]);
   networks = signal<Network[]>([]);
   loading  = signal(true);
+
+  sortMode = signal<'custom' | 'az' | 'za' | 'usage-desc' | 'usage-asc'>('custom');
+  sortedSpaces = computed(() => {
+    const list = this.spaces();
+    switch (this.sortMode()) {
+      case 'az':         return [...list].sort((a, b) => a.label.localeCompare(b.label));
+      case 'za':         return [...list].sort((a, b) => b.label.localeCompare(a.label));
+      case 'usage-desc': return [...list].sort((a, b) => (b.usageGiB ?? 0) - (a.usageGiB ?? 0));
+      case 'usage-asc':  return [...list].sort((a, b) => (a.usageGiB ?? 0) - (b.usageGiB ?? 0));
+      default:           return list;
+    }
+  });
 
   // create dialog
   creating         = signal(false);
