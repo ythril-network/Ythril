@@ -764,7 +764,7 @@
   "schemaLib.field.name": "Name (identifier)",
   "schemaLib.field.namePlaceholder": "my-schema-v1",
   "schemaLib.field.nameHint": "Lowercase, numbers, dashes and underscores only",
-  "schemaLib.field.typeName": "Default type name",
+  "schemaLib.field.typeName": "Name",
   "schemaLib.field.typeNamePlaceholder": "e.g. service, task, …",
   "schemaLib.field.knowledgeType": "Knowledge type",
   "schemaLib.field.description": "Description (optional)",

@@ -736,7 +736,7 @@
   "schemaLib.field.name": "Nazwa (identyfikator)",
   "schemaLib.field.namePlaceholder": "my-schema-v1",
   "schemaLib.field.nameHint": "Tylko małe litery, cyfry, myślniki i podkreślenia",
-  "schemaLib.field.typeName": "Domyślna nazwa typu",
+  "schemaLib.field.typeName": "Nazwa",
   "schemaLib.field.typeNamePlaceholder": "np. service, task, …",
   "schemaLib.field.knowledgeType": "Typ wiedzy",
   "schemaLib.field.description": "Opis (opcjonalnie)",

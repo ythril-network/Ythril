@@ -737,7 +737,7 @@
   "schemaLib.field.name": "Name (Bezeichner)",
   "schemaLib.field.namePlaceholder": "my-schema-v1",
   "schemaLib.field.nameHint": "Nur Kleinbuchstaben, Zahlen, Bindestriche und Unterstriche",
-  "schemaLib.field.typeName": "Standard-Typname",
+  "schemaLib.field.typeName": "Name",
   "schemaLib.field.typeNamePlaceholder": "z.B. service, task, …",
   "schemaLib.field.knowledgeType": "Wissenstyp",
   "schemaLib.field.description": "Beschreibung (optional)",

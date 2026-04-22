@@ -333,7 +333,7 @@ interface TypeSchemaState {
                             <div style="display:flex;align-items:center;gap:8px;">
                               <span style="font-family:var(--font-mono);font-size:13px;color:var(--accent);">{{ name }}</span>
                               @if (typeLibRef(kt,name)) {
-                                <span class="badge badge-blue" style="font-size:10px;" [attr.title]="'\: library:' + typeLibRef(kt,name)">$ref: {{ typeLibRef(kt,name) }}</span>
+                                <span class="badge badge-blue" style="font-size:10px;">Library</span>
                               } @else {
                                 @if (typeState(kt,name).propertySchemas.length) {
                                   <span class="badge badge-gray" style="font-size:10px;">{{ typeState(kt,name).propertySchemas.length }} prop{{ typeState(kt,name).propertySchemas.length !== 1 ? 's' : '' }}</span>
@@ -351,8 +351,10 @@ interface TypeSchemaState {
                             <div style="display:flex;gap:4px;justify-content:flex-end;">
                               <button class="btn btn-ghost btn-sm" type="button" (click)="exportTypeSchema(kt,name)"
                                 style="padding:2px 6px;" [attr.title]="'spaces.schema.exportTypeTitle' | transloco"><ph-icon name="upload" [size]="12"/></button>
-                              <button class="btn btn-ghost btn-sm" type="button" (click)="saveTypeToLibrary(kt,name)"
-                                style="font-size:10px;padding:2px 6px;" [attr.title]="'spaces.schema.saveToLibraryTitle' | transloco">{{ 'spaces.schema.saveToLibraryButton' | transloco }}</button>
+                              @if (!typeLibRef(kt,name)) {
+                                <button class="btn btn-ghost btn-sm" type="button" (click)="saveTypeToLibrary(kt,name)"
+                                  style="font-size:10px;padding:2px 6px;" [attr.title]="'spaces.schema.saveToLibraryTitle' | transloco">{{ 'spaces.schema.saveToLibraryButton' | transloco }}</button>
+                              }
                               <button class="btn btn-ghost btn-sm" type="button" (click)="toggleTypeExpand(kt,name)"
                                 style="font-size:10px;padding:2px 8px;min-width:28px;">{{ isTypeExpanded(kt,name) ? '▲' : '▼' }}</button>
                               <button class="icon-btn danger" type="button" (click)="removeType(kt,name)" [attr.title]="'common.remove' | transloco">✕</button>
@@ -643,8 +645,8 @@ interface TypeSchemaState {
 
     <!-- Library picker dialog -->
     @if (showLibPickerDialog()) {
-      <div class="dialog-backdrop" (click)="closeLibPicker()">
-        <div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-lg);padding:24px;width:560px;max-width:96vw;max-height:80vh;overflow-y:auto;z-index:300;" (click)="$event.stopPropagation()">
+      <div style="position:fixed;inset:0;background:var(--bg-scrim);display:flex;align-items:center;justify-content:center;z-index:310;" (click)="closeLibPicker()">
+        <div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-lg);padding:24px;width:560px;max-width:96vw;max-height:80vh;overflow-y:auto;" (click)="$event.stopPropagation()">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
             <strong>{{ 'spaces.schema.libPicker.title' | transloco }}</strong>
             <button class="icon-btn" type="button" (click)="closeLibPicker()">✕</button>
@@ -1220,6 +1222,11 @@ export class SpacesComponent implements OnInit {
         const name: string = this._typeImportTarget?.name || (typeof raw?.typeName === 'string' ? raw.typeName.trim() : '');
         if (!name) {
           this.schImportError = this.transloco.translate('spaces.schema.import.invalidTypeFile');
+          return;
+        }
+        // When importing as a new type (name derived from file), refuse to overwrite an existing type
+        if (!this._typeImportTarget?.name && this.typeNames(kt).includes(name)) {
+          this.schImportError = `Type "${name}" already exists. Rename or remove it first.`;
           return;
         }
         const ts2 = schemaRaw as Record<string, unknown>;
