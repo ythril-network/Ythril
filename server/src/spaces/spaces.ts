@@ -519,8 +519,7 @@ export function reorderSpaces(orderedIds: string[]): SpaceConfig[] | null {
   // Build new order: provided IDs first (in given order), then any remaining spaces
   const reordered: SpaceConfig[] = [];
   for (const id of orderedIds) {
-    const space = cfg.spaces.find(s => s.id === id);
-    if (space) reordered.push(space);
+    reordered.push(cfg.spaces.find(s => s.id === id)!);
   }
   for (const space of cfg.spaces) {
     if (!idSet.has(space.id)) reordered.push(space);

@@ -792,7 +792,10 @@ export class SpacesComponent implements OnInit {
     const list = [...this.spaces()];
     moveItemInArray(list, event.previousIndex, event.currentIndex);
     this.spaces.set(list);
-    this.api.reorderSpaces(list.map(s => s.id)).subscribe({ error: () => this.load() });
+    this.api.reorderSpaces(list.map(s => s.id)).subscribe({
+      next: ({ spaces }) => { this.spaces.set(spaces); },
+      error: () => this.load(),
+    });
   }
 
   networksForSpace(spaceId: string): Network[] {
