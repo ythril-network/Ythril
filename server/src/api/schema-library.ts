@@ -61,7 +61,7 @@ const LibraryTypeSchemaZ = z.object({
 const LIBRARY_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,199}$/;
 
 const LibraryEntryBodyZ = z.object({
-  name: z.string().min(1).max(200).regex(LIBRARY_NAME_RE, 'name must be lowercase alphanumeric with optional dashes/underscores, starting with a letter or digit'),
+  name: z.string().min(1).max(200).regex(LIBRARY_NAME_RE, 'name must be lowercase alphanumeric with optional dashes/underscores, starting with a lowercase letter or digit'),
   knowledgeType: z.enum(['entity', 'memory', 'edge', 'chrono']),
   typeName: z.string().min(1).max(200),
   schema: LibraryTypeSchemaZ,

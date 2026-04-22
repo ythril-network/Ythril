@@ -152,6 +152,16 @@ describe('POST /api/schema-library — create entry', () => {
     const r = await createEntry({ ...ENTRY_BODY, name: 'UPPERCASE-name' });
     assert.equal(r.status, 400, JSON.stringify(r.body));
   });
+
+  it('returns 400 for name starting with a dash', async () => {
+    const r = await createEntry({ ...ENTRY_BODY, name: '-invalid-start' });
+    assert.equal(r.status, 400, JSON.stringify(r.body));
+  });
+
+  it('returns 400 for name starting with an underscore', async () => {
+    const r = await createEntry({ ...ENTRY_BODY, name: '_invalid-start' });
+    assert.equal(r.status, 400, JSON.stringify(r.body));
+  });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
