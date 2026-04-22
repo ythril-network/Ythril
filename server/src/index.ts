@@ -1,6 +1,6 @@
 ﻿import { createServer } from 'http';
 import os from 'os';
-import { configExists, loadConfig, loadSecrets, getMongoUri } from './config/loader.js';
+import { configExists, loadConfig, loadSecrets, loadSchemaLibrary, getMongoUri } from './config/loader.js';
 import { connectMongo, closeMongo, checkVectorSearchAvailability } from './db/mongo.js';
 import { initAllSpaces } from './spaces/spaces.js';
 import { resetStaleWatermarksIfNeeded } from './util/seq.js';
@@ -30,6 +30,7 @@ async function main(): Promise<void> {
   if (!isFirstRun) {
     loadConfig();
     loadSecrets();
+    loadSchemaLibrary();
 
     // Migration: tokens created before the prefix field was introduced have no
     // prefix and cannot be looked up efficiently (nor can the prefix be

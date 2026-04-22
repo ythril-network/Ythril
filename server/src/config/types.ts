@@ -43,6 +43,13 @@ export interface PropertySchema {
 
 /** Schema definition for a single entity type, edge label, memory type, or chrono type. */
 export interface TypeSchema {
+  /**
+   * Reference to an instance-level schema library entry.
+   * Format: `"library:<name>"` (e.g. `"library:service-v1"`).
+   * When present, the library entry's schema is used for validation instead of any
+   * inline fields.  Inline fields on the same object are ignored when `$ref` is set.
+   */
+  $ref?: string;
   /** Regex pattern for entity.name validation (entity collection only). */
   namingPattern?: string;
   /** Non-enforced tag hints surfaced in UI autocomplete for items of this type. */
@@ -56,6 +63,34 @@ export type ValidationMode = 'off' | 'warn' | 'strict';
 
 /** Knowledge type keys used in typeSchemas. */
 export type KnowledgeType = 'entity' | 'memory' | 'edge' | 'chrono';
+
+// ── Schema library ─────────────────────────────────────────────────────────
+
+/**
+ * A named, versioned TypeSchema definition stored in the instance-level schema
+ * library.  Spaces can reference an entry via `$ref: "library:<name>"` instead
+ * of duplicating the schema inline.
+ */
+export interface SchemaLibraryEntry {
+  /** Unique identifier for this library entry (e.g. `"service-v1"`). */
+  name: string;
+  /** The knowledge-type collection this schema applies to. */
+  knowledgeType: KnowledgeType;
+  /**
+   * The type name within that collection (e.g. `"service"` for entity type).
+   * This is informational — it does not restrict which type name a referencing
+   * space uses.
+   */
+  typeName: string;
+  /** The actual schema definition (inline only — no `$ref` nesting allowed). */
+  schema: Omit<TypeSchema, '$ref'>;
+  /** Optional human-readable description for the library entry. */
+  description?: string;
+  /** ISO8601 creation timestamp. */
+  createdAt: string;
+  /** ISO8601 last-update timestamp. */
+  updatedAt: string;
+}
 
 /** Structured schema and metadata for a space — all fields optional. */
 export interface SpaceMeta {

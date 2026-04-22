@@ -1931,6 +1931,123 @@ Incompatible `mergeFn`/`type` combinations (e.g. `sum` on `boolean`) are rejecte
 
 ---
 
+### Schema Library
+
+The Schema Library is an instance-level store of reusable `TypeSchema` definitions. Spaces can reference a library entry with `$ref` instead of duplicating the inline schema. Editing a library entry is reflected in every referencing space immediately — no space re-patch is needed.
+
+Library entries are stored in `schema-library.json` (sibling to `config.json`). Max 500 entries per instance.
+
+**Entry structure:**
+
+```json
+{
+  "name": "service-v1",
+  "knowledgeType": "entity",
+  "typeName": "service",
+  "description": "Standard service entity schema",
+  "schema": {
+    "namingPattern": "^[a-z][a-z0-9-]{1,60}$",
+    "tagSuggestions": ["backend", "frontend"],
+    "propertySchemas": {
+      "owner": { "type": "string", "required": true },
+      "status": { "type": "string", "enum": ["active", "deprecated"] }
+    }
+  },
+  "createdAt": "2026-04-22T10:00:00.000Z",
+  "updatedAt": "2026-04-22T10:00:00.000Z"
+}
+```
+
+**Name format:** `^[a-z0-9][a-z0-9_-]{0,199}$` — lowercase alphanumeric, dashes, and underscores. May not start with a dash or underscore.
+
+#### List all entries
+
+```
+GET /api/schema-library
+Authorization: Bearer <token>
+```
+
+**Response** `200`:
+```json
+{ "entries": [ { "name": "...", ... } ] }
+```
+
+#### Get a single entry
+
+```
+GET /api/schema-library/:name
+Authorization: Bearer <token>
+```
+
+**Response** `200 { "entry": { ... } }` or `404`.
+
+#### Create an entry
+
+```
+POST /api/schema-library
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "name": "service-v1",
+  "knowledgeType": "entity",
+  "typeName": "service",
+  "schema": { "propertySchemas": { "owner": { "type": "string", "required": true } } },
+  "description": "optional"
+}
+```
+
+**Response** `201 { "entry": { ... } }`. Returns `409` if the name already exists (use `PUT` to update). Returns `400` for invalid payloads.
+
+#### Create or replace an entry
+
+```
+PUT /api/schema-library/:name
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "knowledgeType": "entity",
+  "typeName": "service",
+  "schema": { ... },
+  "description": "optional"
+}
+```
+
+**Response** `201` (created) or `200` (replaced). Returns `400` for invalid name format or payload.
+
+#### Delete an entry
+
+```
+DELETE /api/schema-library/:name
+Authorization: Bearer <token>
+```
+
+**Response** `204`. Returns `404` if not found.
+
+#### Using `$ref` in space typeSchemas
+
+A space type definition can reference a library entry instead of embedding the schema inline:
+
+```json
+{
+  "meta": {
+    "validationMode": "strict",
+    "typeSchemas": {
+      "entity": {
+        "service": { "$ref": "library:service-v1" }
+      }
+    }
+  }
+}
+```
+
+`resolveMetaRefs()` resolves all `$ref` pointers from the library before validation runs. Unresolvable refs (entry not found, or unknown `$ref` format) silently degrade to an empty schema — no constraints are applied, which is identical to the behaviour for an undefined type.
+
+`$ref` and inline fields are mutually exclusive: a `TypeSchema` that contains `$ref` must not also contain `namingPattern`, `propertySchemas`, etc.
+
+---
+
 ### Delete a Space
 
 ```

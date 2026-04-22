@@ -715,5 +715,55 @@
   "brain.query.filterPlaceholder": "{\"tags\": {\"$in\": [\"mein-tag\"]}} oder {\"name\": {\"$regex\": \"auth\", \"$options\": \"i\"}}",
   "brain.query.projectionPlaceholder": "{\"fact\": 1, \"tags\": 1}",
   "brain.query.resultsFrom": "Ergebnis(se) aus {{ collection }}",
-  "graph.stats.nodesEdges": "{{ nodes }} Knoten · {{ edges }} Kanten"
+  "graph.stats.nodesEdges": "{{ nodes }} Knoten · {{ edges }} Kanten",
+
+  "nav.schemaLibrary": "Schema-Bibliothek",
+
+  "schemaLib.title": "Schema-Bibliothek",
+  "schemaLib.description": "Wiederverwendbare TypeSchema-Definitionen für die gesamte Instanz. Spaces können einen Eintrag mit $ref: \"library:<name>\" referenzieren, anstatt das Schema inline zu duplizieren.",
+  "schemaLib.createButton": "+ Neuer Eintrag",
+  "schemaLib.updated": "Aktualisiert",
+  "schemaLib.empty.title": "Noch keine Bibliothekseinträge",
+  "schemaLib.empty.subtitle": "Erstellen Sie eine wiederverwendbare TypeSchema-Definition, die jeder Space referenzieren kann.",
+
+  "schemaLib.refHint.prefix": "Referenz in Space-typeSchemas:",
+  "schemaLib.refHint.suffix": "(wird zur Laufzeit aufgelöst – Änderungen hier wirken sofort)",
+
+  "schemaLib.dialog.createTitle": "Bibliothekseintrag erstellen",
+  "schemaLib.dialog.editTitle": "Bibliothekseintrag bearbeiten",
+
+  "schemaLib.field.name": "Name (Bezeichner)",
+  "schemaLib.field.namePlaceholder": "my-schema-v1",
+  "schemaLib.field.nameHint": "Nur Kleinbuchstaben, Zahlen, Bindestriche und Unterstriche",
+  "schemaLib.field.typeName": "Standard-Typname",
+  "schemaLib.field.typeNamePlaceholder": "z.B. service, task, …",
+  "schemaLib.field.knowledgeType": "Wissenstyp",
+  "schemaLib.field.description": "Beschreibung (optional)",
+  "schemaLib.field.descriptionPlaceholder": "Kurze Beschreibung des Zwecks dieses Schemas",
+
+  "schemaLib.export.title": "Eintrag als JSON herunterladen",
+  "schemaLib.import.fileTitle": "Einträge aus JSON-Datei importieren",
+  "schemaLib.import.fileButton": "↑ Aus Datei importieren",
+  "schemaLib.import.noneImported": "Keine gültigen Bibliothekseinträge in der Datei gefunden.",
+  "schemaLib.import.parseFailed": "JSON-Datei konnte nicht geparst werden.",
+
+  "schemaLib.error.nameRequired": "Eintragsname ist erforderlich.",
+  "schemaLib.error.saveFailed": "Eintrag konnte nicht gespeichert werden.",
+  "schemaLib.error.deleteFailed": "Eintrag konnte nicht gelöscht werden.",
+
+  "schemaLib.delete.title": "Bibliothekseintrag löschen",
+  "schemaLib.delete.confirm": "Bibliothekseintrag dauerhaft löschen",
+
+  "spaces.schema.saveToLibraryButton": "→ Bib",
+  "spaces.schema.saveToLibraryTitle": "Dieses Typschema in der Instanzbibliothek speichern",
+  "spaces.schema.importFromLibraryButton": "← Bib",
+  "spaces.schema.importFromLibraryTitle": "Aus der Instanz-Schema-Bibliothek importieren",
+  "spaces.schema.libSave.prompt": "Name des Bibliothekseintrags (z.B. service-v1):",
+  "spaces.schema.libSave.invalidName": "Ungültiger Name. Verwende Kleinbuchstaben, Zahlen, Bindestriche und Unterstriche.",
+  "spaces.schema.libSave.success": "In der Bibliothek als «{{name}}» gespeichert.",
+  "spaces.schema.libSave.failed": "Konnte nicht in der Bibliothek gespeichert werden.",
+  "spaces.schema.libPicker.title": "Aus Schema-Bibliothek importieren",
+  "spaces.schema.libPicker.empty": "Noch keine Bibliothekseinträge für diesen Wissenstyp.",
+  "spaces.schema.libPicker.importInline": "Inline importieren",
+  "spaces.schema.libPicker.importRef": "$ref verwenden"
 }

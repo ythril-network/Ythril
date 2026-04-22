@@ -22,6 +22,7 @@ import { setupRouter } from './setup/routes.js';
 import { mcpRouter } from './mcp/router.js';
 import { auditMiddleware } from './audit/middleware.js';
 import { webhooksRouter } from './api/webhooks.js';
+import { schemaLibraryRouter } from './api/schema-library.js';
 import { localAgentRouter } from './api/local-agent.js';
 import { globalRateLimit } from './rate-limit/middleware.js';
 import { configExists, reloadConfig, getConfig, saveConfig, loadSecrets } from './config/loader.js';
@@ -179,6 +180,7 @@ export function createApp() {
   // ── Webhook management ─────────────────────────────────────────────────────
   app.use('/api/admin/webhooks', webhooksRouter);
   app.use('/api/admin/local-agent', localAgentRouter);
+  app.use('/api/schema-library', schemaLibraryRouter);
 
   // ── Admin: space wipe ─────────────────────────────────────────────────────
   // Wipes data from a space while preserving the space itself and its configuration.

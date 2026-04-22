@@ -4,6 +4,23 @@ All notable changes to Ythril are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Instance-level Schema Library** — a dedicated first-class store of reusable `TypeSchema` definitions, persisted in `schema-library.json` (sibling to `config.json`).
+  - Full CRUD REST API: `GET/POST/PUT/DELETE /api/schema-library/:name`. Max 500 entries. Entry names must match `^[a-z0-9][a-z0-9_-]{0,199}$`.
+  - `TypeSchema` now accepts `{ "$ref": "library:<name>" }` in place of an inline definition. `resolveMetaRefs()` in `schema-validation.ts` resolves all refs before validation runs. Unresolvable refs silently degrade to an empty schema (no constraints).
+  - Editing a library entry takes effect immediately for all referencing spaces — no per-space re-patch needed.
+  - **Schema Library** UI is a top-level page (`/schema-library`) accessible from the Workspace section of the main navigation. Editor reuses the same TypeSchemaState-based form as the per-space schema editor (naming pattern, tag suggestions, full property table).
+  - Per-type export/import buttons in the spaces schema editor: **→ Lib** (save to library) and **← Lib** (import inline or as `$ref`). Types using `$ref` display a blue badge in the type list.
+  - File export (↓) and bulk import from file (↑ Import from file) in the library page.
+  - Integration tests: `testing/integration/schema-library.test.js` covering CRUD, `$ref` resolution, live library-update propagation, unresolvable-ref fallback, 409 duplicate, 400 invalid payloads, and name-format validation.
+  - i18n: en / de / pl.
+
+---
+
+
 ## [1.0.0] — 2026-04-20
 
 ### ⚠ Breaking Changes

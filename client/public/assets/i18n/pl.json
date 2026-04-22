@@ -714,5 +714,55 @@
   "settings.language": "Język",
   "settings.language.en": "angielski",
   "settings.language.de": "niemiecki",
-  "settings.language.pl": "Polski"
+  "settings.language.pl": "Polski",
+
+  "nav.schemaLibrary": "Biblioteka schematów",
+
+  "schemaLib.title": "Biblioteka schematów",
+  "schemaLib.description": "Wielokrotnego użytku definicje TypeSchema dla całej instancji. Przestrzenie mogą odwoływać się do wpisu za pomocą $ref: \"library:<name>\" zamiast duplikowania schematu inline.",
+  "schemaLib.createButton": "+ Nowy wpis",
+  "schemaLib.updated": "Zaktualizowano",
+  "schemaLib.empty.title": "Brak wpisów w bibliotece",
+  "schemaLib.empty.subtitle": "Utwórz wielokrotnego użytku definicję TypeSchema, do której może odwoływać się każda przestrzeń.",
+
+  "schemaLib.refHint.prefix": "Odwołanie w typeSchemas przestrzeni:",
+  "schemaLib.refHint.suffix": "(rozwiązywane w czasie wykonywania – zmiany tutaj obowiązują natychmiast)",
+
+  "schemaLib.dialog.createTitle": "Utwórz wpis biblioteki",
+  "schemaLib.dialog.editTitle": "Edytuj wpis biblioteki",
+
+  "schemaLib.field.name": "Nazwa (identyfikator)",
+  "schemaLib.field.namePlaceholder": "my-schema-v1",
+  "schemaLib.field.nameHint": "Tylko małe litery, cyfry, myślniki i podkreślenia",
+  "schemaLib.field.typeName": "Domyślna nazwa typu",
+  "schemaLib.field.typeNamePlaceholder": "np. service, task, …",
+  "schemaLib.field.knowledgeType": "Typ wiedzy",
+  "schemaLib.field.description": "Opis (opcjonalnie)",
+  "schemaLib.field.descriptionPlaceholder": "Krótki opis przeznaczenia tego schematu",
+
+  "schemaLib.export.title": "Pobierz wpis jako JSON",
+  "schemaLib.import.fileTitle": "Importuj wpisy z pliku JSON",
+  "schemaLib.import.fileButton": "↑ Importuj z pliku",
+  "schemaLib.import.noneImported": "W pliku nie znaleziono prawidłowych wpisów biblioteki.",
+  "schemaLib.import.parseFailed": "Nie można przetworzyć pliku JSON.",
+
+  "schemaLib.error.nameRequired": "Nazwa wpisu jest wymagana.",
+  "schemaLib.error.saveFailed": "Nie można zapisać wpisu.",
+  "schemaLib.error.deleteFailed": "Nie można usunąć wpisu.",
+
+  "schemaLib.delete.title": "Usuń wpis biblioteki",
+  "schemaLib.delete.confirm": "Trwale usuń wpis biblioteki",
+
+  "spaces.schema.saveToLibraryButton": "→ Bib",
+  "spaces.schema.saveToLibraryTitle": "Zapisz ten schemat typu w bibliotece instancji",
+  "spaces.schema.importFromLibraryButton": "← Bib",
+  "spaces.schema.importFromLibraryTitle": "Importuj z biblioteki schematów instancji",
+  "spaces.schema.libSave.prompt": "Nazwa wpisu biblioteki (np. service-v1):",
+  "spaces.schema.libSave.invalidName": "Nieprawidłowa nazwa. Użyj małych liter, cyfr, myślników i podkreśleń.",
+  "spaces.schema.libSave.success": "Zapisano w bibliotece jako «{{name}}».",
+  "spaces.schema.libSave.failed": "Nie można zapisać do biblioteki.",
+  "spaces.schema.libPicker.title": "Importuj z biblioteki schematów",
+  "spaces.schema.libPicker.empty": "Brak wpisów biblioteki dla tego typu wiedzy.",
+  "spaces.schema.libPicker.importInline": "Importuj inline",
+  "spaces.schema.libPicker.importRef": "Użyj $ref"
 }

@@ -21,7 +21,7 @@ import { needsReindex, clearReindexFlag } from '../spaces/spaces.js';
 import { log } from '../util/log.js';
 import { checkQuota, QuotaError } from '../quota/quota.js';
 import { resolveMemberSpaces, resolveWriteTarget, findSpace, isProxySpace } from '../spaces/proxy.js';
-import { validateEntity, validateEdge, validateMemory, validateChrono, type SchemaViolation } from '../spaces/schema-validation.js';
+import { validateEntity, validateEdge, validateMemory, validateChrono, resolveMetaRefs, type SchemaViolation } from '../spaces/schema-validation.js';
 import type { MemoryDoc, EntityDoc, EdgeDoc, ChronoEntry, FileMetaDoc, ChronoType, ChronoStatus, SpaceMeta } from '../config/types.js';
 import { reindexInProgress } from '../metrics/registry.js';
 import { emitWebhookEvent } from '../webhooks/dispatcher.js';
@@ -43,10 +43,12 @@ function webhookToken(req: express.Request): { tokenId?: string; tokenLabel?: st
 
 // ── Schema validation helpers ─────────────────────────────────────────────
 
-/** Look up the meta block for a space from config. Returns undefined if none. */
+/** Look up the meta block for a space from config, with library refs resolved. Returns undefined if none. */
 function getSpaceMeta(spaceId: string): SpaceMeta | undefined {
   const cfg = getConfig();
-  return cfg.spaces.find(s => s.id === spaceId)?.meta;
+  const meta = cfg.spaces.find(s => s.id === spaceId)?.meta;
+  if (!meta) return undefined;
+  return resolveMetaRefs(meta);
 }
 
 /** Check whether strict linkage enforcement is enabled for a space. */

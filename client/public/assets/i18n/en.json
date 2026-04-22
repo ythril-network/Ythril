@@ -742,5 +742,55 @@
   "settings.language": "Language",
   "settings.language.en": "English",
   "settings.language.de": "Deutsch",
-  "settings.language.pl": "Polski"
+  "settings.language.pl": "Polski",
+
+  "nav.schemaLibrary": "Schema Library",
+
+  "schemaLib.title": "Schema Library",
+  "schemaLib.description": "Reusable TypeSchema definitions for the whole instance. Spaces can reference an entry with $ref: \"library:<name>\" instead of duplicating the schema inline.",
+  "schemaLib.createButton": "+ New entry",
+  "schemaLib.updated": "Updated",
+  "schemaLib.empty.title": "No library entries yet",
+  "schemaLib.empty.subtitle": "Create a reusable TypeSchema definition that any space can reference.",
+
+  "schemaLib.refHint.prefix": "Reference in space typeSchemas:",
+  "schemaLib.refHint.suffix": "(resolves at runtime — editing here takes effect immediately)",
+
+  "schemaLib.dialog.createTitle": "Create library entry",
+  "schemaLib.dialog.editTitle": "Edit library entry",
+
+  "schemaLib.field.name": "Name (identifier)",
+  "schemaLib.field.namePlaceholder": "my-schema-v1",
+  "schemaLib.field.nameHint": "Lowercase, numbers, dashes and underscores only",
+  "schemaLib.field.typeName": "Default type name",
+  "schemaLib.field.typeNamePlaceholder": "e.g. service, task, …",
+  "schemaLib.field.knowledgeType": "Knowledge type",
+  "schemaLib.field.description": "Description (optional)",
+  "schemaLib.field.descriptionPlaceholder": "Short description of what this schema is for",
+
+  "schemaLib.export.title": "Download entry as JSON",
+  "schemaLib.import.fileTitle": "Import entries from JSON file",
+  "schemaLib.import.fileButton": "↑ Import from file",
+  "schemaLib.import.noneImported": "No valid library entries found in the file.",
+  "schemaLib.import.parseFailed": "Could not parse the JSON file.",
+
+  "schemaLib.error.nameRequired": "Entry name is required.",
+  "schemaLib.error.saveFailed": "Could not save the entry.",
+  "schemaLib.error.deleteFailed": "Could not delete the entry.",
+
+  "schemaLib.delete.title": "Delete library entry",
+  "schemaLib.delete.confirm": "Permanently delete library entry",
+
+  "spaces.schema.saveToLibraryButton": "→ Lib",
+  "spaces.schema.saveToLibraryTitle": "Save this type schema to the instance library",
+  "spaces.schema.importFromLibraryButton": "← Lib",
+  "spaces.schema.importFromLibraryTitle": "Import from the instance schema library",
+  "spaces.schema.libSave.prompt": "Library entry name (e.g. service-v1):",
+  "spaces.schema.libSave.invalidName": "Invalid name. Use lowercase letters, numbers, dashes and underscores.",
+  "spaces.schema.libSave.success": "Saved to library as «{{name}}».",
+  "spaces.schema.libSave.failed": "Could not save to library.",
+  "spaces.schema.libPicker.title": "Import from Schema Library",
+  "spaces.schema.libPicker.empty": "No library entries for this knowledge type yet.",
+  "spaces.schema.libPicker.importInline": "Import inline",
+  "spaces.schema.libPicker.importRef": "Use $ref"
 }

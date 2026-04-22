@@ -406,6 +406,32 @@ When validation is `strict`, any write (individual or bulk) that violates the sc
 
 Schema validation applies equally to REST API writes, MCP tool calls, and bulk operations.
 
+### Schema Library
+
+The **Schema Library** (accessible from the main navigation, under Workspace) is an instance-level store of reusable `TypeSchema` definitions. Instead of copying the same schema into every space, you define it once in the library and reference it from each space.
+
+**Creating a library entry:** Open **Schema Library** → **+ New entry**. Give it a unique name (e.g. `service-v1`), select the knowledge type and type name it is intended for, then fill in the same constraints you would enter in a space's schema editor: naming pattern, tag suggestions, and property schemas.
+
+**Referencing a library entry from a space:** In the space's schema tab, each type row has a **← Lib** button that opens a picker showing matching library entries. Choose **Import inline** to copy the schema directly, or **Use $ref** to store a reference (`library:<name>`) instead. Spaces that use `$ref` automatically pick up library edits without any re-configuration.
+
+**Exporting a library entry to a space (and vice-versa):** In the space's schema tab, click **→ Lib** on any type row to save that type's current schema to the library (you will be prompted for a name). Use the download icon (↓) in the library list to export an entry as a JSON file, or the **↑ Import from file** button to bulk-import entries from a JSON file.
+
+**JSON format for `$ref`:**
+
+```json
+{
+  "meta": {
+    "typeSchemas": {
+      "entity": {
+        "service": { "$ref": "library:service-v1" }
+      }
+    }
+  }
+}
+```
+
+Editing a library entry takes effect immediately for all spaces that reference it. If a `$ref` points to a non-existent entry, the type is treated as having an empty schema (no constraints).
+
 ### Exporting a space
 
 Use the REST API to export a full space dump:

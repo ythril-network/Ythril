@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { finalize } from 'rxjs';
 import {
   ApiService, Network, Space, SpaceMeta, SpaceStats,
-  KnowledgeType, PropertySchema, TypeSchema, ValidationMode,
+  KnowledgeType, PropertySchema, TypeSchema, ValidationMode, SchemaLibraryEntry,
 } from '../../core/api.service';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { TranslocoService } from '@jsverse/transloco';
@@ -331,14 +331,18 @@ interface TypeSchemaState {
                           <td (click)="toggleTypeExpand(kt,name)" style="cursor:pointer;">
                             <div style="display:flex;align-items:center;gap:8px;">
                               <span style="font-family:var(--font-mono);font-size:13px;color:var(--accent);">{{ name }}</span>
-                              @if (typeState(kt,name).propertySchemas.length) {
-                                <span class="badge badge-gray" style="font-size:10px;">{{ typeState(kt,name).propertySchemas.length }} prop{{ typeState(kt,name).propertySchemas.length !== 1 ? 's' : '' }}</span>
-                              }
-                              @if (typeState(kt,name).tagSuggestions.length) {
-                                <span class="badge badge-gray" style="font-size:10px;">{{ typeState(kt,name).tagSuggestions.length }} tag{{ typeState(kt,name).tagSuggestions.length !== 1 ? 's' : '' }}</span>
-                              }
-                              @if (kt === 'entity' && typeState(kt,name).namingPattern) {
-                                <span class="badge badge-gray" style="font-size:10px;">pattern</span>
+                              @if (typeLibRef(kt,name)) {
+                                <span class="badge badge-blue" style="font-size:10px;" [attr.title]="'\: library:' + typeLibRef(kt,name)">$ref: {{ typeLibRef(kt,name) }}</span>
+                              } @else {
+                                @if (typeState(kt,name).propertySchemas.length) {
+                                  <span class="badge badge-gray" style="font-size:10px;">{{ typeState(kt,name).propertySchemas.length }} prop{{ typeState(kt,name).propertySchemas.length !== 1 ? 's' : '' }}</span>
+                                }
+                                @if (typeState(kt,name).tagSuggestions.length) {
+                                  <span class="badge badge-gray" style="font-size:10px;">{{ typeState(kt,name).tagSuggestions.length }} tag{{ typeState(kt,name).tagSuggestions.length !== 1 ? 's' : '' }}</span>
+                                }
+                                @if (kt === 'entity' && typeState(kt,name).namingPattern) {
+                                  <span class="badge badge-gray" style="font-size:10px;">pattern</span>
+                                }
                               }
                             </div>
                           </td>
@@ -348,6 +352,10 @@ interface TypeSchemaState {
                                 style="font-size:10px;padding:2px 6px;" [attr.title]="'spaces.schema.exportTypeTitle' | transloco">↓</button>
                               <button class="btn btn-ghost btn-sm" type="button" (click)="triggerImportTypeSchema(kt,name)"
                                 style="font-size:10px;padding:2px 6px;" [attr.title]="'spaces.schema.importTypeTitle' | transloco">↑</button>
+                              <button class="btn btn-ghost btn-sm" type="button" (click)="saveTypeToLibrary(kt,name)"
+                                style="font-size:10px;padding:2px 6px;" [attr.title]="'spaces.schema.saveToLibraryTitle' | transloco">{{ 'spaces.schema.saveToLibraryButton' | transloco }}</button>
+                              <button class="btn btn-ghost btn-sm" type="button" (click)="triggerImportFromLibrary(kt,name)"
+                                style="font-size:10px;padding:2px 6px;" [attr.title]="'spaces.schema.importFromLibraryTitle' | transloco">{{ 'spaces.schema.importFromLibraryButton' | transloco }}</button>
                               <button class="btn btn-ghost btn-sm" type="button" (click)="toggleTypeExpand(kt,name)"
                                 style="font-size:10px;padding:2px 8px;min-width:28px;">{{ isTypeExpanded(kt,name) ? '▲' : '▼' }}</button>
                               <button class="icon-btn danger" type="button" (click)="removeType(kt,name)" [attr.title]="'common.remove' | transloco">✕</button>
@@ -620,6 +628,39 @@ interface TypeSchemaState {
           }
         </div><!-- sp-panel -->
       </div><!-- sp-backdrop -->
+    }
+
+    <!-- Library picker dialog -->
+    @if (showLibPickerDialog()) {
+      <div class="dialog-backdrop" (click)="closeLibPicker()">
+        <div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-lg);padding:24px;width:560px;max-width:96vw;max-height:80vh;overflow-y:auto;z-index:300;" (click)="$event.stopPropagation()">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+            <strong>{{ 'spaces.schema.libPicker.title' | transloco }}</strong>
+            <button class="icon-btn" type="button" (click)="closeLibPicker()">✕</button>
+          </div>
+          @if (libPickerLoading()) {
+            <div class="empty-state"><span class="spinner"></span></div>
+          } @else if (!libPickerEntries().length) {
+            <p style="font-size:13px;color:var(--text-muted);">{{ 'spaces.schema.libPicker.empty' | transloco }}</p>
+          } @else {
+            <div style="display:grid;gap:8px;">
+              @for (entry of libPickerEntries(); track entry.name) {
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-surface);">
+                  <div>
+                    <div style="font-weight:600;font-size:13px;font-family:var(--font-mono);">{{ entry.name }}</div>
+                    <div style="font-size:11px;color:var(--text-muted);">{{ entry.knowledgeType }} · {{ entry.typeName }}</div>
+                    @if (entry.description) { <div style="font-size:11px;color:var(--text-secondary);">{{ entry.description }}</div> }
+                  </div>
+                  <div style="display:flex;gap:6px;flex-shrink:0;">
+                    <button class="btn btn-secondary btn-sm" type="button" (click)="importFromLibraryInline(entry)">{{ 'spaces.schema.libPicker.importInline' | transloco }}</button>
+                    <button class="btn btn-ghost btn-sm" type="button" (click)="importFromLibraryRef(entry)">{{ 'spaces.schema.libPicker.importRef' | transloco }}</button>
+                  </div>
+                </div>
+              }
+            </div>
+          }
+        </div>
+      </div>
     }
 
     <!-- SPACES TABLE -->
@@ -911,13 +952,22 @@ export class SpacesComponent implements OnInit {
     const loadKt = (kt: KnowledgeType): Record<string, TypeSchemaState> => {
       const map: Record<string, TypeSchemaState> = {};
       for (const [name, ts] of Object.entries(meta.typeSchemas?.[kt] ?? {})) {
-        map[name] = {
-          namingPattern:   ts.namingPattern   ?? '',
-          tagSuggestions:  [...(ts.tagSuggestions ?? [])],
-          propertySchemas: Object.entries(ts.propertySchemas ?? {}).map(([k, ps]) => ({ key: k, s: { ...ps }, _enumInput: '' })),
-          _newPropInput: '',
-          _newTagInput:  '',
-        };
+        // Preserve $ref as _libRef sentinel so buildMeta() can round-trip it
+        if (ts.$ref?.startsWith('library:')) {
+          (map[name] as TypeSchemaState & { _libRef?: string }) = {
+            namingPattern: '', tagSuggestions: [], propertySchemas: [],
+            _newPropInput: '', _newTagInput: '',
+            _libRef: ts.$ref.slice('library:'.length),
+          };
+        } else {
+          map[name] = {
+            namingPattern:   ts.namingPattern   ?? '',
+            tagSuggestions:  [...(ts.tagSuggestions ?? [])],
+            propertySchemas: Object.entries(ts.propertySchemas ?? {}).map(([k, ps]) => ({ key: k, s: { ...ps }, _enumInput: '' })),
+            _newPropInput: '',
+            _newTagInput:  '',
+          };
+        }
       }
       return map;
     };
@@ -977,7 +1027,12 @@ export class SpacesComponent implements OnInit {
       if (names.length) {
         const out: Record<string, TypeSchema> = {};
         for (const name of names) {
-          const state = ktMap[name];
+          const state = ktMap[name] as TypeSchemaState & { _libRef?: string };
+          // If this type was set via "import as $ref", emit a $ref TypeSchema
+          if (state._libRef) {
+            out[name] = { $ref: `library:${state._libRef}` };
+            continue;
+          }
           const ts: TypeSchema = {};
           if (kt === 'entity' && state.namingPattern.trim()) ts.namingPattern = state.namingPattern.trim();
           if (state.tagSuggestions.length) ts.tagSuggestions = [...state.tagSuggestions];
@@ -1179,6 +1234,10 @@ export class SpacesComponent implements OnInit {
   typeNames(kt: KnowledgeType): string[] { return Object.keys(this.schTypeSchemas[kt] ?? {}); }
   typeState(kt: KnowledgeType, name: string): TypeSchemaState { return (this.schTypeSchemas[kt] ?? {})[name]!; }
   typeCount(kt: KnowledgeType): number { return Object.keys(this.schTypeSchemas[kt] ?? {}).length; }
+  /** Returns the library entry name if this type is set as a $ref, otherwise null. */
+  typeLibRef(kt: KnowledgeType, name: string): string | null {
+    return ((this.schTypeSchemas[kt] ?? {})[name] as TypeSchemaState & { _libRef?: string })?._libRef ?? null;
+  }
 
   isTypeExpanded(kt: KnowledgeType, name: string): boolean {
     return this.schExpandedType?.kt === kt && this.schExpandedType?.name === name;
@@ -1336,5 +1395,117 @@ export class SpacesComponent implements OnInit {
       next: () => this.api.listNetworks().subscribe({ next: ({ networks }) => this.networks.set(networks), error: () => {} }),
       error: () => alert(this.transloco.translate('spaces.error.leaveNetworkFailed')),
     });
+  }
+
+  // ── Library: save a type to library ───────────────────────────────────────
+
+  saveTypeToLibrary(kt: KnowledgeType, name: string): void {
+    const state = this.typeState(kt, name);
+    const promptName = prompt(
+      this.transloco.translate('spaces.schema.libSave.prompt'),
+      `${name}-v1`,
+    );
+    if (!promptName) return;
+    const entryName = promptName.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/^[^a-z0-9]+/, '');
+    if (!entryName) {
+      alert(this.transloco.translate('spaces.schema.libSave.invalidName'));
+      return;
+    }
+
+    const schema: TypeSchema = {};
+    if (kt === 'entity' && state.namingPattern.trim()) schema.namingPattern = state.namingPattern.trim();
+    if (state.tagSuggestions.length) schema.tagSuggestions = [...state.tagSuggestions];
+    if (state.propertySchemas.length) {
+      const ps: Record<string, PropertySchema> = {};
+      for (const { key, s } of state.propertySchemas) {
+        const entry: PropertySchema = {};
+        if (s.type)            entry.type    = s.type;
+        if (s.enum?.length)    entry.enum    = [...s.enum];
+        if (s.minimum != null) entry.minimum = s.minimum;
+        if (s.maximum != null) entry.maximum = s.maximum;
+        if (s.pattern?.trim()) entry.pattern = s.pattern.trim();
+        if (s.mergeFn)         entry.mergeFn = s.mergeFn;
+        if (s.required)        entry.required = s.required;
+        if (s.default != null) entry.default  = s.default;
+        ps[key] = entry;
+      }
+      schema.propertySchemas = ps;
+    }
+
+    const body = { knowledgeType: kt, typeName: name, schema: schema as Omit<TypeSchema, '$ref'> };
+    this.api.upsertSchemaLibraryEntry(entryName, body).subscribe({
+      next: () => alert(this.transloco.translate('spaces.schema.libSave.success', { name: entryName })),
+      error: (err) => alert(err?.error?.error ?? this.transloco.translate('spaces.schema.libSave.failed')),
+    });
+  }
+
+  // ── Library: import from library ──────────────────────────────────────────
+
+  showLibPickerDialog = signal(false);
+  libPickerLoading    = signal(false);
+  libPickerEntries    = signal<SchemaLibraryEntry[]>([]);
+  /** kt/typeName context for the open library picker */
+  private _libPickerTarget: { kt: KnowledgeType; name: string } | null = null;
+
+  triggerImportFromLibrary(kt: KnowledgeType, name: string): void {
+    this._libPickerTarget = { kt, name };
+    this.libPickerLoading.set(true);
+    this.showLibPickerDialog.set(true);
+    this.api.listSchemaLibrary().subscribe({
+      next: ({ entries }) => {
+        this.libPickerEntries.set(entries.filter(e => e.knowledgeType === kt));
+        this.libPickerLoading.set(false);
+      },
+      error: () => {
+        this.libPickerEntries.set([]);
+        this.libPickerLoading.set(false);
+      },
+    });
+  }
+
+  closeLibPicker(): void {
+    this.showLibPickerDialog.set(false);
+    this._libPickerTarget = null;
+  }
+
+  /** Import the library entry's schema as an inline TypeSchemaState (merges into current). */
+  importFromLibraryInline(entry: SchemaLibraryEntry): void {
+    const target = this._libPickerTarget;
+    if (!target) return;
+    const s = entry.schema;
+    const imported: TypeSchemaState = {
+      namingPattern:   s.namingPattern ?? '',
+      tagSuggestions:  [...(s.tagSuggestions ?? [])],
+      propertySchemas: Object.entries(s.propertySchemas ?? {}).map(([k, v]) => ({
+        key: k, s: { ...v }, _enumInput: '',
+      })),
+      _newPropInput: '',
+      _newTagInput:  '',
+    };
+    this.schTypeSchemas = {
+      ...this.schTypeSchemas,
+      [target.kt]: { ...(this.schTypeSchemas[target.kt] ?? {}), [target.name]: imported },
+    };
+    this.closeLibPicker();
+  }
+
+  /** Set the space's type to use a $ref pointing at this library entry. */
+  importFromLibraryRef(entry: SchemaLibraryEntry): void {
+    const target = this._libPickerTarget;
+    if (!target) return;
+    // Store as a special sentinel state that renders as a $ref in buildMeta()
+    const refState: TypeSchemaState & { _libRef?: string } = {
+      namingPattern:   '',
+      tagSuggestions:  [],
+      propertySchemas: [],
+      _newPropInput:   '',
+      _newTagInput:    '',
+      _libRef:         entry.name,
+    };
+    this.schTypeSchemas = {
+      ...this.schTypeSchemas,
+      [target.kt]: { ...(this.schTypeSchemas[target.kt] ?? {}), [target.name]: refState },
+    };
+    this.closeLibPicker();
   }
 }

@@ -1,10 +1,11 @@
 ﻿import fs from 'node:fs';
 import path from 'node:path';
 import { log } from '../util/log.js';
-import type { Config, SecretsFile } from './types.js';
+import type { Config, SecretsFile, SchemaLibraryEntry } from './types.js';
 
 const CONFIG_PATH = process.env['CONFIG_PATH'] ?? '/config/config.json';
 const SECRETS_PATH = path.join(path.dirname(CONFIG_PATH), 'secrets.json');
+const SCHEMA_LIB_PATH = path.join(path.dirname(CONFIG_PATH), 'schema-library.json');
 
 let _config: Config | null = null;
 let _secrets: SecretsFile | null = null;
@@ -192,6 +193,46 @@ export function saveSecrets(secrets: SecretsFile): void {
   fs.writeFileSync(tmp, JSON.stringify(secrets, null, 2), { encoding: 'utf8', mode: 0o600 });
   fs.renameSync(tmp, SECRETS_PATH);
   fs.chmodSync(SECRETS_PATH, 0o600);
+}
+
+// ── Schema Library ─────────────────────────────────────────────────────────
+
+let _schemaLibrary: SchemaLibraryEntry[] | null = null;
+
+/**
+ * Load schema-library.json from disk. Returns an empty array if the file
+ * does not exist yet (first run before any entry is created).
+ */
+export function loadSchemaLibrary(): SchemaLibraryEntry[] {
+  if (!fs.existsSync(SCHEMA_LIB_PATH)) {
+    _schemaLibrary = [];
+    return _schemaLibrary;
+  }
+  try {
+    checkPermissions(SCHEMA_LIB_PATH);
+    const raw = fs.readFileSync(SCHEMA_LIB_PATH, 'utf8');
+    _schemaLibrary = JSON.parse(raw) as SchemaLibraryEntry[];
+  } catch (err) {
+    log.warn(`schema-library.json could not be loaded — treating as empty: ${err}`);
+    _schemaLibrary = [];
+  }
+  return _schemaLibrary;
+}
+
+/** Return the in-memory schema library, loading from disk if not yet loaded. */
+export function getSchemaLibrary(): SchemaLibraryEntry[] {
+  if (!_schemaLibrary) return loadSchemaLibrary();
+  return _schemaLibrary;
+}
+
+/** Atomically persist the schema library to disk. */
+export function saveSchemaLibrary(entries: SchemaLibraryEntry[]): void {
+  _schemaLibrary = entries;
+  fs.mkdirSync(path.dirname(SCHEMA_LIB_PATH), { recursive: true });
+  const tmp = SCHEMA_LIB_PATH + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(entries, null, 2), { encoding: 'utf8', mode: 0o600 });
+  fs.renameSync(tmp, SCHEMA_LIB_PATH);
+  try { fs.chmodSync(SCHEMA_LIB_PATH, 0o600); } catch { /* non-POSIX — ignore */ }
 }
 
 // ── Defaults ───────────────────────────────────────────────────────────────

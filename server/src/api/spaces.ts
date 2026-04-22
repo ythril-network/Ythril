@@ -38,11 +38,18 @@ const PropertySchemaZ = z.object({
   message: 'mergeFn is incompatible with the declared type (numeric fns require type "number", boolean fns require type "boolean")',
 });
 
-const TypeSchemaZ = z.object({
-  namingPattern: z.string().max(500).optional(),
-  tagSuggestions: z.array(z.string().min(1).max(200)).max(200).optional(),
-  propertySchemas: z.record(z.string().min(1).max(200), PropertySchemaZ).optional(),
-}).strict();
+const TypeSchemaZ = z.union([
+  // Reference to a schema library entry
+  z.object({
+    $ref: z.string().regex(/^library:[a-z0-9][a-z0-9_-]{0,199}$/, '$ref must be in format "library:<name>"'),
+  }).strict(),
+  // Inline schema definition
+  z.object({
+    namingPattern: z.string().max(500).optional(),
+    tagSuggestions: z.array(z.string().min(1).max(200)).max(200).optional(),
+    propertySchemas: z.record(z.string().min(1).max(200), PropertySchemaZ).optional(),
+  }).strict(),
+]);
 
 const TypeSchemasZ = z.object({
   entity: z.record(z.string().min(1).max(200), TypeSchemaZ).optional(),
@@ -495,7 +502,8 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireAdminMfa, asyn
   const dryMeta = parsedMeta.data as SpaceMeta;
 
   // Import validation functions dynamically to avoid circular deps
-  const { validateEntity, validateEdge, validateMemory, validateChrono } = await import('../spaces/schema-validation.js');
+  const { validateEntity, validateEdge, validateMemory, validateChrono, resolveMetaRefs } = await import('../spaces/schema-validation.js');
+  const resolvedMeta = resolveMetaRefs(dryMeta);
 
   const violations: Array<{ collection: string; _id: string; violations: Array<{ field: string; value: unknown; reason: string }> }> = [];
   const memberIds = resolveMemberSpaces(id);
@@ -506,7 +514,7 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireAdminMfa, asyn
     const entities = await col(`${mid}_entities`).find({}).limit(SCAN_LIMIT).toArray();
     for (const ent of entities) {
       const doc = ent as unknown as { _id: string; name?: string; type?: string; properties?: Record<string, unknown> };
-      const v = validateEntity(dryMeta, doc);
+      const v = validateEntity(resolvedMeta, doc);
       if (v.length) violations.push({ collection: 'entities', _id: String(doc._id), violations: v });
     }
 
@@ -514,7 +522,7 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireAdminMfa, asyn
     const edges = await col(`${mid}_edges`).find({}).limit(SCAN_LIMIT).toArray();
     for (const edge of edges) {
       const doc = edge as unknown as { _id: string; label?: string; properties?: Record<string, unknown> };
-      const v = validateEdge(dryMeta, doc);
+      const v = validateEdge(resolvedMeta, doc);
       if (v.length) violations.push({ collection: 'edges', _id: String(doc._id), violations: v });
     }
 
@@ -522,7 +530,7 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireAdminMfa, asyn
     const memories = await col(`${mid}_memories`).find({}).limit(SCAN_LIMIT).toArray();
     for (const mem of memories) {
       const doc = mem as unknown as { _id: string; properties?: Record<string, unknown> };
-      const v = validateMemory(dryMeta, doc);
+      const v = validateMemory(resolvedMeta, doc);
       if (v.length) violations.push({ collection: 'memories', _id: String(doc._id), violations: v });
     }
 
@@ -530,7 +538,7 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireAdminMfa, asyn
     const chronoEntries = await col(`${mid}_chrono`).find({}).limit(SCAN_LIMIT).toArray();
     for (const ch of chronoEntries) {
       const doc = ch as unknown as { _id: string; properties?: Record<string, unknown> };
-      const v = validateChrono(dryMeta, doc);
+      const v = validateChrono(resolvedMeta, doc);
       if (v.length) violations.push({ collection: 'chrono', _id: String(doc._id), violations: v });
     }
   }

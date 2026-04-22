@@ -32,9 +32,22 @@ export interface PropertySchema {
 }
 
 export interface TypeSchema {
+  /** Reference to a schema library entry. Format: `"library:<name>"`. */
+  $ref?: string;
   namingPattern?: string;
   tagSuggestions?: string[];
   propertySchemas?: Record<string, PropertySchema>;
+}
+
+/** An entry in the instance-level schema library. */
+export interface SchemaLibraryEntry {
+  name: string;
+  knowledgeType: KnowledgeType;
+  typeName: string;
+  schema: Omit<TypeSchema, '$ref'>;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface SpaceMeta {
@@ -385,6 +398,28 @@ export class ApiService {
     settingsPassword: string;
   }): Observable<{ plaintext: string }> {
     return this.http.post<{ plaintext: string }>('/api/setup', body);
+  }
+
+  // ── Schema Library ─────────────────────────────────────────────────────────
+
+  listSchemaLibrary(): Observable<{ entries: SchemaLibraryEntry[] }> {
+    return this.http.get<{ entries: SchemaLibraryEntry[] }>('/api/schema-library');
+  }
+
+  getSchemaLibraryEntry(name: string): Observable<{ entry: SchemaLibraryEntry }> {
+    return this.http.get<{ entry: SchemaLibraryEntry }>(`/api/schema-library/${encodeURIComponent(name)}`);
+  }
+
+  createSchemaLibraryEntry(body: Omit<SchemaLibraryEntry, 'createdAt' | 'updatedAt'>): Observable<{ entry: SchemaLibraryEntry }> {
+    return this.http.post<{ entry: SchemaLibraryEntry }>('/api/schema-library', body);
+  }
+
+  upsertSchemaLibraryEntry(name: string, body: Omit<SchemaLibraryEntry, 'name' | 'createdAt' | 'updatedAt'>): Observable<{ entry: SchemaLibraryEntry }> {
+    return this.http.put<{ entry: SchemaLibraryEntry }>(`/api/schema-library/${encodeURIComponent(name)}`, body);
+  }
+
+  deleteSchemaLibraryEntry(name: string): Observable<void> {
+    return this.http.delete<void>(`/api/schema-library/${encodeURIComponent(name)}`);
   }
 
   // ── Spaces ────────────────────────────────────────────────────────────────

@@ -10,9 +10,17 @@ import type { SpaceConfig, SpaceMeta, MemoryDoc, KnowledgeType } from '../config
 const SCHEMA_KTS: KnowledgeType[] = ['entity', 'edge', 'memory', 'chrono'];
 
 /**
- * Write per-type schema JSON files into the space's `schemas/` folder.
+ * @deprecated Write per-type schema JSON files into the space's `schemas/` folder.
  * File name: `schemas/<spaceId>_<kt>_<typeName>.json`
- * This is best-effort — errors are logged but never propagated.
+ *
+ * These files are **deprecated snapshots** — they are no longer written automatically
+ * on boot and should NOT be treated as the source of truth.  The live schema lives
+ * in `config.json` under `spaces[*].meta.typeSchemas`.  Do not edit these files to
+ * change the live schema; use the API (PATCH /api/spaces/:id or
+ * PUT /api/spaces/:id/meta/typeSchemas/:kt/:name) instead.
+ *
+ * This function is kept for callers that explicitly request a snapshot export;
+ * it is no longer called automatically.
  */
 export async function syncSchemaFiles(spaceId: string, meta: SpaceMeta | undefined): Promise<void> {
   if (!meta?.typeSchemas) return;
@@ -215,8 +223,8 @@ export async function initAllSpaces(): Promise<void> {
   for (const space of cfg.spaces) {
     log.debug(`Initialising space: ${space.id}`);
     await initSpace(space.id);
-    // Sync schema files on boot so the schemas/ folder stays current
-    await syncSchemaFiles(space.id, space.meta);
+    // syncSchemaFiles is deprecated and no longer called automatically.
+    // The live schema source of truth is config.json; see syncSchemaFiles JSDoc.
   }
 }
 
