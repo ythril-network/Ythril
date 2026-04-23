@@ -126,7 +126,9 @@ const PublishPatchZ = z.object({
 const CATALOG_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,99}$/;
 const CatalogBodyZ = z.object({
   name: z.string().min(1).max(100).regex(CATALOG_NAME_RE, 'catalog name must be lowercase alphanumeric with optional dashes/underscores'),
-  url: z.string().url().max(2048).refine(u => isSsrfSafeUrl(u), { message: 'Catalog URL must use HTTPS and must not target private IPs, loopback, or cloud metadata endpoints' }),
+  url: z.string().url().max(2048)
+    .refine(u => { try { return new URL(u).protocol === 'https:'; } catch { return false; } }, { message: 'Catalog URL must use HTTPS.' })
+    .refine(u => isSsrfSafeUrl(u), { message: 'Catalog URL must not target private IPs, loopback, or cloud metadata endpoints.' }),
   description: z.string().max(500).optional(),
 });
 
@@ -448,7 +450,9 @@ schemaLibraryRouter.get('/catalogs/:name/entries', catalogProxyRateLimit, requir
 
   const result = await proxyCatalogFetch(indexUrl);
   if (!result.ok) {
-    res.status(result.status).json(result.body);
+    // Normalize all upstream errors to 502 — never forward upstream status codes.
+    const outStatus = result.status === 504 ? 504 : 502;
+    res.status(outStatus).json(result.body);
     return;
   }
   res.json({ catalog: catalogName, ...( result.body as object) });
@@ -471,7 +475,9 @@ schemaLibraryRouter.get('/catalogs/:name/entries/:entryName', catalogProxyRateLi
 
   const result = await proxyCatalogFetch(entryUrl);
   if (!result.ok) {
-    res.status(result.status).json(result.body);
+    // Normalize all upstream errors to 502 — never forward upstream status codes.
+    const outStatus = result.status === 504 ? 504 : 502;
+    res.status(outStatus).json(result.body);
     return;
   }
   res.json({ catalog: catalogName, ...(result.body as object) });
