@@ -58,6 +58,8 @@ export interface SchemaCatalog {
   url: string;
   description?: string;
   createdAt: string;
+  /** True if an access token is stored server-side for this catalog (token itself is never returned). */
+  hasAccessToken?: boolean;
 }
 
 /** A single entry from a foreign catalog (public endpoint shape). */
@@ -110,6 +112,7 @@ export interface TokenRecord {
   spaces?: string[];
   admin: boolean;
   readOnly?: boolean;
+  schemaLibrary?: boolean;
 }
 
 export interface Memory {
@@ -461,7 +464,7 @@ export class ApiService {
     return this.http.get<{ catalogs: SchemaCatalog[] }>('/api/schema-library/catalogs');
   }
 
-  addSchemaCatalog(body: { name: string; url: string; description?: string }): Observable<{ catalog: SchemaCatalog }> {
+  addSchemaCatalog(body: { name: string; url: string; description?: string; accessToken?: string }): Observable<{ catalog: SchemaCatalog }> {
     return this.http.post<{ catalog: SchemaCatalog }>('/api/schema-library/catalogs', body);
   }
 
@@ -537,7 +540,7 @@ export class ApiService {
     return this.http.get<{ tokens: TokenRecord[] }>('/api/tokens');
   }
 
-  createToken(body: { name: string; expiresAt?: string; spaces?: string[]; admin?: boolean; readOnly?: boolean }): Observable<{ token: TokenRecord; plaintext: string }> {
+  createToken(body: { name: string; expiresAt?: string; spaces?: string[]; admin?: boolean; readOnly?: boolean; schemaLibrary?: boolean }): Observable<{ token: TokenRecord; plaintext: string }> {
     return this.http.post<{ token: TokenRecord; plaintext: string }>('/api/tokens', body);
   }
 

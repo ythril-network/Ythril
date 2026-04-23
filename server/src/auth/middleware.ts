@@ -74,6 +74,8 @@ function extractBearer(req: Request): string | null {
 /**
  * Middleware that requires a valid Bearer PAT token.
  * Sets req.authToken on success.
+ * SchemaLibrary-scoped tokens are rejected here — they are only valid on
+ * GET /api/schema-library/public* via acceptSchemaLibraryToken.
  */
 export async function requireAuth(
   req: Request,
@@ -94,12 +96,53 @@ export async function requireAuth(
     return;
   }
 
+  // schemaLibrary tokens have no space/admin access — reject them on all other routes
+  if ('schemaLibrary' in record && record.schemaLibrary) {
+    res.status(403).json({ error: 'Library access tokens may only be used on the schema library public endpoint' });
+    return;
+  }
+
   authAttemptsTotal.inc({ result: 'success' });
   req.authToken = record;
 
   // Update lastUsed asynchronously for PAT tokens — do not block request
   if (isPat(bearer) && 'id' in record) touchToken(record.id);
 
+  next();
+}
+
+/**
+ * Middleware for GET /api/schema-library/public* routes.
+ * The route is unauthenticated by default, but ALSO accepts a valid
+ * schemaLibrary Bearer token so that instances behind a reverse proxy
+ * that requires Bearer credentials can still browse the catalog.
+ * Any other token type present in the header is rejected with 403
+ * (don't silently ignore an invalid/wrong-scope credential).
+ */
+export async function acceptSchemaLibraryToken(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  const bearer = extractBearer(req);
+  if (!bearer) { next(); return; } // no auth header — public access
+
+  const record = await resolveBearer(bearer);
+  if (!record) {
+    authAttemptsTotal.inc({ result: 'invalid' });
+    logAuthFailure(req);
+    res.status(401).json({ error: 'Invalid or expired token' });
+    return;
+  }
+
+  if (!('schemaLibrary' in record) || !record.schemaLibrary) {
+    res.status(403).json({ error: 'Only library access tokens may be used on this endpoint' });
+    return;
+  }
+
+  authAttemptsTotal.inc({ result: 'success' });
+  req.authToken = record;
+  if (isPat(bearer) && 'id' in record) touchToken(record.id);
   next();
 }
 

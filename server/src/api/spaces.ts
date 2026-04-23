@@ -41,7 +41,7 @@ const PropertySchemaZ = z.object({
 const TypeSchemaZ = z.union([
   // Reference to a schema library entry
   z.object({
-    $ref: z.string().regex(/^library:[a-z0-9][a-z0-9_-]{0,199}$/, '$ref must be in format "library:<name>"'),
+    $ref: z.string().regex(/^library:[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}$/, '$ref must be in format "library:<name>"'),
   }).strict(),
   // Inline schema definition
   z.object({

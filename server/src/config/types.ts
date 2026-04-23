@@ -10,6 +10,7 @@ export interface TokenRecord {
   admin: boolean;       // true = may access admin-gated routes
   readOnly?: boolean;   // true = read-only access; all mutations blocked
   peerInstanceId?: string; // set on tokens created for network peers — links this PAT to the peer that uses it inbound
+  schemaLibrary?: boolean; // true = only valid on GET /api/schema-library/public*; no space access
 }
 
 // ── Space meta / schema types ──────────────────────────────────────────────
@@ -126,6 +127,13 @@ export interface SchemaCatalog {
   url: string;
   /** Optional human-readable description. */
   description?: string;
+  /**
+   * Optional Bearer token forwarded by the catalog proxy when fetching from
+   * the remote instance.  Required when the remote is behind a reverse proxy
+   * that demands authentication (e.g. Cloudflare Access).
+   * Never returned to the client — stored server-side only.
+   */
+  accessToken?: string;
   /** ISO8601 creation timestamp. */
   createdAt: string;
 }

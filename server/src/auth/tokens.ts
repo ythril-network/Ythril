@@ -111,6 +111,7 @@ export async function createToken(opts: {
   admin?: boolean;
   readOnly?: boolean;
   peerInstanceId?: string;
+  schemaLibrary?: boolean;
 }): Promise<{ record: TokenRecord; plaintext: string }> {
   const plaintext = generateToken();
   const hash = await hashToken(plaintext);
@@ -126,6 +127,7 @@ export async function createToken(opts: {
     admin: opts.admin ?? false,
     readOnly: opts.readOnly ?? false,
     peerInstanceId: opts.peerInstanceId,
+    ...(opts.schemaLibrary ? { schemaLibrary: true } : {}),
   };
   const config = getConfig();
   config.tokens.push(record);

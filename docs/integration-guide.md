@@ -1964,7 +1964,7 @@ Library entries are stored in `schema-library.json` (sibling to `config.json`). 
 }
 ```
 
-**Name format:** `^[a-z0-9][a-z0-9_-]{0,199}$` — lowercase alphanumeric, dashes, and underscores. May not start with a dash or underscore.
+**Name format:** `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}$` — alphanumeric (upper and lower), dots, dashes, and underscores. May not start with a dash, dot, or underscore. Max 200 characters.
 
 #### List all entries
 
@@ -2099,13 +2099,21 @@ To unpublish, send `{ "published": false }`.
 
 > **Security note:** Publishing only exposes the schema definition (field types, constraints, naming patterns, tag suggestions). It never exposes space data, memories, or any other tenant information.
 
-#### Public listing (unauthenticated)
+#### Public listing
 
-Returns all published entries. No `Authorization` header is required. Rate-limited at 60 requests/minute per IP.
+Returns all published entries. Rate-limited at 60 requests/minute per IP.
 
 ```
 GET /api/schema-library/public
 ```
+
+No `Authorization` header is required for open instances. When the remote instance is behind an auth proxy (e.g. Cloudflare Access), pass a **library access token** as a Bearer credential:
+
+```
+Authorization: Bearer <schemaLibrary-token>
+```
+
+An invalid or wrong-scope token returns `401`/`403`. A missing token on an open instance is accepted.
 
 **Response** `200`:
 ```json
@@ -2147,7 +2155,9 @@ GET /api/schema-library/catalogs
 Authorization: Bearer <token>
 ```
 
-**Response** `200 { "catalogs": [ { "name", "url", "description", "createdAt" } ] }`.
+**Response** `200 { "catalogs": [ { "name", "url", "description", "createdAt", "hasAccessToken" } ] }`.
+
+`hasAccessToken` is `true` when a library access token is stored for this catalog (used to authenticate against the remote). The plaintext token is never returned.
 
 ##### Add a catalog link
 
@@ -2159,7 +2169,8 @@ Content-Type: application/json
 {
   "name": "acme-schemas",
   "url": "https://brain.acme.example/api/schema-library",
-  "description": "ACME Corp shared schema catalog"
+  "description": "ACME Corp shared schema catalog",
+  "accessToken": "ythril_xK9mPq..."
 }
 ```
 
@@ -2167,11 +2178,12 @@ Content-Type: application/json
 
 | Field | Required | Notes |
 |---|---|---|
-| `name` | ✓ | Unique catalog ID: `^[a-z0-9][a-z0-9_-]{0,99}$` |
+| `name` | ✓ | Unique catalog ID: `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$` |
 | `url` | ✓ | Base URL of the remote schema library. Must be HTTPS; private/loopback addresses are rejected (SSRF protection). |
 | `description` | — | Free text, up to 500 characters. |
+| `accessToken` | — | A library access token issued by the remote instance. Required only when the remote's `/public` endpoint is behind an auth proxy (e.g. Cloudflare Access). Stored encrypted at rest; never returned in list or get responses — only `hasAccessToken: true/false` is exposed. |
 
-**Responses:** `201 { "catalog": { ... } }`, `400` (invalid URL/name), `409` (name already exists), `400` (SSRF-blocked URL).
+**Responses:** `201 { "catalog": { ..., "hasAccessToken": true } }`, `400` (invalid URL/name), `409` (name already exists), `400` (SSRF-blocked URL).
 
 > **SSRF protection:** Private-range IPs (`10.x`, `172.16–31.x`, `192.168.x`), loopback (`127.x`, `::1`), link-local (`169.254.x`), and GCP metadata (`169.254.169.254`) are rejected at validation time. Only HTTPS scheme is accepted.
 
@@ -2312,6 +2324,17 @@ POST /api/tokens
 }
 ```
 
+**Fields:**
+
+| Field | Notes |
+|---|---|
+| `name` | Required. Human-readable label. |
+| `admin` | `true` for full admin scope. Mutually exclusive with `schemaLibrary`. |
+| `readOnly` | Block all writes. Ignored when `schemaLibrary` is `true` (always read-only). |
+| `spaces` | Array of space IDs to scope this token. Omit for all-spaces access. Must be empty or omitted when `schemaLibrary` is `true`. |
+| `expiresAt` | ISO 8601 expiry timestamp. Omit for non-expiring. |
+| `schemaLibrary` | `true` to issue a **library access token**. See below. |
+
 **Response** `201`:
 
 ```json
@@ -2322,6 +2345,20 @@ POST /api/tokens
 ```
 
 > **The `plaintext` field is shown once.** Store it immediately.
+
+#### Library Access Tokens
+
+A **library access token** (`schemaLibrary: true`) grants read-only access to the public schema library endpoints (`GET /api/schema-library/public*`) only. It cannot access brain data, files, MCP tools, or any space.
+
+```json
+{ "name": "Remote Catalog Reader", "schemaLibrary": true }
+```
+
+Use cases:
+- The remote instance's `/public` endpoint is behind an auth proxy (Cloudflare Access, nginx auth, etc.) that requires a Bearer token.
+- A consumer instance adds a foreign catalog and stores this token as the catalog's `accessToken`. It is forwarded as `Authorization: Bearer` on every catalog browse request.
+
+Constraints: `admin` must be `false`/omitted; `spaces` must be empty/omitted. The token is always `readOnly: true` — this cannot be overridden. Multiple library access tokens may coexist.
 
 ---
 

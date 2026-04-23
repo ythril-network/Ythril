@@ -85,6 +85,16 @@ import { TranslocoService } from '@jsverse/transloco';
       font-weight: 600;
       letter-spacing: 0.02em;
     }
+    .badge-schema-lib {
+      background: rgba(14,165,233,.12);
+      color: #0ea5e9;
+      border: 1px solid rgba(14,165,233,.3);
+      border-radius: 4px;
+      padding: 1px 7px;
+      font-size: 0.73rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
     .form-grid {
       display: grid;
       grid-template-columns: 1fr 160px;
@@ -380,6 +390,7 @@ import { TranslocoService } from '@jsverse/transloco';
                   </td>
                   <td>
                     @if (t.admin) { <span class="badge-admin">{{ 'tokens.badge.admin' | transloco }}</span> }
+                    @else if (t.schemaLibrary) { <span class="badge-schema-lib">{{ 'tokens.badge.schemaLibrary' | transloco }}</span> }
                     @else if (t.readOnly) { <span class="badge-readonly">{{ 'tokens.badge.readOnly' | transloco }}</span> }
                     @else { <span class="badge badge-gray">{{ 'tokens.badge.standard' | transloco }}</span> }
                   </td>
@@ -401,7 +412,9 @@ import { TranslocoService } from '@jsverse/transloco';
                     }
                   </td>
                   <td>
-                    @if (!t.spaces || t.spaces.length === 0) {
+                    @if (t.schemaLibrary) {
+                      <span class="badge badge-gray" style="font-style:italic;">{{ 'tokens.badge.schemaLibraryOnly' | transloco }}</span>
+                    } @else if (!t.spaces || t.spaces.length === 0) {
                       <span class="badge badge-green">{{ 'tokens.badge.allSpaces' | transloco }}</span>
                     } @else {
                       <span class="badge badge-gray">{{ t.spaces.join(', ') }}</span>

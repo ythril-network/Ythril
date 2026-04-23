@@ -272,13 +272,17 @@ Click anywhere on a card to open and edit it. Changes save and close automatical
 
 **Publishing:** Click the globe icon on a card to make the entry visible to other Ythril instances. The icon turns accented when published. Click again to unpublish. No space data is ever exposed — only the schema definition.
 
+**Sharing your library:** On the My Library tab, the search bar row also shows your instance's public library URL. Click **Copy** to copy it. Other instances can paste this URL when adding a catalog link.
+
+To protect your library endpoint with a token (e.g. when your instance sits behind Cloudflare Access), click **Create token**. Give the token a name and click **Create** — the value is shown once. Paste it into the **Library Access Token** field when the consuming instance adds a catalog link pointing to you.
+
 **Deleting:** Click the trash icon. If spaces currently reference the entry, a dialog shows which ones and offers to unlink them automatically before deleting.
 
 ### Foreign Catalogs tab
 
 This tab lets you link to other Ythril instances' public schema libraries and import their definitions.
 
-**Adding a catalog:** Click **Add Catalog**. Enter a short ID (e.g. `acme`), the base URL of the remote instance (e.g. `https://brain.acme.example`), and an optional description.
+**Adding a catalog:** Click **Add Catalog**. Enter a short ID (e.g. `acme`), the base URL of the remote instance (e.g. `https://brain.acme.example`), and an optional description. If the remote instance requires authentication on its public library endpoint (indicated by a lock icon or communicated by the owner), also enter the **Library Access Token** they issued you.
 
 **Browsing:** Click **Browse** on a catalog card to see all published entries on that remote instance.
 
@@ -346,12 +350,13 @@ All access to Ythril — from the web UI, REST API, or AI assistants — require
 | Admin | Everything, including token and space management |
 | Standard | Brain, files, and MCP tools; cannot manage tokens, spaces, or networks |
 | Read-only | Search and read only; all writes blocked |
+| Library Access | Public schema library endpoints only (`/api/schema-library/public*`); no space data, no brain, no files |
 
-Tokens can also be **space-scoped** — restricted to a specific list of spaces. Spaces outside that list are invisible to the token.
+Tokens can also be **space-scoped** — restricted to a specific list of spaces. Spaces outside that list are invisible to the token. Library Access tokens are always space-less.
 
 ### Creating a token
 
-Click **+ New token**. Enter a name, choose a permission level, optionally set an expiry date, and optionally restrict it to specific spaces. Click **Create** — the token value is shown **once**. Copy it immediately.
+Click **+ New token**. Enter a name, choose a permission level, optionally set an expiry date, and optionally restrict it to specific spaces. To create a library access token (for sharing your schema library with other instances), enable **Library Access** — space selection and write access are then disabled automatically. Click **Create** — the token value is shown **once**. Copy it immediately.
 
 ### Rotating a token
 

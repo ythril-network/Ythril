@@ -157,6 +157,8 @@ function formStateToSchema(f: LibraryFormState): Omit<TypeSchema, '$ref'> {
     /* import/export banner */
     .ref-hint { font-size:12px; color:var(--text-secondary); background:var(--bg-elevated); border:1px solid var(--border); border-radius:var(--radius-sm); padding:8px 12px; margin-bottom:20px; font-family:var(--font-mono); }
     .ref-hint code { color:var(--accent); }
+    .share-bar-url { font-size:12px; font-family:var(--font-mono); color:var(--accent); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .badge-auth { font-size:10px; font-weight:600; color:#0ea5e9; background:rgba(14,165,233,.12); border-radius:3px; padding:1px 6px; }
   `],
   template: `
     <div class="header-row">
@@ -178,8 +180,19 @@ function formStateToSchema(f: LibraryFormState): Omit<TypeSchema, '$ref'> {
       <button class="page-tab" [class.active]="pageTab()==='catalogs'" (click)="pageTab.set('catalogs');loadCatalogs()"><ph-icon name="globe" [size]="13" style="margin-right:4px;"/>{{ 'schemaLib.tab.catalogs' | transloco }}</button>
     </div>
 
-    <div class="search-row">
-      <input type="search" [ngModel]="searchQuery()" (ngModelChange)="searchQuery.set($event)" [placeholder]="'schemaLib.searchPlaceholder' | transloco" />
+    <div class="search-row" style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+      <input type="search" style="flex:1;min-width:0;" [ngModel]="searchQuery()" (ngModelChange)="searchQuery.set($event)" [placeholder]="'schemaLib.searchPlaceholder' | transloco" />
+      @if (pageTab() === 'library') {
+        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+          <span class="share-bar-url" style="max-width:260px;">{{ libraryPublicUrl }}</span>
+          <button class="btn btn-secondary btn-sm" type="button" (click)="copyLibraryUrl()" [attr.title]="'schemaLib.share.copyButton' | transloco">
+            @if (urlCopied()) { <ph-icon name="check" [size]="13"/> } @else { <ph-icon name="copy" [size]="13"/> }
+          </button>
+          <button class="btn btn-secondary btn-sm" type="button" (click)="showCreateLibToken.set(true)" [attr.title]="'schemaLib.share.createTokenButton' | transloco">
+            <ph-icon name="key" [size]="13"/>
+          </button>
+        </div>
+      }
     </div>
     @if (pageTab() === 'library' && entries().length) {
       <div class="type-filters">
@@ -261,6 +274,7 @@ function formStateToSchema(f: LibraryFormState): Omit<TypeSchema, '$ref'> {
                 <div style="font-weight:600;font-size:14px;font-family:var(--font-mono);">{{ cat.name }}</div>
                 <div style="font-size:12px;color:var(--text-muted);word-break:break-all;margin-top:2px;">{{ cat.url }}</div>
                 @if (cat.description) { <div style="font-size:12px;color:var(--text-secondary);margin-top:3px;">{{ cat.description }}</div> }
+                @if (cat.hasAccessToken) { <div style="margin-top:4px;"><span class="badge-auth">{{ 'schemaLib.catalog.hasToken' | transloco }}</span></div> }
               </div>
               <div style="display:flex;gap:6px;flex-shrink:0;">
                 <button class="btn btn-secondary btn-sm" type="button" (click)="openBrowse(cat.name)">{{ 'schemaLib.catalog.browseButton' | transloco }}</button>
@@ -288,9 +302,14 @@ function formStateToSchema(f: LibraryFormState): Omit<TypeSchema, '$ref'> {
             <label>{{ 'schemaLib.catalog.urlLabel' | transloco }}</label>
             <input type="url" [(ngModel)]="newCatalog.url" [placeholder]="'schemaLib.catalog.urlPlaceholder' | transloco" />
           </div>
-          <div class="field" style="margin-bottom:20px;">
+          <div class="field" style="margin-bottom:14px;">
             <label>{{ 'schemaLib.catalog.descLabel' | transloco }}</label>
             <input type="text" [(ngModel)]="newCatalog.description" [placeholder]="'schemaLib.catalog.descPlaceholder' | transloco" />
+          </div>
+          <div class="field" style="margin-bottom:20px;">
+            <label>{{ 'schemaLib.catalog.accessTokenLabel' | transloco }}</label>
+            <input type="password" [(ngModel)]="newCatalog.accessToken" [placeholder]="'schemaLib.catalog.accessTokenPlaceholder' | transloco" autocomplete="off" />
+            <span style="font-size:11px;color:var(--text-muted);">{{ 'schemaLib.catalog.accessTokenHint' | transloco }}</span>
           </div>
           @if (catalogError()) { <p style="font-size:12px;color:var(--danger);margin:0 0 12px;">{{ catalogError() }}</p> }
           <div style="display:flex;gap:8px;justify-content:flex-end;">
@@ -336,6 +355,49 @@ function formStateToSchema(f: LibraryFormState): Omit<TypeSchema, '$ref'> {
         </div>
       </div>
     }
+    <!-- Create library access token dialog -->
+    @if (showCreateLibToken()) {
+      <div style="position:fixed;inset:0;background:var(--bg-scrim);display:flex;align-items:center;justify-content:center;z-index:200;" (click)="closeCreateLibToken()">
+        <div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-lg);padding:24px;width:92vw;max-width:420px;" (click)="$event.stopPropagation()">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+            <h3 style="margin:0;font-size:15px;">{{ 'schemaLib.share.tokenDialogTitle' | transloco }}</h3>
+            <button class="icon-btn" type="button" (click)="closeCreateLibToken()"><ph-icon name="x" [size]="18"/></button>
+          </div>
+          <p style="font-size:13px;color:var(--text-secondary);margin:0 0 16px;">{{ 'schemaLib.share.tokenDialogHint' | transloco }}</p>
+          <div class="field" style="margin-bottom:14px;">
+            <label>{{ 'schemaLib.share.tokenNameLabel' | transloco }}</label>
+            <input type="text" [ngModel]="libTokenName()" (ngModelChange)="libTokenName.set($event)" [placeholder]="'schemaLib.share.tokenNamePlaceholder' | transloco" (keydown.enter)="createLibraryToken()" />
+          </div>
+          @if (libTokenError()) { <p style="font-size:12px;color:var(--danger);margin:0 0 12px;">{{ libTokenError() }}</p> }
+          <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <button class="btn btn-secondary btn-sm" type="button" (click)="closeCreateLibToken()">{{ 'common.cancel' | transloco }}</button>
+            <button class="btn btn-primary" type="button" (click)="createLibraryToken()" [disabled]="libTokenCreating()">
+              {{ libTokenCreating() ? ('common.saving' | transloco) : ('schemaLib.share.createTokenButton' | transloco) }}
+            </button>
+          </div>
+        </div>
+      </div>
+    }
+
+    <!-- Library access token one-time reveal -->
+    @if (libTokenRevealed()) {
+      <div style="position:fixed;inset:0;background:var(--bg-scrim);display:flex;align-items:center;justify-content:center;z-index:210;">
+        <div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-lg);padding:24px;width:92vw;max-width:480px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+            <h3 style="margin:0;font-size:15px;">{{ 'schemaLib.share.tokenCreatedTitle' | transloco }}</h3>
+          </div>
+          <p style="font-size:13px;color:var(--text-secondary);margin:0 0 12px;">{{ 'schemaLib.share.tokenCreatedHint' | transloco }}</p>
+          <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;font-family:var(--font-mono);font-size:12px;word-break:break-all;color:var(--accent);margin-bottom:16px;">{{ libTokenRevealed() }}</div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <button class="btn btn-secondary btn-sm" type="button" (click)="copyRevealedToken()">
+              <ph-icon name="copy" [size]="12" style="margin-right:4px;"/>{{ 'schemaLib.share.copyButton' | transloco }}
+            </button>
+            <button class="btn btn-primary" type="button" (click)="libTokenRevealed.set(null)">{{ 'common.close' | transloco }}</button>
+          </div>
+        </div>
+      </div>
+    }
+
     @if (showDialog()) {
       <div class="dialog-backdrop" (click)="closeDialog()">
         <div class="dialog" (click)="$event.stopPropagation()">
@@ -464,7 +526,16 @@ export class SchemaLibraryComponent implements OnInit {
   catalogError    = signal('');
   showAddCatalog  = signal(false);
   catalogImporting = signal(false);
-  newCatalog: { name: string; url: string; description: string } = { name: '', url: '', description: '' };
+  newCatalog: { name: string; url: string; description: string; accessToken: string } = { name: '', url: '', description: '', accessToken: '' };
+
+  /** Library sharing signals. */
+  readonly libraryPublicUrl = window.location.origin + '/api/schema-library';
+  urlCopied           = signal(false);
+  showCreateLibToken  = signal(false);
+  libTokenName        = signal('');
+  libTokenCreating    = signal(false);
+  libTokenRevealed    = signal<string | null>(null);
+  libTokenError       = signal('');
 
   /** Catalog browse dialog state. */
   browsing = signal<{
@@ -729,14 +800,14 @@ export class SchemaLibraryComponent implements OnInit {
   }
 
   openAddCatalog(): void {
-    this.newCatalog = { name: '', url: '', description: '' };
+    this.newCatalog = { name: '', url: '', description: '', accessToken: '' };
     this.catalogError.set('');
     this.showAddCatalog.set(true);
   }
 
   addCatalog(): void {
     this.catalogError.set('');
-    const { name, url, description } = this.newCatalog;
+    const { name, url, description, accessToken } = this.newCatalog;
     if (!name.trim() || !url.trim()) {
       this.catalogError.set(this.transloco.translate('schemaLib.catalog.errorRequired'));
       return;
@@ -744,7 +815,7 @@ export class SchemaLibraryComponent implements OnInit {
     this.catalogSaving.set(true);
     const baseUrl = url.trim().replace(/\/+$/, '');
     const catalogUrl = baseUrl.endsWith('/api/schema-library') ? baseUrl : `${baseUrl}/api/schema-library`;
-    this.api.addSchemaCatalog({ name: name.trim(), url: catalogUrl, description: description.trim() || undefined }).pipe(
+    this.api.addSchemaCatalog({ name: name.trim(), url: catalogUrl, description: description.trim() || undefined, accessToken: accessToken.trim() || undefined }).pipe(
       finalize(() => this.catalogSaving.set(false)),
     ).subscribe({
       next: ({ catalog }) => {
@@ -755,6 +826,47 @@ export class SchemaLibraryComponent implements OnInit {
         this.catalogError.set(err?.error?.error ?? this.transloco.translate('schemaLib.catalog.saveError'));
       },
     });
+  }
+
+  // ── Library sharing ──────────────────────────────────────────────────────
+
+  copyLibraryUrl(): void {
+    navigator.clipboard.writeText(this.libraryPublicUrl).then(() => {
+      this.urlCopied.set(true);
+      setTimeout(() => this.urlCopied.set(false), 2000);
+    }).catch(() => {});
+  }
+
+  closeCreateLibToken(): void {
+    this.showCreateLibToken.set(false);
+    this.libTokenName.set('');
+    this.libTokenError.set('');
+  }
+
+  createLibraryToken(): void {
+    const name = this.libTokenName().trim();
+    if (!name) {
+      this.libTokenError.set(this.transloco.translate('tokens.error.nameRequired'));
+      return;
+    }
+    this.libTokenCreating.set(true);
+    this.libTokenError.set('');
+    this.api.createToken({ name, schemaLibrary: true }).pipe(
+      finalize(() => this.libTokenCreating.set(false)),
+    ).subscribe({
+      next: ({ plaintext }) => {
+        this.closeCreateLibToken();
+        this.libTokenRevealed.set(plaintext);
+      },
+      error: (err) => {
+        this.libTokenError.set(err?.error?.error ?? this.transloco.translate('tokens.error.createFailed'));
+      },
+    });
+  }
+
+  copyRevealedToken(): void {
+    const t = this.libTokenRevealed();
+    if (t) navigator.clipboard.writeText(t).catch(() => {});
   }
 
   removeCatalog(name: string): void {

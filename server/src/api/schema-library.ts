@@ -25,7 +25,7 @@
  */
 
 import { Router } from 'express';
-import { requireAuth, requireAdminMfa } from '../auth/middleware.js';
+import { requireAuth, requireAdminMfa, acceptSchemaLibraryToken } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { getSchemaLibrary, saveSchemaLibrary, getConfig, getSchemaCatalogs, saveSchemaCatalogs } from '../config/loader.js';
 import { isSsrfSafeUrl } from '../util/ssrf.js';
@@ -91,11 +91,11 @@ const LibraryTypeSchemaZ = z.object({
   propertySchemas: z.record(z.string().min(1).max(200), PropertySchemaZ).optional(),
 }).strict();
 
-/** Name must be URL-safe and reasonably short. */
-const LIBRARY_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,199}$/;
+/** Name must be URL-safe and reasonably short. Allows uppercase, dots, dashes, underscores. */
+const LIBRARY_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}$/;
 
 const LibraryEntryBodyZ = z.object({
-  name: z.string().min(1).max(200).regex(LIBRARY_NAME_RE, 'name must be lowercase alphanumeric with optional dashes/underscores, starting with a lowercase letter or digit'),
+  name: z.string().min(1).max(200).regex(LIBRARY_NAME_RE, 'name must start with an alphanumeric character and contain only letters, digits, dots, dashes, or underscores'),
   knowledgeType: z.enum(['entity', 'memory', 'edge', 'chrono']),
   typeName: z.string().min(1).max(200),
   schema: LibraryTypeSchemaZ,
@@ -123,13 +123,15 @@ const PublishPatchZ = z.object({
 });
 
 /** Body for POST /catalogs */
-const CATALOG_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,99}$/;
+const CATALOG_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/;
 const CatalogBodyZ = z.object({
-  name: z.string().min(1).max(100).regex(CATALOG_NAME_RE, 'catalog name must be lowercase alphanumeric with optional dashes/underscores'),
+  name: z.string().min(1).max(100).regex(CATALOG_NAME_RE, 'catalog name must start with an alphanumeric character and contain only letters, digits, dots, dashes, or underscores'),
   url: z.string().url().max(2048)
     .refine(u => { try { return new URL(u).protocol === 'https:'; } catch { return false; } }, { message: 'Catalog URL must use HTTPS.' })
     .refine(u => isSsrfSafeUrl(u), { message: 'Catalog URL must not target private IPs, loopback, or cloud metadata endpoints.' }),
   description: z.string().max(500).optional(),
+  /** Bearer token forwarded when proxying requests to this catalog's /public endpoint. */
+  accessToken: z.string().min(1).max(500).optional(),
 });
 
 // ── GET / — list all library entries ──────────────────────────────────────
@@ -146,7 +148,7 @@ schemaLibraryRouter.get('/', globalRateLimit, requireAuth, (_req, res) => {
 
 // ── GET /public — index of published entries ─────────────────────────────
 
-schemaLibraryRouter.get('/public', publicRateLimit, (_req, res) => {
+schemaLibraryRouter.get('/public', publicRateLimit, acceptSchemaLibraryToken, (_req, res) => {
   const published = getSchemaLibrary()
     .filter(e => e.published)
     .map(({ name, knowledgeType, typeName, description, updatedAt }) => ({
@@ -157,7 +159,7 @@ schemaLibraryRouter.get('/public', publicRateLimit, (_req, res) => {
 
 // ── GET /public/:name — a single published entry ─────────────────────────
 
-schemaLibraryRouter.get('/public/:name', publicRateLimit, (req, res) => {
+schemaLibraryRouter.get('/public/:name', publicRateLimit, acceptSchemaLibraryToken, (req, res) => {
   const name = req.params['name'] as string;
   const entry = getSchemaLibrary().find(e => e.name === name);
 
@@ -170,11 +172,15 @@ schemaLibraryRouter.get('/public/:name', publicRateLimit, (req, res) => {
   res.json({ entry: { name: entry.name, knowledgeType: entry.knowledgeType, typeName: entry.typeName, schema: entry.schema, description: entry.description, updatedAt: entry.updatedAt } });
 });
 
-// ── GET /catalogs — list all catalog links ────────────────────────────────
+// ── GET /catalogs — list catalog links ────────────────────────────────────
 // Must precede GET /:name to avoid 'catalogs' being treated as a library entry name.
-
 schemaLibraryRouter.get('/catalogs', globalRateLimit, requireAuth, (_req, res) => {
-  res.json({ catalogs: getSchemaCatalogs() });
+  // Never expose stored accessToken values — return a boolean flag instead
+  const catalogs = getSchemaCatalogs().map(({ accessToken, ...rest }) => ({
+    ...rest,
+    hasAccessToken: !!accessToken,
+  }));
+  res.json({ catalogs });
 });
 
 // ── GET /:name — get a single library entry ────────────────────────────────
@@ -393,10 +399,13 @@ schemaLibraryRouter.post('/catalogs', globalRateLimit, requireAdminMfa, (req, re
     name: parsed.data.name,
     url: parsed.data.url,
     ...(parsed.data.description ? { description: parsed.data.description } : {}),
+    ...(parsed.data.accessToken ? { accessToken: parsed.data.accessToken } : {}),
     createdAt: new Date().toISOString(),
   };
   saveSchemaCatalogs([...catalogs, catalog]);
-  res.status(201).json({ catalog });
+  // Return catalog without exposing the stored accessToken
+  const { accessToken: _at, ...safeCatalog } = catalog;
+  res.status(201).json({ catalog: { ...safeCatalog, hasAccessToken: !!catalog.accessToken } });
 });
 
 // ── DELETE /catalogs/:name — remove a catalog link ────────────────────────
@@ -417,14 +426,13 @@ schemaLibraryRouter.delete('/catalogs/:name', globalRateLimit, requireAdminMfa, 
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Fetch a foreign URL with timeout and basic safety checks. */
-async function proxyCatalogFetch(url: string): Promise<{ ok: boolean; status: number; body: unknown }> {
+async function proxyCatalogFetch(url: string, accessToken?: string): Promise<{ ok: boolean; status: number; body: unknown }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), CATALOG_PROXY_TIMEOUT_MS);
   try {
-    const resp = await fetch(url, {
-      headers: { Accept: 'application/json', 'User-Agent': 'Ythril-CatalogProxy/1.0' },
-      signal: controller.signal,
-    });
+    const headers: Record<string, string> = { Accept: 'application/json', 'User-Agent': 'Ythril-CatalogProxy/1.0' };
+    if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
+    const resp = await fetch(url, { headers, signal: controller.signal });
     clearTimeout(timer);
     const body = await resp.json().catch(() => null);
     return { ok: resp.ok, status: resp.status, body };
@@ -448,7 +456,7 @@ schemaLibraryRouter.get('/catalogs/:name/entries', catalogProxyRateLimit, requir
   // Build the index URL (ensure no double slash)
   const indexUrl = catalog.url.replace(/\/$/, '') + (catalog.url.endsWith('/public') ? '' : '/public');
 
-  const result = await proxyCatalogFetch(indexUrl);
+  const result = await proxyCatalogFetch(indexUrl, catalog.accessToken);
   if (!result.ok) {
     // Normalize all upstream errors to 502 — never forward upstream status codes.
     const outStatus = result.status === 504 ? 504 : 502;
@@ -473,7 +481,7 @@ schemaLibraryRouter.get('/catalogs/:name/entries/:entryName', catalogProxyRateLi
   const base = catalog.url.replace(/\/$/, '');
   const entryUrl = (base.endsWith('/public') ? base : base + '/public') + '/' + encodeURIComponent(entryName);
 
-  const result = await proxyCatalogFetch(entryUrl);
+  const result = await proxyCatalogFetch(entryUrl, catalog.accessToken);
   if (!result.ok) {
     // Normalize all upstream errors to 502 — never forward upstream status codes.
     const outStatus = result.status === 504 ? 504 : 502;

@@ -156,9 +156,11 @@ describe('POST /api/schema-library — create entry', () => {
     assert.equal(r.status, 400, JSON.stringify(r.body));
   });
 
-  it('returns 400 for name with uppercase characters', async () => {
+  it('returns 201 for name with uppercase characters (relaxed naming rules)', async () => {
+    await del(INSTANCES.a, token(), `/api/schema-library/UPPERCASE-name`).catch(() => {});
     const r = await createEntry({ ...ENTRY_BODY, name: 'UPPERCASE-name' });
-    assert.equal(r.status, 400, JSON.stringify(r.body));
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    await del(INSTANCES.a, token(), `/api/schema-library/UPPERCASE-name`).catch(() => {});
   });
 
   it('returns 400 for name starting with a dash', async () => {
@@ -790,5 +792,127 @@ describe('Foreign catalogs — CRUD and proxy endpoints', () => {
   it('DELETE /catalogs/:name returns 404 for unknown name', async () => {
     const r = await del(INSTANCES.a, token(), `/api/schema-library/catalogs/${encodeURIComponent(`ghost-cat-${RUN}`)}`);
     assert.equal(r.status, 404, JSON.stringify(r.body));
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  Library access tokens — schemaLibrary flag
+// ═════════════════════════════════════════════════════════════════════════════
+describe('Library access tokens', () => {
+  let libToken; // plaintext PAT with schemaLibrary: true
+
+  before(async () => {
+    const r = await post(INSTANCES.a, token(), '/api/tokens', {
+      name: `lib-access-${RUN}`,
+      schemaLibrary: true,
+    });
+    assert.equal(r.status, 201, `Failed to create schemaLibrary token: ${JSON.stringify(r.body)}`);
+    libToken = r.body.plaintext;
+  });
+
+  after(async () => {
+    const listR = await get(INSTANCES.a, token(), '/api/tokens');
+    const found = listR.body?.tokens?.find(t => t.name === `lib-access-${RUN}`);
+    if (found) await del(INSTANCES.a, token(), `/api/tokens/${found.id}`).catch(() => {});
+  });
+
+  it('schemaLibrary token is returned with schemaLibrary:true and readOnly:true', async () => {
+    const listR = await get(INSTANCES.a, token(), '/api/tokens');
+    assert.equal(listR.status, 200);
+    const found = listR.body?.tokens?.find(t => t.name === `lib-access-${RUN}`);
+    assert.ok(found, 'schemaLibrary token should appear in token list');
+    assert.equal(found.schemaLibrary, true);
+    assert.equal(found.readOnly, true);
+    assert.deepEqual(found.spaces, [], 'schemaLibrary token should have empty spaces array');
+    assert.equal(found.admin, false);
+  });
+
+  it('schemaLibrary token cannot be created with admin:true', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/tokens', {
+      name: `lib-admin-${RUN}`,
+      schemaLibrary: true,
+      admin: true,
+    });
+    assert.equal(r.status, 400, `Expected 400 for schemaLibrary+admin combo, got ${r.status}`);
+  });
+
+  it('schemaLibrary token cannot be created with spaces', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/tokens', {
+      name: `lib-spaces-${RUN}`,
+      schemaLibrary: true,
+      spaces: ['some-space'],
+    });
+    assert.equal(r.status, 400, `Expected 400 for schemaLibrary+spaces combo, got ${r.status}`);
+  });
+
+  it('GET /public accepts schemaLibrary token (200)', async () => {
+    const r = await reqJson(INSTANCES.a, libToken, '/api/schema-library/public', {});
+    assert.equal(r.status, 200, `schemaLibrary token should be accepted on /public, got ${r.status}: ${JSON.stringify(r.body)}`);
+  });
+
+  it('GET /public/:name accepts schemaLibrary token (200 or 404 for unknown)', async () => {
+    const r = await reqJson(INSTANCES.a, libToken, '/api/schema-library/public/nonexistent-entry-test', {});
+    assert.ok([200, 404].includes(r.status), `schemaLibrary token on /public/:name got unexpected status ${r.status}`);
+  });
+
+  it('schemaLibrary token is rejected by requireAuth routes (403)', async () => {
+    // GET /api/schema-library (authenticated list) should reject schemaLibrary token
+    const r = await get(INSTANCES.a, libToken, '/api/schema-library');
+    assert.equal(r.status, 403, `schemaLibrary token should be rejected on authenticated routes, got ${r.status}`);
+  });
+
+  it('schemaLibrary token is rejected by /api/tokens/me (403)', async () => {
+    // GET /api/tokens/me uses requireAuth — schemaLibrary tokens must be blocked there too
+    const r = await get(INSTANCES.a, libToken, '/api/tokens/me');
+    assert.equal(r.status, 403, `schemaLibrary token should be rejected on /api/tokens/me, got ${r.status}`);
+  });
+
+  it('invalid Bearer token on /public returns 401', async () => {
+    const r = await reqJson(INSTANCES.a, 'invalid-not-a-real-token', '/api/schema-library/public', {});
+    assert.equal(r.status, 401, `Invalid token on /public should return 401, got ${r.status}`);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  Catalog accessToken — stored and redacted
+// ═════════════════════════════════════════════════════════════════════════════
+describe('Catalog accessToken — stored but never returned', () => {
+  const catName = `test-cat-tok-${RUN}`;
+
+  after(async () => {
+    await del(INSTANCES.a, token(), `/api/schema-library/catalogs/${encodeURIComponent(catName)}`).catch(() => {});
+  });
+
+  it('POST /catalogs stores accessToken and returns hasAccessToken:true', async () => {
+    const r = await post(INSTANCES.a, token(), '/api/schema-library/catalogs', {
+      name: catName,
+      url: 'https://example.com/api/schema-library',
+      accessToken: 'ythril-a-very-long-token-value-1234567890',
+    });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.equal(r.body.catalog?.name, catName);
+    assert.equal(r.body.catalog?.hasAccessToken, true, 'hasAccessToken should be true');
+    assert.ok(!('accessToken' in r.body.catalog), 'accessToken must not be returned in response');
+  });
+
+  it('GET /catalogs redacts accessToken — hasAccessToken:true, no plaintext', async () => {
+    const r = await get(INSTANCES.a, token(), '/api/schema-library/catalogs');
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const found = r.body.catalogs?.find(c => c.name === catName);
+    assert.ok(found, `${catName} should appear in catalog list`);
+    assert.equal(found.hasAccessToken, true, 'hasAccessToken should be true in list');
+    assert.ok(!('accessToken' in found), 'accessToken must not appear in catalog list response');
+  });
+
+  it('POST /catalogs without accessToken returns hasAccessToken:false', async () => {
+    const noTokenName = `test-cat-notok-${RUN}`;
+    const r = await post(INSTANCES.a, token(), '/api/schema-library/catalogs', {
+      name: noTokenName,
+      url: 'https://example.com/api/schema-library',
+    });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.equal(r.body.catalog?.hasAccessToken, false, 'hasAccessToken should be false when no token provided');
+    assert.ok(!('accessToken' in r.body.catalog), 'accessToken must not be returned');
+    await del(INSTANCES.a, token(), `/api/schema-library/catalogs/${encodeURIComponent(noTokenName)}`).catch(() => {});
   });
 });

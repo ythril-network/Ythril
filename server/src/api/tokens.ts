@@ -18,6 +18,7 @@ const CreateTokenBody = z.object({
   admin: z.boolean().optional(),
   readOnly: z.boolean().optional(),
   peerInstanceId: z.string().uuid().optional(),
+  schemaLibrary: z.boolean().optional(),
 });
 
 // GET /api/tokens — list tokens (hashes excluded) — admin only
@@ -33,12 +34,19 @@ tokensRouter.post('/', authRateLimit, requireAdminMfa, async (req, res) => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-  const { name, expiresAt, spaces, admin, readOnly, peerInstanceId } = parsed.data;
+  const { name, expiresAt, spaces, admin, readOnly, peerInstanceId, schemaLibrary } = parsed.data;
   if (admin && readOnly) {
     res.status(400).json({ error: 'A token cannot be both admin and readOnly' });
     return;
   }
-  const { record, plaintext } = await createToken({ name, expiresAt: expiresAt ?? null, spaces, admin, readOnly, peerInstanceId });
+  if (schemaLibrary && (admin || spaces?.length)) {
+    res.status(400).json({ error: 'A schemaLibrary token cannot have admin or space access' });
+    return;
+  }
+  // schemaLibrary tokens are always read-only and have no space access
+  const effectiveReadOnly = schemaLibrary ? true : (readOnly ?? false);
+  const effectiveSpaces = schemaLibrary ? [] : spaces;
+  const { record, plaintext } = await createToken({ name, expiresAt: expiresAt ?? null, spaces: effectiveSpaces, admin, readOnly: effectiveReadOnly, peerInstanceId, schemaLibrary });
   // Return plaintext only on creation — never retrievable again
   const { hash: _h, ...safeRecord } = record;
   res.status(201).json({ token: safeRecord, plaintext });
