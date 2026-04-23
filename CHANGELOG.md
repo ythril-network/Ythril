@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.2] — 2026-04-23
+
+### Fixed
+
+- **Schema Library catalog URLs** — `POST /api/schema-library/catalogs` now rejects non-HTTPS URLs with 400. Previously the SSRF guard allowed `http://` despite the documented requirement for HTTPS.
+- **Catalog proxy error handling** — `GET /catalogs/:name/entries` and `GET /catalogs/:name/entries/:entryName` now normalize all non-2xx upstream responses to `502 Bad Gateway` instead of forwarding the upstream status code directly.
+
+---
+
 ## [1.1.1] — 2026-04-23
 
 ### Fixed
