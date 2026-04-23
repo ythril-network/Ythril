@@ -1003,4 +1003,38 @@ export class ApiService {
     if (params.offset !== undefined) p = p.set('offset', String(params.offset));
     return this.http.get<AuditLogResponse>('/api/admin/audit-log', { params: p });
   }
+
+  // ── Data management ───────────────────────────────────────────────────────
+
+  getDataConfig(): Observable<{ source: 'env' | 'config' | 'default'; mongoUriRedacted: string }> {
+    return this.http.get<{ source: 'env' | 'config' | 'default'; mongoUriRedacted: string }>('/api/admin/data/config');
+  }
+
+  testMongoConnection(uri: string): Observable<{ ok: boolean; error?: string }> {
+    return this.http.post<{ ok: boolean; error?: string }>('/api/admin/data/config/test', { uri });
+  }
+
+  getMaintenanceStatus(): Observable<{ active: boolean }> {
+    return this.http.get<{ active: boolean }>('/api/admin/data/maintenance');
+  }
+
+  setMaintenance(active: boolean): Observable<{ active: boolean }> {
+    return this.http.post<{ active: boolean }>('/api/admin/data/maintenance', { active });
+  }
+
+  triggerBackup(): Observable<{ backup: { id: string; dir: string; manifest: unknown } }> {
+    return this.http.post<{ backup: { id: string; dir: string; manifest: unknown } }>('/api/admin/data/backup', {});
+  }
+
+  listBackups(): Observable<{ backups: Array<{ id: string; createdAt: string; collections: unknown[] }> }> {
+    return this.http.get<{ backups: Array<{ id: string; createdAt: string; collections: unknown[] }> }>('/api/admin/data/backups');
+  }
+
+  restoreBackup(backupId: string): Observable<{ ok: boolean }> {
+    return this.http.post<{ ok: boolean }>('/api/admin/data/restore', { backupId });
+  }
+
+  startMigration(uri: string): Observable<{ ok: boolean; backupDir: string; manifest: unknown }> {
+    return this.http.post<{ ok: boolean; backupDir: string; manifest: unknown }>('/api/admin/data/migrate', { uri });
+  }
 }

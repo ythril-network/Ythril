@@ -192,6 +192,9 @@ import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
         <a class="nav-link" routerLink="/settings/audit-log" routerLinkActive="active">
           <span class="nav-icon"><ph-icon name="list-bullets" [size]="16"/></span>{{ 'nav.logs' | transloco }}
         </a>
+        <a class="nav-link" routerLink="/settings/data" routerLinkActive="active">
+          <span class="nav-icon"><ph-icon name="database" [size]="16"/></span>{{ 'nav.data' | transloco }}
+        </a>
         <a class="nav-link" routerLink="/settings/about" routerLinkActive="active">
           <span class="nav-icon"><ph-icon name="info" [size]="16"/></span>{{ 'nav.about' | transloco }}
         </a>

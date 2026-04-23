@@ -40,6 +40,10 @@ services:
       SKIP_AUTH_RATE_LIMIT: "true"
       SKIP_GLOBAL_RATE_LIMIT: "true"
       SKIP_SYNC_RATE_LIMIT: "true"
+      # Enable DB migration on instance A so db-migration.test.js can exercise it.
+      # Instances B and C intentionally omit this flag — used by red-team tests to
+      # verify the feature is disabled by default.
+      YTHRIL_DB_MIGRATION_ENABLED: "true"
     depends_on:
       ythril-mongo-a:
         condition: service_healthy

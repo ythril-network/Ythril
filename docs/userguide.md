@@ -27,10 +27,11 @@ For setting up a workstation quickly see [workstation-mode-guide.md](workstation
 11. [Settings — MFA](#settings--mfa)
 12. [Settings — Networks](#settings--networks)
 13. [Settings — Storage](#settings--storage)
-14. [Settings — Audit Log](#settings--audit-log)
-15. [Settings — Webhooks](#settings--webhooks)
-16. [Settings — About](#settings--about)
-17. [Connecting an AI assistant (MCP)](#connecting-an-ai-assistant-mcp)
+14. [Settings — Data](#settings--data)
+15. [Settings — Audit Log](#settings--audit-log)
+16. [Settings — Webhooks](#settings--webhooks)
+17. [Settings — About](#settings--about)
+18. [Connecting an AI assistant (MCP)](#connecting-an-ai-assistant-mcp)
 
 ---
 
@@ -449,6 +450,55 @@ Click **Leave network** at the bottom of the network card. Your local data in th
 **Settings → Storage** shows how much disk space each space is using and the configured quota limits.
 
 When a space approaches its quota limit, writes will first return warnings and eventually be rejected. Contact your administrator to raise the quota.
+
+---
+
+## Settings — Data
+
+**Settings → Data** (admin only) gives you control over the underlying MongoDB database: maintenance mode, manual backups, point-in-time restore, and — when enabled by the infrastructure administrator — live database migration.
+
+### Maintenance mode
+
+Maintenance mode suspends all write operations across the entire instance. All write requests return `503 Service Unavailable` while active. Read operations continue normally.
+
+Use it before a restore or any manual database operation where you want to prevent concurrent writes.
+
+Toggle the **Maintenance mode** switch to enable or disable it. A banner appears across the top of the UI on all pages while maintenance is active.
+
+### MongoDB connection
+
+The **Database** card shows which MongoDB server this instance is connected to and how the URI was configured (environment variable, `config.json`, or built-in default).
+
+If your instance has MFA enabled, you will be prompted for a TOTP code before connection details are shown or changed.
+
+### Backups
+
+Click **Run backup now** to trigger an immediate point-in-time dump of the entire MongoDB database. The backup is stored inside the instance's data directory (`<data-root>/backups/<timestamp>/`). Each backup contains a `manifest.json` with metadata and one BSON file per collection.
+
+The **Backups** table lists all available backups with their timestamp and the collections they contain.
+
+### Restore
+
+To restore a backup, click **Restore** on any backup row. The instance will:
+1. Enter maintenance mode automatically.
+2. Replace all data in MongoDB with the backup snapshot.
+3. Exit maintenance mode.
+
+Restore is irreversible — all data written after the backup timestamp will be lost. You will be asked to confirm before the operation begins.
+
+### Database migration
+
+> **This feature must be explicitly enabled by your infrastructure administrator** (`YTHRIL_DB_MIGRATION_ENABLED=true`). It is disabled by default on all instances. If you do not see this section, migration has not been enabled on your instance.
+
+Database migration moves the entire database to a different MongoDB server (for example, from a local container to Atlas, or between clusters).
+
+Enter the target MongoDB URI in the **Migrate database** field and click **Test connection** to verify reachability before committing. Once you click **Migrate**:
+1. Maintenance mode is activated.
+2. The current database is dumped to `<data-root>/migration-backup/`.
+3. A migration marker is written and the new URI is saved to `config.json`.
+4. The server process exits. When Docker or Kubernetes restarts the container, the server detects the marker and restores the dump into the new MongoDB before starting normally.
+
+Migration is a one-way operation. Keep your old database available until you have confirmed the migrated instance is healthy.
 
 ---
 

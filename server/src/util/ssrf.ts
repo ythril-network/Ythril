@@ -71,3 +71,39 @@ export function isSsrfSafeUrl(raw: string): boolean {
 export const SSRF_SAFE_MESSAGE =
   'Peer URL must use http(s) and must not target private IPs, loopback, ' +
   'ULA/link-local IPv6, cloud metadata endpoints, or include embedded credentials';
+
+/**
+ * Returns true if the MongoDB URI hostname is safe (not private/loopback).
+ * Accepts mongodb:// and mongodb+srv:// schemes only.
+ *
+ * Used to validate user-supplied connection strings in the data config API
+ * before the server attempts to connect.
+ */
+export function isSsrfSafeMongoUri(raw: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return false;
+  }
+
+  if (parsed.protocol !== 'mongodb:' && parsed.protocol !== 'mongodb+srv:') return false;
+
+  // For replica sets the host list lives in parsed.host, but URL only parses the first.
+  // This covers the common single-host case and prevents the most obvious SSRF vectors.
+  const host = parsed.hostname.toLowerCase();
+  if (!host) return false;
+
+  if (host === 'localhost') return false;
+  if (host === 'metadata.google.internal') return false;
+
+  // Strip IPv6 brackets
+  const ip6 = host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
+  if (ip6 === '::1') return false;
+  if (/^f[cd][0-9a-f]{0,2}:/i.test(ip6)) return false;
+  if (/^fe[89ab][0-9a-f]:/i.test(ip6)) return false;
+
+  if (PRIVATE_IP_RE.test(host)) return false;
+
+  return true;
+}

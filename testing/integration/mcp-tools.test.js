@@ -379,7 +379,7 @@ describe('MCP brain tools â€” upsert_entity / upsert_edge', () => {
   });
 });
 
-describe('MCP brain tools — traverse', () => {
+describe('MCP brain tools ï¿½ traverse', () => {
   let session;
   let entityAId;
   let entityBId;
@@ -530,7 +530,7 @@ describe('MCP file tools â€” write_file / read_file / list_dir / create_dir / mo
   });
 });
 
-describe('MCP file metadata — write_file persists metadata, query supports files collection', () => {
+describe('MCP file metadata ï¿½ write_file persists metadata, query supports files collection', () => {
   let session;
   const dir = `mcp-meta-test-${Date.now()}`;
   const testSpaceId = `mcp-meta-${Date.now()}`;
@@ -690,7 +690,7 @@ describe('MCP recall_global â€” space-scoped token must only see its own spaces'
     scopedTokenId = tokenRes.body.id;
 
     // The global /mcp endpoint only requires authentication (not space-specific auth),
-    // so any valid token can open a session — access control is enforced per tool call.
+    // so any valid token can open a session ï¿½ access control is enforced per tool call.
     sessionScoped = await openMcpSession(scopedTokenPlaintext);
   });
 
@@ -701,7 +701,7 @@ describe('MCP recall_global â€” space-scoped token must only see its own spaces'
 
   it('space-scoped token is rejected when calling a tool on an unauthorized space', async () => {
     assert.ok(sessionScoped, 'Global MCP session must open for any authenticated token');
-    // The token is scoped to __nonexistent_space__ — a tool call targeting 'general' must be rejected
+    // The token is scoped to __nonexistent_space__ ï¿½ a tool call targeting 'general' must be rejected
     const result = await sessionScoped.callTool('recall', { space: 'general', query: secretFact });
     assert.ok(result?.isError, 'Tool call to unauthorized space must return isError');
     const text = result?.content?.[0]?.text ?? '';
@@ -755,7 +755,7 @@ describe('MCP recall_global â€” full-access token, multi-space isolation', () =>
 });
 
 
-describe('MCP brain tools — update_memory / delete_memory / get_stats', () => {
+describe('MCP brain tools ï¿½ update_memory / delete_memory / get_stats', () => {
   let session;
   let storedMemoryId;
   const factText = `MCP-update-delete-test-${Date.now()}`;
@@ -793,13 +793,13 @@ describe('MCP brain tools — update_memory / delete_memory / get_stats', () => {
   });
 
   it('update_memory with no fields to update returns isError', async (t) => {
-    if (!storedMemoryId) return t.skip('No storedMemoryId — prior test failed');
+    if (!storedMemoryId) return t.skip('No storedMemoryId ï¿½ prior test failed');
     const result = await session.callTool('update_memory', { space: 'general', id: storedMemoryId });
     assert.ok(result?.isError, 'No update fields must return isError');
   });
 
   it('update_memory updates tags on an existing memory', async (t) => {
-    if (!storedMemoryId) return t.skip('No storedMemoryId — prior test failed');
+    if (!storedMemoryId) return t.skip('No storedMemoryId ï¿½ prior test failed');
     const result = await session.callTool('update_memory', {
       space: 'general',
       id: storedMemoryId,
@@ -825,7 +825,7 @@ describe('MCP brain tools — update_memory / delete_memory / get_stats', () => {
   });
 
   it('delete_memory removes the memory', async (t) => {
-    if (!storedMemoryId) return t.skip('No storedMemoryId — prior test failed');
+    if (!storedMemoryId) return t.skip('No storedMemoryId ï¿½ prior test failed');
     const result = await session.callTool('delete_memory', { space: 'general', id: storedMemoryId });
     assert.ok(!result?.isError, `delete_memory returned isError: ${JSON.stringify(result)}`);
     const text = result?.content?.[0]?.text ?? '';
@@ -833,13 +833,13 @@ describe('MCP brain tools — update_memory / delete_memory / get_stats', () => {
   });
 
   it('delete_memory on already-deleted id returns isError', async (t) => {
-    if (!storedMemoryId) return t.skip('No storedMemoryId — prior test failed');
+    if (!storedMemoryId) return t.skip('No storedMemoryId ï¿½ prior test failed');
     const result = await session.callTool('delete_memory', { space: 'general', id: storedMemoryId });
     assert.ok(result?.isError, 'Double-delete must return isError');
   });
 });
 
-describe('MCP chrono tools — list_chrono tags filter / query chrono collection', () => {
+describe('MCP chrono tools ï¿½ list_chrono tags filter / query chrono collection', () => {
   let session;
   const RUN = Date.now();
   const tagA = `mcp-chrono-tag-a-${RUN}`;
@@ -891,7 +891,7 @@ describe('MCP chrono tools — list_chrono tags filter / query chrono collection',
   });
 
   it('list_chrono with tags filter (AND) returns only entries with that tag', async (t) => {
-    if (!idTagA) return t.skip('No idTagA — prior setup failed');
+    if (!idTagA) return t.skip('No idTagA ï¿½ prior setup failed');
     const result = await session.callTool('list_chrono', { space: 'general', tags: [tagA] });
     assert.ok(!result?.isError, `list_chrono with tags returned isError: ${JSON.stringify(result)}`);
     const text = result?.content?.[0]?.text ?? '';
@@ -981,7 +981,7 @@ describe('MCP chrono tools — list_chrono tags filter / query chrono collection',
   });
 });
 
-describe('MCP security — read-only token cannot call mutating tools', () => {
+describe('MCP security ï¿½ read-only token cannot call mutating tools', () => {
   let readOnlySession;
   let readOnlyTokenPlaintext;
   let readOnlyTokenId;
@@ -1064,9 +1064,9 @@ describe('MCP security â€” unauthenticated access', () => {
   });
 });
 
-// -- recall / recall_global — types filter ------------------------------------
+// -- recall / recall_global ï¿½ types filter ------------------------------------
 
-describe('MCP recall — types filter restricts result set', () => {
+describe('MCP recall ï¿½ types filter restricts result set', () => {
   let session;
   let embeddingAvailable = false;
   const entityName = `TypeFilterEntity-${Date.now()}`;
@@ -1087,7 +1087,7 @@ describe('MCP recall — types filter restricts result set', () => {
   after(() => session?.close());
 
   it('recall with types=["memory"] does not return isError', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack — skipping');
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack ï¿½ skipping');
     const result = await session.callTool('recall', { space: 'general', query: entityName, topK: 5, types: ['memory'] });
     assert.ok(!result?.isError, `recall types=memory returned isError: ${JSON.stringify(result)}`);
     const text = result?.content?.[0]?.text ?? '';
@@ -1095,30 +1095,30 @@ describe('MCP recall — types filter restricts result set', () => {
   });
 
   it('recall with types=["entity"] does not return isError', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack — skipping');
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack ï¿½ skipping');
     const result = await session.callTool('recall', { space: 'general', query: entityName, topK: 5, types: ['entity'] });
     assert.ok(!result?.isError, `recall types=entity returned isError: ${JSON.stringify(result)}`);
   });
 
   it('recall with multiple types does not return isError', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack — skipping');
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack ï¿½ skipping');
     const result = await session.callTool('recall', { space: 'general', query: entityName, topK: 5, types: ['memory', 'entity', 'edge'] });
     assert.ok(!result?.isError, `recall types=[memory,entity,edge] returned isError: ${JSON.stringify(result)}`);
   });
 
   it('recall with unknown type strings is tolerated (filter ignores unknown types)', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack — skipping');
-    // Server filters to valid RecallKnowledgeType values — unknown strings are dropped,
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack ï¿½ skipping');
+    // Server filters to valid RecallKnowledgeType values ï¿½ unknown strings are dropped,
     // resulting in an empty types filter (equivalent to no filter) or an empty search.
     // Either way it must not crash.
     const result = await session.callTool('recall', { space: 'general', query: entityName, topK: 5, types: ['__unknown__'] });
-    // Should be either a valid response or an error indicating no results — not a server fault
+    // Should be either a valid response or an error indicating no results ï¿½ not a server fault
     const text = result?.content?.[0]?.text ?? '';
     assert.ok(typeof text === 'string', 'Response text must be a string regardless of types value');
   });
 
   it('recall_global with types=["entity"] does not return isError', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack — skipping');
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack ï¿½ skipping');
     const result = await session.callTool('recall', { query: entityName, topK: 5, types: ['entity'] });
     assert.ok(!result?.isError, `recall_global types=entity returned isError: ${JSON.stringify(result)}`);
   });
@@ -1126,7 +1126,7 @@ describe('MCP recall — types filter restricts result set', () => {
 
 // -- remember / recall with description and properties ---------------------
 
-describe('MCP brain tools — remember with description and properties', () => {
+describe('MCP brain tools ï¿½ remember with description and properties', () => {
   let session;
   let embeddingAvailable = false;
 
@@ -1140,7 +1140,7 @@ describe('MCP brain tools — remember with description and properties', () => {
   after(() => session?.close());
 
   it('remember with description and properties does not return isError', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack — skipping');
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack ï¿½ skipping');
     const result = await session.callTool('remember', {
       space: 'general',
       fact: `MCP-rich-fact-${Date.now()}`,
@@ -1154,7 +1154,7 @@ describe('MCP brain tools — remember with description and properties', () => {
   });
 
   it('remember description is stored and queryable', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack — skipping');
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack ï¿½ skipping');
     const uniqueFact = `DescPropMCPFact-${Date.now()}`;
     await session.callTool('remember', {
       space: 'general',
@@ -1180,7 +1180,7 @@ describe('MCP brain tools — remember with description and properties', () => {
 
 // -- upsert_entity with description ----------------------------------------
 
-describe('MCP brain tools — upsert_entity with description', () => {
+describe('MCP brain tools ï¿½ upsert_entity with description', () => {
   let session;
 
   before(async () => {
@@ -1218,7 +1218,7 @@ describe('MCP brain tools — upsert_entity with description', () => {
 
 // -- MCP bulk_write tool ------------------------------------------------------
 
-describe('MCP brain tools — bulk_write', () => {
+describe('MCP brain tools ï¿½ bulk_write', () => {
   let session;
   const RUN = Date.now();
 
@@ -1259,12 +1259,12 @@ describe('MCP brain tools — bulk_write', () => {
     const result = await session.callTool('bulk_write', {
       space: 'general',
       memories: [
-        { fact: '' },                                // invalid — empty fact
+        { fact: '' },                                // invalid ï¿½ empty fact
         { fact: `ValidBulkMem-${RUN}`, tags: [] },   // valid
       ],
       entities: [
-        { name: '', type: 'concept' },               // invalid — missing name
-        { name: `ValidBulkEnt-${RUN}`, type: '' },   // invalid — missing type
+        { name: '', type: 'concept' },               // invalid ï¿½ missing name
+        { name: `ValidBulkEnt-${RUN}`, type: '' },   // invalid ï¿½ missing type
       ],
     });
     assert.ok(!result?.isError, `bulk_write should not be isError for validation failures: ${JSON.stringify(result)}`);
@@ -1310,9 +1310,9 @@ describe('MCP brain tools — bulk_write', () => {
   });
 });
 
-// -- MCP bulk_write — read-only token blocked ---------------------------------
+// -- MCP bulk_write ï¿½ read-only token blocked ---------------------------------
 
-describe('MCP security — read-only token cannot call bulk_write', () => {
+describe('MCP security ï¿½ read-only token cannot call bulk_write', () => {
   let readOnlySession;
   let readOnlyTokenPlaintext;
   let readOnlyTokenId;
@@ -1346,7 +1346,7 @@ describe('MCP security — read-only token cannot call bulk_write', () => {
 
 // -- upsert_edge with tags, description, and properties --------------------
 
-describe('MCP brain tools — upsert_edge with tags, description, and properties', () => {
+describe('MCP brain tools ï¿½ upsert_edge with tags, description, and properties', () => {
   let session;
   let entityAId;
   let entityBId;
@@ -1408,7 +1408,7 @@ describe('MCP brain tools — upsert_edge with tags, description, and properties',
 
 // -- recall / recall_global with minPerType --------------------------------
 
-describe('MCP brain tools — recall and recall_global with minPerType', () => {
+describe('MCP brain tools ï¿½ recall and recall_global with minPerType', () => {
   let session;
   let embeddingAvailable = false;
   const entityName = `MinPerTypeEntity-${Date.now()}`;
@@ -1417,9 +1417,24 @@ describe('MCP brain tools — recall and recall_global with minPerType', () => {
     tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
     await ensureReindexed(INSTANCES.a, tokenA);
     session = await openMcpSession(tokenA);
-    const probe = await session.callTool('remember', { space: 'general', fact: `__minpertype-probe-${Date.now()}__`, tags: [] });
+    const probeFact = `__minpertype-probe-${Date.now()}__`;
+    const probe = await session.callTool('remember', { space: 'general', fact: probeFact, tags: [] });
     const probeText = probe?.content?.[0]?.text ?? '';
-    embeddingAvailable = !probe?.isError || !probeText.toLowerCase().includes('embedding');
+    const storeSucceeded = !probe?.isError || !probeText.toLowerCase().includes('embedding');
+    if (storeSucceeded) {
+      // Verify recall actually returns results â€” memory storage succeeds in degraded
+      // mode (no embedding server) but recall returns empty without vectors.
+      const recallProbe = await session.callTool('recall', { space: 'general', query: probeFact, topK: 1 });
+      if (!recallProbe?.isError) {
+        try {
+          const rp = JSON.parse(recallProbe?.content?.[0]?.text ?? '{}');
+          embeddingAvailable = (rp.count ?? 0) > 0;
+        } catch {
+          // Non-JSON response means the tool returned formatted text â€” assume available
+          embeddingAvailable = (recallProbe?.content?.[0]?.text ?? '').length > 0;
+        }
+      }
+    }
     if (embeddingAvailable) {
       await session.callTool('upsert_entity', { space: 'general', name: entityName, type: 'concept', tags: ['minpertype-test'] });
     }
@@ -1427,7 +1442,7 @@ describe('MCP brain tools — recall and recall_global with minPerType', () => {
   after(() => session?.close());
 
   it('recall with minPerType object does not return isError', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack — skipping');
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack ï¿½ skipping');
     const result = await session.callTool('recall', {
       space: 'general',
       query: entityName,
@@ -1440,7 +1455,7 @@ describe('MCP brain tools — recall and recall_global with minPerType', () => {
   });
 
   it('recall with minPerType={"entity":1} includes at least one entity when available', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack — skipping');
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack ï¿½ skipping');
     const result = await session.callTool('recall', {
       space: 'general',
       query: entityName,
@@ -1449,13 +1464,13 @@ describe('MCP brain tools — recall and recall_global with minPerType', () => {
     });
     assert.ok(!result?.isError, `recall with minPerType error: ${JSON.stringify(result)}`);
     const text = result?.content?.[0]?.text ?? '';
-    // Response is formatted text — verify entity name appears somewhere in the output
+    // Response is formatted text ï¿½ verify entity name appears somewhere in the output
     // (embedded entity should match the exact name we seeded)
     assert.ok(text.includes(entityName) || text.toLowerCase().includes('[entity]') || text.includes('"type": "entity"'), `Expected entity in recall output: ${text}`);
   });
 
   it('recall_global with minPerType does not return isError', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack — skipping');
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack ï¿½ skipping');
     const result = await session.callTool('recall', {
       query: entityName,
       topK: 5,
@@ -1465,7 +1480,7 @@ describe('MCP brain tools — recall and recall_global with minPerType', () => {
   });
 
   it('recall with empty minPerType object behaves like no minPerType', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack — skipping');
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack ï¿½ skipping');
     const withMinPerType = await session.callTool('recall', { space: 'general', query: entityName, topK: 5, minPerType: {} });
     const withoutMinPerType = await session.callTool('recall', { space: 'general', query: entityName, topK: 5 });
     assert.ok(!withMinPerType?.isError, 'recall with empty minPerType must not error');
@@ -1475,7 +1490,7 @@ describe('MCP brain tools — recall and recall_global with minPerType', () => {
 
 // -- recall / recall_global with minScore ----------------------------------
 
-describe('MCP brain tools — recall and recall_global with minScore', () => {
+describe('MCP brain tools ï¿½ recall and recall_global with minScore', () => {
   let session;
   let embeddingAvailable = false;
   const factForScore = `MinScoreTestFact-${Date.now()}`;
@@ -1494,7 +1509,7 @@ describe('MCP brain tools — recall and recall_global with minScore', () => {
   after(() => session?.close());
 
   it('recall with minScore does not return isError', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack — skipping');
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack ï¿½ skipping');
     const result = await session.callTool('recall', {
       space: 'general',
       query: factForScore,
@@ -1505,7 +1520,7 @@ describe('MCP brain tools — recall and recall_global with minScore', () => {
   });
 
   it('recall with minScore=0.99 returns few or no results', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack — skipping');
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack ï¿½ skipping');
     const result = await session.callTool('recall', {
       space: 'general',
       query: factForScore,
@@ -1520,7 +1535,7 @@ describe('MCP brain tools — recall and recall_global with minScore', () => {
   });
 
   it('recall with minScore=0.0 behaves like no minScore', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack — skipping');
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack ï¿½ skipping');
     const withMinScore = await session.callTool('recall', { space: 'general', query: factForScore, topK: 5, minScore: 0.0 });
     const withoutMinScore = await session.callTool('recall', { space: 'general', query: factForScore, topK: 5 });
     assert.ok(!withMinScore?.isError, 'recall with minScore=0.0 must not error');
@@ -1528,7 +1543,7 @@ describe('MCP brain tools — recall and recall_global with minScore', () => {
   });
 
   it('recall_global with minScore does not return isError', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack — skipping');
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack ï¿½ skipping');
     const result = await session.callTool('recall', {
       query: factForScore,
       topK: 5,
@@ -1538,7 +1553,7 @@ describe('MCP brain tools — recall and recall_global with minScore', () => {
   });
 
   it('recall_global with minScore=0.99 returns few or no results', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack — skipping');
+    if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack ï¿½ skipping');
     const result = await session.callTool('recall', {
       query: factForScore,
       topK: 10,
@@ -1552,7 +1567,7 @@ describe('MCP brain tools — recall and recall_global with minScore', () => {
 
 // -- write_file with properties field --------------------------------------
 
-describe('MCP file tools — write_file with properties metadata', () => {
+describe('MCP file tools ï¿½ write_file with properties metadata', () => {
   let session;
   const dir = `mcp-props-test-${Date.now()}`;
 

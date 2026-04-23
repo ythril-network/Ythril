@@ -24,6 +24,8 @@ import { auditMiddleware } from './audit/middleware.js';
 import { webhooksRouter } from './api/webhooks.js';
 import { schemaLibraryRouter } from './api/schema-library.js';
 import { localAgentRouter } from './api/local-agent.js';
+import { dataRouter } from './api/data.js';
+import { maintenanceMiddleware } from './maintenance.js';
 import { globalRateLimit } from './rate-limit/middleware.js';
 import { configExists, reloadConfig, getConfig, saveConfig, loadSecrets } from './config/loader.js';
 import { requireAuth, requireAdminMfa } from './auth/middleware.js';
@@ -141,6 +143,11 @@ export function createApp() {
   // the 'finish' event for every response.
   app.use(auditMiddleware);
 
+  // ── Maintenance mode ─────────────────────────────────────────────────────
+  // When active, blocks all API traffic except /health, /ready, /metrics and
+  // the /api/admin/ prefix (so admins can still toggle maintenance off).
+  app.use(maintenanceMiddleware);
+
   // ── Setup (first-run only) — JSON API ────────────────────────────────────
   app.use('/api/setup', setupRouter);
   app.use('/setup', setupRouter);  // legacy HTML form (kept for non-SPA access)
@@ -180,6 +187,7 @@ export function createApp() {
   // ── Webhook management ─────────────────────────────────────────────────────
   app.use('/api/admin/webhooks', webhooksRouter);
   app.use('/api/admin/local-agent', localAgentRouter);
+  app.use('/api/admin/data', dataRouter);
   app.use('/api/schema-library', schemaLibraryRouter);
 
   // ── Admin: space wipe ─────────────────────────────────────────────────────

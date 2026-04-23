@@ -82,6 +82,12 @@ const ROUTE_RULES: RouteRule[] = [
   // ── Config / admin ───────────────────────────────────────────────────────
   { method: 'POST',   pattern: /^\/api\/admin\/reload-config$/,                    operation: 'config.reload' },
 
+  // ── Data management ──────────────────────────────────────────────────────
+  { method: 'POST',   pattern: /^\/api\/admin\/data\/backup$/,                     operation: 'data.backup' },
+  { method: 'POST',   pattern: /^\/api\/admin\/data\/restore$/,                    operation: 'data.restore' },
+  { method: 'POST',   pattern: /^\/api\/admin\/data\/migrate$/,                    operation: 'data.migrate' },
+  { method: 'POST',   pattern: /^\/api\/admin\/data\/maintenance$/,                operation: 'data.maintenance.toggle' },
+
   // ── Brain query / recall / stats (reads) ─────────────────────────────────
   { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/recall/,      operation: 'brain.recall',         spaceGroup: 1, read: true },
   { method: 'POST',   pattern: /^\/api\/brain\/recall$/,                           operation: 'brain.recall_global',  read: true },

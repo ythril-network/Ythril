@@ -30,13 +30,14 @@ If you are here for web UI usage, read [User Guide](userguide.md). If you are co
 15. [Conflicts API](#conflicts-api) — view and resolve sync conflicts
 16. [Setup API](#setup-api) — first-run setup
 17. [Admin API](#admin-api) — config reload, export/import, space wipe
-18. [Audit Log API](#audit-log-api) — token and access audit trail
-19. [Webhooks API](#webhooks-api) — event subscriptions for space write events
-20. [About API](#about-api) — instance info and logs
-21. [Theme API](#theme-api) — external CSS theming
-22. [MCP (Model Context Protocol)](#mcp-model-context-protocol) — AI tool integration
-23. [Storage Quotas](#storage-quotas)
-24. [Pagination](#pagination)
+18. [Data Management API](#data-management-api) — maintenance mode, backup, restore, migration
+19. [Audit Log API](#audit-log-api) — token and access audit trail
+20. [Webhooks API](#webhooks-api) — event subscriptions for space write events
+21. [About API](#about-api) — instance info and logs
+22. [Theme API](#theme-api) — external CSS theming
+23. [MCP (Model Context Protocol)](#mcp-model-context-protocol) — AI tool integration
+24. [Storage Quotas](#storage-quotas)
+25. [Pagination](#pagination)
 
 ---
 
@@ -3691,6 +3692,219 @@ wipe_space(types?: string[])
 ```
 
 Available in MCP-connected clients.  Requires an admin token on the MCP session.  When `types` is omitted all collections are wiped.  Returns a plain-text summary of deleted counts.
+
+---
+
+## Data Management API
+
+Base path: `/api/admin/data` — **requires admin token** on all endpoints. Most mutating endpoints additionally require a TOTP code (`X-TOTP-Code` header) when MFA is enabled on the instance.
+
+---
+
+### GET /api/admin/data/config
+
+Returns how the MongoDB URI is configured and a redacted version of the URI (credentials replaced with `[credentials]`).
+
+```
+GET /api/admin/data/config
+Authorization: Bearer <admin-token>
+```
+
+**Response `200`:**
+
+```json
+{
+  "source": "config",
+  "mongoUriRedacted": "mongodb://[credentials]@db:27017/ythril"
+}
+```
+
+`source` is one of `"env"` (set via `MONGO_URI` environment variable), `"config"` (set in `config.json`), or `"default"` (built-in localhost default).
+
+---
+
+### POST /api/admin/data/config/test
+
+Test whether a MongoDB URI is reachable before committing to a migration or config change.
+
+```
+POST /api/admin/data/config/test
+Authorization: Bearer <admin-token>
+X-TOTP-Code: <code>   # required when MFA is enabled
+Content-Type: application/json
+
+{ "uri": "mongodb://user:pass@new-host:27017/ythril" }
+```
+
+**Response `200`:**
+
+```json
+{ "ok": true, "latencyMs": 12 }
+```
+
+Returns `400` for an invalid URI, `400` for URIs targeting private/loopback/cloud-metadata addresses (SSRF protection), and `500` if the connection attempt fails.
+
+---
+
+### GET /api/admin/data/maintenance
+
+Return current maintenance mode state.
+
+```
+GET /api/admin/data/maintenance
+Authorization: Bearer <admin-token>
+```
+
+**Response `200`:** `{ "active": false }`
+
+---
+
+### POST /api/admin/data/maintenance
+
+Enable or disable maintenance mode. While active, all write operations across the instance return `503`; reads continue normally.
+
+```
+POST /api/admin/data/maintenance
+Authorization: Bearer <admin-token>
+X-TOTP-Code: <code>   # required when MFA is enabled
+Content-Type: application/json
+
+{ "active": true }
+```
+
+**Response `200`:** `{ "active": true }`
+
+---
+
+### POST /api/admin/data/backup
+
+Trigger an immediate point-in-time dump of the entire MongoDB database. The backup is written to `<data-root>/backups/<ISO-timestamp>/` and contains a `manifest.json` plus one BSON file per collection.
+
+```
+POST /api/admin/data/backup
+Authorization: Bearer <admin-token>
+X-TOTP-Code: <code>   # required when MFA is enabled
+```
+
+**Response `200`:**
+
+```json
+{
+  "backup": {
+    "id": "2026-04-23T10-00-00-000Z",
+    "dir": "/data/backups/2026-04-23T10-00-00-000Z",
+    "manifest": { "createdAt": "2026-04-23T10:00:00.000Z", "collections": ["memories", "entities"] }
+  }
+}
+```
+
+---
+
+### GET /api/admin/data/backups
+
+List all available backups, sorted newest first.
+
+```
+GET /api/admin/data/backups
+Authorization: Bearer <admin-token>
+```
+
+**Response `200`:**
+
+```json
+{
+  "backups": [
+    {
+      "id": "2026-04-23T10-00-00-000Z",
+      "dir": "/data/backups/2026-04-23T10-00-00-000Z",
+      "createdAt": "2026-04-23T10:00:00.000Z",
+      "collections": ["memories", "entities", "edges"]
+    }
+  ]
+}
+```
+
+---
+
+### POST /api/admin/data/restore
+
+Restore the database from a previously created backup. The instance automatically enters maintenance mode for the duration of the restore, then returns to whatever state it was in before.
+
+```
+POST /api/admin/data/restore
+Authorization: Bearer <admin-token>
+X-TOTP-Code: <code>   # required when MFA is enabled
+Content-Type: application/json
+
+{ "backupId": "2026-04-23T10-00-00-000Z" }
+```
+
+`backupId` must match a directory name under `<data-root>/backups/`. Slashes and `..` are rejected.
+
+**Response `200`:** `{ "ok": true }`
+
+| Status | Meaning |
+|--------|--------|
+| `400` | Missing or invalid `backupId` |
+| `404` | Backup not found |
+| `500` | Restore operation failed |
+
+> All data written after the backup was taken is lost on restore. This operation is not reversible.
+
+---
+
+### POST /api/admin/data/migrate
+
+> **Feature flag required.** This endpoint returns `403` unless the instance was started with `YTHRIL_DB_MIGRATION_ENABLED=true`. The flag is off by default so that a compromised admin token cannot be used to exfiltrate the entire database to an attacker-controlled server.
+
+Migrates the entire database to a new MongoDB server. The sequence is:
+
+1. Validate and test the new URI (SSRF-safe URIs only).
+2. Enter maintenance mode.
+3. Dump the current database to `<data-root>/migration-backup/`.
+4. Write a migration marker (`migration-marker.json`) with the old URI, new URI, and backup path.
+5. Persist the new URI to `config.json`.
+6. Respond `200` to the caller.
+7. Exit the process — Docker / Kubernetes restarts the container automatically.
+
+On restart, the server detects the marker and calls `restoreDatabase()` against the new URI before establishing the normal MongoDB connection.
+
+```
+POST /api/admin/data/migrate
+Authorization: Bearer <admin-token>
+X-TOTP-Code: <code>   # required when MFA is enabled
+Content-Type: application/json
+
+{ "uri": "mongodb+srv://user:pass@cluster.mongodb.net/ythril" }
+```
+
+**Response `200`:**
+
+```json
+{
+  "ok": true,
+  "backupDir": "/data/migration-backup",
+  "message": "Migration started. The server will restart and connect to the new database."
+}
+```
+
+| Status | Meaning |
+|--------|--------|
+| `400` | Invalid or SSRF-unsafe URI |
+| `403` | `YTHRIL_DB_MIGRATION_ENABLED` is not `true` (feature disabled) |
+| `409` | Maintenance mode already active — deactivate it first |
+| `500` | Dump failed or new URI unreachable |
+
+#### Enabling migration on a deployment
+
+Set the environment variable on the Ythril container:
+
+```yaml
+environment:
+  YTHRIL_DB_MIGRATION_ENABLED: "true"
+```
+
+Omit this variable (or set it to any value other than `true`) on any instance where database migration should not be possible. This prevents a stolen admin token from being used as an exfiltration vector.
 
 ---
 
