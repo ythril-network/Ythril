@@ -392,12 +392,13 @@ dataRouter.post('/migrate', requireAdminMfa, async (req, res) => {
     return;
   }
 
-  // Guard: cannot migrate when the connection is managed via environment variable.
-  // MONGO_URI always takes precedence over config.json, so writing a new URI to
-  // config.json would have no effect — the env var would override it on restart.
-  if (process.env['MONGO_URI']) {
+  // Guard: cannot migrate when the operator has explicitly locked out API-based migration.
+  // Set YTHRIL_MONGO_INFRA_MANAGED=true in deployments where the MongoDB URI is
+  // managed entirely through infrastructure config (e.g. K8s secrets / MONGO_URI env var)
+  // and API-driven migration should be prevented regardless of admin credentials.
+  if (process.env['YTHRIL_MONGO_INFRA_MANAGED'] === 'true') {
     res.status(409).json({
-      error: 'Database connection is managed via the MONGO_URI environment variable. Migration is not available; update the environment variable in your infrastructure configuration instead.',
+      error: 'Database migration via API is disabled on this instance. The MongoDB connection is marked as infra-managed (YTHRIL_MONGO_INFRA_MANAGED=true). Update the connection URI in your infrastructure configuration instead.',
       code: 'INFRA_MANAGED',
     });
     return;

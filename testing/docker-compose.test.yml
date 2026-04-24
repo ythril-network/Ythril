@@ -160,16 +160,69 @@ services:
     networks:
       - ythril-test
 
+  # ──────────────────────────────────────────
+  # Instance D  (port 3203)  — infra-managed migration lock test
+  # Has YTHRIL_DB_MIGRATION_ENABLED=true AND YTHRIL_MONGO_INFRA_MANAGED=true.
+  # Used exclusively by red-team-tests/infra-managed-migration.test.js.
+  # ──────────────────────────────────────────
+  ythril-d:
+    build: ..
+    container_name: ythril-d
+    ports:
+      - "3203:3200"
+    volumes:
+      - ./sync/configs/d:/config
+      - ythril-data-d:/data
+    environment:
+      CONFIG_PATH: /config/config.json
+      DATA_ROOT: /data
+      MONGO_URI: mongodb://ythril-mongo-d:27017/?directConnection=true
+      NODE_ENV: test
+      SKIP_AUTH_RATE_LIMIT: "true"
+      SKIP_GLOBAL_RATE_LIMIT: "true"
+      SKIP_SYNC_RATE_LIMIT: "true"
+      YTHRIL_DB_MIGRATION_ENABLED: "true"
+      YTHRIL_MONGO_INFRA_MANAGED: "true"
+    depends_on:
+      ythril-mongo-d:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3200/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    networks:
+      - ythril-test
+
+  ythril-mongo-d:
+    image: mongodb/mongodb-atlas-local:latest
+    container_name: ythril-mongo-d
+    volumes:
+      - ythril-mongo-d-data:/data/db
+      - ythril-mongo-d-configdb:/data/configdb
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand({replSetGetStatus:1}).myState===1 ? 1 : quit(1)"]
+      interval: 10s
+      timeout: 10s
+      retries: 18
+      start_period: 40s
+    networks:
+      - ythril-test
+
 volumes:
   ythril-data-a:
   ythril-data-b:
   ythril-data-c:
+  ythril-data-d:
   ythril-mongo-a-data:
   ythril-mongo-b-data:
   ythril-mongo-c-data:
+  ythril-mongo-d-data:
   ythril-mongo-a-configdb:
   ythril-mongo-b-configdb:
   ythril-mongo-c-configdb:
+  ythril-mongo-d-configdb:
 
 networks:
   ythril-test:

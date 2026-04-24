@@ -22,6 +22,7 @@ const INSTANCES = [
   { name: 'a', container: 'ythril-a', url: 'http://127.0.0.1:3200', port: 3200 },
   { name: 'b', container: 'ythril-b', url: 'http://127.0.0.1:3201', port: 3201 },
   { name: 'c', container: 'ythril-c', url: 'http://127.0.0.1:3202', port: 3202 },
+  { name: 'd', container: 'ythril-d', url: 'http://127.0.0.1:3203', port: 3203 },
 ];
 
 async function wait(ms) {
@@ -108,6 +109,39 @@ async function main() {
     } catch (err) {
       console.error(`  ERROR for instance ${inst.name}: ${err.message}`);
       failed = true;
+    }
+  }
+
+  // Seed backup.json for instance A via the API so db-backup-offsite.test.js has
+  // a known config to assert against. backup.json is .gitignored and wiped on
+  // test:down, so it must be recreated on each fresh stack.
+  const instA = results.find(r => r.name === 'a');
+  if (instA) {
+    try {
+      console.log('\nSeeding backup.json for instance A...');
+      const backupCfgRes = await fetch(`${instA.url}/api/admin/data/backup-config`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${instA.token}`,
+        },
+        body: JSON.stringify({
+          schedule: '0 3 29 2 *',          // 29 Feb — effectively never fires
+          retention: { keepLocal: 3 },
+          offsite: {
+            destPath: '/tmp/ythril-offsite-test',
+            retention: { keepCount: 5 },
+          },
+        }),
+      });
+      if (backupCfgRes.ok) {
+        console.log('  backup.json seeded ✓');
+      } else {
+        const body = await backupCfgRes.text();
+        console.warn(`  backup.json seed failed: ${backupCfgRes.status} ${body}`);
+      }
+    } catch (err) {
+      console.warn(`  backup.json seed error: ${err.message}`);
     }
   }
 
