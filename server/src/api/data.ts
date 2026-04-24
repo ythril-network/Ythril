@@ -7,10 +7,13 @@
  *   POST   /api/admin/data/config/test      — test a MongoDB connection string
  *   GET    /api/admin/data/maintenance      — maintenance mode status
  *   POST   /api/admin/data/maintenance      — toggle maintenance mode
- *   POST   /api/admin/data/backup           — trigger a manual backup (dump)
+ *   POST   /api/admin/data/backup           — trigger a manual backup (dump + optional offsite copy)
  *   GET    /api/admin/data/backups          — list existing backups
  *   POST   /api/admin/data/restore          — restore from a named backup
  *   POST   /api/admin/data/migrate          — full DB migration (dump → marker → exit)
+ *   GET    /api/admin/data/backup-config    — read backup.json (scheduled/offsite config)
+ *                                             requires YTHRIL_DB_MIGRATION_ENABLED=true
+ *   GET    /api/admin/data/browse-dirs      — list child directories at a given path (UI file picker)
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -20,6 +23,8 @@ import { getConfig, getMongoUri, saveConfig, getDataRoot } from '../config/loade
 import { requireAdmin, requireAdminMfa } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { isMaintenanceActive, setMaintenanceActive } from '../maintenance.js';
+import { runBackupNow } from '../db/backup-scheduler.js';
+import { loadBackupConfig, BACKUP_CONFIG_PATH, BackupConfigSchema } from '../db/backup-config.js';
 import { dumpDatabase } from '../db/dump.js';
 import { restoreDatabase } from '../db/restore.js';
 import { testConnection } from '../db/conn-test.js';
@@ -46,7 +51,10 @@ function migrationMarkerPath(): string {
   return path.join(getDataRoot(), 'migration-marker.json');
 }
 
-/** Derive the URI source: env var > config file > built-in default. */
+/**
+ * Derive the URI source: env var > config file > built-in default.
+ * Must match the priority order of getMongoUri() in config/loader.ts.
+ */
 function getMongoUriSource(): 'env' | 'config' | 'default' {
   if (process.env['MONGO_URI']) return 'env';
   const cfg = getConfig();
@@ -125,7 +133,8 @@ dataRouter.get('/config', (_req, res) => {
   try {
     const source = getMongoUriSource();
     const mongoUriRedacted = redactUri(getMongoUri());
-    res.json({ source, mongoUriRedacted });
+    const migrationEnabled = isDbMigrationEnabled();
+    res.json({ source, mongoUriRedacted, migrationEnabled });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: msg });
@@ -169,14 +178,22 @@ dataRouter.post('/maintenance', requireAdminMfa, (req, res) => {
 });
 
 // ── POST /backup ──────────────────────────────────────────────────────────────
+//
+// Runs a full backup cycle via runBackupNow():
+//   1. Dumps MongoDB to <dataRoot>/backups/<timestamp>/
+//   2. If YTHRIL_DB_MIGRATION_ENABLED=true and backup.json is present:
+//      a. Applies local retention (retention.keepLocal)
+//      b. Copies backup + /data/files to offsite.destPath if configured
+//      c. Applies offsite retention (offsite.retention.keepCount)
 
 dataRouter.post('/backup', requireAdminMfa, async (_req, res) => {
-  const ts = new Date().toISOString().replace(/[:.]/g, '-');
-  const destDir = path.join(backupsRoot(), ts);
-
   try {
-    const manifest = await dumpDatabase(getMongoUri(), destDir);
-    res.json({ backup: { id: ts, dir: destDir, manifest } });
+    const result = await runBackupNow();
+    res.json({
+      backup: { id: result.id, dir: result.dir, manifest: result.manifest },
+      ...(result.localPruned !== undefined ? { localPruned: result.localPruned } : {}),
+      ...(result.offsite ? { offsite: result.offsite } : {}),
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     log.error(`POST /api/admin/data/backup: ${err}`);
@@ -190,6 +207,121 @@ dataRouter.get('/backups', (_req, res) => {
   try {
     const backups = listBackups();
     res.json({ backups });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+// ── GET /backup-config ────────────────────────────────────────────────────────
+
+dataRouter.get('/backup-config', (_req, res) => {
+  if (!isDbMigrationEnabled()) {
+    res.status(403).json({
+      error:
+        'Scheduled/offsite backup is disabled on this instance. ' +
+        'Set YTHRIL_DB_MIGRATION_ENABLED=true to enable.',
+      code: 'FEATURE_DISABLED',
+    });
+    return;
+  }
+  const config = loadBackupConfig();
+  const backupsPath = path.join(getDataRoot(), 'backups');
+  res.json({ config, configPath: BACKUP_CONFIG_PATH, backupsPath });
+});
+
+// ── GET /browse-dirs ─────────────────────────────────────────────────────────
+//
+// Lists immediate child directories at the given absolute path.
+// Admin-only (enforced by shared middleware). Used by the backup destination
+// browser in the settings UI.
+
+dataRouter.get('/browse-dirs', (req, res) => {
+  const rawPath =
+    typeof req.query['path'] === 'string' ? req.query['path'].trim() : '/';
+
+  const normalized = path.normalize(rawPath);
+
+  if (!path.isAbsolute(normalized)) {
+    res.status(400).json({ error: 'path must be absolute' });
+    return;
+  }
+
+  // Belt-and-suspenders: after normalize, no segment should still be '..'
+  if (normalized.split(path.sep).some(seg => seg === '..')) {
+    res.status(400).json({ error: 'path traversal not allowed' });
+    return;
+  }
+
+  try {
+    if (!fs.existsSync(normalized)) {
+      res.status(404).json({ error: `Directory not found: ${normalized}` });
+      return;
+    }
+
+    const stat = fs.statSync(normalized);
+    if (!stat.isDirectory()) {
+      res.status(400).json({ error: 'path is not a directory' });
+      return;
+    }
+
+    const entries = fs.readdirSync(normalized, { withFileTypes: true });
+    const dirs: string[] = [];
+
+    for (const entry of entries) {
+      if (entry.name.startsWith('.')) continue; // skip hidden entries
+      if (entry.isDirectory()) {
+        dirs.push(entry.name);
+      } else if (entry.isSymbolicLink()) {
+        // Follow the symlink — useful for /mnt/* or volume-mount points
+        try {
+          const target = fs.statSync(path.join(normalized, entry.name));
+          if (target.isDirectory()) dirs.push(entry.name);
+        } catch {
+          // Broken symlink — skip
+        }
+      }
+    }
+
+    dirs.sort();
+    res.json({ path: normalized, dirs });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(400).json({ error: msg });
+  }
+});
+
+// ── PUT /backup-config ────────────────────────────────────────────────────────
+
+dataRouter.put('/backup-config', requireAdminMfa, (req, res) => {
+  if (!isDbMigrationEnabled()) {
+    res.status(403).json({
+      error:
+        'Scheduled/offsite backup is disabled on this instance. ' +
+        'Set YTHRIL_DB_MIGRATION_ENABLED=true to enable.',
+      code: 'FEATURE_DISABLED',
+    });
+    return;
+  }
+
+  const parsed = BackupConfigSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const cfg = parsed.data;
+
+  // Security: offsite.destPath must be absolute
+  if (cfg.offsite && !path.isAbsolute(cfg.offsite.destPath)) {
+    res.status(400).json({ error: 'offsite.destPath must be an absolute path' });
+    return;
+  }
+
+  try {
+    fs.mkdirSync(path.dirname(BACKUP_CONFIG_PATH), { recursive: true });
+    fs.writeFileSync(BACKUP_CONFIG_PATH, JSON.stringify(cfg, null, 2), 'utf8');
+    res.json({ ok: true, config: cfg });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: msg });
@@ -256,6 +388,17 @@ dataRouter.post('/migrate', requireAdminMfa, async (req, res) => {
     res.status(403).json({
       error: 'Database migration is disabled on this instance. Set YTHRIL_DB_MIGRATION_ENABLED=true to enable.',
       code: 'FEATURE_DISABLED',
+    });
+    return;
+  }
+
+  // Guard: cannot migrate when the connection is managed via environment variable.
+  // MONGO_URI always takes precedence over config.json, so writing a new URI to
+  // config.json would have no effect — the env var would override it on restart.
+  if (process.env['MONGO_URI']) {
+    res.status(409).json({
+      error: 'Database connection is managed via the MONGO_URI environment variable. Migration is not available; update the environment variable in your infrastructure configuration instead.',
+      code: 'INFRA_MANAGED',
     });
     return;
   }

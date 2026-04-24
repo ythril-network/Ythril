@@ -6,6 +6,7 @@ import { initAllSpaces } from './spaces/spaces.js';
 import { resetStaleWatermarksIfNeeded } from './util/seq.js';
 import { createApp } from './app.js';
 import { startSyncScheduler, stopSyncScheduler } from './sync/engine.js';
+import { startBackupScheduler, stopBackupScheduler } from './db/backup-scheduler.js';
 import { cleanupStaleChunks } from './files/chunks.js';
 import { log } from './util/log.js';
 
@@ -107,6 +108,7 @@ async function main(): Promise<void> {
 
     await resetStaleWatermarksIfNeeded();
     startSyncScheduler();
+    startBackupScheduler();
     cleanupStaleChunks().catch(err => log.error(`Stale chunk cleanup failed: ${err}`));
   }
 
@@ -138,6 +140,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     log.debug(`${signal} received — shutting down`);
     stopSyncScheduler();
+    stopBackupScheduler();
     const { stopRetryWorker } = await import('./webhooks/dispatcher.js');
     stopRetryWorker();
     server.close(() => log.debug('HTTP server closed'));

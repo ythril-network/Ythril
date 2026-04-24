@@ -397,6 +397,14 @@ export interface AuditLogParams {
   offset?: number;
 }
 
+// ── Backup config ─────────────────────────────────────────────────────────────
+
+export interface BackupConfigData {
+  schedule?: string;
+  retention?: { keepLocal?: number };
+  offsite?: { destPath: string; retention?: { keepCount?: number } };
+}
+
 // ── API service ───────────────────────────────────────────────────────────────
 
 @Injectable({ providedIn: 'root' })
@@ -1006,8 +1014,8 @@ export class ApiService {
 
   // ── Data management ───────────────────────────────────────────────────────
 
-  getDataConfig(): Observable<{ source: 'env' | 'config' | 'default'; mongoUriRedacted: string }> {
-    return this.http.get<{ source: 'env' | 'config' | 'default'; mongoUriRedacted: string }>('/api/admin/data/config');
+  getDataConfig(): Observable<{ source: 'env' | 'config' | 'default'; mongoUriRedacted: string; migrationEnabled: boolean }> {
+    return this.http.get<{ source: 'env' | 'config' | 'default'; mongoUriRedacted: string; migrationEnabled: boolean }>('/api/admin/data/config');
   }
 
   testMongoConnection(uri: string): Observable<{ ok: boolean; error?: string }> {
@@ -1036,5 +1044,19 @@ export class ApiService {
 
   startMigration(uri: string): Observable<{ ok: boolean; backupDir: string; manifest: unknown }> {
     return this.http.post<{ ok: boolean; backupDir: string; manifest: unknown }>('/api/admin/data/migrate', { uri });
+  }
+
+  getBackupConfig(): Observable<{ config: BackupConfigData | null; backupsPath?: string }> {
+    return this.http.get<{ config: BackupConfigData | null; backupsPath?: string }>('/api/admin/data/backup-config');
+  }
+
+  saveBackupConfig(config: BackupConfigData): Observable<{ ok: boolean; config: BackupConfigData }> {
+    return this.http.put<{ ok: boolean; config: BackupConfigData }>('/api/admin/data/backup-config', config);
+  }
+
+  browseDirs(dirPath: string): Observable<{ path: string; dirs: string[] }> {
+    return this.http.get<{ path: string; dirs: string[] }>('/api/admin/data/browse-dirs', {
+      params: { path: dirPath },
+    });
   }
 }

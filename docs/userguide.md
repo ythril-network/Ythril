@@ -457,25 +457,65 @@ When a space approaches its quota limit, writes will first return warnings and e
 
 **Settings → Data** (admin only) gives you control over the underlying MongoDB database: maintenance mode, manual backups, point-in-time restore, and — when enabled by the infrastructure administrator — live database migration.
 
+### MongoDB connection
+
+The **Database** card shows which MongoDB server this instance is connected to. The **source badge** indicates how the connection was configured:
+
+| Badge | Meaning |
+|---|---|
+| **default** | Using the bundled `ythril-mongo` container. No custom connection has been configured. |
+| **config file** | Connection string is stored in `config.json`, either saved here via migration or set manually. |
+| **env var** | Connection is managed by the infrastructure via the `MONGO_URI` environment variable. The variable always takes precedence over `config.json`. |
+
 ### Maintenance mode
 
 Maintenance mode suspends all write operations across the entire instance. All write requests return `503 Service Unavailable` while active. Read operations continue normally.
 
 Use it before a restore or any manual database operation where you want to prevent concurrent writes.
 
-Toggle the **Maintenance mode** switch to enable or disable it. A banner appears across the top of the UI on all pages while maintenance is active.
-
-### MongoDB connection
-
-The **Database** card shows which MongoDB server this instance is connected to and how the URI was configured (environment variable, `config.json`, or built-in default).
-
-If your instance has MFA enabled, you will be prompted for a TOTP code before connection details are shown or changed.
+Toggle the **Maintenance mode** button to enable or disable it. A banner appears across the top of the UI on all pages while maintenance is active.
 
 ### Backups
 
-Click **Run backup now** to trigger an immediate point-in-time dump of the entire MongoDB database. The backup is stored inside the instance's data directory (`<data-root>/backups/<timestamp>/`). Each backup contains a `manifest.json` with metadata and one BSON file per collection.
+Click **Run backup now** to trigger an immediate point-in-time dump of the entire MongoDB database. The backup is stored inside the instance's data directory (`<data-root>/backups/<timestamp>/`). Each backup contains a `manifest.json` with metadata and one NDJSON file per collection.
 
 The **Backups** table lists all available backups with their timestamp and the collections they contain.
+
+### Scheduled and offsite backups
+
+> **This feature must be explicitly enabled by your infrastructure administrator** (`YTHRIL_DB_MIGRATION_ENABLED=true`). It is disabled by default.
+
+Automatic and offsite backups are configured via a dedicated `backup.json` file placed alongside `config.json` (typically `/config/backup.json`). This file is **never written by the API** — only the infrastructure administrator can create or modify it via direct filesystem access. This design prevents a compromised admin token from redirecting backups to an attacker-controlled location.
+
+**Example `backup.json`:**
+
+```json
+{
+  "schedule": "0 2 * * *",
+  "retention": {
+    "keepLocal": 7
+  },
+  "offsite": {
+    "destPath": "/mnt/offsite-backup/ythril",
+    "retention": {
+      "keepCount": 14
+    }
+  }
+}
+```
+
+| Field | Description |
+|---|---|
+| `schedule` | Cron expression for automatic backups (e.g. `"0 2 * * *"` = daily at 02:00). |
+| `retention.keepLocal` | Maximum number of local backups to retain. Oldest are deleted automatically after each run. |
+| `offsite.destPath` | **Absolute path** on the container filesystem to copy each backup to. Mount external drives, NFS shares, or any storage as a Docker/K8s volume pointing here. |
+| `offsite.retention.keepCount` | Maximum number of offsite backup sets to retain (default: 14). |
+
+Each backup set at the offsite destination contains:
+- `<backupId>/` — MongoDB NDJSON dump (same format as local backups)
+- `<backupId>-files/` — copy of `<data-root>/files/` (user-uploaded files), if present
+
+The `backup.json` file must not exist (or can be empty) to disable the feature entirely. All fields are optional.
 
 ### Restore
 
@@ -488,11 +528,13 @@ Restore is irreversible — all data written after the backup timestamp will be 
 
 ### Database migration
 
-> **This feature must be explicitly enabled by your infrastructure administrator** (`YTHRIL_DB_MIGRATION_ENABLED=true`). It is disabled by default on all instances. If you do not see this section, migration has not been enabled on your instance.
+> **This feature must be explicitly enabled by your infrastructure administrator** (`YTHRIL_DB_MIGRATION_ENABLED=true`). It is disabled by default on all instances.
 
-Database migration moves the entire database to a different MongoDB server (for example, from a local container to Atlas, or between clusters).
+> **Not available when `MONGO_URI` is set.** If the connection is managed via environment variable, the **Migrate Database** card shows an informational message instead of the migration form. To change the database in that case, update `MONGO_URI` in your deployment configuration and restart.
 
-Enter the target MongoDB URI in the **Migrate database** field and click **Test connection** to verify reachability before committing. Once you click **Migrate**:
+Database migration moves the entire database to a different MongoDB server — for example, from the bundled container to Atlas, or between clusters.
+
+Enter the target MongoDB URI and click **Test Connection** to verify reachability before committing. Once you click **Migrate**:
 1. Maintenance mode is activated.
 2. The current database is dumped to `<data-root>/migration-backup/`.
 3. A migration marker is written and the new URI is saved to `config.json`.

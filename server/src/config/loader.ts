@@ -288,7 +288,8 @@ export function getEmbeddingConfig() {
 
 export function getMongoUri(): string {
   const cfg = _config;
-  return cfg?.mongo?.uri ?? process.env['MONGO_URI'] ?? 'mongodb://ythril-mongo:27017/?directConnection=true';
+  // env var wins — infra-managed deployments must be able to override config.json
+  return process.env['MONGO_URI'] ?? cfg?.mongo?.uri ?? 'mongodb://ythril-mongo:27017/?directConnection=true';
 }
 
 export function getDataRoot(): string {

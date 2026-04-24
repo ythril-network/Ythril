@@ -1,4 +1,5 @@
-﻿# ── Stage 1: Build Angular SPA ───────────────────────────────────────────────
+﻿# syntax=docker/dockerfile:1
+# ── Stage 1: Build Angular SPA ───────────────────────────────────────────────
 FROM node:22-slim AS client-builder
 
 WORKDIR /build
@@ -63,20 +64,24 @@ COPY --from=builder /build/server/dist ./server/dist
 COPY --from=client-builder /build/client/dist/browser ./client/dist/browser
 
 # Pre-download & cache the embedding model so first startup is instant and fully offline.
-# MODEL_CACHE_DIR is baked into the image layer; the node user has read/write access.
+# --mount=type=cache keeps downloaded files on the build host between rebuilds so that
+# invalidating an earlier layer (e.g. npm ci) doesn't re-download ~274 MB every time.
+# The model is then copied into the image layer so the container starts offline.
 ENV MODEL_CACHE_DIR=/app/model-cache
-RUN printf '%s\n' \
+RUN --mount=type=cache,target=/tmp/hf-model-cache \
+    printf '%s\n' \
     'import { pipeline, env } from "@huggingface/transformers";' \
-    'env.cacheDir = process.env.MODEL_CACHE_DIR;' \
-    'console.log("Downloading nomic-embed-text-v1.5 (~274 MB, cached in image)...");' \
-    'await pipeline("feature-extraction", "nomic-ai/nomic-embed-text-v1.5");' \
-    'console.log("Embedding model ready.");' \
-    > /app/server/warm.mjs && node /app/server/warm.mjs && rm /app/server/warm.mjs
+    'env.cacheDir = "/tmp/hf-model-cache";' \
+    'await pipeline("feature-extraction", "nomic-ai/nomic-embed-text-v1.5", { dtype: "fp32" });' \
+    > /app/server/warm.mjs && \
+    node /app/server/warm.mjs && \
+    rm /app/server/warm.mjs && \
+    mkdir -p /app/model-cache && \
+    cp -a /tmp/hf-model-cache/. /app/model-cache/
 ENV NODE_ENV=production
 ENV PORT=3200
 ENV CONFIG_PATH=/config/config.json
 ENV DATA_ROOT=/data
-ENV MONGO_URI=mongodb://ythril-mongo:27017
 ENV CLIENT_DIST=/app/client/dist/browser
 
 EXPOSE 3200

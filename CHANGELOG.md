@@ -6,6 +6,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [1.2.0] — 2026-04-24
+
+### Added
+
+- **Database backup scheduling** — cron-based automatic backups configurable from the Settings → Database page. Frequency options: never, hourly, daily, weekly, monthly. Time-of-day, weekday, and day-of-month pickers for non-hourly schedules. Human-readable schedule summary.
+- **Backup destination settings** — backups can stay in Ythril’s internal data folder (default) or be copied to any path accessible from the server (mounted volume, network share). Configurable per-destination retention count (how many backups to keep). Settings persisted in `backup.json`.
+- **`GET /api/data/browse-dirs`** — authenticated server-side directory listing used to display the internal backup path placeholder.
+- **`config/backup.example.json`** — documented example of the backup configuration schema.
+- **Integration test: `db-backup-offsite.test.js`** — covers backup trigger, offsite copy, and retention enforcement.
+- **i18n** — all backup destination and schedule strings localised in en / de / pl, including new hourly frequency option.
+
 ### Changed
 
 - **MCP `recall` output format** — The `recall` tool (and cross-space recall when `space` is omitted) now returns structured JSON instead of human-readable prose. Each result is a wrapper object with five top-level keys: `score`, `spaceId`, `type`, `matchedText`, and `record`. `record` is the full stored document including `_id`, making follow-up tool calls (`update_memory`, `upsert_entity`, `delete_memory`, etc.) possible without a second lookup. `matchedText` is the pre-embedding source text (the exact string fed to the embedding model for that document) — stored at write time for all knowledge types. Old entries without a stored `matchedText` fall back to a summary derived from the same algorithm. `record` also gains `updatedAt` and (for edges/chrono) the native `type` field correctly restored. Integration guide updated with response format, field descriptions, and an example response. Full test suite passes on fresh test instances (issue #91).

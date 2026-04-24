@@ -22,6 +22,7 @@ testing/sync/configs/*/secrets.json
 testing/sync/configs/*/token.txt
 testing/sync/configs/*/schema-library.json
 testing/sync/configs/*/schema-catalogs.json
+testing/sync/configs/*/backup.json
 
 # Env files
 .env

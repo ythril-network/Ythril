@@ -21,7 +21,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, reqJson } from '../sync/helpers.js';
+import { INSTANCES, post, put, reqJson } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Use instance B — YTHRIL_DB_MIGRATION_ENABLED is intentionally absent on B.
@@ -79,5 +79,26 @@ describe('DB migration disabled — POST /api/admin/data/migrate returns 403', (
       `Expected 200 or 500 for backup on instance B, got ${r.status}: ${JSON.stringify(r.body)}`);
     assert.notEqual(r.status, 403,
       'Backup must NOT be gated behind YTHRIL_DB_MIGRATION_ENABLED');
+  });
+
+  it('PUT /backup-config returns 403 FEATURE_DISABLED (offsite config write blocked)', async () => {
+    // Writing backup-config is gated behind the same flag as migration.
+    // An attacker who obtains an admin token must not be able to redirect
+    // backups to an attacker-controlled offsite path.
+    const r = await put(BASE, adminToken, '/api/admin/data/backup-config', {
+      offsite: { destPath: '/attacker/controlled/path' },
+    });
+    assert.equal(r.status, 403,
+      `Expected 403 (feature disabled) but got ${r.status}: ${JSON.stringify(r.body)}`);
+    assert.equal(r.body.code, 'FEATURE_DISABLED');
+  });
+
+  it('PUT /backup-config returns 401 for unauthenticated request', async () => {
+    const resp = await fetch(`${BASE}/api/admin/data/backup-config`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ offsite: { destPath: '/attacker/path' } }),
+    });
+    assert.equal(resp.status, 401);
   });
 });

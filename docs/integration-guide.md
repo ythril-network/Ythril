@@ -30,7 +30,7 @@ If you are here for web UI usage, read [User Guide](userguide.md). If you are co
 15. [Conflicts API](#conflicts-api) — view and resolve sync conflicts
 16. [Setup API](#setup-api) — first-run setup
 17. [Admin API](#admin-api) — config reload, export/import, space wipe
-18. [Data Management API](#data-management-api) — maintenance mode, backup, restore, migration
+18. [Data Management API](#data-management-api) — maintenance mode, backup, restore, migration, backup config
 19. [Audit Log API](#audit-log-api) — token and access audit trail
 20. [Webhooks API](#webhooks-api) — event subscriptions for space write events
 21. [About API](#about-api) — instance info and logs
@@ -3719,7 +3719,13 @@ Authorization: Bearer <admin-token>
 }
 ```
 
-`source` is one of `"env"` (set via `MONGO_URI` environment variable), `"config"` (set in `config.json`), or `"default"` (built-in localhost default).
+`source` indicates where the active connection string comes from, in priority order (highest first):
+
+| Value | Meaning |
+|---|---|
+| `"env"` | `MONGO_URI` environment variable — set in deployment config (e.g. `docker-compose.yml`). Always takes precedence. Migration is not available when this is the source. |
+| `"config"` | Connection string stored in `config.json` — set via database migration or manual edit. |
+| `"default"` | Built-in default (`mongodb://ythril-mongo:27017/`). No custom connection configured. |
 
 ---
 
@@ -3778,7 +3784,12 @@ Content-Type: application/json
 
 ### POST /api/admin/data/backup
 
-Trigger an immediate point-in-time dump of the entire MongoDB database. The backup is written to `<data-root>/backups/<ISO-timestamp>/` and contains a `manifest.json` plus one BSON file per collection.
+Trigger an immediate point-in-time dump of the entire MongoDB database. The backup is written to `<data-root>/backups/<ISO-timestamp>/` and contains a `manifest.json` plus one NDJSON file per collection.
+
+When `YTHRIL_DB_MIGRATION_ENABLED=true` and a `backup.json` config file is present, this endpoint also:
+- Copies the backup (plus `<data-root>/files/`) to the configured `offsite.destPath`
+- Applies local retention (`retention.keepLocal`) — deletes oldest local backups over the limit
+- Applies offsite retention (`offsite.retention.keepCount`) — deletes oldest offsite sets over the limit
 
 ```
 POST /api/admin/data/backup
@@ -3786,7 +3797,7 @@ Authorization: Bearer <admin-token>
 X-TOTP-Code: <code>   # required when MFA is enabled
 ```
 
-**Response `200`:**
+**Response `200` (local backup only):**
 
 ```json
 {
@@ -3797,6 +3808,26 @@ X-TOTP-Code: <code>   # required when MFA is enabled
   }
 }
 ```
+
+**Response `200` (with offsite copy and retention):**
+
+```json
+{
+  "backup": {
+    "id": "2026-04-23T10-00-00-000Z",
+    "dir": "/data/backups/2026-04-23T10-00-00-000Z",
+    "manifest": { "createdAt": "2026-04-23T10:00:00.000Z", "collections": ["memories", "entities"] }
+  },
+  "localPruned": 2,
+  "offsite": {
+    "dir": "/mnt/offsite-backup/ythril/2026-04-23T10-00-00-000Z",
+    "filesDir": "/mnt/offsite-backup/ythril/2026-04-23T10-00-00-000Z-files",
+    "pruned": 1
+  }
+}
+```
+
+`localPruned` and `offsite.pruned` are only present when backups were actually deleted. `offsite.filesDir` is only present when a `files/` directory exists.
 
 ---
 
@@ -3853,9 +3884,87 @@ Content-Type: application/json
 
 ---
 
+### GET /api/admin/data/backup-config
+
+> **Feature flag required.** Returns `403` unless the instance was started with `YTHRIL_DB_MIGRATION_ENABLED=true`.
+
+Returns the current contents of `backup.json` — the infrastructure-admin-managed file that configures scheduled and offsite backups. This endpoint is **read-only**; the file can never be written via the API.
+
+```
+GET /api/admin/data/backup-config
+Authorization: Bearer <admin-token>
+```
+
+**Response `200`:**
+
+```json
+{
+  "config": {
+    "schedule": "0 2 * * *",
+    "retention": { "keepLocal": 7 },
+    "offsite": {
+      "destPath": "/mnt/offsite-backup/ythril",
+      "retention": { "keepCount": 14 }
+    }
+  },
+  "configPath": "/config/backup.json"
+}
+```
+
+`config` is `null` when the file does not exist (feature is enabled but backup.json has not been created yet).
+
+| Status | Meaning |
+|--------|--------|
+| `403` | `YTHRIL_DB_MIGRATION_ENABLED` is not `true` (feature disabled) |
+
+#### Configuring backup.json
+
+Place `backup.json` alongside `config.json` on the container filesystem (typically `/config/backup.json`). All fields are optional — omit any field to disable that aspect.
+
+| Field | Type | Description |
+|---|---|---|
+| `schedule` | string | Cron expression for automatic backups (`"0 2 * * *"` = daily at 02:00). Must be a valid 5-part cron expression. |
+| `retention.keepLocal` | integer ≥ 1 | Max local backups to keep under `<data-root>/backups/`. Oldest are pruned automatically. |
+| `offsite.destPath` | string | **Absolute path** on the container filesystem. Mount external drives, NFS shares, or any storage as a volume pointing here. |
+| `offsite.retention.keepCount` | integer ≥ 1 | Max offsite backup sets to retain (default: 14). |
+
+Each offsite backup set consists of a `<backupId>/` directory (MongoDB dump) and a `<backupId>-files/` directory (copy of `<data-root>/files/`), kept in sync when pruning.
+
+**Example `backup.json`** — also at `config/backup.example.json` in the repository:
+
+```json
+{
+  "schedule": "0 2 * * *",
+  "retention": { "keepLocal": 7 },
+  "offsite": {
+    "destPath": "/mnt/offsite-backup/ythril",
+    "retention": { "keepCount": 14 }
+  }
+}
+```
+
+**Docker Compose example** — mounting an external volume for offsite backups:
+
+```yaml
+services:
+  ythril:
+    environment:
+      YTHRIL_DB_MIGRATION_ENABLED: "true"
+    volumes:
+      - ./config:/config
+      - ythril-data:/data
+      - /mnt/external-drive/ythril-backups:/mnt/offsite-backup/ythril
+
+# config/backup.json  →  { "schedule": "0 2 * * *", "offsite": { "destPath": "/mnt/offsite-backup/ythril" } }
+```
+
+---
+
 ### POST /api/admin/data/migrate
 
 > **Feature flag required.** This endpoint returns `403` unless the instance was started with `YTHRIL_DB_MIGRATION_ENABLED=true`. The flag is off by default so that a compromised admin token cannot be used to exfiltrate the entire database to an attacker-controlled server.
+
+> **Not available when `MONGO_URI` is set.** If the database connection is managed via the `MONGO_URI` environment variable, this endpoint returns `409 INFRA_MANAGED`. Update the environment variable in your deployment configuration instead.
 
 Migrates the entire database to a new MongoDB server. The sequence is:
 
@@ -3888,12 +3997,13 @@ Content-Type: application/json
 }
 ```
 
-| Status | Meaning |
-|--------|--------|
-| `400` | Invalid or SSRF-unsafe URI |
-| `403` | `YTHRIL_DB_MIGRATION_ENABLED` is not `true` (feature disabled) |
-| `409` | Maintenance mode already active — deactivate it first |
-| `500` | Dump failed or new URI unreachable |
+| Status | Code | Meaning |
+|--------|------|---------|
+| `400` | | Invalid or SSRF-unsafe URI |
+| `403` | `FEATURE_DISABLED` | `YTHRIL_DB_MIGRATION_ENABLED` is not `true` |
+| `409` | `INFRA_MANAGED` | `MONGO_URI` env var is set — connection is infra-managed, migration unavailable |
+| `409` | | Maintenance mode already active — deactivate it first |
+| `500` | | Dump failed or new URI unreachable |
 
 #### Enabling migration on a deployment
 

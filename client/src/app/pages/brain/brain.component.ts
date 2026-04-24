@@ -686,20 +686,20 @@ interface SpaceView {
                     <tr>
                       <td style="max-width:300px; white-space:pre-wrap; word-break:break-word;">{{ mem.fact }}</td>
                       <td style="font-size:12px; color:var(--text-muted); max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" [title]="mem.description ?? ''">
-                        {{ mem.description || 'â€”' }}
+                        {{ mem.description || '—' }}
                       </td>
                       <td style="font-size:11px;">
                         @for (tag of (mem.tags ?? []); track tag) { <span class="tag tag-clickable" (click)="applyFilter('tag', tag)">{{ tag }}</span> }
-                        @if (!(mem.tags?.length)) { <span style="color:var(--text-muted)">â€”</span> }
+                        @if (!(mem.tags?.length)) { <span style="color:var(--text-muted)">—</span> }
                       </td>
                       <td style="font-size:11px;">
                         @if (mem.entityIds?.length) {
                           <div class="chip-list">
                             @for (id of mem.entityIds!; track id) {
-                              <span class="chip" [title]="id">{{ entityNameCache()[id] || id.slice(0,8) + 'â€¦' }}</span>
+                              <span class="chip" [title]="id">{{ entityNameCache()[id] || id.slice(0,8) + '…' }}</span>
                             }
                           </div>
-                        } @else { <span style="color:var(--text-muted)">â€”</span> }
+                        } @else { <span style="color:var(--text-muted)">—</span> }
                       </td>
                       <td><app-properties-view [properties]="mem.properties" [schema]="memorySchema()" /></td>
                       <td style="color:var(--text-muted)">{{ mem.createdAt | date:'dd.MM.yyyy' }}</td>
@@ -737,7 +737,7 @@ interface SpaceView {
           @if (memorySearchMode() !== 'semantic') {
             <div class="pagination">
               <button class="btn btn-sm btn-secondary" [disabled]="skip() === 0" (click)="prevPage()"><ph-icon name="arrow-left" [size]="14" style="display:inline-flex;vertical-align:middle;"/> {{ 'common.prev' | transloco }}</button>
-              <span class="pager-info">{{ filteredMemories().length ? (skip() + 1) + 'â€“' + (skip() + filteredMemories().length) : 'â€“' }}</span>
+              <span class="pager-info">{{ filteredMemories().length ? (skip() + 1) + '–' + (skip() + filteredMemories().length) : '–' }}</span>
               <button class="btn btn-sm btn-secondary" [disabled]="memories().length < pageSize" (click)="nextPage()">{{ 'common.next' | transloco }} <ph-icon name="arrow-right" [size]="14" style="display:inline-flex;vertical-align:middle;"/></button>
             </div>
           }
@@ -867,11 +867,11 @@ interface SpaceView {
                         @if (ent.type) { <span class="badge badge-purple">{{ ent.type }}</span> }
                       </td>
                       <td style="font-size:12px; color:var(--text-muted); max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" [title]="ent.description ?? ''">
-                        {{ ent.description || 'â€”' }}
+                        {{ ent.description || '—' }}
                       </td>
                       <td style="font-size:11px;">
                         @for (tag of (ent.tags ?? []); track tag) { <span class="tag">{{ tag }}</span> }
-                        @if (!(ent.tags?.length)) { <span style="color:var(--text-muted)">â€”</span> }
+                        @if (!(ent.tags?.length)) { <span style="color:var(--text-muted)">—</span> }
                       </td>
                       <td><app-properties-view [properties]="ent.properties" [schema]="entitySchema(ent.type)" /></td>
                       <td style="color:var(--text-muted)">{{ ent.createdAt | date:'dd.MM.yyyy' }}</td>
@@ -902,7 +902,7 @@ interface SpaceView {
           </div>
           <div class="pagination">
             <button class="btn btn-sm btn-secondary" [disabled]="entitySkip() === 0" (click)="prevEntityPage()"><ph-icon name="arrow-left" [size]="14" style="display:inline-flex;vertical-align:middle;"/> {{ 'common.prev' | transloco }}</button>
-            <span class="pager-info">{{ entities().length ? (entitySkip() + 1) + 'â€“' + (entitySkip() + entities().length) : 'â€“' }}</span>
+            <span class="pager-info">{{ entities().length ? (entitySkip() + 1) + '–' + (entitySkip() + entities().length) : '–' }}</span>
             <button class="btn btn-sm btn-secondary" [disabled]="entities().length < pageSize" (click)="nextEntityPage()">{{ 'common.next' | transloco }} <ph-icon name="arrow-right" [size]="14" style="display:inline-flex;vertical-align:middle;"/></button>
           </div>
         }
@@ -1005,7 +1005,7 @@ interface SpaceView {
                           <div class="field" style="min-width:200px; margin-bottom:0;">
                             <label style="font-size:11px; color:var(--text-muted);">{{ 'brain.edges.form.editingLabel' | transloco }}</label>
                             <div style="font-size:12px; padding:6px 8px; background:var(--bg-secondary); border-radius:4px; color:var(--text-muted);">
-                              {{ editEdge.fromName || editEdge.from }} â†’ {{ editEdge.toName || editEdge.to }}
+                              {{ editEdge.fromName || editEdge.from }} → {{ editEdge.toName || editEdge.to }}
                             </div>
                           </div>
                           <div class="field" style="flex:1; min-width:120px; margin-bottom:0;">
@@ -1055,13 +1055,13 @@ interface SpaceView {
                       <td style="font-size:12px; white-space:nowrap;">{{ edge.fromName || edge.from }}</td>
                       <td><span class="badge badge-blue">{{ edge.label }}</span></td>
                       <td style="font-size:12px; white-space:nowrap;">{{ edge.toName || edge.to }}</td>
-                      <td style="color:var(--text-muted);">{{ edge.weight ?? 'â€”' }}</td>
+                      <td style="color:var(--text-muted);">{{ edge.weight ?? '—' }}</td>
                       <td style="font-size:11px;">
                         @for (tag of (edge.tags ?? []); track tag) { <span class="tag">{{ tag }}</span> }
-                        @if (!(edge.tags?.length)) { <span style="color:var(--text-muted)">â€”</span> }
+                        @if (!(edge.tags?.length)) { <span style="color:var(--text-muted)">—</span> }
                       </td>
                       <td style="font-size:12px; color:var(--text-muted); white-space:normal; word-break:break-word; min-width:140px; min-height:4.2em;">
-                        {{ edge.description || 'â€”' }}
+                        {{ edge.description || '—' }}
                       </td>
                       <td><app-properties-view [properties]="edge.properties" [schema]="edgeSchema(edge.label)" /></td>
                       <td style="color:var(--text-muted); white-space:nowrap;">{{ edge.createdAt | date:'dd.MM.yyyy' }}</td>
@@ -1098,7 +1098,7 @@ interface SpaceView {
           @if (edgeSearchMode() !== 'semantic') {
             <div class="pagination">
               <button class="btn btn-sm btn-secondary" [disabled]="edgeSkip() === 0" (click)="prevEdgePage()"><ph-icon name="arrow-left" [size]="14" style="display:inline-flex;vertical-align:middle;"/> {{ 'common.prev' | transloco }}</button>
-              <span class="pager-info">{{ filteredEdges().length ? (edgeSkip() + 1) + 'â€“' + (edgeSkip() + filteredEdges().length) : 'â€“' }}</span>
+              <span class="pager-info">{{ filteredEdges().length ? (edgeSkip() + 1) + '–' + (edgeSkip() + filteredEdges().length) : '–' }}</span>
               <button class="btn btn-sm btn-secondary" [disabled]="edges().length < pageSize" (click)="nextEdgePage()">{{ 'common.next' | transloco }} <ph-icon name="arrow-right" [size]="14" style="display:inline-flex;vertical-align:middle;"/></button>
             </div>
           }
@@ -1278,12 +1278,12 @@ interface SpaceView {
                     <tr>
                       <td>{{ entry.title }}</td>
                       <td style="font-size:12px; color:var(--text-muted); max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" [title]="entry.description ?? ''">
-                        {{ entry.description || 'â€”' }}
+                        {{ entry.description || '—' }}
                       </td>
                       <td><span class="badge badge-blue">{{ entry.type }}</span></td>
                       <td><span class="badge" [class.badge-purple]="entry.status === 'upcoming'" [class.badge-blue]="entry.status === 'active'" style="font-size:11px">{{ entry.status }}</span></td>
                       <td style="color:var(--text-muted); font-size:12px">{{ entry.startsAt | date:'dd.MM.yyyy HH:mm' }}</td>
-                      <td style="color:var(--text-muted); font-size:12px">{{ entry.endsAt ? (entry.endsAt | date:'dd.MM.yyyy HH:mm') : 'â€”' }}</td>
+                      <td style="color:var(--text-muted); font-size:12px">{{ entry.endsAt ? (entry.endsAt | date:'dd.MM.yyyy HH:mm') : '—' }}</td>
                       <td>
                         @for (tag of entry.tags; track tag) { <span class="tag">{{ tag }}</span> }
                       </td>
@@ -1291,10 +1291,10 @@ interface SpaceView {
                         @if (entry.entityIds.length) {
                           <div class="chip-list">
                             @for (id of entry.entityIds; track id) {
-                              <span class="chip" [title]="id">{{ entityNameCache()[id] || id.slice(0,8) + 'â€¦' }}</span>
+                              <span class="chip" [title]="id">{{ entityNameCache()[id] || id.slice(0,8) + '…' }}</span>
                             }
                           </div>
-                        } @else { <span style="color:var(--text-muted)">â€”</span> }
+                        } @else { <span style="color:var(--text-muted)">—</span> }
                       </td>
                       <td style="white-space:nowrap;">
                         <button class="icon-btn" [attr.title]="'common.viewDetails' | transloco" [attr.aria-label]="'common.viewDetails' | transloco" (click)="openDrawer('chrono', entry)"><ph-icon name="eye" [size]="16"/></button>
@@ -1329,7 +1329,7 @@ interface SpaceView {
           @if (chronoSearchMode() !== 'semantic') {
             <div class="pagination">
               <button class="btn btn-sm btn-secondary" [disabled]="chronoSkip() === 0" (click)="prevChronoPage()"><ph-icon name="arrow-left" [size]="14" style="display:inline-flex;vertical-align:middle;"/> {{ 'common.prev' | transloco }}</button>
-              <span class="pager-info">{{ chrono().length ? (chronoSkip() + 1) + 'â€“' + (chronoSkip() + chrono().length) : 'â€“' }}</span>
+              <span class="pager-info">{{ chrono().length ? (chronoSkip() + 1) + '–' + (chronoSkip() + chrono().length) : '–' }}</span>
               <button class="btn btn-sm btn-secondary" [disabled]="chrono().length < pageSize" (click)="nextChronoPage()">{{ 'common.next' | transloco }} <ph-icon name="arrow-right" [size]="14" style="display:inline-flex;vertical-align:middle;"/></button>
             </div>
           }
@@ -1407,7 +1407,7 @@ interface SpaceView {
                                     <input type="text" [value]="fmMemPickerQuery()" (input)="onFmMemPickerInput($any($event.target).value)" [placeholder]="'brain.fileMeta.picker.searchMemories' | transloco" style="width:100%; margin-bottom:6px;" />
                                     @for (mem of fmMemPickerResults(); track mem._id) {
                                       <div class="flyout-result" (click)="addFmMemoryId(editFileMeta, mem._id); closeFlyout()" style="cursor:pointer; padding:4px 6px; border-radius:4px;">
-                                        {{ mem.fact.slice(0, 60) }}{{ mem.fact.length > 60 ? 'â€¦' : '' }}
+                                        {{ mem.fact.slice(0, 60) }}{{ mem.fact.length > 60 ? '…' : '' }}
                                       </div>
                                     }
                                     <div style="display:flex; justify-content:flex-end; margin-top:8px;">
@@ -1431,7 +1431,7 @@ interface SpaceView {
                                     <input type="text" [value]="fmChronoPickerQuery()" (input)="onFmChronoPickerInput($any($event.target).value)" [placeholder]="'brain.fileMeta.picker.searchChrono' | transloco" style="width:100%; margin-bottom:6px;" />
                                     @for (c of fmChronoPickerResults(); track c._id) {
                                       <div class="flyout-result" (click)="addFmChronoId(editFileMeta, c._id); closeFlyout()" style="cursor:pointer; padding:4px 6px; border-radius:4px;">
-                                        {{ c.title.slice(0, 60) }}{{ c.title.length > 60 ? 'â€¦' : '' }}
+                                        {{ c.title.slice(0, 60) }}{{ c.title.length > 60 ? '…' : '' }}
                                       </div>
                                     }
                                     <div style="display:flex; justify-content:flex-end; margin-top:8px;">
@@ -1459,7 +1459,7 @@ interface SpaceView {
                         <td>
                           <button class="link-btn" [attr.title]="'brain.fileMeta.openInFilesTabTitle' | transloco" (click)="openFileInManager(fm.path)">{{ fm.path }}</button>
                         </td>
-                        <td class="text-muted" style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ fm.description || 'â€“' }}</td>
+                        <td class="text-muted" style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ fm.description || '–' }}</td>
                         <td>
                           <div class="chip-list">
                             @for (tag of fm.tags; track tag) {
@@ -1470,7 +1470,7 @@ interface SpaceView {
                         <td>
                           <div class="chip-list">
                             @for (id of (fm.entityIds ?? []); track id) {
-                              <span class="chip" [title]="id">{{ entityNameCache()[id] || id.slice(0,8) + 'â€¦' }}</span>
+                              <span class="chip" [title]="id">{{ entityNameCache()[id] || id.slice(0,8) + '…' }}</span>
                             }
                           </div>
                         </td>
@@ -1509,7 +1509,7 @@ interface SpaceView {
             </div>
             <div class="pagination">
               <button class="btn btn-sm btn-secondary" [disabled]="fileMetaSkip() === 0" (click)="prevFileMetaPage()"><ph-icon name="arrow-left" [size]="14" style="display:inline-flex;vertical-align:middle;"/> {{ 'common.prev' | transloco }}</button>
-              <span class="pager-info">{{ fileMetas().length ? (fileMetaSkip() + 1) + 'â€“' + (fileMetaSkip() + fileMetas().length) : 'â€“' }}</span>
+              <span class="pager-info">{{ fileMetas().length ? (fileMetaSkip() + 1) + '–' + (fileMetaSkip() + fileMetas().length) : '–' }}</span>
               <button class="btn btn-sm btn-secondary" [disabled]="fileMetas().length < pageSize" (click)="nextFileMetaPage()">{{ 'common.next' | transloco }} <ph-icon name="arrow-right" [size]="14" style="display:inline-flex;vertical-align:middle;"/></button>
             </div>
           }
@@ -1689,7 +1689,7 @@ interface SpaceView {
             }
 
             <form>
-              <!-- â”€â”€ MEMORY â”€â”€ -->
+              <!-- ── MEMORY ── -->
               @if (dr.kind === 'memory') {
                 <div class="drawer-field">
                   <div class="drawer-label">{{ 'common.form.fact' | transloco }} <span style="color:var(--error)">*</span></div>
@@ -1747,7 +1747,7 @@ interface SpaceView {
                 </div>
               }
 
-              <!-- â”€â”€ ENTITY â”€â”€ -->
+              <!-- ── ENTITY ── -->
               @if (dr.kind === 'entity') {
                 <div class="drawer-field">
                   <div class="drawer-label">{{ 'brain.entities.table.name' | transloco }} <span style="color:var(--error)">*</span></div>
@@ -1788,7 +1788,7 @@ interface SpaceView {
                 </div>
               }
 
-              <!-- â”€â”€ EDGE â”€â”€ -->
+              <!-- ── EDGE ── -->
               @if (dr.kind === 'edge') {
                 <div class="drawer-field">
                   <div class="drawer-label">{{ 'common.form.from' | transloco }} <span class="drawer-muted">{{ 'common.readOnly' | transloco }}</span></div>
@@ -1841,7 +1841,7 @@ interface SpaceView {
                 </div>
               }
 
-              <!-- â”€â”€ CHRONO â”€â”€ -->
+              <!-- ── CHRONO ── -->
               @if (dr.kind === 'chrono') {
                 <div class="drawer-field">
                   <div class="drawer-label">{{ 'common.form.title' | transloco }} <span style="color:var(--error)">*</span></div>
@@ -2158,7 +2158,7 @@ export class BrainComponent implements OnInit {
   recallResults = signal<RecallResult[]>([]);
   recallError = signal('');
 
-  // Settings tab (schema only â€” UI lives in Admin â†’ Spaces)
+  // Settings tab (schema only — UI lives in Admin → Spaces)
   spaceMeta = signal<SpaceMetaResponse | null>(null);
 
   // Entity picker
@@ -2245,12 +2245,12 @@ export class BrainComponent implements OnInit {
 
   onFileMetaSearch(q: string): void {
     this.fileMetaSearch.set(q);
-    // client-side filter via filteredFileMetas computed() â€” no API call per keystroke
+    // client-side filter via filteredFileMetas computed() — no API call per keystroke
   }
 
   searchEntities(): void { this.entitySkip.set(0); this.loadCurrentTab(this.activeSpaceId()); }
 
-  // â”€â”€ Entity search bar handlers (brain entities tab) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Entity search bar handlers (brain entities tab) ──────────────────────
   onEntitySearchChange(q: string): void {
     this.entitySearch.set(q);
     this.entitySkip.set(0);
@@ -2276,7 +2276,7 @@ export class BrainComponent implements OnInit {
     });
   }
 
-  // â”€â”€ Memory / Edge / Chrono search with mode toggle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Memory / Edge / Chrono search with mode toggle ─────────────────────────
   onMemorySearch(q: string): void {
     this.memorySearch.set(q);
     if (this.memorySearchMode() === 'semantic') {
@@ -2496,7 +2496,7 @@ export class BrainComponent implements OnInit {
   requestDelete(id: string): void { this.confirmDeleteId.set(id); }
   cancelDelete(): void { this.confirmDeleteId.set(''); }
 
-  // â”€â”€ Inline edit methods â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Inline edit methods ────────────────────────────────────────────────
 
   startEditMemory(mem: Memory): void {
     this.editingId.set(mem._id);
@@ -2648,7 +2648,7 @@ export class BrainComponent implements OnInit {
     });
   }
 
-  // â”€â”€ File Meta inline edit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── File Meta inline edit ─────────────────────────────────────────────────
 
   startEditFileMeta(entry: FileMeta): void {
     this.editingId.set(entry._id);
@@ -2700,7 +2700,7 @@ export class BrainComponent implements OnInit {
     });
   }
 
-  // â”€â”€ File Meta navigation helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── File Meta navigation helpers ─────────────────────────────────────────
 
   /** Called from Files tab file preview: switch to Filemeta tab filtered by path. */
   openFileMetaEntry(path: string): void {
@@ -2717,7 +2717,7 @@ export class BrainComponent implements OnInit {
     this.setTab('files');
   }
 
-  // â”€â”€ File Meta memory/chrono pickers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── File Meta memory/chrono pickers ──────────────────────────────────────
 
   onFmMemPickerInput(q: string, isDrawer = false): void {
     if (isDrawer) {
@@ -2797,12 +2797,12 @@ export class BrainComponent implements OnInit {
 
   fmMemoryTitle(id: string): string {
     const mem = this.memories().find(m => m._id === id);
-    return mem ? mem.fact.slice(0, 40) + (mem.fact.length > 40 ? 'â€¦' : '') : id.slice(0, 8) + 'â€¦';
+    return mem ? mem.fact.slice(0, 40) + (mem.fact.length > 40 ? '…' : '') : id.slice(0, 8) + '…';
   }
 
   fmChronoTitle(id: string): string {
     const c = this.chrono().find(c => c._id === id);
-    return c ? c.title.slice(0, 40) + (c.title.length > 40 ? 'â€¦' : '') : id.slice(0, 8) + 'â€¦';
+    return c ? c.title.slice(0, 40) + (c.title.length > 40 ? '…' : '') : id.slice(0, 8) + '…';
   }
 
   createMemory(): void {
@@ -2938,7 +2938,7 @@ export class BrainComponent implements OnInit {
         this.needsReindex.set(false);
         this.loadStats(this.activeSpaceId());
       },
-      error: () => { this.reindexing.set(false); this.reindexResult.set('Reindex failed â€” check server logs.'); },
+      error: () => { this.reindexing.set(false); this.reindexResult.set('Reindex failed — check server logs.'); },
     });
   }
 
@@ -2960,11 +2960,11 @@ export class BrainComponent implements OnInit {
 
     if (this.queryForm.filter.trim()) {
       try { filter = JSON.parse(this.queryForm.filter.trim()); }
-      catch (e) { this.queryFilterError.set(`Invalid JSON â€” ${e instanceof Error ? e.message : 'check your filter syntax'}`); return; }
+      catch (e) { this.queryFilterError.set(`Invalid JSON — ${e instanceof Error ? e.message : 'check your filter syntax'}`); return; }
     }
     if (this.queryForm.projection.trim()) {
       try { projection = JSON.parse(this.queryForm.projection.trim()); }
-      catch (e) { this.queryProjectionError.set(`Invalid JSON â€” ${e instanceof Error ? e.message : 'check your projection syntax'}`); return; }
+      catch (e) { this.queryProjectionError.set(`Invalid JSON — ${e instanceof Error ? e.message : 'check your projection syntax'}`); return; }
     }
 
     this.queryRunning.set(true);
@@ -3012,7 +3012,7 @@ export class BrainComponent implements OnInit {
     return JSON.stringify(doc, null, 2);
   }
 
-  // â”€â”€ Space meta (schema, loaded for property prefill) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Space meta (schema, loaded for property prefill) ────────────────────
 
   loadSpaceMeta(spaceId: string): void {
     if (!spaceId) return;
@@ -3022,7 +3022,7 @@ export class BrainComponent implements OnInit {
     });
   }
 
-  // â”€â”€ Form openers with schema prefill â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Form openers with schema prefill ────────────────────────────────────
 
   /** Format an API error response into a human-readable string.
    *  When the server returns { error: 'schema_violation', violations: [...] }
@@ -3031,7 +3031,7 @@ export class BrainComponent implements OnInit {
     const body = err?.error;
     if (body?.error === 'schema_violation' && Array.isArray(body.violations) && body.violations.length > 0) {
       const details = body.violations.map(v => `${v.field}: ${v.reason}`).join('; ');
-      return `Schema violation â€” ${details}`;
+      return `Schema violation — ${details}`;
     }
     return body?.error ?? fallback;
   }
@@ -3092,7 +3092,7 @@ export class BrainComponent implements OnInit {
     return result;
   }
 
-  // â”€â”€ Detail drawer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Detail drawer ──────────────────────────────────────────────────────
 
   drawerRecord = signal<{ kind: 'memory' | 'entity' | 'edge' | 'chrono'; record: any } | null>(null);
   drawerSaving = signal(false);
@@ -3255,7 +3255,7 @@ export class BrainComponent implements OnInit {
     });
   }
 
-  // â”€â”€ Entity picker & flyouts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Entity picker & flyouts ─────────────────────────────────────────────
 
   flyoutField = signal('');
   entityNameCache = signal<Record<string, string>>({});

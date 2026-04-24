@@ -1,0 +1,13 @@
+{
+  "_comment": "Copy this file to backup.json in the same directory as config.json. All fields are optional.",
+  "schedule": "0 2 * * *",
+  "retention": {
+    "keepLocal": 7
+  },
+  "offsite": {
+    "destPath": "/mnt/offsite-backup/ythril",
+    "retention": {
+      "keepCount": 14
+    }
+  }
+}
