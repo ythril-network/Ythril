@@ -33,7 +33,7 @@ function safeRegexTest(pattern, value) {
   }
 }
 
-const NESTED_QUANTIFIER_RE = /([+*])\)([+*?]|\{)/;
+const NESTED_QUANTIFIER_RE = /\((?:\?:)?(?![-/:](?![?*{]))([^)]*[+*])\)([+*?]|\{)/;
 const ALTERNATION_QUANTIFIER_RE = /\([^)]*\|[^)]*\)([+*?]|\{)/;
 
 function hasReDoSRisk(pattern) {
@@ -500,6 +500,45 @@ describe('safeRegexTest — ReDoS protection', () => {
 
   it('allows non-capturing groups (?:a|b)', () => {
     assert.equal(safeRegexTest('(?:a|b)', 'a'), true);
+  });
+
+  it('allows capturing group with mandatory literal separator (-[a-z0-9]+)+', () => {
+    assert.equal(safeRegexTest('(-[a-z0-9]+)+', '-abc'), true);
+  });
+
+  it('allows capturing group with mandatory / separator (/[a-z]+)+', () => {
+    assert.equal(safeRegexTest('(/[a-z]+)+', '/abc'), true);
+  });
+
+  it('allows capturing group with mandatory : separator (:[a-z]+)+', () => {
+    assert.equal(safeRegexTest('(:[a-z]+)+', ':abc'), true);
+  });
+
+  it('allows anchored naming pattern with mandatory separator ^[a-z](-[a-z0-9]+)+$', () => {
+    assert.equal(safeRegexTest('^[a-z](-[a-z0-9]+)+$', 'a-bc'), true);
+    assert.equal(safeRegexTest('^[a-z](-[a-z0-9]+)+$', 'c-brand-500'), true);
+    assert.equal(safeRegexTest('^[a-z](-[a-z0-9]+)+$', 'no-dash'), false);
+  });
+
+  it('still rejects capturing group with optional separator (-?[a-z]+)+', () => {
+    assert.equal(safeRegexTest('(-?[a-z]+)+', 'abc'), false);
+  });
+
+  it('naming pattern with mandatory-separator capturing group passes valid names', () => {
+    const meta = {
+      namingPatterns: { token: '^[a-z](-[a-z0-9]+)+$' },
+    };
+    // Valid: single letter followed by one or more '-segment' groups
+    const pass = validateEntity(meta, { name: 'a-bc', type: 'token' });
+    assert.equal(pass.length, 0, 'a-bc should match ^[a-z](-[a-z0-9]+)+$');
+
+    const pass2 = validateEntity(meta, { name: 'c-brand-500', type: 'token' });
+    assert.equal(pass2.length, 0, 'c-brand-500 should match ^[a-z](-[a-z0-9]+)+$');
+
+    // Invalid: name does not contain any dash segment
+    const fail = validateEntity(meta, { name: 'nodash', type: 'token' });
+    assert.ok(fail.some(x => x.field === 'name' && x.reason.includes('naming pattern')),
+      'nodash should fail the naming pattern');
   });
 
   it('rejects pattern exceeding 500 chars', () => {
