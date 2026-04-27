@@ -6,6 +6,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`PATCH /api/spaces/:id` now uses true merge semantics for `meta`** — Previously,
+  supplying a `meta.typeSchemas` payload silently replaced the *entire* schema, dropping
+  every entity/edge/memory/chrono type not present in the request body.  PATCH now deep-merges:
+  scalar meta fields (`purpose`, `usageNotes`, `validationMode`, `tagSuggestions`,
+  `strictLinkage`) overwrite the stored value only when explicitly supplied; `typeSchemas` is
+  merged per-knowledge-type and per-type-name, so types absent from the request body are
+  preserved.  This also means existing meta fields are no longer lost when only `typeSchemas`
+  is patched.
+
+### Added
+
+- **`PUT /api/spaces/:id/schema`** — New endpoint for *full* typeSchemas replacement
+  (PUT semantics).  Before overwriting, the previous schema is written to a timestamped
+  JSON backup file (`_schema-backup-<timestamp>.json`) inside the space's file store so it
+  can be recovered or re-imported.  Use this endpoint when an intentional full replacement is
+  required instead of an incremental update.  Returns the updated space on success.
+
 ---
 
 ## [1.2.0] — 2026-04-24

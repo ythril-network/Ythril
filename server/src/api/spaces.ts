@@ -10,7 +10,8 @@ import { resolveMemberSpaces } from '../spaces/proxy.js';
 import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
 import { log } from '../util/log.js';
-import type { SpaceMeta } from '../config/types.js';
+import type { SpaceMeta, KnowledgeType, TypeSchema } from '../config/types.js';
+import { writeFile as writeSpaceFile } from '../files/files.js';
 
 export const spacesRouter = Router();
 
@@ -126,6 +127,52 @@ const UpdateSpaceBody = z.object({
 const ReorderSpacesBody = z.object({
   ids: z.array(z.string().min(1).max(40)).min(1),
 });
+
+const PutSchemaBody = z.object({
+  typeSchemas: TypeSchemasZ,
+});
+
+/**
+ * Deep-merge an incoming PATCH `meta` payload into the existing SpaceMeta.
+ *
+ * - Scalar fields (purpose, usageNotes, validationMode, tagSuggestions,
+ *   strictLinkage) overwrite the existing value when present in `incoming`.
+ * - `typeSchemas` is merged per-knowledge-type, then per-type-name:
+ *   types present in `incoming` are added or updated; types *not* mentioned
+ *   in the request body are left untouched.
+ *
+ * The `version`, `updatedAt`, and `previousVersions` housekeeping fields are
+ * intentionally omitted from the return value — `updateSpace()` re-adds them.
+ */
+function mergeSpaceMeta(
+  existing: SpaceMeta,
+  incoming: Partial<SpaceMeta>,
+): Omit<SpaceMeta, 'version' | 'updatedAt' | 'previousVersions'> {
+  // Spread the existing base (drop housekeeping fields that updateSpace re-adds)
+  const { version: _v, updatedAt: _u, previousVersions: _pv, ...existingBase } = existing;
+  const merged: Omit<SpaceMeta, 'version' | 'updatedAt' | 'previousVersions'> = { ...existingBase };
+
+  // Scalar fields — replace if present in incoming
+  if (incoming.purpose !== undefined) merged.purpose = incoming.purpose;
+  if (incoming.usageNotes !== undefined) merged.usageNotes = incoming.usageNotes;
+  if (incoming.validationMode !== undefined) merged.validationMode = incoming.validationMode;
+  if (incoming.tagSuggestions !== undefined) merged.tagSuggestions = incoming.tagSuggestions;
+  if (incoming.strictLinkage !== undefined) merged.strictLinkage = incoming.strictLinkage;
+
+  // typeSchemas — merge per-KT, per-type: incoming types add/update, existing untouched types preserved
+  if (incoming.typeSchemas !== undefined) {
+    const existingTs = existingBase.typeSchemas ?? {};
+    const mergedTs: Partial<Record<KnowledgeType, Record<string, TypeSchema>>> = { ...existingTs };
+    for (const [kt, ktMap] of Object.entries(incoming.typeSchemas) as
+        [KnowledgeType, Record<string, TypeSchema> | undefined][]) {
+      if (!ktMap) continue;
+      mergedTs[kt] = { ...(existingTs[kt] ?? {}), ...ktMap };
+    }
+    merged.typeSchemas = mergedTs;
+  }
+
+  return merged;
+}
 
 // PATCH /api/spaces/:id/rename
 spacesRouter.patch('/:id/rename', globalRateLimit, requireAdminMfaScoped('id'), async (req, res) => {
@@ -268,10 +315,18 @@ spacesRouter.patch('/:id', globalRateLimit, requireAdminMfaScoped('id'), async (
     }
   }
 
+  // Merge the incoming meta with the existing meta so that PATCH has true
+  // RFC-7396 semantics: scalar fields overwrite, typeSchemas entries are
+  // added/updated, and types *not* mentioned in the body are preserved.
+  const mergedMeta: SpaceMeta | undefined =
+    parsed.data.meta !== undefined
+      ? mergeSpaceMeta(space.meta ?? {}, parsed.data.meta)
+      : undefined;
+
   // ── Network voting for meta changes ──────────────────────────────────────
   // If this space is part of a network and a meta change is requested,
   // open a meta_change vote round instead of applying immediately.
-  if (parsed.data.meta !== undefined) {
+  if (mergedMeta !== undefined) {
     const networkedIn = cfg.networks.filter(n => n.spaces.includes(id));
     if (networkedIn.length > 0) {
       const now = new Date().toISOString();
@@ -290,7 +345,7 @@ spacesRouter.patch('/:id', globalRateLimit, requireAdminMfaScoped('id'), async (
           openedAt: now,
           votes: [{ instanceId: cfg.instanceId, vote: 'yes', castAt: now }],
           spaceId: id,
-          pendingMeta: parsed.data.meta as SpaceMeta,
+          pendingMeta: mergedMeta as SpaceMeta,
         });
         rounds.push({ networkId: net.id, networkLabel: net.label, roundId });
       }
@@ -331,7 +386,60 @@ spacesRouter.patch('/:id', globalRateLimit, requireAdminMfaScoped('id'), async (
     }
   }
 
-  const updated = updateSpace(id, parsed.data);
+  const updated = updateSpace(id, { ...parsed.data, meta: mergedMeta });
+  if (!updated) {
+    res.status(404).json({ error: `Space '${id}' not found` });
+    return;
+  }
+  res.json({ space: updated });
+});
+
+// PUT /api/spaces/:id/schema — full replacement of the space's typeSchemas.
+// Unlike PATCH (which merges types), this completely overwrites `meta.typeSchemas`
+// with the supplied value.  Before applying, the previous schema is written to a
+// timestamped JSON backup file inside the space so it can be recovered or re-imported.
+spacesRouter.put('/:id/schema', globalRateLimit, requireAdminMfaScoped('id'), async (req, res) => {
+  const id = req.params['id'] as string;
+  const cfg = getConfig();
+  const space = cfg.spaces.find(s => s.id === id);
+  if (!space) {
+    res.status(404).json({ error: `Space '${id}' not found` });
+    return;
+  }
+
+  const parsed = PutSchemaBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  // Validate any $ref values against the instance schema library
+  const brokenRefs = findBrokenLibraryRefs(parsed.data.typeSchemas as z.infer<typeof TypeSchemasZ>);
+  if (brokenRefs.length > 0) {
+    res.status(422).json({ error: `Schema library ${brokenRefs.length === 1 ? 'entry' : 'entries'} not found: ${brokenRefs.join(', ')}. Create ${brokenRefs.length === 1 ? 'it' : 'them'} via POST /api/schema-library before referencing.` });
+    return;
+  }
+
+  // Write a backup of the previous schema before replacing it
+  const previousTypeSchemas = space.meta?.typeSchemas;
+  if (previousTypeSchemas && Object.keys(previousTypeSchemas).length > 0) {
+    try {
+      const backupTimestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const backupContent = JSON.stringify({ typeSchemas: previousTypeSchemas }, null, 2);
+      await writeSpaceFile(id, `_schema-backup-${backupTimestamp}.json`, backupContent);
+    } catch (err) {
+      log.warn(`PUT /${id}/schema: could not write schema backup: ${err}`);
+      // Non-fatal — proceed with replacement
+    }
+  }
+
+  // Replace the entire typeSchemas (full-replace semantics)
+  const newMeta: SpaceMeta = {
+    ...(space.meta ?? {}),
+    typeSchemas: parsed.data.typeSchemas as SpaceMeta['typeSchemas'],
+  };
+
+  const updated = updateSpace(id, { meta: newMeta });
   if (!updated) {
     res.status(404).json({ error: `Space '${id}' not found` });
     return;
