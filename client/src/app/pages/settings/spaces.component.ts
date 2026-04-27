@@ -1,7 +1,7 @@
 ﻿import { Component, inject, signal, computed, OnInit, ElementRef, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { finalize } from 'rxjs';
+import { finalize, timeout, TimeoutError } from 'rxjs';
 import {
   ApiService, Network, Space, SpaceMeta, SpaceStats,
   KnowledgeType, PropertySchema, TypeSchema, ValidationMode, SchemaLibraryEntry,
@@ -955,6 +955,7 @@ export class SpacesComponent implements OnInit {
     if (this.form.strictLinkage) meta.strictLinkage = true;
     if (Object.keys(meta).length) body.meta = meta;
     this.api.createSpace(body).pipe(
+      timeout(30_000),
       finalize(() => this.creating.set(false)),
     ).subscribe({
       next: ({ space }) => {
@@ -964,7 +965,12 @@ export class SpacesComponent implements OnInit {
         this.proxyForSelected = [];
         this.proxyForAll = false;
       },
-      error: (err) => { this.createError.set(err.error?.error ?? this.transloco.translate('spaces.error.createFailed')); },
+      error: (err) => {
+        const msg = err instanceof TimeoutError
+          ? this.transloco.translate('spaces.error.createTimeout')
+          : (err.error?.error ?? this.transloco.translate('spaces.error.createFailed'));
+        this.createError.set(msg);
+      },
     });
   }
 

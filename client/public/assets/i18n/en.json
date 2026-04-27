@@ -710,6 +710,7 @@
   "spaces.stats.chrono": "Chrono",
   "spaces.stats.files": "Files",
   "spaces.error.createFailed": "Failed to create space",
+  "spaces.error.createTimeout": "Space creation timed out — the server may still be processing your request. Please refresh to check if the space was created.",
   "spaces.error.saveFailed": "Failed to save",
   "spaces.error.renameFailed": "Failed to rename",
   "spaces.error.wipeFailed": "Failed to wipe",
