@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, delWithBody, patch } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, delWithBody, patch, put } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -219,6 +219,125 @@ describe('Space management', () => {
       description: 'x'.repeat(4001),
     });
     assert.equal(r.status, 400, `Expected 400, got ${r.status}`);
+  });
+
+  // ── Space-scoped admin token enforcement ────────────────────────────────────
+
+  it('Space-scoped admin token: PATCH /api/spaces/:id schema on own space succeeds', async () => {
+    // Create the target space
+    const targetId = `scope-own-${RUN_ID}`;
+    const created = await post(INSTANCES.a, tokenA, '/api/spaces', {
+      id: targetId,
+      label: 'Scope Own Space',
+    });
+    assert.equal(created.status, 201, `Create space: ${JSON.stringify(created.body)}`);
+    createdSpaceIds.push(targetId);
+
+    // Create an admin token scoped to that space
+    const tokenRes = await post(INSTANCES.a, tokenA, '/api/tokens', {
+      name: `scoped-own-${RUN_ID}`,
+      admin: true,
+      spaces: [targetId],
+    });
+    assert.equal(tokenRes.status, 201, `Create scoped token: ${JSON.stringify(tokenRes.body)}`);
+    const scopedToken = tokenRes.body.plaintext;
+
+    // Patching the token's own space should succeed
+    const r = await patch(INSTANCES.a, scopedToken, `/api/spaces/${targetId}`, {
+      description: 'updated by scoped token',
+    });
+    assert.equal(r.status, 200, `Expected 200 on own space, got ${r.status}: ${JSON.stringify(r.body)}`);
+    assert.equal(r.body.space?.description, 'updated by scoped token');
+
+    // Revoke the token
+    const revokeR = await del(INSTANCES.a, tokenA, `/api/tokens/${tokenRes.body.token?.id}`);
+    assert.ok(revokeR.status < 400, `Revoke scoped token failed: ${revokeR.status}`);
+  });
+
+  it('Space-scoped admin token: PATCH /api/spaces/:id schema on another space returns 403', async () => {
+    // Create two spaces
+    const allowedId = `scope-allowed-${RUN_ID}`;
+    const forbiddenId = `scope-forbidden-${RUN_ID}`;
+
+    const c1 = await post(INSTANCES.a, tokenA, '/api/spaces', { id: allowedId, label: 'Scope Allowed' });
+    assert.equal(c1.status, 201, `Create allowed space: ${JSON.stringify(c1.body)}`);
+    createdSpaceIds.push(allowedId);
+
+    const c2 = await post(INSTANCES.a, tokenA, '/api/spaces', { id: forbiddenId, label: 'Scope Forbidden' });
+    assert.equal(c2.status, 201, `Create forbidden space: ${JSON.stringify(c2.body)}`);
+    createdSpaceIds.push(forbiddenId);
+
+    // Create an admin token scoped to allowedId only
+    const tokenRes = await post(INSTANCES.a, tokenA, '/api/tokens', {
+      name: `scoped-restricted-${RUN_ID}`,
+      admin: true,
+      spaces: [allowedId],
+    });
+    assert.equal(tokenRes.status, 201, `Create scoped token: ${JSON.stringify(tokenRes.body)}`);
+    const scopedToken = tokenRes.body.plaintext;
+
+    // Attempting to PATCH the forbidden space should return 403
+    const r = await patch(INSTANCES.a, scopedToken, `/api/spaces/${forbiddenId}`, {
+      description: 'should be blocked',
+    });
+    assert.equal(r.status, 403, `Expected 403 on forbidden space, got ${r.status}: ${JSON.stringify(r.body)}`);
+
+    // Revoke the token
+    const revokeR = await del(INSTANCES.a, tokenA, `/api/tokens/${tokenRes.body.token?.id}`);
+    assert.ok(revokeR.status < 400, `Revoke scoped token failed: ${revokeR.status}`);
+  });
+
+  it('Space-scoped admin token: PUT typeSchema on own space succeeds; 403 on another space', async () => {
+    const allowedId = `scope-ts-allowed-${RUN_ID}`;
+    const forbiddenId = `scope-ts-forbidden-${RUN_ID}`;
+
+    const c1 = await post(INSTANCES.a, tokenA, '/api/spaces', { id: allowedId, label: 'TS Allowed' });
+    assert.equal(c1.status, 201);
+    createdSpaceIds.push(allowedId);
+
+    const c2 = await post(INSTANCES.a, tokenA, '/api/spaces', { id: forbiddenId, label: 'TS Forbidden' });
+    assert.equal(c2.status, 201);
+    createdSpaceIds.push(forbiddenId);
+
+    const tokenRes = await post(INSTANCES.a, tokenA, '/api/tokens', {
+      name: `scoped-ts-${RUN_ID}`,
+      admin: true,
+      spaces: [allowedId],
+    });
+    assert.equal(tokenRes.status, 201);
+    const scopedToken = tokenRes.body.plaintext;
+
+    // PUT on own space — should succeed
+    const okR = await put(INSTANCES.a, scopedToken, `/api/spaces/${allowedId}/meta/typeSchemas/entity/Widget`, {
+      namingPattern: '^Widget-',
+    });
+    assert.equal(okR.status, 200, `Expected 200 on own space PUT, got ${okR.status}: ${JSON.stringify(okR.body)}`);
+
+    // PUT on forbidden space — should be blocked
+    const badR = await put(INSTANCES.a, scopedToken, `/api/spaces/${forbiddenId}/meta/typeSchemas/entity/Widget`, {
+      namingPattern: '^Widget-',
+    });
+    assert.equal(badR.status, 403, `Expected 403 on forbidden space PUT, got ${badR.status}: ${JSON.stringify(badR.body)}`);
+
+    // Revoke the token
+    const revokeR = await del(INSTANCES.a, tokenA, `/api/tokens/${tokenRes.body.token?.id}`);
+    assert.ok(revokeR.status < 400, `Revoke scoped token failed: ${revokeR.status}`);
+  });
+
+  it('Unrestricted admin token: PATCH /api/spaces/:id schema is not blocked', async () => {
+    const spaceId = `scope-unrestricted-${RUN_ID}`;
+    const created = await post(INSTANCES.a, tokenA, '/api/spaces', {
+      id: spaceId,
+      label: 'Scope Unrestricted',
+    });
+    assert.equal(created.status, 201);
+    createdSpaceIds.push(spaceId);
+
+    // tokenA has no spaces restriction — must succeed on any space
+    const r = await patch(INSTANCES.a, tokenA, `/api/spaces/${spaceId}`, {
+      description: 'written by unrestricted admin',
+    });
+    assert.equal(r.status, 200, `Expected 200 for unrestricted admin, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 
 });

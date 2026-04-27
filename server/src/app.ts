@@ -28,7 +28,7 @@ import { dataRouter } from './api/data.js';
 import { maintenanceMiddleware } from './maintenance.js';
 import { globalRateLimit } from './rate-limit/middleware.js';
 import { configExists, reloadConfig, getConfig, saveConfig, loadSecrets } from './config/loader.js';
-import { requireAuth, requireAdminMfa } from './auth/middleware.js';
+import { requireAuth, requireAdminMfa, requireAdminMfaScoped } from './auth/middleware.js';
 import { clearTokenCache } from './auth/tokens.js';
 import { clearOidcCache } from './auth/oidc.js';
 import { initSpace, ensureGeneralSpace, wipeSpace, WIPE_COLLECTION_TYPES, type WipeCollectionType } from './spaces/spaces.js';
@@ -194,7 +194,7 @@ export function createApp() {
   // Wipes data from a space while preserving the space itself and its configuration.
   // Pass an optional `types` array to wipe only specific collections; omit to wipe all.
   // Requires an admin-scoped token and respects TOTP if MFA is enabled.
-  app.post('/api/admin/spaces/:spaceId/wipe', globalRateLimit, requireAdminMfa, async (req, res) => {
+  app.post('/api/admin/spaces/:spaceId/wipe', globalRateLimit, requireAdminMfaScoped('spaceId'), async (req, res) => {
     const spaceId = req.params['spaceId'] as string;
     const cfg = getConfig();
     if (!cfg.spaces.some(s => s.id === spaceId)) {
@@ -225,7 +225,7 @@ export function createApp() {
   // chrono entries, and file metadata (binary file content excluded by default).
   // Vector embeddings are omitted from the export to keep the payload small;
   // run POST /api/brain/spaces/:spaceId/reindex after import to rebuild them.
-  app.get('/api/admin/spaces/:spaceId/export', globalRateLimit, requireAdminMfa, async (req, res) => {
+  app.get('/api/admin/spaces/:spaceId/export', globalRateLimit, requireAdminMfaScoped('spaceId'), async (req, res) => {
     const spaceId = req.params['spaceId'] as string;
     const cfg = getConfig();
     const space = cfg.spaces.find(s => s.id === spaceId);
@@ -268,7 +268,7 @@ export function createApp() {
   // Upserts all documents from an export payload into the target space.
   // Existing documents with the same _id are replaced; new ones are inserted.
   // Returns per-type counts: { inserted, updated, errors }.
-  app.post('/api/admin/spaces/:spaceId/import', globalRateLimit, requireAdminMfa, async (req, res) => {
+  app.post('/api/admin/spaces/:spaceId/import', globalRateLimit, requireAdminMfaScoped('spaceId'), async (req, res) => {
     const spaceId = req.params['spaceId'] as string;
     const cfg = getConfig();
     if (!cfg.spaces.some(s => s.id === spaceId)) {

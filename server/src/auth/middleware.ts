@@ -191,6 +191,66 @@ export async function requireSpaceAuth(
   next();
 }
 
+/**
+ * Like requireAdminMfa, but also enforces the token's `spaces` allowlist
+ * against the space ID found in `req.params[paramName]`.
+ *
+ * Use this on admin endpoints that target a specific space (e.g. schema
+ * mutation, wipe, export, import) so that space-restricted admin tokens
+ * cannot operate on spaces outside their allowlist.
+ */
+export function requireAdminMfaScoped(paramName: string) {
+  return async function (req: Request, res: Response, next: NextFunction): Promise<void> {
+    const bearer = extractBearer(req);
+    if (!bearer) {
+      res.status(401).json({ error: 'Missing Authorization header' });
+      return;
+    }
+
+    const record = await resolveBearer(bearer);
+    if (!record) {
+      logAuthFailure(req);
+      res.status(401).json({ error: 'Invalid or expired token' });
+      return;
+    }
+
+    if (!record.admin) {
+      res.status(403).json({ error: 'Admin token required' });
+      return;
+    }
+
+    // MFA check — same as requireAdminMfa
+    if (isPat(bearer) && isMfaEnabled()) {
+      const code = (req.headers['x-totp-code'] as string | undefined ?? '').trim();
+      if (!code) {
+        res.status(403).json({ error: 'MFA_REQUIRED' });
+        return;
+      }
+      if (!verifyMfaCode(code)) {
+        res.status(403).json({ error: 'MFA_INVALID' });
+        return;
+      }
+    }
+
+    // Space-scope enforcement for space-restricted admin tokens.
+    // Tokens without a spaces allowlist (unrestricted admin) are always allowed.
+    const spaceId = req.params[paramName] as string | undefined;
+    if (record.spaces && spaceId) {
+      const memberIds = resolveMemberSpaces(spaceId);
+      const targets = memberIds.length > 0 ? memberIds : [spaceId];
+      const missing = targets.filter(sid => !record.spaces!.includes(sid));
+      if (missing.length > 0) {
+        res.status(403).json({ error: `Token does not have access to space '${spaceId}'` });
+        return;
+      }
+    }
+
+    req.authToken = record;
+    if (isPat(bearer) && 'id' in record) touchToken(record.id);
+    next();
+  };
+}
+
 /** Middleware: requires a valid PAT **with admin: true**.
  *  Must be used after (or instead of) requireAuth on admin-only routes.
  *  Non-admin tokens receive 403 even if they are otherwise valid.

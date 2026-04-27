@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import path from 'path';
-import { requireAuth, requireAdmin, requireAdminMfa } from '../auth/middleware.js';
+import { requireAuth, requireAdmin, requireAdminMfa, requireAdminMfaScoped } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { getConfig, saveConfig, getSecrets, getDataRoot, getSchemaLibrary } from '../config/loader.js';
 import { createSpace, updateSpace, removeSpace, renameSpace, reorderSpaces, slugify } from '../spaces/spaces.js';
@@ -128,7 +128,7 @@ const ReorderSpacesBody = z.object({
 });
 
 // PATCH /api/spaces/:id/rename
-spacesRouter.patch('/:id/rename', globalRateLimit, requireAdminMfa, async (req, res) => {
+spacesRouter.patch('/:id/rename', globalRateLimit, requireAdminMfaScoped('id'), async (req, res) => {
   const oldId = req.params['id'] as string;
   const parsed = RenameSpaceBody.safeParse(req.body);
   if (!parsed.success) {
@@ -243,7 +243,7 @@ spacesRouter.post('/', globalRateLimit, requireAdminMfa, async (req, res) => {
 });
 
 // PATCH /api/spaces/:id
-spacesRouter.patch('/:id', globalRateLimit, requireAdminMfa, async (req, res) => {
+spacesRouter.patch('/:id', globalRateLimit, requireAdminMfaScoped('id'), async (req, res) => {
   const id = req.params['id'] as string;
   const cfg = getConfig();
 
@@ -411,7 +411,7 @@ spacesRouter.get('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
 });
 
 // PUT /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName — upsert a single type definition
-spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLimit, requireAdminMfa, (req, res) => {
+spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLimit, requireAdminMfaScoped('id'), (req, res) => {
   const { id, knowledgeType, typeName } = req.params as { id: string; knowledgeType: string; typeName: string };
 
   if (!VALID_KNOWLEDGE_TYPES.has(knowledgeType)) {
@@ -475,7 +475,7 @@ spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
 });
 
 // DELETE /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName — remove a single type definition
-spacesRouter.delete('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLimit, requireAdminMfa, (req, res) => {
+spacesRouter.delete('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLimit, requireAdminMfaScoped('id'), (req, res) => {
   const { id, knowledgeType, typeName } = req.params as { id: string; knowledgeType: string; typeName: string };
 
   if (!VALID_KNOWLEDGE_TYPES.has(knowledgeType)) {
@@ -522,7 +522,7 @@ spacesRouter.delete('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRate
 });
 
 // POST /api/spaces/:id/validate-schema — dry-run validation of existing data
-spacesRouter.post('/:id/validate-schema', globalRateLimit, requireAdminMfa, async (req, res) => {
+spacesRouter.post('/:id/validate-schema', globalRateLimit, requireAdminMfaScoped('id'), async (req, res) => {
   const id = req.params['id'] as string;
   const cfg = getConfig();
   const space = cfg.spaces.find(s => s.id === id);
@@ -598,7 +598,7 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireAdminMfa, asyn
 // Networked space: opens a space_deletion vote round on every network that includes this space,
 // casts this instance's own yes vote immediately, notifies all peers, and returns 202.
 // The space is only deleted once the vote passes on each network.
-spacesRouter.delete('/:id', globalRateLimit, requireAdminMfa, async (req, res) => {
+spacesRouter.delete('/:id', globalRateLimit, requireAdminMfaScoped('id'), async (req, res) => {
   const id = req.params['id'] as string;
   const cfg = getConfig();
 
