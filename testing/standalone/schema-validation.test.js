@@ -517,7 +517,8 @@ describe('safeRegexTest — ReDoS protection', () => {
   it('allows anchored naming pattern with mandatory separator ^[a-z](-[a-z0-9]+)+$', () => {
     assert.equal(safeRegexTest('^[a-z](-[a-z0-9]+)+$', 'a-bc'), true);
     assert.equal(safeRegexTest('^[a-z](-[a-z0-9]+)+$', 'c-brand-500'), true);
-    assert.equal(safeRegexTest('^[a-z](-[a-z0-9]+)+$', 'no-dash'), false);
+    // Pattern is correctly evaluated (not blocked by ReDoS check); 'abc' has no dash so it does not match
+    assert.equal(safeRegexTest('^[a-z](-[a-z0-9]+)+$', 'abc'), false);
   });
 
   it('still rejects capturing group with optional separator (-?[a-z]+)+', () => {
