@@ -292,7 +292,7 @@ schemaLibraryRouter.post('/export-space', globalRateLimit, requireAdminMfa, (req
         resultEntries.push(newEntry);
         created++;
       } else {
-        const updated_entry: SchemaLibraryEntry = {
+        const updatedEntry: SchemaLibraryEntry = {
           ...library[existingIdx]!,
           knowledgeType: kt,
           typeName,
@@ -300,8 +300,8 @@ schemaLibraryRouter.post('/export-space', globalRateLimit, requireAdminMfa, (req
           schemaGroup: groupName,
           updatedAt: now,
         };
-        library[existingIdx] = updated_entry;
-        resultEntries.push(updated_entry);
+        library[existingIdx] = updatedEntry;
+        resultEntries.push(updatedEntry);
         updated++;
       }
     }
