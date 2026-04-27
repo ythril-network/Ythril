@@ -398,7 +398,7 @@ spacesRouter.patch('/:id', globalRateLimit, requireAdminMfaScoped('id'), async (
 // Unlike PATCH (which merges types), this completely overwrites `meta.typeSchemas`
 // with the supplied value.  Before applying, the previous schema is written to a
 // timestamped JSON backup file inside the space so it can be recovered or re-imported.
-spacesRouter.put('/:id/schema', globalRateLimit, requireAdminMfa, async (req, res) => {
+spacesRouter.put('/:id/schema', globalRateLimit, requireAdminMfaScoped('id'), async (req, res) => {
   const id = req.params['id'] as string;
   const cfg = getConfig();
   const space = cfg.spaces.find(s => s.id === id);

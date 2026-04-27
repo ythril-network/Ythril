@@ -59,7 +59,12 @@ async function setMeta(meta) {
 }
 
 async function resetMeta() {
-  await setMeta({ validationMode: 'off', typeSchemas: {} });
+  // Use PUT /schema for full typeSchemas replacement (PATCH now merges, so
+  // typeSchemas:{} via PATCH is a no-op and would not clear existing types).
+  const r = await put(INSTANCES.a, token(), `/api/spaces/${TEST_SPACE}/schema`, { typeSchemas: {} });
+  assert.ok([200, 202].includes(r.status), `resetMeta: PUT /schema failed: ${r.status}: ${JSON.stringify(r.body)}`);
+  // Reset scalar meta fields separately (PUT /schema preserves them).
+  await setMeta({ validationMode: 'off' });
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
