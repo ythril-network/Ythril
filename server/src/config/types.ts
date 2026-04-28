@@ -201,6 +201,104 @@ export interface StorageConfig {
   brain?: { softLimitGiB: number; hardLimitGiB: number };
 }
 
+/**
+ * A single pluggable media-embedding provider entry — vision or STT.
+ *
+ * The shape is deliberately generic so any OpenAI-compatible vision
+ * (Ollama `/api/chat`, OpenAI GPT-4o, Anthropic Claude, etc.) or STT
+ * (faster-whisper-server `/v1/audio/transcriptions`, OpenAI Whisper, etc.)
+ * endpoint can be plugged in by editing config.json or the Settings → Models
+ * page in the UI — no code changes required.
+ *
+ * `apiKey` is optional and only used when the endpoint requires
+ * Authorization (i.e. external providers). Local cluster endpoints (Ollama,
+ * faster-whisper-server) leave it empty.
+ */
+export interface MediaProviderConfig {
+  /** Human-readable label shown in the Settings UI. */
+  label?: string;
+  /** Base URL of the provider (e.g. `http://ollama.ythril.svc.cluster.local:11434`
+   *  or `https://api.openai.com/v1`). The provider client appends the route. */
+  baseUrl?: string;
+  /** Model tag passed to the provider (e.g. `moondream2`, `gpt-4o-mini`,
+   *  `whisper-1`, `base`). */
+  model?: string;
+  /** Optional API key for endpoints that require Authorization.
+   *  When empty, no Authorization header is sent.
+   *  Stored in config.json by the Settings UI; for production deployments
+   *  prefer an env-var override (`VISION_API_KEY` / `STT_API_KEY`) which
+   *  takes precedence and locks this field as read-only in the UI. */
+  apiKey?: string;
+}
+
+/**
+ * Media embedding pipeline configuration.
+ *
+ * Routes binary media (image / audio / video) through text-as-intermediate
+ * captioning + STT so every embedding lands in the same vector space as
+ * memories, entities and converted documents (`nomic-embed-text-v1.5`).
+ *
+ * Off by default — must be explicitly enabled in config.json or via
+ * `MEDIA_EMBEDDING_ENABLED=true`.
+ *
+ * ── Plugin model ────────────────────────────────────────────────────────────
+ * Vision and STT are pluggable via the generic `vision` / `stt`
+ * `MediaProviderConfig` blocks. Any OpenAI-compatible endpoint works
+ * out-of-the-box; switching providers is a config edit, not a code change.
+ *
+ * ── Resolution order (high → low precedence) ────────────────────────────────
+ *   1. Env vars (`MEDIA_EMBEDDING_ENABLED`, `VISION_PROVIDER`, `OLLAMA_URL`,
+ *      `VISION_MODEL`, `VISION_API_KEY`, `STT_PROVIDER`, `WHISPER_URL`,
+ *      `WHISPER_MODEL`, `STT_API_KEY`, …)
+ *   2. `config.json` `mediaEmbedding.*` (writable from the UI)
+ *   3. Built-in defaults
+ *
+ * When an env var is set for a given key, the corresponding field in the
+ * Settings UI is rendered read-only (locked-by-infra). This allows ops to
+ * pin endpoints/keys via Kubernetes Secrets while still letting end-users
+ * tweak unrelated values from the UI.
+ */
+export interface MediaEmbeddingConfig {
+  /** Master switch — when false, media files store with embeddingStatus="disabled". */
+  enabled?: boolean;
+  /** "local" → bundled cluster endpoint (Ollama); "external" → user-supplied API. */
+  visionProvider?: 'local' | 'external';
+  /** "local" → bundled cluster endpoint (faster-whisper-server); "external" → user-supplied API. */
+  sttProvider?: 'local' | 'external';
+  /** Pluggable vision provider settings (endpoint + model + optional API key). */
+  vision?: MediaProviderConfig;
+  /** Pluggable STT provider settings (endpoint + model + optional API key). */
+  stt?: MediaProviderConfig;
+  /** @deprecated Use `vision.baseUrl`. Kept for backward compatibility. */
+  ollamaUrl?: string;
+  /** @deprecated Use `vision.model`. Kept for backward compatibility. */
+  visionModel?: string;
+  /** @deprecated Use `stt.baseUrl`. Kept for backward compatibility. */
+  whisperUrl?: string;
+  /** @deprecated Use `stt.model`. Kept for backward compatibility. */
+  whisperModel?: string;
+  /** Max concurrent jobs processed per worker tick. */
+  workerConcurrency?: number;
+  /** Base poll interval — doubles on empty result up to workerMaxPollIntervalMs. */
+  workerPollIntervalMs?: number;
+  /** Idle backoff cap. */
+  workerMaxPollIntervalMs?: number;
+  /** When true and the local provider returns non-200, fall back to external. */
+  fallbackToExternal?: boolean;
+  /** Files larger than this skip embedding (embeddingStatus="skipped"). */
+  maxFileSizeBytes?: number;
+  /** Stalled "processing" jobs older than this are reset to "pending" on startup. */
+  stalledJobTimeoutMs?: number;
+  /**
+   * Names of fields whose value is currently being supplied by an env var
+   * (and is therefore read-only in the Settings UI). Populated by the loader
+   * at runtime; never persisted to config.json.
+   *
+   * Examples: `["enabled", "vision.apiKey", "stt.baseUrl"]`.
+   */
+  lockedByInfra?: string[];
+}
+
 // ── Network types ──────────────────────────────────────────────────────────
 
 export type NetworkType = 'closed' | 'democratic' | 'club' | 'braintree' | 'pubsub';
@@ -357,6 +455,8 @@ export interface Config {
   ejectedFromNetworks?: string[];  // network IDs this instance has been removed from via vote
   embedding?: EmbeddingConfig;
   storage?: StorageConfig;
+  /** Optional media embedding pipeline (image / audio / video). Off by default. */
+  mediaEmbedding?: MediaEmbeddingConfig;
   maxUploadBodyBytes?: number;
   allowInsecurePlaintext?: boolean;
   setup?: { completed: true };
@@ -531,6 +631,24 @@ export interface FileMetaDoc {
   chunkCount?: number;
   /** Set when conversion failed: human-readable error message. */
   conversionError?: string;
+  // ── Media embedding fields ────────────────────────────────────────────────
+  /** Detected media class for the original file. Set on image/audio/video uploads. */
+  mediaType?: 'image' | 'audio' | 'video';
+  /** Async embedding lifecycle for binary media:
+   *   "pending"    → enqueued, not yet processed
+   *   "processing" → claimed by a worker
+   *   "complete"   → all chunk records produced
+   *   "failed"     → exhausted retries; lastError carries the reason
+   *   "skipped"    → file too large (> maxFileSizeBytes) — original kept, no embedding
+   *   "disabled"   → mediaEmbedding.enabled=false at upload time
+   */
+  embeddingStatus?: 'pending' | 'processing' | 'complete' | 'failed' | 'skipped' | 'disabled';
+  /** For audio/video chunk records: start offset within the parent media file. */
+  chunkOffsetMs?: number;
+  /** For audio/video chunk records: duration covered by this chunk. */
+  chunkDurationMs?: number;
+  /** Last error message from a failed media embedding job, when embeddingStatus="failed". */
+  mediaJobError?: string;
 }
 
 export interface ConflictDoc {
@@ -563,5 +681,26 @@ export interface LinkViolationDoc {
 export interface SpaceCounterDoc {
   _id: string;  // spaceId
   seq: number;
+}
+
+/**
+ * Background job record for asynchronous media embedding (caption/STT + chunking).
+ * Stored in the per-space `<spaceId>_media_jobs` collection and claimed by the
+ * MediaEmbeddingWorker. The corresponding filemeta record's `embeddingStatus`
+ * mirrors `status` (pending/processing/complete/failed).
+ */
+export interface MediaJobDoc {
+  _id: string;                // file _id (normalised path) — one job per file
+  spaceId: string;
+  filePath: string;           // normalised path on disk
+  mimeType: string;           // raw upload MIME type
+  mediaType: 'image' | 'audio' | 'video';
+  status: 'pending' | 'processing' | 'complete' | 'failed';
+  attempts: number;
+  maxAttempts: number;
+  lastError: string | null;
+  claimedAt: string | null;   // ISO8601 — set when a worker claims this job
+  createdAt: string;          // ISO8601
+  updatedAt: string;          // ISO8601
 }
 
