@@ -21,10 +21,19 @@ export interface SectionChunkerOptions {
   minBodyLength?: number; // default 150
 }
 
-/** Extract the last paragraph from a chunk body for overlap. */
+/** Extract the last paragraph from a chunk body for overlap.
+ *  Table blocks are excluded — they are semantic units that should
+ *  not be duplicated into the following chunk as context overlap.
+ */
 function lastParagraph(body: string): string {
   const paras = body.split(/\n{2,}/).filter(p => p.trim().length > 0);
-  return paras.length > 0 ? (paras[paras.length - 1] ?? '') : '';
+  for (let i = paras.length - 1; i >= 0; i--) {
+    const para = paras[i]!;
+    if (!/<table/i.test(para)) {
+      return para;
+    }
+  }
+  return '';
 }
 
 /**

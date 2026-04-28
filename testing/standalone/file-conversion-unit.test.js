@@ -34,7 +34,7 @@ describe('normaliseMarkdown', () => {
     const out = normaliseMarkdown(input);
     assert.ok(out.includes('## Title'));
     assert.ok(out.includes('## Section Two'));
-    assert.ok(!out.includes('# Title'));
+    assert.ok(!out.match(/^# /m)); // no H1-level headings should remain
   });
 
   it('shifts H1/H2 document: H1→H2, H2→H3', () => {
