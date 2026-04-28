@@ -201,6 +201,45 @@ export interface StorageConfig {
   brain?: { softLimitGiB: number; hardLimitGiB: number };
 }
 
+/**
+ * Media embedding pipeline configuration.
+ *
+ * Routes binary media (image / audio / video) through text-as-intermediate
+ * captioning + STT so every embedding lands in the same vector space as
+ * memories, entities and converted documents (`nomic-embed-text-v1.5`).
+ *
+ * Off by default — must be explicitly enabled in config.json or via
+ * `MEDIA_EMBEDDING_ENABLED=true`.
+ */
+export interface MediaEmbeddingConfig {
+  /** Master switch — when false, media files store with embeddingStatus="disabled". */
+  enabled?: boolean;
+  /** "local" → Ollama; "external" → OpenAI/Anthropic vision API. */
+  visionProvider?: 'local' | 'external';
+  /** "local" → faster-whisper-server; "external" → OpenAI Whisper API. */
+  sttProvider?: 'local' | 'external';
+  /** Local Ollama service URL (cluster-internal). */
+  ollamaUrl?: string;
+  /** Vision model tag (e.g. "moondream2", "llava"). Verify license before use. */
+  visionModel?: string;
+  /** Local faster-whisper-server URL. */
+  whisperUrl?: string;
+  /** Whisper model tag (base / small / medium). */
+  whisperModel?: string;
+  /** Max concurrent jobs processed per worker tick. */
+  workerConcurrency?: number;
+  /** Base poll interval — doubles on empty result up to workerMaxPollIntervalMs. */
+  workerPollIntervalMs?: number;
+  /** Idle backoff cap. */
+  workerMaxPollIntervalMs?: number;
+  /** When true and the local provider returns non-200, fall back to external. */
+  fallbackToExternal?: boolean;
+  /** Files larger than this skip embedding (embeddingStatus="skipped"). */
+  maxFileSizeBytes?: number;
+  /** Stalled "processing" jobs older than this are reset to "pending" on startup. */
+  stalledJobTimeoutMs?: number;
+}
+
 // ── Network types ──────────────────────────────────────────────────────────
 
 export type NetworkType = 'closed' | 'democratic' | 'club' | 'braintree' | 'pubsub';
@@ -357,6 +396,8 @@ export interface Config {
   ejectedFromNetworks?: string[];  // network IDs this instance has been removed from via vote
   embedding?: EmbeddingConfig;
   storage?: StorageConfig;
+  /** Optional media embedding pipeline (image / audio / video). Off by default. */
+  mediaEmbedding?: MediaEmbeddingConfig;
   maxUploadBodyBytes?: number;
   allowInsecurePlaintext?: boolean;
   setup?: { completed: true };
@@ -531,6 +572,24 @@ export interface FileMetaDoc {
   chunkCount?: number;
   /** Set when conversion failed: human-readable error message. */
   conversionError?: string;
+  // ── Media embedding fields ────────────────────────────────────────────────
+  /** Detected media class for the original file. Set on image/audio/video uploads. */
+  mediaType?: 'image' | 'audio' | 'video';
+  /** Async embedding lifecycle for binary media:
+   *   "pending"    → enqueued, not yet processed
+   *   "processing" → claimed by a worker
+   *   "complete"   → all chunk records produced
+   *   "failed"     → exhausted retries; lastError carries the reason
+   *   "skipped"    → file too large (> maxFileSizeBytes) — original kept, no embedding
+   *   "disabled"   → mediaEmbedding.enabled=false at upload time
+   */
+  embeddingStatus?: 'pending' | 'processing' | 'complete' | 'failed' | 'skipped' | 'disabled';
+  /** For audio/video chunk records: start offset within the parent media file. */
+  chunkOffsetMs?: number;
+  /** For audio/video chunk records: duration covered by this chunk. */
+  chunkDurationMs?: number;
+  /** Last error message from a failed media embedding job, when embeddingStatus="failed". */
+  mediaJobError?: string;
 }
 
 export interface ConflictDoc {
@@ -563,5 +622,26 @@ export interface LinkViolationDoc {
 export interface SpaceCounterDoc {
   _id: string;  // spaceId
   seq: number;
+}
+
+/**
+ * Background job record for asynchronous media embedding (caption/STT + chunking).
+ * Stored in the per-space `<spaceId>_media_jobs` collection and claimed by the
+ * MediaEmbeddingWorker. The corresponding filemeta record's `embeddingStatus`
+ * mirrors `status` (pending/processing/complete/failed).
+ */
+export interface MediaJobDoc {
+  _id: string;                // file _id (normalised path) — one job per file
+  spaceId: string;
+  filePath: string;           // normalised path on disk
+  mimeType: string;           // raw upload MIME type
+  mediaType: 'image' | 'audio' | 'video';
+  status: 'pending' | 'processing' | 'complete' | 'failed';
+  attempts: number;
+  maxAttempts: number;
+  lastError: string | null;
+  claimedAt: string | null;   // ISO8601 — set when a worker claims this job
+  createdAt: string;          // ISO8601
+  updatedAt: string;          // ISO8601
 }
 
