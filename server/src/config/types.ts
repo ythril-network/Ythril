@@ -516,6 +516,21 @@ export interface FileMetaDoc {
   author: AuthorRef;    // writer: instanceId + instanceLabel
   embedding?: number[];
   embeddingModel?: string;
+  // ── Conversion pipeline fields ────────────────────────────────────────────
+  /** For chunk records: ID of the parent file's filemeta record (_id = normalised path). */
+  parentFileId?: string;
+  /** 0-based position of this chunk within the document. */
+  chunkIndex?: number;
+  /** The H2/H3 heading that opened this chunk (null for paragraph-chunked txt files). */
+  headingText?: string | null;
+  /** The chunk body text (Markdown). Used as embedding source alongside headingText. */
+  content?: string;
+  /** For the original file: _id of the converted Markdown file record (binary formats only). */
+  convertedFileId?: string;
+  /** For the original file: total number of chunk records produced. */
+  chunkCount?: number;
+  /** Set when conversion failed: human-readable error message. */
+  conversionError?: string;
 }
 
 export interface ConflictDoc {

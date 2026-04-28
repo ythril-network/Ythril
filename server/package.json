@@ -11,7 +11,10 @@
     "local-connector:start": "node dist/local-agent-connector/index.js"
   },
   "dependencies": {
+    "@mozilla/readability": "^0.6.0",
     "@huggingface/transformers": "^3.8.1",
+    "jsdom": "^29.1.0",
+    "turndown": "^7.2.4",
     "@modelcontextprotocol/sdk": "^1.28.0",
     "bcrypt": "^6.0.0",
     "express": "^5.2.1",
@@ -28,8 +31,10 @@
   "devDependencies": {
     "@types/bcrypt": "^5",
     "@types/express": "^5",
+    "@types/jsdom": "^21",
     "@types/multer": "^1",
     "@types/node": "^22",
+    "@types/turndown": "^5",
     "@typescript-eslint/eslint-plugin": "^8",
     "@typescript-eslint/parser": "^8",
     "eslint": "^9",
