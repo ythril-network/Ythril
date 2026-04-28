@@ -202,6 +202,36 @@ export interface StorageConfig {
 }
 
 /**
+ * A single pluggable media-embedding provider entry — vision or STT.
+ *
+ * The shape is deliberately generic so any OpenAI-compatible vision
+ * (Ollama `/api/chat`, OpenAI GPT-4o, Anthropic Claude, etc.) or STT
+ * (faster-whisper-server `/v1/audio/transcriptions`, OpenAI Whisper, etc.)
+ * endpoint can be plugged in by editing config.json or the Settings → Models
+ * page in the UI — no code changes required.
+ *
+ * `apiKey` is optional and only used when the endpoint requires
+ * Authorization (i.e. external providers). Local cluster endpoints (Ollama,
+ * faster-whisper-server) leave it empty.
+ */
+export interface MediaProviderConfig {
+  /** Human-readable label shown in the Settings UI. */
+  label?: string;
+  /** Base URL of the provider (e.g. `http://ollama.ythril.svc.cluster.local:11434`
+   *  or `https://api.openai.com/v1`). The provider client appends the route. */
+  baseUrl?: string;
+  /** Model tag passed to the provider (e.g. `moondream2`, `gpt-4o-mini`,
+   *  `whisper-1`, `base`). */
+  model?: string;
+  /** Optional API key for endpoints that require Authorization.
+   *  When empty, no Authorization header is sent.
+   *  Stored in config.json by the Settings UI; for production deployments
+   *  prefer an env-var override (`VISION_API_KEY` / `STT_API_KEY`) which
+   *  takes precedence and locks this field as read-only in the UI. */
+  apiKey?: string;
+}
+
+/**
  * Media embedding pipeline configuration.
  *
  * Routes binary media (image / audio / video) through text-as-intermediate
@@ -210,21 +240,42 @@ export interface StorageConfig {
  *
  * Off by default — must be explicitly enabled in config.json or via
  * `MEDIA_EMBEDDING_ENABLED=true`.
+ *
+ * ── Plugin model ────────────────────────────────────────────────────────────
+ * Vision and STT are pluggable via the generic `vision` / `stt`
+ * `MediaProviderConfig` blocks. Any OpenAI-compatible endpoint works
+ * out-of-the-box; switching providers is a config edit, not a code change.
+ *
+ * ── Resolution order (high → low precedence) ────────────────────────────────
+ *   1. Env vars (`MEDIA_EMBEDDING_ENABLED`, `VISION_PROVIDER`, `OLLAMA_URL`,
+ *      `VISION_MODEL`, `VISION_API_KEY`, `STT_PROVIDER`, `WHISPER_URL`,
+ *      `WHISPER_MODEL`, `STT_API_KEY`, …)
+ *   2. `config.json` `mediaEmbedding.*` (writable from the UI)
+ *   3. Built-in defaults
+ *
+ * When an env var is set for a given key, the corresponding field in the
+ * Settings UI is rendered read-only (locked-by-infra). This allows ops to
+ * pin endpoints/keys via Kubernetes Secrets while still letting end-users
+ * tweak unrelated values from the UI.
  */
 export interface MediaEmbeddingConfig {
   /** Master switch — when false, media files store with embeddingStatus="disabled". */
   enabled?: boolean;
-  /** "local" → Ollama; "external" → OpenAI/Anthropic vision API. */
+  /** "local" → bundled cluster endpoint (Ollama); "external" → user-supplied API. */
   visionProvider?: 'local' | 'external';
-  /** "local" → faster-whisper-server; "external" → OpenAI Whisper API. */
+  /** "local" → bundled cluster endpoint (faster-whisper-server); "external" → user-supplied API. */
   sttProvider?: 'local' | 'external';
-  /** Local Ollama service URL (cluster-internal). */
+  /** Pluggable vision provider settings (endpoint + model + optional API key). */
+  vision?: MediaProviderConfig;
+  /** Pluggable STT provider settings (endpoint + model + optional API key). */
+  stt?: MediaProviderConfig;
+  /** @deprecated Use `vision.baseUrl`. Kept for backward compatibility. */
   ollamaUrl?: string;
-  /** Vision model tag (e.g. "moondream2", "llava"). Verify license before use. */
+  /** @deprecated Use `vision.model`. Kept for backward compatibility. */
   visionModel?: string;
-  /** Local faster-whisper-server URL. */
+  /** @deprecated Use `stt.baseUrl`. Kept for backward compatibility. */
   whisperUrl?: string;
-  /** Whisper model tag (base / small / medium). */
+  /** @deprecated Use `stt.model`. Kept for backward compatibility. */
   whisperModel?: string;
   /** Max concurrent jobs processed per worker tick. */
   workerConcurrency?: number;
@@ -238,6 +289,14 @@ export interface MediaEmbeddingConfig {
   maxFileSizeBytes?: number;
   /** Stalled "processing" jobs older than this are reset to "pending" on startup. */
   stalledJobTimeoutMs?: number;
+  /**
+   * Names of fields whose value is currently being supplied by an env var
+   * (and is therefore read-only in the Settings UI). Populated by the loader
+   * at runtime; never persisted to config.json.
+   *
+   * Examples: `["enabled", "vision.apiKey", "stt.baseUrl"]`.
+   */
+  lockedByInfra?: string[];
 }
 
 // ── Network types ──────────────────────────────────────────────────────────
