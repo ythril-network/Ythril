@@ -1473,20 +1473,37 @@ Base path: `/api/spaces`
 
 ```
 GET /api/spaces
+GET /api/spaces?counts=true
 ```
+
+Returns spaces accessible to the requesting token. Tokens with a `spaces`
+scope restriction only receive spaces in their allowlist; full-access tokens
+receive all spaces.
+
+Add `?counts=true` to include per-space document counts (memories, entities,
+edges, chrono). Useful for agents deciding which spaces are populated and
+worth querying.
 
 **Response** `200`:
 
 ```json
 {
   "spaces": [
-    { "id": "general", "label": "General", "builtIn": true }
+    {
+      "id": "general",
+      "label": "General",
+      "builtIn": true,
+      "description": "Default workspace space.",
+      "counts": { "memories": 42, "entities": 10, "edges": 5, "chrono": 3 }
+    }
   ],
   "storage": {
     "total": { "usedBytes": 52428800, "softLimitGiB": 150, "hardLimitGiB": 200 }
   }
 }
 ```
+
+> **Note:** `counts` fields are only present when `?counts=true` is passed.
 
 ---
 
@@ -4542,7 +4559,7 @@ Ythril exposes a single global MCP server via SSE. Each tool accepts a `space` p
 
 ### Server Instructions
 
-On connect, the server sends global instructions listing all available space IDs and noting that each tool requires a `space` parameter (except `recall` and `list_chrono`, where `space` is optional and enables cross-space results when omitted; and `list_peers`/`sync_now` which are global). Call `list_spaces` to get space IDs and descriptions. Call `get_space_meta` with a specific space to get its full schema, purpose, and usage notes.
+On connect, the server sends global instructions listing all available space IDs and noting that each tool requires a `space` parameter (except `recall` and `list_chrono`, where `space` is optional and enables cross-space results when omitted; and `list_peers`/`sync_now` which are global). Call `list_spaces` to get space IDs, descriptions, and entry counts (memories, entities, edges, chrono) — useful for discovering which spaces are populated before querying. Call `get_space_meta` with a specific space to get its full schema, purpose, and usage notes.
 
 ### Read-Only Tokens
 

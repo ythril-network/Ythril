@@ -125,7 +125,7 @@ function createGlobalMcpServer(tokenSpaces?: string[], readOnly?: boolean, isAdm
   const allTools = [
     {
       name: 'list_spaces',
-      description: 'List all accessible spaces with their IDs, labels, and descriptions.',
+      description: 'List all accessible spaces with their IDs, labels, descriptions, and entry counts (memories, entities, edges, chrono). Use counts to decide which spaces are populated and worth querying.',
       inputSchema: { type: 'object', properties: {}, required: [] },
     },
     {
@@ -781,10 +781,35 @@ function createGlobalMcpServer(tokenSpaces?: string[], readOnly?: boolean, isAdm
       mcpToolCallsTotal.inc({ tool: name, space: callSpace || 'global' });
       switch (name) {
         case 'list_spaces': {
+          const spaceCountResults = await Promise.allSettled(
+            accessibleSpaces.map(async s => {
+              const memberIds = resolveMemberSpaces(s.id);
+              const perMember = await Promise.all(memberIds.map(async mid => ({
+                memories: await col(`${mid}_memories`).countDocuments(),
+                entities: await col(`${mid}_entities`).countDocuments(),
+                edges:    await col(`${mid}_edges`).countDocuments(),
+                chrono:   await col(`${mid}_chrono`).countDocuments(),
+              })));
+              return {
+                id: s.id,
+                counts: {
+                  memories: perMember.reduce((n, c) => n + c.memories, 0),
+                  entities: perMember.reduce((n, c) => n + c.entities, 0),
+                  edges:    perMember.reduce((n, c) => n + c.edges, 0),
+                  chrono:   perMember.reduce((n, c) => n + c.chrono, 0),
+                },
+              };
+            }),
+          );
+          const countsBySpaceId: Record<string, { memories: number; entities: number; edges: number; chrono: number }> = {};
+          for (const r of spaceCountResults) {
+            if (r.status === 'fulfilled') countsBySpaceId[r.value.id] = r.value.counts;
+          }
           const result = accessibleSpaces.map(s => ({
             id: s.id,
             label: s.label ?? null,
             description: s.description ?? null,
+            counts: countsBySpaceId[s.id] ?? { memories: 0, entities: 0, edges: 0, chrono: 0 },
           }));
           return {
             content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],

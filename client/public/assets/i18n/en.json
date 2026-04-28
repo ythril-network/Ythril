@@ -504,6 +504,7 @@
   "networks.wizard.step1.whyItem": "Why: dynamic home IPs and CGNAT are handled automatically.",
   "networks.wizard.step1.riskItem": "Risk model: the endpoint is internet-reachable, so keep strong tokens and monitor logs.",
   "spaces.table.title": "Spaces",
+  "spaces.table.search.placeholder": "Search spaces…",
   "spaces.table.createButton": "Create New Space",
   "spaces.table.refreshButton": "Refresh",
   "spaces.table.column.label": "Label",

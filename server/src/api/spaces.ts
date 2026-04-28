@@ -219,22 +219,60 @@ spacesRouter.post('/reorder', globalRateLimit, requireAdminMfa, (req, res) => {
 });
 
 // GET /api/spaces
-spacesRouter.get('/', globalRateLimit, requireAuth, async (_req, res) => {
+spacesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
   const cfg = getConfig();
   const dataRoot = getDataRoot();
   const GiB = 1024 ** 3;
 
+  // Respect token space-scope restrictions: if the token is scoped to specific
+  // spaces, only return those spaces. Full-access tokens (no `spaces` field)
+  // receive the full list.
+  const tokenSpaces = req.authToken && 'spaces' in req.authToken ? req.authToken.spaces : undefined;
+  const visibleSpaces = tokenSpaces
+    ? cfg.spaces.filter(s => tokenSpaces.includes(s.id))
+    : cfg.spaces;
+
   // Measure per-space file usage in parallel (non-blocking; falls back to 0 on error)
   const usageResults = await Promise.allSettled(
-    cfg.spaces.map(s => dirSizeBytes(path.join(dataRoot, 'files', s.id))),
+    visibleSpaces.map(s => dirSizeBytes(path.join(dataRoot, 'files', s.id))),
   );
   const usageGiBByIdx = usageResults.map(r => r.status === 'fulfilled' ? r.value / GiB : 0);
 
-  const spaces = cfg.spaces.map(({ id, label, builtIn, folders, maxGiB, flex, description, proxyFor, meta }, idx) => ({
+  // Optional per-space entity/memory/edge/chrono counts (?counts=true)
+  const includeCounts = req.query['counts'] === 'true';
+  let countsBySpaceId: Record<string, { memories: number; entities: number; edges: number; chrono: number }> = {};
+  if (includeCounts) {
+    const countResults = await Promise.allSettled(
+      visibleSpaces.map(async s => {
+        const memberIds = resolveMemberSpaces(s.id);
+        const perMember = await Promise.all(memberIds.map(async mid => ({
+          memories: await col(`${mid}_memories`).countDocuments(),
+          entities: await col(`${mid}_entities`).countDocuments(),
+          edges:    await col(`${mid}_edges`).countDocuments(),
+          chrono:   await col(`${mid}_chrono`).countDocuments(),
+        })));
+        return {
+          id: s.id,
+          counts: {
+            memories: perMember.reduce((n, c) => n + c.memories, 0),
+            entities: perMember.reduce((n, c) => n + c.entities, 0),
+            edges:    perMember.reduce((n, c) => n + c.edges, 0),
+            chrono:   perMember.reduce((n, c) => n + c.chrono, 0),
+          },
+        };
+      }),
+    );
+    for (const r of countResults) {
+      if (r.status === 'fulfilled') countsBySpaceId[r.value.id] = r.value.counts;
+    }
+  }
+
+  const spaces = visibleSpaces.map(({ id, label, builtIn, folders, maxGiB, flex, description, proxyFor, meta }, idx) => ({
     id, label, builtIn, folders, maxGiB, flex, description,
     usageGiB: usageGiBByIdx[idx],
     ...(proxyFor ? { proxyFor } : {}),
     ...(meta ? { meta: { ...meta, previousVersions: undefined } } : {}),
+    ...(includeCounts && countsBySpaceId[id] ? { counts: countsBySpaceId[id] } : {}),
   }));
   // Include storage usage summary when quota is configured
   let storage: { usageGiB?: { files: number; brain: number; total: number }; limits?: typeof cfg.storage } | undefined;
