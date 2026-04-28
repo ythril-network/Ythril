@@ -107,8 +107,6 @@ interface TypeSchemaState {
     .prop-row.prow-open td { background:color-mix(in srgb,var(--accent) 6%,transparent); }
     /* ── property detail card ── */
     .pdet { background:var(--bg-surface); border-top:2px solid color-mix(in srgb,var(--accent) 30%,transparent); }
-    .pdet-head { display:flex; align-items:center; gap:10px; padding:10px 14px; background:color-mix(in srgb,var(--accent) 8%,transparent); border-bottom:1px solid var(--border); }
-    .pdet-key { font-family:var(--font-mono); font-size:13px; font-weight:700; flex:1; color:var(--text-primary); }
     .pdet-fields { display:grid; grid-template-columns:repeat(3,1fr); gap:10px 16px; padding:14px; }
     .pdet-full { padding:0 14px 14px; }
     .req-toggle { display:inline-flex; align-items:center; gap:6px; font-size:12px; cursor:pointer; color:var(--text-muted); background:none; border:1px solid var(--border); font-family:var(--font); padding:3px 10px; border-radius:var(--radius-sm); transition:all .15s; }
@@ -412,9 +410,10 @@ interface TypeSchemaState {
                                           <td>
                                             <div style="display:flex;align-items:center;gap:7px;">
                                               <span style="font-family:var(--font-mono);font-size:12px;">{{ p.key }}</span>
-                                              @if (p.s.required) {
-                                                <span style="font-size:10px;background:color-mix(in srgb,var(--warning) 16%,transparent);color:var(--warning);border-radius:3px;padding:1px 5px;font-weight:700;">req</span>
-                                              }
+                                              <label class="req-toggle" [class.is-req]="p.s.required" (click)="$event.stopPropagation()">
+                                                <input type="checkbox" [checked]="p.s.required" (change)="p.s.required = !p.s.required" style="pointer-events:none;" />
+                                                {{ 'spaces.schema.propDetail.required' | transloco }}
+                                              </label>
                                             </div>
                                           </td>
                                           <td><span class="badge badge-gray" style="font-size:11px;">{{ p.s.type ?? 'any' }}</span></td>
@@ -428,8 +427,6 @@ interface TypeSchemaState {
                                           </td>
                                           <td (click)="$event.stopPropagation()">
                                             <div style="display:flex;gap:4px;justify-content:flex-end;">
-                                              <button class="btn btn-ghost btn-sm" type="button" (click)="togglePropExpand(kt,name,p.key)"
-                                                style="font-size:10px;padding:2px 8px;min-width:28px;">{{ isPropExpanded(kt,name,p.key) ? '▲' : '▼' }}</button>
                                               <button class="icon-btn danger" type="button" (click)="removeProp(kt,name,p.key)" [attr.title]="'common.remove' | transloco">✕</button>
                                             </div>
                                           </td>
@@ -438,14 +435,6 @@ interface TypeSchemaState {
                                           <tr class="prop-expand-row" (click)="$event.stopPropagation()">
                                             <td colspan="4" style="padding:0;">
                                               <div class="pdet">
-                                                <div class="pdet-head">
-                                                  <span class="pdet-key">{{ p.key }}</span>
-                                                  <label class="req-toggle" [class.is-req]="p.s.required">
-                                                    <input type="checkbox" [checked]="p.s.required" (change)="p.s.required = !p.s.required" style="pointer-events:none;" />
-                                                    {{ 'spaces.schema.propDetail.required' | transloco }}
-                                                  </label>
-                                                  <button class="icon-btn danger" type="button" (click)="removeProp(kt,name,p.key)" [attr.title]="'spaces.schema.removePropertyTitle' | transloco">✕</button>
-                                                </div>
                                                 <div class="pdet-fields">
                                                   <div class="field" style="margin:0;">
                                                     <label>{{ 'spaces.schema.propDetail.type' | transloco }}</label>
