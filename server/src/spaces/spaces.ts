@@ -262,12 +262,15 @@ export async function createSpace(opts: {
     ...(opts.proxyFor ? { proxyFor: opts.proxyFor } : {}),
     ...(opts.meta ? { meta: opts.meta } : {}),
   };
-  cfg.spaces.push(space);
-  saveConfig(cfg);
-  // Proxy spaces are virtual — no DB collections or file directory needed
+  // Initialize MongoDB collections/indexes before committing to config.
+  // This ensures the server always responds (success or error) and prevents
+  // a race where saveConfig succeeds but initSpace hangs, leaving the space
+  // in config with no backing DB — which caused the "spinner forever" bug.
   if (!opts.proxyFor) {
     await initSpace(opts.id);
   }
+  cfg.spaces.push(space);
+  saveConfig(cfg);
   return space;
 }
 

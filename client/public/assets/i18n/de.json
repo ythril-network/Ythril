@@ -715,6 +715,7 @@
   "spaces.stats.chrono": "Chrono",
   "spaces.stats.files": "Dateien",
   "spaces.error.createFailed": "Bereich konnte nicht erstellt werden",
+  "spaces.error.createTimeout": "Erstellung des Bereichs hat zu lange gedauert — der Server verarbeitet die Anfrage möglicherweise noch. Bitte aktualisieren Sie die Seite, um zu prüfen, ob der Bereich erstellt wurde.",
   "spaces.error.saveFailed": "Speichern fehlgeschlagen",
   "spaces.error.renameFailed": "Umbenennen fehlgeschlagen",
   "spaces.error.wipeFailed": "L\u00f6schen fehlgeschlagen",

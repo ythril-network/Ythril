@@ -711,6 +711,7 @@
   "spaces.stats.chrono": "Chrono",
   "spaces.stats.files": "Pliki",
   "spaces.error.createFailed": "Nie uda\u0142o si\u0119 utworzy\u0107 przestrzeni",
+  "spaces.error.createTimeout": "Tworzenie przestrzeni przekroczy\u0142o limit czasu \u2014 serwer mo\u017ce nadal przetwarza\u0107 \u017c\u0105danie. Od\u015bwie\u017c stron\u0119, aby sprawdzi\u0107, czy przestrze\u0144 zosta\u0142a utworzona.",
   "spaces.error.saveFailed": "Nie uda\u0142o si\u0119 zapisa\u0107",
   "spaces.error.renameFailed": "Nie uda\u0142o si\u0119 zmieni\u0107 nazwy",
   "spaces.error.wipeFailed": "Nie uda\u0142o si\u0119 wyczy\u015bci\u0107",
