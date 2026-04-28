@@ -57,6 +57,8 @@ interface TypeSchemaState {
     .sort-btn { background:none; border:none; padding:3px 8px; font-size:12px; cursor:pointer; color:var(--text-muted); font-family:var(--font); transition:background .15s,color .15s; white-space:nowrap; }
     .sort-btn:hover { background:var(--bg-surface); color:var(--text-primary); }
     .sort-btn.active { background:var(--accent-dim); color:var(--accent); font-weight:600; }
+    /* search input */
+    .space-search-input { height:28px; padding:0 8px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-surface); color:var(--text-primary); font-size:13px; min-width:160px; }
     /* create dialog */
     .dialog-backdrop { position:fixed; inset:0; background:var(--bg-scrim); display:flex; align-items:center; justify-content:center; z-index:100; }
     .dialog { background:var(--bg-primary); border:1px solid var(--border); border-radius:var(--radius-lg); padding:24px; width:90%; max-width:960px; max-height:90vh; overflow-y:auto; }
@@ -687,7 +689,10 @@ interface TypeSchemaState {
     <div class="card">
       <div class="card-header">
         <div class="card-title">{{ 'spaces.table.title' | transloco }}</div>
-        <div style="display:flex;gap:8px;align-items:center;">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <input type="search" [value]="spaceSearch()" (input)="spaceSearch.set($any($event.target).value)"
+            class="space-search-input"
+            [placeholder]="'spaces.table.search.placeholder' | transloco" />
           <div class="sort-group" [attr.aria-label]="'spaces.table.sortLabel' | transloco">
             <button class="sort-btn" [class.active]="sortMode()==='custom'" (click)="sortMode.set('custom')" [attr.title]="'spaces.table.sort.custom' | transloco">⠿</button>
             <button class="sort-btn" [class.active]="sortMode()==='az'" (click)="sortMode.set('az')" [attr.title]="'spaces.table.sort.az' | transloco">A→Z</button>
@@ -763,16 +768,26 @@ export class SpacesComponent implements OnInit {
   networks = signal<Network[]>([]);
   loading  = signal(true);
 
+  spaceSearch = signal('');
   sortMode = signal<'custom' | 'az' | 'za' | 'usage-desc' | 'usage-asc'>('custom');
   sortedSpaces = computed(() => {
     const list = this.spaces();
-    switch (this.sortMode()) {
-      case 'az':         return [...list].sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
-      case 'za':         return [...list].sort((a, b) => b.label.localeCompare(a.label, undefined, { sensitivity: 'base' }));
-      case 'usage-desc': return [...list].sort((a, b) => (b.usageGiB ?? 0) - (a.usageGiB ?? 0));
-      case 'usage-asc':  return [...list].sort((a, b) => (a.usageGiB ?? 0) - (b.usageGiB ?? 0));
-      default:           return list;
-    }
+    const sorted = (() => {
+      switch (this.sortMode()) {
+        case 'az':         return [...list].sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
+        case 'za':         return [...list].sort((a, b) => b.label.localeCompare(a.label, undefined, { sensitivity: 'base' }));
+        case 'usage-desc': return [...list].sort((a, b) => (b.usageGiB ?? 0) - (a.usageGiB ?? 0));
+        case 'usage-asc':  return [...list].sort((a, b) => (a.usageGiB ?? 0) - (b.usageGiB ?? 0));
+        default:           return list;
+      }
+    })();
+    const q = this.spaceSearch().trim().toLowerCase();
+    if (!q) return sorted;
+    return sorted.filter(s =>
+      s.label.toLowerCase().includes(q) ||
+      s.id.toLowerCase().includes(q) ||
+      (s.description ?? '').toLowerCase().includes(q),
+    );
   });
 
   // create dialog

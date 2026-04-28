@@ -505,6 +505,7 @@
   "networks.wizard.step1.whyItem": "Dlaczego: dynamiczne domowe adresy IP i CGNAT s\u0105 obs\u0142ugiwane automatycznie.",
   "networks.wizard.step1.riskItem": "Model ryzyka: punkt ko\u0144cowy jest dost\u0119pny przez Internet, dlatego przechowuj mocne tokeny i monitoruj logi.",
   "spaces.table.title": "Przestrzenie",
+  "spaces.table.search.placeholder": "Szukaj przestrzeni…",
   "spaces.table.createButton": "Utw\u00f3rz now\u0105 przestrze\u0144",
   "spaces.table.refreshButton": "Od\u015bwie\u017ca\u0107",
   "spaces.table.column.label": "Etykieta",

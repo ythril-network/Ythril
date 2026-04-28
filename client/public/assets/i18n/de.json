@@ -505,6 +505,7 @@
   "networks.wizard.step1.whyItem": "Warum: Dynamische Home-IPs und CGNAT werden automatisch verarbeitet.",
   "networks.wizard.step1.riskItem": "Risikomodell: Der Endpunkt ist \u00fcber das Internet erreichbar. Behalten Sie daher starke Token und \u00fcberwachen Sie Protokolle.",
   "spaces.table.title": "R\u00e4ume",
+  "spaces.table.search.placeholder": "Räume durchsuchen…",
   "spaces.table.createButton": "Schaffen Sie neuen Raum",
   "spaces.table.refreshButton": "Aktualisieren",
   "spaces.table.column.label": "Etikett",
