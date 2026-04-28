@@ -1,0 +1,99 @@
+# ── Ythril Deployment ────────────────────────────────────────────────────────
+# This manifest deploys Ythril with the unstructured-api-full sidecar for
+# server-side PDF / DOCX / EPUB conversion.
+#
+# BEFORE DEPLOYING: Verify the unstructured-api-full image tag's LICENSE file:
+#   docker run --rm --entrypoint cat \
+#     downloads.unstructured.io/unstructured-io/unstructured-api-full:<TAG> \
+#     /app/LICENSE
+# Confirm it is Apache-2.0 with no commercial-use restrictions.
+# Repeat on every version bump.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ythril
+  labels:
+    app: ythril
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ythril
+  template:
+    metadata:
+      labels:
+        app: ythril
+    spec:
+      containers:
+        # ── Main Ythril container ────────────────────────────────────────────
+        - name: ythril
+          image: ghcr.io/ythril-network/ythril:latest
+          ports:
+            - containerPort: 4100
+          env:
+            - name: DATA_ROOT
+              value: /data
+            # When the unstructured sidecar is running in the same Pod,
+            # Ythril reaches it on the loopback interface.
+            - name: CONVERSION_SIDECAR_URL
+              value: http://localhost:8000
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /api/ready
+              port: 4100
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          startupProbe:
+            httpGet:
+              path: /api/ready
+              port: 4100
+            failureThreshold: 30
+            periodSeconds: 10
+
+        # ── Unstructured sidecar ────────────────────────────────────────────
+        # Handles PDF / DOCX / EPUB → Markdown conversion.
+        # Runs in the same Pod so traffic stays on localhost (bypasses Cilium).
+        # strategy=auto: fast text-layer extraction for digital PDFs;
+        # hi_res OCR (Tesseract/PaddleOCR) for scanned/image-only PDFs.
+        #
+        # Image: downloads.unstructured.io/unstructured-io/unstructured-api-full
+        # License: Apache-2.0 (verify before pinning any new tag — see note above)
+        # The full image bundles OCR model weights (Tesseract/PaddleOCR) and is
+        # 8–12 GB. Pre-pull on nodes before first deployment to avoid cold-start
+        # delays on Pod restarts.
+        - name: unstructured
+          # Pin to a specific tag and verify the LICENSE before upgrading.
+          # Run `docker run --rm --entrypoint cat <image> /app/LICENSE` to confirm Apache-2.0.
+          image: downloads.unstructured.io/unstructured-io/unstructured-api-full:0.0.75
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "2Gi"
+            limits:
+              cpu: "1000m"
+              memory: "4Gi"
+          readinessProbe:
+            httpGet:
+              path: /healthcheck
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 10
+          startupProbe:
+            httpGet:
+              path: /healthcheck
+              port: 8000
+            # Large failureThreshold to allow the OCR model weights to load on
+            # first start (especially without pre-pulled images).
+            failureThreshold: 60
+            periodSeconds: 10
+
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: ythril-data

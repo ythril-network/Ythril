@@ -14,7 +14,7 @@ import { updateSpace, wipeSpace, WIPE_COLLECTION_TYPES, type WipeCollectionType 
 
 // Brain tools
 import { remember, recall, recallGlobal, findSimilar, queryBrain, updateMemory, deleteMemory, type RecallKnowledgeType, type RecallResult } from '../brain/memory.js';
-import { col, mFilter } from '../db/mongo.js';
+import { col, mFilter, mDoc } from '../db/mongo.js';
 import { upsertEntity, updateEntityById, findEntitiesByName } from '../brain/entities.js';
 import { upsertEdge, traverseGraph, updateEdgeById } from '../brain/edges.js';
 import { computeMergePlan, applyResolutions, executeMerge, validateResolution, type PropertyResolution } from '../brain/merge.js';
@@ -36,6 +36,9 @@ import {
 } from '../files/files.js';
 import { upsertFileMeta, deleteFileMeta, renameFileMeta } from '../files/file-meta.js';
 import { validateEntity, validateEdge, validateMemory, validateChrono, resolveMetaRefs } from '../spaces/schema-validation.js';
+import { resolveInputFormat, runConversionPipeline, storeConversionResults } from '../files/converters/pipeline.js';
+import { ConversionUnavailableError } from '../files/converters/types.js';
+import type { InputFormat } from '../files/converters/pipeline.js';
 
 // Session map: sessionId → transport
 const transports = new Map<string, SSEServerTransport>();
@@ -78,7 +81,7 @@ function toRecallRecord(r: RecallResult): Record<string, unknown> {
     case 'chrono':
       return { ...common, title: r.title, type: r.chronoType, startsAt: r.startsAt, ...(r.status !== undefined ? { status: r.status } : {}), ...(r.entityIds !== undefined ? { entityIds: r.entityIds } : {}) };
     case 'file':
-      return { ...common, path: r.path, ...(r.sizeBytes !== undefined ? { sizeBytes: r.sizeBytes } : {}) };
+      return { ...common, path: r.path, ...(r.sizeBytes !== undefined ? { sizeBytes: r.sizeBytes } : {}), ...(r.parentFileId !== undefined ? { parentFileId: r.parentFileId } : {}), ...(r.chunkIndex !== undefined ? { chunkIndex: r.chunkIndex } : {}), ...(r.headingText !== undefined ? { headingText: r.headingText } : {}), ...(r.content !== undefined ? { content: r.content } : {}) };
   }
 }
 
@@ -550,6 +553,11 @@ function createGlobalMcpServer(tokenSpaces?: string[], readOnly?: boolean, isAdm
             additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
           },
           targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+          inputFormat: {
+            type: 'string',
+            enum: ['pdf', 'docx', 'epub', 'html', 'md', 'txt', 'text', 'auto'],
+            description: 'How to process the file. "auto" (default) detects from extension/MIME type. "text" bypasses conversion (single flat embedding). "md"/"txt" use the in-process normaliser+chunker. "pdf"/"docx"/"epub"/"html" use the full conversion pipeline.',
+          },
         },
         required: ['space', 'path', 'content'],
       },
@@ -1555,6 +1563,34 @@ function createGlobalMcpServer(tokenSpaces?: string[], readOnly?: boolean, isAdm
             metaOpts.properties = a['properties'] as Record<string, string | number | boolean>;
           }
           await upsertFileMeta(wt.target, filePath, sizeBytes, metaOpts);
+          // Conversion pipeline
+          const ifFmt = typeof a['inputFormat'] === 'string' ? a['inputFormat'] as InputFormat : 'auto';
+          const fileBytes = Buffer.from(content, 'utf8');
+          const resolvedFmt = resolveInputFormat(filePath, undefined, ifFmt);
+          if (resolvedFmt !== 'text') {
+            try {
+              const { chunks, convertedMarkdown } = await runConversionPipeline(fileBytes, filePath, resolvedFmt);
+              if (chunks.length > 0) {
+                const { chunkCount, convertedFileId } = await storeConversionResults(wt.target, filePath, chunks, convertedMarkdown);
+                const metaUpdate: Record<string, unknown> = { chunkCount };
+                if (convertedFileId) metaUpdate['convertedFileId'] = convertedFileId;
+                const normId = filePath.replace(/\\/g, '/').replace(/^\/+/, '');
+                await col<import('../config/types.js').FileMetaDoc>(`${wt.target}_files`).updateOne(
+                  mFilter<import('../config/types.js').FileMetaDoc>({ _id: normId }),
+                  { $set: metaUpdate },
+                );
+              }
+            } catch (err) {
+              if (err instanceof ConversionUnavailableError) {
+                log.warn(`write_file conversion failed for ${wt.target}/${filePath}: ${err.message}`);
+                const normId = filePath.replace(/\\/g, '/').replace(/^\/+/, '');
+                await col<import('../config/types.js').FileMetaDoc>(`${wt.target}_files`).updateOne(
+                  mFilter<import('../config/types.js').FileMetaDoc>({ _id: normId }),
+                  { $set: { conversionError: err.message } },
+                );
+              }
+            }
+          }
           const wfText = `Written (sha256: ${sha256}).`
             + (wfQuota.softBreached ? `\n⚠️ Storage warning: ${wfQuota.warning}` : '');
           return {

@@ -359,7 +359,8 @@ brainRouter.get('/spaces/:spaceId/stats', globalRateLimit, requireSpaceAuth, asy
     entities: await col(`${mid}_entities`).countDocuments(),
     edges: await col(`${mid}_edges`).countDocuments(),
     chrono: await col(`${mid}_chrono`).countDocuments(),
-    files: await col(`${mid}_files`).countDocuments(),
+    // Exclude chunk records (parentFileId set) — count only top-level file records
+    files: await col(`${mid}_files`).countDocuments({ parentFileId: { $exists: false } }),
   })));
   const memories = counts.reduce((s, c) => s + c.memories, 0);
   const entities = counts.reduce((s, c) => s + c.entities, 0);
@@ -1384,7 +1385,11 @@ brainRouter.get('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth, asy
   }
   const limit = Math.min(Number(req.query['limit'] ?? 50), 200);
   const skip = Number(req.query['skip'] ?? 0);
+  // By default exclude chunk records (parentFileId set) so the file manager only shows
+  // top-level files. Pass ?includeChunks=true to see all records (e.g. for debugging).
+  const includeChunks = req.query['includeChunks'] === 'true';
   const filter: Record<string, unknown> = {};
+  if (!includeChunks) filter['parentFileId'] = { $exists: false };
   if (typeof req.query['tag'] === 'string') filter['tags'] = req.query['tag'];
   if (typeof req.query['path'] === 'string') filter['path'] = req.query['path'].replace(/\\/g, '/').replace(/^\/+/, '');
   const memberIds = resolveMemberSpaces(spaceId);
@@ -1774,7 +1779,10 @@ brainRouter.post('/spaces/:spaceId/reindex', globalRateLimit, requireSpaceAuth, 
           let cursor: string | null = null;
           // eslint-disable-next-line no-constant-condition
           while (true) {
-            const q: Record<string, unknown> = cursor ? { _id: { $gt: cursor } } : {};
+            // Exclude chunk records (parentFileId set) — they have their own embedding logic
+            const q: Record<string, unknown> = cursor
+              ? { _id: { $gt: cursor }, parentFileId: { $exists: false } }
+              : { parentFileId: { $exists: false } };
             const batch: FileMetaDoc[] = await col<FileMetaDoc>(`${mid}_files`)
               .find(mFilter<FileMetaDoc>(q), { projection: { _id: 1, path: 1, tags: 1, description: 1 } })
               .sort({ _id: 1 })

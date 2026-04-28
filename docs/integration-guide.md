@@ -1463,6 +1463,85 @@ DELETE /api/files/:spaceId?path=reports/q1.pdf
 
 To delete a directory, include `{ "confirm": true }` in the request body.
 
+Deleting a file that was converted automatically cascades: all chunk records and the `_converted/<id>.md` file are removed from the file store.
+
+---
+
+### Server-Side Conversion Pipeline
+
+When a convertible file is uploaded, Ythril automatically:
+
+1. Converts it to clean Markdown (via unstructured sidecar for PDF/DOCX/EPUB, or in-process for HTML/MD/TXT).
+2. Normalises the Markdown (strips page numbers, collapses blank lines, levels headings).
+3. Splits it into heading- or paragraph-delimited chunks.
+4. Embeds each chunk independently for high-quality semantic recall.
+
+#### `inputFormat` parameter
+
+Pass `inputFormat` in the JSON body (or as a query parameter in raw uploads) to control conversion:
+
+| Value | Behaviour |
+|-------|-----------|
+| `"auto"` | (default) Detect from MIME type or file extension |
+| `"pdf"` / `"docx"` / `"epub"` | Use the unstructured sidecar (same-Pod, localhost:8000) |
+| `"html"` | Extract article body with jsdom + @mozilla/readability + turndown, fully in-process |
+| `"md"` | Normalise + split on H2/H3 headings, in-process — no sidecar, no `_converted/` copy |
+| `"txt"` | Normalise + split on paragraph boundaries, in-process — `headingText` is null on all chunks |
+| `"text"` | Legacy bypass: single flat embedding, no chunking, unchanged behaviour |
+
+Example — upload and convert a PDF:
+
+```
+POST /api/files/:spaceId?path=reports/q1.pdf
+Content-Type: application/json
+
+{
+  "content": "<base64-encoded PDF bytes>",
+  "encoding": "base64"
+}
+```
+
+Or force the bypass (no conversion):
+
+```json
+{
+  "content": "<base64-encoded PDF bytes>",
+  "encoding": "base64",
+  "inputFormat": "text"
+}
+```
+
+#### Stored artefacts
+
+Three things are stored for each converted file (conversion artefacts are **hidden** from the file manager UI and the `GET /api/brain/spaces/:spaceId/files` listing by default):
+
+1. **Original file** — bytes on disk, accessible via the usual download URL. Unchanged.
+2. **`_converted/<path>.md`** — full converted Markdown, stored in the space file store (binary formats only). The original file's filemeta record has a `convertedFileId` property pointing to it.
+3. **Chunk records** — one filemeta record per heading/paragraph section. Each has:
+   - `parentFileId` — `_id` of the original file's filemeta record
+   - `chunkIndex` — 0-based position within the document
+   - `headingText` — the H2/H3 heading that opened this chunk (`null` for `.txt` paragraph chunks)
+   - `content` — the Markdown body of the chunk
+   - An embedding derived from `headingText + " " + content`
+
+Chunk records and `_converted/` records share the same vector space as memories, entities, and edges. A standard `recall` query therefore covers document chunks alongside all other content — **no separate query path is required**.
+
+#### File manager and listing endpoints
+
+Chunk records and `_converted/` file records carry a `parentFileId` field. The following surfaces **exclude** them by default, so users only see top-level files:
+
+- **File manager UI** — shows only original, user-uploaded files.
+- **`GET /api/brain/spaces/:spaceId/files`** — omits records where `parentFileId` is set. Pass `?includeChunks=true` to include all records.
+- **`GET /api/brain/spaces/:spaceId/stats`** — the `files` count reflects only top-level files.
+
+Recall results (`recall`, `recall_global`, `find_similar`) **do** include chunk records by design. When a result has `parentFileId` set, the caller can follow it to retrieve the original file record.
+
+#### Resilience
+
+If the unstructured sidecar is unavailable, `write_file` still succeeds. The original file is stored as-is and `conversionError` is set on the filemeta record. No HTTP 5xx is returned to the caller.
+
+To disable the conversion pipeline entirely, set `CONVERSION_SIDECAR_URL=""` in Ythril's environment — all uploads fall back to the `"text"` bypass regardless of `inputFormat`.
+
 ---
 
 ## Spaces API

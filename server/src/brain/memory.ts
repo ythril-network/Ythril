@@ -138,6 +138,14 @@ export interface RecallFile extends RecallBase {
   type: 'file';
   path: string;
   sizeBytes?: number;
+  /** Set on chunk records: the H2/H3 heading that opened this chunk (null for paragraph-chunked txt). */
+  headingText?: string | null;
+  /** Set on chunk records: the Markdown body of this chunk. */
+  content?: string;
+  /** Set on chunk and _converted/ records: _id of the parent file's filemeta record. */
+  parentFileId?: string;
+  /** Set on chunk records: 0-based position within the document. */
+  chunkIndex?: number;
 }
 
 /** Discriminated union of all knowledge-type recall results. Narrow by `result.type`. */
@@ -265,7 +273,7 @@ async function recallByType(
   } else if (knowledgeType === 'chrono') {
     typeProject = { title: 1, description: 1, type: 1, status: 1, startsAt: 1, tags: 1, entityIds: 1, properties: 1 };
   } else if (knowledgeType === 'file') {
-    typeProject = { path: 1, description: 1, tags: 1, sizeBytes: 1, properties: 1 };
+    typeProject = { path: 1, description: 1, tags: 1, sizeBytes: 1, properties: 1, headingText: 1, content: 1, parentFileId: 1, chunkIndex: 1 };
   }
   pipeline.push({ $project: { ...commonProject, ...typeProject } });
 
@@ -302,7 +310,7 @@ function mapToRecallResult(doc: Record<string, unknown>, knowledgeType: RecallKn
     case 'chrono':
       return { ...base, type: 'chrono', title: doc['title'] as string, chronoType: doc['type'] as string, startsAt: doc['startsAt'] as string, status: doc['status'] as string | undefined, entityIds: doc['entityIds'] as string[] | undefined };
     case 'file':
-      return { ...base, type: 'file', path: doc['path'] as string, sizeBytes: doc['sizeBytes'] as number | undefined };
+      return { ...base, type: 'file', path: doc['path'] as string, sizeBytes: doc['sizeBytes'] as number | undefined, headingText: doc['headingText'] as string | null | undefined, content: doc['content'] as string | undefined, parentFileId: doc['parentFileId'] as string | undefined, chunkIndex: doc['chunkIndex'] as number | undefined };
   }
 }
 

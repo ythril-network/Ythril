@@ -47,6 +47,9 @@ import { upsertFileMeta, deleteFileMeta, deleteFileMetaByPrefix, renameFileMeta,
 import { v4 as uuidv4 } from 'uuid';
 import { resolveMemberSpaces, resolveWriteTarget } from '../spaces/proxy.js';
 import { emitWebhookEvent } from '../webhooks/dispatcher.js';
+import { resolveInputFormat, runConversionPipeline, storeConversionResults, deleteConversionArtifacts } from '../files/converters/pipeline.js';
+import { ConversionUnavailableError } from '../files/converters/types.js';
+import type { InputFormat } from '../files/converters/pipeline.js';
 
 export const filesRouter = Router();
 
@@ -356,6 +359,37 @@ filesRouter.post(
         log.warn(`upsertFileMeta error for space ${targetSpace}, path ${filePath}: ${err}`);
       });
 
+      // Run conversion pipeline for convertible formats
+      const inputFormat = typeof req.body?.inputFormat === 'string' ? req.body.inputFormat as InputFormat : 'auto';
+      const fileBuffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body.content as string, (req.body.encoding ?? 'utf8') as BufferEncoding);
+      const resolvedFormat = resolveInputFormat(filePath, req.headers['content-type'], inputFormat);
+      if (resolvedFormat !== 'text') {
+        try {
+          const { chunks, convertedMarkdown } = await runConversionPipeline(fileBuffer, filePath, resolvedFormat);
+          if (chunks.length > 0) {
+            const { chunkCount, convertedFileId } = await storeConversionResults(targetSpace, filePath, chunks, convertedMarkdown);
+            // Update original filemeta with chunkCount and convertedFileId
+            const metaUpdate: Record<string, unknown> = { chunkCount };
+            if (convertedFileId) metaUpdate['convertedFileId'] = convertedFileId;
+            await col<FileMetaDoc>(`${targetSpace}_files`).updateOne(
+              mFilter<FileMetaDoc>({ _id: filePath.replace(/\\/g, '/').replace(/^\/+/, '') }),
+              { $set: metaUpdate },
+            );
+          }
+        } catch (err) {
+          if (err instanceof ConversionUnavailableError) {
+            log.warn(`Conversion pipeline failed for ${targetSpace}/${filePath}: ${err.message}`);
+            // Store conversionError on the filemeta record — do not fail the write
+            await col<FileMetaDoc>(`${targetSpace}_files`).updateOne(
+              mFilter<FileMetaDoc>({ _id: filePath.replace(/\\/g, '/').replace(/^\/+/, '') }),
+              { $set: { conversionError: err.message } },
+            );
+          } else {
+            log.warn(`Unexpected conversion error for ${targetSpace}/${filePath}: ${err}`);
+          }
+        }
+      }
+
       const response: { path: string; sha256: string; storageWarning?: boolean } = { path: filePath, sha256 };
       if (quotaResult.softBreached) response.storageWarning = true;
       emitWebhookEvent({ event: 'file.created', spaceId: targetSpace, entry: { path: filePath, sha256 }, ...webhookToken(req) });
@@ -460,6 +494,9 @@ filesRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadOnly,
     await col<FileTombstoneDoc>(`${targetSpace}_file_tombstones`).insertOne(mDoc<FileTombstoneDoc>(tombstone));
     await deleteFileMeta(targetSpace, filePath).catch(err => {
       log.warn(`deleteFileMeta error for space ${targetSpace}, path ${filePath}: ${err}`);
+    });
+    await deleteConversionArtifacts(targetSpace, filePath).catch(err => {
+      log.warn(`deleteConversionArtifacts error for space ${targetSpace}, path ${filePath}: ${err}`);
     });
     emitWebhookEvent({ event: 'file.deleted', spaceId: targetSpace, entry: { path: filePath }, ...webhookToken(req) });
     res.status(204).end();
