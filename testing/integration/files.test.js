@@ -75,11 +75,13 @@ describe('File upload & download', () => {
     tokenA = fs.readFileSync(TOKEN_FILE_A, 'utf8').trim();
   });
 
-  it('Upload file via JSON body returns 201 with sha256', async () => {
+  it('Upload file via JSON body returns 202 with sha256 (text document async embedding)', async () => {
     const r = await uploadFile(tokenA, 'general', 'test-upload.txt', 'hello world');
-    assert.equal(r.status, 201, JSON.stringify(r.body));
+    // .txt files are text documents — embedding is asynchronous, so 202 Accepted is returned
+    assert.equal(r.status, 202, JSON.stringify(r.body));
     assert.ok(r.body.sha256, 'Should include sha256 hash');
     assert.equal(r.body.path, 'test-upload.txt');
+    assert.equal(r.body.embeddingStatus, 'pending', 'Text document uploads must return embeddingStatus=pending');
   });
 
   it('Download uploaded file returns correct bytes', async () => {
@@ -89,14 +91,15 @@ describe('File upload & download', () => {
     assert.equal(r.body, 'download me');
   });
 
-  it('Upload raw bytes (Buffer) returns 201', async () => {
+  it('Upload raw bytes (Buffer) for non-document format returns 201', async () => {
     const buf = Buffer.from('raw content here', 'utf8');
+    // .bin has no recognized document format — resolves to "text" passthrough, no async embedding
     const r = await uploadRaw(tokenA, 'general', 'test-raw.bin', buf, 'application/octet-stream');
     assert.equal(r.status, 201, JSON.stringify(r.body));
     assert.ok(r.body.sha256);
   });
 
-  it('Upload base64-encoded content returns 201', async () => {
+  it('Upload base64-encoded content for text document returns 202', async () => {
     const content = Buffer.from('base64 content', 'utf8').toString('base64');
     const url = `${INSTANCES.a}/api/files/general?path=${encodeURIComponent('test-b64.txt')}`;
     const r = await fetch(url, {
@@ -104,7 +107,8 @@ describe('File upload & download', () => {
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${tokenA}` },
       body: JSON.stringify({ content, encoding: 'base64' }),
     });
-    assert.equal(r.status, 201);
+    // .txt is a document format — async embedding → 202
+    assert.equal(r.status, 202);
   });
 
   it('Upload with invalid encoding returns 400', async () => {
@@ -722,14 +726,12 @@ describe('Media embedding — upload response (embedding enabled by default)', (
       `Expected embeddingStatus=pending when media embedding is enabled, got: ${r.body.embeddingStatus}`);
   });
 
-  it('Uploading a text file does NOT set embeddingStatus (non-media)', async () => {
+  it('Uploading a text document returns embeddingStatus=pending (async embedding)', async () => {
     const r = await uploadFile(tokenA, 'general', `embed-text-${RUN}.txt`, 'plain text');
-    assert.equal(r.status, 201, JSON.stringify(r.body));
-    // Non-media files must not have embeddingStatus
-    assert.ok(
-      r.body.embeddingStatus === undefined || r.body.embeddingStatus === null,
-      `Expected no embeddingStatus for text file, got: ${r.body.embeddingStatus}`,
-    );
+    // Text documents (.txt, .md, etc.) now use async embedding — 202 Accepted with embeddingStatus=pending
+    assert.equal(r.status, 202, JSON.stringify(r.body));
+    assert.equal(r.body.embeddingStatus, 'pending',
+      `Expected embeddingStatus=pending for text document, got: ${r.body.embeddingStatus}`);
   });
 });
 
@@ -749,7 +751,7 @@ describe('Media embedding — retry_embedding endpoint', () => {
     assert.equal(r.status, 404, `Expected 404 for non-existent file, got ${r.status}`);
   });
 
-  it('retry_embedding on a text file returns 404 (no job record)', async () => {
+  it('retry_embedding on a text document file returns 202 (job record exists)', async () => {
     const filePath = `retry-text-${RUN}.txt`;
     await uploadFile(tokenA, 'general', filePath, 'text content');
 
@@ -758,8 +760,11 @@ describe('Media embedding — retry_embedding endpoint', () => {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${tokenA}` },
     });
-    // Text files never have a job record — endpoint returns 404
-    assert.equal(r.status, 404, `Expected 404 for text file retry, got ${r.status}`);
+    // Text documents now have a job record — retry_embedding should reset it to pending
+    assert.ok(
+      [202, 409].includes(r.status),
+      `Expected 202 or 409 for text document retry, got ${r.status}`,
+    );
   });
 
   it('retry_embedding requires authentication', async () => {

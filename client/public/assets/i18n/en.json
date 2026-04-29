@@ -309,6 +309,8 @@
   "brain.fileMeta.removeTitle": "Remove metadata record",
   "brain.fileMeta.removeAriaLabel": "Remove metadata record",
   "brain.fileMeta.openInFilesTabTitle": "Open in Files tab",
+  "brain.fileMeta.embedding": "Embedding…",
+  "brain.fileMeta.embeddingFailed": "Embedding failed",
   "brain.fileMeta.picker.searchMemories": "Search memories\u2026",
   "brain.fileMeta.picker.searchChrono": "Search chrono\u2026",
   "graph.toolbar.depth": "Depth",

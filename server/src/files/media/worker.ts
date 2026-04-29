@@ -35,6 +35,12 @@ import { embedVideo } from './video-embedder.js';
 import { col, mFilter } from '../../db/mongo.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import { updateFileMeta } from '../file-meta.js';
+import {
+  runConversionPipeline,
+  storeConversionResults,
+  deleteConversionArtifacts,
+} from '../converters/pipeline.js';
+import type { ResolvedFormat } from '../converters/pipeline.js';
 import fs from 'fs/promises';
 import path from 'path';
 import { spaceRoot } from '../sandbox.js';
@@ -185,6 +191,27 @@ async function processJob(
       case 'video':
         await embedVideo(spaceId, fileId, fileBytes, mimeType, providers.vision, providers.stt);
         break;
+      case 'text': {
+        // Text/document embedding: chunk + embed the file content asynchronously.
+        // Delete any stale chunks first so a re-upload always produces a clean set.
+        await deleteConversionArtifacts(spaceId, fileId);
+        const resolvedFmt = (job.resolvedFormat ?? 'text') as ResolvedFormat;
+        const { chunks, convertedMarkdown, extractedImages } = await runConversionPipeline(
+          fileBytes, filePath, resolvedFmt,
+        );
+        if (chunks.length > 0 || extractedImages.length > 0) {
+          const { chunkCount, convertedFileId } = await storeConversionResults(
+            spaceId, filePath, chunks, convertedMarkdown, extractedImages,
+          );
+          const metaUpdate: Record<string, unknown> = { chunkCount };
+          if (convertedFileId) metaUpdate['convertedFileId'] = convertedFileId;
+          await col<FileMetaDoc>(`${spaceId}_files`).updateOne(
+            mFilter<FileMetaDoc>({ _id: fileId }),
+            { $set: metaUpdate },
+          ).catch(() => {});
+        }
+        break;
+      }
       default:
         throw new Error(`Unknown mediaType: ${String(mediaType)}`);
     }

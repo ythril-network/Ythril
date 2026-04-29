@@ -102,6 +102,74 @@ export async function enqueueMediaJob(
   }
 }
 
+/**
+ * Enqueue a new text document embedding job.
+ * Unlike enqueueMediaJob, this ALWAYS resets the job to `pending` even when
+ * a job is currently `pending` or `processing` — a re-upload means we have
+ * new file content that must replace any in-flight work.
+ *
+ * The caller is responsible for deleting stale chunk records before enqueueing
+ * so that a concurrent in-flight job (if any) finds no old data to overwrite.
+ */
+export async function enqueueTextJob(
+  spaceId: string,
+  filePath: string,
+  resolvedFormat: string,
+  mimeType = 'text/plain',
+): Promise<void> {
+  const id = normPath(filePath);
+  const now = new Date().toISOString();
+
+  const existing = await jobCollection(spaceId).findOne(
+    mFilter<MediaJobDoc>({ _id: id }),
+  ) as MediaJobDoc | null;
+
+  if (existing) {
+    // Always reset — new upload supersedes any previous or in-progress job
+    await jobCollection(spaceId).updateOne(
+      mFilter<MediaJobDoc>({ _id: id }),
+      mUpdate<MediaJobDoc>({
+        $set: {
+          status: 'pending',
+          attempts: 0,
+          lastError: null,
+          claimedAt: null,
+          claimableAfter: null,
+          updatedAt: now,
+          mimeType,
+          mediaType: 'text',
+          resolvedFormat,
+        },
+      }),
+    );
+  } else {
+    const doc: MediaJobDoc = {
+      _id: id,
+      spaceId,
+      filePath: id,
+      mimeType,
+      mediaType: 'text',
+      resolvedFormat,
+      status: 'pending',
+      attempts: 0,
+      maxAttempts: MAX_ATTEMPTS,
+      lastError: null,
+      claimedAt: null,
+      claimableAfter: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await jobCollection(spaceId).insertOne(mDoc<MediaJobDoc>(doc));
+  }
+
+  // Reflect pending status on the file meta record immediately so the UI
+  // can show an "embedding" indicator without waiting for the worker.
+  await fileCollection(spaceId).updateOne(
+    mFilter<FileMetaDoc>({ _id: id }),
+    { $set: { embeddingStatus: 'pending', updatedAt: now } },
+  ).catch(() => {}); // non-fatal
+}
+
 // ── Claim ─────────────────────────────────────────────────────────────────
 
 /**

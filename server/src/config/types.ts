@@ -801,7 +801,8 @@ export interface SpaceCounterDoc {
 }
 
 /**
- * Background job record for asynchronous media embedding (caption/STT + chunking).
+ * Background job record for asynchronous media embedding (caption/STT + chunking)
+ * and text document embedding (chunking + vector embedding).
  * Stored in the per-space `<spaceId>_media_jobs` collection and claimed by the
  * MediaEmbeddingWorker. The corresponding filemeta record's `embeddingStatus`
  * mirrors `status` (pending/processing/complete/failed).
@@ -811,7 +812,9 @@ export interface MediaJobDoc {
   spaceId: string;
   filePath: string;           // normalised path on disk
   mimeType: string;           // raw upload MIME type
-  mediaType: 'image' | 'audio' | 'video';
+  mediaType: 'image' | 'audio' | 'video' | 'text';
+  /** For text jobs: the resolved document format (md, txt, html, pdf, docx, epub). */
+  resolvedFormat?: string;
   status: 'pending' | 'processing' | 'complete' | 'failed';
   attempts: number;
   maxAttempts: number;
