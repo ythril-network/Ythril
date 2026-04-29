@@ -167,7 +167,9 @@ export async function enqueueTextJob(
   await fileCollection(spaceId).updateOne(
     mFilter<FileMetaDoc>({ _id: id }),
     { $set: { embeddingStatus: 'pending', updatedAt: now } },
-  ).catch(() => {}); // non-fatal
+  ).catch(err => {
+    log.debug(`enqueueTextJob: could not set embeddingStatus on file meta ${spaceId}/${id}: ${err instanceof Error ? err.message : String(err)}`);
+  });
 }
 
 // ── Claim ─────────────────────────────────────────────────────────────────

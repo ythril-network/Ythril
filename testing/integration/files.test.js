@@ -93,7 +93,7 @@ describe('File upload & download', () => {
 
   it('Upload raw bytes (Buffer) for non-document format returns 201', async () => {
     const buf = Buffer.from('raw content here', 'utf8');
-    // .bin has no recognized document format — resolves to "text" passthrough, no async embedding
+    // .bin has no recognized document format -- resolves to "text" passthrough, no async embedding
     const r = await uploadRaw(tokenA, 'general', 'test-raw.bin', buf, 'application/octet-stream');
     assert.equal(r.status, 201, JSON.stringify(r.body));
     assert.ok(r.body.sha256);

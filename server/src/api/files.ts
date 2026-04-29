@@ -315,10 +315,8 @@ filesRouter.post(
           }
 
           emitWebhookEvent({ event: 'file.created', spaceId: targetSpace, entry: { path: filePath, sha256 }, ...webhookToken(req) });
-          // Document uploads return 202 — the client gets a quick response while
-          // embedding continues in the background.
-          const isDocFmt = resolvedFmt !== 'text' && !isMediaFormat(resolvedFmt);
-          const chunkedStatusCode = (chunkedEmbeddingStatus === 'pending' && isDocFmt) ? 202 : 201;
+          const isDocFormat = resolvedFmt !== 'text' && !isMediaFormat(resolvedFmt);
+          const chunkedStatusCode = (chunkedEmbeddingStatus === 'pending' && isDocFormat) ? 202 : 201;
           const chunkedResponse: Record<string, unknown> = { path: filePath, sha256 };
           if (chunkedEmbeddingStatus !== undefined) chunkedResponse['embeddingStatus'] = chunkedEmbeddingStatus;
           res.status(chunkedStatusCode).json(chunkedResponse);
