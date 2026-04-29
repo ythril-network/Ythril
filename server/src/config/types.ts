@@ -339,6 +339,17 @@ export interface FaceRecognitionConfig {
    * files are stored. Defaults to "human-models".
    */
   modelPath?: string;
+  /**
+   * Entity type names that represent people. Only entities whose `type` is in
+   * this list are eligible to be stored in the face gallery.
+   *
+   * Linking a "location" or "object" entity to a photo will never poison the
+   * gallery regardless of how many faces are in the image.
+   *
+   * Default: ["person"]. Add your own type names if you use a different
+   * convention (e.g. ["person", "contact", "employee"]).
+   */
+  personEntityTypes?: string[];
 }
 
 // ── Network types ──────────────────────────────────────────────────────────

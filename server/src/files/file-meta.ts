@@ -165,26 +165,38 @@ export async function updateFileMeta(
   );
 
   // Propagate entity label to face-chunk records so they enter the gallery.
-  // Strict guard: both conditions must hold simultaneously:
-  //  1. Exactly ONE face-chunk on the file — if there are multiple faces we
-  //     cannot tell which face the entity refers to.
-  //  2. Exactly ONE entity being linked — if the file is tagged with both
-  //     "John" and "London" we cannot tell which entity is the person, so
-  //     we refuse to guess rather than risk gallery poisoning.
+  // Guards (ALL must hold):
+  //  1. Exactly ONE entity is being linked — multiple entities means we can't
+  //     tell which one is the person in the photo.
+  //  2. That entity's type is in personEntityTypes (default: ["person"]) —
+  //     prevents locations, objects, events etc. from ever entering the gallery
+  //     regardless of face count.
+  //  3. Exactly ONE face-chunk on the file — multiple faces means we can't
+  //     tell which face belongs to the entity.
   //
-  // Consequence: a solo portrait tagged with a single person entity is the
-  // only path that feeds the face gallery via manual labeling. Everything
-  // else still gets face-embedded (searchable) but won't be a training example.
+  // Result: only an unambiguous solo portrait tagged with a single person
+  // entity feeds the gallery. Everything else remains face-embedded and
+  // auto-labelable but never acts as a training source.
   if (opts.entityIds !== undefined && opts.entityIds.length === 1) {
     try {
       const { getFaceRecognitionConfig } = await import('../config/loader.js');
-      if (getFaceRecognitionConfig().enabled) {
-        const faceChunkCount = await col<FileMetaDoc>(`${spaceId}_files`).countDocuments(
-          mFilter<FileMetaDoc>({ parentFileId: normalised, faceEmbedding: { $exists: true } }),
-        );
-        if (faceChunkCount === 1) {
-          const { propagateFaceLabel } = await import('./media/face-embedder.js');
-          await propagateFaceLabel(spaceId, normalised, opts.entityIds[0]!);
+      const faceCfg = getFaceRecognitionConfig();
+      if (faceCfg.enabled) {
+        // Resolve the entity to check its type
+        const entity = await col<EntityDoc>(`${spaceId}_entities`).findOne(
+          mFilter<EntityDoc>({ _id: opts.entityIds[0]! }),
+          { projection: { type: 1 } },
+        ) as EntityDoc | null;
+        const isPersonType = entity != null &&
+          faceCfg.personEntityTypes.some(t => t.toLowerCase() === entity.type.toLowerCase());
+        if (isPersonType) {
+          const faceChunkCount = await col<FileMetaDoc>(`${spaceId}_files`).countDocuments(
+            mFilter<FileMetaDoc>({ parentFileId: normalised, faceEmbedding: { $exists: true } }),
+          );
+          if (faceChunkCount === 1) {
+            const { propagateFaceLabel } = await import('./media/face-embedder.js');
+            await propagateFaceLabel(spaceId, normalised, opts.entityIds[0]!);
+          }
         }
       }
     } catch { /* non-fatal — face label propagation must never block file meta write */ }

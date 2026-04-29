@@ -421,6 +421,7 @@ const FACE_RECOGNITION_DEFAULTS: Required<FaceRecognitionConfig> = {
   confidenceThreshold: 0.6,
   minFaceSizeFraction: 0.05,
   modelPath: 'human-models',
+  personEntityTypes: ['person'],
 };
 
 /**
@@ -438,5 +439,6 @@ export function getFaceRecognitionConfig(): Required<FaceRecognitionConfig> {
     confidenceThreshold: base.confidenceThreshold ?? FACE_RECOGNITION_DEFAULTS.confidenceThreshold,
     minFaceSizeFraction: base.minFaceSizeFraction ?? FACE_RECOGNITION_DEFAULTS.minFaceSizeFraction,
     modelPath: base.modelPath ?? FACE_RECOGNITION_DEFAULTS.modelPath,
+    personEntityTypes: base.personEntityTypes ?? FACE_RECOGNITION_DEFAULTS.personEntityTypes,
   };
 }

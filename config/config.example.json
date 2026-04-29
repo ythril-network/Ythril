@@ -24,7 +24,8 @@
       "enabled": false,
       "confidenceThreshold": 0.6,
       "minFaceSizeFraction": 0.05,
-      "modelPath": "human-models"
+      "modelPath": "human-models",
+      "personEntityTypes": ["person"]
     }
   },
   "oidc": {
