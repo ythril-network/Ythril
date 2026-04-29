@@ -165,13 +165,24 @@ export async function updateFileMeta(
   );
 
   // Propagate entity label to face-chunk records so they enter the gallery.
-  // Only fires when entityIds is non-empty AND face recognition is enabled.
+  // Only fires when:
+  //  - entityIds is non-empty (a label is being applied)
+  //  - face recognition is enabled
+  //  - the file has EXACTLY ONE face-chunk record — if there are multiple faces
+  //    we cannot determine which face the entity refers to, so we don't guess.
+  //    (Single-face constraint also prevents object/place/non-person entities
+  //     from contaminating the face gallery when linking them to group photos.)
   if (opts.entityIds !== undefined && opts.entityIds.length > 0) {
     try {
       const { getFaceRecognitionConfig } = await import('../config/loader.js');
       if (getFaceRecognitionConfig().enabled) {
-        const { propagateFaceLabel } = await import('./media/face-embedder.js');
-        await propagateFaceLabel(spaceId, normalised, opts.entityIds[0]!);
+        const faceChunkCount = await col<FileMetaDoc>(`${spaceId}_files`).countDocuments(
+          mFilter<FileMetaDoc>({ parentFileId: normalised, faceEmbedding: { $exists: true } }),
+        );
+        if (faceChunkCount === 1) {
+          const { propagateFaceLabel } = await import('./media/face-embedder.js');
+          await propagateFaceLabel(spaceId, normalised, opts.entityIds[0]!);
+        }
       }
     } catch { /* non-fatal — face label propagation must never block file meta write */ }
   }
