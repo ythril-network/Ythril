@@ -1,0 +1,102 @@
+# ── faster-whisper-server Deployment ─────────────────────────────────────────
+# Speech-to-text service for the media embedding pipeline.
+# Exposes an OpenAI-compatible POST /v1/audio/transcriptions endpoint with
+# response_format=verbose_json for per-segment timing data.
+#
+# Image: fedirz/faster-whisper-server (MIT licence, Apache 2.0 models).
+# Default model: base — adequate for most speech; upgrade to medium/large-v3
+# for noisy recordings or non-English audio.
+#
+# RESOURCE NOTE: Whisper is CPU-bound unless a GPU is available.
+# Increase memory limits when switching to medium or large models.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whisper
+  namespace: ythril
+  labels:
+    app: whisper
+    component: media-embedding
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: whisper
+  template:
+    metadata:
+      labels:
+        app: whisper
+        component: media-embedding
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: whisper
+          image: fedirz/faster-whisper-server:latest-cpu
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: WHISPER_MODEL
+              value: "base"
+            - name: HF_HOME
+              value: /tmp/huggingface
+            - name: XDG_CACHE_HOME
+              value: /tmp/.cache
+          volumeMounts:
+            - name: cache
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "2"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+      volumes:
+        - name: cache
+          emptyDir:
+            sizeLimit: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: whisper
+  namespace: ythril
+  labels:
+    app: whisper
+    component: media-embedding
+spec:
+  selector:
+    app: whisper
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+  type: ClusterIP

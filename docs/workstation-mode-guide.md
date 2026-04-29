@@ -14,13 +14,17 @@ For UI usage details see [userguide.md](userguide.md).
 1. Docker Engine or Docker Desktop installed and running.
 2. Docker Compose v2 available (`docker compose version`).
 3. Port `3200` free on your host (or choose an alternate host port like `3201`).
-4. Internet access for first image pull (`ghcr.io/ythril-network/ythril:latest`, `mongodb/mongodb-atlas-local:latest`).
+4. Internet access for first image pull (`ghcr.io/ythril-network/ythril:latest`, `mongodb/mongodb-atlas-local:latest`, `ollama/ollama:latest`, `fedirz/faster-whisper-server:latest-cpu`).
 
 Recommended host minimums:
 
 - CPU: 2 cores
-- RAM: 4 GB
-- Disk: at least 10 GB free
+- RAM: 6 GB (4 GB for Ythril + Mongo, ~2 GB for the bundled media-embedding stack)
+- Disk: at least 12 GB free (includes ~2 GB for the `moondream2` vision model and the Whisper `base` model)
+
+> **Slimmer install:** Ythril ships with bundled image and audio/video understanding
+> services so attachments become searchable automatically. If your machine is tight
+> on memory, turn it off in **Settings → Models** — no command line needed.
 
 Quick checks:
 

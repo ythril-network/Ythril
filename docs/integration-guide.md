@@ -19,7 +19,7 @@ If you are here for web UI usage, read [User Guide](userguide.md). If you are co
 4. [Error Format](#error-format)
 5. [Rate Limits](#rate-limits)
 6. [Brain API](#brain-api) — memories, entities, edges, chrono, traverse, search, stats, bulk write
-7. [Files API](#files-api) — upload, download, chunked upload, move, delete
+7. [Files API](#files-api) — upload, download, chunked upload, move, delete, media embedding
 8. [Spaces API](#spaces-api) — create, list, delete, proxy spaces, schema validation, meta
 9. [Tokens API](#tokens-api) — create, list, regenerate, revoke
 10. [Networks API](#networks-api) — create, join, members, voting, sync history, fork
@@ -602,6 +602,7 @@ Available as both:
 | `topK` | — | `10` | Max returned results (1-100) |
 | `types` | — | all types | Restrict result knowledge types |
 | `minScore` | — | none | Filter out low-similarity matches |
+| `filter` | — | none | Property equality/comparison filter (see below) |
 
 **Response** `200`:
 
@@ -615,6 +616,60 @@ Available as both:
 ```
 
 Searches **all knowledge types** (memories, entities, edges, chrono entries, and files) using the built-in embedding model and MongoDB Atlas `$vectorSearch`. Results are ranked by vector similarity across all types and include a `type` discriminator field. No extra configuration needed.
+
+#### Prefiltered Recall (`filter` parameter)
+
+Use `filter` to restrict results to records where specific properties match a condition. All filter conditions are AND-ed together. Records not satisfying every condition are excluded.
+
+```json
+{
+  "query": "authentication architecture decisions",
+  "types": ["entity"],
+  "filter": {
+    "properties.status": { "eq": "accepted" },
+    "properties.domain": { "eq": "security" }
+  }
+}
+```
+
+**Supported operators:**
+
+| Operator | Meaning | Example |
+|----------|---------|---------|
+| `eq` | Exact equality | `{ "eq": "accepted" }` |
+| `ne` | Not equal | `{ "ne": "draft" }` |
+| `in` | Value is in array (any-of) | `{ "in": ["security", "auth"] }` |
+| `exists` | Property is/isn't present | `{ "exists": true }` |
+| `gt` | Greater than (numeric) | `{ "gt": 10 }` |
+| `gte` | Greater than or equal | `{ "gte": 5 }` |
+| `lt` | Less than (numeric) | `{ "lt": 100 }` |
+| `lte` | Less than or equal | `{ "lte": 99 }` |
+
+Multiple operators on the same key are AND-ed (range queries):
+
+```json
+{ "properties.score": { "gte": 50, "lt": 100 } }
+```
+
+**Allowed filter key prefixes:** `properties.`, `tags`, `type`, `name`. Any other key returns `400`. This prevents filter-key injection attacks.
+
+**Examples:**
+
+```json
+// Only accepted ADRs
+{ "filter": { "properties.status": { "eq": "accepted" } } }
+
+// Records tagged with "security" OR "auth" (any-of)
+{ "filter": { "tags": { "in": ["security", "auth"] } } }
+
+// Entities of type "service" with a count property > 0
+{ "filter": { "type": { "eq": "service" }, "properties.count": { "gt": 0 } } }
+
+// Records where properties.domain exists
+{ "filter": { "properties.domain": { "exists": true } } }
+```
+
+> **Performance note:** When a `filter` is provided, Ythril switches to ENN (exact nearest-neighbour) search — MongoDB exhaustively scores all documents in the space, applies the filter, then returns the top-K results. This is semantically correct for any collection size: ANN + post-filter would silently discard matching documents that fell below the ANN candidate threshold. For very large spaces (>50k records per type), consider adding a standard MongoDB index on heavily-filtered fields (e.g. `properties.status`) to speed up the post-match stage.
 
 **What is vector-indexed:**
 
@@ -1544,6 +1599,112 @@ To disable the conversion pipeline entirely, set `CONVERSION_SIDECAR_URL=""` in 
 
 ---
 
+### Media Embedding Pipeline (Images, Audio, Video)
+
+Binary media files (images, audio, video) are automatically captioned or transcribed and embedded into the vector space for semantic recall. The pipeline is **enabled by default** — the bundled workstation `docker-compose.yml` and the Kubernetes manifests both ship with the required `ollama` (vision) and `whisper` (STT) services. To disable it (or point Ythril at external providers), use **Settings → Models** in the web UI or `PATCH /api/admin/media-config`.
+
+#### Overview
+
+| Media type | Processing |
+|---|---|
+| Images (PNG, JPEG, GIF, WebP, …) | Caption via Ollama-compatible vision model → embed caption |
+| Audio (MP3, WAV, OGG, FLAC, …) | Silence-detect → STT chunks via Whisper-compatible API → embed each chunk |
+| Video (MP4, MKV, MOV, WebM, …) | Extract audio → STT + keyframe captioning → embed combined segments |
+
+All media ultimately produces text that passes through the same `nomic-embed-text-v1.5` embedding model used for documents — no separate CLIP or multimodal vector space is required.
+
+#### Disabling or Switching Providers
+
+Use **Settings → Models** in the web UI, or `PATCH /api/admin/media-config`, or set `MEDIA_EMBEDDING_ENABLED=false` in Ythril's environment to turn the pipeline off.
+
+Required services (bundled by default; override only when you point at external providers):
+- **Ollama** (image captioning): `OLLAMA_URL=http://ollama:11434` — deploy any vision-capable model (default: `moondream2`).
+- **faster-whisper-server** (audio/video STT): `WHISPER_URL=http://whisper:8000` — set model via `WHISPER_MODEL` (default: `base`).
+
+Kubernetes manifests are provided in `kubernetes/manifests/ollama-deploy.yaml` and `kubernetes/manifests/whisper-deploy.yaml`. Dual `NetworkPolicy` + `CiliumNetworkPolicy` resources are in `media-netpol.yaml` and `media-cilium-netpol.yaml`.
+
+#### Upload Response
+
+When a media file is uploaded, the response includes an `embeddingStatus` field:
+
+| Value | Meaning |
+|---|---|
+| `"pending"` | Job enqueued; background worker will process soon |
+| `"disabled"` | `MEDIA_EMBEDDING_ENABLED` is `false`; file stored but not embedded |
+| `"skipped"` | File exceeds `MAX_FILE_SIZE_BYTES` limit |
+
+While processing, the filemeta record on the file (accessible via `GET /api/brain/spaces/:spaceId/files`) reflects the current status:
+
+| Status | Meaning |
+|---|---|
+| `"pending"` | Waiting in queue |
+| `"processing"` | Currently being processed by the worker |
+| `"complete"` | Embedding finished successfully |
+| `"failed"` | All retry attempts exhausted; see `mediaJobError` field for details |
+
+#### Recall Results
+
+Recall queries (`recall`, `recall_global`, `find_similar`) include embedded media chunks. Each media chunk result has additional fields:
+
+```json
+{
+  "type": "file",
+  "mediaType": "audio",
+  "embeddingStatus": "complete",
+  "chunkOffsetMs": 12000,
+  "chunkDurationMs": 8000,
+  "parentFile": {
+    "path": "recordings/meeting-2025-01.mp3",
+    "description": "Q1 strategy meeting"
+  }
+}
+```
+
+`chunkOffsetMs` and `chunkDurationMs` identify the segment within the original audio or video file. Image results have `chunkIndex: 0` with no time offset.
+
+#### Retry Failed Embedding
+
+To re-queue a failed job:
+
+```
+POST /api/files/:spaceId/retry_embedding?path=uploads/photo.jpg
+Authorization: Bearer ythril_…
+```
+
+**Response** `202` — job re-queued.
+
+**Response** `404` — file does not exist or has no embedding job.
+
+**Response** `409` — job is currently processing; retry is blocked until it completes.
+
+#### Configuration
+
+All settings can be managed at `GET/PATCH /api/admin/media-config` or via **Settings → Models** in the web UI. Fields set via environment variables are locked (the UI shows an `env` badge; PATCH returns `403` for those fields).
+
+| Field | Env var | Default | Description |
+|---|---|---|---|
+| `enabled` | `MEDIA_EMBEDDING_ENABLED` | `true` | Master on/off switch |
+| `visionProvider` | `VISION_PROVIDER` | `local` | `local` (Ollama) or `external` (OpenAI-compatible) |
+| `sttProvider` | `STT_PROVIDER` | `local` | `local` (Whisper) or `external` (OpenAI-compatible) |
+| `vision.baseUrl` | `OLLAMA_URL` | `http://ollama:11434` | Vision service endpoint (short name resolves in both Docker Compose and the K8s `ythril` namespace) |
+| `vision.model` | `VISION_MODEL` | `moondream2` | Vision model name |
+| `vision.apiKey` | `VISION_API_KEY` | — | API key for external vision provider (stored in `secrets.json`, never in `config.json`) |
+| `stt.baseUrl` | `WHISPER_URL` | `http://whisper:8000` | STT service endpoint |
+| `stt.model` | `WHISPER_MODEL` | `base` | Whisper model size/name |
+| `stt.apiKey` | `STT_API_KEY` | — | API key for external STT provider (stored in `secrets.json`) |
+| `workerConcurrency` | `WORKER_CONCURRENCY` | `2` | Max parallel jobs |
+| `workerPollIntervalMs` | `WORKER_POLL_INTERVAL_MS` | `1000` | Base poll interval (ms) |
+| `workerMaxPollIntervalMs` | `WORKER_MAX_POLL_INTERVAL_MS` | `30000` | Max poll interval when idle (ms) |
+| `fallbackToExternal` | `MEDIA_EMBEDDING_FALLBACK_TO_EXTERNAL` | `false` | Use external provider if local fails |
+| `maxFileSizeBytes` | `MAX_FILE_SIZE_BYTES` | `524288000` | Skip embedding for files above this size (500 MiB) |
+| `stalledJobTimeoutMs` | `STALLED_JOB_TIMEOUT_MS` | `300000` | Re-queue jobs stuck in processing for > N ms |
+
+#### ISO 27001 / Data Egress Note
+
+When `visionProvider: external` or `sttProvider: external`, file bytes (image frames, audio segments) are transmitted to the configured external endpoint. Ensure the endpoint URL complies with your data residency and privacy requirements. Using `visionProvider: local` and `sttProvider: local` with on-premises Ollama and Whisper keeps all data within your infrastructure.
+
+---
+
 ## Spaces API
 
 Base path: `/api/spaces`
@@ -1822,6 +1983,45 @@ Returns a single type definition from the space's `typeSchemas`. `:knowledgeType
 ```
 
 Returns `404` when the space or the requested type name does not exist. Returns `400` for an invalid `:knowledgeType`.
+
+---
+
+### Replace Full Schema (Bulk Overwrite)
+
+```
+PUT /api/spaces/:id/schema
+Content-Type: application/json
+Authorization: Bearer <admin-token>
+```
+
+Full-replace semantics for the entire `meta.typeSchemas` map. Use this when you want to overwrite all type definitions across all knowledge types in a single call (for example, restoring an exported schema). For incremental updates, prefer `PUT /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName` (single type) or `PATCH /api/spaces/:id` (deep-merge).
+
+Before the new schema is written, the previous `typeSchemas` is automatically backed up to `_schema-backup-<ISO-timestamp>.json` inside the space's file store, so a bad replacement can be recovered or re-imported. Backup write failures are logged but never block the replacement.
+
+`$ref` values inside any property schema are validated against the instance's schema library — unknown refs return `422` with the list of missing entries.
+
+**Request body**:
+
+```json
+{
+  "typeSchemas": {
+    "entity": {
+      "service": { "namingPattern": "^[a-z][a-z0-9-]{1,60}$" },
+      "person":  {}
+    },
+    "memory": { "decision": {} },
+    "edge":   { "depends_on": {} },
+    "chrono": { "release": {} }
+  }
+}
+```
+
+**Response** `200` — the updated space document.
+
+**Errors:**
+- `400` — body fails `TypeSchemas` Zod validation.
+- `404` — space not found.
+- `422` — one or more `$ref` values point at non-existent schema-library entries.
 
 ---
 

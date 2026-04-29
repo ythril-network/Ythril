@@ -8,6 +8,67 @@ import { needsReindex } from '../spaces/spaces.js';
 import { applyDeleteFields } from './delete-fields.js';
 import type { MemoryDoc, EntityDoc, TombstoneDoc } from '../config/types.js';
 
+// ── Prefiltered recall ────────────────────────────────────────────────────
+
+/**
+ * A single filter operator applied to one field.
+ * Multiple operators on the same field are AND-ed together (e.g. gt+lt for a range).
+ */
+export interface FilterOperator {
+  eq?: string | number | boolean;
+  ne?: string | number | boolean;
+  in?: Array<string | number | boolean>;
+  exists?: boolean;
+  gt?: number;
+  gte?: number;
+  lt?: number;
+  lte?: number;
+}
+
+/**
+ * Map of dot-notation field paths to their filter operator(s).
+ * Keys must start with `properties.`, `tags`, `type`, or `name`.
+ */
+export type FilterExpression = Record<string, FilterOperator>;
+
+const ALLOWED_FILTER_KEY_PREFIXES = ['properties.', 'tags', 'type', 'name'] as const;
+
+/**
+ * Validate that all filter keys use allowed prefixes (injection prevention).
+ * Returns an error message string, or null if valid.
+ */
+export function validateFilterExpression(filter: FilterExpression): string | null {
+  for (const key of Object.keys(filter)) {
+    const allowed = ALLOWED_FILTER_KEY_PREFIXES.some(
+      prefix => key === prefix || key.startsWith(prefix + '.') || (prefix.endsWith('.') && key.startsWith(prefix)),
+    );
+    if (!allowed) {
+      return `Filter key '${key}' is not allowed. Keys must start with: properties., tags, type, or name.`;
+    }
+  }
+  return null;
+}
+
+/** Convert a FilterExpression to a MongoDB match document. */
+export function buildMongoFilter(filter: FilterExpression): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, op] of Object.entries(filter)) {
+    const mongoOp: Record<string, unknown> = {};
+    if (op.eq !== undefined) mongoOp['$eq'] = op.eq;
+    if (op.ne !== undefined) mongoOp['$ne'] = op.ne;
+    if (op.in !== undefined) mongoOp['$in'] = op.in;
+    if (op.exists !== undefined) mongoOp['$exists'] = op.exists;
+    if (op.gt !== undefined) mongoOp['$gt'] = op.gt;
+    if (op.gte !== undefined) mongoOp['$gte'] = op.gte;
+    if (op.lt !== undefined) mongoOp['$lt'] = op.lt;
+    if (op.lte !== undefined) mongoOp['$lte'] = op.lte;
+    if (Object.keys(mongoOp).length > 0) {
+      result[key] = mongoOp;
+    }
+  }
+  return result;
+}
+
 function authorRef() {
   const cfg = getConfig();
   return { instanceId: cfg.instanceId, instanceLabel: cfg.instanceLabel };
@@ -146,6 +207,16 @@ export interface RecallFile extends RecallBase {
   parentFileId?: string;
   /** Set on chunk records: 0-based position within the document. */
   chunkIndex?: number;
+  /** Set on media chunk records: 'image' | 'audio' | 'video'. */
+  mediaType?: 'image' | 'audio' | 'video';
+  /** Set on media file records: current async embedding status. */
+  embeddingStatus?: 'pending' | 'processing' | 'complete' | 'failed' | 'skipped' | 'disabled';
+  /** Set on audio/video chunk records: start time of the chunk in milliseconds. */
+  chunkOffsetMs?: number;
+  /** Set on audio/video chunk records: duration of the chunk in milliseconds. */
+  chunkDurationMs?: number;
+  /** Inline parent file metadata — populated on chunk records when parentFileId is present. */
+  parentFile?: { path: string; description?: string; tags?: string[] };
 }
 
 /** Discriminated union of all knowledge-type recall results. Narrow by `result.type`. */
@@ -160,6 +231,7 @@ export async function recall(
   types?: RecallKnowledgeType[],
   minPerType?: Partial<Record<RecallKnowledgeType, number>>,
   minScore?: number,
+  filter?: FilterExpression,
 ): Promise<RecallResult[]> {
   if (!isVectorSearchAvailable()) {
     throw new Error(
@@ -187,7 +259,7 @@ export async function recall(
     const floorSearches = Object.entries(minPerType)
       .filter(([t, floor]) => activeTypes.includes(t as RecallKnowledgeType) && (floor ?? 0) > 0)
       .map(([t, floor]) =>
-        recallByType(spaceId, t as RecallKnowledgeType, embResult.vector, floor!, tags),
+        recallByType(spaceId, t as RecallKnowledgeType, embResult.vector, floor!, tags, filter),
       );
     const floorResults = (await Promise.all(floorSearches)).flat();
     for (const r of floorResults) {
@@ -200,7 +272,7 @@ export async function recall(
 
   // Phase 2: run the global unrestricted search for all active types
   const perTypeK = Math.ceil(topK * 1.5);
-  const searches = activeTypes.map(t => recallByType(spaceId, t, embResult.vector, perTypeK, tags));
+  const searches = activeTypes.map(t => recallByType(spaceId, t, embResult.vector, perTypeK, tags, filter));
   const allResults = (await Promise.all(searches)).flat();
   allResults.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 
@@ -218,6 +290,10 @@ export async function recall(
   if (minScore != null && minScore > 0) {
     return final.filter(r => (r.score ?? 0) >= minScore);
   }
+
+  // Enrich file chunk results with inline parent metadata
+  await enrichFileChunksWithParent(spaceId, final);
+
   return final;
 }
 
@@ -237,13 +313,50 @@ async function recallByType(
   queryVector: number[],
   topK: number,
   tags?: string[],
+  filter?: FilterExpression,
 ): Promise<RecallResult[]> {
   const collSuffix = KNOWLEDGE_COLLECTION[knowledgeType];
   const collName = `${spaceId}_${collSuffix}`;
   const indexName = `${spaceId}_${collSuffix}_embedding`;
 
-  const pipeline: object[] = [
-    {
+  // $vectorSearch native `filter` requires each field to be declared as type:"filter"
+  // in the index definition — infeasible for dynamic properties.* fields.
+  //
+  // When filtering, use ENN (exact: true): MongoDB exhaustively scores ALL documents,
+  // then we $match the full scored set, then re-limit to topK.
+  // ANN + post-$match is wrong: it discards matching docs that fall below ANN's topK
+  // before filtering even runs. MongoDB docs recommend ENN for selective pre-filter cases.
+  //
+  // When no filter/tags: standard ANN for performance (unchanged behaviour).
+  const hasFilter = filter != null && Object.keys(filter).length > 0;
+  const hasTags = tags != null && tags.length > 0;
+  const needsPostMatch = hasFilter || hasTags;
+
+  const pipeline: object[] = [];
+
+  if (needsPostMatch) {
+    // ENN: exhaustive search across all documents. limit is set high enough to
+    // pass all candidates through to the $match stages; topK is re-applied after.
+    const ennLimit = Math.min(10000, Math.max(topK * 100, 1000));
+    pipeline.push({
+      $vectorSearch: {
+        index: indexName,
+        path: 'embedding',
+        queryVector,
+        exact: true,
+        limit: ennLimit,
+      },
+    });
+    if (hasTags) {
+      pipeline.push({ $match: { tags: { $all: tags } } });
+    }
+    if (hasFilter) {
+      pipeline.push({ $match: buildMongoFilter(filter!) });
+    }
+    pipeline.push({ $limit: topK });
+  } else {
+    // ANN: approximate search, no post-filtering needed.
+    pipeline.push({
       $vectorSearch: {
         index: indexName,
         path: 'embedding',
@@ -251,12 +364,7 @@ async function recallByType(
         numCandidates: Math.min(topK * 15, 1000),
         limit: topK,
       },
-    },
-  ];
-
-  // Tags filter applies to all types that have tags
-  if (tags && tags.length > 0) {
-    pipeline.push({ $match: { tags: { $all: tags } } });
+    });
   }
 
   pipeline.push({ $addFields: { _knowledgeType: knowledgeType, score: { $meta: 'vectorSearchScore' } } });
@@ -273,16 +381,21 @@ async function recallByType(
   } else if (knowledgeType === 'chrono') {
     typeProject = { title: 1, description: 1, type: 1, status: 1, startsAt: 1, tags: 1, entityIds: 1, properties: 1 };
   } else if (knowledgeType === 'file') {
-    typeProject = { path: 1, description: 1, tags: 1, sizeBytes: 1, properties: 1, headingText: 1, content: 1, parentFileId: 1, chunkIndex: 1 };
+    typeProject = { path: 1, description: 1, tags: 1, sizeBytes: 1, properties: 1, headingText: 1, content: 1, parentFileId: 1, chunkIndex: 1, mediaType: 1, embeddingStatus: 1, chunkOffsetMs: 1, chunkDurationMs: 1 };
   }
   pipeline.push({ $project: { ...commonProject, ...typeProject } });
 
   try {
     const docs = await col(collName).aggregate<Record<string, unknown>>(pipeline).toArray();
     return docs.map(d => mapToRecallResult(d, knowledgeType));
-  } catch {
-    // If this collection has no vector index yet (e.g. old data), return empty
-    return [];
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // Only swallow "index not found" errors (e.g. new space with no data yet).
+    // All other errors are rethrown so they surface to the caller.
+    if (/index.*not.*found|no.*such.*index|search.*index/i.test(msg)) {
+      return [];
+    }
+    throw err;
   }
 }
 
@@ -310,7 +423,39 @@ function mapToRecallResult(doc: Record<string, unknown>, knowledgeType: RecallKn
     case 'chrono':
       return { ...base, type: 'chrono', title: doc['title'] as string, chronoType: doc['type'] as string, startsAt: doc['startsAt'] as string, status: doc['status'] as string | undefined, entityIds: doc['entityIds'] as string[] | undefined };
     case 'file':
-      return { ...base, type: 'file', path: doc['path'] as string, sizeBytes: doc['sizeBytes'] as number | undefined, headingText: doc['headingText'] as string | null | undefined, content: doc['content'] as string | undefined, parentFileId: doc['parentFileId'] as string | undefined, chunkIndex: doc['chunkIndex'] as number | undefined };
+      return { ...base, type: 'file', path: doc['path'] as string, sizeBytes: doc['sizeBytes'] as number | undefined, headingText: doc['headingText'] as string | null | undefined, content: doc['content'] as string | undefined, parentFileId: doc['parentFileId'] as string | undefined, chunkIndex: doc['chunkIndex'] as number | undefined, mediaType: doc['mediaType'] as 'image' | 'audio' | 'video' | undefined, embeddingStatus: doc['embeddingStatus'] as RecallFile['embeddingStatus'], chunkOffsetMs: doc['chunkOffsetMs'] as number | undefined, chunkDurationMs: doc['chunkDurationMs'] as number | undefined };
+  }
+}
+
+/**
+ * For file chunk results that have a parentFileId, batch-fetch the parent
+ * file document and attach `parentFile: { path, description?, tags? }` inline.
+ * Non-chunk file results and non-file results are left unchanged.
+ */
+async function enrichFileChunksWithParent(spaceId: string, results: RecallResult[]): Promise<void> {
+  const fileChunks = results.filter(
+    (r): r is RecallFile => r.type === 'file' && typeof r.parentFileId === 'string',
+  );
+  if (fileChunks.length === 0) return;
+
+  const parentIds = [...new Set(fileChunks.map(r => r.parentFileId as string))];
+
+  // Batch-fetch parent file docs — projection only (no embedding field)
+  const parents = (await col(`${spaceId}_files`)
+    .find(mFilter({ _id: { $in: parentIds } }), { projection: { path: 1, description: 1, tags: 1 } })
+    .toArray()) as unknown as Array<{ _id: string; path?: string; description?: string; tags?: string[] }>;
+
+  const parentMap = new Map(parents.map(p => [p._id, p]));
+
+  for (const chunk of fileChunks) {
+    const parent = parentMap.get(chunk.parentFileId as string);
+    if (parent) {
+      chunk.parentFile = {
+        path: parent.path ?? (parent._id),
+        ...(parent.description ? { description: parent.description } : {}),
+        ...(parent.tags?.length ? { tags: parent.tags } : {}),
+      };
+    }
   }
 }
 
@@ -323,8 +468,9 @@ export async function recallGlobal(
   types?: RecallKnowledgeType[],
   minPerType?: Partial<Record<RecallKnowledgeType, number>>,
   minScore?: number,
+  filter?: FilterExpression,
 ): Promise<RecallResult[]> {
-  const results = await Promise.all(spaceIds.map(id => recall(id, query, topK, tags, types, minPerType, minScore)));
+  const results = await Promise.all(spaceIds.map(id => recall(id, query, topK, tags, types, minPerType, minScore, filter)));
   const flat = results.flat();
   // Sort by score descending, deduplicate by _id
   const seen = new Set<string>();

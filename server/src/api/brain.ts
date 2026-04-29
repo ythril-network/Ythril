@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit, bulkWipeRateLimit } from '../rate-limit/middleware.js';
 import { NotFoundError } from '../util/errors.js';
-import { listMemories, deleteMemory, countMemories, bulkDeleteMemories, remember, updateMemory, queryBrain, findSimilar, recall, type RecallKnowledgeType } from '../brain/memory.js';
+import { listMemories, deleteMemory, countMemories, bulkDeleteMemories, remember, updateMemory, queryBrain, findSimilar, recall, validateFilterExpression, type RecallKnowledgeType, type FilterExpression } from '../brain/memory.js';
 import { listEntities, deleteEntity, upsertEntity, getEntityById, updateEntityById, bulkDeleteEntities, findEntitiesByName, findEntityBacklinks } from '../brain/entities.js';
 import { listEdges, deleteEdge, upsertEdge, getEdgeById, updateEdgeById, bulkDeleteEdges, traverseGraph } from '../brain/edges.js';
 import { computeMergePlan, applyResolutions, executeMerge, validateResolution, type PropertyResolution } from '../brain/merge.js';
@@ -1509,7 +1509,7 @@ brainRouter.post('/spaces/:spaceId/recall', globalRateLimit, requireSpaceAuth, a
     res.status(404).json({ error: `Space '${spaceId}' not found` });
     return;
   }
-  const { query, topK, types, minScore } = req.body ?? {};
+  const { query, topK, types, minScore, filter } = req.body ?? {};
   if (!query || typeof query !== 'string' || !query.trim()) {
     res.status(400).json({ error: 'query must be a non-empty string' });
     return;
@@ -1518,10 +1518,24 @@ brainRouter.post('/spaces/:spaceId/recall', globalRateLimit, requireSpaceAuth, a
   const safeTypes = Array.isArray(types) ? types.filter((t: unknown): t is RecallKnowledgeType => typeof t === 'string') : undefined;
   const safeMinScore = typeof minScore === 'number' ? minScore : undefined;
 
+  let safeFilter: FilterExpression | undefined;
+  if (filter != null) {
+    if (typeof filter !== 'object' || Array.isArray(filter)) {
+      res.status(400).json({ error: 'filter must be an object' });
+      return;
+    }
+    const filterErr = validateFilterExpression(filter as FilterExpression);
+    if (filterErr) {
+      res.status(400).json({ error: filterErr });
+      return;
+    }
+    safeFilter = filter as FilterExpression;
+  }
+
   try {
     const memberIds = resolveMemberSpaces(spaceId);
     const all = (await Promise.all(
-      memberIds.map(mid => recall(mid, query.trim(), safeTopK, undefined, safeTypes, undefined, safeMinScore)),
+      memberIds.map(mid => recall(mid, query.trim(), safeTopK, undefined, safeTypes, undefined, safeMinScore, safeFilter)),
     )).flat();
     all.sort((x, y) => (y.score ?? 0) - (x.score ?? 0));
     const results = all.slice(0, safeTopK);

@@ -47,9 +47,11 @@ import { upsertFileMeta, deleteFileMeta, deleteFileMetaByPrefix, renameFileMeta,
 import { v4 as uuidv4 } from 'uuid';
 import { resolveMemberSpaces, resolveWriteTarget } from '../spaces/proxy.js';
 import { emitWebhookEvent } from '../webhooks/dispatcher.js';
-import { resolveInputFormat, runConversionPipeline, storeConversionResults, deleteConversionArtifacts } from '../files/converters/pipeline.js';
+import { resolveInputFormat, runConversionPipeline, storeConversionResults, deleteConversionArtifacts, isMediaFormat } from '../files/converters/pipeline.js';
 import { ConversionUnavailableError } from '../files/converters/types.js';
 import type { InputFormat } from '../files/converters/pipeline.js';
+import { enqueueMediaJob } from '../files/media/job-queue.js';
+import { getMediaEmbeddingConfig } from '../config/loader.js';
 
 export const filesRouter = Router();
 
@@ -359,11 +361,42 @@ filesRouter.post(
         log.warn(`upsertFileMeta error for space ${targetSpace}, path ${filePath}: ${err}`);
       });
 
-      // Run conversion pipeline for convertible formats
+      // Run conversion pipeline for convertible formats, or enqueue media jobs
       const inputFormat = typeof req.body?.inputFormat === 'string' ? req.body.inputFormat as InputFormat : 'auto';
       const fileBuffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body.content as string, (req.body.encoding ?? 'utf8') as BufferEncoding);
       const resolvedFormat = resolveInputFormat(filePath, req.headers['content-type'], inputFormat);
-      if (resolvedFormat !== 'text') {
+      const normId = filePath.replace(/\\/g, '/').replace(/^\/+/, '');
+
+      let mediaEmbeddingStatus: 'disabled' | 'skipped' | 'pending' | undefined;
+
+      if (isMediaFormat(resolvedFormat)) {
+        // Media file: enqueue async embedding job (or skip if disabled / oversized)
+        const mediaCfg = getMediaEmbeddingConfig();
+        if (!mediaCfg.enabled) {
+          mediaEmbeddingStatus = 'disabled';
+          await col<FileMetaDoc>(`${targetSpace}_files`).updateOne(
+            mFilter<FileMetaDoc>({ _id: normId }),
+            { $set: { mediaType: resolvedFormat, embeddingStatus: 'disabled' } },
+          );
+        } else if (incomingBytes > (mediaCfg.maxFileSizeBytes ?? 524_288_000)) {
+          mediaEmbeddingStatus = 'skipped';
+          await col<FileMetaDoc>(`${targetSpace}_files`).updateOne(
+            mFilter<FileMetaDoc>({ _id: normId }),
+            { $set: { mediaType: resolvedFormat, embeddingStatus: 'skipped' } },
+          );
+          log.info(`Media file ${targetSpace}/${filePath} skipped: ${incomingBytes} bytes exceeds maxFileSizeBytes (${mediaCfg.maxFileSizeBytes})`);
+        } else {
+          mediaEmbeddingStatus = 'pending';
+          const mimeType = (req.headers['content-type'] ?? 'application/octet-stream').split(';')[0]!.trim();
+          await col<FileMetaDoc>(`${targetSpace}_files`).updateOne(
+            mFilter<FileMetaDoc>({ _id: normId }),
+            { $set: { mediaType: resolvedFormat, embeddingStatus: 'pending' } },
+          );
+          await enqueueMediaJob(targetSpace, filePath, mimeType, resolvedFormat).catch(err => {
+            log.warn(`enqueueMediaJob error for ${targetSpace}/${filePath}: ${err instanceof Error ? err.message : String(err)}`);
+          });
+        }
+      } else if (resolvedFormat !== 'text') {
         try {
           const { chunks, convertedMarkdown } = await runConversionPipeline(fileBuffer, filePath, resolvedFormat);
           if (chunks.length > 0) {
@@ -372,7 +405,7 @@ filesRouter.post(
             const metaUpdate: Record<string, unknown> = { chunkCount };
             if (convertedFileId) metaUpdate['convertedFileId'] = convertedFileId;
             await col<FileMetaDoc>(`${targetSpace}_files`).updateOne(
-              mFilter<FileMetaDoc>({ _id: filePath.replace(/\\/g, '/').replace(/^\/+/, '') }),
+              mFilter<FileMetaDoc>({ _id: normId }),
               { $set: metaUpdate },
             );
           }
@@ -381,7 +414,7 @@ filesRouter.post(
             log.warn(`Conversion pipeline failed for ${targetSpace}/${filePath}: ${err.message}`);
             // Store conversionError on the filemeta record — do not fail the write
             await col<FileMetaDoc>(`${targetSpace}_files`).updateOne(
-              mFilter<FileMetaDoc>({ _id: filePath.replace(/\\/g, '/').replace(/^\/+/, '') }),
+              mFilter<FileMetaDoc>({ _id: normId }),
               { $set: { conversionError: err.message } },
             );
           } else {
@@ -390,8 +423,9 @@ filesRouter.post(
         }
       }
 
-      const response: { path: string; sha256: string; storageWarning?: boolean } = { path: filePath, sha256 };
+      const response: { path: string; sha256: string; storageWarning?: boolean; embeddingStatus?: string } = { path: filePath, sha256 };
       if (quotaResult.softBreached) response.storageWarning = true;
+      if (mediaEmbeddingStatus !== undefined) response.embeddingStatus = mediaEmbeddingStatus;
       emitWebhookEvent({ event: 'file.created', spaceId: targetSpace, entry: { path: filePath, sha256 }, ...webhookToken(req) });
       res.status(201).json(response);
     } catch (err) {
@@ -401,6 +435,63 @@ filesRouter.post(
       }
       log.warn(`writeFile error for space ${targetSpace}, path ${filePath}: ${err}`);
       res.status(500).json({ error: 'Failed to write file' });
+    }
+  },
+);
+
+// ── POST /api/files/:spaceId/retry_embedding ──────────────────────────────────
+// Manually re-trigger media embedding for a failed / skipped file.
+filesRouter.post(
+  '/:spaceId/retry_embedding',
+  globalRateLimit,
+  requireSpaceAuth,
+  denyReadOnly,
+  async (req, res) => {
+    const spaceId = req.params['spaceId'] as string;
+    const cfg = getConfig();
+    if (!cfg.spaces.some(s => s.id === spaceId)) {
+      res.status(404).json({ error: `Space '${spaceId}' not found` });
+      return;
+    }
+
+    const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
+    if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+    const targetSpace = wt.target;
+
+    const filePath = req.query['path'];
+    if (typeof filePath !== 'string' || !filePath.trim()) {
+      res.status(400).json({ error: 'Required query param: path' });
+      return;
+    }
+
+    let normId: string;
+    try {
+      normId = filePath.replace(/\\/g, '/').replace(/^\/+/, '');
+      // Validate the path doesn't escape the space root
+      resolveSafePath(targetSpace, filePath);
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+      return;
+    }
+
+    const { retryJob } = await import('../files/media/job-queue.js');
+    const result = await retryJob(targetSpace, normId).catch(err => {
+      log.warn(`retryJob error for ${targetSpace}/${normId}: ${err}`);
+      return 'error' as const;
+    });
+
+    switch (result) {
+      case 'not_found':
+        res.status(404).json({ error: 'No media job found for this file' });
+        break;
+      case 'processing':
+        res.status(409).json({ error: 'Job is currently processing' });
+        break;
+      case 'ok':
+        res.status(202).json({ queued: true });
+        break;
+      default:
+        res.status(500).json({ error: 'Internal error' });
     }
   },
 );

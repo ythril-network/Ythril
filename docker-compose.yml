@@ -59,10 +59,66 @@
     networks:
       - ythril-internal
 
+  # ── Media embedding stack (image / audio / video → text → embedding) ──────
+  # On by default to mirror the K8s setup (kubernetes/manifests/{ollama,whisper}-deploy.yaml).
+  # Disable for resource-constrained workstations by either:
+  #   1. Setting `mediaEmbedding.enabled: false` in config/config.json
+  #      (containers still run but no jobs are enqueued), or
+  #   2. Stopping them: `docker compose stop ollama whisper` and either
+  #      `docker compose up --scale ollama=0 --scale whisper=0` thereafter,
+  #      or assigning a non-default profile in docker-compose.override.yml.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ythril-ollama
+    restart: unless-stopped
+    # Auto-pull the default vision model on first start so the first upload
+    # does not fail with "model not found". Subsequent restarts no-op.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        ollama serve &
+        SERVE_PID=$$!
+        until ollama list >/dev/null 2>&1; do sleep 1; done
+        ollama pull moondream2 || echo "WARN: moondream2 pull failed; will retry on first request"
+        wait $$SERVE_PID
+    environment:
+      OLLAMA_KEEP_ALIVE: "24h"
+    volumes:
+      - ythril-ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - ythril-internal
+
+  whisper:
+    image: fedirz/faster-whisper-server:latest-cpu
+    container_name: ythril-whisper
+    restart: unless-stopped
+    environment:
+      WHISPER_MODEL: "base"  # ~140 MB; auto-downloads on first request
+    volumes:
+      - ythril-whisper-cache:/root/.cache
+    healthcheck:
+      # faster-whisper-server is python-based; use the bundled python rather
+      # than relying on curl/wget being present in the slim base image.
+      test: ["CMD", "python", "-c", "import urllib.request,sys; urllib.request.urlopen('http://localhost:8000/health',timeout=3).read() or sys.exit(1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - ythril-internal
+
 volumes:
   ythril-data:
   ythril-mongo-data:
   ythril-mongo-configdb:
+  ythril-ollama-models:
+  ythril-whisper-cache:
 
 networks:
   ythril-internal:

@@ -269,3 +269,88 @@ export const syncDurationSeconds = new Histogram({
   buckets: [0.1, 0.5, 1, 2.5, 5, 10, 30, 60],
   registers: [register],
 });
+
+// ── Media embedding ──────────────────────────────────────────────────────────
+// Pipeline that converts image / audio / video into text → embedding vector.
+// Counters are pre-initialised with `.inc(0)` so HELP/TYPE lines appear from
+// startup even before the first job (matches the sync-metric convention).
+
+export const mediaJobsCompletedTotal = new Counter({
+  name: 'ythril_media_jobs_completed_total',
+  help: 'Media embedding jobs that completed successfully, by space and media type',
+  labelNames: ['space', 'media_type'] as const,
+  registers: [register],
+});
+mediaJobsCompletedTotal.labels({ space: '', media_type: 'image' }).inc(0);
+
+export const mediaJobsFailedTotal = new Counter({
+  name: 'ythril_media_jobs_failed_total',
+  help: 'Media embedding jobs that exhausted retries, by space and media type',
+  labelNames: ['space', 'media_type'] as const,
+  registers: [register],
+});
+mediaJobsFailedTotal.labels({ space: '', media_type: 'image' }).inc(0);
+
+export const mediaJobsRetriedTotal = new Counter({
+  name: 'ythril_media_jobs_retried_total',
+  help: 'Media embedding jobs that failed an attempt and were re-queued, by space and media type',
+  labelNames: ['space', 'media_type'] as const,
+  registers: [register],
+});
+mediaJobsRetriedTotal.labels({ space: '', media_type: 'image' }).inc(0);
+
+export const mediaJobDurationSeconds = new Histogram({
+  name: 'ythril_media_job_duration_seconds',
+  help: 'End-to-end processing time per media embedding job',
+  labelNames: ['media_type'] as const,
+  buckets: [0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600, 1800],
+  registers: [register],
+});
+
+export const mediaJobsPending = new Gauge({
+  name: 'ythril_media_jobs_pending',
+  help: 'Pending media embedding jobs by space (collected at scrape time)',
+  labelNames: ['space'] as const,
+  registers: [register],
+  async collect() {
+    try {
+      const cfg = getConfig();
+      for (const space of cfg.spaces.filter(s => !s.proxyFor)) {
+        const count = await col(`${space.id}_media_jobs`).countDocuments({ status: 'pending' });
+        this.set({ space: space.id }, count);
+      }
+    } catch { /* MongoDB may not be ready */ }
+  },
+});
+
+export const mediaJobsProcessing = new Gauge({
+  name: 'ythril_media_jobs_processing',
+  help: 'In-flight media embedding jobs by space (collected at scrape time)',
+  labelNames: ['space'] as const,
+  registers: [register],
+  async collect() {
+    try {
+      const cfg = getConfig();
+      for (const space of cfg.spaces.filter(s => !s.proxyFor)) {
+        const count = await col(`${space.id}_media_jobs`).countDocuments({ status: 'processing' });
+        this.set({ space: space.id }, count);
+      }
+    } catch { /* ignore */ }
+  },
+});
+
+export const mediaJobsFailed = new Gauge({
+  name: 'ythril_media_jobs_failed',
+  help: 'Media embedding jobs in terminal failed state by space (collected at scrape time)',
+  labelNames: ['space'] as const,
+  registers: [register],
+  async collect() {
+    try {
+      const cfg = getConfig();
+      for (const space of cfg.spaces.filter(s => !s.proxyFor)) {
+        const count = await col(`${space.id}_media_jobs`).countDocuments({ status: 'failed' });
+        this.set({ space: space.id }, count);
+      }
+    } catch { /* ignore */ }
+  },
+});

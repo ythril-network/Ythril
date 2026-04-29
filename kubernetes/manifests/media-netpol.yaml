@@ -1,0 +1,160 @@
+# ── Media Embedding NetworkPolicies ──────────────────────────────────────────
+# The ythril namespace has a default-deny-all policy.
+# BOTH a standard K8s NetworkPolicy AND a CiliumNetworkPolicy are required —
+# Cilium evaluates both; a CiliumNetworkPolicy alone does NOT unblock traffic.
+#
+# Connections allowed:
+#   ythril → ollama:11434    (vision captioning)
+#   ythril → whisper:8000    (speech-to-text)
+#   ollama → internet:443    (model downloads from registry.ollama.ai)
+#   whisper → internet:443   (model downloads from huggingface.co)
+#
+# ── Standard K8s NetworkPolicies ──────────────────────────────────────────────
+---
+# Allow ythril pods to reach ollama (port 11434)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ythril-allow-ollama-egress
+  namespace: ythril
+spec:
+  podSelector:
+    matchLabels:
+      app: ythril
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: TCP
+          port: 11434
+      to:
+        - podSelector:
+            matchLabels:
+              app: ollama
+---
+# Allow ythril pods to reach whisper (port 8000)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ythril-allow-whisper-egress
+  namespace: ythril
+spec:
+  podSelector:
+    matchLabels:
+      app: ythril
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: TCP
+          port: 8000
+      to:
+        - podSelector:
+            matchLabels:
+              app: whisper
+---
+# Allow ollama pods to receive traffic from ythril
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ollama-allow-ythril-ingress
+  namespace: ythril
+spec:
+  podSelector:
+    matchLabels:
+      app: ollama
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 11434
+      from:
+        - podSelector:
+            matchLabels:
+              app: ythril
+---
+# Allow whisper pods to receive traffic from ythril
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: whisper-allow-ythril-ingress
+  namespace: ythril
+spec:
+  podSelector:
+    matchLabels:
+      app: whisper
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8000
+      from:
+        - podSelector:
+            matchLabels:
+              app: ythril
+---
+# Allow ollama to reach the internet (model downloads from registry.ollama.ai)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ollama-allow-internet-egress
+  namespace: ythril
+spec:
+  podSelector:
+    matchLabels:
+      app: ollama
+  policyTypes:
+    - Egress
+  egress:
+    # DNS — required so the pod can resolve registry.ollama.ai
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 80
+---
+# Allow whisper to reach the internet (model downloads from huggingface.co)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: whisper-allow-internet-egress
+  namespace: ythril
+spec:
+  podSelector:
+    matchLabels:
+      app: whisper
+  policyTypes:
+    - Egress
+  egress:
+    # DNS — required so the pod can resolve huggingface.co
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 80

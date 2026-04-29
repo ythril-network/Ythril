@@ -24,9 +24,13 @@ Track events, deadlines, plans, predictions, and milestones with the **chrono** 
 
 Full file manager with **chunked upload** (5 MB pieces, progress tracking, automatic retry), directory tree, inline preview (text, code, images, PDF), and file-level metadata (description, tags, properties). All file operations are available as MCP tools and via the REST API.
 
+### Image, Audio & Video Understanding
+
+Upload binary media and Ythril makes it searchable like everything else. Images are captioned with a vision model (default `moondream2` via Ollama), audio is silence-segmented and transcribed with Whisper, and video is decomposed into keyframes plus audio chunks. Every result lands in the **same** `nomic-embed-text-v1.5` vector space as memories, entities, and documents — so a single semantic query crosses text, speech, and pictures. Bundled out of the box on both Docker Compose and Kubernetes; toggle in **Settings → Models** if you'd rather plug in OpenAI, Azure, or your own endpoints.
+
 ### Schema Validation
 
-Define per-type schemas (`typeSchemas`) organised by knowledge type (`entity`, `edge`, `memory`, `chrono`) and type name. Each type entry can specify a naming pattern (regex), tag suggestions, and per-property schemas with `type` (string/number/boolean/date), `enum`, `minimum`/`maximum`, `pattern` (regex), `required`, `default`, and `mergeFn` constraints. Enforce them in **strict** mode (reject violations), **warn** mode (accept with warnings), or leave validation **off**. Schema files are auto-synced to the `schemas/` folder in the space file store on every save. Export and import the full schema as JSON from the Settings → Spaces → Schema tab or via the APIode (accept with warnings), or leave validation **off**. Schema files are auto-synced to the `schemas/` folder in the space file store on every save. Export and import the full schema as JSON from the Settings → Spaces → Schema tab or via the API.
+Define per-type schemas (`typeSchemas`) organised by knowledge type (`entity`, `edge`, `memory`, `chrono`) and type name. Each type entry can specify a naming pattern (regex), tag suggestions, and per-property schemas with `type` (string/number/boolean/date), `enum`, `minimum`/`maximum`, `pattern` (regex), `required`, `default`, and `mergeFn` constraints. Enforce them in **strict** mode (reject violations), **warn** mode (accept with warnings), or leave validation **off**. Schema files are auto-synced to the `schemas/` folder in the space file store on every save. Export and import the full schema as JSON from the Settings → Spaces → Schema tab or via the API.
 
 ### Bulk Operations
 

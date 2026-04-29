@@ -46,7 +46,9 @@ LABEL org.opencontainers.image.description="Ythril — self-hosted brain & knowl
 LABEL org.opencontainers.image.licenses="PolyForm-Small-Business-1.0.0"
 
 # Build tools for bcrypt native addon (compiled during npm ci --omit=dev)
-RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ && rm -rf /var/lib/apt/lists/*
+# ffmpeg: LGPL-2.1+ core only (no GPL codecs); used for audio/video media embedding pipeline.
+# Verify at build time: ffmpeg -buildconf | grep enable-gpl must be absent.
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ ffmpeg && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

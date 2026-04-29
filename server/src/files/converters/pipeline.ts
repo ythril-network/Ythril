@@ -26,7 +26,14 @@ import { log } from '../../util/log.js';
 export type InputFormat = 'pdf' | 'docx' | 'epub' | 'html' | 'md' | 'txt' | 'text' | 'auto';
 
 /** The resolved, concrete format used for dispatching. */
-export type ResolvedFormat = 'pdf' | 'docx' | 'epub' | 'html' | 'md' | 'txt' | 'text';
+export type ResolvedFormat = 'pdf' | 'docx' | 'epub' | 'html' | 'md' | 'txt' | 'text' | 'image' | 'audio' | 'video';
+
+/** The set of resolved formats that represent binary media files (handled by the async media pipeline). */
+export const MEDIA_FORMATS = new Set<ResolvedFormat>(['image', 'audio', 'video']);
+
+export function isMediaFormat(fmt: ResolvedFormat): fmt is 'image' | 'audio' | 'video' {
+  return MEDIA_FORMATS.has(fmt);
+}
 
 function authorRef(): AuthorRef {
   const cfg = getConfig();
@@ -42,6 +49,30 @@ const EXT_MAP: Record<string, ResolvedFormat> = {
   '.md': 'md',
   '.markdown': 'md',
   '.txt': 'txt',
+  // Images
+  '.jpg': 'image',
+  '.jpeg': 'image',
+  '.png': 'image',
+  '.webp': 'image',
+  '.gif': 'image',
+  '.svg': 'image',
+  '.bmp': 'image',
+  '.tiff': 'image',
+  '.tif': 'image',
+  // Audio
+  '.mp3': 'audio',
+  '.wav': 'audio',
+  '.ogg': 'audio',
+  '.m4a': 'audio',
+  '.aac': 'audio',
+  '.flac': 'audio',
+  // Video
+  '.mp4': 'video',
+  '.webm': 'video',
+  '.mkv': 'video',
+  '.mov': 'video',
+  '.avi': 'video',
+  '.ogv': 'video',
 };
 
 const MIME_MAP: Record<string, ResolvedFormat> = {
@@ -52,6 +83,13 @@ const MIME_MAP: Record<string, ResolvedFormat> = {
   'text/markdown': 'md',
   'text/plain': 'txt',
 };
+
+// MIME type prefix → media format (checked separately since Map iteration order is not guaranteed for prefixes)
+const MIME_PREFIX_MAP: Array<[string, 'image' | 'audio' | 'video']> = [
+  ['image/', 'image'],
+  ['audio/', 'audio'],
+  ['video/', 'video'],
+];
 
 /** Resolve the input format to a concrete format. */
 export function resolveInputFormat(
@@ -75,6 +113,10 @@ export function resolveInputFormat(
   if (mimeType) {
     const base = mimeType.split(';')[0]?.trim() ?? '';
     if (MIME_MAP[base]) return MIME_MAP[base]!;
+    // Check MIME prefix for media types (image/*, audio/*, video/*)
+    for (const [prefix, fmt] of MIME_PREFIX_MAP) {
+      if (base.startsWith(prefix)) return fmt;
+    }
   }
 
   const ext = path.extname(filePath).toLowerCase();
@@ -113,6 +155,12 @@ export async function runConversionPipeline(
   switch (format) {
     case 'text':
       // Bypass: caller handles single-record storage
+      return { chunks: [], convertedMarkdown: null };
+
+    case 'image':
+    case 'audio':
+    case 'video':
+      // Media formats are handled by the async media embedding pipeline, not here
       return { chunks: [], convertedMarkdown: null };
 
     case 'md': {

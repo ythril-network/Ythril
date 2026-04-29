@@ -94,6 +94,11 @@ export const routes: Routes = [
             loadComponent: () =>
               import('./pages/settings/about.component').then(m => m.AboutComponent),
           },
+          {
+            path: 'models',
+            loadComponent: () =>
+              import('./pages/settings/models.component').then(m => m.ModelsComponent),
+          },
         ],
       },
     ],

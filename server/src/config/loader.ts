@@ -295,3 +295,121 @@ export function getMongoUri(): string {
 export function getDataRoot(): string {
   return process.env['DATA_ROOT'] ?? '/data';
 }
+
+// ── Media Embedding Config ─────────────────────────────────────────────────
+
+import type { MediaEmbeddingConfig, MediaProviderConfig } from './types.js';
+
+const MEDIA_EMBEDDING_DEFAULTS: Required<Omit<MediaEmbeddingConfig, 'vision' | 'stt' | 'ollamaUrl' | 'visionModel' | 'whisperUrl' | 'whisperModel' | 'lockedByInfra'>> = {
+  // Enabled by default: both K8s manifests (kubernetes/manifests/ollama-deploy.yaml,
+  // whisper-deploy.yaml) and the workstation docker-compose.yml ship with bundled
+  // ollama + whisper services. The default `vision.baseUrl` / `stt.baseUrl` resolve
+  // in both environments via the short service name (Docker bridge DNS in compose;
+  // ClusterFirst DNS in the `ythril` namespace in K8s).
+  enabled: true,
+  visionProvider: 'local',
+  sttProvider: 'local',
+  workerConcurrency: 2,
+  workerPollIntervalMs: 1000,
+  workerMaxPollIntervalMs: 30_000,
+  fallbackToExternal: false,
+  maxFileSizeBytes: 524_288_000, // 500 MiB
+  stalledJobTimeoutMs: 300_000,  // 5 min
+};
+
+/**
+ * Resolve the full media embedding configuration by merging:
+ *   1. Environment variables (highest precedence)
+ *   2. config.json `mediaEmbedding` block
+ *   3. Built-in defaults (lowest precedence)
+ *
+ * Populates `lockedByInfra` with any key whose effective value came from an
+ * env var — the Settings UI uses this list to render those fields as read-only.
+ */
+export function getMediaEmbeddingConfig(): MediaEmbeddingConfig {
+  const cfg = getConfig();
+  const base = cfg.mediaEmbedding ?? {};
+  const locked: string[] = [];
+
+  function pick<T>(envKey: string, fieldName: string, configVal: T | undefined, defaultVal: T): T {
+    const envRaw = process.env[envKey];
+    if (envRaw !== undefined) {
+      // Use the explicit field name so the UI's `isLocked('fallbackToExternal')`
+      // check matches — derived camelCase (e.g. `mediaEmbeddingFallbackToExternal`)
+      // would silently NOT lock the UI control.
+      locked.push(fieldName);
+      // numeric coercion
+      if (typeof defaultVal === 'number') return Number(envRaw) as T;
+      // boolean coercion
+      if (typeof defaultVal === 'boolean') return (envRaw === 'true' || envRaw === '1') as unknown as T;
+      return envRaw as unknown as T;
+    }
+    return configVal !== undefined ? configVal : defaultVal;
+  }
+
+  const enabled = pick('MEDIA_EMBEDDING_ENABLED', 'enabled', base.enabled, MEDIA_EMBEDDING_DEFAULTS.enabled);
+  const visionProvider = pick('VISION_PROVIDER', 'visionProvider', base.visionProvider, MEDIA_EMBEDDING_DEFAULTS.visionProvider) as 'local' | 'external';
+  const sttProvider = pick('STT_PROVIDER', 'sttProvider', base.sttProvider, MEDIA_EMBEDDING_DEFAULTS.sttProvider) as 'local' | 'external';
+
+  // Vision provider block — each sub-field has its own env var
+  const visionBaseUrlEnv = process.env['OLLAMA_URL'];
+  const visionModelEnv = process.env['VISION_MODEL'];
+  const visionApiKeyEnv = process.env['VISION_API_KEY'];
+  // API keys: env var > secrets.json > legacy config.json (deprecated)
+  let mediaSecrets: { visionApiKey?: string; sttApiKey?: string } = {};
+  try { mediaSecrets = getSecrets().mediaEmbedding ?? {}; } catch { /* secrets file may not exist pre-setup */ }
+  const vision: MediaProviderConfig = {
+    baseUrl: visionBaseUrlEnv
+      ?? base.vision?.baseUrl
+      ?? base.ollamaUrl
+      // Short service name resolves in both:
+      //  - Docker Compose: bridge-network DNS to the `ollama` service
+      //  - K8s: ClusterFirst DNS within the `ythril` namespace
+      ?? 'http://ollama:11434',
+    model: visionModelEnv
+      ?? base.vision?.model
+      ?? base.visionModel
+      ?? 'moondream2',
+    apiKey: visionApiKeyEnv ?? mediaSecrets.visionApiKey ?? base.vision?.apiKey,
+    label: base.vision?.label ?? 'Vision provider (Ollama-compatible)',
+  };
+  if (visionBaseUrlEnv) locked.push('vision.baseUrl');
+  if (visionModelEnv) locked.push('vision.model');
+  if (visionApiKeyEnv) locked.push('vision.apiKey');
+
+  // STT provider block
+  const sttBaseUrlEnv = process.env['WHISPER_URL'];
+  const sttModelEnv = process.env['WHISPER_MODEL'];
+  const sttApiKeyEnv = process.env['STT_API_KEY'];
+  const stt: MediaProviderConfig = {
+    baseUrl: sttBaseUrlEnv
+      ?? base.stt?.baseUrl
+      ?? base.whisperUrl
+      // Short service name — resolves in both Docker Compose and the K8s `ythril` namespace.
+      ?? 'http://whisper:8000',
+    model: sttModelEnv
+      ?? base.stt?.model
+      ?? base.whisperModel
+      ?? 'base',
+    apiKey: sttApiKeyEnv ?? mediaSecrets.sttApiKey ?? base.stt?.apiKey,
+    label: base.stt?.label ?? 'STT provider (OpenAI-compatible)',
+  };
+  if (sttBaseUrlEnv) locked.push('stt.baseUrl');
+  if (sttModelEnv) locked.push('stt.model');
+  if (sttApiKeyEnv) locked.push('stt.apiKey');
+
+  return {
+    enabled,
+    visionProvider,
+    sttProvider,
+    vision,
+    stt,
+    workerConcurrency: pick('WORKER_CONCURRENCY', 'workerConcurrency', base.workerConcurrency, MEDIA_EMBEDDING_DEFAULTS.workerConcurrency),
+    workerPollIntervalMs: pick('WORKER_POLL_INTERVAL_MS', 'workerPollIntervalMs', base.workerPollIntervalMs, MEDIA_EMBEDDING_DEFAULTS.workerPollIntervalMs),
+    workerMaxPollIntervalMs: pick('WORKER_MAX_POLL_INTERVAL_MS', 'workerMaxPollIntervalMs', base.workerMaxPollIntervalMs, MEDIA_EMBEDDING_DEFAULTS.workerMaxPollIntervalMs),
+    fallbackToExternal: pick('MEDIA_EMBEDDING_FALLBACK_TO_EXTERNAL', 'fallbackToExternal', base.fallbackToExternal, MEDIA_EMBEDDING_DEFAULTS.fallbackToExternal),
+    maxFileSizeBytes: pick('MAX_FILE_SIZE_BYTES', 'maxFileSizeBytes', base.maxFileSizeBytes, MEDIA_EMBEDDING_DEFAULTS.maxFileSizeBytes),
+    stalledJobTimeoutMs: pick('STALLED_JOB_TIMEOUT_MS', 'stalledJobTimeoutMs', base.stalledJobTimeoutMs, MEDIA_EMBEDDING_DEFAULTS.stalledJobTimeoutMs),
+    lockedByInfra: locked,
+  };
+}

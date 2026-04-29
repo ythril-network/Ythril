@@ -6,6 +6,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Binary media embedding pipeline** — image / audio / video uploads now convert to text and produce
+  searchable chunks in the same vector space (`nomic-embed-text-v1.5`) as memories, entities and
+  documents. Pluggable provider model: vision via Ollama-compatible API (default `moondream2`) or any
+  OpenAI vision API; STT via faster-whisper-server (`/v1/audio/transcriptions`) or OpenAI Whisper.
+  **Enabled by default** — both the K8s manifests and the workstation `docker-compose.yml` ship with
+  bundled `ollama` and `whisper` services, so binary embedding works out of the box. Disable via
+  `mediaEmbedding.enabled: false` in `config.json` or `MEDIA_EMBEDDING_ENABLED=false`.
+  - Persistent per-space `<spaceId>_media_jobs` queue with atomic `findOneAndUpdate` claim, exponential
+    idle backoff, and crash-recovery sweep (per-document, race-safe; runs at startup and periodically).
+  - Per-job retry up to `maxAttempts` (default 3) with sanitised error surface; `POST /api/files/:spaceId/retry_embedding`
+    re-triggers manually. Failed attempts schedule the next retry with exponential backoff
+    (`claimableAfter` field; 30 s after attempt 1, 2 min after attempt 2) so a fast-failing job
+    cannot starve siblings in the queue.
+  - Audio chunked on natural silence boundaries (`ffmpeg silencedetect`) with overlap window;
+    video keyframes sampled per-second (`fps=1/intervalS`) and combined with audio transcript chunks.
+  - Recall responses (`brain.recall_files`) now hydrate parent file context for chunk hits.
+- **`GET / PATCH /api/admin/media-config`** — admin API to inspect and update the media embedding
+  pipeline configuration. PATCH requires MFA. API keys are stored in `secrets.json` (mode 0o600),
+  never in `config.json`. Fields supplied by env vars are read-only (returned in `lockedByInfra`).
+  External provider URLs validated by the existing SSRF guard (no private IPs / loopback / cloud metadata).
+- **Settings → Models page** — UI for switching between local (cluster Ollama / Whisper) and external
+  providers, model names, base URLs and API keys, with infra-locked indicator.
+- **Kubernetes manifests** — `ollama-deploy.yaml`, `whisper-deploy.yaml`, `media-netpol.yaml`,
+  `media-cilium-netpol.yaml`. Both NetworkPolicy and CiliumNetworkPolicy required (Cilium policy
+  alone does not unblock traffic when a default-deny policy exists). Pods run as non-root with
+  read-only root filesystem, dropped capabilities, RuntimeDefault seccomp, and explicit memory limits.
+  Internet egress restricted by FQDN to `registry.ollama.ai` (Ollama) and `huggingface.co` (Whisper),
+  with explicit kube-dns egress.
+- **Prometheus media metrics** — `ythril_media_jobs_completed_total`, `_failed_total`, `_retried_total`
+  (counters by space + media_type), `ythril_media_job_duration_seconds` (histogram), and
+  `ythril_media_jobs_pending` / `_processing` / `_failed` (gauges by space, scrape-time).
+- **Audit route** — `PATCH /api/admin/media-config` recorded as `config.media.update`.
+- **Dockerfile** — `ffmpeg` added (required by audio/video pipelines).
+- **Workstation media stack** — `docker-compose.yml` now ships `ollama` (auto-pulls
+  `moondream2` on first start) and `whisper` (`fedirz/faster-whisper-server:latest-cpu`,
+  Whisper `base` model auto-downloaded on first request) so binary embedding works
+  out of the box on workstation deployments, mirroring the K8s manifests. Defaults
+  for `vision.baseUrl` / `stt.baseUrl` use short service names (`ollama:11434`,
+  `whisper:8000`) which resolve in both Docker Compose bridge DNS and the K8s
+  `ythril` namespace.
+
 ### Fixed
 
 - **`PATCH /api/spaces/:id` now uses true merge semantics for `meta`** — Previously,

@@ -81,6 +81,7 @@ const ROUTE_RULES: RouteRule[] = [
 
   // ── Config / admin ───────────────────────────────────────────────────────
   { method: 'POST',   pattern: /^\/api\/admin\/reload-config$/,                    operation: 'config.reload' },
+  { method: 'PATCH',  pattern: /^\/api\/admin\/media-config$/,                     operation: 'config.media.update' },
 
   // ── Data management ──────────────────────────────────────────────────────
   { method: 'POST',   pattern: /^\/api\/admin\/data\/backup$/,                     operation: 'data.backup' },

@@ -110,6 +110,10 @@ async function main(): Promise<void> {
     startSyncScheduler();
     startBackupScheduler();
     cleanupStaleChunks().catch(err => log.error(`Stale chunk cleanup failed: ${err}`));
+
+    // Start media embedding worker unconditionally (enqueueing is skipped when disabled)
+    const { startMediaEmbeddingWorker } = await import('./files/media/worker.js');
+    startMediaEmbeddingWorker();
   }
 
   const app = createApp();

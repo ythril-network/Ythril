@@ -1,0 +1,126 @@
+# ── Ollama Deployment ─────────────────────────────────────────────────────────
+# Vision captioning service for the media embedding pipeline.
+# Provides the Ollama API (POST /api/chat with image payload) used by
+# OllamaVisionProvider in server/src/files/media/providers.ts.
+#
+# Default model: moondream2 (Apache 2.0 — no commercial-use restrictions).
+# Pull the model into the PVC before enabling media embedding:
+#   kubectl exec -n ythril deploy/ollama -- ollama pull moondream2
+#
+# LICENCE NOTE: Ollama itself is MIT. moondream2 is Apache 2.0.
+# Before switching to a different model, verify its licence.
+#
+# RESOURCE NOTE: GPU is optional — CPU inference works but is slower.
+# Uncomment the resources.limits block and add nodeSelector / tolerations
+# for GPU nodes when available.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama
+  namespace: ythril
+  labels:
+    app: ollama
+    component: media-embedding
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ollama
+  template:
+    metadata:
+      labels:
+        app: ollama
+        component: media-embedding
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: ollama
+          image: ollama/ollama:latest
+          ports:
+            - containerPort: 11434
+              name: http
+          env:
+            - name: OLLAMA_KEEP_ALIVE
+              value: "24h"
+            - name: HOME
+              value: /tmp
+          volumeMounts:
+            - name: models
+              mountPath: /root/.ollama
+            - name: tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "4Gi"
+              cpu: "2"
+            # Add the GPU limit on GPU nodes (requires nodeSelector / tolerations):
+            #   nvidia.com/gpu: "1"
+          readinessProbe:
+            httpGet:
+              path: /api/tags
+              port: 11434
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/tags
+              port: 11434
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: ollama-models
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ollama-models
+  namespace: ythril
+  labels:
+    app: ollama
+    component: media-embedding
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama
+  namespace: ythril
+  labels:
+    app: ollama
+    component: media-embedding
+spec:
+  selector:
+    app: ollama
+  ports:
+    - name: http
+      port: 11434
+      targetPort: 11434
+  type: ClusterIP

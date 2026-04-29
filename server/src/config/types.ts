@@ -239,24 +239,23 @@ export interface MediaProviderConfig {
  * memories, entities and converted documents (`nomic-embed-text-v1.5`).
  *
  * Off by default — must be explicitly enabled in config.json or via
- * `MEDIA_EMBEDDING_ENABLED=true`.
+ * `MEDIA_EMBEDDING_ENABLED=true` once the config loader is implemented.
  *
  * ── Plugin model ────────────────────────────────────────────────────────────
  * Vision and STT are pluggable via the generic `vision` / `stt`
  * `MediaProviderConfig` blocks. Any OpenAI-compatible endpoint works
  * out-of-the-box; switching providers is a config edit, not a code change.
  *
- * ── Resolution order (high → low precedence) ────────────────────────────────
+ * ── Planned resolution order (high → low precedence; not yet active) ────────
+ * When `getMediaEmbeddingConfig()` in the loader is implemented, it will apply:
  *   1. Env vars (`MEDIA_EMBEDDING_ENABLED`, `VISION_PROVIDER`, `OLLAMA_URL`,
  *      `VISION_MODEL`, `VISION_API_KEY`, `STT_PROVIDER`, `WHISPER_URL`,
  *      `WHISPER_MODEL`, `STT_API_KEY`, …)
  *   2. `config.json` `mediaEmbedding.*` (writable from the UI)
  *   3. Built-in defaults
  *
- * When an env var is set for a given key, the corresponding field in the
- * Settings UI is rendered read-only (locked-by-infra). This allows ops to
- * pin endpoints/keys via Kubernetes Secrets while still letting end-users
- * tweak unrelated values from the UI.
+ * When an env var supplies a value, `lockedByInfra` will list that field so
+ * the Settings UI can render it read-only (locked-by-infra).
  */
 export interface MediaEmbeddingConfig {
   /** Master switch — when false, media files store with embeddingStatus="disabled". */
@@ -476,6 +475,15 @@ export interface SecretsFile {
   peerTokens: Record<string, string>;
   totpSecret?: string;              // base32 TOTP secret; absent = MFA disabled
   webhookEncryptionKey?: string;    // hex-encoded AES-256 key for webhook secret encryption
+  /**
+   * Media embedding provider credentials. Stored here (0o600) instead of
+   * config.json so API keys are never world-readable. Env vars
+   * (`VISION_API_KEY` / `STT_API_KEY`) still take precedence.
+   */
+  mediaEmbedding?: {
+    visionApiKey?: string;
+    sttApiKey?: string;
+  };
 }
 
 // ── MongoDB document shapes ────────────────────────────────────────────────
@@ -638,7 +646,7 @@ export interface FileMetaDoc {
    *   "pending"    → enqueued, not yet processed
    *   "processing" → claimed by a worker
    *   "complete"   → all chunk records produced
-   *   "failed"     → exhausted retries; lastError carries the reason
+   *   "failed"     → exhausted retries; mediaJobError carries the reason
    *   "skipped"    → file too large (> maxFileSizeBytes) — original kept, no embedding
    *   "disabled"   → mediaEmbedding.enabled=false at upload time
    */
@@ -700,6 +708,13 @@ export interface MediaJobDoc {
   maxAttempts: number;
   lastError: string | null;
   claimedAt: string | null;   // ISO8601 — set when a worker claims this job
+  /**
+   * ISO8601 — when set on a `pending` job, the worker MUST NOT claim it
+   * until this timestamp has passed. Used for exponential retry backoff so
+   * a fast-failing "poison pill" job can’t monopolise the queue and starve
+   * sibling jobs that would otherwise succeed. Cleared on success/manual retry.
+   */
+  claimableAfter?: string | null;
   createdAt: string;          // ISO8601
   updatedAt: string;          // ISO8601
 }

@@ -26,12 +26,13 @@ For setting up a workstation quickly see [workstation-mode-guide.md](workstation
 10. [Settings — Tokens](#settings--tokens)
 11. [Settings — MFA](#settings--mfa)
 12. [Settings — Networks](#settings--networks)
-13. [Settings — Storage](#settings--storage)
-14. [Settings — Data](#settings--data)
-15. [Settings — Audit Log](#settings--audit-log)
-16. [Settings — Webhooks](#settings--webhooks)
-17. [Settings — About](#settings--about)
-18. [Connecting an AI assistant (MCP)](#connecting-an-ai-assistant-mcp)
+13. [Settings — Models](#settings--models)
+14. [Settings — Storage](#settings--storage)
+15. [Settings — Data](#settings--data)
+16. [Settings — Audit Log](#settings--audit-log)
+17. [Settings — Webhooks](#settings--webhooks)
+18. [Settings — About](#settings--about)
+19. [Connecting an AI assistant (MCP)](#connecting-an-ai-assistant-mcp)
 
 ---
 
@@ -442,6 +443,28 @@ When a vote is open (e.g. a member wants to leave), expand the network card and 
 ### Leaving a network
 
 Click **Leave network** at the bottom of the network card. Your local data in the network's spaces is kept.
+
+---
+
+## Settings — Models
+
+**Settings → Models** (admin only, MFA-protected) controls how Ythril turns image, audio, and video uploads into searchable text.
+
+By default, Ythril ships with a bundled vision service (Ollama running `moondream2`) and a bundled speech-to-text service (faster-whisper-server). When you upload a picture, Ythril writes a short caption of what's in it; when you upload audio or video, it transcribes the words. The result is added to the same search index as your memories, so you can find an attachment by what's *inside* it, not just its filename.
+
+### When to change this
+
+- **Disable it.** Untick **Enable media embedding** if you don't upload media or your machine is tight on memory. Existing files keep their captions; new uploads are stored as-is.
+- **Use an external provider.** Switch **Vision provider** or **STT provider** to *External* if you'd rather call OpenAI, Azure, or any other OpenAI-compatible service. Fill in the **Base URL**, **Model**, and **API key** for that provider. API keys are stored in the encrypted secrets file, never alongside the rest of the configuration.
+- **Use a different local model.** Keep the provider on *Local* but change the **Model** field — for example, switch the vision model from `moondream2` to `llava` if you've pulled it into Ollama.
+
+### Locked fields
+
+Fields shown with an **env** badge cannot be changed from the UI — they are pinned by an environment variable set by your infrastructure administrator. This is normal in managed deployments where credentials are injected by Kubernetes secrets or similar.
+
+### Privacy note
+
+When both providers are set to *Local*, no file content ever leaves your instance. Switching to *External* sends image frames or audio segments to the configured endpoint — review your data residency policy before doing so.
 
 ---
 

@@ -6,14 +6,14 @@ import {
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
-import { getConfig } from '../config/loader.js';
+import { getConfig, getMediaEmbeddingConfig } from '../config/loader.js';
 import { log } from '../util/log.js';
 import { checkQuota, QuotaError } from '../quota/quota.js';
 import { resolveMemberSpaces, resolveWriteTarget, isProxySpace, isStrictLinkage } from '../spaces/proxy.js';
 import { updateSpace, wipeSpace, WIPE_COLLECTION_TYPES, type WipeCollectionType } from '../spaces/spaces.js';
 
 // Brain tools
-import { remember, recall, recallGlobal, findSimilar, queryBrain, updateMemory, deleteMemory, type RecallKnowledgeType, type RecallResult } from '../brain/memory.js';
+import { remember, recall, recallGlobal, findSimilar, queryBrain, updateMemory, deleteMemory, validateFilterExpression, type RecallKnowledgeType, type RecallResult, type FilterExpression } from '../brain/memory.js';
 import { col, mFilter, mDoc } from '../db/mongo.js';
 import { upsertEntity, updateEntityById, findEntitiesByName } from '../brain/entities.js';
 import { upsertEdge, traverseGraph, updateEdgeById } from '../brain/edges.js';
@@ -36,7 +36,8 @@ import {
 } from '../files/files.js';
 import { upsertFileMeta, deleteFileMeta, renameFileMeta } from '../files/file-meta.js';
 import { validateEntity, validateEdge, validateMemory, validateChrono, resolveMetaRefs } from '../spaces/schema-validation.js';
-import { resolveInputFormat, runConversionPipeline, storeConversionResults } from '../files/converters/pipeline.js';
+import { resolveInputFormat, runConversionPipeline, storeConversionResults, isMediaFormat } from '../files/converters/pipeline.js';
+import { enqueueMediaJob } from '../files/media/job-queue.js';
 import { ConversionUnavailableError } from '../files/converters/types.js';
 import type { InputFormat } from '../files/converters/pipeline.js';
 
@@ -183,6 +184,23 @@ function createGlobalMcpServer(tokenSpaces?: string[], readOnly?: boolean, isAdm
           minScore: {
             type: 'number',
             description: 'Minimum cosine similarity score (0.0–1.0). Results below this threshold are excluded.',
+          },
+          filter: {
+            type: 'object',
+            description: 'Optional property equality/comparison filter applied after vector search. Keys must use dot-notation and start with "properties.", "tags", "type", or "name". Each value is an operator object with one or more of: eq, ne, in (array), exists (boolean), gt, gte, lt, lte. Example: { "properties.status": { "eq": "accepted" }, "properties.count": { "gt": 10 } }. Records not matching ALL filter conditions are excluded.',
+            additionalProperties: {
+              type: 'object',
+              properties: {
+                eq: { description: 'Exact equality.' },
+                ne: { description: 'Not equal.' },
+                in: { type: 'array', description: 'Value is in array (any-of for tags).' },
+                exists: { type: 'boolean', description: 'Property is present.' },
+                gt: { type: 'number', description: 'Greater than.' },
+                gte: { type: 'number', description: 'Greater than or equal.' },
+                lt: { type: 'number', description: 'Less than.' },
+                lte: { type: 'number', description: 'Less than or equal.' },
+              },
+            },
           },
         },
         required: ['query'],
@@ -897,10 +915,21 @@ function createGlobalMcpServer(tokenSpaces?: string[], readOnly?: boolean, isAdm
             ? (a['minPerType'] as Partial<Record<RecallKnowledgeType, number>>)
             : undefined;
           const minScore = typeof a['minScore'] === 'number' ? a['minScore'] : undefined;
+
+          let filter: FilterExpression | undefined;
+          if (a['filter'] != null) {
+            if (typeof a['filter'] !== 'object' || Array.isArray(a['filter'])) {
+              throw new Error('filter must be an object');
+            }
+            const filterErr = validateFilterExpression(a['filter'] as FilterExpression);
+            if (filterErr) throw new Error(filterErr);
+            filter = a['filter'] as FilterExpression;
+          }
+
           if (callSpace) {
             // Search specific space
             const memberIds = resolveMemberSpaces(callSpace);
-            const all = (await Promise.all(memberIds.map(mid => recall(mid, query, topK, tags, types, minPerType, minScore)))).flat();
+            const all = (await Promise.all(memberIds.map(mid => recall(mid, query, topK, tags, types, minPerType, minScore, filter)))).flat();
             all.sort((x, y) => (y.score ?? 0) - (x.score ?? 0));
             const results = all.slice(0, topK);
             const output = {
@@ -918,7 +947,7 @@ function createGlobalMcpServer(tokenSpaces?: string[], readOnly?: boolean, isAdm
             };
           } else {
             // Cross-space search across all accessible spaces
-            const results = await recallGlobal(accessibleSpaceIds, query, topK, tags, types, minPerType, minScore);
+            const results = await recallGlobal(accessibleSpaceIds, query, topK, tags, types, minPerType, minScore, filter);
             const output = {
               results: results.map(r => ({
                 score: r.score,
@@ -1563,18 +1592,43 @@ function createGlobalMcpServer(tokenSpaces?: string[], readOnly?: boolean, isAdm
             metaOpts.properties = a['properties'] as Record<string, string | number | boolean>;
           }
           await upsertFileMeta(wt.target, filePath, sizeBytes, metaOpts);
-          // Conversion pipeline
+          // Conversion pipeline — or async media job
           const ifFmt = typeof a['inputFormat'] === 'string' ? a['inputFormat'] as InputFormat : 'auto';
           const fileBytes = Buffer.from(content, 'utf8');
           const resolvedFmt = resolveInputFormat(filePath, undefined, ifFmt);
-          if (resolvedFmt !== 'text') {
+          const normId = filePath.replace(/\\/g, '/').replace(/^\/+/, '');
+
+          if (isMediaFormat(resolvedFmt)) {
+            // MCP write_file is text-only; media content via MCP is not expected,
+            // but handle gracefully: record as disabled/pending same as REST API.
+            const mediaCfg = getMediaEmbeddingConfig();
+            if (!mediaCfg.enabled) {
+              await col<import('../config/types.js').FileMetaDoc>(`${wt.target}_files`).updateOne(
+                mFilter<import('../config/types.js').FileMetaDoc>({ _id: normId }),
+                { $set: { mediaType: resolvedFmt, embeddingStatus: 'disabled' } },
+              );
+            } else if (sizeBytes > (mediaCfg.maxFileSizeBytes ?? 524_288_000)) {
+              await col<import('../config/types.js').FileMetaDoc>(`${wt.target}_files`).updateOne(
+                mFilter<import('../config/types.js').FileMetaDoc>({ _id: normId }),
+                { $set: { mediaType: resolvedFmt, embeddingStatus: 'skipped' } },
+              );
+            } else {
+              const mimeType = 'application/octet-stream';
+              await col<import('../config/types.js').FileMetaDoc>(`${wt.target}_files`).updateOne(
+                mFilter<import('../config/types.js').FileMetaDoc>({ _id: normId }),
+                { $set: { mediaType: resolvedFmt, embeddingStatus: 'pending' } },
+              );
+              await enqueueMediaJob(wt.target, filePath, mimeType, resolvedFmt).catch(err => {
+                log.warn(`write_file enqueueMediaJob error for ${wt.target}/${filePath}: ${err instanceof Error ? err.message : String(err)}`);
+              });
+            }
+          } else if (resolvedFmt !== 'text') {
             try {
               const { chunks, convertedMarkdown } = await runConversionPipeline(fileBytes, filePath, resolvedFmt);
               if (chunks.length > 0) {
                 const { chunkCount, convertedFileId } = await storeConversionResults(wt.target, filePath, chunks, convertedMarkdown);
                 const metaUpdate: Record<string, unknown> = { chunkCount };
                 if (convertedFileId) metaUpdate['convertedFileId'] = convertedFileId;
-                const normId = filePath.replace(/\\/g, '/').replace(/^\/+/, '');
                 await col<import('../config/types.js').FileMetaDoc>(`${wt.target}_files`).updateOne(
                   mFilter<import('../config/types.js').FileMetaDoc>({ _id: normId }),
                   { $set: metaUpdate },
@@ -1583,7 +1637,6 @@ function createGlobalMcpServer(tokenSpaces?: string[], readOnly?: boolean, isAdm
             } catch (err) {
               if (err instanceof ConversionUnavailableError) {
                 log.warn(`write_file conversion failed for ${wt.target}/${filePath}: ${err.message}`);
-                const normId = filePath.replace(/\\/g, '/').replace(/^\/+/, '');
                 await col<import('../config/types.js').FileMetaDoc>(`${wt.target}_files`).updateOne(
                   mFilter<import('../config/types.js').FileMetaDoc>({ _id: normId }),
                   { $set: { conversionError: err.message } },

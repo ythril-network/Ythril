@@ -25,6 +25,7 @@ import { webhooksRouter } from './api/webhooks.js';
 import { schemaLibraryRouter } from './api/schema-library.js';
 import { localAgentRouter } from './api/local-agent.js';
 import { dataRouter } from './api/data.js';
+import { mediaConfigRouter } from './api/media-config.js';
 import { maintenanceMiddleware } from './maintenance.js';
 import { globalRateLimit } from './rate-limit/middleware.js';
 import { configExists, reloadConfig, getConfig, saveConfig, loadSecrets } from './config/loader.js';
@@ -188,6 +189,7 @@ export function createApp() {
   app.use('/api/admin/webhooks', webhooksRouter);
   app.use('/api/admin/local-agent', localAgentRouter);
   app.use('/api/admin/data', dataRouter);
+  app.use('/api/admin/media-config', mediaConfigRouter);
   app.use('/api/schema-library', schemaLibraryRouter);
 
   // ── Admin: space wipe ─────────────────────────────────────────────────────

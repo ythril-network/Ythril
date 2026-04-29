@@ -1,0 +1,146 @@
+# ── Media Embedding CiliumNetworkPolicies ────────────────────────────────────
+# Cilium defense-in-depth policies mirroring media-netpol.yaml.
+# IMPORTANT: These alone are NOT sufficient — standard K8s NetworkPolicies in
+# media-netpol.yaml must also be applied (Cilium evaluates both).
+#
+# These policies add L7 awareness and are applied alongside the standard policies.
+#
+# ── PORT NUMBERS: ALWAYS POD PORT, NEVER SERVICE PORT ────────────────────────
+# Cilium eBPF DNAT (kube-proxy-replacement) fires BEFORE the policy hook for
+# both egress and ingress. By the time a packet is matched against a CNP it
+# has already been rewritten from `<ClusterIP>:<servicePort>` to
+# `<podIP>:<containerPort>`. Listing the service port silently drops the SYN
+# (TCP timeout, no rejection log).
+#
+# In this file we are safe because for both upstreams the service port equals
+# the container port:
+#   - ollama : service 11434 → containerPort 11434   ✓
+#   - whisper: service  8000 → containerPort  8000   ✓
+# When adding a new service whose ports differ, set the CNP toPorts/ports
+# entry to the CONTAINER port, not the service port.
+#
+# ── DNS EGRESS REQUIREMENT ───────────────────────────────────────────────────
+# toFQDNs rules require DNS resolution to succeed. The default-deny policy in
+# the ythril namespace blocks everything by default, so an explicit egress to
+# kube-dns is needed for both ollama and whisper to resolve their model
+# registries. The K8s NetworkPolicy in media-netpol.yaml grants this.
+#
+# ── ALLOWLIST AUDIT ──────────────────────────────────────────────────────────
+# Any change to the FQDN matchPattern lists below is a supply-chain decision
+# (it adds a new third party that the cluster will pull binaries / model
+# weights from). Review carefully before extending these lists.
+---
+# Allow ythril → ollama:11434
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: ythril-allow-ollama-egress
+  namespace: ythril
+spec:
+  endpointSelector:
+    matchLabels:
+      app: ythril
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            app: ollama
+      toPorts:
+        - ports:
+            - port: "11434"
+              protocol: TCP
+---
+# Allow ythril → whisper:8000
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: ythril-allow-whisper-egress
+  namespace: ythril
+spec:
+  endpointSelector:
+    matchLabels:
+      app: ythril
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            app: whisper
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP
+---
+# Allow ollama ingress from ythril
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: ollama-allow-ythril-ingress
+  namespace: ythril
+spec:
+  endpointSelector:
+    matchLabels:
+      app: ollama
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: ythril
+      toPorts:
+        - ports:
+            - port: "11434"
+              protocol: TCP
+---
+# Allow whisper ingress from ythril
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: whisper-allow-ythril-ingress
+  namespace: ythril
+spec:
+  endpointSelector:
+    matchLabels:
+      app: whisper
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: ythril
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP
+---
+# Allow ollama egress to internet (model downloads)
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: ollama-allow-internet-egress
+  namespace: ythril
+spec:
+  endpointSelector:
+    matchLabels:
+      app: ollama
+  egress:
+    - toFQDNs:
+        - matchPattern: "registry.ollama.ai"
+        - matchPattern: "*.ollama.ai"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+# Allow whisper egress to internet (Hugging Face model downloads)
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: whisper-allow-internet-egress
+  namespace: ythril
+spec:
+  endpointSelector:
+    matchLabels:
+      app: whisper
+  egress:
+    - toFQDNs:
+        - matchPattern: "huggingface.co"
+        - matchPattern: "*.huggingface.co"
+        - matchPattern: "cdn-lfs.huggingface.co"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
