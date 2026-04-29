@@ -298,6 +298,37 @@ export interface MediaEmbeddingConfig {
   lockedByInfra?: string[];
   /** Face recognition settings — requires @vladmandic/human WASM backend. */
   faceRecognition?: FaceRecognitionConfig;
+  /** Document processing settings — controls the unstructured sidecar behaviour. */
+  documentProcessing?: DocumentProcessingConfig;
+}
+
+/**
+ * Configuration for the document processing pipeline (PDF, DOCX, EPUB conversion).
+ * Uses the unstructured-api sidecar for partition extraction.
+ */
+export interface DocumentProcessingConfig {
+  /**
+   * Unstructured partition strategy passed to the sidecar.
+   *
+   * - `"hi_res"` (default): full OCR + layout detection. Slower but extracts
+   *   images, recognises tables from scanned PDFs, and handles complex layouts.
+   *   Required for embedded-image extraction.
+   * - `"auto"`: unstructured picks the fastest strategy that still produces
+   *   reasonable text. No guaranteed image extraction.
+   * - `"fast"`: text-layer extraction only (pdfminer). Fastest but no OCR, no
+   *   image extraction.
+   * - `"ocr_only"`: full OCR on every page regardless of whether a text layer
+   *   exists. Useful for scanned documents but redundant for born-digital PDFs.
+   */
+  strategy?: 'hi_res' | 'auto' | 'fast' | 'ocr_only';
+  /**
+   * When true (default), embedded images found during hi_res conversion are
+   * extracted as `_extracted/{originalId}/image-{N}.{ext}` subfiles and
+   * re-enqueued for the full media pipeline (caption + face recognition).
+   *
+   * Has no effect when strategy is not `hi_res`.
+   */
+  extractImages?: boolean;
 }
 
 /**

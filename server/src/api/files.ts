@@ -398,9 +398,9 @@ filesRouter.post(
         }
       } else if (resolvedFormat !== 'text') {
         try {
-          const { chunks, convertedMarkdown } = await runConversionPipeline(fileBuffer, filePath, resolvedFormat);
-          if (chunks.length > 0) {
-            const { chunkCount, convertedFileId } = await storeConversionResults(targetSpace, filePath, chunks, convertedMarkdown);
+          const { chunks, convertedMarkdown, extractedImages } = await runConversionPipeline(fileBuffer, filePath, resolvedFormat);
+          if (chunks.length > 0 || extractedImages.length > 0) {
+            const { chunkCount, convertedFileId } = await storeConversionResults(targetSpace, filePath, chunks, convertedMarkdown, extractedImages);
             // Update original filemeta with chunkCount and convertedFileId
             const metaUpdate: Record<string, unknown> = { chunkCount };
             if (convertedFileId) metaUpdate['convertedFileId'] = convertedFileId;

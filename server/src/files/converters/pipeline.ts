@@ -10,18 +10,20 @@
 
 import path from 'path';
 import { UnstructuredConverter } from './unstructured.js';
+import type { ExtractedImage } from './unstructured.js';
 import { HtmlConverter } from './html.js';
 import { MarkdownPassthrough, PlainTextPassthrough } from './passthrough.js';
 import { normaliseMarkdown } from './normaliser.js';
 import { sectionChunk } from './section-chunker.js';
 import { paragraphChunk } from './paragraph-chunker.js';
 import type { Chunk } from './types.js';
-import { writeFile } from '../files.js';
+import { writeFile, writeFileBytes } from '../files.js';
 import { col, mFilter, mDoc } from '../../db/mongo.js';
 import { embed } from '../../brain/embedding.js';
 import { getConfig } from '../../config/loader.js';
 import type { FileMetaDoc, AuthorRef } from '../../config/types.js';
 import { log } from '../../util/log.js';
+import { enqueueMediaJob } from '../media/job-queue.js';
 
 export type InputFormat = 'pdf' | 'docx' | 'epub' | 'html' | 'md' | 'txt' | 'text' | 'auto';
 
@@ -133,6 +135,7 @@ export interface ConversionPipelineOptions {
 export interface ConversionResult {
   chunks: Chunk[];
   convertedMarkdown: string | null; // null for md/txt (source IS the markdown)
+  extractedImages: ExtractedImage[];  // populated for pdf/docx/epub when hi_res extraction is on
 }
 
 /**
@@ -155,13 +158,13 @@ export async function runConversionPipeline(
   switch (format) {
     case 'text':
       // Bypass: caller handles single-record storage
-      return { chunks: [], convertedMarkdown: null };
+      return { chunks: [], convertedMarkdown: null, extractedImages: [] };
 
     case 'image':
     case 'audio':
     case 'video':
       // Media formats are handled by the async media embedding pipeline, not here
-      return { chunks: [], convertedMarkdown: null };
+      return { chunks: [], convertedMarkdown: null, extractedImages: [] };
 
     case 'md': {
       const conv = new MarkdownPassthrough();
@@ -187,9 +190,14 @@ export async function runConversionPipeline(
     case 'docx':
     case 'epub': {
       const conv = new UnstructuredConverter();
-      markdown = await conv.convert(fileBytes, fileName);
+      const result = await conv.convertRich(fileBytes, fileName);
+      markdown = result.markdown;
       convertedMarkdown = markdown;
-      break;
+      return {
+        chunks: sectionChunk(normaliseMarkdown(result.markdown), { minBodyLength: opts.minChunkBodyLength }),
+        convertedMarkdown,
+        extractedImages: result.extractedImages,
+      };
     }
   }
 
@@ -199,7 +207,7 @@ export async function runConversionPipeline(
     ? paragraphChunk(normalised, { maxChunkLength: opts.maxParagraphChunkLength })
     : sectionChunk(normalised, { minBodyLength: opts.minChunkBodyLength });
 
-  return { chunks, convertedMarkdown };
+  return { chunks, convertedMarkdown, extractedImages: [] };
 }
 
 /** Normalise a path to forward-slash convention and strip leading slashes. */
@@ -210,11 +218,15 @@ function normPath(p: string): string {
 /**
  * Store a converted file's chunk records in the {spaceId}_files collection.
  * Each chunk gets its own record with a per-chunk embedding.
+ * Extracted images (from hi_res PDF/DOCX/EPUB conversion) are written as
+ * `_extracted/{originalId}/image-{N}.{ext}` subfiles and enqueued for the
+ * full media pipeline (caption + face recognition).
  *
  * @param spaceId           Space ID
  * @param originalFilePath  Relative path of the original file (its _id in filemeta)
  * @param chunks            Chunk array from the pipeline
  * @param convertedMarkdown If not null, write to _converted/<originalFileId>.md and return its path
+ * @param extractedImages   Embedded images extracted during hi_res conversion
  * @returns object with chunkCount and optional convertedFileId
  */
 export async function storeConversionResults(
@@ -222,6 +234,7 @@ export async function storeConversionResults(
   originalFilePath: string,
   chunks: Chunk[],
   convertedMarkdown: string | null,
+  extractedImages: ExtractedImage[] = [],
 ): Promise<{ chunkCount: number; convertedFileId: string | null }> {
   const originalId = normPath(originalFilePath);
   const now = new Date().toISOString();
@@ -249,7 +262,40 @@ export async function storeConversionResults(
     await col<FileMetaDoc>(`${spaceId}_files`).insertOne(mDoc<FileMetaDoc>(convertedDoc));
   }
 
-  // 2. Insert chunk records
+  // 2. Write extracted image subfiles and enqueue for media pipeline
+  if (extractedImages.length > 0) {
+    for (const img of extractedImages) {
+      const imgPath = `_extracted/${originalId}/image-${img.index}.${img.ext}`;
+      const imgId = normPath(imgPath);
+      try {
+        const imgBytes = Buffer.from(img.base64, 'base64');
+        await writeFileBytes(spaceId, imgPath, imgBytes);
+
+        const imgDoc: FileMetaDoc = {
+          _id: imgId,
+          spaceId,
+          path: imgId,
+          tags: [],
+          createdAt: now,
+          updatedAt: now,
+          sizeBytes: imgBytes.length,
+          author: authorRef(),
+          parentFileId: originalId,
+        };
+        await col<FileMetaDoc>(`${spaceId}_files`).insertOne(mDoc<FileMetaDoc>(imgDoc));
+
+        // Enqueue for media pipeline (caption + face recognition)
+        const mimeType = `image/${img.ext === 'jpg' ? 'jpeg' : img.ext}`;
+        await enqueueMediaJob(spaceId, imgPath, mimeType, 'image');
+      } catch (err) {
+        // Non-fatal: log and continue; other images and chunks still processed
+        log.warn(`Failed to store extracted image ${imgId}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    log.info(`Stored ${extractedImages.length} extracted image(s) from ${spaceId}/${originalId}`);
+  }
+
+  // 3. Insert chunk records
   for (const chunk of chunks) {
     const chunkId = `${originalId}#chunk${chunk.chunkIndex}`;
     const embedText = chunk.headingText

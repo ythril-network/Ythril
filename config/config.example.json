@@ -27,6 +27,10 @@
       "modelPath": "human-models",
       "personEntityTypes": ["person"],
       "reprocessSyncedImages": true
+    },
+    "documentProcessing": {
+      "strategy": "hi_res",
+      "extractImages": true
     }
   },
   "oidc": {

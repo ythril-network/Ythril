@@ -298,9 +298,9 @@ export function getDataRoot(): string {
 
 // ── Media Embedding Config ─────────────────────────────────────────────────
 
-import type { MediaEmbeddingConfig, MediaProviderConfig, FaceRecognitionConfig } from './types.js';
+import type { MediaEmbeddingConfig, MediaProviderConfig, FaceRecognitionConfig, DocumentProcessingConfig } from './types.js';
 
-const MEDIA_EMBEDDING_DEFAULTS: Required<Omit<MediaEmbeddingConfig, 'vision' | 'stt' | 'ollamaUrl' | 'visionModel' | 'whisperUrl' | 'whisperModel' | 'lockedByInfra' | 'faceRecognition'>> = {
+const MEDIA_EMBEDDING_DEFAULTS: Required<Omit<MediaEmbeddingConfig, 'vision' | 'stt' | 'ollamaUrl' | 'visionModel' | 'whisperUrl' | 'whisperModel' | 'lockedByInfra' | 'faceRecognition' | 'documentProcessing'>> = {
   // Enabled by default: both K8s manifests (kubernetes/manifests/ollama-deploy.yaml,
   // whisper-deploy.yaml) and the workstation docker-compose.yml ship with bundled
   // ollama + whisper services. The default `vision.baseUrl` / `stt.baseUrl` resolve
@@ -411,6 +411,27 @@ export function getMediaEmbeddingConfig(): MediaEmbeddingConfig {
     maxFileSizeBytes: pick('MAX_FILE_SIZE_BYTES', 'maxFileSizeBytes', base.maxFileSizeBytes, MEDIA_EMBEDDING_DEFAULTS.maxFileSizeBytes),
     stalledJobTimeoutMs: pick('STALLED_JOB_TIMEOUT_MS', 'stalledJobTimeoutMs', base.stalledJobTimeoutMs, MEDIA_EMBEDDING_DEFAULTS.stalledJobTimeoutMs),
     lockedByInfra: locked,
+  };
+}
+
+// ── Document Processing Config ──────────────────────────────────────────────
+
+const DOCUMENT_PROCESSING_DEFAULTS: Required<DocumentProcessingConfig> = {
+  strategy: 'hi_res',
+  extractImages: true,
+};
+
+/**
+ * Return the resolved document processing configuration, merging:
+ *   1. `config.json` `mediaEmbedding.documentProcessing` block
+ *   2. Built-in defaults
+ */
+export function getDocumentProcessingConfig(): Required<DocumentProcessingConfig> {
+  const mediaCfg = getConfig().mediaEmbedding;
+  const base: DocumentProcessingConfig = mediaCfg?.documentProcessing ?? {};
+  return {
+    strategy: base.strategy ?? DOCUMENT_PROCESSING_DEFAULTS.strategy,
+    extractImages: base.extractImages ?? DOCUMENT_PROCESSING_DEFAULTS.extractImages,
   };
 }
 

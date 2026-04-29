@@ -1624,9 +1624,9 @@ function createGlobalMcpServer(tokenSpaces?: string[], readOnly?: boolean, isAdm
             }
           } else if (resolvedFmt !== 'text') {
             try {
-              const { chunks, convertedMarkdown } = await runConversionPipeline(fileBytes, filePath, resolvedFmt);
-              if (chunks.length > 0) {
-                const { chunkCount, convertedFileId } = await storeConversionResults(wt.target, filePath, chunks, convertedMarkdown);
+              const { chunks, convertedMarkdown, extractedImages } = await runConversionPipeline(fileBytes, filePath, resolvedFmt);
+              if (chunks.length > 0 || extractedImages.length > 0) {
+                const { chunkCount, convertedFileId } = await storeConversionResults(wt.target, filePath, chunks, convertedMarkdown, extractedImages);
                 const metaUpdate: Record<string, unknown> = { chunkCount };
                 if (convertedFileId) metaUpdate['convertedFileId'] = convertedFileId;
                 await col<import('../config/types.js').FileMetaDoc>(`${wt.target}_files`).updateOne(
