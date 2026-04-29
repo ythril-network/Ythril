@@ -227,7 +227,7 @@ flowchart TD
 
 ## License
 
-Ythril is source-available under the [PolyForm Small Business License 1.0.0](LICENSE). Individuals and small businesses (< 100 people, < $1M revenue) can use, modify, and self-host it freely. Larger organisations require a commercial license — contact `contact@ythril.net`.
+Ythril is source-available under the [PolyForm Small Business License 1.0.0](LICENSE). Individuals and small businesses (< 100 people, < $1M revenue) can use, modify, and self-host it freely. Larger organisations require a commercial license. Hosting Ythril as a paid managed or cloud service offered to third parties also requires a commercial license, regardless of company size. Contact `contact@ythril.net` to obtain one.
 
 ## Contributing
 
