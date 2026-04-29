@@ -296,6 +296,49 @@ export interface MediaEmbeddingConfig {
    * Examples: `["enabled", "vision.apiKey", "stt.baseUrl"]`.
    */
   lockedByInfra?: string[];
+  /** Face recognition settings — requires @vladmandic/human WASM backend. */
+  faceRecognition?: FaceRecognitionConfig;
+}
+
+/**
+ * Configuration for the face recognition pipeline.
+ * Uses @vladmandic/human with the WASM backend (CPU-only, no Python/CUDA).
+ * Models: BlazeFace (detect, ~0.5 MB) + FaceRes (embed, 128d, ~6.7 MB).
+ *
+ * Face embeddings are stored in a separate Atlas vector index (path: faceEmbedding)
+ * on the {spaceId}_files collection. When a new image is processed:
+ *   1. All faces are detected and embedded.
+ *   2. Each face embedding is searched against the gallery (face-chunk records
+ *      that have a faceEntityId) via $vectorSearch.
+ *   3. If the top match exceeds `confidenceThreshold`, the file is auto-labeled
+ *      with that entity (updateFileMeta({ entityIds })).
+ *   4. Face-chunk records (one per detected face) are stored as
+ *      `{fileId}#face-chunk{N}` with parentFileId, faceEmbedding, and optionally
+ *      faceEntityId when auto-labeled or manually labeled.
+ */
+export interface FaceRecognitionConfig {
+  /**
+   * Master switch. When false, face detection/embedding is skipped entirely.
+   * Default: false (opt-in; requires local model files to be present).
+   */
+  enabled?: boolean;
+  /**
+   * Cosine similarity threshold (0–1) above which an auto-label is applied.
+   * Below this threshold the face is embedded but left unlabeled.
+   * Default: 0.6 (conservative — tune up as gallery grows).
+   */
+  confidenceThreshold?: number;
+  /**
+   * Minimum face bounding box size as a fraction of the image's shorter side (0–1).
+   * Faces smaller than this are skipped (avoids noise from crowd shots).
+   * Default: 0.05 (5% of shorter side).
+   */
+  minFaceSizeFraction?: number;
+  /**
+   * Directory (relative to DATA_ROOT) where the @vladmandic/human WASM model
+   * files are stored. Defaults to "human-models".
+   */
+  modelPath?: string;
 }
 
 // ── Network types ──────────────────────────────────────────────────────────
@@ -657,6 +700,19 @@ export interface FileMetaDoc {
   chunkDurationMs?: number;
   /** Last error message from a failed media embedding job, when embeddingStatus="failed". */
   mediaJobError?: string;
+  // ── Face recognition fields ───────────────────────────────────────────────
+  /**
+   * For face-chunk records: 128d face descriptor from @vladmandic/human FaceRes.
+   * Stored on separate chunk records ({fileId}#face-chunkN) alongside faceEntityId.
+   * Searched via a separate Atlas vector index (path: faceEmbedding).
+   */
+  faceEmbedding?: number[];
+  /** Entity ID matched at embedding time (auto or manual label). */
+  faceEntityId?: string;
+  /** Bounding box of the detected face within the original image [x,y,w,h] as 0–1 fractions. */
+  faceBbox?: [number, number, number, number];
+  /** Recognition confidence score (cosine similarity to gallery match, 0–1). */
+  faceScore?: number;
 }
 
 export interface ConflictDoc {

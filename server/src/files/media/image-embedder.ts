@@ -8,7 +8,8 @@
 
 import { col, mDoc, mFilter } from '../../db/mongo.js';
 import { embed } from '../../brain/embedding.js';
-import { getConfig } from '../../config/loader.js';
+import { getConfig, getMediaEmbeddingConfig } from '../../config/loader.js';
+import { log } from '../../util/log.js';
 import type { FileMetaDoc, AuthorRef } from '../../config/types.js';
 import type { VisionProvider } from './providers.js';
 
@@ -63,6 +64,16 @@ export async function embedImage(
     mDoc<FileMetaDoc>(chunkDoc),
     { upsert: true },
   );
+
+  // Face recognition — run after the caption chunk is stored so the job can
+  // still complete if face detection fails. Non-fatal.
+  const mediaCfg = getMediaEmbeddingConfig();
+  if (mediaCfg.faceRecognition?.enabled) {
+    const { embedFaces } = await import('./face-embedder.js');
+    await embedFaces(spaceId, fileId, imageBytes).catch((err: unknown) => {
+      log.warn(`Face recogniser: embedFaces failed for ${spaceId}/${fileId}: ${err instanceof Error ? err.message : String(err)}`);
+    });
+  }
 
   return caption;
 }

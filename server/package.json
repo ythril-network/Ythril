@@ -1,6 +1,6 @@
 {
   "name": "@ythril/server",
-  "version": "1.3.5",
+  "version": "1.3.6",
   "license": "PolyForm-Small-Business-1.0.0",
   "type": "module",
   "scripts": {
@@ -11,20 +11,22 @@
     "local-connector:start": "node dist/local-agent-connector/index.js"
   },
   "dependencies": {
-    "@mozilla/readability": "^0.6.0",
     "@huggingface/transformers": "^3.8.1",
-    "jsdom": "^29.1.0",
-    "turndown": "^7.2.4",
     "@modelcontextprotocol/sdk": "^1.28.0",
+    "@mozilla/readability": "^0.6.0",
+    "@vladmandic/human": "^3.3.6",
     "bcrypt": "^6.0.0",
     "express": "^5.2.1",
     "express-rate-limit": "^8.3.1",
     "jose": "^6.2.2",
+    "jsdom": "^29.1.0",
     "mongodb": "^7.1.1",
     "multer": "^2.1.1",
     "node-cron": "^4.2.1",
     "otplib": "^13.4.0",
     "prom-client": "^15.1.3",
+    "sharp": "^0.34.5",
+    "turndown": "^7.2.4",
     "uuid": "^13.0.0",
     "zod": "^4.3.6"
   },
@@ -34,6 +36,7 @@
     "@types/jsdom": "^21",
     "@types/multer": "^1",
     "@types/node": "^22",
+    "@types/sharp": "^0.31.1",
     "@types/turndown": "^5",
     "@typescript-eslint/eslint-plugin": "^8",
     "@typescript-eslint/parser": "^8",
@@ -42,6 +45,3 @@
     "typescript": "^5"
   }
 }
-
-
-

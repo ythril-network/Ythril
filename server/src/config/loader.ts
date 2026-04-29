@@ -298,9 +298,9 @@ export function getDataRoot(): string {
 
 // ── Media Embedding Config ─────────────────────────────────────────────────
 
-import type { MediaEmbeddingConfig, MediaProviderConfig } from './types.js';
+import type { MediaEmbeddingConfig, MediaProviderConfig, FaceRecognitionConfig } from './types.js';
 
-const MEDIA_EMBEDDING_DEFAULTS: Required<Omit<MediaEmbeddingConfig, 'vision' | 'stt' | 'ollamaUrl' | 'visionModel' | 'whisperUrl' | 'whisperModel' | 'lockedByInfra'>> = {
+const MEDIA_EMBEDDING_DEFAULTS: Required<Omit<MediaEmbeddingConfig, 'vision' | 'stt' | 'ollamaUrl' | 'visionModel' | 'whisperUrl' | 'whisperModel' | 'lockedByInfra' | 'faceRecognition'>> = {
   // Enabled by default: both K8s manifests (kubernetes/manifests/ollama-deploy.yaml,
   // whisper-deploy.yaml) and the workstation docker-compose.yml ship with bundled
   // ollama + whisper services. The default `vision.baseUrl` / `stt.baseUrl` resolve
@@ -411,5 +411,32 @@ export function getMediaEmbeddingConfig(): MediaEmbeddingConfig {
     maxFileSizeBytes: pick('MAX_FILE_SIZE_BYTES', 'maxFileSizeBytes', base.maxFileSizeBytes, MEDIA_EMBEDDING_DEFAULTS.maxFileSizeBytes),
     stalledJobTimeoutMs: pick('STALLED_JOB_TIMEOUT_MS', 'stalledJobTimeoutMs', base.stalledJobTimeoutMs, MEDIA_EMBEDDING_DEFAULTS.stalledJobTimeoutMs),
     lockedByInfra: locked,
+  };
+}
+
+// ── Face Recognition Config ──────────────────────────────────────────────────
+
+const FACE_RECOGNITION_DEFAULTS: Required<FaceRecognitionConfig> = {
+  enabled: false,
+  confidenceThreshold: 0.6,
+  minFaceSizeFraction: 0.05,
+  modelPath: 'human-models',
+};
+
+/**
+ * Return the resolved face recognition configuration, merging:
+ *   1. `config.json` `mediaEmbedding.faceRecognition` block
+ *   2. Built-in defaults
+ *
+ * Returns defaults with `enabled: false` when no config block is present.
+ */
+export function getFaceRecognitionConfig(): Required<FaceRecognitionConfig> {
+  const mediaCfg = getConfig().mediaEmbedding;
+  const base: FaceRecognitionConfig = mediaCfg?.faceRecognition ?? {};
+  return {
+    enabled: base.enabled ?? FACE_RECOGNITION_DEFAULTS.enabled,
+    confidenceThreshold: base.confidenceThreshold ?? FACE_RECOGNITION_DEFAULTS.confidenceThreshold,
+    minFaceSizeFraction: base.minFaceSizeFraction ?? FACE_RECOGNITION_DEFAULTS.minFaceSizeFraction,
+    modelPath: base.modelPath ?? FACE_RECOGNITION_DEFAULTS.modelPath,
   };
 }

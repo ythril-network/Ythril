@@ -18,6 +18,15 @@
   "ejectedFromNetworks": [],
   "maxUploadBodyBytes": 5368709120,
   "allowInsecurePlaintext": false,
+  "mediaEmbedding": {
+    "enabled": true,
+    "faceRecognition": {
+      "enabled": false,
+      "confidenceThreshold": 0.6,
+      "minFaceSizeFraction": 0.05,
+      "modelPath": "human-models"
+    }
+  },
   "oidc": {
     "enabled": false,
     "issuerUrl": "https://keycloak.example.com/realms/my-realm",

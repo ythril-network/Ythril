@@ -2,7 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs/promises';
 import path from 'path';
 import { getDb, col, mDoc } from '../db/mongo.js';
-import { getConfig, saveConfig, getEmbeddingConfig, getDataRoot } from '../config/loader.js';
+import { getConfig, saveConfig, getEmbeddingConfig, getDataRoot, getFaceRecognitionConfig } from '../config/loader.js';
 import { ensureSpaceFilesDir, writeFile as writeSpaceFile } from '../files/files.js';
 import { log } from '../util/log.js';
 import type { SpaceConfig, SpaceMeta, MemoryDoc, KnowledgeType } from '../config/types.js';
@@ -111,6 +111,12 @@ export async function initSpace(spaceId: string): Promise<void> {
     await ensureVectorSearchIndex(spaceId, suffix, embCfg.dimensions, embCfg.similarity);
   }
 
+  // Face recognition vector index (separate path + index on the files collection)
+  const faceCfg = getFaceRecognitionConfig();
+  if (faceCfg.enabled) {
+    await ensureVectorSearchIndex(spaceId, 'files', 128, 'cosine', 'faceEmbedding', 'faceEmbedding');
+  }
+
   // Ensure files directory exists
   await ensureSpaceFilesDir(spaceId);
 
@@ -142,10 +148,12 @@ async function ensureVectorSearchIndex(
   collectionSuffix: VectorIndexedCollection,
   numDimensions: number,
   similarity: string,
+  vectorPath: string = 'embedding',
+  indexSuffix: string = 'embedding',
 ): Promise<void> {
   const db = getDb();
   const coll = db.collection(`${spaceId}_${collectionSuffix}`);
-  const indexName = `${spaceId}_${collectionSuffix}_embedding`;
+  const indexName = `${spaceId}_${collectionSuffix}_${indexSuffix}`;
 
   // List existing search indexes
   let indexes: Array<{ name: string; status?: string; latestDefinition?: { fields?: Array<{ numDimensions?: number }> } }> = [];
@@ -179,7 +187,7 @@ async function ensureVectorSearchIndex(
     }
   }
 
-  log.debug(`Creating vector search index ${indexName} (${numDimensions}d, ${similarity})`);
+  log.debug(`Creating vector search index ${indexName} (${numDimensions}d, ${similarity}, path: ${vectorPath})`);
   try {
     await coll.createSearchIndex(mDoc({
       name: indexName,
@@ -188,7 +196,7 @@ async function ensureVectorSearchIndex(
         fields: [
           {
             type: 'vector',
-            path: 'embedding',
+            path: vectorPath,
             numDimensions,
             similarity,
           },

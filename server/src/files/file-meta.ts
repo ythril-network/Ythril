@@ -163,6 +163,19 @@ export async function updateFileMeta(
     mFilter<FileMetaDoc>({ _id: normalised }),
     mUpdate<FileMetaDoc>({ $set }),
   );
+
+  // Propagate entity label to face-chunk records so they enter the gallery.
+  // Only fires when entityIds is non-empty AND face recognition is enabled.
+  if (opts.entityIds !== undefined && opts.entityIds.length > 0) {
+    try {
+      const { getFaceRecognitionConfig } = await import('../config/loader.js');
+      if (getFaceRecognitionConfig().enabled) {
+        const { propagateFaceLabel } = await import('./media/face-embedder.js');
+        await propagateFaceLabel(spaceId, normalised, opts.entityIds[0]!);
+      }
+    } catch { /* non-fatal — face label propagation must never block file meta write */ }
+  }
+
   return col<FileMetaDoc>(`${spaceId}_files`).findOne(mFilter<FileMetaDoc>({ _id: normalised })) as Promise<FileMetaDoc | null>;
 }
 
