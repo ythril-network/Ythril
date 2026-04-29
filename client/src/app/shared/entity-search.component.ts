@@ -200,11 +200,11 @@ import { TranslocoPipe } from '@jsverse/transloco';
         autocomplete="off"
       />
       <div class="pill-group" [attr.title]="'common.searchMode.tooltip' | transloco">
-        <button [class.active]="searchMode() === 'name'"     (click)="setMode('name')">{{ 'common.sortAZ' | transloco }}</button>
-        <button [class.active]="searchMode() === 'semantic'" (click)="setMode('semantic')">{{ 'entitySearch.semantic' | transloco }}</button>
+        <button type="button" [class.active]="searchMode() === 'name'"     (click)="setMode('name')">{{ 'common.sortAZ' | transloco }}</button>
+        <button type="button" [class.active]="searchMode() === 'semantic'" (click)="setMode('semantic')">{{ 'entitySearch.semantic' | transloco }}</button>
       </div>
       @if (mode === 'bar' && displayValue()) {
-        <button class="btn-clear" (click)="clear()">{{ 'entitySearch.clearButton' | transloco }}</button>
+        <button type="button" class="btn-clear" (click)="clear()">{{ 'entitySearch.clearButton' | transloco }}</button>
       }
     </div>
 
