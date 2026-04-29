@@ -165,14 +165,17 @@ export async function updateFileMeta(
   );
 
   // Propagate entity label to face-chunk records so they enter the gallery.
-  // Only fires when:
-  //  - entityIds is non-empty (a label is being applied)
-  //  - face recognition is enabled
-  //  - the file has EXACTLY ONE face-chunk record — if there are multiple faces
-  //    we cannot determine which face the entity refers to, so we don't guess.
-  //    (Single-face constraint also prevents object/place/non-person entities
-  //     from contaminating the face gallery when linking them to group photos.)
-  if (opts.entityIds !== undefined && opts.entityIds.length > 0) {
+  // Strict guard: both conditions must hold simultaneously:
+  //  1. Exactly ONE face-chunk on the file — if there are multiple faces we
+  //     cannot tell which face the entity refers to.
+  //  2. Exactly ONE entity being linked — if the file is tagged with both
+  //     "John" and "London" we cannot tell which entity is the person, so
+  //     we refuse to guess rather than risk gallery poisoning.
+  //
+  // Consequence: a solo portrait tagged with a single person entity is the
+  // only path that feeds the face gallery via manual labeling. Everything
+  // else still gets face-embedded (searchable) but won't be a training example.
+  if (opts.entityIds !== undefined && opts.entityIds.length === 1) {
     try {
       const { getFaceRecognitionConfig } = await import('../config/loader.js');
       if (getFaceRecognitionConfig().enabled) {
