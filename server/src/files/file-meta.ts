@@ -166,36 +166,37 @@ export async function updateFileMeta(
 
   // Propagate entity label to face-chunk records so they enter the gallery.
   // Guards (ALL must hold):
-  //  1. Exactly ONE entity is being linked — multiple entities means we can't
-  //     tell which one is the person in the photo.
-  //  2. That entity's type is in personEntityTypes (default: ["person"]) —
-  //     prevents locations, objects, events etc. from ever entering the gallery
-  //     regardless of face count.
-  //  3. Exactly ONE face-chunk on the file — multiple faces means we can't
+  //  1. Exactly ONE person-type entity is being linked — filter entityIds to
+  //     those whose type is in personEntityTypes (default: ["person"]).
+  //     Multiple person entities = ambiguous. Zero = no person linked.
+  //     Non-person entities (locations, objects…) are completely ignored.
+  //  2. Exactly ONE face-chunk on the file — multiple faces means we can't
   //     tell which face belongs to the entity.
   //
-  // Result: only an unambiguous solo portrait tagged with a single person
-  // entity feeds the gallery. Everything else remains face-embedded and
-  // auto-labelable but never acts as a training source.
-  if (opts.entityIds !== undefined && opts.entityIds.length === 1) {
+  // Examples:
+  //   [john(person)]              → 1 person entity, passes
+  //   [john(person), london(loc)] → 1 person entity (london filtered out), passes
+  //   [john(person), alice(person)] → 2 person entities, ambiguous, skipped
+  //   [london(location)]          → 0 person entities, skipped
+  if (opts.entityIds !== undefined && opts.entityIds.length > 0) {
     try {
       const { getFaceRecognitionConfig } = await import('../config/loader.js');
       const faceCfg = getFaceRecognitionConfig();
       if (faceCfg.enabled) {
-        // Resolve the entity to check its type
-        const entity = await col<EntityDoc>(`${spaceId}_entities`).findOne(
-          mFilter<EntityDoc>({ _id: opts.entityIds[0]! }),
-          { projection: { type: 1 } },
-        ) as EntityDoc | null;
-        const isPersonType = entity != null &&
-          faceCfg.personEntityTypes.some(t => t.toLowerCase() === entity.type.toLowerCase());
-        if (isPersonType) {
+        // Resolve all linked entities and filter to person types
+        const entities = await col<EntityDoc>(`${spaceId}_entities`)
+          .find(mFilter<EntityDoc>({ _id: { $in: opts.entityIds } }), { projection: { _id: 1, type: 1 } })
+          .toArray() as Array<{ _id: string; type: string }>;
+        const personEntities = entities.filter(e =>
+          faceCfg.personEntityTypes.some(t => t.toLowerCase() === e.type.toLowerCase()),
+        );
+        if (personEntities.length === 1) {
           const faceChunkCount = await col<FileMetaDoc>(`${spaceId}_files`).countDocuments(
             mFilter<FileMetaDoc>({ parentFileId: normalised, faceEmbedding: { $exists: true } }),
           );
           if (faceChunkCount === 1) {
             const { propagateFaceLabel } = await import('./media/face-embedder.js');
-            await propagateFaceLabel(spaceId, normalised, opts.entityIds[0]!);
+            await propagateFaceLabel(spaceId, normalised, personEntities[0]!._id);
           }
         }
       }
