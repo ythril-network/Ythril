@@ -12,6 +12,7 @@
  * pattern in api/files.ts.
  */
 
+import path from 'node:path';
 import { col, mFilter, mDoc, mUpdate } from '../db/mongo.js';
 import { embed } from '../brain/embedding.js';
 import { getConfig } from '../config/loader.js';
@@ -164,43 +165,56 @@ export async function updateFileMeta(
     mUpdate<FileMetaDoc>({ $set }),
   );
 
-  // Propagate entity label to face-chunk records so they enter the gallery.
-  // Guards (ALL must hold):
-  //  1. Exactly ONE person-type entity is being linked — filter entityIds to
-  //     those whose type is in personEntityTypes (default: ["person"]).
-  //     Multiple person entities = ambiguous. Zero = no person linked.
-  //     Non-person entities (locations, objects…) are completely ignored.
-  //  2. Exactly ONE face-chunk on the file — multiple faces means we can't
-  //     tell which face belongs to the entity.
+  // Face recognition side-effects when entity links change.
   //
+  // Two cases:
+  //   A) Image not yet processed (no face-chunk records) AND reprocessSyncedImages=true
+  //      → enqueue a media job so face embeddings are produced.  Once the job runs, a
+  //        subsequent label propagation (case B) may fire automatically via image-embedder.
+  //   B) Exactly ONE person-type entity AND exactly ONE face-chunk
+  //      → propagate that entity as the face label for the chunk (gallery entry).
+  //
+  // Non-person entities are invisible to both paths.
   // Examples:
-  //   [john(person)]              → 1 person entity, passes
-  //   [john(person), london(loc)] → 1 person entity (london filtered out), passes
-  //   [john(person), alice(person)] → 2 person entities, ambiguous, skipped
-  //   [london(location)]          → 0 person entities, skipped
+  //   [john(person)]                → case B if 1 face chunk, case A if 0
+  //   [john(person), london(loc)]   → london ignored; same as above for john
+  //   [john(person), alice(person)] → 2 persons — ambiguous, skip case B; still runs case A
+  //   [london(location)]            → 0 persons — skip case B; still runs case A
   if (opts.entityIds !== undefined && opts.entityIds.length > 0) {
     try {
       const { getFaceRecognitionConfig } = await import('../config/loader.js');
       const faceCfg = getFaceRecognitionConfig();
       if (faceCfg.enabled) {
-        // Resolve all linked entities and filter to person types
-        const entities = await col<EntityDoc>(`${spaceId}_entities`)
-          .find(mFilter<EntityDoc>({ _id: { $in: opts.entityIds } }), { projection: { _id: 1, type: 1 } })
-          .toArray() as Array<{ _id: string; type: string }>;
-        const personEntities = entities.filter(e =>
-          faceCfg.personEntityTypes.some(t => t.toLowerCase() === e.type.toLowerCase()),
+        const faceChunkCount = await col<FileMetaDoc>(`${spaceId}_files`).countDocuments(
+          mFilter<FileMetaDoc>({ parentFileId: normalised, faceEmbedding: { $exists: true } }),
         );
-        if (personEntities.length === 1) {
-          const faceChunkCount = await col<FileMetaDoc>(`${spaceId}_files`).countDocuments(
-            mFilter<FileMetaDoc>({ parentFileId: normalised, faceEmbedding: { $exists: true } }),
+
+        if (faceChunkCount === 0 && faceCfg.reprocessSyncedImages) {
+          // Case A: image not yet processed by face recognizer — enqueue for processing.
+          const { resolveInputFormat } = await import('../files/converters/pipeline.js');
+          if (resolveInputFormat(normalised) === 'image') {
+            const { enqueueMediaJob } = await import('./media/job-queue.js');
+            const ext = path.extname(normalised).toLowerCase();
+            const mimeType = (({ '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+              '.webp': 'image/webp', '.gif': 'image/gif', '.bmp': 'image/bmp',
+              '.tiff': 'image/tiff', '.tif': 'image/tiff' }) as Record<string, string>)[ext] ?? 'image/jpeg';
+            await enqueueMediaJob(spaceId, normalised, mimeType, 'image');
+          }
+        } else if (faceChunkCount === 1) {
+          // Case B: face chunks exist — propagate label if exactly 1 person entity.
+          const entities = await col<EntityDoc>(`${spaceId}_entities`)
+            .find(mFilter<EntityDoc>({ _id: { $in: opts.entityIds } }), { projection: { _id: 1, type: 1 } })
+            .toArray() as Array<{ _id: string; type: string }>;
+          const personEntities = entities.filter(e =>
+            faceCfg.personEntityTypes.some(t => t.toLowerCase() === e.type.toLowerCase()),
           );
-          if (faceChunkCount === 1) {
+          if (personEntities.length === 1) {
             const { propagateFaceLabel } = await import('./media/face-embedder.js');
             await propagateFaceLabel(spaceId, normalised, personEntities[0]!._id);
           }
         }
       }
-    } catch { /* non-fatal — face label propagation must never block file meta write */ }
+    } catch { /* non-fatal — face side-effects must never block file meta write */ }
   }
 
   return col<FileMetaDoc>(`${spaceId}_files`).findOne(mFilter<FileMetaDoc>({ _id: normalised })) as Promise<FileMetaDoc | null>;

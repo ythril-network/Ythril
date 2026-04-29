@@ -422,6 +422,7 @@ const FACE_RECOGNITION_DEFAULTS: Required<FaceRecognitionConfig> = {
   minFaceSizeFraction: 0.05,
   modelPath: 'human-models',
   personEntityTypes: ['person'],
+  reprocessSyncedImages: true,
 };
 
 /**
@@ -440,5 +441,6 @@ export function getFaceRecognitionConfig(): Required<FaceRecognitionConfig> {
     minFaceSizeFraction: base.minFaceSizeFraction ?? FACE_RECOGNITION_DEFAULTS.minFaceSizeFraction,
     modelPath: base.modelPath ?? FACE_RECOGNITION_DEFAULTS.modelPath,
     personEntityTypes: base.personEntityTypes ?? FACE_RECOGNITION_DEFAULTS.personEntityTypes,
+    reprocessSyncedImages: base.reprocessSyncedImages ?? FACE_RECOGNITION_DEFAULTS.reprocessSyncedImages,
   };
 }

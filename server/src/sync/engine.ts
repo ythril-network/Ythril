@@ -15,7 +15,7 @@
  *   and pulls from its parent.
  */
 
-import { getConfig, saveConfig, getSecrets } from '../config/loader.js';
+import { getConfig, saveConfig, getSecrets, getFaceRecognitionConfig } from '../config/loader.js';
 import { col, mFilter, mDoc } from '../db/mongo.js';
 import { applyRemoteTombstone, listTombstones } from '../brain/tombstones.js';
 import { recordSyncResult, type SyncCounts } from './history.js';
@@ -23,6 +23,8 @@ import { buildFileManifest } from '../files/manifest.js';
 import { log } from '../util/log.js';
 import { bumpSeq } from '../util/seq.js';
 import { concludeRoundIfReady, sendMemberRemovedNotify } from '../api/sync.js';
+import { enqueueMediaJob } from '../files/media/job-queue.js';
+import { resolveInputFormat } from '../files/converters/pipeline.js';
 import {
   syncCyclesTotal,
   syncItemsPulledTotal,
@@ -468,6 +470,29 @@ async function runSyncForMember(
     if (shouldPull || shouldPush) {
       const fc = await syncFiles(member, spaceId, remoteSpaceId, net.id, headers, fetchOpts, shouldPull, shouldPush);
       pulled.files += fc.pulledFiles; pushed.files += fc.pushedFiles;
+
+      // Re-enqueue newly-pulled image files for face recognition so secondary
+      // instances can build their own gallery from synced content.
+      // Gated on faceRecognition.enabled && reprocessSyncedImages (default: true).
+      if (fc.pulledPaths.length > 0) {
+        const faceCfg = getFaceRecognitionConfig();
+        if (faceCfg.enabled && faceCfg.reprocessSyncedImages) {
+          for (const p of fc.pulledPaths) {
+            if (resolveInputFormat(p) === 'image') {
+              const ext = path.extname(p).toLowerCase();
+              const mimeType = (({
+                '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+                '.png': 'image/png', '.webp': 'image/webp',
+                '.gif': 'image/gif', '.bmp': 'image/bmp',
+                '.tiff': 'image/tiff', '.tif': 'image/tiff',
+              }) as Record<string, string>)[ext] ?? 'image/jpeg';
+              enqueueMediaJob(spaceId, p, mimeType, 'image').catch(err =>
+                log.warn(`Face reprocess enqueue for ${spaceId}/${p}: ${err}`),
+              );
+            }
+          }
+        }
+      }
     }
 
     // Merkle integrity check (opt-in: network.merkle === true)
@@ -959,8 +984,9 @@ async function syncFiles(
   opts: () => RequestInit,
   doPull = true,
   doPush = true,
-): Promise<{ pulledFiles: number; pushedFiles: number }> {
+): Promise<{ pulledFiles: number; pushedFiles: number; pulledPaths: string[] }> {
   let pulledFiles = 0, pushedFiles = 0;
+  const pulledPaths: string[] = [];
   try {
     // ── 1. Apply peer's file tombstones (deletions) first ─────────────────
     // Fetch tombstones before the manifest so that files deleted on the peer
@@ -1016,9 +1042,9 @@ async function syncFiles(
     // ── 2. Fetch peer manifest and download new/changed files ─────────────
     // Only fetch the peer manifest if we need to pull or push (manifest comparison
     // drives both directions). When neither direction needs manifest, skip entirely.
-    if (!doPull && !doPush) return { pulledFiles, pushedFiles };
+    if (!doPull && !doPush) return { pulledFiles, pushedFiles, pulledPaths };
     const resp = await fetch(`${member.url}/api/sync/manifest?spaceId=${encodeURIComponent(remoteSpaceId)}&networkId=${encodeURIComponent(networkId)}`, opts());
-    if (!resp.ok) { log.warn(`File manifest from ${member.label}: ${resp.status}`); return { pulledFiles, pushedFiles }; }
+    if (!resp.ok) { log.warn(`File manifest from ${member.label}: ${resp.status}`); return { pulledFiles, pushedFiles, pulledPaths }; }
     const { manifest } = await resp.json() as { manifest: { path: string; sha256: string; size: number; modifiedAt: string }[] };
 
     // Build our manifest for comparison
@@ -1049,6 +1075,7 @@ async function syncFiles(
           await fs.mkdir(path.dirname(absPath), { recursive: true });
           await fs.writeFile(absPath, buf);
           await upsertFileMeta(spaceId, remote.path, buf.length).catch(() => { /* best-effort */ });
+          pulledPaths.push(remote.path);
         } else {
           // File exists locally with a different hash — keep local, save incoming
           // under a conflict-copy name so the user can decide which version to keep.
@@ -1129,7 +1156,7 @@ async function syncFiles(
   } catch (err) {
     log.warn(`syncFiles for ${member.label} space ${spaceId}: ${err}`);
   }
-  return { pulledFiles, pushedFiles };
+  return { pulledFiles, pushedFiles, pulledPaths };
 }
 
 // ── Local upsert helpers ────────────────────────────────────────────────────

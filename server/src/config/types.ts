@@ -350,6 +350,17 @@ export interface FaceRecognitionConfig {
    * convention (e.g. ["person", "contact", "employee"]).
    */
   personEntityTypes?: string[];
+  /**
+   * When true, image files downloaded during a sync cycle (or any image whose
+   * entity links are manually updated) are automatically re-enqueued for media
+   * embedding if they have not yet been processed by the face recognizer.
+   *
+   * This allows a secondary instance to build its own face gallery from images
+   * that arrived via sync rather than direct upload.
+   *
+   * Default: true (opt-out with false to keep gallery processing local-origin only).
+   */
+  reprocessSyncedImages?: boolean;
 }
 
 // ── Network types ──────────────────────────────────────────────────────────

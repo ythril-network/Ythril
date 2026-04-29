@@ -25,7 +25,8 @@
       "confidenceThreshold": 0.6,
       "minFaceSizeFraction": 0.05,
       "modelPath": "human-models",
-      "personEntityTypes": ["person"]
+      "personEntityTypes": ["person"],
+      "reprocessSyncedImages": true
     }
   },
   "oidc": {
