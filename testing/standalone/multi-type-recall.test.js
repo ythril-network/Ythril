@@ -359,7 +359,7 @@ function memoryEmbedText(fact, tags = [], entityNames = [], description, propert
   if (description?.trim()) parts.push(description.trim());
   if (properties) {
     const propEntries = Object.entries(properties);
-    if (propEntries.length > 0) parts.push(propEntries.map(([k, v]) => `${k} ${String(v)}`).join(' '));
+    if (propEntries.length > 0) parts.push(propEntries.map(([_k, v]) => String(v)).join(' '));
   }
   return parts.join(' ');
 }
@@ -369,7 +369,7 @@ function entityEmbedText(name, type, tags = [], description, properties = {}) {
   if (tags.length > 0) parts.push(tags.join(' '));
   if (description?.trim()) parts.push(description.trim());
   const propEntries = Object.entries(properties);
-  if (propEntries.length > 0) parts.push(propEntries.map(([k, v]) => `${k} ${String(v)}`).join(' '));
+  if (propEntries.length > 0) parts.push(propEntries.map(([_k, v]) => String(v)).join(' '));
   return parts.join(' ');
 }
 
@@ -425,14 +425,14 @@ describe('Embedding text derivation — memory', () => {
   it('properties are appended last', () => {
     assert.equal(
       memoryEmbedText('Redis TTL is 30 minutes', [], [], undefined, { aspect: 'cache', severity: 'low' }),
-      'Redis TTL is 30 minutes aspect cache severity low',
+      'Redis TTL is 30 minutes cache low',
     );
   });
 
   it('combines all fields in correct order', () => {
     assert.equal(
       memoryEmbedText('Redis TTL is 30 minutes', ['infra'], ['portal-backend'], 'Session timeout', { aspect: 'cache' }),
-      'infra portal-backend Redis TTL is 30 minutes Session timeout aspect cache',
+      'infra portal-backend Redis TTL is 30 minutes Session timeout cache',
     );
   });
 });
@@ -456,17 +456,17 @@ describe('Embedding text derivation — entity', () => {
     );
   });
 
-  it('includes properties as key-value pairs', () => {
+  it('includes property values', () => {
     assert.equal(
       entityEmbedText('portal-backend', 'service', [], undefined, { language: 'Go', port: 8080 }),
-      'portal-backend service language Go port 8080',
+      'portal-backend service Go 8080',
     );
   });
 
   it('combines all fields', () => {
     assert.equal(
       entityEmbedText('portal-backend', 'service', ['backend'], 'Main API', { language: 'Go' }),
-      'portal-backend service backend Main API language Go',
+      'portal-backend service backend Main API Go',
     );
   });
 });

@@ -113,7 +113,7 @@ function entityEmbedText(
   if (description?.trim()) parts.push(description.trim());
   const propEntries = Object.entries(properties);
   if (propEntries.length > 0) {
-    parts.push(propEntries.map(([k, v]) => `${k} ${String(v)}`).join(' '));
+    parts.push(propEntries.map(([_k, v]) => String(v)).join(' '));
   }
   return parts.join(' ');
 }

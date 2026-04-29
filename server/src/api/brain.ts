@@ -157,7 +157,7 @@ brainRouter.post('/:spaceId/memories', globalRateLimit, requireSpaceAuth, denyRe
   if (safeDesc?.trim()) embedParts.push(safeDesc.trim());
   if (safeProps) {
     const propEntries = Object.entries(safeProps);
-    if (propEntries.length > 0) embedParts.push(propEntries.map(([k, v]) => `${k} ${String(v)}`).join(' '));
+    if (propEntries.length > 0) embedParts.push(propEntries.map(([_k, v]) => String(v)).join(' '));
   }
 
   // Attempt embedding; fall back to empty vector if server not configured/reachable
@@ -1677,7 +1677,7 @@ brainRouter.post('/spaces/:spaceId/reindex', globalRateLimit, requireSpaceAuth, 
                 if (doc.description?.trim()) parts.push(doc.description.trim());
                 if (doc.properties) {
                   const propEntries = Object.entries(doc.properties);
-                  if (propEntries.length > 0) parts.push(propEntries.map(([k, v]) => `${k} ${String(v)}`).join(' '));
+                  if (propEntries.length > 0) parts.push(propEntries.map(([_k, v]) => String(v)).join(' '));
                 }
                 const text = parts.join(' ');
                 const result = await embed(text);
@@ -1712,7 +1712,7 @@ brainRouter.post('/spaces/:spaceId/reindex', globalRateLimit, requireSpaceAuth, 
                 if (doc.description?.trim()) parts.push(doc.description.trim());
                 if (doc.properties) {
                   const propEntries = Object.entries(doc.properties);
-                  if (propEntries.length > 0) parts.push(propEntries.map(([k, v]) => `${k} ${String(v)}`).join(' '));
+                  if (propEntries.length > 0) parts.push(propEntries.map(([_k, v]) => String(v)).join(' '));
                 }
                 const result = await embed(parts.join(' '));
                 await col<EntityDoc>(`${mid}_entities`).updateOne(
