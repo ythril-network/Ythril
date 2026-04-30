@@ -112,7 +112,7 @@ describe('Space deletion — full cleanup', () => {
       body: fileContent,
       headers: { 'Content-Type': 'text/plain' },
     });
-    assert.ok(uploadR.status === 200 || uploadR.status === 201, `Upload: got ${uploadR.status}`);
+    assert.ok(uploadR.status === 200 || uploadR.status === 201 || uploadR.status === 202, `Upload: got ${uploadR.status}`);
 
     // 3. Verify file exists
     const preRead = await reqJson(INSTANCES.a, token, `/api/files/${spaceId}?path=deletion-test.txt`);

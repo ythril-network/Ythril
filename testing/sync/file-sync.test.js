@@ -105,7 +105,7 @@ describe('File sync — cross-instance', () => {
     const content = `content-${RUN}-new`;
 
     const upload = await uploadFile(INSTANCES.a, tokenA, 'general', filePath, content);
-    assert.equal(upload.status, 201, `Upload on A: ${JSON.stringify(upload.body)}`);
+    assert.ok([201, 202].includes(upload.status), `Upload on A: ${JSON.stringify(upload.body)}`);
 
     await triggerAndWait(networkId, tokenA, async () => {
       const r = await downloadFile(INSTANCES.b, tokenB, 'general', filePath);
@@ -173,8 +173,8 @@ describe('File sync — cross-instance', () => {
     // Write the SAME path with DIFFERENT content on both instances BEFORE syncing
     const upA = await uploadFile(INSTANCES.a, tokenA, 'general', filePath, contentA);
     const upB = await uploadFile(INSTANCES.b, tokenB, 'general', filePath, contentB);
-    assert.equal(upA.status, 201, `Upload on A: ${JSON.stringify(upA.body)}`);
-    assert.equal(upB.status, 201, `Upload on B: ${JSON.stringify(upB.body)}`);
+    assert.ok([201, 202].includes(upA.status), `Upload on A: ${JSON.stringify(upA.body)}`);
+    assert.ok([201, 202].includes(upB.status), `Upload on B: ${JSON.stringify(upB.body)}`);
 
     // Trigger sync: A pulls from B, detects hash mismatch, should create conflict copy
     let conflictFound = false;

@@ -351,14 +351,14 @@ describe('Proxy spaces', () => {
       const r = await post(BASE, tokenA, `/api/files/${PROXY}?path=proxy-alpha.txt&targetSpace=${SPACE_A}`, {
         content: 'alpha file content', encoding: 'utf8',
       });
-      assert.equal(r.status, 201, JSON.stringify(r.body));
+      assert.ok([201, 202].includes(r.status), JSON.stringify(r.body));
     });
 
     it('Write file to beta via proxy', async () => {
       const r = await post(BASE, tokenA, `/api/files/${PROXY}?path=proxy-beta.txt&targetSpace=${SPACE_B}`, {
         content: 'beta file content', encoding: 'utf8',
       });
-      assert.equal(r.status, 201, JSON.stringify(r.body));
+      assert.ok([201, 202].includes(r.status), JSON.stringify(r.body));
     });
 
     it('Read file from alpha via proxy', async () => {
@@ -427,7 +427,7 @@ describe('Proxy spaces', () => {
       const r = await post(BASE, tokenA, `/api/files/${SPACE_B}?path=direct.txt`, {
         content: 'direct content', encoding: 'utf8',
       });
-      assert.equal(r.status, 201, JSON.stringify(r.body));
+      assert.ok([201, 202].includes(r.status), JSON.stringify(r.body));
     });
   });
 

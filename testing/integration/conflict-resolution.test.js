@@ -154,9 +154,9 @@ describe('Conflict Resolution Actions', () => {
 
       // Create both files
       const u1 = await uploadFile('general', origPath, 'local version');
-      assert.equal(u1.status, 201, `Upload original: ${JSON.stringify(u1.body)}`);
+      assert.ok([201, 202].includes(u1.status), `Upload original: ${JSON.stringify(u1.body)}`);
       const u2 = await uploadFile('general', confPath, 'incoming version');
-      assert.equal(u2.status, 201, `Upload conflict: ${JSON.stringify(u2.body)}`);
+      assert.ok([201, 202].includes(u2.status), `Upload conflict: ${JSON.stringify(u2.body)}`);
 
       // Seed conflict record
       const conflictId = await seedConflict('general', origPath, confPath);

@@ -264,6 +264,13 @@ export interface FileMeta {
   sizeBytes: number;
   createdAt: string;
   updatedAt: string;
+  /** Async embedding lifecycle status (text documents and media files).
+   *  "pending" → queued; "processing" → being embedded; "complete" → done;
+   *  "failed" → all retries exhausted; "skipped" / "disabled" → media-only states. */
+  embeddingStatus?: 'pending' | 'processing' | 'complete' | 'failed' | 'skipped' | 'disabled';
+  /** Error message when embeddingStatus is "failed". */
+  mediaJobError?: string;
+  chunkCount?: number;
 }
 
 export interface UploadProgress {

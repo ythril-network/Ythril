@@ -44,7 +44,7 @@ describe('File conversion pipeline — inputFormat bypass', () => {
     assert.ok(r.body?.sha256);
   });
 
-  it('Markdown file (.md extension) is processed via in-process path, returns 201', async () => {
+  it('Markdown file (.md extension) is processed asynchronously, returns 202', async () => {
     const filePath = `conv-md-test-${Date.now()}.md`;
     const content = '# Document Title\n\nIntroduction paragraph.\n\n## Section One\n\n' +
       'This is the first section with enough content to exceed the minimum chunk body length ' +
@@ -52,21 +52,23 @@ describe('File conversion pipeline — inputFormat bypass', () => {
       '## Section Two\n\nThis is the second section with enough content to pass the minimum ' +
       'body length threshold and produce a second chunk record.';
     const r = await uploadJson(tokenA, 'general', filePath, { content, encoding: 'utf8' });
-    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.equal(r.status, 202, JSON.stringify(r.body));
     assert.ok(r.body?.sha256);
+    assert.equal(r.body?.embeddingStatus, 'pending');
   });
 
-  it('Plain text file (.txt extension) is processed via in-process path, returns 201', async () => {
+  it('Plain text file (.txt extension) is processed asynchronously, returns 202', async () => {
     const filePath = `conv-txt-test-${Date.now()}.txt`;
     const content = 'First paragraph of plain text content that goes on for a while.\n\n' +
       'Second paragraph with different information.\n\n' +
       'Third paragraph completing the document.';
     const r = await uploadJson(tokenA, 'general', filePath, { content, encoding: 'utf8' });
-    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.equal(r.status, 202, JSON.stringify(r.body));
     assert.ok(r.body?.sha256);
+    assert.equal(r.body?.embeddingStatus, 'pending');
   });
 
-  it('HTML file with inputFormat "html" is processed in-process, returns 201', async () => {
+  it('HTML file with inputFormat "html" is processed asynchronously, returns 202', async () => {
     const filePath = `conv-html-test-${Date.now()}.html`;
     const html = `<!DOCTYPE html><html><head><title>Test Article</title></head><body>
       <article>
@@ -81,8 +83,9 @@ describe('File conversion pipeline — inputFormat bypass', () => {
       encoding: 'base64',
       inputFormat: 'html',
     });
-    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.equal(r.status, 202, JSON.stringify(r.body));
     assert.ok(r.body?.sha256);
+    assert.equal(r.body?.embeddingStatus, 'pending');
   });
 
   it('PDF uploaded with inputFormat "text" (explicit bypass) does not call sidecar, returns 201', async () => {
@@ -96,13 +99,16 @@ describe('File conversion pipeline — inputFormat bypass', () => {
     assert.ok(r.body?.sha256);
   });
 
-  it('PDF with auto format and unavailable sidecar: write succeeds, conversionError set', async () => {
+  it('PDF with auto format and unavailable sidecar: write succeeds with async embedding queued', async () => {
     const filePath = `conv-pdf-no-sidecar-${Date.now()}.pdf`;
     const r = await uploadJson(tokenA, 'general', filePath, {
       content: Buffer.from('%PDF-1.4 test').toString('base64'),
       encoding: 'base64',
     });
-    assert.equal(r.status, 201, `Expected 201 even with sidecar down, got ${r.status}: ${JSON.stringify(r.body)}`);
+    // PDF auto-format is now enqueued for async embedding, so returns 202 Accepted immediately.
+    // The sidecar being unavailable is handled by the background worker, not the upload handler.
+    assert.equal(r.status, 202, `Expected 202 for async PDF embedding, got ${r.status}: ${JSON.stringify(r.body)}`);
     assert.ok(r.body?.sha256);
+    assert.equal(r.body?.embeddingStatus, 'pending');
   });
 });

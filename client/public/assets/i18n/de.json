@@ -310,6 +310,8 @@
   "brain.fileMeta.removeTitle": "Metadatensatz entfernen",
   "brain.fileMeta.removeAriaLabel": "Metadatensatz entfernen",
   "brain.fileMeta.openInFilesTabTitle": "Im Dateien-Tab \u00f6ffnen",
+  "brain.fileMeta.embedding": "Einbettung\u2026",
+  "brain.fileMeta.embeddingFailed": "Einbettung fehlgeschlagen",
   "brain.fileMeta.picker.searchMemories": "Erinnerungen suchen\u2026",
   "brain.fileMeta.picker.searchChrono": "Chrono suchen\u2026",
   "graph.toolbar.depth": "Tiefe",

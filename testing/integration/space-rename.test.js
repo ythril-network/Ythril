@@ -90,7 +90,7 @@ describe('Space rename', () => {
     const writeR = await post(INSTANCES.a, tokenA, `/api/files/${oldId}?path=${encodeURIComponent('test-file.txt')}`, {
       content: 'file rename test content',
     });
-    assert.ok([200, 201].includes(writeR.status), `File write: ${JSON.stringify(writeR.body)}`);
+    assert.ok([200, 201, 202].includes(writeR.status), `File write: ${JSON.stringify(writeR.body)}`);
 
     // Rename
     const renameR = await patch(INSTANCES.a, tokenA, `/api/spaces/${oldId}/rename`, { newId });

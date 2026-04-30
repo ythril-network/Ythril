@@ -202,11 +202,11 @@ describe('File metadata — injection and oversized field rejection', () => {
     const filePath = `rt-meta-tag-injection-${RUN}.txt`;
     const injectedTag = '{"$gt":""}';
     const r = await uploadWithMeta(filePath, 'injection test', [injectedTag]);
-    // Server should accept (200/201) or reject with 400 — never 500
-    assert.ok(r.status === 201 || r.status === 400,
+    // Server should accept (200/201/202) or reject with 400 — never 500
+    assert.ok(r.status === 201 || r.status === 202 || r.status === 400,
       `Expected 201 or 400, got ${r.status}: ${JSON.stringify(r.body)}`);
 
-    if (r.status === 201) {
+    if (r.status === 201 || r.status === 202) {
       // The tag must be returned as a literal string, not cause a query error
       const q = await queryByTag(injectedTag);
       assert.ok(q.status === 200,
@@ -218,10 +218,10 @@ describe('File metadata — injection and oversized field rejection', () => {
     const filePath = `rt-meta-desc-injection-${RUN}.txt`;
     const injectedDesc = '{"$where":"function(){return true;}"}';
     const r = await uploadWithMeta(filePath, injectedDesc, []);
-    assert.ok(r.status === 201 || r.status === 400,
+    assert.ok(r.status === 201 || r.status === 202 || r.status === 400,
       `Expected 201 or 400, got ${r.status}: ${JSON.stringify(r.body)}`);
 
-    if (r.status === 201) {
+    if (r.status === 201 || r.status === 202) {
       // Verify description is stored verbatim
       const url = `${INSTANCES.a}/api/brain/spaces/general/files?path=${encodeURIComponent(filePath)}`;
       const q = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });

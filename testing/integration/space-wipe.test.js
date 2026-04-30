@@ -65,7 +65,7 @@ describe('Space wipe — full wipe', () => {
       body: 'content to wipe',
       headers: { 'Content-Type': 'text/plain' },
     });
-    assert.ok(fileR.status === 200 || fileR.status === 201, `File upload: ${fileR.status}`);
+    assert.ok(fileR.status === 200 || fileR.status === 201 || fileR.status === 202, `File upload: ${fileR.status}`);
 
     // Verify pre-wipe stats
     const preStats = await get(INSTANCES.a, adminToken, `/api/brain/spaces/${spaceId}/stats`);
@@ -208,7 +208,7 @@ describe('Space wipe — partial wipe (by type)', () => {
       body: 'file content',
       headers: { 'Content-Type': 'text/plain' },
     });
-    assert.ok(fileR.status === 200 || fileR.status === 201, `Upload: ${fileR.status}`);
+    assert.ok(fileR.status === 200 || fileR.status === 201 || fileR.status === 202, `Upload: ${fileR.status}`);
 
     // Seed a memory so we can check it survives
     await post(INSTANCES.a, adminTok, `/api/brain/${spaceId}/memories`, { fact: 'Surviving memory', tags: [] });

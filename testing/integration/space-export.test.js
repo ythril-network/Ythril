@@ -137,7 +137,7 @@ describe('Space export — basic export', () => {
       body: 'file content for export',
       headers: { 'Content-Type': 'text/plain' },
     });
-    assert.ok(fileR.status === 200 || fileR.status === 201, `Upload: ${fileR.status}`);
+    assert.ok(fileR.status === 200 || fileR.status === 201 || fileR.status === 202, `Upload: ${fileR.status}`);
 
     const exportR = await get(INSTANCES.a, adminToken, `/api/admin/spaces/${spaceId}/export`);
     assert.equal(exportR.status, 200);

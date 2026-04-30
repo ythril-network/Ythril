@@ -180,10 +180,10 @@ describe('Conflicts API â€” seeded via file sync hash mismatch', () => {
     });
 
     const rA = await fetch(uploadA, putOpts(tokenA, `version-A-${RUN}`));
-    assert.ok(rA.status === 201, `Write file on A: ${rA.status}`);
+    assert.ok([201, 202].includes(rA.status), `Write file on A: ${rA.status}`);
 
     const rB = await fetch(uploadB, putOpts(tokenB, `version-B-${RUN}`));
-    assert.ok(rB.status === 201, `Write file on B: ${rB.status}`);
+    assert.ok([201, 202].includes(rB.status), `Write file on B: ${rB.status}`);
 
     // Trigger sync on A so the engine pulls from B and detects the hash mismatch.
     // The peer token B gave to A must be registered in A's secrets config for the
@@ -264,9 +264,9 @@ describe('Conflicts API â€” seeded via file sync hash mismatch', () => {
     });
 
     const rA = await fetch(uploadA, putOpts(tokenA, `del-version-A-${RUN}`));
-    if (rA.status !== 201) return t.skip('Could not write competing file for DELETE test');
+    if (![201, 202].includes(rA.status)) return t.skip('Could not write competing file for DELETE test');
     const rB = await fetch(uploadB, putOpts(tokenB, `del-version-B-${RUN}`));
-    if (rB.status !== 201) return t.skip('Could not write competing file for DELETE test');
+    if (![201, 202].includes(rB.status)) return t.skip('Could not write competing file for DELETE test');
 
     let delConflictId;
     for (let attempt = 0; attempt < 6; attempt++) {
