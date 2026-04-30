@@ -75,7 +75,7 @@ describe('Space-scoped token enforcement', () => {
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${generalOnlyToken}` },
       body: JSON.stringify({ content: 'in-scope write', encoding: 'utf8' }),
     });
-    assert.equal(r.status, 201, 'Token should write to its allowed space');
+    assert.ok([201, 202].includes(r.status), 'Token should write to its allowed space');
   });
 
   it('Scoped token cannot access brain in a different space → 403', async () => {

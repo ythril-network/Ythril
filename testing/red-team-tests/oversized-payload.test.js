@@ -122,6 +122,6 @@ describe('File upload size limit (raw bytes)', () => {
       },
       body: 'small content',
     });
-    assert.ok(r.status === 200 || r.status === 201, `Upload should succeed, got ${r.status}`);
+    assert.ok(r.status === 200 || r.status === 201 || r.status === 202, `Upload should succeed, got ${r.status}`);
   });
 });

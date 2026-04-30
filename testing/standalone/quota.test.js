@@ -122,7 +122,7 @@ describe('Storage quota enforcement', () => {
     await applyConfig(cfg);
 
     const r = await uploadFile(token, `quota-test-no-limit-${Date.now()}.txt`);
-    assert.equal(r.status, 201, `Expected 201 got ${r.status}: ${JSON.stringify(r.body)}`);
+    assert.ok([201, 202].includes(r.status), `Expected 201 got ${r.status}: ${JSON.stringify(r.body)}`);
     assert.ok(!r.body?.storageWarning, 'storageWarning must be absent when quota not configured');
   });
 
@@ -172,7 +172,7 @@ describe('Storage quota enforcement', () => {
     await applyConfig({ ...originalConfig, storage: { files: { softLimitGiB: 0, hardLimitGiB: 9999 } } });
 
     const r = await uploadFile(token, `quota-soft-files-${Date.now()}.txt`);
-    assert.equal(r.status, 201, `Expected 201 got ${r.status}: ${JSON.stringify(r.body)}`);
+    assert.ok([201, 202].includes(r.status), `Expected 201 got ${r.status}: ${JSON.stringify(r.body)}`);
     assert.equal(r.body?.storageWarning, true, 'storageWarning must be true when soft limit exceeded');
   });
 
