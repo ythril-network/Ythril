@@ -28,6 +28,7 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { stripComments } from './_strip-comments.mjs';
 
 const src = (p) => stripComments(readFileSync(p, 'utf8'));
@@ -116,13 +117,56 @@ describe('every decision site asks the one predicate', () => {
     }
   });
 
-  it('nothing left reads `.admin` to make an authorization decision', () => {
-    // Scoped to the auth-bearing modules. `oidc.ts` maps a CLAIM to the flag, which is where the flag is
-    // legitimately produced rather than consumed, and `rights-migration.ts` reads it to build the matrix.
-    for (const f of ['server/src/auth/middleware.ts']) {
-      const body = src(f).replace(/return \(record as \{ admin\?: boolean \}\)\.admin === true;/, '');
-      assert.doesNotMatch(body, /\brecord\.admin\b/,
-        `${f} still reads the legacy field outside the one fallback`);
-    }
+  /**
+   * Where the legacy flag may legitimately be touched, with the reason on each row.
+   *
+   * An exemption list is what this repository has a rule against, so two things keep it honest: the FILE SET
+   * it is applied to is derived rather than named, and a row that stops matching FAILS below. A stale
+   * exemption is how a page goes unchecked for weeks while every run reports clean.
+   */
+  const MAY_READ_IT = new Map([
+    ['server/src/auth/instance-admin.ts', 'the predicate itself — this is where the fallback lives'],
+    ['server/src/auth/rights-migration.ts', 'reads the legacy token to BUILD the matrix, which is its whole job'],
+    ['server/src/auth/oidc.ts', 'maps a CLAIM to the flag; the flag is produced here rather than consumed'],
+    ['server/src/mcp/oauth.ts', 'logs the flag on a minted identity — a log line, not a decision'],
+    ['server/src/auth/tokens.ts', 'the create route, where the flag is written onto a NEW token from its options'],
+  ]);
+
+  it('nothing else reads the legacy admin flag to make an authorization decision', () => {
+    /*
+     * **DERIVED, because the title claims the whole server and the body read ONE file.** `middleware.ts` was
+     * where the seven copies happened to be found; every other module was outside everything this gate
+     * looked at while the sentence went on covering all of them (`Q-6`, 2026-09-07).
+     *
+     * The pattern excludes `.admin(` — `db.admin()` is the Mongo driver and has nothing to do with tokens —
+     * and `admin:` , which is an object KEY rather than a read.
+     */
+    const files = execFileSync('git', ['ls-files', 'server/src'], { maxBuffer: 32 * 1024 * 1024 })
+      .toString('utf8').split('\n').filter(f => f.endsWith('.ts'));
+    assert.ok(files.length > 100, `only ${files.length} server sources found; the listing is broken`);
+
+    /*
+     * `tool.admin` is EXCLUDED, and it is not a near-miss — it is a different fact with the same spelling.
+     * A tool's `admin` says *this tool requires an administrator*; a token's says *this caller is one*. The
+     * first sweep flagged `mcp/router.ts` and `mcp/tool-visibility.ts` on it, and exempting those two files
+     * by name would have blinded the gate to a real token read appearing in either of them later.
+     *
+     * `.admin(` is out too — `db.admin()` is the Mongo driver — and `admin:` is an object KEY, not a read.
+     */
+    const READS_IT = /(?<!tool)\.admin\s*(?![(:])/;
+    const readers = files.filter(f => READS_IT.test(src(f)));
+
+    // A stale exemption fails. If a file stopped reading the flag, its row is a claim about code that no
+    // longer exists, and the next person to add a read there inherits a pass nobody granted.
+    const dead = [...MAY_READ_IT.keys()].filter(f => !readers.includes(f));
+    assert.deepEqual(dead, [],
+      `${dead.join(', ')} is exempted here and no longer reads the flag at all. Delete the row: an exemption `
+      + 'nobody re-reads is how a file goes unchecked while every run reports clean.');
+
+    const offenders = readers.filter(f => !MAY_READ_IT.has(f));
+    assert.deepEqual(offenders, [],
+      `${offenders.join(', ')} reads the legacy admin flag directly. Ask isInstanceAdmin() instead — it `
+      + 'consults the rights matrix and falls back to the flag, and a copy that drifts means a token '
+      + 'reaching a route it never could, with nothing in the response to say so.');
   });
 });
