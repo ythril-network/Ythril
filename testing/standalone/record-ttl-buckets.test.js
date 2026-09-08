@@ -21,6 +21,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { stripComments } from './_strip-comments.mjs';
 
 const {
   normaliseRecordTtl, recordTtlWindows, TTL_BUCKETS,
@@ -172,7 +173,11 @@ describe('the API and the storage type agree', () => {
     const src = readFileSync(join(ROOT, 'client/src/app/pages/settings/spaces.component.ts'), 'utf8');
     assert.ok(!/recordTtlDays: this\.state\.stForm/.test(src),
       'the footer save must not send recordTtlDays — the Danger Zone owns it and saves itself');
-    const state = readFileSync(join(ROOT, 'client/src/app/pages/settings/space-settings-state.service.ts'), 'utf8');
+    // Comments STRIPPED: the rule is worth explaining where the field would otherwise be added, and this
+    // fired on the prose explaining it. A source-reading gate that cannot tell code from a comment about
+    // the code punishes the documentation it wants.
+    const state = stripComments(
+      readFileSync(join(ROOT, 'client/src/app/pages/settings/space-settings-state.service.ts'), 'utf8'));
     assert.ok(!/recordTtlDays/.test(state),
       'stForm must not hold a copy of the space window: the field it mirrored is not editable on that tab');
   });

@@ -1267,6 +1267,7 @@
   "spaces.error.createFailed": "Nie udało się utworzyć przestrzeni",
   "spaces.error.createTimeout": "Tworzenie przestrzeni trwa dłużej niż zwykle — pojawi się na liście, gdy będzie gotowa.",
   "spaces.error.saveFailed": "Nie udało się zapisać",
+  "spaces.settings.nothingToSave": "Nie ma czego zapisać — żadne ustawienie nie zostało zmienione.",
   "spaces.settings.votePending": "Zapisano jako propozycję — tą przestrzenią zarządza {{ networks }}, więc zmiana ustawień wymaga zgody członków. Zacznie obowiązywać automatycznie po przyjęciu głosowania.",
   "spaces.error.renameFailed": "Nie udało się zmienić nazwy",
   "spaces.error.wipeFailed": "Nie udało się wyczyścić",

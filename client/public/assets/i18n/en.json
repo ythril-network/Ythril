@@ -1267,6 +1267,7 @@
   "spaces.error.createFailed": "Failed to create space",
   "spaces.error.createTimeout": "Space creation is taking longer than expected — it will appear in the list once ready.",
   "spaces.error.saveFailed": "Failed to save",
+  "spaces.settings.nothingToSave": "Nothing to save — no setting was changed.",
   "spaces.settings.votePending": "Saved as a proposal — this space is governed by {{ networks }}, so a settings change needs member approval before it applies. It will take effect automatically once the vote passes.",
   "spaces.error.renameFailed": "Failed to rename",
   "spaces.error.wipeFailed": "Failed to wipe",

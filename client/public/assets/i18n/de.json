@@ -1271,6 +1271,7 @@
   "spaces.error.createFailed": "Bereich konnte nicht erstellt werden",
   "spaces.error.createTimeout": "Die Erstellung des Bereichs dauert länger als erwartet — er erscheint in der Liste, sobald er bereit ist.",
   "spaces.error.saveFailed": "Speichern fehlgeschlagen",
+  "spaces.settings.nothingToSave": "Nichts zu speichern — es wurde keine Einstellung geändert.",
   "spaces.settings.votePending": "Als Vorschlag gespeichert — dieser Space wird von {{ networks }} verwaltet, daher muss eine Änderung erst von den Mitgliedern bestätigt werden. Sie wird automatisch wirksam, sobald die Abstimmung angenommen ist.",
   "spaces.error.renameFailed": "Umbenennen fehlgeschlagen",
   "spaces.error.wipeFailed": "Löschen fehlgeschlagen",

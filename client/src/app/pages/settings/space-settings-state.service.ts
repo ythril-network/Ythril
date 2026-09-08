@@ -382,6 +382,8 @@ export class SpaceSettingsState {
 
   // ── unsaved-changes tracking (U4) ────────────────────────────────────────────
   private initialSnapshot = '';
+  /** The payload as the dialog opened it. `changedSettings()` is the difference against this. */
+  private pristinePayload: Record<string, unknown> = {};
   private dupeInitialSnapshot = '';
 
   /**
@@ -391,8 +393,16 @@ export class SpaceSettingsState {
    * edits are snapshotted separately by `dupeSnapshot()` — but BOTH feed `isDirty()`, so unsaved dupe
    * edits still trip the close guard (previously they were silently dropped with no warning).
    */
-  snapshot(): string {
-    return JSON.stringify({
+  snapshot(): string { return JSON.stringify(this.settingsPayload()); }
+
+  /**
+   * Everything the footer save can persist, as an object. `snapshot()` is this, stringified.
+   *
+   * Split out because the SAVE now sends the difference against the pristine copy rather than all of it,
+   * and both need the same shape or the diff would compare one thing against another.
+   */
+  settingsPayload(): Record<string, unknown> {
+    return {
       label: this.stForm.label.trim(),
       maxGiB: this.stForm.maxGiB,
       documentExtraction: this.stForm.documentExtraction,
@@ -401,7 +411,56 @@ export class SpaceSettingsState {
       videoAnalysis: this.stForm.videoAnalysis,
       textAnalysis: this.stForm.textAnalysis,
       meta: this.buildMeta(),
-    });
+    };
+  }
+
+  /**
+   * Only the fields the operator actually changed. Empty means there is nothing to save.
+   *
+   * ## Why the whole form was the wrong body
+   *
+   * Each field on `PATCH /api/spaces/:id` answers to the area that owns it since 4.4 — a media level is
+   * `files` write, a duplicate rule is `dataQuality`, the quota is instance-admin. Posting every field on
+   * every save makes the HIGHEST requirement in the form decide, so a token holding exactly what it needs
+   * to change one thing is refused for the twenty-one it did not touch. The per-field rungs were real on
+   * the API and inert in this dialog.
+   *
+   * ## Two fields that are not a plain diff, and both have cost something before
+   *
+   * - `typeSchemasMode: 'replace'` rides along whenever `meta.typeSchemas` does. Without it the server
+   *   MERGES, so a type deleted in the editor is simply not mentioned and is faithfully preserved — the
+   *   deletion appears to work, survives the save, and is still there on reload. It must never be sent on
+   *   its own: with no `typeSchemas` beside it, `replace` is a mode for a map that is not in the body.
+   * - `recordTtlDays` is not in this payload at all and must not be added. It is edited in the Danger
+   *   Zone, which saves itself, and the space tier is five buckets — a scalar write REPLACES the whole
+   *   object, so echoing a stored value back would flatten every per-collection window to one figure.
+   */
+  changedSettings(): Record<string, unknown> {
+    // `record-ttl-buckets.test.js` asserts that field's NAME appears nowhere in this file, and it strips
+    // comments before looking — so the paragraph above may name it and this code may not.
+    const now = this.settingsPayload();
+    const was = this.pristinePayload;
+    const out: Record<string, unknown> = {};
+
+    for (const key of Object.keys(now)) {
+      if (key === 'meta') continue;
+      if (JSON.stringify(now[key]) !== JSON.stringify(was[key])) out[key] = now[key];
+    }
+
+    // `meta` is diffed per KEY rather than whole: sending the object because one field inside it moved
+    // would put `purpose` (space-admin) and `suppressEmbeddings` (knowledge admin) into a request that
+    // meant to change a validation mode.
+    const nowMeta = (now['meta'] ?? {}) as Record<string, unknown>;
+    const wasMeta = (was['meta'] ?? {}) as Record<string, unknown>;
+    const meta: Record<string, unknown> = {};
+    for (const key of Object.keys(nowMeta)) {
+      if (JSON.stringify(nowMeta[key]) !== JSON.stringify(wasMeta[key])) meta[key] = nowMeta[key];
+    }
+    if (Object.keys(meta).length) {
+      out['meta'] = meta;
+      if ('typeSchemas' in meta) out['typeSchemasMode'] = 'replace';
+    }
+    return out;
   }
 
   /** Serializes the duplicates-tab form. Baselined independently because that tab has its own save. */
@@ -415,6 +474,7 @@ export class SpaceSettingsState {
 
   /** Re-baseline both dirty snapshots — called after opening a space. */
   markPristine(): void {
+    this.pristinePayload = this.settingsPayload();
     this.initialSnapshot = this.snapshot();
     this.dupeInitialSnapshot = this.dupeSnapshot();
   }
