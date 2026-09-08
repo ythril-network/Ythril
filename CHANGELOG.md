@@ -82,6 +82,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the highest requirement in the form still decides. Nothing there behaves differently than before; the
   dialog simply does not benefit yet.
 
+- **The two data-quality sweeps answer to the `dataQuality` rung, not to instance admin.**
+
+  `POST /api/duplicates/scan` and `POST /api/contradictions/scan` both narrow their work correctly already:
+  each walks only the spaces where the token holds `dataQuality` write, so naming a space it cannot reach
+  answers `404` and a destructive rule never fires outside its reach. The narrowing was never the problem.
+  The guard in front of it was — `requireAdminMfa` refused everyone but an instance administrator before
+  the loop was reached, so the `dataQuality` column in the rights panel could not open these doors either.
+
+  Both now use a guard that is `requireAdminMfa` minus the admin demand: same authentication, same second
+  factor, and the rung the panel advertises is what decides. An operator responsible for a space's data
+  quality can run its scans without being handed the instance.
+
+  `POST /api/conflicts/seed` went the other way. It inserts a conflict record directly — something no
+  product path does, since a real conflict is written by the sync engine — and it exists for tests. It is
+  now declared as not area-scoped and stays instance-admin, rather than advertising a `dataQuality` rung
+  that never opened it.
+
+  **`dataQuality` admin therefore now means one thing, and the rights panel says which:** switching on
+  merging as records are written, so duplicates are combined without anyone reviewing them. Every other
+  data-quality operation — including starting a scan — is `write`.
+
 ### Internal
 
 - An MCP tool now forwards the arguments its own schema declares, rather than a list of names written beside

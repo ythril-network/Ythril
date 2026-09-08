@@ -57,11 +57,7 @@ const ADMIN_FIRST = [
  * Rows known to be guarded above their stated rung, with what each needs. `D-2` and `D-4` are the decisions
  * that settle them; this list is the visible cost of not having built them yet, and it must only shrink.
  */
-const KNOWN_MISMATCH = {
-  'POST /api/duplicates/scan': 'D-2 sibling: dataQuality write, guarded at instance admin',
-  'POST /api/contradictions/scan': 'D-2 sibling: dataQuality write, guarded at instance admin',
-  'POST /api/conflicts/seed': 'D-2 sibling: dataQuality admin, guarded at instance admin',
-};
+const KNOWN_MISMATCH = {};
 
 const src = f => stripComments(readFileSync(f, 'utf8'));
 

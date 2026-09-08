@@ -18,7 +18,7 @@ import type { TokenRights, Rung } from '../config/rights-shape.js';
  * leaves the records themselves to the normal edit paths.
  */
 import { Router } from 'express';
-import { requireAuth, requireAdminMfa, denyReadOnly } from '../auth/middleware.js';
+import { requireAuth, requireAdminMfa, denyReadOnly, requireAuthMfa } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
@@ -267,7 +267,7 @@ contradictionsRouter.post('/:id/resolve', globalRateLimit, requireAuth, denyRead
 
 // POST /api/contradictions/scan?space=<id> — run the sweep now instead of waiting for the schedule.
 // Admin + MFA, like the duplicate scan: it is a model-spending operation over a whole space.
-contradictionsRouter.post('/scan', globalRateLimit, requireAdminMfa, denyReadOnly, async (req, res) => {
+contradictionsRouter.post('/scan', globalRateLimit, requireAuthMfa, denyReadOnly, async (req, res) => {
   try {
     const spaceFilter = typeof req.query['space'] === 'string' ? req.query['space'] : undefined;
     const spaces = accessibleSpaces(req, 'write').filter(id => !spaceFilter || id === spaceFilter);

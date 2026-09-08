@@ -65,7 +65,7 @@ Base path: `/api/duplicates`.
 | `POST` | `/api/duplicates/:id/dismiss` | non-read-only | Mark a pair reviewed / not-a-duplicate. A later re-embed/re-sync will not resurface it; a real content change will. |
 | `POST` | `/api/duplicates/:id/reopen` | non-read-only | Manually re-rate a **dismissed** pair back onto the open list. `404` if the pair is not currently dismissed. |
 | `POST` | `/api/duplicates/:id/merge` | non-read-only | Merge an entity candidate losslessly. `409` with the merge plan if there is a value conflict. |
-| `POST` | `/api/duplicates/scan?space=<id>` | admin + MFA | Trigger an on-demand full re-scan (all accessible spaces, or one). Requires `X-TOTP-Code` when MFA is enabled. |
+| `POST` | `/api/duplicates/scan?space=<id>` | `dataQuality` write + MFA | Trigger an on-demand full re-scan. It only ever touches spaces where the token holds `dataQuality` write — naming one it does not answers `404`. Requires `X-TOTP-Code` when MFA is enabled. |
 
 A candidate is `{ id, spaceId, type, aId, aSummary, bId, bSummary, score, status, resolution?, contradiction, negationAsymmetry?, detectedAt, updatedAt }`. The web UI (a space's **Brain → Review** tab) lists that space's candidates with dismiss / merge / re-rate actions, a **search box** (handy for a large dismissed pile), and a "Scan now" button.
 
@@ -107,7 +107,7 @@ sticky dismissal — because the Review tab presents both under one vocabulary.
 | `POST` | `/api/contradictions/:id/dismiss` | non-read-only | Reviewed / not a real disagreement. Content-gated exactly like a duplicate dismissal. |
 | `POST` | `/api/contradictions/:id/reopen` | non-read-only | Bring a **dismissed** pair back onto the open list. `404` if it is not currently dismissed. |
 | `POST` | `/api/contradictions/:id/resolve` | non-read-only | Body `{ "resolution": "edited" \| "linked" \| "superseded" }`. Records HOW a human settled it. `superseded` also needs `"winner": "a" \| "b"` — see below. |
-| `POST` | `/api/contradictions/scan?space=<id>` | admin + MFA | Run the sweep now. Returns `nliStalled: true` if it stopped because the judge was unavailable. |
+| `POST` | `/api/contradictions/scan?space=<id>` | `dataQuality` write + MFA | Run the sweep now, over the spaces where the token holds `dataQuality` write. Returns `nliStalled: true` if it stopped because the judge was unavailable. |
 
 A candidate is `{ id, spaceId, type, aId, aSummary, bId, bSummary, basis, confidence, fields?, truncated?,
 status, resolution?, supersededId?, resolvedBy?, detectedAt, updatedAt }`.
@@ -252,7 +252,7 @@ Plus two *distinct* incomplete endings: `nliStalled` means the judge was unreach
 settled (the cursor is parked), while `budgetExhausted` means the pairs it judged **are** settled and the next
 run continues from there. Neither should be read as a clean result.
 
-Until it is enabled, contradictions are found **only** when an admin runs `POST /api/contradictions/scan`
+Until it is enabled, contradictions are found **only** when somebody runs `POST /api/contradictions/scan`
 by hand — so the Review tab's Contradictions view stays empty on an instance nobody has scanned manually.
 An invalid cron expression is refused at boot with a warning rather than silently ignored, and a scheduled
 run that parks because the judge was unreachable logs that it did **not** clear the queue.

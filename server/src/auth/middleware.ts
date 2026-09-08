@@ -811,6 +811,34 @@ export async function requireAdminOrSpaceAdminMfa(req: Request, res: Response, n
  *   403 { error: 'MFA_REQUIRED' } — MFA enabled, header missing
  *   403 { error: 'MFA_INVALID'  } — MFA enabled, code wrong / expired
  */
+/**
+ * A valid token and the second factor. No admin demand, and no space to scope to.
+ *
+ * ## Why it exists
+ *
+ * The three data-quality sweeps -- `POST /api/duplicates/scan`, `POST /api/contradictions/scan` and
+ * `POST /api/conflicts/seed` -- take NO space. They walk every space the token can reach, and their
+ * `ROUTE_RIGHTS` rows are `scope: 'iterates'`: the enforcement point is the ITERATION SET, not the call.
+ *
+ * That half was already right. Each handler narrows its loop with `accessibleSpaces(req, 'write')`, so a
+ * token only ever scans spaces where it holds the rung. What made the rows unreachable was the guard in
+ * front: `requireAdminMfa` refused everyone but an instance administrator before the loop was reached, so
+ * the `dataQuality` column in the rights panel could never open these doors either.
+ *
+ * This is `requireAdminMfa` minus `enforceAdmin`, exactly -- the same auth, the same second factor. It runs
+ * no area check of its own on purpose: an iterating route has no single space to check one against, and
+ * adding one here would be a second, weaker copy of the narrowing the handler already does.
+ */
+export async function requireAuthMfa(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const auth = await resolveAuthOrFail(req, res, {});
+  if (!auth) return;
+  const { record, bearer } = auth;
+
+  if (!enforceMfa(req, res, bearer, record)) return;
+
+  attachToken(req, res, next, record, bearer);
+}
+
 export async function requireAdminMfa(req: Request, res: Response, next: NextFunction): Promise<void> {
   const auth = await resolveAuthOrFail(req, res, {});
   if (!auth) return;
