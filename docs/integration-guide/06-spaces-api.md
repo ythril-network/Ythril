@@ -306,6 +306,11 @@ Update space properties. Requires an admin token (+ TOTP if MFA is enabled). At 
 > `POST /api/spaces` (create), `POST /api/spaces/reorder`, or `DELETE /api/spaces/:id`: those are
 > instance-shaped, and destroying a space is not one of its settings.
 >
+> **And `PATCH :id` itself is now governed FIELD BY FIELD**, since 4.4. See the table below: a `files`
+> writer can set a media level without being handed the whole space, and `maxGiB` still needs the instance
+> administrator. A body mixing a field you may set with one you may not is refused WHOLE, with every
+> refused field named — a half-applied settings save is worse than a refused one.
+>
 > **The other five routes this note used to list have moved DOWN rather than out**, in 4.4: `PUT :id/schema`,
 > the single-type `PUT`/`DELETE` on `:id/meta/typeSchemas/...`, `POST :id/validate-schema` and
 > `POST :id/rebuild-indexes` are now guarded at the area rung they advertise. A space administrator holds
@@ -314,6 +319,29 @@ Update space properties. Requires an admin token (+ TOTP if MFA is enabled). At 
 >
 > MFA is unchanged. A space administrator is still a human with an authenticator, and exempting one would make
 > the role a way around an instance-wide second factor.
+
+#### What each field in the update body requires
+
+Every field answers to the area that owns it rather than to the route. A token needs **one** of: the
+instance administrator, the space's administrator (`admin` on all four areas), or the rung named here on
+that space.
+
+| field | requires |
+|---|---|
+| `label`, `meta.purpose`, `meta.usageNotes` | space administrator — the space's own description of itself, which no data area owns |
+| `maxGiB` | **instance administrator** — it is the space's share of the host's disk, not a setting of the space |
+| `faceDescriptorDims` | `files` **admin** — changing the width invalidates every stored face descriptor |
+| `documentExtraction`, `imageAnalysis`, `audioAnalysis`, `videoAnalysis`, `textAnalysis` | `files` write |
+| `meta.typeSchemas`, `typeSchemasMode`, `meta.whenDuePasses` | `schema` write |
+| `meta.validationMode`, `meta.strictLinkage` | `schema` **admin** — enforcement: flipping either makes writes that used to succeed start failing |
+| `meta.suppressEmbeddings` | `knowledge` **admin** — recall silently stops finding anything written afterwards |
+| `recordTtlDays` | `knowledge` **admin** — it deletes records on a clock |
+| `completeLinkage` | `knowledge` **admin** — the six legacy array fields start refusing writes for everyone in the space |
+| `dupeRules`, `dupeMergeSurvivor` | `dataQuality` write |
+| `dupeRulesOnInsert` | `dataQuality` **admin** — merges then happen ON WRITE, without anyone looking |
+
+A refusal is a `403` naming each field and its requirement, so one save produces one conversation with
+whoever grants rights rather than one per field.
 
 **Optimistic concurrency (`If-Match`).** Meta writes are last-write-wins by default: if two clients read a space, both edit it, and both save, the second save replaces the first in full. To make your write conditional, send the `meta.version` you read as an `If-Match` header:
 

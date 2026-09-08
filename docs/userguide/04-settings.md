@@ -344,17 +344,16 @@ two things it could not before:
 
 - **Manage that space's tokens** — create them, edit their rights, rotate and revoke them. It only ever sees
   and edits tokens whose own reach sits inside the spaces it administers.
-  - **That last sentence was true of listing and editing, and is now true of rotating and revoking too.**
-    Until this release those two verbs checked only that you were an administrator of *something*, so an
-    administrator of one space could revoke or rotate any token on the instance — including tokens for
-    spaces it cannot see. Both now refuse with a message naming which spaces put the token out of reach.
+    Rotating and revoking are bounded the same way, and refuse with a message naming which spaces put the
+    token out of reach.
 - **Change that space's settings** — its name, its schema and types, and a re-index of its own search
   indexes.
 
-**Most of that second bullet no longer NEEDS all four areas**, since 4.4: writing a type is `Schema` at
-**write**, replacing the whole type map in one call is `Schema` at **admin**, and rebuilding or re-embedding
-the search index is `Knowledge` at **admin**. A space administrator holds all of those, so nothing they could
-do is gone — but a token needing only one can now be given only that one, which is what the grid is for.
+**Since 4.4 almost none of that needs all four areas.** Each setting answers to its own area — media levels
+to `Files`, duplicate rules to `Data quality`, the record lifetime and embedding switch to `Knowledge` admin,
+types to `Schema`. A space administrator holds all of them, so nothing they could do is gone; a token needing
+only one can now be given only that one. A save touching something the token may not change is refused
+WHOLE, naming each field, so nothing is half-applied.
 
 All four areas, deliberately. Admin on **Files** alone would be enough to mint tokens if any single area
 counted, which is a bigger grant than the cell appears to make.

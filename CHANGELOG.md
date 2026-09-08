@@ -52,6 +52,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   On the MCP door, `update_space_schema` needs `schema` `admin` on the space rather than all four areas, so
   the two doors admit the same callers. `reindex` moved to `knowledge` admin with its route.
 
+- **A space's settings are governed field by field, so a media level no longer costs the whole space.**
+
+  Every one of the twenty-two fields on `PATCH /api/spaces/:id` demanded Space-admin — `admin` on all four
+  areas at once. On the busiest space-configuration door in the API the four areas therefore bought nothing:
+  a `files` administrator could not set a media-analysis level, a `dataQuality` writer could not tune a
+  duplicate rule, and either had to be handed the entire space instead.
+
+  Each field now answers to the area that owns it. Media levels and `faceDescriptorDims` are `files`, the
+  duplicate rules are `dataQuality`, `recordTtlDays` / `completeLinkage` / `meta.suppressEmbeddings` are
+  `knowledge` admin, and the type schemas are `schema`. `label`, `meta.purpose` and `meta.usageNotes` stay
+  with the space administrator: they are the space's description of itself and no data area owns them. The
+  full table is in the integration guide.
+
+  **`maxGiB` is the one field that TIGHTENED.** A space's quota is its share of the host's disk, so it takes
+  the instance administrator — a space administrator raising their own was self-granting. The route already
+  refused it per-field; that hand-written check is gone and the table says it once.
+
+  A body mixing a field you may set with one you may not is refused **whole**, with a `403` naming each
+  refused field and what it needs. A half-applied settings save is worse than a refused one, and one save
+  should produce one conversation with whoever grants rights rather than one per field.
+
+  Both MCP tools that write space meta run the same table, so no field means something different on the two
+  doors. `update_space` still asks for the space administrator at the door, which makes MCP the stricter
+  surface here — a narrowing, not a second rule.
+
+  **In the web UI this reaches the tabs that save a narrow body — the Danger Zone and Duplicates — and not
+  yet the main space-settings dialog**, which posts every field on the form whether or not it changed, so
+  the highest requirement in the form still decides. Nothing there behaves differently than before; the
+  dialog simply does not benefit yet.
+
 ### Internal
 
 - An MCP tool now forwards the arguments its own schema declares, rather than a list of names written beside

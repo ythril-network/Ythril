@@ -303,8 +303,10 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 
 > **`update_space` is a SPACE-admin tool**, which is a different requirement: either instance-admin rights,
 > **or** the `admin` rung on all four areas (`knowledge`, `files`, `schema`, `dataQuality`) of the space named
-> in `space`. It is the MCP counterpart of `PATCH /api/spaces/:id` and admits exactly whom that route admits —
-> see [Update a Space](06-spaces-api.md#update-a-space).
+> in `space`. Its REST counterpart `PATCH /api/spaces/:id` went further in 4.4 and governs each field by the
+> area that owns it, so **this door is the stricter of the two at the entry**. It is a narrowing, not a
+> different rule: both doors run the same per-field table, so no field means anything different here — see
+> [What each field in the update body requires](06-spaces-api.md#what-each-field-in-the-update-body-requires).
 >
 > **`update_space_schema` needs only `schema` `admin` on that space**, since 4.4. Its REST counterpart
 > `PUT /api/spaces/:id/schema` is the `schema` area's admin rung, so demanding all four areas here would have

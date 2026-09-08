@@ -20,11 +20,12 @@
  * settings. Delete is the sharp one: it is reachable with the same `:id` parameter as everything widened here,
  * so it would have been swept up by any edit that worked route-by-name rather than route-by-meaning.
  *
- * ## And one field inside a widened route
+ * ## And the fields inside the settings route
  *
- * `maxGiB` is a space's share of the HOST's disk. Everything else in the update body configures the space;
- * that number spends the instance. The guard admits a space administrator to `PATCH /:id` and the route
- * refuses the single field, which is better than keeping the whole route shut over one number.
+ * `PATCH /:id` carries twenty-two settings and they no longer share one requirement. Each answers to the
+ * area that owns it (`SPACE_FIELD_RIGHTS`), so a `files` writer may set a media level without being handed
+ * the space. `maxGiB` is the one field that went the other way: it is the space's share of the HOST's disk,
+ * so it takes the instance administrator and a space administrator is refused it.
  *
  * Run: node --test testing/standalone/space-admin-reaches-its-own-space-settings.test.js
  */
@@ -35,6 +36,8 @@ import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 
 const { TOOL_RIGHTS } = await import('../../server/dist/auth/space-rights.js');
+const { SPACE_FIELD_RIGHTS, refusalsForSpaceUpdate, describeFieldRequirement } =
+  await import('../../server/dist/auth/space-field-rights.js');
 
 const SPACES = readFileSync('server/src/api/spaces.ts', 'utf8');
 const MIDDLEWARE = readFileSync('server/src/auth/middleware.ts', 'utf8');
@@ -51,7 +54,6 @@ const guardsFor = (verb, path) => {
 
 /** Every route a space administrator may reach: this space's own configuration. */
 const WIDENED = [
-  ['patch', '/:id', 'its settings'],
   ['patch', '/:id/rename', 'its display name'],
 ];
 
@@ -63,8 +65,7 @@ const INSTANCE_ONLY = [
 ];
 
 /**
- * Five routes left `WIDENED` on 2026-09-08, and every one of them went DOWN rather than
- * out.
+ * Six routes left `WIDENED` on 2026-09-08, and every one of them went DOWN rather than out.
  *
  * P-8 widened them from instance-admin to also admit a space administrator, and their `ROUTE_RIGHTS` rows
  * name an area and a rung. Those two facts contradicted each other: a space administrator is `admin` on all
@@ -83,6 +84,7 @@ const INSTANCE_ONLY = [
  * SCOPED TO THE ID IN THE URL, which is the escalation this file exists to prevent.
  */
 const SCOPED_BY_RUNG = [
+  ['patch', '/:id', 'the settings body, whose FIELDS are governed one by one — see SPACE_FIELD_RIGHTS'],
   ['post', '/:id/validate-schema', 'a dry run that writes nothing, so it sits at the rung it advertises'],
   ['put', '/:id/schema', 'replacing the whole type map — the schema area\'s own admin rung'],
   ['put', '/:id/meta/typeSchemas/:knowledgeType/:typeName', 'one of its types, at schema write'],
@@ -249,18 +251,31 @@ describe('the MCP door widens with the REST one', () => {
 });
 
 describe('maxGiB stays with the instance', () => {
-  it('PATCH /:id refuses it from a token that is not an instance admin', () => {
-    const stripped = stripComments(SPACES);
-    // The predicate moved from the legacy `req.authToken?.admin` to `isInstanceAdmin` when every
-    // instance-admin check was unified. The rule is identical — this field needs the INSTANCE bit — so the
-    // assertion follows the spelling rather than being loosened to "some check exists".
-    assert.match(stripped, /maxGiB !== undefined && !\(req\.authToken && isInstanceAdmin\(req\.authToken\)\)/,
+  /*
+   * This used to pin the inline check in `spaces.ts`, character for character:
+   *
+   *     maxGiB !== undefined && !(req.authToken && isInstanceAdmin(req.authToken))
+   *
+   * The check is gone and the RULE is unchanged. `SPACE_FIELD_RIGHTS` governs every field on that body now,
+   * and `maxGiB` is the one row reading `instanceAdmin` — the inline copy said the same thing a second time,
+   * which is how the two start disagreeing. Asserting the site would have reported this as a regression.
+   */
+  it('the quota requires the instance administrator, wherever that is written', () => {
+    assert.equal(SPACE_FIELD_RIGHTS['maxGiB'], 'instanceAdmin',
       'a space administrator must not set its share of the host disk');
-    assert.match(stripped, /res\.status\(403\)/, 'and the refusal is a 403, not a silent drop');
+  });
+
+  it('a space administrator holding every area still cannot set it', () => {
+    // The property, exercised rather than read: four areas at `admin` is what "space administrator" means,
+    // and it must not add up to the instance bit.
+    const fourAreas = { perSpace: { s1: { knowledge: 'admin', files: 'admin', schema: 'admin', dataQuality: 'admin' } } };
+    assert.deepEqual(refusalsForSpaceUpdate({ maxGiB: 10 }, 's1', false, fourAreas), ['maxGiB']);
+    // And the same token IS admitted to what it does own, or this case would pass on a broken table.
+    assert.deepEqual(refusalsForSpaceUpdate({ imageAnalysis: 'caption' }, 's1', false, fourAreas), []);
   });
 
   it('and says WHO can change it, so the refusal is actionable', () => {
-    assert.match(SPACES, /Ask an instance administrator to change the quota/,
+    assert.match(describeFieldRequirement('maxGiB'), /instance administrator/,
       'a refusal that does not name the next step makes the caller guess');
   });
 });

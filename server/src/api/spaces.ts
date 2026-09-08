@@ -38,6 +38,7 @@ import {
   stripServerOwnedMeta, findBrokenLibraryRefs, brokenRefsError,
   CreateSpaceBody, DeleteSpaceBody, RenameSpaceBody, ReorderSpacesBody, PutSchemaBody,
 } from '../spaces/body-schemas.js';
+import { requireSettingsFields } from '../auth/require-settings-fields.js';
 import { planSpaceMetaUpdate, applySpaceMetaUpdate } from '../spaces/meta-update.js';
 import { refuseFaceWidthChange } from '../spaces/face-width-change.js';
 import { planSpaceCreate, applySpaceCreate } from '../spaces/space-create.js';
@@ -296,25 +297,26 @@ spacesRouter.post('/', globalRateLimit, requireAdminMfa, async (req, res) => {
 //
 // `space-meta-update-contract.test.js` pins the chain the planner now owns, including its ORDER, and it was proven
 // against this handler before the move.
-spacesRouter.patch('/:id', globalRateLimit, requireAdminOrSpaceAdminMfaScoped('id'), async (req, res) => {
+/*
+ * The settings door, and the ONE place its twenty-two fields are authorised.
+ *
+ * The guard chain is the rung guard rather than `requireAdminOrSpaceAdminMfaScoped`, because most of this body no
+ * longer needs the whole space: a `files` writer may set a media level, a `dataQuality` writer may tune a
+ * duplicate rule. So that guard answers reach, scope and the second factor, and `requireSettingsFields`
+ * answers WHICH FIELDS — see `auth/space-field-rights.ts` for the table and for why it is a table.
+ *
+ * That means this route FAILS OPEN if a field has no row, which is why the table is asserted total against
+ * the zod schemas and why the helper refuses an unknown field rather than allowing it. Two independent
+ * answers to one question, deliberately: one fails the build, the other fails the request.
+ *
+ * The hand-written `maxGiB` check that used to stand here is gone. It said exactly what one row of the
+ * table says, and one rule with two implementations is the defect this repository produces most.
+ */
+spacesRouter.patch('/:id', globalRateLimit, requireSpaceAuthMfaScoped('id'), denyReadOnly,
+  requireSettingsFields('id'), async (req, res) => {
   const id = req.params['id'] as string;
   const cfg = getConfig();
   const space = cfg.spaces.find(s => s.id === id);
-
-  // `maxGiB` is the one field in this body that spends an INSTANCE resource rather than configuring a space:
-  // it is that space's share of the host's disk. A space administrator setting their own quota could take the
-  // whole volume, which is the instance's to give — so the guard admits them to the route and this refuses the
-  // single field, rather than the route staying shut over one number.
-  //
-  // Asks `isInstanceAdmin` for the same reason every guard does: it is the instance-admin question, and a space
-  // administrator is by construction not it.
-  if (req.body?.maxGiB !== undefined && !(req.authToken && isInstanceAdmin(req.authToken))) {
-    res.status(403).json({
-      error: 'maxGiB is an instance setting: a space administrator may change this space\'s settings but not '
-        + 'its share of the host\'s storage. Ask an instance administrator to change the quota.',
-    });
-    return;
-  }
 
   // The face gallery's width is refused by STATE, not by surface — it is accepted on this body and declined
   // when the space holds descriptors or its index is already built at another width. Checked HERE rather than

@@ -131,9 +131,13 @@ describe('a token carrying a DERIVED matrix is not exempt from the rung', () => 
       headers: { Authorization: `Bearer ${tok.plaintext}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ typeSchemas: {} }),
     });
-    // A legacy full-access token derives `write` everywhere, and the schema PUT asks for `schema: write` — so
-    // this is allowed. What matters is that the answer is a DECISION, not a skipped check: an admin-rung route
-    // must still refuse it.
+    // A legacy full-access token derives `write` everywhere. `PUT /:id/schema` asks for `schema: ADMIN` since
+    // 2026-09-08 — the whole-map replace is the schema area's irreversible operation — so this is now refused
+    // rather than allowed. Either answer satisfies this case, because what it is about is that the answer is a
+    // DECISION and not a skipped check; the assertion below is where a rung is held to refusing.
+    //
+    // The sentence here previously read "so this is allowed", and it was already wrong before that change: the
+    // route was guarded at space-admin, so the rung was never what decided.
     assert.ok(r.status !== 500, `the derived matrix must not break the request: ${r.status}`);
 
     const wipe = await fetch(`${INSTANCES.a}/api/brain/spaces/general/memories`, {

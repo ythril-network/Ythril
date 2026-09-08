@@ -110,7 +110,11 @@ describe('every decision site asks the one predicate', () => {
     for (const [f, what] of [
       ['server/src/api/notify.ts', 'the peer-relay check'],
       ['server/src/api/sync/tombstones.ts', 'the trusted-relay check'],
-      ['server/src/api/spaces.ts', 'the maxGiB carve-out'],
+      // Was `api/spaces.ts`, "the maxGiB carve-out". That inline check is gone: `SPACE_FIELD_RIGHTS` now
+      // governs every field on the settings body and `maxGiB` is the row reading `instanceAdmin`. The
+      // decision moved, so the row follows it — the site is not the rule, but this case is a set-claim
+      // about where the decisions ARE, and a row pointing at a file that no longer decides checks nothing.
+      ['server/src/auth/require-settings-fields.ts', 'the per-field settings guard'],
       ['server/src/api/tokens.ts', 'the last-admin lockout guard'],
     ]) {
       assert.match(src(f), /isInstanceAdmin\(/, `${what} in ${f} must ask the predicate`);

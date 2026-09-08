@@ -1,4 +1,5 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
+import { refusalsForSpaceUpdate, describeFieldRequirement } from '../../auth/space-field-rights.js';
 import { BRAIN_COLLECTIONS } from '../../config/types.js';
 import { getConfig } from '../../config/loader.js';
 import { col } from '../../db/mongo.js';
@@ -311,7 +312,7 @@ export const update_spaceTool: ToolHandler = {
     // this tool applied it immediately. So a directive change made over MCP skipped the vote in precisely the
     // spaces that had voted to govern directive changes — the same *two surfaces, one rule, one weaker* defect the
     // rest of this batch is about, one field over. Found while adding `update_space_schema` below.
-    return await runSpaceMetaUpdate(callSpace, updates, `Space '${callSpace}' updated.`);
+    return await runSpaceMetaUpdate(callSpace, updates, `Space '${callSpace}' updated.`, ctx.rights);
   },
 };
 
@@ -326,9 +327,28 @@ async function runSpaceMetaUpdate(
   spaceId: string,
   body: Record<string, unknown>,
   okText: string,
+  rights: TokenRights | undefined,
 ): Promise<ToolResult> {
   const { planSpaceMetaUpdate, applySpaceMetaUpdate } = await import('../../spaces/meta-update.js');
   const space = getConfig().spaces.find(s => s.id === spaceId);
+
+  /*
+   * THE SAME per-field table the REST door uses, and it is here rather than in each tool for the reason
+   * this function exists at all: two callers, one rule.
+   *
+   * `PATCH /api/spaces/:id` stopped demanding Space-admin for its whole body on 2026-09-08 and now asks
+   * each field's own area. Leaving these two tools on the four-area demand would have made a `files` writer
+   * able to set a media level through one door and refused through the other -- with the MCP side being the
+   * stricter one, which is the shape the canary reports from outside and nobody sees from in here.
+   */
+  const refused = refusalsForSpaceUpdate(body, spaceId, !!rights?.instanceAdmin, rights);
+  if (refused.length) {
+    return {
+      content: [{ type: 'text' as const, text: `Error (403): Not allowed to change `
+        + `${refused.map(describeFieldRequirement).join(', ')}.` }],
+      isError: true,
+    };
+  }
 
   // No `If-Match`: MCP has no header to carry one, and absence means "no precondition asked for" — the same
   // default a REST caller gets. A tool parameter for it would be inventing a concurrency protocol for a surface
@@ -500,7 +520,7 @@ export const update_space_schemaTool: ToolHandler = {
     if (a['typeSchemasMode'] !== undefined) body['typeSchemasMode'] = a['typeSchemasMode'];
 
     const wrote = Object.keys(meta).join(', ');
-    return await runSpaceMetaUpdate(callSpace, body, `Space '${callSpace}' schema updated (${wrote}).`);
+    return await runSpaceMetaUpdate(callSpace, body, `Space '${callSpace}' schema updated (${wrote}).`, ctx.rights);
   },
 };
 
