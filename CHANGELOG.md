@@ -135,6 +135,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prefixes with a tool for each, and both are right — and the number of such skips is asserted so the hole
   cannot quietly widen.
 
+- **A REST caller can sync one peer, which only an MCP caller could before.**
+
+  `sync_now` has taken a `peerId` since it was written — it validates the id against the configured members
+  and syncs that peer across every network it belongs to. No REST route accepted one anywhere, so a REST
+  caller could sync a network and never a single peer. One capability, two doors, and the difference only
+  visible from outside; found by the new parameter-parity gate rather than reported.
+
+  `POST /api/notify/trigger` now takes `peerId` in place of `networkId`. Sending both is a `400` — they name
+  different subjects — and an id belonging to no network is a `404`, because an unvalidated value would
+  become the address this instance connects to. That check (SEC-16) now lives in one place and both doors
+  call it, rather than the route growing a second copy of the tool's.
+
+  `?wait=true` works on the peer path too, reporting `networksSynced` rather than `synced`.
+
+- **A sync started from the "Sync now" button used to fail in silence.**
+
+  `POST /api/networks/:id/sync` launched the cycle with a bare `void` and no `.catch`, and the cycle
+  outlives the response — so a rejection had nowhere to go: no log line, no audit entry, an `ok: true`
+  already sent to the operator, and an unhandled rejection at the process level. Pressing the button on a
+  network whose peer was unreachable looked exactly like success.
+
+  It now logs the failure, which is what `POST /api/notify/trigger` has always done for the same
+  fire-and-forget.
+
+### Security
+
+- **Any valid token could start a sync cycle. Now it takes an administrator, as the sibling route always did.**
+
+  `POST /api/notify/trigger` was guarded by `requireAuth` alone, so a token with `instanceAdmin: false`,
+  every area at `none` and no spaces reached it and got `200 {"status": "triggered"}` — on any network id it
+  named. `POST /api/networks/:id/sync`, which does the same thing, refused that token with
+  `403 Admin token required`. Two doors onto one capability and the weaker one in charge, which is this
+  repository's signature defect.
+
+  It is now `requireAdmin`, matching the sibling. The route's own comment has always called it "(admin)";
+  only the guard disagreed. Nothing legitimate loses access: no peer and no client calls it — the peer
+  protocol uses `POST /api/notify`, and the "Sync now" button uses the sibling.
+
+  **Why no gate caught it.** `route-guard-coverage` exempted the whole `notifyRouter` under the reason
+  *"peer notifications + admin sync trigger — peer-authenticated"*, which is true of `POST /api/notify` and
+  was never true of `/trigger`. The exemption now names the one route it was about, and putting the old
+  guard back turns the gate red.
+
+  **And the class, not just the instance.** Every remaining router-wide exemption was checked against every
+  route on its router. One more had the same shape: `inviteRouter` was excused as *"authenticated by the
+  invite key itself"*, which is true of the handshake's two joining legs and false of `POST /generate`,
+  which MINTS the key. That route is correctly `requireAdmin` today, so nothing was open — but dropping the
+  guard would have been invisible, which is exactly how the trigger came to take any token. Both are now
+  exempt per ROUTE, and removing either guard turns the gate red.
+
+  **What it did and did not reach.** A sync cycle authenticates peer-to-peer in both directions,
+  so this exposed no data to the caller: what an unprivileged token could do was make this instance
+  start work, repeatedly, against networks it holds no rights in. An unauthenticated denial-of-service
+  surface rather than a disclosure — there is nothing to rotate.
+
 ### Internal
 
 - Parameter parity between an MCP tool and its REST route is gated on every pair that can be READ, instead

@@ -109,7 +109,14 @@ crudRouter.post('/:id/sync', globalRateLimit, requireAdmin, (req, res) => {
   if (!net) { res.status(404).json({ error: 'Network not found' }); return; }
 
   import('../../sync/engine.js').then(({ runSyncForNetwork }) => {
-    void runSyncForNetwork(net!.id);
+    // `.catch`, not a bare `void`. This is the route the UI's "Sync now" button calls, and the cycle it
+    // starts outlives the response — so a rejection had nowhere to go: no log line, no audit entry, an
+    // `ok: true` already sent, and an unhandled rejection at the process level. An operator pressing the
+    // button on a network whose peer is unreachable saw success and no record of anything else.
+    // `POST /api/notify/trigger` has always logged its failure; this is the same fire-and-forget with the
+    // same handling.
+    void runSyncForNetwork(net!.id)
+      .catch(err => log.error(`Triggered sync for network ${net!.id} failed: ${err}`));
   }).catch(err => log.error(`POST /api/networks/:id/sync import: ${err}`));
 
   res.json({ ok: true });

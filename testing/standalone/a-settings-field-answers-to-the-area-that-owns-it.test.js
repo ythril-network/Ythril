@@ -138,5 +138,15 @@ describe('every settings field answers to the area that owns it', () => {
       'the hand-written maxGiB refusal is still in the route, beside the table that now owns the rule');
     assert.match(GUARD, /if \(!refused\.length\) \{ next\(\); return; \}/,
       'the guard must pass the request on only when NOTHING was refused');
+    // A missing space id CLOSES. Unreachable behind the rung guard today; the fail-open case is a
+    // floor-admin token on a route whose parameter got renamed, because `isSpaceAdminFor(rights, '')`
+    // answers about any id at all. The sibling guard in `middleware.ts` carries the same check.
+    assert.match(GUARD, /if \(!spaceId\) \{/,
+      'no space in the path must refuse, not fall through with an empty id');
+    // A missing space id CLOSES. Unreachable behind the rung guard today, and the fail-open case is a
+    // floor-admin token on a route whose parameter got renamed: `isSpaceAdminFor(rights, '')` answers
+    // about any id at all. The sibling guard in `middleware.ts` carries the same check, pinned next door.
+    assert.match(GUARD, /if \(!spaceId\) \{/,
+      'no space in the path must refuse, not fall through with an empty id');
   });
 });

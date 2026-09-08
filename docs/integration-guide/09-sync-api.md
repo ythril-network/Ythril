@@ -38,11 +38,16 @@ GET /api/notify?networkId=net-uuid&limit=50
 
 ```http
 POST /api/notify/trigger
+Authorization: Bearer <instance-admin token>
 ```
 
 ```json
 { "networkId": "net-uuid" }
 ```
+
+**Instance administrator, since 4.4.** It was any authenticated token until then — a token with no rights at
+all could start a cycle on any network id it named, while `POST /api/networks/:id/sync`, which does the same
+thing, already required an administrator.
 
 Triggers an immediate sync cycle for the given network. **Fire-and-forget by default** — it returns as
 soon as the cycle is scheduled:
@@ -64,6 +69,27 @@ POST /api/notify/trigger?wait=true&timeoutMs=15000
 **Response** `200` (completed): `{ "status": "completed", "networkId": "…", "synced": 12, "errors": 0 }`
 · `504` (timed out, still running): `{ "status": "timeout", "networkId": "…", "timeoutMs": 15000 }`
 · `500` (the cycle failed): `{ "status": "error", "networkId": "…", "error": "…" }`
+
+#### One peer instead of a network
+
+Send `peerId` in place of `networkId` to sync a single peer across every network it belongs to. Available
+since 4.4 — the `sync_now` MCP tool had taken this argument from the start and no REST route accepted one,
+so a REST caller could sync a network and never a single peer.
+
+```json
+{ "peerId": "inst-9f2c…" }
+```
+
+It must be an **exact `instanceId`** of a configured member, as returned by `GET /api/networks` — never a
+URL and never a label. An id that belongs to no network is refused with `404`, because an unvalidated value
+would become the address this instance connects to.
+
+Sending both `networkId` and `peerId` is a `400`: they name different subjects. Sending neither is also a
+`400`.
+
+`?wait=true` applies here too, and the completed body reports `networksSynced` rather than `synced` — one
+peer can belong to several networks. There is no `timeoutMs` race on this path: a single peer is bounded by
+its own request timeouts, where a network cycle can span many peers.
 
 ---
 

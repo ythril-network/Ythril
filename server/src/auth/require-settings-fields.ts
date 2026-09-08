@@ -31,9 +31,23 @@ import { refusalsForSpaceUpdate, describeFieldRequirement } from './space-field-
 export function requireSettingsFields(paramName: string) {
   return function (req: Request, res: Response, next: NextFunction): void {
     const spaceId = req.params[paramName] as string | undefined;
+    /*
+     * A missing space id CLOSES, and this is defence in depth rather than a reachable path.
+     *
+     * Mounted as it is today, `requireSpaceAuthMfaScoped('id')` has already refused a request with no
+     * `:id`, so this cannot fire. But passing `''` onward would ask `isSpaceAdminFor(rights, '')` and
+     * `effectiveRung(rights, '', area)` about a space that does not exist, and a token with an admin FLOOR
+     * answers those about any id at all — so the fail-open case is a floor-admin token editing settings on
+     * a route where the parameter was renamed. `requireAdminOrSpaceAdminMfaScoped` carries the same guard
+     * for the same reason, and `space-admin-reaches-its-own-space-settings.test.js` pins it there.
+     */
+    if (!spaceId) {
+      res.status(400).json({ error: 'No space in the request path, so no setting can be authorised.' });
+      return;
+    }
     const refused = refusalsForSpaceUpdate(
       (req.body ?? {}) as Record<string, unknown>,
-      spaceId ?? '',
+      spaceId,
       !!(req.authToken && isInstanceAdmin(req.authToken)),
       (req.authToken as { rights?: TokenRights } | undefined)?.rights,
     );

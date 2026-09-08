@@ -71,10 +71,9 @@ const DIFFER_ON_PURPOSE = new Map();
  * purpose: a defect filed beside a sanctioned difference stops looking like a defect.
  */
 const KNOWN_GAP = new Map([
-  ['sync_now:peerId', 'Q-20. `sync_now` syncs ONE peer — it validates the id against `list_peers` and calls '
-    + '`runSyncForPeer` — and no REST route accepts `peerId` anywhere. `POST /api/notify/trigger` reads '
-    + '`networkId` from the body and `wait` from the query, so a REST caller can sync a network and never a '
-    + 'single peer. Found by this gate on its first honest run.'],
+  // EMPTY, and it has been. The one row it held — `sync_now:peerId` — was closed by giving
+  // `POST /api/notify/trigger` the same argument, so the case below has nothing to police yet. A row here
+  // is a defect somebody has not got to; the list may only shrink.
 ]);
 
 /** `/api/spaces/:id/schema` → a concrete path an audit rule's regex can be tested against. */

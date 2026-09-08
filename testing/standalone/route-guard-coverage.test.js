@@ -87,6 +87,21 @@ const PEER_AUTH_REASON = 'peer-to-peer sync — authenticated as a PEER via peer
  * space-scoped write. The path is the only handle that means one route.
  */
 const EXEMPT_ROUTE = new Map([
+  ['POST /', 'the peer notification channel on `notifyRouter`. Authenticated INSIDE the handler against the '
+    + 'claiming instance: a peer PAT carries `peerInstanceId` and may only speak as that peer, and a '
+    + 'non-member is refused. Middleware cannot do it — which instance may send the event depends on the '
+    + 'body. Its sibling `/trigger` is NOT covered by this and never was.'],
+  /*
+   * The invite handshake's two unauthenticated legs, and NOT its third route.
+   *
+   * `inviteRouter` was exempt as a whole under "authenticated by the invite key itself". True of `/apply`
+   * and `/finalize`, which is where the key is presented — and false of `POST /generate`, which MINTS the
+   * key and is `requireAdmin`. Nothing was wrong today; what was wrong was that dropping that guard would
+   * have been invisible, which is exactly how `POST /api/notify/trigger` came to take any token at all.
+   */
+  ['POST /apply', 'the joining leg of the invite handshake. Authenticated by the invite KEY in the body — '
+    + 'the caller has no token on this instance yet, which is what the handshake is for.'],
+  ['POST /finalize', 'the completing leg of the same handshake, authenticated by the same key.'],
   ['POST /mcp-oauth/consent', 'the OAuth consent form POST. It carries no bearer header by design — the '
     + 'token arrives in the form body, and `handleConsent` validates it itself with `findMatchingToken` and '
     + 'answers 401 when it does not match. Middleware could not read it from there.'],
@@ -104,10 +119,18 @@ const EXEMPT = new Map([
   ['syncMembersRouter', PEER_AUTH_REASON],
   ['syncVotesRouter', PEER_AUTH_REASON],
   ['syncWarmRouter', PEER_AUTH_REASON],
-  ['inviteRouter', 'network invite handshake — authenticated by the invite key itself'],
+
   ['oidcRouter', 'OIDC login/callback — this is how you GET a token'],
   ['themeRouter', 'public unauthenticated theme endpoint (read-only, no user data)'],
-  ['notifyRouter', 'peer notifications + admin sync trigger — peer-authenticated'],
+  // `notifyRouter` was exempt AS A WHOLE here, under the reason "peer notifications + admin sync trigger —
+  // peer-authenticated". That is true of `POST /api/notify` and was never true of `POST /api/notify/trigger`,
+  // which carried `requireAuth`: ANY valid token — one with every area at `none` and no spaces — could start
+  // a sync cycle on any network id it named. Proven on 2026-09-09 by minting exactly that token and getting
+  // `200 {"status":"triggered"}`, while the sibling `POST /api/networks/:id/sync` refused it with 403.
+  //
+  // The trigger now carries `requireAdmin`, which this gate can see. The exemption narrowed to the ONE route
+  // it was ever about, in `EXEMPT_ROUTE` above. An exemption whose reason covers one route and is applied to
+  // the whole router is the shape `CLAUDE.md` warns about, and this file is where it should have been caught.
   // mcpRouter is deliberately NOT here any more. `requireMcpAuth` is in AUTH_GUARDS above, so the gate
   // can now see that the router is guarded instead of being told to look away. It remains exempt from the
   // READ-ONLY check below, where the original reason was true: a read-only token does reach the
