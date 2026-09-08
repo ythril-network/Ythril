@@ -189,24 +189,26 @@ export class SpaceSettingsPopupComponent {
     this.state.settingsSaving.set(true);
     this.state.settingsError.set('');
     this.state.settingsNotice.set('');
-    this.spacesApi.updateSpace(target.id, {
-      label:  this.state.stForm.label.trim() || target.label,
-      maxGiB: this.state.stForm.maxGiB,
-      // NO recordTtlDays. It moved to the Danger Zone, which saves itself; this tab has only a note pointing
-      // there. Echoing the stored value back was harmless while it was one number and is not now: the space
-      // tier is five buckets, and a scalar write REPLACES the whole object — so a label edit would have
-      // flattened every per-collection window to one figure.
-      documentExtraction: this.state.stForm.documentExtraction || null, // F11-c ('' = inherit instance default)
-      imageAnalysis: this.state.stForm.imageAnalysis || null,           // '' = inherit instance default
-      audioAnalysis: this.state.stForm.audioAnalysis || null,
-      videoAnalysis: this.state.stForm.videoAnalysis || null,
-      textAnalysis: this.state.stForm.textAnalysis || null,
-      meta:   this.state.buildMeta(),
-      // Save persists the state the editor is showing. Without this the PATCH merges, so a type deleted in
-      // the UI is simply not mentioned and the server keeps it — the delete appears to work, survives the
-      // save, and is still there on reload.
-      typeSchemasMode: 'replace',
-    }).subscribe({
+    /*
+     * ONLY WHAT CHANGED. See `changedSettings()` for why, and for the two fields that are not a plain diff.
+     *
+     * Every field on this route answers to the area that owns it since 4.4, so posting the whole form made
+     * the highest requirement in it decide — a `files` writer editing a media level was refused for the
+     * twenty-one fields they had not touched.
+     *
+     * The empty case is a real one: the footer Save is reachable with nothing edited, and the body is
+     * `.strict()` with an at-least-one-field refine, so sending `{}` would be a 400 rather than a no-op.
+     */
+    const body = this.state.changedSettings();
+    if (!Object.keys(body).length) {
+      this.state.settingsSaving.set(false);
+      this.state.settingsNotice.set(this.transloco.translate('spaces.settings.nothingToSave'));
+      return;
+    }
+    // An emptied label field means "unchanged", not "no name": the diff compares against what the dialog
+    // opened with, so a blank simply does not appear in the body.
+    if (body['label'] === '') delete body['label'];
+    this.spacesApi.updateSpace(target.id, body).subscribe({
       next: (result) => {
         this.state.settingsSaving.set(false);
         // A networked space does not apply a meta change on the spot: the server opens a vote round per

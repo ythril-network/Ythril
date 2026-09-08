@@ -28,12 +28,18 @@ function space(over: Partial<Space> = {}): Space {
   return { id: 'work', label: 'Work', maxGiB: 10, networks: [], ...over } as Space;
 }
 
+/** What the last `updateSpace` call was given, so a case can assert the BODY and not just the effect. */
+let lastUpdateBody: Record<string, unknown> | null = null;
+
 function makeApi(spaces: Space[] = []) {
   return {
     listSpaces: () => of({ spaces }),
     list: () => of({ spaces }),
     getActivity: () => of({ spaces: [] }),
-    updateSpace: () => of({ space: spaces[0] ?? space() }),
+    updateSpace: (_id: string, body: Record<string, unknown>) => {
+      lastUpdateBody = body;
+      return of({ space: spaces[0] ?? space() });
+    },
     getSchema: () => of({ meta: {} }),
     listEntries: () => of({ entries: [] }),
     listSchemaLibrary: () => of({ entries: [] }),
@@ -212,3 +218,40 @@ describe('SpaceSettingsPopup — save re-baselines the unsaved-changes guard', (
  * answer rate, and must not sort as though it were the worst offender. Zero-filling it would put every unused
  * space above the one space that actually has a problem.
  */
+
+describe('SpaceSettingsPopup — Save sends the difference, not the form', () => {
+  /*
+   * Every field on `PATCH /api/spaces/:id` answers to the area that owns it since 4.4. Posting the whole
+   * form makes the HIGHEST requirement in it decide, so a `files` writer editing a media level was refused
+   * for the twenty-one fields they had not touched — the per-field rungs were real on the API and inert in
+   * this dialog. `changedSettings()` is unit-tested next door; this pins the WIRING, which is the half a
+   * green diff function cannot tell you about.
+   */
+  it('one edited field reaches the API alone', () => {
+    lastUpdateBody = null;
+    const fixture = create([space()]);
+    const c = fixture.componentInstance as any;
+
+    c.state.settingsSpace.set(space());
+    c.state.markPristine();
+    c.state.stForm.imageAnalysis = 'caption';
+    c.saveSettings();
+
+    expect(lastUpdateBody).toEqual({ imageAnalysis: 'caption' });
+  });
+
+  it('an untouched dialog calls nothing at all', () => {
+    // The body is `.strict()` with an at-least-one-field refine, so an empty object is a 400 rather than a
+    // no-op. Save is reachable with nothing edited, so this path has to exist.
+    lastUpdateBody = null;
+    const fixture = create([space()]);
+    const c = fixture.componentInstance as any;
+
+    c.state.settingsSpace.set(space());
+    c.state.markPristine();
+    c.saveSettings();
+
+    expect(lastUpdateBody).toBeNull();
+    expect(c.state.settingsSaving()).toBe(false);
+  });
+});

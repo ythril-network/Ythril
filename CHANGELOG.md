@@ -103,6 +103,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   merging as records are written, so duplicates are combined without anyone reviewing them. Every other
   data-quality operation — including starting a scan — is `write`.
 
+- **The space settings dialog saves only what you changed, so the per-field rungs mean something in the UI.**
+
+  Every field on `PATCH /api/spaces/:id` answers to the area that owns it. The dialog posted all of them on
+  every save regardless, so the highest requirement in the form decided — a token holding exactly the
+  `files` write it needed to change a media level was refused for the twenty-one fields it had not touched.
+  Nothing was broken; the loosening simply did not reach this dialog.
+
+  Save now sends the difference against what the dialog opened with, and `meta` is diffed per key rather
+  than sent whole — otherwise changing a validation mode would carry the space's purpose and its embedding
+  switch along with it, each of which answers to something different.
+
+  Two fields are not a plain diff and both have cost something before. `typeSchemasMode: "replace"` rides
+  along whenever the type map does, or a type deleted in the editor is simply not mentioned and the server
+  faithfully keeps it. `recordTtlDays` is still not in this payload at all: it belongs to the Danger Zone,
+  which saves itself, and a scalar write would flatten all five per-collection windows to one figure.
+
+  Pressing Save with nothing edited now says so instead of sending an empty body, which the route refuses.
+
 ### Internal
 
 - Four sweeps each worked out where an Express router hangs, and two of them got it wrong. The graph is now

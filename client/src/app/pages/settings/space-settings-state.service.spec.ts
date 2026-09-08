@@ -476,3 +476,69 @@ describe('SpaceSettingsState — duplicate rules', () => {
     expect(c.dupeSaved()).toBe(false);
   });
 });
+
+describe('the settings save sends only what changed', () => {
+  /*
+   * `PATCH /api/spaces/:id` governs each field by the area that owns it since 4.4 — a media level is
+   * `files` write, the quota is instance-admin. Posting every field on every save makes the HIGHEST
+   * requirement in the form decide, so a token holding exactly what it needs to change one thing is
+   * refused for the twenty-one it did not touch. The per-field rungs were real on the API and inert here.
+   */
+  it('an untouched dialog has nothing to send', () => {
+    const s = make();
+    s.openSettings(space());
+    s.markPristine();
+    expect(s.changedSettings()).toEqual({});
+  });
+
+  it('one edited field is the whole body', () => {
+    const s = make();
+    s.openSettings(space());
+    s.markPristine();
+    s.stForm.imageAnalysis = 'caption';
+    expect(s.changedSettings()).toEqual({ imageAnalysis: 'caption' });
+  });
+
+  it('meta is diffed per KEY, not sent whole because one field inside it moved', () => {
+    // Sending the object would put `purpose` (space administrator) and `suppressEmbeddings` (knowledge
+    // admin) into a request that meant to change a validation mode.
+    const s = make();
+    s.openSettings(space({ meta: { purpose: 'notes' } } as Partial<Space>));
+    s.markPristine();
+    s.schValidation = 'strict';
+    const body = s.changedSettings();
+    expect(Object.keys(body)).toEqual(['meta']);
+    expect(body['meta']).toEqual({ validationMode: 'strict' });
+  });
+
+  it('typeSchemasMode rides with typeSchemas, and never travels alone', () => {
+    // Without it the server MERGES, so a type deleted in the editor is not mentioned and is preserved —
+    // the deletion appears to work and is still there on reload. With no `typeSchemas` beside it, though,
+    // `replace` is a mode for a map that is not in the body.
+    const s = make();
+    s.openSettings(space());
+    s.markPristine();
+    s.schTypeSchemas.entity = { widget: emptyTypeSchemaState() };
+    const withSchemas = s.changedSettings();
+    expect(withSchemas['typeSchemasMode']).toBe('replace');
+    expect(Object.keys(withSchemas['meta'] as object)).toContain('typeSchemas');
+
+    const t = make();
+    t.openSettings(space());
+    t.markPristine();
+    t.stForm.label = 'Renamed';
+    expect(t.changedSettings()).toEqual({ label: 'Renamed' });
+  });
+
+  it('recordTtlDays is not in this payload at all', () => {
+    // It is edited in the Danger Zone, which saves itself, and the space tier is five buckets — a scalar
+    // write REPLACES the whole object, so echoing a stored value back would flatten every per-collection
+    // window to one figure.
+    const s = make();
+    s.openSettings(space({ recordTtlDays: 30 } as Partial<Space>));
+    s.markPristine();
+    s.stForm.label = 'Renamed';
+    expect(s.changedSettings()).not.toHaveProperty('recordTtlDays');
+    expect(s.settingsPayload()).not.toHaveProperty('recordTtlDays');
+  });
+});
