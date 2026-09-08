@@ -40,6 +40,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { trackedSources } from './_sources.mjs';
+import { routerMounts } from './_router-mounts.mjs';
 
 const { ROUTE_RIGHTS } = await import('../../server/dist/auth/space-rights.js');
 
@@ -61,74 +62,13 @@ const KNOWN_MISMATCH = {};
 
 const src = f => stripComments(readFileSync(f, 'utf8'));
 
-/**
- * Where each router hangs, resolved from the `use()` calls rather than guessed.
- *
- * The first draft matched a row to a registration by asking whether the row's route ENDED WITH the
- * registration's path, across every router in the tree. Four routers declare `/:id`, so `PATCH /api/spaces/:id`
- * was answered by the first `/:id` the scan happened to reach and the gate reported a guard belonging to a
- * different route — a wrong reason attached to a real row, which is worse than no finding at all.
- */
-function mountPrefixes() {
-  const edges = [];
-  const allSources = trackedSources(['server/src'], { floor: 50 });
-  for (const f of allSources) {
-    const s = src(f);
-    for (const m of s.matchAll(/\b(\w+)\.use\(\s*'([^']*)'\s*,\s*(\w+)/g)) {
-      edges.push({ parent: m[1], prefix: m[2], child: m[3] });
-    }
-    /*
-     * `brainRouter.use(memoriesRouter)` — mounted at the parent's own path with NO prefix argument.
-     *
-     * Reading only the two-argument form resolved 117 of 217 registrations, and the hundred it missed were
-     * the whole brain tree — fifty of the eighty-five `ROUTE_RIGHTS` rows. They were not reported as
-     * unmatched; they were absent, and the floor below passed comfortably on what remained. A gate
-     * concluding about every row while reading two fifths of them is this file's own subject.
-     */
-    for (const m of s.matchAll(/\b(\w+)\.use\(\s*(\w+Router)\s*\)/g)) {
-      edges.push({ parent: m[1], prefix: '', child: m[2] });
-    }
-    /*
-     * A route registered by a FUNCTION, onto the router it is handed:
-     *
-     *     export function registerUploadRoute(router: Router) { router.post('/:spaceId', ...) }
-     *     registerUploadRoute(fileStoreRouter);            // in another file
-     *
-     * The registration names its parameter, so the scan sees a router called `router` that nothing mounts.
-     * `registerReembedRoute` gets away with it only because its parameter happens to be spelled
-     * `spacesRouter` — luck, not design, and `POST /api/files/:spaceId` had no such luck: a real row on a
-     * real route, invisible. Bind the parameter to whatever the single call site passes.
-     */
-    for (const m of s.matchAll(/export function (\w+)\(\s*(\w+)\s*:\s*Router/g)) {
-      const callers = allSources
-        .flatMap(g => [...src(g).matchAll(new RegExp(`\\b${m[1]}\\(\\s*(\\w+)\\s*\\)`, 'g'))].map(c => c[1]));
-      // Only when every call site passes the SAME router. Two callers would make one parameter mean two
-      // prefixes, and a guess there is worse than the gap it fills.
-      if (callers.length && callers.every(c => c === callers[0])) {
-        edges.push({ parent: callers[0], prefix: '', child: m[2], alias: true });
-      }
-    }
-  }
-  const at = { app: '' };
-  // Mounts can nest (`app` → `brainRouter` → `searchRouter`), and the file order says nothing about the
-  // depth, so walk to a fixed point instead of once.
-  for (let pass = 0; pass < 10; pass++) {
-    let grew = false;
-    for (const e of edges) {
-      if (e.parent in at && !(e.child in at)) { at[e.child] = at[e.parent] + e.prefix; grew = true; }
-    }
-    if (!grew) break;
-  }
-  return at;
-}
-
 /** Every `router.verb('path', …guards)` registration in the API tree, with the guards named on it. */
-function registrations(at) {
+function registrations(mounts) {
   const out = [];
   for (const f of trackedSources(['server/src/api'], { floor: 10 })) {
     const s = src(f);
     for (const m of s.matchAll(/(\w*[Rr]outer)\.(get|post|patch|put|delete)\(\s*'([^']*)'/g)) {
-      const prefix = at[m[1]];
+      const prefix = mounts.prefixOf(m[1]);
       if (prefix === undefined) continue;   // a router nobody mounts serves nothing
       // From the path to the handler: the guards are the arguments between them.
       const from = m.index + m[0].length;
@@ -144,7 +84,7 @@ function registrations(at) {
 }
 
 describe('a rights row is reachable at the rung it names', () => {
-  const regs = registrations(mountPrefixes());
+  const regs = registrations(routerMounts());
 
   it('found the registrations', () => {
     // A floor: an empty scan passes the loop below while checking nothing.

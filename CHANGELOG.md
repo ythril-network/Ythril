@@ -105,6 +105,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- Four sweeps each worked out where an Express router hangs, and two of them got it wrong. The graph is now
+  `testing/standalone/_router-mounts.mjs` and the conclusions stay apart, because they genuinely differ:
+  one asks whether a router is reachable at all, one wants the full path to match a rights row, one wants
+  the mount prefix by name.
+
+  The shared version resolves all three mount forms, and the two that were missed are why this is a module.
+  `brainRouter.use(memoriesRouter)` carries no prefix argument — ten of the brain routers hang that way — and
+  a route registered inside a function is written against that function's `router` PARAMETER, which nothing
+  mounts by that name.
+
+  Widening the guard sweep to see the second form put `POST /api/files/:spaceId` and
+  `POST /mcp-oauth/consent` into the analysis for the first time. Both are fine: the upload route is
+  guarded, and the consent POST is now exempt WITH its reason — it carries no bearer header because the
+  token arrives in the form body, and the handler validates it itself.
+
+  It throws below a floor rather than returning a thin map. A graph that resolves nothing makes every caller
+  pass on an empty set, which is exactly how the gap stayed hidden.
+
+
 - An MCP tool now forwards the arguments its own schema declares, rather than a list of names written beside
   it. Two tools had that shape and one was already wrong — a field declared on the tool, accepted, and
   dropped before the write while the REST door stored it. A gate refuses a third.

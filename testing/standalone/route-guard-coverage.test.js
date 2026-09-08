@@ -25,6 +25,7 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { argumentsOf } from './_structural-window.mjs';
+import { routerMounts } from './_router-mounts.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
@@ -78,6 +79,19 @@ const WRITE_GUARDS = [
  * that file uploads and the entire governance surface were unlogged).
  */
 const PEER_AUTH_REASON = 'peer-to-peer sync — authenticated as a PEER via peer tokens, not user tokens';
+/**
+ * Routes exempt by PATH rather than by router, because their router has no name worth keying on.
+ *
+ * A route registered inside a function is written against that function's `router` parameter, so exempting
+ * `'router'` would exempt every such route on the instance -- including the file upload, which is a real
+ * space-scoped write. The path is the only handle that means one route.
+ */
+const EXEMPT_ROUTE = new Map([
+  ['POST /mcp-oauth/consent', 'the OAuth consent form POST. It carries no bearer header by design — the '
+    + 'token arrives in the form body, and `handleConsent` validates it itself with `findMatchingToken` and '
+    + 'answers 401 when it does not match. Middleware could not read it from there.'],
+]);
+
 const EXEMPT = new Map([
   ['setupRouter', 'first-run setup — runs BEFORE any token exists; guarded by configExists()'],
   // The /api/sync surface was one `syncRouter` until A17.6 split it into per-concern sub-routers.
@@ -157,35 +171,21 @@ function apiFiles(dir = null, out = []) {
   return out;
 }
 
-function mountedRouters() {
-  const src = fs.readFileSync(APP_TS, 'utf8');
-  const names = new Set();
-  const re = /app\.use\(\s*'[^']+'\s*,\s*([A-Za-z_]\w*)/g;
-  let m;
-  while ((m = re.exec(src)) !== null) names.add(m[1]);
-
-  // A sub-router mounted on a mounted parent is itself reachable — api/brain/index.ts does
-  // `brainRouter.use(memoriesRouter)`. Without this every brain route would drop out of the guard
-  // check and it would pass on a short list.
-  const links = [];
-  for (const f of apiFiles()) {
-    const s = fs.readFileSync(f, 'utf8');
-    const childRe = /(\w+Router)\s*\.\s*use\(\s*(\w+Router)\s*\)/g;
-    let c;
-    while ((c = childRe.exec(s)) !== null) links.push([c[1], c[2]]);
-  }
-  for (let changed = true; changed;) {
-    changed = false;
-    for (const [parent, child] of links) {
-      if (names.has(parent) && !names.has(child)) { names.add(child); changed = true; }
-    }
-  }
-  return names;
-}
+/**
+ * Which routers are reachable from the app, via `_router-mounts.mjs`.
+ *
+ * This used to resolve the graph here: `app.use('/x', r)` plus a fixed-point walk over
+ * `parentRouter.use(childRouter)`, with a comment explaining that without the second form *"every brain
+ * route would drop out of the guard check and it would pass on a short list"*. That was right, and it was
+ * the SECOND place to work it out; there are now four. `Q-19` extracted the graph, and the shared version
+ * also resolves a route registered onto a function's `router` PARAMETER — which this copy did not, so
+ * `POST /api/files/:spaceId` was never in the analysis.
+ */
+const mountedRouters = () => routerMounts();
 
 describe('Route guards — every mutating route must be protected', () => {
   before(() => {
-    const mounted = mountedRouters();
+    const mounts = mountedRouters();
 
     for (const filePath of apiFiles()) {
       const file = path.relative(API_DIR, filePath).replace(/\\/g, '/');
@@ -214,11 +214,15 @@ describe('Route guards — every mutating route must be protected', () => {
        * registrations whose handler is named or destructures its request differently. The last argument is the
        * handler because it is the last argument, whatever it looks like.
        */
-      const re = /(\w+Router)\s*\.\s*(get|post|put|patch|delete)\s*\(\s*'([^']+)'/g;
+      // `\w*[Rr]outer`, not `\w+Router`: a route registered inside a function names its PARAMETER, and
+      // `registerUploadRoute(router: Router)` spells it `router`. `POST /api/files/:spaceId` was never in
+      // the analysis until this matched it — not reported as unguarded, absent. The mount graph resolves
+      // the parameter to the router its call site passes, so `isMounted` still answers correctly.
+      const re = /(\w*[Rr]outer)\s*\.\s*(get|post|put|patch|delete)\s*\(\s*'([^']+)'/g;
       let m;
       while ((m = re.exec(src)) !== null) {
         const [, router, method, routePath] = m;
-        if (!mounted.has(router)) continue;
+        if (!mounts.isMounted(router)) continue;
         const args = argumentsOf(src, src.indexOf('(', m.index), `${routePath}: the route registration`);
         // Argument 0 is the path and the last is the handler; everything between them is the chain.
         const chain = args.slice(1, -1).join(',');
@@ -279,7 +283,7 @@ describe('Route guards — every mutating route must be protected', () => {
     const unguarded = [];
     for (const r of routes) {
       if (!MUTATING.has(r.method)) continue;
-      if (EXEMPT.has(r.router)) continue;
+      if (EXEMPT.has(r.router) || EXEMPT_ROUTE.has(`${r.method.toUpperCase()} ${r.routePath}`)) continue;
       if (!AUTH_GUARDS.some(g => effectiveChain(r).includes(g))) {
         unguarded.push(`${r.method.toUpperCase()} ${r.routePath}  (${r.file}: ${r.router})`);
       }
@@ -297,7 +301,8 @@ describe('Route guards — every mutating route must be protected', () => {
     const writable = [];
     for (const r of routes) {
       if (!MUTATING.has(r.method)) continue;
-      if (EXEMPT.has(r.router) || WRITE_EXEMPT.has(r.router)) continue;
+      if (EXEMPT.has(r.router) || WRITE_EXEMPT.has(r.router)
+          || EXEMPT_ROUTE.has(`${r.method.toUpperCase()} ${r.routePath}`)) continue;
       if (r.method === 'post' && READ_SHAPED_POSTS.includes(r.routePath)) continue;
       if (!WRITE_GUARDS.some(g => effectiveChain(r).includes(g))) {
         writable.push(`${r.method.toUpperCase()} ${r.routePath}  (${r.file}: ${r.router})`);
@@ -316,7 +321,7 @@ describe('Route guards — every mutating route must be protected', () => {
     // DIFFERENT space — a cross-tenant read/write, not merely a missing login check.
     const unscoped = [];
     for (const r of routes) {
-      if (EXEMPT.has(r.router)) continue;
+      if (EXEMPT.has(r.router) || EXEMPT_ROUTE.has(`${r.method.toUpperCase()} ${r.routePath}`)) continue;
       if (!/:spaceId\b/.test(r.routePath)) continue;
       // Admin-scoped guards carry the space check themselves.
       const chain = effectiveChain(r);
