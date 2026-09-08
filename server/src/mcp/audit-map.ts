@@ -92,8 +92,23 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | null> = {
   list_dir: 'file.list',
   read_file: 'file.read',
   find_entities_by_name: 'entity.list',
-  // A vector-similarity search over existing entries — a read of the same records `entity.list` covers.
-  find_similar: 'entity.list',
+  /*
+   * `brain.find_similar`, matching the REST route this tool mirrors.
+   *
+   * It said `entity.list`, with the reason *"a vector-similarity search over existing entries — a read of
+   * the same records `entity.list` covers"*. That reasoning had a fact missing: `brain.find_similar` is a
+   * real operation, and `POST /api/brain/spaces/:id/find-similar` logs it. So one capability was audited
+   * under two names depending on which door the caller used — an operator filtering for
+   * `brain.find_similar` saw only REST calls, and one filtering `entity.list` found similarity searches
+   * mixed in with entity listings.
+   *
+   * Every sibling already agreed with its route: `query`, `recall`, `traverse`, `get_stats`, `er_model`.
+   * This was the one that did not, and it was found by joining the two tables rather than by reading them.
+   *
+   * `get_space_meta: 'space.list'` below is NOT the same case and stays: `GET /api/spaces/:id/meta` has no
+   * rule of its own, so there is no operation for it to disagree with.
+   */
+  find_similar: 'brain.find_similar',
   // Returns the space's schema and counts. `space.list` is the REST read that exposes the same shape.
   get_space_meta: 'space.list',
 
