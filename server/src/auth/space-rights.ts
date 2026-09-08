@@ -240,9 +240,8 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   { route: '/api/conflicts/:id', method: 'DELETE', area: 'dataQuality', needs: 'write', scope: 'iterates' },
   { route: '/api/conflicts/link-violations', method: 'DELETE', area: 'dataQuality', needs: 'write', scope: 'iterates' },
   { route: '/api/conflicts/link-violations/:id', method: 'DELETE', area: 'dataQuality', needs: 'write', scope: 'iterates' },
-  // A seed route exists for tests. Classified rather than exempted: an unclassified route is exactly what
-  // this inventory is for, and "it is only for tests" is the sentence that precedes finding it in production.
-  { route: '/api/conflicts/seed', method: 'POST', area: 'dataQuality', needs: 'admin', scope: 'iterates' },
+  // `POST /api/conflicts/seed` used to sit here as `dataQuality` / `admin`. It moved to `NOT_AREA_SCOPED`
+  // below rather than down to a reachable rung -- see the row there for why.
 ];
 
 /**
@@ -394,6 +393,29 @@ export const NOT_AREA_SCOPED: readonly { route: string; why: string }[] = [
        + 'the four data areas; deleting the space destroys all four at once and is instance-admin. Neither '
        + 'is a view of one area\'s data, so neither takes an area rung. Governing PATCH per FIELD by area '
        + 'is D-4 and is separate.',
+  },
+  /*
+   * A TEST SEEDING ROUTE, and it stays instance-admin.
+   *
+   * It inserts a conflict record directly -- a document that no product path creates, because a real
+   * conflict is written by the sync engine when two instances disagree about a file. There is no operator
+   * task this route serves, so there is no rung that ought to reach it.
+   *
+   * It carried `dataQuality` / `admin` and `requireAdmin`, which is the mismatch this file's gate exists to
+   * report: a row advertising a rung that the guard never consults. The two ways out were to drop the guard
+   * to the rung or to say what the route is. Dropping the guard would have widened a route whose only
+   * caller is a test, and the row's own comment already said as much -- *"a seed route exists for tests"* --
+   * so the row was the part that was wrong, not the guard.
+   *
+   * The sibling sweeps went the other way in the same change: `duplicates/scan` and `contradictions/scan`
+   * ARE operator tasks, they already narrow their loops to spaces holding `dataQuality: write`, and only
+   * the admin demand in front of them made their rows unreachable.
+   */
+  {
+    route: '/api/conflicts/seed',
+    why: 'Inserts a conflict record directly, which no product path does — a real conflict is written by the '
+       + 'sync engine. It exists for tests and is instance-admin: there is no operator task it serves, so '
+       + 'there is no area rung that should reach it.',
   },
   {
     route: '/api/spaces/:id/rename',

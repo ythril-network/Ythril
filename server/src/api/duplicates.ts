@@ -9,7 +9,7 @@
  */
 
 import { Router } from 'express';
-import { requireAuth, requireAdminMfa, denyReadOnly } from '../auth/middleware.js';
+import { requireAuth, requireAdminMfa, denyReadOnly, requireAuthMfa } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { spacesWhereTokenMay } from '../auth/reachable-spaces.js';
@@ -321,7 +321,7 @@ duplicatesRouter.post('/:id/merge', globalRateLimit, requireAuth, denyReadOnly, 
 
 // POST /api/duplicates/scan?space=<id> — trigger an on-demand full re-scan.
 // Admin + non-read-only: it is write-heavy (populates the candidates collection).
-duplicatesRouter.post('/scan', globalRateLimit, requireAdminMfa, denyReadOnly, async (req, res) => {
+duplicatesRouter.post('/scan', globalRateLimit, requireAuthMfa, denyReadOnly, async (req, res) => {
   try {
     const spaceFilter = typeof req.query['space'] === 'string' ? req.query['space'] : undefined;
     const cfg = getConfig();
