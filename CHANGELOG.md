@@ -121,7 +121,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Pressing Save with nothing edited now says so instead of sending an empty body, which the route refuses.
 
+- **A similarity search is audited under the same operation whichever door it came through.**
+
+  `find_similar` over MCP logged `entity.list`; `POST /api/brain/spaces/:id/find-similar` logged
+  `brain.find_similar`. So an operator filtering the audit log for `brain.find_similar` saw only REST calls,
+  and one filtering `entity.list` found similarity searches mixed in with entity listings. Every sibling
+  already agreed with its route — `query`, `recall`, `traverse`, `get_stats`, `er_model` — and the comment
+  justifying the odd one out had simply missed that `brain.find_similar` existed.
+
+  Gated, because a fix without one is a fix waiting to be undone: if a route operation's last segment names
+  a tool, that tool must log that operation. Derived from both tables, so the next tool is covered without
+  anybody remembering the rule. `retry_embedding` is skipped and says why — the name appears under two
+  prefixes with a tool for each, and both are right — and the number of such skips is asserted so the hole
+  cannot quietly widen.
+
 ### Internal
+
+- Parameter parity between an MCP tool and its REST route is gated on every pair that can be READ, instead
+  of on four out of forty-six. `_route-accept-keys.mjs` reads what a route accepts out of the route — an
+  exported refusal list, a zod schema (including one declared locally), a destructure that is the whole of
+  the reading, or nothing at all, which is an answer. Anything else comes back `unresolved` WITH the reason
+  and is skipped, because "accepts nothing" and "we could not tell" looking alike is how a sweep reports
+  clean about what nobody checked. 78 of 124 mutating routes are readable, and a case holds that number to
+  only improving — alongside one that names the four pairs the previous gate covered, so they cannot go
+  missing inside a bigger total.
+
+  It found a real gap on its first honest run — `sync_now` takes a `peerId` no REST route accepts — which is
+  filed rather than fixed here, with a case that fails if the exemption outlives the defect.
+
+  **Eight wrong answers came before that one**, four of them arriving as findings, and each is recorded
+  beside the code that now prevents it: a partial destructure read as the whole contract, query parameters
+  compared against body keys, a query key reached through a helper, a helper's body slid to end-of-file, a
+  tool compared against a sibling route because the right one was unreadable, path parameters counted as
+  missing, and the mount graph that `Q-19` extracted. The last was the worst: a negated-comma class stopped
+  inside `Record<string, unknown>`, so the four pairs the OLD gate checked were skipped while this one
+  reported a bigger number. The pattern in all of them is the same: the shape of the output gave it away,
+  not the code under test.
+
 
 - Four sweeps each worked out where an Express router hangs, and two of them got it wrong. The graph is now
   `testing/standalone/_router-mounts.mjs` and the conclusions stay apart, because they genuinely differ:

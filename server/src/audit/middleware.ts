@@ -17,7 +17,7 @@ import type { OidcTokenRecord } from '../auth/oidc.js';
 
 // ── Operation mapping ──────────────────────────────────────────────────────
 
-interface RouteRule {
+export interface RouteRule {
   method: string;
   pattern: RegExp;
   operation: string;
@@ -29,7 +29,7 @@ interface RouteRule {
   read?: boolean;
 }
 
-const ROUTE_RULES: RouteRule[] = [
+export const ROUTE_RULES: RouteRule[] = [
   // ── Memory CRUD ──────────────────────────────────────────────────────────
   { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/memories$/,   operation: 'memory.create',  spaceGroup: 1 },
   { method: 'PATCH',  pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/memories\/([^/]+)$/, operation: 'memory.update', spaceGroup: 1, entryGroup: 2 },
