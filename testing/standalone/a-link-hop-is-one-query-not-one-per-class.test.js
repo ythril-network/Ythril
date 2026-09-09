@@ -7,7 +7,7 @@
  * per class: six link queries plus up to six document reads per hop, where the array walk it replaced does
  * three collection reads.
  *
- * Measured on a corpus of 8 380 links (`benchmarks/LINK-READERS.md`):
+ * Measured on a corpus of 8 380 links (`scripts/LINK-READERS.md`):
  *
  *     traverse depth 2   37.28 ms per-class   vs   6.92 ms on the arrays it replaced
  *     backlink scan      10.71 ms per-class   vs   3.19 ms
@@ -115,7 +115,7 @@ describe('every reader uses them', () => {
      * somebody has to take on trust. This is the same rule the benchmark protocol states for every other
      * figure the project publishes.
      */
-    const doc = readFileSync('benchmarks/LINK-READERS.md', 'utf8');
+    const doc = readFileSync('scripts/LINK-READERS.md', 'utf8');
     assert.match(doc, /scripts\/bench-link-readers\.mjs/, 'the doc must name the script that produced it');
     assert.match(doc, /6506fb84/, 'and the exact commit it measured 3.x at');
     readFileSync('scripts/bench-link-readers.mjs', 'utf8');

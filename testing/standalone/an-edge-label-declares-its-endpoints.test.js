@@ -4,7 +4,7 @@
  *
  * ## What was missing
  *
- * A space could allowlist edge LABELS and say nothing about their ends. `benchmarks/INGESTION.md` declares
+ * A space could allowlist edge LABELS and say nothing about their ends. `benchmarks/schema/conversation-schema.mjs` declares
  * `"from"` and `"to"` for all fourteen of its labels — twenty-eight endpoint declarations with nowhere to put
  * them — and three of its rows are wrong in ways only an endpoint rule catches. Nothing could express that
  * `reports_to` goes person → person, so a `reports_to` from a document to a deadline stored silently.

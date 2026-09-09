@@ -1,0 +1,610 @@
+[
+  {
+    "name": "conversation.person",
+    "knowledgeType": "entity",
+    "typeName": "person",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "Someone the conversation is about, including both speakers. The one type no corpus can do without: people are the only reliable coreference anchor and the subject of nearly every claim.",
+    "schema": {
+      "propertySchemas": {
+        "aliases": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "conversation.animal",
+    "knowledgeType": "entity",
+    "typeName": "animal",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "A named animal. An unnamed one (\"a dog we saw\") is not an entity.",
+    "schema": {
+      "propertySchemas": {
+        "species": {
+          "type": "string"
+        },
+        "breed": {
+          "type": "string"
+        },
+        "aliases": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "conversation.place",
+    "knowledgeType": "entity",
+    "typeName": "place",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "A named location at geographic or venue scale. Places are cheap, highly connective and containment-structured, so one hop generalises a location the question never named.",
+    "schema": {
+      "propertySchemas": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "city",
+            "country",
+            "region",
+            "venue",
+            "natural"
+          ]
+        },
+        "country": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "conversation.organization",
+    "knowledgeType": "entity",
+    "typeName": "organization",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "A named employer, school, club, team, course, non-profit, band or business. The standard second hop off a person, and how two people who never share a turn become connected.",
+    "schema": {
+      "propertySchemas": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "employer",
+            "school",
+            "club",
+            "team",
+            "nonprofit",
+            "business",
+            "course"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "conversation.work",
+    "knowledgeType": "entity",
+    "typeName": "work",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "A named creative work — book, film, album, game, artwork. Its creator is an edge, not a property.",
+    "schema": {
+      "propertySchemas": {
+        "medium": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "conversation.object",
+    "knowledgeType": "entity",
+    "typeName": "object",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "A specific possession worth naming: a car, an instrument, an heirloom.",
+    "schema": {
+      "propertySchemas": {
+        "kind": {
+          "type": "string"
+        },
+        "brand": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "conversation.activity",
+    "knowledgeType": "entity",
+    "typeName": "activity",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "Something a person does repeatedly — a sport, a craft, a practice. Distinct from a project: an activity has no end.",
+    "schema": {
+      "propertySchemas": {
+        "kind": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "conversation.condition",
+    "knowledgeType": "entity",
+    "typeName": "condition",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "A health or life condition attributed to a person. Its severity and course are claims, not properties.",
+    "schema": {
+      "propertySchemas": {
+        "kind": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "conversation.project",
+    "knowledgeType": "entity",
+    "typeName": "project",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "A bounded undertaking with an end in view. Its start, milestones and completion are chrono entries.",
+    "schema": {
+      "propertySchemas": {}
+    }
+  },
+  {
+    "name": "conversation.family_of",
+    "knowledgeType": "edge",
+    "typeName": "family_of",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "A kin tie. ONE label with a `relation` discriminator rather than eight labels, so `label` stays a coarse filter that actually narrows and extraction stays consistent.",
+    "schema": {
+      "endpoints": {
+        "from": [
+          "person"
+        ],
+        "to": [
+          "person"
+        ]
+      },
+      "propertySchemas": {
+        "relation": {
+          "type": "string"
+        },
+        "since": {
+          "type": "date"
+        },
+        "until": {
+          "type": "date"
+        }
+      }
+    }
+  },
+  {
+    "name": "conversation.knows",
+    "knowledgeType": "edge",
+    "typeName": "knows",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "A non-kin social tie. A different question from kinship, so it must not share a label with it.",
+    "schema": {
+      "endpoints": {
+        "from": [
+          "person"
+        ],
+        "to": [
+          "person"
+        ]
+      },
+      "propertySchemas": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "friend",
+            "colleague",
+            "neighbour",
+            "ex_partner",
+            "acquaintance",
+            "mentor"
+          ]
+        },
+        "since": {
+          "type": "date"
+        },
+        "until": {
+          "type": "date"
+        }
+      }
+    }
+  },
+  {
+    "name": "conversation.owns",
+    "knowledgeType": "edge",
+    "typeName": "owns",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "Possession.",
+    "schema": {
+      "endpoints": {
+        "from": [
+          "person"
+        ],
+        "to": [
+          "animal",
+          "object"
+        ]
+      },
+      "propertySchemas": {
+        "since": {
+          "type": "date"
+        },
+        "until": {
+          "type": "date"
+        }
+      }
+    }
+  },
+  {
+    "name": "conversation.works_at",
+    "knowledgeType": "edge",
+    "typeName": "works_at",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "Employment.",
+    "schema": {
+      "endpoints": {
+        "from": [
+          "person"
+        ],
+        "to": [
+          "organization"
+        ]
+      },
+      "propertySchemas": {
+        "role": {
+          "type": "string"
+        },
+        "since": {
+          "type": "date"
+        },
+        "until": {
+          "type": "date"
+        }
+      }
+    }
+  },
+  {
+    "name": "conversation.member_of",
+    "knowledgeType": "edge",
+    "typeName": "member_of",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "Membership without employment — a club, a team, a course.",
+    "schema": {
+      "endpoints": {
+        "from": [
+          "person"
+        ],
+        "to": [
+          "organization"
+        ]
+      },
+      "propertySchemas": {
+        "role": {
+          "type": "string"
+        },
+        "since": {
+          "type": "date"
+        },
+        "until": {
+          "type": "date"
+        }
+      }
+    }
+  },
+  {
+    "name": "conversation.lives_in",
+    "knowledgeType": "edge",
+    "typeName": "lives_in",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "Residence.",
+    "schema": {
+      "endpoints": {
+        "from": [
+          "person"
+        ],
+        "to": [
+          "place"
+        ]
+      },
+      "propertySchemas": {
+        "since": {
+          "type": "date"
+        },
+        "until": {
+          "type": "date"
+        }
+      }
+    }
+  },
+  {
+    "name": "conversation.located_in",
+    "knowledgeType": "edge",
+    "typeName": "located_in",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "Containment. The place-in-place chain is what lets one hop reach a fact filed under a narrower location.",
+    "schema": {
+      "endpoints": {
+        "from": [
+          "place",
+          "organization"
+        ],
+        "to": [
+          "place"
+        ]
+      },
+      "propertySchemas": {}
+    }
+  },
+  {
+    "name": "conversation.part_of",
+    "knowledgeType": "edge",
+    "typeName": "part_of",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "Structural containment between non-place things.",
+    "schema": {
+      "endpoints": {
+        "from": [
+          "organization",
+          "project",
+          "work"
+        ],
+        "to": [
+          "organization",
+          "project",
+          "work"
+        ]
+      },
+      "propertySchemas": {}
+    }
+  },
+  {
+    "name": "conversation.practices",
+    "knowledgeType": "edge",
+    "typeName": "practices",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "Someone does this. How often, and how well, are claims.",
+    "schema": {
+      "endpoints": {
+        "from": [
+          "person"
+        ],
+        "to": [
+          "activity"
+        ]
+      },
+      "propertySchemas": {
+        "since": {
+          "type": "date"
+        },
+        "until": {
+          "type": "date"
+        }
+      }
+    }
+  },
+  {
+    "name": "conversation.works_on",
+    "knowledgeType": "edge",
+    "typeName": "works_on",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "Involvement in a bounded undertaking.",
+    "schema": {
+      "endpoints": {
+        "from": [
+          "person"
+        ],
+        "to": [
+          "project"
+        ]
+      },
+      "propertySchemas": {
+        "role": {
+          "type": "string"
+        },
+        "since": {
+          "type": "date"
+        },
+        "until": {
+          "type": "date"
+        }
+      }
+    }
+  },
+  {
+    "name": "conversation.has_condition",
+    "knowledgeType": "edge",
+    "typeName": "has_condition",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "A condition attributed to a person. Severity and course are claims.",
+    "schema": {
+      "endpoints": {
+        "from": [
+          "person"
+        ],
+        "to": [
+          "condition"
+        ]
+      },
+      "propertySchemas": {
+        "since": {
+          "type": "date"
+        },
+        "until": {
+          "type": "date"
+        }
+      }
+    }
+  },
+  {
+    "name": "conversation.created_by",
+    "knowledgeType": "edge",
+    "typeName": "created_by",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "Authorship.",
+    "schema": {
+      "endpoints": {
+        "from": [
+          "work"
+        ],
+        "to": [
+          "person"
+        ]
+      },
+      "propertySchemas": {
+        "role": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "conversation.likes",
+    "knowledgeType": "edge",
+    "typeName": "likes",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "A stated preference. How strongly, and when it was said, live on the claim that stated it.",
+    "schema": {
+      "endpoints": {
+        "from": [
+          "person"
+        ],
+        "to": [
+          "work",
+          "activity",
+          "place",
+          "organization",
+          "object",
+          "animal",
+          "person"
+        ]
+      },
+      "propertySchemas": {}
+    }
+  },
+  {
+    "name": "conversation.dislikes",
+    "knowledgeType": "edge",
+    "typeName": "dislikes",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "A stated aversion.",
+    "schema": {
+      "endpoints": {
+        "from": [
+          "person"
+        ],
+        "to": [
+          "work",
+          "activity",
+          "place",
+          "organization",
+          "object",
+          "animal",
+          "person"
+        ]
+      },
+      "propertySchemas": {}
+    }
+  },
+  {
+    "name": "conversation.event",
+    "knowledgeType": "chrono",
+    "typeName": "event",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "Something that happened, on a date. This is where a date lands when it is not qualifying an edge: a birth, an acquisition, a move, a diagnosis, a release. Linked to the entities it concerns.",
+    "schema": {
+      "propertySchemas": {}
+    }
+  },
+  {
+    "name": "conversation.milestone",
+    "knowledgeType": "chrono",
+    "typeName": "milestone",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "A dated point in a project or a life that the speakers treat as significant.",
+    "schema": {
+      "propertySchemas": {}
+    }
+  },
+  {
+    "name": "conversation.plan",
+    "knowledgeType": "chrono",
+    "typeName": "plan",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "Something stated as intended, with the date it was intended for.",
+    "schema": {
+      "propertySchemas": {}
+    }
+  },
+  {
+    "name": "conversation.deadline",
+    "knowledgeType": "chrono",
+    "typeName": "deadline",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "A date something is due by.",
+    "schema": {
+      "propertySchemas": {}
+    }
+  },
+  {
+    "name": "conversation.prediction",
+    "knowledgeType": "chrono",
+    "typeName": "prediction",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "Something expected, with the date it was expected for.",
+    "schema": {
+      "propertySchemas": {}
+    }
+  },
+  {
+    "name": "conversation.utterance",
+    "knowledgeType": "memory",
+    "typeName": "utterance",
+    "schemaGroup": "conversation",
+    "published": true,
+    "description": "One thing said, as it was said. The record a question matches on. It names the entities it is about through links rather than repeating them, and carries who said it and when.",
+    "schema": {
+      "propertySchemas": {
+        "speaker": {
+          "type": "string",
+          "required": true
+        },
+        "statedOn": {
+          "type": "date",
+          "required": true
+        }
+      }
+    }
+  }
+]
