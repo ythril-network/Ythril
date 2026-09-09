@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A benchmark score is now published beside the highest score that question set allows.**
+
+  The Tier 0-R headline asks whether the single top result held every turn the gold answer cites. On the
+  published sample, 30 of 199 questions cite turns from two different sessions of the conversation, and no
+  record built from consecutive turns can hold both — at any width. So every window strategy in the
+  programme is capped at **84.9%** before retrieval runs, and a reader of the old table had no way to tell
+  three points from the maximum apart from thirty.
+
+  Every report now states that ceiling and the cross-session share in its header, and the report writer
+  refuses to render without them. The number is derived from the pinned dataset and the seeded sample rather
+  than written down, because a different sample is a different layout. A strategy that LINKS turns across
+  sessions is not bound by it, and the report says so: rank-1 credit reaches through a result's graph
+  expansions.
+
+  Protocol Amendment 7. No measurement changed and no result moved — the existing report was regenerated
+  from its own unmodified rows and every other figure in it is unchanged.
+
 ### Changed
 
 - **Two doors trigger a sync, and each one now says what it acts on.**

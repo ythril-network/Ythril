@@ -22,6 +22,9 @@
  * unretrieved one may still be answerable from elsewhere in the transcript, and a configuration that retrieves
  * more of everything scores better here while being worse in use.
  */
+import { ceilingSentence, evidenceShape } from './evidence-shape.mjs';
+import { stratifiedSample } from './sample.mjs';
+import { loadQuestions } from './dataset/locomo.mjs';
 import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -112,6 +115,7 @@ export function tier0rMarkdown({ rows, meta }) {
     + `${meta.excluded ? ` (${meta.excluded} excluded: no evidence cited)` : ''}`);
   lines.push(`**Retrieval:** \`recall\` at the shipped default, \`topK: ${meta.topK}\`, no traverse, no threshold`);
   lines.push(`**Model calls:** 0`);
+  lines.push(ceilingSentence(meta.shape));
   lines.push('');
 
   lines.push('## What this measures, and what it does not');
@@ -218,7 +222,7 @@ export function tier0rMarkdown({ rows, meta }) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [rowsPath, outDir] = process.argv.slice(2);
   if (!rowsPath || !outDir) {
-    console.error('usage: report-tier0r.mjs <rows.json> <outDir> [--commit x] [--image y] [--sha z] [--date d]');
+    console.error('usage: report-tier0r.mjs <rows.json> <outDir> [--commit x] [--image y] [--sha z] [--date d] --data <dataset> [--questions n] [--seed n]');
     process.exit(2);
   }
   const arg = (n, d) => {
@@ -226,6 +230,22 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     return i > -1 && process.argv[i + 1] ? process.argv[i + 1] : d;
   };
   const rows = JSON.parse(readFileSync(rowsPath, 'utf8'));
+  /*
+   * The ceiling is derived from the DATASET, not from the rows, because the rows do not say which session
+   * each cited turn came from — and that is the whole question. Regenerating a report therefore needs the
+   * same pinned dataset and the same seeded sample the run used, and refuses without them rather than
+   * printing a score with no maximum beside it.
+   */
+  const dataPath = arg('data', '');
+  if (!dataPath) {
+    console.error('report-tier0r.mjs: --data <pinned dataset> is required — the ceiling beside the score is '
+      + 'computed from where the evidence sits, which only the dataset knows.');
+    process.exit(2);
+  }
+  const answerableQuestions = (await loadQuestions(dataPath)).filter(q => (q.evidence ?? []).length > 0);
+  const shape = evidenceShape(
+    stratifiedSample(answerableQuestions, Number(arg('questions', '200')), Number(arg('seed', '1'))),
+  );
   const md = tier0rMarkdown({
     rows,
     meta: {
@@ -237,6 +257,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       answerable: Number(arg('answerable', '0')),
       excluded: Number(arg('excluded', '0')),
       topK: Number(arg('topk', '20')),
+      shape,
     },
   });
   mkdirSync(outDir, { recursive: true });

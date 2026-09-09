@@ -497,6 +497,40 @@ Raw model outputs — every question, every candidate answer, every judge verdic
 Append here, dated, with the reason and what was re-run. A silent edit elsewhere in this file invalidates the
 runs it covers; this section is how a change stays legitimate.
 
+### Amendment 7 — every rank-1 score is published beside the highest score its question set allows
+
+**2026-09-09, after reading a Tier 0-R result table while trying to raise the number.**
+
+The headline asks whether the single top result held **every** turn the gold answer cites. On the published
+199-question sample, 30 of those questions — 15.1% — cite turns from two different sessions of the
+conversation. One record built from consecutive turns cannot contain both, at any width. So those questions
+are lost before retrieval runs, and **every window rung in the programme is capped at 84.9%**.
+
+That number was not known while the programme was being designed, and not knowing it was expensive. The
+window-shape sweep exists to find points that the shape can move; measured against the layout of the
+evidence, the whole sweep from a 3-turn window to a 25-turn window is worth at most **one** point. Three of
+its cells were still queued as outstanding work. A target was also set above the ceiling, which no honest
+run could ever have met.
+
+**Changed:** a Tier 0-R report states the ceiling and the cross-session share in its header, and
+`report-tier0r.mjs` refuses to render without them — a rank-1 score with nothing beside it cannot be read as
+near or far from the maximum. This is the same defence as the `top record chars` column that Amendment 6
+added: a number that can be quoted alone will be.
+
+**It is derived, never written down.** `benchmarks/harness/evidence-shape.mjs` computes it from the pinned
+dataset and the seeded sample, because a different `--questions` or `--seed` is a different set of questions
+with a different layout, and a constant in prose would be right for exactly one run.
+
+**What the ceiling does not bound, stated so it is not over-read.** Rank-1 credit reaches through a result's
+graph expansions — the runner gives an expanded node its parent's rank, because a caller reading result 1
+reads them with it. A rung that LINKS turns across sessions can therefore carry a second session's turn into
+the first result and is genuinely not capped at 84.9%. The export is named for contiguous windows for that
+reason, and nothing asserts that a score is below it.
+
+**Nothing re-run.** No measurement changed and no result moved; this adds a column that was always
+computable and was never computed. The existing `2026-09-06-tier0r-rank` report was regenerated from its own
+unmodified `rows.json` to carry the line, and every other figure in it is byte-identical.
+
 ### Amendment 6 — the retrieval headline is a RANK, because coverage can be brute-forced
 
 **2026-09-06.** Owner's ruling, after reading a Tier 0-R score that had been raised from 66% to 90%: *"do not
