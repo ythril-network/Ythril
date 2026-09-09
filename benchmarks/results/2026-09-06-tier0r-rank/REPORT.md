@@ -5,6 +5,7 @@
 **Questions:** 199 sampled from 1982 answerable (4 excluded: no evidence cited)
 **Retrieval:** `recall` at the shipped default, `topK: 60`, no traverse, no threshold
 **Model calls:** 0
+**Ceiling:** 84.9% for any rung whose answering record is a run of consecutive turns — 30 of 199 questions (15.1%) are **cross-session**, citing turns from different sessions, and no window of any width holds both. A rung that LINKS turns across sessions is not bound by it: rank-1 credit reaches through a result's graph expansions.
 
 ## What this measures, and what it does not
 

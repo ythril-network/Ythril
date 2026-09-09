@@ -28,6 +28,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
+import { evidenceShape } from '../../benchmarks/harness/evidence-shape.mjs';
 import { tier0rMarkdown } from '../../benchmarks/harness/report-tier0r.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -42,6 +43,9 @@ const META = {
   answerable: 2,
   excluded: 0,
   topK: 20,
+  // The report refuses to render without one: a rank-1 score with no ceiling beside it cannot be read
+  // as near or far from the maximum. Two questions, one of them cross-session, so the ceiling is 50%.
+  shape: evidenceShape([{ evidence: ['D1:1'] }, { evidence: ['D1:2', 'D4:9'] }]),
 };
 
 /** A row shaped like the runner writes one, with only the fields this gate cares about varied. */
