@@ -13,6 +13,8 @@ import { notifyRateLimit } from '../rate-limit/middleware.js';
 import { getConfig, saveConfig } from '../config/loader.js';
 import { revokePeerCredentialsIfOrphaned } from '../auth/tokens.js';
 import { log } from '../util/log.js';
+import { unknownPeerRefusal } from '../sync/peer-target.js';
+import { triggerNetworkSync, triggerPeerSync, syncTimeoutMs } from '../sync/trigger.js';
 
 export const notifyRouter = Router();
 
@@ -215,11 +217,20 @@ notifyRouter.get('/', notifyRateLimit, requireAuth, (req, res) => {
 // synchronously and get its outcome — bounded by `?timeoutMs` (default 30s, clamped 1s–120s) so a
 // slow or stuck sync can never hang the request; on timeout the cycle keeps running in the background.
 
-import { unknownPeerRefusal } from '../sync/peer-target.js';
-
-const TIMEOUT_SENTINEL = Symbol('sync-trigger-timeout');
 
 /*
+ * DEPRECATED since 4.5. Use `POST /api/networks/:id/sync` or `POST /api/networks/peers/:peerId/sync`.
+ *
+ * A sync trigger has no business on the peer NOTIFICATION channel, and the cost of that was not
+ * theoretical: this router was exempt from the guard sweep under a reason written for `POST /api/notify`,
+ * and that exemption is why this route accepted any valid token for as long as it did. The name was wrong,
+ * so the guard was wrong. Owner, 2026-09-09: *"merge if the goal is the same"* — it is, so both subjects
+ * now have doors that say what they are, and this one delegates to the same module rather than keeping a
+ * third implementation alive while it is retired.
+ *
+ * Kept working, not deleted: the integration harness calls it from twenty-odd places and an integrator's
+ * tooling may too. `_DEPRECATIONS.md` carries the removal row.
+ *
  * `requireAdmin`, matching `POST /api/networks/:id/sync`, and it was `requireAuth` until 2026-09-09.
  *
  * ANY valid token could start a sync cycle on any network id it named — proven by minting a token with
@@ -238,16 +249,6 @@ const TIMEOUT_SENTINEL = Symbol('sync-trigger-timeout');
  */
 notifyRouter.post('/trigger', notifyRateLimit, requireAdmin, async (req, res) => {
   const { networkId, peerId } = req.body as { networkId?: string; peerId?: string };
-  /*
-   * `peerId` — one peer rather than a whole network, and it is here because MCP had it and REST did not.
-   *
-   * `sync_now` has taken a `peerId` since it was written; no REST route accepted one anywhere, so a REST
-   * caller could sync a network and never a single peer. One capability, two doors, and the difference
-   * only visible from outside — found by the parameter-parity gate rather than reported (`Q-20`).
-   *
-   * The id is checked against the configured members by `unknownPeerRefusal`, which is the SEC-16 rule the
-   * tool already ran: an unvalidated value becomes the address the sync engine connects to.
-   */
   if (networkId && peerId) {
     res.status(400).json({ error: 'Send networkId or peerId, not both — they name different subjects.' });
     return;
@@ -258,54 +259,9 @@ notifyRouter.post('/trigger', notifyRateLimit, requireAdmin, async (req, res) =>
   if (peerId) {
     const refusal = unknownPeerRefusal(peerId);
     if (refusal) { res.status(refusal.status).json({ error: refusal.error }); return; }
-    const { runSyncForPeer } = await import('../sync/engine.js');
-    if (!wait) {
-      void runSyncForPeer(peerId).catch(err => log.error(`Triggered sync for peer ${peerId} failed: ${err}`));
-      res.json({ status: 'triggered', peerId });
-      return;
-    }
-    // No timeout race here: `runSyncForPeer` is bounded by the peer's own request timeouts, and the
-    // network path's race exists because a cycle can span many peers. One peer cannot.
-    try {
-      const r = await runSyncForPeer(peerId);
-      res.json({ status: 'completed', peerId, networksSynced: r.networksSynced, errors: r.errors });
-    } catch (err) {
-      log.error(`Synchronous trigger for peer ${peerId} failed: ${err}`);
-      res.status(500).json({ status: 'error', peerId, error: err instanceof Error ? err.message : String(err) });
-    }
+    await triggerPeerSync(res, peerId, { wait });
     return;
   }
-
-  let runSyncForNetwork: (id: string) => Promise<{ synced: number; errors: number }>;
-  try {
-    ({ runSyncForNetwork } = await import('../sync/engine.js'));
-  } catch (err) {
-    log.error(`trigger import: ${err}`);
-    res.status(500).json({ error: 'Sync engine unavailable' });
-    return;
-  }
-
-  const net = networkId as string;
-  if (!wait) {
-    void runSyncForNetwork(net).catch(err => log.error(`Triggered sync for ${networkId} failed: ${err}`));
-    res.json({ status: 'triggered', networkId });
-    return;
-  }
-
-  const timeoutMs = Math.min(Math.max(parseInt(String(req.query['timeoutMs'] ?? ''), 10) || 30_000, 1_000), 120_000);
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(TIMEOUT_SENTINEL), timeoutMs); });
-  try {
-    const result = await Promise.race([runSyncForNetwork(net), timeout]);
-    res.json({ status: 'completed', networkId, synced: result.synced, errors: result.errors });
-  } catch (err) {
-    if (err === TIMEOUT_SENTINEL) {
-      res.status(504).json({ status: 'timeout', networkId, timeoutMs });
-    } else {
-      log.error(`Synchronous trigger for ${networkId} failed: ${err}`);
-      res.status(500).json({ status: 'error', networkId, error: err instanceof Error ? err.message : String(err) });
-    }
-  } finally {
-    clearTimeout(timer);
-  }
+  await triggerNetworkSync(res, networkId as string, { wait, timeoutMs: syncTimeoutMs(req.query['timeoutMs']) });
 });
+

@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Two doors trigger a sync, and each one now says what it acts on.**
+
+  `POST /api/networks/:id/sync` is the network door and has gained what the other route had: `?wait=true`
+  and `?timeoutMs`. It also stops answering a bare `{ ok: true }` that said nothing about what happened —
+  every door now answers `triggered`, `completed`, `timeout` or `error`, with `ok` kept as the one-bit
+  summary so an existing reader is unaffected.
+
+  `POST /api/networks/peers/:peerId/sync` is new, and syncs one peer across every network it belongs to.
+  It sits on the networks COLLECTION rather than under one network's id because a peer is not a property
+  of one network. The id is checked against the configured members and never treated as a URL.
+
+  Both go through `sync/trigger.ts`, so a fourth door cannot invent a fourth set of semantics. The one
+  asymmetry is deliberate and documented there: a network cycle races the timeout because it can span many
+  peers, a peer cycle does not because it is already bounded by that peer's own request timeouts.
+
+- **`POST /api/notify/trigger` is DEPRECATED.** Use the two routes above. It still works and delegates to the same code,
+  so nothing breaks today.
+
+  A sync trigger had no business on the peer NOTIFICATION channel, and the cost was not theoretical: that
+  router was exempt from parts of the guard sweep under a reason written for the notification endpoint
+  beside it, which is exactly why this route accepted any authenticated token until 4.4. The name was
+  wrong, so the guard was wrong, and no gate could see it.
+
 ## [4.4.0] — 2026-09-09
 
 **The release where the rights matrix means what the panel says.** A token granted exactly the rung the

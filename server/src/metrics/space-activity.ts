@@ -208,7 +208,11 @@ export function classifyOperation(operation: string): CallClass | null {
  */
 const ADMIN_DOMAINS = [
   'space.', 'network.', 'token.', 'webhook.', 'config.', 'data.', 'mfa.', 'auth.', 'schema_library.',
-  'about.', 'sync.', 'local_agent.',
+  // `peer.` joins `network.` and `sync.` for the same reason: triggering a cycle is an operator acting on
+  // the instance's replication, not anybody using a space. It arrived as its own domain in 4.5, when
+  // syncing ONE peer got a door of its own — a peer belongs to several networks, so `network.` could not
+  // honestly cover it.
+  'about.', 'sync.', 'local_agent.', 'peer.',
 ] as const;
 
 /**

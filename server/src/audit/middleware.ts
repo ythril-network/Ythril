@@ -201,6 +201,10 @@ export const ROUTE_RULES: RouteRule[] = [
   { method: 'POST',   pattern: /^\/api\/networks\/([^/]+)\/join$/,                  operation: 'network.join' },
   { method: 'POST',   pattern: /^\/api\/networks\/([^/]+)\/fork$/,                  operation: 'network.fork' },
   { method: 'POST',   pattern: /^\/api\/networks\/([^/]+)\/reparent-self$/,         operation: 'network.reparent_self' },
+  // The PEER door must come first: `/api/networks/peers/x/sync` also satisfies the network pattern below,
+  // with `peers` captured as the network id. Order is the disambiguation, and getting it wrong would file
+  // every peer sync under a network that does not exist.
+  { method: 'POST',   pattern: /^\/api\/networks\/peers\/([^/]+)\/sync$/,           operation: 'peer.sync_trigger' },
   { method: 'POST',   pattern: /^\/api\/networks\/([^/]+)\/sync$/,                  operation: 'network.sync_trigger' },
 
   // ── Conflict resolution ──────────────────────────────────────────────────

@@ -14,6 +14,8 @@ import { getConfig, saveConfig, getSecrets } from '../../config/loader.js';
 import { revokePeerCredentialsIfOrphaned } from '../../auth/tokens.js';
 import { getSyncHistory } from '../../sync/history.js';
 import { peerSafeFetch } from '../../sync/peer-fetch.js';
+import { unknownPeerRefusal } from '../../sync/peer-target.js';
+import { triggerNetworkSync, triggerPeerSync, syncTimeoutMs } from '../../sync/trigger.js';
 import { log } from '../../util/log.js';
 import type { NetworkConfig } from '../../config/types.js';
 
@@ -103,23 +105,42 @@ crudRouter.get('/:id/sync-history', globalRateLimit, requireAdmin, async (req, r
 
 // ── POST /api/networks/:id/sync — manually trigger a sync run ──────────────
 
-crudRouter.post('/:id/sync', globalRateLimit, requireAdmin, (req, res) => {
-  const cfg = getConfig();
-  const net = cfg.networks.find(n => n.id === req.params['id']);
+/*
+ * THE network sync door, and since 4.4 it has the strong sides of the route it is replacing.
+ *
+ * Owner, 2026-09-09, on the two routes that did this: *"merge if the goal is the same. then use the strong
+ * sides of each."* This one already had what the other lacked — it names its subject in the URL and 404s a
+ * network that does not exist — and lacked what the other had: `?wait=true` and `?timeoutMs`.
+ *
+ * Both now come from `sync/trigger.ts`, so the answer shapes cannot drift again. The old body also
+ * answered `{ ok: true }`, which said nothing about what happened; it now answers `triggered`,
+ * `completed`, `timeout` or `error` like every other door.
+ */
+crudRouter.post('/:id/sync', globalRateLimit, requireAdmin, async (req, res) => {
+  const net = getConfig().networks.find(n => n.id === req.params['id']);
   if (!net) { res.status(404).json({ error: 'Network not found' }); return; }
+  const wait = req.query['wait'] === 'true' || req.query['wait'] === '1';
+  await triggerNetworkSync(res, net.id, { wait, timeoutMs: syncTimeoutMs(req.query['timeoutMs']) });
+});
 
-  import('../../sync/engine.js').then(({ runSyncForNetwork }) => {
-    // `.catch`, not a bare `void`. This is the route the UI's "Sync now" button calls, and the cycle it
-    // starts outlives the response — so a rejection had nowhere to go: no log line, no audit entry, an
-    // `ok: true` already sent, and an unhandled rejection at the process level. An operator pressing the
-    // button on a network whose peer is unreachable saw success and no record of anything else.
-    // `POST /api/notify/trigger` has always logged its failure; this is the same fire-and-forget with the
-    // same handling.
-    void runSyncForNetwork(net!.id)
-      .catch(err => log.error(`Triggered sync for network ${net!.id} failed: ${err}`));
-  }).catch(err => log.error(`POST /api/networks/:id/sync import: ${err}`));
-
-  res.json({ ok: true });
+/*
+ * ONE PEER, across every network it belongs to.
+ *
+ * It lives on the networks COLLECTION rather than under `/:id/` because a peer is not a property of one
+ * network — it can be a member of several, and `runSyncForPeer` walks all of them. That is exactly why
+ * this could not simply be folded into the route above, and why `sync_now` had no REST twin for it until
+ * `Q-20` bolted one onto the notification channel.
+ *
+ * `unknownPeerRefusal` is the SEC-16 check, shared with the MCP tool: an unvalidated id becomes the
+ * address the sync engine connects to, so the id is checked against the configured members and never
+ * treated as a URL.
+ */
+crudRouter.post('/peers/:peerId/sync', globalRateLimit, requireAdmin, async (req, res) => {
+  const peerId = req.params['peerId'] as string;
+  const refusal = unknownPeerRefusal(peerId);
+  if (refusal) { res.status(refusal.status).json({ error: refusal.error }); return; }
+  const wait = req.query['wait'] === 'true' || req.query['wait'] === '1';
+  await triggerPeerSync(res, peerId, { wait });
 });
 
 
