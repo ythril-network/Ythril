@@ -248,6 +248,12 @@ size-idempotent refresh skips a file whose byte size matches the stored copy, so
 
 ### Internal
 
+- The two sync doors are exercised by CI rather than by hand. `Q-21` added them and verified them against a
+  scratch instance, which covers nothing afterwards. Nine cases now drive the live stack, and three assert
+  things no source-reading gate can see: that `ok` is still beside `status` in the answer the UI colours its
+  banner from, that both doors refuse a token with no rights, and that `/api/networks/peers/x/sync` is not
+  shadowed by `/api/networks/:id/sync` — both answer 404, so only the REASON distinguishes them.
+
 - Parameter parity between an MCP tool and its REST route is gated on every pair that can be READ, instead
   of on four out of forty-six. `_route-accept-keys.mjs` reads what a route accepts out of the route — an
   exported refusal list, a zod schema (including one declared locally), a destructure that is the whole of
