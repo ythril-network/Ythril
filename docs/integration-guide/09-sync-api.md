@@ -36,6 +36,36 @@ GET /api/notify?networkId=net-uuid&limit=50
 
 ### Trigger Sync
 
+Two doors, one for each subject. Both need an **instance administrator**.
+
+```http
+POST /api/networks/:id/sync            one network
+POST /api/networks/peers/:peerId/sync  one peer, across every network it belongs to
+Authorization: Bearer <instance-admin token>
+```
+
+Both answer the same shape: `{ "ok": true, "status": "triggered", ... }` when fire-and-forget, and with
+`?wait=true` either `completed`, `504 timeout` (still running) or `500 error`. `ok` is the one-bit summary
+and `status` the detail.
+
+`?timeoutMs` (default `30000`, clamped `1000`–`120000`) bounds the WAIT on the network door only. A peer
+cycle is already bounded by that peer's own request timeouts, so racing it would report a timeout for
+something that cannot hang.
+
+The peer id must be an exact `instanceId` of a configured member, as `GET /api/networks` returns — never a
+URL and never a label. An id belonging to no network is refused `404`, because an unvalidated value would
+become the address this instance connects to.
+
+A peer lives on the networks COLLECTION rather than under one network's id on purpose: a peer can be a
+member of several, and the cycle walks all of them.
+
+#### `POST /api/notify/trigger` — DEPRECATED since 4.5
+
+It still works and takes `networkId` or `peerId` in the body, delegating to the same code as the two routes
+above. Prefer them: a sync trigger on the peer NOTIFICATION channel is what let this route accept any
+authenticated token until 4.4, because the router-wide guard exemption was written for the notification
+endpoint beside it.
+
 ```http
 POST /api/notify/trigger
 Authorization: Bearer <instance-admin token>
