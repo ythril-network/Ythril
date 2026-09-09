@@ -27,7 +27,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { makeYthril } from '../_shared/ythril-client.mjs';
+import { makeYthril } from '../../benchmarks/writer/ythril-client.mjs';
 
 /**
  * Stand in for the instance.

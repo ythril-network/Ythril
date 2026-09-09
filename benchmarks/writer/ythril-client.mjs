@@ -597,6 +597,36 @@ export function makeYthril({ baseUrl, token, totpCode, timeoutMs = DEFAULT_TIMEO
     writeChrono: (space, record) => writeRecord(space, 'chrono', record),
 
     /**
+     * Write a file, then attach its links.
+     *
+     * TWO REQUESTS, and it is not an oversight. The upload route takes the bytes and the path and nothing
+     * else; the links a file carries — the claims it produced, the people in it — are set through the
+     * file-meta route afterwards. A caller doing this by hand forgets the second call, and the symptom is a
+     * transcript that exists and is reachable from nothing, which looks exactly like a transcript that is
+     * working.
+     *
+     * `links` is optional because a file with nothing to point at is legitimate. Passing an EMPTY object is
+     * not: it means the caller meant to link something and computed nothing, so it is refused rather than
+     * silently skipped.
+     */
+    async writeFile(space, { path, content, links, tags, description }) {
+      requireString(space, 'writeFile: space');
+      requireString(path, 'writeFile: path');
+      requireString(content, 'writeFile: content');
+      if (links !== undefined && Object.keys(links).length === 0) {
+        throw new TypeError(`writeFile: '${path}' passed an empty \`links\` object. Omit it to write a file `
+          + 'with no links; an empty one means a caller meant to link something and found nothing.');
+      }
+      const q = `?path=${encodeURIComponent(path)}`;
+      await request('POST', `/api/files/${encodeURIComponent(space)}${q}`, { body: { content, encoding: 'utf8' } });
+      const meta = { ...(links ?? {}), ...(tags ? { tags } : {}), ...(description ? { description } : {}) };
+      if (Object.keys(meta).length > 0) {
+        await request('PATCH', `/api/brain/spaces/${encodeURIComponent(space)}/files${q}`, { body: meta });
+      }
+      return { path };
+    },
+
+    /**
      * Semantic search. Returns the WHOLE response envelope, not just `results`.
      *
      * `degraded`, `truncated`, `nextSkip`, `count` and `bytesReturned` are on the envelope, and each one

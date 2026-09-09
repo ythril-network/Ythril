@@ -106,6 +106,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The deterministic half of ingestion exists: a writer that replays an extraction file into a space.**
+
+  Extraction needs a model and happens once; replaying its output does not and can be repeated by anyone.
+  The writer creates the space from the schema, its purpose and its usage notes, then writes entities,
+  chrono entries, claims, edges and one transcript file per session — in that order, because each step names
+  records the one before it created, and a link to a record that does not exist yet is dropped silently
+  rather than refused.
+
+  Which turns a claim came from is returned to the caller and stored in no record. Every property is folded
+  into the text that gets embedded, so a turn id inside a claim would be unique noise in every vector in the
+  space, and no user of the product has one.
+
+  A validator runs before the first write and reports every problem at once. Half of what it catches the
+  instance would catch too, but only on the request that reaches it — leaving a space holding most of a
+  conversation, which is interpretable, wrong, and says nothing about it. The other half the instance cannot
+  catch at all: an extraction refers to its own records by local key, and a claim naming a key nothing
+  defines produces a valid record with one fewer link and a successful response.
+
 - **The benchmark dataset was re-fetched from its pinned source, and extraction is now structurally blind to the answer key.**
 
   A session had read some of the questions and gold answers while investigating retrieval. The cached copy 
