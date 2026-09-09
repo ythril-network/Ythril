@@ -1,0 +1,33 @@
+{
+  "$comment": [
+    "The dataset is PINNED, not vendored: it is fetched by URL and refused if the sha256 does not match.",
+    "Redistributing somebody else's dataset inside this repository would put us in the business of hosting it,",
+    "and a copy is one more thing that can drift from what the authors publish.",
+    "",
+    "Re-fetched fresh 2026-09-09 on the owner's instruction, after a session had read some of the questions.",
+    "The bytes are identical to the 2026-08-28 pin, so nothing about the corpus changed — what changed is that",
+    "no local copy carries any edit or annotation from that session.",
+    "",
+    "IT MAY NOT BE TOUCHED. The extraction step reads conversations and must never read the questions, the",
+    "answers or the categories. That is enforced rather than promised: `loadConversations` returns objects",
+    "carrying no question data, and a gate asserts it."
+  ],
+  "pinnedAt": "2026-08-28",
+  "refetchedAt": "2026-09-09",
+  "datasets": {
+    "locomo": {
+      "url": "https://raw.githubusercontent.com/snap-research/locomo/main/data/locomo10.json",
+      "sha256": "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4",
+      "bytes": 2805274,
+      "cachePath": "benchmarks/.cache/datasets/locomo-79fa87e90f04.json",
+      "licence": "TO CONFIRM before publishing any result — read the repository's LICENSE and the paper's terms, and record the answer here rather than assuming a permissive default.",
+      "observed": {
+        "$method": "measured from the file, never taken from a paper",
+        "conversations": 10,
+        "questions": 1986,
+        "sessionsTotal": 272,
+        "turnsTotal": 5882
+      }
+    }
+  }
+}

@@ -106,6 +106,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The benchmark dataset was re-fetched from its pinned source, and extraction is now structurally blind to the answer key.**
+
+  A session had read some of the questions and gold answers while investigating retrieval. The cached copy 
+  was deleted and re-fetched from the URL the pin names; the bytes came back identical, so the corpus never
+  changed — what changed is that no local copy carries anything from that session.
+
+  The rule that extraction never sees a question is now enforced rather than promised. A gate walks the
+  whole tree the loader hands the extraction step and fails on a question, answer, evidence reference or
+  category appearing at any depth, and checks the bytes on disk still match the recorded hash. A graph built
+  while looking at the answer key scores well on it and describes nothing else, and no results table can
+  reveal that afterwards.
+
 - **The benchmark folder was restarted from the schema, and 56 files were deleted.**
 
   Everything that was there took a conversation to be a pile of transcript chunks and asked how big to cut
