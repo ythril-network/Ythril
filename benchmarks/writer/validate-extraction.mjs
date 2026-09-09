@@ -131,6 +131,31 @@ export function validateExtraction(extraction, schemaEntries) {
     if (!ISO_DATE.test(String(s.date ?? ''))) say(`sessions[${i}] has date '${s.date}', which is not YYYY-MM-DD`);
   }
 
+  /*
+   * THE CLAIM LAYER IS COMPLETE, and this is the check that makes that a rule rather than advice.
+   *
+   * Measured, not assumed: an extraction that kept only the turns that seemed to say something covered 34.6%
+   * of a conversation and scored WORSE on every measure than storing the raw turns and nothing else. Two
+   * thirds of what was said was gone, so no question about it could be answered from any structure built on
+   * top — and nothing in the graph looked wrong. It had entities, edges, dates and links; it was simply
+   * missing most of the conversation.
+   *
+   * Only checkable when the sessions carry their turn ids. A file without them is not refused — the writer
+   * has no transcript to compare against and inventing a failure there would block a legitimate caller who
+   * is not running a benchmark.
+   */
+  const declared = sessions.flatMap(s => s.turns ?? []);
+  if (declared.length > 0) {
+    const covered = new Set(claims.flatMap(c => c.sourceTurns ?? []));
+    const missing = declared.filter(t => !covered.has(t));
+    if (missing.length > 0) {
+      const shown = missing.slice(0, 8).join(', ');
+      say(`${missing.length} of ${declared.length} turns are in no claim (${shown}${missing.length > 8 ? ', …' : ''}). `
+        + 'The claim layer is complete or the conversation is partly missing, and a partly missing conversation '
+        + 'looks exactly like a working graph.');
+    }
+  }
+
   return problems;
 }
 

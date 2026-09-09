@@ -134,6 +134,31 @@ describe('what a claim must carry', () => {
   });
 });
 
+describe('the claim layer is complete', () => {
+  test('a turn in no claim is reported, when the sessions say which turns they had', () => {
+    // Measured: keeping only the turns that seemed to say something covered 34.6% of a conversation and
+    // scored worse on every measure than storing the raw turns. The graph looked fine — it was just
+    // missing two thirds of what was said.
+    const e = good();
+    e.sessions[0].turns = ['D1:1', 'D1:2', 'D1:3'];
+    const p = validateExtraction(e, SCHEMA);
+    assert.equal(p.length, 1);
+    assert.match(p[0], /2 of 3 turns are in no claim \(D1:2, D1:3\)/);
+  });
+
+  test('and says nothing when every turn is covered', () => {
+    const e = good();
+    e.sessions[0].turns = ['D1:1'];
+    assert.deepEqual(validateExtraction(e, SCHEMA), []);
+  });
+
+  test('a file whose sessions carry no turn ids is not refused', () => {
+    // The writer has no transcript to compare against, and inventing a failure there would block a caller
+    // who is not running a benchmark at all.
+    assert.deepEqual(validateExtraction(good(), SCHEMA), []);
+  });
+});
+
 describe('the floors', () => {
   test('every problem is reported, not the first', () => {
     // A validator that stops at one turns a bad extraction into a dozen round trips through a model.

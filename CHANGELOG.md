@@ -106,6 +106,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The first conversation was extracted, measured against a control, and lost — for a reason the
+  measurement names exactly.**
+
+  A 419-turn conversation became 74 entities, 68 edges, 57 chrono entries and 145 claims. Scored against
+  one-record-per-turn on the same questions at the same byte budget, the graph answered 22.3% correctly at
+  rank 1 against the control's 32.5% — worse on every column.
+
+  The cause is not the graph. The claims covered **34.6%** of the turns, because the extraction prompt said
+  a claim mentioning nobody and nothing was probably not worth making. Two thirds of the conversation was
+  therefore absent, and no structure built on top can answer a question about a remark that was never
+  stored. Nothing in the result looked wrong: the graph had entities, edges, dates and links.
+
+  The rule is reversed — every turn becomes a claim, and the claim layer is complete rather than curated —
+  and it is now enforced rather than advised: the validator refuses an extraction whose sessions declare
+  their turns and whose claims do not cover them. Judging which remarks matter is retrieval's job, at read
+  time, when the question is known.
+
 - **The deterministic half of ingestion exists: a writer that replays an extraction file into a space.**
 
   Extraction needs a model and happens once; replaying its output does not and can be repeated by anyone.

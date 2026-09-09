@@ -52,12 +52,21 @@ say why in the entity's `aliases`.
 employer, pet, project, possession, work, activity or condition. Not a passing noun. An entity nobody
 mentions twice and nothing links to is noise with a type on it.
 
-**A claim is one thing that was said.** Keep the words. Do not summarise several turns into one claim, and do
-not split a turn unless it genuinely states separable things. Every claim carries the speaker and the date of
-the session it was said in.
+**EVERY TURN BECOMES A CLAIM. The claim layer is complete, not curated.** Keep the words. Do not summarise
+several turns into one, and do not split a turn unless it genuinely states separable things. Every claim
+carries the speaker and the date of the session it was said in.
 
-**Link every claim to what it is about.** This is what makes it reachable from another session. A claim
-mentioning nobody and nothing is almost always a claim you should not have made.
+This rule replaces its opposite, and the opposite was measured. The first version of this prompt said a
+claim mentioning nobody and nothing was probably a claim not worth making. Following that, an extraction of
+a 419-turn conversation produced 145 claims covering **34.6%** of the turns — and scored WORSE than storing
+the raw turns and nothing else, on every measure. Two thirds of what was said was simply gone, so no
+question about it could be answered from any structure built on top.
+
+A remark that seems to say nothing is still what somebody said, and later it is the only record that they
+said it. Judging which remarks matter is the retrieval's job, at read time, when the question is known.
+
+**Link every claim to what it is about.** This is what makes it reachable from another session. A claim with
+no links is still written — it just has fewer ways in.
 
 **Draw an edge when the conversation asserts a relationship**, not when two things are merely mentioned
 together. `works_at`, `lives_in`, `family_of` — and `since` / `until` only when the text says so.
@@ -82,9 +91,10 @@ set scores well on it and describes nothing else, which is worse than useless �
 turn counts. The transcript is kept separately as a file; the graph is about what was said, not about the
 file it arrived in.
 
-**Do not pad.** More entities is not better. An extraction whose entity list is full of common nouns links
+**Do not pad the ENTITIES.** More entities is not better — an entity list full of common nouns links
 everything to everything, which performs exactly like having no graph at all. If the entity list does not
-read like a list of names of things, start again.
+read like a list of names of things, start again. This is about entities only: the claims are complete by
+rule and are never trimmed.
 
 **Do not leave a key dangling.** Every `from`, `to`, and every entry in a claim's `entities` or `chrono` must
 name a `key` you defined in the same file.
@@ -98,3 +108,4 @@ Check these yourself; the writer will refuse the file otherwise.
 - Every date matches `YYYY-MM-DD`.
 - Every referenced `key` is defined.
 - Every claim has `speaker`, `statedOn` and at least one `sourceTurns` entry.
+- **Every turn of every session appears in some claim's `sourceTurns`.** Count them.
