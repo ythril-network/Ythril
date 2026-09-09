@@ -30,6 +30,20 @@ auditable, and one with no date cannot answer a question about when.
 a thing, how severe a condition became, how a role changed — each of those is something somebody said, so it
 is a claim.
 
+## The transcript
+
+**One file per session, holding the turns as they were said.** Name it by the session date —
+`transcripts/2023-05-08.md` — and tag it `transcript`. A file has no type field and therefore no type
+schema, so the path and the tag are what identify it; there is nothing to declare.
+
+**The file names the claims, not the other way round.** A claim can only link to entities. A file can link
+to entities, claims and chrono entries, so the transcript is written with `memoryIds` naming the claims
+drawn from it and `entityIds` naming the people in it. A walk reads links in both directions, so a match on
+a claim still reaches its transcript.
+
+**Never fold the transcript into a claim.** The file is the evidence; the claim is the thing a question
+matches on. Pasting one into the other loses both.
+
 ## Reading
 
 **Search finds a claim; the graph gets you the rest.** A question usually matches one remark. What makes a
@@ -39,6 +53,10 @@ other claims naming them — so a search worth making is a search with traversal
 **Ask for linked records explicitly.** A walk returns the entities a match names by default; the claims that
 name those entities are opt-in. Without that, an expansion returns nodes and not sentences, which looks like
 the graph is working and answers nothing.
+
+**Exclude files by asking for what you want.** Recall takes a list of knowledge types; pass
+`["memory", "entity", "chrono"]` for a normal question and `["file"]` when you want the verbatim passage. A
+per-type cap of zero is not the mechanism — it is refused, and the refusal says to use the type list.
 
 **Expansion is charged against the answer budget.** Records a walk brings back displace records that would
 otherwise have been returned. That is deliberate: a walk that returns noise comes out *worse*, not merely

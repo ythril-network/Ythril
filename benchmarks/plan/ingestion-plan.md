@@ -2,12 +2,29 @@
 
 How a conversation becomes the space described by `../space/schema.json`.
 
+## This is a product capability, not a benchmark step
+
+**One ingester, and the benchmark is one of its callers.** Everything below describes ingesting a
+conversation into Ythril for its own sake — a chat log, a support history, a set of meeting transcripts. It
+runs with no benchmark present and knows nothing about questions or scoring.
+
+That splits the work in three, and the split is what keeps the ingester honest:
+
+| | |
+|---|---|
+| **a source** | turns a corpus into sessions of speaker-and-text with dates. The LoCoMo loader is one; a chat export is another |
+| **the ingester** | everything on this page. Takes sessions, writes the space. The only part that touches Ythril |
+| **the measurement** | questions, answer keys, scoring. Present only when there is a benchmark |
+
+An ingester that can see the questions will end up shaped by them, and a vocabulary fitted to one corpus is
+a worse product. Keeping the measurement out of the ingester is what makes both usable.
+
 ## The unit of work
 
 One conversation, one space. A conversation arrives as sessions; each session has a date and a sequence of
 turns; each turn has a speaker and text. Nothing else about the source file survives ingestion.
 
-Four kinds of record come out:
+Five kinds of record come out:
 
 | | |
 |---|---|
@@ -15,6 +32,7 @@ Four kinds of record come out:
 | **edges** | how two of them are related, and for how long |
 | **chrono** | anything that happened on a date, linked to what it concerns |
 | **memories** | the individual things said, each with a speaker and a date |
+| **files** | the verbatim transcript, one per session, so anything can be quoted exactly |
 
 ## Order of writing
 
@@ -34,7 +52,11 @@ everything else hangs from.
   says so.
 - **Write a chrono entry for anything that happened on a date**, linked to the entities it concerns.
 
-**4. Nothing is written twice.** Re-reading a session must produce the same graph, not a second copy of it.
+**4. Write the session transcript as a file**, named by the session date and tagged `transcript`, naming
+the claims it produced and the people in it. It is the evidence a claim can be checked against, and it is
+written last because it names records that must already exist.
+
+**5. Nothing is written twice.** Re-reading a session must produce the same graph, not a second copy of it.
 
 ## The rules that decide the shape
 

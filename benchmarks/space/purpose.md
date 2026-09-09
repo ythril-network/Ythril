@@ -21,6 +21,17 @@ both remarks name the same subject and a search that finds one can reach the oth
 | **edges** | how two of those are related, and for how long — `works_at`, `family_of`, `lives_in`, `owns` |
 | **chrono** | anything that happened on a date, linked to the entities it concerns |
 | **memories** | the individual things said, each carrying who said it and when |
+| **files** | the verbatim transcript, one per session, so anything can be quoted exactly |
+
+## Quoting the source
+
+The transcript itself is kept, as a file per session, and the claims drawn from it point back at it. That is
+what makes an exact quote possible and an attribution checkable — a claim is a record of what was said, and
+the file is the evidence for it.
+
+It stays out of the way. Normal recall asks for claims, entities and chrono entries and never for files, so
+a transcript never competes with a claim for a place in an answer. Ask for files on purpose and the quote is
+there.
 
 ## What does not go in it
 
