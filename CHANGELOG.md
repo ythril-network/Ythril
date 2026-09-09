@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.0] — 2026-09-09
+
+**The release where the rights matrix means what the panel says.** A token granted exactly the rung the
+rights panel asked for was refused by five schema routes, because each was guarded above the rung it
+advertised. Every one of them now answers to what it advertises, a space's settings answer field by
+field to the area that owns them, the data-quality sweeps left instance-admin, and the settings dialog
+stopped posting the whole form so those rungs reach the UI rather than stopping at the API.
+
+**Nobody loses a permission they were using, with ONE exception.** Every rung change here loosens or is
+neutral — a space administrator holds `admin` on all four areas, so it still passes the rung that
+replaced the admin check. The exception is `POST /api/notify/trigger`, which accepted ANY valid token and
+now needs an instance administrator; see Security below before upgrading.
+
+**Documentation changed in this release**, for deployments that re-ingest the guides on deploy: a
+size-idempotent refresh skips a file whose byte size matches the stored copy, so use `--force` for these.
+
+| file | why |
+|---|---|
+| `docs/integration-guide/06-spaces-api.md` | the per-field requirement table for `PATCH /:id` |
+| `docs/integration-guide/06a-schema-api.md` | three auth lines, and the whole-map replace as the area's `admin` rung |
+| `docs/integration-guide/09-sync-api.md` | `peerId` on the trigger, and that the trigger needs an administrator |
+| `docs/integration-guide/13-audit-log-api.md` | an MCP tool logs the same operation as the route it mirrors |
+| `docs/integration-guide/16-mcp.md` | `update_space_schema` needs `schema` admin; `reindex` changed area |
+| `docs/integration-guide/04d-brain-ops-api.md` | rebuild-indexes is `knowledge` admin, not `schema` |
+| `docs/integration-guide/14-duplicates-and-webhooks.md` | both scans are `dataQuality` write, not admin |
+| `docs/userguide/04-settings.md` | each setting answers to its own area |
+
 ### Fixed
 
 - **A token with `schema` read on a space can validate that space's schema again.**
@@ -170,8 +197,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   repository's signature defect.
 
   It is now `requireAdmin`, matching the sibling. The route's own comment has always called it "(admin)";
-  only the guard disagreed. Nothing legitimate loses access: no peer and no client calls it — the peer
-  protocol uses `POST /api/notify`, and the "Sync now" button uses the sibling.
+  only the guard disagreed.
+
+  **UPGRADE NOTE, and read this one if you integrate.** Nothing of OURS loses access: the peer protocol uses
+  `POST /api/notify`, and the "Sync now" button uses the sibling. But your own tooling may call this route,
+  and from 4.4 it needs an **instance-admin** token — a space administrator, however many spaces it
+  administers, is refused. Check before you upgrade rather than after.
 
   **Why no gate caught it.** `route-guard-coverage` exempted the whole `notifyRouter` under the reason
   *"peer notifications + admin sync trigger — peer-authenticated"*, which is true of `POST /api/notify` and
