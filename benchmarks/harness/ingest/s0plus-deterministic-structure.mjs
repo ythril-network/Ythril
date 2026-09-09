@@ -216,9 +216,17 @@ export async function ingest({ conversation, ythril, space }) {
    * That is deliberate and it is what makes this rung a control. Two things were tried here and both are
    * recorded because each was wrong in an instructive way:
    *
-   * 1. **`entityIds` linking each turn to its session and speaker.** It changes the ranking — `memoryEmbedText`
-   *    prepends the linked entities' NAMES to the fact — and measured -1.5 points of strict evidence recall.
-   *    It buys nothing back: **graph traversal never reads `entityIds`.**
+   * 1. **`entityIds` linking each turn to its session and speaker.** It measured -1.5 points of strict
+   *    evidence recall and bought nothing back, because graph traversal did not read `entityIds`.
+   *
+   *    **BOTH halves of that have since stopped being true, and this row is kept as the record of it.** The
+   *    reason given was that `memoryEmbedText` prepends the linked entities' NAMES to the fact; it no longer
+   *    does — the names were removed FROM THE PRODUCT precisely because of the 1.5 points measured here, so
+   *    the cost was paid off rather than avoided. And a traverse now starts a walk from a non-entity seed,
+   *    so `entityIds` IS read. `s0l-linked-memories.mjs` is the rung that re-tests it.
+   *
+   *    Worth stating plainly beside it, because two rungs were built on getting this wrong: a property IS
+   *    embedded. `memoryEmbedText` appends every one of them as `key value`.
    * 2. **An edge from each turn to its session.** Refused by the store, and correctly:
    *    `assertRefsResolve` validates an edge's `from`/`to` against the `_entities` collection, so **a memory
    *    cannot be an edge endpoint at all.** Edges are entity-to-entity.

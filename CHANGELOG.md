@@ -9,22 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **A benchmark score is now published beside the highest score that question set allows.**
+- **The benchmark harness has a generic conversation schema, and it is read from the specification rather than copied.**
 
-  The Tier 0-R headline asks whether the single top result held every turn the gold answer cites. On the
-  published sample, 30 of 199 questions cite turns from two different sessions of the conversation, and no
-  record built from consecutive turns can hold both — at any width. So every window strategy in the
-  programme is capped at **84.9%** before retrieval runs, and a reader of the old table had no way to tell
-  three points from the maximum apart from thirty.
+  `INGESTION.md` has always specified a product-grade knowledge schema for any conversation — nine entity
+  types (`person`, `animal`, `place`, `organization`, `work`, `object`, `activity`, `condition`, `project`)
+  and fourteen edge labels with both endpoints pinned, so `works_at` runs person to organization and an edge
+  drawn any other way is refused at write time. **No ingest strategy implemented it.** Every one declared a
+  transcript instead: a single `utterance` type carrying the session, the turn ids and the speaker, and the
+  one strategy that declared entities typed them `subject` with a naming pattern of four-or-more lower-case
+  letters, which admitted `anything`, `around` and `also` as nodes of the graph.
 
-  Every report now states that ceiling and the cross-session share in its header, and the report writer
-  refuses to render without them. The number is derived from the pinned dataset and the seeded sample rather
-  than written down, because a different sample is a different layout. A strategy that LINKS turns across
-  sessions is not bound by it, and the report says so: rank-1 credit reaches through a result's graph
-  expansions.
-
-  Protocol Amendment 7. No measurement changed and no result moved — the existing report was regenerated
-  from its own unmodified rows and every other figure in it is unchanged.
+  The schema now lives in the harness and parses the specification's own JSON, so there is one source and a
+  gate that fails when the two disagree. Dates documented as `YYYY-MM-DD` are declared as dates rather than
+  strings, so they can be range-queried. The benchmark's own join key stays out of the shared vocabulary and
+  is passed in per caller.
 
 ### Changed
 
@@ -50,6 +48,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   router was exempt from parts of the guard sweep under a reason written for the notification endpoint
   beside it, which is exactly why this route accepted any authenticated token until 4.4. The name was
   wrong, so the guard was wrong, and no gate could see it.
+
+### Fixed
+
+- **A benchmark result now credits everything it brought back, not just the first hop.**
+
+  A recall answer nests a wrapper — `{ edge, node, paths, _graph }` — and a node's children hang off the
+  wrapper, not off the node. The scorer read the node and then looked for children on it, so it descended
+  exactly one level and stopped, at any depth, with nothing to indicate it. Against a live instance, a recall
+  at depth 2 returned 10 matches, 18 linked entities and 92 linked memories; the scorer credited the 18 and
+  none of the 92.
+
+  Every graph strategy ever measured was scored as though its walk returned nothing past hop 1 — including
+  the one whose entire claim is that a match reaches a record in a different session, which is the only
+  mechanism that can answer a cross-session question at all. It is worth about a point at the equal byte
+  budget the protocol fixes, because expansion is charged against that budget; the point is that the number
+  was not a measurement of the thing it named.
+
+  The scorer moved out of the runner to be testable at all: importing the runner executes its `main()`, so a
+  scoring rule that decides every published figure had no test.
+
+- **The strategy that links windows across sessions was joining them on stopwords.**
+
+  Its subjects were derived as words appearing in several sessions of a conversation but not most of them —
+  which is exactly the spread an ordinary English word has, so the rule could not separate a word that
+  recurs because the speakers keep discussing it from one that recurs because it is English. It produced 484
+  subjects for one conversation, beginning `able accomplishment advice after again ages album alive almost
+  along also another anything around`.
+
+  Fixed by giving the rule the rest of the corpus: a term appearing across most of the transcripts is
+  English, a term in one or two is a topic. One conversation goes from 334 subjects to 34, now
+  `transgender`, `transition`, `pottery`, `advocacy`, `inclusivity`, `identity`, `parade`, `pride`.
+
+- **Two ingest strategies documented premises that were no longer true**, and both had cost a measurement. One
+  stated that a property is not embedded — every property is appended to the embedded text as `key value`, so
+  the strategy built to add a date added a second copy of one already there and correctly measured nothing.
+  The other stated that graph traversal never reads a record's entity links and that linking cost 1.5 points
+  of recall; traversal reads them now, and the 1.5 points were paid off by removing linked entity names from
+  the embedded text rather than avoided.
+
+- **A benchmark score is now published beside the highest score that question set allows.**
+
+  The Tier 0-R headline asks whether the single top result held every turn the gold answer cites. On the
+  published sample, 30 of 199 questions cite turns from two different sessions of the conversation, and no
+  record built from consecutive turns can hold both — at any width. So every window strategy in the
+  programme is capped at **84.9%** before retrieval runs, and a reader of the old table had no way to tell
+  three points from the maximum apart from thirty.
+
+  Every report now states that ceiling and the cross-session share in its header, and the report writer
+  refuses to render without them. The number is derived from the pinned dataset and the seeded sample rather
+  than written down, because a different sample is a different layout. A strategy that LINKS turns across
+  sessions is not bound by it, and the report says so: rank-1 credit reaches through a result's graph
+  expansions.
+
+  Protocol Amendment 7. No measurement changed and no result moved — the existing report was regenerated
+  from its own unmodified rows and every other figure in it is unchanged.
 
 ## [4.4.0] — 2026-09-09
 
