@@ -84,18 +84,41 @@ with.
 
 ## Extraction
 
-Turning free dialogue into typed entities and labelled edges is the hard part and it needs a model. A rule
-based on word shape or word frequency does not produce entities; it produces common words, which link
-everything to everything and are worse than no graph at all.
+Turning free dialogue into typed entities and labelled edges needs a model. A rule based on word shape or
+word frequency does not produce entities; it produces common words, which link everything to everything and
+are worse than no graph at all.
 
-Two ways to pay for it, and the choice is the owner's:
+**The model is the assistant doing the work.** Owner, 2026-09-09. That costs nothing extra and needs no key,
+and it raises one problem that has to be solved rather than noted: a benchmark whose extraction happened
+inside an interactive session is not reproducible by anybody else.
 
-- **A local model** — free per run, reproducible only if the model file is pinned by hash the way the dataset
-  is.
-- **A hosted model** — comparable to what other systems publish, and it costs per run. Extraction happens
-  once per conversation, so the bill is paid ten times, not once per question.
+### So the extraction is pinned as data
 
-Until one is chosen this plan can build the loader, the schema and the writer, and cannot fill the graph.
+Extraction runs **once per conversation** and its output is written to a committed JSON file — the entities,
+edges, chrono entries and claims, with no Ythril ids in them. The writer replays that file into a space
+deterministically.
+
+| | |
+|---|---|
+| **extract** | needs a model, happens once, output committed |
+| **write** | pure, repeatable, no model, anybody can run it |
+
+So a sceptic can rebuild the exact graph from the repository and check every record against the transcript.
+
+What they cannot do is re-derive the extraction without a model of their own — which is true of every
+system in this space, and is why the file is committed rather than regenerated.
+
+### The rule extraction runs under
+
+**It never sees a question.** Not the text, not the answers, not the categories, not how many there are of
+each kind. The extractor is handed sessions of speaker-and-text and nothing else. A graph built while
+looking at the questions scores well here and describes nothing else, which is the opposite of the point.
+
+**Disclosure, because it is already partly untrue.** While investigating the old approach this assistant
+read about ten questions and their gold answers, across four of the ten conversations, to work out where the
+evidence sat. That exposure exists and cannot be undone. It is recorded here rather than left for somebody
+to infer, and the honest options are to extract those four conversations with a fresh context or to report
+their numbers separately. Whichever is chosen goes in the results.
 
 ## What is measured
 
