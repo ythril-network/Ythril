@@ -279,7 +279,7 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 | `update_space_schema` | Write the space's type schemas and its other meta fields — `validationMode`, `strictLinkage`, `usageNotes`, `suppressEmbeddings`, `whenDuePasses` (needs `schema` `admin` on the space). **Merges** by default: types you do not name are preserved. `typeSchemasMode: "replace"` makes the payload authoritative, which is the only way to DELETE a type. Same refusals as `PATCH /api/spaces/:id`, including `422` for a `$ref` to a schema-library entry that does not exist. In a networked space it opens a meta vote rather than applying at once |
 | `wipe_space` | Wipe all or specific collection types from the space (admin only) |
 | `list_peers` | List all configured peer instances (admin only) |
-| `sync_now` | Trigger immediate sync (all networks or specific peer) (admin only) |
+| `sync_now` | Trigger immediate sync (all networks, or one peer via `peerId`) (admin only). `POST /api/notify/trigger` takes the same `peerId` since 4.4 |
 
 > **Instance-admin tools.** `list_peers`, `sync_now`, `create_space`, `reindex`, and `wipe_space` require
 > instance-admin rights: they expose the whole peer topology, drive outbound connections to every peer, or
@@ -605,7 +605,7 @@ composes what REST exposes as one DELETE per collection.
 | | `list_tokens` | `GET /api/tokens` | admin (MCP) · instance-level |
 | **Networks / sync** | | | |
 | | `list_peers` | `GET /api/networks` | admin (MCP) · instance-level |
-| | `sync_now` | `POST /api/networks/:id/sync` | admin (MCP) · instance-level |
+| | `sync_now` | `POST /api/notify/trigger` | admin (MCP) · instance-level |
 | **Meta** | | | |
 | | `help` | **MCP only** | read (MCP) |
 

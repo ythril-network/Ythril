@@ -1,6 +1,7 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { getConfig } from '../../config/loader.js';
 import { MIN_PEER_VERSION, peerFloorRefusal } from '../../sync/peer-floor.js';
+import { unknownPeerRefusal } from '../../sync/peer-target.js';
 
 export const list_peersTool: ToolHandler = {
   name: 'list_peers',
@@ -135,11 +136,12 @@ export const sync_nowTool: ToolHandler = {
     const syncCfg = getConfig();
 
     if (peerId) {
-      // SEC-16: validate peerId is a known instanceId, never use as URL
-      const knownIds = new Set(syncCfg.networks.flatMap(n => n.members.map(m => m.instanceId)));
-      if (!knownIds.has(peerId)) {
+      // SEC-16, through the shared check. `POST /api/notify/trigger` takes the same argument since Q-20,
+      // and a security rule with two implementations is how the weaker one ends up in charge.
+      const refusal = unknownPeerRefusal(peerId);
+      if (refusal) {
         return {
-          content: [{ type: 'text' as const, text: `Error: peerId '${peerId}' is not a registered member in any network.` }],
+          content: [{ type: 'text' as const, text: `Error (${refusal.status}): ${refusal.error}` }],
           isError: true,
         };
       }

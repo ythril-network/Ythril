@@ -8,7 +8,7 @@
 
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth, isInstanceAdmin } from '../auth/middleware.js';
+import { requireAuth, requireAdmin, isInstanceAdmin } from '../auth/middleware.js';
 import { notifyRateLimit } from '../rate-limit/middleware.js';
 import { getConfig, saveConfig } from '../config/loader.js';
 import { revokePeerCredentialsIfOrphaned } from '../auth/tokens.js';
@@ -215,12 +215,66 @@ notifyRouter.get('/', notifyRateLimit, requireAuth, (req, res) => {
 // synchronously and get its outcome — bounded by `?timeoutMs` (default 30s, clamped 1s–120s) so a
 // slow or stuck sync can never hang the request; on timeout the cycle keeps running in the background.
 
+import { unknownPeerRefusal } from '../sync/peer-target.js';
+
 const TIMEOUT_SENTINEL = Symbol('sync-trigger-timeout');
 
-notifyRouter.post('/trigger', notifyRateLimit, requireAuth, async (req, res) => {
-  const { networkId } = req.body as { networkId?: string };
-  if (!networkId) { res.status(400).json({ error: 'networkId required' }); return; }
+/*
+ * `requireAdmin`, matching `POST /api/networks/:id/sync`, and it was `requireAuth` until 2026-09-09.
+ *
+ * ANY valid token could start a sync cycle on any network id it named — proven by minting a token with
+ * `instanceAdmin: false`, every area `none` and no spaces, and getting `200 {"status":"triggered"}`. The
+ * sibling route refused the same token with `403 Admin token required`, which is what made the difference
+ * visible: two doors onto one capability, and the weaker one in charge.
+ *
+ * The guard-coverage gate did not see it because `notifyRouter` is exempt as a whole, under a reason —
+ * "peer notifications, peer-authenticated" — that is true of `POST /api/notify` and was never true of this
+ * route. Its own comment above has always called it "(admin)". An exemption whose reason covers one route
+ * and is applied to every route on the router is the shape `CLAUDE.md` warns about, and this is what it
+ * costs.
+ *
+ * Found while answering `Q-21`, and worth saying plainly: adding `peerId` here in `Q-20` widened what an
+ * unprivileged caller could aim before this line was written.
+ */
+notifyRouter.post('/trigger', notifyRateLimit, requireAdmin, async (req, res) => {
+  const { networkId, peerId } = req.body as { networkId?: string; peerId?: string };
+  /*
+   * `peerId` — one peer rather than a whole network, and it is here because MCP had it and REST did not.
+   *
+   * `sync_now` has taken a `peerId` since it was written; no REST route accepted one anywhere, so a REST
+   * caller could sync a network and never a single peer. One capability, two doors, and the difference
+   * only visible from outside — found by the parameter-parity gate rather than reported (`Q-20`).
+   *
+   * The id is checked against the configured members by `unknownPeerRefusal`, which is the SEC-16 rule the
+   * tool already ran: an unvalidated value becomes the address the sync engine connects to.
+   */
+  if (networkId && peerId) {
+    res.status(400).json({ error: 'Send networkId or peerId, not both — they name different subjects.' });
+    return;
+  }
+  if (!networkId && !peerId) { res.status(400).json({ error: 'networkId or peerId required' }); return; }
   const wait = req.query['wait'] === 'true' || req.query['wait'] === '1';
+
+  if (peerId) {
+    const refusal = unknownPeerRefusal(peerId);
+    if (refusal) { res.status(refusal.status).json({ error: refusal.error }); return; }
+    const { runSyncForPeer } = await import('../sync/engine.js');
+    if (!wait) {
+      void runSyncForPeer(peerId).catch(err => log.error(`Triggered sync for peer ${peerId} failed: ${err}`));
+      res.json({ status: 'triggered', peerId });
+      return;
+    }
+    // No timeout race here: `runSyncForPeer` is bounded by the peer's own request timeouts, and the
+    // network path's race exists because a cycle can span many peers. One peer cannot.
+    try {
+      const r = await runSyncForPeer(peerId);
+      res.json({ status: 'completed', peerId, networksSynced: r.networksSynced, errors: r.errors });
+    } catch (err) {
+      log.error(`Synchronous trigger for peer ${peerId} failed: ${err}`);
+      res.status(500).json({ status: 'error', peerId, error: err instanceof Error ? err.message : String(err) });
+    }
+    return;
+  }
 
   let runSyncForNetwork: (id: string) => Promise<{ synced: number; errors: number }>;
   try {
@@ -231,8 +285,9 @@ notifyRouter.post('/trigger', notifyRateLimit, requireAuth, async (req, res) => 
     return;
   }
 
+  const net = networkId as string;
   if (!wait) {
-    void runSyncForNetwork(networkId).catch(err => log.error(`Triggered sync for ${networkId} failed: ${err}`));
+    void runSyncForNetwork(net).catch(err => log.error(`Triggered sync for ${networkId} failed: ${err}`));
     res.json({ status: 'triggered', networkId });
     return;
   }
@@ -241,7 +296,7 @@ notifyRouter.post('/trigger', notifyRateLimit, requireAuth, async (req, res) => 
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(TIMEOUT_SENTINEL), timeoutMs); });
   try {
-    const result = await Promise.race([runSyncForNetwork(networkId), timeout]);
+    const result = await Promise.race([runSyncForNetwork(net), timeout]);
     res.json({ status: 'completed', networkId, synced: result.synced, errors: result.errors });
   } catch (err) {
     if (err === TIMEOUT_SENTINEL) {
