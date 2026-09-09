@@ -150,44 +150,96 @@ export const MAX_SESSION_SHARE = 0.5;
 export const MAX_SUBJECTS_PER_WINDOW = 3;
 
 /**
- * The terms worth joining two windows on — DERIVED from how they are distributed, not listed and not named.
+ * The share of the CORPUS a term may appear in and still count as a subject.
  *
- * ## Two wrong answers came before this one, and both are the reason it is written this way
+ * ## Why a corpus-wide rule, and why the previous one could not work
  *
- * **First a stop list.** `S0E` filters capitalised words through about eighty hand-written grammar words, and
- * its top subjects are still *Taking*, *Any* and *Hey*. Repairing the list means adding whatever this dataset
- * happens to capitalise, and the same pass surfaces *Mel*, a participant's nickname here — at which point the
- * corpus has been shaped by looking at the corpus. A list is also never finished and never obviously short.
+ * This rung's first rule kept a term that appeared in several sessions of a conversation but not most of
+ * them, and its docblock claimed that derived the subjects properly where `S0E`'s hand-written list of
+ * capitalised words had not. Measured, it produced 484 subjects for one conversation, and the alphabetical
+ * head of them was: `able accomplishment advice after again ages album alive almost along also another
+ * anything around artist artists asking atmosphere attention audience`.
  *
- * **Then a derived rule that was derived for the wrong property.** The replacement kept a word only if it
- * never appeared in lower case anywhere — a clean test for *is this a proper name*. It produced **five**
- * entities across 186 windows, and the walk built on them returned nothing at all, because proper names are
- * not what these questions hinge on. *Adoption*, *mentor*, *tattoo* are ordinary nouns and they are exactly
- * the joints a multi-hop question turns on. A rule can be perfectly derived and still answer a question
- * nobody needed answered.
+ * That is a stopword list. `anything` appeared in twelve sessions, `around` in eleven, `also` in eight —
+ * and the rule cannot object, because **that is exactly the spread an ordinary English word has.** Session
+ * spread separates a word that recurs from a word that does not; it cannot separate a word that recurs
+ * because the speakers keep discussing it from one that recurs because it is English. The two are
+ * indistinguishable inside one conversation, so no threshold on that axis would have worked.
  *
- * ## What actually distinguishes a joint
+ * The consequence was not a low score, which is what makes it worth this much comment: it was **no score at
+ * all**. Every window linked to whichever three stopwords it happened to contain, so the joints connected
+ * unrelated windows, the walk brought back noise, the budget trimmed it, and the rank-1 numbers came out
+ * byte-identical to `S0W` — 50.8%, 61.3% and 7.7%, to the decimal. A rung that measures nothing reports the
+ * control's number, and reads as "linking does not help".
  *
- * Not capitalisation — **distribution.** A term worth linking on appears in SEVERAL sessions but not in most
- * of them:
+ * ## What separates them
  *
- * - in one session only, it cannot produce a cross-session hop at all;
- * - in nearly every session — *that*, *think*, *really*, and the participants' own names — it joins everything
- *   to everything, and a joint connecting the whole corpus carries no information about any part of it.
+ * The other conversations. Ten transcripts of unrelated people is a corpus, and a term appearing across most
+ * of them is English rather than a topic: `anything` is in all ten, `Ferrari` is in one. That is ordinary
+ * inverse document frequency, derived from the data rather than typed out, which is the same discipline that
+ * rejected `S0E`'s hand-written list.
  *
- * That is document frequency, with a session as the document, and it needs no vocabulary: the words a stop
- * list would have held are excluded because they are everywhere, which is the same reason a stop list holds
- * them. Nothing here is specific to English, to this dataset, or to any question.
+ * A third is the ceiling: a term in four of ten conversations is already common enough to join windows that
+ * have nothing to do with each other.
  */
-function linkTerms(conversation) {
+export const MAX_CORPUS_SHARE = 0.34;
+
+/**
+ * The minimum corpus size for the rule above to mean anything.
+ *
+ * With one conversation every term is in 100% of the corpus, so the ceiling would reject all of them and the
+ * rung would silently ingest zero subjects — a smoke run on `--conversations 1` would report a corpus that
+ * looks fine and links nothing. Below this the corpus filter is skipped rather than applied to a sample too
+ * small to carry it, and `subjectReport` says which of the two happened.
+ */
+export const MIN_CORPUS_FOR_FILTER = 4;
+
+/** Lower-case words of four letters or more — the candidate terms, in one place so both passes agree. */
+const WORDS = /\b([a-z]{4,})\b/g;
+
+/** Every distinct candidate term in one conversation. */
+function termsOfConversation(conversation) {
+  const out = new Set();
+  for (const session of conversation.sessions) {
+    for (const turn of session.turns) {
+      for (const m of turn.text.toLowerCase().matchAll(WORDS)) out.add(m[1]);
+    }
+  }
+  return out;
+}
+
+/**
+ * How many conversations of the corpus each term appears in.
+ *
+ * Computed over the whole corpus once per conversation ingested, which is cheap next to embedding and keeps
+ * the rung a pure function of what it is handed rather than of a cache somebody has to invalidate.
+ */
+export function corpusDocumentFrequency(conversations) {
+  const df = new Map();
+  for (const c of conversations ?? []) {
+    for (const term of termsOfConversation(c)) df.set(term, (df.get(term) ?? 0) + 1);
+  }
+  return df;
+}
+
+/**
+ * The terms worth joining two windows on.
+ *
+ * @param {object} conversation   the one being ingested
+ * @param {Array<object>} corpus  every conversation, for the document-frequency filter
+ * @returns {Map<string, number>} term -> how many sessions of THIS conversation name it
+ *
+ * Throws on an empty result rather than returning one. A rung whose joints are all filtered away still
+ * ingests, still answers, and reports the control's score — which is the failure this module was rewritten
+ * after, and it is invisible from every number in the report.
+ */
+export function linkTerms(conversation, corpus) {
   const sessionsWith = new Map();   // term -> Set(session index)
   const totalOf = new Map();        // term -> occurrences
 
   for (const session of conversation.sessions) {
     for (const turn of session.turns) {
-      // Four letters and up: shorter tokens are almost all function words, and they are the ones whose
-      // document frequency is high anyway, so this is a cost saving rather than a second rule.
-      for (const m of turn.text.toLowerCase().matchAll(/\b([a-z]{4,})\b/g)) {
+      for (const m of turn.text.toLowerCase().matchAll(WORDS)) {
         const term = m[1];
         if (!sessionsWith.has(term)) sessionsWith.set(term, new Set());
         sessionsWith.get(term).add(session.index);
@@ -196,13 +248,39 @@ function linkTerms(conversation) {
     }
   }
 
+  const corpusSize = (corpus ?? []).length;
+  const filterByCorpus = corpusSize >= MIN_CORPUS_FOR_FILTER;
+  const df = filterByCorpus ? corpusDocumentFrequency(corpus) : null;
+  const dfCeiling = corpusSize * MAX_CORPUS_SHARE;
+
   const ceiling = conversation.sessions.length * MAX_SESSION_SHARE;
   const kept = new Map();
+  // Counted so the floor below can tell "this conversation has no repeated terms" — true of any small
+  // fixture, and not a bug — from "the corpus filter removed every one of them", which is.
+  let survivedConversationRules = 0;
   for (const [term, sessions] of sessionsWith) {
     if ((totalOf.get(term) ?? 0) < MIN_MENTIONS) continue;
     if (sessions.size < MIN_SESSIONS) continue;
     if (sessions.size > ceiling) continue;
+    survivedConversationRules++;
+    // The filter that does the real work: a term most of the corpus also uses is English, not a subject.
+    if (df && (df.get(term) ?? 0) > dfCeiling) continue;
     kept.set(term, sessions.size);
+  }
+
+  /*
+   * The floor, scoped to the failure it is for.
+   *
+   * A conversation with no repeated terms at all yields nothing, and that is a property of the input — every
+   * small fixture is like that. What must never pass quietly is the CORPUS filter emptying a set the
+   * conversation's own rules had filled: every joint was then judged ordinary English, nothing would link,
+   * and the rung would ingest, answer, and report the un-walked control's score with no field in the report
+   * able to show it. That is exactly how this rung spent its first two runs.
+   */
+  if (kept.size === 0 && survivedConversationRules > 0) {
+    throw new Error(`s0wl: all ${survivedConversationRules} candidate subjects were filtered out as ordinary `
+      + 'English, so nothing would link and the rung would silently report the control score. Raise '
+      + 'MAX_CORPUS_SHARE or check the corpus.');
   }
   return kept;
 }
@@ -223,11 +301,11 @@ function termsIn(text, kept) {
  * @param {string} args.space
  * @returns {Promise<{records: number, modelCalls: number}>}
  */
-export async function ingest({ conversation, ythril, space }) {
+export async function ingest({ conversation, conversations, ythril, space }) {
   let records = 0;
 
   // ── Pass 1: the terms that join sessions together ─────────────────────────
-  const spread = linkTerms(conversation);   // term -> how many sessions name it
+  const spread = linkTerms(conversation, conversations);   // term -> how many sessions name it
 
   const keep = new Map();   // term -> entity id
   for (const [term, sessions] of [...spread].sort()) {

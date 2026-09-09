@@ -137,3 +137,7 @@ XREVIEWX.md
 # the URL and the sha256 so a clone re-fetches the identical bytes. Committing the copy would be redistribution
 # nobody checked the terms for, and a `git add -A` after one run is all it would take.
 benchmarks/.cache/
+
+# Local scratch — the benchmark ingest walkthrough (owner-requested, not for commit)
+example.md
+gen-example.mjs

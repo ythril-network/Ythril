@@ -1,14 +1,25 @@
 /**
- * Rung S0WD — the windows of S0W, with WHEN they were said written into the text that gets embedded.
+ * Rung S0WD — the windows of S0W, with WHEN they were said written a SECOND time, into the fact.
  *
- * ## The hole this closes, which is not about returning more of anything
+ * ## CORRECTED 2026-09-09: the hole this was built to close was never open
  *
- * Every rung so far embeds `speaker: text` and files the date under `properties.statedOn`. A property is not
- * embedded. So the record for a turn said on 27 June 2023 contains no trace of June, of 2023, or of its
- * position in the conversation — and a question asking *when* something happened has nothing in the corpus to
- * match on. It is not that those questions rank badly; there is nothing there for them to rank against.
+ * This rung was written on the premise below, and the premise is false:
  *
- * LoCoMo calls that category `temporal` and it is a fifth of the question set.
+ * > Every rung so far embeds `speaker: text` and files the date under `properties.statedOn`. A property is
+ * > not embedded. So the record for a turn said on 27 June 2023 contains no trace of June, of 2023 [...]
+ *
+ * **`memoryEmbedText` appends every property to the embedded string as `key value`.** So an `S0W` record
+ * already carries `statedOn 2023-01-23` in its vector, and always did. What this rung adds is a second copy
+ * of a date that was in there the whole time.
+ *
+ * That is exactly what it measured, and the measurement now has a reason rather than a shrug: nothing moved.
+ * The finding is kept here in full because a rung whose stated purpose is wrong is worse than a rung that
+ * lost — somebody re-reads the premise, believes it, and builds the same thing again.
+ *
+ * **What was really wrong with the vector is the other half of that string**, and no rung tested it until
+ * `s0cd`: `turn D1:3,D1:4,D1:5,D1:6,D1:7` is about thirty tokens of unique identifier, present in every
+ * record, and it exists only so the scorer can join a result back to the answer key. `S0C` removed it and
+ * removed the date along with it, so the two variables moved together. See `s0cd-clean-dated-windows.mjs`.
  *
  * ## Why this is a rank improvement rather than a coverage one
  *

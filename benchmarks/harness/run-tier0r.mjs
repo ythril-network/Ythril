@@ -22,6 +22,7 @@
  *
  * Run: node benchmarks/harness/run-tier0r.mjs --base-url http://localhost:3260 --token <admin> [--questions 200]
  */
+import { turnRanks } from './turn-ranks.mjs';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadConversations, loadQuestions } from './dataset/locomo.mjs';
@@ -37,8 +38,9 @@ import * as s0wl from './ingest/s0wl-linked-windows.mjs';
 import * as s0f from './ingest/s0f-full-decomposition.mjs';
 import * as s0m from './ingest/s0m-multi-scale-windows.mjs';
 import * as s0c from './ingest/s0c-clean-windows.mjs';
+import * as s0cd from './ingest/s0cd-clean-dated-windows.mjs';
 
-const RUNGS = [s0, s0plus, s0g, s0l, s0w, s0wd, s0wl, s0f, s0m, s0c, s0e];
+const RUNGS = [s0, s0plus, s0g, s0l, s0w, s0wd, s0wl, s0f, s0m, s0c, s0cd, s0e];
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -76,49 +78,6 @@ function stratifiedSample(questions, n, seed) {
   return out;
 }
 
-/**
- * Where each source turn appeared in the ranked results — turn id to 1-based rank, first appearance wins.
- *
- * ## Why a RANK and not a set
- *
- * A set answers "did the evidence come back anywhere in `topK`", and that question rewards breadth: a rung
- * that packs more of the conversation into each record scores better without ever having ranked the right
- * thing first. Owner's ruling, 2026-09-06: *"first answer must be right - it must reflect reality, not brute
- * force"*. Reading twenty records to find the evidence in the twentieth is not retrieval working; it is the
- * caller doing the retrieval by hand.
- *
- * So the rank is recorded per turn and the report leads with rank-1, which no amount of coverage can fake —
- * there is only one first result, and either it holds what the question needed or it does not.
- *
- * A record's graph expansions carry that record's own rank, because they were returned as part of its payload
- * and a caller reading result 1 reads them with it.
- */
-function turnRanks(results, covers) {
-  const ranks = new Map();
-  const note = (ids, rank) => {
-    for (const one of ids) {
-      const id = String(one).trim();
-      if (id && !ranks.has(id)) ranks.set(id, rank);
-    }
-  };
-  const walk = (r, rank) => {
-    /*
-     * The OUT-OF-BAND map first, then the record's own property.
-     *
-     * A rung that keeps its coverage outside the corpus is the correct arrangement — a memory's embedded text
-     * includes its properties, key and value, so `turn D3:1,D3:2,D3:3` inside the record puts a dozen
-     * meaningless tokens into every vector in the corpus. Rungs written before that was noticed still store
-     * it, and their numbers are still readable, so both are supported and the record's own field is the
-     * fallback rather than the error.
-     */
-    const outOfBand = covers?.get(r?._id);
-    if (Array.isArray(outOfBand)) note(outOfBand, rank);
-    else if (typeof r?.properties?.turn === 'string') note(r.properties.turn.split(','), rank);
-    for (const g of r?._graph ?? []) walk(g.node ?? g, rank);
-  };
-  (results ?? []).forEach((r, i) => walk(r, i + 1));
-  return ranks;
-}
 
 async function main() {
   const baseUrl = arg('base-url', 'http://localhost:3260');
@@ -263,7 +222,15 @@ async function main() {
          * before this existed — the gate is what stops that being the quiet default forever.
          */
         await ythril.createSpace(space, rung.typeSchemas ? { typeSchemas: rung.typeSchemas } : {});
-        ({ records, modelCalls } = await rung.ingest({ conversation: conv, ythril, space }));
+        /*
+         * `conversations` is the whole corpus, and a rung that needs it says so. `s0wl` does: telling a
+         * topic word from an ordinary English word is not possible inside one conversation, because both
+         * appear in several of its sessions. A term in most of the TEN conversations is English.
+         *
+         * It carries no question data — `loadConversations` returns objects that have none — so this
+         * keeps the ingest question-blind exactly as before.
+         */
+        ({ records, modelCalls } = await rung.ingest({ conversation: conv, conversations, ythril, space }));
         process.stdout.write(`${records} records (${modelCalls} model calls) `);
       }
       await ythril.waitForEmbeddings(space, { timeoutMs: 20 * 60_000 });
