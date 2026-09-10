@@ -104,6 +104,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Protocol Amendment 7. No measurement changed and no result moved — the existing report was regenerated
   from its own unmodified rows and every other figure in it is unchanged.
 
+### Internal
+
+- **The first conversation was extracted, measured against a control, and lost — for a reason the
+  measurement names exactly.**
+
+  A 419-turn conversation became 74 entities, 68 edges, 57 chrono entries and 145 claims. Scored against
+  one-record-per-turn on the same questions at the same byte budget, the graph answered 22.3% correctly at
+  rank 1 against the control's 32.5% — worse on every column.
+
+  The cause is not the graph. The claims covered **34.6%** of the turns, because the extraction prompt said
+  a claim mentioning nobody and nothing was probably not worth making. Two thirds of the conversation was
+  therefore absent, and no structure built on top can answer a question about a remark that was never
+  stored. Nothing in the result looked wrong: the graph had entities, edges, dates and links.
+
+  The rule is reversed — every turn becomes a claim, and the claim layer is complete rather than curated —
+  and it is now enforced rather than advised: the validator refuses an extraction whose sessions declare
+  their turns and whose claims do not cover them. Judging which remarks matter is retrieval's job, at read
+  time, when the question is known.
+
+- **The deterministic half of ingestion exists: a writer that replays an extraction file into a space.**
+
+  Extraction needs a model and happens once; replaying its output does not and can be repeated by anyone.
+  The writer creates the space from the schema, its purpose and its usage notes, then writes entities,
+  chrono entries, claims, edges and one transcript file per session — in that order, because each step names
+  records the one before it created, and a link to a record that does not exist yet is dropped silently
+  rather than refused.
+
+  Which turns a claim came from is returned to the caller and stored in no record. Every property is folded
+  into the text that gets embedded, so a turn id inside a claim would be unique noise in every vector in the
+  space, and no user of the product has one.
+
+  A validator runs before the first write and reports every problem at once. Half of what it catches the
+  instance would catch too, but only on the request that reaches it — leaving a space holding most of a
+  conversation, which is interpretable, wrong, and says nothing about it. The other half the instance cannot
+  catch at all: an extraction refers to its own records by local key, and a claim naming a key nothing
+  defines produces a valid record with one fewer link and a successful response.
+
+- **The benchmark dataset was re-fetched from its pinned source, and extraction is now structurally blind to the answer key.**
+
+  A session had read some of the questions and gold answers while investigating retrieval. The cached copy 
+  was deleted and re-fetched from the URL the pin names; the bytes came back identical, so the corpus never
+  changed — what changed is that no local copy carries anything from that session.
+
+  The rule that extraction never sees a question is now enforced rather than promised. A gate walks the
+  whole tree the loader hands the extraction step and fails on a question, answer, evidence reference or
+  category appearing at any depth, and checks the bytes on disk still match the recorded hash. A graph built
+  while looking at the answer key scores well on it and describes nothing else, and no results table can
+  reveal that afterwards.
+
+- **The benchmark folder was restarted from the schema, and 56 files were deleted.**
+
+  Everything that was there took a conversation to be a pile of transcript chunks and asked how big to cut
+  the chunks. Twelve ingestion strategies, a window sweep, a grid runner and a 65 KB specification all
+  explored that one idea. Measured on 199 questions at an equal byte budget, the best of them answered 50.8%
+  correctly at rank 1, the worst 10.6%, the whole sweep from a 3-turn to a 25-turn window was worth at most
+  one point — and **multi-hop questions scored 0.0% under every single strategy**, because those answers need
+  two remarks from sessions weeks apart and no run of consecutive turns can hold both.
+
+  What is left is what a conversation actually is: `benchmarks/space/` holds an importable schema, the
+  space's purpose and its usage notes; `benchmarks/dataset/` holds the loader; `benchmarks/plan/` holds the
+  plan for the writer, written from the schema rather than from what was deleted.
+
+  **The schema is data, not code** — an array of schema-library entries in one group, so it can be POSTed to
+  a Ythril instance as-is and shared with anyone storing a conversation. Nine entity types, fourteen edge
+  labels with both ends pinned so `works_at` from a place is refused at write time, five chrono types, and
+  one claim type carrying who said it and when.
+
+  Four rules shape it, and each one removes something the old vocabulary had: a date that does not say how
+  long a relationship held is a chrono entry, not a property of a thing; every date is declared as a date, so
+  it can be compared rather than only matched; an edge says *that* two things are related and *for how long*
+  and never narrates, so how strongly, how severely and how it changed are claims; and no transcript
+  bookkeeping appears anywhere, because every property is folded into the embedded text and a turn id is
+  meaningless tokens inside every vector in the space.
+
+  `scripts/LINK-READERS.md` moved out of `benchmarks/` rather than going with it — it is a server performance
+  record, not a corpus artefact.
+
 ## [4.4.0] — 2026-09-09
 
 **The release where the rights matrix means what the panel says.** A token granted exactly the rung the
