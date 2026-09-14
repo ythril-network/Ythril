@@ -106,6 +106,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The graph layer no longer competes with the claims for a place in the answer.**
+
+  Entities, edges and chrono entries are declared `suppressEmbeddings`. They are joints and dates, not
+  sentences: an entity embeds as its name and type, matches a query weakly, and takes a ranked slot that a
+  claim would have used. Measured on one conversation, that cost about **ten points** of rank-1 accuracy —
+  24.9% against the control's 33.5% — and the fix brings it to 34.0%, level with the control and with no
+  `types` filter needed at the call site. They stay fully reachable by walking, which is what they are for.
+
+  Two extraction rules were also found the expensive way and are now measured facts rather than advice: the
+  claim layer must cover **every** turn, and a claim's text must be the turn **verbatim**. Trimming
+  greetings out of 118 otherwise-verbatim claims was worth several points on its own, because a paraphrase
+  drops the words a question might match on.
+
 - **The first conversation was extracted, measured against a control, and lost — for a reason the
   measurement names exactly.**
 
