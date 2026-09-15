@@ -51,6 +51,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The guides now say which cross-encoder to pick, because the wrong one is a regression rather than a
+  no-op.** Same instance, same questions, same budget, only the model changed: no reranker 45.7% first
+  answers right, `bge-reranker-base` **27.4%**, `ms-marco-MiniLM-L-6-v2` **53.8%**.
+
+  A cross-encoder replaces the retrieval ordering, which is right when it knows better and catastrophic
+  when it does not. The failing model saturated — 0.9958 for the right passage against 0.9969 for a wrong
+  one — so a difference of 0.001 overturned a vector margin of 0.100, confidently, on every query. Nothing
+  in the API can say a reranker is making things worse: from outside, a worse ordering looks exactly like
+  an ordering. So the advice is to pick a model trained for question-to-passage relevance, and to measure
+  it against no reranker on your own corpus before leaving it on.
+
 - **A benchmark result now credits everything it brought back, not just the first hop.**
 
   A recall answer nests a wrapper — `{ edge, node, paths, _graph }` — and a node's children hang off the

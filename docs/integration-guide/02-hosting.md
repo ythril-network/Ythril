@@ -439,7 +439,27 @@ broken, and nothing compared the two.
 | Assist model | `assist` | `DOC_ASSIST_URL` | draft transcription + OCR text | yes, always | **required** |
 | External face model | `faceExternal` | `FACE_RECOGNITION_EXTERNAL_MODEL` | **face crops (biometric data)** | yes, always | **required** |
 
-Five things worth reading twice:
+Six things worth reading twice:
+
+- **Which cross-encoder you pick decides whether reranking helps or hurts, and a bad one is not neutral.**
+  Measured on one corpus, same instance, same questions, same budget — only the model changed:
+
+  | reranker | first answer right | within three |
+  |---|---|---|
+  | none | 45.7% | 60.9% |
+  | `BAAI/bge-reranker-base` | **27.4%** | 45.2% |
+  | `cross-encoder/ms-marco-MiniLM-L-6-v2` | **53.8%** | 64.0% |
+
+  A cross-encoder's score REPLACES the retrieval's ordering, which is right when it knows better and
+  catastrophic when it does not. The failing model saturated — 0.9958 for the right passage against 0.9969
+  for a wrong one — so a difference of 0.001 overturned a vector margin of 0.100, and it did that
+  confidently on every query. The one that worked separated the same pair 0.99997 against 0.653.
+
+  Two things follow. Pick a model trained for **question-to-passage relevance** rather than for
+  passage-to-passage similarity; the MS MARCO family is the obvious starting point and is small enough to
+  run on a CPU. And **measure it against no reranker on your own corpus before leaving it on** — there is no
+  signal in the API that says a reranker is making things worse, because from the outside a worse ordering
+  looks exactly like an ordering.
 
 - **A reranker must accept 100 passages in one request, and the common self-hosted server does not by
   default.** One recall sends up to a hundred candidates in a single call, because the over-fetch IS
