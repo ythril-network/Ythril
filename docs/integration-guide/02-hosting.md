@@ -439,7 +439,16 @@ broken, and nothing compared the two.
 | Assist model | `assist` | `DOC_ASSIST_URL` | draft transcription + OCR text | yes, always | **required** |
 | External face model | `faceExternal` | `FACE_RECOGNITION_EXTERNAL_MODEL` | **face crops (biometric data)** | yes, always | **required** |
 
-Four things worth reading twice:
+Five things worth reading twice:
+
+- **A reranker must accept 100 passages in one request, and the common self-hosted server does not by
+  default.** One recall sends up to a hundred candidates in a single call, because the over-fetch IS
+  the reranking mechanism — a cross-encoder can only reorder what the vector search already found.
+  `text-embeddings-inference` caps a client batch at **32** unless you start it with
+  `--max-client-batch-size 512`, and Ythril's request comes back `413`. The search still answers, ordered by
+  meaning alone, and looks entirely reasonable; the only signs are a `WARN` in the log and
+  `rerank_unavailable` in the answer's `degraded` array. If reranking appears to do nothing, check that
+  array first.
 
 - The **document VLM, repair and verify slots inherit the vision endpoint** when their own base URL is
   unset — so pointing vision at an external provider points all three there, and page images follow.
