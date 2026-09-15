@@ -106,6 +106,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The thing a question matches is now a resolved fact, not a line of the transcript.**
+
+  The graph had been scoring level with storing raw turns, and the reason was structural rather than a
+  tuning problem: the retrievable records WERE the raw turns, with links hung off them. A line of dialogue
+  is not self-contained — *"I went to a support group yesterday"* names nobody and dates nothing, and an
+  embedding sees exactly those words. The fact it establishes — *Caroline attended an LGBTQ support group on
+  7 May 2023* — is what a question can actually match.
+
+  Three changes follow, and all three are now refused rather than advised against. A claim that opens with
+  its own speaker's name is a transcript line and is rejected. An entity with no `description` is rejected:
+  a bare name embeds as two words, loses every search it takes part in, and still occupies a ranked slot.
+  And entities and chrono entries are searchable again — they hold the resolved facts, so suppressing them
+  had hidden the answers; edges stay suppressed, because a label has no content.
+
+  The verbatim words are not lost. They live in the session transcript file, which exists so anything can be
+  quoted exactly: the graph is for finding, the transcript is for quoting.
+
 - **The graph layer no longer competes with the claims for a place in the answer.**
 
   Entities, edges and chrono entries are declared `suppressEmbeddings`. They are joints and dates, not

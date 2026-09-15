@@ -43,13 +43,13 @@ const good = () => ({
   conversationId: 'conv-x',
   sessions: [{ date: '2023-05-08', text: 'Ada: hello' }],
   entities: [
-    { key: 'ada', type: 'person', name: 'Ada' },
-    { key: 'acme', type: 'organization', name: 'Acme' },
+    { key: 'ada', type: 'person', name: 'Ada', description: 'An engineer who joined Acme in March 2021.' },
+    { key: 'acme', type: 'organization', name: 'Acme', description: "Ada's employer since March 2021." },
   ],
   edges: [{ label: 'works_at', from: 'ada', to: 'acme', properties: { since: '2021-03-01' } }],
   chrono: [{ key: 'joined', type: 'event', title: 'Ada joined Acme', date: '2021-03-01', entities: ['ada'] }],
   claims: [{
-    text: 'Ada: I started at Acme in March.', speaker: 'Ada', statedOn: '2023-05-08',
+    text: 'Ada started working at Acme in March 2021.', speaker: 'Ada', statedOn: '2023-05-08',
     entities: ['ada', 'acme'], chrono: ['joined'], sourceTurns: ['D1:1'],
   }],
 });
@@ -131,6 +131,34 @@ describe('what a claim must carry', () => {
 
   test('text', () => {
     assert.match(problemsFor(e => { delete e.claims[0].text; }).join(' '), /has no text/);
+  });
+});
+
+describe('a record must be worth retrieving', () => {
+  test('a claim that is a transcript line is refused', () => {
+    /*
+     * The failure this whole layer exists to avoid. A line of dialogue names nobody a search can find and
+     * dates nothing: 'I went yesterday' has no subject and no date in it, and an embedding sees only those
+     * words. Store lines and the graph retrieves exactly as well as the raw transcript, which is what it is
+     * supposed to beat — measured, it did, to within half a point.
+     */
+    const p = problemsFor(e => { e.claims[0].text = 'Ada: I started at Acme in March.'; });
+    assert.equal(p.length, 1);
+    assert.match(p[0], /transcript line rather than a resolved fact/);
+  });
+
+  test('an entity with no description is refused', () => {
+    // A bare name embeds as two or three words and loses every search it takes part in, while still
+    // occupying a ranked slot a claim would have used. Measured at about ten points of rank-1 accuracy.
+    const p = problemsFor(e => { delete e.entities[0].description; });
+    assert.equal(p.length, 1);
+    assert.match(p[0], /has no description/);
+  });
+
+  test('a fact that merely contains a colon is not mistaken for one', () => {
+    // The check looks for a leading `Name: `, so a sentence with a colon in it must pass.
+    const p = problemsFor(e => { e.claims[0].text = 'Ada named three reasons: pay, people and place.'; });
+    assert.deepEqual(p, []);
   });
 });
 

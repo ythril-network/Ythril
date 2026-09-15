@@ -11,8 +11,7 @@
         "aliases": {
           "type": "string"
         }
-      },
-      "suppressEmbeddings": true
+      }
     }
   },
   {
@@ -33,8 +32,7 @@
         "aliases": {
           "type": "string"
         }
-      },
-      "suppressEmbeddings": true
+      }
     }
   },
   {
@@ -59,8 +57,7 @@
         "country": {
           "type": "string"
         }
-      },
-      "suppressEmbeddings": true
+      }
     }
   },
   {
@@ -84,8 +81,7 @@
             "course"
           ]
         }
-      },
-      "suppressEmbeddings": true
+      }
     }
   },
   {
@@ -100,8 +96,7 @@
         "medium": {
           "type": "string"
         }
-      },
-      "suppressEmbeddings": true
+      }
     }
   },
   {
@@ -119,8 +114,7 @@
         "brand": {
           "type": "string"
         }
-      },
-      "suppressEmbeddings": true
+      }
     }
   },
   {
@@ -135,8 +129,7 @@
         "kind": {
           "type": "string"
         }
-      },
-      "suppressEmbeddings": true
+      }
     }
   },
   {
@@ -151,8 +144,7 @@
         "kind": {
           "type": "string"
         }
-      },
-      "suppressEmbeddings": true
+      }
     }
   },
   {
@@ -163,8 +155,7 @@
     "published": true,
     "description": "A bounded undertaking with an end in view. Its start, milestones and completion are chrono entries.",
     "schema": {
-      "propertySchemas": {},
-      "suppressEmbeddings": true
+      "propertySchemas": {}
     }
   },
   {
@@ -563,8 +554,7 @@
     "published": true,
     "description": "Something that happened, on a date. This is where a date lands when it is not qualifying an edge: a birth, an acquisition, a move, a diagnosis, a release. Linked to the entities it concerns.",
     "schema": {
-      "propertySchemas": {},
-      "suppressEmbeddings": true
+      "propertySchemas": {}
     }
   },
   {
@@ -575,8 +565,7 @@
     "published": true,
     "description": "A dated point in a project or a life that the speakers treat as significant.",
     "schema": {
-      "propertySchemas": {},
-      "suppressEmbeddings": true
+      "propertySchemas": {}
     }
   },
   {
@@ -587,8 +576,7 @@
     "published": true,
     "description": "Something stated as intended, with the date it was intended for.",
     "schema": {
-      "propertySchemas": {},
-      "suppressEmbeddings": true
+      "propertySchemas": {}
     }
   },
   {
@@ -599,8 +587,7 @@
     "published": true,
     "description": "A date something is due by.",
     "schema": {
-      "propertySchemas": {},
-      "suppressEmbeddings": true
+      "propertySchemas": {}
     }
   },
   {
@@ -611,8 +598,7 @@
     "published": true,
     "description": "Something expected, with the date it was expected for.",
     "schema": {
-      "propertySchemas": {},
-      "suppressEmbeddings": true
+      "propertySchemas": {}
     }
   },
   {

@@ -40,6 +40,26 @@ a type or a label.** Anything you cannot express in that vocabulary is either a 
 Return a single JSON object in the shape given by `benchmarks/plan/extraction-format.md`. Return nothing else
 — no commentary before or after it.
 
+## The one thing to get right
+
+**You are recording what is TRUE, not what was typed.** A conversation is the evidence; the graph is what the
+conversation establishes. If you store the lines of the transcript you have built a transcript with tags on
+it, and it retrieves exactly as well as the transcript did — which is to say, badly, because a line of
+dialogue is not self-contained.
+
+*"I went to a LGBTQ support group yesterday and it was so powerful."*
+
+Nothing in that sentence says who, or when. A search engine sees those words and nothing else. The fact is:
+
+*"Caroline attended an LGBTQ support group on 7 May 2023 and found it powerful."*
+
+Every record you write must read like the second one: **it names its subjects, it carries resolved dates, and
+it makes sense to somebody who has never seen the conversation.** That is the whole difference between a
+graph that models reality and a pile of chat lines.
+
+The verbatim words are not lost — they live in the session transcript, which is kept as a file so anything
+can be quoted exactly. The graph is for finding; the transcript is for quoting.
+
 ## How to do it well
 
 **Identity is the whole job.** The graph is worth having because a mention in session 3 and a mention in
@@ -48,32 +68,41 @@ friend from the pottery class"* are one person; put the variants in `aliases`. T
 failure that makes the graph useless — when unsure whether two mentions are the same, prefer merging them and
 say why in the entity's `aliases`.
 
+**Every entity carries a `description` saying what is known about it**, written from the whole conversation
+and updated as it goes. `Luna, animal, cat` is a label and deserves to lose to a sentence in any search.
+*"Melanie's cat, one of two pets along with the dog Oliver; a third, Bailey, arrived in August 2023"* is a
+retrieval target — and it is the natural hub for any question about the pets. An entity is a place facts
+accumulate, not a tag.
+
 **Mint an entity only for something the conversation returns to, or plainly could.** A named person, place,
 employer, pet, project, possession, work, activity or condition. Not a passing noun. An entity nobody
 mentions twice and nothing links to is noise with a type on it.
 
-**EVERY TURN BECOMES A CLAIM. The claim layer is complete, not curated.** Keep the words. Do not summarise
-several turns into one, and do not split a turn unless it genuinely states separable things. Every claim
-carries the speaker and the date of the session it was said in.
+**A claim is one RESOLVED FACT, and it may draw on several turns.** Write what the exchange establishes, in
+a sentence that stands alone: subjects named, dates resolved, pronouns replaced. One exchange about one thing
+is one claim, even when it took four turns to say. A turn that only says *"Thanks, that's so sweet!"*
+contributes nothing of its own and belongs in the `sourceTurns` of the claim it is part of.
 
-This rule replaces its opposite, and the opposite was measured. The first version of this prompt said a
-claim mentioning nobody and nothing was probably a claim not worth making. Following that, an extraction of
-a 419-turn conversation produced 145 claims covering **34.6%** of the turns — and scored WORSE than storing
-the raw turns and nothing else, on every measure. Two thirds of what was said was simply gone, so no
-question about it could be answered from any structure built on top.
+**Every turn must appear in some claim's `sourceTurns`.** That is how the claim layer stays complete without
+being a transcript: facts cover the turns they came from, including the ones that carry no fact alone. An
+extraction that dropped the quiet turns covered 34.6% of a conversation and scored worse than storing raw
+turns, because a question about a dropped turn cannot be answered by anything.
 
-A remark that seems to say nothing is still what somebody said, and later it is the only record that they
-said it. Judging which remarks matter is the retrieval's job, at read time, when the question is known.
+**Resolve every date, everywhere.** *"Yesterday"*, *"last Friday"*, *"three years ago"* — against the date of
+the session the remark was made in. The resolved date goes in the sentence itself, not only in a chrono
+entry, because the sentence is what gets searched. A question asking *when* has nothing to match against the
+word "yesterday".
 
-**Link every claim to what it is about.** This is what makes it reachable from another session. A claim with
-no links is still written — it just has fewer ways in.
+**Link every claim to what it is about.** This is what makes it reachable from another session, and it is how
+two facts stated months apart become one answer: both hang off the subject they share.
+
+**Anything that happened on a date is also a chrono entry**, linked to what it concerns, with its title
+written the same self-contained way.
 
 **Draw an edge when the conversation asserts a relationship**, not when two things are merely mentioned
 together. `works_at`, `lives_in`, `family_of` — and `since` / `until` only when the text says so.
 
-**Anything that happened on a date is a chrono entry**, linked to what it concerns. Resolve the date: people
-say *"last year"* and *"last weekend"*, and the session's own date is what those are relative to. Store the
-resolved `YYYY-MM-DD`. Never store a relative expression.
+
 
 **An edge does not narrate.** It says that two things are related and for how long. How strongly someone
 liked something, how bad a condition got, how a job changed — each of those is a claim.
@@ -109,3 +138,5 @@ Check these yourself; the writer will refuse the file otherwise.
 - Every referenced `key` is defined.
 - Every claim has `speaker`, `statedOn` and at least one `sourceTurns` entry.
 - **Every turn of every session appears in some claim's `sourceTurns`.** Count them.
+- **Every entity has a `description`.** A bare name loses every search it takes part in.
+- **Every claim reads on its own** — subjects named, dates resolved, no pronoun pointing outside it.
