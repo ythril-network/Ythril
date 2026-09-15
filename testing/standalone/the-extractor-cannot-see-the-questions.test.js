@@ -32,10 +32,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-import { loadConversations } from '../../benchmarks/dataset/locomo.mjs';
+import { loadConversations } from '../../benchmarks/locomo/loader.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const pin = JSON.parse(readFileSync(join(repoRoot, 'benchmarks', 'dataset', 'pin.json'), 'utf8'));
+const pinPath = join(repoRoot, 'benchmarks', 'locomo', 'pin.json');
+const pin = JSON.parse(readFileSync(pinPath, 'utf8'));
 const dataPath = join(repoRoot, pin.datasets.locomo.cachePath);
 
 /** Everything the answer key is spelled with, in the release and in anything derived from it. */
@@ -85,8 +86,11 @@ describe('the dataset is the one that was pinned', { skip: existsSync(dataPath) 
   test('the bytes on disk match the recorded sha256', async () => {
     // The pin is what makes "may not be touched" checkable rather than a promise: an edited local copy stops
     // matching, and a result produced from it is not a result about the published corpus.
-    const { createHash } = await import('node:crypto');
-    const actual = createHash('sha256').update(readFileSync(dataPath)).digest('hex');
-    assert.equal(actual, pin.datasets.locomo.sha256, 'the cached dataset is not the pinned one');
+    //
+    // Through the shared refusal rather than a comparison written here. A hand-rolled `assert.equal` against
+    // the pin field is the second copy of a rule whose whole difficulty is the case it does not cover — a pin
+    // with no hash at all. See `benchmarks/dataset-pin.mjs`.
+    const { assertPinned } = await import('../../benchmarks/dataset-pin.mjs');
+    assert.equal(assertPinned(pin.datasets.locomo, readFileSync(dataPath), 'locomo'), true);
   });
 });

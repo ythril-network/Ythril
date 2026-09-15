@@ -20,6 +20,28 @@
  * is the half that would otherwise be found by a benchmark score being mysteriously low.
  */
 
+/**
+ * Does this text open with `<the speaker's name>:` — the shape of a transcript line?
+ *
+ * Compared against the claim's OWN speaker rather than pattern-matched. A pattern for "a short capitalised
+ * word then a colon" also flags *"Ada named three reasons: pay, people and place"*, which is a perfectly
+ * good fact — and a validator that refuses good input is one people learn to work around.
+ */
+function startsWithSpeakerName(text, speaker) {
+  const name = String(speaker ?? '').trim();
+  if (!name) return false;
+  return String(text ?? '').trimStart().toLowerCase().startsWith(`${name.toLowerCase()}:`);
+}
+
+/**
+ * The share of a conversation one synthesised record may name as its provenance.
+ *
+ * A few sentences about a subject cannot have been derived from most of a transcript. Beyond this the
+ * record is a summary of the conversation rather than of a subject, which is the padding cheat with a
+ * graph drawn round it.
+ */
+const MAX_SYNTHESISED_PROVENANCE_SHARE = 0.12;
+
 /** `YYYY-MM-DD`, and nothing looser. A partial date cannot be compared and a relative one cannot be resolved. */
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -65,6 +87,13 @@ export function validateExtraction(extraction, schemaEntries) {
     if (entityType.has(e.key)) say(`${at} redefines the key '${e.key}'`);
     if (!e.name) say(`${at} ('${e.key}') has no name`);
     if (!entityTypes.has(e.type)) say(`${at} ('${e.key}') has type '${e.type}', which the schema does not declare`);
+    // An entity is where facts about a subject accumulate, and it is the natural hub for a question about
+    // that subject — but only if there is something in it. `Luna, animal, cat` embeds as three words and
+    // loses every search it takes part in, which is what makes a bare-name entity worse than no entity: it
+    // occupies a ranked slot and answers nothing.
+    if (!String(e.description ?? '').trim()) {
+      say(`${at} ('${e.key}') has no description. A bare name is a tag, not something a question can match.`);
+    }
     entityType.set(e.key, e.type);
   }
 
@@ -114,6 +143,21 @@ export function validateExtraction(extraction, schemaEntries) {
   for (const [i, c] of claims.entries()) {
     const at = `claims[${i}]`;
     if (!c.text) say(`${at} has no text`);
+    /*
+     * A claim is a resolved fact, not a line of the transcript.
+     *
+     * `Caroline: I went to a support group yesterday` names nobody a search can find and dates nothing — an
+     * embedding sees those words and no context. The fact is `Caroline attended an LGBTQ support group on 7
+     * May 2023`. Storing the line instead produces a graph that retrieves exactly as well as the raw
+     * transcript, which is what this whole layer exists to beat.
+     *
+     * The leading `Speaker: ` is the tell, and it is the one part of this that a machine can see. Whether the
+     * rest of the sentence stands on its own is the writer's job.
+     */
+    if (startsWithSpeakerName(c.text, c.speaker)) {
+      say(`${at} starts with a speaker prefix, so it is a transcript line rather than a resolved fact. `
+        + 'The verbatim words belong in the session transcript; a claim says what is true.');
+    }
     if (!c.speaker) say(`${at} has no speaker — a claim nobody can attribute is not auditable`);
     if (!ISO_DATE.test(String(c.statedOn ?? ''))) say(`${at} has statedOn '${c.statedOn}', which is not YYYY-MM-DD`);
     if ((c.sourceTurns ?? []).length === 0) say(`${at} names no sourceTurns, so nothing can trace it to the transcript`);
@@ -144,7 +188,35 @@ export function validateExtraction(extraction, schemaEntries) {
    * has no transcript to compare against and inventing a failure there would block a legitimate caller who
    * is not running a benchmark.
    */
-  const declared = sessions.flatMap(s => s.turns ?? []);
+  /*
+   * A SYNTHESISED RECORD MAY NOT CLAIM MOST OF THE CONVERSATION.
+   *
+   * An entity's description says what the conversation established about a subject, and it carries the turns
+   * that established it so the statement can be checked. That provenance is also what a benchmark credits —
+   * which makes it the obvious place for the oldest cheat in retrieval to reappear: give one record the turns
+   * of the whole transcript, match it once, and score everything.
+   *
+   * The line is what the description actually SAYS. Three sentences about a person cannot have been derived
+   * from four hundred turns; they were derived from the handful that state those three sentences. A record
+   * claiming more than this share is either over-claiming its provenance or is a summary of the conversation
+   * wearing a subject's name, and both are refused.
+   */
+  const declaredTurns = sessions.flatMap(s => s.turns ?? []);
+  if (declaredTurns.length > 0) {
+    const ceiling = Math.max(4, Math.ceil(declaredTurns.length * MAX_SYNTHESISED_PROVENANCE_SHARE));
+    for (const [kind, list] of [['entities', entities], ['chrono', chrono]]) {
+      for (const [i, r] of list.entries()) {
+        const n = (r.sourceTurns ?? []).length;
+        if (n > ceiling) {
+          say(`${kind}[${i}] ('${r.key}') claims ${n} source turns of ${declaredTurns.length}, over the `
+            + `${ceiling} a synthesised record may claim. Either its provenance names turns its description `
+            + 'does not use, or the description is a summary of the conversation rather than of a subject.');
+        }
+      }
+    }
+  }
+
+  const declared = declaredTurns;
   if (declared.length > 0) {
     const covered = new Set(claims.flatMap(c => c.sourceTurns ?? []));
     const missing = declared.filter(t => !covered.has(t));

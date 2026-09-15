@@ -7,24 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- **The benchmark harness has a generic conversation schema, and it is read from the specification rather than copied.**
-
-  `INGESTION.md` has always specified a product-grade knowledge schema for any conversation — nine entity
-  types (`person`, `animal`, `place`, `organization`, `work`, `object`, `activity`, `condition`, `project`)
-  and fourteen edge labels with both endpoints pinned, so `works_at` runs person to organization and an edge
-  drawn any other way is refused at write time. **No ingest strategy implemented it.** Every one declared a
-  transcript instead: a single `utterance` type carrying the session, the turn ids and the speaker, and the
-  one strategy that declared entities typed them `subject` with a naming pattern of four-or-more lower-case
-  letters, which admitted `anything`, `around` and `also` as nodes of the graph.
-
-  The schema now lives in the harness and parses the specification's own JSON, so there is one source and a
-  gate that fails when the two disagree. Dates documented as `YYYY-MM-DD` are declared as dates rather than
-  strings, so they can be range-queried. The benchmark's own join key stays out of the shared vocabulary and
-  is passed in per caller.
-
 ### Changed
+
+- **A recall answer now spends the byte budget on what was remembered, not on where it is filed.**
+
+  `maxChars` is a contract: it is how much of their context window a caller is willing to give to memory.
+  Measured on a real corpus, **30% of what came back was content** — 3,314 characters of JSON carrying 986
+  characters of remembered fact. The rest described the record's place in the store.
+
+  Two rules, and only one of them is a choice. **An empty collection is never sent**: `"tags":[]` and
+  `"properties":{}` say nothing their absence does not, and no caller can tell the difference — so that
+  needs no flag and takes nothing away. **Storage bookkeeping is opt-in** through the new
+  `includeRecordMeta`, default false on both doors: `createdAt`, `updatedAt` and the link-id arrays.
+  Together they cut a response by about a third, and the space goes back to the caller as more evidence
+  inside the same budget.
+
+  `createdAt` is the one worth calling out: it is when the RECORD was written, not when the remembered
+  thing happened. That lives in the record's own properties, put there by whoever stored it, and the two
+  are routinely confused.
+
+  Nothing a question is answered from is affected — the text, the properties, the id, the type and the
+  scores all stay, and a gate asserts it. It applies recursively, so a `traverse` answer is trimmed at
+  every depth, which is where the bytes actually are.
 
 - **Two doors trigger a sync, and each one now says what it acts on.**
 
@@ -51,135 +55,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **A benchmark result now credits everything it brought back, not just the first hop.**
+- **The recall guide said `includeDiagnostics` hides the per-stage scores. It does not, deliberately, and
+  has not for some time.**
 
-  A recall answer nests a wrapper — `{ edge, node, paths, _graph }` — and a node's children hang off the
-  wrapper, not off the node. The scorer read the node and then looked for children on it, so it descended
-  exactly one level and stopped, at any depth, with nothing to indicate it. Against a live instance, a recall
-  at depth 2 returned 10 matches, 18 linked entities and 92 linked memories; the scorer credited the 18 and
-  none of the 92.
+  `lexicalScore`, `fusedScore` and `rerankScore` are returned unconditionally on both doors — the reasoning
+  is in the code and it is sound: the number that DECIDED a result's position must not be the one a caller
+  cannot read, and three floats are not a cost worth a flag. The flag governs `matchedText`,
+  `embeddingModel` and `seq`, which is three fields rather than six.
 
-  Every graph strategy ever measured was scored as though its walk returned nothing past hop 1 — including
-  the one whose entire claim is that a match reaches a record in a different session, which is the only
-  mechanism that can answer a cross-session question at all. It is worth about a point at the equal byte
-  budget the protocol fixes, because expansion is charged against that budget; the point is that the number
-  was not a measurement of the thing it named.
+  An integrator reading the guide would have believed the ordering signal was hidden from them by default.
+  Corrected in both copies of the parameter table.
 
-  The scorer moved out of the runner to be testable at all: importing the runner executes its `main()`, so a
-  scoring rule that decides every published figure had no test.
+- **The guides now say which cross-encoder to pick, because the wrong one is a regression rather than a
+  no-op.** Same instance, same questions, same budget, only the model changed: no reranker 45.7% first
+  answers right, `bge-reranker-base` **27.4%**, `ms-marco-MiniLM-L-6-v2` **53.8%**.
 
-- **The strategy that links windows across sessions was joining them on stopwords.**
-
-  Its subjects were derived as words appearing in several sessions of a conversation but not most of them —
-  which is exactly the spread an ordinary English word has, so the rule could not separate a word that
-  recurs because the speakers keep discussing it from one that recurs because it is English. It produced 484
-  subjects for one conversation, beginning `able accomplishment advice after again ages album alive almost
-  along also another anything around`.
-
-  Fixed by giving the rule the rest of the corpus: a term appearing across most of the transcripts is
-  English, a term in one or two is a topic. One conversation goes from 334 subjects to 34, now
-  `transgender`, `transition`, `pottery`, `advocacy`, `inclusivity`, `identity`, `parade`, `pride`.
-
-- **Two ingest strategies documented premises that were no longer true**, and both had cost a measurement. One
-  stated that a property is not embedded — every property is appended to the embedded text as `key value`, so
-  the strategy built to add a date added a second copy of one already there and correctly measured nothing.
-  The other stated that graph traversal never reads a record's entity links and that linking cost 1.5 points
-  of recall; traversal reads them now, and the 1.5 points were paid off by removing linked entity names from
-  the embedded text rather than avoided.
-
-- **A benchmark score is now published beside the highest score that question set allows.**
-
-  The Tier 0-R headline asks whether the single top result held every turn the gold answer cites. On the
-  published sample, 30 of 199 questions cite turns from two different sessions of the conversation, and no
-  record built from consecutive turns can hold both — at any width. So every window strategy in the
-  programme is capped at **84.9%** before retrieval runs, and a reader of the old table had no way to tell
-  three points from the maximum apart from thirty.
-
-  Every report now states that ceiling and the cross-session share in its header, and the report writer
-  refuses to render without them. The number is derived from the pinned dataset and the seeded sample rather
-  than written down, because a different sample is a different layout. A strategy that LINKS turns across
-  sessions is not bound by it, and the report says so: rank-1 credit reaches through a result's graph
-  expansions.
-
-  Protocol Amendment 7. No measurement changed and no result moved — the existing report was regenerated
-  from its own unmodified rows and every other figure in it is unchanged.
+  A cross-encoder replaces the retrieval ordering, which is right when it knows better and catastrophic
+  when it does not. The failing model saturated — 0.9958 for the right passage against 0.9969 for a wrong
+  one — so a difference of 0.001 overturned a vector margin of 0.100, confidently, on every query. Nothing
+  in the API can say a reranker is making things worse: from outside, a worse ordering looks exactly like
+  an ordering. So the advice is to pick a model trained for question-to-passage relevance, and to measure
+  it against no reranker on your own corpus before leaving it on.
 
 ### Internal
 
-- **The first conversation was extracted, measured against a control, and lost — for a reason the
-  measurement names exactly.**
+- **`benchmarks/` now holds a folder per benchmark: LoCoMo, LongMemEval and MemoryArena.** LongMemEval is
+  recorded and not yet fetched, MemoryArena is not released by its authors, and a dataset whose hash is
+  missing is now refused rather than read as nothing to check.
 
-  A 419-turn conversation became 74 entities, 68 edges, 57 chrono entries and 145 claims. Scored against
-  one-record-per-turn on the same questions at the same byte budget, the graph answered 22.3% correctly at
-  rank 1 against the control's 32.5% — worse on every column.
-
-  The cause is not the graph. The claims covered **34.6%** of the turns, because the extraction prompt said
-  a claim mentioning nobody and nothing was probably not worth making. Two thirds of the conversation was
-  therefore absent, and no structure built on top can answer a question about a remark that was never
-  stored. Nothing in the result looked wrong: the graph had entities, edges, dates and links.
-
-  The rule is reversed — every turn becomes a claim, and the claim layer is complete rather than curated —
-  and it is now enforced rather than advised: the validator refuses an extraction whose sessions declare
-  their turns and whose claims do not cover them. Judging which remarks matter is retrieval's job, at read
-  time, when the question is known.
-
-- **The deterministic half of ingestion exists: a writer that replays an extraction file into a space.**
-
-  Extraction needs a model and happens once; replaying its output does not and can be repeated by anyone.
-  The writer creates the space from the schema, its purpose and its usage notes, then writes entities,
-  chrono entries, claims, edges and one transcript file per session — in that order, because each step names
-  records the one before it created, and a link to a record that does not exist yet is dropped silently
-  rather than refused.
-
-  Which turns a claim came from is returned to the caller and stored in no record. Every property is folded
-  into the text that gets embedded, so a turn id inside a claim would be unique noise in every vector in the
-  space, and no user of the product has one.
-
-  A validator runs before the first write and reports every problem at once. Half of what it catches the
-  instance would catch too, but only on the request that reaches it — leaving a space holding most of a
-  conversation, which is interpretable, wrong, and says nothing about it. The other half the instance cannot
-  catch at all: an extraction refers to its own records by local key, and a claim naming a key nothing
-  defines produces a valid record with one fewer link and a successful response.
-
-- **The benchmark dataset was re-fetched from its pinned source, and extraction is now structurally blind to the answer key.**
-
-  A session had read some of the questions and gold answers while investigating retrieval. The cached copy 
-  was deleted and re-fetched from the URL the pin names; the bytes came back identical, so the corpus never
-  changed — what changed is that no local copy carries anything from that session.
-
-  The rule that extraction never sees a question is now enforced rather than promised. A gate walks the
-  whole tree the loader hands the extraction step and fails on a question, answer, evidence reference or
-  category appearing at any depth, and checks the bytes on disk still match the recorded hash. A graph built
-  while looking at the answer key scores well on it and describes nothing else, and no results table can
-  reveal that afterwards.
-
-- **The benchmark folder was restarted from the schema, and 56 files were deleted.**
-
-  Everything that was there took a conversation to be a pile of transcript chunks and asked how big to cut
-  the chunks. Twelve ingestion strategies, a window sweep, a grid runner and a 65 KB specification all
-  explored that one idea. Measured on 199 questions at an equal byte budget, the best of them answered 50.8%
-  correctly at rank 1, the worst 10.6%, the whole sweep from a 3-turn to a 25-turn window was worth at most
-  one point — and **multi-hop questions scored 0.0% under every single strategy**, because those answers need
-  two remarks from sessions weeks apart and no run of consecutive turns can hold both.
-
-  What is left is what a conversation actually is: `benchmarks/space/` holds an importable schema, the
-  space's purpose and its usage notes; `benchmarks/dataset/` holds the loader; `benchmarks/plan/` holds the
-  plan for the writer, written from the schema rather than from what was deleted.
-
-  **The schema is data, not code** — an array of schema-library entries in one group, so it can be POSTed to
-  a Ythril instance as-is and shared with anyone storing a conversation. Nine entity types, fourteen edge
-  labels with both ends pinned so `works_at` from a place is refused at write time, five chrono types, and
-  one claim type carrying who said it and when.
-
-  Four rules shape it, and each one removes something the old vocabulary had: a date that does not say how
-  long a relationship held is a chrono entry, not a property of a thing; every date is declared as a date, so
-  it can be compared rather than only matched; an edge says *that* two things are related and *for how long*
-  and never narrates, so how strongly, how severely and how it changed are claims; and no transcript
-  bookkeeping appears anywhere, because every property is folded into the embedded text and a turn id is
-  meaningless tokens inside every vector in the space.
-
-  `scripts/LINK-READERS.md` moved out of `benchmarks/` rather than going with it — it is a server performance
-  record, not a corpus artefact.
+- **The LoCoMo benchmark was rebuilt around the conversation schema.** Storing resolved facts instead of
+  transcript lines, with provenance and cross-session synthesis, took first-result accuracy from 33.0% to
+  55.3% and evidence delivery to 91.4% on the first conversation. The measurements, the dead ends and the
+  ceiling that method has are in `benchmarks/DEVELOPMENT-LOG.md`.
 
 ## [4.4.0] — 2026-09-09
 

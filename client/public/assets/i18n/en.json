@@ -489,6 +489,8 @@
   "brain.query.truncated.body": "What you have is the top of the ranking, in order, with nothing skipped in the middle — and every record is complete. A match is counted together with its whole graph, so a deeper expansion means fewer matches fit.",
   "brain.query.truncated.what": "To see more, raise Max response size under Show advanced, or narrow the search. A search that comes back shortened is usually a sign the question was broader than intended.",
   "brain.query.maxPerType.none": "no cap",
+  "brain.query.includeRecordMeta": "Include storage bookkeeping",
+  "brain.query.includeRecordMeta.tooltip": "Adds back the fields that say where a record SITS rather than what it says: when it was written, when it was last changed, and the ids of everything it links to. Off by default because on a measured corpus only 30% of an answer was content and most of the rest was this. Careful with the creation date: it is when the RECORD was written, not when the remembered thing happened — that lives in the record's own properties.",
   "brain.query.includeFreshWrites": "Include fresh writes",
   "brain.query.includeFreshWrites.tooltip": "Also scan the newest records directly, for when the vector index has not caught up yet. Slower, and only useful right after a write.",
   "brain.query.includeContent": "Include passage text",

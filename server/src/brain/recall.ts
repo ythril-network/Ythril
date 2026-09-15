@@ -1,3 +1,9 @@
+  /**
+   * How this step says a stage did not run — the SAME channel the budget skip uses.
+   *
+   * It incremented the counter directly, so an unreachable or refusing reranker reached a dashboard and
+   * never the caller, against a `degraded` reason the integration guide already documents.
+   */
 /**
  * Recall engine — semantic search across every knowledge type, plus duplicate detection.
  *
@@ -402,7 +408,7 @@ export async function recall(
     noteDegraded('rerank_skipped_budget');
     log.warn(`Recall: ${remaining}ms of the ${effectiveBudgetMs}ms budget left — skipping the reranker and returning the fused order`);
   } else if (reranking) {
-    await applyRerank(query, guaranteed, allResults, remaining);
+    await applyRerank(query, guaranteed, allResults, remaining, noteDegraded);
   }
 
   const final = mergeRecallResults(guaranteed, allResults, topK, minScore, opts?.maxPerType);
@@ -614,6 +620,18 @@ async function applyRerank(
   allResults: RecallResult[],
   /** What is left of the call's budget. The reranker's own timeout is capped to it. */
   budgetMs: number,
+  /**
+   * How this step says a stage did not run — the SAME channel the budget skip uses.
+   *
+   * It used to increment `recallDegradedTotal` directly, which told an operator with a dashboard and nobody
+   * else. Two ways the reranker fails to run, one signature — results ordered by meaning alone, a 200, and
+   * a plausible list — and only the budget one reachable from the answer.
+   *
+   * Found by wiring a real cross-encoder to a bench instance for the first time: every call came back
+   * `413 Payload Too Large`, because `MAX_CANDIDATES` is 100 and a stock text-embeddings-inference server
+   * accepts 32 per request. `degraded` was null and the results looked fine.
+   */
+  noteDegraded: (reason: string) => void,
 ): Promise<void> {
   // One entry per distinct record, holding every reference to it so a single score updates all of them.
   const byId = new Map<string, RecallResult[]>();
@@ -632,8 +650,9 @@ async function applyRerank(
   const scores = await rerank(query, passages, budgetMs);
   if (!scores) {
     // Configured but it did not answer. `rerank()` already logged why; this is what makes a reranker
-    // that has been down for a week visible without anyone reading a week of logs.
-    recallDegradedTotal.labels({ reason: 'rerank_unavailable' }).inc();
+    // that has been down for a week visible without anyone reading a week of logs — and, through
+    // `noteDegraded`, visible to the caller holding the answer rather than only on a dashboard.
+    noteDegraded('rerank_unavailable');
     return; // no opinion — vector order stands
   }
 

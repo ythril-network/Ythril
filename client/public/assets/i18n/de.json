@@ -489,6 +489,8 @@
   "brain.query.truncated.body": "Sie sehen die höchstplatzierten Treffer in ihrer Reihenfolge, ohne Lücken in der Mitte — und jeder Datensatz ist vollständig. Ein Treffer zählt zusammen mit seinem gesamten Graphen, daher passen bei größerer Graph-Tiefe weniger Treffer hinein.",
   "brain.query.truncated.what": "Für mehr Treffer die max. Antwortgröße unter „Erweitert anzeigen“ erhöhen oder die Suche eingrenzen. Eine gekürzte Antwort ist meist ein Hinweis darauf, dass die Frage weiter gefasst war als beabsichtigt.",
   "brain.query.maxPerType.none": "unbegrenzt",
+  "brain.query.includeRecordMeta": "Speicher-Metadaten einbeziehen",
+  "brain.query.includeRecordMeta.tooltip": "Liefert die Felder mit, die sagen, WO ein Datensatz liegt statt was er aussagt: wann er geschrieben wurde, wann er zuletzt geändert wurde, und die IDs von allem, womit er verknüpft ist. Standardmäßig aus, denn in einer Messung an echten Daten waren nur 30% einer Antwort Inhalt und der größte Teil des Rests genau das. Vorsicht beim Erstellungsdatum: es ist der Zeitpunkt des SCHREIBENS, nicht der des erinnerten Ereignisses — das steht in den Eigenschaften des Datensatzes selbst.",
   "brain.query.includeFreshWrites": "Neueste Schreibvorgänge einbeziehen",
   "brain.query.includeFreshWrites.tooltip": "Durchsucht zusätzlich die neuesten Datensätze direkt, falls der Vektorindex noch nicht aufgeholt hat. Langsamer und nur direkt nach einem Schreibvorgang sinnvoll.",
   "brain.query.includeContent": "Textstellen einbeziehen",

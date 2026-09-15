@@ -439,7 +439,40 @@ broken, and nothing compared the two.
 | Assist model | `assist` | `DOC_ASSIST_URL` | draft transcription + OCR text | yes, always | **required** |
 | External face model | `faceExternal` | `FACE_RECOGNITION_EXTERNAL_MODEL` | **face crops (biometric data)** | yes, always | **required** |
 
-Four things worth reading twice:
+Six things worth reading twice:
+
+- **A cross-encoder must be one trained for QUESTION-to-passage relevance, and a weaker sibling of the right model is a regression rather than a smaller gain.**
+  Measured on one corpus, same instance, same questions, same budget — only the model changed:
+
+  | reranker | first answer right | within three |
+  |---|---|---|
+  | none | 45.7% | 60.9% |
+  | `BAAI/bge-reranker-base` | **27.4%** | 45.2% |
+  | `cross-encoder/ms-marco-MiniLM-L-6-v2` | **53.8%** | 64.0% |
+
+  A cross-encoder's score REPLACES the retrieval's ordering, which is right when it knows better and
+  catastrophic when it does not. The failing model saturated — 0.9958 for the right passage against 0.9969
+  for a wrong one — so a difference of 0.001 overturned a vector margin of 0.100, and it did that
+  confidently on every query. The one that worked separated the same pair 0.99997 against 0.653.
+
+  The model this guide recommends, `BAAI/bge-reranker-v2-m3`, is NOT the failing one and ranks that same
+  pair correctly. The trap is reaching for a smaller relative of it: `bge-reranker-base` is trained for
+  passage-to-passage similarity, and on question-shaped queries it rates everything about the right subject
+  as equally relevant.
+
+  So: use `bge-reranker-v2-m3`, or a model from the MS MARCO family if you want something small enough to
+  be comfortable on a CPU. And **measure it against no reranker on your own corpus before leaving it on** —
+  there is no signal in the API that says a reranker is making things worse, because from the outside a
+  worse ordering looks exactly like an ordering.
+
+- **A reranker must accept 100 passages in one request, and the common self-hosted server does not by
+  default.** One recall sends up to a hundred candidates in a single call, because the over-fetch IS
+  the reranking mechanism — a cross-encoder can only reorder what the vector search already found.
+  `text-embeddings-inference` caps a client batch at **32** unless you start it with
+  `--max-client-batch-size 512`, and Ythril's request comes back `413`. The search still answers, ordered by
+  meaning alone, and looks entirely reasonable; the only signs are a `WARN` in the log and
+  `rerank_unavailable` in the answer's `degraded` array. If reranking appears to do nothing, check that
+  array first.
 
 - The **document VLM, repair and verify slots inherit the vision endpoint** when their own base URL is
   unset — so pointing vision at an external provider points all three there, and page images follow.

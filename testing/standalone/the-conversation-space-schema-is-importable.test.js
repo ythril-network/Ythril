@@ -3,8 +3,9 @@
  *
  * ## What this is guarding
  *
- * `benchmarks/space/schema.json` is the only thing left in `benchmarks/` besides the dataset loader and a
- * plan. Twelve ingest strategies were deleted rather than adapted: they all took a conversation to be a pile
+ * `benchmarks/space/schema.json` is the shared half of `benchmarks/` — it belongs to no benchmark, and each
+ * benchmark folder holds only its own dataset pin, loader and extractions. Twelve ingest strategies were
+ * deleted rather than adapted: they all took a conversation to be a pile
  * of transcript chunks, and measured, that premise caps out — the best of them answered 50.8% of questions
  * at rank 1 and **multi-hop scored 0.0% under every single one**, because those answers need two remarks from
  * sessions weeks apart and no chunk of consecutive turns holds both.

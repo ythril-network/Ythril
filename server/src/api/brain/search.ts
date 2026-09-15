@@ -42,6 +42,7 @@ import {
   rankOf, byRankThenId, mergeRecallResults, withoutDiagnostics, RECALL_ENVELOPE_KEYS,
 } from '../../brain/recall-shape.js';
 import { mapGraphNodes, graphNodeRecord } from '../../brain/recall-graph.js';
+import { stripRecordMeta } from '../../brain/recall-record-meta.js';
 import { applyProjection, normaliseProjection, type NormalisedProjection } from '../../brain/projection.js';
 import { resolveBudget, resolvePaging, budgetedEnvelope, applyBudget, budgetFields, type BudgetRequest } from '../../brain/result-budget.js';
 import { sendReadFailure, statesRetryability } from './_read-failure.js';
@@ -587,6 +588,22 @@ searchRouter.post('/spaces/:spaceId/recall', globalRateLimit, requireSpaceAuth, 
     // is a BREAKING change to the REST response, and deliberately: `matchedText` is the pre-embedding source
     // string, which for a file chunk is the passage a SECOND time, so the old default sent a large field
     // nobody had asked for `topK` times.
+    /*
+     * `includeRecordMeta` (default FALSE) restores `createdAt`, `updatedAt` and the link-id arrays.
+     *
+     * They describe where a record SITS rather than what it says, and measured on a real corpus they were
+     * most of the answer: 30% of a recall response was content, the rest this. `createdAt` is the worst of
+     * them because it reads as when the remembered thing happened, which is not what it means.
+     *
+     * Refused rather than coerced, like every other flag here.
+     */
+    const includeMetaRaw = (req.body as { includeRecordMeta?: unknown }).includeRecordMeta;
+    if (includeMetaRaw !== undefined && typeof includeMetaRaw !== 'boolean') {
+      res.status(400).json({ error: '`includeRecordMeta` must be a boolean' });
+      return;
+    }
+    const safeIncludeRecordMeta = includeMetaRaw === true;
+
     const includeDiagRaw = (req.body as { includeDiagnostics?: unknown }).includeDiagnostics;
     if (includeDiagRaw !== undefined && typeof includeDiagRaw !== 'boolean') {
       res.status(400).json({ error: '`includeDiagnostics` must be a boolean' });
@@ -699,7 +716,11 @@ searchRouter.post('/spaces/:spaceId/recall', globalRateLimit, requireSpaceAuth, 
           graph.bySeed.get(s._id), graphNodeRecord, safeIncludeDiagnostics, safeProjection);
         return nested ? { ...s, _graph: nested } : s;
       });
-    const results = projectResults(withGraph as RecallResult[], safeProjection);
+    // Storage bookkeeping is opt-in, and it goes BEFORE the byte budget is measured — trimming after
+    // would shrink the response without letting the caller spend what it saved on more evidence, which is
+    // the whole point of the change.
+    const results = projectResults(withGraph as RecallResult[], safeProjection)
+      .map(r => stripRecordMeta(r as object, { includeRecordMeta: safeIncludeRecordMeta }));
     // `graphNodes` reports what `count` used to conflate: how much graph came back. Two numbers, each meaning
     // one thing, rather than one number meaning whichever the reader assumes.
     // The WHOLE result set spills, not the graph alone: `topK: 100, traverse: 2` is a large answer even when

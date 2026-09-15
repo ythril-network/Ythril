@@ -13,6 +13,7 @@ import { RECORD_TYPES } from '../../config/types.js';
 import { UUID_V4_RE, formatRecallSummary, toRecallRecord, uuidSchema, unitScoreSchema, QUERY_FILTER_OPERATORS } from './shared.js';
 import { MAX_RECALL_TRAVERSE } from '../../brain/recall-seed-traversal.js';
 import { mapGraphNodes, graphNodeRecord } from '../../brain/recall-graph.js';
+import { stripRecordMeta } from '../../brain/recall-record-meta.js';
 import { applyProjection, normaliseProjection } from '../../brain/projection.js';
 import { resolveBudget, resolvePaging, budgetedEnvelope, applyBudget, budgetFields, type BudgetRequest, MCP_DEFAULT_MAX_CHARS } from '../../brain/result-budget.js';
 import { buildGraphWithSpill, spillResultSet, countGraphNodes } from '../../brain/graph-spill.js';
@@ -134,6 +135,11 @@ export const recallTool: ToolHandler = {
                 + 'The general argument is still true and is why both exist: every field a result carries is '
                 + 'multiplied by topK and paid for in tokens, and passage bodies are by far the largest.',
             },
+            includeRecordMeta: {
+              type: 'boolean',
+              default: false,
+              description: 'Add back the fields that describe where a record SITS rather than what it says: `createdAt`, `updatedAt` and the link-id arrays (default false, and false is what you want almost always). Measured on a real corpus, only 30% of a recall answer was content and most of the rest was this. `createdAt` is the one to be careful of: it is when the RECORD was written, not when the remembered thing happened - that lives in the record\'s own properties, put there by whoever stored it. Turn this on when you need to act on the record\'s place in the store, not to read what it says. REST takes the same parameter with the same default.',
+            },
             includeDiagnostics: {
               type: 'boolean',
               default: false,
@@ -228,6 +234,7 @@ export const recallTool: ToolHandler = {
     const minScore = typeof a['minScore'] === 'number' ? a['minScore'] : undefined;
     const includeContent = a['includeContent'] !== false;
     const includeDiagnostics = a['includeDiagnostics'] === true;
+    const includeRecordMeta = a['includeRecordMeta'] === true;
     const recallProjection = normaliseProjection(a['projection'] as Record<string, unknown> | undefined);
     const budget = resolveBudget(a as BudgetRequest, MCP_DEFAULT_MAX_CHARS);
     if (!budget.ok) throw new Error(budget.error);
@@ -337,7 +344,10 @@ export const recallTool: ToolHandler = {
         ...rankingFields(r as unknown as Record<string, unknown>),
         spaceId: r.spaceId,
         type: r.type,
-        record: applyProjection(toRecallRecord(r, { includeContent, includeDiagnostics }), recallProjection),
+        record: stripRecordMeta(
+          applyProjection(toRecallRecord(r, { includeContent, includeDiagnostics }), recallProjection),
+          { includeRecordMeta },
+        ),
       }));
       const plainBudgeted = await budgetedEnvelope({
         results: plain,

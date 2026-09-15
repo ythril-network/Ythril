@@ -67,7 +67,8 @@ export function loadSpaceDefinition() {
  * @param {object} args.ythril      a client from `ythril-client.mjs`
  * @param {string} args.space       the space id to create and fill
  * @returns {Promise<{records: number, sourceTurns: Map<string, string[]>}>}
- *   `sourceTurns` maps a written claim's id to the turn ids it came from. Held by the caller, stored nowhere.
+ *   `sourceTurns` maps a written record's id to the turn ids it came from — claims, and also the entities
+ *   and chrono entries whose content was synthesised from the transcript. Held by the caller, stored nowhere.
  */
 export async function writeSpace({ extraction, ythril, space }) {
   const { entries, typeSchemas, purpose, usageNotes } = loadSpaceDefinition();
@@ -89,7 +90,15 @@ export async function writeSpace({ extraction, ythril, space }) {
       type: e.type,
       ...(e.properties && Object.keys(e.properties).length > 0 ? { properties: e.properties } : {}),
     });
-    entityId.set(e.key, created.id ?? created._id);
+    const eid = created.id ?? created._id;
+    entityId.set(e.key, eid);
+    /*
+     * An entity's description is SYNTHESISED — it says what the conversation established about a subject,
+     * drawn from every session that mentioned it. A synthesised record with no provenance is unusable twice
+     * over: nobody can check it, and nothing can credit the turns it was built from. So it carries the same
+     * side map a claim does.
+     */
+    if ((e.sourceTurns ?? []).length > 0) sourceTurns.set(eid, e.sourceTurns);
     records++;
   }
 
@@ -106,7 +115,10 @@ export async function writeSpace({ extraction, ythril, space }) {
       ...(c.description ? { description: c.description } : {}),
       ...(linked.length > 0 ? { entityIds: linked } : {}),
     });
-    chronoId.set(c.key, created.id ?? created._id);
+    const cid = created.id ?? created._id;
+    chronoId.set(c.key, cid);
+    // Same reason as the entity above: a dated event was established by particular turns.
+    if ((c.sourceTurns ?? []).length > 0) sourceTurns.set(cid, c.sourceTurns);
     records++;
   }
 

@@ -1,0 +1,58 @@
+{
+  "$comment": [
+    "NOT YET PINNED. The URLs below are recorded; the hashes are not, because nothing has been fetched.",
+    "A null sha256 is refused by the fetcher exactly like a mismatch — this file cannot be used to pull an",
+    "unverified dataset. The first fetch records the hash and the byte count, and every fetch after that",
+    "is checked against them.",
+    "",
+    "The dataset is pinned rather than vendored, for the same reason as LoCoMo: redistributing somebody",
+    "else's corpus inside this repository would put us in the business of hosting it, and a local copy is",
+    "one more thing that can drift from what the authors publish.",
+    "",
+    "IT MAY NOT BE TOUCHED once fetched. Extraction reads histories and must never read the questions, the",
+    "answers or the abilities. That is enforced by the loader rather than promised.",
+    "",
+    "Counts below are as the authors state them and are marked so. Every number this repository publishes",
+    "about a corpus is measured from the file instead — see LoCoMo's `observed` block for the shape."
+  ],
+  "pinnedAt": null,
+  "datasets": {
+    "longmemeval_s": {
+      "url": "https://huggingface.co/datasets/xiaowu0162/longmemeval/resolve/main/longmemeval_s.json",
+      "sha256": null,
+      "bytes": null,
+      "cachePath": "benchmarks/.cache/datasets/longmemeval-s-<sha12>.json",
+      "licence": "TO CONFIRM before publishing any result. The repository README does not state one; read the Hugging Face dataset card and the ICLR 2025 paper, and record the answer here rather than assuming a permissive default.",
+      "stated": {
+        "$method": "taken from the authors, NOT measured — replace with an `observed` block on first fetch",
+        "instances": 500,
+        "approxTokensPerHistory": 115000,
+        "approxSessionsPerHistory": 40
+      }
+    },
+    "longmemeval_m": {
+      "url": "https://huggingface.co/datasets/xiaowu0162/longmemeval/resolve/main/longmemeval_m.json",
+      "sha256": null,
+      "bytes": null,
+      "cachePath": "benchmarks/.cache/datasets/longmemeval-m-<sha12>.json",
+      "licence": "TO CONFIRM — as above.",
+      "stated": {
+        "$method": "taken from the authors, NOT measured",
+        "instances": 500,
+        "approxSessionsPerHistory": 500
+      }
+    },
+    "longmemeval_oracle": {
+      "url": "https://huggingface.co/datasets/xiaowu0162/longmemeval/resolve/main/longmemeval_oracle.json",
+      "sha256": null,
+      "bytes": null,
+      "cachePath": "benchmarks/.cache/datasets/longmemeval-oracle-<sha12>.json",
+      "licence": "TO CONFIRM — as above.",
+      "stated": {
+        "$method": "taken from the authors, NOT measured",
+        "instances": 500,
+        "$note": "Evidence sessions only. This is the control that measures the ANSWERING model with retrieval removed — the number to subtract, not the number to quote."
+      }
+    }
+  }
+}
