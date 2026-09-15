@@ -51,6 +51,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The recall guide said `includeDiagnostics` hides the per-stage scores. It does not, deliberately, and
+  has not for some time.**
+
+  `lexicalScore`, `fusedScore` and `rerankScore` are returned unconditionally on both doors — the reasoning
+  is in the code and it is sound: the number that DECIDED a result's position must not be the one a caller
+  cannot read, and three floats are not a cost worth a flag. The flag governs `matchedText`,
+  `embeddingModel` and `seq`, which is three fields rather than six.
+
+  An integrator reading the guide would have believed the ordering signal was hidden from them by default.
+  Corrected in both copies of the parameter table.
+
 - **The guides now say which cross-encoder to pick, because the wrong one is a regression rather than a
   no-op.** Same instance, same questions, same budget, only the model changed: no reranker 45.7% first
   answers right, `bge-reranker-base` **27.4%**, `ms-marco-MiniLM-L-6-v2` **53.8%**.
