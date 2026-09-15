@@ -79,6 +79,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **`benchmarks/` now holds a folder per benchmark: LoCoMo, LongMemEval and MemoryArena.** LongMemEval is
+  recorded and not yet fetched, MemoryArena is not released by its authors, and a dataset whose hash is
+  missing is now refused rather than read as nothing to check.
+
 - **The LoCoMo benchmark was rebuilt around the conversation schema.** Storing resolved facts instead of
   transcript lines, with provenance and cross-session synthesis, took first-result accuracy from 33.0% to
   55.3% and evidence delivery to 91.4% on the first conversation. The measurements, the dead ends and the

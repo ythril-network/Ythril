@@ -1,6 +1,6 @@
 # Extraction format
 
-One file per conversation, at `benchmarks/extractions/<conversationId>.json`. It is the output of the step
+One file per conversation, at `benchmarks/locomo/extractions/<conversationId>.json`. It is the output of the step
 that needs a model and the input to the step that does not, so it holds **no Ythril ids** — nothing that
 depends on a write having happened.
 
