@@ -106,6 +106,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **Storing resolved facts instead of transcript lines beats storing the transcript, by six points.**
+
+  One conversation, 197 questions, equal budget, against one-record-per-turn:
+
+  | | rank 1 | within 3 | all evidence |
+  |---|---|---|---|
+  | one record per turn | 33.0% | 42.1% | 73.6% |
+  | resolved facts | **39.1%** | **57.9%** | **85.8%** |
+
+  419 turns became 117 facts, each a sentence that stands on its own with its subjects named and its dates
+  resolved, covering the turns of the exchange it came from. 82 entities carry descriptions. Nothing is
+  dropped: every turn is still reachable through the fact that reports it.
+
 - **The thing a question matches is now a resolved fact, not a line of the transcript.**
 
   The graph had been scoring level with storing raw turns, and the reason was structural rather than a
