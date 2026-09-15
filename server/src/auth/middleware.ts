@@ -9,13 +9,17 @@ import type { TokenRecord } from '../config/types.js';
 import { spaceAdminSpacesFor, isSpaceAdminFor, administersAnySpace } from './editor-scope.js';
 import type { OidcTokenRecord } from './oidc.js';
 import { resolveMemberSpaces } from '../spaces/proxy.js';
-import { reachesSpace } from './space-reach.js';
+import { reachesSpace, reachableSpaceIds } from './space-reach.js';
+import { spacesForBodyScopedRequest } from './body-scoped-space.js';
+import type { SpaceArea } from '../config/rights-shape.js';
+import type { Rung } from './space-rights.js';
 import { rungFor, satisfies } from './required-rung.js';
 import { effectiveRung } from './mint-cap.js';
 import { authAttemptsTotal } from '../metrics/registry.js';
 import { logAuthFailure } from '../audit/middleware.js';
 import { mcpResourceMetadataUrl } from '../mcp/oauth.js';
 import { canWriteAnywhere } from './write-anywhere.js';
+import { getConfig } from '../config/loader.js';
 import type { TokenRights } from '../config/rights-shape.js';
 // Re-exported so the guards here and every existing importer keep one name for one rule. The definition
 // lives in its own module because `mcp/oauth.ts` needs it too, and this file already imports from there.
@@ -29,6 +33,14 @@ declare global {
     interface Request {
       authToken?: Omit<TokenRecord, 'hash'> | OidcTokenRecord;
       resolvedSpaceId?: string;
+      /**
+       * The spaces a body-scoped route was AUTHORISED for, resolved once by `requireBodyScopedSpace`.
+       *
+       * A handler on such a route reads this and never `req.body.space`. Reading the body again is the
+       * defect the whole mechanism exists to prevent: the two readings are spelled identically, so nothing
+       * in a diff shows that the value acted on is not the value that was checked.
+       */
+      authorisedSpaces?: string[];
       /** Bearer exchanged from a single-use SSE ticket, cached so multiple auth middlewares in the same
        *  request (e.g. a router-level requireAuth + a route-level requireAdmin) don't each try to consume
        *  it. `null` means the ticket was invalid; `undefined` means not yet exchanged. */
@@ -616,6 +628,66 @@ export function requireSpaceAuthScoped(paramName: string) {
 
     authAttemptsTotal.inc({ result: 'success' });
     req.resolvedSpaceId = spaceId;
+    attachToken(req, res, next, record, bearer);
+  };
+}
+
+/**
+ * The BODY-scoped twin of {@link requireSpaceAuthScoped}, for routes where the space is a parameter.
+ *
+ * Owner ruling, 2026-09-15: the search family must read across spaces, so *"the route has to change and
+ * space moved to parameter."* `POST /api/brain/spaces/:spaceId/recall` becomes `POST /api/brain/recall`
+ * with an optional `space` in the body.
+ *
+ * ## What this does that the path-scoped guard cannot
+ *
+ * `enforceAreaRung` refuses unless the rung is held in EVERY target, which is right when the caller named
+ * one space. With the space omitted the targets are every space the token can reach, and an all-or-nothing
+ * refusal would kill a cross-space search because some space the caller never asked about exists on the
+ * instance. `spacesForBodyScopedRequest` holds that rule, with the named and unnamed cases decided
+ * separately, and returns the authorised list.
+ *
+ * ## The list is attached, never recomputed
+ *
+ * `req.authorisedSpaces` is what the handler acts on. A handler that reads `req.body.space` again is the
+ * failure this exists to prevent — a second parse, a mutated body or a differently trimmed string, and the
+ * value acted on stops being the value that was checked, with nothing in the diff to show it.
+ *
+ * A space that does not exist still answers 404, as every other route does; existence is not a secret this
+ * API keeps anywhere else, and answering 403 here alone would be a new inconsistency rather than a
+ * tightening.
+ */
+export function requireBodyScopedSpace(area: SpaceArea, needs: Exclude<Rung, 'none'>) {
+  return async function (req: Request, res: Response, next: NextFunction): Promise<void> {
+    const auth = await resolveAuthOrFail(req, res, { recordInvalidMetric: true });
+    if (!auth) return;
+    const { record, bearer } = auth;
+
+    const named = (req.body as { space?: unknown } | undefined)?.space;
+    const cfg = getConfig();
+    if (typeof named === 'string' && named.trim() && !cfg.spaces.some((sp: { id: string }) => sp.id === named.trim())) {
+      res.status(404).json({ error: `Space '${named.trim()}' not found` });
+      return;
+    }
+
+    const rights = (record as { rights?: TokenRights }).rights;
+    const verdict = spacesForBodyScopedRequest({
+      named,
+      accessible: reachableSpaceIds(rights, cfg.spaces.map((sp: { id: string }) => sp.id)),
+      rights,
+      area,
+      needs,
+    });
+    if (verdict.refusal) {
+      res.status(verdict.refusal.startsWith('The \'space\'') ? 400 : 403).json({ error: verdict.refusal });
+      return;
+    }
+
+    authAttemptsTotal.inc({ result: 'success' });
+    req.authorisedSpaces = verdict.spaces;
+    // Set only when the caller named one, so a handler that still reads it cannot silently act on the first
+    // space of a fan-out and call that "the space".
+    if (verdict.spaces.length === 1 && typeof named === 'string') req.resolvedSpaceId = verdict.spaces[0];
     attachToken(req, res, next, record, bearer);
   };
 }
