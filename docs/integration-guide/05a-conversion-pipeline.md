@@ -163,7 +163,7 @@ Chunk records and `_converted/` file records carry a `parentFileId` field. The f
 - **`GET /api/brain/spaces/:spaceId/files`** — omits records where `parentFileId` is set. Pass `?includeChunks=true` to include all records.
 - **`GET /api/brain/spaces/:spaceId/stats`** — the `files` count reflects only top-level files.
 
-Recall results (`recall`, `find_similar`) **do** include chunk records by design. When a result has `parentFileId` set, the caller can follow it to retrieve the original file record.
+Recall results (`recall`, `similar`) **do** include chunk records by design. When a result has `parentFileId` set, the caller can follow it to retrieve the original file record.
 
 #### Resilience
 

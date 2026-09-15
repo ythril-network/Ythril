@@ -36,3 +36,20 @@ export function reachesSpace(rights: TokenRights, spaceId: string): boolean {
   const floor = rights.floor;
   return !!floor && AREAS.some(a => floor[a] !== 'none');
 }
+
+/**
+ * Every space on this instance the token reaches at all — the CEILING any per-area check narrows from.
+ *
+ * Extracted at the second site, which is the threshold: the MCP router built this list inline and a
+ * body-scoped REST route needed the identical one. A third hand-written copy is how one door ends up
+ * reaching a space the other does not, and the last time this rule had two implementations MCP answered
+ * from `tokenSpaces` while HTTP used `reachesSpace` — two surfaces, one rule, the weaker one reachable.
+ *
+ * **Reach is not permission.** This says which spaces exist for this token, never what it may do in them;
+ * the area rung is a separate question and asking only this one is the mistake it is easy to make, because
+ * the answer looks like an authorisation result. A caller with no matrix reaches NOTHING, not everything.
+ */
+export function reachableSpaceIds(rights: TokenRights | undefined, allSpaceIds: readonly string[]): string[] {
+  if (!rights) return [];
+  return allSpaceIds.filter(id => reachesSpace(rights, id));
+}

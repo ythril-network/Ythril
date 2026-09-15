@@ -276,10 +276,11 @@ export const ROUTE_RULES: RouteRule[] = [
   { method: 'POST',   pattern: /^\/api\/spaces\/([^/]+)\/validate-schema$/,        operation: 'space.schema.validate', spaceGroup: 1, read: true },
 
   // ── Brain query / recall / stats (reads) ─────────────────────────────────
-  { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/recall/,      operation: 'brain.recall',         spaceGroup: 1, read: true },
-  { method: 'POST',   pattern: /^\/api\/brain\/recall$/,                           operation: 'brain.recall_global',  read: true },
-  { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/query$/,      operation: 'brain.query',          spaceGroup: 1, read: true },
-  { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/find-similar$/, operation: 'brain.find_similar', spaceGroup: 1, read: true },
+  { method: 'POST',   pattern: /^\/api\/brain\/recall$/,                           operation: 'brain.recall',         read: true },
+  // The search family takes its space from the BODY since 5.0, so the path carries no group to read.
+  // `spaceId` falls back to the spaces the guard authorised — see the entry builder below.
+  { method: 'POST',   pattern: /^\/api\/brain\/filter$/,                            operation: 'brain.filter',         read: true },
+  { method: 'POST',   pattern: /^\/api\/brain\/similar$/,                           operation: 'brain.similar',        read: true },
   { method: 'GET',    pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/stats$/,      operation: 'brain.stats',          spaceGroup: 1, read: true },
   { method: 'GET',    pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/er-model$/,   operation: 'brain.er_model',       spaceGroup: 1, read: true },
 
@@ -413,7 +414,23 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
       ip: req.ip ?? req.socket.remoteAddress ?? 'unknown',
       method: req.method,
       path: fullPath,
-      spaceId: matched.spaceId,
+      /*
+       * The path first, then the space the GUARD authorised.
+       *
+       * A rule extracts the space from a path group, which is every route except the ones that moved the
+       * space into the body at 5.0 so a caller could omit it. For those the path carries nothing, and an
+       * audit entry with `spaceId: null` for a search that read real data is a hole in exactly the record
+       * that exists to answer “who read what”.
+       *
+       * It is taken from `req.authorisedSpaces` rather than from `req.body.space`, and the difference
+       * matters: that list is what the guard AUTHORISED and what the handler searched. Re-reading the body
+       * here could record a space the request never touched — an audit trail that disagrees with what
+       * happened is worse than one that says nothing.
+       *
+       * A cross-space read is joined rather than dropped: `a,b,c` says plainly that this one call read
+       * three spaces, which is the fact an auditor is looking for.
+       */
+      spaceId: matched.spaceId ?? (req.authorisedSpaces?.length ? req.authorisedSpaces.join(',') : null),
       operation: matched.operation,
       status: res.statusCode,
       entryId: matched.entryId,

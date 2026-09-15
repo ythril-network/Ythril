@@ -4,7 +4,7 @@
  * ## The defect, which shipped
  *
  * `parseTraverseOption` gained `includeChrono` / `includeMemories` / `includeFiles` in 3.6 and the REST route
- * accepted them the same day. MCP's `recall` and `find_similar` did not: their `traverse` object schema still
+ * accepted them the same day. MCP's `recall` and `similar` did not: their `traverse` object schema still
  * declared `{depth, edgeLabels, direction}` with `additionalProperties: false`, and the dispatcher enforces
  * `inputSchema` with Ajv **before** the handler runs (`router.ts`, `skipSchemaValidation` is not set on these
  * tools). So the call was refused with `must match exactly one schema in oneOf` while the byte-identical REST
@@ -87,7 +87,7 @@ describe('the traverse object schema accepts what the parser accepts', () => {
   it('the two tools declare the SAME object branch, from one definition', () => {
     /*
      * It was written out twice, and that is how they came to disagree: the flags were added to neither, and
-     * a fix that touched only `recall` would have left `find_similar` behind for another release. One
+     * a fix that touched only `recall` would have left `similar` behind for another release. One
      * definition means a key cannot reach one tool and not the other.
      */
     assert.deepEqual(traverseObjectBranch(recallTool), traverseObjectBranch(find_similarTool),
@@ -149,7 +149,7 @@ describe('the description matches the schema', () => {
     /*
      * The other direction, and the reason it took until A-7 to exist: the check above derives what is
      * `promised` FROM the description, so a description mentioning no flag at all had nothing to be unmet and
-     * passed. One-directional by construction — which is how `find_similar` accepted all three link flags from
+     * passed. One-directional by construction — which is how `similar` accepted all three link flags from
      * #1083 while its own description still described the pre-3.6 shape.
      *
      * The docblock above already claimed both mattered: *"a schema key no description mentions is a capability

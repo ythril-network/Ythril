@@ -4,7 +4,7 @@
  * ## The report (`Q-11`)
  *
  * The canary operator's vector-index panel declared **fifteen spaces missing an index** while recall against
- * those exact spaces returned correctly ranked results with real cosine scores — and `find_similar`, which is
+ * those exact spaces returned correctly ranked results with real cosine scores — and `similar`, which is
  * pure vector with no lexical channel, worked too. The vectors existed and were being searched.
  *
  * `listSearchIndexes` is the Atlas Search API. On a self-hosted replica set running `$vectorSearch` natively

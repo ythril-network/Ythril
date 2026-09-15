@@ -38,10 +38,10 @@ const { ALL_TOOLS } = await import('../../server/dist/mcp/tools/index.js');
 
 /** The four strict routes, each pointing at the set the route actually gates on. */
 const SETS = new Map([
-  ['query', QUERY_BODY_FIELDS],
+  ['filter', QUERY_BODY_FIELDS],
   ['recall', RECALL_BODY_FIELDS],
   ['traverse', TRAVERSE_BODY_FIELDS],
-  ['find-similar', FIND_SIMILAR_BODY_FIELDS],
+  ['similar', FIND_SIMILAR_BODY_FIELDS],
 ]);
 
 /** Comments are stripped: a doc comment inside a body type literal names keys it does not declare. */
@@ -94,9 +94,13 @@ function clientPosts() {
   const found = [];
   for (const file of clientSources()) {
     const src = strip(readFileSync(file, 'utf8'));
-    const call = /\.post\s*<[^(;]*?>\s*\(\s*`\/api\/brain\/spaces\/\$\{[^}]+\}\/([a-z-]+)`\s*,\s*/g;
+    // TWO shapes, because 5.0 moved the search family off the space path: the older
+    // `/api/brain/spaces/${id}/<route>` template, and the body-scoped `'/api/brain/<route>'` plain string
+    // where the space rides in the body. A regex that knew only the first reported “no client POST found”
+    // for a route the client calls on every search — an extractor defect that reads as a missing caller.
+    const call = /\.post\s*<[^(;]*?>\s*\(\s*(?:`\/api\/brain\/spaces\/\$\{[^}]+\}\/([a-z-]+)`|'\/api\/brain\/([a-z-]+)')\s*,\s*/g;
     for (let m = call.exec(src); m; m = call.exec(src)) {
-      const route = m[1];
+      const route = m[1] ?? m[2];
       if (!SETS.has(route)) continue;
       const argAt = m.index + m[0].length;
       if (src[argAt] === '{') {
@@ -141,7 +145,7 @@ describe('the sweep itself found the call sites', () => {
     // Asserted by IDENTITY, not by count: a regex that silently stops matching would otherwise report
     // "no client key is wrong" while having looked at nothing.
     const routes = new Set(posts.map(p => p.route));
-    for (const route of ['query', 'recall', 'traverse']) {
+    for (const route of ['filter', 'recall', 'traverse']) {
       assert.ok(routes.has(route), `no client POST to /${route} was found — the extractor is broken, or the
         call moved. This gate is worthless until it can see them.`);
     }
@@ -154,9 +158,9 @@ describe('the sweep itself found the call sites', () => {
   });
 });
 
-/** The MCP tool that is the same capability as each REST route. `find-similar` is `find_similar` there. */
+/** The MCP tool that is the same capability as each REST route. `similar` is `similar` there. */
 const MCP_TOOL = new Map([
-  ['query', 'query'], ['recall', 'recall'], ['traverse', 'traverse'], ['find-similar', 'find_similar'],
+  ['filter', 'filter'], ['recall', 'recall'], ['traverse', 'traverse'], ['similar', 'similar'],
 ]);
 
 /** What the router passes to every `inputSchema`. The `space` enum is token-scoped, so a stub is faithful. */
@@ -168,7 +172,7 @@ const TRANSPORT_ONLY = new Set(['space']);
 describe('MCP advertises the same parameters the REST route accepts', () => {
   // The owner's standing rule is that the two doors take the same params, and `mcp-rest-parity` checks which
   // TOOLS exist, not which parameters they take. This half was unenforced, and it was hiding a real gap:
-  // `find_similar` advertised `traverse` and `includeContent` — implemented in its handler — while the REST
+  // `similar` advertised `traverse` and `includeContent` — implemented in its handler — while the REST
   // route read neither, so a caller who read the tool schema got a 400 from the other door.
   for (const [route, tool] of MCP_TOOL) {
     it(`${route} ↔ ${tool}`, () => {
@@ -222,7 +226,7 @@ describe('the integration guide lists exactly what each route accepts', () => {
 
 describe('every key the client sends is a key the server allows', () => {
   // The loop is over the four ROUTES, which are static, so each gets a named test whether or not the client
-  // calls it today. `find-similar` has no UI caller yet; the day one is added it is already covered.
+  // calls it today. `similar` has no UI caller yet; the day one is added it is already covered.
   for (const [route, allowed] of SETS) {
     it(route, () => {
       const sites = clientPosts().filter(p => p.route === route);

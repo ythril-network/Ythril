@@ -186,9 +186,15 @@ describe('the matrix itself still answers what it always did', () => {
      * The inverse of everything above: fail-closed is also what you get by breaking the helper, so the
      * matrix arm has to be exercised or "reaches nothing" would pass for the wrong reason.
      */
+    // Through `holdsRung`, which is where that pair of calls moved at 5.0 — it had four longhand sites
+    // and both arguments are strings, so the wrong order would have compiled and passed. The rule is that
+    // the matrix is read per space and area and compared against the rung asked for; WHERE that happens is
+    // an implementation detail, so the assertion follows it instead of pinning the old spelling.
     const s = src(REACH);
-    assert.match(s, /effectiveRung\(rights, id, area\)/, 'the matrix must still be read per space and area');
-    assert.match(s, /satisfies\(/, 'and compared against the rung the caller needs');
+    assert.match(s, /holdsRung\(rights, id, area, needs\)/,
+      'the per-space listing must ask the shared predicate');
+    assert.match(s, /satisfies\(effectiveRung\(rights, space, area\), needs\)/,
+      'and that predicate must read the matrix per space and area, compared against the rung needed');
   });
 
   it('a matrix that grants one space reaches that space and no other', () => {

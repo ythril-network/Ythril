@@ -88,7 +88,7 @@ describe('every door counts what it sent', () => {
   it('each one counts its OWN envelope, not a neighbouring one', () => {
     /*
      * The mistake this catches is one I made writing the fix: both sites on a door were given
-     * `countGraphNodes(budgeted.results)` by a blanket replace, and `find_similar` names its envelope
+     * `countGraphNodes(budgeted.results)` by a blanket replace, and `similar` names its envelope
      * `itemsBudgeted`. TypeScript caught it here because the name was undefined — but had the two been named
      * alike, the compiler would have been happy and each door would have reported its sibling endpoint's
      * count, which is exactly the class of bug this whole file is about.

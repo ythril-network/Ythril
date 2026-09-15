@@ -181,7 +181,7 @@ thing — a historical import, a backfilled document — and what is being repor
 presence the signal, and this the whole integrity check:
 
 ```http
-POST /api/brain/spaces/:spaceId/query
+POST /api/brain/filter
 { "collection": "memories", "filter": { "stampSkew": { "$exists": true } } }
 ```
 
@@ -411,7 +411,7 @@ The consequence is worth stating plainly, because it is the reason to choose thi
 
 | reader | sees a suppressed record? |
 |---|---|
-| `recall`'s ranked results, `find_similar`, duplicate/contradiction scans | **no**, and there is no parameter that asks for it back |
+| `recall`'s ranked results, `similar`, duplicate/contradiction scans | **no**, and there is no parameter that asks for it back |
 | `GET`/`PATCH` by id, `query`, `list`, exports | **yes**, unchanged and complete |
 | the `traverse` tool | **yes** |
 | **`recall(traverse: n)` — the graph expansion** | **yes** |

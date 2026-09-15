@@ -574,7 +574,7 @@ the marker switches, and they are what the graph reads either way.
 recomputes the same ids, finds them stored, and writes nothing. An interrupted run is fixed by running it
 again rather than by working out where it stopped. It never removes an array.
 
-**There is no `GET`.** Links are a queryable collection like any other — `POST /api/brain/spaces/:spaceId/query`
+**There is no `GET`.** Links are a queryable collection like any other — `POST /api/brain/filter`
 with `collection: "links"` and the full filter grammar. A list endpoint here would be a second, weaker copy
 of it.
 

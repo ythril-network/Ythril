@@ -26,7 +26,13 @@ export interface ListSort {
  * could contain a key the route refuses while still compiling. The route is `.strict()`, so that key would
  * be a 400 for whoever pasted the JSON — a preview being BELIEVED is the whole point of having one.
  */
-export interface RecallRequestBody {      query: string;
+export interface RecallRequestBody {
+      /**
+       * Which space to search. OMIT it and the search runs across every space the token may read — the
+       * reason the route stopped carrying the space in its path at 5.0.
+       */
+      space?: string;
+      query: string;
       topK?: number;
       types?: RecallKnowledgeType[];
       minScore?: number;
@@ -180,7 +186,7 @@ export class BrainApi {
       maxTimeMS?: number;
     },
   ): Observable<QueryResult> {
-    return this.http.post<QueryResult>(`/api/brain/spaces/${spaceId}/query`, body);
+    return this.http.post<QueryResult>('/api/brain/filter', { ...body, space: spaceId });
   }
 
   /** Embedding-job backlog for a space (F9 Overview embedding-queue panel). */
@@ -198,11 +204,19 @@ export class BrainApi {
     return this.http.get<{ tokens: TokenAccessEntry[] }>(`/api/brain/spaces/${spaceId}/token-access`);
   }
 
+  /**
+   * Meaning-ranked search. The space rides in the BODY since 5.0, because the route has to be able to
+   * express “search every space I can read” and a path segment cannot be omitted.
+   *
+   * The panel always names one — it is opened ON a space and rendering another space’s results under this
+   * one’s name is the fabricated-context defect — so `spaceId` stays a required argument here even though
+   * the API allows it to be omitted.
+   */
   recallBrain(
     spaceId: string,
     body: RecallRequestBody,
   ): Observable<RecallResponse> {
-    return this.http.post<RecallResponse>(`/api/brain/spaces/${spaceId}/recall`, body);
+    return this.http.post<RecallResponse>('/api/brain/recall', { ...body, space: spaceId });
   }
 
   // ── Brain — memories ──────────────────────────────────────────────────────

@@ -52,8 +52,7 @@ let token;
 let hubIds = [];
 let tightChars = 0;
 
-const recall = (body) => post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/recall`,
-  { includeFreshWrites: true, ...body });
+const recall = (body) => post(INSTANCES.a, token, '/api/brain/recall', { space: SPACE, ...({ includeFreshWrites: true, ...body }) });
 
 before(async () => {
   token = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();

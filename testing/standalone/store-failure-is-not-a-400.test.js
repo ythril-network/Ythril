@@ -165,9 +165,21 @@ describe('both doors, and all three routes', () => {
      * one wrapper rather than through twenty-odd hand edits that would miss the twenty-first.
      */
     const routes = stripComments(readFileSync('server/src/api/brain/search.ts', 'utf8'));
-    const guarded = (routes.match(/requireSpaceAuth, statesRetryability/g) ?? []).length;
-    assert.equal(guarded, 3,
-      '/query, /recall and /find-similar must each carry the wrapper, or one of them omits the field');
+    /*
+     * By ROUTE, not by the guard in front of it. This counted the literal
+     * `requireSpaceAuth, statesRetryability`, so when `/recall` moved to `requireBodyScopedSpace` at 5.0
+     * the count fell to two and the gate read it as a route DROPPING the wrapper — a false alarm about
+     * the one thing it exists to prevent. The guard is not the subject; the three read routes are.
+     */
+    for (const path of ['/filter', '/recall', '/similar']) {
+      const at = routes.indexOf(`searchRouter.post('${path}'`);
+      const legacy = at < 0 ? routes.indexOf(`searchRouter.post('/spaces/:spaceId${path}'`) : -1;
+      const start = at >= 0 ? at : legacy;
+      assert.ok(start >= 0, `${path} is no longer registered on the search router — re-anchor this gate`);
+      const decl = routes.slice(start, routes.indexOf('async (req, res)', start));
+      assert.match(decl, /statesRetryability/,
+        `${path} does not carry statesRetryability, so its early refusals omit \`retryable\``);
+    }
 
     const helper = stripComments(readFileSync('server/src/api/brain/_read-failure.ts', 'utf8'));
     assert.match(helper, /res\.statusCode >= 500 \|\| res\.statusCode === 429/,

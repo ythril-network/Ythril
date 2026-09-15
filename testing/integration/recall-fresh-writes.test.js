@@ -41,7 +41,7 @@ let tokenA;
 let ready = false;
 const token = () => tokenA;
 const P = (p, body) => post(INSTANCES.a, token(), p, body);
-const recall = (body) => P(`/api/brain/spaces/${SPACE}/recall`, body);
+const recall = (body) => P('/api/brain/recall', { space: SPACE, ...(body) });
 
 before(async () => {
   tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();

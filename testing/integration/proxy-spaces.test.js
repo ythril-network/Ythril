@@ -411,7 +411,7 @@ describe('Proxy spaces', () => {
 
     it('query tool aggregates across member spaces', async () => {
       // Use query (MongoDB find, no vector index needed) to verify aggregation
-      const result = await session.callTool('query', {
+      const result = await session.callTool('filter', {
         space: PROXY, collection: 'memories', filter: { tags: 'mcp-test' }, limit: 50,
       });
       assert.ok(!result.isError, JSON.stringify(result));

@@ -200,7 +200,7 @@ describe('MCP brain tools — remember / recall / query', () => {
   });
 
   it('query with allowed operators returns results (no error)', async () => {
-    const result = await session.callTool('query', {
+    const result = await session.callTool('filter', {
       space: 'general',
       collection: 'memories',
       filter: { fact: { $exists: true } },
@@ -225,7 +225,7 @@ describe('MCP brain tools — remember / recall / query', () => {
     assert.equal(seed.status, 201, JSON.stringify(seed.body));
     const seededId = seed.body._id;
     try {
-      const result = await session.callTool('query', {
+      const result = await session.callTool('filter', {
         space: 'general',
         collection: 'memories',
         filter: { _id: seededId },
@@ -245,7 +245,7 @@ describe('MCP brain tools — remember / recall / query', () => {
   });
 
   it('query with disallowed $where operator returns isError', async () => {
-    const result = await session.callTool('query', {
+    const result = await session.callTool('filter', {
       space: 'general',
       collection: 'memories',
       filter: { $where: 'this.fact.length > 0' },
@@ -256,7 +256,7 @@ describe('MCP brain tools — remember / recall / query', () => {
   });
 
   it('query with disallowed $function operator returns isError', async () => {
-    const result = await session.callTool('query', {
+    const result = await session.callTool('filter', {
       space: 'general',
       collection: 'memories',
       filter: { $function: { body: 'function() { return true; }', args: [], lang: 'js' } },
@@ -268,7 +268,7 @@ describe('MCP brain tools — remember / recall / query', () => {
     // Build a 10-level deep nested object to exceed depth=8 limit
     let deep = { _id: 'x' };
     for (let i = 0; i < 10; i++) deep = { $and: [deep] };
-    const result = await session.callTool('query', {
+    const result = await session.callTool('filter', {
       space: 'general',
       collection: 'memories',
       filter: deep,
@@ -277,7 +277,7 @@ describe('MCP brain tools — remember / recall / query', () => {
   });
 
   it('query on invalid collection returns isError', async () => {
-    const result = await session.callTool('query', {
+    const result = await session.callTool('filter', {
       space: 'general',
       collection: 'admin',
       filter: {},
@@ -555,7 +555,7 @@ describe('MCP file metadata � write_file persists metadata, query supports fil
     assert.ok(!writeResult?.isError, `write_file error: ${JSON.stringify(writeResult)}`);
 
     // Query the files collection and verify the metadata record exists
-    const queryResult = await session.callTool('query', {
+    const queryResult = await session.callTool('filter', {
       space: testSpaceId,
       collection: 'files',
       filter: { tags: 'meta-test' },
@@ -581,7 +581,7 @@ describe('MCP file metadata � write_file persists metadata, query supports fil
     });
     assert.ok(!writeResult?.isError, `write_file error: ${JSON.stringify(writeResult)}`);
 
-    const queryResult = await session.callTool('query', {
+    const queryResult = await session.callTool('filter', {
       space: testSpaceId,
       collection: 'files',
       filter: { _id: filePath },
@@ -593,7 +593,7 @@ describe('MCP file metadata � write_file persists metadata, query supports fil
   });
 
   it('query tool rejects unknown collection', async () => {
-    const result = await session.callTool('query', {
+    const result = await session.callTool('filter', {
       space: testSpaceId,
       collection: 'unknown_coll',
       filter: {},
@@ -622,7 +622,7 @@ describe('MCP file metadata � write_file persists metadata, query supports fil
 
     await session.callTool('delete_file', { space: testSpaceId, path: filePath });
 
-    const queryResult = await session.callTool('query', {
+    const queryResult = await session.callTool('filter', {
       space: testSpaceId,
       collection: 'files',
       filter: { _id: filePath },
@@ -640,7 +640,7 @@ describe('MCP file metadata � write_file persists metadata, query supports fil
     await session.callTool('move_file', { space: testSpaceId, src: srcPath, dst: dstPath });
 
     // Old path metadata should be gone
-    const srcQuery = await session.callTool('query', {
+    const srcQuery = await session.callTool('filter', {
       space: testSpaceId,
       collection: 'files',
       filter: { _id: srcPath },
@@ -649,7 +649,7 @@ describe('MCP file metadata � write_file persists metadata, query supports fil
     assert.equal(srcDocs.length, 0, 'Source path metadata must be removed after move');
 
     // New path metadata should exist
-    const dstQuery = await session.callTool('query', {
+    const dstQuery = await session.callTool('filter', {
       space: testSpaceId,
       collection: 'files',
       filter: { _id: dstPath },
@@ -1008,7 +1008,7 @@ describe('MCP chrono tools � list_chrono tags filter / query chrono collection
 
   it('query with collection "chrono" returns array without isError', async (t) => {
     if (!idTagA) return t.skip('No seeded chrono entry');
-    const result = await session.callTool('query', {
+    const result = await session.callTool('filter', {
       space: 'general',
       collection: 'chrono',
       filter: { _id: idTagA },
@@ -1023,7 +1023,7 @@ describe('MCP chrono tools � list_chrono tags filter / query chrono collection
 
   it('query chrono with tag filter returns matching entries', async (t) => {
     if (!idTagA) return t.skip('No seeded chrono entry');
-    const result = await session.callTool('query', {
+    const result = await session.callTool('filter', {
       space: 'general',
       collection: 'chrono',
       filter: { tags: { $in: [tagA] } },
@@ -1271,7 +1271,7 @@ describe('MCP brain tools � remember with description and properties', () => {
     });
 
     // Query memories collection and verify description + properties are persisted
-    const queryResult = await session.callTool('query', {
+    const queryResult = await session.callTool('filter', {
       space: 'general',
       collection: 'memories',
       filter: { fact: uniqueFact },
@@ -1310,7 +1310,7 @@ describe('MCP brain tools � upsert_entity with description', () => {
     assert.ok(text.includes('upserted'), `Expected "upserted" in: ${text}`);
 
     // Verify description is queryable via query tool
-    const q = await session.callTool('query', {
+    const q = await session.callTool('filter', {
       space: 'general',
       collection: 'entities',
       filter: { name },
@@ -1504,7 +1504,7 @@ describe('MCP brain tools � upsert_edge with tags, description, and properties
       properties: { edge_prop: 'stored' },
     });
 
-    const q = await session.callTool('query', {
+    const q = await session.callTool('filter', {
       space: 'general',
       collection: 'edges',
       filter: { label },
@@ -1770,7 +1770,7 @@ describe('MCP file tools � write_file with properties metadata', () => {
     });
     assert.ok(!writeResult?.isError, `write_file error: ${JSON.stringify(writeResult)}`);
 
-    const queryResult = await session.callTool('query', {
+    const queryResult = await session.callTool('filter', {
       space: 'general',
       collection: 'files',
       filter: { _id: filePath },

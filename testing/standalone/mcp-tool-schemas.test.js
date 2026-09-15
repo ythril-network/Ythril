@@ -3,8 +3,8 @@
  *
  * An agent must be able to discover every possible input, value, bound, and operator for a tool from
  * `tools/list` alone. These tests pin the machine-readable invariants that make that true across ALL_TOOLS,
- * plus the highest-value per-tool enrichments (query.filter operators, recall filter key allowlist, the
- * corrected query.maxTimeMS ceiling, find_similar's omit-space harmonisation) and the pure scope resolver.
+ * plus the highest-value per-tool enrichments (filter.filter operators, recall filter key allowlist, the
+ * corrected filter.maxTimeMS ceiling, similar's omit-space harmonisation) and the pure scope resolver.
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -89,22 +89,22 @@ describe('MCP tool schemas — universal invariants', () => {
 });
 
 describe('MCP tool schemas — high-value enrichments', () => {
-  it('query.filter documents the MongoDB operator allowlist + regex/depth rules', () => {
-    const filter = schemaOf('query').properties.filter;
+  it('filter.filter documents the MongoDB operator allowlist + regex/depth rules', () => {
+    const filter = schemaOf('filter').properties.filter;
     for (const op of ['$eq', '$in', '$regex', '$options', '$elemMatch', '$mod']) {
-      assert.ok(filter.description.includes(op), `query.filter description must list ${op}`);
+      assert.ok(filter.description.includes(op), `filter.filter description must list ${op}`);
     }
-    assert.ok(/depth 8/.test(filter.description), 'query.filter must document the depth-8 cap');
+    assert.ok(/depth 8/.test(filter.description), 'filter.filter must document the depth-8 cap');
   });
 
-  it('query.maxTimeMS advertises the REAL 10000 ceiling (not the old prose 30000)', () => {
-    const m = schemaOf('query').properties.maxTimeMS;
+  it('filter.maxTimeMS advertises the REAL 10000 ceiling (not the old prose 30000)', () => {
+    const m = schemaOf('filter').properties.maxTimeMS;
     assert.equal(m.maximum, 10000);
     assert.equal(m.default, 5000);
   });
 
-  it('query.limit carries real bounds', () => {
-    const l = schemaOf('query').properties.limit;
+  it('filter.limit carries real bounds', () => {
+    const l = schemaOf('filter').properties.limit;
     assert.equal(l.minimum, 1);
     assert.equal(l.maximum, 100);
     assert.equal(l.default, 20);
@@ -159,7 +159,7 @@ describe('MCP tool schemas — high-value enrichments', () => {
   });
 
   it('find_similar is harmonised to omit-space, and crossSpace is kept rather than deprecated', () => {
-    const fs = schemaOf('find_similar');
+    const fs = schemaOf('similar');
     assert.ok(!fs.required.includes('space'), 'space must be optional (omit → all accessible spaces)');
     assert.deepEqual(fs.required, ['entryId', 'entryType']);
     assert.ok(fs.properties.traverse, 'find_similar must expose traverse (parity with recall)');
@@ -172,7 +172,7 @@ describe('MCP tool schemas — high-value enrichments', () => {
       traverseBounds(schemaOf('recall').properties.traverse).length,
       'find_similar and recall must offer the SAME traverse forms — a narrowing valid on one search and '
       + 'refused on the other is the asymmetry this tool already carries a comment about');
-    assert.equal(ALL_TOOLS.find(t => t.name === 'find_similar').spaceRequired, false);
+    assert.equal(ALL_TOOLS.find(t => t.name === 'similar').spaceRequired, false);
 
     // THIS ASSERTION WAS REVERSED IN 3.0, and the reason is worth more than the line it replaces.
     //
@@ -194,7 +194,7 @@ describe('MCP tool schemas — high-value enrichments', () => {
   });
 
   it('id fields carry a UUID-v4 pattern', () => {
-    const pat = schemaOf('find_similar').properties.entryId.pattern;
+    const pat = schemaOf('similar').properties.entryId.pattern;
     const re = new RegExp(pat);
     assert.ok(re.test('3b241101-e2bb-4255-8caf-4136c566a962'), 'valid uuid v4 accepted');
     assert.ok(!re.test('not-a-uuid'), 'non-uuid rejected by the pattern');

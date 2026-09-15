@@ -42,13 +42,16 @@
  * it. That asymmetry is deliberate and matches what the gate has always done; `every-space-route-has-an-area`
  * asserts the two readers agree instead of assuming it.
  */
+import type { ScopeShape } from './space-rights.js';
 import { ROUTE_RIGHTS, NOT_AREA_SCOPED_PATHS, type SpaceArea } from './space-rights.js';
 import type { Rung } from '../config/rights-shape.js';
 
 export interface RungRequirement {
   area: SpaceArea;
   needs: Rung;
-  scope: 'path' | 'iterates';
+  /** The SAME vocabulary as `ROUTE_RIGHTS`, referenced rather than respelled — two copies of one list is
+   *  how a third scope becomes valid in one file and a type error in the other. */
+  scope: ScopeShape;
 }
 
 /** The three states a route can be in. Discriminated so a caller cannot read one as another. */

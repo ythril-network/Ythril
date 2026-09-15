@@ -73,7 +73,7 @@ describe('recall exposes includeContent on both surfaces', () => {
     // demanding the old lines back rather than the property.
     //
     // Both routes, not one: `/recall` and `/find-similar` each expand a graph, and the flag has to survive on
-    // both. `find_similar`'s traverse existed on MCP alone for a while, so this is the site where the two
+    // both. `similar`'s traverse existed on MCP alone for a while, so this is the site where the two
     // surfaces most recently disagreed.
     // The window used to be `at + 900`, and a comment added above the strip pushed the call out of it — the
     // gate went red against code that still did the right thing, for the second time in this file's life. A

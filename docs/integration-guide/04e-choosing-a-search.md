@@ -17,7 +17,7 @@ This page is the decision, then the tuning. The parameters themselves are docume
 |---|---|
 | roughly **what it says** | `recall` — meaning-ranked |
 | exactly **which field equals what** | `query` — a filter, no ranking |
-| **a record**, and want ones like it | `find_similar` — no re-embedding |
+| **a record**, and want ones like it | `similar` — no re-embedding |
 | **a record**, and want what it connects to | `traverse`, or `recall` with `traverse > 0` |
 
 If two of those are true at once, read on: the combinations are where the real choice is.
@@ -52,9 +52,9 @@ Reach for it when:
 **It is the wrong tool for a phrase.** A `$regex` over `fact` is not semantic search: it matches characters, so it
 finds *"PKCE"* and misses *"the auth flow"*.
 
-## `find_similar` — when you already have the record
+## `similar` — when you already have the record
 
-Given an id, `find_similar` uses that record's **stored** vector — no embedding call, no query text to get wrong.
+Given an id, `similar` uses that record's **stored** vector — no embedding call, no query text to get wrong.
 For deduplication, "more like this", and merge detection it is both cheaper and more accurate than pasting the
 record's own text into `recall`.
 

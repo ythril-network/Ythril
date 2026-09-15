@@ -5,7 +5,7 @@
  *
  * The fleet integrator reported `skip` being accepted at 200 and silently ignored on `POST /query` — *"it cost us a fabricated
  * number"*. The reported key is not the defect. The defect is a body that accepts anything and honours some of it, and
- * `/query` was simply the route they happened to be paging. `traverse`, `recall` and `find-similar` had it too.
+ * `/query` was simply the route they happened to be paging. `traverse`, `recall` and `similar` had it too.
  *
  * A test per route would have been satisfied by fixing the three that exist today and would say nothing about the fifth
  * read route somebody adds next year. So this enumerates the POST routes on the search router **from source** and
@@ -91,9 +91,12 @@ describe('brain read routes refuse unknown body keys', () => {
   it('finds the routes (the gate itself works)', () => {
     const paths = postRoutes().map(r => r.path);
     assert.ok(paths.length >= 4, `expected at least four POST routes on the search router, found ${paths.length}`);
-    // The four this was reported for, named explicitly: if one is renamed the gate must not quietly stop covering it.
-    for (const p of ['/spaces/:spaceId/query', '/spaces/:spaceId/recall', '/spaces/:spaceId/traverse',
-      '/spaces/:spaceId/find-similar']) {
+    // The four this was reported for, named explicitly: if one is renamed the gate must not quietly stop
+    // covering it. `/recall` lost its `/spaces/:spaceId` prefix at 5.0 — the space moved into the body so a
+    // caller can omit it and search everything it reads — and this list is the reason that showed up as a
+    // failure rather than as silently reduced coverage, which is what it is for.
+    for (const p of ['/filter', '/recall', '/spaces/:spaceId/traverse',
+      '/similar']) {
       assert.ok(paths.includes(p), `${p} is no longer registered under that path — re-point this gate`);
     }
   });
@@ -188,7 +191,7 @@ describe('brain read routes refuse unknown body keys', () => {
   it('the read-key extraction actually finds keys (the check is not vacuous)', () => {
     // Without this, a regex that matches nothing makes the assertion above pass for every route for ever — the shape of
     // a green gate that measures nothing.
-    const recall = postRoutes().find(r => r.path === '/spaces/:spaceId/recall');
+    const recall = postRoutes().find(r => r.path === '/recall');
     const found = [...recall.body.matchAll(/\(\s*req\.body\s+as\s*\{[^}]*\}\s*\)\s*\.\s*(\w+)/g)].map(m => m[1]);
     assert.ok(found.includes('includeFreshWrites'),
       'the cast-then-dot pattern must be detected — it is the one that was missed, and if this stops matching the '

@@ -37,7 +37,7 @@ before(async () => {
 
 describe('the lookup', () => {
   it('answers for a classified route', () => {
-    const r = rungFor('POST', '/api/brain/spaces/:spaceId/recall');
+    const r = rungFor('POST', '/api/brain/spaces/:spaceId/traverse');
     assert.deepEqual(r, { kind: 'requires', area: 'knowledge', needs: 'read', scope: 'path' });
   });
 
@@ -50,7 +50,7 @@ describe('the lookup', () => {
 
   it('says UNCLASSIFIED for a route nobody decided about, NOT a permissive default', () => {
     assert.deepEqual(rungFor('GET', '/api/brain/spaces/:spaceId/invented'), { kind: 'unclassified' });
-    assert.deepEqual(rungFor('PUT', '/api/brain/spaces/:spaceId/recall'), { kind: 'unclassified' },
+    assert.deepEqual(rungFor('PUT', '/api/brain/recall'), { kind: 'unclassified' },
       'a method the inventory does not list must miss, not inherit the path');
   });
 
@@ -83,7 +83,12 @@ describe('the lookup', () => {
     // Those routes take no space and iterate the token's reachable ones. A caller that ignores `scope` would
     // gate the call instead of the loop, leaving that column decorative.
     assert.equal(rungFor('GET', '/api/duplicates').scope, 'iterates');
-    assert.equal(rungFor('POST', '/api/brain/spaces/:spaceId/recall').scope, 'path');
+    assert.equal(rungFor('POST', '/api/brain/spaces/:spaceId/traverse').scope, 'path');
+    // The third shape, added at 5.0: the search family moved the space into the BODY so a caller can omit
+    // it and read across spaces. `enforceAreaRung` skips those — `requireBodyScopedSpace` checks the same
+    // area and rung against the space the body named, or against every space the token may read — so a
+    // caller that ignored `scope` here would gate a cross-space search as though it named one space.
+    assert.equal(rungFor('POST', '/api/brain/recall').scope, 'body');
   });
 
   it('every inventory entry is findable — the map has no dropped rows', () => {
@@ -100,8 +105,8 @@ describe('the lookup', () => {
   });
 
   it('a trailing slash does not change the answer', () => {
-    assert.deepEqual(rungFor('POST', '/api/brain/spaces/:spaceId/recall/'),
-      rungFor('POST', '/api/brain/spaces/:spaceId/recall'));
+    assert.deepEqual(rungFor('POST', '/api/brain/recall/'),
+      rungFor('POST', '/api/brain/recall'));
     // The exemption path is normalised the same way, or the two lists disagree on `/x` versus `/x/`.
     assert.deepEqual(rungFor('PATCH', '/api/spaces/:id/rename/'), { kind: 'not-area-scoped' });
   });

@@ -7,7 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+> **THE NEXT RELEASE IS 5.0 AND IT BREAKS EVERY PUBLIC NAME.** Owner decision, 2026-09-15: *"break
+> everything right away."* No aliases, no compatibility window, nothing built for 4.x. A peer below 5.0.0 is
+> refused at the handshake with a `426` — `MIN_PEER_VERSION` derives from our own major — so a network
+> upgrades together or not at all. Read the migration section of the 5.0 notes before upgrading one instance
+> of several.
+
 ### Changed
+
+- **BREAKING — the search family is renamed and drops the space from its path.**
+
+  | was | is |
+  |---|---|
+  | `query` — `POST /api/brain/spaces/:spaceId/query` | **`filter`** — `POST /api/brain/filter` |
+  | `find_similar` — `…/find-similar` | **`similar`** — `POST /api/brain/similar` |
+  | `recall` — `…/recall` | `recall` — `POST /api/brain/recall` |
+
+  `query` was the collision worth removing: it is the word every caller reads as *search*, and ours is the
+  structured-predicate door — so a client reaching for meaning-ranked results picked it and got a 400 for a
+  missing `collection`. `recall` keeps its name because it is what every memory protocol calls this.
+  Audit operations follow: `brain.filter` and `brain.similar`, so a log filter on the old strings stops
+  matching.
+
+  **The space is a body field on all three, and you may omit it.**
+
+  Omit it and the search runs across every space the token holds `knowledge: read` in, ranked together. A
+  `traverse` keeps its path deliberately: it walks FROM an entity, and an entity lives in exactly one
+  space, so there is nothing to omit.
+
+  **`crossSpace` on `find-similar` stays, and checking why is the interesting part.** Its comment said it
+  existed only because the space was in the PATH and "omit the space" could not be expressed — which this
+  change would have retired. It does not, because on that route the space says where the SEED ENTRY lives
+  rather than where to search. "The entry is in Research, find similar records everywhere" is a real
+  request and omission cannot express it, because omitting the space stops pinning the entry too.
+
+  A path segment cannot be omitted, so the old routes could never express "search everything I can reach" —
+  MCP's `recall` has taken an optional space since it shipped, and REST callers had to point at a proxy
+  space or make one call per space and merge the rankings by hand.
+
+  **What a caller changes:** move the space out of the URL and into the body as `space`, or leave it out.
+  A space you cannot read is skipped, not an error; a space you NAME and cannot read is a 403.
+
+  **Authorisation happens once, and this is the part that needed building.** Every row in the rights
+  inventory was `scope: 'path'` or `scope: 'iterates'` — nothing had ever authorised on a space read out of
+  a body. `requireBodyScopedSpace` resolves it, checks the area and rung, and hands the handler the
+  authorised list; the handler never reads `req.body.space` again, because acting on a second reading of a
+  field is a vulnerability that no diff shows, the two readings being spelled identically. Where the caller
+  names a space, not holding the rung there is a refusal. Where it names none, the spaces it cannot read are
+  DROPPED rather than the call being refused — the path guard's all-or-nothing rule would have killed a
+  cross-space search because some space the caller never asked about exists on the instance.
+
+  **The audit log still says which spaces were read.** Its `spaceId` comes from a path match group, so this
+  move would have logged `null` for every recall — a hole in the one record that answers "who read what". It
+  now falls back to the spaces the guard AUTHORISED, never to the body, because an audit trail that
+  disagrees with what happened is worse than one that says nothing. A cross-space read logs `a,b,c`.
+
 
 - **A recall answer now spends the byte budget on what was remembered, not on where it is filed.**
 
@@ -78,6 +132,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it against no reranker on your own corpus before leaving it on.
 
 ### Internal
+
+- **Six gates asserted a SITE rather than a rule, and every one of them went red on a change that improved
+  the code.**
+
+  A guard recognised by a list of five names — the same list whose missing `requireMcpAuth` once caused the
+  entire agent-facing API to be *exempted* rather than checked. A client-body extractor that knew only the
+  `/spaces/${id}/…` template and so reported "no client POST to /recall" for a route the client calls on
+  every search. A count of one guard spelling standing in for "all three read routes carry the retryability
+  wrapper". An inline expression pinned by its exact text, which broke when it moved into a shared helper
+  that makes the rule harder to get wrong.
+
+  All six now assert the rule: the guard list is DERIVED from the middleware that reaches `resolveAuthOrFail`
+  with a floor under it, the extractor knows both route shapes, the wrapper is checked per route, and the
+  reach rule is checked in the module it moved to. This is the argument for doing the whole rename at once
+  rather than a name at a time — it moves every identifier together, so it finds these as a batch instead of
+  one false alarm a year that somebody talks themselves past.
+
 
 - **A cross-door budget fixture was sized from the larger door, and only luck made it bind on the other.**
 

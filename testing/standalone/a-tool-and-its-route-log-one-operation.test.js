@@ -3,7 +3,7 @@
  *
  * ## The defect
  *
- * `find_similar` over MCP logged `entity.list`. `POST /api/brain/spaces/:id/find-similar` logged
+ * `similar` over MCP logged `entity.list`. `POST /api/brain/spaces/:id/find-similar` logged
  * `brain.find_similar`. Same capability, two names, chosen by which door the caller happened to use — so an
  * operator filtering the audit log for `brain.find_similar` saw only REST calls, and one filtering
  * `entity.list` found similarity searches mixed in with entity listings.
@@ -39,7 +39,7 @@ const { ROUTE_RULES } = await import('../../server/dist/audit/middleware.js');
 const { MCP_TOOL_OPERATIONS } = await import('../../server/dist/mcp/audit-map.js');
 const { ALL_TOOLS } = await import('../../server/dist/mcp/tools/index.js');
 
-/** Route operations grouped by their last segment: `brain.find_similar` → `find_similar`. */
+/** Route operations grouped by their last segment: `brain.find_similar` → `similar`. */
 function operationsBySuffix() {
   const bySuffix = new Map();
   for (const rule of ROUTE_RULES) {

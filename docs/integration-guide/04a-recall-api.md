@@ -6,10 +6,7 @@
 
 ### Semantic Search (Recall)
 
-Available as both:
-
-- REST: `POST /api/brain/spaces/:spaceId/recall`
-- MCP tool: `recall`
+Available as both — REST `POST /api/brain/recall`, MCP tool `recall`:
 
 ```json
 {
@@ -22,6 +19,7 @@ Available as both:
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
+| `space` | — | every space you can read | Which space to search. **Omit it and the search runs across every space this token holds `knowledge: read` in**, ranked together — the reason this route no longer carries the space in its path. A space you cannot read is not searched and is not an error; a space you NAMED and cannot read is a 403. |
 | `query` | ✅ | — | Natural-language search text (non-empty string) |
 | `topK` | — | `10` | Max returned results, minimum 1 and **no ceiling** — the same on both doors since 4.0, where REST clamped to 100 silently. What comes back is bounded by the byte budget instead: every record whole, `truncated` on every response, `nextSkip` when it bit |
 | `types` | — | all types | Restrict result knowledge types |
@@ -230,7 +228,7 @@ Nothing here is required — this is one call exercising all eight parameters at
 compose.
 
 ```json
-POST /api/brain/spaces/dev-apps/recall
+POST /api/brain/recall
 {
   "query": "PKCE failures on form NMK-SI-11 during the auth rewrite",
   "topK": 20,
@@ -387,7 +385,7 @@ governing the rest of the answer. An unknown field inside the object is a `400`,
 caller's assertion still holds, and the object when it was, so a narrowing you sent is one you can confirm took
 effect.
 
-**Same parameter, same parser, both doors, and on `find_similar` too.** Until 3.5 the expansion reachable from a
+**Same parameter, same parser, both doors, and on `similar` too.** Until 3.5 the expansion reachable from a
 search could not narrow while the standalone tool could — one rule with two implementations, and the one people
 actually reached was the weaker.
 
@@ -649,7 +647,7 @@ passage you want: path, heading, chunk index, tags, properties.
 ```
 
 That turns one expensive call into a cheap two-phase flow — recall to find **where** something is, then read
-only the chunk you chose (`GET /api/files/:spaceId/…`). MCP `recall` and `find_similar` have taken the same
+only the chunk you chose (`GET /api/files/:spaceId/…`). MCP `recall` and `similar` have taken the same
 flag with the same meaning since they shipped; REST had no way to ask, which an integrator pointed out.
 
 It drops `content` and nothing else, on file results and nothing else — the flag is about the passage body,
@@ -802,12 +800,12 @@ Multiple operators on the same key are AND-ed (range queries):
 ### Find Similar (Vector Similarity by Entry ID)
 
 ```http
-POST /api/brain/spaces/:spaceId/find-similar
+POST /api/brain/similar
 ```
 
-Given an existing entry's `_id`, find other entries with high vector similarity. Unlike `recall` (which re-embeds a text query), `find_similar` uses the entry's **stored embedding vector** directly — no re-embedding step. Ideal for deduplication, "more like this", and merge detection.
+Given an existing entry's `_id`, find other entries with high vector similarity. Unlike `recall` (which re-embeds a text query), `similar` uses the entry's **stored embedding vector** directly — no re-embedding step. Ideal for deduplication, "more like this", and merge detection.
 
-> **Also available as MCP tool:** `find_similar` — note the MCP tool makes `space` optional (omit it to search all accessible spaces, like `recall`); its `crossSpace` flag is deprecated in favour of omitting `space`. This REST endpoint keeps `spaceId` in the path and the `crossSpace` body flag. Every other parameter, including `traverse`, `includeContent` and `includeDiagnostics`, is identical on both doors.
+> **Also available as MCP tool:** `similar` — note the MCP tool makes `space` optional (omit it to search all accessible spaces, like `recall`); its `crossSpace` flag is deprecated in favour of omitting `space`. This REST endpoint keeps `spaceId` in the path and the `crossSpace` body flag. Every other parameter, including `traverse`, `includeContent` and `includeDiagnostics`, is identical on both doors.
 >
 > **The MCP tool returned plain TEXT at `traverse: 0` until 3.1.0**, and JSON only above it. It is now JSON at every depth, with the same per-result shape `recall` uses plus a `source` naming the entry you asked about. This REST endpoint has always returned JSON at every depth and is unchanged by that.
 

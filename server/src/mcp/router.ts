@@ -8,7 +8,7 @@ import {
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { getConfig } from '../config/loader.js';
 import { log, currentRequestId } from '../util/log.js';
-import { reachesSpace } from '../auth/space-reach.js';
+import { reachableSpaceIds } from '../auth/space-reach.js';
 import { toolRightsRefusal, spaceAdminRefusal } from './tool-rights-guard.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { memberSpacesWithin } from '../spaces/proxy-scoped.js';
@@ -80,10 +80,11 @@ function createGlobalMcpServer(tokenId?: string, tokenLabel?: string,
   // the call, and this change made it worse rather than better; it wants to be one `caller` object. Filed rather than
   // done here, because rewriting the signature and every use of the five it replaces is a bigger diff than the
   // correctness fix it would be hiding inside.
-  const accessibleSpaces = cfg.spaces.filter(s => (
-    rights ? reachesSpace(rights, s.id) : false
-  ));
-  const accessibleSpaceIds = accessibleSpaces.map(s => s.id);
+  // Through the shared helper rather than the same filter written here: a body-scoped REST route asks the
+  // identical question, and the last time this rule had two implementations MCP answered from `tokenSpaces`
+  // while HTTP used `reachesSpace`.
+  const accessibleSpaceIds = reachableSpaceIds(rights, cfg.spaces.map(s => s.id));
+  const accessibleSpaces = cfg.spaces.filter(s => accessibleSpaceIds.includes(s.id));
   const spacesLine = accessibleSpaces.length > 0
     ? accessibleSpaces.map(s => s.id + (s.label ? ` ("${s.label.replace(/[\x00-\x1f]/g, '').slice(0, 200)}")` : '')).join(', ')
     : '(none accessible)';

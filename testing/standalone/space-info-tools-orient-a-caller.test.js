@@ -15,7 +15,7 @@
  * `get_stats` returns totals. A record retired from semantic ranking is counted and cannot be recalled; a
  * record written seconds ago is counted before its embedding exists. So `count > what a search returned` is
  * NORMAL — and without being told, it reads as a broken index. This is the same family of misreading as an
- * empty `find_similar`: the number is right and the inference from it is wrong.
+ * empty `similar`: the number is right and the inference from it is wrong.
  *
  * ## Proxy spaces aggregate
  *

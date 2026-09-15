@@ -62,7 +62,7 @@ Authorization: Bearer <token>
       "excludes": "Nothing instance-shaped: it cannot grant `instanceAdmin` or `createSpaces`, cannot set a floor, and cannot reach, mint for, or edit tokens for any space it does not administer — it does not even list them." }
   ],
   "routes": [
-    { "area": "knowledge", "method": "POST", "route": "/api/brain/spaces/:spaceId/recall", "needs": "read" },
+    { "area": "knowledge", "method": "POST", "route": "/api/brain/recall", "needs": "read" },
     { "area": "files", "method": "DELETE", "route": "/api/files/:spaceId", "needs": "write" }
   ],
   "notAreaScoped": [

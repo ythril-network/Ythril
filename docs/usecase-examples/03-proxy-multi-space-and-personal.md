@@ -509,7 +509,7 @@ graph TD
 
 **Workflow:**
 
-1. **Discover duplicates** — agent uses `find_similar` to find high-similarity entities:
+1. **Discover duplicates** — agent uses `similar` to find high-similarity entities:
 
    ```json
    { "space": "<space-id>", "entryId": "<docker-entity-1-uuid>", "entryType": "entity", "minScore": 0.85 }

@@ -167,9 +167,10 @@ export function classifyOperation(operation: string): CallClass | null {
   // read demand for a space nobody queried.
   if (NON_USAGE_SUFFIXES.some(s => operation.endsWith(s))) return null;
 
-  // Demand on the brain — the reason a space exists. `find_similar` belongs here despite its name: it is a
-  // vector query with a record as the query text.
-  if (/^brain\.(recall|query|find_similar)/.test(operation)) return 'recall';
+  // Demand on the brain — the reason a space exists. All three are the same class: `filter` is a
+  // predicate read and `similar` is a vector query with a record as its query text, but a caller reaching
+  // for any of them is asking the space a question, which is what this class counts.
+  if (/^brain\.(recall|filter|similar)/.test(operation)) return 'recall';
 
   // Verb before noun: knowledge going IN is a write whether it arrived as a record or as a file. Grouping all
   // of `file.*` as file traffic instead would hide the "is anyone still adding to this space" signal inside

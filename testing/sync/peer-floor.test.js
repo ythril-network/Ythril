@@ -106,9 +106,9 @@ async function storedVersionOfB() {
 
 /** Does a marker record exist on B yet? */
 async function onB(marker) {
-  const r = await post(INSTANCES.b, tokenB, `/api/brain/spaces/${spaceId}/query`, {
+  const r = await post(INSTANCES.b, tokenB, '/api/brain/filter', { space: spaceId, ...({
     collection: 'memories', filter: { fact: { $regex: marker } },
-  });
+  }) });
   return (r.body?.results ?? r.body?.rows ?? []).length;
 }
 
