@@ -111,8 +111,8 @@ describe('the response is documented, not just the request', () => {
 
 /** The `query` tool object, scoped the same way. */
 const QUERY = (() => {
-  const at = SRC.indexOf("name: 'query'");
-  assert.ok(at > 0, 'the query tool was not found — the scanner is wrong, not the code');
+  const at = SRC.indexOf("name: 'filter'");
+  assert.ok(at > 0, 'the filter tool was not found — the scanner is wrong, not the code');
   const next = SRC.indexOf("name: '", at + 20);
   return next === -1 ? SRC.slice(at) : SRC.slice(at, next);
 })();
@@ -152,21 +152,21 @@ describe('query says what it is FOR and what comes back', () => {
   });
 });
 
-/** The `find_similar` tool object, scoped the same way. */
+/** The `similar` tool object, scoped the same way. */
 const FIND_SIMILAR = (() => {
-  const at = SRC.indexOf("name: 'find_similar'");
-  assert.ok(at > 0, 'the find_similar tool was not found — the scanner is wrong, not the code');
+  const at = SRC.indexOf("name: 'similar'");
+  assert.ok(at > 0, 'the similar tool was not found — the scanner is wrong, not the code');
   const next = SRC.indexOf("name: '", at + 20);
   return next === -1 ? SRC.slice(at) : SRC.slice(at, next);
 })();
 
-describe('find_similar documents the SAME envelope, because it returns the same one', () => {
+describe('similar documents the SAME envelope, because it returns the same one', () => {
   /*
-   * This scanner was scoped to `recall` alone, and that is how `find_similar` came to promise a `complete`
+   * This scanner was scoped to `recall` alone, and that is how `similar` came to promise a `complete`
    * field years after the field stopped existing: the gate for "the schema documents its response" only ever
    * looked at one of the two tools that share the response.
    *
-   * A caller reading `find_similar` was told to wait for `complete` holding {path, download, expiresAt} for
+   * A caller reading `similar` was told to wait for `complete` holding {path, download, expiresAt} for
    * the full set. Nothing emits that. They never set `remainderDump`, so no spill was written either, and
    * they never learned `nextSkip` exists — three ways to reach the rest of the answer, and the documented
    * one was the one that does not work.
@@ -174,7 +174,7 @@ describe('find_similar documents the SAME envelope, because it returns the same 
   it('names every accounting field it actually returns', () => {
     for (const field of BUDGET_FIELDS) {
       assert.ok(FIND_SIMILAR.includes(field),
-        `\`${field}\` is in every find_similar response and the schema never names it`);
+        `\`${field}\` is in every similar response and the schema never names it`);
     }
   });
 

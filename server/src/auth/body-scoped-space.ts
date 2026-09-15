@@ -39,8 +39,7 @@
  */
 import type { SpaceArea, TokenRights } from '../config/rights-shape.js';
 import type { Rung } from './space-rights.js';
-import { effectiveRung } from './mint-cap.js';
-import { satisfies } from './required-rung.js';
+import { holdsRung } from './reachable-spaces.js';
 
 export interface BodyScopedRequest {
   /** The `space` value exactly as it arrived. Anything but a non-empty string is refused, never coerced. */
@@ -78,7 +77,8 @@ export function spacesForBodyScopedRequest(req: BodyScopedRequest): BodyScopedVe
     return { spaces: [], refusal: `Token needs '${needs}' on ${area}, and presented no rights matrix` };
   }
 
-  const holds = (sid: string): boolean => satisfies(effectiveRung(rights, sid, area), needs);
+  // The shared predicate, not a fifth copy of `satisfies(effectiveRung(...), needs)`.
+  const holds = (sid: string): boolean => holdsRung(rights, sid, area, needs);
 
   if (namedSpace) {
     if (!accessible.includes(namedSpace)) {

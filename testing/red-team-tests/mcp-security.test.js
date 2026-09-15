@@ -227,7 +227,7 @@ describe('MCP security — query tool operator allowlist', () => {
       assert.equal(status, 200, 'MCP endpoint must be reachable for security testing');
       assert.ok(callTool, 'MCP session must establish');
 
-      const rpc = await callTool('query', {
+      const rpc = await callTool('filter', {
         space: 'general',
         collection: 'memories',
         filter: { $where: 'function() { return true; }' },
@@ -247,7 +247,7 @@ describe('MCP security — query tool operator allowlist', () => {
       assert.equal(status, 200, 'MCP endpoint must be reachable for security testing');
       assert.ok(callTool, 'MCP session must establish');
 
-      const rpc = await callTool('query', {
+      const rpc = await callTool('filter', {
         space: 'general',
         collection: 'memories',
         filter: { $function: { body: 'return true', args: [], lang: 'js' } },
@@ -273,7 +273,7 @@ describe('MCP security — query tool operator allowlist', () => {
         deep = { $and: [deep] };
       }
 
-      const rpc = await callTool('query', {
+      const rpc = await callTool('filter', {
         space: 'general',
         collection: 'memories',
         filter: deep,
@@ -293,7 +293,7 @@ describe('MCP security — query tool operator allowlist', () => {
       assert.equal(status, 200, 'MCP endpoint must be reachable for security testing');
       assert.ok(callTool, 'MCP session must establish');
 
-      const rpc = await callTool('query', {
+      const rpc = await callTool('filter', {
         space: 'general',
         collection: 'memories',
         filter: { tags: { $in: ['test'] } },

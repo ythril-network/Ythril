@@ -79,7 +79,7 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | null> = {
   sync_now: 'sync.trigger',
 
   // ── Reads. Recorded only when `logReads` is on, exactly as the REST reads are. ──────────────────
-  query: 'brain.query',
+  filter: 'brain.filter',
   recall: 'brain.recall',
   traverse: 'brain.traverse',
   get_stats: 'brain.stats',
@@ -108,7 +108,7 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | null> = {
    * `get_space_meta: 'space.list'` below is NOT the same case and stays: `GET /api/spaces/:id/meta` has no
    * rule of its own, so there is no operation for it to disagree with.
    */
-  find_similar: 'brain.find_similar',
+  similar: 'brain.similar',
   // Returns the space's schema and counts. `space.list` is the REST read that exposes the same shape.
   get_space_meta: 'space.list',
 

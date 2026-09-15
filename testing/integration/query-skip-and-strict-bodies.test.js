@@ -45,7 +45,7 @@ let token;
 let session;
 const created = [];
 
-const query = (body, space = SPACE) => post(INSTANCES.a, token, `/api/brain/spaces/${space}/query`, body);
+const query = (body, space = SPACE) => post(INSTANCES.a, token, '/api/brain/filter', { space: space, ...(body) });
 
 async function makeSpace(id, body = {}) {
   const r = await post(INSTANCES.a, token, '/api/spaces', { id, label: id, ...body });
@@ -154,17 +154,22 @@ describe('REST: the four read routes refuse a key they cannot honour', () => {
     // `orderBy`, not `sort`: this case originally used `sort` when it was unimplemented, and became a false alarm the day
     // it shipped. A plausible ALIAS is the better test anyway — it is what a caller actually reaches for, and it is the
     // one that would otherwise be accepted and ignored.
-    ['/query', { collection: 'memories', filter: {}, orderBy: 'seq' }, 'orderBy'],
+    ['/filter', { collection: 'memories', filter: {}, orderBy: 'seq' }, 'orderBy'],
     ['/recall', { query: 'anything', topk: 5 }, 'topk'],
     ['/traverse', { startId: '00000000-0000-4000-8000-000000000000', depth: 2 }, 'depth'],
-    ['/find-similar', { entryId: '00000000-0000-4000-8000-000000000000', entryType: 'memory', limit: 5 }, 'limit'],
+    ['/similar', { entryId: '00000000-0000-4000-8000-000000000000', entryType: 'memory', limit: 5 }, 'limit'],
   ];
 
   for (const [route, body, offender] of cases) {
     it(`${route} names the unknown key '${offender}' in a 400`, async () => {
       // Naming it matters: `{"error":"unknown field"}` sends a caller reading their own request to find which one, and
       // the entire value of refusing is to shorten that search to zero.
-      const r = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}${route}`, body);
+      // THREE of the four moved off the space path at 5.0 and take `space` in the body; `traverse` did not,
+      // because it walks FROM an entity and an entity lives in exactly one space. Building the URL from a
+      // variable is why the bulk rewriter could not see this site — it matched a literal path.
+      const moved = route !== '/traverse';
+      const url = moved ? `/api/brain${route}` : `/api/brain/spaces/${SPACE}${route}`;
+      const r = await post(INSTANCES.a, token, url, moved ? { space: SPACE, ...body } : body);
       assert.equal(r.status, 400, `${route} accepted '${offender}': ${JSON.stringify(r.body)}`);
       assert.ok(JSON.stringify(r.body).includes(offender), `the 400 must name '${offender}': ${JSON.stringify(r.body)}`);
       assert.deepEqual(r.body.unrecognized_keys, [offender]);
@@ -182,23 +187,23 @@ describe('REST: the four read routes refuse a key they cannot honour', () => {
   it('still accepts the DEPRECATED crossSpace on find-similar', async () => {
     // Refusing a key we deprecated but still accept elsewhere would be a worse contract than the permissive body this
     // replaces: we told callers to stop using it, not that it would start erroring.
-    const r = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/find-similar`, {
+    const r = await post(INSTANCES.a, token, '/api/brain/similar', { space: SPACE, ...({
       entryId: '00000000-0000-4000-8000-000000000000', entryType: 'memory', crossSpace: false,
-    });
+    }) });
     assert.notEqual(r.status, 400, `crossSpace was refused: ${JSON.stringify(r.body)}`);
   });
 });
 
 describe('MCP: query offers skip too, rather than it becoming REST-only', () => {
   it('advertises skip in the tool schema', async () => {
-    const tool = (await session.listTools()).find(t => t.name === 'query');
+    const tool = (await session.listTools()).find(t => t.name === 'filter');
     assert.ok(tool, 'query tool missing');
     assert.ok(tool.inputSchema.properties.skip,
       'skip must be on the MCP schema as well — a parameter added to REST alone is how the capability map filled up');
   });
 
   it('honours it, and the pages tile', async () => {
-    const call = (args) => session.callTool('query', { space: SPACE, collection: 'memories', filter: {}, ...args });
+    const call = (args) => session.callTool('filter', { space: SPACE, collection: 'memories', filter: {}, ...args });
     const all = JSON.parse((await call({ limit: 100 })).content[0].text);
     assert.equal(all.length, TOTAL);
 
@@ -210,14 +215,14 @@ describe('MCP: query offers skip too, rather than it becoming REST-only', () => 
   });
 
   it('refuses a fractional skip', async () => {
-    const r = await session.callTool('query', { space: SPACE, collection: 'memories', filter: {}, skip: 1.5 });
+    const r = await session.callTool('filter', { space: SPACE, collection: 'memories', filter: {}, skip: 1.5 });
     assert.ok(r?.isError, `a fractional skip was accepted: ${JSON.stringify(r)}`);
   });
 
   it('already refused unknown arguments, and still does', async () => {
     // `additionalProperties: false` was always there. Asserted so that a future relaxation of the schema shows up here
     // rather than as a silently ignored argument, which is the REST defect arriving on the other surface.
-    const r = await session.callTool('query', { space: SPACE, collection: 'memories', filter: {}, sort: { seq: 1 } });
+    const r = await session.callTool('filter', { space: SPACE, collection: 'memories', filter: {}, sort: { seq: 1 } });
     assert.ok(r?.isError, `MCP accepted an unknown argument: ${JSON.stringify(r)}`);
   });
 });
@@ -275,7 +280,7 @@ describe('the match TOTAL and a caller-chosen order, on both surfaces', () => {
   });
 
   it('MCP carries the same total and takes the same sort', async () => {
-    const r = await session.callTool('query', {
+    const r = await session.callTool('filter', {
       space: SPACE, collection: 'memories', filter: {}, limit: 4, sort: 'createdAt', dir: 'asc',
     });
     assert.ok(!r?.isError, JSON.stringify(r));
@@ -292,7 +297,7 @@ describe('the match TOTAL and a caller-chosen order, on both surfaces', () => {
     // while a tool returning no structuredContent rendered its whole body in the same session. That is the
     // worst shape available: the answer is absent while the metadata reports how many rows were returned,
     // so it reads as a thin page rather than as a dropped payload.
-    const r = await session.callTool('query', { space: SPACE, collection: 'memories', filter: {}, limit: 3 });
+    const r = await session.callTool('filter', { space: SPACE, collection: 'memories', filter: {}, limit: 3 });
     assert.ok(!r?.isError, JSON.stringify(r));
     assert.ok(Array.isArray(r.structuredContent.results), 'structuredContent carries no rows at all');
     assert.equal(r.structuredContent.results.length, r.structuredContent.count,
@@ -302,7 +307,7 @@ describe('the match TOTAL and a caller-chosen order, on both surfaces', () => {
   });
 
   it('MCP refuses an unsortable field with the same message', async () => {
-    const r = await session.callTool('query', { space: SPACE, collection: 'memories', filter: {}, sort: 'fact' });
+    const r = await session.callTool('filter', { space: SPACE, collection: 'memories', filter: {}, sort: 'fact' });
     assert.ok(r?.isError, `MCP accepted an unlisted sort field: ${JSON.stringify(r)}`);
     assert.match(JSON.stringify(r), /Sortable fields/);
   });
@@ -328,7 +333,7 @@ describe('paging PAST the window — the defect 2.8.0 shipped', () => {
     }
   });
 
-  const q = (body) => post(INSTANCES.a, token, `/api/brain/spaces/${DEEP}/query`, body);
+  const q = (body) => post(INSTANCES.a, token, '/api/brain/filter', { space: DEEP, ...(body) });
 
   it('reports the real total', async () => {
     const r = await q({ collection: 'memories', filter: {}, limit: 5 });

@@ -202,9 +202,11 @@ const WRITE_EXEMPT = new Map([
  * but must NOT be blocked for a read-only token — searching is exactly what read-only is for.
  */
 const READ_SHAPED_POSTS = [
-  '/spaces/:spaceId/query',
-  '/spaces/:spaceId/recall',
-  '/spaces/:spaceId/find-similar',
+  // The search family lost its `/spaces/:spaceId` prefix at 5.0 — the space moved into the body so a
+  // caller can omit it and read across spaces. `traverse` keeps its path: it walks FROM an entity, which
+  // lives in exactly one space, so there is nothing to omit.
+  '/filter',
+  '/similar',
   '/spaces/:spaceId/traverse',
   // Minting a single-use ticket to WATCH the live-events stream is a read (the stream itself allows
   // read-only tokens — "watching is a read"), so it must not be blocked for a read-only token.

@@ -21,7 +21,7 @@
  *
  * The count this replaces was measured by hand at "14 of ~28", and the tilde was doing real work. The real
  * number is below, computed, and it turned out the hand list named four parameters `recall` does not have
- * (`sort`, `dir`, `entryId`, `entryType` belong to `/query` and `find-similar`).
+ * (`sort`, `dir`, `entryId`, `entryType` belong to `/query` and `similar`).
  *
  * ## And it reads the REQUEST, not the form
  *

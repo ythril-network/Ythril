@@ -45,7 +45,7 @@
  *     counted as missing.
  *  8. **The worst of them: a negated-comma class inside a generic.** `unknownBodyFields((req.body ?? {}) as
  *     Record<string, unknown>, RECALL_BODY_FIELDS)` yielded the set name `unknown`, so the four pairs the
- *     PREVIOUS gate covered — `recall`, `query`, `traverse`, `find_similar` — were silently skipped while
+ *     PREVIOUS gate covered — `recall`, `query`, `traverse`, `similar` — were silently skipped while
  *     this one reported a much bigger number. A new instrument that drops the old one's coverage is the
  *     worst way to be wrong here, and it is why those four now have a case of their own.
  *
@@ -147,7 +147,7 @@ export function bodyKeysFrom(body, exportedSets, fileSrc = '') {
      * The call is written `unknownBodyFields((req.body ?? {}) as Record<string, unknown>, RECALL_BODY_FIELDS)`
      * and a negated-comma class stops inside the GENERIC, so the set name came back as `unknown` — an
      * exported set nobody supplied, so the route came back unresolved and its tool was skipped. That
-     * silently un-covered `recall`, `query`, `traverse` and `find_similar`: the only four pairs the gate
+     * silently un-covered `recall`, `query`, `traverse` and `similar`: the only four pairs the gate
      * before this one did check. A new instrument that drops the old one's coverage while reporting a
      * bigger number is the worst way to be wrong here, and this is instrument error 8.
      */

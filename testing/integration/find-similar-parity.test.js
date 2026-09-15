@@ -1,5 +1,5 @@
 /**
- * `find_similar` takes the same parameters through both doors, and they DO something.
+ * `similar` takes the same parameters through both doors, and they DO something.
  *
  * ## What was wrong
  *
@@ -66,7 +66,7 @@ async function syncPostEdge(from, to, label, seq) {
 }
 
 const findSimilar = (body) =>
-  post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/find-similar`, body);
+  post(INSTANCES.a, token(), '/api/brain/similar', { space: SPACE, ...(body) });
 
 /** Every nested node in the results' `_graph`, at any depth. */
 function allNested(results) {
@@ -176,7 +176,7 @@ describe('both doors answer the same question the same way', () => {
     if (!embeddingAvailable || !sourceId) return t.skip('embedding unavailable');
     const session = await openMcpSession(token());
     try {
-      const res = await session.callTool('find_similar', {
+      const res = await session.callTool('similar', {
         space: SPACE, entryId: sourceId, entryType: 'entity', topK: 5, traverse: 1,
       });
       // `callTool` already unwraps the JSON-RPC envelope down to `result`.

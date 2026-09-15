@@ -3,7 +3,7 @@
  *
  * ## The decision, and the two sentences that outlived it
  *
- * `crossSpace` on `find_similar` looked like a pure duplicate: omitting `space` on MCP says the same thing.
+ * `crossSpace` on `similar` looked like a pure duplicate: omitting `space` on MCP says the same thing.
  * Removing it from the tool turned the MCP/REST parity gate's `find-similar ↔ find_similar` case RED,
  * because **the REST route takes the space in its PATH** — *"omit the space"* is not expressible there, so
  * `crossSpace: true` is REST's only route to that capability. Dropping it on one door alone is precisely the

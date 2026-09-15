@@ -20,8 +20,8 @@
  *
  * `minScore` was applied AFTER the cut to `topK`, so `topK: 10, minScore: 0.7` could return three while
  * forty records cleared the threshold — the window was chosen from the unfiltered ranking and then thinned.
- * `find_similar` applies it inside its selection loop, so the same parameter behaved differently on two
- * tools, and the guide documented the `find_similar` behaviour for both.
+ * `similar` applies it inside its selection loop, so the same parameter behaved differently on two
+ * tools, and the guide documented the `similar` behaviour for both.
  *
  * ## And the shape that recurs: a refusal one door states and the other does not
  *
@@ -157,8 +157,8 @@ describe('the parity gaps, one case each', () => {
    * own reasoning.
    *
    * REST clamps it to 100 silently and this door declares no maximum at all, saying "no hard cap" — a
-   * real divergence. I wrote a case demanding `maximum: 100` on the strength of `find_similar` capping on
-   * both doors. It does not: `find_similar` REFUSES on MCP and CLAMPS on REST, so it is the same split one
+   * real divergence. I wrote a case demanding `maximum: 100` on the strength of `similar` capping on
+   * both doors. It does not: `similar` REFUSES on MCP and CLAMPS on REST, so it is the same split one
    * tool along rather than the precedent that settles this one.
    *
    * Aligning it removes a capability whichever way it goes — refusing breaks an MCP caller passing more

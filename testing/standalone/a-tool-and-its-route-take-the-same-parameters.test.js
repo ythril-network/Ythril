@@ -118,7 +118,7 @@ describe('a tool and its route take the same parameters', () => {
     /*
      * A new instrument must not quietly drop the coverage of the one it replaces, and this one did.
      *
-     * `client-bodies-match-server.test.js` checked `query`, `recall`, `traverse` and `find_similar` over a
+     * `client-bodies-match-server.test.js` checked `query`, `recall`, `traverse` and `similar` over a
      * hard-coded map. Reading their sets here matched `unknownBodyFields(...)` with a negated-comma class,
      * which stops inside `Record<string, unknown>` — so the set name came back as `unknown`, the route
      * read as unresolved, and all four were SKIPPED while the gate reported a much bigger number.
@@ -127,7 +127,7 @@ describe('a tool and its route take the same parameters', () => {
      * derived count above cannot notice four specific pairs going missing inside it.
      */
     const stillCovered = [];
-    for (const name of ['query', 'recall', 'traverse', 'find_similar']) {
+    for (const name of ['filter', 'recall', 'traverse', 'similar']) {
       const entry = paired.find(p => p.tool.name === name);
       const ok = entry && entry.routes.length && entry.routes.every(r => r.keys);
       if (!ok) stillCovered.push(`${name}: ${entry ? (entry.routes[0]?.unresolved ?? 'no route') : 'not paired'}`);

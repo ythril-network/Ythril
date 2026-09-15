@@ -89,7 +89,7 @@ a p95 here would either be a fabrication or require keeping every sample.
 
 | field | counts |
 |---|---|
-| `recall` | `recall`, `query` and `find_similar` — demand on the brain |
+| `recall` | `recall`, `query` and `similar` — demand on the brain |
 | `writes` | anything that changed a record or added a file, including curation (resolving a conflict, merging a duplicate) |
 | `calls` | all four classes: recall, reads, writes and file traffic |
 
@@ -512,7 +512,7 @@ Entity items in the `entities` array accept an optional `id` field (UUID v4). If
 ### Structured Query (Read-Only)
 
 ```http
-POST /api/brain/spaces/:spaceId/query
+POST /api/brain/filter
 ```
 
 Run a constrained Mongo-style read query against one logical collection. Intended for advanced clients and MCP parity with the `query` tool.
@@ -610,7 +610,7 @@ page therefore costs more on a proxy space than on a plain one, but it is the sa
 
 #### A read result too large to return inline is bounded, and you page through the rest
 
-`recall` and `find-similar` bound the response by **`maxChars`** (default **50 000 over REST, 25 000 over MCP** — the one
+`recall` and `similar` bound the response by **`maxChars`** (default **50 000 over REST, 25 000 over MCP** — the one
 place the two doors deliberately differ) and, if you set it, by **`maxBytes`**, which has NO default and counts real
 UTF-8 bytes. Set both and both apply: the answer stops at whichever it reaches first. `maxTokens` is a convenience
 onto `maxChars`, converted with `charsPerToken`.
@@ -641,7 +641,7 @@ expires after one day.
 > what a caller had to read rather than reducing it. The full reasoning is in
 > [Prefiltered Recall and the byte budget](04a-recall-api.md).
 
-`recall` and `find-similar` with `traverse > 0` cap the traversed nodes they return inline. Past that cap the
+`recall` and `similar` with `traverse > 0` cap the traversed nodes they return inline. Past that cap the
 **complete** graph is written to the space's file store under `_tmp/` as JSON, and the response carries
 `graphTruncated: true` with `graphComplete: {nodes, path, download, expiresAt}`. The download is the normal
 authenticated `GET /api/files/:spaceId?path=…`, the file expires after one day, and it is hidden from browsing
@@ -663,10 +663,10 @@ keys:
 
 | Route | Accepted fields |
 |---|---|
-| `POST /query` | `collection`, `filter`, `projection`, `limit`, `skip`, `sort`, `dir`, `maxTimeMS`, `maxChars`, `maxBytes`, `maxTokens`, `charsPerToken` |
+| `POST /filter` | `space`, `collection`, `filter`, `projection`, `limit`, `skip`, `sort`, `dir`, `maxTimeMS`, `maxChars`, `maxBytes`, `maxTokens`, `charsPerToken` |
 | `POST /recall` | `space`, `query`, `topK`, `types`, `minScore`, `filter`, `traverse`, `tags`, `minPerType`, `maxPerType`, `maxTimeMS`, `includeFreshWrites`, `includeContent`, `includeDiagnostics`, `includeRecordMeta`, `projection`, `maxChars`, `maxBytes`, `maxTokens`, `charsPerToken`, `skip`, `remainderDump` |
 | `POST /traverse` | `startId`, `direction`, `edgeLabels`, `maxDepth`, `limit`, `includeChrono`, `includeMemories`, `includeFiles`, `includeEdges` |
-| `POST /find-similar` | `entryId`, `entryType`, `topK`, `minScore`, `targetTypes`, `traverse`, `includeContent`, `includeDiagnostics`, `projection`, `maxChars`, `maxBytes`, `maxTokens`, `charsPerToken`, `skip`, `remainderDump`, `crossSpace` *(deprecated, still accepted)* |
+| `POST /similar` | `space`, `entryId`, `entryType`, `topK`, `minScore`, `targetTypes`, `traverse`, `includeContent`, `includeDiagnostics`, `projection`, `maxChars`, `maxBytes`, `maxTokens`, `charsPerToken`, `skip`, `remainderDump`, `crossSpace` *(not deprecated: `space` pins the seed ENTRY here, `crossSpace` widens the SEARCH)* |
 
 ```json
 {

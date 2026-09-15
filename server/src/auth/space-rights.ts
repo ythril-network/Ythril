@@ -106,9 +106,9 @@ export interface RouteRight {
 export const ROUTE_RIGHTS: readonly RouteRight[] = [
   // ── Knowledge ────────────────────────────────────────────────────────────────────────────────────────
   { route: '/api/brain/recall', method: 'POST', area: 'knowledge', needs: 'read', scope: 'body' },
-  { route: '/api/brain/spaces/:spaceId/query', method: 'POST', area: 'knowledge', needs: 'read', scope: 'path' },
+  { route: '/api/brain/filter', method: 'POST', area: 'knowledge', needs: 'read', scope: 'body' },
   { route: '/api/brain/spaces/:spaceId/traverse', method: 'POST', area: 'knowledge', needs: 'read', scope: 'path' },
-  { route: '/api/brain/spaces/:spaceId/find-similar', method: 'POST', area: 'knowledge', needs: 'read', scope: 'path' },
+  { route: '/api/brain/similar', method: 'POST', area: 'knowledge', needs: 'read', scope: 'body' },
   { route: '/api/brain/spaces/:spaceId/er-model', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/stats', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/events', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
@@ -311,8 +311,8 @@ export const TOOL_RIGHTS: readonly ToolRight[] = [
   { tool: 'delete_chrono', area: 'knowledge', needs: 'write' },
   { tool: 'list_chrono', area: 'knowledge', needs: 'read' },
   { tool: 'recall', area: 'knowledge', needs: 'read' },
-  { tool: 'query', area: 'knowledge', needs: 'read' },
-  { tool: 'find_similar', area: 'knowledge', needs: 'read' },
+  { tool: 'filter', area: 'knowledge', needs: 'read' },
+  { tool: 'similar', area: 'knowledge', needs: 'read' },
   { tool: 'traverse', area: 'knowledge', needs: 'read' },
   { tool: 'bulk_write', area: 'knowledge', needs: 'write' },
   { tool: 'get_stats', area: 'knowledge', needs: 'read' },

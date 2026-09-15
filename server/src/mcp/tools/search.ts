@@ -430,7 +430,7 @@ export const recallTool: ToolHandler = {
 };
 
 export const find_similarTool: ToolHandler = {
-  name: 'find_similar',
+  name: 'similar',
   description: 'Find entries with high vector similarity to an EXISTING entry — deduplication, "more like this", merge detection. It uses that entry\'s STORED embedding rather than re-embedding anything, which is what separates it from `recall`: no query string, no BM25 half, no reranker. Pure cosine distance from one record to the rest.\n\n'
     + 'Two consequences of using the stored vector, and both are silent if you do not know them:\n'
     + '• A source entry retired from semantic ranking has NO vector, so there is nothing to be similar to and the answer is empty — not an error, and not evidence that nothing resembles it.\n'
@@ -655,7 +655,7 @@ export const find_similarTool: ToolHandler = {
 };
 
 export const queryTool: ToolHandler = {
-  name: 'query',
+  name: 'filter',
   description: 'Run a structured read-only query (MongoDB filter) against brain collections. This is the EXACT counterpart to `recall`: no embedding, no ranking, no score — a predicate, and every row that satisfies it. Reach for it when you know what you are looking for, and for `recall` when you know what it is about.\n\n'
     + 'It also reaches records `recall` cannot: a record retired from semantic ranking has no vector, and this reads the collection.\n\n'
     + 'PAY FOR THE FIELDS YOU BRANCH ON, AND NOTHING ELSE: `projection` is the field-selection lever, and '

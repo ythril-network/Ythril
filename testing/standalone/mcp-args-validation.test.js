@@ -27,7 +27,7 @@ describe('MCP args enforcement — accept path', () => {
     assert.equal(v.validate(tool('recall'), { query: 'x', filter: { 'properties.status': { eq: 'accepted' } } }), null);
   });
   it('accepts find_similar with the space OMITTED (now optional)', () => {
-    assert.equal(v.validate(tool('find_similar'), { entryId: UUID, entryType: 'entity' }), null);
+    assert.equal(v.validate(tool('similar'), { entryId: UUID, entryType: 'entity' }), null);
   });
 });
 
@@ -51,16 +51,16 @@ describe('MCP args enforcement — breaking rejections', () => {
     rejects('remember', { space: 'general' }, 'fact');
   });
   it('rejects an out-of-range number (find_similar.topK > 100)', () => {
-    rejects('find_similar', { entryId: UUID, entryType: 'entity', topK: 500 });
+    rejects('similar', { entryId: UUID, entryType: 'entity', topK: 500 });
   });
-  it('rejects the wrong maxTimeMS ceiling (query.maxTimeMS > 10000)', () => {
-    rejects('query', { space: 'general', collection: 'memories', filter: {}, maxTimeMS: 99999 });
+  it('rejects the wrong maxTimeMS ceiling (filter.maxTimeMS > 10000)', () => {
+    rejects('filter', { space: 'general', collection: 'memories', filter: {}, maxTimeMS: 99999 });
   });
   it('rejects a bad enum value (wipe_space.types)', () => {
     rejects('wipe_space', { space: 'general', types: ['bogus'] });
   });
-  it('rejects a bad collection enum (query.collection)', () => {
-    rejects('query', { space: 'general', collection: 'widgets', filter: {} });
+  it('rejects a bad collection enum (filter.collection)', () => {
+    rejects('filter', { space: 'general', collection: 'widgets', filter: {} });
   });
   it('does NOT reject a recall filter at the validator — the resolver owns that, in either grammar', () => {
     /*
@@ -88,7 +88,7 @@ describe('MCP args enforcement — breaking rejections', () => {
     accepts('recall', { query: 'x', filter: { 'properties.status': { eq: 'open' } } });
   });
   it('rejects a non-UUID entryId (pattern)', () => {
-    rejects('find_similar', { entryId: 'not-a-uuid', entryType: 'entity' });
+    rejects('similar', { entryId: 'not-a-uuid', entryType: 'entity' });
   });
   it('rejects a space the token cannot see (enum)', () => {
     rejects('get_stats', { space: 'secret' });

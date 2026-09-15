@@ -136,7 +136,7 @@ const CLAIMS = [
       // All four registered, and the "what this is bad at" half is the part that would quietly rot: a tool
       // description is what a caller reads WHILE constructing arguments, so a missing warning is invisible.
       const names = ALL_TOOLS.map(t => t.name);
-      for (const n of ['recall', 'query', 'find_similar', 'traverse']) {
+      for (const n of ['recall', 'filter', 'similar', 'traverse']) {
         assert.ok(names.includes(n), `${n} must be a registered tool`);
       }
       const recall = ALL_TOOLS.find(t => t.name === 'recall').description;

@@ -81,6 +81,9 @@ const ALLOWED_COLLECTIONS = new Set<string>(BRAIN_COLLECTIONS);
  * a parameter to the query and forgetting to allow it in the body is one edit rather than two.
  */
 export const QUERY_BODY_FIELDS: ReadonlySet<string> = new Set([
+  // `space` is a BODY field since 5.0, and omitting it reads across every space the token may read.
+  // The fan-out is not new — this route already paged across the members of a proxy space.
+  'space',
   'collection', 'filter', 'projection', 'limit', 'skip', 'sort', 'dir', 'maxTimeMS',
   /*
    * The size budget, which this route had none of: `limit` caps ROWS and says nothing about how big one is,
@@ -130,6 +133,10 @@ export const RECALL_BODY_FIELDS: ReadonlySet<string> = new Set([
 ]);
 
 export const FIND_SIMILAR_BODY_FIELDS: ReadonlySet<string> = new Set([
+  // `space` is a BODY field since 5.0. It has a NARROWER job here than on recall: it says where the SEED
+  // ENTRY lives, not where to search. Omit it and the entry is located across every readable space;
+  // `crossSpace` is the separate axis that widens the SEARCH, which is why both exist.
+  'space',
   'entryId', 'entryType', 'topK', 'minScore', 'targetTypes', 'crossSpace',
   // `traverse` and `includeContent` were on the MCP tool's schema and read by its handler while this route read
   // neither. Found by the gate that compares every declared surface against these sets, not by a report — the

@@ -120,7 +120,7 @@ describe('the remainder is written out, with a TTL', () => {
     // TWO branches each: with and without `traverse`. The first version wired only the graph branch, so the
     // plainest large call — `topK: 100`, no traversal — returned everything. The E2E caught it; this counts it.
     //
-    // MCP went 3 → 4 in 3.1.0. `find_similar` answered plain TEXT at `traverse: 0`, so it had nothing to
+    // MCP went 3 → 4 in 3.1.0. `similar` answered plain TEXT at `traverse: 0`, so it had nothing to
     // spill there and only its graph branch was wired; returning JSON at every depth gave the default depth
     // a size cap it had never had. That is the second time a "plainest large call" went uncapped, which is
     // why this counts sites rather than trusting that a new branch remembered.

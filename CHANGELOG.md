@@ -15,11 +15,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **BREAKING — `POST /api/brain/spaces/:spaceId/recall` is now `POST /api/brain/recall`, and the space is a
-  body field you may omit.**
+- **BREAKING — the search family is renamed and drops the space from its path.**
+
+  | was | is |
+  |---|---|
+  | `query` — `POST /api/brain/spaces/:spaceId/query` | **`filter`** — `POST /api/brain/filter` |
+  | `find_similar` — `…/find-similar` | **`similar`** — `POST /api/brain/similar` |
+  | `recall` — `…/recall` | `recall` — `POST /api/brain/recall` |
+
+  `query` was the collision worth removing: it is the word every caller reads as *search*, and ours is the
+  structured-predicate door — so a client reaching for meaning-ranked results picked it and got a 400 for a
+  missing `collection`. `recall` keeps its name because it is what every memory protocol calls this.
+  Audit operations follow: `brain.filter` and `brain.similar`, so a log filter on the old strings stops
+  matching.
+
+  **The space is a body field on all three, and you may omit it.**
 
   Omit it and the search runs across every space the token holds `knowledge: read` in, ranked together. A
-  path segment cannot be omitted, so the old route could never express "search everything I can reach" —
+  `traverse` keeps its path deliberately: it walks FROM an entity, and an entity lives in exactly one
+  space, so there is nothing to omit.
+
+  **`crossSpace` on `find-similar` stays, and checking why is the interesting part.** Its comment said it
+  existed only because the space was in the PATH and "omit the space" could not be expressed — which this
+  change would have retired. It does not, because on that route the space says where the SEED ENTRY lives
+  rather than where to search. "The entry is in Research, find similar records everywhere" is a real
+  request and omission cannot express it, because omitting the space stops pinning the entry too.
+
+  A path segment cannot be omitted, so the old routes could never express "search everything I can reach" —
   MCP's `recall` has taken an optional space since it shipped, and REST callers had to point at a proxy
   space or make one call per space and merge the rankings by hand.
 

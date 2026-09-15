@@ -39,7 +39,7 @@ const src = (p) => stripComments(readFileSync(p, 'utf8'));
 /** The `/query` handler, bounded by the next route registration. */
 function queryHandler() {
   const body = src(ROUTE);
-  const at = body.indexOf("Router.post('/spaces/:spaceId/query'");
+  const at = body.indexOf("Router.post('/filter'");
   assert.ok(at > 0, 'could not find the query route — re-point this gate');
   const rest = body.slice(at + 20);
   const next = rest.search(/Router\.(post|get|patch|delete|put)\(/);
@@ -71,7 +71,7 @@ describe('the query route takes a budget', () => {
     assert.ok(BUDGET_REQUEST_FIELDS.length >= 4,
       `only ${BUDGET_REQUEST_FIELDS.length} budget field(s) — the import is stale and this loop checks little`);
     for (const k of BUDGET_REQUEST_FIELDS) {
-      assert.ok(QUERY_BODY_FIELDS.has(k), `POST /query refuses \`${k}\`, which every other read route takes`);
+      assert.ok(QUERY_BODY_FIELDS.has(k), `POST /filter refuses \`${k}\`, which every other read route takes`);
     }
   });
 
@@ -143,10 +143,10 @@ describe('the guide says so', () => {
     // `client-bodies-match-server.test.js` checks this table against the field set; asserted here too because
     // that gate reports the row as a whole and this one names the reason.
     const doc = readFileSync('docs/integration-guide/04d-brain-ops-api.md', 'utf8');
-    const row = doc.split('\n').find(l => l.startsWith('| `POST /query` |'));
-    assert.ok(row, 'no accepted-fields row for POST /query');
+    const row = doc.split('\n').find(l => l.startsWith('| `POST /filter` |'));
+    assert.ok(row, 'no accepted-fields row for POST /filter');
     for (const k of ['maxChars', 'maxBytes', 'maxTokens', 'charsPerToken']) {
-      assert.ok(row.includes(`\`${k}\``), `the table does not list ${k} for POST /query`);
+      assert.ok(row.includes(`\`${k}\``), `the table does not list ${k} for POST /filter`);
     }
   });
 });

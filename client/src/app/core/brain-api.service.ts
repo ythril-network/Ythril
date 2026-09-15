@@ -186,7 +186,7 @@ export class BrainApi {
       maxTimeMS?: number;
     },
   ): Observable<QueryResult> {
-    return this.http.post<QueryResult>(`/api/brain/spaces/${spaceId}/query`, body);
+    return this.http.post<QueryResult>('/api/brain/filter', { ...body, space: spaceId });
   }
 
   /** Embedding-job backlog for a space (F9 Overview embedding-queue panel). */

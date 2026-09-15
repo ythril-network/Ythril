@@ -277,8 +277,10 @@ export const ROUTE_RULES: RouteRule[] = [
 
   // ── Brain query / recall / stats (reads) ─────────────────────────────────
   { method: 'POST',   pattern: /^\/api\/brain\/recall$/,                           operation: 'brain.recall',         read: true },
-  { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/query$/,      operation: 'brain.query',          spaceGroup: 1, read: true },
-  { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/find-similar$/, operation: 'brain.find_similar', spaceGroup: 1, read: true },
+  // The search family takes its space from the BODY since 5.0, so the path carries no group to read.
+  // `spaceId` falls back to the spaces the guard authorised — see the entry builder below.
+  { method: 'POST',   pattern: /^\/api\/brain\/filter$/,                            operation: 'brain.filter',         read: true },
+  { method: 'POST',   pattern: /^\/api\/brain\/similar$/,                           operation: 'brain.similar',        read: true },
   { method: 'GET',    pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/stats$/,      operation: 'brain.stats',          spaceGroup: 1, read: true },
   { method: 'GET',    pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/er-model$/,   operation: 'brain.er_model',       spaceGroup: 1, read: true },
 

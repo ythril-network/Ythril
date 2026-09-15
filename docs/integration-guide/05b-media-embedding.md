@@ -67,7 +67,7 @@ While processing, the filemeta record on the file (accessible via `GET /api/brai
 
 #### Recall Results
 
-Recall queries (`recall`, `find_similar`) include embedded media chunks. Each media chunk result has additional fields:
+Recall queries (`recall`, `similar`) include embedded media chunks. Each media chunk result has additional fields:
 
 ```json
 {

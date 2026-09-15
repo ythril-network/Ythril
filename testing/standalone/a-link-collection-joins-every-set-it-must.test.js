@@ -16,7 +16,7 @@
  *
  *   - **not created** (`SPACE_COLLECTIONS`) — no collection, no indexes, and the first write creates it
  *     un-indexed, so every read is a scan.
- *   - **not knowledge-bearing** (`BRAIN_COLLECTIONS`) — a wipe leaves links behind, `/query` refuses the
+ *   - **not knowledge-bearing** (`BRAIN_COLLECTIONS`) — a wipe leaves links behind, `/filter` refuses the
  *     collection, the importer skips it, an MCP caller is told it does not exist.
  *   - **not hashed** (`brain/merkle.ts`) — **the loudest.** Two instances holding different links report
  *     themselves IDENTICAL. That is worse than not replicating, because it reports agreement.
@@ -53,7 +53,7 @@ describe('the link collection joins every set it belongs to', () => {
     assert.match(decl, new RegExp(`['"]${LINKS}['"]`), 'links must be in SPACE_COLLECTIONS');
   });
 
-  it('it is KNOWLEDGE-bearing, so a wipe clears it and /query can read it', () => {
+  it('it is KNOWLEDGE-bearing, so a wipe clears it and /filter can read it', () => {
     const src = code('server/src/config/types-knowledge.ts');
     const at = src.indexOf('BRAIN_COLLECTIONS');
     const decl = src.slice(at, src.indexOf(';', at));
@@ -129,14 +129,14 @@ describe('the link collection joins every set it belongs to', () => {
      * the defect shape this repo produces most.
      *
      * **There is no `/links` route in this slice, and that is not a gap.** Joining `BRAIN_COLLECTIONS`
-     * makes the collection readable through `/query` and the `query` MCP tool immediately — which is a
+     * makes the collection readable through `/filter` and the `filter` MCP tool immediately — which is a
      * real new capability, on both doors, and it is why the guides change in this slice too. Both doors
      * are already governed by the same row, so what this asserts is that the row governing them is the
      * knowledge one. A dedicated route, when it lands, brings its own row with it.
      */
     const rows = code('server/src/auth/space-rights.ts').split('\n');
-    const query = rows.filter(l => /route: '[^']*\/query'/.test(l));
-    assert.equal(query.length, 1, 'expected exactly one rights row for /query');
+    const query = rows.filter(l => /route: '[^']*\/filter'/.test(l));
+    assert.equal(query.length, 1, 'expected exactly one rights row for /filter');
     assert.match(query[0], /area: 'knowledge'/,
       'the door that can now read the links collection must be knowledge-governed');
     // A link route, if one exists, is knowledge too — never files or dataQuality. Matched on the route

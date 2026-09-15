@@ -166,8 +166,8 @@ Audit entries are recorded for all write operations and (when `logReads` is enab
 | Auth | `auth.failed` (invalid or expired tokens on any endpoint) |
 
 **An MCP tool logs the same operation as the REST route it mirrors**, so a filter finds the capability
-rather than the door. `find_similar` was the exception until 4.4: it logged `entity.list` while
-`POST /api/brain/spaces/:id/find-similar` logged `brain.find_similar`, so filtering for the latter showed
+rather than the door. `similar` was the exception until 4.4: it logged `entity.list` while
+`POST /api/brain/similar` logged `brain.find_similar`, so filtering for the latter showed
 only REST calls and filtering the former mixed similarity searches into entity listings.
 
 One pair still differs on purpose. `get_space_meta` logs `space.list`, because `GET /api/spaces/:id/meta`

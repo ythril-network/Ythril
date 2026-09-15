@@ -63,5 +63,20 @@ export function spacesWhereTokenMay(
   // Fail closed, explicitly. A record with no matrix cannot reach a handler; if one ever does, the honest
   // answer to "which spaces may it see" is none.
   if (!rights) return [];
-  return getConfig().spaces.map(s => s.id).filter(id => satisfies(effectiveRung(rights, id, area), needs));
+  return getConfig().spaces.map(s => s.id).filter(id => holdsRung(rights, id, area, needs));
+}
+
+/**
+ * Does this token hold `needs` or better on `area` in this one space?
+ *
+ * One line, extracted because it had four callers written out longhand — the listing above, the REST area
+ * guard, the MCP tool guard, and the body-scoped resolver added at 5.0. Each was `satisfies(effectiveRung(
+ * ...), needs)` and each could have been written with the arguments in the wrong order without anything
+ * noticing, because both are strings.
+ *
+ * It takes the space rather than a list on purpose: the CALLER decides which spaces are candidates, and
+ * folding that in is how a predicate acquires an opinion about scope that its name does not mention.
+ */
+export function holdsRung(rights: TokenRights, space: string, area: SpaceArea, needs: Rung): boolean {
+  return satisfies(effectiveRung(rights, space, area), needs);
 }

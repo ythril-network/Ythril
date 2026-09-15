@@ -90,7 +90,7 @@ describe('MCP help tool — scope consistency', () => {
       assert.ok(!re.test(text), `read-only help must not mention ${t.name}`);
     }
     // ...but the always-available read path is still fully documented.
-    for (const name of ['recall', 'query', 'get_space_meta', 'list_spaces']) {
+    for (const name of ['recall', 'filter', 'get_space_meta', 'list_spaces']) {
       assert.ok(text.includes(`**${name}**`), `read-only help must still list ${name}`);
     }
     assert.match(text, /some tools are hidden/i, 'must carry the honest hidden-tools line');

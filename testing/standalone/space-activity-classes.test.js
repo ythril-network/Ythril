@@ -69,8 +69,8 @@ describe('space activity — call classification', () => {
       + 'failure mode this test exists for — an unclassified route is a space whose usage does not count.');
   });
 
-  it('puts recall, query and find_similar in the demand class', () => {
-    for (const op of ['brain.recall', 'brain.recall_global', 'brain.query', 'brain.find_similar']) {
+  it('puts recall, filter and similar in the demand class', () => {
+    for (const op of ['brain.recall', 'brain.filter', 'brain.similar']) {
       assert.equal(classifyOperation(op), 'recall', op);
     }
   });

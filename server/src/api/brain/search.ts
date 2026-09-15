@@ -278,16 +278,20 @@ searchRouter.post('/spaces/:spaceId/traverse', globalRateLimit, requireSpaceAuth
 // So both halves are here: the body is strict, and `skip` is real. MCP's `query` tool already declared
 // `additionalProperties: false` and so already refused unknown keys — REST was the weaker of the two surfaces for the
 // same rule, which is this repo's most repeated defect class.
-searchRouter.post('/spaces/:spaceId/query', globalRateLimit, requireSpaceAuth, statesRetryability, async (req, res) => {
-  const spaceId = req.params['spaceId'] as string;
+/*
+ * POST /api/brain/filter — structured predicate read, across one space or every space you can read.
+ *
+ * The space moved out of the path at 5.0 for the same reason as `recall`: a path segment cannot be omitted,
+ * so the route had no way to express "everything I can reach". The fan-out itself is not new — this already
+ * paged across the members of a proxy space, and an omitted space is the same walk over a different list.
+ */
+searchRouter.post('/filter', globalRateLimit, requireBodyScopedSpace('knowledge', 'read'), statesRetryability, async (req, res) => {
+  const authorised = req.authorisedSpaces ?? [];
+  const namedSpace = req.resolvedSpaceId;
+  const spaceId = namedSpace ?? authorised[0] ?? '';
   // Resolved before anything is read, so a bad `maxBytes` is a 400 rather than a query that runs first.
   const budget = resolveBudget(req.body as BudgetRequest);
   if (!budget.ok) { res.status(400).json({ error: budget.error }); return; }
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
 
   const body = (req.body ?? {}) as Record<string, unknown>;
   const bad = unknownBodyFields(body, QUERY_BODY_FIELDS);
@@ -330,7 +334,10 @@ searchRouter.post('/spaces/:spaceId/query', globalRateLimit, requireSpaceAuth, s
   try {
     // One paging rule, shared with the embed-job listing. It used to be inline here, and being inline is how it shipped
     // a window capped at 100 that sliced deep pages to nothing — see `spaces/page-across-members.ts`.
-    const members = memberSpacesForRequest(req, spaceId);
+    // A NAMED space may be a proxy and resolves to its members; an omitted one is already the list the
+    // guard authorised — every space where this token actually holds `knowledge: read`, which is a stricter
+    // question than reach.
+    const members = namedSpace ? memberSpacesForRequest(req, namedSpace) : authorised;
     const page = await pageAcrossMembers({
       members,
       limit: safeLimit,
@@ -787,26 +794,36 @@ searchRouter.post('/recall', globalRateLimit, requireBodyScopedSpace('knowledge'
 });
 
 
-// POST /api/brain/spaces/:spaceId/find-similar — vector similarity search by existing entry ID
+/*
+ * POST /api/brain/similar — vector similarity to an entry that already exists.
+ *
+ * The space moved out of the path at 5.0 with the rest of the search family. Here it has a narrower job
+ * than on `recall`: it says WHERE THE SEED ENTRY IS, not where to search. Omit it and the entry is located
+ * across every space this token can read.
+ */
 const VALID_ENTRY_TYPES = new Set<string>(RECORD_TYPES);
 
-searchRouter.post('/spaces/:spaceId/find-similar', globalRateLimit, requireSpaceAuth, statesRetryability, async (req, res) => {
-  const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
+searchRouter.post('/similar', globalRateLimit, requireBodyScopedSpace('knowledge', 'read'), statesRetryability, async (req, res) => {
+  const authorised = req.authorisedSpaces ?? [];
+  const namedSpace = req.resolvedSpaceId;
+  const spaceId = namedSpace ?? authorised[0] ?? '';
 
   const body = (req.body ?? {}) as Record<string, unknown>;
   // `crossSpace` is ALLOWED here, permanently, so this refusal does not reject a body that is correct.
   //
-  // THIS COMMENT SAID "deprecated … before we have removed it", WHICH POINTED THE NEXT READER AT A CHANGE
-  // THAT MUST NOT HAPPEN. On this route the space arrives in the PATH, so *"omit the space"* — the idiomatic
-  // MCP form — cannot be expressed. `crossSpace: true` is REST's only route to a cross-space find_similar,
-  // and removing it turns the MCP/REST parity gate's `find-similar ↔ find_similar` case red. The tool's own
-  // schema description was corrected to say "Not slated for removal" precisely so that a caller does not
-  // build around an absence that will never arrive; this comment kept the sentence that correction removed.
+  // THE REASON RECORDED HERE WAS ABOUT TO EXPIRE, AND CHECKING IT FOUND A BETTER ONE. It read: the space
+  // arrives in the PATH, so "omit the space" cannot be expressed, and `crossSpace: true` is REST's only
+  // route to a cross-space find_similar. At 5.0 the space moved into the body and omitting it became
+  // expressible — which by that reasoning would have retired the flag.
+  //
+  // It does not, because the two are not the same question HERE. On `recall` the space says where to
+  // search. On this route it says where the SEED ENTRY lives, and the search is a separate axis: naming a
+  // space to locate the entry and then looking for similar records in every other space is a real request,
+  // and omission cannot express it — omitting the space locates the entry anywhere too.
+  //
+  // So the flag stays, and the tool's schema description still correctly says "Not slated for removal".
+  // The earlier version of this comment said "deprecated … before we have removed it", which pointed the
+  // next reader at a change that must not happen.
   //
   // Refusing a key we still accept elsewhere would in any case be a worse contract than the permissive body
   // it replaces.

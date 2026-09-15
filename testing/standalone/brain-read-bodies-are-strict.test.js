@@ -5,7 +5,7 @@
  *
  * The fleet integrator reported `skip` being accepted at 200 and silently ignored on `POST /query` — *"it cost us a fabricated
  * number"*. The reported key is not the defect. The defect is a body that accepts anything and honours some of it, and
- * `/query` was simply the route they happened to be paging. `traverse`, `recall` and `find-similar` had it too.
+ * `/query` was simply the route they happened to be paging. `traverse`, `recall` and `similar` had it too.
  *
  * A test per route would have been satisfied by fixing the three that exist today and would say nothing about the fifth
  * read route somebody adds next year. So this enumerates the POST routes on the search router **from source** and
@@ -95,8 +95,8 @@ describe('brain read routes refuse unknown body keys', () => {
     // covering it. `/recall` lost its `/spaces/:spaceId` prefix at 5.0 — the space moved into the body so a
     // caller can omit it and search everything it reads — and this list is the reason that showed up as a
     // failure rather than as silently reduced coverage, which is what it is for.
-    for (const p of ['/spaces/:spaceId/query', '/recall', '/spaces/:spaceId/traverse',
-      '/spaces/:spaceId/find-similar']) {
+    for (const p of ['/filter', '/recall', '/spaces/:spaceId/traverse',
+      '/similar']) {
       assert.ok(paths.includes(p), `${p} is no longer registered under that path — re-point this gate`);
     }
   });

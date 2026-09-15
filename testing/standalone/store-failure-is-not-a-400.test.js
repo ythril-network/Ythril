@@ -171,7 +171,7 @@ describe('both doors, and all three routes', () => {
      * the count fell to two and the gate read it as a route DROPPING the wrapper — a false alarm about
      * the one thing it exists to prevent. The guard is not the subject; the three read routes are.
      */
-    for (const path of ['/query', '/recall', '/find-similar']) {
+    for (const path of ['/filter', '/recall', '/similar']) {
       const at = routes.indexOf(`searchRouter.post('${path}'`);
       const legacy = at < 0 ? routes.indexOf(`searchRouter.post('/spaces/:spaceId${path}'`) : -1;
       const start = at >= 0 ? at : legacy;
