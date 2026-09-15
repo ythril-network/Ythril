@@ -6,10 +6,7 @@
 
 ### Semantic Search (Recall)
 
-Available as both:
-
-- REST: `POST /api/brain/spaces/:spaceId/recall`
-- MCP tool: `recall`
+Available as both — REST `POST /api/brain/recall`, MCP tool `recall`:
 
 ```json
 {
@@ -22,6 +19,7 @@ Available as both:
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
+| `space` | — | every space you can read | Which space to search. **Omit it and the search runs across every space this token holds `knowledge: read` in**, ranked together — the reason this route no longer carries the space in its path. A space you cannot read is not searched and is not an error; a space you NAMED and cannot read is a 403. |
 | `query` | ✅ | — | Natural-language search text (non-empty string) |
 | `topK` | — | `10` | Max returned results, minimum 1 and **no ceiling** — the same on both doors since 4.0, where REST clamped to 100 silently. What comes back is bounded by the byte budget instead: every record whole, `truncated` on every response, `nextSkip` when it bit |
 | `types` | — | all types | Restrict result knowledge types |
@@ -230,7 +228,7 @@ Nothing here is required — this is one call exercising all eight parameters at
 compose.
 
 ```json
-POST /api/brain/spaces/dev-apps/recall
+POST /api/brain/recall
 {
   "query": "PKCE failures on form NMK-SI-11 during the auth rewrite",
   "topK": 20,

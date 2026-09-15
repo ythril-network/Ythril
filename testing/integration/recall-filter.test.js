@@ -89,32 +89,32 @@ describe('Recall maxPerType — input validation over REST', () => {
   // reaches one door and not the other is the defect the last brain-API sweep was.
 
   it('a non-object maxPerType returns 400', async () => {
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'test', maxPerType: 3,
-    });
+    }) });
     assert.equal(r.status, 400, `Expected 400, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 
   it('a non-integer ceiling returns 400', async () => {
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'test', maxPerType: { entity: 1.5 },
-    });
+    }) });
     assert.equal(r.status, 400, `Expected 400, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 
   it('a ceiling of 0 returns 400 and points at `types`', async () => {
     // Deliberate: 0 would work, and it would be a second confusing way to spell "not this type".
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'test', maxPerType: { entity: 0 },
-    });
+    }) });
     assert.equal(r.status, 400, `Expected 400, got ${r.status}: ${JSON.stringify(r.body)}`);
     assert.match(r.body.error, /types/, `the error should point at \`types\`: ${r.body.error}`);
   });
 
   it('minPerType above maxPerType for the same type returns 400 naming both values', async () => {
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'test', minPerType: { entity: 5 }, maxPerType: { entity: 2 },
-    });
+    }) });
     assert.equal(r.status, 400, `Expected 400, got ${r.status}: ${JSON.stringify(r.body)}`);
     assert.match(r.body.error, /contradict/, `the error should name the contradiction: ${r.body.error}`);
     assert.match(r.body.error, /5/, 'the error should quote the floor');
@@ -122,16 +122,16 @@ describe('Recall maxPerType — input validation over REST', () => {
   });
 
   it('a floor EQUAL to its ceiling is accepted — the tightest legal pair', async () => {
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'test', minPerType: { entity: 2 }, maxPerType: { entity: 2 },
-    });
+    }) });
     assert.notEqual(r.status, 400, `min == max must be allowed: ${JSON.stringify(r.body)}`);
   });
 
   it('floors and ceilings on DIFFERENT types never contradict', async () => {
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'test', minPerType: { entity: 3 }, maxPerType: { file: 1 },
-    });
+    }) });
     assert.notEqual(r.status, 400, `unrelated types must not be compared: ${JSON.stringify(r.body)}`);
   });
 });
@@ -141,17 +141,17 @@ describe('Recall maxTimeMS — the per-call deadline over REST', () => {
   const KNOWN_REASONS = new Set(['search_timeout', 'rerank_skipped_budget', 'rerank_unavailable']);
 
   it('a non-integer maxTimeMS returns 400', async () => {
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'test', maxTimeMS: 12.5,
-    });
+    }) });
     assert.equal(r.status, 400, `Expected 400, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 
   it('a zero or negative maxTimeMS returns 400', async () => {
     for (const v of [0, -1]) {
-      const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+      const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
         query: 'test', maxTimeMS: v,
-      });
+      }) });
       assert.equal(r.status, 400, `Expected 400 for maxTimeMS=${v}, got ${r.status}`);
     }
   });
@@ -159,9 +159,9 @@ describe('Recall maxTimeMS — the per-call deadline over REST', () => {
   it('a value ABOVE the instance budget is clamped, not refused', async () => {
     // A caller asking for longer than the operator allows means "as long as you allow". Refusing would
     // teach them nothing and break a reasonable request.
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'test', maxTimeMS: 999_999,
-    });
+    }) });
     assert.notEqual(r.status, 400, `a large maxTimeMS must be clamped: ${JSON.stringify(r.body)}`);
   });
 
@@ -170,9 +170,9 @@ describe('Recall maxTimeMS — the per-call deadline over REST', () => {
     // finish inside the 250 ms floor, and an assertion that depends on losing a race is a flake. What is
     // asserted is the contract that holds either way — a 200, a results array, and if the flag IS there,
     // only reasons from the closed set.
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'test', maxTimeMS: 1,
-    });
+    }) });
     assert.equal(r.status, 200, `Expected 200, got ${r.status}: ${JSON.stringify(r.body)}`);
     assert.ok(Array.isArray(r.body.results), 'results must be an array even on a partial answer');
     if (r.body.degraded !== undefined) {
@@ -185,7 +185,7 @@ describe('Recall maxTimeMS — the per-call deadline over REST', () => {
 
   it('a normal recall carries NO degraded key', async () => {
     // The field's value is in its absence: an empty array on every healthy response is one readers skip.
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, { query: 'test' });
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ query: 'test' }) });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal('degraded' in r.body, false, `a healthy recall must omit the key: ${JSON.stringify(r.body)}`);
   });
@@ -193,88 +193,88 @@ describe('Recall maxTimeMS — the per-call deadline over REST', () => {
 
 describe('Recall filter — input validation', () => {
   it('filter key not starting with properties./tags/type/name returns 400', async () => {
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'test',
       filter: { 'injected.key': { eq: 'value' } },
-    });
+    }) });
     assert.equal(r.status, 400, `Expected 400 for invalid filter key, got ${r.status}: ${JSON.stringify(r.body)}`);
     assert.ok(r.body.error, 'Response must have error field');
   });
 
   it('filter key with arbitrary top-level field returns 400', async () => {
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'test',
       filter: { 'spaceId': { eq: 'anything' } },
-    });
+    }) });
     assert.equal(r.status, 400, `Expected 400 for disallowed top-level key, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 
   it('filter key with _id injection attempt returns 400', async () => {
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'test',
       filter: { '_id': { eq: 'anything' } },
-    });
+    }) });
     assert.equal(r.status, 400, `Expected 400 for _id filter key, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 
   it('filter: non-object body returns 400', async () => {
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'test',
       filter: 'not-an-object',
-    });
+    }) });
     assert.equal(r.status, 400, `Expected 400 for non-object filter, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 
   it('filter: array body returns 400', async () => {
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'test',
       filter: [{ 'properties.status': { eq: 'x' } }],
-    });
+    }) });
     assert.equal(r.status, 400, `Expected 400 for array filter, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 
   it('allowed key properties.* passes validation (200)', async (t) => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'test',
       filter: { 'properties.status': { eq: 'nonexistent-value-xyzzy' } },
-    });
+    }) });
     assert.equal(r.status, 200, `Expected 200 for valid filter key, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 
   it('allowed key "type" passes validation (200)', async (t) => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'test',
       filter: { 'type': { eq: 'entity' } },
-    });
+    }) });
     assert.equal(r.status, 200, `Expected 200 for type filter key, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 
   it('allowed key "name" passes validation (200)', async (t) => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'test',
       filter: { 'name': { eq: 'nonexistent-xyzzy' } },
-    });
+    }) });
     assert.equal(r.status, 200, `Expected 200 for name filter key, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 
   it('allowed key "tags" passes validation (200)', async (t) => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'test',
       filter: { 'tags': { in: ['nonexistent-tag-xyzzy'] } },
-    });
+    }) });
     assert.equal(r.status, 200, `Expected 200 for tags filter key, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 
   it('recall without filter returns 200 (backward compat)', async (t) => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'test query',
       types: ['entity'],
-    });
+    }) });
     assert.equal(r.status, 200, `Expected 200 without filter, got ${r.status}: ${JSON.stringify(r.body)}`);
     assert.ok(Array.isArray(r.body.results), 'results must be an array');
   });
@@ -316,12 +316,12 @@ describe('Recall filter — eq filter on properties.status', () => {
 
   it('filter eq accepted — accepted entity appears, rejected does not', async (t) => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: sharedDesc,
       types: ['entity'],
       topK: 20,
       filter: { 'properties.status': { eq: 'accepted' } },
-    });
+    }) });
     assert.equal(r.status, 200, `recall returned ${r.status}: ${JSON.stringify(r.body)}`);
     const ids = r.body.results.map(x => x.record?._id ?? x._id);
     assert.ok(ids.includes(acceptedId), `Accepted entity (${acceptedId}) must be in results`);
@@ -335,12 +335,12 @@ describe('Recall filter — eq filter on properties.status', () => {
     //
     // Both fixtures share an identical description, so similarity cannot distinguish them — only the filter can. An `$or`
     // over both statuses must return BOTH, which the old grammar could not ask for.
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: sharedDesc,
       types: ['entity'],
       topK: 20,
       filter: { $or: [{ 'properties.status': 'accepted' }, { 'properties.status': 'rejected' }] },
-    });
+    }) });
     assert.equal(r.status, 200, `recall returned ${r.status}: ${JSON.stringify(r.body)}`);
     const ids = r.body.results.map(x => x.record?._id ?? x._id);
     assert.ok(ids.includes(acceptedId), `$or must reach the accepted entity: ${JSON.stringify(ids)}`);
@@ -351,12 +351,12 @@ describe('Recall filter — eq filter on properties.status', () => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
     // The half that matters more: accepting the grammar is worthless if it is then ignored. A filtered search that
     // returns everything is the defect class this whole change came out of.
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: sharedDesc,
       types: ['entity'],
       topK: 20,
       filter: { $or: [{ 'properties.status': 'accepted' }] },
-    });
+    }) });
     assert.equal(r.status, 200, `recall returned ${r.status}: ${JSON.stringify(r.body)}`);
     const ids = r.body.results.map(x => x.record?._id ?? x._id);
     assert.ok(ids.includes(acceptedId), 'the named status must be reached');
@@ -366,32 +366,32 @@ describe('Recall filter — eq filter on properties.status', () => {
 
   it('refuses a filter that MIXES the two grammars rather than guessing', async (t) => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: sharedDesc,
       filter: { $or: [{ 'properties.status': 'accepted' }], 'properties.domain': { eq: 'security' } },
-    });
+    }) });
     assert.equal(r.status, 400, `a mixed filter was accepted: ${JSON.stringify(r.body)}`);
     assert.match(r.body.error, /mixes both grammars/);
   });
 
   it('applies the key allowlist INSIDE $or, so the widening cannot smuggle a field', async (t) => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: sharedDesc,
       filter: { $or: [{ embedding: { $exists: true } }] },
-    });
+    }) });
     assert.equal(r.status, 400, `a disallowed key inside $or was accepted: ${JSON.stringify(r.body)}`);
     assert.match(r.body.error, /embedding/);
   });
 
   it('filter eq rejected — rejected entity appears, accepted does not', async (t) => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: sharedDesc,
       types: ['entity'],
       topK: 20,
       filter: { 'properties.status': { eq: 'rejected' } },
-    });
+    }) });
     assert.equal(r.status, 200, `recall returned ${r.status}: ${JSON.stringify(r.body)}`);
     const ids = r.body.results.map(x => x.record?._id ?? x._id);
     assert.ok(!ids.includes(acceptedId), `Accepted entity must NOT be in rejected-filter results`);
@@ -400,12 +400,12 @@ describe('Recall filter — eq filter on properties.status', () => {
 
   it('filter ne rejected — accepted entity appears, rejected does not', async (t) => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: sharedDesc,
       types: ['entity'],
       topK: 20,
       filter: { 'properties.status': { ne: 'rejected' } },
-    });
+    }) });
     assert.equal(r.status, 200, `recall returned ${r.status}: ${JSON.stringify(r.body)}`);
     const ids = r.body.results.map(x => x.record?._id ?? x._id);
     assert.ok(ids.includes(acceptedId), `Accepted entity must appear with ne:rejected filter`);
@@ -443,12 +443,12 @@ describe('Recall filter — numeric gt/gte/lt/lte on properties', () => {
 
   it('filter gt:10 returns high-count record, excludes low-count', async (t) => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: desc,
       types: ['memory'],
       topK: 20,
       filter: { 'properties.count': { gt: 10 } },
-    });
+    }) });
     assert.equal(r.status, 200, `recall returned ${r.status}: ${JSON.stringify(r.body)}`);
     const ids = r.body.results.map(x => x.record?._id ?? x._id);
     assert.ok(ids.includes(highId), `High-count memory must appear with gt:10 filter`);
@@ -457,12 +457,12 @@ describe('Recall filter — numeric gt/gte/lt/lte on properties', () => {
 
   it('filter lte:10 returns low-count record, excludes high-count', async (t) => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: desc,
       types: ['memory'],
       topK: 20,
       filter: { 'properties.count': { lte: 10 } },
-    });
+    }) });
     assert.equal(r.status, 200, `recall returned ${r.status}: ${JSON.stringify(r.body)}`);
     const ids = r.body.results.map(x => x.record?._id ?? x._id);
     assert.ok(!ids.includes(highId), `High-count memory must NOT appear with lte:10 filter`);
@@ -471,12 +471,12 @@ describe('Recall filter — numeric gt/gte/lt/lte on properties', () => {
 
   it('filter gte:5 and lt:100 (range) returns only high-count and low-count', async (t) => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: desc,
       types: ['memory'],
       topK: 20,
       filter: { 'properties.count': { gte: 5, lt: 100 } },
-    });
+    }) });
     assert.equal(r.status, 200, `recall returned ${r.status}: ${JSON.stringify(r.body)}`);
     const ids = r.body.results.map(x => x.record?._id ?? x._id);
     assert.ok(ids.includes(highId), `High-count memory must appear with gte:5,lt:100 filter`);
@@ -521,12 +521,12 @@ describe('Recall filter — tags in (any-of)', () => {
 
   it('filter tags in ["security","infra"] returns both security and infra records, not unrelated', async (t) => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: desc,
       types: ['memory'],
       topK: 20,
       filter: { 'tags': { in: ['security', 'infra'] } },
-    });
+    }) });
     assert.equal(r.status, 200, `recall returned ${r.status}: ${JSON.stringify(r.body)}`);
     const ids = r.body.results.map(x => x.record?._id ?? x._id);
     assert.ok(ids.includes(securityId), `Security-tagged memory must appear`);
@@ -564,12 +564,12 @@ describe('Recall filter — exists operator', () => {
 
   it('filter exists:true on properties.domain returns only records that have that property', async (t) => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: desc,
       types: ['memory'],
       topK: 20,
       filter: { 'properties.domain': { exists: true } },
-    });
+    }) });
     assert.equal(r.status, 200, `recall returned ${r.status}: ${JSON.stringify(r.body)}`);
     const ids = r.body.results.map(x => x.record?._id ?? x._id);
     assert.ok(ids.includes(withPropId), `Record with property must appear`);
@@ -578,12 +578,12 @@ describe('Recall filter — exists operator', () => {
 
   it('filter exists:false on properties.domain returns only records without that property', async (t) => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: desc,
       types: ['memory'],
       topK: 20,
       filter: { 'properties.domain': { exists: false } },
-    });
+    }) });
     assert.equal(r.status, 200, `recall returned ${r.status}: ${JSON.stringify(r.body)}`);
     const ids = r.body.results.map(x => x.record?._id ?? x._id);
     assert.ok(!ids.includes(withPropId), `Record with property must NOT appear`);
@@ -623,9 +623,9 @@ describe('Recall filter — tags param (must contain ALL; native fast path)', ()
 
   it('tags:[alpha,beta] returns only the record carrying BOTH tags', async (t) => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: desc, types: ['memory'], topK: 20, tags: ['alpha-all', 'beta-all'],
-    });
+    }) });
     assert.equal(r.status, 200, `recall ${r.status}: ${JSON.stringify(r.body)}`);
     const ids = r.body.results.map(x => x.record?._id ?? x._id);
     assert.ok(ids.includes(bothId), 'record with BOTH tags must appear');
@@ -683,9 +683,9 @@ describe('Recall filter — schema-declared property (native path via typeSchema
 
   it('filter properties.region eq north returns only the north site', async (t) => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SCHEMA_SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SCHEMA_SPACE, ...({
       query: desc, types: ['entity'], topK: 20, filter: { 'properties.region': { eq: 'north' } },
-    });
+    }) });
     assert.equal(r.status, 200, `recall ${r.status}: ${JSON.stringify(r.body)}`);
     const ids = r.body.results.map(x => x.record?._id ?? x._id);
     assert.ok(ids.includes(northId), 'north site must appear');

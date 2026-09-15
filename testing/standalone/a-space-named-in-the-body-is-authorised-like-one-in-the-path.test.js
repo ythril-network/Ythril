@@ -30,6 +30,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 const { spacesForBodyScopedRequest } = await import('../../server/dist/auth/body-scoped-space.js');
 
@@ -145,5 +146,33 @@ describe('the value that was authorised is the value handed on', () => {
       assert.deepEqual(out.spaces, [], `${JSON.stringify(bad)} was accepted as a space`);
       assert.match(out.refusal ?? '', /space/i);
     }
+  });
+});
+
+describe('a body-scoped route still says which spaces it read', () => {
+  // Moving the space out of the path took it out of the AUDIT entry, which reads its `spaceId` from a path
+  // match group. An audit line saying `spaceId: null` for a search that returned real data is a hole in the
+  // one record that exists to answer "who read what" — and it would have shipped green, because nothing
+  // asserts on a field being populated.
+  const src = readFileSync(
+    new URL('../../server/src/audit/middleware.ts', import.meta.url), 'utf8');
+
+  it('falls back to the spaces the GUARD authorised, not to null', () => {
+    assert.match(src, /spaceId:\s*matched\.spaceId\s*\?\?\s*\(req\.authorisedSpaces/,
+      'a route with no space in its path would log spaceId: null');
+  });
+
+  it('and not by re-reading the body, which could name a space the call never touched', () => {
+    const line = src.split('\n').find(l => l.includes('spaceId: matched.spaceId'));
+    assert.ok(line && !line.includes('req.body'),
+      'the audited space must be the authorised one, or the log can disagree with what happened');
+  });
+
+  it('no audit rule still matches the retired path', () => {
+    // A rule for a route that no longer exists matches nothing for ever, and reads as coverage.
+    // A literal, not a regex: the pattern being searched for IS a regex in the source, and escaping one
+    // inside the other is how this assertion ends up matching nothing and passing for ever.
+    assert.ok(!src.includes(']+)/recall'),
+      'the audit map still carries a rule for /spaces/:spaceId/recall, which no router declares');
   });
 });

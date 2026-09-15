@@ -572,7 +572,7 @@ composes what REST exposes as one DELETE per collection.
 | | `delete_chrono` | `DELETE /api/brain/spaces/:spaceId/chrono/:id` | write `knowledge` |
 | | `list_chrono` | `GET /api/brain/spaces/:spaceId/chrono` | read `knowledge` |
 | **Brain — search** | | | |
-| | `recall` | `POST /api/brain/spaces/:spaceId/recall` | read `knowledge` |
+| | `recall` | `POST /api/brain/recall` | read `knowledge` |
 | | `query` | `POST /api/brain/spaces/:spaceId/query` | read `knowledge` |
 | | `find_similar` | `POST /api/brain/spaces/:spaceId/find-similar` | read `knowledge` |
 | | `traverse` | `POST /api/brain/spaces/:spaceId/traverse` | read `knowledge` |

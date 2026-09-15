@@ -5,7 +5,7 @@
  */
 import { Router } from 'express';
 import { BRAIN_COLLECTIONS } from '../../config/types.js';
-import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
+import { requireSpaceAuth, requireBodyScopedSpace, denyReadOnly } from '../../auth/middleware.js';
 import { spacesWhereTokenMay } from '../../auth/reachable-spaces.js';
 import type { TokenRights } from '../../config/rights-shape.js';
 import { summariseActivity } from '../../metrics/space-activity-store.js';
@@ -398,14 +398,29 @@ searchRouter.post('/spaces/:spaceId/query', globalRateLimit, requireSpaceAuth, s
 });
 
 
-// POST /api/brain/spaces/:spaceId/recall — semantic vector search by natural language query
-searchRouter.post('/spaces/:spaceId/recall', globalRateLimit, requireSpaceAuth, statesRetryability, async (req, res) => {
-  const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
+/*
+ * POST /api/brain/recall — meaning-ranked search, across one space or across every space you can read.
+ *
+ * ## The space is a parameter, not a path segment, and that is the whole reason this route moved
+ *
+ * Owner ruling, 2026-09-15: *"filter should also be able to read cross space"* and *"in that case the route
+ * has to change and space moved to parameter."* A path segment cannot be omitted, so `/spaces/:spaceId/recall`
+ * could never express "search everything I can reach" — MCP's `recall` has taken an optional space since it
+ * shipped, and REST callers had to point at a proxy space or make one call per space and merge by hand.
+ *
+ * ## Authorisation happens ONCE, in the guard, and this handler acts on what it returned
+ *
+ * `requireBodyScopedSpace` resolves `req.body.space` and hands back `req.authorisedSpaces`. This handler
+ * never reads `req.body.space` again: a second reading is the defect the guard exists to prevent, because
+ * the two readings are spelled identically and nothing in a diff shows that the value acted on is not the
+ * value that was checked.
+ */
+searchRouter.post('/recall', globalRateLimit, requireBodyScopedSpace('knowledge', 'read'), statesRetryability, async (req, res) => {
+  // Resolved and authorised by the guard. A named space narrows to itself; an omitted one means every space
+  // this token may read, which is the case a path segment could not express.
+  const authorised = req.authorisedSpaces ?? [];
+  const namedSpace = req.resolvedSpaceId;
+  const spaceId = namedSpace ?? authorised[0] ?? '';
   // A mistyped `minScore` on recall silently returns the unfiltered ranking, which reads as a working search.
   const badRecall = unknownBodyFields((req.body ?? {}) as Record<string, unknown>, RECALL_BODY_FIELDS);
   if (badRecall) { res.status(400).json(badRecall); return; }
@@ -547,7 +562,11 @@ searchRouter.post('/spaces/:spaceId/recall', globalRateLimit, requireSpaceAuth, 
       : undefined;
 
   try {
-    const memberIds = memberSpacesForRequest(req, spaceId);
+    // A NAMED space may be a proxy, so it resolves to its members and is narrowed to this request's reach.
+    // An omitted one is already that list: the guard filtered every reachable space to the ones where this
+    // token actually holds `knowledge: read`, which is a stricter question than reach and the reason the
+    // guard returns spaces rather than a boolean.
+    const memberIds = namedSpace ? memberSpacesForRequest(req, namedSpace) : authorised;
     // One collector across every member, deduped by `recall` itself, so a proxy space reports "the answer is
     // partial" once rather than once per member.
     // Opt-in scan of the newest records, for the case the index has not caught up yet. Rejected rather

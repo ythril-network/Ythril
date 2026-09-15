@@ -229,16 +229,16 @@ after(async () => {
 
 describe('Recall traverse — input validation', () => {
   it('traverse: 6 (over cap) returns 400', async () => {
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, { query: 'anything', traverse: 6 });
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ query: 'anything', traverse: 6 }) });
     assert.equal(r.status, 400, JSON.stringify(r.body));
     assert.match(r.body.error, /traverse/);
   });
   it('traverse: -1 (negative) returns 400', async () => {
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, { query: 'anything', traverse: -1 });
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ query: 'anything', traverse: -1 }) });
     assert.equal(r.status, 400, JSON.stringify(r.body));
   });
   it('traverse: 2.5 (non-integer) returns 400', async () => {
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, { query: 'anything', traverse: 2.5 });
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ query: 'anything', traverse: 2.5 }) });
     assert.equal(r.status, 400, JSON.stringify(r.body));
   });
 });
@@ -250,7 +250,7 @@ describe('Recall traverse — graph expansion', () => {
 
   it('traverse: 0 is identical to classic recall (backward compat)', async (t) => {
     if (!embeddingAvailable) return t.skip('embedding unavailable');
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, { query: q, types: ['entity'], traverse: 0 });
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ query: q, types: ['entity'], traverse: 0 }) });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.traverseDepth, undefined, 'classic response must not carry traverseDepth');
     assert.ok(Array.isArray(r.body.results));
@@ -262,7 +262,7 @@ describe('Recall traverse — graph expansion', () => {
 
   it('traverse: 1 returns the seed plus its direct neighbours, annotated', async (t) => {
     if (!embeddingAvailable) return t.skip('embedding unavailable');
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, { query: q, types: ['entity'], topK: 10, traverse: 1 });
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ query: q, types: ['entity'], topK: 10, traverse: 1 }) });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.traverseDepth, 1);
 
@@ -290,7 +290,7 @@ describe('Recall traverse — graph expansion', () => {
 
   it('traverse: 2 reaches the two-hop neighbour with a two-edge path', async (t) => {
     if (!embeddingAvailable) return t.skip('embedding unavailable');
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, { query: q, types: ['entity'], topK: 10, traverse: 2 });
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ query: q, types: ['entity'], topK: 10, traverse: 2 }) });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     const b = nested(r.body.results, entB);
     assert.ok(b, 'the one-hop neighbour B is nested under the seed');
@@ -307,7 +307,7 @@ describe('Recall traverse — graph expansion', () => {
   it('a cycle does not loop or duplicate records', async (t) => {
     if (!embeddingAvailable) return t.skip('embedding unavailable');
     // C→A closes a cycle. Depth 3 would revisit A without cycle detection.
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, { query: q, types: ['entity'], topK: 10, traverse: 3 });
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ query: q, types: ['entity'], topK: 10, traverse: 3 }) });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     const ids = [...r.body.results.map(x => x._id), ...allNested(r.body.results).map(n => n.node?._id)];
     const unique = new Set(ids);
@@ -331,8 +331,7 @@ describe('Recall traverse — links, which are not edges', () => {
      * seed in `entityIds` is related to it, and an ordinary `traverse: 1` must still not return it: a change
      * that silently widened the walk would spend the caller's byte budget on records they did not ask for.
      */
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`,
-      { query: q, types: ['entity'], topK: 10, traverse: 1 });
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ query: q, types: ['entity'], topK: 10, traverse: 1 }) });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(nested(r.body.results, memLinked), undefined,
       'a link was followed without being asked for');
@@ -340,8 +339,7 @@ describe('Recall traverse — links, which are not edges', () => {
 
   it('includeMemories reaches it, with its kind and a synthetic edge', async (t) => {
     if (!embeddingAvailable) return t.skip('embedding unavailable');
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`,
-      { query: q, types: ['entity'], topK: 10, traverse: { depth: 1, includeMemories: true } });
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ query: q, types: ['entity'], topK: 10, traverse: { depth: 1, includeMemories: true } }) });
     assert.equal(r.status, 200, JSON.stringify(r.body));
 
     const mem = nested(r.body.results, memLinked);
@@ -361,10 +359,10 @@ describe('Recall traverse — links, which are not edges', () => {
     if (!embeddingAvailable) return t.skip('embedding unavailable');
     // A filter that cannot exclude something is not a filter. Asking for `depends_on` alone must not return
     // memories just because the flag is on.
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: q, types: ['entity'], topK: 10,
       traverse: { depth: 1, includeMemories: true, edgeLabels: ['depends_on'] },
-    });
+    }) });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(nested(r.body.results, memLinked), undefined, 'an explicit label filter did not exclude the link');
     assert.ok(nested(r.body.results, entB), 'the named label must still be followed');
@@ -378,15 +376,13 @@ describe('Recall traverse — links, which are not edges', () => {
      * caller to lift the ids off the match and traverse from one of those by hand.
      */
     const mq = 'wombat marsupial burrow relocation checklist';
-    const off = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`,
-      { query: mq, types: ['memory'], topK: 5, traverse: 1 });
+    const off = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ query: mq, types: ['memory'], topK: 5, traverse: 1 }) });
     assert.equal(off.status, 200, JSON.stringify(off.body));
     const seedOff = off.body.results.find(x => x._id === seedMemId);
     assert.ok(seedOff, 'the memory must match its own text');
     assert.equal(nested(off.body.results, seedAId), undefined, 'unflagged behaviour must be unchanged');
 
-    const on = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`,
-      { query: mq, types: ['memory'], topK: 5, traverse: { depth: 1, includeMemories: true } });
+    const on = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ query: mq, types: ['memory'], topK: 5, traverse: { depth: 1, includeMemories: true } }) });
     assert.equal(on.status, 200, JSON.stringify(on.body));
     const a = nested(on.body.results, seedAId);
     assert.ok(a, `the entity the memory names must be hop 1: ${JSON.stringify(allNested(on.body.results).map(n => n.node?._id))}`);
@@ -398,10 +394,10 @@ describe('Recall traverse — links, which are not edges', () => {
     if (!embeddingAvailable) return t.skip('embedding unavailable');
     // Reaching the entity and stopping would be half the fix: the point of starting from it is that
     // everything the graph relates to it is now reachable from the memory that matched.
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'wombat marsupial burrow relocation checklist',
       types: ['memory'], topK: 5, traverse: { depth: 2, includeMemories: true },
-    });
+    }) });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     const b = nested(r.body.results, entB);
     assert.ok(b, `A→B must be reached at depth 2: ${JSON.stringify(allNested(r.body.results).map(n => n.node?._id))}`);
@@ -421,10 +417,10 @@ describe('Recall traverse — links, which are not edges', () => {
      * At topK 5 the sibling ranked, the graph held only entities, and that reads exactly like a broken walk —
      * it cost several hours and a wrong bug report before the `topK` was the thing that changed.
      */
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'wombat marsupial burrow relocation checklist',
       types: ['memory'], topK: 1, traverse: { depth: 2, includeMemories: true },
-    });
+    }) });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.results?.length, 1, 'more than one match makes this test unable to fail honestly');
 
@@ -439,15 +435,13 @@ describe('Recall traverse — links, which are not edges', () => {
     if (!embeddingAvailable) return t.skip('embedding unavailable');
     // A response echoing `traverse: 1` for a call that also asked for memories would describe a walk the
     // server did not do, which is the one thing the echo exists to prevent.
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`,
-      { query: q, types: ['entity'], topK: 5, traverse: { depth: 1, includeMemories: true } });
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ query: q, types: ['entity'], topK: 5, traverse: { depth: 1, includeMemories: true } }) });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.traverse?.includeMemories, true, `echo was: ${JSON.stringify(r.body.traverse)}`);
   });
 
   it('a non-boolean flag is refused, not coerced', async () => {
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`,
-      { query: 'anything', traverse: { depth: 1, includeChrono: 'yes' } });
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ query: 'anything', traverse: { depth: 1, includeChrono: 'yes' } }) });
     assert.equal(r.status, 400, JSON.stringify(r.body));
     assert.match(r.body.error, /includeChrono/);
   });
@@ -458,9 +452,9 @@ describe('Recall traverse — result cap', () => {
     if (!embeddingAvailable) return t.skip('embedding unavailable');
     // topK 1, traverse 1 → cap = 1 * (1+1) * 4 = 8. Hub has 30 leaves at hop 1,
     // so truncation MUST engage: exactly 1 seed + 7 neighbours = 8.
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE_DENSE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE_DENSE, ...({
       query: 'telemetry metrics aggregation collectors', types: ['entity'], topK: 1, traverse: 1,
-    });
+    }) });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     // The cap bounds the traversed NODES exactly as before — `topK * (traverse+1) * 4` minus the seeds — but
     // `count` now describes the matches, so the two numbers are asserted separately rather than conflated.
@@ -479,9 +473,9 @@ describe('Recall traverse — the complete graph is downloadable when it does no
   // this at all, which is exactly how the deep-skip defect shipped behind tests that paged 12 and 25 rows.
   it('a graph past the cap returns a link to the whole of it', async (t) => {
     if (!embeddingAvailable) return t.skip('embedding unavailable');
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE_DENSE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE_DENSE, ...({
       query: 'telemetry metrics aggregation collectors', types: ['entity'], topK: 1, traverse: 1,
-    });
+    }) });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.graphTruncated, true, 'the inline graph is short, and the response must say so');
     assert.ok(r.body.graphComplete, 'and must say where the rest is');
@@ -496,9 +490,9 @@ describe('Recall traverse — the complete graph is downloadable when it does no
 
   it('the link needs the caller token, and serves the complete graph', async (t) => {
     if (!embeddingAvailable) return t.skip('embedding unavailable');
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE_DENSE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE_DENSE, ...({
       query: 'telemetry metrics aggregation collectors', types: ['entity'], topK: 1, traverse: 1,
-    });
+    }) });
     const url = `${INSTANCES.a}${r.body.graphComplete.download}`;
 
     // Unauthenticated first. A download URL that worked without a token would be a way to read a space's
@@ -520,9 +514,9 @@ describe('Recall traverse — the complete graph is downloadable when it does no
     if (!embeddingAvailable) return t.skip('embedding unavailable');
     // The other half of the check, and the one a flag-only implementation would have got wrong: three
     // neighbours at depth 1 in the chain space is well inside the cap.
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'authentication token scoping vault', types: ['entity'], topK: 10, traverse: 1,
-    });
+    }) });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.graphTruncated, undefined, 'a complete graph must not be flagged as truncated');
     assert.equal(r.body.graphComplete, undefined, 'and must not write a file nobody needs');
@@ -530,9 +524,9 @@ describe('Recall traverse — the complete graph is downloadable when it does no
 
   it('the spill is hidden from file browsing and never queued for embedding', async (t) => {
     if (!embeddingAvailable) return t.skip('embedding unavailable');
-    await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE_DENSE}/recall`, {
+    await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE_DENSE, ...({
       query: 'telemetry metrics aggregation collectors', types: ['entity'], topK: 1, traverse: 1,
-    });
+    }) });
 
     // Hidden: `_tmp` is output, like `_converted/` and `_extracted/`.
     const listing = await get(INSTANCES.a, token(), `/api/files/${SPACE_DENSE}`);

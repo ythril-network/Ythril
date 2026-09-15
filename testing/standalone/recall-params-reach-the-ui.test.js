@@ -6,7 +6,7 @@
  * The owner asked where the search is that has all the fields `recall` accepts via MCP. It is the Brain →
  * Query tab's recall panel, and the answer was "ten of the twelve".
  *
- * `POST /api/brain/spaces/:spaceId/recall` has always accepted `traverse` (graph expansion, 0–5) and
+ * `POST /api/brain/recall` has always accepted `traverse` (graph expansion, 0–5) and
  * `maxTimeMS` (a deadline that returns a PARTIAL answer instead of hanging). Both are validated by the route.
  * Both are documented on the MCP tool. Neither was **declared on the client's typed `recallBrain` body**, so
  * no component could send them and no form could offer them. A capability shipped on two surfaces and reached
@@ -92,7 +92,7 @@ function paramsOf(path) {
 }
 
 function routeParams() {
-  const names = paramsOf('/spaces/:spaceId/recall');
+  const names = paramsOf('/recall');
 
   // `space` is the path parameter, not a body field, and `query` is required rather than optional.
   assert.ok(names.has('query'), 'the parsed set does not contain `query` — the parser is reading the wrong statement');

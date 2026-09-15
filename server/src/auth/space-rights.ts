@@ -48,7 +48,16 @@ export const RUNGS = ['none', 'read', 'write', 'admin'] as const;
 export type Rung = (typeof RUNGS)[number];
 
 /** How a route learns which space it is acting on. See the note above — this is not cosmetic. */
-export type ScopeShape = 'path' | 'iterates';
+export type ScopeShape = 'path' | 'iterates' | 'body';
+
+/*
+ * `body` arrived at 5.0, when the search family dropped its `/spaces/:spaceId` segment so a caller could
+ * omit the space and search everything it may read. Those routes are NOT enforced by `enforceAreaRung`:
+ * its loop refuses unless the rung is held in EVERY target, which is right for a named space and would
+ * kill a cross-space search because some space the caller never asked about exists on the instance.
+ * `requireBodyScopedSpace` owns them instead, and the row here is what makes the area and the rung
+ * visible to the inventory, the docs and the audit rather than living only in a middleware argument.
+ */
 
 export interface RouteRight {
   /** Express path as registered, including the router's mount prefix. */
@@ -96,7 +105,7 @@ export interface RouteRight {
  */
 export const ROUTE_RIGHTS: readonly RouteRight[] = [
   // ── Knowledge ────────────────────────────────────────────────────────────────────────────────────────
-  { route: '/api/brain/spaces/:spaceId/recall', method: 'POST', area: 'knowledge', needs: 'read', scope: 'path' },
+  { route: '/api/brain/recall', method: 'POST', area: 'knowledge', needs: 'read', scope: 'body' },
   { route: '/api/brain/spaces/:spaceId/query', method: 'POST', area: 'knowledge', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/traverse', method: 'POST', area: 'knowledge', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/find-similar', method: 'POST', area: 'knowledge', needs: 'read', scope: 'path' },

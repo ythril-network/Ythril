@@ -94,9 +94,13 @@ function clientPosts() {
   const found = [];
   for (const file of clientSources()) {
     const src = strip(readFileSync(file, 'utf8'));
-    const call = /\.post\s*<[^(;]*?>\s*\(\s*`\/api\/brain\/spaces\/\$\{[^}]+\}\/([a-z-]+)`\s*,\s*/g;
+    // TWO shapes, because 5.0 moved the search family off the space path: the older
+    // `/api/brain/spaces/${id}/<route>` template, and the body-scoped `'/api/brain/<route>'` plain string
+    // where the space rides in the body. A regex that knew only the first reported “no client POST found”
+    // for a route the client calls on every search — an extractor defect that reads as a missing caller.
+    const call = /\.post\s*<[^(;]*?>\s*\(\s*(?:`\/api\/brain\/spaces\/\$\{[^}]+\}\/([a-z-]+)`|'\/api\/brain\/([a-z-]+)')\s*,\s*/g;
     for (let m = call.exec(src); m; m = call.exec(src)) {
-      const route = m[1];
+      const route = m[1] ?? m[2];
       if (!SETS.has(route)) continue;
       const argAt = m.index + m[0].length;
       if (src[argAt] === '{') {

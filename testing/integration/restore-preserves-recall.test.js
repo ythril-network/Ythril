@@ -46,7 +46,7 @@ async function recallEventually(query, { timeoutMs = 120_000, intervalMs = 3_000
   const deadline = Date.now() + timeoutMs;
   let last = null;
   while (Date.now() < deadline) {
-    const r = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/recall', { query, topK: 3 });
+    const r = await post(INSTANCES.a, tokenA, '/api/brain/recall', { space: 'general', query, topK: 3 });
     last = r;
     if (r.status === 200 && (r.body?.count ?? r.body?.results?.length ?? 0) > 0) {
       return { ok: true, elapsedMs: timeoutMs - (deadline - Date.now()), body: r.body };

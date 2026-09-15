@@ -69,8 +69,7 @@ after(async () => {
 
 /** REST: did this filter produce an answer, or a refusal? */
 async function viaRest(filter) {
-  const r = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/recall`,
-    { query: 'board note about retrieval', filter, includeFreshWrites: true, topK: 10 });
+  const r = await post(INSTANCES.a, token, '/api/brain/recall', { space: SPACE, ...({ query: 'board note about retrieval', filter, includeFreshWrites: true, topK: 10 }) });
   return { accepted: r.status === 200, detail: r.status === 200 ? '' : JSON.stringify(r.body).slice(0, 200) };
 }
 
@@ -144,10 +143,10 @@ describe('recall filter: both doors accept and refuse the same things', () => {
     // A filter that is accepted and matches nothing would satisfy every assertion above while proving the
     // grammar reaches no records. `$not` on a value that is present is the reported shape, and the seeded
     // record's `readBy` is "the canary operator" — so `$not /ythril/` must return it.
-    const r = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/recall`, {
+    const r = await post(INSTANCES.a, token, '/api/brain/recall', { space: SPACE, ...({
       query: 'board note about retrieval', includeFreshWrites: true, topK: 10,
       filter: { type: 'message', 'properties.readBy': { $not: { $regex: 'ythril' } } },
-    });
+    }) });
     assert.equal(r.status, 200, JSON.stringify(r.body).slice(0, 200));
     assert.ok(r.body.results.length >= 1,
       'the raw filter must reach the seeded record — an accepted filter returning nothing proves nothing');

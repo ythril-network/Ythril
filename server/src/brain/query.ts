@@ -109,6 +109,10 @@ export const TRAVERSE_BODY_FIELDS: ReadonlySet<string> = new Set([
 ]);
 
 export const RECALL_BODY_FIELDS: ReadonlySet<string> = new Set([
+  // `space` is a BODY field since 5.0 — the route dropped its `/spaces/:spaceId` segment so the search can
+  // run across every space the token reads. Omitting it is the cross-space call, not an error. The guard
+  // (`requireBodyScopedSpace`) consumes it; the handler never reads it again.
+  'space',
   'query', 'topK', 'types', 'minScore', 'filter', 'traverse', 'tags',
   'minPerType', 'maxPerType', 'maxTimeMS',
   // NOT on the destructuring line — these two are read 120 lines further down the handler as

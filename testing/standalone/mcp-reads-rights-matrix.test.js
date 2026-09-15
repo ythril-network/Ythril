@@ -34,9 +34,13 @@ const SRC = readFileSync(new URL('../../server/src/mcp/router.ts', import.meta.u
 const CODE = SRC.replace(/(^|[^:])\/\/.*$/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
 
 describe('the rights matrix decides', () => {
-  it('consults reachesSpace, not the allowlist alone', () => {
-    assert.match(CODE, /reachesSpace\(rights, s\.id\)/);
+  it('resolves reach through the matrix module, not an allowlist', () => {
+    // The import is the durable half: whether the dispatcher filters inline or calls the shared helper,
+    // it must get its answer from `space-reach.ts` — the module whose whole subject is “does this matrix
+    // reach this space”. The expression itself moved at 5.0 and is asserted where it now lives, below.
     assert.match(CODE, /from '\.\.\/auth\/space-reach\.js'/);
+    assert.match(CODE, /reach(?:esSpace|ableSpaceIds)\(/,
+      'the dispatcher must ask the reach module rather than reading an allowlist itself');
   });
 
   it('receives the rights from the request at every transport that builds a server', () => {
@@ -69,8 +73,26 @@ describe('the rights matrix decides', () => {
      * `a-token-without-a-matrix-reaches-nothing.test.js` carries the proof that no record without a matrix
      * reaches a handler; what is asserted here is that this surface no longer has the arm.
      */
-    assert.match(CODE, /rights \? reachesSpace\(rights, s\.id\) : false/,
-      'the accessible-space filter reads the matrix, and answers false without one');
+    /*
+     * THE RULE, NOT THE SITE. This pinned the literal expression
+     * `rights ? reachesSpace(rights, s.id) : false` in the dispatcher, and at 5.0 that expression moved: a
+     * body-scoped REST route needed the identical list, so the filter became `reachableSpaceIds` in
+     * `auth/space-reach.ts` and both doors call it. The assertion broke on an extraction that made the
+     * rule HARDER to get wrong, which is the failure mode of naming a site instead of a rule.
+     *
+     * Both halves are still checked, in the place each now lives: the dispatcher must resolve its list
+     * through the shared helper rather than filtering by hand, and the helper must answer NOTHING without a
+     * matrix.
+     */
+    assert.match(CODE, /reachableSpaceIds\(rights,/,
+      'the dispatcher must resolve its accessible spaces through the shared helper, not a private filter');
+
+    const REACH = readFileSync(new URL('../../server/src/auth/space-reach.ts', import.meta.url), 'utf8');
+    const helper = REACH.slice(REACH.indexOf('export function reachableSpaceIds'));
+    assert.ok(helper.length > 0, 'reachableSpaceIds is gone or renamed — re-anchor this gate');
+    assert.match(helper, /if \(!rights\) return \[\];/,
+      'the accessible-space filter must answer NOTHING without a matrix — an absent matrix once meant '
+      + 'unrestricted, and that is the direction this fails in');
 
     /*
      * And the dispatcher's own per-call check went with it, which is the find worth recording: it read
@@ -86,7 +108,13 @@ describe('the rights matrix decides', () => {
   it('does not read `spaces` when rights are present', () => {
     // The whole defect. A belt-and-braces `&&` of the two would re-admit the stale array as a second gate, and the
     // matrix can be WIDER than the legacy list — so an `&&` would silently refuse access the matrix grants.
-    const filter = CODE.slice(CODE.indexOf('const accessibleSpaces'), CODE.indexOf('const accessibleSpaceIds'));
+    // Both declarations, in whichever order they appear: the filter moved into the shared helper at 5.0 and
+    // `accessibleSpaceIds` is now derived FIRST, so a slice assuming the old order reads backwards and
+    // silently checks an empty string.
+    const a = CODE.indexOf('const accessibleSpaces');
+    const b = CODE.indexOf('const accessibleSpaceIds');
+    const filter = CODE.slice(Math.min(a, b), Math.max(a, b) + 200);
+    assert.ok(a > -1 && b > -1, 'neither accessible-spaces declaration was found — re-anchor this gate');
     assert.ok(!/tokenSpaces\.includes\(s\.id\)\s*&&/.test(filter), 'the legacy list is still gating alongside rights');
     assert.ok(!/&&\s*!?tokenSpaces/.test(filter), 'the legacy list is still gating alongside rights');
   });

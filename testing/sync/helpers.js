@@ -238,8 +238,7 @@ export async function waitForIndexed(baseUrl, token, spaceId, ids, types, timeou
   let lastStatus = null;
   let polls = 0;
   while (pending.size > 0 && Date.now() < deadline) {
-    const r = await post(baseUrl, token, `/api/brain/spaces/${spaceId}/recall`,
-      { query: 'indexing probe query', types, topK: 100 });
+    const r = await post(baseUrl, token, '/api/brain/recall', { space: spaceId, ...({ query: 'indexing probe query', types, topK: 100 }) });
     polls++;
     lastStatus = r.status;
     if (r.status === 200 && Array.isArray(r.body?.results)) {

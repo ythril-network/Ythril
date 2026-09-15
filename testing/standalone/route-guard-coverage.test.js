@@ -26,7 +26,9 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { argumentsOf } from './_structural-window.mjs';
 import { routerMounts } from './_router-mounts.mjs';
+import { stripComments } from './_strip-comments.mjs';
 import fs from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
 
@@ -48,22 +50,60 @@ const ROUTER_DIRS = [
 ];
 const API_DIR = ROUTER_DIRS[0];
 const APP_TS = path.join(__dirname, '..', '..', 'server', 'src', 'app.ts');
+/** `server/src`, for reading the module that DEFINES the guards rather than the routes that use them. */
+const SERVER = path.join(__dirname, '..', '..', 'server', 'src');
 
 const MUTATING = new Set(['post', 'put', 'patch', 'delete']);
 
 /** Any of these means "an authenticated identity is required to reach this route". */
-const AUTH_GUARDS = [
-  'requireSpaceAuth',
-  'requireAuth',
-  'requireAdminMfaScoped',
-  'requireAdminMfa',
-  'requireAdmin',
-  // `mcpRouter.use(requireMcpAuth)` guards every MCP route, but this list did not know the name — so the
-  // router was EXEMPTED instead, under a reason ("authorises at the tool dispatcher") that described its
-  // read-only enforcement rather than its authentication. Between that and the scan never reaching
-  // `server/src/mcp`, the entire agent-facing API sat outside this gate.
-  'requireMcpAuth',
-];
+/**
+ * Every middleware that establishes an identity — DERIVED from the module that defines them.
+ *
+ * This was a hand-written list of five names, and the comment it carried is the argument for deriving it:
+ * `requireMcpAuth` was missing, so rather than being recognised the whole MCP router was EXEMPTED, under a
+ * reason that described its read-only enforcement instead of its authentication. The entire agent-facing API
+ * sat outside this gate until somebody noticed the name.
+ *
+ * The same thing happened again at 5.0 with `requireBodyScopedSpace`, which is what prompted this: a new
+ * guard is invisible to a list, and the gate reports the route it guards as UNPROTECTED — a false alarm that
+ * costs a debugging session, where the reverse (a guard nobody added, silently trusted) costs a breach.
+ *
+ * **The property, not the names:** an auth guard is an exported middleware in `auth/middleware.ts` whose body
+ * reaches `resolveAuthOrFail`, directly or through another guard. Two passes, because `requireSpaceAuth` is
+ * `requireSpaceAuthScoped('spaceId')` — a binding whose own body calls nothing.
+ */
+function deriveAuthGuards() {
+  const src = stripComments(readFileSync(path.join(SERVER, 'auth/middleware.ts'), 'utf8'));
+
+  // Each exported binding, with the source span up to the next top-level export. A span rather than a
+  // brace-match: the question is only "does this definition reach the resolver", and a span cannot
+  // under-read it.
+  const spans = [];
+  const re = /^export\s+(?:async\s+)?(?:function|const)\s+([A-Za-z_$][\w$]*)/gm;
+  const marks = [...src.matchAll(re)];
+  for (let i = 0; i < marks.length; i++) {
+    const start = marks[i].index;
+    const end = i + 1 < marks.length ? marks[i + 1].index : src.length;
+    spans.push({ name: marks[i][1], body: src.slice(start, end) });
+  }
+  assert.ok(spans.length > 5, `parsed ${spans.length} exports from auth/middleware.ts — the derivation broke`);
+
+  const guards = new Set(spans.filter(x => x.body.includes('resolveAuthOrFail')).map(x => x.name));
+  // Second pass: a thin binding of a guard is a guard.
+  for (const x of spans) {
+    if (guards.has(x.name)) continue;
+    if ([...guards].some(g => new RegExp(`\\b${g}\\s*\\(`).test(x.body))) guards.add(x.name);
+  }
+
+  // The floor. An empty or tiny set passes every loop written over it, and this one decides whether a
+  // mutating route counts as protected — the direction that fails OPEN.
+  assert.ok(guards.size >= 5,
+    `derived only ${guards.size} auth guards (${[...guards].join(', ')}) — expected at least the five that `
+    + 'predate this derivation, so the parse is wrong rather than the code');
+  return [...guards];
+}
+
+const AUTH_GUARDS = deriveAuthGuards();
 
 /** Guards that block a READ-ONLY token from writing. Admin guards imply a non-read-only admin. */
 const WRITE_GUARDS = [

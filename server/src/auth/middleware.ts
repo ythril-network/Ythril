@@ -425,7 +425,11 @@ function enforceAreaRung(
     return true;
   }
   const need = verdict;
-  if (need.scope !== 'path') return true;      // iterating routes gate their LOOP, not the call
+  // `iterates` gates its LOOP, not the call. `body` is owned by `requireBodyScopedSpace`, which checks the
+  // same area and rung against the space the body named — or, when it named none, against every space the
+  // token may read, KEEPING the ones where the rung is held instead of refusing because one it never asked
+  // about is missing. Neither is unchecked; both are checked somewhere this function cannot see.
+  if (need.scope !== 'path') return true;
 
   /*
    * NO MATRIX, NO AREA — and the position of this check is the fix rather than the check itself.

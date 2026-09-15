@@ -78,8 +78,7 @@ describe('Space creation is asynchronous (B1)', () => {
     assert.equal(r.status, 201, JSON.stringify(r.body));
     created.push(id);
 
-    const rec = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${id}/recall`,
-      { query: 'anything', topK: 5 });
+    const rec = await post(INSTANCES.a, tokenA, '/api/brain/recall', { space: id, ...({ query: 'anything', topK: 5 }) });
     assert.equal(rec.status, 200,
       `recall on a still-building space must return 200, got ${rec.status}: ${JSON.stringify(rec.body)}`);
   });

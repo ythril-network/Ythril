@@ -161,8 +161,7 @@ after(async () => {
 });
 
 /** Always with `includeFreshWrites`, so the answer does not wait on the embedding queue. */
-const recall = (body) => post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/recall`,
-  { includeFreshWrites: true, ...body });
+const recall = (body) => post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ includeFreshWrites: true, ...body }) });
 
 /**
  * The full match total, measured NOW — never the `COUNT` constant.
