@@ -264,7 +264,7 @@ graph LR
     end
 ```
 
-**Source:** Every conversation — your LLM calls `remember` to store decisions, preferences, project context, and learnings. It calls `upsert_entity` and `upsert_edge` to build a structured knowledge graph as it learns.
+**Source:** Every conversation — your LLM calls `save_fact` to store decisions, preferences, project context, and learnings. It calls `save_entity` and `save_edge` to build a structured knowledge graph as it learns.
 **Consumers:** The same LLM (or any future LLM) in every future conversation.
 
 > This is the door-opener. Connect any MCP-compatible LLM client to Ythril and it gains: `recall` for semantic memory search, `query` for structured retrieval, `list_chrono` for time-awareness, and `read_file`/`write_file` for document access. **Switch from Claude to GPT to Llama — the memory stays.** The brain belongs to you, not the model provider. No vendor lock-in on your own knowledge.

@@ -24,7 +24,7 @@
  * We publish the opposite, absolutely, in three places a caller reads while constructing arguments:
  * `/query`'s own parameter description (*"always excluded and cannot be re-included"*), `recall`'s MCP
  * description (*"never returned by anything here, and no parameter can ask for it"*), and
- * `update_memory`'s. **An integrator who believed those sentences had no reason to look at a payload size.**
+ * `update_fact`'s. **An integrator who believed those sentences had no reason to look at a payload size.**
  * A stale absolute is invisible in a way a missing feature is not.
  *
  * So the vector is not withheld "by default". It is withheld, full stop, and there is no flag — which is
@@ -96,7 +96,7 @@ export const NEVER_RETURNED_PROJECTION: Record<string, 0> =
  * ## Why writes needed their own answer
  *
  * A projection fixes reads. A write that embeds INLINE has just computed the vector in memory, so there is
- * no read to project: `remember`, `upsert_entity`, `upsert_edge` and `create_chrono` assembled it into the
+ * no read to project: `remember`, `save_entity`, `save_edge` and `save_chrono` assembled it into the
  * document they stored AND into the document they returned, and the route sent that as its 201.
  *
  * Measured against the live stack 2026-08-19, all five leaked: entity, memory, chrono and edge creates with

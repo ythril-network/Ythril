@@ -4,7 +4,7 @@
  * ## Why this file exists before any refactor
  *
  * B-2: five capabilities were reachable over REST and not over MCP, and two of the five turned out to be thin
- * wrappers (`retry_embedding` #842, `list_tokens` #843). The remaining three are not. `update_space_schema` is one
+ * wrappers (`retry_embed_file` #842, `list_tokens` #843). The remaining three are not. `schema_update` is one
  * of them: `updateSpace()` exists, but this route wraps it in a chain of refusals, and an MCP tool that called
  * `updateSpace()` directly would skip every one — the *two surfaces, one rule, one weaker* defect, reintroduced by
  * the fix for it.

@@ -544,7 +544,7 @@ export function buildChronoQuery(
       ? { type: { $nin: exempt } } : {};
     if (filter.status === 'overdue') {
       // BOTH kinds, and the second half is the fix. `overdue` is a legal value on every write door — the
-      // enum accepts it on `create_chrono`, `update_chrono`, `bulk_write`, both REST routes and the Brain
+      // enum accepts it on `save_chrono`, `update_chrono`, `save_bulk`, both REST routes and the Brain
       // UI's own status dropdown — so a caller can store it, and `deriveChronoStatus` passes a stored one
       // straight through. Matching only the derivable ones therefore hid exactly the entries somebody had
       // taken the trouble to mark, from the filter that names them.

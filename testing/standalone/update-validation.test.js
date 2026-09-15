@@ -216,7 +216,7 @@ const strip = s => s.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '
 
 describe('every update path runs the gate', () => {
   // Eight surfaces for four record types. The asymmetry this prevents is not hypothetical: `update_chrono`
-  // shipped without the type allowlist `create_chrono` enforced, and REST/MCP disagreeing about the same
+  // shipped without the type allowlist `save_chrono` enforced, and REST/MCP disagreeing about the same
   // record is the same bug one layer up. A constraint looks enforced right up until someone uses the
   // other door.
   const PATHS = [

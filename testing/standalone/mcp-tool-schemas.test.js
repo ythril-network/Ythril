@@ -40,37 +40,37 @@ describe('MCP tool schemas — universal invariants', () => {
     // A deliberate tripwire, not a fact worth asserting for its own sake: the number changing means a tool
     // was added or removed, and every tool needs an audit mapping, a read-only classification and a docs
     // row. Bump it when you have done those three, never to make the suite quiet.
-    // 36 -> 37: `update_space_schema`. Its three prerequisites are done — `audit-map.ts` maps it to
+    // 36 -> 37: `schema_update`. Its three prerequisites are done — `audit-map.ts` maps it to
     // `space.update`, it is `mutating: true` + `admin: true` and listed among the tools a readOnly token cannot
     // see, and `16-mcp.md` carries its row.
-    // 37 -> 38: `create_space`. Prerequisites done — `audit-map.ts` maps it to `space.create`, it is
+    // 37 -> 38: `save_space`. Prerequisites done — `audit-map.ts` maps it to `space.create`, it is
     // `mutating: true` + `admin: true` and listed among the tools a readOnly token cannot see, and `16-mcp.md`
     // carries its row.
     // 38 -> 39: `reindex`, the LAST row of the capability map. Prerequisites done — audit mapping, readOnly
     // classification, docs row.
-    // 39 -> 41: `list_embed_jobs` + `retry_record_embedding`, the brain-record half of the embed queue. These are the
+    // 39 -> 41: `list_embed_jobs` + `retry_embed_record`, the brain-record half of the embed queue. These are the
     // first pair to arrive WITH their REST route rather than after it, which is the whole point — the capability map
-    // was five rows long because five routes shipped alone. Prerequisites done for both: `retry_record_embedding` maps
+    // was five rows long because five routes shipped alone. Prerequisites done for both: `retry_embed_record` maps
     // to `brain.retry_embedding` and is listed among the tools a readOnly token cannot see, `list_embed_jobs` is
     // read-only and deliberately visible to a readOnly token, and `16-mcp.md` carries a row for each.
     // 41 -> 42: `er_model`. Prerequisites done — `audit-map.ts` maps it to `brain.er_model` (and the REST
     // route is now audited too, which it was not while `stats` was), it is read-only and deliberately
     // visible to a readOnly token, and `16-mcp.md` carries its row.
-    // 42 -> 43: `retry_failed_media_embeddings`, the bulk counterpart to `retry_embedding`. Prerequisites done —
+    // 42 -> 43: `retry_embed_media`, the bulk counterpart to `retry_embed_file`. Prerequisites done —
     // `audit-map.ts` maps it to `file.retry_embedding_all` like the route it mirrors, it is `mutating: true` and listed among
     // the tools a readOnly token cannot see, and `16-mcp.md` carries its row.
     // 43 -> 44: `update_file_meta`. Prerequisites done — `audit-map.ts` maps it to `file.meta.update` like
     // the route it mirrors, it is `mutating: true` and listed among the tools a readOnly token cannot see,
     // and `16-mcp.md` carries its row.
-    // 44 -> 46: `upsert_link` + `delete_link`, the link write door. Prerequisites done for both:
+    // 44 -> 46: `save_link` + `delete_link`, the link write door. Prerequisites done for both:
     // `audit-map.ts` maps them to `link.create` / `link.delete`, both are `mutating: true` and listed among
     // the tools a readOnly token cannot see, and `16-mcp.md` carries a row for each. They ship WITH their
     // REST routes rather than after them, which is the rule the capability map exists to enforce.
-    // 46 -> 47: `entity_cascade_preview` (`F-17`). Prerequisites done — `audit-map.ts` maps it to
+    // 46 -> 47: `delete_entity_preview` (`F-17`). Prerequisites done — `audit-map.ts` maps it to
     // `entity.cascade_preview`, it is READ-ONLY and deliberately visible to a readOnly token (it deletes
     // nothing and answers the same question the 409 already answers), and `16-mcp.md` carries its row in
     // the tool table, the read-only list and the REST mapping.
-    // 47 -> 48: `links_convert_preflight` (`F-25`). Prerequisites done -- `audit-map.ts` maps it to
+    // 47 -> 48: `graph_link_preflight` (`F-25`). Prerequisites done -- `audit-map.ts` maps it to
     // `link.convert_preflight`, it is READ-ONLY and visible to a readOnly token (it writes nothing and
     // answers a question about writes that already happened), and `16-mcp.md` carries its row. It ships
     // WITH its REST route rather than after it.
@@ -152,7 +152,7 @@ describe('MCP tool schemas — high-value enrichments', () => {
   });
 
   it('bulk_write arrays advertise the 500-item cap', () => {
-    const props = schemaOf('bulk_write').properties;
+    const props = schemaOf('save_bulk').properties;
     for (const k of ['memories', 'entities', 'edges', 'chrono']) {
       assert.equal(props[k].maxItems, 500, `bulk_write.${k} must cap at 500`);
     }

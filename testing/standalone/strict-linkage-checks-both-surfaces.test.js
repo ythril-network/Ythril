@@ -3,7 +3,7 @@
  *
  * ## The defect, reported by the canary
  *
- * `upsert_edge` over MCP, in a space with `strictLinkage: true`, with `to:` a **chrono** uuid: it returned
+ * `save_edge` over MCP, in a space with `strictLinkage: true`, with `to:` a **chrono** uuid: it returned
  * 201 and an edge id. The edge stored fine and was then absent from `traverse` and from
  * `recall(traverse: 1)` alike — missing from `nodes` AND from `edges`, because both hydrate neighbours out
  * of the entity collection and a non-entity endpoint yields nothing.

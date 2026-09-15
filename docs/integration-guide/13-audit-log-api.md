@@ -8,7 +8,7 @@ Base path: `/api/admin/audit-log` — **requires admin token** on all endpoints.
 
 Ythril maintains an append-only, immutable audit log of every authenticated API operation. The log captures who performed what action, when, on which space, and the resulting HTTP status — providing a full access trail for compliance and security review.
 
-**MCP tool calls are in it, under the same operation names as REST.** An agent calling `remember`
+**MCP tool calls are in it, under the same operation names as REST.** An agent calling `save_fact`
 produces a `memory.create` entry, exactly as `POST /api/brain/spaces/:id/memories` does — so a query for
 "who created this memory" does not have to know which transport was used. The transport is recorded
 separately: `method` is `MCP` and `path` is `http:<tool>`. Entries written before 4.0 can also carry
@@ -21,7 +21,7 @@ would log every rejected write as a success.
 
 Read tools (`query`, `recall`, `traverse`, `list_*`, `read_file`, …) follow the same rule as REST reads —
 recorded only when `audit.logReads` is on. Three tools record nothing at all and say why in
-`server/src/mcp/audit-map.ts`: `help` (returns this instance's own documentation), and `list_peers`
+`server/src/mcp/audit-map.ts`: `help` (returns this instance's own documentation), and `network_peers`
 (reads local config, with no REST counterpart that is audited either).
 
 ⚠️ **Before 2.2.1, no MCP tool call was audited.** If you are reconstructing a history that crosses that
@@ -170,7 +170,7 @@ rather than the door. `similar` was the exception until 4.4: it logged `entity.l
 `POST /api/brain/similar` logged `brain.find_similar`, so filtering for the latter showed
 only REST calls and filtering the former mixed similarity searches into entity listings.
 
-One pair still differs on purpose. `get_space_meta` logs `space.list`, because `GET /api/spaces/:id/meta`
+One pair still differs on purpose. `space_meta` logs `space.list`, because `GET /api/spaces/:id/meta`
 has no operation of its own for it to agree with.
 
 ### Query audit log

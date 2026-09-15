@@ -15,7 +15,7 @@ import { syncSchemaFiles, META_VERSION_CAP } from './_shared.js';
  *
  * `description` and `meta.purpose` were two fields for the same thing — `description` was commented
  * "shown to MCP clients as space-level instructions", `purpose` is "injected into MCP instructions at
- * handshake" — and they were served by different tools, so `list_spaces` and `get_space_meta` disagreed
+ * handshake" — and they were served by different tools, so `list_spaces` and `space_meta` disagreed
  * about the same space. Worse, the UI only ever gained an editor for `purpose`, so the field MCP clients
  * actually read was the one no admin could change.
  *

@@ -1,5 +1,5 @@
 /**
- * `create_space` over MCP — the same refusals as the route, because it is the same function.
+ * `save_space` over MCP — the same refusals as the route, because it is the same function.
  *
  * ## What only this file can check
  *
@@ -37,7 +37,7 @@ const idFor = (what) => `mcp-create-${what}-${RUN}`;
 const meta = (id) => get(INSTANCES.a, token, `/api/spaces/${id}/meta`);
 
 async function makeSpace(args) {
-  const r = await session.callTool('create_space', args);
+  const r = await session.callTool('save_space', args);
   if (!r?.isError && args.id) created.push(args.id);
   return r;
 }
@@ -57,7 +57,7 @@ after(async () => {
 describe('create_space is offered and creates', () => {
   it('appears in tools/list for an admin token', async () => {
     const names = (await session.listTools()).map(t => t.name);
-    assert.ok(names.includes('create_space'), `not offered: ${names.join(', ')}`);
+    assert.ok(names.includes('save_space'), `not offered: ${names.join(', ')}`);
   });
 
   it('creates a space and SEEDS the strict posture — the check a direct createSpace() call would skip', async () => {
@@ -75,7 +75,7 @@ describe('create_space is offered and creates', () => {
   });
 
   it('derives the id from the label when none is given', async () => {
-    const r = await session.callTool('create_space', { label: `Derived Slug ${RUN}` });
+    const r = await session.callTool('save_space', { label: `Derived Slug ${RUN}` });
     assert.ok(!r?.isError, `refused: ${JSON.stringify(r)}`);
     const derived = r?.structuredContent?.id;
     assert.ok(derived, `the reply must name the id it chose: ${JSON.stringify(r)}`);
@@ -144,7 +144,7 @@ describe('create_space is held to the ROUTE rules, not looser ones', () => {
     // An agent that can tell the two apart stops retrying; one that cannot keeps going.
     const id = idFor('conflict');
     assert.ok(!(await makeSpace({ id, label: 'First' }))?.isError);
-    const r = await session.callTool('create_space', { id, label: 'Second' });
+    const r = await session.callTool('save_space', { id, label: 'Second' });
     assert.ok(r?.isError, `a duplicate id was accepted: ${JSON.stringify(r)}`);
     assert.match(r.content[0].text, /409/);
     assert.equal(r?.structuredContent?.outcome, 'conflict', 'the outcome must be machine-readable, not only prose');
@@ -164,7 +164,7 @@ describe('create_space is held to the ROUTE rules, not looser ones', () => {
   });
 
   it('REFUSES an unknown parameter rather than silently dropping it', async () => {
-    const r = await session.callTool('create_space', { label: 'Typo', validationMdoe: 'strict' });
+    const r = await session.callTool('save_space', { label: 'Typo', validationMdoe: 'strict' });
     assert.ok(r?.isError, `a misspelled parameter was accepted: ${JSON.stringify(r)}`);
   });
 });

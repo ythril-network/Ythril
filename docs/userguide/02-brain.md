@@ -187,7 +187,7 @@ row per connection, showing which record it hangs off and which record it names.
 > where you make one.
 
 **Making one directly** is an API capability in this release — `POST /api/brain/spaces/:spaceId/links` or the
-`upsert_link` tool, needing the same **write knowledge** right as an edge. There is no button for it,
+`save_link` tool, needing the same **write knowledge** right as an edge. There is no button for it,
 because the ordinary way to make a link is to attach the record, which the tabs already do.
 
 ### Two things change when a space is converted

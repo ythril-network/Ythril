@@ -56,7 +56,7 @@ export const list_spacesTool: ToolHandler = {
     for (const r of spaceCountResults) {
       if (r.status === 'fulfilled') countsBySpaceId[r.value.id] = r.value.counts;
     }
-    // `purpose` is the field an admin can edit, the one `get_space_meta` returns, and since 3.0 the only
+    // `purpose` is the field an admin can edit, the one `space_meta` returns, and since 3.0 the only
     // spelling — its `description` alias was removed from every surface in the same release.
     const result = accessibleSpaces.map(s => ({
       id: s.id,
@@ -78,8 +78,8 @@ export const list_spacesTool: ToolHandler = {
   },
 };
 
-export const get_statsTool: ToolHandler = {
-  name: 'get_stats',
+export const space_statsTool: ToolHandler = {
+  name: 'space_stats',
   description: 'Return counts of memories, entities, edges, chrono entries and files for one space — the cheapest call there is, and the right way to check whether a space holds anything before spending a recall on it.\n\n'
     + 'These are TOTALS, not search coverage. A record retired from semantic ranking is counted here and cannot be reached by `recall`, and a record written seconds ago is counted before its embedding exists. So a count that exceeds what a search returns is normal and is not evidence of a broken index — `list_embed_jobs` is what answers "is anything still queued or failed".\n\n'
     + 'On a PROXY space the numbers are the members\' totals combined, so a per-member breakdown means asking each member by id.',
@@ -119,7 +119,7 @@ export const get_statsTool: ToolHandler = {
 /**
  * The space's entity-relationship model — REST-only until now, and it is the question an agent asks first.
  *
- * `get_space_meta` returns the DECLARED schema: what may exist. This returns what DOES exist — which types are
+ * `space_meta` returns the DECLARED schema: what may exist. This returns what DOES exist — which types are
  * actually present, which relationships actually occur between them, and how many of each. An agent deciding how
  * to write into an unfamiliar space wants both, and only one of them was reachable.
  *
@@ -136,7 +136,7 @@ export const er_modelTool: ToolHandler = {
   description:
         'Return the space\'s entity-relationship model: which entity types actually exist, which edge labels '
         + 'connect which types, and the counts of each — inferred from the stored records AND the declared '
-        + 'schema. Use it to learn how a space is actually shaped before writing into it; `get_space_meta` gives '
+        + 'schema. Use it to learn how a space is actually shaped before writing into it; `space_meta` gives '
         + 'the declared schema (what MAY exist), this gives what DOES. A type with zero records is reported '
         + 'rather than omitted. On a proxy space each member is reported separately, because merging would '
         + 'invent relationships that cannot exist across spaces.',
@@ -162,8 +162,8 @@ export const er_modelTool: ToolHandler = {
   },
 };
 
-export const get_space_metaTool: ToolHandler = {
-  name: 'get_space_meta',
+export const space_metaTool: ToolHandler = {
+  name: 'space_meta',
   description:
         // Deliberately NOT the words "reindex state": `mcp-help.test.js` holds that a read-only token is never told
         // the name of a tool it cannot call, and `reindex` is one. Naming the STATE rather than the repair is also
@@ -311,7 +311,7 @@ export const update_spaceTool: ToolHandler = {
     // META write. On a networked space `PATCH /api/spaces/:id` opens a `meta_change` vote for exactly that edit;
     // this tool applied it immediately. So a directive change made over MCP skipped the vote in precisely the
     // spaces that had voted to govern directive changes — the same *two surfaces, one rule, one weaker* defect the
-    // rest of this batch is about, one field over. Found while adding `update_space_schema` below.
+    // rest of this batch is about, one field over. Found while adding `schema_update` below.
     return await runSpaceMetaUpdate(callSpace, updates, `Space '${callSpace}' updated.`, ctx.rights);
   },
 };
@@ -387,7 +387,7 @@ async function runSpaceMetaUpdate(
  *
  * The canary operator listed it among five capabilities a token could HOLD and not exercise, and gave the case that
  * makes it more than ergonomics: they designed an 11-entity / 7-memory / 13-edge / 10-chrono research model with an
- * agent, and the agent could not apply it. `get_space_meta` reads the schema; nothing wrote it. A sixth instance
+ * agent, and the agent could not apply it. `space_meta` reads the schema; nothing wrote it. A sixth instance
  * arrived on 2026-08-12 with the sharper consequence — under `validationMode: 'strict'` a stale enum makes every
  * write fail, and a schema write is the documented way out. So this is the recovery path for a wedged space.
  *
@@ -400,7 +400,7 @@ async function runSpaceMetaUpdate(
  * mentioned are preserved, and `typeSchemasMode: 'replace'` is how a deletion is expressed.
  */
 /**
- * The keys `update_space_schema` forwards into `meta` — read from the tool's OWN schema, once.
+ * The keys `schema_update` forwards into `meta` — read from the tool's OWN schema, once.
  *
  * `space` and `typeSchemasMode` are the two arguments that are NOT meta: one names the space, the other says
  * how `typeSchemas` combines. Everything else the tool declares is a meta field by construction, so this is a
@@ -410,7 +410,7 @@ async function runSpaceMetaUpdate(
 const NOT_META = new Set(['space', 'typeSchemasMode']);
 
 /**
- * `create_space` declares `purpose`, which the create body still calls `description` — so it is translated
+ * `save_space` declares `purpose`, which the create body still calls `description` — so it is translated
  * at the call site rather than forwarded, and must not be forwarded under its own name as well.
  */
 const NOT_BODY = new Set(['purpose']);
@@ -429,8 +429,8 @@ function forwardedArgNames(tool: ToolHandler, exclude: ReadonlySet<string>): str
   return Object.keys(props).filter(k => !exclude.has(k));
 }
 
-export const update_space_schemaTool: ToolHandler = {
-  name: 'update_space_schema',
+export const schema_updateTool: ToolHandler = {
+  name: 'schema_update',
   description: 'Write a space\'s type schemas (and its other meta fields). Needs EITHER instance-admin rights OR '
     + 'the `admin` rung on the `schema` area of the space named in `space` — holding it on a different space does '
     + 'not grant this one. '
@@ -507,7 +507,7 @@ export const update_space_schemaTool: ToolHandler = {
      * REST door storing it and this one not, which `CLAUDE.md` names as worse than either door refusing.
      * The schema is the contract, so the schema is the list.
      */
-    const declared = forwardedArgNames(update_space_schemaTool, NOT_META);
+    const declared = forwardedArgNames(schema_updateTool, NOT_META);
     const meta: Record<string, unknown> = {};
     for (const k of declared) {
       if (a[k] !== undefined) meta[k] = a[k];
@@ -547,8 +547,8 @@ export const update_space_schemaTool: ToolHandler = {
  * same operator asked the question on 2026-08-20, and neither the schema nor the guide covered the empty case.
  * Setting it at creation is still the reliable path, because it is the only one that cannot be refused.
  */
-export const create_spaceTool: ToolHandler = {
-  name: 'create_space',
+export const save_spaceTool: ToolHandler = {
+  name: 'save_space',
   description: 'Create a new space. Requires an admin token. The id is derived from the label when omitted. '
     + 'A new space is seeded with a fully strict schema posture (validationMode: strict, strictLinkage: true) '
     + 'unless you pass meta saying otherwise — with no typeSchemas defined yet that accepts every type, so it does '
@@ -611,14 +611,14 @@ export const create_spaceTool: ToolHandler = {
     /*
      * The forwarded names come from this tool's OWN schema, not from an array written beside it.
      *
-     * `update_space_schema` had the same shape and it FAILED: an array of five key names sitting next to a
+     * `schema_update` had the same shape and it FAILED: an array of five key names sitting next to a
      * schema that declared six, so `whenDuePasses` was declared, accepted by the dispatcher, and silently
      * dropped before the write. This one is correct today and is the same accident waiting — the two lists
      * have to agree and nothing makes them. `RENAMED` is the only exception, and it is an exception because
      * it is a TRANSLATION rather than an omission.
      */
     const body: Record<string, unknown> = {};
-    for (const k of forwardedArgNames(create_spaceTool, NOT_BODY)) {
+    for (const k of forwardedArgNames(save_spaceTool, NOT_BODY)) {
       if (a[k] !== undefined) body[k] = a[k];
     }
     // `purpose` is the current name for what the create body still calls `description`. Translated here
@@ -680,11 +680,11 @@ export const create_spaceTool: ToolHandler = {
  * Getting that wrong is how a tool would re-embed a member of a proxy that the token cannot reach — so the planner
  * takes it as an argument rather than resolving it, and each surface supplies the list it is entitled to.
  */
-export const reindexTool: ToolHandler = {
-  name: 'reindex',
+export const space_reindexTool: ToolHandler = {
+  name: 'space_reindex',
   description: 'Re-embed every record in a space with the currently configured embedding model — the recovery path '
     + 'after changing embedder or model. Requires an admin token. Returns as soon as the job STARTS: it runs in the '
-    + 'background and may take minutes, so poll `get_space_meta` — its `needsReindex` field — rather than waiting '
+    + 'background and may take minutes, so poll `space_meta` — its `needsReindex` field — rather than waiting '
     + 'on this call. One job per instance at a time; a second call while one is running is refused. A PROXY space is '
     + 'refused by name — it has no index of its own, and its members are listed in the error so you can reindex them '
     + 'instead. Idempotent: re-embedding a record that is already current is harmless.',
@@ -734,8 +734,8 @@ export const reindexTool: ToolHandler = {
   },
 };
 
-export const wipe_spaceTool: ToolHandler = {
-  name: 'wipe_space',
+export const delete_space_dataTool: ToolHandler = {
+  name: 'delete_space_data',
   description: 'Empty a space of its DATA while keeping the space itself — its id, label, purpose, schema, '
     + 'rights and network membership all survive. Requires instance-admin rights. IRREVERSIBLE: there is no '
     + 'undo, no trash, and no confirmation step, so the call that arrives is the call that runs.\n\n'

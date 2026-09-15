@@ -368,7 +368,7 @@ export function createApp() {
     }
     // X-5: on a space that belongs to a network, emptying it is a governed act and opens a vote instead of
     // happening now. A space in no network is unaffected — `planSpaceWipe` says which, and the same planner
-    // answers for the `wipe_space` tool so the two doors cannot drift.
+    // answers for the `delete_space_data` tool so the two doors cannot drift.
     const plan = planSpaceWipe(spaceId, rawTypes);
     if (plan.governed) {
       notifyPeersOfWipe(spaceId, rawTypes);

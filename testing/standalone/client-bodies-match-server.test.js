@@ -160,7 +160,7 @@ describe('the sweep itself found the call sites', () => {
 
 /** The MCP tool that is the same capability as each REST route. `similar` is `similar` there. */
 const MCP_TOOL = new Map([
-  ['filter', 'filter'], ['recall', 'recall'], ['traverse', 'traverse'], ['similar', 'similar'],
+  ['filter', 'filter'], ['recall', 'recall'], ['traverse', 'graph_traverse'], ['similar', 'similar'],
 ]);
 
 /** What the router passes to every `inputSchema`. The `space` enum is token-scoped, so a stub is faithful. */

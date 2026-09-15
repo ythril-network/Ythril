@@ -110,7 +110,7 @@ describe('the tools section is searched per LINE', () => {
     // Asserted by the ABSENCE of the others rather than by counting `- **` lines: the retrieval-guide section
     // legitimately matches too (its prose names this tool) and its own bullets start the same way, so a count measures
     // the wrong thing. What must be true is that the other forty tools did not come along.
-    for (const other of ['upsert_entity', 'wipe_space', 'write_file', 'merge_entities']) {
+    for (const other of ['save_entity', 'delete_space_data', 'write_file', 'graph_merge']) {
       assert.ok(!text.includes(other), `searching one tool returned ${other} as well — the whole tool list came back`);
     }
     const full = textOf(await helpTool.handle(ctx()));

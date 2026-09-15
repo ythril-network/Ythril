@@ -1,5 +1,5 @@
 /**
- * `wipe_space` says it does not propagate — and the claim is pinned to the code that makes it true.
+ * `delete_space_data` says it does not propagate — and the claim is pinned to the code that makes it true.
  *
  * ## The finding
  *
@@ -31,7 +31,7 @@ const LIFECYCLE = stripComments(readFileSync('server/src/spaces/lifecycle.ts', '
 
 const WIPE = (() => {
   const s = stripComments(TOOLS);
-  const at = s.indexOf("name: 'wipe_space'");
+  const at = s.indexOf("name: 'delete_space_data'");
   assert.ok(at > 0, 'wipe_space not found — the scanner is wrong, not the code');
   const d = s.indexOf('description:', at);
   const end = s.slice(d).search(/\n {2,}(mutating|spaceRequired|admin|spaceAdmin|inputSchema|async handle):/);

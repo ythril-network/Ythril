@@ -3,8 +3,8 @@
  *
  * ## Why this file exists
  *
- * MCP tool calls were not audited **at all**. Every write an agent made — `remember`, `upsert_entity`,
- * `bulk_write`, `wipe_space` — left the audit log unchanged, while the REST equivalent of each one wrote
+ * MCP tool calls were not audited **at all**. Every write an agent made — `remember`, `save_entity`,
+ * `save_bulk`, `delete_space_data` — left the audit log unchanged, while the REST equivalent of each one wrote
  * an entry. For a product whose primary write path is an agent, that is most of the trail missing.
  *
  * The gap was not an oversight nobody had considered. The HTTP audit middleware explicitly admits `/mcp`:
@@ -36,54 +36,54 @@
 /** Tool name → the audit operation it performs, or `null` with the reason it is not one. */
 export const MCP_TOOL_OPERATIONS: Record<string, string | null> = {
   // ── Mutations. Each records exactly what its REST counterpart records. ──────────────────────────
-  remember: 'memory.create',
-  update_memory: 'memory.update',
-  delete_memory: 'memory.delete',
-  upsert_entity: 'entity.create',
+  save_fact: 'memory.create',
+  update_fact: 'memory.update',
+  delete_fact: 'memory.delete',
+  save_entity: 'entity.create',
   update_entity: 'entity.update',
   delete_entity: 'entity.delete',
-  entity_cascade_preview: 'entity.cascade_preview',
-  merge_entities: 'entity.merge',
-  upsert_edge: 'edge.create',
+  delete_entity_preview: 'entity.cascade_preview',
+  graph_merge: 'entity.merge',
+  save_edge: 'edge.create',
   update_edge: 'edge.update',
   delete_edge: 'edge.delete',
-  upsert_link: 'link.create',
+  save_link: 'link.create',
   delete_link: 'link.delete',
-  links_convert_preflight: 'link.convert_preflight',
-  create_chrono: 'chrono.create',
+  graph_link_preflight: 'link.convert_preflight',
+  save_chrono: 'chrono.create',
   update_chrono: 'chrono.update',
   delete_chrono: 'chrono.delete',
-  bulk_write: 'bulk.write',
+  save_bulk: 'bulk.write',
   update_space: 'space.update',
-  update_space_schema: 'space.update',
-  create_space: 'space.create',
-  reindex: 'space.reindex',
-  wipe_space: 'space.wipe',
+  schema_update: 'space.update',
+  save_space: 'space.create',
+  space_reindex: 'space.reindex',
+  delete_space_data: 'space.wipe',
   write_file: 'file.create',
   move_file: 'file.update',
   delete_file: 'file.delete',
   // Same operation string the REST route audits under, so one query finds a retry however it arrived.
-  retry_embedding: 'file.retry_embedding',
+  retry_embed_file: 'file.retry_embedding',
   // Same operation string the REST route audits under, so one query finds a record retry however it arrived.
   // Same operation as the REST route it mirrors: one capability, one audit name.
   // The route's own operation: one capability, one audit name, whichever door it came through.
   update_file_meta: 'file.meta.update',
-  retry_failed_media_embeddings: 'file.retry_embedding_all',
-  retry_record_embedding: 'brain.retry_embedding',
+  retry_embed_media: 'file.retry_embedding_all',
+  retry_embed_record: 'brain.retry_embedding',
   create_dir: 'file.mkdir',
   // The tool registry flags this `mutating: true`, and it is right: a sync cycle pulls records from
   // peers and writes them locally, so "who started the run that brought in these records" is a fair
   // audit question. `/api/notify` is exempt on the REST side as "peer notifications + the admin sync
   // trigger — not a data mutation"; the peer half is right and the trigger half was not, so
   // `/api/notify/trigger` records `sync.trigger` too and the two surfaces agree.
-  sync_now: 'sync.trigger',
+  network_sync: 'sync.trigger',
 
   // ── Reads. Recorded only when `logReads` is on, exactly as the REST reads are. ──────────────────
   filter: 'brain.filter',
   recall: 'brain.recall',
-  traverse: 'brain.traverse',
-  get_stats: 'brain.stats',
-  // Audited for the same reason `get_stats` is: it reports what a space CONTAINS — type names, edge labels
+  graph_traverse: 'brain.traverse',
+  space_stats: 'brain.stats',
+  // Audited for the same reason `space_stats` is: it reports what a space CONTAINS — type names, edge labels
   // and counts. The REST route was not audited while `stats` was, which was an asymmetry rather than a
   // decision; both are now.
   er_model: 'brain.er_model',
@@ -102,7 +102,7 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | null> = {
    * `brain.find_similar` saw only REST calls, and one filtering `entity.list` found similarity searches
    * mixed in with entity listings.
    *
-   * Every sibling already agreed with its route: `query`, `recall`, `traverse`, `get_stats`, `er_model`.
+   * Every sibling already agreed with its route: `query`, `recall`, `traverse`, `space_stats`, `er_model`.
    * This was the one that did not, and it was found by joining the two tables rather than by reading them.
    *
    * `get_space_meta: 'space.list'` below is NOT the same case and stays: `GET /api/spaces/:id/meta` has no
@@ -110,14 +110,14 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | null> = {
    */
   similar: 'brain.similar',
   // Returns the space's schema and counts. `space.list` is the REST read that exposes the same shape.
-  get_space_meta: 'space.list',
+  space_meta: 'space.list',
 
   // ── Not audited operations, with the reason each. ──────────────────────────────────────────────
   // Returns this instance's own documentation. Reads no space and no record.
   help: null,
   // Lists configured peers from local config. There is no `network.list` operation on the REST side
   // either — peer topology is read from `/api/networks`, which is itself unaudited as a read.
-  list_peers: null,
+  network_peers: null,
   // Reads the token inventory from local config. `GET /api/tokens` is not audited either — it is a
   // read, and the acts worth an entry are the mint, the edit and the revoke, all of which are.
   list_tokens: null,

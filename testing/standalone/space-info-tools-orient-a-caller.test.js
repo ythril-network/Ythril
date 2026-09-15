@@ -12,7 +12,7 @@
  *
  * ## Counts are not search coverage
  *
- * `get_stats` returns totals. A record retired from semantic ranking is counted and cannot be recalled; a
+ * `space_stats` returns totals. A record retired from semantic ranking is counted and cannot be recalled; a
  * record written seconds ago is counted before its embedding exists. So `count > what a search returned` is
  * NORMAL — and without being told, it reads as a broken index. This is the same family of misreading as an
  * empty `similar`: the number is right and the inference from it is wrong.
@@ -37,7 +37,7 @@ const tool = (name) => {
 };
 
 const LIST = tool('list_spaces');
-const STATS = tool('get_stats');
+const STATS = tool('space_stats');
 
 describe('list_spaces orients a new caller', () => {
   it('says to call it first, and why', () => {
@@ -79,7 +79,7 @@ describe('get_stats says what its numbers do NOT mean', () => {
 });
 
 describe('both say a proxy aggregates', () => {
-  for (const [label, text] of [['list_spaces', LIST], ['get_stats', STATS]]) {
+  for (const [label, text] of [['list_spaces', LIST], ['space_stats', STATS]]) {
     it(`${label} says a proxy reports its members combined`, () => {
       assert.match(text, /PROXY|proxy/, 'a proxy is not one space and the numbers are not one space\'s');
       // Matched without the apostrophe: it is escaped as \' inside the single-quoted TS string, so a regex

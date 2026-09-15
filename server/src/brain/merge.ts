@@ -730,7 +730,7 @@ export async function executeMerge(
        * input necessarily had — a `sum` can exceed a `maximum`, a `concat` can break a `pattern`, a pick can
        * land outside an `enum`. This file imported nothing from `spaces/schema-validation.ts`, so a background
        * `automerge` that nobody invoked could write a survivor into a `strict` space that the same space would
-       * have refused through `upsert_entity`.
+       * have refused through `save_entity`.
        *
        * The precedent is exact, from CHANGELOG: *"An entity merge left every FILE linked to the absorbed entity
        * pointing at a record it had just deleted… The merge path broke the invariant the write path enforces."*

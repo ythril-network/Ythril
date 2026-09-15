@@ -1,5 +1,5 @@
 /**
- * `update_space_schema` over MCP — the same rules as the REST route, because it is the same function.
+ * `schema_update` over MCP — the same rules as the REST route, because it is the same function.
  *
  * ## What this is checking, and what it deliberately is not
  *
@@ -53,11 +53,11 @@ describe('update_space_schema is offered and writes', () => {
     // The parity map's row for this capability was DELETED when the tool landed, so the tool existing is what makes
     // that deletion honest. `mcp-rest-parity.test.js` gates the other direction.
     const names = (await session.listTools()).map(t => t.name);
-    assert.ok(names.includes('update_space_schema'), `not offered: ${names.join(', ')}`);
+    assert.ok(names.includes('schema_update'), `not offered: ${names.join(', ')}`);
   });
 
   it('writes a type schema an agent designed', async () => {
-    const r = await session.callTool('update_space_schema', {
+    const r = await session.callTool('schema_update', {
       space: SPACE,
       typeSchemas: { entity: { widget: { propertySchemas: { region: { type: 'string' } } } } },
     });
@@ -68,7 +68,7 @@ describe('update_space_schema is offered and writes', () => {
   });
 
   it('MERGES by default, so editing one type does not drop the others', async () => {
-    await session.callTool('update_space_schema', {
+    await session.callTool('schema_update', {
       space: SPACE, typeSchemas: { entity: { gadget: { namingPattern: '^G-' } } },
     });
     const after = await meta();
@@ -77,7 +77,7 @@ describe('update_space_schema is offered and writes', () => {
   });
 
   it('`replace` is how a type is DELETED — the only way to express it', async () => {
-    const r = await session.callTool('update_space_schema', {
+    const r = await session.callTool('schema_update', {
       space: SPACE, typeSchemasMode: 'replace',
       typeSchemas: { entity: { gadget: { namingPattern: '^G-' } } },
     });
@@ -88,7 +88,7 @@ describe('update_space_schema is offered and writes', () => {
   });
 
   it('writes the other meta fields too, so a wedged space can be repaired in one call', async () => {
-    const r = await session.callTool('update_space_schema', {
+    const r = await session.callTool('schema_update', {
       space: SPACE, validationMode: 'warn', usageNotes: 'written over MCP',
     });
     assert.ok(!r?.isError, `refused: ${JSON.stringify(r)}`);
@@ -104,7 +104,7 @@ describe('update_space_schema is held to the ROUTE rules, not looser ones', () =
     // this as an empty schema and report success — in a strict space that silently removes every constraint from
     // the type while the schema looks authored.
     const before = await meta();
-    const r = await session.callTool('update_space_schema', {
+    const r = await session.callTool('schema_update', {
       space: SPACE, typeSchemas: { entity: { broken: { $ref: `library:absent-${RUN}` } } },
     });
     assert.ok(r?.isError, `a broken $ref was accepted: ${JSON.stringify(r)}`);
@@ -118,12 +118,12 @@ describe('update_space_schema is held to the ROUTE rules, not looser ones', () =
   it('REFUSES an unknown field rather than silently dropping it', async () => {
     // `additionalProperties: false` on the tool schema is the first gate; the planner's `.strict()` meta body is the
     // second. Either is enough — what must not happen is a 200 that ignored the field.
-    const r = await session.callTool('update_space_schema', { space: SPACE, validationMdoe: 'strict' });
+    const r = await session.callTool('schema_update', { space: SPACE, validationMdoe: 'strict' });
     assert.ok(r?.isError, `a misspelled field was accepted: ${JSON.stringify(r)}`);
   });
 
   it('refuses a call that names no field at all', async () => {
-    const r = await session.callTool('update_space_schema', { space: SPACE });
+    const r = await session.callTool('schema_update', { space: SPACE });
     assert.ok(r?.isError, `an empty update was accepted: ${JSON.stringify(r)}`);
   });
 });

@@ -26,7 +26,7 @@ imports**, where records legitimately reference targets that are created later i
 deliberate per-space choice to accept dangling links, and it is **off by default** — you do not get lax
 linkage by saying nothing.
 
-Bulk writes (`POST /bulk`, `bulk_write`) check reference **format** but not existence even when strict,
+Bulk writes (`POST /bulk`, `save_bulk`) check reference **format** but not existence even when strict,
 because a payload may reference a record created earlier in the same payload; rejecting those would
 break valid forward references within a batch.
 
@@ -204,7 +204,7 @@ Content-Type: application/json
 > undone by the next sync, which offered everything back to an instance that had no record of any deletion.
 > Voting removes that problem rather than working around it: the peers are wiping too.
 >
-> The same rule governs the `wipe_space` MCP tool, through the same planner.
+> The same rule governs the `delete_space_data` MCP tool, through the same planner.
 
 #### Request body
 

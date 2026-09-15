@@ -36,22 +36,22 @@ before(async () => {
 describe('the matrix an OIDC identity gets', () => {
   it('an admin identity reaches an admin-rung capability', () => {
     const rights = migrateToken({ admin: true, readOnly: false });
-    assert.equal(toolRightsRefusal('wipe_space', rights, 'general'), null,
+    assert.equal(toolRightsRefusal('delete_space_data', rights, 'general'), null,
       'wipe_space carries no area row, so this also proves the instance-level pass-through still holds');
-    assert.equal(toolRightsRefusal('delete_memory', rights, 'general'), null);
+    assert.equal(toolRightsRefusal('delete_fact', rights, 'general'), null);
   });
 
   it('a read-only identity is refused a write, where before it was refused only by the boolean', () => {
     const rights = migrateToken({ admin: false, readOnly: true });
-    const refusal = toolRightsRefusal('remember', rights, 'general');
+    const refusal = toolRightsRefusal('save_fact', rights, 'general');
     assert.ok(refusal, 'read-only must not reach a write through the matrix either');
     assert.match(refusal, /knowledge: write/);
   });
 
   it('a scoped identity reaches its spaces and nothing else', () => {
     const rights = migrateToken({ admin: false, readOnly: false, spaces: ['alpha'] });
-    assert.equal(toolRightsRefusal('remember', rights, 'alpha'), null);
-    assert.ok(toolRightsRefusal('remember', rights, 'beta'), 'a claim-granted allowlist is still an allowlist');
+    assert.equal(toolRightsRefusal('save_fact', rights, 'alpha'), null);
+    assert.ok(toolRightsRefusal('save_fact', rights, 'beta'), 'a claim-granted allowlist is still an allowlist');
   });
 
   it('an EMPTY spaces claim reaches nothing — the widening that must not happen', () => {
@@ -59,7 +59,7 @@ describe('the matrix an OIDC identity gets', () => {
     // or not an array. That is deny. Reading it as "absent, therefore all spaces" would turn the narrowest
     // identity into the widest, which is the exact defect the migration's comments warn about.
     const rights = migrateToken({ admin: false, readOnly: false, spaces: [] });
-    assert.ok(toolRightsRefusal('remember', rights, 'general'));
+    assert.ok(toolRightsRefusal('save_fact', rights, 'general'));
     assert.ok(toolRightsRefusal('recall', rights, 'general'));
   });
 
@@ -67,7 +67,7 @@ describe('the matrix an OIDC identity gets', () => {
     // The other direction, and the two must not be conflated: no allowlist at all meant every space in the
     // old model, including future ones.
     const rights = migrateToken({ admin: false, readOnly: false });
-    assert.equal(toolRightsRefusal('remember', rights, 'anything-at-all'), null);
+    assert.equal(toolRightsRefusal('save_fact', rights, 'anything-at-all'), null);
   });
 });
 

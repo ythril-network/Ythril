@@ -20,7 +20,7 @@ const PAIR_LABELS = LINK_PAIRS.map(([f, t]) => linkLabel(f, t)).join(', ');
 const WHAT_A_LINK_IS =
   'A LINK IS NOT AN EDGE. A link says one record CONCERNS another — a memory about an entity, a file about '
   + 'a chrono entry. It carries no label, no weight, no properties and no type, because those are what an '
-  + 'edge is for. If you want to say HOW two things relate, use `upsert_edge`.';
+  + 'edge is for. If you want to say HOW two things relate, use `save_edge`.';
 
 const THE_SIX = `THE SIX CLASSES, and there is no seventh: ${PAIR_LABELS}. An entity is only ever the TO end — `
   + 'nothing hangs off an entity, which is why there is no `entity.…` class. A pair outside this list is an '
@@ -36,8 +36,8 @@ function kindSchema(side: 'from' | 'to') {
   };
 }
 
-export const upsert_linkTool: ToolHandler = {
-  name: 'upsert_link',
+export const save_linkTool: ToolHandler = {
+  name: 'save_link',
   description: 'Record that one record concerns another.\n\n'
     + WHAT_A_LINK_IS + '\n\n'
     + THE_SIX + '\n\n'
@@ -121,7 +121,7 @@ export const delete_linkTool: ToolHandler = {
     + 'A TOMBSTONE IS WRITTEN, so the deletion reaches peer instances on the next sync instead of being '
     + 'quietly restored by one that still holds the link.\n\n'
     + 'PARAMETERS:\n'
-    + '- `id` — the link\'s `_id`, as `upsert_link` and `query` report it. An id that is not a link is an '
+    + '- `id` — the link\'s `_id`, as `save_link` and `query` report it. An id that is not a link is an '
     + 'ERROR, not a silent success.\n'
     + '- `targetSpace` — required when `space` is a proxy: the member space holding the link.\n\n'
     + 'RESPONSE: one line confirming the id that was removed.',
@@ -155,8 +155,8 @@ export const delete_linkTool: ToolHandler = {
   },
 };
 
-export const links_convert_preflightTool: ToolHandler = {
-  name: 'links_convert_preflight',
+export const graph_link_preflightTool: ToolHandler = {
+  name: 'graph_link_preflight',
   description: 'Who is still writing the LEGACY ARRAYS to this space? Read this before converting it.\n\n'
     + 'WHAT CONVERSION DOES. `links:convert` walks a space, turns its `entityIds` / `memoryIds` / '
     + '`chronoIds` entries into link records, and marks the space `completeLinkage`. From then on those six '

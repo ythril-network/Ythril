@@ -5,7 +5,7 @@
  *
  * `GET /api/brain/spaces/:spaceId/er-model` was REST-only, and it answers the question an agent asks FIRST:
  * which entity types are actually here, which edge labels connect which of them, and how many of each.
- * `get_space_meta` answers a different question — the DECLARED schema, what may exist — so an MCP-only client
+ * `space_meta` answers a different question — the DECLARED schema, what may exist — so an MCP-only client
  * could learn what a space permits and not what it contains.
  *
  * Found by `scripts/surface-matrix.mjs`, which listed `GET /er-model` in the REST-only column.

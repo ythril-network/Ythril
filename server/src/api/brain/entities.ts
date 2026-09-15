@@ -63,8 +63,8 @@ entitiesRouter.post('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAu
   /*
    * `type` IS REQUIRED, and it no longer defaults to the empty string.
    *
-   * Owner’s ruling on `P-31`, 2026-09-04: option A. `upsert_entity` requires it, the batch importer reports
-   * *"missing required field: type"*, and `bulk_write`’s item schema requires it — three doors of four. This
+   * Owner’s ruling on `P-31`, 2026-09-04: option A. `save_entity` requires it, the batch importer reports
+   * *"missing required field: type"*, and `save_bulk`’s item schema requires it — three doors of four. This
    * one defaulted it, which was not a permissive default: `type` is what SELECTS the per-type property
    * schema, so a typeless entity is one `validateEntity` can never check. The most-used door was the one
    * producing records nothing could validate.

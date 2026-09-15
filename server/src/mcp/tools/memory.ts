@@ -1,8 +1,8 @@
 /**
- * MCP memory CRUD tools — `remember`, `update_memory`, `delete_memory`.
+ * MCP memory CRUD tools — `remember`, `update_fact`, `delete_fact`.
  *
  * The cross-type retrieval tools (`recall`/`find_similar`/`query`) live in `search.ts` and the
- * cross-type batch writer (`bulk_write`) in `bulk.ts`; this file is just memory create/update/delete.
+ * cross-type batch writer (`save_bulk`) in `bulk.ts`; this file is just memory create/update/delete.
  */
 
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
@@ -15,7 +15,7 @@ import { assertRefsResolve, UUID_V4_PATTERN } from '../../brain/entity-refs.js';
 import { deleteMemory, listMemories, remember, updateMemory } from '../../brain/memory.js';
 import { applyDeleteFields as applyDeleteFieldsPaths } from '../../brain/delete-fields.js';
 // The API layer's write gate, imported rather than reimplemented: `update_chrono` once shipped without
-// the allowlist `create_chrono` enforced, and two copies of a validation rule is how that happens.
+// the allowlist `save_chrono` enforced, and two copies of a validation rule is how that happens.
 import { getConfig } from '../../config/loader.js';
 import { checkQuota } from '../../quota/quota.js';
 import { resolveWriteTarget, findFirstAcrossMembers, isStrictLinkage } from '../../spaces/proxy.js';
@@ -27,11 +27,11 @@ import { mergePropertiesOrKeep } from '../../brain/merge-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { connectionSchemas, applyConnections } from '../../brain/write-connections.js';
 
-export const rememberTool: ToolHandler = {
-  name: 'remember',
+export const save_factTool: ToolHandler = {
+  name: 'save_fact',
   description: 'Store a fact in the knowledge graph. It is embedded for semantic search, so write it as a SENTENCE that carries its own context — a memory retrieved months later arrives without the conversation it was written in, and "he agreed to the change" is unusable on its own.\n\n'
-    + 'WITHOUT `id` IT IS ALWAYS AN INSERT, and nothing deduplicates by content: remembering the same fact twice stores it twice, and both then compete for the same result slots in a recall. Search before writing if a fact may already be there, and use `update_memory` when you mean to revise one.\n\n'
-    + 'WITH an `id` that already names a record it CONVERGES instead of duplicating — that is the retry-safety contract, and it is why a repeated call after a timeout is safe. Convergence MERGES, the same way `upsert_entity` does: tags are unioned and properties shallow-merged over what is stored, so a partial payload does not erase the rest. An id that names nothing is ignored rather than adopted; identity is server-generated.\n\n'
+    + 'WITHOUT `id` IT IS ALWAYS AN INSERT, and nothing deduplicates by content: remembering the same fact twice stores it twice, and both then compete for the same result slots in a recall. Search before writing if a fact may already be there, and use `update_fact` when you mean to revise one.\n\n'
+    + 'WITH an `id` that already names a record it CONVERGES instead of duplicating — that is the retry-safety contract, and it is why a repeated call after a timeout is safe. Convergence MERGES, the same way `save_entity` does: tags are unioned and properties shallow-merged over what is stored, so a partial payload does not erase the rest. An id that names nothing is ignored rather than adopted; identity is server-generated.\n\n'
     + 'Embedding is ASYNCHRONOUS. The write returns as soon as the record is stored, and a queued job computes the vector — so a `recall` issued seconds later may not find what you just wrote. Pass `includeFreshWrites: true` on that recall to read straight from the collection instead of waiting.\n\n'
     + 'IF THE SPACE VALIDATES, a refusal names WHOSE FAULT it is: `introduced` are violations this write caused and are what refuses it; `preExisting` were already stored, are reported, and do NOT block. Branch on `introduced`.',
   mutating: true,
@@ -194,8 +194,8 @@ export const rememberTool: ToolHandler = {
   },
 };
 
-export const update_memoryTool: ToolHandler = {
-  name: 'update_memory',
+export const update_factTool: ToolHandler = {
+  name: 'update_fact',
   description: 'Update one memory by its ID. Every field except `id` is optional; a field you omit is left '
     + 'exactly as it was. Changing content re-embeds the record automatically — you never queue that '
     + 'yourself.\n\n'
@@ -363,11 +363,11 @@ export const update_memoryTool: ToolHandler = {
   },
 };
 
-export const delete_memoryTool: ToolHandler = {
-  name: 'delete_memory',
+export const delete_factTool: ToolHandler = {
+  name: 'delete_fact',
   description: 'Delete one memory by its ID. IRREVERSIBLE — there is no undelete and no trash.\n\n'
     + 'IF YOU WANT IT OUT OF SEARCH RATHER THAN GONE, this is the wrong tool. Set '
-    + '`suppressEmbeddings` with `update_memory` instead: the record stays readable, listable and '
+    + '`suppressEmbeddings` with `update_fact` instead: the record stays readable, listable and '
     + 'traversable, and only stops being ranked by meaning. Deleting is for records that should not exist.\n\n'
     + 'IT IS REFUSED IF SOMETHING STILL POINTS AT IT, in a space with strict linkage on. A chrono entry '
     + 'listing this memory in `memoryIds`, or a file listing it, blocks the delete and the error names what '

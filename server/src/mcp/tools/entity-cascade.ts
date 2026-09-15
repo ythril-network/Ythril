@@ -9,8 +9,8 @@ import { previewEntityCascade } from '../../brain/entity-delete-cascade.js';
 import { getEntityById } from '../../brain/entities.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
 
-export const entity_cascade_previewTool: ToolHandler = {
-  name: 'entity_cascade_preview',
+export const delete_entity_previewTool: ToolHandler = {
+  name: 'delete_entity_preview',
   description: 'What deleting an entity would remove, and the token that lets you do it.\n\n'
     /*
      * NO OTHER TOOL IS NAMED HERE, and that is a rule rather than an omission.

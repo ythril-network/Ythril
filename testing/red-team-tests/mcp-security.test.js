@@ -93,7 +93,7 @@ describe('MCP security — every request is authorized on its own bearer', () =>
     const attacker = await openMcpSession(INSTANCES.a, readOnlyToken);
     try {
       assert.equal(attacker.status, 200, 'the read-only token must reach MCP — a refusal is the point, not a 401');
-      const refused = await attacker.callTool('remember', { fact: 'S2-successor-write-attempt', space: 'general' });
+      const refused = await attacker.callTool('save_fact', { fact: 'S2-successor-write-attempt', space: 'general' });
       assert.ok(refused?.isError, `VULNERABILITY: a read-only token wrote through MCP: ${JSON.stringify(refused)}`);
     } finally { attacker.close(); }
 
@@ -101,7 +101,7 @@ describe('MCP security — every request is authorized on its own bearer', () =>
     // and not about the tool, the space, or the transport being broken.
     const admin = await openMcpSession(INSTANCES.a, tokenA);
     try {
-      const ok = await admin.callTool('remember', { fact: `S2-successor-control-${Date.now()}`, space: 'general' });
+      const ok = await admin.callTool('save_fact', { fact: `S2-successor-control-${Date.now()}`, space: 'general' });
       assert.ok(!ok?.isError, `the control write must succeed: ${JSON.stringify(ok)}`);
     } finally { admin.close(); }
   });
@@ -203,7 +203,7 @@ describe('MCP security — remember tool input validation', () => {
       assert.equal(status, 200, 'MCP endpoint must be reachable for security testing');
       assert.ok(callTool, 'MCP session must establish');
 
-      const rpc = await callTool('remember', {
+      const rpc = await callTool('save_fact', {
         space: 'general',
         fact: 'X'.repeat(200_000),
       });

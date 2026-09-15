@@ -3,12 +3,12 @@
  *
  * ## What it is for (`F-27` item 2)
  *
- * `bulk_write` takes memories, entities, chrono entries and edges in one payload, and its own contract says
+ * `save_bulk` takes memories, entities, chrono entries and edges in one payload, and its own contract says
  * why that is not enough: **you cannot reference a record this call creates**, because identities are minted
  * server-side. So a person, a document about them and the date it was signed is three ordered calls.
  *
  * Measured by the operator who asked: posting ONE message to their board cost six round trips — one
- * `upsert_entity`, then five `upsert_edge` for `posted_by`, `addressed_to`, two `answers` and one `corrects`.
+ * `save_entity`, then five `save_edge` for `posted_by`, `addressed_to`, two `answers` and one `corrects`.
  * Every post on that board is one record and three to five labelled relationships.
  *
  * ## A key, scoped to the call, never stored

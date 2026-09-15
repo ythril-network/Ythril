@@ -41,7 +41,7 @@ const STUB = {
   requiredSpace: { type: 'string', description: 'Space ID to operate on.' },
   optionalSpace: { type: 'string', description: 'Optional space ID.' },
 };
-const remember = () => ALL_TOOLS.find(t => t.name === 'remember');
+const remember = () => ALL_TOOLS.find(t => t.name === 'save_fact');
 
 describe('the code really does converge on a supplied id', () => {
   const src = () => stripComments(readFileSync('server/src/brain/memory.ts', 'utf8'));

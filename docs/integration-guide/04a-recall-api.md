@@ -515,7 +515,7 @@ counting rows never double-counts a record, and no relationship is invisible.
   All three default to **false**, which is deliberate and is why this changed nothing for existing callers. You
   asked for semantic matches; expansion is decoration on them, and the answer is budgeted — a match is counted
   together with its whole `_graph` subtree, so every extra record admitted by default would be paid for in
-  matches that no longer fit. The standalone `traverse` tool defaults `includeChrono` to **true** because its
+  matches that no longer fit. The standalone `graph_traverse` tool defaults `includeChrono` to **true** because its
   caller is explicitly exploring a graph rather than searching.
 
   A linked node arrives carrying `kind` (`chrono`, `memory` or `file`) and the fields that say what it is — a

@@ -42,9 +42,9 @@ The expiry surfaces as `_expireAt` (an ISO timestamp) on the record — **not `e
 instance; expiry is eventual (granularity is days), not to-the-second. A `ttlDays`-only update (no other
 fields) is a valid write — use it to set, extend, or clear an existing record's expiry.
 
-`ttlDays` is accepted on the **MCP** write tools as well (`remember`, `update_memory`, `upsert_entity`,
-`update_entity`, `upsert_edge`, `update_edge`, `create_chrono`, `update_chrono`, `write_file`) and per item in
-`bulk_write` / `POST /bulk`, with the same semantics — so agents can set an expiry directly.
+`ttlDays` is accepted on the **MCP** write tools as well (`save_fact`, `update_fact`, `save_entity`,
+`update_entity`, `save_edge`, `update_edge`, `save_chrono`, `update_chrono`, `write_file`) and per item in
+`save_bulk` / `POST /bulk`, with the same semantics — so agents can set an expiry directly.
 
 **Files** carry TTL too: pass `ttlDays` as a **query parameter** on the upload — `POST /api/files/:spaceId?path=…&ttlDays=30`
 (a query param so it works for raw-binary bodies) — or the `ttlDays` field on the MCP `write_file` tool. The
@@ -190,7 +190,7 @@ epoch seconds or milliseconds. A property that is not a timestamp at all is **no
 
 #### Configuring it, per space
 
-In the space's `meta`, so `PATCH /api/spaces/:id` and `update_space_schema` already write it:
+In the space's `meta`, so `PATCH /api/spaces/:id` and `schema_update` already write it:
 
 ```json
 { "meta": { "stampSkew": { "warnMinutes": 40, "properties": ["stampedAt", "postedAt"] } } }
@@ -218,7 +218,7 @@ follows, so there is one thing to know across memories, entities, edges and chro
 |---|---|---|
 | `PATCH .../entities/:id`, `update_entity` | merge | **union** with the stored tags |
 | `PATCH .../edges/:id`, `update_edge` | merge | **union** with the stored tags |
-| `PATCH .../memories/:id`, `update_memory` | merge | **replaces** the stored tags |
+| `PATCH .../memories/:id`, `update_fact` | merge | **replaces** the stored tags |
 | `PATCH .../chrono/:id`, `update_chrono` | merge | **replaces** the stored tags |
 
 **Removing a key is `deleteFields`' job, never an absence.** Omitting a property does not delete it, and sending
@@ -243,7 +243,7 @@ the phase. The second shape is also the one `traverse`, `er_model` and the backl
 > rewrites stored data, and `deleteFields: ["properties.theKey"]` removes it.
 >
 > **Changed in 2.4.1.** `PATCH .../memories/:id` and chrono updates previously **replaced** the whole
-> `properties` map, so a patch naming one key silently dropped the rest — while `update_memory`'s own schema
+> `properties` map, so a patch naming one key silently dropped the rest — while `update_fact`'s own schema
 > described the field as "properties to merge". If you were relying on the replace to clear keys, switch to
 > `deleteFields`.
 
@@ -413,7 +413,7 @@ The consequence is worth stating plainly, because it is the reason to choose thi
 |---|---|
 | `recall`'s ranked results, `similar`, duplicate/contradiction scans | **no**, and there is no parameter that asks for it back |
 | `GET`/`PATCH` by id, `query`, `list`, exports | **yes**, unchanged and complete |
-| the `traverse` tool | **yes** |
+| the `graph_traverse` tool | **yes** |
 | **`recall(traverse: n)` — the graph expansion** | **yes** |
 
 That last row is the one people ask about, so it is spelled out rather than folded into "traverse". Recall's
@@ -555,6 +555,6 @@ PATCH /api/brain/spaces/:spaceId/files?path=…
 
 > **⚠️ Warning:** Fields deleted via `deleteFields` are **permanently removed**. Recovery requires audit logs or a backup. The explicit path list design is intentional — accidental data loss requires consciously naming each field to remove.
 
-**MCP tools:** all five — `update_memory`, `update_entity`, `update_edge`, `update_chrono` and
+**MCP tools:** all five — `update_fact`, `update_entity`, `update_edge`, `update_chrono` and
 `update_file_meta` — accept a `deleteFields` array with the same semantics. This named three, which read
 as a deliberate parity gap against the five REST endpoints listed below. There is none.

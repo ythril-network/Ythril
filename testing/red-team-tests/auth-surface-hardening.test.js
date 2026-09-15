@@ -11,7 +11,7 @@
  *      is what keeps the token out of the URL.
  * M8 — a TOTP code is single-use: replaying a code that is still inside its
  *      ±1-step validity window must be refused.
- * M9 — the instance-level MCP tools (`list_peers`, `sync_now`) require an admin
+ * M9 — the instance-level MCP tools (`network_peers`, `network_sync`) require an admin
  *      token: they expose the peer topology / drive outbound sync and have no
  *      space scoping.
  * L1 — the token lookup `prefix` is taken from the RANDOM part of the token
@@ -177,25 +177,25 @@ describe('M9 — list_peers / sync_now require an admin token', () => {
     mcp(token, { method: 'tools/call', params: { name, arguments: args } });
 
   it('list_peers via a non-admin token is refused', async () => {
-    const r = await callTool(plainToken, 'list_peers');
+    const r = await callTool(plainToken, 'network_peers');
     assert.match(r.text, /requires a token with instance-admin rights/i,
       `VULNERABILITY: non-admin token reached list_peers: ${r.text.slice(0, 300)}`);
   });
 
   it('sync_now via a non-admin token is refused', async () => {
-    const r = await callTool(plainToken, 'sync_now');
+    const r = await callTool(plainToken, 'network_sync');
     assert.match(r.text, /requires a token with instance-admin rights/i,
       `VULNERABILITY: non-admin token reached sync_now: ${r.text.slice(0, 300)}`);
   });
 
   it('tools/list hides the admin-only tools from a non-admin token', async () => {
     const r = await mcp(plainToken, { method: 'tools/list', params: {} });
-    assert.ok(!/"name"\s*:\s*"list_peers"/.test(r.text), 'list_peers must not be advertised to a non-admin token');
-    assert.ok(!/"name"\s*:\s*"sync_now"/.test(r.text), 'sync_now must not be advertised to a non-admin token');
+    assert.ok(!/"name"\s*:\s*"network_peers"/.test(r.text), 'list_peers must not be advertised to a non-admin token');
+    assert.ok(!/"name"\s*:\s*"network_sync"/.test(r.text), 'sync_now must not be advertised to a non-admin token');
   });
 
   it('an admin token can still call list_peers (regression)', async () => {
-    const r = await callTool(adminToken, 'list_peers');
+    const r = await callTool(adminToken, 'network_peers');
     // Absence of the CURRENT wording. The previous version of this line matched the OLD wording, so when the
     // refusal text changed it would have passed against a refused admin — a security test proving nothing
     // while reading as "admin still works".

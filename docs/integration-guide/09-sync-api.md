@@ -103,7 +103,7 @@ POST /api/notify/trigger?wait=true&timeoutMs=15000
 #### One peer instead of a network
 
 Send `peerId` in place of `networkId` to sync a single peer across every network it belongs to. Available
-since 4.4 — the `sync_now` MCP tool had taken this argument from the start and no REST route accepted one,
+since 4.4 — the `network_sync` MCP tool had taken this argument from the start and no REST route accepted one,
 so a REST caller could sync a network and never a single peer.
 
 ```json
@@ -192,11 +192,11 @@ ejection vote about a stale peer because the peer is stale is how a network lose
 it.
 
 **Reading it from either door — the same three fields, per member, spelled the same way.**
-`GET /api/networks`, `GET /api/networks/:id` and the MCP tool `list_peers` all carry `version` (what the
+`GET /api/networks`, `GET /api/networks/:id` and the MCP tool `network_peers` all carry `version` (what the
 peer last reported, `null` if never), `belowFloor` (the refusal sentence, or `null`) and
 `minPeerVersion` (this instance's floor, identical on every row) on each member.
 
-`minPeerVersion` is per-member rather than on an envelope because `list_peers` returns a bare JSON
+`minPeerVersion` is per-member rather than on an envelope because `network_peers` returns a bare JSON
 array by contract, and wrapping it would break every caller that indexes the result. Repeating a
 constant per row is that tool's existing idiom — `network`, `networkId` and `networkType` already are —
 and it keeps one spelling of the fact across both doors.

@@ -11,7 +11,7 @@
  *
  * A fleet operator, 2026-09-06: they intend to convert to link records and this is what stops them. Every
  * write door takes a reference at create time today, and after conversion those fields are refused — so
- * attaching a record to three things becomes four calls, and `bulk_write`'s reason for existing is undone.
+ * attaching a record to three things becomes four calls, and `save_bulk`'s reason for existing is undone.
  *
  * **They are not asking to keep the arrays.** Their words: *"if links become the only truth and the arrays
  * are deleted, that is cleaner than carrying two things that must be kept in step forever."* What has to
@@ -26,7 +26,7 @@
  * and the rename is what explains the change — the same argument this project made for
  * `OLLAMA_URL` → `VISION_BASE_URL`, quoted back at us.
  *
- * One field per kind rather than a generic `links: [{to, toKind}]`, for the reason `upsert_link` already
+ * One field per kind rather than a generic `links: [{to, toKind}]`, for the reason `save_link` already
  * gives for requiring `toKind` explicitly: the same UUID can name records in two collections, and a wrong
  * guess produces a link that reads as correct and points at nothing. Putting the kind in the field NAME
  * retires that hazard instead of restating it.
@@ -171,7 +171,7 @@ export function linkInputSchemas(): Record<string, unknown> {
  *
  * A single-record write has exactly one new record in it, so there is nothing to correlate: every `to` names
  * something already stored. No `$ref`, no ordering, no derived kind. The batch case — creating a post and
- * three labelled relationships to records the same call minted — is the correlation key in `bulk_write`, and
+ * three labelled relationships to records the same call minted — is the correlation key in `save_bulk`, and
  * it stays there.
  *
  * ## Edges UPSERT. They do NOT replace, and links do
@@ -201,7 +201,7 @@ export function edgeInputSchema(): Record<string, unknown> {
     description:
       'Create labelled relationships from this record, in the same call. Each entry needs `to` and '
       + '`label`; `toKind` defaults to entity. The other end must ALREADY EXIST — this is not a way to '
-      + 'connect two records the same call creates, which is what `bulk_write` and its `$ref` are for. '
+      + 'connect two records the same call creates, which is what `save_bulk` and its `$ref` are for. '
       + 'THESE UPSERT, they do not replace: writing the same (to, label) again updates that edge, and no '
       + 'edge is ever removed by this field — an edge carries a label, properties and possibly another '
       + "author, so clearing the set would delete work nobody asked to delete. Use `delete_edge` for that. "

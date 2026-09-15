@@ -4,7 +4,7 @@
  *
  * ## Why three, and why that is the whole risk
  *
- * `POST /edges` and `PATCH /edges/:id`, the `upsert_edge` and `update_edge` MCP tools, and the bulk importer
+ * `POST /edges` and `PATCH /edges/:id`, the `save_edge` and `update_edge` MCP tools, and the bulk importer
  * (which is itself two doors sharing one implementation) all reach `upsertEdge`. Each of them re-derives what
  * a valid endpoint looks like: REST called `assertRefsResolve(..., 'entity', ...)`, the MCP tool tested
  * `UUID_V4_RE` itself with its own message, and bulk had a third copy of the same pattern. Every one of those
@@ -39,8 +39,8 @@ import { bodyOf } from './_structural-window.mjs';
 
 const { REF_KINDS } = await import('../../server/dist/config/types-knowledge.js');
 const { edgeEndpointKindSchema, edgeEndpointKind, isWellFormedRef } = await import('../../server/dist/brain/entity-refs.js');
-const { upsert_edgeTool, update_edgeTool } = await import('../../server/dist/mcp/tools/edge.js');
-const { bulk_writeTool } = await import('../../server/dist/mcp/tools/bulk.js');
+const { save_edgeTool, update_edgeTool } = await import('../../server/dist/mcp/tools/edge.js');
+const { save_bulkTool } = await import('../../server/dist/mcp/tools/bulk.js');
 
 const STUB = { requiredSpace: { type: 'string' }, optionalSpace: { type: 'string' } };
 const src = (p) => stripComments(readFileSync(p, 'utf8'));
@@ -51,12 +51,12 @@ describe('the MCP door declares the kinds', () => {
   it('the tools are the ones this gate thinks they are', () => {
     // Floors everything below: a renamed export would import as undefined and every loop would pass over
     // nothing at all.
-    for (const tool of [upsert_edgeTool, update_edgeTool, bulk_writeTool]) {
+    for (const tool of [save_edgeTool, update_edgeTool, save_bulkTool]) {
       assert.ok(tool?.inputSchema, 'an edge-writing tool is gone or renamed — re-anchor this gate');
     }
   });
 
-  for (const [name, tool] of [['upsert_edge', upsert_edgeTool], ['update_edge', update_edgeTool]]) {
+  for (const [name, tool] of [['save_edge', save_edgeTool], ['update_edge', update_edgeTool]]) {
     for (const field of FIELDS) {
       it(`${name} accepts \`${field}\``, () => {
         const props = tool.inputSchema(STUB).properties ?? {};
@@ -74,7 +74,7 @@ describe('the MCP door declares the kinds', () => {
        * levels down inside an array. A field added to the single-write tool and not here is a capability that
        * works one edge at a time and is refused in a batch.
        */
-      const item = bulk_writeTool.inputSchema(STUB).properties?.edges?.items?.properties ?? {};
+      const item = save_bulkTool.inputSchema(STUB).properties?.edges?.items?.properties ?? {};
       assert.ok(field in item,
         `bulk_write's edge item omits ${field}, so a batch import cannot write what upsert_edge can`);
     });
@@ -86,8 +86,8 @@ describe('the MCP door declares the kinds', () => {
      * — a valid enum refusing a kind the database stores, differently per tool.
      */
     const expected = edgeEndpointKindSchema('to');
-    const item = bulk_writeTool.inputSchema(STUB).properties?.edges?.items?.properties ?? {};
-    for (const props of [upsert_edgeTool.inputSchema(STUB).properties, update_edgeTool.inputSchema(STUB).properties, item]) {
+    const item = save_bulkTool.inputSchema(STUB).properties?.edges?.items?.properties ?? {};
+    for (const props of [save_edgeTool.inputSchema(STUB).properties, update_edgeTool.inputSchema(STUB).properties, item]) {
       assert.deepEqual(props.toKind, expected, 'a tool spells its own kind schema out instead of sharing one');
     }
     assert.deepEqual([...expected.enum].sort(), [...REF_KINDS].sort(),

@@ -69,25 +69,25 @@ describe('MCP tools', () => {
     it('sync_now is in the tool list', async () => {
       const tools = await session.listTools();
       const names = tools.map(t => t.name);
-      assert.ok(names.includes('sync_now'), `Expected sync_now in tools: ${names.join(', ')}`);
+      assert.ok(names.includes('network_sync'), `Expected sync_now in tools: ${names.join(', ')}`);
     });
 
     it('list_peers is in the tool list', async () => {
       const tools = await session.listTools();
       const names = tools.map(t => t.name);
-      assert.ok(names.includes('list_peers'), `Expected list_peers in tools: ${names.join(', ')}`);
+      assert.ok(names.includes('network_peers'), `Expected list_peers in tools: ${names.join(', ')}`);
     });
 
     it('list_peers has no required parameters', async () => {
       const tools = await session.listTools();
-      const tool = tools.find(t => t.name === 'list_peers');
+      const tool = tools.find(t => t.name === 'network_peers');
       assert.ok(tool, 'list_peers tool must exist');
       assert.deepEqual(tool.inputSchema?.required ?? [], [], 'list_peers must have no required parameters');
     });
 
     it('sync_now tool has optional peerId parameter', async () => {
       const tools = await session.listTools();
-      const tool = tools.find(t => t.name === 'sync_now');
+      const tool = tools.find(t => t.name === 'network_sync');
       assert.ok(tool, 'sync_now tool must exist');
       assert.ok(tool.inputSchema?.properties?.peerId, 'sync_now must expose peerId parameter');
       assert.ok(!tool.inputSchema?.required?.includes('peerId'), 'peerId must be optional');
@@ -102,7 +102,7 @@ describe('MCP tools', () => {
     it('returns the empty-networks message when no networks are configured', async () => {
       // ythril-a may OR may not have networks at this point; we just check
       // the output is valid: either the empty message or a JSON array.
-      const result = await session.callTool('list_peers', {});
+      const result = await session.callTool('network_peers', {});
       assert.equal(result?.isError, undefined, `list_peers must not return isError`);
       const text = result?.content?.[0]?.text ?? '';
       assert.ok(text.length > 0, 'list_peers must return non-empty text');
@@ -151,20 +151,20 @@ describe('MCP tools', () => {
     });
 
     it('returns a list that includes the test peer instanceId', async () => {
-      const result = await session.callTool('list_peers', {});
+      const result = await session.callTool('network_peers', {});
       const text = result?.content?.[0]?.text ?? '';
       assert.ok(text.includes(PEER_ID), `Expected peer ${PEER_ID} in list_peers output`);
     });
 
     it('never exposes tokenHash or inviteKeyHash', async () => {
-      const result = await session.callTool('list_peers', {});
+      const result = await session.callTool('network_peers', {});
       const text = result?.content?.[0]?.text ?? '';
       assert.ok(!text.includes('tokenHash'), 'list_peers must not expose tokenHash');
       assert.ok(!text.includes('inviteKeyHash'), 'list_peers must not expose inviteKeyHash');
     });
 
     it('exposes expected peer fields: instanceId, label, url, direction, network', async () => {
-      const result = await session.callTool('list_peers', {});
+      const result = await session.callTool('network_peers', {});
       const text = result?.content?.[0]?.text ?? '';
       // Output should be parseable JSON array of peer records
       let peers;
@@ -185,7 +185,7 @@ describe('MCP tools', () => {
     after(() => session?.close());
 
     it('returns "No networks configured" when no networks exist (or a sync summary if they do)', async () => {
-      const result = await session.callTool('sync_now', {});
+      const result = await session.callTool('network_sync', {});
       const text = result?.content?.[0]?.text ?? '';
       // Either no networks, or a valid sync summary line
       const valid =
@@ -201,7 +201,7 @@ describe('MCP tools', () => {
     after(() => session?.close());
 
     it('rejects an unknown peerId with isError', async () => {
-      const result = await session.callTool('sync_now', { peerId: 'http://evil.example.com/steal' });
+      const result = await session.callTool('network_sync', { peerId: 'http://evil.example.com/steal' });
       assert.ok(result?.isError === true, 'Must return isError for unknown peerId');
       const text = result?.content?.[0]?.text ?? '';
       assert.ok(
@@ -253,7 +253,7 @@ describe('MCP tools', () => {
     });
 
     it('accepts a valid peerId and returns a sync result', async () => {
-      const result = await session.callTool('sync_now', { peerId: FAKE_PEER_ID });
+      const result = await session.callTool('network_sync', { peerId: FAKE_PEER_ID });
       // Peer is unreachable so errors > 0, but the call itself must succeed
       // (isError may be true due to sync failure, but content must be present)
       const text = result?.content?.[0]?.text ?? '';
@@ -264,7 +264,7 @@ describe('MCP tools', () => {
     });
 
     it('sync_now all-networks runs without throwing (may report errors for unreachable peers)', async () => {
-      const result = await session.callTool('sync_now', {});
+      const result = await session.callTool('network_sync', {});
       const text = result?.content?.[0]?.text ?? '';
       assert.ok(text.length > 0, 'Expected non-empty response text');
     });
@@ -291,15 +291,15 @@ describe('MCP transport-level behaviour (POST /mcp)', () => {
     const tools = rpc?.result?.tools ?? [];
     assert.ok(Array.isArray(tools) && tools.length > 0, 'tools/list must return a non-empty array');
     const names = tools.map(t => t.name);
-    assert.ok(names.includes('remember'), `Expected 'remember' tool in list: ${names.join(', ')}`);
+    assert.ok(names.includes('save_fact'), `Expected 'save_fact' tool in list: ${names.join(', ')}`);
     assert.ok(names.includes('recall'), `Expected 'recall' tool in list: ${names.join(', ')}`);
-    assert.ok(names.includes('sync_now'), `Expected 'sync_now' tool in list: ${names.join(', ')}`);
+    assert.ok(names.includes('network_sync'), `Expected 'network_sync' tool in list: ${names.join(', ')}`);
   });
 
   it('tools/call returns a result via stateless JSON response', async () => {
     const rpc = await postMcpHttp({
       jsonrpc: '2.0', id: 2, method: 'tools/call',
-      params: { name: 'list_peers', arguments: {} },
+      params: { name: 'network_peers', arguments: {} },
     });
     const result = rpc?.result;
     assert.ok(result !== undefined, `Expected a result from tools/call, got: ${JSON.stringify(rpc)}`);

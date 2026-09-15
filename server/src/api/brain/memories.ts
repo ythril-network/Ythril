@@ -365,7 +365,7 @@ memoriesRouter.patch('/spaces/:spaceId/memories/:id', globalRateLimit, requireSp
     if (!Array.isArray(entityIds) || entityIds.some((t: unknown) => typeof t !== 'string')) { res.status(400).json({ error: '`entityIds` must be an array of strings' }); return; }
     /*
      * `W-16`: EXISTENCE, not just shape — the same `assertRefsResolve` the create route, `remember` and
-     * `update_memory` all call. This door alone ran `UUID_V4_RE.test` and stopped, so a syntactically
+     * `update_fact` all call. This door alone ran `UUID_V4_RE.test` and stopped, so a syntactically
      * perfect id pointing at nothing was stored.
      *
      * The create route's own comment is the argument: *"a syntactically perfect id pointing at nothing

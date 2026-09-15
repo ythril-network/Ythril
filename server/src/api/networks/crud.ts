@@ -128,7 +128,7 @@ crudRouter.post('/:id/sync', globalRateLimit, requireAdmin, async (req, res) => 
  *
  * It lives on the networks COLLECTION rather than under `/:id/` because a peer is not a property of one
  * network — it can be a member of several, and `runSyncForPeer` walks all of them. That is exactly why
- * this could not simply be folded into the route above, and why `sync_now` had no REST twin for it until
+ * this could not simply be folded into the route above, and why `network_sync` had no REST twin for it until
  * `Q-20` bolted one onto the notification channel.
  *
  * `unknownPeerRefusal` is the SEC-16 check, shared with the MCP tool: an unvalidated id becomes the

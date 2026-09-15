@@ -3,8 +3,8 @@ import { getConfig } from '../../config/loader.js';
 import { MIN_PEER_VERSION, peerFloorRefusal } from '../../sync/peer-floor.js';
 import { unknownPeerRefusal } from '../../sync/peer-target.js';
 
-export const list_peersTool: ToolHandler = {
-  name: 'list_peers',
+export const network_peersTool: ToolHandler = {
+  name: 'network_peers',
   description: 'List every peer instance this brain is connected to, flattened across all of its networks. '
     + 'Requires instance-admin rights. Read-only — it configures nothing and triggers nothing.\n\n'
     + 'ONE PEER APPEARS ONCE PER NETWORK IT BELONGS TO, not once overall. The same instance in two networks '
@@ -86,8 +86,8 @@ export const list_peersTool: ToolHandler = {
   },
 };
 
-export const sync_nowTool: ToolHandler = {
-  name: 'sync_now',
+export const network_syncTool: ToolHandler = {
+  name: 'network_sync',
   description:
         'Run a sync cycle now instead of waiting for the schedule. Requires instance-admin rights.\n\n'
         + 'IT WAITS FOR THE CYCLE, so the reply is an outcome and not an acknowledgement: the transfers run '
@@ -99,14 +99,14 @@ export const sync_nowTool: ToolHandler = {
         + 'for something that had already finished.\n\n'
         + 'WHAT IT STILL DOES NOT TELL YOU is whether every record is now in step. A cycle transfers what the '
         + 'watermarks say is outstanding and can be bounded per hop, so a clean run is not proof of a '
-        + 'converged space — `list_peers` and its `lastSyncAt` / `consecutiveFailures` are how you see that.'
+        + 'converged space — `network_peers` and its `lastSyncAt` / `consecutiveFailures` are how you see that.'
         + '\n\n'
         + 'SYNC IS ALREADY AUTOMATIC. Every network has a schedule, so this is for closing a gap you do not '
         + 'want to wait out: after fixing a peer that was unreachable, or before reading a space you have just '
         + 'been told was changed elsewhere. It is not something to call in a loop — a cycle that overlaps the '
         + 'scheduled one does no more work, it competes with it.\n\n'
         + 'PARAMETERS:\n'
-        + '- `peerId` — an EXACT `instanceId` from `list_peers`. Never a URL and never a label. That one peer '
+        + '- `peerId` — an EXACT `instanceId` from `network_peers`. Never a URL and never a label. That one peer '
         + 'is synced across every network it belongs to. Omit it to run a full cycle for every network, which '
         + 'is the usual call.\n\n'
         + 'RESPONSE: what the cycle did — per network when you omit `peerId`, with a total. A peer that is '

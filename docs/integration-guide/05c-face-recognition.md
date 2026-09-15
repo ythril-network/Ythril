@@ -107,7 +107,7 @@ POST /api/spaces
 { "id": "photos", "label": "Photos", "faceDescriptorDims": 512 }
 ```
 
-Also available as `faceDescriptorDims` on the `create_space` MCP tool. Use **128** for MobileFaceNet-class models (including the bundled one) and **512** for ArcFace / AdaFace / FaceNet / EdgeFace / buffalo_l.
+Also available as `faceDescriptorDims` on the `save_space` MCP tool. Use **128** for MobileFaceNet-class models (including the bundled one) and **512** for ArcFace / AdaFace / FaceNet / EdgeFace / buffalo_l.
 
 **Every space has a width from the moment it exists, whether or not a face index was ever built.** An unset `faceDescriptorDims` is not "undecided" — it resolves to **128**, the built-in default, and nothing derives it from the endpoint you configure. So a space created without it, pointed at a 512-d recogniser, builds a 128-wide index and skips every descriptor it is handed. This sentence exists because that resolution was invisible: an operator with fourteen spaces read the rule below and could not tell whether their empty ones carried a width at all.
 

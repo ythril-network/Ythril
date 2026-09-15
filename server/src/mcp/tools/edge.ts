@@ -14,13 +14,13 @@ import { resolveMetaRefs, validateEdge } from '../../spaces/schema-validation.js
 import { mergePropertiesOrKeep } from '../../brain/merge-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 
-export const upsert_edgeTool: ToolHandler = {
-  name: 'upsert_edge',
+export const save_edgeTool: ToolHandler = {
+  name: 'save_edge',
   description: 'Create or update a directed relationship between two entities.\n\n'
     + 'IDENTITY IS THE TRIPLET `(from, to, label)` — there is no id anywhere in the call, so EVERY repeat of the same triplet is an update of the existing edge and nothing in the arguments suggests it. Properties merge over what is stored; an absent `properties` means "leave them alone", not "clear them". Change the label and you have a second, different edge rather than a renamed one.\n\n'
     + 'DIRECTION IS PART OF THE MEANING. `from`/`to` are not interchangeable, and `depends_on` reversed is a different claim about the world. A traversal follows them separately (`direction: outbound|inbound|both`), so a reversed edge is not merely untidy — it is unreachable from the side that should have found it.\n\n'
     + 'Both endpoints must be entity ids that exist when the space uses strict linkage; that is a refusal, not a dangling edge. And an edge IS a searchable record: it carries its own embedding and competes with knowledge for a recall\'s result slots, which is why `recall` has a `types` filter.\n\n'
-    + 'A LABEL CAN DICTATE WHAT SITS AT EACH END, AND HOW MANY. A space may declare that `reports_to` runs from a person to a person, and that a person reports to at most one manager; this write is REFUSED when it breaks either, with `fromType`, `toType` or `functional` as the violation field and the admitted types in the reason. Read `typeSchemas.edge` from `get_space_meta` before inventing a label, or expect the refusal to teach you the model one edge at a time. Re-writing the same triplet is never a cardinality breach — an edge is not its own duplicate — and an endpoint that resolves to nothing is not a type breach, because a space may permit dangling references.\n\n'
+    + 'A LABEL CAN DICTATE WHAT SITS AT EACH END, AND HOW MANY. A space may declare that `reports_to` runs from a person to a person, and that a person reports to at most one manager; this write is REFUSED when it breaks either, with `fromType`, `toType` or `functional` as the violation field and the admitted types in the reason. Read `typeSchemas.edge` from `space_meta` before inventing a label, or expect the refusal to teach you the model one edge at a time. Re-writing the same triplet is never a cardinality breach — an edge is not its own duplicate — and an endpoint that resolves to nothing is not a type breach, because a space may permit dangling references.\n\n'
     + 'IF THE SPACE VALIDATES: `introduced` are violations this write caused and are what refuses it; `preExisting` were already stored, are reported, and do NOT block. Branch on `introduced`.',
   mutating: true,
   spaceRequired: true,
@@ -46,7 +46,7 @@ export const upsert_edgeTool: ToolHandler = {
             type: { type: 'string', description: 'Optional edge type (e.g. "causal", "attribution").' },
             weight: unitScoreSchema('Optional strength for this relationship, 0 to 1. Nothing derives it '
               + 'and nothing ranks on it — it is stored, returned, and sortable by `query`, so it means '
-              + 'whatever you decide it means. The 0–1 bound is enforced HERE and not on `bulk_write`, whose '
+              + 'whatever you decide it means. The 0–1 bound is enforced HERE and not on `save_bulk`, whose '
               + 'per-item schemas are for discovery only.'),
             tags: {
               type: 'array', items: { type: 'string' },
@@ -163,13 +163,13 @@ export const update_edgeTool: ToolHandler = {
     + 'exactly as it was.\n\n'
     + 'IT CANNOT REPOINT AN EDGE. There is no `from`/`to` here, deliberately: an edge that changes either end '
     + 'is a different relationship, not an edited one, and rewriting it in place would silently invalidate '
-    + 'anything already traversed through it. Delete this edge and `upsert_edge` the new one.\n\n'
+    + 'anything already traversed through it. Delete this edge and `save_edge` the new one.\n\n'
     + 'CHANGING THE `label` MOVES THE EDGE UNDER A DIFFERENT RULE. A space can declare what sits at each end of '
     + 'a label and whether a subject may have more than one; the ends cannot change here, but the label can, so '
     + 'the check is against the NEW label\'s rule and this update is refused when the existing ends do not fit '
     + 'it. A violation the edge already had does not block an edit that leaves the ends and the label alone.\n\n'
     + 'MERGE, NOT REPLACE, for `tags` and `properties`. Sending `tags: ["b"]` on an edge tagged `["a"]` leaves '
-    + 'it tagged `["a","b"]`. Note that `update_memory` REPLACES tags instead — one word of difference between '
+    + 'it tagged `["a","b"]`. Note that `update_fact` REPLACES tags instead — one word of difference between '
     + 'tools that otherwise take the same arguments. To remove a tag or a property here, use `deleteFields` '
     + 'with its dot path; there is no way to shrink either by sending a smaller value.\n\n'
     + 'EDGES ARE SEARCHABLE RECORDS, which is why `suppressEmbeddings` exists on this tool at all: an edge '
@@ -206,12 +206,12 @@ export const update_edgeTool: ToolHandler = {
               type: 'string', minLength: 1,
               description: 'The edge\'s `_id`, as `traverse`, `recall` and `query` report it. Required, '
                 + 'and an id that names nothing is an ERROR rather than a silent no-op. Note this addresses '
-                + 'the edge by id, while `upsert_edge` addresses it by the from/to/label TRIPLET.',
+                + 'the edge by id, while `save_edge` addresses it by the from/to/label TRIPLET.',
             },
             label: {
               type: 'string',
-              description: 'Replaces the relationship label. It is part of the identity `upsert_edge` uses '
-                + '(from + to + label), so renaming it here means a later `upsert_edge` with the OLD label '
+              description: 'Replaces the relationship label. It is part of the identity `save_edge` uses '
+                + '(from + to + label), so renaming it here means a later `save_edge` with the OLD label '
                 + 'creates a second edge instead of updating this one. It is also embedded, so it changes '
                 + 'how this edge ranks.',
             },
@@ -231,7 +231,7 @@ export const update_edgeTool: ToolHandler = {
             tags: {
               type: 'array', items: { type: 'string' },
               description: 'MERGED into the stored tags, never replacing them — so no value here removes a '
-                + 'tag. `update_memory` and `update_chrono` REPLACE the same field; this tool and '
+                + 'tag. `update_fact` and `update_chrono` REPLACE the same field; this tool and '
                 + '`update_entity` merge. Removing one is `deleteFields`, with `tags` for all of them.',
             },
             properties: {
@@ -286,7 +286,7 @@ export const update_edgeTool: ToolHandler = {
 
     // Validate the edge AS IT WILL BE, against the meta of the member space it actually lives in. This
     // path had no schema validation at all, so `label` could be moved outside the allowlist that
-    // `upsert_edge` enforces on the very same record.
+    // `save_edge` enforces on the very same record.
         /*
      * The schema check moved into the writer, which validates the record it is about to store rather than a
      * rebuilt simulation of it. `assertUpdateAllowed` threw exactly the `SchemaViolationError` the writer now
@@ -302,8 +302,8 @@ export const update_edgeTool: ToolHandler = {
   },
 };
 
-export const traverseTool: ToolHandler = {
-  name: 'traverse',
+export const graph_traverseTool: ToolHandler = {
+  name: 'graph_traverse',
   description: 'Follow edges from a starting entity and return reachable nodes up to `maxDepth` hops. For dependency analysis, impact assessment and lineage.\n\n'
     + 'NOT THE SAME AS `recall(traverse: n)`, and the difference decides which one you want:\n'
     + '• This starts from a node you ALREADY KNOW, by id. `recall`\'s expansion starts from whatever a search matched, so it answers "what is near the things about X" rather than "what is near THIS".\n'
@@ -371,8 +371,8 @@ export const traverseTool: ToolHandler = {
 /**
  * Delete one edge.
  *
- * This tool is the reported gap, in the reporter's words: an agent could `wipe_space` but could not delete
- * a single edge. REST has deleted all four record types since it existed; MCP had `delete_memory` and
+ * This tool is the reported gap, in the reporter's words: an agent could `delete_space_data` but could not delete
+ * a single edge. REST has deleted all four record types since it existed; MCP had `delete_fact` and
  * nothing else — so the only edge-removal an agent could reach was destroying the entire space.
  */
 export const delete_edgeTool: ToolHandler = {
@@ -382,7 +382,7 @@ export const delete_edgeTool: ToolHandler = {
     + 'else: both endpoints stay exactly as they were, and every other edge between them survives. This is '
     + 'the tool for "these two are not related after all", not for removing a record.\n\n'
     + 'IT IS ALSO HOW YOU REPOINT AN EDGE. `update_edge` deliberately has no `from`/`to` — an edge whose end '
-    + 'changed is a different relationship — so the sequence is delete this one, then `upsert_edge` the new '
+    + 'changed is a different relationship — so the sequence is delete this one, then `save_edge` the new '
     + 'one.\n\n'
     + 'IF YOU WANT IT OUT OF SEARCH RATHER THAN GONE, set `suppressEmbeddings` with `update_edge` '
     + 'instead. Edges are searchable records and compete with knowledge for a recall `topK`; excluding one '

@@ -11,8 +11,8 @@
  * query['$expr']  = { $lt: [refDate, now] };
  * ```
  *
- * But `overdue` is a legal STORED value on every write door — the enum accepts it on `create_chrono`,
- * `update_chrono`, `bulk_write`, both REST routes, and the Brain UI's own status dropdown — and
+ * But `overdue` is a legal STORED value on every write door — the enum accepts it on `save_chrono`,
+ * `update_chrono`, `save_bulk`, both REST routes, and the Brain UI's own status dropdown — and
  * `deriveChronoStatus` passes a stored one straight through. So `status: "overdue"` returned the entries
  * nobody had touched and hid the ones somebody had deliberately marked. Backwards.
  *

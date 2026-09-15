@@ -48,16 +48,16 @@ describe('MCP args enforcement — breaking rejections', () => {
     rejects('recall', { query: 'x', bogus: 1 }, 'bogus');
   });
   it('rejects a missing required property', () => {
-    rejects('remember', { space: 'general' }, 'fact');
+    rejects('save_fact', { space: 'general' }, 'fact');
   });
-  it('rejects an out-of-range number (find_similar.topK > 100)', () => {
+  it('rejects an out-of-range number (similar.topK > 100)', () => {
     rejects('similar', { entryId: UUID, entryType: 'entity', topK: 500 });
   });
   it('rejects the wrong maxTimeMS ceiling (filter.maxTimeMS > 10000)', () => {
     rejects('filter', { space: 'general', collection: 'memories', filter: {}, maxTimeMS: 99999 });
   });
   it('rejects a bad enum value (wipe_space.types)', () => {
-    rejects('wipe_space', { space: 'general', types: ['bogus'] });
+    rejects('delete_space_data', { space: 'general', types: ['bogus'] });
   });
   it('rejects a bad collection enum (filter.collection)', () => {
     rejects('filter', { space: 'general', collection: 'widgets', filter: {} });
@@ -91,12 +91,12 @@ describe('MCP args enforcement — breaking rejections', () => {
     rejects('similar', { entryId: 'not-a-uuid', entryType: 'entity' });
   });
   it('rejects a space the token cannot see (enum)', () => {
-    rejects('get_stats', { space: 'secret' });
+    rejects('space_stats', { space: 'secret' });
   });
   it('bulk_write is EXEMPT from schema enforcement (partial-success: per-item errors, not call rejection)', () => {
     // bulk_write's contract is to process valid items and report per-item errors in the result, so the
     // dispatcher skips arg-validation for it (tool.skipSchemaValidation). Its rich schema stays in
     // tools/list for discovery; the handler validates each item.
-    assert.equal(tool('bulk_write').skipSchemaValidation, true);
+    assert.equal(tool('save_bulk').skipSchemaValidation, true);
   });
 });

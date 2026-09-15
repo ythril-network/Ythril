@@ -9,7 +9,7 @@
  *
  * That is not a reading of the code. It was measured against a running instance: a token whose matrix said
  * `perSpace.general.knowledge = 'write'` was refused `DELETE /api/brain/spaces/general/memories/:id` with a
- * **403**, and the identical delete through the `delete_memory` tool answered **"Memory deleted"**.
+ * **403**, and the identical delete through the `delete_fact` tool answered **"Memory deleted"**.
  *
  * ## Why the table is derived and not written
  *
@@ -98,25 +98,25 @@ describe('the guard REFUSES and ALLOWS — behaviourally, not by reading the sou
   it('refuses a delete the token only holds write-below-admin for', () => {
     // Nothing to refuse at `write`, since S-1 levelled single-record deletes DOWN to write.
     const r = rights({ perSpace: { general: { knowledge: 'read' } } });
-    const refusal = toolRightsRefusal('delete_memory', r, 'general');
+    const refusal = toolRightsRefusal('delete_fact', r, 'general');
     assert.ok(refusal, 'read must not reach a delete');
     assert.match(refusal, /knowledge: write/, 'the refusal must name what was needed');
     assert.match(refusal, /holds knowledge: read/, 'and what the token actually holds');
   });
 
   it('allows the same call once the rung is there', () => {
-    assert.equal(toolRightsRefusal('delete_memory', rights({ perSpace: { general: { knowledge: 'write' } } }), 'general'), null);
+    assert.equal(toolRightsRefusal('delete_fact', rights({ perSpace: { general: { knowledge: 'write' } } }), 'general'), null);
   });
 
   it('a grant in one space does not carry into another', () => {
     const r = rights({ perSpace: { general: { knowledge: 'admin' } } });
-    assert.ok(toolRightsRefusal('remember', r, 'other'), 'a per-space grant is per space');
+    assert.ok(toolRightsRefusal('save_fact', r, 'other'), 'a per-space grant is per space');
   });
 
   it('areas do not leak into each other', () => {
     // `files: admin` must not buy a knowledge write. Separate areas is the whole point of the matrix.
     const r = rights({ perSpace: { general: { files: 'admin' } } });
-    assert.ok(toolRightsRefusal('remember', r, 'general'));
+    assert.ok(toolRightsRefusal('save_fact', r, 'general'));
     assert.equal(toolRightsRefusal('write_file', r, 'general'), null);
   });
 
@@ -133,13 +133,13 @@ describe('the guard REFUSES and ALLOWS — behaviourally, not by reading the sou
      * row lookup has to come first. Refusing on an absent matrix before it would have 403'd every
      * instance-level tool, which is the same mistake pointing the other way.
      */
-    assert.ok(toolRightsRefusal('delete_memory', undefined, 'general'),
+    assert.ok(toolRightsRefusal('delete_fact', undefined, 'general'),
       'an MCP tool call with no rights matrix was allowed');
     assert.equal(toolRightsRefusal('list_spaces', rights({ floor: 'none' }), 'general'), null,
       'an instance-level tool has no rights row and is governed by `instanceAdmin` — still a pass-through');
     assert.equal(toolRightsRefusal('list_spaces', undefined, ''), null,
       'the row lookup must run BEFORE the matrix check, or every instance-level tool is refused');
-    assert.ok(toolRightsRefusal('delete_memory', rights({ floor: 'none' }), ''),
+    assert.ok(toolRightsRefusal('delete_fact', rights({ floor: 'none' }), ''),
       'a tool that needs an area rung cannot be checked without a space, and cannot-be-checked is not passes');
   });
 

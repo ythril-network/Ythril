@@ -15,6 +15,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING — every remaining MCP tool is renamed to the verb-first scheme.** 23 of them, on top of the
+  search family that moved with its routes. No aliases: the old names are gone.
+
+  | | |
+  |---|---|
+  | create or update a record | `save_fact`, `save_entity`, `save_edge`, `save_link`, `save_chrono`, `save_space`, `save_bulk` |
+  | edit one by id | `update_fact` (was `update_memory`) |
+  | delete | `delete_fact`, `delete_entity_preview` (was `entity_cascade_preview`), `delete_space_data` (was `wipe_space`) |
+  | graph actions | `graph_traverse`, `graph_merge`, `graph_link_preflight` |
+  | the space | `space_stats`, `space_meta`, `space_reindex` |
+  | schema, federation, embedding | `schema_update`, `network_peers`, `network_sync`, `retry_embed_record`, `retry_embed_media`, `retry_embed_file` |
+
+  **What a caller changes: the tool name, nothing else.** No parameter, default, cap or refusal moved.
+  `delete_space_data` is the one worth reading twice — it was `wipe_space`, and the new name says what it
+  removes rather than what it does.
+
+  **Audit operations follow the tools**, so a log filter on an old operation name stops matching. The
+  exported constants follow too: a `delete_memoryTool` exporting a tool named `delete_fact` is a trap for
+  the next reader.
+
+  **Three names were NOT swept, deliberately.** `remember` is also a brain function, `traverse` is also
+  recall's `traverse` BODY FIELD — including its entry in the allowlist — and `reindex` is also a route
+  segment. A blanket rename would have removed a documented parameter from `RECALL_BODY_FIELDS`, so every
+  caller sending `traverse` would get a 400 naming a key the guide tells them to send. Measured before
+  applying: of seven `'traverse'` sites in the server, two are the tool.
+
 - **BREAKING — the search family is renamed and drops the space from its path.**
 
   | was | is |

@@ -3,7 +3,7 @@
  *
  * ## Why it is a module and not two checks
  *
- * `sync_now` has validated a `peerId` since SEC-16: the id must be a known member `instanceId`, and it is
+ * `network_sync` has validated a `peerId` since SEC-16: the id must be a known member `instanceId`, and it is
  * never used as a URL. `POST /api/notify/trigger` gained the same parameter afterwards, and a second copy
  * of a security check is the defect this repository produces most — the two would agree on the day they
  * were written and the weaker one would win silently afterwards.

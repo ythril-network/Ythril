@@ -16,7 +16,7 @@
  * before the 2.4.0 docs promised that all four record types converge "matching the entity path".
  *
  * That promise is the reason this is correctness rather than tidiness. A stated guarantee with eleven
- * implementations is held together by nothing, and it was not in fact held: `update_memory`'s own tool
+ * implementations is held together by nothing, and it was not in fact held: `update_fact`'s own tool
  * schema said `properties` were "to merge" while `updateMemory` **replaced** them, so an agent that
  * patched one property silently destroyed every other property on the record.
  *

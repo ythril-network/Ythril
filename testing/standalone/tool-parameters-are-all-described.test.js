@@ -12,7 +12,7 @@
  *
  * ## The nesting is the whole point
  *
- * 8 of those 26 were at the top level. **18 were inside `bulk_write`'s per-item schemas** — `entities[].tags`,
+ * 8 of those 26 were at the top level. **18 were inside `save_bulk`'s per-item schemas** — `entities[].tags`,
  * `chrono[].status`, `edges[].weight` and the rest — which a top-level-only sweep reports as clean. That is
  * this repo's most common defect shape arriving in a measurement: the check and the thing it checks shared a
  * blind spot. So the walker descends into `properties` AND into `items`, and the test below proves it reaches
@@ -55,7 +55,7 @@ function walkProperties(node, path = '', out = []) {
   for (const [key, value] of Object.entries(node.properties ?? {})) {
     out.push([`${path}${key}`, value]);
     walkProperties(value, `${path}${key}.`, out);
-    // Array items: `bulk_write` puts four whole record schemas here and nowhere else.
+    // Array items: `save_bulk` puts four whole record schemas here and nowhere else.
     if (value?.items && typeof value.items === 'object') walkProperties(value.items, `${path}${key}[].`, out);
   }
   return out;
@@ -67,7 +67,7 @@ describe('the walker reaches where the gaps were', () => {
   it('descends into nested objects and into array items', () => {
     // Mutation-proof for the SCANNER. A walker that only reads the top level passes this whole suite while
     // 18 undescribed parameters sit one level down, which is how they survived X-2's first pass.
-    const paths = walkProperties(ALL_TOOLS.find(t => t.name === 'bulk_write').inputSchema(SCHEMAS)).map(([p]) => p);
+    const paths = walkProperties(ALL_TOOLS.find(t => t.name === 'save_bulk').inputSchema(SCHEMAS)).map(([p]) => p);
     assert.ok(paths.includes('chrono[].status'), 'array items must be walked');
     assert.ok(paths.includes('memories[].properties'), 'and every collection, not just the first');
 
@@ -116,15 +116,15 @@ describe('every parameter is described', () => {
 
 describe('the claims those descriptions make are still true', () => {
   /**
-   * Several new sentences say a bound is enforced on `create_chrono`/`upsert_edge` and NOT on `bulk_write`.
+   * Several new sentences say a bound is enforced on `save_chrono`/`save_edge` and NOT on `save_bulk`.
    * That is true because of one line, and if the line goes the sentences become lies that read as facts —
    * which is the exact cost CLAUDE.md records for a stale schema description.
    */
   it('bulk_write really does skip per-item schema validation', () => {
-    const bulk = ALL_TOOLS.find(t => t.name === 'bulk_write');
+    const bulk = ALL_TOOLS.find(t => t.name === 'save_bulk');
     assert.equal(bulk.skipSchemaValidation, true,
       'the item descriptions say the 0–1 bounds are not enforced here; remove this flag and they stop being true');
-    for (const name of ['create_chrono', 'upsert_edge']) {
+    for (const name of ['save_chrono', 'save_edge']) {
       assert.notEqual(ALL_TOOLS.find(t => t.name === name).skipSchemaValidation, true,
         `${name} is the door the bulk descriptions contrast with — it must still validate`);
     }

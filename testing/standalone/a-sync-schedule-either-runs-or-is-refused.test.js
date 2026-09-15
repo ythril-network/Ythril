@@ -182,7 +182,7 @@ describe('both network routes ask before they save', () => {
     /*
      * Stated rather than assumed, because "MCP and REST are one API with two doors" is the rule this repo
      * breaks most expensively. Networks are REST-only: no tool creates or updates one, and the two
-     * network-adjacent tools (`list_peers`, `sync_now`) neither read nor write a schedule. So there is
+     * network-adjacent tools (`network_peers`, `network_sync`) neither read nor write a schedule. So there is
      * nothing to keep in parity here — and if a network tool ever arrives, this case is what fails.
      */
     const tools = src('server/src/mcp/tools/index.ts') + SHORTHANDS.length;

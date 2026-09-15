@@ -82,7 +82,7 @@ export interface RouteRight {
  * Owner ruling, 2026-08-13, after the difference was MEASURED rather than argued. A token carrying
  * `rights.perSpace.general.knowledge = 'write'` was refused `DELETE /memories/:id` with
  * `403 Token needs 'admin' on knowledge in space 'general'` — and deleted the same record through MCP
- * `delete_memory` seconds later, because `mcp/router.ts` gates on the token's `readOnly`/`admin` FLAGS and never
+ * `delete_fact` seconds later, because `mcp/router.ts` gates on the token's `readOnly`/`admin` FLAGS and never
  * consults the rung. One rule, two implementations, and the weaker one silently in charge.
  *
  * The ruling was to level DOWN, not up: **`write` is the right rung for deleting a single record you could have
@@ -91,11 +91,11 @@ export interface RouteRight {
  *
  * **What deliberately did NOT move:**
  * - The **collection wipes** (`DELETE /memories`, `/entities`, `/edges`, `/chrono`) stay `admin`. Their MCP
- *   counterpart `wipe_space` is `admin: true`, so those two doors already agree — and emptying a collection is not
+ *   counterpart `delete_space_data` is `admin: true`, so those two doors already agree — and emptying a collection is not
  *   the same act as deleting a row.
  * - `DELETE /api/brain/spaces/:spaceId/files` (the file-META record) stays `admin`. No tool mirrors it, so
  *   lowering it would weaken a door for parity with nothing.
- * - `update_space_schema` used to be listed here as the one known difference in the OTHER direction — REST
+ * - `schema_update` used to be listed here as the one known difference in the OTHER direction — REST
  *   asking `schema: write` while the tool demanded instance admin. Both halves have since moved and the two
  *   doors now agree: the route is `schema: admin` (the whole-map replace is the area's irreversible act) and
  *   the tool is governed by the same rung instead of by a flag. `surface-matrix.mjs` no longer reports it.
@@ -181,7 +181,7 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   //
   // `DELETE` is `admin` to match `DELETE /api/brain/spaces/:spaceId/files`: deleting a directory takes the tree
   // with it, and the metadata half of the same operation has always been the highest rung. `PATCH` (move/rename)
-  // and `retry_embedding` (re-queues a file's embedding) are `write`.
+  // and `retry_embed_file` (re-queues a file's embedding) are `write`.
   { route: '/api/files/:spaceId', method: 'DELETE', area: 'files', needs: 'write', scope: 'path' },
   { route: '/api/files/:spaceId', method: 'PATCH', area: 'files', needs: 'write', scope: 'path' },
   { route: '/api/files/:spaceId/retry_embedding', method: 'POST', area: 'files', needs: 'write', scope: 'path' },
@@ -268,7 +268,7 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
  * MCP gated on two BOOLEANS — `readOnly` and `admin` — while REST enforced a per-space, per-area rung. Same
  * store, same policy, two enforcement models, and the weaker one was reachable: a token whose matrix said
  * `knowledge: write` was refused `DELETE /memories/:id` over REST with a 403 and allowed the identical
- * delete through `delete_memory`. That was measured against a running instance, not reasoned about.
+ * delete through `delete_fact`. That was measured against a running instance, not reasoned about.
  *
  * ## Why it is generated from ROUTE_RIGHTS rather than written
  *
@@ -279,8 +279,8 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
  *
  * A tool ABSENT from this table is instance-level: it is governed by the `admin` flag on the tool and by
  * `instanceAdmin` on the token, not by a per-space rung, because the capability it maps to is not scoped to
- * a space at all (`list_spaces`, `create_space`, `update_space`, `list_tokens`, `list_peers`, `sync_now`,
- * `wipe_space`, `help`).
+ * a space at all (`list_spaces`, `save_space`, `update_space`, `list_tokens`, `network_peers`, `network_sync`,
+ * `delete_space_data`, `help`).
  */
 export interface ToolRight {
   tool: string;
@@ -289,54 +289,54 @@ export interface ToolRight {
 }
 
 export const TOOL_RIGHTS: readonly ToolRight[] = [
-  { tool: 'remember', area: 'knowledge', needs: 'write' },
-  { tool: 'update_memory', area: 'knowledge', needs: 'write' },
-  { tool: 'delete_memory', area: 'knowledge', needs: 'write' },
-  { tool: 'upsert_entity', area: 'knowledge', needs: 'write' },
+  { tool: 'save_fact', area: 'knowledge', needs: 'write' },
+  { tool: 'update_fact', area: 'knowledge', needs: 'write' },
+  { tool: 'delete_fact', area: 'knowledge', needs: 'write' },
+  { tool: 'save_entity', area: 'knowledge', needs: 'write' },
   { tool: 'update_entity', area: 'knowledge', needs: 'write' },
   { tool: 'delete_entity', area: 'knowledge', needs: 'write' },
-  { tool: 'entity_cascade_preview', area: 'knowledge', needs: 'read' },
-  { tool: 'merge_entities', area: 'knowledge', needs: 'write' },
+  { tool: 'delete_entity_preview', area: 'knowledge', needs: 'read' },
+  { tool: 'graph_merge', area: 'knowledge', needs: 'write' },
   { tool: 'find_entities_by_name', area: 'knowledge', needs: 'read' },
-  { tool: 'upsert_edge', area: 'knowledge', needs: 'write' },
+  { tool: 'save_edge', area: 'knowledge', needs: 'write' },
   { tool: 'update_edge', area: 'knowledge', needs: 'write' },
   { tool: 'delete_edge', area: 'knowledge', needs: 'write' },
-  { tool: 'upsert_link', area: 'knowledge', needs: 'write' },
+  { tool: 'save_link', area: 'knowledge', needs: 'write' },
   { tool: 'delete_link', area: 'knowledge', needs: 'write' },
   // Reads who wrote a space's legacy link arrays — a view of that space's data, so the same area as the two
   // above at the lowest rung, matching its REST twin's `ROUTE_RIGHTS` row.
-  { tool: 'links_convert_preflight', area: 'knowledge', needs: 'read' },
-  { tool: 'create_chrono', area: 'knowledge', needs: 'write' },
+  { tool: 'graph_link_preflight', area: 'knowledge', needs: 'read' },
+  { tool: 'save_chrono', area: 'knowledge', needs: 'write' },
   { tool: 'update_chrono', area: 'knowledge', needs: 'write' },
   { tool: 'delete_chrono', area: 'knowledge', needs: 'write' },
   { tool: 'list_chrono', area: 'knowledge', needs: 'read' },
   { tool: 'recall', area: 'knowledge', needs: 'read' },
   { tool: 'filter', area: 'knowledge', needs: 'read' },
   { tool: 'similar', area: 'knowledge', needs: 'read' },
-  { tool: 'traverse', area: 'knowledge', needs: 'read' },
-  { tool: 'bulk_write', area: 'knowledge', needs: 'write' },
-  { tool: 'get_stats', area: 'knowledge', needs: 'read' },
+  { tool: 'graph_traverse', area: 'knowledge', needs: 'read' },
+  { tool: 'save_bulk', area: 'knowledge', needs: 'write' },
+  { tool: 'space_stats', area: 'knowledge', needs: 'read' },
   { tool: 'er_model', area: 'knowledge', needs: 'read' },
-  { tool: 'reindex', area: 'knowledge', needs: 'admin' },
+  { tool: 'space_reindex', area: 'knowledge', needs: 'admin' },
   { tool: 'list_embed_jobs', area: 'knowledge', needs: 'read' },
-  { tool: 'retry_record_embedding', area: 'knowledge', needs: 'write' },
-  { tool: 'retry_failed_media_embeddings', area: 'files', needs: 'write' },
+  { tool: 'retry_embed_record', area: 'knowledge', needs: 'write' },
+  { tool: 'retry_embed_media', area: 'files', needs: 'write' },
   { tool: 'read_file', area: 'files', needs: 'read' },
   { tool: 'write_file', area: 'files', needs: 'write' },
   { tool: 'delete_file', area: 'files', needs: 'write' },
   { tool: 'move_file', area: 'files', needs: 'write' },
   { tool: 'list_dir', area: 'files', needs: 'read' },
   { tool: 'create_dir', area: 'files', needs: 'write' },
-  { tool: 'retry_embedding', area: 'files', needs: 'write' },
+  { tool: 'retry_embed_file', area: 'files', needs: 'write' },
   { tool: 'update_file_meta', area: 'files', needs: 'write' },
-  { tool: 'get_space_meta', area: 'schema', needs: 'read' },
-  { tool: 'update_space_schema', area: 'schema', needs: 'admin' },
+  { tool: 'space_meta', area: 'schema', needs: 'read' },
+  { tool: 'schema_update', area: 'schema', needs: 'admin' },
   // Governed by a rung from the moment it stopped being an instance-admin tool. `admin: true` exempts a tool
   // from this inventory because an instance-level capability has no space to scope to; `spaceAdmin: true` is
   // the opposite claim — the space IS the subject — so the area check applies like any other space-scoped
   // tool, on top of the four-area administrator check the dispatcher makes.
   //
-  // `schema: write` to match `update_space_schema` beside it and the meta half of `PATCH /api/spaces/:id`:
+  // `schema: write` to match `schema_update` beside it and the meta half of `PATCH /api/spaces/:id`:
   // label and purpose are space meta, and meta is the schema area throughout this inventory.
   { tool: 'update_space', area: 'schema', needs: 'write' },
 ];

@@ -217,7 +217,7 @@ export function migrateMediaEmbeddingMasterSwitch(config: Config): boolean {
  *
  * The two fields say the same thing — `description` is commented "shown to MCP clients as space-level
  * instructions" and `purpose` is "short directive injected into MCP instructions at handshake" — and they
- * were served by different tools: `get_space_meta` returned purpose, `list_spaces` returned description.
+ * were served by different tools: `space_meta` returned purpose, `list_spaces` returned description.
  * The UI stopped offering an editor for description when purpose arrived, so on a real deployment the
  * field every MCP client reads was the one no admin could change: three spaces returning null, three
  * returning mojibake from an old import, and the purposes their admins had written sitting invisible.

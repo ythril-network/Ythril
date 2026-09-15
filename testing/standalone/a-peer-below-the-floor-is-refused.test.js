@@ -271,7 +271,7 @@ describe('both doors report the floor the same way', () => {
   it('the same three fields, per member, on REST and on MCP', () => {
     /*
      * ONE SPELLING, not one per door. `minPeerVersion` went on the REST envelope first and inside an
-     * object wrapper on MCP — and CI refused the wrapper, because `list_peers` returns a bare JSON
+     * object wrapper on MCP — and CI refused the wrapper, because `network_peers` returns a bare JSON
      * array by contract and an envelope breaks every caller that indexes it. Per-member on both is
      * the shape that is identical through both doors and breaks nothing.
      */

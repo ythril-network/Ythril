@@ -3,7 +3,7 @@
  *
  * ## Why this is a function and not a route
  *
- * B-2's last two capabilities are `create_space` and `reindex`. `createSpace()` already exists in `lifecycle.ts`, so
+ * B-2's last two capabilities are `save_space` and `reindex`. `createSpace()` already exists in `lifecycle.ts`, so
  * a tool could call it today — and that is the problem. `POST /api/spaces` wraps it in checks that would all be
  * skipped: the two proxy refusals, the schema-library `$ref`, and the strict-flag seeding. A token holding
  * `createSpaces` would then get a *weaker* create over MCP than over REST, which is the *two surfaces, one rule, one

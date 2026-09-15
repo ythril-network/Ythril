@@ -78,14 +78,14 @@ describe('H1 — MCP proxy space cannot exceed member-space token scope', () => 
   });
 
   it('a proxy-only token is DENIED access to the proxy\'s member spaces', async () => {
-    const r = await mcpCall(proxyOnlyToken, 'get_stats', { space: proxyId });
+    const r = await mcpCall(proxyOnlyToken, 'space_stats', { space: proxyId });
     assert.equal(r.status, 200);
     assert.match(r.text, /member space/i,
       `VULNERABILITY: proxy-only token reached member spaces via MCP. Response: ${r.text.slice(0, 300)}`);
   });
 
   it('a token scoped to all member spaces IS allowed', async () => {
-    const r = await mcpCall(fullToken, 'get_stats', { space: proxyId });
+    const r = await mcpCall(fullToken, 'space_stats', { space: proxyId });
     assert.equal(r.status, 200);
     assert.doesNotMatch(r.text, /does not have access to member space/i,
       `Regression: full-scope token was wrongly denied. Response: ${r.text.slice(0, 300)}`);

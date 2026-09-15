@@ -133,7 +133,7 @@ const RECLASSIFIED = 1;
  * cannot exist, since an edge cannot cross a space.
  */
 /**
- * 39 -> 40: the `retry_failed_media_embeddings` MCP tool.
+ * 39 -> 40: the `retry_embed_media` MCP tool.
  *
  * The REST route it mirrors has always summed across members with `memberSpacesForRequest`; the tool narrows
  * with `memberSpacesWithin` and retries every member, because asking a proxy to retry means all of them.

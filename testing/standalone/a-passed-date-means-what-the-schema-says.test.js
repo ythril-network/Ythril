@@ -128,8 +128,8 @@ describe('both doors take the same space-meta fields', () => {
 
   const mcpKeys = (() => {
     const src2 = src('server/src/mcp/tools/spaces.ts');
-    const at = src2.indexOf('export const update_space_schemaTool');
-    assert.ok(at > -1, 'update_space_schemaTool moved — re-anchor this gate');
+    const at = src2.indexOf('export const schema_updateTool');
+    assert.ok(at > -1, 'schema_updateTool moved — re-anchor this gate');
     const props = src2.indexOf('properties: {', at);
     return [...src2.slice(props, src2.indexOf("required: ['space']", props)).matchAll(/^\s{6}(\w+):/gm)]
       .map(m => m[1]);
