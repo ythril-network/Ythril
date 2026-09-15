@@ -441,7 +441,7 @@ broken, and nothing compared the two.
 
 Six things worth reading twice:
 
-- **Which cross-encoder you pick decides whether reranking helps or hurts, and a bad one is not neutral.**
+- **A cross-encoder must be one trained for QUESTION-to-passage relevance, and a weaker sibling of the right model is a regression rather than a smaller gain.**
   Measured on one corpus, same instance, same questions, same budget — only the model changed:
 
   | reranker | first answer right | within three |
@@ -455,11 +455,15 @@ Six things worth reading twice:
   for a wrong one — so a difference of 0.001 overturned a vector margin of 0.100, and it did that
   confidently on every query. The one that worked separated the same pair 0.99997 against 0.653.
 
-  Two things follow. Pick a model trained for **question-to-passage relevance** rather than for
-  passage-to-passage similarity; the MS MARCO family is the obvious starting point and is small enough to
-  run on a CPU. And **measure it against no reranker on your own corpus before leaving it on** — there is no
-  signal in the API that says a reranker is making things worse, because from the outside a worse ordering
-  looks exactly like an ordering.
+  The model this guide recommends, `BAAI/bge-reranker-v2-m3`, is NOT the failing one and ranks that same
+  pair correctly. The trap is reaching for a smaller relative of it: `bge-reranker-base` is trained for
+  passage-to-passage similarity, and on question-shaped queries it rates everything about the right subject
+  as equally relevant.
+
+  So: use `bge-reranker-v2-m3`, or a model from the MS MARCO family if you want something small enough to
+  be comfortable on a CPU. And **measure it against no reranker on your own corpus before leaving it on** —
+  there is no signal in the API that says a reranker is making things worse, because from the outside a
+  worse ordering looks exactly like an ordering.
 
 - **A reranker must accept 100 passages in one request, and the common self-hosted server does not by
   default.** One recall sends up to a hundred candidates in a single call, because the over-fetch IS

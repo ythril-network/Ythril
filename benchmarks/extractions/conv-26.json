@@ -5062,6 +5062,266 @@
         "D15:27",
         "D15:28"
       ]
+    },
+    {
+      "text": "Caroline's adoption went from researching agencies in May 2023, through an adoption council meeting in July and a formal application in August, to passing the adoption agency interviews on 20 October 2023. She contacted her adoption mentor in October when she felt ready to be a mother.",
+      "speaker": "Caroline",
+      "statedOn": "2023-10-22",
+      "entities": [
+        "caroline",
+        "adoption",
+        "adoption-council",
+        "adoption-advice-group",
+        "adoption-mentor"
+      ],
+      "chrono": [
+        "adoption-applied",
+        "adoption-interviews-passed"
+      ],
+      "sourceTurns": [
+        "D2:8",
+        "D8:9",
+        "D13:1",
+        "D17:1",
+        "D19:1"
+      ],
+      "synthesis": true
+    },
+    {
+      "text": "Caroline has made art since she was about 17 and uses it to express her trans experience: a red and blue painting about the binary gender system, the self-portrait she made in August 2023, 'Embracing Identity', a sunset painted after a beach visit, and a stained glass window for a local church. She is putting on an LGBTQ art show of her paintings.",
+      "speaker": "Caroline",
+      "statedOn": "2023-09-13",
+      "entities": [
+        "caroline",
+        "painting",
+        "binary-painting",
+        "self-portrait",
+        "embracing-identity",
+        "sunset-painting",
+        "stained-glass",
+        "art-show"
+      ],
+      "sourceTurns": [
+        "D16:7",
+        "D11:10",
+        "D11:12",
+        "D13:11",
+        "D14:7",
+        "D14:17",
+        "D9:12",
+        "D14:33"
+      ],
+      "synthesis": true
+    },
+    {
+      "text": "Melanie took up pottery in July 2023, made a black-and-white bowl and then a plate in her class, and had to stop for a time after being hurt in September 2023.",
+      "speaker": "Melanie",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "melanie",
+        "pottery",
+        "pottery-class",
+        "melanie-bowl",
+        "melanie-plate"
+      ],
+      "chrono": [
+        "pottery-signup",
+        "melanie-injury"
+      ],
+      "sourceTurns": [
+        "D5:4",
+        "D5:8",
+        "D14:4",
+        "D17:8"
+      ],
+      "synthesis": true
+    },
+    {
+      "text": "Caroline's involvement in the LGBTQ community grew through 2023: a support group in May, a school talk and a counselling workshop in June, a pride parade and a conference, then mentoring LGBTQ youth, joining the activist group Connected LGBTQ Activists in July, volunteering at an LGBTQ+ youth centre in August, and a transgender poetry reading in October.",
+      "speaker": "Caroline",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "caroline",
+        "lgbtq-support-group",
+        "mentorship-program",
+        "activist-group",
+        "youth-center",
+        "poetry-reading"
+      ],
+      "sourceTurns": [
+        "D1:3",
+        "D3:1",
+        "D4:13",
+        "D5:1",
+        "D7:1",
+        "D9:2",
+        "D10:3",
+        "D15:3",
+        "D17:17"
+      ],
+      "synthesis": true
+    },
+    {
+      "text": "Melanie's household has three pets: the cat Luna and the dog Oliver, and a second cat, Bailey, who arrived in August 2023. Caroline keeps a guinea pig called Oscar.",
+      "speaker": "Melanie",
+      "statedOn": "2023-08-23",
+      "entities": [
+        "melanie",
+        "luna",
+        "oliver",
+        "bailey",
+        "caroline",
+        "oscar"
+      ],
+      "sourceTurns": [
+        "D7:16",
+        "D7:18",
+        "D13:3",
+        "D13:4"
+      ],
+      "synthesis": true
+    },
+    {
+      "text": "Caroline has been pursuing counselling and mental health work as a career since May 2023, driven by her own experience of being supported, and wants in particular to work with transgender people.",
+      "speaker": "Caroline",
+      "statedOn": "2023-07-12",
+      "entities": [
+        "caroline",
+        "counseling"
+      ],
+      "sourceTurns": [
+        "D1:11",
+        "D4:11",
+        "D4:13",
+        "D7:5",
+        "D7:7"
+      ],
+      "synthesis": true
+    },
+    {
+      "text": "Melanie's family spend their time outdoors together: camping in the mountains in June 2023, at the beach and in the forest in July, a museum visit and a park in the summer, and a road trip to the Grand Canyon in October.",
+      "speaker": "Melanie",
+      "statedOn": "2023-10-20",
+      "entities": [
+        "melanie",
+        "camping",
+        "mountains",
+        "the-beach",
+        "the-forest",
+        "museum",
+        "the-park",
+        "grand-canyon"
+      ],
+      "sourceTurns": [
+        "D4:6",
+        "D10:8",
+        "D8:32",
+        "D6:4",
+        "D15:2",
+        "D18:5"
+      ],
+      "synthesis": true
+    },
+    {
+      "text": "Caroline moved from Sweden in 2019. Her grandmother is still there and gave her a necklace standing for love, faith and strength, which she keeps as a reminder of her roots.",
+      "speaker": "Caroline",
+      "statedOn": "2023-06-27",
+      "entities": [
+        "caroline",
+        "home-country",
+        "grandma",
+        "necklace"
+      ],
+      "chrono": [
+        "moved-from-home-country",
+        "necklace-gift"
+      ],
+      "sourceTurns": [
+        "D3:13",
+        "D4:3"
+      ],
+      "synthesis": true
+    },
+    {
+      "text": "Melanie has made art for about seven years and settled on painting and pottery: a lake at sunrise in 2022, a horse painting in August 2023, and a sunset-inspired piece and an abstract in October.",
+      "speaker": "Melanie",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "melanie",
+        "painting",
+        "pottery",
+        "lake-sunrise",
+        "horse-painting",
+        "sunset-painting-melanie",
+        "abstract-painting-melanie"
+      ],
+      "sourceTurns": [
+        "D16:8",
+        "D1:14",
+        "D13:8",
+        "D17:12",
+        "D17:14"
+      ],
+      "synthesis": true
+    },
+    {
+      "text": "Caroline began transitioning in 2020. Making art helped her understand and accept herself through it, some friendships did not survive it, and by late 2023 she describes having found self-acceptance and wanting to pass that support to others.",
+      "speaker": "Caroline",
+      "statedOn": "2023-10-22",
+      "entities": [
+        "caroline",
+        "painting"
+      ],
+      "chrono": [
+        "transition-began"
+      ],
+      "sourceTurns": [
+        "D3:1",
+        "D16:9",
+        "D16:15",
+        "D19:9"
+      ],
+      "synthesis": true
+    },
+    {
+      "text": "Melanie married in 2018 and has several children including a son, a daughter whose birthday she celebrated at a Matt Patterson concert, and a youngest whose first steps she remembers as her happiest moment.",
+      "speaker": "Melanie",
+      "statedOn": "2023-10-20",
+      "entities": [
+        "melanie",
+        "melanies-husband",
+        "melanies-son",
+        "melanies-daughter",
+        "melanies-youngest"
+      ],
+      "chrono": [
+        "melanie-wedding"
+      ],
+      "sourceTurns": [
+        "D3:16",
+        "D11:1",
+        "D10:20",
+        "D18:1"
+      ],
+      "synthesis": true
+    },
+    {
+      "text": "Both women use a creative practice as a way of coping: Caroline paints and draws to explore her identity, and Melanie paints and makes pottery to express her feelings and relax.",
+      "speaker": "Caroline",
+      "statedOn": "2023-09-13",
+      "entities": [
+        "caroline",
+        "melanie",
+        "painting",
+        "pottery"
+      ],
+      "sourceTurns": [
+        "D13:13",
+        "D16:9",
+        "D12:6",
+        "D5:10"
+      ],
+      "synthesis": true
     }
   ]
 }

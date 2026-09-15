@@ -117,6 +117,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **A conversation now records how things developed, not only what was said on each day.**
+
+  Every claim came from a single exchange, so the graph held both ends of a story and never the story. A
+  system that can report "she applied in August" and "she passed in October" but not "the adoption went
+  from researching agencies in May to passing the interviews in October" is a log rather than a knowledge
+  base, and a question about the arc has nothing to match.
+
+  Twelve such claims on one conversation lifted `within 3` everywhere — multi-hop from 12.5% to 21.9%,
+  single-hop from 82.9% to 85.7%. They are additional records: per-turn coverage is unchanged and
+  complete, and each names only the turns that state what it says, the widest being nine.
+
+  **What it did NOT move is coverage, and that is worth knowing.** `allEvidence` stayed at about 88% because
+  at a fixed result count more records compete for the same slots. Coverage is near its ceiling for this
+  shape; converting it into rank is the remaining work.
+
 - **A synthesised record now carries the turns it was built from, and that is what finally answers a
   question spanning two sessions.**
 

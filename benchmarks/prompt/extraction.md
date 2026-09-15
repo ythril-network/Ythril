@@ -83,6 +83,20 @@ a sentence that stands alone: subjects named, dates resolved, pronouns replaced.
 is one claim, even when it took four turns to say. A turn that only says *"Thanks, that's so sweet!"*
 contributes nothing of its own and belongs in the `sourceTurns` of the claim it is part of.
 
+**Write the ARC as well as the moments.** When the conversation establishes how something developed
+across sessions — a project that progressed, a habit that started and stopped, a household that gained a
+pet — write that as a claim of its own, naming the turns that state it. The per-turn claims stay; these
+are additional.
+
+A system that can report *"she applied in August"* and *"she passed in October"* but not *"the adoption
+went from researching agencies in May to passing the interviews in October"* is a log, not a knowledge
+base — and a question about the arc has nothing to match. This is the one place a claim may draw on turns
+from more than one session.
+
+Keep it bounded: a claim names the turns that state what it says, never everything about the subject. A
+record whose provenance covers most of a conversation is a summary of the conversation, which the writer
+refuses.
+
 **Every turn must appear in some claim's `sourceTurns`.** That is how the claim layer stays complete without
 being a transcript: facts cover the turns they came from, including the ones that carry no fact alone. An
 extraction that dropped the quiet turns covered 34.6% of a conversation and scored worse than storing raw
