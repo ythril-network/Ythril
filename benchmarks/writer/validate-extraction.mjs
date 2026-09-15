@@ -33,6 +33,15 @@ function startsWithSpeakerName(text, speaker) {
   return String(text ?? '').trimStart().toLowerCase().startsWith(`${name.toLowerCase()}:`);
 }
 
+/**
+ * The share of a conversation one synthesised record may name as its provenance.
+ *
+ * A few sentences about a subject cannot have been derived from most of a transcript. Beyond this the
+ * record is a summary of the conversation rather than of a subject, which is the padding cheat with a
+ * graph drawn round it.
+ */
+const MAX_SYNTHESISED_PROVENANCE_SHARE = 0.12;
+
 /** `YYYY-MM-DD`, and nothing looser. A partial date cannot be compared and a relative one cannot be resolved. */
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -179,7 +188,35 @@ export function validateExtraction(extraction, schemaEntries) {
    * has no transcript to compare against and inventing a failure there would block a legitimate caller who
    * is not running a benchmark.
    */
-  const declared = sessions.flatMap(s => s.turns ?? []);
+  /*
+   * A SYNTHESISED RECORD MAY NOT CLAIM MOST OF THE CONVERSATION.
+   *
+   * An entity's description says what the conversation established about a subject, and it carries the turns
+   * that established it so the statement can be checked. That provenance is also what a benchmark credits —
+   * which makes it the obvious place for the oldest cheat in retrieval to reappear: give one record the turns
+   * of the whole transcript, match it once, and score everything.
+   *
+   * The line is what the description actually SAYS. Three sentences about a person cannot have been derived
+   * from four hundred turns; they were derived from the handful that state those three sentences. A record
+   * claiming more than this share is either over-claiming its provenance or is a summary of the conversation
+   * wearing a subject's name, and both are refused.
+   */
+  const declaredTurns = sessions.flatMap(s => s.turns ?? []);
+  if (declaredTurns.length > 0) {
+    const ceiling = Math.max(4, Math.ceil(declaredTurns.length * MAX_SYNTHESISED_PROVENANCE_SHARE));
+    for (const [kind, list] of [['entities', entities], ['chrono', chrono]]) {
+      for (const [i, r] of list.entries()) {
+        const n = (r.sourceTurns ?? []).length;
+        if (n > ceiling) {
+          say(`${kind}[${i}] ('${r.key}') claims ${n} source turns of ${declaredTurns.length}, over the `
+            + `${ceiling} a synthesised record may claim. Either its provenance names turns its description `
+            + 'does not use, or the description is a summary of the conversation rather than of a subject.');
+        }
+      }
+    }
+  }
+
+  const declared = declaredTurns;
   if (declared.length > 0) {
     const covered = new Set(claims.flatMap(c => c.sourceTurns ?? []));
     const missing = declared.filter(t => !covered.has(t));

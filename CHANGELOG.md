@@ -106,6 +106,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **A synthesised record now carries the turns it was built from, and that is what finally answers a
+  question spanning two sessions.**
+
+  An entity description says what the whole conversation established about a subject — the adoption entry
+  names research in May, a council meeting in July, an application in August and interviews passed in
+  October. That is one record whose content spans four sessions, and it was unusable twice over: nobody
+  could check it, and nothing could credit what it was drawn from.
+
+  | | rank 1 | within 3 | all evidence | multi-session questions |
+  |---|---|---|---|---|
+  | one record per turn | 34.0% | 43.1% | 74.6% | 0.0% |
+  | facts, no provenance | 39.1% | 57.9% | 85.8% | 0.0% |
+  | with provenance | **47.2%** | 59.9% | **88.3%** | 0.0% |
+  | with provenance, top 5 and one hop | **51.8%** | **64.0%** | 70.6% | **12.8%** |
+
+  **The cheat this opens is closed in the same change.** Handing a record the union of every turn linked to
+  it would let one entity claim most of the transcript, match once and score everything — the oldest trick
+  in retrieval, wearing a graph. Provenance names the turns the description actually states, and a record
+  claiming more than a small share of the conversation is refused: a few sentences about a subject were not
+  derived from four hundred turns.
+
 - **Storing resolved facts instead of transcript lines beats storing the transcript, by six points.**
 
   One conversation, 197 questions, equal budget, against one-record-per-turn:
