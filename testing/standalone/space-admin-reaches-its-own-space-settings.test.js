@@ -168,7 +168,7 @@ describe('the scoped guard admits on THIS space, not on any space', () => {
 
 describe('the MCP door widens with the REST one', () => {
   // The rule this repo pays most for: one capability, two surfaces, and the difference only found from
-  // outside. `update_space` and `update_space_schema` are the MCP counterparts of `PATCH :id` and
+  // outside. `update_space` and `schema_update` are the MCP counterparts of `PATCH :id` and
   // `PUT :id/schema` — leaving them on `admin: true` would have meant a space administrator who can configure
   // their space through the REST door and is refused through the MCP one.
   // Stripped, all four: each of these assertions would otherwise fire on the comment EXPLAINING the rule.
@@ -186,10 +186,10 @@ describe('the MCP door widens with the REST one', () => {
     return end === -1 ? MCP.slice(at) : MCP.slice(at, end);
   };
 
-  for (const name of ['update_space', 'update_space_schema']) {
+  for (const name of ['update_space', 'schema_update']) {
     it(`${name} is not instance-admin only`, () => {
       // The RULE, not the flag. `update_space` still carries `spaceAdmin: true` because its REST twin
-      // `PATCH /:id` is Space-admin; `update_space_schema` dropped it because its twin `PUT /:id/schema` is
+      // `PATCH /:id` is Space-admin; `schema_update` dropped it because its twin `PUT /:id/schema` is
       // now the `schema` area's admin rung and the tool is governed by `TOOL_RIGHTS` instead. Pinning the
       // FLAG would have made the second change look like the regression this case exists to catch, when it
       // is a further step in the same direction — the door opening wider, not narrower.
@@ -212,9 +212,9 @@ describe('the MCP door widens with the REST one', () => {
   }
 
   it('the tools that are genuinely instance-shaped did NOT get swept along', () => {
-    // `create_space` has no space to scope to. `wipe_space` destroys data and its REST counterpart was not
+    // `save_space` has no space to scope to. `delete_space_data` destroys data and its REST counterpart was not
     // widened either. `reindex` likewise. A sweep by flag name would have taken all three.
-    for (const name of ['create_space', 'wipe_space', 'reindex']) {
+    for (const name of ['save_space', 'delete_space_data', 'space_reindex']) {
       assert.match(mcpTool(name), /\n {2}admin: true/, `${name} must stay instance-admin only`);
       assert.doesNotMatch(mcpTool(name), /spaceAdmin: true/, `${name} must stay instance-admin only`);
     }

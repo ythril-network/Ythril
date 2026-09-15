@@ -385,7 +385,7 @@ instance — use [Reindex Space](#reindex-space) instead.
 Requires `knowledge: write`. Audited as `brain.retry_embedding`, with the failure it was retried from in the snapshot: a
 successful retry clears `lastError`, so the audit entry is the only place the original reason survives.
 
-Both endpoints are also MCP tools — `list_embed_jobs` and `retry_record_embedding`. See [MCP](16-mcp.md).
+Both endpoints are also MCP tools — `list_embed_jobs` and `retry_embed_record`. See [MCP](16-mcp.md).
 
 ---
 
@@ -540,7 +540,7 @@ Run a constrained Mongo-style read query against one logical collection. Intende
 
 Any other field is a `400`. See **Unknown body fields are refused** below.
 
-**`links` is read-only through THIS route, and it does have write doors of its own** — `POST /api/brain/spaces/:spaceId/links` and `DELETE /api/brain/spaces/:spaceId/links/:id`, with `upsert_link` and `delete_link` on MCP. This said it had none, which was true before 4.0 and stopped being when links became records. A link record says that one
+**`links` is read-only through THIS route, and it does have write doors of its own** — `POST /api/brain/spaces/:spaceId/links` and `DELETE /api/brain/spaces/:spaceId/links/:id`, with `save_link` and `delete_link` on MCP. This said it had none, which was true before 4.0 and stopped being when links became records. A link record says that one
 record concerns another — it is what a `memory.entityIds`, `chrono.entityIds`/`memoryIds` or
 `file.entityIds`/`memoryIds`/`chronoIds` entry becomes when it is stored as a record instead of an array
 element. You write one by writing that array on the record, exactly as before; querying this collection is how

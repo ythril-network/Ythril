@@ -277,7 +277,7 @@ export type MetaUpdateOutcome =
  * ## Why this exists now and not with the planner
  *
  * It was left out of the extraction deliberately — an interface with one caller is designed against a guess. The
- * second caller is `update_space_schema`, and it settled two things one caller could not:
+ * second caller is `schema_update`, and it settled two things one caller could not:
  *
  *  - **the vote branch belongs in here, not at the call site.** A tool that skipped it would let an agent write meta
  *    directly in a space whose network votes on exactly that. That is a governance bypass, not a missing feature.

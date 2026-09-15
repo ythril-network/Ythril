@@ -15,7 +15,7 @@
  * this entirely."*
  *
  * The file pipeline already had all of this: persisted jobs, backoff, a terminal `failed` state, and a
- * `retry_embedding` recovery path. Recall had none of it, against the same dependency.
+ * `retry_embed_file` recovery path. Recall had none of it, against the same dependency.
  *
  * ## Why this drives the retry directly and not an HTTP server
  *

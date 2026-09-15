@@ -109,7 +109,7 @@ describe('both doors call the SAME guard', () => {
     assert.equal(bounded.length, 2,
       `create and update must both carry the field with identical bounds; found ${bounded.length}`);
     // COUNTED, not matched. The first draft used `assert.match` and SURVIVED narrowing update_space's bound to
-    // 128-512: the pattern found `create_space`'s field, which still said 64-4096, and reported success. Two
+    // 128-512: the pattern found `save_space`'s field, which still said 64-4096, and reported success. Two
     // tools declare this parameter, so a sample proves nothing about which one it found.
     const mcpBounds = [...MCP.matchAll(/faceDescriptorDims: \{\s*type: 'integer', minimum: (\d+), maximum: (\d+)/g)];
     assert.equal(mcpBounds.length, 2,

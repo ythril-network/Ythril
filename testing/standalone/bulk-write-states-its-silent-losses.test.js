@@ -1,5 +1,5 @@
 /**
- * `bulk_write` says where it loses data quietly, and each claim is pinned to the code.
+ * `save_bulk` says where it loses data quietly, and each claim is pinned to the code.
  *
  * ## Two silent losses and one asymmetry
  *
@@ -13,7 +13,7 @@
  * status: every rejection lands in `errors` and the call still returns normally. A caller who treats the
  * result as proof of success is wrong, and this tool invites exactly that.
  *
- * **3. References are checked for SHAPE, never existence** — unlike `remember` and `update_memory`, which
+ * **3. References are checked for SHAPE, never existence** — unlike `remember` and `update_fact`, which
  * call `assertRefsResolve` under strict linkage and refuse a link that points at nothing. Bulk deliberately
  * does not, and the cost is real and worth stating: bulk can store a dangling link the single-record path
  * would have refused.
@@ -39,7 +39,7 @@ const CORE = stripComments(readFileSync('server/src/brain/bulk.ts', 'utf8'));
 const MEMORY_TOOL = stripComments(readFileSync('server/src/mcp/tools/memory.ts', 'utf8'));
 
 const DESC = (() => {
-  const at = TOOL.indexOf("name: 'bulk_write'");
+  const at = TOOL.indexOf("name: 'save_bulk'");
   assert.ok(at > 0, 'bulk_write not found — the scanner is wrong, not the code');
   const d = TOOL.indexOf('description:', at);
   const end = TOOL.slice(d).search(/\n {2,}(mutating|spaceRequired|skipSchemaValidation|inputSchema|async handle):/);

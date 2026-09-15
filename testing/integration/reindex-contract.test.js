@@ -6,7 +6,7 @@
  * **This paragraph is kept in the past tense on purpose, because the extraction it describes HAS SINCE HAPPENED**
  * and the file still earns its place as the net that made it safe. It read *"`reindex` is the last row of
  * `REST_ONLY_CAPABILITIES`"* — the list is now EMPTY, the re-embedding loop lives in `brain/reindex.ts`, and
- * `reindexTool` calls it. A docblock describing a future that arrived is the same defect as a stale sentence in a
+ * `space_reindexTool` calls it. A docblock describing a future that arrived is the same defect as a stale sentence in a
  * schema description: nobody reports a capability they were told did not exist.
  *
  * `reindex` WAS the last row. It was the one capability that could not be given a tool by wrapping something,

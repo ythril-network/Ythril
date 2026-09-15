@@ -16,7 +16,7 @@
  *
  * ## Why this is one module rather than a branch in each door
  *
- * REST (`POST /api/admin/spaces/:spaceId/wipe`) and MCP (`wipe_space`) both wipe. A second copy of "is this
+ * REST (`POST /api/admin/spaces/:spaceId/wipe`) and MCP (`delete_space_data`) both wipe. A second copy of "is this
  * space governed, and if so open a round on every network that holds it" is the defect this repo produces
  * most — one rule, two implementations, and the weaker one wins silently. Both doors call `planSpaceWipe`
  * and act on its verdict; neither decides anything itself.

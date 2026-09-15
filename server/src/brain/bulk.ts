@@ -1,7 +1,7 @@
 /**
  * Shared bulk-write batch processor.
  *
- * The REST `POST /api/brain/spaces/:id/bulk` endpoint and the MCP `bulk_write` tool were two
+ * The REST `POST /api/brain/spaces/:id/bulk` endpoint and the MCP `save_bulk` tool were two
  * ~185-line parallel copies of the same validate-and-dispatch loop, and they had drifted (the
  * MCP copy skipped the 50k-fact cap and did not normalise chrono `status`). This is the one
  * source of truth: each surface coerces its input, calls `bulkWrite`, then shapes its own
@@ -301,7 +301,7 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
     /*
      * `W-22`: THE RECURRENCE RULE, which this loop never read at all.
      *
-     * `mcp/tools/bulk.ts` says a bulk chrono item takes the *"same fields as the `create_chrono` tool"*,
+     * `mcp/tools/bulk.ts` says a bulk chrono item takes the *"same fields as the `save_chrono` tool"*,
      * twice. It did not: the token `recurrence` appeared nowhere in this file, so a recurring event
      * created in a batch was accepted, counted as inserted, and had no recurrence — with nothing said.
      *

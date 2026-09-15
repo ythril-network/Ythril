@@ -100,12 +100,12 @@ export const list_embed_jobsTool: ToolHandler = {
 };
 
 /**
- * The brain counterpart of `retry_embedding`, which does files. Same three outcomes, reported verbatim for the same
+ * The brain counterpart of `retry_embed_file`, which does files. Same three outcomes, reported verbatim for the same
  * reason: `processing` means a worker already holds the job, which is not an error and must not be reset out from under
  * a run in progress.
  */
-export const retry_record_embeddingTool: ToolHandler = {
-  name: 'retry_record_embedding',
+export const retry_embed_recordTool: ToolHandler = {
+  name: 'retry_embed_record',
   description: 'Re-queue one brain record whose embedding failed, so the worker picks it up again. Resets the job to '
     + 'pending and clears its attempt count and last error. Returns `processing` unchanged if the worker already holds '
     + 'it — not a failure, and retrying would interrupt a run. Get `recordType`/`recordId` from list_embed_jobs. For '
@@ -152,7 +152,7 @@ export const retry_record_embeddingTool: ToolHandler = {
 };
 
 /**
- * Re-queue EVERY failed media job in a space — the bulk counterpart to `retry_embedding`.
+ * Re-queue EVERY failed media job in a space — the bulk counterpart to `retry_embed_file`.
  *
  * `POST /api/brain/spaces/:spaceId/embedding-queue/media/retry-failed` was REST-only, so an agent recovering a space
  * after an embedder outage had to enumerate the failures and call the single-file tool once per file. That is the
@@ -164,17 +164,17 @@ export const retry_record_embeddingTool: ToolHandler = {
  * **Sums across member spaces**, exactly as the route does: on a proxy the failures live in the members, and a
  * caller who asked the proxy to retry means all of them.
  */
-export const retry_failed_media_embeddingsTool: ToolHandler = {
-  name: 'retry_failed_media_embeddings',
+export const retry_embed_mediaTool: ToolHandler = {
+  name: 'retry_embed_media',
   description: 'Re-queue EVERY failed MEDIA job in a space at once — image captioning, audio and video '
     + 'transcription, document extraction — so the worker picks them all up again. The recovery path after an '
     + 'extractor or model outage.\n\n'
     + 'MEDIA, NOT THE BRAIN QUEUE, and the name now says so. It was `retry_failed_embeddings` until 3.1, which '
     + 'sat beside `list_embed_jobs` and read as its remedy while acting on a different queue entirely. It does '
     + 'NOT touch the brain embed jobs that `list_embed_jobs` reports; for one of those use '
-    + '`retry_record_embedding`. And usually you need neither: a brain job that failed against an unreachable '
+    + '`retry_embed_record`. And usually you need neither: a brain job that failed against an unreachable '
     + 'embedder is retried on its own, backing off, and needs no intervention at all.\n\n'
-    + 'ONE FILE OR ALL OF THEM. Use `retry_embedding` for one specific file; use this instead of calling it in '
+    + 'ONE FILE OR ALL OF THEM. Use `retry_embed_file` for one specific file; use this instead of calling it in '
     + 'a loop. Jobs the worker currently holds are left alone rather than interrupted, so a retry during a run '
     + 'cannot take work away from it.\n\n'
     + 'PARAMETERS:\n'

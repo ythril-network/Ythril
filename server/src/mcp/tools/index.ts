@@ -1,17 +1,17 @@
 import type { ToolHandler } from './types.js';
-import { list_spacesTool, get_statsTool, get_space_metaTool, er_modelTool, update_spaceTool, update_space_schemaTool, create_spaceTool, reindexTool, wipe_spaceTool , list_tokensTool } from './spaces.js';
-import { rememberTool, update_memoryTool, delete_memoryTool } from './memory.js';
+import { list_spacesTool, space_statsTool, space_metaTool, er_modelTool, update_spaceTool, schema_updateTool, save_spaceTool, space_reindexTool, delete_space_dataTool , list_tokensTool } from './spaces.js';
+import { save_factTool, update_factTool, delete_factTool } from './memory.js';
 import { recallTool, find_similarTool, queryTool } from './search.js';
-import { bulk_writeTool } from './bulk.js';
-import { merge_entitiesTool, upsert_entityTool, find_entities_by_nameTool, update_entityTool, delete_entityTool } from './entity.js';
-import { upsert_edgeTool, traverseTool, update_edgeTool, delete_edgeTool } from './edge.js';
-import { upsert_linkTool, delete_linkTool, links_convert_preflightTool } from './link.js';
-import { entity_cascade_previewTool } from './entity-cascade.js';
-import { create_chronoTool, update_chronoTool, list_chronoTool, delete_chronoTool } from './chrono.js';
-import { read_fileTool, write_fileTool, update_file_metaTool, list_dirTool, delete_fileTool, create_dirTool, move_fileTool, retry_embeddingTool } from './file.js';
-import { list_peersTool, sync_nowTool } from './sync.js';
+import { save_bulkTool } from './bulk.js';
+import { graph_mergeTool, save_entityTool, find_entities_by_nameTool, update_entityTool, delete_entityTool } from './entity.js';
+import { save_edgeTool, graph_traverseTool, update_edgeTool, delete_edgeTool } from './edge.js';
+import { save_linkTool, delete_linkTool, graph_link_preflightTool } from './link.js';
+import { delete_entity_previewTool } from './entity-cascade.js';
+import { save_chronoTool, update_chronoTool, list_chronoTool, delete_chronoTool } from './chrono.js';
+import { read_fileTool, write_fileTool, update_file_metaTool, list_dirTool, delete_fileTool, create_dirTool, move_fileTool, retry_embed_fileTool } from './file.js';
+import { network_peersTool, network_syncTool } from './sync.js';
 import { helpTool } from './help.js';
-import { list_embed_jobsTool, retry_record_embeddingTool, retry_failed_media_embeddingsTool } from './embed.js';
+import { list_embed_jobsTool, retry_embed_recordTool, retry_embed_mediaTool } from './embed.js';
 
 export type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 
@@ -25,31 +25,31 @@ export type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.
 export const ALL_TOOLS: ToolHandler[] = [
   helpTool,
   list_spacesTool,
-  rememberTool,
+  save_factTool,
   recallTool,
   find_similarTool,
-  merge_entitiesTool,
-  update_memoryTool,
-  delete_memoryTool,
-  get_statsTool,
-  get_space_metaTool,
+  graph_mergeTool,
+  update_factTool,
+  delete_factTool,
+  space_statsTool,
+  space_metaTool,
   er_modelTool,
   queryTool,
-  upsert_entityTool,
+  save_entityTool,
   find_entities_by_nameTool,
-  upsert_edgeTool,
-  traverseTool,
+  save_edgeTool,
+  graph_traverseTool,
   update_entityTool,
   update_edgeTool,
   // The three deletes an agent could not reach: REST has deleted all four record types since it existed,
-  // MCP had `delete_memory` alone, so the only way to remove one edge was to wipe the whole space.
+  // MCP had `delete_fact` alone, so the only way to remove one edge was to wipe the whole space.
   delete_entityTool,
   delete_edgeTool,
-  upsert_linkTool,
+  save_linkTool,
   delete_linkTool,
-  links_convert_preflightTool,
-  entity_cascade_previewTool,
-  create_chronoTool,
+  graph_link_preflightTool,
+  delete_entity_previewTool,
+  save_chronoTool,
   update_chronoTool,
   delete_chronoTool,
   list_chronoTool,
@@ -58,21 +58,21 @@ export const ALL_TOOLS: ToolHandler[] = [
   update_file_metaTool,
   list_dirTool,
   delete_fileTool,
-  retry_embeddingTool,
+  retry_embed_fileTool,
   create_dirTool,
   move_fileTool,
   update_spaceTool,
-  update_space_schemaTool,
-  create_spaceTool,
-  reindexTool,
-  wipe_spaceTool,
+  schema_updateTool,
+  save_spaceTool,
+  space_reindexTool,
+  delete_space_dataTool,
   list_tokensTool,
-  bulk_writeTool,
-  list_peersTool,
-  sync_nowTool,
+  save_bulkTool,
+  network_peersTool,
+  network_syncTool,
   list_embed_jobsTool,
-  retry_record_embeddingTool,
-  retry_failed_media_embeddingsTool,
+  retry_embed_recordTool,
+  retry_embed_mediaTool,
 ];
 
 export const TOOLS_BY_NAME: ReadonlyMap<string, ToolHandler> =

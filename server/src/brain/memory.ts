@@ -302,7 +302,7 @@ export async function updateMemory(
   // patching one key silently destroyed every other property on the record, with no error anywhere.
   // Removing a key is `deleteFields`' job — an absence never means "delete".
   //
-  // `tags` deliberately still REPLACE here, and that is not an oversight: `update_memory` documents them
+  // `tags` deliberately still REPLACE here, and that is not an oversight: `update_fact` documents them
   // as "New tags (replaces existing)" while `update_entity`/`update_edge` document a union. Both halves
   // are stated, so both are kept and pinned by a test rather than silently unified.
   const mergedUpdateProps = mergePropertiesOrKeep(existing.properties, updates.properties);

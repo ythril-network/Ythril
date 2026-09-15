@@ -9,7 +9,7 @@
  * compares parameters over a hard-coded map of four. `16-mcp.md` documents forty-six pairs.
  *
  * So a parameter gap was caught on four pairs and invisible on the rest — which is exactly what happened:
- * `update_space_schema` declared `whenDuePasses`, the dispatcher accepted it, and the handler dropped it
+ * `schema_update` declared `whenDuePasses`, the dispatcher accepted it, and the handler dropped it
  * before the write while REST stored it. Nothing failed.
  *
  * ## Derived on both axes
@@ -127,7 +127,7 @@ describe('a tool and its route take the same parameters', () => {
      * derived count above cannot notice four specific pairs going missing inside it.
      */
     const stillCovered = [];
-    for (const name of ['filter', 'recall', 'traverse', 'similar']) {
+    for (const name of ['filter', 'recall', 'graph_traverse', 'similar']) {
       const entry = paired.find(p => p.tool.name === name);
       const ok = entry && entry.routes.length && entry.routes.every(r => r.keys);
       if (!ok) stillCovered.push(`${name}: ${entry ? (entry.routes[0]?.unresolved ?? 'no route') : 'not paired'}`);
@@ -157,7 +157,7 @@ describe('a tool and its route take the same parameters', () => {
       const accepted = new Set(readable.flatMap(r => [
         ...r.keys,
         ...(r.queryKeys ?? []),
-        // PATH parameters. `delete_memory` declares `id` and the route spells it `/memories/:id` — the
+        // PATH parameters. `delete_fact` declares `id` and the route spells it `/memories/:id` — the
         // record is named in the URL rather than in a body, which is a transport difference and not a
         // parameter the route refuses. Reported as sixteen gaps before this was here.
         ...[...r.route.matchAll(/:(\w+)/g)].map(m => m[1]),

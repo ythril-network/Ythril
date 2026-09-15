@@ -196,7 +196,7 @@ export const delete_fileTool: ToolHandler = {
     + 'and thumbnails are removed, the space\'s usage figure is invalidated, and a `file.deleted` webhook '
     + 'fires. Deleting the blob by other means leaves all of that behind.\n\n'
     + 'IT IS IDEMPOTENT, AND THAT DIFFERS FROM THE BRAIN DELETES. Deleting a path that is not there succeeds '
-    + 'quietly; `delete_memory`, `delete_edge`, `delete_entity` and `delete_chrono` all ERROR on an id that '
+    + 'quietly; `delete_fact`, `delete_edge`, `delete_entity` and `delete_chrono` all ERROR on an id that '
     + 'does not exist. So a success here does not prove a file was there — check `list_dir` first if that '
     + 'distinction matters to you. The tradeoff is deliberate: a retried delete after a dropped connection '
     + 'must not report failure for having worked the first time.\n\n'
@@ -290,7 +290,7 @@ export const move_fileTool: ToolHandler = {
     + 'lose something. Missing parent directories of `dst` ARE created for you.\n\n'
     + 'THE FILE IS NOT RE-READ. Moving does not re-extract text, re-run media analysis or re-embed: the '
     + 'content did not change, only where it lives. A file that failed extraction at the old path is still '
-    + 'failed at the new one — use `retry_embedding` for that, which is a different question from where the '
+    + 'failed at the new one — use `retry_embed_file` for that, which is a different question from where the '
     + 'file sits.\n\n'
     + 'PARAMETERS:\n'
     + '- `src` — the existing path, relative to the space root, exactly as `list_dir` reports it. A file or a '
@@ -363,8 +363,8 @@ export const move_fileTool: ToolHandler = {
  * drifts is the one nobody is watching. The three outcomes are reported verbatim rather than collapsed into
  * success/failure: `processing` means someone else already has it, which is not an error and not a retry.
  */
-export const retry_embeddingTool: ToolHandler = {
-  name: 'retry_embedding',
+export const retry_embed_fileTool: ToolHandler = {
+  name: 'retry_embed_file',
   description: 'Re-queue a file whose media embedding failed or was skipped, so the worker picks it up again. '
     + 'Resets the job to pending and clears its attempt count and last error. Returns `processing` unchanged if '
     + 'the worker already holds it — that is not a failure, and retrying it would take the job away from a run in '

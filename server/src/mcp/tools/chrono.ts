@@ -38,8 +38,8 @@ import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { connectionSchemas, applyConnections } from '../../brain/write-connections.js';
 
-export const create_chronoTool: ToolHandler = {
-  name: 'create_chrono',
+export const save_chronoTool: ToolHandler = {
+  name: 'save_chrono',
   description: 'Create a chronological entry — something that happened, or is meant to. Default types are event, deadline, plan, prediction and milestone; a space with its own `typeSchemas.chrono` accepts ITS names INSTEAD, not in addition, so a custom schema that omits `event` refuses `event`.\n\n'
     + 'THIS IS THE RECORD FOR ANYTHING DATED, and the reason the distinction matters: a memory saying "the migration is planned for March" is a fact whose truth expires, while a chrono entry carries `startsAt`/`endsAt` and a `status`, so it can be listed by date, found by `list_chrono` in a window, and closed rather than contradicted. If it has a date, it belongs here.\n\n'
     + 'Link it with `entityIds` — that is what lets `traverse` reach it from the entity it is about (with `includeChrono`, on by default). Those references are NOT edges, so a chrono entry left unlinked is reachable only by search or by date, never from the thing it concerns.\n\n'
@@ -252,7 +252,7 @@ export const create_chronoTool: ToolHandler = {
  * The space's resolved meta, and the chrono types it allows.
  *
  * Extracted because create and update MUST agree: `update_chrono` shipped without the allowlist check
- * `create_chrono` has, so a record could be moved to a disallowed type through the door that did not
+ * `save_chrono` has, so a record could be moved to a disallowed type through the door that did not
  * check. One helper, called by both, is what stops that recurring — two copies of a validation rule is
  * how they diverged in the first place.
  */
@@ -269,7 +269,7 @@ export const update_chronoTool: ToolHandler = {
     + 'ONE FIELD MERGES AND THE REST REPLACE, and the split is not guessable. `properties` MERGES key by key, '
     + 'so patching one key keeps the others. `tags`, `entityIds` and `memoryIds` REPLACE — send the FULL list '
     + 'you want the entry to end up with, because sending one id drops the rest. (`update_entity` and '
-    + '`update_edge` merge tags instead; `update_memory` replaces them, like this tool.)\n\n'
+    + '`update_edge` merge tags instead; `update_fact` replaces them, like this tool.)\n\n'
     + 'REMOVING SOMETHING IS `deleteFields`, NEVER AN OMISSION. An absent field means "leave it alone", so '
     + 'there is no value you can send that clears one — send its dot path in `deleteFields` instead, which is '
     + 'applied AFTER the merge above and is permanent. A path that cannot be honoured is REFUSED by name '
@@ -349,7 +349,7 @@ export const update_chronoTool: ToolHandler = {
               type: 'array', items: { type: 'string' },
               description: 'REPLACES the stored tag list — send the FULL list you want the entry to end up '
                 + 'with, because sending one tag drops the rest. `update_entity` and `update_edge` MERGE tags '
-                + 'instead; this tool and `update_memory` replace, and the split is not guessable from the '
+                + 'instead; this tool and `update_fact` replace, and the split is not guessable from the '
                 + 'field name.',
             },
             entityIds: {
@@ -414,7 +414,7 @@ export const update_chronoTool: ToolHandler = {
     if (sup.value !== undefined) updates['suppressEmbeddings'] = sup.value;
     if (typeof a['title'] === 'string') updates['title'] = a['title'];
     if (typeof a['type'] === 'string') {
-      // Same allowlist check `create_chrono` runs, and the same one the REST PATCH already runs.
+      // Same allowlist check `save_chrono` runs, and the same one the REST PATCH already runs.
       // Without it this was the ONE surface of four that let a record be moved to a type the space
       // does not allow — and an asymmetry between two write paths is worse than either rule alone,
       // because the constraint looks enforced right up until someone uses the other door.
@@ -472,7 +472,7 @@ export const update_chronoTool: ToolHandler = {
     }
 
     // Validate the entry AS IT WILL BE, against the meta of the member space it actually lives in. The
-    // type allowlist above is not the whole schema: property constraints applied at `create_chrono` and
+    // type allowlist above is not the whole schema: property constraints applied at `save_chrono` and
     // nowhere on this path, so an agent could write a value the same space refuses on creation.
         /*
      * The schema check moved into the writer, which validates the record it is about to store rather than a

@@ -379,19 +379,19 @@ describe('Proxy spaces', () => {
     it('tools/list includes all expected tools', async () => {
       const tools = await session.listTools();
       const names = tools.map(t => t.name);
-      assert.ok(names.includes('remember'), 'remember tool should be present');
+      assert.ok(names.includes('save_fact'), 'remember tool should be present');
       assert.ok(names.includes('recall'), 'recall tool should be present');
       assert.ok(names.includes('read_file'), 'read_file tool should be present');
     });
 
     it('remember without targetSpace returns error for proxy', async () => {
-      const result = await session.callTool('remember', { space: PROXY, fact: 'Should fail without target' });
+      const result = await session.callTool('save_fact', { space: PROXY, fact: 'Should fail without target' });
       assert.ok(result.isError || result.content?.[0]?.text?.includes('targetSpace'),
         `Expected error about targetSpace, got: ${JSON.stringify(result)}`);
     });
 
     it('remember with targetSpace works', async () => {
-      const result = await session.callTool('remember', {
+      const result = await session.callTool('save_fact', {
         space: PROXY,
         fact: 'MCP proxy write to alpha',
         targetSpace: SPACE_A,
@@ -449,13 +449,13 @@ describe('Proxy spaces', () => {
     });
 
     it('upsert_entity without targetSpace returns error for proxy', async () => {
-      const result = await session.callTool('upsert_entity', { space: PROXY, name: 'Fail', type: 'test' });
+      const result = await session.callTool('save_entity', { space: PROXY, name: 'Fail', type: 'test' });
       assert.ok(result.isError || result.content?.[0]?.text?.includes('targetSpace'),
         `Expected targetSpace error, got: ${JSON.stringify(result)}`);
     });
 
     it('upsert_entity with targetSpace works', async () => {
-      const result = await session.callTool('upsert_entity', {
+      const result = await session.callTool('save_entity', {
         space: PROXY, name: 'McpEntity', type: 'test', targetSpace: SPACE_A,
       });
       assert.ok(!result.isError, JSON.stringify(result));

@@ -75,11 +75,11 @@ with no error and nothing to notice.
 as a static `Authorization` header as shown above. An explicit header means the client never enters the OAuth
 flow, so it cannot be overwritten by a later authentication against the same URL. It is also the correct
 reading of per-caller attribution: one token per caller *is* each caller authenticating as itself. Do not
-grant admin unless the window genuinely administers the instance — an assistant has no use for `wipe_space`.
+grant admin unless the window genuinely administers the instance — an assistant has no use for `delete_space_data`.
 
 **Verify by reading the token's own view, not by the absence of an error.** Call the **`help`** tool: it
 prints the spaces accessible to this token, and when the token is restricted it says so explicitly
-(*"some tools are hidden from this token by its scope"*) — admin-only tools such as `wipe_space` and
+(*"some tools are hidden from this token by its scope"*) — admin-only tools such as `delete_space_data` and
 `update_space` disappear from the tool list. A cross-space `recall` will **not** reveal a collapsed scope: it
 happily returns results from the one space still reachable, which reads like a successful search.
 
@@ -109,7 +109,7 @@ credential store — a second, invisible route to the same collision, and its au
 definitions written for other tools. If you want MCP from one client only, turn the other off outright
 (`chat.mcp.enabled: false` and `chat.mcp.discovery.enabled: false`).
 
-One connection entry is all you need — every space the token can access is available. On connect, the AI receives instructions naming the spaces it can reach and is told to call **`list_spaces`** (and `get_space_meta`) to learn the schema, purpose, and record counts of each — so it can orient itself before reading or writing. It can also call the **`help`** tool for a guided overview of the whole system (the knowledge model, when to use `query` vs. `recall`, and the tools available to its token).
+One connection entry is all you need — every space the token can access is available. On connect, the AI receives instructions naming the spaces it can reach and is told to call **`list_spaces`** (and `space_meta`) to learn the schema, purpose, and record counts of each — so it can orient itself before reading or writing. It can also call the **`help`** tool for a guided overview of the whole system (the knowledge model, when to use `query` vs. `recall`, and the tools available to its token).
 
 ### Browser connectors (OAuth)
 

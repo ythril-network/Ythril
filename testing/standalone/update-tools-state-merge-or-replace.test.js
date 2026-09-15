@@ -9,7 +9,7 @@
  * | --- | --- | --- | --- |
  * | `update_entity` | merge | merge | `deleteFields` |
  * | `update_edge` | merge | merge | `deleteFields` |
- * | `update_memory` | **replace** | merge | `deleteFields` |
+ * | `update_fact` | **replace** | merge | `deleteFields` |
  * | `update_chrono` | **replace** | merge | `deleteFields` |
  *
  * The memory/chrono split is deliberate and `brain/memory.ts` says so in as many words — both halves were
@@ -59,7 +59,7 @@ const description = (file, name) => {
 const TOOLS = {
   update_entity: description('server/src/mcp/tools/entity.ts', 'update_entity'),
   update_edge: description('server/src/mcp/tools/edge.ts', 'update_edge'),
-  update_memory: description('server/src/mcp/tools/memory.ts', 'update_memory'),
+  update_memory: description('server/src/mcp/tools/memory.ts', 'update_fact'),
   update_chrono: description('server/src/mcp/tools/chrono.ts', 'update_chrono'),
 };
 

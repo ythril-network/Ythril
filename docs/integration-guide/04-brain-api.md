@@ -83,7 +83,7 @@ When `id` names a record that exists, the write lands on it:
 - **Omitting `id` is unchanged**: every call creates a new record. Existing clients are unaffected.
 - An id that names nothing yet simply becomes the new record's id, so your *first* attempt does not need to know
   whether it is the first.
-- The MCP tools `remember` and `create_chrono` take the same optional `id`, with the same
+- The MCP tools `save_fact` and `save_chrono` take the same optional `id`, with the same
   meaning.
 
 ---
@@ -153,7 +153,7 @@ the set would delete work nobody asked to delete. Remove one with `DELETE /api/b
 or the `delete_edge` tool.
 
 **The other end must already exist.** Neither field can connect two records the same call creates, because
-identities are minted server-side. That case is `bulk_write`, which takes `entities` and `edges` in one
+identities are minted server-side. That case is `save_bulk`, which takes `entities` and `edges` in one
 payload.
 
 **A reference that names nothing is refused**, not stored — the same rule the rest of the API applies, so a
@@ -163,7 +163,7 @@ existence check instead, which is why that check is not optional.
 
 #### A batch that connects what it creates
 
-`POST /api/brain/spaces/:spaceId/bulk` and `bulk_write` take memories, entities, chrono entries and edges in
+`POST /api/brain/spaces/:spaceId/bulk` and `save_bulk` take memories, entities, chrono entries and edges in
 one payload. Until now they could not be joined up: identities are minted server-side, so an id you invent
 for a record in the payload is not the id it gets, and an edge naming it points at nothing.
 

@@ -449,7 +449,7 @@ graph TD
 **Source:**
 
 - `my-project` (democratic network): Your team's ADRs, architecture notes, bug postmortems, gotchas. Syncs with the team.
-- `react-docs`, `prisma-docs`, `tailwind-docs` (no network — local only): Ingested library documentation. Populate via `write_file` for markdown pages, `remember` for key concepts and patterns, `upsert_entity` + `upsert_edge` for API relationships.
+- `react-docs`, `prisma-docs`, `tailwind-docs` (no network — local only): Ingested library documentation. Populate via `write_file` for markdown pages, `save_fact` for key concepts and patterns, `save_entity` + `save_edge` for API relationships.
 
 **Consumers:** Your IDE's LLM connects to `fullstack-brain` proxy.
 
@@ -461,7 +461,7 @@ graph TD
 - `remember("Gotcha: Prisma $transaction has a 5s default timeout. Hit this in the bulk import job — set timeout: 30000.", entities: ["$transaction"], tags: ["gotcha", "timeout"])` in `my-project` → next time anyone on the team hits a transaction timeout, `recall("prisma transaction timeout")` returns the gotcha from your project space AND the official docs from `prisma-docs`.
 - Swap projects? Create a new proxy with different `proxyFor`: `["new-project", "vue-docs", "drizzle-docs", "tailwind-docs"]`. Reuse `tailwind-docs` across both — it's just a space reference.
 - Version upgrade? Wipe `react-docs` space, re-ingest React 20 docs. Project notes with your real-world gotchas in `my-project` stay untouched — they're in a separate space.
-- `write_file` for full markdown pages (migration guides, changelog summaries), `remember` for atomic facts, `upsert_entity`/`upsert_edge` for API structure. Three ingestion modes, one unified brain.
+- `write_file` for full markdown pages (migration guides, changelog summaries), `save_fact` for atomic facts, `save_entity`/`save_edge` for API structure. Three ingestion modes, one unified brain.
 - Library docs never sync anywhere — they're local-only spaces. Your project notes sync with the team. Different lifecycle, different governance, same proxy.
 
 ---
@@ -515,13 +515,13 @@ graph TD
    { "space": "<space-id>", "entryId": "<docker-entity-1-uuid>", "entryType": "entity", "minScore": 0.85 }
    ```
 
-2. **Inspect the merge plan** — call `merge_entities` with an empty resolution map:
+2. **Inspect the merge plan** — call `graph_merge` with an empty resolution map:
 
    ```json
    { "space": "<space-id>", "survivorId": "<docker-entity-1-uuid>", "absorbedId": "<docker-entity-2-uuid>", "resolutions": [] }
    ```
 
-   The MCP `merge_entities` tool returns the plan as a **text response flagged `isError: true`** (so the agent reads it and retries with resolutions); the REST endpoint returns the equivalent `409` with a `MergePlan` body. Either surface shows:
+   The MCP `graph_merge` tool returns the plan as a **text response flagged `isError: true`** (so the agent reads it and retries with resolutions); the REST endpoint returns the equivalent `409` with a `MergePlan` body. Either surface shows:
    - Property conflicts (e.g. `score: 80 vs 95`, `active: true vs false`)
    - Absorbed-only properties (auto-added, no resolution needed)
    - Duplicate edge warnings (edges that become identical after relinking)

@@ -223,7 +223,7 @@ const ADMIN_DOMAINS = [
 const NON_USAGE_SUFFIXES = ['.ticket'] as const;
 
 /**
- * Verbs that mean something changed. `retry_embedding` and `mkdir` are here because they are mutations whose
+ * Verbs that mean something changed. `retry_embed_file` and `mkdir` are here because they are mutations whose
  * names do not end in an obvious verb, and `write` because the bulk endpoint is called `bulk.write`.
  */
 const MUTATION_VERB =

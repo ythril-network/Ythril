@@ -47,7 +47,7 @@ export function capPage<T>(rows: T[], limit: number, sort?: { field: string; dir
  * The fleet integrator paged `/memories?limit=300&offset=N` in a loop. `offset` is not a parameter of ours — the routes read `skip` —
  * so it was accepted and ignored, every page was the same newest-300, and the loop ran until their own guard stopped it.
  * They summed 67 identical pages into 10,184 matching records where 152 exist, and were about to delete records on that
- * number. What caught it was `get_stats` disagreeing, not anything the paging response said.
+ * number. What caught it was `space_stats` disagreeing, not anything the paging response said.
  *
  * Their words, and the reason this is a refusal rather than an alias: *"accepting a parameter and ignoring it is worse
  * than rejecting it, because the caller writes a loop around it."*

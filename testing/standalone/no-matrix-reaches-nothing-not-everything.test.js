@@ -163,18 +163,18 @@ describe('and every other guard that can see an absent matrix answers the same w
      * before looking the row up would have broken `list_spaces` and friends — the same mistake pointing the
      * other way.
      */
-    assert.notEqual(mcp.toolRightsRefusal('remember', undefined, 'demo'), null,
+    assert.notEqual(mcp.toolRightsRefusal('save_fact', undefined, 'demo'), null,
       'an MCP tool call with no rights matrix was allowed — the absent-means-permission shape the owner '
       + 'ruled out on 2026-09-05, still standing on the MCP door');
     assert.equal(mcp.toolRightsRefusal('list_spaces', undefined, ''), null,
       'a tool with no rights row is instance-level; refusing it here means the matrix check ran before the '
       + 'row lookup');
-    assert.equal(mcp.toolRightsRefusal('remember', GRANTING, 'demo'), null,
+    assert.equal(mcp.toolRightsRefusal('save_fact', GRANTING, 'demo'), null,
       'the guard refuses a matrix granting admin on every area — this case would then pass vacuously');
   });
 
   it('the space-admin guard already refused, and is asserted so it cannot drift the other way', () => {
-    const tool = { name: 'update_space_schema', spaceAdmin: true };
+    const tool = { name: 'schema_update', spaceAdmin: true };
     assert.notEqual(mcp.spaceAdminRefusal(tool, undefined, 'demo'), null,
       'a space-configuring tool was allowed to a token with no rights matrix');
     assert.equal(mcp.spaceAdminRefusal(tool, GRANTING, 'demo'), null,

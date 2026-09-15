@@ -47,7 +47,7 @@ import { noteLegacyArrayWrite, type WriteActor } from './legacy-array-writers.js
 export const LINK_ARRAY_FIELDS: readonly string[] = [...new Set(LINK_CLASSES.map(c => c.field))];
 
 /** Where a caller is sent instead. Named once so the seven doors answer the same sentence. */
-const THE_DOOR = 'POST /api/brain/spaces/:spaceId/links (or the `upsert_link` tool)';
+const THE_DOOR = 'POST /api/brain/spaces/:spaceId/links (or the `save_link` tool)';
 
 /**
  * The refusal for a body that writes a link array on a converted space, or `null` when there is none.

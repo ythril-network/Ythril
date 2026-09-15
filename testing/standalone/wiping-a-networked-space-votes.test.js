@@ -15,7 +15,7 @@
  *
  * ## What this file pins
  *
- * **One planner, both doors.** REST (`POST /api/admin/spaces/:spaceId/wipe`) and MCP (`wipe_space`) both ask
+ * **One planner, both doors.** REST (`POST /api/admin/spaces/:spaceId/wipe`) and MCP (`delete_space_data`) both ask
  * `planSpaceWipe`. A second copy of "is this space governed" is the defect this repo produces most, and here
  * it would mean one surface wiping immediately while the other voted.
  *
@@ -149,7 +149,7 @@ describe('peers are told a round is open', () => {
 describe('the tool says what actually happens', () => {
   const DESC = (() => {
     const s = stripComments(readFileSync('server/src/mcp/tools/spaces.ts', 'utf8'));
-    const at = s.indexOf("name: 'wipe_space'");
+    const at = s.indexOf("name: 'delete_space_data'");
     const d = s.indexOf('description:', at);
     const end = s.slice(d).search(/\n {2,}(mutating|spaceRequired|admin|spaceAdmin|inputSchema|async handle):/);
     return s.slice(d, d + end);

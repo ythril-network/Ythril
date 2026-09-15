@@ -3,7 +3,7 @@
  *
  * ## The defect
  *
- * `create_chrono` with a supplied `_id` that already names an entry does not duplicate — it CONVERGES, and the
+ * `save_chrono` with a supplied `_id` that already names an entry does not duplicate — it CONVERGES, and the
  * converge branch stores `mergeProperties(existing.properties, incoming.properties)`. Both doors validated the
  * incoming properties alone, so the document checked was not the document written, and it failed in **both
  * directions at once**:

@@ -180,7 +180,7 @@ POST /api/brain/spaces/all-research/memories?targetSpace=bio-research
 
 The `targetSpace` must be one of the proxy's `proxyFor` members. Omitting it on a write returns `400`.
 
-**MCP**: When connected via MCP to a proxy space, read tools (`recall`, `query`, `read_file`, `list_dir`) aggregate automatically. Write tools (`remember`, `upsert_entity`, `write_file`, etc.) accept an optional `targetSpace` argument — required when the MCP endpoint is a proxy space.
+**MCP**: When connected via MCP to a proxy space, read tools (`recall`, `query`, `read_file`, `list_dir`) aggregate automatically. Write tools (`save_fact`, `save_entity`, `write_file`, etc.) accept an optional `targetSpace` argument — required when the MCP endpoint is a proxy space.
 
 ---
 
@@ -577,11 +577,11 @@ type schemas are readable only by tokens that may reach the space.
 state `POST /reindex` clears. On a **proxy space** it is `true` when **any** member needs one, matching
 [`GET /reindex-status`](04d-brain-ops-api.md).
 
-It is here because `reindex` returns as soon as the job *starts*: this is the field you poll to learn it
+It is here because `space_reindex` returns as soon as the job *starts*: this is the field you poll to learn it
 finished. The dedicated `GET /api/brain/spaces/:spaceId/reindex-status` route still exists and is unchanged.
 
-> **MCP tool:** `get_space_meta` — returns the same information, `needsReindex` included. Available to all
-> tokens (not admin-only). Before this field existed, the `reindex` tool's own description told MCP callers to
+> **MCP tool:** `space_meta` — returns the same information, `needsReindex` included. Available to all
+> tokens (not admin-only). Before this field existed, the `space_reindex` tool's own description told MCP callers to
 > poll the REST status route — which a client with no HTTP door cannot do.
 
 ---

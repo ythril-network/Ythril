@@ -135,7 +135,7 @@ describe('no tool repeats the claim that was false', () => {
     // CASE-INSENSITIVE, and that is not a detail: the sentence being refused was CAPITALISED in three of the
     // four tools, and the first draft of this pattern was `/[Nn]othing recomputes/`. Restoring the exact
     // paragraph this gate exists to refuse left it green. Its own mutation check is what said so.
-    // Whole-body, not description-only, for the same reason — on `create_chrono` the claim lived in the
+    // Whole-body, not description-only, for the same reason — on `save_chrono` the claim lived in the
     // parameter schema rather than in the prose.
     /*
      * EVERY `{0,N}` in this list is an ADJACENCY CLAIM, and they stay.
@@ -258,9 +258,9 @@ describe('no tool repeats the claim that was false', () => {
 
   it('and the four tools that discuss status say it is derived', () => {
     // Presence, not spelling: each of these had a wrong paragraph, so each must now carry the right one.
-    // Checked across the description AND the schema, because on `create_chrono` the correction lives in the
+    // Checked across the description AND the schema, because on `save_chrono` the correction lives in the
     // parameter rather than in the prose.
-    for (const name of ['create_chrono', 'update_chrono', 'list_chrono', 'delete_chrono']) {
+    for (const name of ['save_chrono', 'update_chrono', 'list_chrono', 'delete_chrono']) {
       const t = ALL_TOOLS.find(x => x.name === name);
       const text = (t.description ?? '') + JSON.stringify(t.inputSchema(STUB));
       assert.match(text, /derive[ds]?/i, `${name} must tell a caller that overdue is derived`);

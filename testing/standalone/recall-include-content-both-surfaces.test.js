@@ -9,7 +9,7 @@
  * by far the largest field a result carries, and every field is paid for `topK` times.
  *
  * REST had no way to ask. An integrator pointed it out, and it is the same shape as the four
- * two-surfaces-one-rule defects fixed on 2026-08-05 (`upsert_edge` existence checks,
+ * two-surfaces-one-rule defects fixed on 2026-08-05 (`save_edge` existence checks,
  * `excludeFromVectorSearch` over REST and then over MCP, the recall ceiling): a capability that reaches one
  * door and not the other.
  *

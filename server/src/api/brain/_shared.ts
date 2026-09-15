@@ -112,7 +112,7 @@ export function buildMemoryFilter(query: Record<string, unknown>): Record<string
  *
  * ## Both flags are OPT-IN here, and that differs from MCP on purpose
  *
- * MCP's `remember` and `upsert_entity` default `checkDuplicates` ON. Copying that default to REST would be a
+ * MCP's `remember` and `save_entity` default `checkDuplicates` ON. Copying that default to REST would be a
  * silent latency regression for every integration that exists today, because **the check implies
  * `waitForEmbedding`** — it needs the vector before the insert so the new record cannot match itself. Every
  * REST write would start paying the embedding model synchronously, including bulk loaders, without anyone

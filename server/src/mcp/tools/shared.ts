@@ -58,7 +58,7 @@ export const SUPPRESS_EMBEDDINGS_SCHEMA = {
     + 'competing on meaning. May be the only field you send — retiring a record is a complete edit.\n\n'
     + 'THIS IS THE TOP OF THREE TIERS OF ONE SWITCH, ALL THREE SPELLED THE SAME. A type schema carries '
     + '`suppressEmbeddings`, and so does the space; they resolve `record > schema > space`, the same order '
-    + '`ttlDays` uses. So when a record is unembedded and this field is not why, check `get_space_meta` — '
+    + '`ttlDays` uses. So when a record is unembedded and this field is not why, check `space_meta` — '
     + 'the tier below is answering.\n\n'
     + '`false` MEANS "NOT STATED", NOT "DO EMBED". It falls through to the tiers below rather than '
     + 'overriding them, so setting it false CANNOT re-embed a record whose type or space suppresses '
@@ -138,7 +138,7 @@ export function filePathSchema(extra: string) {
 }
 
 /**
- * The chrono `recurrence` block, shared by `create_chrono` and `update_chrono`.
+ * The chrono `recurrence` block, shared by `save_chrono` and `update_chrono`.
  *
  * It was two near-identical literals differing only in the word "Optional", and `freq` — the one REQUIRED
  * field — had no description in either copy. Two copies of one schema is the shape this repo produces most,

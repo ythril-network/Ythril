@@ -3,10 +3,10 @@
  *
  * ## The defect this was written for
  *
- * `reindex`'s description said: *"it runs in the background and may take minutes, so poll `get_space_meta` or
+ * `reindex`'s description said: *"it runs in the background and may take minutes, so poll `space_meta` or
  * the REST reindex-status route rather than waiting on this call."*
  *
- * `get_space_meta` did not carry the reindex state. `needsReindex` was read by one route and by no tool at all.
+ * `space_meta` did not carry the reindex state. `needsReindex` was read by one route and by no tool at all.
  * So the only actually-working half of that sentence was the REST one — and for a pure-MCP client (Claude
  * Desktop, any agent with no HTTP door) the description named something it could not reach.
  *
@@ -19,7 +19,7 @@
  *
  * 1. No tool description tells the reader to use a REST route or a `curl`. If a capability is worth naming in a
  *    tool schema, it is worth reaching from a tool.
- * 2. `get_space_meta` actually reports `needsReindex` — so the sentence `reindex` now carries is true. Asserted
+ * 2. `space_meta` actually reports `needsReindex` — so the sentence `reindex` now carries is true. Asserted
  *    against the built tool's OUTPUT shape, not against its prose, because prose is what was wrong before.
  *
  * Run: node --test testing/standalone/tool-descriptions-name-reachable-things.test.js
@@ -36,7 +36,7 @@ const REST_REF = /\bREST\b|\bcurl\b|\b(?:GET|POST|PATCH|PUT|DELETE) \/api\//i;
 /**
  * Naming a route is not the defect — being SENT to one is.
  *
- * `create_space` says *"Refusals match POST /api/spaces exactly, including 422 …"*, which is a parity statement:
+ * `save_space` says *"Refusals match POST /api/spaces exactly, including 422 …"*, which is a parity statement:
  * useful to a reader who has both doors, harmless to one who does not, and true. `reindex` said *"poll … the
  * REST reindex-status route"*, which is an instruction an MCP-only caller cannot carry out.
  *
@@ -70,9 +70,9 @@ describe('get_space_meta reports the reindex state the reindex tool points at', 
   const source = readFileSync('server/src/mcp/tools/spaces.ts', 'utf8');
 
   it('the reindex description names get_space_meta and its field', () => {
-    const reindex = ALL_TOOLS.find(t => t.name === 'reindex');
-    assert.ok(reindex, 'no reindex tool');
-    assert.match(reindex.description, /poll `get_space_meta`/,
+    const reindex = ALL_TOOLS.find(t => t.name === 'space_reindex');
+    assert.ok(reindex, 'no space_reindex tool');
+    assert.match(reindex.description, /poll `space_meta`/,
       'the description must name the tool a caller can actually reach');
     assert.match(reindex.description, /needsReindex/,
       'and the field, so the caller knows what to look at rather than diffing whole responses');

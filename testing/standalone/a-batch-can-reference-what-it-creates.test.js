@@ -3,10 +3,10 @@
  *
  * ## What this is for (`F-27` item 2)
  *
- * `bulk_write` takes four record arrays in one payload and its own contract says why that is not enough:
+ * `save_bulk` takes four record arrays in one payload and its own contract says why that is not enough:
  * you cannot reference a record the call creates, because identities are minted server-side. The operator
- * measured what that costs — posting ONE message to their board took six round trips, one `upsert_entity`
- * and five `upsert_edge`.
+ * measured what that costs — posting ONE message to their board took six round trips, one `save_entity`
+ * and five `save_edge`.
  *
  * ## The cases that matter are the REFUSALS
  *

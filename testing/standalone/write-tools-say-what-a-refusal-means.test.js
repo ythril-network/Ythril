@@ -14,7 +14,7 @@
  *
  * ## The other two facts a write tool must state
  *
- * **What the write DOES to an existing record.** `upsert_entity` merges and validates the merged form, which
+ * **What the write DOES to an existing record.** `save_entity` merges and validates the merged form, which
  * is why a partial upsert of a conformant record is accepted when the fragment alone would fail. `remember`
  * is always an insert and deduplicates nothing, so the same fact stored twice competes with itself in recall.
  *
@@ -36,17 +36,17 @@ const toolText = (file, name) => {
   return next === -1 ? src.slice(at) : src.slice(at, next);
 };
 
-const UPSERT_ENTITY = toolText('server/src/mcp/tools/entity.ts', 'upsert_entity');
-const REMEMBER = toolText('server/src/mcp/tools/memory.ts', 'remember');
-const UPSERT_EDGE = toolText('server/src/mcp/tools/edge.ts', 'upsert_edge');
-const CREATE_CHRONO = toolText('server/src/mcp/tools/chrono.ts', 'create_chrono');
+const UPSERT_ENTITY = toolText('server/src/mcp/tools/entity.ts', 'save_entity');
+const REMEMBER = toolText('server/src/mcp/tools/memory.ts', 'save_fact');
+const UPSERT_EDGE = toolText('server/src/mcp/tools/edge.ts', 'save_edge');
+const CREATE_CHRONO = toolText('server/src/mcp/tools/chrono.ts', 'save_chrono');
 
 describe('every write tool explains the refusal shape', () => {
   // Applied across the family rather than per tool: the refusal shape is identical on all four, so one of
   // them documenting it and three not is the drift this loop exists to prevent.
   for (const [label, text] of [
-    ['upsert_entity', UPSERT_ENTITY], ['remember', REMEMBER],
-    ['upsert_edge', UPSERT_EDGE], ['create_chrono', CREATE_CHRONO],
+    ['save_entity', UPSERT_ENTITY], ['save_fact', REMEMBER],
+    ['save_edge', UPSERT_EDGE], ['save_chrono', CREATE_CHRONO],
   ]) {
     it(`${label} names introduced vs preExisting and says which one refuses`, () => {
       assert.match(text, /introduced/, 'name the half that is the caller\'s fault');

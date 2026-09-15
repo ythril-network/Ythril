@@ -3,7 +3,7 @@
  *
  * ## What was wrong
  *
- * MCP tool calls were not audited at all. `remember`, `upsert_entity`, `bulk_write`, `wipe_space` — every
+ * MCP tool calls were not audited at all. `remember`, `save_entity`, `save_bulk`, `delete_space_data` — every
  * write an agent made left the audit log unchanged, while the REST equivalent of each wrote an entry. For
  * a product whose primary write path is an agent, that was most of the trail missing, and the integration
  * guide promised the opposite: *"every authenticated API operation … a full access trail for compliance

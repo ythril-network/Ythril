@@ -265,7 +265,7 @@ spacesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
 
 // POST /api/spaces
 // Every refusal — the parse, the two proxy checks, the schema-library `$ref` — and the strict-posture seeding are
-// decided by `planSpaceCreate`, so an MCP `create_space` reaches the same rules instead of a weaker copy of them
+// decided by `planSpaceCreate`, so an MCP `save_space` reaches the same rules instead of a weaker copy of them
 // (B-2). What stays here is turning an outcome into a status.
 //
 // `space-create-contract.test.js` pins that chain, including that a refusal leaves NO SPACE BEHIND, and it was proven
@@ -469,7 +469,7 @@ spacesRouter.get('/:id/meta', globalRateLimit, requireSpaceAuthScoped('id'), asy
   };
 
   // Reindex state travels with the meta on BOTH doors. The `reindex` tool's own description tells a caller to
-  // "poll `get_space_meta` or the REST reindex-status route" after starting a job — and `get_space_meta` did not
+  // "poll `space_meta` or the REST reindex-status route" after starting a job — and `space_meta` did not
   // carry it, so for an MCP-only client (Claude Desktop, any agent with no HTTP door) the sentence named
   // something unreachable. A schema description is read while arguments are being constructed; one that points
   // at a door the reader does not have is worse than silence.

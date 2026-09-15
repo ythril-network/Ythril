@@ -3,8 +3,8 @@
  *
  * ## The reported gap
  *
- * *"An agent can `wipe_space` over MCP but cannot delete one edge."* REST has deleted all four record types
- * since it existed; MCP shipped `delete_memory` and nothing else. So the only edge-removal reachable from an
+ * *"An agent can `delete_space_data` over MCP but cannot delete one edge."* REST has deleted all four record types
+ * since it existed; MCP shipped `delete_fact` and nothing else. So the only edge-removal reachable from an
  * agent was **destroying the entire space** — the most destructive operation available standing in for the
  * least.
  *
@@ -54,7 +54,7 @@ const MCP_TOOL_FOR = {
   entities: 'delete_entity',
   edges: 'delete_edge',
   chrono: 'delete_chrono',
-  memories: 'delete_memory',
+  memories: 'delete_fact',
 };
 
 describe('MCP can delete everything REST can delete', () => {
@@ -72,7 +72,7 @@ describe('MCP can delete everything REST can delete', () => {
       .map(c => MCP_TOOL_FOR[c])
       .filter(tool => !new RegExp(`^\\s*${tool}Tool,`, 'm').test(registry));
     assert.deepEqual(missing, [],
-      'REST deletes these record types one at a time and MCP does not — leaving `wipe_space` as the only way '
+      'REST deletes these record types one at a time and MCP does not — leaving `delete_space_data` as the only way '
       + 'an agent can remove one of them');
   });
 
@@ -81,7 +81,7 @@ describe('MCP can delete everything REST can delete', () => {
       ['server/src/mcp/tools/entity.ts', 'delete_entity'],
       ['server/src/mcp/tools/edge.ts', 'delete_edge'],
       ['server/src/mcp/tools/chrono.ts', 'delete_chrono'],
-      ['server/src/mcp/tools/memory.ts', 'delete_memory'],
+      ['server/src/mcp/tools/memory.ts', 'delete_fact'],
     ]) {
       const src = read(file);
       const at = src.indexOf(`name: '${tool}'`);

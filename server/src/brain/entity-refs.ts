@@ -137,7 +137,7 @@ export function collectionForRefKind(kind: RefKind): string {
 /**
  * The published JSON schema for one edge endpoint's kind, for the MCP tools.
  *
- * Built here, from `REF_KINDS`, and shared by `upsert_edge` and `update_edge` — because the same four
+ * Built here, from `REF_KINDS`, and shared by `save_edge` and `update_edge` — because the same four
  * strings written out in two tool schemas is how `traverse` came to accept three flags on one tool and refuse
  * them on the other, with `additionalProperties: false` turning the omission into a refused call that REST
  * answered 200 for. The description is part of the shared definition for the same reason: a tool's schema

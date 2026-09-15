@@ -765,7 +765,7 @@ export const queryTool: ToolHandler = {
     // facts ALONE, on the stated assumption that "a client that ignores structuredContent loses nothing because
     // `content` remains the whole answer". True — and the opposite client is the one that breaks: a client that
     // SURFACES structuredContent in preference to content showed the caller `{count: 25, total: 32, limit, skip}` and
-    // not one row. Observed against Claude Code on 2026-08-15, four calls in a row, while `get_space_meta` — which
+    // not one row. Observed against Claude Code on 2026-08-15, four calls in a row, while `space_meta` — which
     // returns no structuredContent — rendered its whole body in the same session.
     //
     // That is the worst shape a result can have: the answer is absent and the metadata says how many rows were

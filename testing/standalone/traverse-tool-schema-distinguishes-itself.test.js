@@ -31,7 +31,7 @@ import { readFileSync } from 'node:fs';
 
 const SRC = readFileSync('server/src/mcp/tools/edge.ts', 'utf8');
 const TRAVERSE = (() => {
-  const at = SRC.indexOf("name: 'traverse'");
+  const at = SRC.indexOf("name: 'graph_traverse'");
   assert.ok(at > 0, 'the traverse tool was not found — the scanner is wrong, not the code');
   const next = SRC.indexOf("name: '", at + 20);
   return next === -1 ? SRC.slice(at) : SRC.slice(at, next);

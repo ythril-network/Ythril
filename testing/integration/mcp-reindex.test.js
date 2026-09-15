@@ -65,13 +65,13 @@ after(async () => {
 describe('reindex is offered and starts a job', () => {
   it('appears in tools/list for an admin token', async () => {
     const names = (await session.listTools()).map(t => t.name);
-    assert.ok(names.includes('reindex'), `not offered: ${names.join(', ')}`);
+    assert.ok(names.includes('space_reindex'), `not offered: ${names.join(', ')}`);
   });
 
   it('starts the job and says plainly that it has NOT finished', async () => {
     // The contract the route already had, and the one most easily lost: the reply means SCHEDULED. An agent that read
     // it as "done" would check for results immediately, find the old vectors, and conclude the reindex failed.
-    const r = await session.callTool('reindex', { space: SPACE });
+    const r = await session.callTool('space_reindex', { space: SPACE });
     assert.ok(!r?.isError, `refused: ${JSON.stringify(r)}`);
     assert.equal(r?.structuredContent?.status, 'started', 'the outcome must be machine-readable, not only prose');
     assert.match(r.content[0].text, /background|does not mean it finished/i,
@@ -81,7 +81,7 @@ describe('reindex is offered and starts a job', () => {
   it('reports the member spaces it will walk', async () => {
     // This is the argument that differs per surface, so it is the one worth surfacing to the caller. For a normal
     // space it is the space itself.
-    const r = await session.callTool('reindex', { space: SPACE });
+    const r = await session.callTool('space_reindex', { space: SPACE });
     if (r?.isError) {
       // A job from the previous test may still hold the guard; that is the 409 path, asserted below.
       assert.match(r.content[0].text, /409/);
@@ -93,7 +93,7 @@ describe('reindex is offered and starts a job', () => {
 
 describe('reindex is held to the ROUTE rules, not looser ones', () => {
   it('REFUSES a proxy space, naming its members so the caller knows what to do instead', async () => {
-    const r = await session.callTool('reindex', { space: PROXY });
+    const r = await session.callTool('space_reindex', { space: PROXY });
     assert.ok(r?.isError, `accepted a proxy: ${JSON.stringify(r)}`);
     assert.match(r.content[0].text, /400/);
     assert.match(r.content[0].text, new RegExp(MEMBER), 'the members must be named');
@@ -104,15 +104,15 @@ describe('reindex is held to the ROUTE rules, not looser ones', () => {
   it('REFUSES a second job while one is running, with 409 rather than a generic failure', async () => {
     // 409 means "try later"; 400 means "never". An agent that cannot tell them apart either retries forever or gives
     // up on a space that is merely busy.
-    const first = await session.callTool('reindex', { space: SPACE });
-    const second = await session.callTool('reindex', { space: MEMBER });
+    const first = await session.callTool('space_reindex', { space: SPACE });
+    const second = await session.callTool('space_reindex', { space: MEMBER });
     const both = [first, second].filter(r => r?.isError).map(r => r.content[0].text);
     assert.ok(both.some(t => /409/.test(t)) || !second?.isError,
       `expected a 409 while a job runs, or a clean start once it finished: ${JSON.stringify([first, second])}`);
   });
 
   it('REFUSES an unknown parameter rather than silently ignoring it', async () => {
-    const r = await session.callTool('reindex', { space: SPACE, force: true });
+    const r = await session.callTool('space_reindex', { space: SPACE, force: true });
     assert.ok(r?.isError, `a misspelled parameter was accepted: ${JSON.stringify(r)}`);
   });
 });

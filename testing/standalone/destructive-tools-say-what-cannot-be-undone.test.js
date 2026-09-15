@@ -3,13 +3,13 @@
  *
  * ## X-2, the entity-management family
  *
- * `merge_entities` and `delete_entity` both described their mechanics accurately and neither said the word
+ * `graph_merge` and `delete_entity` both described their mechanics accurately and neither said the word
  * that matters most to an agent deciding whether to call them: **irreversible**. An agent weighing a tool
  * call has no undo and no confirmation dialog; the schema is the only place that warning can live.
  *
  * ## The 409 that is not an error
  *
- * `merge_entities` is two-phase: call it with an empty resolution and it answers **409 with a conflict plan**.
+ * `graph_merge` is two-phase: call it with an empty resolution and it answers **409 with a conflict plan**.
  * That is the question being asked, not a failure — but a client with a generic retry-on-4xx path will hammer
  * it, and one with a generic fail-on-4xx path will report a merge as broken. The description now says the
  * first call is expected to 409.
@@ -37,11 +37,11 @@ const tool = (name) => {
   return next === -1 ? SRC.slice(at) : SRC.slice(at, next);
 };
 
-const MERGE = tool('merge_entities');
+const MERGE = tool('graph_merge');
 const DELETE = tool('delete_entity');
 
 describe('both say they cannot be undone', () => {
-  for (const [label, text] of [['merge_entities', MERGE], ['delete_entity', DELETE]]) {
+  for (const [label, text] of [['graph_merge', MERGE], ['delete_entity', DELETE]]) {
     it(`${label} says IRREVERSIBLE`, () => {
       // An agent has no undo and no confirmation dialog. The schema is where the warning has to live.
       assert.match(text, /IRREVERSIBLE/, 'say it in the description, not only in the docs');
@@ -81,7 +81,7 @@ describe('delete_entity: the alternative, and why a refusal is right', () => {
   it('says a strictLinkage refusal is usually CORRECT', () => {
     assert.match(DELETE, /usually correct/i,
       'it reads as an obstacle unless the description says it means an orphan would be created');
-    assert.match(DELETE, /merge_entities/, 'point at the tool that resolves it properly');
+    assert.match(DELETE, /graph_merge/, 'point at the tool that resolves it properly');
   });
 
   it('explains the tombstone rather than just naming it', () => {

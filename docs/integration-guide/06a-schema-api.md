@@ -346,8 +346,8 @@ What the schema enforces:
 | `strictLinkage` | When `true`, all reference fields (`from`/`to`, `entityIds`, `memoryIds`) must be valid UUID v4 values, and entity deletion is blocked while inbound backlinks exist. **Default: `true`** — and an absent value also resolves to `true`. Turning it off is a deliberate per-space choice to accept dangling references (the case it exists for is bulk import, where targets are resolved in a later pass); you do not get that by saying nothing. |
 | `whenDuePasses` | **Chrono only.** What a PASSED due moment means across this space, for chrono types whose own schema is silent: `overdue` (the built-in behaviour) or `nothing`, which returns the STORED status. The OUTER tier of **schema > space** — a chrono type schema that states a value overrides it, and absent here is the built-in behaviour, so an instance that sets nothing sees no change. Set `nothing` on a space whose chrono entries mostly record events that happened — a deploy, a backup run, an alert episode — where a past date is the normal condition and does not mean late, then override per type where a real deadline lives. See [the chrono API](04c-chrono-api.md). |
 | `suppressEmbeddings` | When `true`, records in this space are **not embedded**, so they never appear in semantic recall. **Default: `false`** — suppression is opt-in. This is the LOWEST of three tiers, all three spelled the same: a per-record `suppressEmbeddings` wins, then a type's own `suppressEmbeddings`, then this. (The record tier was called `excludeFromVectorSearch` before 3.1.0; 4.0 removed that spelling and sending it is now refused.) A type schema that says nothing falls through to this value rather than overriding it with `false`. Intended for records that are **state rather than prose** — a row whose text never changes but whose numbers are patched constantly, which would otherwise re-embed identical text on every write. **Switching it off does not backfill on its own** — records written while it was on have no vector and nothing revisits them. Run [`POST /api/spaces/:id/reembed`](06-spaces-api.md#re-embed-backfill) afterwards to queue the missing ones. |
-| `purpose` | Short description of the space (max 4000 chars). Returned by `get_space_meta`. |
-| `usageNotes` | Extended Markdown-formatted guidance for LLM clients (max 50 000 chars — the settings form shows a live count and accepts the same limit). Returned by `get_space_meta`. |
+| `purpose` | Short description of the space (max 4000 chars). Returned by `space_meta`. |
+| `usageNotes` | Extended Markdown-formatted guidance for LLM clients (max 50 000 chars — the settings form shows a live count and accepts the same limit). Returned by `space_meta`. |
 
 ### An edge label can declare its ends, and whether a subject may have more than one (3.7)
 
@@ -381,7 +381,7 @@ records can ever be edge endpoints, so it cannot later be read as a type name th
 edge identity — and not per `to`, which is the inverse relation and has its own name.
 
 **Where the rules are enforced.** A write that would break either one is **refused**, on every door — the two
-edge routes, `upsert_edge`, `update_edge`, and per item through `/bulk`. The violation names `fromType`, `toType`
+edge routes, `save_edge`, `update_edge`, and per item through `/bulk`. The violation names `fromType`, `toType`
 or `functional` as its field, and the reason says which types the label admits. In a `warn` space it is reported
 in the response instead of refused, like every other schema rule.
 
@@ -408,7 +408,7 @@ Schema validation runs on:
 
 - Individual writes: `POST /entities`, `POST /edges`, `POST /memories`, `POST /chrono`
 - Bulk writes: `POST /bulk` (per-item; strict skips violating items, warn records warnings)
-- MCP tools: `remember`, `upsert_entity`, `upsert_edge`, `create_chrono`, `bulk_write`
+- MCP tools: `save_fact`, `save_entity`, `save_edge`, `save_chrono`, `save_bulk`
 
 **Security:** Regex patterns in `namingPattern` and `propertySchemas.pattern` are protected against ReDoS: patterns are limited to 500 characters, test values to 10K characters, and structural analysis rejects nested quantifiers and alternation-with-quantifier patterns.
 

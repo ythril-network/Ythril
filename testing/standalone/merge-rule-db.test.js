@@ -8,7 +8,7 @@
  *
  * ## The defect this exists for
  *
- * `update_memory`'s tool schema said `properties` were "to merge". `updateMemory` did
+ * `update_fact`'s tool schema said `properties` were "to merge". `updateMemory` did
  * `$set['properties'] = updates.properties` — a whole-map REPLACE. An agent patching one key silently
  * destroyed every other property on the record: no error, no warning, and the REST validation
  * simulation mirrored the same replace so the schema check could not see it either. `updateChrono`

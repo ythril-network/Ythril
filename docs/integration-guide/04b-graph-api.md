@@ -24,7 +24,7 @@ POST /api/brain/spaces/:spaceId/entities
 **Response** `201`: Full entity doc.
 
 > **`type` IS REQUIRED, and this is a BREAKING change in 4.0.** It used to default to the empty string on
-> this endpoint alone: `upsert_entity`, the batch importer and `bulk_write` have always demanded it. `type`
+> this endpoint alone: `save_entity`, the batch importer and `save_bulk` have always demanded it. `type`
 > is what selects the per-type property schema, so an entity without one is an entity nothing can validate
 > — and this was the door producing them. A create that omits it now answers `400`.
 >
@@ -556,7 +556,7 @@ from them, and **every existing writer keeps working** — nothing is refused, b
 the refusal. Only a run with no argument walks every space and marks each one that finished without failures.
 
 **So the prerequisite is not "before you convert" — it is "before you MARK".** Between the two you can find
-your remaining array writers at your own pace. Note that the list includes agent sessions: `create_chrono`
+your remaining array writers at your own pace. Note that the list includes agent sessions: `save_chrono`
 and its siblings accept `entityIds` directly, so an agent writing to a marked space gets the same `400`.
 
 **And the marker is reversible.** `completeLinkage` is an ordinary space setting:
@@ -637,7 +637,7 @@ instead of being restored by one that still holds it.
 GET /api/brain/spaces/:spaceId/links/convert-preflight?windowDays=30
 ```
 
-MCP: `links_convert_preflight`, same parameter and same default.
+MCP: `graph_link_preflight`, same parameter and same default.
 
 **Read this before running `links:convert`.** Conversion sets `completeLinkage`, after which the six array
 fields are refused on write. That refusal reaches a caller on its **next write**, not at conversion time — so
@@ -836,7 +836,7 @@ nothing cached, every number a real count of records.
 
 > **Also available as MCP tool:** `er_model` — same output, same proxy rule (members reported separately),
 > and available to every token including read-only ones. It answers what a space *contains*, where
-> `get_space_meta` answers what its schema *permits*; an agent deciding how to write into an unfamiliar
+> `space_meta` answers what its schema *permits*; an agent deciding how to write into an unfamiliar
 > space usually wants both.
 
 ```json

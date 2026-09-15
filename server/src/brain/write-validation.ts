@@ -160,7 +160,7 @@ export async function locateForUpdate<T>(
  * The MCP-side gate. Same verdict, thrown rather than returned — MCP tools report failure by throwing.
  *
  * It exists so the two surfaces cannot drift. `update_chrono` already shipped once without the type
- * allowlist that `create_chrono` enforced, and this is the same shape of hole one layer down: an agent
+ * allowlist that `save_chrono` enforced, and this is the same shape of hole one layer down: an agent
  * writing through MCP would otherwise store values the REST route now refuses for the identical record.
  */
 /**

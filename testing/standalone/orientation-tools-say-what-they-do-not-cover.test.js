@@ -16,7 +16,7 @@
  * `list_embed_jobs`, `find_entities_by_name` and `list_dir` one at a time, because the one place it really
  * belonged — `help` itself — did not carry it.
  *
- * ## `get_space_meta` — declared, not actual
+ * ## `space_meta` — declared, not actual
  *
  * It returns what MAY exist. `er_model` returns what DOES. A space can declare twenty types and hold three,
  * and a caller who reads the declaration as an inventory plans against types with no records in them.
@@ -41,7 +41,7 @@ const description = (file, name) => {
 };
 
 const HELP = description('server/src/mcp/tools/help.ts', 'help');
-const META = description('server/src/mcp/tools/spaces.ts', 'get_space_meta');
+const META = description('server/src/mcp/tools/spaces.ts', 'space_meta');
 
 describe('help says its own tool list is filtered', () => {
   it('says the list is scoped to the calling token', () => {

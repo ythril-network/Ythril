@@ -104,7 +104,7 @@ export interface ToolHandler {
   spaceRequired?: boolean;
   /**
    * Skip the dispatcher's inputSchema arg-validation for this tool (it still appears in tools/list with
-   * its full schema for discovery). For partial-success tools like `bulk_write`, whose contract is to
+   * its full schema for discovery). For partial-success tools like `save_bulk`, whose contract is to
    * process the valid items and report per-item errors in the RESULT rather than reject the whole call —
    * enforcing the item schemas up front would wrongly abort the batch. Such tools validate each item in
    * their handler.

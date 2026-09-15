@@ -51,7 +51,7 @@ Rules are evaluated **highest `minScore` first**; the first match decides the ac
 |--------|--------|
 | `flag` | Record a reviewable candidate (default; non-destructive). |
 | `automerge` | **Entities only.** Merge losslessly using the existing entity merge (unions edges, tags, and non-conflicting properties). If the two records set the same property to *different* values, the merge is not lossless — it is **not** performed and the pair falls back to `flag`. The survivor is the older record by default (`dupeMergeSurvivor`). |
-| `notify` | Emit a `duplicate.detected` webhook with both full records + the score. By default this goes to your webhook **subscriptions** (subscribe your automation, e.g. an n8n workflow, to `duplicate.detected` for the space); set a rule-level `webhookUrl` to POST directly to a specific (SSRF-validated) endpoint instead. Your automation can then apply custom logic and call back the API (`merge_entities`, delete, etc.). |
+| `notify` | Emit a `duplicate.detected` webhook with both full records + the score. By default this goes to your webhook **subscriptions** (subscribe your automation, e.g. an n8n workflow, to `duplicate.detected` for the space); set a rule-level `webhookUrl` to POST directly to a specific (SSRF-validated) endpoint instead. Your automation can then apply custom logic and call back the API (`graph_merge`, delete, etc.). |
 
 An action runs once per pair; it re-runs only after one of the records changes. **A dismissed pair is content-gated:** it stays dismissed when a record is merely re-written with the *same* content — a re-embed, a peer re-sync, an index rebuild (all of which advance `seq`) — but it **re-opens automatically when the pair's content materially changes** (a real edit to the embedded text). This is why a routine re-embed no longer resurfaces every pair you already dismissed, while a genuine edit still comes back for review. You can also bring a dismissed pair back manually at any time by re-rating it (`POST /api/duplicates/:id/reopen`, or the **Re-rate** button in the UI). Mechanically, dismissal records a fingerprint of both records' embedded text; the scanner re-opens the pair only when that fingerprint no longer matches.
 
@@ -303,7 +303,7 @@ Webhooks allow external systems to receive real-time HTTP POST notifications whe
 | `file.created` | A file is written (new or overwrite) |
 | `file.updated` | A file is moved/renamed |
 | `file.deleted` | A file is deleted |
-| `bulk.write` | A bulk write completed (`POST /bulk` or MCP `bulk_write`). Per-item events are **not** fired for bulk; this one summary carries `entry` = `{ inserted, updated, errorCount }` for a workflow to inspect. |
+| `bulk.write` | A bulk write completed (`POST /bulk` or MCP `save_bulk`). Per-item events are **not** fired for bulk; this one summary carries `entry` = `{ inserted, updated, errorCount }` for a workflow to inspect. |
 | `duplicate.detected` | The duplicate scanner found a near-duplicate pair under a `notify` rule (see [Duplicate Scanner](#duplicate-scanner--action-rules)). Payload `entry` = `{ type, score, a: {record}, b: {record} }` |
 | `test.ping` | Synthetic test event sent via the test endpoint |
 

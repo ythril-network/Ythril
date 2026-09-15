@@ -247,7 +247,7 @@ const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
  * was simply gone. Their words: *"a single retry with a little jitter would absorb this entirely."*
  *
  * The file pipeline had all of this already: persisted jobs, backoff, a terminal `failed` state and a
- * `retry_embedding` recovery path. Recall had none of it, on the same dependency.
+ * `retry_embed_file` recovery path. Recall had none of it, on the same dependency.
  *
  * A `Retry-After` longer than our own budget is a refusal to wait, not an instruction to: we give up and let
  * the caller see the 429, rather than sleeping past a deadline somebody set.

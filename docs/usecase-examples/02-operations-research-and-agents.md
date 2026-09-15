@@ -93,7 +93,7 @@ graph LR
 **Wow factor:**
 
 - One Ythril instance, N customers, full isolation via spaces + space-scoped tokens. No separate databases, no tenant ID middleware hell.
-- Customer gives their MCP client a space-scoped token → the LLM can `remember`, `recall`, `write_file` only within their silo. Zero chance of cross-tenant leakage — it's token-enforced at the API layer, not application-logic.
+- Customer gives their MCP client a space-scoped token → the LLM can `save_fact`, `recall`, `write_file` only within their silo. Zero chance of cross-tenant leakage — it's token-enforced at the API layer, not application-logic.
 - Support agent connects with a proxy space → `recall("connection timeout")` with `space` omitted → finds matching incidents across ALL customers, ranked by relevance. "This looks like the same issue Customer B had last week."
 - Read-only tokens for customer-facing dashboards — they can query their knowledge but not accidentally corrupt it.
 

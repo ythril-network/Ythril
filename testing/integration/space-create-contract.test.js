@@ -3,7 +3,7 @@
  *
  * ## Why this lands before the code moves
  *
- * B-2's last two capabilities are `create_space` and `reindex`, and `create_space` is the 9-refusal one:
+ * B-2's last two capabilities are `save_space` and `reindex`, and `save_space` is the 9-refusal one:
  * `createSpace()` exists in `spaces/lifecycle.ts`, but this route wraps it in checks that an MCP tool calling
  * `createSpace()` directly would skip — proxy member existence, proxy nesting, the schema-library `$ref`, and the
  * strict-flag seeding. That is the *two surfaces, one rule, one weaker* defect the whole item is about, and it would

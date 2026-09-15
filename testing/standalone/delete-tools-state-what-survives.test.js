@@ -3,7 +3,7 @@
  *
  * ## The asymmetry a caller cannot guess
  *
- * `delete_entity`, `delete_memory` and `delete_chrono` each consult the blockers for their own kind and,
+ * `delete_entity`, `delete_fact` and `delete_chrono` each consult the blockers for their own kind and,
  * under strict linkage, refuse while anything still points at the record. `delete_edge` deletes
  * unconditionally, and that is the real asymmetry: an edge IS the link, so there is nothing structural
  * left dangling when it goes.
@@ -49,7 +49,7 @@ const description = (file, name) => {
 const TOOLS = {
   delete_entity: description('server/src/mcp/tools/entity.ts', 'delete_entity'),
   delete_edge: description('server/src/mcp/tools/edge.ts', 'delete_edge'),
-  delete_memory: description('server/src/mcp/tools/memory.ts', 'delete_memory'),
+  delete_fact: description('server/src/mcp/tools/memory.ts', 'delete_fact'),
   delete_chrono: description('server/src/mcp/tools/chrono.ts', 'delete_chrono'),
 };
 
@@ -92,7 +92,7 @@ describe('which deletes can be refused, and each one says so where the caller is
    * `M-2` gave those fields readers. Two of the three now behave like the entity delete, and their
    * descriptions have to say so — a caller who read the old paragraph built on it.
    */
-  for (const name of ['delete_memory', 'delete_chrono']) {
+  for (const name of ['delete_fact', 'delete_chrono']) {
     it(`${name} says it CAN be refused now, and that this CHANGED`, () => {
       assert.match(TOOLS[name], /REFUSED IF SOMETHING STILL POINTS AT IT/,
         'the guard applies to this delete and the description still says it never does');

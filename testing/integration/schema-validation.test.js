@@ -399,7 +399,7 @@ describe('Schema validation — GET /api/spaces/:id/meta', () => {
   });
 
   it('reports needsReindex, the field the reindex tool tells callers to poll', async () => {
-    // `reindex` returns as soon as the job STARTS, and its description says to poll `get_space_meta`. That was
+    // `reindex` returns as soon as the job STARTS, and its description says to poll `space_meta`. That was
     // only true over REST until now: `needsReindex` reached no tool, so a client with no HTTP door could start a
     // multi-minute job and never learn it finished. Asserted as a BOOLEAN rather than for truthiness — an
     // absent field and a `false` one are the same to `if (!x)` and opposite to a caller polling for a change.
@@ -423,7 +423,7 @@ describe('Schema validation — GET /api/spaces/:id/meta', () => {
       return t.skip(`MCP session unavailable: ${e.message}`);
     }
     try {
-      const res = await session.callTool('get_space_meta', { space: TEST_SPACE });
+      const res = await session.callTool('space_meta', { space: TEST_SPACE });
       const text = res?.content?.[0]?.text ?? '';
       const meta = JSON.parse(text);
       assert.equal(typeof meta.needsReindex, 'boolean',

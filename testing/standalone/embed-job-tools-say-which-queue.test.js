@@ -3,14 +3,14 @@
  *
  * ## The trap in the names
  *
- * `list_embed_jobs` reports BRAIN embed jobs. `retry_failed_media_embeddings` sits in the same module, next to it,
+ * `list_embed_jobs` reports BRAIN embed jobs. `retry_embed_media` sits in the same module, next to it,
  * with a name that reads as its remedy — and re-queues the MEDIA queue instead: captioning, transcription,
  * document extraction. It imports `files/media/job-queue.js`, which is a fact about the code rather than a
  * suspicion.
  *
  * So the obvious sequence — list the failed embed jobs, then retry the failed embeddings — silently acts on a
  * different queue and reports a count that has nothing to do with what was listed. Nothing in either
- * description said so. The tool for a brain record is `retry_record_embedding`.
+ * description said so. The tool for a brain record is `retry_embed_record`.
  *
  * Renaming is the real fix and is a breaking change to a tool name; until then, each description says which
  * queue it is, which is the half that can ship today.
@@ -60,8 +60,8 @@ const body = (name) => {
 };
 
 const LIST = tool('list_embed_jobs');
-const RETRY_ALL = tool('retry_failed_media_embeddings');
-const RETRY_ALL_BODY = body('retry_failed_media_embeddings');
+const RETRY_ALL = tool('retry_embed_media');
+const RETRY_ALL_BODY = body('retry_embed_media');
 
 describe('the queue each tool acts on is stated', () => {
   it('the NAME says media now, so the description need not open with a correction', () => {
@@ -74,7 +74,7 @@ describe('the queue each tool acts on is stated', () => {
     assert.match(RETRY_ALL, /MEDIA, NOT THE BRAIN QUEUE/, 'still stated, just no longer as an apology');
     assert.match(RETRY_ALL, /`retry_failed_embeddings` until 3\.1/,
       'and the OLD name is named, so an integrator hitting an unknown-tool error can find out why');
-    assert.match(RETRY_ALL, /retry_record_embedding/, 'name the tool that does the brain-side job');
+    assert.match(RETRY_ALL, /retry_embed_record/, 'name the tool that does the brain-side job');
   });
 
   it('and that it really is the media queue, not a stale comment', () => {

@@ -15,7 +15,7 @@
  *
  * ## The parity half
  *
- * `update_memory` did not declare `type` at all, under `additionalProperties: false` — so the MCP door
+ * `update_fact` did not declare `type` at all, under `additionalProperties: false` — so the MCP door
  * **hard-refused** a parameter the REST door accepted and applied. Fixing only the validation would have left
  * one door unable to reach the bug.
  *
@@ -104,7 +104,7 @@ describe('re-typing validates the destination type', () => {
   it('both doors accept `type` on update — the capability exists on each', () => {
     // The MCP tool declared no `type` under additionalProperties:false, so it refused what REST applied.
     const mcp = stripComments(readFileSync('server/src/mcp/tools/memory.ts', 'utf8'));
-    const at = mcp.indexOf("name: 'update_memory'");
+    const at = mcp.indexOf("name: 'update_fact'");
     assert.notEqual(at, -1, 'update_memory is gone — re-point this gate');
     const tool = mcp.slice(at, mcp.indexOf("name: '", at + 10) === -1 ? undefined : mcp.indexOf("name: '", at + 10));
     assert.match(

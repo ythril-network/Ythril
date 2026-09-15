@@ -5,7 +5,7 @@
  *
  * The canary operator, 2026-08-11T1722Z: *"The rights matrix decides what a token may do; the surface should not
  * also decide whether it can."* They hit five REST-only capabilities in one day of ordinary work, none of them
- * from auditing the API — reindex, schema write, token listing, `retry_embedding`, space creation.
+ * from auditing the API — reindex, schema write, token listing, `retry_embed_file`, space creation.
  *
  * The sharpest part of the report was not the five. It was that they **could not tell absent from gated**: a
  * tool hidden by a right they lack and a tool that was never built look identical from outside, and one is a
@@ -64,7 +64,7 @@ function declaredRoutes() {
  * wrote the object. A tool absent from `ALL_TOOLS` is absent from `tools/list` and cannot be called, so declaring one
  * and never registering it satisfied the source scan while changing nothing an agent can reach.
  *
- * Found by mutation-testing the empty map: with the `reindex` row deleted AND `reindexTool` removed from the registry,
+ * Found by mutation-testing the empty map: with the `reindex` row deleted AND `space_reindexTool` removed from the registry,
  * this file stayed GREEN — the exact "delete the row to quiet the gate" move it claims to prevent. The declaration was
  * still in `spaces.ts`, so the scan still saw it.
  */
@@ -158,7 +158,7 @@ describe('the declared MCP/REST gap is real in both directions', () => {
     const mapped = new Set(REST_ONLY_CAPABILITIES.map(c => c.wouldBeTool));
     const built = toolNames();
     const lost = [];
-    for (const t of ['reindex', 'update_space_schema', 'list_tokens', 'retry_embedding', 'create_space']) {
+    for (const t of ['space_reindex', 'schema_update', 'list_tokens', 'retry_embed_file', 'save_space']) {
       if (!mapped.has(t) && !built.has(t)) lost.push(t);
     }
     assert.deepEqual(lost, [],

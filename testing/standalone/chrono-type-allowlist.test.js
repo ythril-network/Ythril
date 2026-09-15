@@ -1,7 +1,7 @@
 /**
  * The chrono type allowlist must be enforced by EVERY write surface.
  *
- * `create_chrono` rejected a type outside the space's allowed set; `update_chrono` did not — so a record
+ * `save_chrono` rejected a type outside the space's allowed set; `update_chrono` did not — so a record
  * could be moved to a disallowed type through the door that skipped the check. Both REST handlers
  * enforced it, which made MCP update the one surface of four that did not.
  *
@@ -33,13 +33,13 @@ const SPACE = {
   meta: { typeSchemas: { chrono: { incident: {}, maintenance: {} } } },
 };
 
-let create_chronoTool, update_chronoTool;
+let save_chronoTool, update_chronoTool;
 
 before(async () => {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify({ spaces: [SPACE], networks: [], tokens: [] }, null, 2));
   const loader = await import('../../server/dist/config/loader.js');
   loader.loadConfig();
-  ({ create_chronoTool, update_chronoTool } = await import('../../server/dist/mcp/tools/chrono.js'));
+  ({ save_chronoTool, update_chronoTool } = await import('../../server/dist/mcp/tools/chrono.js'));
 });
 
 after(() => { try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ } });
@@ -81,14 +81,14 @@ describe('update_chrono — the gap this closes', () => {
 describe('create_chrono still enforces the same rule', () => {
   it('REJECTS a type outside the space allowlist', async () => {
     await assert.rejects(
-      () => create_chronoTool.handle(ctx({ title: 'x', type: 'event', startsAt: '2026-01-01T00:00:00Z' })),
+      () => save_chronoTool.handle(ctx({ title: 'x', type: 'event', startsAt: '2026-01-01T00:00:00Z' })),
       isAllowlistRejection,
     );
   });
 
   it('and both surfaces reject with the SAME message', async () => {
     // Two rules that agree in effect but differ in wording still read as two rules to whoever hits them.
-    const a = await create_chronoTool.handle(ctx({ title: 'x', type: 'nope', startsAt: '2026-01-01T00:00:00Z' })).catch(e => e);
+    const a = await save_chronoTool.handle(ctx({ title: 'x', type: 'nope', startsAt: '2026-01-01T00:00:00Z' })).catch(e => e);
     const b = await update_chronoTool.handle(ctx({ id: 'c1', type: 'nope' })).catch(e => e);
     assert.equal(a.message, b.message);
   });

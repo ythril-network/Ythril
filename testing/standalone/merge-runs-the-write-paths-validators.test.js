@@ -12,7 +12,7 @@
  * necessarily had**: a `sum` can exceed a `maximum`, a `concat` can break a `pattern`, a pick can land outside
  * an `enum`. `brain/merge.ts` imported nothing from `spaces/schema-validation.ts`, so a background `automerge`
  * that nobody invoked could write a survivor into a `strict` space that the same space would have refused
- * through `upsert_entity`.
+ * through `save_entity`.
  *
  * The precedent is exact and one invariant over, from the CHANGELOG: *"An entity merge left every FILE linked to
  * the absorbed entity pointing at a record it had just deleted… The merge path broke the invariant the write

@@ -19,12 +19,12 @@ import type { TokenRights } from '../config/rights-shape.js';
  * enforced a per-space, per-area rung. One policy, two implementations, and the weaker one was reachable.
  * Measured, not inferred: a token whose matrix said `perSpace.general.knowledge = 'write'` was refused
  * `DELETE /api/brain/spaces/general/memories/:id` with a 403, and the identical delete through
- * `delete_memory` answered "Memory deleted".
+ * `delete_fact` answered "Memory deleted".
  *
  * ## The ONE way it deliberately does nothing, and the one it used to
  *
- * - **No row for the tool.** It is instance-level — `list_spaces`, `create_space`, `list_tokens`,
- *   `list_peers`, `sync_now`, `wipe_space`, `help` — and governed by the tool's `admin` flag against
+ * - **No row for the tool.** It is instance-level — `list_spaces`, `save_space`, `list_tokens`,
+ *   `network_peers`, `network_sync`, `delete_space_data`, `help` — and governed by the tool's `admin` flag against
  *   `instanceAdmin`, because the capability is not scoped to a space at all. This one stays: the absence
  *   of a row means *not my question*, not *permitted*.
  * - **No rights matrix — REMOVED.** This said: *"Every token created since 2.9 carries one and a boot

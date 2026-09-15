@@ -5,7 +5,7 @@
  *
  * A fleet operator, 2026-09-06, on why they have not converted to link records: every write door takes a
  * reference at create time today, and after conversion those fields are refused — so attaching a record to
- * three things becomes four calls, and `bulk_write`'s reason for existing is undone on a converted space.
+ * three things becomes four calls, and `save_bulk`'s reason for existing is undone on a converted space.
  *
  * **They are not asking to keep the arrays.** *"If links become the only truth and the arrays are deleted,
  * that is cleaner than carrying two things that must be kept in step forever."* The single call is what has
@@ -96,7 +96,7 @@ describe('what it refuses', () => {
   });
 
   it('a file reference is a PATH, and a UUID there is refused', () => {
-    // The hazard `upsert_link` names: the same UUID can name records in two collections, so a file field
+    // The hazard `save_link` names: the same UUID can name records in two collections, so a file field
     // holding one is a link that reads as correct and points at nothing.
     assert.equal(linkInputError({ linkFiles: ['notes/report.md'] }), null);
     assert.match(linkInputError({ linkFiles: ['../secrets/keys.txt'] }), /paths/);
@@ -169,7 +169,7 @@ describe('and the LABELLED half, which links deliberately cannot carry', () => {
     /*
      * A UUID is a legal filename, so no amount of shape checking distinguishes "the path of a file" from
      * "an entity id somebody put in the wrong field". That is precisely the hazard the operator names for
-     * `upsert_link`: the same UUID can address records in two collections, and a wrong guess stores a
+     * `save_link`: the same UUID can address records in two collections, and a wrong guess stores a
      * relationship that reads as correct and points at nothing.
      *
      * Only EXISTENCE separates them, and that is `assertRefsResolve` at the writer — which is why this
@@ -199,9 +199,9 @@ describe('and the LABELLED half, which links deliberately cannot carry', () => {
     assert.match(desc, /ALREADY EXIST/, 'a caller must be told this cannot connect two records it creates');
   });
 
-  it('and points at bulk_write for the case it does NOT cover', () => {
+  it('and points at save_bulk for the case it does NOT cover', () => {
     // Creating a post and three labelled relationships to records the same call mints is the correlation
-    // key, and it lives in `bulk_write`. Saying so here is what stops a caller trying it and failing.
-    assert.match(edgeInputSchema().description, /bulk_write/);
+    // key, and it lives in `save_bulk`. Saying so here is what stops a caller trying it and failing.
+    assert.match(edgeInputSchema().description, /save_bulk/);
   });
 });

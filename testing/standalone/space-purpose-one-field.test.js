@@ -5,7 +5,7 @@
  *
  * `SpaceConfig.description` was commented "shown to MCP clients as space-level instructions".
  * `SpaceMeta.purpose` is "short directive injected into MCP instructions at handshake". Two fields, one
- * meaning — and they were served by different tools: `get_space_meta` returned `purpose`, `list_spaces`
+ * meaning — and they were served by different tools: `space_meta` returned `purpose`, `list_spaces`
  * returned `description`. They could say anything relative to each other.
  *
  * Then the settings UI gained an editor for `purpose` and never had one for `description`, so the field

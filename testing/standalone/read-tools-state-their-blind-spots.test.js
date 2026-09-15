@@ -10,8 +10,8 @@
  * | `list_chrono` | `after`/`before` filter `createdAt` — when it was WRITTEN, not when it HAPPENS |
  * | `list_dir` | on a proxy, two members holding the same filename collapse to one entry, silently |
  * | `find_entities_by_name` | exact and case-sensitive, and an empty list does not mean the thing is absent |
- * | `list_peers` | one row per peer PER NETWORK, not per machine |
- * | `sync_now` | returns when the cycle STARTS; an unreachable peer does not make it fail |
+ * | `network_peers` | one row per peer PER NETWORK, not per machine |
+ * | `network_sync` | returns when the cycle STARTS; an unreachable peer does not make it fail |
  * | `list_tokens` | an expired token is still listed, and `rights` is not the legacy `admin` flag |
  *
  * The `list_chrono` one is the sharpest: "list entries between two dates" is the obvious reading, the
@@ -40,8 +40,8 @@ const description = (file, name) => {
 const CHRONO = description('server/src/mcp/tools/chrono.ts', 'list_chrono');
 const DIR = description('server/src/mcp/tools/file.ts', 'list_dir');
 const BYNAME = description('server/src/mcp/tools/entity.ts', 'find_entities_by_name');
-const PEERS = description('server/src/mcp/tools/sync.ts', 'list_peers');
-const SYNCNOW = description('server/src/mcp/tools/sync.ts', 'sync_now');
+const PEERS = description('server/src/mcp/tools/sync.ts', 'network_peers');
+const SYNCNOW = description('server/src/mcp/tools/sync.ts', 'network_sync');
 const TOKENS = description('server/src/mcp/tools/spaces.ts', 'list_tokens');
 
 describe('list_chrono: the date filter answers a different question', () => {

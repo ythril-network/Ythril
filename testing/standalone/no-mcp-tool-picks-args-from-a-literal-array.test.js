@@ -3,13 +3,13 @@
  *
  * ## The defect this generalises
  *
- * `update_space_schema` built its payload from `['typeSchemas', 'validationMode', 'strictLinkage',
+ * `schema_update` built its payload from `['typeSchemas', 'validationMode', 'strictLinkage',
  * 'usageNotes', 'suppressEmbeddings']` — five names, sitting next to an `inputSchema` that declared six.
  * `whenDuePasses` was therefore DECLARED on the tool, accepted by the dispatcher, and silently dropped
  * before the write. REST stored it; MCP did not; nothing said so. `CLAUDE.md` names that shape as worse
  * than either door refusing, because the behaviour then depends on which client the caller picked.
  *
- * `create_space` had the same shape and was correct — six of seven, plus one translated name. Correct today
+ * `save_space` had the same shape and was correct — six of seven, plus one translated name. Correct today
  * is what makes it worth a gate rather than a fix: two lists that must agree, and nothing making them.
  *
  * ## What this asserts

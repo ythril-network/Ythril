@@ -8,12 +8,12 @@
  * | call | before | after |
  * |---|---|---|
  * | `DELETE /api/brain/spaces/general/memories/:id` | **403** `Token needs 'admin' on knowledge…` | 204 |
- * | MCP `delete_memory`, same record | deleted it | deletes it |
+ * | MCP `delete_fact`, same record | deleted it | deletes it |
  *
  * One rule, two implementations, and the weaker one silently in charge — `mcp/router.ts` gates on the token's
  * `readOnly`/`admin` FLAGS and never consults the rung. Owner ruling B, 2026-08-13: level DOWN. `write` is the
  * right rung for deleting a single record you could have created, so the seven REST rows that asked for `admin`
- * now ask for `write`. The collection WIPES still ask for `admin`, matching `wipe_space`.
+ * now ask for `write`. The collection WIPES still ask for `admin`, matching `delete_space_data`.
  *
  * The second defect: a token minted with no `rights` at all skipped the rung check entirely, because
  * `enforceAreaRung` used to return early without a matrix. Minting always derives one — *"only matrix from
@@ -91,7 +91,7 @@ describe('a write token deletes one record on both doors', () => {
       return t.skip(`MCP session unavailable: ${e.message}`);
     }
     try {
-      const res = await session.callTool('delete_memory', { space: 'general', id });
+      const res = await session.callTool('delete_fact', { space: 'general', id });
       assert.doesNotMatch(JSON.stringify(res ?? {}), /isError/, `MCP delete failed: ${JSON.stringify(res).slice(0, 200)}`);
       const after = await get(INSTANCES.a, admin, `/api/brain/spaces/general/memories/${id}`);
       assert.equal(after.status, 404, 'the record must be gone');

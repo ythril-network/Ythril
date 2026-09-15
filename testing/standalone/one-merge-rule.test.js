@@ -14,7 +14,7 @@
  * The docs promise the copies agree. 2.4.0's *Retry Safety* section says a converged retry does
  * "tags union and properties shallow-merge" for all four record types; the `deleteFields` section says
  * it is "applied **after** the normal merge" for entities, edges **and memories**; and
- * `update_memory`'s own tool schema said `properties` were "to merge".
+ * `update_fact`'s own tool schema said `properties` were "to merge".
  *
  * They did not agree. `updateMemory` and `updateChrono` **replaced** the properties map, so an agent
  * patching one key silently destroyed every other property on the record — no error, no warning, and
@@ -26,7 +26,7 @@
  * 2. that no write path hand-rolls it again — enumerated from the SHAPE (`{ ...x.properties }`,
  *    `new Set([...tags])`), not from a list of file names, because a name list is what let the eleventh
  *    copy be added by the same person who wrote the promise;
- * 3. the one divergence that is deliberate and documented: `update_memory` REPLACES tags
+ * 3. the one divergence that is deliberate and documented: `update_fact` REPLACES tags
  *    ("New tags (replaces existing)") while `update_entity`/`update_edge` union them. Both halves are
  *    stated, so the test states them too rather than letting a future sweep quietly unify them.
  *
@@ -174,7 +174,7 @@ describe('one merge rule', () => {
   describe('the one divergence is deliberate, and stated in both places', () => {
     const schema = (file) => readFileSync(join(ROOT, file), 'utf8');
 
-    it('update_memory documents tags as a REPLACE and update_entity as a union', () => {
+    it('update_fact documents tags as a REPLACE and update_entity as a union', () => {
       // Not an oversight to be tidied away: both halves are written down, so a future sweep that
       // "unifies" them is changing documented behaviour and has to say so.
       //
@@ -200,7 +200,7 @@ describe('one merge rule', () => {
       };
 
       assert.match(tagsDescriptionOf('server/src/mcp/tools/memory.ts'), /\breplaces?\b/i,
-        'update_memory still documents replace semantics for tags');
+        'update_fact still documents replace semantics for tags');
       assert.doesNotMatch(tagsDescriptionOf('server/src/mcp/tools/memory.ts'), /\bmerged into\b/i,
         'and must not also claim to merge them');
 
@@ -226,12 +226,22 @@ describe('one merge rule', () => {
        * has one and REPLACES it, deliberately and documented. The merge is the brain records' rule.
        */
       const toolFiles = trackedSources('server/src/mcp/tools/*.ts', { floor: 10 });
+      /*
+       * THE TOOL NOUN IS NOT ALWAYS THE KNOWLEDGE TYPE, and A-1 is where they parted.
+       *
+       * This built `update_${type}` and that held while every tool was named after its collection. The
+       * 5.0 rename made the memory tool `update_fact` — `save_fact` reads as what is stored, `save_memory`
+       * reads as saving the memory system — while the knowledge TYPE is still `memory` until `A-2`
+       * migrates it. One entry, and it disappears when A-2 lands rather than becoming permanent.
+       */
+      const TOOL_NOUN = { memory: 'fact' };
       for (const t of KNOWLEDGE_TYPES) {
-        const file = toolFiles.find(f => new RegExp(`name: 'update_${t}'`).test(schema(f)));
-        assert.ok(file, `no MCP module declares an update_${t} tool — either it is gone, or it moved and this `
+        const noun = TOOL_NOUN[t] ?? t;
+        const file = toolFiles.find(f => new RegExp(`name: 'update_${noun}'`).test(schema(f)));
+        assert.ok(file, `no MCP module declares an update_${noun} tool — either it is gone, or it moved and this `
           + 'gate can no longer find it, and both need reading rather than a passing tick');
         assert.match(schema(file), /properties to merge|properties to merge into the stored map/i,
-          `update_${t}'s properties description must state the merge — the code does it`);
+          `update_${noun}'s properties description must state the merge — the code does it`);
       }
     });
   });

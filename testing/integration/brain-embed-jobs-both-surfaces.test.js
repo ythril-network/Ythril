@@ -161,7 +161,7 @@ describe('MCP: the same two capabilities, through the other door', () => {
   it('offers BOTH tools — the whole point of shipping them together', async () => {
     const names = (await session.listTools()).map(t => t.name);
     assert.ok(names.includes('list_embed_jobs'), `list_embed_jobs not offered: ${names.join(', ')}`);
-    assert.ok(names.includes('retry_record_embedding'), `retry_record_embedding not offered: ${names.join(', ')}`);
+    assert.ok(names.includes('retry_embed_record'), `retry_record_embedding not offered: ${names.join(', ')}`);
   });
 
   it('list_embed_jobs reports the same counts REST does', async () => {
@@ -185,7 +185,7 @@ describe('MCP: the same two capabilities, through the other door', () => {
   it('retry_record_embedding reports not_found verbatim rather than as an error', async () => {
     // `not_found` is an ANSWER: the record has no job, which usually means it embedded fine. Reporting it as a tool
     // error would make an agent retry or escalate over the queue being healthy.
-    const r = await session.callTool('retry_record_embedding', {
+    const r = await session.callTool('retry_embed_record', {
       space: SPACE, recordType: 'memory', recordId: `no-such-${RUN}`,
     });
     assert.ok(!r?.isError, `a not_found outcome must not be a tool error: ${JSON.stringify(r)}`);
@@ -193,14 +193,14 @@ describe('MCP: the same two capabilities, through the other door', () => {
   });
 
   it('retry_record_embedding rejects an unknown recordType', async () => {
-    const r = await session.callTool('retry_record_embedding', {
+    const r = await session.callTool('retry_embed_record', {
       space: SPACE, recordType: 'sandwich', recordId: 'abc',
     });
     assert.ok(r?.isError, `an unknown recordType was accepted: ${JSON.stringify(r)}`);
   });
 
   it('refuses a proxy retry with no target, with the same message REST gives', async () => {
-    const mcp = await session.callTool('retry_record_embedding', {
+    const mcp = await session.callTool('retry_embed_record', {
       space: PROXY, recordType: 'memory', recordId: 'anything',
     });
     assert.ok(mcp?.isError, JSON.stringify(mcp));

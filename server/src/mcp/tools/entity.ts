@@ -15,8 +15,8 @@ import { mergePropertiesOrKeep, mergeTagsOrKeep } from '../../brain/merge-fields
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { connectionSchemas, applyConnections } from '../../brain/write-connections.js';
 
-export const upsert_entityTool: ToolHandler = {
-  name: 'upsert_entity',
+export const save_entityTool: ToolHandler = {
+  name: 'save_entity',
   description: 'Create or update a named entity in the knowledge graph. Identity is by `id` — supply one and the matching record is updated, omit it and a NEW record is always inserted regardless of name. Two entities may share a name; nothing deduplicates for you. Use `find_entities_by_name` first if you meant to update.\n\n'
     + 'An upsert onto an existing record MERGES: properties and tags are merged over what is stored, so you can set one field without restating the rest, and the record is validated in its MERGED form rather than as the fragment you sent. That is why a partial upsert of a conformant record is accepted even when the fragment alone would fail a required-property rule.\n\n'
     + 'IF THE SPACE VALIDATES, a refusal names WHOSE FAULT it is. `introduced` are violations your write caused — fix those. `preExisting` were already stored and your write neither caused nor fixed them; in `strict` mode they are REPORTED and do NOT refuse the write, so an unrelated edit is never blocked by a field somebody else broke. Branch on `introduced` and treat `preExisting` as a repair opportunity rather than an error.',
@@ -169,7 +169,7 @@ export const update_entityTool: ToolHandler = {
     + 'PARAMETERS:\n'
     + '- `id` — the entity\'s `_id`, as `query`, `recall` and `find_entities_by_name` report it. Required.\n'
     + '- `name` / `type` / `description` — replaced when sent. Changing `type` is re-validated against the '
-    + 'space\'s type allowlist, so it cannot be moved somewhere `upsert_entity` would have refused.\n'
+    + 'space\'s type allowlist, so it cannot be moved somewhere `save_entity` would have refused.\n'
     + '- `tags` — MERGED into the existing tags, never replacing them.\n'
     + '- `properties` — MERGED key by key. Values must be string, number or boolean; nested objects are not '
     + 'stored.\n'
@@ -202,7 +202,7 @@ export const update_entityTool: ToolHandler = {
               type: 'string',
               description: 'Replaces the stored name. Renaming does not merge anything: edges point at the '
                 + 'id, so they follow automatically, but a SECOND entity that already carries the new name '
-                + 'stays a separate record — use `merge_entities` for that.',
+                + 'stays a separate record — use `graph_merge` for that.',
             },
             type: {
               type: 'string',
@@ -219,7 +219,7 @@ export const update_entityTool: ToolHandler = {
             tags: {
               type: 'array', items: { type: 'string' },
               description: 'MERGED into the stored tags, never replacing them — sending `["b"]` on an entity '
-                + 'tagged `["a"]` leaves it `["a","b"]`, so no value here removes a tag. `update_memory` and '
+                + 'tagged `["a"]` leaves it `["a","b"]`, so no value here removes a tag. `update_fact` and '
                 + '`update_chrono` REPLACE the same field. Removing one is `deleteFields`, with `tags` for '
                 + 'all of them.',
             },
@@ -267,7 +267,7 @@ export const update_entityTool: ToolHandler = {
 
     // Validate the entity AS IT WILL BE, against the meta of the member space it actually lives in. This
     // path had no schema validation at all, so `type` could be moved outside the allowlist that
-    // `upsert_entity` enforces on the very same record.
+    // `save_entity` enforces on the very same record.
         /*
      * The schema check moved into the writer, which validates the record it is about to store rather than a
      * rebuilt simulation of it. `assertUpdateAllowed` threw exactly the `SchemaViolationError` the writer now
@@ -301,8 +301,8 @@ function appendEndpointRuleWarnings(lines: string[], warnings: readonly Endpoint
     + 'endpoints in the space schema.');
 }
 
-export const merge_entitiesTool: ToolHandler = {
-  name: 'merge_entities',
+export const graph_mergeTool: ToolHandler = {
+  name: 'graph_merge',
   description: 'Merge two entities into one. IRREVERSIBLE: the survivor keeps its identity and id, every reference to the absorbed entity is relinked to it, and the absorbed record is then DELETED. There is no unmerge.\n\n'
     + 'TWO-PHASE BY DESIGN, and the 409 is the feature rather than an error. Call it with an empty or partial `resolution` and you get a CONFLICT PLAN back with status 409: every property where the two disagree, with both values. Call it again with a fully resolved map and it executes. A 409 on the first call is the expected path — treat it as the question being asked, not as a failure to retry.\n\n'
     + 'RESOLVE EVERY CONFLICT OR NOTHING HAPPENS. A partial map returns the plan again rather than merging what it can, because a half-merge would leave two records that are neither separate nor one.\n\n'
@@ -509,7 +509,7 @@ export const find_entities_by_nameTool: ToolHandler = {
 export const delete_entityTool: ToolHandler = {
   name: 'delete_entity',
   description: 'Delete an entity by id. IRREVERSIBLE, and it is a DELETE rather than a retire — if you want the record to stop appearing in semantic search while staying readable and traversable, set `suppressEmbeddings` on it instead.\n\n'
-    + 'A REFUSAL HERE IS USUALLY CORRECT. With `strictLinkage` on, an entity is refused while an edge, memory, chrono entry or file still references it, and the refusal names each one — for an EDGE, including which of its ends this entity is, because that is the end you have to clear. Note that BOTH ends count: an edge pointing FROM this entity blocks the delete exactly as one pointing at it does, since either would be left dangling. Resolve them first, or `merge_entities` into the record that should have held them. There is no cascade.\n\n'
+    + 'A REFUSAL HERE IS USUALLY CORRECT. With `strictLinkage` on, an entity is refused while an edge, memory, chrono entry or file still references it, and the refusal names each one — for an EDGE, including which of its ends this entity is, because that is the end you have to clear. Note that BOTH ends count: an edge pointing FROM this entity blocks the delete exactly as one pointing at it does, since either would be left dangling. Resolve them first, or `graph_merge` into the record that should have held them. There is no cascade.\n\n'
     + 'It writes a TOMBSTONE, so the deletion propagates to peer instances on the next sync. A space that syncs will not quietly resurrect the record from a peer, and the tombstone is why.',
   mutating: true,
   spaceRequired: true,
@@ -526,7 +526,7 @@ export const delete_entityTool: ToolHandler = {
       },
       cascadeToken: {
         type: 'string', minLength: 1,
-        description: 'The `token` from `entity_cascade_preview`, which turns this into a CASCADE: it '
+        description: 'The `token` from `delete_entity_preview`, which turns this into a CASCADE: it '
           + 'removes the edges that block the delete, and then the entity. Refused if the list has changed '
           + 'since the preview — so a record created after you looked cannot be deleted by a decision taken '
           + 'before it existed. Nothing at the other end of those edges is touched.',
@@ -548,7 +548,7 @@ export const delete_entityTool: ToolHandler = {
       const existing = await getEntityById(mid, id);
       if (!existing) continue;
       /*
-       * `F-17`: the CASCADE, when the caller quotes back a token from `entity_cascade_preview`.
+       * `F-17`: the CASCADE, when the caller quotes back a token from `delete_entity_preview`.
        *
        * Same parameter, same refusals, same commit as the REST door — and the same function under both, so
        * neither can enforce a rule the other does not. The token binds to the SET, so a record added since

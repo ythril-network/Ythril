@@ -2,7 +2,7 @@
  * Entity references end to end: a reference that cannot resolve is REFUSED, not stored.
  *
  * The reported defect was that the write paths disagreed — `remember` took entity names and silently
- * stored the memory unlinked when a name did not resolve, `upsert_edge` demanded a UUID, and several
+ * stored the memory unlinked when a name did not resolve, `save_edge` demanded a UUID, and several
  * paths (update_memory, file metadata, bulk memory items) validated nothing at all. In a graph store a
  * dropped link is invisible: the write returns success and the gap only shows up later as a traversal
  * that comes back empty.

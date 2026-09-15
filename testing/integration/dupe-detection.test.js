@@ -1,7 +1,7 @@
 /**
  * Integration tests: Insert-time semantic duplicate detection
  *
- * Covers the F4 feature — the `remember` and `upsert_entity` MCP tools run an
+ * Covers the F4 feature — the `remember` and `save_entity` MCP tools run an
  * opt-in (default-on) near-duplicate check using the freshly computed embedding
  * and flag highly similar existing records in the response:
  *  - remember a near-identical memory → response flags the existing one
@@ -79,12 +79,12 @@ describe('Duplicate detection — remember', () => {
     const first = 'The Vault service stores secrets and rotates authentication tokens on a schedule.';
     const dup = 'The Vault service stores secrets and rotates authentication tokens on a fixed schedule.';
 
-    const r1 = await session.callTool('remember', { space: SPACE, fact: first });
+    const r1 = await session.callTool('save_fact', { space: SPACE, fact: first });
     const id1 = idFrom(r1?.content?.[0]?.text);
     assert.ok(id1, `first remember returned an id: ${r1?.content?.[0]?.text}`);
     await waitForIndexed([id1], ['memory']);
 
-    const r2 = await session.callTool('remember', { space: SPACE, fact: dup });
+    const r2 = await session.callTool('save_fact', { space: SPACE, fact: dup });
     const text2 = r2?.content?.[0]?.text ?? '';
     assert.match(text2, /Possible duplicate/, `expected a duplicate flag, got: ${text2}`);
     assert.ok(text2.includes(id1), `duplicate flag should name the existing memory ${id1}: ${text2}`);
@@ -94,7 +94,7 @@ describe('Duplicate detection — remember', () => {
 
   it('does not flag a clearly distinct memory', async (t) => {
     if (!embeddingAvailable) return t.skip('embedding unavailable');
-    const r = await session.callTool('remember', { space: SPACE, fact: 'Ripe bananas are a yellow tropical fruit rich in potassium.' });
+    const r = await session.callTool('save_fact', { space: SPACE, fact: 'Ripe bananas are a yellow tropical fruit rich in potassium.' });
     const text = r?.content?.[0]?.text ?? '';
     assert.ok(idFrom(text), 'distinct memory stored');
     assert.doesNotMatch(text, /Possible duplicate/, `distinct memory should not be flagged: ${text}`);
@@ -103,7 +103,7 @@ describe('Duplicate detection — remember', () => {
   it('skips the check when checkDuplicates:false', async (t) => {
     if (!embeddingAvailable) return t.skip('embedding unavailable');
     const dup = 'The Vault service stores secrets and rotates authentication tokens on a schedule.';
-    const r = await session.callTool('remember', { space: SPACE, fact: dup, checkDuplicates: false });
+    const r = await session.callTool('save_fact', { space: SPACE, fact: dup, checkDuplicates: false });
     const text = r?.content?.[0]?.text ?? '';
     assert.ok(idFrom(text), 'memory stored');
     assert.doesNotMatch(text, /Possible duplicate/, `checkDuplicates:false must skip the flag: ${text}`);
@@ -114,13 +114,13 @@ describe('Duplicate detection — upsert_entity', () => {
   it('flags a semantically duplicate entity insert', async (t) => {
     if (!embeddingAvailable) return t.skip('embedding unavailable');
     const desc = 'Central telemetry aggregation pipeline collecting metrics from downstream collectors.';
-    const r1 = await session.callTool('upsert_entity', { space: SPACE, name: `Telemetry Aggregator ${RUN}`, type: 'service', description: desc });
+    const r1 = await session.callTool('save_entity', { space: SPACE, name: `Telemetry Aggregator ${RUN}`, type: 'service', description: desc });
     const id1 = idFrom(r1?.content?.[0]?.text);
     assert.ok(id1, `first upsert returned an id: ${r1?.content?.[0]?.text}`);
     await waitForIndexed([id1], ['entity']);
 
     // Different name (avoids the exact-name warning), same semantics → semantic dup.
-    const r2 = await session.callTool('upsert_entity', { space: SPACE, name: `Telemetry Collector Aggregation ${RUN}`, type: 'service', description: desc });
+    const r2 = await session.callTool('save_entity', { space: SPACE, name: `Telemetry Collector Aggregation ${RUN}`, type: 'service', description: desc });
     const text2 = r2?.content?.[0]?.text ?? '';
     assert.match(text2, /Possible duplicate/, `expected a duplicate flag, got: ${text2}`);
     assert.ok(text2.includes(id1), `duplicate flag should name the existing entity ${id1}: ${text2}`);
@@ -129,7 +129,7 @@ describe('Duplicate detection — upsert_entity', () => {
   it('skips the check when checkDuplicates:false', async (t) => {
     if (!embeddingAvailable) return t.skip('embedding unavailable');
     const desc = 'Central telemetry aggregation pipeline collecting metrics from downstream collectors.';
-    const r = await session.callTool('upsert_entity', { space: SPACE, name: `Telemetry Something Else ${RUN}`, type: 'service', description: desc, checkDuplicates: false });
+    const r = await session.callTool('save_entity', { space: SPACE, name: `Telemetry Something Else ${RUN}`, type: 'service', description: desc, checkDuplicates: false });
     const text = r?.content?.[0]?.text ?? '';
     assert.doesNotMatch(text, /Possible duplicate/, `checkDuplicates:false must skip the flag: ${text}`);
   });

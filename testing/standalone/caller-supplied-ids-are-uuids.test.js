@@ -3,21 +3,21 @@
  *
  * ## What happened
  *
- * An operator passed a corrupted UUID to `create_chrono` — *"a Devanagari digit where a hex nibble belonged"* —
+ * An operator passed a corrupted UUID to `save_chrono` — *"a Devanagari digit where a hex nibble belonged"* —
  * and it stored **silently**. Nothing broke: the record came back, and its `entityIds` linkage resolved fine.
  *
  * What was lost is the only reason that field exists. A caller supplies `id` to make the call **idempotent** —
  * retrying with the same id converges on the same record instead of writing a second one. An id no generator
  * would ever produce again cannot serve that purpose, so the retry it was there to enable can never fire.
  *
- * `upsert_entity` had it right, via a shared `uuidSchema()` helper. `create_chrono` and `remember` hand-rolled
+ * `save_entity` had it right, via a shared `uuidSchema()` helper. `save_chrono` and `remember` hand-rolled
  * the declaration and only **described** "Optional UUID v4" in prose, with no `pattern` at all — so the docs
  * promised a constraint the schema never applied.
  *
  * ## The fourth one, which nobody reported
  *
  * The report named two tools and inferred a third it deliberately did not test (writing a junk record to prove
- * it is a poor trade). Sweeping by SHAPE instead of by those names found **`bulk_write`** as well — the same
+ * it is a poor trade). Sweeping by SHAPE instead of by those names found **`save_bulk`** as well — the same
  * hand-rolled declaration, on the tool most likely to be handed machine-generated ids in volume.
  *
  * That is why this gate reads the tool schemas rather than checking three file names: a per-tool fix leaves the
@@ -102,7 +102,7 @@ describe('a caller-supplied id must be a UUID', () => {
    *
    * A record id is server-generated and a caller supplies one only to be idempotent, so anything but a UUID
    * destroys the field's purpose. A space id is **chosen by a human**, appears in every URL and collection name,
-   * and is documented as a slug — `create_space` would be unusable if it demanded a UUID.
+   * and is documented as a slug — `save_space` would be unusable if it demanded a UUID.
    *
    * So this is an allowlist of identity SHAPES, not of tools. That distinction is the whole point: a per-tool
    * exemption is what let the original defect hide in a fourth tool nobody named, and it would let the next

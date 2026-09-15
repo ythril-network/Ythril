@@ -1,5 +1,5 @@
 /**
- * MCP `bulk_write` tool — batch upsert across knowledge types in one call.
+ * MCP `save_bulk` tool — batch upsert across knowledge types in one call.
  *
  * A cross-type writer (memories + entities + edges + chrono), so it lives in its own file rather
  * than with memory CRUD. The actual batch logic is the shared `bulkWrite()` in `brain/bulk.ts`
@@ -16,8 +16,8 @@ import { edgeEndpointKindSchema } from '../../brain/entity-refs.js';
 import { CHRONO_STATUSES } from '../../config/types.js';
 import { refDeclareSchema } from '../../brain/batch-refs.js';
 
-export const bulk_writeTool: ToolHandler = {
-  name: 'bulk_write',
+export const save_bulkTool: ToolHandler = {
+  name: 'save_bulk',
   description: 'Write memories, entities, edges and chrono entries in one call. Every array is optional; send '
     + 'any combination.\n\n'
     + 'A SUCCESSFUL CALL MAY HAVE WRITTEN NOTHING. This is partial-success by design: a bad item is reported '
@@ -42,7 +42,7 @@ export const bulk_writeTool: ToolHandler = {
     + 'first of all, so a memory\'s `entityIds` cannot name an entity from this same call under any ordering.\n\n'
     + 'A RECORD THIS CALL CREATES IS REFERENCED BY A CORRELATION KEY. Put `"$ref": "post-1"` on an item and later items name it as `"$ref:post-1"` — in an edge\'s `from`/`to`, or in a link field. The key is scoped to this call, is never stored, and is NOT the id: identities are still minted here. Every record array is written before any edge, so an edge can reference any record in the payload; within one array a reference cannot point FORWARDS. A key used twice is refused rather than resolved, and a stated kind that disagrees with the array the key was declared in is refused too — the array decides. A LITERAL id you invent is still not the id the record gets, and still points at nothing.\n\n'
     + 'PARAMETERS: each collection takes the same fields as its single-record tool — `memories` as `remember`, '
-    + '`entities` as `upsert_entity`, `edges` as `upsert_edge`, `chrono` as `create_chrono` — including '
+    + '`entities` as `save_entity`, `edges` as `save_edge`, `chrono` as `save_chrono` — including '
     + '`ttlDays` per item. `targetSpace` is required when `space` is a proxy.\n\n'
     + 'RESPONSE: `inserted` (a count per collection) and `errors` (one entry per rejected item, with its '
     + 'collection and index). Neither tells you about items dropped by the 500 cap; only your own count does.',
@@ -100,7 +100,7 @@ export const bulk_writeTool: ToolHandler = {
             entities: {
               type: 'array',
               maxItems: 500,
-              description: 'Entity entries to upsert (max 500; excess entries are dropped). Same fields as the `upsert_entity` tool.',
+              description: 'Entity entries to upsert (max 500; excess entries are dropped). Same fields as the `save_entity` tool.',
               items: {
                 type: 'object',
                 additionalProperties: false,
@@ -112,7 +112,7 @@ export const bulk_writeTool: ToolHandler = {
                   tags:        {
                     type: 'array', items: { type: 'string' },
                     description: 'Categorisation tags. MERGED over the stored tags when `id` names an '
-                      + 'existing entity, exactly as `upsert_entity` merges — so no value here removes a tag.',
+                      + 'existing entity, exactly as `save_entity` merges — so no value here removes a tag.',
                   },
                   description: { type: 'string', description: 'Optional prose description or summary of this entity. Replaced when sent.' },
                   properties:  {
@@ -131,7 +131,7 @@ export const bulk_writeTool: ToolHandler = {
             edges: {
               type: 'array',
               maxItems: 500,
-              description: 'Edge entries to upsert (max 500; excess entries are dropped). Same fields as the `upsert_edge` tool.',
+              description: 'Edge entries to upsert (max 500; excess entries are dropped). Same fields as the `save_edge` tool.',
               items: {
                 type: 'object',
                 additionalProperties: false,
@@ -161,7 +161,7 @@ export const bulk_writeTool: ToolHandler = {
                   type:        { type: 'string', description: 'Optional edge type (e.g. "causal", "attribution"). Free text; nothing validates it against a list.' },
                   weight:      {
                     type: 'number',
-                    description: 'Optional edge weight. `upsert_edge` BOUNDS this to 0–1 and this door does '
+                    description: 'Optional edge weight. `save_edge` BOUNDS this to 0–1 and this door does '
                       + 'NOT — the per-item schemas here are for discovery only (`skipSchemaValidation`), so '
                       + 'a weight outside 0–1 is stored as sent rather than refused. Send 0–1 to match what '
                       + 'the single-record tool would have accepted. A non-number is dropped silently and '
@@ -171,7 +171,7 @@ export const bulk_writeTool: ToolHandler = {
                   tags:        {
                     type: 'array', items: { type: 'string' },
                     description: 'Categorisation tags. MERGED over the stored tags when the triplet already '
-                      + 'exists, exactly as `upsert_edge` merges — so no value here removes a tag.',
+                      + 'exists, exactly as `save_edge` merges — so no value here removes a tag.',
                   },
                   properties:  {
                     type: 'object',
@@ -187,7 +187,7 @@ export const bulk_writeTool: ToolHandler = {
             chrono: {
               type: 'array',
               maxItems: 500,
-              description: 'Chrono entries to insert (max 500; excess entries are dropped). Same fields as the `create_chrono` tool.',
+              description: 'Chrono entries to insert (max 500; excess entries are dropped). Same fields as the `save_chrono` tool.',
               items: {
                 type: 'object',
                 additionalProperties: false,
@@ -211,12 +211,12 @@ export const bulk_writeTool: ToolHandler = {
                     type: 'string', enum: [...CHRONO_STATUSES],
                     description: 'Stored status (default `upcoming`). A value outside this list is DISCARDED '
                       + 'SILENTLY — the entry is still written, with the default, and nothing appears in '
-                      + '`errors`. `create_chrono` refuses the same value, because the per-item schemas here '
+                      + '`errors`. `save_chrono` refuses the same value, because the per-item schemas here '
                       + 'are for discovery only (`skipSchemaValidation`). You do not need `overdue`: it is '
                       + 'derived on read from the due moment, so leaving an entry `upcoming` is what makes it '
                       + 'overdue, and a stored one never reverts when the dates move.',
                   },
-                  confidence:  { type: 'number', description: 'Confidence 0 to 1, for entries that are predictions. A non-number is dropped silently and does not appear in `errors`; unlike `create_chrono`, the 0–1 bound is not enforced on this door.' },
+                  confidence:  { type: 'number', description: 'Confidence 0 to 1, for entries that are predictions. A non-number is dropped silently and does not appear in `errors`; unlike `save_chrono`, the 0–1 bound is not enforced on this door.' },
                   description: { type: 'string', description: 'Optional longer description of the entry.' },
                   tags:        { type: 'array', items: { type: 'string' }, description: 'Categorisation tags. Every chrono item is an INSERT, so there is nothing to merge with.' },
                   entityIds:   { type: 'array', items: { type: 'string' }, description: 'Entity IDs this entry concerns — what lets `traverse` reach it from that entity. NEVER checked for existence on this door, and checked for UUID shape only when the space uses strict linkage, so a well-formed id pointing at nothing is stored as a dangling link.' },

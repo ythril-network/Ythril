@@ -89,7 +89,7 @@ describe('both surfaces name both traversals', () => {
      */
     const g = read('docs/integration-guide/04f-write-semantics.md');
     assert.match(g, /recall\(traverse: n\)/, 'the guide must name recall.s expansion explicitly');
-    assert.match(g, /the `traverse` tool/, 'and the tool, as a separate row');
+    assert.match(g, /the `graph_traverse` tool/, 'and the tool, as a separate row');
     assert.match(g, /still findable through its relationships/i,
       'state the consequence, which is the half the owner actually wanted');
   });

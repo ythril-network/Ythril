@@ -42,17 +42,17 @@ export interface RestOnlyCapability {
  * The five they reported, minus the ones now built. Nothing invented alongside them.
  *
  * Confirmed absent rather than gated on 2026-08-12 by reading the tool registry: 34 tools, none of which was a
- * reindex, a token list, a `retry_embedding` or a space create. `update_space` existed but accepted only `label`,
+ * reindex, a token list, a `retry_embed_file` or a space create. `update_space` existed but accepted only `label`,
  * `purpose` and `description`, so nothing on MCP wrote a schema — their reading was right on every one.
  *
  * **Four of the five rows have now been deleted by being built**, which is the only way a row leaves this list:
- * `retry_embedding`, `list_tokens`, `update_space_schema`, `create_space`. Two of those needed their route's
+ * `retry_embed_file`, `list_tokens`, `schema_update`, `save_space`. Two of those needed their route's
  * validation extracted into a shared function first, because `createSpace()` and `updateSpace()` both already
  * existed — which is what made a "just add a tool" fix dangerous rather than easy.
  *
  * **And then the fifth, `reindex`.** This said *"one row left"* and that the extraction was its own future work — it
  * has since been done: the re-embedding loop moved out of the route handler into `brain/reindex.ts` and
- * `reindexTool` calls it. Nothing is left, which is what the empty array below says.
+ * `space_reindexTool` calls it. Nothing is left, which is what the empty array below says.
  *
  * `mcp-rest-parity.test.js` asserts both halves of every surviving row — the REST route exists, and no MCP tool by
  * that name does — so a row cannot rot in either direction.
