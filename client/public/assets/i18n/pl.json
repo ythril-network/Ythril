@@ -489,6 +489,8 @@
   "brain.query.truncated.body": "Masz najwyżej ocenione trafienia w kolejności, bez luk w środku — a każdy rekord jest kompletny. Trafienie liczy się razem z całym swoim grafem, więc przy większej głębokości grafu mieści się mniej trafień.",
   "brain.query.truncated.what": "Aby zobaczyć więcej, zwiększ maks. rozmiar odpowiedzi w sekcji „Pokaż zaawansowane” lub zawęź wyszukiwanie. Skrócona odpowiedź zwykle oznacza, że pytanie było szersze niż zamierzano.",
   "brain.query.maxPerType.none": "bez limitu",
+  "brain.query.includeRecordMeta": "Uwzględnij metadane zapisu",
+  "brain.query.includeRecordMeta.tooltip": "Dodaje pola mówiące, GDZIE leży rekord, a nie co zawiera: kiedy został zapisany, kiedy ostatnio zmieniony oraz identyfikatory wszystkiego, z czym jest powiązany. Domyślnie wyłączone, bo w pomiarze na prawdziwym zbiorze tylko 30% odpowiedzi stanowiła treść, a większość reszty to właśnie te pola. Uwaga na datę utworzenia: to moment ZAPISU rekordu, a nie moment zapamiętanego zdarzenia — ten znajduje się we własnościach samego rekordu.",
   "brain.query.includeFreshWrites": "Uwzględnij najnowsze zapisy",
   "brain.query.includeFreshWrites.tooltip": "Dodatkowo skanuje najnowsze rekordy bezpośrednio, gdy indeks wektorowy jeszcze ich nie objął. Wolniejsze i przydatne tylko zaraz po zapisie.",
   "brain.query.includeContent": "Uwzględnij treść fragmentu",

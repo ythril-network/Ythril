@@ -62,6 +62,13 @@ export interface RecallRequestBody {      query: string;
        */
       includeDiagnostics?: boolean;
       /**
+       * Adds back the fields that say where a record SITS rather than what it says: `createdAt`,
+       * `updatedAt` and the link-id arrays. Off by default — measured on a real corpus only 30% of an
+       * answer was content. `createdAt` is when the RECORD was written, not when the remembered thing
+       * happened; that date lives in the record’s own properties.
+       */
+      includeRecordMeta?: boolean;
+      /**
        * Graph expansion depth, 0–5. Each match is expanded along edges and what the walk reached comes back
        * NESTED under it, as `_graph: [{edge, node, paths}]`, and a nested node carries its own `_graph` again.
        * It STAYS nested — see `relatedOf`, which reads a match's neighbourhood without moving anything into

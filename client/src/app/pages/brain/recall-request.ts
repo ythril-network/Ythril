@@ -111,6 +111,7 @@ export function recallRequestFrom(form: RecallFormState, typeOpts: readonly Reca
       ...(form.includeFreshWrites ? { includeFreshWrites: true } : {}),
       ...(form.includeContent ? {} : { includeContent: false }),
       ...(form.includeDiagnostics ? { includeDiagnostics: true } : {}),
+      ...(form.includeRecordMeta ? { includeRecordMeta: true } : {}),
       ...(traverse ? { traverse } : {}),
       ...(projectionResult.value ? { projection: projectionResult.value } : {}),
       ...(form.maxTimeMS > 0 ? { maxTimeMS: form.maxTimeMS } : {}),
