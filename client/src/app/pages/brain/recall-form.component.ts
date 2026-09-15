@@ -31,6 +31,8 @@ export interface RecallFormState {
   includeFreshWrites: boolean;
   includeContent: boolean;
   includeDiagnostics: boolean;
+  /** Storage bookkeeping — when a record was written and what it links to. Off by default; see the tooltip. */
+  includeRecordMeta: boolean;
   /** How far to walk. 0 means no expansion, which is the server default, so it is not sent. */
   depth: number;
   /** Comma-separated, like `tags`. Empty means every label. */
@@ -379,6 +381,11 @@ export interface RecallTypeOpt {
       <input type="checkbox" [(ngModel)]="form().includeDiagnostics" name="recallIncludeDiagnostics" />
       <span>{{ 'brain.query.includeDiagnostics' | transloco }}</span>
       <span class="rf-hint" [attr.title]="'brain.query.includeDiagnostics.tooltip' | transloco"><ph-icon name="info" [size]="11"/></span>
+    </label>
+    <label class="rf-check">
+      <input type="checkbox" [(ngModel)]="form().includeRecordMeta" name="recallIncludeRecordMeta" />
+      <span>{{ 'brain.query.includeRecordMeta' | transloco }}</span>
+      <span class="rf-hint" [attr.title]="'brain.query.includeRecordMeta.tooltip' | transloco"><ph-icon name="info" [size]="11"/></span>
     </label>
     <label class="rf-check">
       <input type="checkbox" [(ngModel)]="form().includeFreshWrites" name="recallFresh" />

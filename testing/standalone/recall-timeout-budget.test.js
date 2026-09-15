@@ -63,7 +63,11 @@ describe('the deadline is threaded through the pipeline', () => {
   });
 
   it('the remaining budget is passed to the reranker, not just checked', () => {
-    assert.match(recall, /applyRerank\(query, guaranteed, allResults, remaining\)/);
+    // The budget must be the argument after the results, and the list is left OPEN on purpose: this
+    // assertion is about `remaining` reaching the reranker, not about how many parameters the call has.
+    // Pinned to the exact argument list, it failed the day the step gained a way to report a degradation —
+    // a passing gate broken by a change it has no opinion about.
+    assert.match(recall, /applyRerank\(query, guaranteed, allResults, remaining[,)]/);
     const client = readFileSync('server/src/brain/rerank-client.ts', 'utf8');
     // `rerankTimeout()` rather than a `TIMEOUT_MS` constant: the reranker's own ceiling became
     // operator-settable, so it is resolved per call. A module constant would ignore a config reload, and this

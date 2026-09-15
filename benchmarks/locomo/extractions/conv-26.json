@@ -1,0 +1,5327 @@
+{
+  "conversationId": "conv-26",
+  "extractedBy": "Opus 5, following benchmarks/prompt/extraction.md",
+  "extractedOn": "2026-09-09",
+  "complete": true,
+  "note": "all 19 sessions; every turn has a claim. Claims marked linkedBy:\"name-match\" had their entity links assigned by matching entity names against the text rather than by reading.",
+  "sessions": [
+    {
+      "date": "2023-05-08",
+      "turns": [
+        "D1:1",
+        "D1:2",
+        "D1:3",
+        "D1:4",
+        "D1:5",
+        "D1:6",
+        "D1:7",
+        "D1:8",
+        "D1:9",
+        "D1:10",
+        "D1:11",
+        "D1:12",
+        "D1:13",
+        "D1:14",
+        "D1:15",
+        "D1:16",
+        "D1:17",
+        "D1:18"
+      ]
+    },
+    {
+      "date": "2023-05-25",
+      "turns": [
+        "D2:1",
+        "D2:2",
+        "D2:3",
+        "D2:4",
+        "D2:5",
+        "D2:6",
+        "D2:7",
+        "D2:8",
+        "D2:9",
+        "D2:10",
+        "D2:11",
+        "D2:12",
+        "D2:13",
+        "D2:14",
+        "D2:15",
+        "D2:16",
+        "D2:17"
+      ]
+    },
+    {
+      "date": "2023-06-09",
+      "turns": [
+        "D3:1",
+        "D3:2",
+        "D3:3",
+        "D3:4",
+        "D3:5",
+        "D3:6",
+        "D3:7",
+        "D3:8",
+        "D3:9",
+        "D3:10",
+        "D3:11",
+        "D3:12",
+        "D3:13",
+        "D3:14",
+        "D3:15",
+        "D3:16",
+        "D3:17",
+        "D3:18",
+        "D3:19",
+        "D3:20",
+        "D3:21",
+        "D3:22",
+        "D3:23"
+      ]
+    },
+    {
+      "date": "2023-06-27",
+      "turns": [
+        "D4:1",
+        "D4:2",
+        "D4:3",
+        "D4:4",
+        "D4:5",
+        "D4:6",
+        "D4:7",
+        "D4:8",
+        "D4:9",
+        "D4:10",
+        "D4:11",
+        "D4:12",
+        "D4:13",
+        "D4:14",
+        "D4:15",
+        "D4:16",
+        "D4:17",
+        "D4:18"
+      ]
+    },
+    {
+      "date": "2023-07-03",
+      "turns": [
+        "D5:1",
+        "D5:2",
+        "D5:3",
+        "D5:4",
+        "D5:5",
+        "D5:6",
+        "D5:7",
+        "D5:8",
+        "D5:9",
+        "D5:10",
+        "D5:11",
+        "D5:12",
+        "D5:13",
+        "D5:14",
+        "D5:15",
+        "D5:16"
+      ]
+    },
+    {
+      "date": "2023-07-06",
+      "turns": [
+        "D6:1",
+        "D6:2",
+        "D6:3",
+        "D6:4",
+        "D6:5",
+        "D6:6",
+        "D6:7",
+        "D6:8",
+        "D6:9",
+        "D6:10",
+        "D6:11",
+        "D6:12",
+        "D6:13",
+        "D6:14",
+        "D6:15",
+        "D6:16"
+      ]
+    },
+    {
+      "date": "2023-07-12",
+      "turns": [
+        "D7:1",
+        "D7:2",
+        "D7:3",
+        "D7:4",
+        "D7:5",
+        "D7:6",
+        "D7:7",
+        "D7:8",
+        "D7:9",
+        "D7:10",
+        "D7:11",
+        "D7:12",
+        "D7:13",
+        "D7:14",
+        "D7:15",
+        "D7:16",
+        "D7:17",
+        "D7:18",
+        "D7:19",
+        "D7:20",
+        "D7:21",
+        "D7:22",
+        "D7:23",
+        "D7:24",
+        "D7:25",
+        "D7:26",
+        "D7:27"
+      ]
+    },
+    {
+      "date": "2023-07-15",
+      "turns": [
+        "D8:1",
+        "D8:2",
+        "D8:3",
+        "D8:4",
+        "D8:5",
+        "D8:6",
+        "D8:7",
+        "D8:8",
+        "D8:9",
+        "D8:10",
+        "D8:11",
+        "D8:12",
+        "D8:13",
+        "D8:14",
+        "D8:15",
+        "D8:16",
+        "D8:17",
+        "D8:18",
+        "D8:19",
+        "D8:20",
+        "D8:21",
+        "D8:22",
+        "D8:23",
+        "D8:24",
+        "D8:25",
+        "D8:26",
+        "D8:27",
+        "D8:28",
+        "D8:29",
+        "D8:30",
+        "D8:31",
+        "D8:32",
+        "D8:33",
+        "D8:34",
+        "D8:35",
+        "D8:36",
+        "D8:37",
+        "D8:38",
+        "D8:39"
+      ]
+    },
+    {
+      "date": "2023-07-17",
+      "turns": [
+        "D9:1",
+        "D9:2",
+        "D9:3",
+        "D9:4",
+        "D9:5",
+        "D9:6",
+        "D9:7",
+        "D9:8",
+        "D9:9",
+        "D9:10",
+        "D9:11",
+        "D9:12",
+        "D9:13",
+        "D9:14",
+        "D9:15",
+        "D9:16",
+        "D9:17"
+      ]
+    },
+    {
+      "date": "2023-07-20",
+      "turns": [
+        "D10:1",
+        "D10:2",
+        "D10:3",
+        "D10:4",
+        "D10:5",
+        "D10:6",
+        "D10:7",
+        "D10:8",
+        "D10:9",
+        "D10:10",
+        "D10:11",
+        "D10:12",
+        "D10:13",
+        "D10:14",
+        "D10:15",
+        "D10:16",
+        "D10:17",
+        "D10:18",
+        "D10:19",
+        "D10:20",
+        "D10:21",
+        "D10:22",
+        "D10:23",
+        "D10:24"
+      ]
+    },
+    {
+      "date": "2023-08-14",
+      "turns": [
+        "D11:1",
+        "D11:2",
+        "D11:3",
+        "D11:4",
+        "D11:5",
+        "D11:6",
+        "D11:7",
+        "D11:8",
+        "D11:9",
+        "D11:10",
+        "D11:11",
+        "D11:12",
+        "D11:13",
+        "D11:14",
+        "D11:15",
+        "D11:16",
+        "D11:17"
+      ]
+    },
+    {
+      "date": "2023-08-17",
+      "turns": [
+        "D12:1",
+        "D12:2",
+        "D12:3",
+        "D12:4",
+        "D12:5",
+        "D12:6",
+        "D12:7",
+        "D12:8",
+        "D12:9",
+        "D12:10",
+        "D12:11",
+        "D12:12",
+        "D12:13",
+        "D12:14",
+        "D12:15",
+        "D12:16",
+        "D12:17",
+        "D12:18",
+        "D12:19",
+        "D12:20",
+        "D12:21"
+      ]
+    },
+    {
+      "date": "2023-08-23",
+      "turns": [
+        "D13:1",
+        "D13:2",
+        "D13:3",
+        "D13:4",
+        "D13:5",
+        "D13:6",
+        "D13:7",
+        "D13:8",
+        "D13:9",
+        "D13:10",
+        "D13:11",
+        "D13:12",
+        "D13:13",
+        "D13:14",
+        "D13:15",
+        "D13:16",
+        "D13:17",
+        "D13:18"
+      ]
+    },
+    {
+      "date": "2023-08-25",
+      "turns": [
+        "D14:1",
+        "D14:2",
+        "D14:3",
+        "D14:4",
+        "D14:5",
+        "D14:6",
+        "D14:7",
+        "D14:8",
+        "D14:9",
+        "D14:10",
+        "D14:11",
+        "D14:12",
+        "D14:13",
+        "D14:14",
+        "D14:15",
+        "D14:16",
+        "D14:17",
+        "D14:18",
+        "D14:19",
+        "D14:20",
+        "D14:21",
+        "D14:22",
+        "D14:23",
+        "D14:24",
+        "D14:25",
+        "D14:26",
+        "D14:27",
+        "D14:28",
+        "D14:29",
+        "D14:30",
+        "D14:31",
+        "D14:32",
+        "D14:33",
+        "D14:34",
+        "D14:35"
+      ]
+    },
+    {
+      "date": "2023-08-28",
+      "turns": [
+        "D15:1",
+        "D15:2",
+        "D15:3",
+        "D15:4",
+        "D15:5",
+        "D15:6",
+        "D15:7",
+        "D15:8",
+        "D15:9",
+        "D15:10",
+        "D15:11",
+        "D15:12",
+        "D15:13",
+        "D15:14",
+        "D15:15",
+        "D15:16",
+        "D15:17",
+        "D15:18",
+        "D15:19",
+        "D15:20",
+        "D15:21",
+        "D15:22",
+        "D15:23",
+        "D15:24",
+        "D15:25",
+        "D15:26",
+        "D15:27",
+        "D15:28"
+      ]
+    },
+    {
+      "date": "2023-09-13",
+      "turns": [
+        "D16:1",
+        "D16:2",
+        "D16:3",
+        "D16:4",
+        "D16:5",
+        "D16:6",
+        "D16:7",
+        "D16:8",
+        "D16:9",
+        "D16:10",
+        "D16:11",
+        "D16:12",
+        "D16:13",
+        "D16:14",
+        "D16:15",
+        "D16:16",
+        "D16:17",
+        "D16:18",
+        "D16:19",
+        "D16:20"
+      ]
+    },
+    {
+      "date": "2023-10-13",
+      "turns": [
+        "D17:1",
+        "D17:2",
+        "D17:3",
+        "D17:4",
+        "D17:5",
+        "D17:6",
+        "D17:7",
+        "D17:8",
+        "D17:9",
+        "D17:10",
+        "D17:11",
+        "D17:12",
+        "D17:13",
+        "D17:14",
+        "D17:15",
+        "D17:16",
+        "D17:17",
+        "D17:18",
+        "D17:19",
+        "D17:20",
+        "D17:21",
+        "D17:22",
+        "D17:23",
+        "D17:24",
+        "D17:25",
+        "D17:26"
+      ]
+    },
+    {
+      "date": "2023-10-20",
+      "turns": [
+        "D18:1",
+        "D18:2",
+        "D18:3",
+        "D18:4",
+        "D18:5",
+        "D18:6",
+        "D18:7",
+        "D18:8",
+        "D18:9",
+        "D18:10",
+        "D18:11",
+        "D18:12",
+        "D18:13",
+        "D18:14",
+        "D18:15",
+        "D18:16",
+        "D18:17",
+        "D18:18",
+        "D18:19",
+        "D18:20",
+        "D18:21",
+        "D18:22",
+        "D18:23",
+        "D18:24"
+      ]
+    },
+    {
+      "date": "2023-10-22",
+      "turns": [
+        "D19:1",
+        "D19:2",
+        "D19:3",
+        "D19:4",
+        "D19:5",
+        "D19:6",
+        "D19:7",
+        "D19:8",
+        "D19:9",
+        "D19:10",
+        "D19:11",
+        "D19:12",
+        "D19:13",
+        "D19:14",
+        "D19:15"
+      ]
+    }
+  ],
+  "entities": [
+    {
+      "key": "caroline",
+      "type": "person",
+      "name": "Caroline",
+      "description": "A transgender woman who began transitioning in 2020. She moved from Sweden in 2019, paints and draws, volunteers with LGBTQ youth, and spent 2023 applying to adopt a child. She keeps a guinea pig called Oscar and is a close friend of Melanie.",
+      "sourceTurns": [
+        "D3:1",
+        "D3:13",
+        "D4:3",
+        "D16:7",
+        "D15:3",
+        "D13:1",
+        "D19:1",
+        "D13:3",
+        "D1:1"
+      ]
+    },
+    {
+      "key": "melanie",
+      "type": "person",
+      "name": "Melanie",
+      "properties": {
+        "aliases": "Mel"
+      },
+      "description": "A married mother of several children, friend of Caroline. She paints, makes pottery, runs, hikes and camps with her family, and keeps three pets: the cat Luna, the dog Oliver and a second cat Bailey.",
+      "sourceTurns": [
+        "D3:14",
+        "D3:16",
+        "D1:1",
+        "D1:14",
+        "D5:4",
+        "D2:5",
+        "D8:34",
+        "D7:18",
+        "D13:4"
+      ]
+    },
+    {
+      "key": "melanies-husband",
+      "type": "person",
+      "name": "Melanie's husband",
+      "description": "Melanie's husband, whom she married in 2018. She describes him as her partner and a source of motivation.",
+      "sourceTurns": [
+        "D3:14",
+        "D3:15",
+        "D3:16",
+        "D3:17",
+        "D3:18",
+        "D8:12",
+        "D8:13",
+        "D8:14",
+        "D8:15",
+        "D8:16"
+      ]
+    },
+    {
+      "key": "lgbtq-support-group",
+      "type": "organization",
+      "name": "LGBTQ support group",
+      "properties": {
+        "kind": "nonprofit"
+      },
+      "description": "An LGBTQ support group Caroline attends. Hearing transgender stories there in May 2023 made her feel accepted and gave her courage to embrace herself.",
+      "sourceTurns": [
+        "D1:3",
+        "D1:4",
+        "D1:5",
+        "D1:6",
+        "D1:7",
+        "D1:8",
+        "D4:15",
+        "D4:16",
+        "D4:17",
+        "D4:18"
+      ]
+    },
+    {
+      "key": "painting",
+      "type": "activity",
+      "name": "painting",
+      "properties": {
+        "kind": "creative"
+      },
+      "description": "Painting — the art form both women practise. Caroline paints about her trans experience and gender identity; Melanie paints landscapes, still life, animals and nature scenes, often with her children.",
+      "sourceTurns": [
+        "D1:14",
+        "D11:10",
+        "D14:30",
+        "D13:10",
+        "D8:6",
+        "D16:7"
+      ]
+    },
+    {
+      "key": "lake-sunrise",
+      "type": "work",
+      "name": "lake sunrise painting",
+      "properties": {
+        "medium": "painting"
+      },
+      "description": "A painting of a lake at sunrise that Melanie made in 2022 and describes as special to her.",
+      "sourceTurns": [
+        "D1:13",
+        "D1:14",
+        "D1:15",
+        "D1:16"
+      ]
+    },
+    {
+      "key": "violin",
+      "type": "activity",
+      "name": "playing the violin",
+      "properties": {
+        "kind": "music"
+      },
+      "description": "Playing the violin — one of the daily activities Melanie uses as time for herself.",
+      "sourceTurns": [
+        "D2:3",
+        "D2:4",
+        "D2:5",
+        "D2:6"
+      ]
+    },
+    {
+      "key": "running",
+      "type": "activity",
+      "name": "running",
+      "properties": {
+        "kind": "exercise"
+      },
+      "description": "Running — how Melanie de-stresses. She ran a charity race for mental health in May 2023 and has been running longer distances since.",
+      "sourceTurns": [
+        "D2:1",
+        "D7:20",
+        "D2:5"
+      ]
+    },
+    {
+      "key": "reading",
+      "type": "activity",
+      "name": "reading",
+      "properties": {
+        "kind": "leisure"
+      },
+      "description": "Reading — a daily activity for Melanie and a source of guidance and motivation for Caroline, who is assembling a library for her future children.",
+      "sourceTurns": [
+        "D2:5",
+        "D6:7",
+        "D7:9"
+      ]
+    },
+    {
+      "key": "swimming",
+      "type": "activity",
+      "name": "swimming",
+      "properties": {
+        "kind": "exercise"
+      },
+      "description": "Swimming — something Melanie does with her children.",
+      "sourceTurns": [
+        "D1:17",
+        "D1:18"
+      ]
+    },
+    {
+      "key": "counseling",
+      "type": "activity",
+      "name": "counseling",
+      "properties": {
+        "kind": "profession"
+      },
+      "description": "Counselling and mental health work — the career Caroline is pursuing, wanting to support transgender people through what she went through herself.",
+      "sourceTurns": [
+        "D1:11",
+        "D4:13",
+        "D7:7"
+      ]
+    },
+    {
+      "key": "adoption",
+      "type": "project",
+      "name": "Caroline's adoption plan",
+      "description": "Caroline's plan to adopt a child as a single parent. She researched agencies in May 2023, attended a council meeting in July, applied in August, and passed the agency interviews on 20 October 2023.",
+      "sourceTurns": [
+        "D2:8",
+        "D8:9",
+        "D13:1",
+        "D19:1",
+        "D17:1"
+      ]
+    },
+    {
+      "key": "home-country",
+      "type": "place",
+      "name": "Sweden",
+      "properties": {
+        "kind": "country",
+        "country": "Sweden"
+      },
+      "description": "Sweden — the country Caroline comes from and left in 2019, and where her grandmother lives.",
+      "sourceTurns": [
+        "D3:13",
+        "D4:1",
+        "D4:2",
+        "D4:3",
+        "D4:4"
+      ]
+    },
+    {
+      "key": "grandma",
+      "type": "person",
+      "name": "Caroline's grandmother",
+      "description": "Caroline's grandmother in Sweden, who gave her a necklace standing for love, faith and strength when Caroline was young.",
+      "sourceTurns": [
+        "D4:1",
+        "D4:2",
+        "D4:3",
+        "D4:4"
+      ]
+    },
+    {
+      "key": "necklace",
+      "type": "object",
+      "name": "necklace from Caroline's grandmother",
+      "properties": {
+        "kind": "jewellery"
+      },
+      "description": "A necklace Caroline's grandmother in Sweden gave her when she was young, standing for love, faith and strength, and a reminder of her roots.",
+      "sourceTurns": [
+        "D4:1",
+        "D4:2",
+        "D4:3",
+        "D4:4"
+      ]
+    },
+    {
+      "key": "painted-bowl",
+      "type": "object",
+      "name": "Caroline's hand-painted bowl",
+      "properties": {
+        "kind": "ceramic"
+      },
+      "description": "A hand-painted bowl a friend made for Caroline's 18th birthday in 2013; she keeps it for its pattern and colours.",
+      "sourceTurns": [
+        "D4:5"
+      ]
+    },
+    {
+      "key": "pottery",
+      "type": "activity",
+      "name": "pottery",
+      "properties": {
+        "kind": "craft"
+      },
+      "description": "Pottery — the craft Melanie took up in July 2023 and calls both a creative outlet and therapy. Caroline has not tried it.",
+      "sourceTurns": [
+        "D5:4",
+        "D5:10",
+        "D14:4",
+        "D16:11"
+      ]
+    },
+    {
+      "key": "pottery-class",
+      "type": "organization",
+      "name": "Melanie's pottery class",
+      "properties": {
+        "kind": "course"
+      },
+      "description": "The pottery class Melanie joined on 2 July 2023. She made a black-and-white bowl and later a plate there, and calls pottery therapy.",
+      "sourceTurns": [
+        "D5:4",
+        "D5:6",
+        "D5:7",
+        "D5:8",
+        "D5:9",
+        "D5:10",
+        "D5:11",
+        "D5:12",
+        "D14:3",
+        "D14:4",
+        "D14:5"
+      ]
+    },
+    {
+      "key": "melanie-bowl",
+      "type": "work",
+      "name": "black and white bowl",
+      "properties": {
+        "medium": "pottery"
+      },
+      "description": "A black-and-white bowl Melanie made in her pottery class in July 2023 and is proud of.",
+      "sourceTurns": [
+        "D5:7",
+        "D5:8",
+        "D5:9",
+        "D5:10",
+        "D5:11",
+        "D5:12"
+      ]
+    },
+    {
+      "key": "piano",
+      "type": "activity",
+      "name": "playing the piano",
+      "properties": {
+        "kind": "music"
+      },
+      "description": "Playing the piano — which Caroline began learning in July 2023.",
+      "sourceTurns": [
+        "D5:5"
+      ]
+    },
+    {
+      "key": "charlottes-web",
+      "type": "work",
+      "name": "Charlotte's Web",
+      "properties": {
+        "medium": "book"
+      },
+      "description": "Charlotte's Web — Melanie's favourite book from childhood, which taught her about friendship and compassion.",
+      "sourceTurns": [
+        "D6:10"
+      ]
+    },
+    {
+      "key": "becoming-nicole",
+      "type": "work",
+      "name": "Becoming Nicole",
+      "properties": {
+        "medium": "book"
+      },
+      "description": "Becoming Nicole by Amy Ellis Nutt — the true story of a trans girl and her family, which Caroline calls inspiring and says taught her self-acceptance and how to find support.",
+      "sourceTurns": [
+        "D7:11",
+        "D7:12",
+        "D7:13",
+        "D7:14"
+      ]
+    },
+    {
+      "key": "amy-ellis-nutt",
+      "type": "person",
+      "name": "Amy Ellis Nutt",
+      "description": "Author of \"Becoming Nicole\", the book about a trans girl and her family that Caroline names as her favourite and most helpful read.",
+      "sourceTurns": [
+        "D7:11",
+        "D7:12",
+        "D7:13",
+        "D7:14"
+      ]
+    },
+    {
+      "key": "luna",
+      "type": "animal",
+      "name": "Luna",
+      "properties": {
+        "species": "cat"
+      },
+      "description": "Melanie's cat, one of her household's pets.",
+      "sourceTurns": [
+        "D7:15",
+        "D7:16",
+        "D7:17",
+        "D7:18",
+        "D13:4",
+        "D13:6"
+      ]
+    },
+    {
+      "key": "oliver",
+      "type": "animal",
+      "name": "Oliver",
+      "properties": {
+        "species": "dog"
+      },
+      "description": "Melanie's dog, who once hid a bone in her slipper.",
+      "sourceTurns": [
+        "D7:15",
+        "D7:16",
+        "D7:17",
+        "D7:18",
+        "D13:4",
+        "D13:6"
+      ]
+    },
+    {
+      "key": "running-shoes",
+      "type": "object",
+      "name": "Melanie's running shoes",
+      "properties": {
+        "kind": "footwear"
+      },
+      "description": "Purple running shoes Melanie bought in July 2023.",
+      "sourceTurns": [
+        "D7:19",
+        "D7:20",
+        "D7:21",
+        "D7:22",
+        "D7:23",
+        "D7:24",
+        "D7:25",
+        "D7:26",
+        "D7:27"
+      ]
+    },
+    {
+      "key": "childrens-library",
+      "type": "project",
+      "name": "Caroline's children's library",
+      "description": "A library of children's books — classics, stories from other cultures and educational books — that Caroline is assembling for the children she hopes to adopt.",
+      "sourceTurns": [
+        "D6:7",
+        "D6:8",
+        "D6:9"
+      ]
+    },
+    {
+      "key": "mountains",
+      "type": "place",
+      "name": "the mountains",
+      "properties": {
+        "kind": "natural"
+      },
+      "description": "The mountains where Melanie takes her family camping and hiking; the site of a June 2023 camping trip with marshmallows, a campfire and a hike to a view.",
+      "sourceTurns": [
+        "D4:6",
+        "D4:7",
+        "D4:8",
+        "D4:9",
+        "D4:10",
+        "D8:32",
+        "D8:33",
+        "D8:34",
+        "D8:35",
+        "D8:36",
+        "D8:37",
+        "D8:38",
+        "D8:39"
+      ]
+    },
+    {
+      "key": "museum",
+      "type": "organization",
+      "name": "the museum",
+      "properties": {
+        "kind": "nonprofit"
+      },
+      "description": "A museum Melanie took her children to in July 2023, where they were most excited by the dinosaur exhibit.",
+      "sourceTurns": [
+        "D6:4",
+        "D6:5",
+        "D6:6"
+      ]
+    },
+    {
+      "key": "kids-cup",
+      "type": "work",
+      "name": "the cup Melanie's kids made",
+      "properties": {
+        "medium": "pottery"
+      },
+      "description": "A cup Melanie's children made at a pottery workshop in July 2023.",
+      "sourceTurns": [
+        "D8:1",
+        "D8:2",
+        "D8:3",
+        "D8:4",
+        "D8:5"
+      ]
+    },
+    {
+      "key": "nature-painting",
+      "type": "work",
+      "name": "nature painting by Melanie and her kids",
+      "properties": {
+        "medium": "painting"
+      },
+      "description": "A nature-inspired painting Melanie made together with her children in July 2023.",
+      "sourceTurns": [
+        "D8:6",
+        "D8:7",
+        "D8:8"
+      ]
+    },
+    {
+      "key": "adoption-council",
+      "type": "organization",
+      "name": "the adoption council",
+      "properties": {
+        "kind": "nonprofit"
+      },
+      "description": "An adoption council whose meeting Caroline attended on 14 July 2023; she found it inspiring and emotional and it strengthened her determination to adopt.",
+      "sourceTurns": [
+        "D8:9",
+        "D8:10"
+      ]
+    },
+    {
+      "key": "mentorship-program",
+      "type": "organization",
+      "name": "mentorship program for LGBTQ youth",
+      "properties": {
+        "kind": "nonprofit"
+      },
+      "description": "A mentorship programme for LGBTQ youth that Caroline joined in July 2023, through which she mentors a transgender teenager.",
+      "sourceTurns": [
+        "D9:2",
+        "D9:3",
+        "D9:4",
+        "D9:5"
+      ]
+    },
+    {
+      "key": "mentee",
+      "type": "person",
+      "name": "Caroline's mentee, a transgender teen",
+      "description": "A transgender teenager Caroline mentors through an LGBTQ youth mentorship programme. They worked on confidence together and attended a pride event in June 2023.",
+      "sourceTurns": [
+        "D9:6",
+        "D9:7",
+        "D9:8",
+        "D9:9",
+        "D9:10",
+        "D9:11"
+      ]
+    },
+    {
+      "key": "lgbtq-center",
+      "type": "organization",
+      "name": "the LGBTQ center",
+      "properties": {
+        "kind": "nonprofit"
+      },
+      "description": "An LGBTQ centre Caroline visited in July 2023; the visit inspired a painting about unity and strength.",
+      "sourceTurns": [
+        "D9:12",
+        "D9:13",
+        "D9:14",
+        "D9:15",
+        "D9:16",
+        "D9:17"
+      ]
+    },
+    {
+      "key": "activist-group",
+      "type": "organization",
+      "name": "Connected LGBTQ Activists",
+      "properties": {
+        "kind": "nonprofit"
+      },
+      "description": "Connected LGBTQ Activists — the activist group Caroline joined on 18 July 2023. It holds regular meetings and plans events and campaigns for LGBTQ rights.",
+      "sourceTurns": [
+        "D10:1",
+        "D10:2",
+        "D10:3",
+        "D10:4",
+        "D10:5",
+        "D10:6"
+      ]
+    },
+    {
+      "key": "matt-patterson",
+      "type": "person",
+      "name": "Matt Patterson",
+      "description": "A singer whose concert Melanie attended in August 2023 for her daughter's birthday; she praised his voice and songs.",
+      "sourceTurns": [
+        "D11:1",
+        "D11:2",
+        "D11:3"
+      ]
+    },
+    {
+      "key": "embracing-identity",
+      "type": "work",
+      "name": "Embracing Identity",
+      "properties": {
+        "medium": "painting"
+      },
+      "description": "Embracing Identity — Caroline's painting of a woman representing the journey of acceptance, about finding comfort and love in being yourself.",
+      "sourceTurns": [
+        "D11:12",
+        "D11:13",
+        "D11:14",
+        "D11:15",
+        "D11:16"
+      ]
+    },
+    {
+      "key": "melanies-daughter",
+      "type": "person",
+      "name": "Melanie's daughter",
+      "description": "One of Melanie's daughters, whose birthday was celebrated at a Matt Patterson concert in August 2023.",
+      "sourceTurns": [
+        "D11:1",
+        "D11:2",
+        "D11:3"
+      ]
+    },
+    {
+      "key": "melanies-youngest",
+      "type": "person",
+      "name": "Melanie's youngest child",
+      "description": "Melanie's youngest child, whose first steps Melanie remembers as one of her happiest moments.",
+      "sourceTurns": [
+        "D10:20",
+        "D10:21",
+        "D10:22",
+        "D10:23",
+        "D10:24"
+      ]
+    },
+    {
+      "key": "art-show",
+      "type": "project",
+      "name": "Caroline's LGBTQ art show",
+      "description": "An LGBTQ art show Caroline is putting together to exhibit her paintings alongside other LGBTQ artists.",
+      "sourceTurns": [
+        "D9:12",
+        "D9:13",
+        "D9:14",
+        "D9:15",
+        "D9:16",
+        "D9:17",
+        "D14:33",
+        "D14:34",
+        "D14:35"
+      ]
+    },
+    {
+      "key": "hiking",
+      "type": "activity",
+      "name": "hiking",
+      "properties": {
+        "kind": "outdoors"
+      },
+      "description": "Hiking — which Melanie does with her family in the mountains and forests, and which Caroline was doing when she was confronted by religious conservatives in August 2023.",
+      "sourceTurns": [
+        "D8:34",
+        "D12:1"
+      ]
+    },
+    {
+      "key": "camping",
+      "type": "activity",
+      "name": "camping",
+      "properties": {
+        "kind": "outdoors"
+      },
+      "description": "Camping — the highlight of Melanie's family summers, with marshmallows, campfires and stories. A 2022 trip coincided with the Perseid meteor shower.",
+      "sourceTurns": [
+        "D10:12",
+        "D10:14",
+        "D4:8",
+        "D8:32"
+      ]
+    },
+    {
+      "key": "the-beach",
+      "type": "place",
+      "name": "the beach",
+      "properties": {
+        "kind": "natural"
+      },
+      "description": "A beach Melanie takes her family to once or twice a year, and which Caroline visited in August 2023 and painted the sunset from.",
+      "sourceTurns": [
+        "D6:16",
+        "D10:8",
+        "D10:9",
+        "D10:10",
+        "D10:11",
+        "D14:6",
+        "D14:7",
+        "D14:8",
+        "D14:9"
+      ]
+    },
+    {
+      "key": "the-forest",
+      "type": "place",
+      "name": "the forest",
+      "properties": {
+        "kind": "natural"
+      },
+      "description": "Forest Melanie and her family explore and camp in; a July 2023 camping trip took place there.",
+      "sourceTurns": [
+        "D8:32",
+        "D8:33",
+        "D8:34",
+        "D8:35",
+        "D8:36",
+        "D8:37",
+        "D8:38",
+        "D8:39",
+        "D16:2",
+        "D16:3",
+        "D16:4"
+      ]
+    },
+    {
+      "key": "oscar",
+      "type": "animal",
+      "name": "Oscar",
+      "properties": {
+        "species": "guinea pig"
+      },
+      "description": "Caroline's guinea pig, whose favourite food is parsley.",
+      "sourceTurns": [
+        "D13:3",
+        "D13:5"
+      ]
+    },
+    {
+      "key": "bailey",
+      "type": "animal",
+      "name": "Bailey",
+      "properties": {
+        "species": "cat"
+      },
+      "description": "A second cat Melanie got in August 2023.",
+      "sourceTurns": [
+        "D13:4",
+        "D13:6"
+      ]
+    },
+    {
+      "key": "carolines-dad",
+      "type": "person",
+      "name": "Caroline's dad",
+      "description": "Caroline's father, who took her horseback riding through the fields when she was a child.",
+      "sourceTurns": [
+        "D13:7"
+      ]
+    },
+    {
+      "key": "horseback-riding",
+      "type": "activity",
+      "name": "horseback riding",
+      "properties": {
+        "kind": "outdoors"
+      },
+      "description": "Horseback riding — which Caroline did with her father as a child and still loves.",
+      "sourceTurns": [
+        "D13:7"
+      ]
+    },
+    {
+      "key": "horse-painting",
+      "type": "work",
+      "name": "Melanie's horse painting",
+      "properties": {
+        "medium": "painting"
+      },
+      "description": "A painting of a horse Melanie made in August 2023, praised by Caroline for capturing the animal's grace and strength.",
+      "sourceTurns": [
+        "D13:8",
+        "D13:9",
+        "D13:10"
+      ]
+    },
+    {
+      "key": "self-portrait",
+      "type": "work",
+      "name": "Caroline's self-portrait",
+      "properties": {
+        "medium": "painting"
+      },
+      "description": "A self-portrait Caroline painted in August 2023, dominated by blue, which she says left her feeling liberated and empowered.",
+      "sourceTurns": [
+        "D13:11",
+        "D13:12",
+        "D13:13",
+        "D13:14"
+      ]
+    },
+    {
+      "key": "sunset-painting",
+      "type": "work",
+      "name": "Caroline's sunset painting",
+      "properties": {
+        "medium": "painting"
+      },
+      "description": "A painting of a sunset Caroline made after visiting the beach in August 2023, capturing the calm of the sun dropping below the horizon.",
+      "sourceTurns": [
+        "D14:6",
+        "D14:7",
+        "D14:8",
+        "D14:9"
+      ]
+    },
+    {
+      "key": "rainbow-mural",
+      "type": "work",
+      "name": "the rainbow flag mural",
+      "properties": {
+        "medium": "mural"
+      },
+      "description": "A rainbow flag mural with an eagle, which Caroline says reflects the courage and strength of the trans community and her own resilience.",
+      "sourceTurns": [
+        "D14:13",
+        "D14:14",
+        "D14:15",
+        "D14:16"
+      ]
+    },
+    {
+      "key": "stained-glass",
+      "type": "work",
+      "name": "Caroline's stained glass window",
+      "properties": {
+        "medium": "stained glass"
+      },
+      "description": "A stained glass window Caroline made for a local church, showing time changing our lives and her own journey as a transgender woman.",
+      "sourceTurns": [
+        "D14:17",
+        "D14:18",
+        "D14:19",
+        "D14:20",
+        "D14:21",
+        "D14:22"
+      ]
+    },
+    {
+      "key": "local-church",
+      "type": "organization",
+      "name": "the local church",
+      "properties": {
+        "kind": "nonprofit"
+      },
+      "description": "A local church for which Caroline made a stained glass window about time changing our lives.",
+      "sourceTurns": [
+        "D14:17",
+        "D14:18",
+        "D14:19",
+        "D14:20",
+        "D14:21",
+        "D14:22"
+      ]
+    },
+    {
+      "key": "melanie-plate",
+      "type": "work",
+      "name": "Melanie's pottery plate",
+      "properties": {
+        "medium": "pottery"
+      },
+      "description": "A plate Melanie made in her pottery class on 24 August 2023.",
+      "sourceTurns": [
+        "D14:3",
+        "D14:4",
+        "D14:5"
+      ]
+    },
+    {
+      "key": "homeless-shelter",
+      "type": "organization",
+      "name": "the homeless shelter",
+      "properties": {
+        "kind": "nonprofit"
+      },
+      "description": "A homeless shelter where Melanie and her family volunteered for a day in August 2023.",
+      "sourceTurns": [
+        "D14:10",
+        "D14:11",
+        "D14:12"
+      ]
+    },
+    {
+      "key": "youth-center",
+      "type": "organization",
+      "name": "the LGBTQ+ youth center",
+      "properties": {
+        "kind": "nonprofit"
+      },
+      "description": "An LGBTQ+ youth centre where Caroline volunteers, sharing her story with young people. She is helping organise a talent show for the children there.",
+      "sourceTurns": [
+        "D15:3",
+        "D15:4",
+        "D15:5",
+        "D15:6",
+        "D15:7",
+        "D15:8",
+        "D15:9",
+        "D15:10",
+        "D15:11",
+        "D15:12"
+      ]
+    },
+    {
+      "key": "adoption-advice-group",
+      "type": "organization",
+      "name": "adoption advice and assistance group",
+      "properties": {
+        "kind": "nonprofit"
+      },
+      "description": "An adoption advice and assistance group that helped Caroline when she applied to adoption agencies in August 2023.",
+      "sourceTurns": [
+        "D13:1",
+        "D13:2",
+        "D13:3"
+      ]
+    },
+    {
+      "key": "summer-sounds",
+      "type": "organization",
+      "name": "Summer Sounds",
+      "properties": {
+        "kind": "business"
+      },
+      "description": "Summer Sounds — a band Melanie saw live in August 2023, playing a pop song that got everyone dancing.",
+      "sourceTurns": [
+        "D15:13",
+        "D15:14",
+        "D15:15",
+        "D15:16",
+        "D15:17"
+      ]
+    },
+    {
+      "key": "talent-show",
+      "type": "project",
+      "name": "talent show for the youth centre kids",
+      "description": "A talent show Caroline is helping organise for the children at the LGBTQ youth centre.",
+      "sourceTurns": [
+        "D15:9",
+        "D15:10",
+        "D15:11",
+        "D15:12"
+      ]
+    },
+    {
+      "key": "the-park",
+      "type": "place",
+      "name": "the park",
+      "properties": {
+        "kind": "venue"
+      },
+      "description": "A park Melanie took her children to in August 2023, where they played and explored outdoors.",
+      "sourceTurns": [
+        "D15:1",
+        "D15:2"
+      ]
+    },
+    {
+      "key": "biking",
+      "type": "activity",
+      "name": "biking",
+      "properties": {
+        "kind": "outdoors"
+      },
+      "description": "Biking — which Caroline did with friends on a day out in September 2023.",
+      "sourceTurns": [
+        "D16:1"
+      ]
+    },
+    {
+      "key": "binary-painting",
+      "type": "work",
+      "name": "Caroline's red and blue painting about the binary gender system",
+      "properties": {
+        "medium": "painting"
+      },
+      "description": "A red and blue painting by Caroline about her path as a trans woman; the two colours stand for the binary gender system and their mixing for breaking it.",
+      "sourceTurns": [
+        "D16:12",
+        "D16:13",
+        "D16:14"
+      ]
+    },
+    {
+      "key": "the-cafe",
+      "type": "organization",
+      "name": "the café",
+      "properties": {
+        "kind": "business"
+      },
+      "description": "A café Melanie visited in September 2023 and enjoyed; it displayed thoughtful signs.",
+      "sourceTurns": [
+        "D16:16",
+        "D16:17",
+        "D16:18",
+        "D16:19",
+        "D16:20"
+      ]
+    },
+    {
+      "key": "adoption-mentor",
+      "type": "person",
+      "name": "Caroline's adoption mentor",
+      "description": "A mentor Caroline turns to for adoption advice; she contacted them in October 2023 when she felt ready to be a mother.",
+      "sourceTurns": [
+        "D17:1",
+        "D17:2",
+        "D17:3"
+      ]
+    },
+    {
+      "key": "melanies-friend",
+      "type": "person",
+      "name": "Melanie's friend who adopted",
+      "description": "A friend of Melanie who adopted a child in 2022 and is happy with it; Melanie cites them when considering adoption herself.",
+      "sourceTurns": [
+        "D17:4",
+        "D17:5",
+        "D17:6"
+      ]
+    },
+    {
+      "key": "sunset-painting-melanie",
+      "type": "work",
+      "name": "Melanie's sunset-inspired painting",
+      "properties": {
+        "medium": "painting"
+      },
+      "description": "A sunset-inspired painting Melanie made in October 2023; she says the colours make her feel calm.",
+      "sourceTurns": [
+        "D17:12",
+        "D17:13",
+        "D17:14",
+        "D17:15",
+        "D17:16"
+      ]
+    },
+    {
+      "key": "abstract-painting-melanie",
+      "type": "work",
+      "name": "Melanie's abstract painting",
+      "properties": {
+        "medium": "painting"
+      },
+      "description": "An abstract painting by Melanie using peaceful blue streaks to convey tranquillity.",
+      "sourceTurns": [
+        "D17:12",
+        "D17:13",
+        "D17:14",
+        "D17:15",
+        "D17:16"
+      ]
+    },
+    {
+      "key": "poetry-reading",
+      "type": "organization",
+      "name": "the transgender poetry reading",
+      "properties": {
+        "kind": "nonprofit"
+      },
+      "description": "A transgender poetry reading Caroline attended in October 2023, where trans people shared their stories; she describes the room as electric with support.",
+      "sourceTurns": [
+        "D17:17",
+        "D17:18",
+        "D17:19",
+        "D17:20",
+        "D17:21",
+        "D17:22",
+        "D17:23",
+        "D17:24",
+        "D17:25",
+        "D17:26"
+      ]
+    },
+    {
+      "key": "poetry-artwork",
+      "type": "work",
+      "name": "Caroline's drawing inspired by the poetry reading",
+      "properties": {
+        "medium": "drawing"
+      },
+      "description": "A drawing Caroline made after a transgender poetry reading, standing for freedom and being real.",
+      "sourceTurns": [
+        "D17:17",
+        "D17:18",
+        "D17:19",
+        "D17:20",
+        "D17:21",
+        "D17:22",
+        "D17:23",
+        "D17:24",
+        "D17:25",
+        "D17:26"
+      ]
+    },
+    {
+      "key": "melanies-son",
+      "type": "person",
+      "name": "Melanie's son",
+      "description": "Melanie's son, who was hurt in a car accident on a family road trip in October 2023 and recovered.",
+      "sourceTurns": [
+        "D18:1",
+        "D18:2",
+        "D18:3",
+        "D18:4",
+        "D18:5",
+        "D18:6",
+        "D18:7",
+        "D18:8"
+      ]
+    },
+    {
+      "key": "grand-canyon",
+      "type": "place",
+      "name": "the Grand Canyon",
+      "properties": {
+        "kind": "natural"
+      },
+      "description": "The Grand Canyon, which Melanie and her family visited on the October 2023 road trip during which her son was in an accident.",
+      "sourceTurns": [
+        "D18:5",
+        "D18:6",
+        "D18:7",
+        "D18:8"
+      ]
+    },
+    {
+      "key": "figurines",
+      "type": "object",
+      "name": "Melanie's family figurines",
+      "properties": {
+        "kind": "ornament"
+      },
+      "description": "Figurines Melanie bought in October 2023 that remind her of family love.",
+      "sourceTurns": [
+        "D19:2"
+      ]
+    },
+    {
+      "key": "guitar",
+      "type": "activity",
+      "name": "playing the guitar",
+      "properties": {
+        "kind": "music"
+      },
+      "description": "Playing acoustic guitar — which Caroline took up around 2018 and uses to express her emotions.",
+      "sourceTurns": [
+        "D15:18",
+        "D15:19",
+        "D15:20",
+        "D15:21"
+      ]
+    },
+    {
+      "key": "clarinet",
+      "type": "activity",
+      "name": "playing the clarinet",
+      "properties": {
+        "kind": "music"
+      },
+      "description": "Playing the clarinet — which Melanie began as a child and uses to express herself and relax.",
+      "sourceTurns": [
+        "D15:26",
+        "D15:27",
+        "D15:28"
+      ]
+    },
+    {
+      "key": "brave-song",
+      "type": "work",
+      "name": "Brave",
+      "properties": {
+        "medium": "song"
+      },
+      "description": "\"Brave\" by Sara Bareilles — the song Caroline finds most meaningful, about courage and fighting for what is right. It makes her think about how far she has come.",
+      "sourceTurns": [
+        "D15:22",
+        "D15:23",
+        "D15:24",
+        "D15:25"
+      ]
+    },
+    {
+      "key": "sara-bareilles",
+      "type": "person",
+      "name": "Sara Bareilles",
+      "description": "The singer who wrote \"Brave\", the song Caroline says means the most to her.",
+      "sourceTurns": [
+        "D15:22",
+        "D15:23",
+        "D15:24",
+        "D15:25"
+      ]
+    },
+    {
+      "key": "perfect-song",
+      "type": "work",
+      "name": "Perfect",
+      "properties": {
+        "medium": "song"
+      },
+      "description": "Ed Sheeran's \"Perfect\" — one of the modern songs Melanie likes, alongside classical composers.",
+      "sourceTurns": [
+        "D15:26",
+        "D15:27",
+        "D15:28"
+      ]
+    },
+    {
+      "key": "ed-sheeran",
+      "type": "person",
+      "name": "Ed Sheeran",
+      "description": "Singer of \"Perfect\", one of the modern pieces Melanie enjoys.",
+      "sourceTurns": [
+        "D15:26",
+        "D15:27",
+        "D15:28"
+      ]
+    },
+    {
+      "key": "bach",
+      "type": "person",
+      "name": "Bach",
+      "description": "Classical composer Melanie is a fan of, alongside Mozart.",
+      "sourceTurns": [
+        "D15:26",
+        "D15:27",
+        "D15:28"
+      ]
+    },
+    {
+      "key": "mozart",
+      "type": "person",
+      "name": "Mozart",
+      "description": "Classical composer Melanie is a fan of, alongside Bach.",
+      "sourceTurns": [
+        "D15:26",
+        "D15:27",
+        "D15:28"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "label": "knows",
+      "from": "caroline",
+      "to": "melanie",
+      "properties": {
+        "kind": "friend"
+      }
+    },
+    {
+      "label": "family_of",
+      "from": "melanie",
+      "to": "melanies-husband",
+      "properties": {
+        "relation": "spouse",
+        "since": "2018-06-09"
+      }
+    },
+    {
+      "label": "member_of",
+      "from": "caroline",
+      "to": "lgbtq-support-group"
+    },
+    {
+      "label": "practices",
+      "from": "melanie",
+      "to": "painting"
+    },
+    {
+      "label": "practices",
+      "from": "melanie",
+      "to": "violin"
+    },
+    {
+      "label": "practices",
+      "from": "melanie",
+      "to": "running"
+    },
+    {
+      "label": "practices",
+      "from": "melanie",
+      "to": "reading"
+    },
+    {
+      "label": "practices",
+      "from": "melanie",
+      "to": "swimming"
+    },
+    {
+      "label": "created_by",
+      "from": "lake-sunrise",
+      "to": "melanie"
+    },
+    {
+      "label": "likes",
+      "from": "melanie",
+      "to": "painting"
+    },
+    {
+      "label": "works_on",
+      "from": "caroline",
+      "to": "adoption"
+    },
+    {
+      "label": "lives_in",
+      "from": "caroline",
+      "to": "home-country",
+      "properties": {
+        "until": "2019-06-09"
+      }
+    },
+    {
+      "label": "family_of",
+      "from": "caroline",
+      "to": "grandma",
+      "properties": {
+        "relation": "grandmother"
+      }
+    },
+    {
+      "label": "owns",
+      "from": "caroline",
+      "to": "necklace"
+    },
+    {
+      "label": "owns",
+      "from": "caroline",
+      "to": "painted-bowl"
+    },
+    {
+      "label": "owns",
+      "from": "melanie",
+      "to": "luna"
+    },
+    {
+      "label": "owns",
+      "from": "melanie",
+      "to": "oliver"
+    },
+    {
+      "label": "owns",
+      "from": "melanie",
+      "to": "running-shoes"
+    },
+    {
+      "label": "practices",
+      "from": "melanie",
+      "to": "pottery",
+      "properties": {
+        "since": "2023-07-02"
+      }
+    },
+    {
+      "label": "member_of",
+      "from": "melanie",
+      "to": "pottery-class",
+      "properties": {
+        "since": "2023-07-02"
+      }
+    },
+    {
+      "label": "created_by",
+      "from": "melanie-bowl",
+      "to": "melanie"
+    },
+    {
+      "label": "created_by",
+      "from": "becoming-nicole",
+      "to": "amy-ellis-nutt"
+    },
+    {
+      "label": "practices",
+      "from": "caroline",
+      "to": "piano",
+      "properties": {
+        "since": "2023-07-03"
+      }
+    },
+    {
+      "label": "likes",
+      "from": "melanie",
+      "to": "pottery"
+    },
+    {
+      "label": "likes",
+      "from": "melanie",
+      "to": "charlottes-web"
+    },
+    {
+      "label": "likes",
+      "from": "caroline",
+      "to": "becoming-nicole"
+    },
+    {
+      "label": "likes",
+      "from": "caroline",
+      "to": "reading"
+    },
+    {
+      "label": "works_on",
+      "from": "caroline",
+      "to": "childrens-library"
+    },
+    {
+      "label": "lives_in",
+      "from": "grandma",
+      "to": "home-country"
+    },
+    {
+      "label": "practices",
+      "from": "caroline",
+      "to": "painting"
+    },
+    {
+      "label": "created_by",
+      "from": "embracing-identity",
+      "to": "caroline"
+    },
+    {
+      "label": "created_by",
+      "from": "nature-painting",
+      "to": "melanie"
+    },
+    {
+      "label": "member_of",
+      "from": "caroline",
+      "to": "mentorship-program",
+      "properties": {
+        "role": "mentor",
+        "since": "2023-07-15"
+      }
+    },
+    {
+      "label": "member_of",
+      "from": "caroline",
+      "to": "activist-group",
+      "properties": {
+        "since": "2023-07-18"
+      }
+    },
+    {
+      "label": "knows",
+      "from": "caroline",
+      "to": "mentee",
+      "properties": {
+        "kind": "mentor",
+        "since": "2023-07-15"
+      }
+    },
+    {
+      "label": "family_of",
+      "from": "melanie",
+      "to": "melanies-daughter",
+      "properties": {
+        "relation": "daughter"
+      }
+    },
+    {
+      "label": "family_of",
+      "from": "melanie",
+      "to": "melanies-youngest",
+      "properties": {
+        "relation": "daughter"
+      }
+    },
+    {
+      "label": "works_on",
+      "from": "caroline",
+      "to": "art-show"
+    },
+    {
+      "label": "practices",
+      "from": "melanie",
+      "to": "hiking"
+    },
+    {
+      "label": "practices",
+      "from": "melanie",
+      "to": "camping"
+    },
+    {
+      "label": "likes",
+      "from": "melanie",
+      "to": "the-beach"
+    },
+    {
+      "label": "likes",
+      "from": "melanie",
+      "to": "camping"
+    },
+    {
+      "label": "likes",
+      "from": "melanies-daughter",
+      "to": "matt-patterson"
+    },
+    {
+      "label": "owns",
+      "from": "caroline",
+      "to": "oscar"
+    },
+    {
+      "label": "owns",
+      "from": "melanie",
+      "to": "bailey"
+    },
+    {
+      "label": "family_of",
+      "from": "caroline",
+      "to": "carolines-dad",
+      "properties": {
+        "relation": "father"
+      }
+    },
+    {
+      "label": "practices",
+      "from": "caroline",
+      "to": "horseback-riding"
+    },
+    {
+      "label": "created_by",
+      "from": "horse-painting",
+      "to": "melanie"
+    },
+    {
+      "label": "created_by",
+      "from": "self-portrait",
+      "to": "caroline"
+    },
+    {
+      "label": "created_by",
+      "from": "sunset-painting",
+      "to": "caroline"
+    },
+    {
+      "label": "created_by",
+      "from": "stained-glass",
+      "to": "caroline"
+    },
+    {
+      "label": "created_by",
+      "from": "melanie-plate",
+      "to": "melanie"
+    },
+    {
+      "label": "member_of",
+      "from": "caroline",
+      "to": "youth-center",
+      "properties": {
+        "role": "volunteer"
+      }
+    },
+    {
+      "label": "member_of",
+      "from": "caroline",
+      "to": "adoption-advice-group"
+    },
+    {
+      "label": "works_on",
+      "from": "caroline",
+      "to": "talent-show"
+    },
+    {
+      "label": "likes",
+      "from": "caroline",
+      "to": "horseback-riding"
+    },
+    {
+      "label": "likes",
+      "from": "melanie",
+      "to": "summer-sounds"
+    },
+    {
+      "label": "likes",
+      "from": "melanie",
+      "to": "painting"
+    },
+    {
+      "label": "practices",
+      "from": "caroline",
+      "to": "biking"
+    },
+    {
+      "label": "created_by",
+      "from": "binary-painting",
+      "to": "caroline"
+    },
+    {
+      "label": "created_by",
+      "from": "sunset-painting-melanie",
+      "to": "melanie"
+    },
+    {
+      "label": "created_by",
+      "from": "abstract-painting-melanie",
+      "to": "melanie"
+    },
+    {
+      "label": "created_by",
+      "from": "poetry-artwork",
+      "to": "caroline"
+    },
+    {
+      "label": "knows",
+      "from": "caroline",
+      "to": "adoption-mentor",
+      "properties": {
+        "kind": "mentor"
+      }
+    },
+    {
+      "label": "knows",
+      "from": "melanie",
+      "to": "melanies-friend",
+      "properties": {
+        "kind": "friend"
+      }
+    },
+    {
+      "label": "family_of",
+      "from": "melanie",
+      "to": "melanies-son",
+      "properties": {
+        "relation": "son"
+      }
+    },
+    {
+      "label": "owns",
+      "from": "melanie",
+      "to": "figurines",
+      "properties": {
+        "since": "2023-10-21"
+      }
+    },
+    {
+      "label": "likes",
+      "from": "melanie",
+      "to": "the-cafe"
+    },
+    {
+      "label": "practices",
+      "from": "caroline",
+      "to": "guitar",
+      "properties": {
+        "since": "2018-08-28"
+      }
+    },
+    {
+      "label": "practices",
+      "from": "melanie",
+      "to": "clarinet"
+    },
+    {
+      "label": "created_by",
+      "from": "brave-song",
+      "to": "sara-bareilles"
+    },
+    {
+      "label": "created_by",
+      "from": "perfect-song",
+      "to": "ed-sheeran"
+    },
+    {
+      "label": "likes",
+      "from": "caroline",
+      "to": "brave-song"
+    },
+    {
+      "label": "likes",
+      "from": "melanie",
+      "to": "perfect-song"
+    },
+    {
+      "label": "likes",
+      "from": "melanie",
+      "to": "bach"
+    },
+    {
+      "label": "likes",
+      "from": "melanie",
+      "to": "mozart"
+    }
+  ],
+  "chrono": [
+    {
+      "key": "support-group-visit",
+      "type": "event",
+      "title": "Caroline attended an LGBTQ support group",
+      "date": "2023-05-07",
+      "entities": [
+        "caroline",
+        "lgbtq-support-group"
+      ],
+      "sourceTurns": [
+        "D1:3",
+        "D1:4",
+        "D1:5"
+      ]
+    },
+    {
+      "key": "lake-sunrise-painted",
+      "type": "event",
+      "title": "Melanie painted the lake sunrise",
+      "date": "2022-05-08",
+      "entities": [
+        "melanie",
+        "lake-sunrise"
+      ],
+      "sourceTurns": [
+        "D1:13",
+        "D1:14",
+        "D1:15",
+        "D1:16"
+      ]
+    },
+    {
+      "key": "charity-race",
+      "type": "event",
+      "title": "Melanie ran a charity race for mental health",
+      "date": "2023-05-20",
+      "entities": [
+        "melanie"
+      ],
+      "sourceTurns": [
+        "D2:1",
+        "D2:2"
+      ]
+    },
+    {
+      "key": "school-talk",
+      "type": "event",
+      "title": "Caroline spoke at a school event about her transgender journey",
+      "date": "2023-06-02",
+      "entities": [
+        "caroline"
+      ],
+      "sourceTurns": [
+        "D3:1",
+        "D3:2",
+        "D3:3",
+        "D3:4",
+        "D3:5",
+        "D3:6",
+        "D3:7",
+        "D3:8",
+        "D3:9"
+      ]
+    },
+    {
+      "key": "transition-began",
+      "type": "milestone",
+      "title": "Caroline began transitioning",
+      "date": "2020-06-09",
+      "entities": [
+        "caroline"
+      ],
+      "sourceTurns": [
+        "D3:1",
+        "D3:2",
+        "D3:3",
+        "D3:4",
+        "D8:25",
+        "D8:26",
+        "D8:27",
+        "D19:8",
+        "D19:9",
+        "D19:10",
+        "D19:11",
+        "D19:12",
+        "D19:13",
+        "D19:14",
+        "D19:15"
+      ]
+    },
+    {
+      "key": "moved-from-home-country",
+      "type": "event",
+      "title": "Caroline moved from her home country",
+      "date": "2019-06-09",
+      "entities": [
+        "caroline",
+        "home-country"
+      ],
+      "sourceTurns": [
+        "D3:13"
+      ]
+    },
+    {
+      "key": "melanie-wedding",
+      "type": "milestone",
+      "title": "Melanie married",
+      "date": "2018-06-09",
+      "entities": [
+        "melanie",
+        "melanies-husband"
+      ],
+      "sourceTurns": [
+        "D3:14",
+        "D3:15",
+        "D3:16",
+        "D3:17",
+        "D3:18",
+        "D8:12",
+        "D8:13",
+        "D8:14",
+        "D8:15",
+        "D8:16"
+      ]
+    },
+    {
+      "key": "friends-meetup",
+      "type": "event",
+      "title": "Caroline met up with her friends",
+      "date": "2023-06-02",
+      "entities": [
+        "caroline"
+      ],
+      "sourceTurns": [
+        "D3:11",
+        "D3:12"
+      ]
+    },
+    {
+      "key": "necklace-gift",
+      "type": "event",
+      "title": "Caroline's grandmother gave her the necklace",
+      "date": "2013-06-27",
+      "entities": [
+        "caroline",
+        "grandma",
+        "necklace"
+      ],
+      "sourceTurns": [
+        "D4:1",
+        "D4:2",
+        "D4:3",
+        "D4:4"
+      ]
+    },
+    {
+      "key": "caroline-18th",
+      "type": "milestone",
+      "title": "Caroline's 18th birthday, when a friend made her the hand-painted bowl",
+      "date": "2013-06-27",
+      "entities": [
+        "caroline",
+        "painted-bowl"
+      ],
+      "sourceTurns": []
+    },
+    {
+      "key": "mountain-camping",
+      "type": "event",
+      "title": "Melanie took her family camping in the mountains",
+      "date": "2023-06-20",
+      "entities": [
+        "melanie",
+        "mountains"
+      ],
+      "sourceTurns": [
+        "D4:6",
+        "D4:7",
+        "D4:8",
+        "D4:9",
+        "D4:10"
+      ]
+    },
+    {
+      "key": "counseling-workshop",
+      "type": "event",
+      "title": "Caroline attended an LGBTQ+ counseling workshop",
+      "date": "2023-06-23",
+      "entities": [
+        "caroline",
+        "counseling"
+      ],
+      "sourceTurns": [
+        "D4:13",
+        "D4:14"
+      ]
+    },
+    {
+      "key": "pride-parade",
+      "type": "event",
+      "title": "Caroline went to an LGBTQ+ pride parade",
+      "date": "2023-06-26",
+      "entities": [
+        "caroline"
+      ],
+      "sourceTurns": [
+        "D5:1",
+        "D5:2",
+        "D8:17",
+        "D8:18",
+        "D8:19",
+        "D8:20",
+        "D8:21",
+        "D8:22",
+        "D8:23",
+        "D8:24"
+      ]
+    },
+    {
+      "key": "pottery-signup",
+      "type": "event",
+      "title": "Melanie signed up for a pottery class",
+      "date": "2023-07-02",
+      "entities": [
+        "melanie",
+        "pottery-class",
+        "pottery"
+      ],
+      "sourceTurns": [
+        "D5:4",
+        "D5:6"
+      ]
+    },
+    {
+      "key": "trans-conference",
+      "type": "event",
+      "title": "Caroline attended a transgender / LGBTQ conference",
+      "date": "2023-07-10",
+      "entities": [
+        "caroline"
+      ],
+      "sourceTurns": [
+        "D5:13",
+        "D5:14",
+        "D5:15",
+        "D5:16",
+        "D7:1",
+        "D7:2",
+        "D7:3",
+        "D7:4"
+      ]
+    },
+    {
+      "key": "museum-visit",
+      "type": "event",
+      "title": "Melanie took the kids to the museum for the dinosaur exhibit",
+      "date": "2023-07-05",
+      "entities": [
+        "melanie",
+        "museum"
+      ],
+      "sourceTurns": [
+        "D6:4",
+        "D6:5",
+        "D6:6"
+      ]
+    },
+    {
+      "key": "friends-picnic",
+      "type": "event",
+      "title": "Caroline had a picnic with her friends and family",
+      "date": "2023-06-29",
+      "entities": [
+        "caroline"
+      ],
+      "sourceTurns": [
+        "D6:11",
+        "D6:12",
+        "D6:13",
+        "D6:14",
+        "D6:15"
+      ]
+    },
+    {
+      "key": "beach-camping",
+      "type": "event",
+      "title": "Melanie went camping at the beach with her family",
+      "date": "2023-07-06",
+      "entities": [
+        "melanie"
+      ],
+      "sourceTurns": [
+        "D6:16"
+      ]
+    },
+    {
+      "key": "kids-pottery-workshop",
+      "type": "event",
+      "title": "Melanie took her kids to a pottery workshop",
+      "date": "2023-07-14",
+      "entities": [
+        "melanie",
+        "pottery",
+        "kids-cup"
+      ],
+      "sourceTurns": [
+        "D8:1",
+        "D8:2",
+        "D8:3",
+        "D8:4",
+        "D8:5"
+      ]
+    },
+    {
+      "key": "family-nature-painting",
+      "type": "event",
+      "title": "Melanie and her kids painted a nature scene",
+      "date": "2023-07-08",
+      "entities": [
+        "melanie",
+        "nature-painting",
+        "painting"
+      ],
+      "sourceTurns": [
+        "D8:6",
+        "D8:7",
+        "D8:8"
+      ]
+    },
+    {
+      "key": "adoption-council-meeting",
+      "type": "event",
+      "title": "Caroline went to a council meeting for adoption",
+      "date": "2023-07-14",
+      "entities": [
+        "caroline",
+        "adoption",
+        "adoption-council"
+      ],
+      "sourceTurns": [
+        "D8:9",
+        "D8:10"
+      ]
+    },
+    {
+      "key": "forest-camping",
+      "type": "event",
+      "title": "Melanie went camping in the forest with her family",
+      "date": "2023-07-15",
+      "entities": [
+        "melanie",
+        "camping",
+        "the-forest"
+      ],
+      "sourceTurns": [
+        "D8:32",
+        "D8:33",
+        "D8:34",
+        "D8:35",
+        "D8:36",
+        "D8:37",
+        "D8:38",
+        "D8:39"
+      ]
+    },
+    {
+      "key": "joined-mentorship",
+      "type": "event",
+      "title": "Caroline joined a mentorship program for LGBTQ youth",
+      "date": "2023-07-15",
+      "entities": [
+        "caroline",
+        "mentorship-program"
+      ],
+      "sourceTurns": [
+        "D9:2",
+        "D9:3",
+        "D9:4",
+        "D9:5"
+      ]
+    },
+    {
+      "key": "mentee-pride-event",
+      "type": "event",
+      "title": "Caroline and her mentee went to an LGBT pride event",
+      "date": "2023-06-17",
+      "entities": [
+        "caroline",
+        "mentee"
+      ],
+      "sourceTurns": [
+        "D9:6",
+        "D9:7",
+        "D9:8",
+        "D9:9",
+        "D9:10",
+        "D9:11"
+      ]
+    },
+    {
+      "key": "joined-activist-group",
+      "type": "event",
+      "title": "Caroline joined Connected LGBTQ Activists",
+      "date": "2023-07-18",
+      "entities": [
+        "caroline",
+        "activist-group"
+      ],
+      "sourceTurns": [
+        "D10:1",
+        "D10:2",
+        "D10:3",
+        "D10:4",
+        "D10:5",
+        "D10:6"
+      ]
+    },
+    {
+      "key": "city-pride-parade",
+      "type": "event",
+      "title": "The city held a pride parade, which Caroline missed",
+      "date": "2023-07-15",
+      "entities": [
+        "caroline",
+        "activist-group"
+      ],
+      "sourceTurns": [
+        "D10:7"
+      ]
+    },
+    {
+      "key": "beach-trip",
+      "type": "event",
+      "title": "Melanie took the family to the beach",
+      "date": "2023-07-15",
+      "entities": [
+        "melanie",
+        "the-beach"
+      ],
+      "sourceTurns": [
+        "D10:8",
+        "D10:9",
+        "D10:10",
+        "D10:11"
+      ]
+    },
+    {
+      "key": "meteor-shower-camping",
+      "type": "event",
+      "title": "Melanie and her family saw the Perseid meteor shower while camping",
+      "date": "2022-08-12",
+      "entities": [
+        "melanie",
+        "camping"
+      ],
+      "sourceTurns": [
+        "D10:14",
+        "D10:15",
+        "D10:16",
+        "D10:17",
+        "D10:18",
+        "D10:19"
+      ]
+    },
+    {
+      "key": "youngest-first-steps",
+      "type": "milestone",
+      "title": "Melanie's youngest took her first steps",
+      "date": "2020-07-20",
+      "entities": [
+        "melanie",
+        "melanies-youngest"
+      ],
+      "sourceTurns": [
+        "D10:20",
+        "D10:21",
+        "D10:22",
+        "D10:23",
+        "D10:24"
+      ]
+    },
+    {
+      "key": "birthday-concert",
+      "type": "event",
+      "title": "Melanie celebrated her daughter's birthday at a Matt Patterson concert",
+      "date": "2023-08-13",
+      "entities": [
+        "melanie",
+        "melanies-daughter",
+        "matt-patterson"
+      ],
+      "sourceTurns": [
+        "D11:1",
+        "D11:2",
+        "D11:3"
+      ]
+    },
+    {
+      "key": "august-pride-parade",
+      "type": "event",
+      "title": "Caroline went to a pride parade",
+      "date": "2023-08-11",
+      "entities": [
+        "caroline"
+      ],
+      "sourceTurns": [
+        "D11:4",
+        "D11:5",
+        "D11:6",
+        "D11:7"
+      ]
+    },
+    {
+      "key": "lgbtq-center-visit",
+      "type": "event",
+      "title": "Caroline visited an LGBTQ center and painted afterwards",
+      "date": "2023-07-10",
+      "entities": [
+        "caroline",
+        "lgbtq-center",
+        "painting"
+      ],
+      "sourceTurns": [
+        "D9:12",
+        "D9:13",
+        "D9:14",
+        "D9:15",
+        "D9:16",
+        "D9:17"
+      ]
+    },
+    {
+      "key": "hike-incident",
+      "type": "event",
+      "title": "Caroline was upset by religious conservatives on a hike",
+      "date": "2023-08-14",
+      "entities": [
+        "caroline",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D12:1",
+        "D12:2"
+      ]
+    },
+    {
+      "key": "hike-apology",
+      "type": "event",
+      "title": "Caroline apologised to the people from the hike",
+      "date": "2023-08-22",
+      "entities": [
+        "caroline"
+      ],
+      "sourceTurns": [
+        "D14:1",
+        "D14:2"
+      ]
+    },
+    {
+      "key": "pride-fest-last-year",
+      "type": "event",
+      "title": "Caroline and Melanie went to Pride fest together",
+      "date": "2022-08-17",
+      "entities": [
+        "caroline",
+        "melanie"
+      ],
+      "sourceTurns": [
+        "D12:15",
+        "D12:16",
+        "D12:17",
+        "D12:18",
+        "D12:19",
+        "D12:20",
+        "D12:21"
+      ]
+    },
+    {
+      "key": "adoption-applied",
+      "type": "milestone",
+      "title": "Caroline applied to adoption agencies",
+      "date": "2023-08-21",
+      "entities": [
+        "caroline",
+        "adoption",
+        "adoption-advice-group"
+      ],
+      "sourceTurns": [
+        "D13:1",
+        "D13:2",
+        "D13:3"
+      ]
+    },
+    {
+      "key": "bailey-arrived",
+      "type": "event",
+      "title": "Melanie got another cat, Bailey",
+      "date": "2023-08-23",
+      "entities": [
+        "melanie",
+        "bailey"
+      ],
+      "sourceTurns": [
+        "D13:4",
+        "D13:6"
+      ]
+    },
+    {
+      "key": "self-portrait-made",
+      "type": "event",
+      "title": "Caroline made a self-portrait",
+      "date": "2023-08-16",
+      "entities": [
+        "caroline",
+        "self-portrait"
+      ],
+      "sourceTurns": [
+        "D13:11",
+        "D13:12",
+        "D13:13",
+        "D13:14"
+      ]
+    },
+    {
+      "key": "beach-visit-caroline",
+      "type": "event",
+      "title": "Caroline visited the beach and later painted the sunset",
+      "date": "2023-08-18",
+      "entities": [
+        "caroline",
+        "the-beach",
+        "sunset-painting"
+      ],
+      "sourceTurns": [
+        "D14:6",
+        "D14:7",
+        "D14:8",
+        "D14:9"
+      ]
+    },
+    {
+      "key": "plate-made",
+      "type": "event",
+      "title": "Melanie made a plate in pottery class",
+      "date": "2023-08-24",
+      "entities": [
+        "melanie",
+        "melanie-plate",
+        "pottery-class"
+      ],
+      "sourceTurns": [
+        "D14:3",
+        "D14:4",
+        "D14:5"
+      ]
+    },
+    {
+      "key": "shelter-volunteering",
+      "type": "event",
+      "title": "Melanie volunteered at a homeless shelter with her family",
+      "date": "2023-08-24",
+      "entities": [
+        "melanie",
+        "homeless-shelter"
+      ],
+      "sourceTurns": [
+        "D14:10",
+        "D14:11",
+        "D14:12"
+      ]
+    },
+    {
+      "key": "park-visit",
+      "type": "event",
+      "title": "Melanie took her kids to the park",
+      "date": "2023-08-27",
+      "entities": [
+        "melanie",
+        "the-park"
+      ],
+      "sourceTurns": [
+        "D15:1",
+        "D15:2"
+      ]
+    },
+    {
+      "key": "youth-center-volunteering",
+      "type": "event",
+      "title": "Caroline volunteered at an LGBTQ+ youth center",
+      "date": "2023-08-28",
+      "entities": [
+        "caroline",
+        "youth-center"
+      ],
+      "sourceTurns": [
+        "D15:3",
+        "D15:4",
+        "D15:5",
+        "D15:6",
+        "D15:7",
+        "D15:8"
+      ]
+    },
+    {
+      "key": "summer-sounds-show",
+      "type": "event",
+      "title": "Melanie went to a Summer Sounds show",
+      "date": "2023-08-28",
+      "entities": [
+        "melanie",
+        "summer-sounds"
+      ],
+      "sourceTurns": [
+        "D15:13",
+        "D15:14",
+        "D15:15",
+        "D15:16",
+        "D15:17"
+      ]
+    },
+    {
+      "key": "biking-day",
+      "type": "event",
+      "title": "Caroline went biking with friends",
+      "date": "2023-09-09",
+      "entities": [
+        "caroline",
+        "biking"
+      ],
+      "sourceTurns": [
+        "D16:1"
+      ]
+    },
+    {
+      "key": "caroline-art-began",
+      "type": "milestone",
+      "title": "Caroline started making art, aged about 17",
+      "date": "2012-09-13",
+      "entities": [
+        "caroline",
+        "painting"
+      ],
+      "sourceTurns": [
+        "D16:7"
+      ]
+    },
+    {
+      "key": "melanie-art-began",
+      "type": "milestone",
+      "title": "Melanie started making art, seven years before",
+      "date": "2016-09-13",
+      "entities": [
+        "melanie",
+        "painting",
+        "pottery"
+      ],
+      "sourceTurns": [
+        "D16:8"
+      ]
+    },
+    {
+      "key": "cafe-visit",
+      "type": "event",
+      "title": "Melanie had a good time at the café",
+      "date": "2023-09-09",
+      "entities": [
+        "melanie",
+        "the-cafe"
+      ],
+      "sourceTurns": [
+        "D16:16",
+        "D16:17",
+        "D16:18",
+        "D16:19",
+        "D16:20"
+      ]
+    },
+    {
+      "key": "contacted-adoption-mentor",
+      "type": "event",
+      "title": "Caroline contacted her mentor for adoption advice",
+      "date": "2023-10-13",
+      "entities": [
+        "caroline",
+        "adoption",
+        "adoption-mentor"
+      ],
+      "sourceTurns": [
+        "D17:1",
+        "D17:2",
+        "D17:3"
+      ]
+    },
+    {
+      "key": "friend-adopted",
+      "type": "event",
+      "title": "Melanie's friend adopted a child",
+      "date": "2022-10-13",
+      "entities": [
+        "melanie",
+        "melanies-friend"
+      ],
+      "sourceTurns": [
+        "D17:4",
+        "D17:5",
+        "D17:6"
+      ]
+    },
+    {
+      "key": "melanie-injury",
+      "type": "event",
+      "title": "Melanie was hurt and had to take a break from pottery",
+      "date": "2023-09-13",
+      "entities": [
+        "melanie",
+        "pottery"
+      ],
+      "sourceTurns": [
+        "D17:8",
+        "D17:9",
+        "D17:10",
+        "D17:11"
+      ]
+    },
+    {
+      "key": "melanie-sunset-painted",
+      "type": "event",
+      "title": "Melanie painted a sunset-inspired piece",
+      "date": "2023-10-06",
+      "entities": [
+        "melanie",
+        "sunset-painting-melanie"
+      ],
+      "sourceTurns": [
+        "D17:12",
+        "D17:13",
+        "D17:14",
+        "D17:15",
+        "D17:16"
+      ]
+    },
+    {
+      "key": "poetry-reading-event",
+      "type": "event",
+      "title": "Caroline went to a transgender poetry reading",
+      "date": "2023-10-06",
+      "entities": [
+        "caroline",
+        "poetry-reading"
+      ],
+      "sourceTurns": [
+        "D17:17",
+        "D17:18",
+        "D17:19",
+        "D17:20",
+        "D17:21",
+        "D17:22",
+        "D17:23",
+        "D17:24",
+        "D17:25",
+        "D17:26"
+      ]
+    },
+    {
+      "key": "roadtrip-accident",
+      "type": "event",
+      "title": "Melanie's son was in an accident on a family road trip",
+      "date": "2023-10-14",
+      "entities": [
+        "melanie",
+        "melanies-son"
+      ],
+      "sourceTurns": [
+        "D18:1",
+        "D18:2",
+        "D18:3",
+        "D18:4"
+      ]
+    },
+    {
+      "key": "grand-canyon-trip",
+      "type": "event",
+      "title": "Melanie and her family visited the Grand Canyon",
+      "date": "2023-10-14",
+      "entities": [
+        "melanie",
+        "grand-canyon"
+      ],
+      "sourceTurns": [
+        "D18:5",
+        "D18:6",
+        "D18:7",
+        "D18:8"
+      ]
+    },
+    {
+      "key": "adoption-interviews-passed",
+      "type": "milestone",
+      "title": "Caroline passed the adoption agency interviews",
+      "date": "2023-10-20",
+      "entities": [
+        "caroline",
+        "adoption"
+      ],
+      "sourceTurns": [
+        "D19:1",
+        "D19:2"
+      ]
+    },
+    {
+      "key": "figurines-bought",
+      "type": "event",
+      "title": "Melanie bought family figurines",
+      "date": "2023-10-21",
+      "entities": [
+        "melanie",
+        "figurines"
+      ],
+      "sourceTurns": [
+        "D19:2"
+      ]
+    },
+    {
+      "key": "guitar-began",
+      "type": "milestone",
+      "title": "Caroline started playing acoustic guitar",
+      "date": "2018-08-28",
+      "entities": [
+        "caroline",
+        "guitar"
+      ],
+      "sourceTurns": [
+        "D15:18",
+        "D15:19",
+        "D15:20",
+        "D15:21"
+      ]
+    }
+  ],
+  "claims": [
+    {
+      "text": "In May 2023 Melanie was swamped with her children and her work.",
+      "speaker": "Melanie",
+      "statedOn": "2023-05-08",
+      "entities": [
+        "melanie"
+      ],
+      "sourceTurns": [
+        "D1:1",
+        "D1:2"
+      ]
+    },
+    {
+      "text": "Caroline attended an LGBTQ support group on 7 May 2023. She found it powerful and was moved by the transgender stories she heard there.",
+      "speaker": "Caroline",
+      "statedOn": "2023-05-08",
+      "entities": [
+        "caroline",
+        "lgbtq-support-group"
+      ],
+      "chrono": [
+        "support-group-visit"
+      ],
+      "sourceTurns": [
+        "D1:3",
+        "D1:4",
+        "D1:5"
+      ]
+    },
+    {
+      "text": "The LGBTQ support group has made Caroline feel accepted and given her the courage to embrace herself.",
+      "speaker": "Caroline",
+      "statedOn": "2023-05-08",
+      "entities": [
+        "caroline",
+        "lgbtq-support-group"
+      ],
+      "sourceTurns": [
+        "D1:6",
+        "D1:7",
+        "D1:8"
+      ]
+    },
+    {
+      "text": "Caroline plans to continue her education and is considering a career in counselling or mental health, so she can support people who have been through what she has. Melanie told her she would make a great counsellor.",
+      "speaker": "Caroline",
+      "statedOn": "2023-05-08",
+      "entities": [
+        "caroline",
+        "counseling"
+      ],
+      "sourceTurns": [
+        "D1:9",
+        "D1:10",
+        "D1:11",
+        "D1:12"
+      ]
+    },
+    {
+      "text": "Melanie painted a lake at sunrise in 2022 and the painting is special to her. She uses painting to express her feelings, be creative and relax after a long day.",
+      "speaker": "Melanie",
+      "statedOn": "2023-05-08",
+      "entities": [
+        "melanie",
+        "lake-sunrise",
+        "painting"
+      ],
+      "chrono": [
+        "lake-sunrise-painted"
+      ],
+      "sourceTurns": [
+        "D1:13",
+        "D1:14",
+        "D1:15",
+        "D1:16"
+      ]
+    },
+    {
+      "text": "On 8 May 2023 Caroline went off to research career options and Melanie went swimming with her children.",
+      "speaker": "Melanie",
+      "statedOn": "2023-05-08",
+      "entities": [
+        "caroline",
+        "melanie",
+        "swimming"
+      ],
+      "sourceTurns": [
+        "D1:17",
+        "D1:18"
+      ]
+    },
+    {
+      "text": "Melanie ran a charity race for mental health on 20 May 2023 and found it rewarding. It made her think about looking after her own mind.",
+      "speaker": "Melanie",
+      "statedOn": "2023-05-25",
+      "entities": [
+        "melanie",
+        "running"
+      ],
+      "chrono": [
+        "charity-race"
+      ],
+      "sourceTurns": [
+        "D2:1",
+        "D2:2"
+      ]
+    },
+    {
+      "text": "Melanie has come to see self-care as important: when she looks after herself she can better look after her family. She sets aside time each day for running, reading or playing her violin.",
+      "speaker": "Melanie",
+      "statedOn": "2023-05-25",
+      "entities": [
+        "melanie",
+        "running",
+        "reading",
+        "violin"
+      ],
+      "sourceTurns": [
+        "D2:3",
+        "D2:4",
+        "D2:5",
+        "D2:6"
+      ]
+    },
+    {
+      "text": "Melanie's children were excited about the summer break in 2023 and the family was considering a camping trip the following month.",
+      "speaker": "Melanie",
+      "statedOn": "2023-05-25",
+      "entities": [
+        "melanie",
+        "camping"
+      ],
+      "sourceTurns": [
+        "D2:7"
+      ]
+    },
+    {
+      "text": "In May 2023 Caroline was researching adoption agencies. Having a family and giving a loving home to children who need one has long been her dream.",
+      "speaker": "Caroline",
+      "statedOn": "2023-05-25",
+      "entities": [
+        "caroline",
+        "adoption"
+      ],
+      "sourceTurns": [
+        "D2:8",
+        "D2:9",
+        "D2:10"
+      ]
+    },
+    {
+      "text": "Caroline chose the adoption agency she was considering because it helps LGBTQ+ people adopt; its inclusivity and support were what spoke to her.",
+      "speaker": "Caroline",
+      "statedOn": "2023-05-25",
+      "entities": [
+        "caroline",
+        "adoption"
+      ],
+      "sourceTurns": [
+        "D2:11",
+        "D2:12"
+      ]
+    },
+    {
+      "text": "Caroline expects adopting as a single parent to be hard but is ready for it, and wants to give children a safe and loving home.",
+      "speaker": "Caroline",
+      "statedOn": "2023-05-25",
+      "entities": [
+        "caroline",
+        "adoption"
+      ],
+      "sourceTurns": [
+        "D2:13",
+        "D2:14",
+        "D2:15",
+        "D2:16",
+        "D2:17"
+      ]
+    },
+    {
+      "text": "Caroline spoke at a school event on about 2 June 2023 about her transgender journey and encouraged students to get involved in the LGBTQ community. She began transitioning three years earlier, in 2020.",
+      "speaker": "Caroline",
+      "statedOn": "2023-06-09",
+      "entities": [
+        "caroline"
+      ],
+      "chrono": [
+        "school-talk",
+        "transition-began"
+      ],
+      "sourceTurns": [
+        "D3:1",
+        "D3:2",
+        "D3:3",
+        "D3:4"
+      ]
+    },
+    {
+      "text": "Giving the school talk made Caroline feel powerful. She shared her struggles and her growth since coming out, and believes sharing such stories builds understanding and acceptance.",
+      "speaker": "Caroline",
+      "statedOn": "2023-06-09",
+      "entities": [
+        "caroline"
+      ],
+      "chrono": [
+        "school-talk"
+      ],
+      "sourceTurns": [
+        "D3:5",
+        "D3:6",
+        "D3:7",
+        "D3:8",
+        "D3:9"
+      ]
+    },
+    {
+      "text": "Melanie draws her courage from her family, who motivate her and give her love.",
+      "speaker": "Melanie",
+      "statedOn": "2023-06-09",
+      "entities": [
+        "melanie"
+      ],
+      "sourceTurns": [
+        "D3:10"
+      ]
+    },
+    {
+      "text": "Caroline's friends, family and mentors are what motivate her and give her the strength to keep going. She met up with those friends in early June 2023.",
+      "speaker": "Caroline",
+      "statedOn": "2023-06-09",
+      "entities": [
+        "caroline"
+      ],
+      "chrono": [
+        "friends-meetup"
+      ],
+      "sourceTurns": [
+        "D3:11",
+        "D3:12"
+      ]
+    },
+    {
+      "text": "Caroline has known her closest friends for four years, since she moved from her home country in 2019. Their support mattered especially after a difficult breakup.",
+      "speaker": "Caroline",
+      "statedOn": "2023-06-09",
+      "entities": [
+        "caroline",
+        "home-country"
+      ],
+      "chrono": [
+        "moved-from-home-country"
+      ],
+      "sourceTurns": [
+        "D3:13"
+      ]
+    },
+    {
+      "text": "Melanie is motivated by her husband and children. She married in 2018, five years before this conversation.",
+      "speaker": "Melanie",
+      "statedOn": "2023-06-09",
+      "entities": [
+        "melanie",
+        "melanies-husband"
+      ],
+      "chrono": [
+        "melanie-wedding"
+      ],
+      "sourceTurns": [
+        "D3:14",
+        "D3:15",
+        "D3:16",
+        "D3:17",
+        "D3:18"
+      ]
+    },
+    {
+      "text": "Melanie treasures time with her family — playing games, eating together and simply being together — and says those moments are when she feels most alive.",
+      "speaker": "Melanie",
+      "statedOn": "2023-06-09",
+      "entities": [
+        "melanie"
+      ],
+      "sourceTurns": [
+        "D3:19",
+        "D3:20",
+        "D3:21",
+        "D3:22",
+        "D3:23"
+      ]
+    },
+    {
+      "text": "Caroline's grandmother in Sweden gave her a necklace when she was young. It stands for love, faith and strength and reminds Caroline of her roots and her family's support.",
+      "speaker": "Caroline",
+      "statedOn": "2023-06-27",
+      "entities": [
+        "caroline",
+        "grandma",
+        "necklace",
+        "home-country"
+      ],
+      "chrono": [
+        "necklace-gift"
+      ],
+      "sourceTurns": [
+        "D4:1",
+        "D4:2",
+        "D4:3",
+        "D4:4"
+      ]
+    },
+    {
+      "text": "Caroline also keeps a hand-painted bowl a friend made for her 18th birthday in 2013; she values its pattern and colours as a reminder of art and self-expression.",
+      "speaker": "Caroline",
+      "statedOn": "2023-06-27",
+      "entities": [
+        "caroline",
+        "painted-bowl"
+      ],
+      "sourceTurns": [
+        "D4:5"
+      ]
+    },
+    {
+      "text": "Melanie took her family camping in the mountains in about the third week of June 2023. They explored nature, roasted marshmallows round a campfire and hiked to a view, and her two younger children loved it.",
+      "speaker": "Melanie",
+      "statedOn": "2023-06-27",
+      "entities": [
+        "melanie",
+        "mountains",
+        "camping",
+        "hiking"
+      ],
+      "chrono": [
+        "mountain-camping"
+      ],
+      "sourceTurns": [
+        "D4:6",
+        "D4:7",
+        "D4:8",
+        "D4:9",
+        "D4:10"
+      ]
+    },
+    {
+      "text": "Caroline is pursuing counselling and mental health as a career, and wants in particular to work with transgender people on self-acceptance and mental health.",
+      "speaker": "Caroline",
+      "statedOn": "2023-06-27",
+      "entities": [
+        "caroline",
+        "counseling"
+      ],
+      "sourceTurns": [
+        "D4:11",
+        "D4:12"
+      ]
+    },
+    {
+      "text": "Caroline attended an LGBTQ+ counselling workshop on 23 June 2023, which covered therapeutic methods and working with trans people. She found the professionals' commitment to making a safe space inspiring.",
+      "speaker": "Caroline",
+      "statedOn": "2023-06-27",
+      "entities": [
+        "caroline",
+        "counseling"
+      ],
+      "chrono": [
+        "counseling-workshop"
+      ],
+      "sourceTurns": [
+        "D4:13",
+        "D4:14"
+      ]
+    },
+    {
+      "text": "Caroline says counselling and support groups improved her own life, which is why she cares about mental health and wants to create a safe place for others to grow.",
+      "speaker": "Caroline",
+      "statedOn": "2023-06-27",
+      "entities": [
+        "caroline",
+        "counseling",
+        "lgbtq-support-group"
+      ],
+      "sourceTurns": [
+        "D4:15",
+        "D4:16",
+        "D4:17",
+        "D4:18"
+      ]
+    },
+    {
+      "text": "Caroline went to an LGBTQ+ pride parade in late June 2023. The happiness there made her feel she belonged and showed her how much the community has grown.",
+      "speaker": "Caroline",
+      "statedOn": "2023-07-03",
+      "entities": [
+        "caroline"
+      ],
+      "chrono": [
+        "pride-parade"
+      ],
+      "sourceTurns": [
+        "D5:1",
+        "D5:2"
+      ]
+    },
+    {
+      "text": "The pride parade strengthened Caroline's wish to use her own story to help others, and confirmed counselling and mental health as the direction she wants to take.",
+      "speaker": "Caroline",
+      "statedOn": "2023-07-03",
+      "entities": [
+        "caroline",
+        "counseling"
+      ],
+      "sourceTurns": [
+        "D5:3"
+      ]
+    },
+    {
+      "text": "Melanie signed up for a pottery class on 2 July 2023. She describes pottery as therapy — a way to express herself, be creative and stay calm.",
+      "speaker": "Melanie",
+      "statedOn": "2023-07-03",
+      "entities": [
+        "melanie",
+        "pottery",
+        "pottery-class"
+      ],
+      "chrono": [
+        "pottery-signup"
+      ],
+      "sourceTurns": [
+        "D5:4",
+        "D5:6"
+      ]
+    },
+    {
+      "text": "Caroline began learning the piano in July 2023.",
+      "speaker": "Caroline",
+      "statedOn": "2023-07-03",
+      "entities": [
+        "caroline",
+        "piano"
+      ],
+      "sourceTurns": [
+        "D5:5"
+      ]
+    },
+    {
+      "text": "Melanie made a black-and-white bowl in her pottery class and is proud of it. She says pottery is a large part of her life rather than just a hobby, and that working with clay brings her joy.",
+      "speaker": "Melanie",
+      "statedOn": "2023-07-03",
+      "entities": [
+        "melanie",
+        "melanie-bowl",
+        "pottery",
+        "pottery-class"
+      ],
+      "sourceTurns": [
+        "D5:7",
+        "D5:8",
+        "D5:9",
+        "D5:10",
+        "D5:11",
+        "D5:12"
+      ]
+    },
+    {
+      "text": "Caroline planned to attend a transgender conference in July 2023 to meet others in the community and learn about advocacy.",
+      "speaker": "Caroline",
+      "statedOn": "2023-07-03",
+      "entities": [
+        "caroline"
+      ],
+      "chrono": [
+        "trans-conference"
+      ],
+      "sourceTurns": [
+        "D5:13",
+        "D5:14",
+        "D5:15",
+        "D5:16"
+      ]
+    },
+    {
+      "text": "Caroline has continued looking into counselling and mental health work, which she finds demanding but rewarding.",
+      "speaker": "Caroline",
+      "statedOn": "2023-07-06",
+      "entities": [
+        "caroline",
+        "counseling"
+      ],
+      "sourceTurns": [
+        "D6:1",
+        "D6:2",
+        "D6:3"
+      ]
+    },
+    {
+      "text": "Melanie took her children to a museum on 5 July 2023. They were most excited by the dinosaur exhibit, and the day reminded her why she loves being a mother.",
+      "speaker": "Melanie",
+      "statedOn": "2023-07-06",
+      "entities": [
+        "melanie",
+        "museum"
+      ],
+      "chrono": [
+        "museum-visit"
+      ],
+      "sourceTurns": [
+        "D6:4",
+        "D6:5",
+        "D6:6"
+      ]
+    },
+    {
+      "text": "Caroline is assembling a children's library for the children she hopes to adopt — classics, stories from other cultures and educational books — and looks forward to reading to them.",
+      "speaker": "Caroline",
+      "statedOn": "2023-07-06",
+      "entities": [
+        "caroline",
+        "childrens-library",
+        "reading"
+      ],
+      "sourceTurns": [
+        "D6:7",
+        "D6:8",
+        "D6:9"
+      ]
+    },
+    {
+      "text": "Melanie's favourite book as a child was Charlotte's Web, for what it showed her about friendship and compassion.",
+      "speaker": "Melanie",
+      "statedOn": "2023-07-06",
+      "entities": [
+        "melanie",
+        "charlottes-web"
+      ],
+      "sourceTurns": [
+        "D6:10"
+      ]
+    },
+    {
+      "text": "Caroline is grateful for the friends and family supporting her through her transition; they had a picnic together at the end of June 2023. She says their love, guidance and acceptance were what made her transition possible.",
+      "speaker": "Caroline",
+      "statedOn": "2023-07-06",
+      "entities": [
+        "caroline"
+      ],
+      "chrono": [
+        "friends-picnic"
+      ],
+      "sourceTurns": [
+        "D6:11",
+        "D6:12",
+        "D6:13",
+        "D6:14",
+        "D6:15"
+      ]
+    },
+    {
+      "text": "Melanie went camping at the beach with her family in early July 2023 and says such trips bring them closer.",
+      "speaker": "Melanie",
+      "statedOn": "2023-07-06",
+      "entities": [
+        "melanie",
+        "camping",
+        "the-beach"
+      ],
+      "chrono": [
+        "beach-camping"
+      ],
+      "sourceTurns": [
+        "D6:16"
+      ]
+    },
+    {
+      "text": "Caroline attended an LGBTQ conference on 10 July 2023 where she met people with similar journeys. She felt completely accepted and came away convinced of the importance of fighting for trans rights.",
+      "speaker": "Caroline",
+      "statedOn": "2023-07-12",
+      "entities": [
+        "caroline"
+      ],
+      "chrono": [
+        "trans-conference"
+      ],
+      "sourceTurns": [
+        "D7:1",
+        "D7:2",
+        "D7:3",
+        "D7:4"
+      ]
+    },
+    {
+      "text": "Caroline struggled with her own mental health and was helped by the support she received, which is why she is looking into counselling and mental health careers.",
+      "speaker": "Caroline",
+      "statedOn": "2023-07-12",
+      "entities": [
+        "caroline",
+        "counseling"
+      ],
+      "sourceTurns": [
+        "D7:5",
+        "D7:6",
+        "D7:7",
+        "D7:8"
+      ]
+    },
+    {
+      "text": "Books guide and motivate Caroline and help her work out who she is.",
+      "speaker": "Caroline",
+      "statedOn": "2023-07-12",
+      "entities": [
+        "caroline",
+        "reading"
+      ],
+      "sourceTurns": [
+        "D7:9",
+        "D7:10"
+      ]
+    },
+    {
+      "text": "Caroline's favourite book is \"Becoming Nicole\" by Amy Ellis Nutt, the true story of a trans girl and her family. It taught her self-acceptance and how to find support, and gave her hope for her own path.",
+      "speaker": "Caroline",
+      "statedOn": "2023-07-12",
+      "entities": [
+        "caroline",
+        "becoming-nicole",
+        "amy-ellis-nutt"
+      ],
+      "sourceTurns": [
+        "D7:11",
+        "D7:12",
+        "D7:13",
+        "D7:14"
+      ]
+    },
+    {
+      "text": "Melanie has two pets, a dog and a cat, named Luna and Oliver. They liven up the house and make the family smile.",
+      "speaker": "Melanie",
+      "statedOn": "2023-07-12",
+      "entities": [
+        "melanie",
+        "luna",
+        "oliver"
+      ],
+      "sourceTurns": [
+        "D7:15",
+        "D7:16",
+        "D7:17",
+        "D7:18"
+      ]
+    },
+    {
+      "text": "Melanie bought purple running shoes in July 2023 and has been running longer distances to de-stress and clear her mind, which has been good for her mental health.",
+      "speaker": "Melanie",
+      "statedOn": "2023-07-12",
+      "entities": [
+        "melanie",
+        "running",
+        "running-shoes"
+      ],
+      "sourceTurns": [
+        "D7:19",
+        "D7:20",
+        "D7:21",
+        "D7:22",
+        "D7:23",
+        "D7:24",
+        "D7:25",
+        "D7:26",
+        "D7:27"
+      ]
+    },
+    {
+      "text": "Melanie took her children to a pottery workshop on 14 July 2023 where they each made a pot. Her children made a cup and loved working with the clay.",
+      "speaker": "Melanie",
+      "statedOn": "2023-07-15",
+      "entities": [
+        "melanie",
+        "pottery",
+        "kids-cup"
+      ],
+      "chrono": [
+        "kids-pottery-workshop"
+      ],
+      "sourceTurns": [
+        "D8:1",
+        "D8:2",
+        "D8:3",
+        "D8:4",
+        "D8:5"
+      ]
+    },
+    {
+      "text": "Melanie and her children painted a nature-inspired picture together in early July 2023 and bonded over it while talking about nature.",
+      "speaker": "Melanie",
+      "statedOn": "2023-07-15",
+      "entities": [
+        "melanie",
+        "painting",
+        "nature-painting"
+      ],
+      "chrono": [
+        "family-nature-painting"
+      ],
+      "sourceTurns": [
+        "D8:6",
+        "D8:7",
+        "D8:8"
+      ]
+    },
+    {
+      "text": "Caroline attended an adoption council meeting on 14 July 2023. She found it inspiring and emotional to see so many people wanting to give children a loving home, and it made her more determined to adopt.",
+      "speaker": "Caroline",
+      "statedOn": "2023-07-15",
+      "entities": [
+        "caroline",
+        "adoption",
+        "adoption-council"
+      ],
+      "chrono": [
+        "adoption-council-meeting"
+      ],
+      "sourceTurns": [
+        "D8:9",
+        "D8:10"
+      ]
+    },
+    {
+      "text": "Caroline's favourite colour is blue, which she finds relaxing.",
+      "speaker": "Caroline",
+      "statedOn": "2023-07-15",
+      "entities": [
+        "caroline"
+      ],
+      "sourceTurns": [
+        "D8:11"
+      ]
+    },
+    {
+      "text": "Flowers were an important part of Melanie's wedding decoration in 2018 and still remind her of the day. Marrying her partner was her favourite part of it.",
+      "speaker": "Melanie",
+      "statedOn": "2023-07-15",
+      "entities": [
+        "melanie",
+        "melanies-husband"
+      ],
+      "chrono": [
+        "melanie-wedding"
+      ],
+      "sourceTurns": [
+        "D8:12",
+        "D8:13",
+        "D8:14",
+        "D8:15",
+        "D8:16"
+      ]
+    },
+    {
+      "text": "Caroline counts the pride parade she attended in late June 2023 among her best memories: being surrounded by people who accepted and celebrated her left her proud and grateful.",
+      "speaker": "Caroline",
+      "statedOn": "2023-07-15",
+      "entities": [
+        "caroline"
+      ],
+      "chrono": [
+        "pride-parade"
+      ],
+      "sourceTurns": [
+        "D8:17",
+        "D8:18",
+        "D8:19",
+        "D8:20",
+        "D8:21",
+        "D8:22",
+        "D8:23",
+        "D8:24"
+      ]
+    },
+    {
+      "text": "The best part of Caroline's journey has been realising she can be herself without fear and finding the courage to transition.",
+      "speaker": "Caroline",
+      "statedOn": "2023-07-15",
+      "entities": [
+        "caroline"
+      ],
+      "chrono": [
+        "transition-began"
+      ],
+      "sourceTurns": [
+        "D8:25",
+        "D8:26",
+        "D8:27"
+      ]
+    },
+    {
+      "text": "Melanie finds peace in creativity and in her family, who supported her through her move and through difficult times.",
+      "speaker": "Melanie",
+      "statedOn": "2023-07-15",
+      "entities": [
+        "melanie"
+      ],
+      "sourceTurns": [
+        "D8:28",
+        "D8:29",
+        "D8:30",
+        "D8:31"
+      ]
+    },
+    {
+      "text": "Melanie and her family went camping in the forest in July 2023. They enjoy hiking in the mountains and exploring forests together as a way to connect with nature and each other.",
+      "speaker": "Melanie",
+      "statedOn": "2023-07-15",
+      "entities": [
+        "melanie",
+        "camping",
+        "the-forest",
+        "hiking",
+        "mountains"
+      ],
+      "chrono": [
+        "forest-camping"
+      ],
+      "sourceTurns": [
+        "D8:32",
+        "D8:33",
+        "D8:34",
+        "D8:35",
+        "D8:36",
+        "D8:37",
+        "D8:38",
+        "D8:39"
+      ]
+    },
+    {
+      "text": "Melanie had a quiet weekend in mid-July 2023 after a family camping trip at the start of the month.",
+      "speaker": "Melanie",
+      "statedOn": "2023-07-17",
+      "entities": [
+        "melanie",
+        "camping"
+      ],
+      "sourceTurns": [
+        "D9:1"
+      ]
+    },
+    {
+      "text": "Caroline joined a mentorship programme for LGBTQ youth in mid-July 2023 and finds helping the community rewarding. She is struck by how resilient the young people are.",
+      "speaker": "Caroline",
+      "statedOn": "2023-07-17",
+      "entities": [
+        "caroline",
+        "mentorship-program"
+      ],
+      "chrono": [
+        "joined-mentorship"
+      ],
+      "sourceTurns": [
+        "D9:2",
+        "D9:3",
+        "D9:4",
+        "D9:5"
+      ]
+    },
+    {
+      "text": "Caroline mentors a transgender teenager, working with them on confidence and coping strategies. They attended an LGBT pride event together in June 2023, and seeing her mentee light up at the support was the best moment of it.",
+      "speaker": "Caroline",
+      "statedOn": "2023-07-17",
+      "entities": [
+        "caroline",
+        "mentee"
+      ],
+      "chrono": [
+        "mentee-pride-event"
+      ],
+      "sourceTurns": [
+        "D9:6",
+        "D9:7",
+        "D9:8",
+        "D9:9",
+        "D9:10",
+        "D9:11"
+      ]
+    },
+    {
+      "text": "Caroline is holding an LGBTQ art show in August 2023 to exhibit her paintings. One of the pieces was painted after she visited an LGBTQ centre and was meant to capture the community's unity and strength.",
+      "speaker": "Caroline",
+      "statedOn": "2023-07-17",
+      "entities": [
+        "caroline",
+        "art-show",
+        "painting",
+        "lgbtq-center"
+      ],
+      "chrono": [
+        "lgbtq-center-visit"
+      ],
+      "sourceTurns": [
+        "D9:12",
+        "D9:13",
+        "D9:14",
+        "D9:15",
+        "D9:16",
+        "D9:17"
+      ]
+    },
+    {
+      "text": "Caroline joined an LGBTQ activist group called Connected LGBTQ Activists on 18 July 2023. The group holds regular meetings and plans events and campaigns, and she finds having a platform for rights and community support fulfilling.",
+      "speaker": "Caroline",
+      "statedOn": "2023-07-20",
+      "entities": [
+        "caroline",
+        "activist-group"
+      ],
+      "chrono": [
+        "joined-activist-group"
+      ],
+      "sourceTurns": [
+        "D10:1",
+        "D10:2",
+        "D10:3",
+        "D10:4",
+        "D10:5",
+        "D10:6"
+      ]
+    },
+    {
+      "text": "Caroline's city held a pride parade in mid-July 2023 with people marching, waving flags and celebrating. Caroline missed it but took it as a reminder that she is not alone in the fight for equality.",
+      "speaker": "Caroline",
+      "statedOn": "2023-07-20",
+      "entities": [
+        "caroline"
+      ],
+      "chrono": [
+        "city-pride-parade"
+      ],
+      "sourceTurns": [
+        "D10:7"
+      ]
+    },
+    {
+      "text": "Melanie took her family to the beach in July 2023. They go only once or twice a year, and she treasures seeing her children happy there.",
+      "speaker": "Melanie",
+      "statedOn": "2023-07-20",
+      "entities": [
+        "melanie",
+        "the-beach"
+      ],
+      "chrono": [
+        "beach-trip"
+      ],
+      "sourceTurns": [
+        "D10:8",
+        "D10:9",
+        "D10:10",
+        "D10:11"
+      ]
+    },
+    {
+      "text": "The family camping trip is the highlight of Melanie's summer — roasting marshmallows, telling stories round the campfire and enjoying each other's company.",
+      "speaker": "Melanie",
+      "statedOn": "2023-07-20",
+      "entities": [
+        "melanie",
+        "camping"
+      ],
+      "sourceTurns": [
+        "D10:12",
+        "D10:13"
+      ]
+    },
+    {
+      "text": "Melanie remembers a camping trip in August 2022 when the family watched the Perseid meteor shower, made wishes and felt part of something vast.",
+      "speaker": "Melanie",
+      "statedOn": "2023-07-20",
+      "entities": [
+        "melanie",
+        "camping"
+      ],
+      "chrono": [
+        "meteor-shower-camping"
+      ],
+      "sourceTurns": [
+        "D10:14",
+        "D10:15",
+        "D10:16",
+        "D10:17",
+        "D10:18",
+        "D10:19"
+      ]
+    },
+    {
+      "text": "Melanie's happiest memory is the day her youngest child took her first steps, which showed her how fleeting life is.",
+      "speaker": "Melanie",
+      "statedOn": "2023-07-20",
+      "entities": [
+        "melanie",
+        "melanies-youngest"
+      ],
+      "chrono": [
+        "youngest-first-steps"
+      ],
+      "sourceTurns": [
+        "D10:20",
+        "D10:21",
+        "D10:22",
+        "D10:23",
+        "D10:24"
+      ]
+    },
+    {
+      "text": "Melanie celebrated her daughter's birthday at a Matt Patterson concert on 13 August 2023. She praised his voice and songs and was glad to see her children smiling.",
+      "speaker": "Melanie",
+      "statedOn": "2023-08-14",
+      "entities": [
+        "melanie",
+        "melanies-daughter",
+        "matt-patterson"
+      ],
+      "chrono": [
+        "birthday-concert"
+      ],
+      "sourceTurns": [
+        "D11:1",
+        "D11:2",
+        "D11:3"
+      ]
+    },
+    {
+      "text": "Caroline went to a pride parade on 11 August 2023 and found the energy and love there a reminder to keep standing up for equality.",
+      "speaker": "Caroline",
+      "statedOn": "2023-08-14",
+      "entities": [
+        "caroline"
+      ],
+      "chrono": [
+        "august-pride-parade"
+      ],
+      "sourceTurns": [
+        "D11:4",
+        "D11:5",
+        "D11:6",
+        "D11:7"
+      ]
+    },
+    {
+      "text": "Caroline uses her art to represent inclusivity and diversity, to speak up for the LGBTQ+ community and to express her trans experience so that others understand it.",
+      "speaker": "Caroline",
+      "statedOn": "2023-08-14",
+      "entities": [
+        "caroline",
+        "painting"
+      ],
+      "sourceTurns": [
+        "D11:8",
+        "D11:9",
+        "D11:10",
+        "D11:11"
+      ]
+    },
+    {
+      "text": "Caroline painted \"Embracing Identity\", in which a woman stands for the journey of acceptance; she meant it to show warmth, love and self-acceptance. Art has let her explore her transition and her changing body and taught her to accept imperfection.",
+      "speaker": "Caroline",
+      "statedOn": "2023-08-14",
+      "entities": [
+        "caroline",
+        "embracing-identity",
+        "painting"
+      ],
+      "sourceTurns": [
+        "D11:12",
+        "D11:13",
+        "D11:14",
+        "D11:15",
+        "D11:16"
+      ]
+    },
+    {
+      "text": "Caroline was upset by a group of religious conservatives she met while hiking in August 2023. It reminded her how much work remains on LGBTQ rights, though her supportive friends left her confident she would be fine.",
+      "speaker": "Caroline",
+      "statedOn": "2023-08-17",
+      "entities": [
+        "caroline",
+        "hiking"
+      ],
+      "chrono": [
+        "hike-incident"
+      ],
+      "sourceTurns": [
+        "D12:1",
+        "D12:2"
+      ]
+    },
+    {
+      "text": "Melanie finished another pottery piece in August 2023, colourful and patterned, made to catch the eye and make people smile. She describes art as both a sanctuary and a source of comfort.",
+      "speaker": "Melanie",
+      "statedOn": "2023-08-17",
+      "entities": [
+        "melanie",
+        "pottery",
+        "painting"
+      ],
+      "sourceTurns": [
+        "D12:3",
+        "D12:4",
+        "D12:5",
+        "D12:6",
+        "D12:7",
+        "D12:8",
+        "D12:9",
+        "D12:10",
+        "D12:11",
+        "D12:12",
+        "D12:13",
+        "D12:14"
+      ]
+    },
+    {
+      "text": "Caroline and Melanie went to a Pride festival together in 2022 and both remember it as a great time. In August 2023 they agreed to plan something special together.",
+      "speaker": "Caroline",
+      "statedOn": "2023-08-17",
+      "entities": [
+        "caroline",
+        "melanie"
+      ],
+      "chrono": [
+        "pride-fest-last-year"
+      ],
+      "sourceTurns": [
+        "D12:15",
+        "D12:16",
+        "D12:17",
+        "D12:18",
+        "D12:19",
+        "D12:20",
+        "D12:21"
+      ]
+    },
+    {
+      "text": "Caroline applied to adoption agencies in the week before 23 August 2023, her first formal step towards becoming a mother. An adoption advice and assistance group she attended helped her with it. She finds the prospect exciting and nerve-wracking.",
+      "speaker": "Caroline",
+      "statedOn": "2023-08-23",
+      "entities": [
+        "caroline",
+        "adoption",
+        "adoption-advice-group"
+      ],
+      "chrono": [
+        "adoption-applied"
+      ],
+      "sourceTurns": [
+        "D13:1",
+        "D13:2",
+        "D13:3"
+      ]
+    },
+    {
+      "text": "Caroline keeps a guinea pig called Oscar, whose favourite food is parsley.",
+      "speaker": "Caroline",
+      "statedOn": "2023-08-23",
+      "entities": [
+        "caroline",
+        "oscar"
+      ],
+      "sourceTurns": [
+        "D13:3",
+        "D13:5"
+      ]
+    },
+    {
+      "text": "Melanie got a second cat, Bailey, in August 2023, joining Luna and the dog Oliver — who once hid a bone in her slipper.",
+      "speaker": "Melanie",
+      "statedOn": "2023-08-23",
+      "entities": [
+        "melanie",
+        "bailey",
+        "oliver",
+        "luna"
+      ],
+      "chrono": [
+        "bailey-arrived"
+      ],
+      "sourceTurns": [
+        "D13:4",
+        "D13:6"
+      ]
+    },
+    {
+      "text": "Caroline went horseback riding with her father through the fields as a child and has loved horses ever since.",
+      "speaker": "Caroline",
+      "statedOn": "2023-08-23",
+      "entities": [
+        "caroline",
+        "carolines-dad",
+        "horseback-riding"
+      ],
+      "sourceTurns": [
+        "D13:7"
+      ]
+    },
+    {
+      "text": "Melanie painted a horse in August 2023 and enjoys painting animals, finding it peaceful.",
+      "speaker": "Melanie",
+      "statedOn": "2023-08-23",
+      "entities": [
+        "melanie",
+        "horse-painting",
+        "painting"
+      ],
+      "sourceTurns": [
+        "D13:8",
+        "D13:9",
+        "D13:10"
+      ]
+    },
+    {
+      "text": "Caroline painted a self-portrait in mid-August 2023, dominated by blue. Painting it left her feeling liberated and empowered, and she uses painting to explore her identity.",
+      "speaker": "Caroline",
+      "statedOn": "2023-08-23",
+      "entities": [
+        "caroline",
+        "self-portrait",
+        "painting"
+      ],
+      "chrono": [
+        "self-portrait-made"
+      ],
+      "sourceTurns": [
+        "D13:11",
+        "D13:12",
+        "D13:13",
+        "D13:14"
+      ]
+    },
+    {
+      "text": "What gives Caroline a sense of freedom is art, supportive people around her, promoting LGBTQ rights and living authentically, and she wants to help others do the same.",
+      "speaker": "Caroline",
+      "statedOn": "2023-08-23",
+      "entities": [
+        "caroline"
+      ],
+      "sourceTurns": [
+        "D13:15",
+        "D13:16",
+        "D13:17",
+        "D13:18"
+      ]
+    },
+    {
+      "text": "After the confrontation while hiking, Caroline apologised to the people involved in August 2023.",
+      "speaker": "Caroline",
+      "statedOn": "2023-08-25",
+      "entities": [
+        "caroline",
+        "hiking"
+      ],
+      "chrono": [
+        "hike-apology"
+      ],
+      "sourceTurns": [
+        "D14:1",
+        "D14:2"
+      ]
+    },
+    {
+      "text": "Melanie made a plate in her pottery class on 24 August 2023 and finds pottery relaxing and creative. Caroline has not tried pottery.",
+      "speaker": "Melanie",
+      "statedOn": "2023-08-25",
+      "entities": [
+        "melanie",
+        "melanie-plate",
+        "pottery",
+        "pottery-class"
+      ],
+      "chrono": [
+        "plate-made"
+      ],
+      "sourceTurns": [
+        "D14:3",
+        "D14:4",
+        "D14:5"
+      ]
+    },
+    {
+      "text": "Caroline painted a sunset after visiting the beach in mid-August 2023, trying to capture the calm of the sun dropping below the horizon.",
+      "speaker": "Caroline",
+      "statedOn": "2023-08-25",
+      "entities": [
+        "caroline",
+        "sunset-painting",
+        "the-beach"
+      ],
+      "chrono": [
+        "beach-visit-caroline"
+      ],
+      "sourceTurns": [
+        "D14:6",
+        "D14:7",
+        "D14:8",
+        "D14:9"
+      ]
+    },
+    {
+      "text": "Melanie spent a day volunteering at a homeless shelter with her family on 24 August 2023. Seeing how neglected some people are was hard, but she was glad to make a difference.",
+      "speaker": "Melanie",
+      "statedOn": "2023-08-25",
+      "entities": [
+        "melanie",
+        "homeless-shelter"
+      ],
+      "chrono": [
+        "shelter-volunteering"
+      ],
+      "sourceTurns": [
+        "D14:10",
+        "D14:11",
+        "D14:12"
+      ]
+    },
+    {
+      "text": "A rainbow flag mural with an eagle matters to Caroline because it reflects the courage and strength of the trans community and her own resilience.",
+      "speaker": "Caroline",
+      "statedOn": "2023-08-25",
+      "entities": [
+        "caroline",
+        "rainbow-mural"
+      ],
+      "sourceTurns": [
+        "D14:13",
+        "D14:14",
+        "D14:15",
+        "D14:16"
+      ]
+    },
+    {
+      "text": "Caroline made a stained glass window for a local church showing time changing our lives, meant to represent her own journey as a transgender woman and the acceptance of growth and change.",
+      "speaker": "Caroline",
+      "statedOn": "2023-08-25",
+      "entities": [
+        "caroline",
+        "stained-glass",
+        "local-church"
+      ],
+      "sourceTurns": [
+        "D14:17",
+        "D14:18",
+        "D14:19",
+        "D14:20",
+        "D14:21",
+        "D14:22"
+      ]
+    },
+    {
+      "text": "Caroline came across a rainbow sidewalk painted for Pride Month while walking in her neighbourhood and took it as a sign that love and acceptance can be found anywhere.",
+      "speaker": "Caroline",
+      "statedOn": "2023-08-25",
+      "entities": [
+        "caroline"
+      ],
+      "sourceTurns": [
+        "D14:23",
+        "D14:24",
+        "D14:25",
+        "D14:26",
+        "D14:27",
+        "D14:28"
+      ]
+    },
+    {
+      "text": "Drawing flowers is one of Caroline's favourite subjects; Melanie prefers painting landscapes and still life and was planning autumn-inspired pieces.",
+      "speaker": "Caroline",
+      "statedOn": "2023-08-25",
+      "entities": [
+        "caroline",
+        "melanie",
+        "painting"
+      ],
+      "sourceTurns": [
+        "D14:29",
+        "D14:30",
+        "D14:31",
+        "D14:32"
+      ]
+    },
+    {
+      "text": "Caroline is putting together an LGBTQ art show for September 2023 featuring her own paintings and other LGBTQ artists, intended to spread understanding and acceptance.",
+      "speaker": "Caroline",
+      "statedOn": "2023-08-25",
+      "entities": [
+        "caroline",
+        "art-show",
+        "painting"
+      ],
+      "sourceTurns": [
+        "D14:33",
+        "D14:34",
+        "D14:35"
+      ]
+    },
+    {
+      "text": "Melanie took her children to a park on 27 August 2023, where they played and explored outdoors.",
+      "speaker": "Melanie",
+      "statedOn": "2023-08-28",
+      "entities": [
+        "melanie",
+        "the-park"
+      ],
+      "chrono": [
+        "park-visit"
+      ],
+      "sourceTurns": [
+        "D15:1",
+        "D15:2"
+      ]
+    },
+    {
+      "text": "Caroline volunteered at an LGBTQ+ youth centre in August 2023. Talking with young people there was gratifying, and sharing her own story let her show them they are not alone.",
+      "speaker": "Caroline",
+      "statedOn": "2023-08-28",
+      "entities": [
+        "caroline",
+        "youth-center"
+      ],
+      "chrono": [
+        "youth-center-volunteering"
+      ],
+      "sourceTurns": [
+        "D15:3",
+        "D15:4",
+        "D15:5",
+        "D15:6",
+        "D15:7",
+        "D15:8"
+      ]
+    },
+    {
+      "text": "Caroline intends to keep volunteering at the youth centre, where she has made strong connections, and is helping organise a talent show for the children in September 2023.",
+      "speaker": "Caroline",
+      "statedOn": "2023-08-28",
+      "entities": [
+        "caroline",
+        "youth-center",
+        "talent-show"
+      ],
+      "sourceTurns": [
+        "D15:9",
+        "D15:10",
+        "D15:11",
+        "D15:12"
+      ]
+    },
+    {
+      "text": "Melanie went to a live show by the band Summer Sounds in August 2023; they played a pop song that got everyone dancing.",
+      "speaker": "Melanie",
+      "statedOn": "2023-08-28",
+      "entities": [
+        "melanie",
+        "summer-sounds"
+      ],
+      "chrono": [
+        "summer-sounds-show"
+      ],
+      "sourceTurns": [
+        "D15:13",
+        "D15:14",
+        "D15:15",
+        "D15:16",
+        "D15:17"
+      ]
+    },
+    {
+      "text": "Caroline spent a day biking with friends in early September 2023 and found it refreshing.",
+      "speaker": "Caroline",
+      "statedOn": "2023-09-13",
+      "entities": [
+        "caroline",
+        "biking"
+      ],
+      "chrono": [
+        "biking-day"
+      ],
+      "sourceTurns": [
+        "D16:1"
+      ]
+    },
+    {
+      "text": "Melanie went camping with her children in late August 2023, exploring the forest, hiking, roasting marshmallows and telling stories round the campfire.",
+      "speaker": "Melanie",
+      "statedOn": "2023-09-13",
+      "entities": [
+        "melanie",
+        "camping",
+        "the-forest",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D16:2",
+        "D16:3",
+        "D16:4"
+      ]
+    },
+    {
+      "text": "Caroline is inspired by seeing her work make a difference to the LGBTQ+ community, and by the support of her friends, family and mentors.",
+      "speaker": "Caroline",
+      "statedOn": "2023-09-13",
+      "entities": [
+        "caroline"
+      ],
+      "sourceTurns": [
+        "D16:5",
+        "D16:6"
+      ]
+    },
+    {
+      "text": "Caroline has been making art since she was about 17, in around 2012, and finds it empowering and cathartic.",
+      "speaker": "Caroline",
+      "statedOn": "2023-09-13",
+      "entities": [
+        "caroline",
+        "painting"
+      ],
+      "chrono": [
+        "caroline-art-began"
+      ],
+      "sourceTurns": [
+        "D16:7"
+      ]
+    },
+    {
+      "text": "Melanie has been making art for seven years, since about 2016, and has settled on painting and pottery as her forms.",
+      "speaker": "Melanie",
+      "statedOn": "2023-09-13",
+      "entities": [
+        "melanie",
+        "painting",
+        "pottery"
+      ],
+      "chrono": [
+        "melanie-art-began"
+      ],
+      "sourceTurns": [
+        "D16:8"
+      ]
+    },
+    {
+      "text": "Painting and drawing helped Caroline express her feelings and explore her gender identity, and were important to her during her transition. She has not tried pottery but is willing to.",
+      "speaker": "Caroline",
+      "statedOn": "2023-09-13",
+      "entities": [
+        "caroline",
+        "painting",
+        "pottery"
+      ],
+      "sourceTurns": [
+        "D16:9",
+        "D16:10",
+        "D16:11"
+      ]
+    },
+    {
+      "text": "Caroline painted a red and blue picture about her path as a trans woman: the two colours stand for the binary gender system and their mixing for breaking that rigid thinking.",
+      "speaker": "Caroline",
+      "statedOn": "2023-09-13",
+      "entities": [
+        "caroline",
+        "binary-painting",
+        "painting"
+      ],
+      "sourceTurns": [
+        "D16:12",
+        "D16:13",
+        "D16:14"
+      ]
+    },
+    {
+      "text": "Caroline's transition changed her relationships. Some close friends kept supporting her and a few could not handle it; she is happier among those who accept her, and her relationships feel more genuine.",
+      "speaker": "Caroline",
+      "statedOn": "2023-09-13",
+      "entities": [
+        "caroline"
+      ],
+      "sourceTurns": [
+        "D16:15"
+      ]
+    },
+    {
+      "text": "Melanie had a good time at a café in early September 2023, which displayed thoughtful signs.",
+      "speaker": "Melanie",
+      "statedOn": "2023-09-13",
+      "entities": [
+        "melanie",
+        "the-cafe"
+      ],
+      "chrono": [
+        "cafe-visit"
+      ],
+      "sourceTurns": [
+        "D16:16",
+        "D16:17",
+        "D16:18",
+        "D16:19",
+        "D16:20"
+      ]
+    },
+    {
+      "text": "Caroline contacted her mentor for adoption advice in October 2023, saying she is ready to be a mother and to share her love and her family.",
+      "speaker": "Caroline",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "caroline",
+        "adoption",
+        "adoption-mentor"
+      ],
+      "chrono": [
+        "contacted-adoption-mentor"
+      ],
+      "sourceTurns": [
+        "D17:1",
+        "D17:2",
+        "D17:3"
+      ]
+    },
+    {
+      "text": "A friend of Melanie adopted a child in 2022; the process was long but they are very happy, and it made Melanie consider adopting too.",
+      "speaker": "Melanie",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "melanie",
+        "melanies-friend"
+      ],
+      "chrono": [
+        "friend-adopted"
+      ],
+      "sourceTurns": [
+        "D17:4",
+        "D17:5",
+        "D17:6"
+      ]
+    },
+    {
+      "text": "Caroline advises anyone starting adoption to research agencies or a lawyer, gather references, financial information and medical checks, and prepare emotionally for a long wait.",
+      "speaker": "Caroline",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "caroline",
+        "adoption"
+      ],
+      "sourceTurns": [
+        "D17:7"
+      ]
+    },
+    {
+      "text": "Melanie was injured in September 2023 and had to stop doing pottery for a time. She kept busy reading a book Caroline had recommended and painting.",
+      "speaker": "Melanie",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "melanie",
+        "pottery",
+        "reading",
+        "painting"
+      ],
+      "chrono": [
+        "melanie-injury"
+      ],
+      "sourceTurns": [
+        "D17:8",
+        "D17:9",
+        "D17:10",
+        "D17:11"
+      ]
+    },
+    {
+      "text": "Melanie painted a sunset-inspired picture in early October 2023 because the colours calm her, and an abstract piece using peaceful blue streaks to convey tranquillity.",
+      "speaker": "Melanie",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "melanie",
+        "sunset-painting-melanie",
+        "abstract-painting-melanie"
+      ],
+      "chrono": [
+        "melanie-sunset-painted"
+      ],
+      "sourceTurns": [
+        "D17:12",
+        "D17:13",
+        "D17:14",
+        "D17:15",
+        "D17:16"
+      ]
+    },
+    {
+      "text": "Caroline has been experimenting with abstract painting, which she finds freeing.",
+      "speaker": "Caroline",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "caroline",
+        "painting"
+      ],
+      "sourceTurns": [
+        "D17:13"
+      ]
+    },
+    {
+      "text": "Caroline went to a transgender poetry reading on about 6 October 2023 where trans people shared their stories. The room was full of energy and support, and it inspired her to make a drawing standing for freedom and being real.",
+      "speaker": "Caroline",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "caroline",
+        "poetry-reading",
+        "poetry-artwork"
+      ],
+      "chrono": [
+        "poetry-reading-event"
+      ],
+      "sourceTurns": [
+        "D17:17",
+        "D17:18",
+        "D17:19",
+        "D17:20",
+        "D17:21",
+        "D17:22",
+        "D17:23",
+        "D17:24",
+        "D17:25",
+        "D17:26"
+      ]
+    },
+    {
+      "text": "Melanie's son was involved in a car accident during a family road trip in mid-October 2023. He was unhurt, but it frightened the family and reminded Melanie that life is precious.",
+      "speaker": "Melanie",
+      "statedOn": "2023-10-20",
+      "entities": [
+        "melanie",
+        "melanies-son"
+      ],
+      "chrono": [
+        "roadtrip-accident"
+      ],
+      "sourceTurns": [
+        "D18:1",
+        "D18:2",
+        "D18:3",
+        "D18:4"
+      ]
+    },
+    {
+      "text": "Despite the accident, Melanie and her family enjoyed the Grand Canyon on that October 2023 road trip. Her other children were frightened but were reassured that their brother would be fine.",
+      "speaker": "Melanie",
+      "statedOn": "2023-10-20",
+      "entities": [
+        "melanie",
+        "grand-canyon",
+        "melanies-son"
+      ],
+      "chrono": [
+        "grand-canyon-trip"
+      ],
+      "sourceTurns": [
+        "D18:5",
+        "D18:6",
+        "D18:7",
+        "D18:8"
+      ]
+    },
+    {
+      "text": "Melanie's family are her motivation and support, and she says they make hard times easier.",
+      "speaker": "Melanie",
+      "statedOn": "2023-10-20",
+      "entities": [
+        "melanie"
+      ],
+      "sourceTurns": [
+        "D18:9",
+        "D18:10",
+        "D18:11",
+        "D18:12",
+        "D18:13",
+        "D18:14",
+        "D18:15"
+      ]
+    },
+    {
+      "text": "Melanie and her family spent a day in nature on 19 October 2023 to relax after the road trip. She loves camping with them because nature brings peace and a chance to be present together.",
+      "speaker": "Melanie",
+      "statedOn": "2023-10-20",
+      "entities": [
+        "melanie",
+        "camping"
+      ],
+      "sourceTurns": [
+        "D18:16",
+        "D18:17",
+        "D18:18",
+        "D18:19",
+        "D18:20",
+        "D18:21",
+        "D18:22",
+        "D18:23",
+        "D18:24"
+      ]
+    },
+    {
+      "text": "Caroline passed the adoption agency interviews on 20 October 2023, a major step towards her goal of having a family.",
+      "speaker": "Caroline",
+      "statedOn": "2023-10-22",
+      "entities": [
+        "caroline",
+        "adoption"
+      ],
+      "chrono": [
+        "adoption-interviews-passed"
+      ],
+      "sourceTurns": [
+        "D19:1",
+        "D19:2"
+      ]
+    },
+    {
+      "text": "Melanie bought figurines on 21 October 2023 that remind her of family love.",
+      "speaker": "Melanie",
+      "statedOn": "2023-10-22",
+      "entities": [
+        "melanie",
+        "figurines"
+      ],
+      "chrono": [
+        "figurines-bought"
+      ],
+      "sourceTurns": [
+        "D19:2"
+      ]
+    },
+    {
+      "text": "Caroline hopes to build her own family and give a home to children who have not had one; she sees adoption as a way of giving back and showing love and acceptance.",
+      "speaker": "Caroline",
+      "statedOn": "2023-10-22",
+      "entities": [
+        "caroline",
+        "adoption"
+      ],
+      "sourceTurns": [
+        "D19:3",
+        "D19:4",
+        "D19:5",
+        "D19:6",
+        "D19:7"
+      ]
+    },
+    {
+      "text": "Caroline says transitioning and finding acceptance were both hard, and the help she had from friends, family and people she looked up to was invaluable — which is why she wants to pass that support on.",
+      "speaker": "Caroline",
+      "statedOn": "2023-10-22",
+      "entities": [
+        "caroline"
+      ],
+      "chrono": [
+        "transition-began"
+      ],
+      "sourceTurns": [
+        "D19:8",
+        "D19:9",
+        "D19:10",
+        "D19:11",
+        "D19:12",
+        "D19:13",
+        "D19:14",
+        "D19:15"
+      ]
+    },
+    {
+      "text": "Melanie ended the August 2023 conversation by inviting Caroline to reach out any time.",
+      "speaker": "Melanie",
+      "statedOn": "2023-08-14",
+      "entities": [
+        "melanie",
+        "caroline"
+      ],
+      "sourceTurns": [
+        "D11:17"
+      ]
+    },
+    {
+      "text": "Caroline plays acoustic guitar, which she started around 2018, and uses it to get her emotions out.",
+      "speaker": "Caroline",
+      "statedOn": "2023-08-28",
+      "entities": [
+        "caroline",
+        "guitar"
+      ],
+      "chrono": [
+        "guitar-began"
+      ],
+      "sourceTurns": [
+        "D15:18",
+        "D15:19",
+        "D15:20",
+        "D15:21"
+      ]
+    },
+    {
+      "text": "The song that means most to Caroline is \"Brave\" by Sara Bareilles, about being courageous and fighting for what is right; hearing it makes her think about the progress she has made.",
+      "speaker": "Caroline",
+      "statedOn": "2023-08-28",
+      "entities": [
+        "caroline",
+        "brave-song",
+        "sara-bareilles"
+      ],
+      "sourceTurns": [
+        "D15:22",
+        "D15:23",
+        "D15:24",
+        "D15:25"
+      ]
+    },
+    {
+      "text": "Melanie plays the clarinet, which she began as a child and uses to express herself and relax. She likes both classical music such as Bach and Mozart and modern music such as Ed Sheeran's \"Perfect\".",
+      "speaker": "Melanie",
+      "statedOn": "2023-08-28",
+      "entities": [
+        "melanie",
+        "clarinet",
+        "bach",
+        "mozart",
+        "perfect-song",
+        "ed-sheeran"
+      ],
+      "sourceTurns": [
+        "D15:26",
+        "D15:27",
+        "D15:28"
+      ]
+    },
+    {
+      "text": "Caroline's adoption went from researching agencies in May 2023, through an adoption council meeting in July and a formal application in August, to passing the adoption agency interviews on 20 October 2023. She contacted her adoption mentor in October when she felt ready to be a mother.",
+      "speaker": "Caroline",
+      "statedOn": "2023-10-22",
+      "entities": [
+        "caroline",
+        "adoption",
+        "adoption-council",
+        "adoption-advice-group",
+        "adoption-mentor"
+      ],
+      "chrono": [
+        "adoption-applied",
+        "adoption-interviews-passed"
+      ],
+      "sourceTurns": [
+        "D2:8",
+        "D8:9",
+        "D13:1",
+        "D17:1",
+        "D19:1"
+      ],
+      "synthesis": true
+    },
+    {
+      "text": "Caroline has made art since she was about 17 and uses it to express her trans experience: a red and blue painting about the binary gender system, the self-portrait she made in August 2023, 'Embracing Identity', a sunset painted after a beach visit, and a stained glass window for a local church. She is putting on an LGBTQ art show of her paintings.",
+      "speaker": "Caroline",
+      "statedOn": "2023-09-13",
+      "entities": [
+        "caroline",
+        "painting",
+        "binary-painting",
+        "self-portrait",
+        "embracing-identity",
+        "sunset-painting",
+        "stained-glass",
+        "art-show"
+      ],
+      "sourceTurns": [
+        "D16:7",
+        "D11:10",
+        "D11:12",
+        "D13:11",
+        "D14:7",
+        "D14:17",
+        "D9:12",
+        "D14:33"
+      ],
+      "synthesis": true
+    },
+    {
+      "text": "Melanie took up pottery in July 2023, made a black-and-white bowl and then a plate in her class, and had to stop for a time after being hurt in September 2023.",
+      "speaker": "Melanie",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "melanie",
+        "pottery",
+        "pottery-class",
+        "melanie-bowl",
+        "melanie-plate"
+      ],
+      "chrono": [
+        "pottery-signup",
+        "melanie-injury"
+      ],
+      "sourceTurns": [
+        "D5:4",
+        "D5:8",
+        "D14:4",
+        "D17:8"
+      ],
+      "synthesis": true
+    },
+    {
+      "text": "Caroline's involvement in the LGBTQ community grew through 2023: a support group in May, a school talk and a counselling workshop in June, a pride parade and a conference, then mentoring LGBTQ youth, joining the activist group Connected LGBTQ Activists in July, volunteering at an LGBTQ+ youth centre in August, and a transgender poetry reading in October.",
+      "speaker": "Caroline",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "caroline",
+        "lgbtq-support-group",
+        "mentorship-program",
+        "activist-group",
+        "youth-center",
+        "poetry-reading"
+      ],
+      "sourceTurns": [
+        "D1:3",
+        "D3:1",
+        "D4:13",
+        "D5:1",
+        "D7:1",
+        "D9:2",
+        "D10:3",
+        "D15:3",
+        "D17:17"
+      ],
+      "synthesis": true
+    },
+    {
+      "text": "Melanie's household has three pets: the cat Luna and the dog Oliver, and a second cat, Bailey, who arrived in August 2023. Caroline keeps a guinea pig called Oscar.",
+      "speaker": "Melanie",
+      "statedOn": "2023-08-23",
+      "entities": [
+        "melanie",
+        "luna",
+        "oliver",
+        "bailey",
+        "caroline",
+        "oscar"
+      ],
+      "sourceTurns": [
+        "D7:16",
+        "D7:18",
+        "D13:3",
+        "D13:4"
+      ],
+      "synthesis": true
+    },
+    {
+      "text": "Caroline has been pursuing counselling and mental health work as a career since May 2023, driven by her own experience of being supported, and wants in particular to work with transgender people.",
+      "speaker": "Caroline",
+      "statedOn": "2023-07-12",
+      "entities": [
+        "caroline",
+        "counseling"
+      ],
+      "sourceTurns": [
+        "D1:11",
+        "D4:11",
+        "D4:13",
+        "D7:5",
+        "D7:7"
+      ],
+      "synthesis": true
+    },
+    {
+      "text": "Melanie's family spend their time outdoors together: camping in the mountains in June 2023, at the beach and in the forest in July, a museum visit and a park in the summer, and a road trip to the Grand Canyon in October.",
+      "speaker": "Melanie",
+      "statedOn": "2023-10-20",
+      "entities": [
+        "melanie",
+        "camping",
+        "mountains",
+        "the-beach",
+        "the-forest",
+        "museum",
+        "the-park",
+        "grand-canyon"
+      ],
+      "sourceTurns": [
+        "D4:6",
+        "D10:8",
+        "D8:32",
+        "D6:4",
+        "D15:2",
+        "D18:5"
+      ],
+      "synthesis": true
+    },
+    {
+      "text": "Caroline moved from Sweden in 2019. Her grandmother is still there and gave her a necklace standing for love, faith and strength, which she keeps as a reminder of her roots.",
+      "speaker": "Caroline",
+      "statedOn": "2023-06-27",
+      "entities": [
+        "caroline",
+        "home-country",
+        "grandma",
+        "necklace"
+      ],
+      "chrono": [
+        "moved-from-home-country",
+        "necklace-gift"
+      ],
+      "sourceTurns": [
+        "D3:13",
+        "D4:3"
+      ],
+      "synthesis": true
+    },
+    {
+      "text": "Melanie has made art for about seven years and settled on painting and pottery: a lake at sunrise in 2022, a horse painting in August 2023, and a sunset-inspired piece and an abstract in October.",
+      "speaker": "Melanie",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "melanie",
+        "painting",
+        "pottery",
+        "lake-sunrise",
+        "horse-painting",
+        "sunset-painting-melanie",
+        "abstract-painting-melanie"
+      ],
+      "sourceTurns": [
+        "D16:8",
+        "D1:14",
+        "D13:8",
+        "D17:12",
+        "D17:14"
+      ],
+      "synthesis": true
+    },
+    {
+      "text": "Caroline began transitioning in 2020. Making art helped her understand and accept herself through it, some friendships did not survive it, and by late 2023 she describes having found self-acceptance and wanting to pass that support to others.",
+      "speaker": "Caroline",
+      "statedOn": "2023-10-22",
+      "entities": [
+        "caroline",
+        "painting"
+      ],
+      "chrono": [
+        "transition-began"
+      ],
+      "sourceTurns": [
+        "D3:1",
+        "D16:9",
+        "D16:15",
+        "D19:9"
+      ],
+      "synthesis": true
+    },
+    {
+      "text": "Melanie married in 2018 and has several children including a son, a daughter whose birthday she celebrated at a Matt Patterson concert, and a youngest whose first steps she remembers as her happiest moment.",
+      "speaker": "Melanie",
+      "statedOn": "2023-10-20",
+      "entities": [
+        "melanie",
+        "melanies-husband",
+        "melanies-son",
+        "melanies-daughter",
+        "melanies-youngest"
+      ],
+      "chrono": [
+        "melanie-wedding"
+      ],
+      "sourceTurns": [
+        "D3:16",
+        "D11:1",
+        "D10:20",
+        "D18:1"
+      ],
+      "synthesis": true
+    },
+    {
+      "text": "Both women use a creative practice as a way of coping: Caroline paints and draws to explore her identity, and Melanie paints and makes pottery to express her feelings and relax.",
+      "speaker": "Caroline",
+      "statedOn": "2023-09-13",
+      "entities": [
+        "caroline",
+        "melanie",
+        "painting",
+        "pottery"
+      ],
+      "sourceTurns": [
+        "D13:13",
+        "D16:9",
+        "D12:6",
+        "D5:10"
+      ],
+      "synthesis": true
+    }
+  ]
+}

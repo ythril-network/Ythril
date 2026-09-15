@@ -318,7 +318,11 @@ const FROZEN = {
   // NO DECOMPOSITION: the alternative to these three lines is not a smaller file, it is a duplicate policy.
   // The real decomposition of this module already happened — the seed traversal and the create-shape
   // vocabulary are their own modules, which is what took it down from 718.
-  'server/src/brain/recall.ts': 689,
+  // 689 -> 690: one parameter. The rerank step could only increment a counter, so a reranker that was
+  // unreachable or refusing the batch size reached a dashboard and never the caller — against a
+  // `degraded` reason the integration guide already documents. Routing it through the helper that
+  // reports both is the whole change; there is no new behaviour here to put beside the file.
+  'server/src/brain/recall.ts': 690,
   // 678 -> 687: two conditional notices on the face card — the enable pin stating what it does NOT reach, and
   // "configured but not in use" for a stored endpoint awaiting acknowledgement. Nine lines of markup, and the
   // first attempt wanted THIRTY because the reasoning was written as HTML comments inside the template. That

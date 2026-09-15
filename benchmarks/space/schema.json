@@ -184,7 +184,8 @@
         "until": {
           "type": "date"
         }
-      }
+      },
+      "suppressEmbeddings": true
     }
   },
   {
@@ -221,7 +222,8 @@
         "until": {
           "type": "date"
         }
-      }
+      },
+      "suppressEmbeddings": true
     }
   },
   {
@@ -248,7 +250,8 @@
         "until": {
           "type": "date"
         }
-      }
+      },
+      "suppressEmbeddings": true
     }
   },
   {
@@ -277,7 +280,8 @@
         "until": {
           "type": "date"
         }
-      }
+      },
+      "suppressEmbeddings": true
     }
   },
   {
@@ -306,7 +310,8 @@
         "until": {
           "type": "date"
         }
-      }
+      },
+      "suppressEmbeddings": true
     }
   },
   {
@@ -332,7 +337,8 @@
         "until": {
           "type": "date"
         }
-      }
+      },
+      "suppressEmbeddings": true
     }
   },
   {
@@ -352,7 +358,8 @@
           "place"
         ]
       },
-      "propertySchemas": {}
+      "propertySchemas": {},
+      "suppressEmbeddings": true
     }
   },
   {
@@ -375,7 +382,8 @@
           "work"
         ]
       },
-      "propertySchemas": {}
+      "propertySchemas": {},
+      "suppressEmbeddings": true
     }
   },
   {
@@ -401,7 +409,8 @@
         "until": {
           "type": "date"
         }
-      }
+      },
+      "suppressEmbeddings": true
     }
   },
   {
@@ -430,7 +439,8 @@
         "until": {
           "type": "date"
         }
-      }
+      },
+      "suppressEmbeddings": true
     }
   },
   {
@@ -456,7 +466,8 @@
         "until": {
           "type": "date"
         }
-      }
+      },
+      "suppressEmbeddings": true
     }
   },
   {
@@ -479,7 +490,8 @@
         "role": {
           "type": "string"
         }
-      }
+      },
+      "suppressEmbeddings": true
     }
   },
   {
@@ -504,7 +516,8 @@
           "person"
         ]
       },
-      "propertySchemas": {}
+      "propertySchemas": {},
+      "suppressEmbeddings": true
     }
   },
   {
@@ -529,7 +542,8 @@
           "person"
         ]
       },
-      "propertySchemas": {}
+      "propertySchemas": {},
+      "suppressEmbeddings": true
     }
   },
   {

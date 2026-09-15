@@ -118,7 +118,7 @@ export const RECALL_BODY_FIELDS: ReadonlySet<string> = new Set([
   // That is the standing hazard of making a body strict: the allowed set has to be the keys the handler READS, and a
   // handler that reads its body in two places will be described by whichever place you looked at. Grep for `req.body`
   // across the whole handler, not for the destructure.
-  'includeFreshWrites', 'includeContent', 'includeDiagnostics', 'projection',
+  'includeFreshWrites', 'includeContent', 'includeDiagnostics', 'includeRecordMeta', 'projection',
   // `maxChars` is the ceiling that carries the defaults, and `maxBytes` now means real UTF-8 bytes — both
   // apply when both are set. See `result-budget.ts`.
   ...BUDGET_REQUEST_FIELDS, 'skip', 'remainderDump',
