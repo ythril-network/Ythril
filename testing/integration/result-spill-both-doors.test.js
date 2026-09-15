@@ -108,8 +108,46 @@ before(async () => {
     const full = await recall({
       query: QUERY, types: ['entity'], topK: COUNT, maxBytes: 5_000_000, maxChars: 5_000_000,
     });
+
+    /*
+     * THE BUDGET IS 80% OF THE SMALLER DOOR'S FULL ANSWER, and taking it from REST alone was a latent bug
+     * that `includeRecordMeta` finally tripped.
+     *
+     * A REST result FLATTENS the record into the ranking envelope; an MCP result nests it under `record`
+     * with a narrower envelope. So the same corpus is a different number of bytes through each door, and
+     * MCP's has always been the smaller. 80% of REST's was above MCP's full answer only by a margin
+     * nobody had measured — it was luck, not design, and the margin was thin.
+     *
+     * Making storage bookkeeping opt-in removed the SAME absolute bytes from both doors, which is a
+     * smaller PROPORTION of the larger one. The bar `M > 0.8R` became `M > 0.8R + 0.2S`, MCP's answer
+     * dropped under it, and the assertion that MCP truncates went false — with nothing wrong in either
+     * door.
+     *
+     * Taking the minimum makes the budget bind on both by construction, so this cannot rot again the next
+     * time either envelope changes size. It stays MEASURED rather than assumed, and it stays ONE number,
+     * which is what lets the assertions below claim the two doors honour the same parameter identically.
+     */
+    let mcpBytes = Infinity;
+    try {
+      const probe = await openMcpSession(token());
+      try {
+        const unbudgeted = JSON.parse((await probe.callTool('recall', {
+          space: SPACE, query: QUERY, types: ['entity'], topK: COUNT,
+          includeFreshWrites: true, maxBytes: 5_000_000, maxChars: 5_000_000,
+        }))?.content?.[0]?.text ?? '{}');
+        if (unbudgeted.truncated === false && typeof unbudgeted.bytesReturned === 'number') {
+          mcpBytes = unbudgeted.bytesReturned;
+        }
+      } finally {
+        await probe.close?.();
+      }
+    } catch {
+      // No MCP session here is not a failure: the MCP test skips itself on the same condition, and the REST
+      // assertions must still run. `Infinity` leaves the budget REST-derived, exactly as before.
+    }
+
     if (full.status === 200 && full.body.truncated === false) {
-      tightBytes = Math.max(1_000, Math.floor(full.body.bytesReturned * 0.8));
+      tightBytes = Math.max(1_000, Math.floor(Math.min(full.body.bytesReturned, mcpBytes) * 0.8));
     }
   }
 });

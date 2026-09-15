@@ -79,6 +79,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **A cross-door budget fixture was sized from the larger door, and only luck made it bind on the other.**
+
+  A REST result flattens the record into the ranking envelope; an MCP result nests it under `record` with a
+  narrower envelope, so the same corpus is a different number of bytes through each door and MCP’s has
+  always been the smaller. The spill test budgeted at 80% of REST’s full answer and asserted that MCP
+  truncates too — which held by a margin nobody had measured.
+
+  Making storage bookkeeping opt-in removes the same ABSOLUTE bytes from both doors, which is a smaller
+  proportion of the larger one. The bar moved from `M > 0.8R` to `M > 0.8R + 0.2S`, MCP’s answer dropped
+  under it, and CI failed an assertion with nothing wrong in either door. The budget is now 80% of the
+  SMALLER door’s full answer, so it binds on both by construction and cannot rot the next time either
+  envelope changes size.
+
 - **`benchmarks/` now holds a folder per benchmark: LoCoMo, LongMemEval and MemoryArena.** LongMemEval is
   recorded and not yet fetched, MemoryArena is not released by its authors, and a dataset whose hash is
   missing is now refused rather than read as nothing to check.
