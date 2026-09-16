@@ -186,20 +186,6 @@ const TOTAL = 45;
  */
 const REMOVED = 3;
 
-/**
- * Fan-out sites that were REMOVED rather than converted, with the tool that owned them.
- *
- * The invariant below says a conversion must MOVE a site and never drop it, because a deletion dressed as a
- * conversion looks exactly like progress. A tool being retired is the one legitimate way a site leaves the
- * inventory — and the honest way to record it is here, not by lowering `TOTAL`, which would erase the fact
- * that the site ever existed and make the original count unverifiable.
- *
- * - **3, at 5.0: `list_chrono`.** It folded into `filter`, which reads across spaces through its own
- *   narrowed path. `server/src/mcp/tools/chrono.ts` left the NARROWED set with it: a file with no fan-out
- *   cannot claim a conversion.
- */
-const REMOVED = 3;
-
 const GUARDS = {
   'server/src/auth/middleware.ts': 2,
   // `mcp/router.ts` used to be here. Its guard is FLIPPED: it calls `memberSpacesWithin` and refuses only when the
