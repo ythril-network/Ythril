@@ -238,7 +238,7 @@ export async function updateFileMeta(
    */
   if (isStrictLinkage(spaceId)) {
     await assertRefsResolve(spaceId, 'entityIds', 'entity', opts.entityIds);
-    await assertRefsResolve(spaceId, 'memoryIds', 'memory', opts.memoryIds);
+    await assertRefsResolve(spaceId, 'memoryIds', 'fact', opts.memoryIds);
     await assertRefsResolve(spaceId, 'chronoIds', 'chrono', opts.chronoIds);
   }
 
@@ -344,7 +344,7 @@ export async function updateFileMeta(
       || deleteFieldsPaths?.some(p => p.startsWith('entityIds') || p.startsWith('memoryIds') || p.startsWith('chronoIds'))) {
     await reconcileLinks(spaceId, normalised, 'file', {
       ...(opts.entityIds !== undefined ? { entity: ($set['entityIds'] as string[] | undefined) ?? [] } : {}),
-      ...(opts.memoryIds !== undefined ? { memory: ($set['memoryIds'] as string[] | undefined) ?? [] } : {}),
+      ...(opts.memoryIds !== undefined ? { fact: ($set['memoryIds'] as string[] | undefined) ?? [] } : {}),
       ...(opts.chronoIds !== undefined ? { chrono: ($set['chronoIds'] as string[] | undefined) ?? [] } : {}),
     }, existing.author ?? authorRef());
   }
@@ -521,7 +521,7 @@ export async function renameFileMeta(
   await removeLinksFrom(spaceId, normSrc, 'file');
   await reconcileLinks(spaceId, normDst, 'file', {
     entity: existing.entityIds ?? [],
-    memory: existing.memoryIds ?? [],
+    fact: existing.memoryIds ?? [],
     chrono: existing.chronoIds ?? [],
   }, existing.author ?? authorRef());
 }

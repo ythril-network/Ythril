@@ -164,13 +164,13 @@ spacesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
 
   // Optional per-space entity/memory/edge/chrono counts (?counts=true)
   const includeCounts = req.query['counts'] === 'true';
-  let countsBySpaceId: Record<string, { memories: number; entities: number; edges: number; chrono: number }> = {};
+  let countsBySpaceId: Record<string, { facts: number; entities: number; edges: number; chrono: number }> = {};
   if (includeCounts) {
     const countResults = await Promise.allSettled(
       visibleSpaces.map(async s => {
         const memberIds = memberSpacesForRequest(req, s.id);
         const perMember = await Promise.all(memberIds.map(async mid => ({
-          memories: await col(`${mid}_memories`).countDocuments(),
+          facts: await col(`${mid}_facts`).countDocuments(),
           entities: await col(`${mid}_entities`).countDocuments(),
           edges:    await col(`${mid}_edges`).countDocuments(),
           chrono:   await col(`${mid}_chrono`).countDocuments(),
@@ -178,7 +178,7 @@ spacesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
         return {
           id: s.id,
           counts: {
-            memories: perMember.reduce((n, c) => n + c.memories, 0),
+            facts: perMember.reduce((n, c) => n + c.facts, 0),
             entities: perMember.reduce((n, c) => n + c.entities, 0),
             edges:    perMember.reduce((n, c) => n + c.edges, 0),
             chrono:   perMember.reduce((n, c) => n + c.chrono, 0),
@@ -453,7 +453,7 @@ spacesRouter.get('/:id/meta', globalRateLimit, requireSpaceAuthScoped('id'), asy
     : rawMeta;
   const memberIds = memberSpacesForRequest(req, id);
   const counts = await Promise.all(memberIds.map(async mid => ({
-    memories: await col(`${mid}_memories`).countDocuments(),
+    facts: await col(`${mid}_facts`).countDocuments(),
     entities: await col(`${mid}_entities`).countDocuments(),
     edges: await col(`${mid}_edges`).countDocuments(),
     chrono: await col(`${mid}_chrono`).countDocuments(),
@@ -461,7 +461,7 @@ spacesRouter.get('/:id/meta', globalRateLimit, requireSpaceAuthScoped('id'), asy
   })));
 
   const stats = {
-    memories: counts.reduce((s, c) => s + c.memories, 0),
+    facts: counts.reduce((s, c) => s + c.facts, 0),
     entities: counts.reduce((s, c) => s + c.entities, 0),
     edges: counts.reduce((s, c) => s + c.edges, 0),
     chrono: counts.reduce((s, c) => s + c.chrono, 0),
@@ -762,11 +762,11 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
     violations.push(...await validateStoredEdges(mid, resolvedMeta, SCAN_LIMIT));
 
     // Memories
-    const memories = await col(`${mid}_memories`).find({}).limit(SCAN_LIMIT).toArray();
+    const memories = await col(`${mid}_facts`).find({}).limit(SCAN_LIMIT).toArray();
     for (const mem of memories) {
       const doc = mem as unknown as { _id: string; properties?: Record<string, unknown> };
       const v = validateMemory(resolvedMeta, doc);
-      if (v.length) violations.push({ collection: 'memories', _id: String(doc._id), violations: v });
+      if (v.length) violations.push({ collection: 'facts', _id: String(doc._id), violations: v });
     }
 
     // Chrono

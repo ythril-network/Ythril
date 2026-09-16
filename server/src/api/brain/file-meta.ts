@@ -460,7 +460,7 @@ fileMetaRouter.patch('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth
   if (isStrictLinkage(wt.target)) {
     try {
       await assertRefsResolve(wt.target, 'entityIds', 'entity', entityIds as string[] | undefined);
-      await assertRefsResolve(wt.target, 'memoryIds', 'memory', memoryIds as string[] | undefined);
+      await assertRefsResolve(wt.target, 'memoryIds', 'fact', memoryIds as string[] | undefined);
       await assertRefsResolve(wt.target, 'chronoIds', 'chrono', chronoIds as string[] | undefined);
     } catch (err) {
       res.status(400).json({ error: err instanceof Error ? err.message : String(err) });

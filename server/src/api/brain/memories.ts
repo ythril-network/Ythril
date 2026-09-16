@@ -26,7 +26,7 @@ import { parseSortParam, SORTABLE_FIELDS, toMongoSort } from '../../brain/list-s
 import { checkQuota, QuotaError } from '../../quota/quota.js';
 import { resolveMemberSpaces, resolveWriteTarget, isProxySpace, isStrictLinkage, findFirstAcrossMembers, collectAcrossMembers } from '../../spaces/proxy.js';
 import { validateMemory } from '../../spaces/schema-validation.js';
-import type { MemoryDoc } from '../../config/types.js';
+import type { FactDoc } from '../../config/types.js';
 import { UUID_V4_RE, webhookToken, getSpaceMeta, applyValidation, buildMemoryFilter, ttlDaysFromBody, ttlDaysError, dupeCheckOptsFromBody, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
 import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
 import { resolveEntityIdsByName } from '../../brain/entities.js';
@@ -135,7 +135,7 @@ memoriesRouter.post('/spaces/:spaceId/memories', globalRateLimit, requireSpaceAu
   // AFTER the checks above, so every refusal this door already made keeps its own wording; this catches
   // only what used to get through. Requiredness stays above — a create demands its fields, an update
   // must not.
-  const shapeErr = shapeError('memory', req.body);
+  const shapeErr = shapeError('fact', req.body);
   if (shapeErr) { res.status(400).json({ error: shapeErr }); return; }
 
   // `F-27`: the one-call write. Shape and well-formedness here; existence is the writer's job, in one query.
@@ -181,7 +181,7 @@ memoriesRouter.post('/spaces/:spaceId/memories', globalRateLimit, requireSpaceAu
    * Links REPLACE per class and edges UPSERT — both semantics live in `applyConnections`, so no door has to
    * restate them and no two doors can disagree about them.
    */
-  await applyConnections(targetSpace, doc._id, 'memory', req.body, doc.author, webhookToken(req));
+  await applyConnections(targetSpace, doc._id, 'fact', req.body, doc.author, webhookToken(req));
   const body: Record<string, unknown> = { ...doc };
   if (quotaResult?.softBreached) body['storageWarning'] = true;
   // The schema warnings a `warn` space produces, plus the keys this route did not understand — one
@@ -202,7 +202,7 @@ memoriesRouter.get('/spaces/:spaceId/memories/:id', globalRateLimit, requireSpac
     return;
   }
   const doc = await findFirstAcrossMembers(spaceId,
-    mid => col<MemoryDoc>(`${mid}_memories`).findOne(asFilter<MemoryDoc>({ _id: id })));
+    mid => col<FactDoc>(`${mid}_facts`).findOne(asFilter<FactDoc>({ _id: id })));
   if (doc) { res.json(doc); return; }
   res.status(404).json({ error: 'Memory not found' });
 });
@@ -223,7 +223,7 @@ memoriesRouter.get('/spaces/:spaceId/memories', globalRateLimit, requireSpaceAut
 
   const limit = parseLimit(req.query['limit'], 100, 500);
   const skip = parseSkip(req.query['skip']);
-  const sortParse = parseSortParam(req.query['sort'], req.query['dir'], SORTABLE_FIELDS.memories);
+  const sortParse = parseSortParam(req.query['sort'], req.query['dir'], SORTABLE_FIELDS.facts);
   if ('error' in sortParse) {
     res.status(400).json({ error: sortParse.error });
     return;
@@ -254,10 +254,10 @@ memoriesRouter.get('/spaces/:spaceId/memories', globalRateLimit, requireSpaceAut
   // compares what it summed against what the server counted and stops. Without it, 67 identical pages summed to a
   // plausible number with nothing in any response contradicting it.
   let total = 0;
-  for (const mid of members) total += await countBrain(mid, 'memories', await filterFor(mid));
+  for (const mid of members) total += await countBrain(mid, 'facts', await filterFor(mid));
 
   res.json({
-    memories: withoutListDiagnostics(page.rows, listDiagnosticsAsked(req)), limit, skip, total,
+    facts: withoutListDiagnostics(page.rows, listDiagnosticsAsked(req)), limit, skip, total,
     // Explicit rather than left to be derived from `total`: their third ask, and a caller that knows it received a
     // partial page does not need to work out whether it did.
     truncated: skip + page.rows.length < total,
@@ -283,7 +283,7 @@ memoriesRouter.delete('/spaces/:spaceId/memories/:id', globalRateLimit, requireS
    * `409` and not `404`: the record IS there, and the caller needs to know which references to clear.
    */
   for (const mid of memberSpacesForRequest(req, spaceId)) {
-    const block = await entityDeleteBlockers(mid, id, 'memory');
+    const block = await entityDeleteBlockers(mid, id, 'fact');
     if (block) {
       res.status(409).json({ error: block.message, backlinks: block.blocking, references: block.backlinks });
       return;
@@ -335,7 +335,7 @@ memoriesRouter.patch('/spaces/:spaceId/memories/:id', globalRateLimit, requireSp
   // AFTER the checks above, so every refusal this door already made keeps its own wording; this catches
   // only what used to get through. Requiredness stays above — a create demands its fields, an update
   // must not.
-  const shapeErr = shapeError('memory', req.body);
+  const shapeErr = shapeError('fact', req.body);
   if (shapeErr) { res.status(400).json({ error: shapeErr }); return; }
 
   // `F-27`: the one-call write. Shape and well-formedness here; existence is the writer's job, in one query.
@@ -455,7 +455,7 @@ memoriesRouter.patch('/spaces/:spaceId/memories/:id', globalRateLimit, requireSp
     // See the note in entities.ts: with a precondition in play, a write that matched nothing is a 412
     // and must not fall through to the next member space.
     if (ifMatch.seq !== undefined) {
-      res.status(412).json(preconditionFailedBody('memory', (await listMemories(mid, { _id: id }, 1, 0))[0]?.seq));
+      res.status(412).json(preconditionFailedBody('fact', (await listMemories(mid, { _id: id }, 1, 0))[0]?.seq));
       return;
     }
   }

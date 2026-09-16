@@ -30,7 +30,7 @@ import { getEntityById } from './entities.js';
 import { resolveEdgeEndpointNames, resolveEdgeEndsForWrite } from './edge-endpoint-names.js';
 import { storedEdgeKind } from './entity-refs.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
-import type { EdgeDoc, EntityDoc, TombstoneDoc, ChronoEntry, MemoryDoc, FileMetaDoc } from '../config/types.js';
+import type { EdgeDoc, EntityDoc, TombstoneDoc, ChronoEntry, FactDoc, FileMetaDoc } from '../config/types.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import { tagContains, textContains, propertiesValueContains, PROPERTIES_SCAN_MAX_MS } from './tag-filter.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
@@ -44,12 +44,12 @@ export interface TraverseNode {
    * WHICH collection this node lives in.
    *
    * Absent on an entity — every node was one until chrono entries became reachable, so absence keeps every
-   * existing response byte-identical. Present and `'chrono'` on a chrono entry, or `'memory'` on a memory,
+   * existing response byte-identical. Present and `'chrono'` on a chrono entry, or `'fact'` on a memory,
    * because each is looked up in a different collection and a caller that follows `_id` needs to know where
    * to look. Guessing from `type` does not work: a chrono's `type` is `event`/`deadline`/…, a memory's is
    * optional entirely, and an entity's is whatever the space calls it.
    */
-  kind?: 'chrono' | 'memory' | 'file';
+  kind?: 'chrono' | 'fact' | 'file';
   /**
    * File META only, and only on a `kind: 'file'` node. A file's searchable body is its CHUNKS, which are
    * large and are what recall returns; a traverse answer that carried passage text would blow up in size for
@@ -82,7 +82,7 @@ export interface TraverseResult {
  * edge id that does not exist — a caller looking it up finds the chrono, not a 404."*
  *
  * **The consumer half of that was the exact opposite of true.** `getEdgeById` queries `${spaceId}_edges` and
- * nothing else, and a chrono lives in `_chrono`, a memory in `_memories`, a file in `_files`. So the
+ * nothing else, and a chrono lives in `_chrono`, a memory in `_facts`, a file in `_files`. So the
  * "helpful" id 404s on every edge-lookup path the product actually has — `GET /edges/:id`, the PATCH, and
  * `update_edge`. The one lookup that does resolve is `GET /chrono/:id`, which needs an id the caller already
  * has from the NODE. The affordance was never delivered; only the collision was.
@@ -675,7 +675,7 @@ export async function updateEdgeById(
  */
 // `!` because `LINK_CLASSES` declares all three — a missing one is a programming error, not a runtime state.
 export const CHRONO_LINK_LABEL = linkClassFor('chrono', 'entity')!.label;
-export const MEMORY_LINK_LABEL = linkClassFor('memory', 'entity')!.label;
+export const MEMORY_LINK_LABEL = linkClassFor('fact', 'entity')!.label;
 export const FILE_LINK_LABEL = linkClassFor('file', 'entity')!.label;
 
 /**

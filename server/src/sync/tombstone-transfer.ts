@@ -77,11 +77,11 @@ export async function pullTombstones(opts: {
       // Keyed by COLLECTION name, matching what `GET /api/sync/tombstones` derives from `TOMBSTONE_TYPES`.
       // A key missing here is a delete a peer told us about and we dropped on the floor — with a 200 logged
       // and the record still present, which is indistinguishable from a record nobody deleted.
-      memories?: TombstoneDoc[]; entities?: TombstoneDoc[]; edges?: TombstoneDoc[]; chrono?: TombstoneDoc[];
+      facts?: TombstoneDoc[]; entities?: TombstoneDoc[]; edges?: TombstoneDoc[]; chrono?: TombstoneDoc[];
       links?: TombstoneDoc[];
     }>(resp, 'sync peer');
     const all = [
-      ...(data.memories ?? []), ...(data.entities ?? []), ...(data.edges ?? []), ...(data.chrono ?? []),
+      ...(data.facts ?? []), ...(data.entities ?? []), ...(data.edges ?? []), ...(data.chrono ?? []),
       ...(data.links ?? []),
     ];
     // The peer we pulled from is the authenticated source. Its own tombstones (issuer === member) are

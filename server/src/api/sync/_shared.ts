@@ -22,7 +22,7 @@ import { isStrictLinkage } from '../../spaces/proxy.js';
 import { LINK_CLASSES } from '../../brain/link-adjacency.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
-import type { MemoryDoc, EntityDoc, EdgeDoc, LinkViolationDoc, BrainEmbedRecordType } from '../../config/types.js';
+import type { FactDoc, EntityDoc, EdgeDoc, LinkViolationDoc, BrainEmbedRecordType } from '../../config/types.js';
 
 export const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -98,7 +98,7 @@ export async function checkEdgeLinkViolations(
  *
  * ## What it used to check, and what that missed
  *
- * It took `entityIds` and a `docType` of `'memory' | 'chrono'`, and hardcoded the field name, the target
+ * It took `entityIds` and a `docType` of `'fact' | 'chrono'`, and hardcoded the field name, the target
  * collection and the UUID shape. So it saw ONE of the six link classes. `chrono.memoryIds` and all three of
  * a file's arrays were invisible to sync — and there was no file call site at all, so a file arriving with a
  * dangling `entityIds` was never reported even for the class that was implemented.
@@ -129,7 +129,7 @@ export async function checkEdgeLinkViolations(
 export async function checkLinkViolations(
   spaceId: string,
   docId: string,
-  docType: 'memory' | 'chrono',
+  docType: 'fact' | 'chrono',
   doc: object | undefined,
   peerInstanceId: string,
 ): Promise<void> {
@@ -269,7 +269,7 @@ export const AuthorRefSchema = z.object({
   instanceLabel: z.string().min(1),
 });
 
-export const IncomingMemoryDoc = z.object({
+export const IncomingFactDoc = z.object({
   _id: z.string().min(1),
   /*
    * A memory's TYPE, which was hashed by the divergence check and stripped on push — found by deriving the
@@ -347,7 +347,7 @@ export const IncomingFileMetaDoc = z.object({
   memoryIds: z.array(z.string()).max(500).optional(),
   chronoIds: z.array(z.string()).max(500).optional(),
   properties: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
-  /** See `IncomingMemoryDoc`: the record tier of suppression, which the receiver needs to honour it. */
+  /** See `IncomingFactDoc`: the record tier of suppression, which the receiver needs to honour it. */
   suppressEmbeddings: z.boolean().optional(),
   author: AuthorRefSchema,
   createdAt: z.string(),
@@ -436,7 +436,7 @@ export async function applyFileMetaPage(
 
 export const IncomingEntityDoc = z.object({
   _id: z.string().min(1),
-  /** See `IncomingMemoryDoc`: the record tier of suppression, which the receiver needs in order to honour it. */
+  /** See `IncomingFactDoc`: the record tier of suppression, which the receiver needs in order to honour it. */
   suppressEmbeddings: z.boolean().optional(),
   spaceId: z.string().min(1),
   name: z.string().min(1),
@@ -460,7 +460,7 @@ const RefKindSchema = z.enum(REF_KINDS);
 
 export const IncomingEdgeDoc = z.object({
   _id: z.string().min(1),
-  /** See `IncomingMemoryDoc`: the record tier of suppression, which the receiver needs in order to honour it. */
+  /** See `IncomingFactDoc`: the record tier of suppression, which the receiver needs in order to honour it. */
   suppressEmbeddings: z.boolean().optional(),
   spaceId: z.string().min(1),
   from: z.string().min(1),
@@ -537,7 +537,7 @@ export const IncomingChronoDoc = z.object({
    */
   contentRedacted: z.boolean().optional(),
   contentRedactedAt: z.string().optional(),
-  /** See `IncomingMemoryDoc`: the record tier of suppression, which the receiver needs in order to honour it. */
+  /** See `IncomingFactDoc`: the record tier of suppression, which the receiver needs in order to honour it. */
   suppressEmbeddings: z.boolean().optional(),
   spaceId: z.string().min(1),
   title: z.string().min(1),
@@ -587,7 +587,7 @@ export function decodeCursor(token: string): number {
  */
 export async function forkChainDepth(spaceId: string, docId: string | undefined): Promise<number> {
   if (!docId) return 0;
-  const coll = col<MemoryDoc>(`${spaceId}_memories`);
+  const coll = col<FactDoc>(`${spaceId}_facts`);
   const visited = new Set<string>();
   let depth = 0;
   let currentId: string | undefined = docId;
@@ -595,7 +595,7 @@ export async function forkChainDepth(spaceId: string, docId: string | undefined)
   while (currentId && depth <= MAX_FORK_DEPTH) {
     if (visited.has(currentId)) break; // cycle guard
     visited.add(currentId);
-    const doc = await coll.findOne(asFilter<MemoryDoc>({ _id: currentId })) as MemoryDoc | null;
+    const doc = await coll.findOne(asFilter<FactDoc>({ _id: currentId })) as FactDoc | null;
     if (!doc?.forkOf) break;
     depth++;
     currentId = doc.forkOf;
@@ -870,7 +870,7 @@ export function violationsAgainstLocalSchema(
       return validateEdge(meta, { label: doc['label'] as string, properties });
     case 'chrono':
       return validateChrono(meta, { type, properties });
-    case 'memory':
+    case 'fact':
       return validateMemory(meta, { type, properties });
   }
 }

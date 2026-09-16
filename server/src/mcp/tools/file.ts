@@ -549,7 +549,7 @@ export const update_file_metaTool: ToolHandler = {
     // The same check the route runs, in the same order: refuse an unresolvable reference rather than store it.
     if (isStrictLinkage(wt.target)) {
       await assertRefsResolve(wt.target, 'entityIds', 'entity', patch.entityIds);
-      await assertRefsResolve(wt.target, 'memoryIds', 'memory', patch.memoryIds);
+      await assertRefsResolve(wt.target, 'memoryIds', 'fact', patch.memoryIds);
       await assertRefsResolve(wt.target, 'chronoIds', 'chrono', patch.chronoIds);
     }
 

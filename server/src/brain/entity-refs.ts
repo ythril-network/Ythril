@@ -39,7 +39,7 @@ export type { RefKind };
 
 const REF_NOUN: Record<RefKind, string> = {
   entity: 'entity ID',
-  memory: 'memory ID',
+  fact: 'memory ID',
   chrono: 'chrono ID',
   file: 'file path',
 };
@@ -116,7 +116,7 @@ export function assertRefs(field: string, kind: RefKind, values: readonly string
 
 const COLLECTION_FOR: Record<RefKind, string> = {
   entity: 'entities',
-  memory: 'memories',
+  fact: 'facts',
   chrono: 'chrono',
   // A file's meta record, keyed by the same space-relative path the reference carries — which is why the
   // existence check below works unchanged for files: it is still one `$in` on `_id`.
@@ -167,7 +167,7 @@ export function edgeEndpointKindSchema(endpoint: 'from' | 'to'): Record<string, 
  */
 const NAME_FIELD: Record<Exclude<RefKind, 'file'>, string> = {
   entity: 'name',
-  memory: 'fact',
+  fact: 'fact',
   chrono: 'title',
 };
 

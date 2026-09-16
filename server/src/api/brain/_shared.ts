@@ -85,7 +85,7 @@ export function buildMemoryFilter(query: Record<string, unknown>): Record<string
   if (props) Object.assign(filter, propertiesValueContains(props));
   // Freetext substring over fact + description (2b-iii-a).
   const search = typeof query['search'] === 'string' ? query['search'] : undefined;
-  const or = textSearchOr(search, SEARCHABLE_FIELDS.memories);
+  const or = textSearchOr(search, SEARCHABLE_FIELDS.facts);
   if (or) Object.assign(filter, or);
   return filter;
 }

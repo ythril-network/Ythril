@@ -25,7 +25,7 @@ import {
   LINK_CLASSES, linksToAny, usesLinkRecords, linksPointingAt, linksStartingFrom, docsFromCollection,
   type LinkClass, type LinkEnd,
 } from './link-adjacency.js';
-import type { ChronoEntry, MemoryDoc, FileMetaDoc } from '../config/types.js';
+import type { ChronoEntry, FactDoc, FileMetaDoc } from '../config/types.js';
 
 /**
  * The shape both scans read a FROM record as: an id plus whichever of the three arrays the class names.
@@ -43,7 +43,7 @@ export interface LinkedRecord {
   /** The synthetic edge's label, taken from the class so the two cannot drift. */
   label: string;
   /** The record, holding only its class's projection. */
-  doc: ChronoEntry | MemoryDoc | FileMetaDoc;
+  doc: ChronoEntry | FactDoc | FileMetaDoc;
   /** The frontier entity it hangs off — the `from` of the synthetic edge. */
   via: string;
 }
@@ -64,7 +64,7 @@ export interface LinkInclusion {
 /** Whether this class is switched on for this walk. */
 function included(cls: LinkClass, inc: LinkInclusion): boolean {
   if (cls.kind === 'chrono') return inc.includeChrono === true;
-  if (cls.kind === 'memory') return inc.includeMemories === true;
+  if (cls.kind === 'fact') return inc.includeMemories === true;
   return inc.includeFiles === true;
 }
 
@@ -377,7 +377,7 @@ export async function entitiesLinkedFromRecords(
  */
 export function linkedRecordName(rec: LinkedRecord): string {
   if (rec.kind === 'chrono') return (rec.doc as ChronoEntry).title;
-  if (rec.kind === 'memory') return (rec.doc as MemoryDoc).fact;
+  if (rec.kind === 'fact') return (rec.doc as FactDoc).fact;
   return (rec.doc as FileMetaDoc).path;
 }
 
@@ -389,6 +389,6 @@ export function linkedRecordName(rec: LinkedRecord): string {
  */
 export function linkedRecordType(rec: LinkedRecord): string {
   if (rec.kind === 'chrono') return (rec.doc as ChronoEntry).type;
-  if (rec.kind === 'memory') return (rec.doc as MemoryDoc).type ?? '';
+  if (rec.kind === 'fact') return (rec.doc as FactDoc).type ?? '';
   return '';
 }

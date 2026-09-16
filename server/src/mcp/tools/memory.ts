@@ -105,7 +105,7 @@ export const save_factTool: ToolHandler = {
     // `W-14`..`W-22`: the same table the REST door reads, so the two cannot disagree about a value. The
     // dispatcher has already run this tool's own schema; what reaches here is what the schema does not
     // declare.
-    const shapeErr = shapeError('memory', a);
+    const shapeErr = shapeError('fact', a);
     if (shapeErr) throw new Error(shapeErr);
     // `M-2`: on a converted space the six arrays are no longer a write surface — see `arrayWriteError`.
     // Against the WRITE TARGET, because a proxy holds no records of its own and its marker would answer
@@ -167,7 +167,7 @@ export const save_factTool: ToolHandler = {
      * every entity and says nothing about the memories, and links are never add-only the way tags are.
      */
     // Links REPLACE per class, edges UPSERT. Both semantics live in `applyConnections`.
-    await applyConnections(ts, mem._id, 'memory', a, mem.author, ctx.actor);
+    await applyConnections(ts, mem._id, 'fact', a, mem.author, ctx.actor);
     const warnings: string[] = [];
     if (mem.similar && mem.similar.length > 0) {
       warnings.push(`⚠️ Possible duplicate — ${mem.similar.length} existing memor${mem.similar.length === 1 ? 'y is' : 'ies are'} highly similar: ${mem.similar.map(s => `"${s.summary}" (ID ${s._id}, ${s.score.toFixed(2)})`).join('; ')}. This memory was still stored; pass checkDuplicates:false to skip this check, or update the existing one instead.`);
@@ -294,7 +294,7 @@ export const update_factTool: ToolHandler = {
     // `W-14`..`W-22`: the same table the REST door reads, so the two cannot disagree about a value. The
     // dispatcher has already run this tool's own schema; what reaches here is what the schema does not
     // declare.
-    const shapeErr = shapeError('memory', a);
+    const shapeErr = shapeError('fact', a);
     if (shapeErr) throw new Error(shapeErr);
     // `M-2`: on a converted space the six arrays are no longer a write surface — see `arrayWriteError`.
     // Against the WRITE TARGET, because a proxy holds no records of its own and its marker would answer
@@ -418,7 +418,7 @@ export const delete_factTool: ToolHandler = {
      * their own refusal for entities and said different things. The sentence and the rows come from
      * `entityDeleteBlockers`; a door decides only how to report them.
      */
-    const block = await findFirstAcrossMembers(wt.target, mid => entityDeleteBlockers(mid, id, 'memory'));
+    const block = await findFirstAcrossMembers(wt.target, mid => entityDeleteBlockers(mid, id, 'fact'));
     if (block) throw new Error(block.message);
     const deleted = await findFirstAcrossMembers(wt.target, mid => deleteMemory(mid, id, ctx.actor));
     if (!deleted) throw new Error(`Memory '${id}' not found`);

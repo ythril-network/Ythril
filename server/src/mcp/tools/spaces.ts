@@ -36,7 +36,7 @@ export const list_spacesTool: ToolHandler = {
       accessibleSpaces.map(async s => {
         const memberIds = memberSpacesWithin(s.id, accessibleSpaceIds);
         const perMember = await Promise.all(memberIds.map(async mid => ({
-          memories: await col(`${mid}_memories`).countDocuments(),
+          facts: await col(`${mid}_facts`).countDocuments(),
           entities: await col(`${mid}_entities`).countDocuments(),
           edges:    await col(`${mid}_edges`).countDocuments(),
           chrono:   await col(`${mid}_chrono`).countDocuments(),
@@ -44,7 +44,7 @@ export const list_spacesTool: ToolHandler = {
         return {
           id: s.id,
           counts: {
-            memories: perMember.reduce((n, c) => n + c.memories, 0),
+            facts: perMember.reduce((n, c) => n + c.facts, 0),
             entities: perMember.reduce((n, c) => n + c.entities, 0),
             edges:    perMember.reduce((n, c) => n + c.edges, 0),
             chrono:   perMember.reduce((n, c) => n + c.chrono, 0),
@@ -52,7 +52,7 @@ export const list_spacesTool: ToolHandler = {
         };
       }),
     );
-    const countsBySpaceId: Record<string, { memories: number; entities: number; edges: number; chrono: number }> = {};
+    const countsBySpaceId: Record<string, { facts: number; entities: number; edges: number; chrono: number }> = {};
     for (const r of spaceCountResults) {
       if (r.status === 'fulfilled') countsBySpaceId[r.value.id] = r.value.counts;
     }
@@ -62,7 +62,7 @@ export const list_spacesTool: ToolHandler = {
       id: s.id,
       label: s.label ?? null,
       purpose: spacePurpose(s) ?? null,
-      counts: countsBySpaceId[s.id] ?? { memories: 0, entities: 0, edges: 0, chrono: 0 },
+      counts: countsBySpaceId[s.id] ?? { facts: 0, entities: 0, edges: 0, chrono: 0 },
       // `null` rather than an omission: a space with no quota is a FACT about that space, and a missing key
       // reads as "this tool does not report quotas" — which is the misunderstanding this whole change fixes.
       maxGiB: s.maxGiB ?? null,
@@ -96,13 +96,13 @@ export const space_statsTool: ToolHandler = {
     const { callSpace , accessibleSpaceIds } = ctx;
     const memberIds = memberSpacesWithin(callSpace, accessibleSpaceIds);
     const counts = await Promise.all(memberIds.map(async mid => ({
-      memories: await col(`${mid}_memories`).countDocuments(),
+      facts: await col(`${mid}_facts`).countDocuments(),
       entities: await col(`${mid}_entities`).countDocuments(),
       edges: await col(`${mid}_edges`).countDocuments(),
       chrono: await col(`${mid}_chrono`).countDocuments(),
       files: await col(`${mid}_files`).countDocuments(),
     })));
-    const memories = counts.reduce((s, c) => s + c.memories, 0);
+    const memories = counts.reduce((s, c) => s + c.facts, 0);
     const entities = counts.reduce((s, c) => s + c.entities, 0);
     const edges = counts.reduce((s, c) => s + c.edges, 0);
     const chrono = counts.reduce((s, c) => s + c.chrono, 0);
@@ -175,7 +175,7 @@ export const space_metaTool: ToolHandler = {
     const metaBlock = resolveMetaRefs(metaSpace?.meta ?? {});
     const metaMemberIds = memberSpacesWithin(callSpace, accessibleSpaceIds);
     const metaCounts = await Promise.all(metaMemberIds.map(async mid => ({
-      memories: await col(`${mid}_memories`).countDocuments(),
+      facts: await col(`${mid}_facts`).countDocuments(),
       entities: await col(`${mid}_entities`).countDocuments(),
       edges: await col(`${mid}_edges`).countDocuments(),
       chrono: await col(`${mid}_chrono`).countDocuments(),
@@ -190,7 +190,7 @@ export const space_metaTool: ToolHandler = {
       spaceName: metaSpace?.label ?? callSpace,
       ...metaPublic,
       stats: {
-        memories: metaCounts.reduce((s, c) => s + c.memories, 0),
+        facts: metaCounts.reduce((s, c) => s + c.facts, 0),
         entities: metaCounts.reduce((s, c) => s + c.entities, 0),
         edges: metaCounts.reduce((s, c) => s + c.edges, 0),
         chrono: metaCounts.reduce((s, c) => s + c.chrono, 0),
@@ -794,7 +794,7 @@ export const delete_space_dataTool: ToolHandler = {
     }
 
     const result = await wipeSpace(callSpace, wipeTypes);
-    const summary = `Wiped [${typesLabel}] in space '${callSpace}': ${result.memories} memories, ${result.entities} entities, ${result.edges} edges, ${result.chrono} chrono, ${result.files} files.`;
+    const summary = `Wiped [${typesLabel}] in space '${callSpace}': ${result.facts} memories, ${result.entities} entities, ${result.edges} edges, ${result.chrono} chrono, ${result.files} files.`;
     return {
       content: [{ type: 'text' as const, text: summary }],
     };

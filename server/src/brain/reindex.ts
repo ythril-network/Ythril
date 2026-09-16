@@ -44,7 +44,7 @@ import { clearReindexFlag } from '../spaces/_shared.js';
 import { resolveEdgeEndpointNames } from './edge-endpoint-names.js';
 import { reindexInProgress } from '../metrics/registry.js';
 import { log } from '../util/log.js';
-import type { SpaceConfig, MemoryDoc, EntityDoc, EdgeDoc, ChronoEntry, FileMetaDoc } from '../config/types.js';
+import type { SpaceConfig, FactDoc, EntityDoc, EdgeDoc, ChronoEntry, FileMetaDoc } from '../config/types.js';
 
 /**
  * One job per process, and the guard lives HERE.
@@ -161,17 +161,17 @@ export function startReindex(plan: ReindexPlan): void {
               // eslint-disable-next-line no-constant-condition
               while (true) {
                 const q: Record<string, unknown> = cursor ? { _id: { $gt: cursor } } : {};
-                const batch: MemoryDoc[] = await col<MemoryDoc>(`${mid}_memories`)
-                  .find(asFilter<MemoryDoc>(q), { projection: { _id: 1, fact: 1, tags: 1, entityIds: 1, description: 1, properties: 1, type: 1, suppressEmbeddings: 1,} })
+                const batch: FactDoc[] = await col<FactDoc>(`${mid}_facts`)
+                  .find(asFilter<FactDoc>(q), { projection: { _id: 1, fact: 1, tags: 1, entityIds: 1, description: 1, properties: 1, type: 1, suppressEmbeddings: 1,} })
                   .sort({ _id: 1 })
                   .limit(BATCH)
-                  .toArray() as MemoryDoc[];
+                  .toArray() as FactDoc[];
                 if (batch.length === 0) break;
                 for (const doc of batch) {
                   try {
-                    if (embeddingSuppressedFor(mid, 'memory', doc as unknown as Record<string, unknown>)) { suppressed++; continue; }
+                    if (embeddingSuppressedFor(mid, 'fact', doc as unknown as Record<string, unknown>)) { suppressed++; continue; }
                     const result = await embed(memoryEmbedText(doc.fact, doc.tags ?? [], doc.description, doc.properties));
-                    await col<MemoryDoc>(`${mid}_memories`).updateOne(
+                    await col<FactDoc>(`${mid}_facts`).updateOne(
                       { _id: doc._id },
                       { $set: { embedding: result.vector, embeddingModel: result.model } },
                     );

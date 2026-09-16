@@ -102,7 +102,7 @@ const entityProperties: Check = v => plainObject('properties')(v) ?? primitivePr
  * `type` on a chrono entry is checked against the SPACE's allowlist, which this module cannot see.
  */
 const SHAPE: Record<ShapedType, Record<string, Check>> = {
-  memory: {
+  fact: {
     // `nonEmptyStr` and not `str`: the create door has always refused `''`, and the update door refused it
     // too. Only the LENGTH cap was missing from the update, on both surfaces.
     fact: v => nonEmptyStr('fact')(v)

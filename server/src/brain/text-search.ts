@@ -16,7 +16,7 @@ import { escapeRegex } from '../util/redos.js';
 export const SEARCHABLE_FIELDS = {
   entities: ['name', 'description'],
   edges: ['label', 'description'],
-  memories: ['fact', 'description'],
+  facts: ['fact', 'description'],
   chrono: ['title', 'description'],
   files: ['path', 'description'],
 } as const;

@@ -190,7 +190,7 @@ export const QUERY_FILTER_OPERATORS = [
 /** Format a RecallResult as a single human-readable summary line. */
 export function formatRecallSummary(r: RecallResult): string {
   switch (r.type) {
-    case 'memory':
+    case 'fact':
       return r.fact;
     case 'entity':
       return `${r.name} (${r.entityType})`;
@@ -252,7 +252,7 @@ export function toRecallRecord(
   if (r.description !== undefined) common['description'] = r.description;
   if (r.properties !== undefined) common['properties'] = r.properties;
   switch (r.type) {
-    case 'memory':
+    case 'fact':
       return { ...common, fact: r.fact, ...(r.entityIds !== undefined ? { entityIds: r.entityIds } : {}) };
     case 'entity':
       return { ...common, name: r.name, type: r.entityType };

@@ -82,7 +82,7 @@ const DEFAULT_REMOTE_PAIR_BUDGET = 2000;
 // Chrono is swept alongside memories and entities: a calendar is exactly where the same thing gets logged
 // twice with conflicting states, and its `status` is a single-valued claim the structured pass can settle
 // without a model. See structured-claims.ts for why its dates are deliberately not part of that.
-export const DEFAULT_TYPES: DupeScanType[] = ['memory', 'entity', 'chrono'];
+export const DEFAULT_TYPES: DupeScanType[] = ['fact', 'entity', 'chrono'];
 const TOPK = 5;
 
 // The record-to-collection map is imported: it was declared here and in four other modules, all five

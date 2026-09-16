@@ -104,6 +104,23 @@ async function main(): Promise<void> {
   // initialise the general space immediately after writing the config.
   await connectMongo();
 
+  /*
+   * BEFORE ANY SERVICE READS A COLLECTION. 5.0 renamed the knowledge type `memory` to `fact`, and a
+   * collection is named after its type — so an instance that skipped this would look for
+   * `<space>_facts`, not find it, create an empty one, and report zero facts in a space holding
+   * thousands. Nothing would error: reading a collection that does not exist is an empty result, which
+   * is the same shape as a space nobody has written to.
+   *
+   * Safe as a BOOT migration, where a synced-content migration would have to be lazy: this renames a
+   * container and touches no document, so every `_id`, field and hash is unchanged and a peer cannot
+   * write the old shape back. The wire format changing in the same release is protected separately, by
+   * the peer floor refusing anything below 5.0.0 at the handshake.
+   */
+  {
+    const { renameMemoriesToFacts } = await import('./db/rename-memories-to-facts.js');
+    await renameMemoriesToFacts();
+  }
+
   // Validate $vectorSearch support and log the result.
   {
     const uri = getMongoUri();

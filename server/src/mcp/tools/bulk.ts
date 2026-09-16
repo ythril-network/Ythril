@@ -55,7 +55,7 @@ export const save_bulkTool: ToolHandler = {
           type: 'object',
           properties: {
             space: s.requiredSpace,
-            memories: {
+            facts: {
               type: 'array',
               maxItems: 500,
               description: 'Memory entries to insert (max 500; excess entries are dropped). Same fields as the `remember` tool.',
@@ -63,7 +63,7 @@ export const save_bulkTool: ToolHandler = {
                 type: 'object',
                 additionalProperties: false,
                 properties: {
-                  '$ref': refDeclareSchema('memory'),
+                  '$ref': refDeclareSchema('fact'),
                   fact:        { type: 'string', minLength: 1, maxLength: 50000, description: 'The fact or memory to store (1–50 000 characters).' },
                   tags:        {
                     type: 'array', items: { type: 'string' },
@@ -244,7 +244,7 @@ export const save_bulkTool: ToolHandler = {
     const ts = wt.target;
 
     const result = await bulkWrite(ts, {
-      memories: a['memories'], entities: a['entities'], edges: a['edges'], chrono: a['chrono'],
+      facts: a['facts'], entities: a['entities'], edges: a['edges'], chrono: a['chrono'],
       // `F-25`: who wrote it, for the conversion pre-flight.
       actor: ctx.actor,
     });

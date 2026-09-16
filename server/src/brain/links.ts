@@ -172,9 +172,9 @@ function allClassesEmpty(fromKind: RefKind): DesiredLinks {
  * else, a chrono entry names entities and memories, a file names all three. An entity is only ever a `to`.
  */
 const CLASSES_BY_FROM: Partial<Record<RefKind, readonly RefKind[]>> = {
-  memory: ['entity'],
-  chrono: ['entity', 'memory'],
-  file: ['entity', 'memory', 'chrono'],
+  fact: ['entity'],
+  chrono: ['entity', 'fact'],
+  file: ['entity', 'fact', 'chrono'],
 };
 
 /** A removal has no author to attribute; the tombstone carries the instance id instead. */
@@ -188,7 +188,7 @@ const NO_AUTHOR: AuthorRef = { instanceId: '', instanceLabel: '' };
  * name in scope when it needs this.
  */
 export const LINK_BEARING_COLLECTIONS: Record<string, RefKind | undefined> = {
-  memories: 'memory',
+  facts: 'fact',
   chrono: 'chrono',
   files: 'file',
 };
@@ -353,7 +353,7 @@ export async function reconcileLinksForDocument(
   const ids = (k: string) => (Array.isArray(doc[k]) ? doc[k] as string[] : undefined);
   const desired: DesiredLinks = {
     ...(ids('entityIds') !== undefined ? { entity: ids('entityIds')! } : {}),
-    ...(ids('memoryIds') !== undefined ? { memory: ids('memoryIds')! } : {}),
+    ...(ids('memoryIds') !== undefined ? { fact: ids('memoryIds')! } : {}),
     ...(ids('chronoIds') !== undefined ? { chrono: ids('chronoIds')! } : {}),
   };
   if (Object.keys(desired).length === 0) return;

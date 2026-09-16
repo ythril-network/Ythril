@@ -111,7 +111,7 @@ export const EndpointMemberZ = z.string().min(1).max(200).refine(
   },
   {
     message: 'an endpoints member is an entity type name, optionally written "entity:<type>". Other knowledge-type '
-      + 'prefixes (memory:, chrono:, edge:) are reserved for when those records can be edge endpoints, and are '
+      + 'prefixes (fact:, chrono:, edge:) are reserved for when those records can be edge endpoints, and are '
       + 'refused now so they cannot be read as type names later. Use "UNTYPED" for entities with no type.',
   },
 );
@@ -527,7 +527,7 @@ export const UpdateSpaceBody = z.object({
   recordTtlDays: z.union([
     TtlWindowZ,
     z.object({
-      entity: TtlWindowZ, memory: TtlWindowZ, edge: TtlWindowZ, chrono: TtlWindowZ, file: TtlWindowZ,
+      entity: TtlWindowZ, fact: TtlWindowZ, edge: TtlWindowZ, chrono: TtlWindowZ, file: TtlWindowZ,
     }).strict().refine(v => Object.values(v).some(x => x !== undefined), {
       message: 'recordTtlDays needs at least one of entity, memory, edge, chrono or file',
     }),

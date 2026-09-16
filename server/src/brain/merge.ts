@@ -26,7 +26,7 @@ import { validateEdge } from '../spaces/schema-validation.js';
 import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
 import { validateEntity, getSpaceMeta, applyValidation, type SchemaViolation } from '../spaces/schema-validation.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
-import type { EntityDoc, EdgeDoc, MemoryDoc, ChronoEntry, FileMetaDoc, TombstoneDoc, SpaceMeta, PropertySchema } from '../config/types.js';
+import type { EntityDoc, EdgeDoc, FactDoc, ChronoEntry, FileMetaDoc, TombstoneDoc, SpaceMeta, PropertySchema } from '../config/types.js';
 
 // ── Public types ───────────────────────────────────────────────────────────
 
@@ -606,17 +606,17 @@ export async function executeMerge(
       }
 
       // ── 2. Relink memories ─────────────────────────────────────────────
-      const memoryColl = col<MemoryDoc>(`${spaceId}_memories`);
+      const memoryColl = col<FactDoc>(`${spaceId}_facts`);
       const affectedMemories = await memoryColl
-        .find(asFilter<MemoryDoc>({ spaceId, entityIds: absorbed._id }), { session })
-        .toArray() as MemoryDoc[];
+        .find(asFilter<FactDoc>({ spaceId, entityIds: absorbed._id }), { session })
+        .toArray() as FactDoc[];
       for (const mem of affectedMemories) {
         const newEntityIds = mem.entityIds.map(id => id === absorbed._id ? survivor._id : id);
         const dedupedIds = [...new Set(newEntityIds)];
         const memSeq = await nextSeq(spaceId);
         await memoryColl.updateOne(
-          asFilter<MemoryDoc>({ _id: mem._id }),
-          asUpdate<MemoryDoc>({ $set: { entityIds: dedupedIds, updatedAt: now, seq: memSeq } }),
+          asFilter<FactDoc>({ _id: mem._id }),
+          asUpdate<FactDoc>({ $set: { entityIds: dedupedIds, updatedAt: now, seq: memSeq } }),
           { session },
         );
       }

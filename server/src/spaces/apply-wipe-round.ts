@@ -41,7 +41,7 @@ export function applyWipeRoundIfPassed(round: VoteRound, where: string): boolean
     wipeSpace(round.spaceId!, types)
       .then(r => log.info(
         `space_wipe round ${round.roundId} passed (${where}): emptied '${round.spaceId}' — `
-        + `${r.memories} memories, ${r.entities} entities, ${r.edges} edges, ${r.chrono} chrono, ${r.files} files`,
+        + `${r.facts} memories, ${r.entities} entities, ${r.edges} edges, ${r.chrono} chrono, ${r.files} files`,
       ))
       .catch((err: unknown) => log.error(`space_wipe side-effect (${where}): ${err}`)),
   ).catch((err: unknown) => log.error(`space_wipe import (${where}): ${err}`));

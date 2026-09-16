@@ -33,7 +33,7 @@ import { needsReindex } from '../../spaces/_shared.js';
 import { planReindex, startReindex } from '../../brain/reindex.js';
 import { log } from '../../util/log.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
-import type { MemoryDoc, EntityDoc, EdgeDoc, ChronoEntry, FileMetaDoc } from '../../config/types.js';
+import type { FactDoc, EntityDoc, EdgeDoc, ChronoEntry, FileMetaDoc } from '../../config/types.js';
 import { RECORD_TYPES } from '../../config/types.js';
 import { reindexInProgress } from '../../metrics/registry.js';
 import { UUID_V4_RE } from './_shared.js';
@@ -72,7 +72,7 @@ searchRouter.get('/spaces/:spaceId/stats', globalRateLimit, requireSpaceAuth, as
   }
   const memberIds = memberSpacesForRequest(req, spaceId);
   const counts = await Promise.all(memberIds.map(async mid => ({
-    memories: await countMemories(mid),
+    facts: await countMemories(mid),
     entities: await col(`${mid}_entities`).countDocuments(),
     edges: await col(`${mid}_edges`).countDocuments(),
     chrono: await col(`${mid}_chrono`).countDocuments(),
@@ -84,7 +84,7 @@ searchRouter.get('/spaces/:spaceId/stats', globalRateLimit, requireSpaceAuth, as
     // defect the queue fixed: a state the system knew about and never reported.
     embedQueue: await getEmbedJobCounts(mid),
   })));
-  const memories = counts.reduce((s, c) => s + c.memories, 0);
+  const memories = counts.reduce((s, c) => s + c.facts, 0);
   const entities = counts.reduce((s, c) => s + c.entities, 0);
   const edges = counts.reduce((s, c) => s + c.edges, 0);
   const chrono = counts.reduce((s, c) => s + c.chrono, 0);

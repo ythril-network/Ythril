@@ -143,7 +143,7 @@ interface RecallBase {
 }
 
 export interface RecallMemory extends RecallBase {
-  type: 'memory';
+  type: 'fact';
   fact: string;
   entityIds?: string[];
 }
@@ -765,7 +765,7 @@ export async function checkDuplicates(
 
 /** Maps knowledge types to their MongoDB collection suffixes. */
 const KNOWLEDGE_COLLECTION: Record<RecallKnowledgeType, string> = {
-  memory: 'memories',
+  fact: 'facts',
   entity: 'entities',
   edge: 'edges',
   chrono: 'chrono',
@@ -785,7 +785,7 @@ function recallProjection(knowledgeType: RecallKnowledgeType): {
 } {
   const commonProject = { _id: 1, spaceId: 1, _knowledgeType: 1, score: 1, createdAt: 1, updatedAt: 1, seq: 1, embeddingModel: 1, matchedText: 1 };
   let typeProject: Record<string, number> = {};
-  if (knowledgeType === 'memory') {
+  if (knowledgeType === 'fact') {
     typeProject = { fact: 1, tags: 1, entityIds: 1, description: 1, properties: 1 };
   } else if (knowledgeType === 'entity') {
     typeProject = { name: 1, type: 1, tags: 1, description: 1, properties: 1 };
@@ -1006,8 +1006,8 @@ function mapToRecallResult(doc: Record<string, unknown>, knowledgeType: RecallKn
     matchedText: doc['matchedText'] as string | undefined,
   };
   switch (knowledgeType) {
-    case 'memory':
-      return { ...base, type: 'memory', fact: doc['fact'] as string, entityIds: doc['entityIds'] as string[] | undefined };
+    case 'fact':
+      return { ...base, type: 'fact', fact: doc['fact'] as string, entityIds: doc['entityIds'] as string[] | undefined };
     case 'entity':
       return { ...base, type: 'entity', name: doc['name'] as string, entityType: doc['type'] as string };
     case 'edge':

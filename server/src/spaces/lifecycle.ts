@@ -13,7 +13,7 @@ import { getConfig, saveConfig, mutateConfig, getEmbeddingConfig, getDataRoot } 
 import { ensureSpaceFilesDir } from '../files/files.js';
 import { invalidateUsageCache } from '../quota/quota.js';
 import { log } from '../util/log.js';
-import type { SpaceConfig, SpaceMeta, MemoryDoc } from '../config/types.js';
+import type { SpaceConfig, SpaceMeta, FactDoc } from '../config/types.js';
 import { VECTOR_INDEXED_COLLECTIONS, buildSpaceVectorIndexes, finalizeSpaceIndexReady } from './vector-index.js';
 import { SPACE_COLLECTIONS, repairStaleSpaceIds, dropLegacyPrefixedIndexes, dropSupersededEdgeIdentityIndex, pendingOpConflictMessage , setReindexNeeded, beginSpaceOp, endSpaceOp, spaceOpInFlight } from './_shared.js';
 import { moveSpaceData, applySpaceRenameToConfig } from './rename.js';
@@ -47,7 +47,7 @@ export async function initSpace(
 
   // Regular indexes.
   //
-  // P10 migration: these collections are ALREADY per-space (`{spaceId}_memories`, …), so every
+  // P10 migration: these collections are ALREADY per-space (`{spaceId}_facts`, …), so every
   // document in them carries the same `spaceId` value. Leading that field in a compound index adds
   // write cost and index bytes with zero selectivity. The indexes below are de-prefixed
   // (`{seq:1}` not `{spaceId:1, seq:1}`); `dropLegacyPrefixedIndexes` removes any old
@@ -55,7 +55,7 @@ export async function initSpace(
   // boot rebuilds them, no `spaceId`-leading index remains, so the drop loop finds nothing and the
   // `createIndex` calls are no-ops. (The former standalone entity-unique-index migration is folded
   // in here — a stale `spaceId_1_name_1_type_1` unique index simply gets dropped like any other.)
-  const memoriesColl = db.collection(`${spaceId}_memories`);
+  const memoriesColl = db.collection(`${spaceId}_facts`);
   const entitiesColl = db.collection(`${spaceId}_entities`);
   const edgesColl = db.collection(`${spaceId}_edges`);
   const chronoColl = db.collection(`${spaceId}_chrono`);
@@ -221,7 +221,7 @@ export async function initSpace(
   // Check for embedding model mismatch — if stored memories use a different
   // model than configured, recall results would be semantically invalid.
   const embCfg2 = getEmbeddingConfig();
-  const sample = await col<MemoryDoc>(`${spaceId}_memories`).findOne(
+  const sample = await col<FactDoc>(`${spaceId}_facts`).findOne(
     {},
     { projection: { embeddingModel: 1 } },
   );
@@ -448,7 +448,7 @@ export async function dropSpaceData(spaceId: string): Promise<string[]> {
   // **This is a prefix match with no boundary check, and it DROPS.** It is safe only because a space id is
   // validated `^[a-z0-9-]+$` everywhere one is accepted (`api/spaces.ts` create + rename,
   // `api/networks/join.ts`), so `_` can never appear inside an id and is therefore an unambiguous
-  // separator: a sibling space `work-archive` owns `work-archive_memories`, which does not start with
+  // separator: a sibling space `work-archive` owns `work-archive_facts`, which does not start with
   // `work_`. Relax that charset to permit `_` and deleting `work` would silently drop `work_archive`'s
   // collections — another space's data, with no confirmation and no recovery outside a backup.
   // `space-id-prefix-safety.test.js` pins the pattern for exactly this reason.
@@ -611,14 +611,14 @@ export function candidateTypesForWipe(targets: ReadonlySet<WipeCollectionType>):
    * of the two it is.
    */
   const MAP: Record<WipeCollectionType, string | null> = {
-    memories: 'memory', entities: 'entity', edges: 'edge', chrono: 'chrono', files: 'file',
+    facts: 'fact', entities: 'entity', edges: 'edge', chrono: 'chrono', files: 'file',
     links: null,
   };
   return Array.from(targets).map(t => MAP[t]).filter((t): t is string => t !== null && t !== undefined);
 }
 
 export interface WipeResult {
-  memories: number;
+  facts: number;
   entities: number;
   edges: number;
   chrono: number;
@@ -662,7 +662,7 @@ export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): 
   // Run all applicable deletes in parallel.
   const zero = Promise.resolve({ deletedCount: 0 });
   const [memRes, entRes, edgeRes, chronoRes, fileRes, linkRes] = await Promise.all([
-    targets.has('memories') ? col(`${spaceId}_memories`).deleteMany({}) : zero,
+    targets.has('facts') ? col(`${spaceId}_facts`).deleteMany({}) : zero,
     targets.has('entities') ? col(`${spaceId}_entities`).deleteMany({}) : zero,
     targets.has('edges') ? col(`${spaceId}_edges`).deleteMany({}) : zero,
     targets.has('chrono') ? col(`${spaceId}_chrono`).deleteMany({}) : zero,
@@ -728,7 +728,7 @@ export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): 
   invalidateUsageCache(); // a wipe frees disk + shrinks brain — honour it in the next quota check
 
   const result: WipeResult = {
-    memories: memRes.deletedCount ?? 0,
+    facts: memRes.deletedCount ?? 0,
     entities: entRes.deletedCount ?? 0,
     edges: edgeRes.deletedCount ?? 0,
     chrono: chronoRes.deletedCount ?? 0,
@@ -736,7 +736,7 @@ export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): 
     links: linkRes.deletedCount ?? 0,
   };
   const typesLabel = isFullWipe ? 'all' : Array.from(targets).join(', ');
-  log.info(`Wiped space '${spaceId}' [${typesLabel}]: ${result.memories} memories, ${result.entities} entities, ${result.edges} edges, ${result.chrono} chrono, ${result.files} files, ${result.links} links`);
+  log.info(`Wiped space '${spaceId}' [${typesLabel}]: ${result.facts} memories, ${result.entities} entities, ${result.edges} edges, ${result.chrono} chrono, ${result.files} files, ${result.links} links`);
   return result;
 }
 

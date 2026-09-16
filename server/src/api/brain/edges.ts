@@ -240,7 +240,7 @@ edgesRouter.get('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, asy
    * to showing that path, which is what a reader wants to see.
    */
   const nameMap = new Map<string, string>();
-  const byKind = new Map<'entity' | 'memory' | 'chrono', Set<string>>();
+  const byKind = new Map<'entity' | 'fact' | 'chrono', Set<string>>();
   for (const e of all) {
     for (const [id, kind] of [[e.from, edgeEndpointKind(e.fromKind)], [e.to, edgeEndpointKind(e.toKind)]] as const) {
       if (kind === 'file') continue;

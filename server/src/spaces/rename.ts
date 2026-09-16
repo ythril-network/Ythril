@@ -26,7 +26,7 @@ export async function moveSpaceData(oldId: string, newId: string): Promise<strin
   //    under the old prefix remain after a partial run, so this is idempotent.
   //
   //    Prefix match with no boundary check — safe only because a space id is validated `^[a-z0-9-]+$`,
-  //    so `_` cannot occur inside an id and separates cleanly (`work-archive_memories` does not start with
+  //    so `_` cannot occur inside an id and separates cleanly (`work-archive_facts` does not start with
   //    `work_`). See the fuller note on the drop path in `lifecycle.ts`, which has the same dependency with
   //    worse consequences. Pinned by `space-id-prefix-safety.test.js`.
   const existingColls = await db.listCollections().toArray();

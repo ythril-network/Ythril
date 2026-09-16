@@ -236,7 +236,7 @@ export type ValidationMode = 'off' | 'warn' | 'strict';
  *
  * Not to be confused with {@link RefKind}, which is what a reference points AT and deliberately differs.
  */
-export const KNOWLEDGE_TYPES = ['entity', 'memory', 'edge', 'chrono'] as const;
+export const KNOWLEDGE_TYPES = ['entity', 'fact', 'edge', 'chrono'] as const;
 
 /** Knowledge type keys used in typeSchemas. Derived, so it cannot drift from the tuple above. */
 export type KnowledgeType = typeof KNOWLEDGE_TYPES[number];
@@ -280,7 +280,7 @@ export type RecordType = typeof RECORD_TYPES[number];
 // `BRAIN_COLLECTIONS` derives as `string[]` — which compiles and silently stops being a literal union, so
 // every `Record<BrainCollection, X>` downstream loses its keys.
 export const COLLECTION_SUFFIX = {
-  entity: 'entities', memory: 'memories', edge: 'edges', chrono: 'chrono',
+  entity: 'entities', fact: 'facts', edge: 'edges', chrono: 'chrono',
 } as const satisfies Record<KnowledgeType, string>;
 
 /**
@@ -411,7 +411,7 @@ export type BrainCollection = (typeof BRAIN_COLLECTIONS)[number];
  * drift at exactly the moment a kind is added, with the compiler silent because both are individually valid.
  * This is the first runtime value in an otherwise type-only module for that reason alone.
  */
-export const REF_KINDS = ['entity', 'memory', 'chrono', 'file'] as const;
+export const REF_KINDS = ['entity', 'fact', 'chrono', 'file'] as const;
 
 /** @see REF_KINDS — derived, never written out a second time. */
 export type RefKind = typeof REF_KINDS[number];

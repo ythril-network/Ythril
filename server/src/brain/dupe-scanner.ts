@@ -48,7 +48,7 @@ const DEFAULT_BATCH_SIZE = 200;
 const DEFAULT_MAX_PER_RUN = 5000;
 // Chrono joins the default sweep: logging the same event twice is one of the commonest ways a knowledge
 // base grows redundant, and nothing else was looking for it. Override per instance with `dupeScanner.types`.
-export const DEFAULT_TYPES: DupeScanType[] = ['memory', 'entity', 'chrono'];
+export const DEFAULT_TYPES: DupeScanType[] = ['fact', 'entity', 'chrono'];
 const TOPK = 5;                          // similar records fetched per seed
 const SCAN_STATE = 'ythril_dupe_scan_state';
 

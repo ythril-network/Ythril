@@ -331,7 +331,7 @@ export function rankOf(r: RecallResult): number {
 export function rerankTextOf(r: RecallResult): string {
   const raw = (() => {
     switch (r.type) {
-      case 'memory': return r.fact;
+      case 'fact': return r.fact;
       case 'entity': return [r.name, r.entityType, r.description].filter(Boolean).join(' — ');
       case 'edge':   return [`${r.from} → ${r.label} → ${r.to}`, r.description].filter(Boolean).join(' — ');
       case 'chrono': return [r.title, r.description].filter(Boolean).join(' — ');
@@ -344,7 +344,7 @@ export function rerankTextOf(r: RecallResult): string {
 /** One-line human summary of a recall result, for duplicate feedback. */
 export function summariseRecall(r: RecallResult): string {
   switch (r.type) {
-    case 'memory': return r.fact.length > 120 ? `${r.fact.slice(0, 117)}…` : r.fact;
+    case 'fact': return r.fact.length > 120 ? `${r.fact.slice(0, 117)}…` : r.fact;
     case 'entity': return `${r.name} (${r.entityType})`;
     case 'edge': return `${r.from} → ${r.label} → ${r.to}`;
     case 'chrono': return r.title;

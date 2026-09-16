@@ -238,7 +238,7 @@ export async function createChrono(
     // Both classes, from the CONVERGED document rather than the parameters: this branch merges, so what
     // the entry now says is the only correct input to a reconcile.
     await reconcileLinks(spaceId, converged._id, 'chrono',
-      { entity: converged.entityIds ?? [], memory: converged.memoryIds ?? [] }, converged.author);
+      { entity: converged.entityIds ?? [], fact: converged.memoryIds ?? [] }, converged.author);
     // `chrono.updated`, not `created` — a subscriber must be able to tell a converged retry from a new entry.
     if (actor) emitWebhookEvent({ event: 'chrono.updated', spaceId, entry: { ...converged, embedding: undefined }, ...actor });
     return withoutVector((similar || contradicts)
@@ -287,7 +287,7 @@ export async function createChrono(
   // A chrono entry is the only record kind that holds TWO classes, and they are told apart by the to-kind
   // rather than by a field name — which is why one reconcile call takes both.
   await reconcileLinks(spaceId, doc._id, 'chrono',
-    { entity: doc.entityIds ?? [], memory: doc.memoryIds ?? [] }, doc.author);
+    { entity: doc.entityIds ?? [], fact: doc.memoryIds ?? [] }, doc.author);
   if (actor) emitWebhookEvent({ event: 'chrono.created', spaceId, entry: { ...doc, embedding: undefined }, ...actor });
   // Advisory only — the entry is stored either way.
   return withoutVector((similar || contradicts) ? { ...doc, ...(similar ? { similar } : {}), ...(contradicts ? { contradicts } : {}) } : doc);
@@ -430,7 +430,7 @@ export async function updateChrono(
   if (updates.entityIds !== undefined || updates.memoryIds !== undefined
       || deleteFieldsPaths?.some(p => p.startsWith('entityIds') || p.startsWith('memoryIds'))) {
     await reconcileLinks(spaceId, updatedChrono._id, 'chrono',
-      { entity: updatedChrono.entityIds ?? [], memory: updatedChrono.memoryIds ?? [] }, updatedChrono.author);
+      { entity: updatedChrono.entityIds ?? [], fact: updatedChrono.memoryIds ?? [] }, updatedChrono.author);
   }
   if (actor) emitWebhookEvent({ event: 'chrono.updated', spaceId, entry: { ...updatedChrono, embedding: undefined }, ...actor });
   return withoutVector(updatedChrono);

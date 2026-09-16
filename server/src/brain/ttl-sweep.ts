@@ -27,7 +27,7 @@ const SWEEP_BATCH = 500;              // max deletions per collection per cycle
 const TTL_ACTOR: WebhookActor = { tokenLabel: 'ttl-sweep' };
 
 const DELETERS: Record<(typeof TTL_COLLECTIONS)[number], (spaceId: string, id: string, actor?: WebhookActor) => Promise<boolean>> = {
-  memories: deleteMemory,
+  facts: deleteMemory,
   entities: deleteEntity,
   edges: deleteEdge,
   chrono: deleteChrono,

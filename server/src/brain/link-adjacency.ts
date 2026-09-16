@@ -51,11 +51,11 @@ import type { LinkDoc } from '../config/types.js';
 /** One class of link: a record kind that names another record kind through one array field. */
 export interface LinkClass {
   /** The record kind HOLDING the link. Matches `TraverseNode.kind`. */
-  kind: 'chrono' | 'memory' | 'file';
+  kind: 'chrono' | 'fact' | 'file';
   /** What it names. An entity is only ever a `to`; nothing hangs off an entity. */
   toKind: RefKind;
   /** Collection suffix of the FROM record: the collection is `${spaceId}_${collection}`. */
-  collection: 'chrono' | 'memories' | 'files';
+  collection: 'chrono' | 'facts' | 'files';
   /** The array field naming the linked records — the 3.x shape, and still the fallback. */
   field: 'entityIds' | 'memoryIds' | 'chronoIds';
   /**
@@ -93,18 +93,18 @@ const fieldFor = (toKind: RefKind): LinkClass['field'] => `${toKind}Ids` as Link
 /** The projection each FROM kind needs, whatever it links to. */
 const PROJECTION: Record<LinkClass['kind'], Record<string, 1>> = {
   chrono: { title: 1, type: 1, entityIds: 1, memoryIds: 1 },
-  memory: { fact: 1, type: 1, entityIds: 1 },
+  fact: { fact: 1, type: 1, entityIds: 1 },
   file: { path: 1, description: 1, tags: 1, entityIds: 1, memoryIds: 1, chronoIds: 1 },
 };
 
 /** The collection each FROM kind lives in. */
 const COLLECTION: Record<LinkClass['kind'], LinkClass['collection']> = {
-  chrono: 'chrono', memory: 'memories', file: 'files',
+  chrono: 'chrono', fact: 'facts', file: 'files',
 };
 
 /** See `LinkClass.scope`: chunks share the file collection with the files they came from. */
 const SCOPE: Record<LinkClass['kind'], Record<string, unknown>> = {
-  chrono: {}, memory: {}, file: { parentFileId: { $exists: false } },
+  chrono: {}, fact: {}, file: { parentFileId: { $exists: false } },
 };
 
 /**
@@ -115,9 +115,9 @@ const SCOPE: Record<LinkClass['kind'], Record<string, unknown>> = {
  * `brain/links.ts`, which reads it from there for the same reason.
  */
 const NAMES: Record<LinkClass['kind'], readonly RefKind[]> = {
-  chrono: ['entity', 'memory'],
-  memory: ['entity'],
-  file: ['entity', 'memory', 'chrono'],
+  chrono: ['entity', 'fact'],
+  fact: ['entity'],
+  file: ['entity', 'fact', 'chrono'],
 };
 
 /**
@@ -128,7 +128,7 @@ const NAMES: Record<LinkClass['kind'], readonly RefKind[]> = {
  * ordering of the three classes that already had readers.
  */
 export const LINK_CLASSES: readonly LinkClass[] =
-  (['chrono', 'memory', 'file'] as const).flatMap(kind =>
+  (['chrono', 'fact', 'file'] as const).flatMap(kind =>
     NAMES[kind].map((toKind): LinkClass => ({
       kind,
       toKind,

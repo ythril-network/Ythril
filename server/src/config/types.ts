@@ -993,7 +993,7 @@ export interface DupeScannerConfig {
   batchSize?: number;
   /** Max records scanned per space per run (bounds resource use; the rest is picked up next run). Default: 5000. */
   maxPerRun?: number;
-  /** Knowledge types to scan. Default: ['memory', 'entity', 'chrono']. */
+  /** Knowledge types to scan. Default: ['fact', 'entity', 'chrono']. */
   types?: DupeScanType[];
 }
 
@@ -1353,7 +1353,7 @@ export interface AuthorRef {
   instanceLabel: string;
 }
 
-export interface MemoryDoc extends StampSkewable {
+export interface FactDoc extends StampSkewable {
   /**
    * Keep this record stored, but stop it being EMBEDDED — the top tier of the switch a type schema and the
    * space also carry under this same name, resolving `record > schema > space`.
@@ -1449,7 +1449,7 @@ export interface EntityDoc extends StampSkewable {
   seq: number;
   embedding?: number[];
   embeddingModel?: string;
-  /** Absolute expiry (F10) — see MemoryDoc._expireAt. */
+  /** Absolute expiry (F10) — see FactDoc._expireAt. */
   _expireAt?: Date;
 }
 
@@ -1519,7 +1519,7 @@ export interface EdgeDoc extends StampSkewable {
   seq: number;
   embedding?: number[];
   embeddingModel?: string;
-  /** Absolute expiry (F10) — see MemoryDoc._expireAt. */
+  /** Absolute expiry (F10) — see FactDoc._expireAt. */
   _expireAt?: Date;
 }
 
@@ -1646,7 +1646,7 @@ export interface ChronoEntry extends StampSkewable {
   seq: number;
   embedding?: number[];
   embeddingModel?: string;
-  /** Absolute expiry (F10) — see MemoryDoc._expireAt. */
+  /** Absolute expiry (F10) — see FactDoc._expireAt. */
   _expireAt?: Date;
   /** When this entry's CONTENT should be dropped while the entry itself stays. Set from the type schema's
    *  `retention.contentDays` (see `TypeSchema.retention`); absent means never. */

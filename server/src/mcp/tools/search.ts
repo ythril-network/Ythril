@@ -110,7 +110,7 @@ export const recallTool: ToolHandler = {
             },
             maxPerType: {
               type: 'object',
-              description: 'Optional MAXIMUM result count per type — the ceiling to minPerType\'s floor (e.g. {"file": 2, "memory": 4}). A slot freed by the cap goes to another type, so this is how you stop one long file chunk from crowding out several one-line records that would answer the query more cheaply. At least 1 per type; use `types` to exclude a type entirely. Must not be below minPerType for the same type — a contradictory pair is refused rather than silently resolved.',
+              description: 'Optional MAXIMUM result count per type — the ceiling to minPerType\'s floor (e.g. {"file": 2, "fact": 4}). A slot freed by the cap goes to another type, so this is how you stop one long file chunk from crowding out several one-line records that would answer the query more cheaply. At least 1 per type; use `types` to exclude a type entirely. Must not be below minPerType for the same type — a contradictory pair is refused rather than silently resolved.',
               additionalProperties: { type: 'number', minimum: 1 },
             },
             maxTimeMS: {
@@ -667,11 +667,13 @@ export const queryTool: ToolHandler = {
     + '• `count` — how many rows are in THIS page. `total` — how many satisfy the filter overall. They differ whenever `limit` bit, and that difference is the only signal that there is more to page through.\n'
     + '• `limit`, `skip` — echoed back, so a pager can carry on without keeping its own state.\n\n'
     + 'A count with no rows is a BUG, not an empty page: `results` is carried in both `content` and `structuredContent`, and a client that reads only one of them gets the whole answer either way. Before 3.1 the rows were in `content` alone, so a client preferring `structuredContent` saw {"count":15,"total":40} and not a single row — reported independently by the canary operator and reproduced here. If you ever see a positive `count` with nothing in it, the instance predates that fix.',
-  spaceRequired: true,
+  // Optional since 5.0, matching `POST /api/brain/filter` and the rest of the search family. Omit it and
+  // the read runs across every space this token holds `knowledge: read` in. It was left REQUIRED here
+  // when the route was changed — one rule, two doors, and the MCP one quietly narrower.
   inputSchema: (s: ToolSchemas) => ({
           type: 'object',
           properties: {
-            space: s.requiredSpace,
+            space: s.optionalSpace,
             collection: {
               type: 'string',
               enum: [...BRAIN_COLLECTIONS],
@@ -692,7 +694,7 @@ export const queryTool: ToolHandler = {
             },
             limit: { type: 'number', minimum: 1, maximum: 100, default: 20, description: 'Max documents in this page, clamped to 1–100. Default 20. Compare `count` against `total` in the response to know whether more rows satisfy the filter — a full page is not evidence that it is the last one.' },
             skip: { type: 'number', minimum: 0, description: 'Rows to discard before the page, for paging. The result order is total (`_id` breaks every tie), so no row can be seen twice or missed between pages. On a proxy space the page is computed over the MERGED set, not per member.' },
-            sort: { type: 'string', description: 'Field to order by. Allowed values depend on the collection (entities: createdAt, name, type; edges: createdAt, label, from, to, type, weight; memories: createdAt, type; chrono: createdAt, title, startsAt, endsAt, status, type; files: createdAt, updatedAt, path). An unknown field is refused and names the allowed ones. Omit for newest-first.' },
+            sort: { type: 'string', description: 'Field to order by. Allowed values depend on the collection (entities: createdAt, name, type; edges: createdAt, label, from, to, type, weight; facts: createdAt, type; chrono: createdAt, title, startsAt, endsAt, status, type; files: createdAt, updatedAt, path). An unknown field is refused and names the allowed ones. Omit for newest-first.' },
             dir: { type: 'string', enum: ['asc', 'desc'], description: "Sort direction, default desc. Only meaningful with `sort`." },
             maxChars: { type: 'integer', minimum: 1000, description: 'Ceiling on the serialised response body, in CHARACTERS. **DEFAULT 25000 ON THIS DOOR, and 50000 on REST.** `limit` caps ROWS and says nothing about how big one is, so a page of file records or of long-described entities had no size bound at all before 3.7 — on the read tool you are most likely to page through. When the budget bites, `results` is a PREFIX of the page, `truncated` says so, and `nextSkip` is where to continue: send it back as `skip`. `count` is what you were actually given and still matches `results.length`; `total` is unchanged and still the whole match.' },
             maxBytes: { type: 'integer', minimum: 1000, description: 'Ceiling on the serialised response body, in real UTF-8 BYTES. **NO DEFAULT — opt-in.** Set it when your limit is genuinely a byte limit. Bytes are always >= characters, so a byte default equal to the character one would silently bind on every non-ASCII answer. When you set both, BOTH apply: the page stops at whichever ceiling it reaches first.' },
@@ -700,7 +702,7 @@ export const queryTool: ToolHandler = {
             charsPerToken: { type: 'number', exclusiveMinimum: 0, description: 'Per-call override of the characters-per-token ratio used by `maxTokens`. Default 3.5.' },
             maxTimeMS: { type: 'number', minimum: 1, maximum: 10000, default: 5000, description: 'Server-side query timeout in ms. Default 5000, hard-capped at 10000.' },
           },
-          required: ['space', 'collection', 'filter'],
+          required: ['collection', 'filter'],
           additionalProperties: false,
         }),
   async handle(ctx: ToolContext): Promise<ToolResult> {

@@ -26,13 +26,13 @@ import { checkDuplicates, type SimilarMatch } from './recall.js';
 import type { DupeCheckOpts } from './write-options.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import { log } from '../util/log.js';
-import type { EntityDoc, EdgeDoc, MemoryDoc, ChronoEntry, TombstoneDoc, FileMetaDoc } from '../config/types.js';
+import type { EntityDoc, EdgeDoc, FactDoc, ChronoEntry, TombstoneDoc, FileMetaDoc } from '../config/types.js';
 import { PROPERTIES_SCAN_MAX_MS, textContains } from './tag-filter.js';
 import { wipeSpaceCollection } from './bulk-wipe.js';
 
 /** An item that references a given entity, and — for an edge — which of its ends does. */
 export interface BacklinkEntry {
-  type: 'edge' | 'memory' | 'chrono' | 'file' | 'face';
+  type: 'edge' | 'fact' | 'chrono' | 'file' | 'face';
   _id: string;
   /**
    * Which end of the EDGE names the entity, and absent on every other type.
@@ -560,7 +560,7 @@ export async function bulkDeleteEntities(spaceId: string): Promise<number> {
  * records (`faceEntityId`).
  * Returns a (possibly empty) list of backlink entries.
  *
- * Faces were the gap: this scanned `_edges` / `_memories` / `_chrono` and not `_files`, so under
+ * Faces were the gap: this scanned `_edges` / `_facts` / `_chrono` and not `_files`, so under
  * `strictLinkage` — the strongest setting available — a person referenced *only* by their face
  * labels deleted cleanly, and the 409 that exists to say "something still points at this" stayed
  * silent about the one reference class holding biometric data.

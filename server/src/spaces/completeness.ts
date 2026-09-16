@@ -127,7 +127,7 @@ export const CHECK_WEIGHTS: Record<CompletenessCheckId, number> = {
 /** The four knowledge types that carry `typeSchemas`, and the collection + type field for each. */
 const SCHEMA_KINDS: { kind: KnowledgeType; collection: string; typeField: string; tab: CompletenessCheck['targetTab'] }[] = [
   { kind: 'entity', collection: 'entities', typeField: 'type', tab: 'entities' },
-  { kind: 'memory', collection: 'memories', typeField: 'type', tab: 'memories' },
+  { kind: 'fact', collection: 'facts', typeField: 'type', tab: 'facts' },
   // Edges are typed by their `label`, not a `type` field — `typeSchemas.edge` keys are label values.
   { kind: 'edge', collection: 'edges', typeField: 'label', tab: 'edges' },
   { kind: 'chrono', collection: 'chrono', typeField: 'type', tab: 'chrono' },
@@ -151,7 +151,7 @@ export interface CompletenessFacts {
 }
 
 function emptyByKind<T>(make: () => T): Record<KnowledgeType, T> {
-  return { entity: make(), memory: make(), edge: make(), chrono: make() };
+  return { entity: make(), fact: make(), edge: make(), chrono: make() };
 }
 
 /**

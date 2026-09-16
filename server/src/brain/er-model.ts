@@ -68,7 +68,7 @@ export interface ErEntityType {
   namingPattern?: string;
   properties: ErProperty[];
   /** Records of the other three kinds that point AT this type through their `entityIds`. */
-  linkedFrom: { memories: number; chrono: number; files: number };
+  linkedFrom: { facts: number; chrono: number; files: number };
 }
 
 export interface ErRelationship {
@@ -104,7 +104,7 @@ export interface ErInputs {
   entities: Array<{ _id: string; type?: string }>;
   edges: Array<{ from: string; to: string; label: string }>;
   /** `entityIds` arrays from the three linking collections. */
-  links: { memories: string[][]; chrono: string[][]; files: string[][] };
+  links: { facts: string[][]; chrono: string[][]; files: string[][] };
   declared: DeclaredTypes;
   totals: { entities: number; edges: number };
   truncated: ErModel['truncated'];
@@ -142,8 +142,8 @@ export function assembleErModel(input: ErInputs): ErModel {
     else rel.set(key, { from, to, label: e.label, count: 1 });
   }
 
-  const byType = new Map<string, { memories: number; chrono: number; files: number }>();
-  for (const [kind, rows] of Object.entries(input.links) as Array<['memories' | 'chrono' | 'files', string[][]]>) {
+  const byType = new Map<string, { facts: number; chrono: number; files: number }>();
+  for (const [kind, rows] of Object.entries(input.links) as Array<['facts' | 'chrono' | 'files', string[][]]>) {
     for (const ids of rows) {
       // A record linking three entities of the SAME type counts ONCE for that type. "How many memories
       // mention a service" must not double because one memory mentions two services.
@@ -153,7 +153,7 @@ export function assembleErModel(input: ErInputs): ErModel {
         if (t !== undefined) seen.add(t);
       }
       for (const t of seen) {
-        const hit = byType.get(t) ?? { memories: 0, chrono: 0, files: 0 };
+        const hit = byType.get(t) ?? { facts: 0, chrono: 0, files: 0 };
         hit[kind]++;
         byType.set(t, hit);
       }
@@ -175,7 +175,7 @@ export function assembleErModel(input: ErInputs): ErModel {
         required: p.required === true,
         ...(p.enum ? { enumValues: p.enum } : {}),
       })),
-      linkedFrom: byType.get(type) ?? { memories: 0, chrono: 0, files: 0 },
+      linkedFrom: byType.get(type) ?? { facts: 0, chrono: 0, files: 0 },
     };
   });
 
@@ -219,7 +219,7 @@ export async function buildErModel(spaceId: string): Promise<ErModel> {
       .toArray() as Promise<Array<{ from: string; to: string; label: string }>>,
   ]);
 
-  const links: ErInputs['links'] = { memories: [], chrono: [], files: [] };
+  const links: ErInputs['links'] = { facts: [], chrono: [], files: [] };
   let linksTruncated = false;
   // Through the shared link classes, so the diagram counts what a traversal would reach. This scan had no
   // chunk exclusion of its own: a file split into forty passages could have contributed forty link rows and

@@ -439,7 +439,7 @@ export function createApp() {
         `"spaceName":${JSON.stringify(space.label)},` +
         `"version":${JSON.stringify(_serverVersion)},`,
       );
-      await write('"memories":'); await streamArray(`${spaceId}_memories`);
+      await write('"facts":'); await streamArray(`${spaceId}_facts`);
       await write(',"entities":'); await streamArray(`${spaceId}_entities`);
       await write(',"edges":'); await streamArray(`${spaceId}_edges`);
       await write(',"chrono":'); await streamArray(`${spaceId}_chrono`);

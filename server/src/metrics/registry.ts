@@ -345,7 +345,7 @@ export const httpResponseSizeBytes = new Histogram({
  * is cheaper than an O(n) scan every fifteen seconds to avoid saying it.)
  */
 export const memoriesTotal = new Gauge({
-  name: 'ythril_memories_total',
+  name: 'ythril_facts_total',
   help: 'Approximate number of memories by space (collection metadata, not a scan)',
   labelNames: ['space'] as const,
   registers: [register],
@@ -353,7 +353,7 @@ export const memoriesTotal = new Gauge({
     await withCollectBudget('memories_total', async () => {
       const cfg = getConfig();
       for (const space of cfg.spaces.filter(s => !s.proxyFor)) {
-        const count = await col(`${space.id}_memories`).estimatedDocumentCount();
+        const count = await col(`${space.id}_facts`).estimatedDocumentCount();
         this.set({ space: space.id }, count);
       }
     }, () => this.reset());
@@ -933,7 +933,7 @@ export const brainWriteSeqTotal = new Counter({
 //
 // All FOUR record types, because all four are now instrumented. #674 shipped `memories` alone while the
 // metric was named for brain records generally, and the canary spotted the gap from the outside — they saw
-// only `collection="memories"` and reasonably guessed the labels were lazy. Pre-declaring the other three
+// only `collection="facts"` and reasonably guessed the labels were lazy. Pre-declaring the other three
 // without instrumenting them would have been the worse fix: a permanent 0 on entities reads as "no
 // collisions here", which is the exact confusion pre-declaring exists to prevent.
 // NOT ALL BRAIN COLLECTIONS: these are the collections whose writes go through the seq allocator, which is

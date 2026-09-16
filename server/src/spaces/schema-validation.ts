@@ -317,7 +317,7 @@ export function validateEdge(
  */
 export function validateMemory(
   meta: SpaceMeta,
-  memory: { type?: string; properties?: Record<string, unknown> },
+  fact: { type?: string; properties?: Record<string, unknown> },
 ): SchemaViolation[] {
   if (!meta) return [];
   const violations: SchemaViolation[] = [];

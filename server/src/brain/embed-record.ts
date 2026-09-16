@@ -24,14 +24,14 @@ import { getSpaceMeta } from '../spaces/schema-validation.js';
 import type { KnowledgeType } from '../config/types-knowledge.js';
 import { getEmbeddingConfig } from '../config/loader.js';
 import type {
-  BrainEmbedRecordType, MemoryDoc, EntityDoc, EdgeDoc, ChronoEntry, FileMetaDoc,
+  BrainEmbedRecordType, FactDoc, EntityDoc, EdgeDoc, ChronoEntry, FileMetaDoc,
 } from '../config/types.js';
 
 /** Collection suffix per record type — the same mapping recall uses. */
 /** Exported so the re-embed backfill scans the same collections this function writes. A second copy of this
  *  map is how a backfill quietly misses a record kind. */
 export const COLLECTION: Record<BrainEmbedRecordType, string> = {
-  memory: 'memories', entity: 'entities', edge: 'edges', chrono: 'chrono', file: 'files',
+  fact: 'facts', entity: 'entities', edge: 'edges', chrono: 'chrono', file: 'files',
 };
 
 // `entityNames` was here: it resolved a record's linked entity ids to names for the memory and file builders,
@@ -50,8 +50,8 @@ export async function buildEmbedText(
   doc: Record<string, unknown>,
 ): Promise<string> {
   switch (recordType) {
-    case 'memory': {
-      const m = doc as unknown as MemoryDoc;
+    case 'fact': {
+      const m = doc as unknown as FactDoc;
       return memoryEmbedText(m.fact, m.tags ?? [], m.description, m.properties);
     }
     case 'entity': {
