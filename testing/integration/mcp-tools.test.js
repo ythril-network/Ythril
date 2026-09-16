@@ -895,7 +895,7 @@ describe('MCP brain tools � update_memory / delete_memory / get_stats', () => 
   });
 });
 
-describe('MCP chrono tools � list_chrono tags filter / query chrono collection', () => {
+describe('MCP chrono tools — tag filtering through `filter`, and the chrono collection', () => {
   let session;
   const RUN = Date.now();
   const tagA = `mcp-chrono-tag-a-${RUN}`;
@@ -941,67 +941,76 @@ describe('MCP chrono tools � list_chrono tags filter / query chrono collection
     }
   });
 
-  it('list_chrono without filters returns results without isError', async () => {
-    const result = await session.callTool('list_chrono', { space: 'general' });
-    assert.ok(!result?.isError, `list_chrono returned isError: ${JSON.stringify(result)}`);
+  it('filtering chrono without filters returns results without isError', async () => {
+    const result = await session.callTool('filter', { space: 'general', collection: 'chrono', filter: {} });
+    assert.ok(!result?.isError, `filtering chrono returned isError: ${JSON.stringify(result)}`);
   });
 
-  it('list_chrono with tags filter (AND) returns only entries with that tag', async (t) => {
+  it('filtering chrono with tags filter (AND) returns only entries with that tag', async (t) => {
     if (!idTagA) return t.skip('No idTagA � prior setup failed');
-    const result = await session.callTool('list_chrono', { space: 'general', tags: [tagA] });
-    assert.ok(!result?.isError, `list_chrono with tags returned isError: ${JSON.stringify(result)}`);
+    const result = await session.callTool('filter', { space: 'general', collection: 'chrono', filter: { tags: { $all: [tagA] } } });
+    assert.ok(!result?.isError, `filtering chrono by tags returned isError: ${JSON.stringify(result)}`);
     const text = result?.content?.[0]?.text ?? '';
     assert.ok(text.includes(idTagA), `Expected entry tagged ${tagA} (id ${idTagA}) in results: ${text}`);
     assert.ok(!text.includes(idTagB), `Entry tagged only ${tagB} should NOT appear when filtering by ${tagA}: ${text}`);
   });
 
-  it('list_chrono with multi-tag AND filter returns only entries with all specified tags', async (t) => {
+  it('filtering chrono with multi-tag AND filter returns only entries with all specified tags', async (t) => {
     if (!idTagA || !idTagB || !idBoth) return t.skip('Missing seeded entries');
-    const result = await session.callTool('list_chrono', { space: 'general', tags: [tagA, tagB] });
-    assert.ok(!result?.isError, `list_chrono multi-tag AND returned isError: ${JSON.stringify(result)}`);
+    const result = await session.callTool('filter', { space: 'general', collection: 'chrono', filter: { tags: { $all: [tagA, tagB] } } });
+    assert.ok(!result?.isError, `filtering chrono by multi-tag AND returned isError: ${JSON.stringify(result)}`);
     const text = result?.content?.[0]?.text ?? '';
     assert.ok(text.includes(idBoth), `Entry with both tags should appear for AND query: ${text}`);
     assert.ok(!text.includes(idTagA), `Entry with only ${tagA} should NOT appear for AND [${tagA},${tagB}] query: ${text}`);
   });
 
-  it('list_chrono with tagsAny filter (OR) returns entries matching any tag', async (t) => {
+  it('filtering chrono with tagsAny filter (OR) returns entries matching any tag', async (t) => {
     if (!idTagA || !idTagB) return t.skip('Missing seeded entries');
-    const result = await session.callTool('list_chrono', { space: 'general', tagsAny: [tagA, tagB] });
-    assert.ok(!result?.isError, `list_chrono tagsAny returned isError: ${JSON.stringify(result)}`);
+    const result = await session.callTool('filter', { space: 'general', collection: 'chrono', filter: { tags: { $in: [tagA, tagB] } } });
+    assert.ok(!result?.isError, `filtering chrono by tagsAny returned isError: ${JSON.stringify(result)}`);
     const text = result?.content?.[0]?.text ?? '';
     assert.ok(text.includes(idTagA), `Expected entry tagged ${tagA} in results: ${text}`);
     assert.ok(text.includes(idTagB), `Expected entry tagged ${tagB} in results: ${text}`);
   });
 
-  it('list_chrono with tags filter that matches nothing returns empty message', async () => {
-    const result = await session.callTool('list_chrono', { tags: [`no-such-tag-${RUN}`] });
-    assert.ok(!result?.isError, `list_chrono returned isError: ${JSON.stringify(result)}`);
-    const text = result?.content?.[0]?.text ?? '';
-    assert.ok(text === 'No chrono entries found.' || text.trim() === '', `Expected empty result, got: ${text}`);
+  it('filtering chrono with tags filter that matches nothing returns empty message', async () => {
+    const result = await session.callTool('filter', { collection: 'chrono', filter: { tags: { $all: [`no-such-tag-${RUN}`] } } });
+    assert.ok(!result?.isError, `filtering chrono returned isError: ${JSON.stringify(result)}`);
+    // `filter` answers with an envelope, not prose: an empty match is `results: []`, which is the shape
+    // every other caller already branches on. `list_chrono` said “No chrono entries found.”, and a sentence
+    // is not something a client can test for.
+    // The MCP door sends the ROWS as the text payload — a bare array — while REST wraps them in an
+    // envelope. Both carry the paging facts, REST in the body and MCP in `structuredContent`, which is
+    // the spec's structured form of the same result rather than a sidecar.
+    const rows = JSON.parse(result?.content?.[0]?.text ?? 'null');
+    assert.deepEqual(rows, [], `Expected an empty result set, got: ${JSON.stringify(rows).slice(0, 200)}`);
   });
 
-  it('list_chrono with after filter returns only entries after the timestamp', async (t) => {
+  it('filtering chrono with after filter returns only entries after the timestamp', async (t) => {
     if (!idTagA) return t.skip('No seeded entries');
     const pastTime = new Date(Date.now() - 60_000).toISOString();
-    const result = await session.callTool('list_chrono', { space: 'general', after: pastTime });
-    assert.ok(!result?.isError, `list_chrono after returned isError: ${JSON.stringify(result)}`);
+    const result = await session.callTool('filter', { space: 'general', collection: 'chrono', filter: { createdAt: { $gte: pastTime } } });
+    assert.ok(!result?.isError, `filtering chrono by after returned isError: ${JSON.stringify(result)}`);
     const text = result?.content?.[0]?.text ?? '';
     assert.ok(text.includes(idTagA), `Seeded entry should appear for after=${pastTime}: ${text}`);
   });
 
-  it('list_chrono with before filter far in future returns seeded entries', async (t) => {
+  it('filtering chrono with before filter far in future returns seeded entries', async (t) => {
     if (!idTagA) return t.skip('No seeded entries');
     const futureTime = new Date(Date.now() + 3_600_000).toISOString();
-    const result = await session.callTool('list_chrono', { space: 'general', before: futureTime });
-    assert.ok(!result?.isError, `list_chrono before returned isError: ${JSON.stringify(result)}`);
+    const result = await session.callTool('filter', { space: 'general', collection: 'chrono', filter: { createdAt: { $lt: futureTime } } });
+    assert.ok(!result?.isError, `filtering chrono by before returned isError: ${JSON.stringify(result)}`);
     const text = result?.content?.[0]?.text ?? '';
     assert.ok(text.includes(idTagA), `Seeded entry should appear for before=${futureTime}: ${text}`);
   });
 
-  it('list_chrono with search filter matches on title', async (t) => {
+  it('filtering chrono with search filter matches on title', async (t) => {
     if (!idTagA) return t.skip('No seeded entries');
-    const result = await session.callTool('list_chrono', { search: `MCP-Tag-A-${RUN}` });
-    assert.ok(!result?.isError, `list_chrono search returned isError: ${JSON.stringify(result)}`);
+    const result = await session.callTool('filter', { collection: 'chrono', filter: { $or: [
+      { title: { $regex: `MCP-Tag-A-${RUN}`, $options: 'i' } },
+      { description: { $regex: `MCP-Tag-A-${RUN}`, $options: 'i' } },
+    ] } });
+    assert.ok(!result?.isError, `filtering chrono by search returned isError: ${JSON.stringify(result)}`);
     const text = result?.content?.[0]?.text ?? '';
     assert.ok(text.includes(idTagA), `Entry with matching title should appear: ${text}`);
   });

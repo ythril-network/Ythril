@@ -179,6 +179,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The `filter` MCP tool required a space while its route did not — one rule, two doors, the MCP one
+  narrower.** Introduced by the change that moved the search family off the space path: `POST
+  /api/brain/filter` took an optional space and read across spaces, and the tool kept demanding one. An
+  agent asking the obvious question — *what do I have about X, anywhere* — got a validation error through
+  one door and an answer through the other.
+
+  Caught by an integration test calling `filter` with no space, not by a unit test: both surfaces were
+  individually consistent, and only exercising them the same way showed the gap. The handler needed the
+  other half too — `memberSpacesWithin('')` answers nothing, so an optional parameter would have turned
+  into a read that silently returned empty rather than the cross-space read it advertises.
+
 - **The recall guide said `includeDiagnostics` hides the per-stage scores. It does not, deliberately, and
   has not for some time.**
 

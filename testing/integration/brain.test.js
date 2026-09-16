@@ -2196,26 +2196,34 @@ describe('Brain — a supplied id does not become a new entity id', () => {
 
 // ── Entities by-name endpoint ────────────────────────────────────────────────
 
-describe('Brain — GET /spaces/:spaceId/entities/by-name', () => {
+describe('Brain — entities by name, through the filter that replaced the route', () => {
+  /*
+   * `GET /spaces/:spaceId/entities/by-name` was removed at 5.0 with its `find_entities_by_name` tool. It ran
+   * `find({spaceId, name})` and nothing else, which is `POST /api/brain/filter` with a collection — and a
+   * second route for one predicate drifts from the thing it duplicates.
+   *
+   * The CASES survive the route because they are about the capability: an exact name matches every record
+   * carrying it whatever its type, a name nobody used is an empty result rather than an error, and a space
+   * that does not exist is refused. One case went WITH the route — `name` was a required query parameter,
+   * and a filter has no such thing as a missing predicate: `{}` is legal and matches everything, which is a
+   * different question with a different right answer.
+   */
   const RUN = Date.now();
   const entityName = `ByNameTest-${RUN}`;
   const createdIds = [];
 
+  const byName = (space, name) => post(INSTANCES.a, token(), '/api/brain/filter', {
+    space, collection: 'entities', filter: { name },
+  });
+
   before(async () => {
     tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
-    const r1 = await post(INSTANCES.a, token(), '/api/brain/spaces/general/entities', {
-      name: entityName,
-      type: 'person',
-    });
-    assert.equal(r1.status, 201);
-    createdIds.push(r1.body._id);
-
-    const r2 = await post(INSTANCES.a, token(), '/api/brain/spaces/general/entities', {
-      name: entityName,
-      type: 'character',
-    });
-    assert.equal(r2.status, 201);
-    createdIds.push(r2.body._id);
+    // TWO types, one name: the point of the lookup is that it does not constrain the type.
+    for (const type of ['person', 'character']) {
+      const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/entities', { name: entityName, type });
+      assert.equal(r.status, 201);
+      createdIds.push(r.body._id);
+    }
   });
 
   after(async () => {
@@ -2225,34 +2233,25 @@ describe('Brain — GET /spaces/:spaceId/entities/by-name', () => {
   });
 
   it('Returns entities matching the name', async () => {
-    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/entities/by-name?name=${encodeURIComponent(entityName)}`);
+    const r = await byName('general', entityName);
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.ok(Array.isArray(r.body.entities), 'entities must be an array');
-    assert.ok(r.body.entities.length >= 2, `Expected at least 2 results, got ${r.body.entities.length}`);
-    for (const ent of r.body.entities) {
-      assert.equal(ent.name, entityName);
-    }
+    assert.ok(Array.isArray(r.body.results), 'the filter answers with a results array');
+    assert.ok(r.body.results.length >= 2,
+      `both types must come back, got ${r.body.results.length}: ${JSON.stringify(r.body).slice(0, 200)}`);
+    for (const ent of r.body.results) assert.equal(ent.name, entityName);
   });
 
   it('Returns empty array for non-existent name', async () => {
-    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/entities/by-name?name=no-such-entity-ever-${RUN}`);
+    const r = await byName('general', `no-such-entity-${RUN}`);
     assert.equal(r.status, 200);
-    assert.deepStrictEqual(r.body.entities, []);
-  });
-
-  it('Returns 400 when name query param is missing', async () => {
-    const r = await get(INSTANCES.a, token(), '/api/brain/spaces/general/entities/by-name');
-    assert.equal(r.status, 400, `Expected 400 without name param, got ${r.status}`);
+    assert.deepEqual(r.body.results, [], 'an unmatched predicate is an empty result, not an error');
   });
 
   it('Returns 404 for non-existent space', async () => {
-    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/no-such-space/entities/by-name?name=${entityName}`);
+    const r = await byName(`no-such-space-${RUN}`, entityName);
     assert.equal(r.status, 404);
   });
 });
-
-// ── Read-only token enforcement on REST write endpoints ─────────────────────
-
 describe('Brain — read-only token blocked on REST write endpoints', () => {
   const RUN = Date.now();
   let readOnlyToken;

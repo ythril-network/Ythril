@@ -161,7 +161,30 @@ const RECLASSIFIED = 1;
  * across a proxy's members, so a scoped token would have previewed an entity in a member space it cannot
  * see. Copying the neighbouring tool is exactly how that happens.
  */
-const TOTAL = 44;
+/*
+ * 44 -> 45 at 5.0: the `filter` tool gained a cross-space read. Its space became OPTIONAL to match the
+ * route, and an omitted space fans out over every space the connection can reach — a fan-out site that
+ * did not exist before, BORN narrowed rather than converted.
+ *
+ * Raised rather than absorbed, because the invariant below only means something if the total is the real
+ * number of fan-out sites. Leaving it at 44 and letting the arithmetic balance elsewhere is how a
+ * conservation check stops conserving anything.
+ */
+const TOTAL = 45;
+
+/**
+ * Fan-out sites that were REMOVED rather than converted, with the tool that owned them.
+ *
+ * The invariant below says a conversion must MOVE a site and never drop it, because a deletion dressed as a
+ * conversion looks exactly like progress. A tool being retired is the one legitimate way a site leaves the
+ * inventory — and the honest way to record it is here, not by lowering `TOTAL`, which would erase the fact
+ * that the site ever existed and make the original count unverifiable.
+ *
+ * - **3, at 5.0: `list_chrono`.** It folded into `filter`, which reads across spaces through its own
+ *   narrowed path. `server/src/mcp/tools/chrono.ts` left the NARROWED set with it: a file with no fan-out
+ *   cannot claim a conversion.
+ */
+const REMOVED = 3;
 
 /**
  * Fan-out sites that were REMOVED rather than converted, with the tool that owned them.
