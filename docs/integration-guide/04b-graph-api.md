@@ -828,13 +828,13 @@ name regex instead of by traversal from the incident.
 ### Data Model (inferred ER)
 
 ```http
-GET /api/brain/spaces/:spaceId/er-model
+GET /api/spaces/:spaceId/meta
 ```
 
 The space's entity-relationship model, derived from the schema **and** from what is stored. Read-only,
 nothing cached, every number a real count of records.
 
-> **Also available as MCP tool:** `er_model` — same output, same proxy rule (members reported separately),
+> **Folded into the space meta at 5.0.** The `er-model` route and the `er_model` tool are both gone; the same answer arrives as `actualSchema` on the space meta, beside the DECLARED schema. Both halves answer "what is this space like before I write to it", and having them together is what lets a type the space really holds be promoted into its declared schema. Same proxy rule (members reported separately),
 > and available to every token including read-only ones. It answers what a space *contains*, where
 > `space_meta` answers what its schema *permits*; an agent deciding how to write into an unfamiliar
 > space usually wants both.

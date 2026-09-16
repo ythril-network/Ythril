@@ -15,6 +15,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING — three tools fold into others, and the MCP surface is 45 rather than 48.**
+
+  | gone | use instead |
+  |---|---|
+  | `er_model`, `GET /api/brain/spaces/:id/er-model` | `space_meta` / `GET /api/spaces/:id/meta` — the same answer arrives as `actualSchema` |
+  | `find_entities_by_name`, `GET …/entities/by-name` | `filter` with `collection: 'entities'`, `filter: { name }` |
+  | `list_chrono` | `filter` with `collection: 'chrono'`. `GET …/chrono` is UNCHANGED |
+
+  **The `er_model` fold gains something neither half had.** `actualSchema` comes back in the DECLARED
+  schema’s own format, so a type a space really holds can be **promoted into its declared schema** without
+  the JSON being written by hand. They were always two answers to one question — a space can declare twenty
+  types and hold three, or hold records of a type nobody declared — and a caller needed both to know either.
+
+  **`list_chrono` was the only list TOOL any record type had**, while every type has a REST listing. Removing
+  it makes the surface consistent rather than poorer, and its REST route is untouched. Every parameter it
+  took is expressible — `status`/`type` as equality, `tagsAny` as `$in`, `after`/`before` as
+  `startsAt: {$gte,$lt}`, and `search` as `$or` of two case-insensitive `$regex` — verified against the
+  operator allowlist rather than assumed. The cost is four lines of predicate where there was one word.
+
+  **And two documented blind spots stopped existing rather than moving.** `list_chrono`’s `after`/`before`
+  filtered when an entry was WRITTEN, on a tool full of dates; `find_entities_by_name` was exact and
+  case-sensitive, so an empty list did not mean the thing was absent. Both were warnings about a predicate
+  the wrapper hid. In `filter` the caller writes the predicate, so there is nothing left to warn about —
+  which is the general case: every hidden predicate is a blind spot somebody has to be told about in prose.
+
 - **BREAKING — every remaining MCP tool is renamed to the verb-first scheme.** 23 of them, on top of the
   search family that moved with its routes. No aliases: the old names are gone.
 

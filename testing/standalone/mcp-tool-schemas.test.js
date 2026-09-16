@@ -36,7 +36,12 @@ function traverseBounds(prop) {
 }
 
 describe('MCP tool schemas — universal invariants', () => {
-  it('exposes exactly 48 tools', () => {
+  it('exposes exactly 45 tools', () => {
+    // 48 -> 45: `er_model`, `find_entities_by_name` and `list_chrono` FOLDED into others at 5.0.
+    // Prerequisites done for each: their audit-map entries and rights rows are gone, their docs rows are
+    // gone, and each has a `_DEPRECATIONS.md` row naming what replaces it. `er_model`'s answer lives on as
+    // `actualSchema` on `space_meta`, on BOTH doors; the other two are `filter` with a collection.
+    //
     // A deliberate tripwire, not a fact worth asserting for its own sake: the number changing means a tool
     // was added or removed, and every tool needs an audit mapping, a read-only classification and a docs
     // row. Bump it when you have done those three, never to make the suite quiet.
@@ -74,7 +79,7 @@ describe('MCP tool schemas — universal invariants', () => {
     // `link.convert_preflight`, it is READ-ONLY and visible to a readOnly token (it writes nothing and
     // answers a question about writes that already happened), and `16-mcp.md` carries its row. It ships
     // WITH its REST route rather than after it.
-    assert.equal(ALL_TOOLS.length, 48);
+    assert.equal(ALL_TOOLS.length, 45);
   });
 
   it('every tool advertises a closed object schema (type:object, additionalProperties:false)', () => {

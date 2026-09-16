@@ -282,7 +282,6 @@ export const ROUTE_RULES: RouteRule[] = [
   { method: 'POST',   pattern: /^\/api\/brain\/filter$/,                            operation: 'brain.filter',         read: true },
   { method: 'POST',   pattern: /^\/api\/brain\/similar$/,                           operation: 'brain.similar',        read: true },
   { method: 'GET',    pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/stats$/,      operation: 'brain.stats',          spaceGroup: 1, read: true },
-  { method: 'GET',    pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/er-model$/,   operation: 'brain.er_model',       spaceGroup: 1, read: true },
 
   // ── Bulk write ───────────────────────────────────────────────────────────
   { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/bulk$/,       operation: 'bulk.write',     spaceGroup: 1 },

@@ -248,24 +248,6 @@ entitiesRouter.get('/spaces/:spaceId/entities/by-ids', globalRateLimit, requireS
 });
 
 
-// GET /api/brain/spaces/:spaceId/entities/by-name?name=... — find entities by name (no type constraint)
-entitiesRouter.get('/spaces/:spaceId/entities/by-name', globalRateLimit, requireSpaceAuth, async (req, res) => {
-  const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
-  const name = req.query['name'];
-  if (typeof name !== 'string' || !name.trim()) {
-    res.status(400).json({ error: '`name` query parameter required' });
-    return;
-  }
-  // Case-insensitive substring search — escape user input to prevent ReDoS
-  const escaped = escapeRegex(name.trim());
-  const all = await collectAcrossMembers(spaceId, mid => listEntities(mid, { name: { $regex: escaped, $options: 'i' } }, 20));
-  res.json({ entities: all });
-});
 
 
 // GET /api/brain/spaces/:spaceId/entities/:id

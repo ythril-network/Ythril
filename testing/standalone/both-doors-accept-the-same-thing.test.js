@@ -180,17 +180,19 @@ describe('the parity gaps, one case each', () => {
 });
 
 describe('a tool that promises a field returns it', () => {
-  it('list_chrono rows carry the space, which is what acting on one requires', () => {
+  it('a cross-space read carries the space each row came from', () => {
     /*
-     * Its description promises *"Results carry their space"* and the selling point is cross-space triage —
-     * and `update_chrono` and `delete_chrono` both REQUIRE a space. So every row it returned was one the
-     * caller could not act on.
+     * THE RULE OUTLIVED THE TOOL IT WAS WRITTEN FOR. This checked `list_chrono`, whose description promised
+     * *"Results carry their space"* while its rows omitted it — so on the one tool built for cross-space
+     * triage, every row was one the caller could not act on, because `update_chrono` and `delete_chrono`
+     * both REQUIRE a space.
+     *
+     * `list_chrono` folded into `filter` at 5.0, and `filter` is now the tool that reads across spaces when
+     * the space is omitted — so the same defect is available in the same shape, one tool along.
      */
-    const src = code(CHRONO);
-    const at = src.indexOf("name: 'list_chrono'");
-    const handler = src.slice(at, src.indexOf("name: '", at + 20));
-    assert.match(handler, /spaceId/,
-      'the rows omit the space they came from, on the one tool built for searching across spaces');
+    const rec = readFileSync('server/src/brain/query.ts', 'utf8');
+    assert.match(rec, /spaceId/,
+      'a row must name the space it came from, or a cross-space result cannot be acted on');
   });
 });
 

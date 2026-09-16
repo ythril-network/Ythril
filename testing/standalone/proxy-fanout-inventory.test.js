@@ -163,6 +163,20 @@ const RECLASSIFIED = 1;
  */
 const TOTAL = 44;
 
+/**
+ * Fan-out sites that were REMOVED rather than converted, with the tool that owned them.
+ *
+ * The invariant below says a conversion must MOVE a site and never drop it, because a deletion dressed as a
+ * conversion looks exactly like progress. A tool being retired is the one legitimate way a site leaves the
+ * inventory — and the honest way to record it is here, not by lowering `TOTAL`, which would erase the fact
+ * that the site ever existed and make the original count unverifiable.
+ *
+ * - **3, at 5.0: `list_chrono`.** It folded into `filter`, which reads across spaces through its own
+ *   narrowed path. `server/src/mcp/tools/chrono.ts` left the NARROWED set with it: a file with no fan-out
+ *   cannot claim a conversion.
+ */
+const REMOVED = 3;
+
 const GUARDS = {
   'server/src/auth/middleware.ts': 2,
   // `mcp/router.ts` used to be here. Its guard is FLIPPED: it calls `memberSpacesWithin` and refuses only when the
@@ -181,7 +195,9 @@ const NARROWED = new Set([
   'server/src/mcp/tools/spaces.ts',
   'server/src/mcp/tools/file.ts',
   'server/src/mcp/tools/edge.ts',
-  'server/src/mcp/tools/chrono.ts',
+  // `chrono.ts` was here and is not any more, which is a REMOVAL rather than a regression: `list_chrono`
+  // was its only read fan-out and it folded into `filter` at 5.0. A file with no fan-out left cannot claim
+  // a conversion, and leaving it listed would let the next reader believe a narrowing is enforced there.
   'server/src/api/spaces.ts',
   'server/src/api/brain/file-meta.ts',
   // Born narrowed: the record half of the embedding queue never had a whole-proxy read to convert.
@@ -347,8 +363,9 @@ describe('the total is conserved', () => {
     const pending = Object.values(PENDING).reduce((a, b) => a + b, 0);
     const guards = Object.values(GUARDS).reduce((a, b) => a + b, 0);
     const narrowed = narrowedCalls().length;
-    assert.equal(pending + guards + narrowed + RECLASSIFIED, TOTAL,
-      `expected ${TOTAL}, got ${pending} pending + ${guards} guards + ${narrowed} narrowed + ${RECLASSIFIED} reclassified`);
+    assert.equal(pending + guards + narrowed + RECLASSIFIED + REMOVED, TOTAL,
+      `expected ${TOTAL}, got ${pending} pending + ${guards} guards + ${narrowed} narrowed + `
+      + `${RECLASSIFIED} reclassified + ${REMOVED} removed`);
   });
 });
 
