@@ -129,7 +129,7 @@ That's it. Your assistant instantly sees the space's purpose, its schema, and ev
 
 ## What's inside
 
-A quick tour — every capability is also a callable **MCP tool** (48 of them), a REST endpoint, and a screen in the web UI.
+A quick tour — every capability is also a callable **MCP tool** (45 of them), a REST endpoint, and a screen in the web UI.
 
 **Every capability is on both doors, not a subset** — a build fails if one reaches REST without its MCP tool, and the exemption list for that check is empty. Same parameters, same defaults, same refusals is the rule the project holds itself to on every change; the build enforces the capability half of it.
 

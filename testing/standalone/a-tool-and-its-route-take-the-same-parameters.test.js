@@ -107,11 +107,23 @@ describe('a tool and its route take the same parameters', () => {
   });
 
   it('and enough of them are READABLE to be worth asserting over', () => {
-    // The second half of the same floor. Pairing every tool to a route it cannot read would satisfy the
-    // case above while comparing nothing at all.
+    /*
+     * The second half of the same floor. Pairing every tool to a route it cannot read would satisfy the
+     * case above while comparing nothing at all.
+     *
+     * A PROPORTION, not a count, and the change is the point. It read `> 20`, calibrated when the surface
+     * had 48 tools. A-4 folded three of them into others — each had a route, so each had been pairing — and
+     * the count fell to 20 for a reason that was correct. A raw count turns every legitimate change to the
+     * surface into a red gate, and the obvious repair is to lower the number, which is how a floor quietly
+     * becomes decoration. The real ratio is measured, not guessed: 20 of 41 tools pair to a readable
+     * route today, and it was 23 of 44 before the fold — about half, both times. The floor sits at 40%
+     * because a BROKEN parser does not land near the real ratio, it lands near zero, so the gap between
+     * 40% and 49% is slack for the surface changing rather than tolerance for a defect.
+     */
     const readable = paired.filter(p => p.routes.some(r => r.keys));
-    assert.ok(readable.length > 20,
-      `only ${readable.length} tools reached a route whose parameters could be read — the parser is wrong`);
+    assert.ok(readable.length > paired.length * 0.4,
+      `only ${readable.length} of ${paired.length} tools reached a route whose parameters could be read `
+      + '— the parser is wrong, not the code');
   });
 
   it('the four pairs the OLD gate covered are still covered', () => {

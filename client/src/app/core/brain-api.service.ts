@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
 import type {
   Memory, Entity, Edge, ChronoEntry, ChronoType, ChronoStatus,
   QueryCollection, QueryResult, RecallKnowledgeType, RecallResponse, TraverseResult, EmbeddingQueue,
@@ -317,9 +318,22 @@ export class BrainApi {
 
   // ── Brain — lookups & graph traverse ──────────────────────────────────────
 
+  /**
+   * Entities with this exact name.
+   *
+   * Through `POST /api/brain/filter` since 5.0. The dedicated `entities/by-name` route was removed with its
+   * MCP tool: it ran `find({spaceId, name})` and nothing else, which is that filter with a collection — and
+   * a second route for one predicate is the kind of duplicate that drifts from the thing it duplicates.
+   *
+   * The `{ entities }` shape is kept for callers rather than leaked outward as `{ results }`: the component
+   * asking this question wants entities, and making every caller learn the generic envelope buys nothing.
+   */
   searchEntitiesByName(spaceId: string, name: string): Observable<{ entities: Entity[] }> {
-    const params = new HttpParams().set('name', name);
-    return this.http.get<{ entities: Entity[] }>(`/api/brain/spaces/${spaceId}/entities/by-name`, { params });
+    return this.http
+      .post<{ results: Entity[] }>('/api/brain/filter', {
+        space: spaceId, collection: 'entities', filter: { name },
+      })
+      .pipe(map(r => ({ entities: r.results ?? [] })));
   }
 
   getEntitiesByIds(spaceId: string, ids: string[]): Observable<{ entities: Entity[] }> {
@@ -430,6 +444,12 @@ export class BrainApi {
    * sum two types that share a name across spaces and show relationships that can never be joined.
    */
   getErModel(spaceId: string): Observable<ErModel | ErModelMembers> {
-    return this.http.get<ErModel | ErModelMembers>(`/api/brain/spaces/${spaceId}/er-model`);
+    /*
+     * From the space's meta since 5.0. `GET /er-model` was folded into it with its MCP tool, because the
+     * declared and the actual shape are two halves of one question and a caller needed both.
+     */
+    return this.http
+      .get<{ actualSchema: ErModel | ErModelMembers }>(`/api/spaces/${spaceId}/meta`)
+      .pipe(map(m => m.actualSchema));
   }
 }

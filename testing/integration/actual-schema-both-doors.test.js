@@ -3,12 +3,12 @@
  *
  * ## Why the tool exists
  *
- * `GET /api/brain/spaces/:spaceId/er-model` was REST-only, and it answers the question an agent asks FIRST:
+ * The actual shape of a space — what it HOLDS, not what it declares — answers the question an agent asks FIRST:
  * which entity types are actually here, which edge labels connect which of them, and how many of each.
  * `space_meta` answers a different question — the DECLARED schema, what may exist — so an MCP-only client
  * could learn what a space permits and not what it contains.
  *
- * Found by `scripts/surface-matrix.mjs`, which listed `GET /er-model` in the REST-only column.
+ * It began as a REST-only route found by `scripts/surface-matrix.mjs`, became a tool, and folded into the space meta at 5.0 — three shapes, one claim: both doors, one answer.
  *
  * ## What these assertions are for
  *
@@ -17,7 +17,7 @@
  * answer is not trivially empty: two entity types and an edge between them, so a wrong narrowing or a dropped
  * relationship shows up as a difference rather than as two identical empty objects.
  *
- * Run: node --test testing/integration/er-model-both-doors.test.js
+ * Run: node --test testing/integration/actual-schema-both-doors.test.js
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -30,7 +30,7 @@ import { openMcpSession } from '../sync/mcp-session.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
 const RUN = Date.now();
-const SPACE = `er-model-${RUN}`;
+const SPACE = `actual-schema-${RUN}`;
 
 let tokenA;
 const token = () => tokenA;
@@ -63,11 +63,21 @@ after(async () => {
   }).catch(() => {});
 });
 
-describe('er_model reaches both doors with the same answer', () => {
+/*
+ * THE TOOL WENT; THE PARITY CLAIM DID NOT. `er_model` folded into `space_meta` at 5.0 and its route folded
+ * into `GET /api/spaces/:id/meta`, arriving as `actualSchema`. What this file was written to catch is
+ * unchanged and is if anything easier to get wrong now: the answer is assembled in two places, so the two
+ * doors can drift while each looks right on its own.
+ *
+ * That very defect shipped in the fold and was caught on a live instance rather than by a build — the fold
+ * went in on MCP first, leaving REST without the capability at all, and then returned `{ members }` where
+ * the proxy form must be `{ spaceId, members }`.
+ */
+describe('the actual schema reaches both doors with the same answer', () => {
   it('REST reports the two types and the relationship', async () => {
-    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/er-model`);
+    const r = await get(INSTANCES.a, token(), `/api/spaces/${SPACE}/meta`);
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    const json = JSON.stringify(r.body);
+    const json = JSON.stringify(r.body?.actualSchema);
     assert.match(json, /service/, `the stored types must appear: ${json.slice(0, 300)}`);
     assert.match(json, /team/);
     assert.match(json, /owned_by/, 'the edge label is the relationship half of the model');
@@ -81,12 +91,13 @@ describe('er_model reaches both doors with the same answer', () => {
       return t.skip(`MCP session unavailable: ${e.message}`);
     }
     try {
-      const rest = await get(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/er-model`);
-      const res = await session.callTool('er_model', { space: SPACE });
+      const rest = await get(INSTANCES.a, token(), `/api/spaces/${SPACE}/meta`);
+      const res = await session.callTool('space_meta', { space: SPACE });
       const text = res?.content?.[0]?.text ?? '';
       const mcp = JSON.parse(text);
       // Same object, not merely both plausible. One builder serves both, and this is what says so.
-      assert.deepEqual(mcp, rest.body, `the two doors disagree:\nMCP:  ${text.slice(0, 300)}\nREST: ${JSON.stringify(rest.body).slice(0, 300)}`);
+      assert.deepEqual(mcp.actualSchema, rest.body?.actualSchema,
+        `the two doors disagree:\nMCP:  ${JSON.stringify(mcp.actualSchema).slice(0, 300)}\nREST: ${JSON.stringify(rest.body?.actualSchema).slice(0, 300)}`);
     } finally {
       session.close();
     }
@@ -101,9 +112,9 @@ describe('er_model reaches both doors with the same answer', () => {
       return t.skip(`MCP session unavailable: ${e.message}`);
     }
     try {
-      const res = await session.callTool('er_model', { space: `no-such-space-${RUN}` });
+      const res = await session.callTool('space_meta', { space: `no-such-space-${RUN}` });
       const text = JSON.stringify(res ?? {});
-      // NOT just /error/: against a stale image this assertion passed on "Unknown tool: er_model", which is
+      // NOT just /error/: against a stale image this assertion passed on "Unknown tool: space_meta", which is
       // a refusal of the TOOL rather than of the space — a false pass that hid the tool being absent.
       assert.doesNotMatch(text, /Unknown tool/i, 'the tool itself must exist — rebuild the test image');
       assert.match(text, /space|not found|not accessible/i,

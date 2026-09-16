@@ -354,7 +354,13 @@ export const SpaceMetaBody = z.object({
  * The rule for anything added to this response in future: **derived, server-written, and echoed back means it
  * belongs here** — otherwise "do not return what you will not accept" is broken again.
  */
-export const SERVER_OWNED_META_FIELDS = ['version', 'updatedAt', 'previousVersions', 'needsReindex'] as const;
+/*
+ * `actualSchema` joined these at 5.0, when `er_model` folded into the space meta. It is DERIVED — counted
+ * from the records the space actually holds — so a caller who GETs the meta, edits one field and PATCHes
+ * the whole object back would otherwise be refused for sending something nobody can write. That is the
+ * rule this list exists for: do not return what you will not accept.
+ */
+export const SERVER_OWNED_META_FIELDS = ['version', 'updatedAt', 'previousVersions', 'needsReindex', 'actualSchema'] as const;
 
 /** Drop the server-owned housekeeping fields from an incoming `meta`, leaving everything else to Zod. */
 export function stripServerOwnedMeta(meta: unknown): unknown {

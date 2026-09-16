@@ -37,48 +37,28 @@ const description = (file, name) => {
   return s.slice(d, d + end);
 };
 
-const CHRONO = description('server/src/mcp/tools/chrono.ts', 'list_chrono');
 const DIR = description('server/src/mcp/tools/file.ts', 'list_dir');
-const BYNAME = description('server/src/mcp/tools/entity.ts', 'find_entities_by_name');
 const PEERS = description('server/src/mcp/tools/sync.ts', 'network_peers');
 const SYNCNOW = description('server/src/mcp/tools/sync.ts', 'network_sync');
 const TOKENS = description('server/src/mcp/tools/spaces.ts', 'list_tokens');
 
-describe('list_chrono: the date filter answers a different question', () => {
-  it('says after/before filter when the entry was WRITTEN', () => {
-    assert.match(CHRONO, /NOT WHEN IT HAPPENS/,
-      'the parameters are named after/before on a tool full of dates — this has to be unmissable');
-  });
 
-  it('and points at what to use for the scheduling question', () => {
-    assert.match(CHRONO, /startsAt/, 'name the field the caller actually meant');
-  });
-
-  it('and that is what the code does', () => {
-    // Pinned: the range really is assigned to createdAt. The old description said "created after", which was
-    // correct and easy to read past.
-    assert.match(src('server/src/brain/chrono.ts'), /query\['createdAt'\] = range/,
-      'the range moved off createdAt — rewrite the warning rather than leaving it wrong');
-  });
-
-  it('says `overdue` IS derived from the clock', () => {
-    // THIS ASSERTION USED TO PIN THE OPPOSITE, and that is the lesson worth keeping. It required the
-    // sentence "NOTHING RECOMPUTES `status` FROM THE CLOCK" — which was false, and had been false since C5
-    // shipped the derivation. A gate written from a description rather than from the code does not catch a
-    // wrong description; it CEMENTS it, and turns rewriting it into a test failure that looks like a
-    // regression. `deriveChronoStatus` is exercised against these claims in
-    // `chrono-status-descriptions-match-the-derivation.test.js`, which is what this one should have done.
-    assert.match(CHRONO, /DERIVED FROM THE CLOCK/,
-      'an entry left `upcoming` past its date reads back as `overdue`, and the list filter is translated to match');
-    assert.doesNotMatch(CHRONO, /nothing recomputes/i, 'the old claim must not come back in any casing');
-  });
-
-  it('and the default order really is newest-written first', () => {
-    assert.match(CHRONO, /newest first/, 'stated');
-    assert.match(src('server/src/brain/chrono.ts'), /\{ createdAt: -1 \}/, 'and true');
-  });
-});
-
+/*
+ * TWO OF THIS FILE'S FINDINGS WERE DISSOLVED BY A FOLD, NOT FIXED, AND THAT IS WORTH THE PARAGRAPH.
+ *
+ * It covered `list_chrono` and `find_entities_by_name`, both of which folded into `filter` at 5.0. Their
+ * blind spots did not move with them — they stopped existing, for the same reason in both cases:
+ *
+ * - `list_chrono`'s `after`/`before` filtered `createdAt`, when the entry was WRITTEN, on a tool full of
+ *   dates where "entries between two dates" is the obvious reading. In `filter` the caller names the field
+ *   themselves, so choosing `startsAt` or `createdAt` is a decision they make rather than one made for them.
+ * - `find_entities_by_name` was exact and case-sensitive, so an empty list did not mean the thing was
+ *   absent. In `filter` that is `{ name: 'x' }`, which is visibly an equality, and `$regex` is right there
+ *   for the other reading.
+ *
+ * The general shape: a convenience wrapper hides the predicate it runs, and every hidden predicate is a
+ * blind spot somebody has to be warned about in prose. Removing the wrapper removes the warning too.
+ */
 describe('list_dir: the proxy merge loses a duplicate name', () => {
   it('says collisions are resolved silently', () => {
     assert.match(DIR, /COLLISION IS RESOLVED SILENTLY/,
@@ -102,31 +82,6 @@ describe('list_dir: the proxy merge loses a duplicate name', () => {
   });
 });
 
-describe('find_entities_by_name: exact, and an empty list proves nothing', () => {
-  it('says exact and case-sensitive', () => {
-    assert.match(BYNAME, /EXACT name/, 'and not a search');
-    assert.match(BYNAME, /[Cc]ase-sensitive/, 'which is the half that surprises');
-  });
-
-  it('says several results usually means a duplicate to merge', () => {
-    assert.match(BYNAME, /duplicate somebody should merge/,
-      'taking [0] is how the second copy survives and keeps accumulating edges');
-  });
-
-  it('without NAMING the mutating merge tool — this is a read-only tool', () => {
-    // `mcp-help.test.js` refused the first draft, for the second time this session: read-only help must not
-    // advertise a tool a read-only token cannot call. The useful fact survives without the name — help()
-    // lists what your token can reach, so its absence means "not you", not "does not exist".
-    assert.doesNotMatch(BYNAME, /merge_entities/,
-      'a read-only tool must not advertise a mutating one');
-    assert.match(BYNAME, /help\(\)/, 'point at where a writing token would find it instead');
-  });
-
-  it('says an empty list does NOT mean the thing is absent', () => {
-    assert.match(BYNAME, /does NOT mean/, 'it may be stored under another spelling');
-    assert.match(BYNAME, /recall/, 'and name the tool for that case');
-  });
-});
 
 describe('the sync tools say what their answers do not cover', () => {
   it('list_peers: one row per peer PER NETWORK', () => {

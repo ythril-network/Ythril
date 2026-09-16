@@ -249,18 +249,22 @@ describe('no tool repeats the claim that was false', () => {
     }
   });
 
-  it('and `list_chrono` says the filter returns BOTH kinds', () => {
-    const t = ALL_TOOLS.find(x => x.name === 'list_chrono');
+  it('and a tool that SETS status says a filter returns both kinds', () => {
+    // `list_chrono` carried this and folded into `filter` at 5.0. `filter` is generic and has no business
+    // describing chrono semantics, so the warning belongs where status is set — the caller who chooses a
+    // status is the one who needs to know that filtering on it returns derived AND stored entries.
+    const t = ALL_TOOLS.find(x => x.name === 'update_chrono');
     const text = (t.description ?? '') + JSON.stringify(t.inputSchema(STUB));
-    assert.match(text, /BOTH kinds|ALSO RETURNS AN ENTRY SOMEBODY STORED/,
+    assert.match(text, /BOTH kinds|ALSO RETURNS AN ENTRY SOMEBODY STORED/i,
       'a caller who reads only "derived from the clock" would still not know a marked entry comes back');
   });
 
   it('and the four tools that discuss status say it is derived', () => {
     // Presence, not spelling: each of these had a wrong paragraph, so each must now carry the right one.
+    // Three, not four: `list_chrono` folded into `filter`.
     // Checked across the description AND the schema, because on `save_chrono` the correction lives in the
     // parameter rather than in the prose.
-    for (const name of ['save_chrono', 'update_chrono', 'list_chrono', 'delete_chrono']) {
+    for (const name of ['save_chrono', 'update_chrono', 'delete_chrono']) {
       const t = ALL_TOOLS.find(x => x.name === name);
       const text = (t.description ?? '') + JSON.stringify(t.inputSchema(STUB));
       assert.match(text, /derive[ds]?/i, `${name} must tell a caller that overdue is derived`);

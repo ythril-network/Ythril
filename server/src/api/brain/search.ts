@@ -37,7 +37,6 @@ import type { MemoryDoc, EntityDoc, EdgeDoc, ChronoEntry, FileMetaDoc } from '..
 import { RECORD_TYPES } from '../../config/types.js';
 import { reindexInProgress } from '../../metrics/registry.js';
 import { UUID_V4_RE } from './_shared.js';
-import { buildErModel } from '../../brain/er-model.js';
 import {
   rankOf, byRankThenId, mergeRecallResults, withoutDiagnostics, RECALL_ENVELOPE_KEYS,
 } from '../../brain/recall-shape.js';
@@ -61,34 +60,6 @@ export const searchRouter = Router();
 
 /** Guard so only one reindex job runs at a time per process. */
 let reindexJobRunning = false;
-
-
-/**
- * GET /api/brain/spaces/:spaceId/er-model
- *
- * The space's entity-relationship model, inferred from the schema AND from what is stored — see
- * `brain/er-model.ts` for why both, and why a type with zero records is a result rather than an omission.
- *
- * Read-only and derived: no state, nothing cached, and every number is a real count.
- *
- * **On a proxy space this reports the member spaces separately rather than merged.** Merging would add up
- * counts for two types that share a name and mean different things in different spaces, and produce
- * relationships between types that can never actually be joined, since an edge cannot cross a space. A
- * union here would look richer and be false.
- */
-searchRouter.get('/spaces/:spaceId/er-model', globalRateLimit, requireSpaceAuth, async (req, res) => {
-  const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
-  const memberIds = memberSpacesForRequest(req, spaceId);
-  const models = await Promise.all(memberIds.map(mid => buildErModel(mid)));
-  res.json(memberIds.length === 1 && memberIds[0] === spaceId
-    ? models[0]
-    : { spaceId, members: models });
-});
 
 
 // GET /api/brain/spaces/:spaceId/stats
