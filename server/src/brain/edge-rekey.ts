@@ -44,6 +44,7 @@ import { getConfig } from '../config/loader.js';
 import { edgeIdFor } from './edge-id.js';
 import { withoutVector } from './read-projection.js';
 import type { EdgeDoc, TombstoneDoc } from '../config/types.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 /**
  * The result of a re-key. `null` where the identity did not change, so a caller can fall through to its
@@ -155,7 +156,7 @@ export async function rekeyEdge(
   const author = existing.author?.instanceId;
   if (author !== undefined && author !== getConfig().instanceId) return null;
 
-  const coll = col<EdgeDoc>(`${spaceId}_edges`);
+  const coll = col<EdgeDoc>(spaceCollection(spaceId, 'edges'));
   // BEFORE anything is written. After the delete, a refused move would have destroyed the edge it declined
   // to relocate.
   const taken = await coll.findOne(asFilter<EdgeDoc>({ _id: newId }), { projection: { _id: 1 }, session });
@@ -167,7 +168,7 @@ export async function rekeyEdge(
   const insertSeq = await nextSeq(spaceId);
 
   await coll.deleteOne(asFilter<EdgeDoc>({ _id: existing._id }), { session });
-  await col<TombstoneDoc>(`${spaceId}_tombstones`).replaceOne(
+  await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).replaceOne(
     asFilter<TombstoneDoc>({ _id: existing._id }),
     asDoc<TombstoneDoc>({
       _id: existing._id, type: 'edge', spaceId, deletedAt: now,

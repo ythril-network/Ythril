@@ -224,7 +224,10 @@ describe('the 3.x link baseline — what the array walk answered', { skip }, () 
   });
 
   it('BASELINE: the ER model counts the entity type\'s inbound links per collection', async () => {
-    const er = await erMod.buildErModel([SPACE]);
+    // A STRING, not [SPACE]. `buildErModel` takes one space id; the array worked only because a template
+    // literal coerces it, and `spaceCollection` refuses it. The old spelling made a JS caller
+    // type-safe by accident, which is one of the things routing the name through a function buys.
+    const er = await erMod.buildErModel(SPACE);
     const svc = er.entityTypes?.find(t => t.type === 'service');
     assert.ok(svc, `the seeded entity type is absent from the ER model: ${JSON.stringify(er.entityTypes)}`);
     assert.deepEqual(

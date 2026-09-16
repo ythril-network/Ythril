@@ -35,6 +35,7 @@ import { enqueueMediaJob } from '../media/job-queue.js';
 import { embedConcurrency } from './embed-concurrency.js';
 import { JobLeaseLostError, shouldHeartbeat } from '../media/lease.js';
 import { embedChunksTotal } from '../../metrics/registry.js';
+import { spaceCollection } from '../../db/space-collection.js';
 
 export type InputFormat = 'pdf' | 'docx' | 'epub' | 'html' | 'md' | 'txt' | 'text' | 'auto';
 
@@ -339,7 +340,7 @@ export async function storeConversionResults(
       author: authorRef(),
       parentFileId: originalId,
     };
-    await col<FileMetaDoc>(`${spaceId}_files`).insertOne(asDoc<FileMetaDoc>(convertedDoc));
+    await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).insertOne(asDoc<FileMetaDoc>(convertedDoc));
   }
 
   // 2. Write extracted image subfiles and enqueue for media pipeline.
@@ -376,7 +377,7 @@ export async function storeConversionResults(
           author: authorRef(),
           parentFileId: originalId,
         };
-        await col<FileMetaDoc>(`${spaceId}_files`).insertOne(asDoc<FileMetaDoc>(imgDoc));
+        await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).insertOne(asDoc<FileMetaDoc>(imgDoc));
 
         // Enqueue for media pipeline (caption + face recognition)
         const mimeType = `image/${img.ext === 'jpg' ? 'jpeg' : img.ext}`;
@@ -495,7 +496,7 @@ export async function storeConversionResults(
     const batch = chunkDocs.slice(i, i + INSERT_BATCH);
     if (batch.length === 0) continue;
     // ordered:false — one duplicate/invalid chunk must not abort the rest of the batch.
-    await col<FileMetaDoc>(`${spaceId}_files`)
+    await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
       .insertMany(batch.map(d => asDoc<FileMetaDoc>(d)), { ordered: false });
   }
 
@@ -524,7 +525,7 @@ export async function deleteConversionArtifacts(
   const originalId = toDocId(originalFilePath);
 
   // DB: all filemeta records with parentFileId = originalId (chunks, converted, extracted).
-  await col<FileMetaDoc>(`${spaceId}_files`).deleteMany(
+  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).deleteMany(
     asFilter<FileMetaDoc>({ parentFileId: originalId }),
   );
 
@@ -552,7 +553,7 @@ export async function deleteConversionArtifactsByPrefix(
   const escaped = escapeRegex(dir + '/');
 
   // DB: every child record whose parent lived under the folder.
-  await col<FileMetaDoc>(`${spaceId}_files`).deleteMany(
+  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).deleteMany(
     asFilter<FileMetaDoc>({ parentFileId: { $regex: `^${escaped}` } }),
   );
 

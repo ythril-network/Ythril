@@ -57,6 +57,11 @@ export type ScopeShape = 'path' | 'iterates' | 'body';
  * kill a cross-space search because some space the caller never asked about exists on the instance.
  * `requireBodyScopedSpace` owns them instead, and the row here is what makes the area and the rung
  * visible to the inventory, the docs and the audit rather than living only in a middleware argument.
+ *
+ * **`space` may also be a LIST** on those three routes, and the rung rule for a list is the NAMED rule,
+ * not the cross-space one: one space in the list without the rung refuses the whole call. So `body` scope
+ * covers two behaviours — refuse what was named, filter what was not — and which one applies is decided by
+ * whether the caller named anything, never by how many they named.
  */
 
 export interface RouteRight {

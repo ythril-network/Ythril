@@ -26,6 +26,7 @@ import { mediaIsOff } from './converters/media-level.js';
 import { mimeTypeForPath } from './mime.js';
 import { toDocId } from '../util/paths.js';
 import { log } from '../util/log.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 /** Embedding-pipeline state surfaced to the HTTP/MCP response after a write. */
 /**
@@ -87,7 +88,7 @@ export async function dispatchFileProcessing(
     // `mediaType` is the guard-narrowed format so it satisfies FileMetaDoc's media subset.
     const mediaType = resolvedFormat;
     const setMediaStatus = (status: Exclude<FileEmbeddingStatus, 'complete'>): Promise<unknown> =>
-      col<FileMetaDoc>(`${spaceId}_files`).updateOne(
+      col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
         asFilter<FileMetaDoc>({ _id: normId }),
         { $set: { mediaType, embeddingStatus: status } },
       );
@@ -104,7 +105,7 @@ export async function dispatchFileProcessing(
     // Getting this wrong in the other direction is invisible: a file silently never embedded, discovered only
     // when someone searches for it and it is not there. So the guard refuses to guess.
     if (input.sha256) {
-      const prior = await col<FileMetaDoc>(`${spaceId}_files`).findOne(
+      const prior = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(
         asFilter<FileMetaDoc>({ _id: normId }),
       ) as FileMetaDoc | null;
       if (prior?.sha256 === input.sha256 && prior?.embeddingStatus === 'complete') {
@@ -146,7 +147,7 @@ export async function dispatchFileProcessing(
     // That is precisely the silent-failure shape the vector-index work was about: the UI shows a
     // spinner, recall returns nothing, and neither says why.
     if (documentsAreOff(spaceId)) {
-      await col<FileMetaDoc>(`${spaceId}_files`).updateOne(
+      await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
         asFilter<FileMetaDoc>({ _id: normId }),
         { $set: { embeddingStatus: 'skipped' } },
       );

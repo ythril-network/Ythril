@@ -59,6 +59,7 @@ import {
   httpRequestSizeBytes,
   httpResponseSizeBytes,
 } from './metrics/registry.js';
+import { spaceCollection } from './db/space-collection.js';
 
 // Server version — one reader, in `util/server-version.ts`. This file and `api/about.ts` each resolved
 // their own path to the same manifest; a third reader (the embed-job revive) is what made the duplication
@@ -439,11 +440,11 @@ export function createApp() {
         `"spaceName":${JSON.stringify(space.label)},` +
         `"version":${JSON.stringify(_serverVersion)},`,
       );
-      await write('"facts":'); await streamArray(`${spaceId}_facts`);
-      await write(',"entities":'); await streamArray(`${spaceId}_entities`);
-      await write(',"edges":'); await streamArray(`${spaceId}_edges`);
-      await write(',"chrono":'); await streamArray(`${spaceId}_chrono`);
-      await write(',"files":'); await streamArray(`${spaceId}_files`);
+      await write('"facts":'); await streamArray(spaceCollection(spaceId, 'facts'));
+      await write(',"entities":'); await streamArray(spaceCollection(spaceId, 'entities'));
+      await write(',"edges":'); await streamArray(spaceCollection(spaceId, 'edges'));
+      await write(',"chrono":'); await streamArray(spaceCollection(spaceId, 'chrono'));
+      await write(',"files":'); await streamArray(spaceCollection(spaceId, 'files'));
       await write('}');
       res.end();
     } catch (err) {

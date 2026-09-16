@@ -12,6 +12,7 @@ import { planSpaceWipe, notifyPeersOfWipe } from '../../spaces/wipe-vote.js';
 import { updateSpace, spacePurpose } from '../../spaces/spaces.js';
 import { SPACE_PURPOSE_MAX, needsReindex } from '../../spaces/_shared.js';
 import { measureSpaceUsage } from '../../spaces/space-usage.js';
+import { spaceCollection } from '../../db/space-collection.js';
 
 export const list_spacesTool: ToolHandler = {
   name: 'list_spaces',
@@ -36,10 +37,10 @@ export const list_spacesTool: ToolHandler = {
       accessibleSpaces.map(async s => {
         const memberIds = memberSpacesWithin(s.id, accessibleSpaceIds);
         const perMember = await Promise.all(memberIds.map(async mid => ({
-          facts: await col(`${mid}_facts`).countDocuments(),
-          entities: await col(`${mid}_entities`).countDocuments(),
-          edges:    await col(`${mid}_edges`).countDocuments(),
-          chrono:   await col(`${mid}_chrono`).countDocuments(),
+          facts: await col(spaceCollection(mid, 'facts')).countDocuments(),
+          entities: await col(spaceCollection(mid, 'entities')).countDocuments(),
+          edges:    await col(spaceCollection(mid, 'edges')).countDocuments(),
+          chrono:   await col(spaceCollection(mid, 'chrono')).countDocuments(),
         })));
         return {
           id: s.id,
@@ -96,11 +97,11 @@ export const space_statsTool: ToolHandler = {
     const { callSpace , accessibleSpaceIds } = ctx;
     const memberIds = memberSpacesWithin(callSpace, accessibleSpaceIds);
     const counts = await Promise.all(memberIds.map(async mid => ({
-      facts: await col(`${mid}_facts`).countDocuments(),
-      entities: await col(`${mid}_entities`).countDocuments(),
-      edges: await col(`${mid}_edges`).countDocuments(),
-      chrono: await col(`${mid}_chrono`).countDocuments(),
-      files: await col(`${mid}_files`).countDocuments(),
+      facts: await col(spaceCollection(mid, 'facts')).countDocuments(),
+      entities: await col(spaceCollection(mid, 'entities')).countDocuments(),
+      edges: await col(spaceCollection(mid, 'edges')).countDocuments(),
+      chrono: await col(spaceCollection(mid, 'chrono')).countDocuments(),
+      files: await col(spaceCollection(mid, 'files')).countDocuments(),
     })));
     const facts = counts.reduce((s, c) => s + c.facts, 0);
     const entities = counts.reduce((s, c) => s + c.entities, 0);
@@ -175,11 +176,11 @@ export const space_metaTool: ToolHandler = {
     const metaBlock = resolveMetaRefs(metaSpace?.meta ?? {});
     const metaMemberIds = memberSpacesWithin(callSpace, accessibleSpaceIds);
     const metaCounts = await Promise.all(metaMemberIds.map(async mid => ({
-      facts: await col(`${mid}_facts`).countDocuments(),
-      entities: await col(`${mid}_entities`).countDocuments(),
-      edges: await col(`${mid}_edges`).countDocuments(),
-      chrono: await col(`${mid}_chrono`).countDocuments(),
-      files: await col(`${mid}_files`).countDocuments(),
+      facts: await col(spaceCollection(mid, 'facts')).countDocuments(),
+      entities: await col(spaceCollection(mid, 'entities')).countDocuments(),
+      edges: await col(spaceCollection(mid, 'edges')).countDocuments(),
+      chrono: await col(spaceCollection(mid, 'chrono')).countDocuments(),
+      files: await col(spaceCollection(mid, 'files')).countDocuments(),
     })));
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { buildErModel: buildMetaErModel } = await import('../../brain/er-model.js');

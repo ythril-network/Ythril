@@ -511,7 +511,7 @@ For cross-space recall (omit `space`), `spaceId` on each result identifies which
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `space` | `string` | — | Space ID to search in. Omit to search across all accessible spaces. |
+| `space` | `string` or `string[]` | — | Space to search in. A LIST searches exactly those spaces and refuses the call if you cannot reach one of them; omit it to search every accessible space. Only `recall`, `filter` and `similar` take a list — every other tool acts on one space and refuses one. |
 | `query` | `string` | ✅ | Natural language search query |
 | `topK` | `number` | — | Max results to return (default `10`) |
 | `tags` | `string[]` | — | Optional tag filter — only results bearing **all** of these tags are returned (applies to all knowledge types). Useful for scoping a semantic search to a specific service or ADR (e.g. `["portal-backend"]`) |

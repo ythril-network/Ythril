@@ -20,6 +20,7 @@ import { scanSpace, pairContentHash } from '../brain/dupe-scanner.js';
 import { computeMergePlan, applyResolutions, executeMerge } from '../brain/merge.js';
 import { nliConfigured } from '../brain/nli-client.js';
 import type { DupeCandidateDoc, ContradictionCandidateDoc } from '../config/types.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 /** Find a candidate across the caller's accessible spaces. */
 async function findCandidate(id: string, rights?: TokenRights): Promise<{ doc: DupeCandidateDoc; spaceId: string } | null> {
@@ -27,7 +28,7 @@ async function findCandidate(id: string, rights?: TokenRights): Promise<{ doc: D
   // reads the record, so `read` is the level, and an empty allowlist means none rather than all.
   const spaces = spacesWhereTokenMay(rights, 'dataQuality', 'read');
   for (const spaceId of spaces) {
-    const doc = await col<DupeCandidateDoc>(`${spaceId}_dupe_candidates`).findOne(asFilter<DupeCandidateDoc>({ _id: id })) as DupeCandidateDoc | null;
+    const doc = await col<DupeCandidateDoc>(spaceCollection(spaceId, 'dupeCandidates')).findOne(asFilter<DupeCandidateDoc>({ _id: id })) as DupeCandidateDoc | null;
     if (doc) return { doc, spaceId };
   }
   return null;
@@ -75,14 +76,14 @@ async function contradictionSignalsFor(
   }
 
   const keys = [...new Set(pairs.map(pairKey))];
-  const found = await col<ContradictionCandidateDoc>(`${spaceId}_contradiction_candidates`)
+  const found = await col<ContradictionCandidateDoc>(spaceCollection(spaceId, 'contradictionCandidates'))
     .find(asFilter<ContradictionCandidateDoc>({ _id: { $in: keys } }))
     .toArray() as ContradictionCandidateDoc[];
   const byKey = new Map(found.map(f => [f._id, f]));
 
   // "The collection is empty" is not "these pairs are clean" — an unscanned space and a clean space look
   // identical from a per-pair lookup, and only one of them licenses a merge.
-  const everScanned = await col(`${spaceId}_contradiction_candidates`).estimatedDocumentCount() > 0;
+  const everScanned = await col(spaceCollection(spaceId, 'contradictionCandidates')).estimatedDocumentCount() > 0;
 
   for (const p of pairs) {
     const key = pairKey(p);
@@ -218,7 +219,7 @@ duplicatesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
       // leading equality field and the sort by (score desc, detectedAt desc) follows it. The
       // redundant `spaceId` equality is a harmless residual (the collection is already per-space).
       const q = status === 'all' ? { spaceId } : { spaceId, status };
-      const docs = await col<DupeCandidateDoc>(`${spaceId}_dupe_candidates`)
+      const docs = await col<DupeCandidateDoc>(spaceCollection(spaceId, 'dupeCandidates'))
         .find(asFilter<DupeCandidateDoc>(q))
         .sort({ score: -1, detectedAt: -1 })
         .limit(500)
@@ -245,7 +246,7 @@ duplicatesRouter.post('/:id/dismiss', globalRateLimit, requireAuth, denyReadOnly
     const id = req.params['id'] as string;
     const spaces = accessibleSpaces(req, 'write');
     for (const spaceId of spaces) {
-      const coll = col<DupeCandidateDoc>(`${spaceId}_dupe_candidates`);
+      const coll = col<DupeCandidateDoc>(spaceCollection(spaceId, 'dupeCandidates'));
       const doc = await coll.findOne(asFilter<DupeCandidateDoc>({ _id: id })) as DupeCandidateDoc | null;
       if (!doc) continue;
       const dismissedContentHash = await pairContentHash(spaceId, doc.type, doc.aId, doc.bId);
@@ -272,7 +273,7 @@ duplicatesRouter.post('/:id/reopen', globalRateLimit, requireAuth, denyReadOnly,
     const id = req.params['id'] as string;
     const spaces = accessibleSpaces(req, 'write');
     for (const spaceId of spaces) {
-      const r = await col<DupeCandidateDoc>(`${spaceId}_dupe_candidates`).updateOne(
+      const r = await col<DupeCandidateDoc>(spaceCollection(spaceId, 'dupeCandidates')).updateOne(
         asFilter<DupeCandidateDoc>({ _id: id, status: 'dismissed' }),
         asUpdate<DupeCandidateDoc>({ $set: { status: 'open', updatedAt: new Date().toISOString() } }),
       );
@@ -308,7 +309,7 @@ duplicatesRouter.post('/:id/merge', globalRateLimit, requireAuth, denyReadOnly, 
     const mergedProps = applyResolutions(plan.survivor.properties ?? {}, plan.absorbed.properties ?? {}, plan.plan.propertyConflicts, plan.plan.absorbedOnlyProperties);
     const result = await executeMerge(spaceId, plan.survivor, plan.absorbed, mergedProps, { tokenId: req.authToken?.id, tokenLabel: req.authToken?.name });
 
-    await col<DupeCandidateDoc>(`${spaceId}_dupe_candidates`).updateOne(
+    await col<DupeCandidateDoc>(spaceCollection(spaceId, 'dupeCandidates')).updateOne(
       asFilter<DupeCandidateDoc>({ _id: doc._id }),
       asUpdate<DupeCandidateDoc>({ $set: { status: 'resolved', resolution: 'merged', updatedAt: new Date().toISOString() } }),
     );

@@ -19,7 +19,7 @@ Available as both — REST `POST /api/brain/recall`, MCP tool `recall`:
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `space` | — | every space you can read | Which space to search. **Omit it and the search runs across every space this token holds `knowledge: read` in**, ranked together — the reason this route no longer carries the space in its path. A space you cannot read is not searched and is not an error; a space you NAMED and cannot read is a 403. |
+| `space` | — | every space you can read | Which space to search. **One name**, **a LIST of names**, or omitted. A list searches exactly those spaces; omitting it runs across every space this token holds `knowledge: read` in, ranked together. The two are not the same, and the difference is paid in the byte budget: a list of three does not spend it on the other nine. **A space you NAMED and cannot read refuses the whole call** — filtering would answer with fewer results, and a caller cannot tell a filtered answer from a small one. A space you did not name and cannot read is simply not searched. An empty list `[]` is refused rather than read as "all". |
 | `query` | ✅ | — | Natural-language search text (non-empty string) |
 | `topK` | — | `10` | Max returned results, minimum 1 and **no ceiling** — the same on both doors since 4.0, where REST clamped to 100 silently. What comes back is bounded by the byte budget instead: every record whole, `truncated` on every response, `nextSkip` when it bit |
 | `types` | — | all types | Restrict result knowledge types |
@@ -309,7 +309,7 @@ work out. The hop labels along the nesting route are not lost either: each node 
 so walking the tree yields the chain in order. Only the last hop of an *alternate* route has no label, and
 both of its endpoint ids are right there.
 
-The MCP `recall` tool takes the same parameters, plus `space` (omit it to search every accessible space):
+The MCP `recall` tool takes the same parameters, plus `space` — one name, a list of them, or omitted to search every accessible space:
 
 ```json
 {

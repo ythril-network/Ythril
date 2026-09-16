@@ -112,11 +112,24 @@ describe('the check itself works before it is trusted', () => {
   });
 
   it('strips the comment that names the collections', () => {
+    /*
+     * The stripper is what makes every assertion below mean anything: `merge.ts` both EXPLAINS the file
+     * phase in prose and performs it, so a gate reading the raw file could be satisfied by the explanation
+     * of a phase that had been deleted.
+     *
+     * The spelling moved at `A-5` — the collection is opened through `spaceCollection(spaceId, 'files')`
+     * rather than a template — and the property did not: the name still occurs in both, so the stripper
+     * still has something to strip and the check below still has something to find.
+     */
     const raw = readFileSync(MERGE, 'utf8');
-    assert.ok(raw.includes('_files'), 'the merge should still explain the file phase in prose');
+    const PROSE_ONLY = 'linkedFrom.files';
+    assert.ok(raw.includes(PROSE_ONLY), 'the merge should still explain the file phase in prose');
     const stripped = withoutComments(raw);
-    // The explanation mentions `${spaceId}_files` in prose; the assertions below must see the real call.
-    assert.ok(stripped.includes('_files'), 'the file collection must be referenced in CODE, not only in a comment');
+    assert.ok(!stripped.includes(PROSE_ONLY),
+      'the explanation survived the stripper, so every assertion below could be satisfied by a comment '
+      + 'describing a phase that had been deleted');
+    assert.ok(stripped.includes("spaceCollection(spaceId, 'files')"),
+      'the file collection must be opened in CODE, not only described in a comment');
   });
 });
 
@@ -126,7 +139,7 @@ describe('executeMerge relinks every collection that can reference an entity', (
   for (const [type, suffix] of Object.entries(COLLECTION_SUFFIX)) {
     it(`relinks ${suffix} (${type})`, () => {
       // The collection must be opened...
-      assert.match(merge, new RegExp(`col<[^>]*>\\(\`\\$\\{spaceId\\}_${suffix}\`\\)`),
+      assert.match(merge, new RegExp(`col<[^>]*>\\(spaceCollection\\(spaceId, '${suffix}'\\)\\)`),
         `the merge never opens the ${suffix} collection — records there keep pointing at the absorbed entity, `
         + 'which phase 5 deletes');
       /*
@@ -153,7 +166,7 @@ describe('executeMerge relinks every collection that can reference an entity', (
        * an afternoon — a window failure would have said nothing at all.
        */
       const decl = new RegExp(
-        '(?:const|let)\\s+(\\w+)\\s*=\\s*col<[^>]*>\\(`\\$\\{spaceId\\}_' + suffix + '`',
+        '(?:const|let)\\s+(\\w+)\\s*=\\s*col<[^>]*>\\(spaceCollection\\(spaceId, .' + suffix + '.\\)',
       ).exec(merge);
       assert.ok(decl, `${suffix}: the collection is not opened into a named variable — re-anchor this gate`);
       const varName = decl[1];

@@ -30,8 +30,18 @@
  * - **A space was named** → the caller asked for THAT one. Not holding the rung there is a refusal, with
  *   the space in the message, because silently searching nothing would answer "no results" to a question
  *   that was really "you may not".
+ * - **SEVERAL were named** (a list, since 5.0) → the same rule, and one unreachable name refuses the whole
+ *   call. Owner decision, 2026-09-16. Dropping the ones the token cannot reach would return a SHORTER
+ *   answer, and a caller cannot tell a filtered result from a small one — so the failure would read as
+ *   "there is less there" rather than as "you cannot see all of it". A 403 naming the space is cheaper
+ *   than a wrong conclusion drawn from a plausible answer.
  * - **No space was named** → the caller asked for whatever they can see. Keep the spaces where the rung is
  *   held, drop the rest, and refuse only when nothing is left.
+ *
+ * **An EMPTY list is refused, not read as "no space named".** `[]` is the value most likely to be produced
+ * by a caller's own filter returning nothing, and every falsy-ish check spells it the same as absent — so
+ * treating it as the cross-space case would widen a request to every reachable space at exactly the moment
+ * the caller meant none.
  *
  * The MCP door sidesteps this by skipping the rung check entirely when no space is named and relying on the
  * connection's accessible list. That is defensible for a read and would be a hole on a write, so the rung is
@@ -42,7 +52,11 @@ import type { Rung } from './space-rights.js';
 import { holdsRung } from './reachable-spaces.js';
 
 export interface BodyScopedRequest {
-  /** The `space` value exactly as it arrived. Anything but a non-empty string is refused, never coerced. */
+  /**
+   * The `space` value exactly as it arrived: one name, a list of names, or absent. Anything else — an
+   * object, a number, a list with a non-string in it — is refused rather than coerced, because every
+   * coercion here silently changes WHICH space is read.
+   */
   named: unknown;
   /** The ceiling: every space this connection could reach at all. The matrix cannot raise it. */
   accessible: readonly string[];
@@ -68,9 +82,31 @@ export interface BodyScopedVerdict {
 export function spacesForBodyScopedRequest(req: BodyScopedRequest): BodyScopedVerdict {
   const { named, accessible, rights, area, needs } = req;
 
-  const namedSpace = typeof named === 'string' ? named.trim() : undefined;
-  if (named !== undefined && named !== null && namedSpace === undefined) {
-    return { spaces: [], refusal: `The 'space' field must be a string naming one space.` };
+  /*
+   * Parsed into ONE shape before anything is authorised. A branch per arriving shape is how a check ends
+   * up applied to one of them and not the other.
+   */
+  let asked: string[] | undefined;
+  if (typeof named === 'string') {
+    asked = [named.trim()];
+  } else if (Array.isArray(named)) {
+    if (!named.every(v => typeof v === 'string')) {
+      return { spaces: [], refusal: `The 'space' list must contain only space names as strings.` };
+    }
+    if (named.length === 0) {
+      return {
+        spaces: [],
+        refusal: `The 'space' list is empty. Name at least one space, or omit 'space' entirely to search `
+          + 'every space this token can reach.',
+      };
+    }
+    // Deduplicated: the same space twice would read it twice and double every match from it.
+    asked = [...new Set(named.map(v => v.trim()))];
+  } else if (named !== undefined && named !== null) {
+    return { spaces: [], refusal: `The 'space' field must be a space name, or a list of them.` };
+  }
+  if (asked?.some(v => v.length === 0)) {
+    return { spaces: [], refusal: `The 'space' field must be a space name, or a list of them.` };
   }
 
   if (!rights) {
@@ -80,17 +116,22 @@ export function spacesForBodyScopedRequest(req: BodyScopedRequest): BodyScopedVe
   // The shared predicate, not a fifth copy of `satisfies(effectiveRung(...), needs)`.
   const holds = (sid: string): boolean => holdsRung(rights, sid, area, needs);
 
-  if (namedSpace) {
-    if (!accessible.includes(namedSpace)) {
-      return { spaces: [], refusal: `Token does not have access to space '${namedSpace}'` };
+  if (asked) {
+    /*
+     * ALL OR NOTHING, and the refusal names only the space that failed.
+     *
+     * Listing the ones that WERE reachable would tell a caller which spaces exist and which they may read
+     * — an inventory they were refused, handed over in the refusal.
+     */
+    for (const sid of asked) {
+      if (!accessible.includes(sid)) {
+        return { spaces: [], refusal: `Token does not have access to space '${sid}'` };
+      }
+      if (!holds(sid)) {
+        return { spaces: [], refusal: `Token needs '${needs}' on ${area} in space '${sid}'` };
+      }
     }
-    if (!holds(namedSpace)) {
-      return {
-        spaces: [],
-        refusal: `Token needs '${needs}' on ${area} in space '${namedSpace}'`,
-      };
-    }
-    return { spaces: [namedSpace], refusal: null };
+    return { spaces: asked, refusal: null };
   }
 
   // No space named: every space this connection can reach, kept only where the rung is actually held.

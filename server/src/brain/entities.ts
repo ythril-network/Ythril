@@ -29,6 +29,7 @@ import { log } from '../util/log.js';
 import type { EntityDoc, EdgeDoc, FactDoc, ChronoEntry, TombstoneDoc, FileMetaDoc } from '../config/types.js';
 import { PROPERTIES_SCAN_MAX_MS, textContains } from './tag-filter.js';
 import { wipeSpaceCollection } from './bulk-wipe.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 /** An item that references a given entity, and — for an edge — which of its ends does. */
 export interface BacklinkEntry {
@@ -75,7 +76,7 @@ export async function unlabelAllFaces(spaceId: string): Promise<number> {
 }
 
 async function unlabelFacesWhere(spaceId: string, match: Record<string, unknown>): Promise<number> {
-  const res = await col<FileMetaDoc>(`${spaceId}_files`).updateMany(
+  const res = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateMany(
     asFilter<FileMetaDoc>(match),
     asUpdate<FileMetaDoc>({ $unset: { faceEntityId: '', faceScore: '' } }),
   );
@@ -127,7 +128,7 @@ export async function upsertEntity(
    */
   onValidation?: (check: UpdateValidation) => void,
 ): Promise<UpsertResult> {
-  const collection = col<EntityDoc>(`${spaceId}_entities`);
+  const collection = col<EntityDoc>(spaceCollection(spaceId, 'entities'));
 
   // When an id is provided, attempt to find the existing record by primary key.
   const existing: EntityDoc | null = id
@@ -289,7 +290,7 @@ export async function upsertEntity(
  * Name is a non-unique label, so multiple results are possible.
  */
 export async function findEntitiesByName(spaceId: string, name: string): Promise<EntityDoc[]> {
-  return col<EntityDoc>(`${spaceId}_entities`)
+  return col<EntityDoc>(spaceCollection(spaceId, 'entities'))
     .find(asFilter<EntityDoc>({ spaceId, name }), { projection: NEVER_RETURNED_PROJECTION })
     .toArray() as Promise<EntityDoc[]>;
 }
@@ -310,7 +311,7 @@ export async function findEntitiesByName(spaceId: string, name: string): Promise
  */
 export async function findEntitiesByIds(spaceId: string, ids: readonly string[]): Promise<EntityDoc[]> {
   if (ids.length === 0) return [];
-  return col<EntityDoc>(`${spaceId}_entities`)
+  return col<EntityDoc>(spaceCollection(spaceId, 'entities'))
     .find(asFilter<EntityDoc>({ _id: { $in: [...new Set(ids)] }, spaceId }),
       { projection: NEVER_RETURNED_PROJECTION })
     .toArray() as Promise<EntityDoc[]>;
@@ -318,7 +319,7 @@ export async function findEntitiesByIds(spaceId: string, ids: readonly string[])
 
 /** Find an entity by exact ID */
 export async function getEntityById(spaceId: string, id: string): Promise<EntityDoc | null> {
-  return col<EntityDoc>(`${spaceId}_entities`)
+  return col<EntityDoc>(spaceCollection(spaceId, 'entities'))
     .findOne(asFilter<EntityDoc>({ _id: id, spaceId }),
       { projection: NEVER_RETURNED_PROJECTION }) as Promise<EntityDoc | null>;
 }
@@ -342,7 +343,7 @@ export async function updateEntityById(
   /** See `upsertEntity`'s: the classification, so a door never re-derives it for presentation. */
   onValidation?: (check: UpdateValidation) => void,
 ): Promise<EntityDoc | null> {
-  const collection = col<EntityDoc>(`${spaceId}_entities`);
+  const collection = col<EntityDoc>(spaceCollection(spaceId, 'entities'));
   const existing = await collection.findOne(asFilter<EntityDoc>({ _id: id, spaceId }),
     { projection: NEVER_RETURNED_PROJECTION }) as EntityDoc | null;
   if (!existing) return null;
@@ -471,7 +472,7 @@ export async function listEntities(
   skip = 0,
   sort?: SortSpec,
 ): Promise<EntityDoc[]> {
-  const cursor = col<EntityDoc>(`${spaceId}_entities`)
+  const cursor = col<EntityDoc>(spaceCollection(spaceId, 'entities'))
     .find(asFilter<EntityDoc>({ ...filter, spaceId }), { projection: NEVER_RETURNED_PROJECTION });
   // A properties-value filter is a collection scan by nature ($expr cannot use an index), so it
   // carries its own deadline instead of running unbounded on a large space.
@@ -491,10 +492,10 @@ export async function deleteEntity(
   entityId: string,
   actor?: WebhookActor,
 ): Promise<boolean> {
-  const existing = await col<EntityDoc>(`${spaceId}_entities`)
+  const existing = await col<EntityDoc>(spaceCollection(spaceId, 'entities'))
     .findOne(asFilter<EntityDoc>({ _id: entityId, spaceId }), { projection: { seq: 1 } }) as { seq?: number } | null;
   const seq = await nextSeq(spaceId);
-  const result = await col<EntityDoc>(`${spaceId}_entities`).deleteOne({
+  const result = await col<EntityDoc>(spaceCollection(spaceId, 'entities')).deleteOne({
     _id: entityId,
     spaceId,
   });
@@ -514,7 +515,7 @@ export async function deleteEntity(
     seq,
     ...(existing?.seq !== undefined ? { originalSeq: existing.seq } : {}),
   };
-  await col<TombstoneDoc>(`${spaceId}_tombstones`).replaceOne(
+  await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).replaceOne(
     asFilter<TombstoneDoc>({ _id: entityId }),
     asDoc<TombstoneDoc>(tombstone),
     { upsert: true },
@@ -644,7 +645,7 @@ export async function findEntityReferences(spaceId: string, targetId: string, ta
   const kindMatches = (side: string) => targetKind === 'entity'
     ? { $or: [{ [side]: targetId, [`${side}Kind`]: { $exists: false } }, { [side]: targetId, [`${side}Kind`]: 'entity' }] }
     : { [side]: targetId, [`${side}Kind`]: targetKind };
-  const edges = await col<EdgeDoc>(`${spaceId}_edges`)
+  const edges = await col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
     .find(asFilter<EdgeDoc>({ spaceId, $or: [kindMatches('from'), kindMatches('to')] }), { projection: { _id: 1 } })
     .toArray() as Array<{ _id: string }>;
   for (const e of edges) backlinks.push({ type: 'edge', _id: e._id });
@@ -686,7 +687,7 @@ export async function findEntityReferences(spaceId: string, targetId: string, ta
   // this for a fact target would compare a fact id against a column of entity ids. It would find
   // nothing, every time, which is exactly what a silently wrong scan looks like from the outside.
   if (targetKind === 'entity') {
-    const faces = await col<FileMetaDoc>(`${spaceId}_files`)
+    const faces = await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
       .find(asFilter<FileMetaDoc>({ faceEntityId: targetId }), { projection: { _id: 1 } })
       .toArray() as Array<{ _id: string }>;
     for (const f of faces) backlinks.push({ type: 'face', _id: f._id });
@@ -714,7 +715,7 @@ export const NAME_FILTER_ID_CAP = 500;
 export async function resolveEntityIdsByName(spaceId: string, needle: string): Promise<string[]> {
   const trimmed = needle.trim();
   if (!trimmed) return [];
-  const docs = await col<EntityDoc>(`${spaceId}_entities`)
+  const docs = await col<EntityDoc>(spaceCollection(spaceId, 'entities'))
     .find(asFilter<EntityDoc>({ name: textContains(trimmed) }), { projection: { _id: 1 } })
     .limit(NAME_FILTER_ID_CAP)
     .toArray();

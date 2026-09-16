@@ -13,6 +13,7 @@ import { getConfig, getMediaEmbeddingConfig } from '../../config/loader.js';
 import { log } from '../../util/log.js';
 import type { FileMetaDoc, AuthorRef } from '../../config/types.js';
 import type { VisionProvider } from './providers.js';
+import { spaceCollection } from '../../db/space-collection.js';
 
 
 /**
@@ -56,7 +57,7 @@ export async function embedImage(
   };
 
   // Upsert: a retry may re-run this after a partial failure
-  await col<FileMetaDoc>(`${spaceId}_files`).replaceOne(
+  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).replaceOne(
     asFilter<FileMetaDoc>({ _id: chunkId }),
     asDoc<FileMetaDoc>(chunkDoc),
     { upsert: true },

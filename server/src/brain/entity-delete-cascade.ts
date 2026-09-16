@@ -47,6 +47,7 @@ import { deleteEdge } from './edges.js';
 import type { BacklinkEntry } from './entities.js';
 import type { WebhookActor } from '../webhooks/dispatcher.js';
 import type { EdgeDoc } from '../config/types.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 /** What a preview answers: the set, and the token that authorises removing exactly it. */
 export interface CascadePreview {
@@ -155,7 +156,7 @@ export async function deleteEntityCascade(
 
 /** The ids of the edges a cascade would remove — for a caller that wants the set without the token. */
 export async function cascadeEdgeIds(spaceId: string, entityId: string): Promise<string[]> {
-  const rows = await col<EdgeDoc>(`${spaceId}_edges`)
+  const rows = await col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
     .find(asFilter<EdgeDoc>({ spaceId, $or: [{ from: entityId }, { to: entityId }] }), { projection: { _id: 1 } })
     .toArray() as Array<{ _id: string }>;
   return rows.map(r => r._id);

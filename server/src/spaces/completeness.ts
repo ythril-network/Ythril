@@ -19,6 +19,7 @@
 import { col } from '../db/mongo.js';
 import type { BrainCollection } from '../config/types.js';
 import type { SpaceMeta, KnowledgeType } from '../config/types.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 /** The knowledge collections a check can point at. `file` is not a `KnowledgeType` — it has no schema. */
 export type CompletenessScope = KnowledgeType | 'file' | 'space';
@@ -204,13 +205,13 @@ export async function gatherCompletenessFacts(memberIds: string[]): Promise<Comp
     // `$nin`-ing it: on a large graph that array IS the graph, shipped into a query. Each `$lookup`
     // stops at the first matching edge, so an entity with 10 000 edges costs the same as one with 1.
     // Both join fields are indexed (`{from,to,label}` gives `from`; `{to:1}` is created alongside it).
-    const [unlinked] = await col(`${sid}_entities`).aggregate<{ n: number; sample: string[] }>([
-      { $lookup: { from: `${sid}_edges`, localField: '_id', foreignField: 'from', pipeline: [{ $limit: 1 }, { $project: { _id: 1 } }], as: 'out' } },
-      { $lookup: { from: `${sid}_edges`, localField: '_id', foreignField: 'to', pipeline: [{ $limit: 1 }, { $project: { _id: 1 } }], as: 'inb' } },
+    const [unlinked] = await col(spaceCollection(sid, 'entities')).aggregate<{ n: number; sample: string[] }>([
+      { $lookup: { from: spaceCollection(sid, 'edges'), localField: '_id', foreignField: 'from', pipeline: [{ $limit: 1 }, { $project: { _id: 1 } }], as: 'out' } },
+      { $lookup: { from: spaceCollection(sid, 'edges'), localField: '_id', foreignField: 'to', pipeline: [{ $limit: 1 }, { $project: { _id: 1 } }], as: 'inb' } },
       { $match: { out: { $size: 0 }, inb: { $size: 0 } } },
       { $group: { _id: null, n: { $sum: 1 }, sample: { $firstN: { input: '$_id', n: SAMPLE_CAP } } } },
     ]).toArray();
-    const entityCount = await col(`${sid}_entities`).countDocuments();
+    const entityCount = await col(spaceCollection(sid, 'entities')).countDocuments();
     facts.entities += entityCount;
     facts.entitiesWithEdges += entityCount - (unlinked?.n ?? 0);
     for (const id of unlinked?.sample ?? []) {
@@ -220,10 +221,10 @@ export async function gatherCompletenessFacts(memberIds: string[]): Promise<Comp
     // A file is recallable if it carries its own embedding OR something chunked it. Chunk records
     // (`parentFileId` set) are not files in their own right and are excluded from both sides.
     const parentFilter = { parentFileId: { $exists: false } };
-    facts.files += await col(`${sid}_files`).countDocuments(parentFilter);
-    const [orphaned] = await col(`${sid}_files`).aggregate<{ n: number; sample: string[] }>([
+    facts.files += await col(spaceCollection(sid, 'files')).countDocuments(parentFilter);
+    const [orphaned] = await col(spaceCollection(sid, 'files')).aggregate<{ n: number; sample: string[] }>([
       { $match: { ...parentFilter, embedding: { $exists: false } } },
-      { $lookup: { from: `${sid}_files`, localField: '_id', foreignField: 'parentFileId', pipeline: [{ $limit: 1 }, { $project: { _id: 1 } }], as: 'chunks' } },
+      { $lookup: { from: spaceCollection(sid, 'files'), localField: '_id', foreignField: 'parentFileId', pipeline: [{ $limit: 1 }, { $project: { _id: 1 } }], as: 'chunks' } },
       { $match: { chunks: { $size: 0 } } },
       { $group: { _id: null, n: { $sum: 1 }, sample: { $firstN: { input: { $ifNull: ['$path', '$_id'] }, n: SAMPLE_CAP } } } },
     ]).toArray();

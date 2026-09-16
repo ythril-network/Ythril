@@ -26,6 +26,7 @@ import { linkedRecordsAtFrontier, entitiesLinkedFromRecords, linkedRecordName, l
 import { frontierEdgeQuery, type TraverseNarrowing } from './frontier-query.js';
 import { syntheticEdgeId } from './edges.js';
 import type { EdgeDoc, EntityDoc, FileMetaDoc } from '../config/types.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 /** Hard cap on the `traverse` depth accepted by graph-augmented recall. */
 export const MAX_RECALL_TRAVERSE = 5;
@@ -172,7 +173,7 @@ export async function traverseFromSeeds(
     if (seedScanCapped) capped = true;
     const wanted = outbound.filter(l => !visited.has(l.to));
     if (wanted.length > 0) {
-      const linkedEntities = await col<EntityDoc>(`${spaceId}_entities`)
+      const linkedEntities = await col<EntityDoc>(spaceCollection(spaceId, 'entities'))
         .find(asFilter<EntityDoc>({ _id: { $in: [...new Set(wanted.map(l => l.to))] } }))
         .project(NEVER_RETURNED_PROJECTION)
         .toArray() as EntityDoc[];
@@ -202,7 +203,7 @@ export async function traverseFromSeeds(
 
   while (frontier.length > 0 && depth < maxDepth) {
     const hopBudget = Math.max(0, limit - results.length);
-    const edges = await col<EdgeDoc>(`${spaceId}_edges`)
+    const edges = await col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
       // An EDGE is a searchable record with a vector of its own, and this query fetched it whole: the edge
       // document is returned verbatim as `_graph[].edge`, so a `recall(traverse: n)` shipped a full float
       // array per hop, on both doors. Nothing consumes it — `nestNeighbours` only nests the document — so
@@ -297,7 +298,7 @@ export async function traverseFromSeeds(
     // EDGE was found but its neighbour ENTITY was silently dropped, so a traversal returned
     // half a graph with no error. Filtering on a redundant, denormalised field is what made
     // a space rename hide data in the first place.
-    const entities = await col<EntityDoc>(`${spaceId}_entities`)
+    const entities = await col<EntityDoc>(spaceCollection(spaceId, 'entities'))
       .find(asFilter<EntityDoc>({ _id: { $in: newNeighborIds } }))
       .project(NEVER_RETURNED_PROJECTION)
       .toArray() as EntityDoc[];

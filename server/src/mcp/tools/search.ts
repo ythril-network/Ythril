@@ -35,10 +35,17 @@ import {
 /**
  * Space scope for find_similar — mirrors recall's omit-space idiom (F1 consistency).
  *
- * - `space` given, without `crossSpace`: locate the source in that proxy-resolved space and search only
+ * - **ONE space, without `crossSpace`**: locate the source in that proxy-resolved space and search only
  *   there (searchIds `undefined` → findSimilar searches just the base space).
- * - `space` omitted, or `crossSpace: true`: locate the source across ALL accessible spaces (first base that
- *   holds the entry wins) and search across all of them.
+ * - **SEVERAL spaces** (a list, since 5.0): search exactly those, proxies expanded, and probe each for the
+ *   source — the first base holding the entry wins, as in the omitted case. Deliberately NOT the same as
+ *   omitting the space: that searches everything reachable, and the difference is paid in the answer's
+ *   byte budget, which is the whole reason a caller names three of their twelve.
+ * - **No space, or `crossSpace: true`**: locate the source across ALL accessible spaces and search them all.
+ *
+ * Takes a LIST rather than a string so the three shapes a caller can send — one name, several, none —
+ * arrive as one type. A `string | string[]` parameter here would put the normalising step at each door,
+ * and the doors are exactly where one of them gets it wrong.
  *
  * **`crossSpace` is NOT deprecated, and this docblock called it that in both bullets** — the word was
  * removed from the tool's own schema description on purpose, and left standing here. It looked like a pure
@@ -50,7 +57,7 @@ import {
  * Pure (proxy resolver injected) so the scope logic is unit-testable without a database.
  */
 export function resolveFindSimilarScope(
-  callSpace: string | undefined,
+  callSpaces: readonly string[] | undefined,
   crossSpace: boolean,
   accessibleSpaceIds: string[],
   /**
@@ -62,15 +69,29 @@ export function resolveFindSimilarScope(
    */
   resolveMembers: (space: string) => string[],
 ): { candidateBases: string[]; searchIds: string[] | undefined } {
-  if (callSpace && !crossSpace) {
-    const members = resolveMembers(callSpace);
-    return { candidateBases: [members[0] ?? callSpace], searchIds: undefined };
+  if (callSpaces && callSpaces.length > 0 && !crossSpace) {
+    // Each named space expanded and DEDUPLICATED: a caller may name a proxy and one of its members, and
+    // searching a space twice doubles every match it contributes.
+    const seen = new Set<string>();
+    for (const sp of callSpaces) for (const m of resolveMembers(sp)) seen.add(m);
+    const members = [...seen];
+
+    // ONE named space keeps the narrow form exactly as before — `searchIds: undefined` tells findSimilar to
+    // search only the base. Widening it to a one-element list here would look equivalent and is not: the
+    // cross-space path probes every base for the source, so a caller who named one space and mistyped the
+    // id would get "not found" from a different space than the one they asked about.
+    if (callSpaces.length === 1) return { candidateBases: [members[0] ?? callSpaces[0] as string], searchIds: undefined };
+
+    return { candidateBases: members, searchIds: members };
   }
   return { candidateBases: accessibleSpaceIds, searchIds: accessibleSpaceIds };
 }
 
 export const recallTool: ToolHandler = {
   name: 'recall',
+  // recall / similar / filter fan out per space already, so a list costs them nothing but the parse.
+  // Every other tool acts on exactly one space and refuses a list.
+  spaceList: true,
   description: 'Search all knowledge types (facts, entities, edges, chrono entries, files) by MEANING and by exact tokens: a semantic vector ranking is fused with a lexical (BM25) ranking, so identifiers such as article numbers or form ids rank even though their embeddings carry little meaning. A cross-encoder refines the top candidates when the operator has configured one. Searches the specified space if provided, otherwise across all accessible spaces.\n\n'
     + 'THE RESPONSE, because knowing the parameters is only half of it:\n'
     + '• `results` — the ranked matches. Each carries `_id`, its name/fact/title, type, tags, properties, `spaceId`, timestamps and `score` (vector similarity).\n'
@@ -305,11 +326,14 @@ export const recallTool: ToolHandler = {
     // Resolve the seed set and the authorized space set (same guard for both).
     let seeds: RecallResult[];
     let traverseSpaces: string[];
-    if (callSpace) {
+    if (ctx.callSpaces.length > 0) {
       // Narrowed to what this connection may see, not every member of the proxy. `accessibleSpaceIds` is built
       // once per connection from the rights matrix (#786), so intersecting with it is the same answer the HTTP side
       // gets from `memberSpacesForRequest` — without threading rights down into every tool.
-      const memberIds = memberSpacesWithin(callSpace, accessibleSpaceIds);
+      //
+      // EVERY named space, deduplicated: a caller may name a proxy and one of its members, and reading a
+      // space twice doubles every match it contributes to the merged ranking.
+      const memberIds = [...new Set(ctx.callSpaces.flatMap(sp => memberSpacesWithin(sp, accessibleSpaceIds)))];
       const all = (await Promise.all(memberIds.map(mid => recall(mid, query, topK, tags, types, minPerType, minScore, filter, { maxPerType, maxTimeMS: recallMaxTimeMS, degraded, includeFreshWrites: a['includeFreshWrites'] === true })))).flat();
       // Same rule as everywhere else: rankOf, not `.score`. See the note on the REST recall route.
       all.sort(byRankThenId);
@@ -446,6 +470,9 @@ export const find_similarTool: ToolHandler = {
     + 'Provide `space` to scope to one space, or omit it to search every space the token can reach. `score` is raw cosine similarity — the same number `recall` reports, but here it is the ONLY ranking, so `minScore` is a genuine relevance gate rather than the vector-side gate it is on `recall`.\n\n'
     + 'With `traverse: 0` the answer is a plain-text summary; above 0 it is JSON, because a graph does not summarise.',
   spaceRequired: false,
+  // recall / similar / filter fan out per space already, so a list costs them nothing but
+  // the parse. Every other tool acts on exactly one space and refuses a list.
+  spaceList: true,
   inputSchema: (s: ToolSchemas) => ({
           type: 'object',
           properties: {
@@ -536,7 +563,8 @@ export const find_similarTool: ToolHandler = {
     // The resolver is NARROWED. `resolveFindSimilarScope` takes it as a parameter, so this is the whole fix — no
     // signature change was needed, which is the opposite of what the plan for this site predicted.
     const { candidateBases, searchIds } = resolveFindSimilarScope(
-      callSpace || undefined, crossSpace, accessibleSpaceIds, sp => memberSpacesWithin(sp, accessibleSpaceIds));
+      ctx.callSpaces.length > 0 ? ctx.callSpaces : undefined, crossSpace, accessibleSpaceIds,
+      sp => memberSpacesWithin(sp, accessibleSpaceIds));
     let result: Awaited<ReturnType<typeof findSimilar>> | undefined;
     let usedBase: string | undefined;
     for (const base of candidateBases) {
@@ -674,6 +702,9 @@ export const queryTool: ToolHandler = {
   // inside the change that was fixing another instance of it: one rule, two doors, and the MCP one
   // quietly narrower. Caught by an integration test calling `filter` without a space.
   spaceRequired: false,
+  // recall / similar / filter fan out per space already, so a list costs them nothing but
+  // the parse. Every other tool acts on exactly one space and refuses a list.
+  spaceList: true,
   inputSchema: (s: ToolSchemas) => ({
           type: 'object',
           properties: {
@@ -748,7 +779,9 @@ export const queryTool: ToolHandler = {
     // `memberSpacesWithin('')` would answer nothing, which is how an optional parameter turns into a read
     // that silently returns empty rather than the cross-space read it advertises.
     const reachable = ctx.accessibleSpaces.map(sp => sp.id);
-    const members = callSpace ? memberSpacesWithin(callSpace, reachable) : reachable;
+    const members = ctx.callSpaces.length > 0
+      ? [...new Set(ctx.callSpaces.flatMap(sp => memberSpacesWithin(sp, reachable)))]
+      : reachable;
     const coll = collName as BrainCollection;
     const page = await pageAcrossMembers({
       members,

@@ -25,6 +25,7 @@ import type { SttProvider, SttSegment } from './providers.js';
 import { extForMimeType } from '../mime.js';
 import { log } from '../../util/log.js';
 import { AUDIO_STEPS, type MediaProgressOpts } from './progress.js';
+import { spaceCollection } from '../../db/space-collection.js';
 
 
 // ── ffmpeg helpers ────────────────────────────────────────────────────────
@@ -297,7 +298,7 @@ export async function embedAudio(
           chunkDurationMs: endMs - startMs,
         };
 
-        await col<FileMetaDoc>(`${spaceId}_files`).replaceOne(
+        await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).replaceOne(
           asFilter<FileMetaDoc>({ _id: chunkId }),
           asDoc<FileMetaDoc>(chunkDoc),
           { upsert: true },

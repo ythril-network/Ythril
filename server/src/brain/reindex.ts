@@ -45,6 +45,7 @@ import { resolveEdgeEndpointNames } from './edge-endpoint-names.js';
 import { reindexInProgress } from '../metrics/registry.js';
 import { log } from '../util/log.js';
 import type { SpaceConfig, FactDoc, EntityDoc, EdgeDoc, ChronoEntry, FileMetaDoc } from '../config/types.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 /**
  * One job per process, and the guard lives HERE.
@@ -161,7 +162,7 @@ export function startReindex(plan: ReindexPlan): void {
               // eslint-disable-next-line no-constant-condition
               while (true) {
                 const q: Record<string, unknown> = cursor ? { _id: { $gt: cursor } } : {};
-                const batch: FactDoc[] = await col<FactDoc>(`${mid}_facts`)
+                const batch: FactDoc[] = await col<FactDoc>(spaceCollection(mid, 'facts'))
                   .find(asFilter<FactDoc>(q), { projection: { _id: 1, fact: 1, tags: 1, entityIds: 1, description: 1, properties: 1, type: 1, suppressEmbeddings: 1,} })
                   .sort({ _id: 1 })
                   .limit(BATCH)
@@ -171,7 +172,7 @@ export function startReindex(plan: ReindexPlan): void {
                   try {
                     if (embeddingSuppressedFor(mid, 'fact', doc as unknown as Record<string, unknown>)) { suppressed++; continue; }
                     const result = await embed(factEmbedText(doc.fact, doc.tags ?? [], doc.description, doc.properties));
-                    await col<FactDoc>(`${mid}_facts`).updateOne(
+                    await col<FactDoc>(spaceCollection(mid, 'facts')).updateOne(
                       { _id: doc._id },
                       { $set: { embedding: result.vector, embeddingModel: result.model } },
                     );
@@ -188,7 +189,7 @@ export function startReindex(plan: ReindexPlan): void {
               // eslint-disable-next-line no-constant-condition
               while (true) {
                 const q: Record<string, unknown> = cursor ? { _id: { $gt: cursor } } : {};
-                const batch: EntityDoc[] = await col<EntityDoc>(`${mid}_entities`)
+                const batch: EntityDoc[] = await col<EntityDoc>(spaceCollection(mid, 'entities'))
                   .find(asFilter<EntityDoc>(q), { projection: { _id: 1, name: 1, type: 1, tags: 1, description: 1, properties: 1, suppressEmbeddings: 1,} })
                   .sort({ _id: 1 })
                   .limit(BATCH)
@@ -198,7 +199,7 @@ export function startReindex(plan: ReindexPlan): void {
                   try {
                     if (embeddingSuppressedFor(mid, 'entity', doc as unknown as Record<string, unknown>)) { suppressed++; continue; }
                     const result = await embed(entityEmbedText(doc.name, doc.type, doc.tags ?? [], doc.description, doc.properties ?? {}));
-                    await col<EntityDoc>(`${mid}_entities`).updateOne(
+                    await col<EntityDoc>(spaceCollection(mid, 'entities')).updateOne(
                       { _id: doc._id },
                       { $set: { embedding: result.vector, embeddingModel: result.model } },
                     );
@@ -215,7 +216,7 @@ export function startReindex(plan: ReindexPlan): void {
               // eslint-disable-next-line no-constant-condition
               while (true) {
                 const q: Record<string, unknown> = cursor ? { _id: { $gt: cursor } } : {};
-                const batch: EdgeDoc[] = await col<EdgeDoc>(`${mid}_edges`)
+                const batch: EdgeDoc[] = await col<EdgeDoc>(spaceCollection(mid, 'edges'))
                   .find(asFilter<EdgeDoc>(q), { projection: { _id: 1, from: 1, label: 1, to: 1, type: 1, tags: 1, description: 1, properties: 1, suppressEmbeddings: 1,} })
                   .sort({ _id: 1 })
                   .limit(BATCH)
@@ -228,7 +229,7 @@ export function startReindex(plan: ReindexPlan): void {
                     const [fromName, toName] = await resolveEdgeEndpointNames(mid, doc.from, doc.to, doc.fromKind, doc.toKind);
                     if (embeddingSuppressedFor(mid, 'edge', doc as unknown as Record<string, unknown>)) { suppressed++; continue; }
                     const result = await embed(edgeEmbedText(fromName, doc.label, toName, doc.tags ?? [], doc.type, doc.description, doc.properties));
-                    await col<EdgeDoc>(`${mid}_edges`).updateOne(
+                    await col<EdgeDoc>(spaceCollection(mid, 'edges')).updateOne(
                       { _id: doc._id },
                       { $set: { embedding: result.vector, embeddingModel: result.model } },
                     );
@@ -245,7 +246,7 @@ export function startReindex(plan: ReindexPlan): void {
               // eslint-disable-next-line no-constant-condition
               while (true) {
                 const q: Record<string, unknown> = cursor ? { _id: { $gt: cursor } } : {};
-                const batch: ChronoEntry[] = await col<ChronoEntry>(`${mid}_chrono`)
+                const batch: ChronoEntry[] = await col<ChronoEntry>(spaceCollection(mid, 'chrono'))
                   .find(asFilter<ChronoEntry>(q), { projection: { _id: 1, title: 1, type: 1, status: 1, description: 1, tags: 1, properties: 1, suppressEmbeddings: 1,} })
                   .sort({ _id: 1 })
                   .limit(BATCH)
@@ -255,7 +256,7 @@ export function startReindex(plan: ReindexPlan): void {
                   try {
                     if (embeddingSuppressedFor(mid, 'chrono', doc as unknown as Record<string, unknown>)) { suppressed++; continue; }
                     const result = await embed(chronoEmbedText(doc.title, doc.type, doc.status, doc.description, doc.tags ?? [], doc.properties));
-                    await col<ChronoEntry>(`${mid}_chrono`).updateOne(
+                    await col<ChronoEntry>(spaceCollection(mid, 'chrono')).updateOne(
                       { _id: doc._id },
                       { $set: { embedding: result.vector, embeddingModel: result.model } },
                     );
@@ -275,7 +276,7 @@ export function startReindex(plan: ReindexPlan): void {
                 const q: Record<string, unknown> = cursor
                   ? { _id: { $gt: cursor }, parentFileId: { $exists: false } }
                   : { parentFileId: { $exists: false } };
-                const batch: FileMetaDoc[] = await col<FileMetaDoc>(`${mid}_files`)
+                const batch: FileMetaDoc[] = await col<FileMetaDoc>(spaceCollection(mid, 'files'))
                   .find(asFilter<FileMetaDoc>(q), { projection: { _id: 1, path: 1, tags: 1, description: 1, properties: 1, entityIds: 1, suppressEmbeddings: 1,} })
                   .sort({ _id: 1 })
                   .limit(BATCH)
@@ -287,7 +288,7 @@ export function startReindex(plan: ReindexPlan): void {
                     // without the document's own text — dropping exactly the phrases a reader searches for.
                     if (embeddingSuppressedFor(mid, 'file', doc as unknown as Record<string, unknown>)) { suppressed++; continue; }
                     const result = await embed(fileEmbedText(doc.path, doc.tags ?? [], doc.description, doc.properties, doc.excerpt));
-                    await col<FileMetaDoc>(`${mid}_files`).updateOne(
+                    await col<FileMetaDoc>(spaceCollection(mid, 'files')).updateOne(
                       { _id: doc._id },
                       { $set: { embedding: result.vector, embeddingModel: result.model } },
                     );

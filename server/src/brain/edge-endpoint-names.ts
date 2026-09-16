@@ -28,6 +28,7 @@ import { getSpaceMeta } from '../spaces/schema-validation.js';
 import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
 import type { EdgeDoc } from '../config/types.js';
 import type { RefKind } from '../config/types-knowledge.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 /**
  * How much of an endpoint's name reaches the edge's embedding.
@@ -99,7 +100,7 @@ export async function resolveEdgeEndsForWrite(
   if (wanted.length > 0) {
     // ONE query for both ends, and only the type is projected: the ids are already in hand.
     const ids = [...new Set(wanted.map(([, id]) => id))];
-    const docs = await col<{ _id: string; type?: string }>(`${spaceId}_entities`)
+    const docs = await col<{ _id: string; type?: string }>(spaceCollection(spaceId, 'entities'))
       .find(asFilter<{ _id: string; type?: string }>({ _id: { $in: ids } }), { projection: { _id: 1, type: 1 } })
       .toArray() as Array<{ _id: string; type?: string }>;
     const typeOf = new Map(docs.map(d => [String(d._id), d.type ?? null]));
@@ -117,7 +118,7 @@ export async function resolveEdgeEndsForWrite(
    */
   const functional = getSpaceMeta(spaceId)?.typeSchemas?.edge?.[label]?.functional;
   if (functional) {
-    out.otherEdgesFromSubject = await col<EdgeDoc>(`${spaceId}_edges`)
+    out.otherEdgesFromSubject = await col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
       .countDocuments(asFilter<EdgeDoc>({ from, label, to: { $ne: to } } as never));
   }
   return out;

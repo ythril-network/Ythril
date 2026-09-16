@@ -47,6 +47,7 @@ import {
 import { COLLECTION_SUFFIX, TYPE_FIELD } from './ttl.js';
 import type { ChronoEntry, KnowledgeType } from '../config/types.js';
 import { KNOWLEDGE_TYPES } from '../config/types.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 /** Every collection the schema tier can reach. `files` is absent: a file has no type, so no schema window. */
 const TYPED_COLLECTIONS: readonly KnowledgeType[] = KNOWLEDGE_TYPES;
@@ -146,7 +147,7 @@ export async function backfillChronoExpiry(spaceId: string, space: RetentionSpac
 /** Drop the content of records whose content window has lapsed, keeping the record. */
 export async function redactLapsedChronoContent(spaceId: string, now: Date): Promise<number> {
   let redacted = 0;
-  const rows = await col<ChronoEntry>(`${spaceId}_chrono`)
+  const rows = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono'))
     .find(
       asFilter<ChronoEntry>({ _contentExpireAt: { $lte: now }, contentRedacted: { $ne: true } }),
       { projection: { _id: 1, description: 1, matchedText: 1, properties: 1, embedding: 1, embeddingModel: 1, contentRedacted: 1 } },
@@ -161,7 +162,7 @@ export async function redactLapsedChronoContent(spaceId: string, now: Date): Pro
     if (needsContentRedaction(r)) {
       for (const f of REDACTED_CHRONO_FIELDS) if (r[f] !== undefined) $unset[f] = '';
     }
-    await col<ChronoEntry>(`${spaceId}_chrono`).updateOne(
+    await col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).updateOne(
       asFilter<ChronoEntry>({ _id: r._id }),
       asUpdate<ChronoEntry>({
         $set: { contentRedacted: true, contentRedactedAt: now.toISOString() },

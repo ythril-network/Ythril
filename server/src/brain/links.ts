@@ -48,6 +48,7 @@ import type { AuthorRef, LinkDoc, TombstoneDoc } from '../config/types.js';
 // `RefKind` is re-exported by `types.ts` as a type only, so it comes from the leaf that DECLARES it —
 // the same import every other `brain/` module that needs it uses.
 import type { RefKind } from '../config/types-knowledge.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 /*
  * The array field a link of this kind came from is `fieldFor`, IMPORTED — this file held its own copy,
@@ -111,7 +112,7 @@ export async function reconcileLinks(
 
   // Only the classes this write TOUCHED. A `PATCH` that names `entityIds` alone must not disturb the fact
   // links, so the existing set is read per class rather than per `from`.
-  const existing = await col<LinkDoc>(`${spaceId}_links`)
+  const existing = await col<LinkDoc>(spaceCollection(spaceId, 'links'))
     .find(asFilter<LinkDoc>({ spaceId, from, fromKind, toKind: { $in: classes } }), { projection: { _id: 1 } })
     .toArray() as Array<{ _id: string }>;
 
@@ -123,11 +124,11 @@ export async function reconcileLinks(
   for (const { _id } of existing) {
     if (wanted.has(_id)) continue;
     const seq = await nextSeq(spaceId);
-    await col<LinkDoc>(`${spaceId}_links`).deleteOne(asFilter<LinkDoc>({ _id, spaceId }));
+    await col<LinkDoc>(spaceCollection(spaceId, 'links')).deleteOne(asFilter<LinkDoc>({ _id, spaceId }));
     // The tombstone is not optional. A link deleted without one comes back on the next pull from any peer
     // that still holds it, so the removal would undo itself and nothing would report that it had.
     const tombstone: TombstoneDoc = { _id, type: 'link', spaceId, deletedAt: now, instanceId, seq };
-    await col<TombstoneDoc>(`${spaceId}_tombstones`).replaceOne(
+    await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).replaceOne(
       asFilter<TombstoneDoc>({ _id }), asDoc<TombstoneDoc>(tombstone), { upsert: true },
     );
     removed++;
@@ -141,12 +142,12 @@ export async function reconcileLinks(
     // `seq > since`, so two rows sharing a seq at a page boundary would leave the rest of that group
     // unreachable — the cursor would step straight over them.
     const doc: LinkDoc = { _id, spaceId, from, fromKind, to, toKind, author, createdAt: now, updatedAt: now, seq };
-    await col<LinkDoc>(`${spaceId}_links`).replaceOne(
+    await col<LinkDoc>(spaceCollection(spaceId, 'links')).replaceOne(
       asFilter<LinkDoc>({ _id, spaceId }), asDoc<LinkDoc>(doc), { upsert: true },
     );
     // A re-created link clears the tombstone that retired it, or the next pull would delete it again on the
     // strength of a deletion the caller has since reversed.
-    await col<TombstoneDoc>(`${spaceId}_tombstones`).deleteOne(asFilter<TombstoneDoc>({ _id }));
+    await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).deleteOne(asFilter<TombstoneDoc>({ _id }));
     added++;
   }
 
@@ -294,7 +295,7 @@ export async function addLink(
   await reconcileLinks(spaceId, from, fromKind, { [toKind]: idsOn(doc, toKind) }, (doc?.['author'] as AuthorRef) ?? NO_AUTHOR);
   emitRecordUpdated(spaceId, fromKind, from, actor);
 
-  const link = await col<LinkDoc>(`${spaceId}_links`)
+  const link = await col<LinkDoc>(spaceCollection(spaceId, 'links'))
     .findOne(asFilter<LinkDoc>({ _id: linkIdFor(from, fromKind, to, toKind), spaceId }));
   if (!link) throw new Error(`link ${linkIdFor(from, fromKind, to, toKind)} was not created`);
   return link as LinkDoc;
@@ -318,7 +319,7 @@ export async function removeLink(spaceId: string, id: string, actor?: WebhookAct
    * sync compares seqs, it does not count them.
    */
   const seq = await nextSeq(spaceId);
-  const link = await col<LinkDoc>(`${spaceId}_links`).findOne(asFilter<LinkDoc>({ _id: id, spaceId }));
+  const link = await col<LinkDoc>(spaceCollection(spaceId, 'links')).findOne(asFilter<LinkDoc>({ _id: id, spaceId }));
   if (!link) return false;
 
   const suffix = COLLECTION_OF[link.fromKind];

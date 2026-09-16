@@ -43,6 +43,7 @@ import { planSpaceMetaUpdate, applySpaceMetaUpdate } from '../spaces/meta-update
 import { refuseFaceWidthChange } from '../spaces/face-width-change.js';
 import { planSpaceCreate, applySpaceCreate } from '../spaces/space-create.js';
 import { validateStoredEdges } from '../spaces/validate-stored-edges.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 export const spacesRouter = Router();
 
@@ -170,10 +171,10 @@ spacesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
       visibleSpaces.map(async s => {
         const memberIds = memberSpacesForRequest(req, s.id);
         const perMember = await Promise.all(memberIds.map(async mid => ({
-          facts: await col(`${mid}_facts`).countDocuments(),
-          entities: await col(`${mid}_entities`).countDocuments(),
-          edges:    await col(`${mid}_edges`).countDocuments(),
-          chrono:   await col(`${mid}_chrono`).countDocuments(),
+          facts: await col(spaceCollection(mid, 'facts')).countDocuments(),
+          entities: await col(spaceCollection(mid, 'entities')).countDocuments(),
+          edges:    await col(spaceCollection(mid, 'edges')).countDocuments(),
+          chrono:   await col(spaceCollection(mid, 'chrono')).countDocuments(),
         })));
         return {
           id: s.id,
@@ -453,11 +454,11 @@ spacesRouter.get('/:id/meta', globalRateLimit, requireSpaceAuthScoped('id'), asy
     : rawMeta;
   const memberIds = memberSpacesForRequest(req, id);
   const counts = await Promise.all(memberIds.map(async mid => ({
-    facts: await col(`${mid}_facts`).countDocuments(),
-    entities: await col(`${mid}_entities`).countDocuments(),
-    edges: await col(`${mid}_edges`).countDocuments(),
-    chrono: await col(`${mid}_chrono`).countDocuments(),
-    files: await col(`${mid}_files`).countDocuments(),
+    facts: await col(spaceCollection(mid, 'facts')).countDocuments(),
+    entities: await col(spaceCollection(mid, 'entities')).countDocuments(),
+    edges: await col(spaceCollection(mid, 'edges')).countDocuments(),
+    chrono: await col(spaceCollection(mid, 'chrono')).countDocuments(),
+    files: await col(spaceCollection(mid, 'files')).countDocuments(),
   })));
 
   const stats = {
@@ -750,7 +751,7 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
 
   for (const mid of memberIds) {
     // Entities
-    const entities = await col(`${mid}_entities`).find({}).limit(SCAN_LIMIT).toArray();
+    const entities = await col(spaceCollection(mid, 'entities')).find({}).limit(SCAN_LIMIT).toArray();
     for (const ent of entities) {
       const doc = ent as unknown as { _id: string; name?: string; type?: string; properties?: Record<string, unknown> };
       const v = validateEntity(resolvedMeta, doc);
@@ -762,7 +763,7 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
     violations.push(...await validateStoredEdges(mid, resolvedMeta, SCAN_LIMIT));
 
     // Facts
-    const facts = await col(`${mid}_facts`).find({}).limit(SCAN_LIMIT).toArray();
+    const facts = await col(spaceCollection(mid, 'facts')).find({}).limit(SCAN_LIMIT).toArray();
     for (const mem of facts) {
       const doc = mem as unknown as { _id: string; properties?: Record<string, unknown> };
       const v = validateFact(resolvedMeta, doc);
@@ -770,7 +771,7 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
     }
 
     // Chrono
-    const chronoEntries = await col(`${mid}_chrono`).find({}).limit(SCAN_LIMIT).toArray();
+    const chronoEntries = await col(spaceCollection(mid, 'chrono')).find({}).limit(SCAN_LIMIT).toArray();
     for (const ch of chronoEntries) {
       const doc = ch as unknown as { _id: string; properties?: Record<string, unknown> };
       const v = validateChrono(resolvedMeta, doc);

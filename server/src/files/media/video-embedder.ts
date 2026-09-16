@@ -21,6 +21,7 @@ import { embedAudio, type AudioChunkRecord } from './audio-embedder.js';
 import { extForMimeType } from '../mime.js';
 import { log } from '../../util/log.js';
 import { VIDEO_STEPS, type MediaProgressOpts } from './progress.js';
+import { spaceCollection } from '../../db/space-collection.js';
 
 const DEFAULT_KEYFRAME_INTERVAL_S = 30;
 
@@ -218,7 +219,7 @@ export async function embedVideo(
 
       try {
         const embResult = await embed(combined);
-        await col<FileMetaDoc>(`${spaceId}_files`).updateOne(
+        await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
           asFilter<FileMetaDoc>({ _id: chunk.chunkId }),
           asUpdate<FileMetaDoc>({
             $set: {

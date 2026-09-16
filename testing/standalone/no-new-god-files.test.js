@@ -322,7 +322,10 @@ const FROZEN = {
   // unreachable or refusing the batch size reached a dashboard and never the caller — against a
   // `degraded` reason the integration guide already documents. Routing it through the helper that
   // reports both is the whole change; there is no new behaviour here to put beside the file.
-  'server/src/brain/recall.ts': 690,
+  // 690 -> 691: one IMPORT line. `A-5` routes every collection name through `spaceCollection`, which
+  // carries the space-id charset check a template string cannot. No behaviour moved into this file —
+  // the change is that a name it used to build itself is now asked for.
+  'server/src/brain/recall.ts': 691,
   // 678 -> 687: two conditional notices on the face card — the enable pin stating what it does NOT reach, and
   // "configured but not in use" for a stored endpoint awaiting acknowledgement. Nine lines of markup, and the
   // first attempt wanted THIRTY because the reasoning was written as HTML comments inside the template. That
@@ -414,7 +417,8 @@ const FROZEN = {
   //
   // Lowered rather than deleted, for the reason written above `tokens.component.ts`: an entry here is a
   // ratchet, and removing it would hand the file back the 192 lines the extraction just took.
-  'server/src/api/files.ts': 455,
+  // 455 -> 456: the same single `spaceCollection` import as `recall.ts` above, for the same reason.
+  'server/src/api/files.ts': 456,
   // 645 -> 660: the data-model panel’s mount and its card header. The panel ITSELF is a separate
   // component (er-model-panel) and its geometry a separate module (er-layout) — which is what this
   // ratchet asks for. What landed here is the 13 lines that place it in the grid, plus the two inputs

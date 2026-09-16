@@ -92,7 +92,7 @@ describe('the delete half leaves a tombstone a peer can act on', () => {
      * for ever, beside the new one — two rows for one relationship, which is what the unique index exists to
      * prevent.
      */
-    assert.match(body(), /_tombstones/,
+    assert.match(body(), /spaceCollection\([A-Za-z]+, 'tombstones'\)/,
       'without a tombstone a peer keeps the old id for ever, beside the new one');
     assert.match(body(), /type: 'edge'/, 'the tombstone must name the collection it belongs to');
   });
@@ -116,7 +116,7 @@ describe('the delete half leaves a tombstone a peer can act on', () => {
      * swapping which variable each write consumes leaves the declarations in place and inverts the property,
      * and the gate would not notice. That is the same wrong-axis mistake this file was written to replace.
      */
-    const tombWrite = b.slice(b.indexOf('_tombstones'));
+    const tombWrite = b.slice(b.indexOf("'tombstones'"));
     assert.match(tombWrite.slice(0, 400), /seq: tombSeq/,
       'the tombstone is stamped with the later seq, so a peer can advance past the insert');
     const insertDoc = b.slice(b.indexOf('const stored ='));

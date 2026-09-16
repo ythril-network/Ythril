@@ -49,6 +49,27 @@ export function memberSpacesForRequest(req: { authToken?: unknown }, spaceId: st
 }
 
 /**
+ * The same, for SEVERAL spaces at once — what a `space` list resolves to.
+ *
+ * Not `list.flatMap(memberSpacesForRequest)` written at each door. Two things have to happen and both are
+ * easy to leave out of a hand-written copy:
+ *
+ * - **A proxy in the list expands to its members.** A proxy space holds no records of its own, so a list
+ *   naming one and not expanding it reads an empty collection and answers "nothing found" — the caller
+ *   named a space and got silence.
+ * - **The result is DEDUPLICATED.** A caller may name a proxy and one of its members, and the reachable
+ *   set already contains both; reading a space twice doubles every match it contributes, which looks like
+ *   duplicate data rather than like a bug in the fan-out.
+ *
+ * Order follows the caller's list, so a response merged across spaces is stable between identical calls.
+ */
+export function memberSpacesForRequestAcross(req: { authToken?: unknown }, spaceIds: readonly string[]): string[] {
+  const out = new Set<string>();
+  for (const sid of spaceIds) for (const mid of memberSpacesForRequest(req, sid)) out.add(mid);
+  return [...out];
+}
+
+/**
  * The same narrowing for a caller that holds a token record rather than a request — the MCP tools.
  *
  * Separate from the request form rather than sharing it through a fake `{ authToken }` wrapper: a synthesised

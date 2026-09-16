@@ -45,6 +45,7 @@ import { col, asFilter } from '../db/mongo.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
 import type { EntityDoc, EdgeDoc, PropertySchema } from '../config/types.js';
 import { LINK_CLASSES, hasAnyLink } from './link-adjacency.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 /** Read caps. Generous enough that no real space hits them, low enough that a runaway one cannot hang a page. */
 export const ER_ENTITY_SCAN_LIMIT = 200_000;
@@ -201,8 +202,8 @@ export function assembleErModel(input: ErInputs): ErModel {
  * capped read reports itself in `truncated`.
  */
 export async function buildErModel(spaceId: string): Promise<ErModel> {
-  const entities = col<EntityDoc>(`${spaceId}_entities`);
-  const edges = col<EdgeDoc>(`${spaceId}_edges`);
+  const entities = col<EntityDoc>(spaceCollection(spaceId, 'entities'));
+  const edges = col<EdgeDoc>(spaceCollection(spaceId, 'edges'));
 
   const [totalEntities, totalEdges] = await Promise.all([
     entities.countDocuments({}),

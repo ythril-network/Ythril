@@ -28,6 +28,7 @@ import type { EdgeDoc } from '../config/types.js';
 import { isStrictLinkage } from '../spaces/proxy.js';
 import { findEntityReferences, type BacklinkEntry } from './entities.js';
 import type { RefKind } from '../config/types-knowledge.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 /** What blocks a delete, and the sentence to say about it. `null` from the check means "go ahead". */
 export interface EntityDeleteBlock {
@@ -63,7 +64,7 @@ function describe(b: BacklinkEntry): string {
  */
 async function endsOfEdges(spaceId: string, entityId: string, ids: readonly string[]): Promise<Map<string, 'from' | 'to' | 'both'>> {
   if (ids.length === 0) return new Map();
-  const docs = await col<EdgeDoc>(`${spaceId}_edges`)
+  const docs = await col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
     .find(asFilter<EdgeDoc>({ _id: { $in: ids } } as never), { projection: { _id: 1, from: 1, to: 1 } })
     .toArray() as Array<{ _id: string; from?: string; to?: string }>;
   const out = new Map<string, 'from' | 'to' | 'both'>();

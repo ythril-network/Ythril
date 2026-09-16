@@ -76,6 +76,7 @@ import { assertPeerAtFloor } from './peer-floor.js';
 import { REPLICATED_FAMILIES, type PayloadKey } from './replicated-families.js';
 import { SERVER_VERSION } from '../util/server-version.js';
 import { stripLocalOnly } from './local-only-fields.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 // Timeout for every outbound fetch to a peer.
 // Without this, the OS TCP timeout (~75 s on Linux) applies, which means one
@@ -413,16 +414,16 @@ async function runSyncForMember(
 
     const localWarm = Promise.all(
       net.spaces.flatMap(sid => [
-        col<FactDoc>(`${sid}_facts`)
+        col<FactDoc>(spaceCollection(sid, 'facts'))
           .findOne(asFilter({}), { projection: { _id: 1 } })
           .catch(() => {}),
-        col<EntityDoc>(`${sid}_entities`)
+        col<EntityDoc>(spaceCollection(sid, 'entities'))
           .findOne(asFilter({}), { projection: { _id: 1 } })
           .catch(() => {}),
-        col<EdgeDoc>(`${sid}_edges`)
+        col<EdgeDoc>(spaceCollection(sid, 'edges'))
           .findOne(asFilter({}), { projection: { _id: 1 } })
           .catch(() => {}),
-        col<ChronoEntry>(`${sid}_chrono`)
+        col<ChronoEntry>(spaceCollection(sid, 'chrono'))
           .findOne(asFilter({}), { projection: { _id: 1 } })
           .catch(() => {}),
       ]),
@@ -1249,7 +1250,7 @@ async function syncFiles(
     // ── 1b. Push our file tombstones to the peer ──────────────────────────
     // Files we deleted locally must be propagated to the peer so they disappear there too.
     if (doPush) try {
-      const ourTombstones = await col<FileTombstoneDoc>(`${spaceId}_file_tombstones`)
+      const ourTombstones = await col<FileTombstoneDoc>(spaceCollection(spaceId, 'fileTombstones'))
         .find(asFilter<FileTombstoneDoc>({ spaceId }))
         .toArray();
       if (ourTombstones.length > 0) {
@@ -1355,7 +1356,7 @@ async function syncFiles(
             peerInstanceLabel: member.label,
             detectedAt: new Date().toISOString(),
           };
-          await col<ConflictDoc>(`${spaceId}_conflicts`).insertOne(asDoc<ConflictDoc>(conflictDoc));
+          await col<ConflictDoc>(spaceCollection(spaceId, 'conflicts')).insertOne(asDoc<ConflictDoc>(conflictDoc));
 
           log.warn(
             `FILE_CONFLICT: '${remote.path}' from peer '${member.label}' differs from local copy. ` +

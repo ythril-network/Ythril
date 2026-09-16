@@ -20,6 +20,7 @@ import type { FactDoc, EntityDoc, EdgeDoc, ChronoEntry, LinkDoc, TombstoneDoc } 
 import type { FileMetaDoc } from '../../config/types.js';
 import { LOCAL_ONLY_EXCLUSION } from '../../sync/local-only-fields.js';
 import { checkEdgeLinkViolations, checkLinkViolations, MAX_FORK_DEPTH, IncomingFactDoc, IncomingEntityDoc, IncomingEdgeDoc, IncomingChronoDoc, IncomingLinkDoc, IncomingFileMetaDoc, ingestFileMeta, encodeCursor, decodeCursor, forkChainDepth, rejectImplausibleSeq, callerPeerId, spaceAllowed, isNonPeerSyncWrite, NON_PEER_WRITE_MESSAGE, isDirectionalWriteBlocked, violationsAgainstLocalSchema, withSchemaViolations, isDuplicateKeyOnly, ingestBrainDoc } from './_shared.js';
+import { spaceCollection } from '../../db/space-collection.js';
 
 export const syncDocsRouter = Router();
 
@@ -214,7 +215,7 @@ syncDocsRouter.post('/facts', syncRateLimit, requireAuth, denyReadOnly, async (r
     const violations = violationsAgainstLocalSchema(spaceId, 'fact', incoming as unknown as Record<string, unknown>);
 
     // Check for tombstone — if a tombstone with >= seq exists, skip
-    const tombstone = await col<TombstoneDoc>(`${spaceId}_tombstones`)
+    const tombstone = await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'))
       .findOne(asFilter<TombstoneDoc>({ _id: incoming._id, type: 'fact' })) as TombstoneDoc | null;
     if (tombstone && tombstone.seq >= incoming.seq) {
       res.status(200).json({ status: 'tombstoned' });
@@ -222,10 +223,10 @@ syncDocsRouter.post('/facts', syncRateLimit, requireAuth, denyReadOnly, async (r
     }
     // Clean up stale tombstone superseded by the incoming document
     if (tombstone) {
-      await col<TombstoneDoc>(`${spaceId}_tombstones`).deleteOne(asFilter<TombstoneDoc>({ _id: incoming._id }));
+      await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).deleteOne(asFilter<TombstoneDoc>({ _id: incoming._id }));
     }
 
-    const existing = await col<FactDoc>(`${spaceId}_facts`)
+    const existing = await col<FactDoc>(spaceCollection(spaceId, 'facts'))
       .findOne(asFilter<FactDoc>({ _id: incoming._id })) as FactDoc | null;
 
     if (!existing) {
@@ -254,7 +255,7 @@ syncDocsRouter.post('/facts', syncRateLimit, requireAuth, denyReadOnly, async (r
         return;
       }
       // Also cap fan-out: count how many forks already point to this document.
-      const siblingCount = await col<FactDoc>(`${spaceId}_facts`)
+      const siblingCount = await col<FactDoc>(spaceCollection(spaceId, 'facts'))
         .countDocuments(asFilter<FactDoc>({ forkOf: incoming._id }), { limit: MAX_FORK_DEPTH + 1 });
       if (siblingCount >= MAX_FORK_DEPTH) {
         res.status(400).json({ error: `Fork depth limit (${MAX_FORK_DEPTH}) exceeded for _id '${incoming._id}'` });
@@ -310,24 +311,24 @@ syncDocsRouter.post('/entities', syncRateLimit, requireAuth, denyReadOnly, async
     // store settled on. The `tombstoned` exit keeps nothing and so reports nothing.
     const violations = violationsAgainstLocalSchema(spaceId, 'entity', incoming as unknown as Record<string, unknown>);
 
-    const tombstone = await col<TombstoneDoc>(`${spaceId}_tombstones`)
+    const tombstone = await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'))
       .findOne(asFilter<TombstoneDoc>({ _id: incoming._id, type: 'entity' })) as TombstoneDoc | null;
     if (tombstone && tombstone.seq >= incoming.seq) {
       res.status(200).json({ status: 'tombstoned' });
       return;
     }
     if (tombstone) {
-      await col<TombstoneDoc>(`${spaceId}_tombstones`).deleteOne(asFilter<TombstoneDoc>({ _id: incoming._id }));
+      await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).deleteOne(asFilter<TombstoneDoc>({ _id: incoming._id }));
     }
 
-    await col<EntityDoc>(`${spaceId}_entities`).updateOne(
+    await col<EntityDoc>(spaceCollection(spaceId, 'entities')).updateOne(
       asFilter<EntityDoc>({ _id: incoming._id }),
       asUpdate<EntityDoc>({ $setOnInsert: incoming }),
       { upsert: true },
     );
 
     // Merge tags on conflict
-    const existing = await col<EntityDoc>(`${spaceId}_entities`).findOne(asFilter<EntityDoc>({ _id: incoming._id })) as EntityDoc;
+    const existing = await col<EntityDoc>(spaceCollection(spaceId, 'entities')).findOne(asFilter<EntityDoc>({ _id: incoming._id })) as EntityDoc;
     if (existing && incoming.seq > existing.seq) {
       await ingestBrainDoc<EntityDoc>(spaceId, 'entity', 'entities', incoming);
     }
@@ -368,17 +369,17 @@ syncDocsRouter.post('/edges', syncRateLimit, requireAuth, denyReadOnly, async (r
     // store settled on. The `tombstoned` exit keeps nothing and so reports nothing.
     const violations = violationsAgainstLocalSchema(spaceId, 'edge', incoming as unknown as Record<string, unknown>);
 
-    const tombstone = await col<TombstoneDoc>(`${spaceId}_tombstones`)
+    const tombstone = await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'))
       .findOne(asFilter<TombstoneDoc>({ _id: incoming._id, type: 'edge' })) as TombstoneDoc | null;
     if (tombstone && tombstone.seq >= incoming.seq) {
       res.status(200).json({ status: 'tombstoned' });
       return;
     }
     if (tombstone) {
-      await col<TombstoneDoc>(`${spaceId}_tombstones`).deleteOne(asFilter<TombstoneDoc>({ _id: incoming._id }));
+      await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).deleteOne(asFilter<TombstoneDoc>({ _id: incoming._id }));
     }
 
-    const existing = await col<EdgeDoc>(`${spaceId}_edges`).findOne(asFilter<EdgeDoc>({ _id: incoming._id })) as EdgeDoc | null;
+    const existing = await col<EdgeDoc>(spaceCollection(spaceId, 'edges')).findOne(asFilter<EdgeDoc>({ _id: incoming._id })) as EdgeDoc | null;
     let duplicateTriplet = false;
     if (!existing || incoming.seq > existing.seq) {
       /*
@@ -476,17 +477,17 @@ syncDocsRouter.post('/chrono', syncRateLimit, requireAuth, denyReadOnly, async (
     }
     const chronoViolations = violationsAgainstLocalSchema(spaceId, 'chrono', incoming as unknown as Record<string, unknown>);
 
-    const tombstone = await col<TombstoneDoc>(`${spaceId}_tombstones`)
+    const tombstone = await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'))
       .findOne(asFilter<TombstoneDoc>({ _id: incoming._id, type: 'chrono' })) as TombstoneDoc | null;
     if (tombstone && tombstone.seq >= incoming.seq) {
       res.status(200).json({ status: 'tombstoned' });
       return;
     }
     if (tombstone) {
-      await col<TombstoneDoc>(`${spaceId}_tombstones`).deleteOne(asFilter<TombstoneDoc>({ _id: incoming._id }));
+      await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).deleteOne(asFilter<TombstoneDoc>({ _id: incoming._id }));
     }
 
-    const existing = await col<ChronoEntry>(`${spaceId}_chrono`).findOne(asFilter<ChronoEntry>({ _id: incoming._id })) as ChronoEntry | null;
+    const existing = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).findOne(asFilter<ChronoEntry>({ _id: incoming._id })) as ChronoEntry | null;
     if (!existing || incoming.seq > existing.seq) {
       await ingestBrainDoc<ChronoEntry>(spaceId, 'chrono', 'chrono', incoming);
     }
@@ -607,12 +608,12 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
      */
     for (const incoming of facts) {
       if (violationsAgainstLocalSchema(spaceId, 'fact', incoming as unknown as Record<string, unknown>).length > 0) memStats.schemaViolations++;
-      const tomb = await col<TombstoneDoc>(`${spaceId}_tombstones`)
+      const tomb = await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'))
         .findOne(asFilter<TombstoneDoc>({ _id: incoming._id, type: 'fact' })) as TombstoneDoc | null;
       if (tomb && tomb.seq >= incoming.seq) { memStats.tombstoned++; continue; }
-      if (tomb) await col<TombstoneDoc>(`${spaceId}_tombstones`).deleteOne(asFilter<TombstoneDoc>({ _id: incoming._id }));
+      if (tomb) await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).deleteOne(asFilter<TombstoneDoc>({ _id: incoming._id }));
 
-      const existing = await col<FactDoc>(`${spaceId}_facts`)
+      const existing = await col<FactDoc>(spaceCollection(spaceId, 'facts'))
         .findOne(asFilter<FactDoc>({ _id: incoming._id })) as FactDoc | null;
       if (!existing) {
         await ingestBrainDoc<FactDoc>(spaceId, 'fact', 'facts', incoming);
@@ -661,12 +662,12 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
     const entStats = { upserted: 0, skipped: 0, tombstoned: 0, schemaViolations: 0 };
     for (const incoming of entities) {
       if (violationsAgainstLocalSchema(spaceId, 'entity', incoming as unknown as Record<string, unknown>).length > 0) entStats.schemaViolations++;
-      const tomb = await col<TombstoneDoc>(`${spaceId}_tombstones`)
+      const tomb = await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'))
         .findOne(asFilter<TombstoneDoc>({ _id: incoming._id, type: 'entity' })) as TombstoneDoc | null;
       if (tomb && tomb.seq >= incoming.seq) { entStats.tombstoned++; continue; }
-      if (tomb) await col<TombstoneDoc>(`${spaceId}_tombstones`).deleteOne(asFilter<TombstoneDoc>({ _id: incoming._id }));
+      if (tomb) await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).deleteOne(asFilter<TombstoneDoc>({ _id: incoming._id }));
 
-      const existing = await col<EntityDoc>(`${spaceId}_entities`)
+      const existing = await col<EntityDoc>(spaceCollection(spaceId, 'entities'))
         .findOne(asFilter<EntityDoc>({ _id: incoming._id })) as EntityDoc | null;
       if (!existing || incoming.seq > existing.seq) {
         await ingestBrainDoc<EntityDoc>(spaceId, 'entity', 'entities', incoming);
@@ -680,12 +681,12 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
     const edgeStats = { upserted: 0, skipped: 0, tombstoned: 0, schemaViolations: 0, duplicateTriplets: 0 };
     for (const incoming of edges) {
       if (violationsAgainstLocalSchema(spaceId, 'edge', incoming as unknown as Record<string, unknown>).length > 0) edgeStats.schemaViolations++;
-      const tomb = await col<TombstoneDoc>(`${spaceId}_tombstones`)
+      const tomb = await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'))
         .findOne(asFilter<TombstoneDoc>({ _id: incoming._id, type: 'edge' })) as TombstoneDoc | null;
       if (tomb && tomb.seq >= incoming.seq) { edgeStats.tombstoned++; continue; }
-      if (tomb) await col<TombstoneDoc>(`${spaceId}_tombstones`).deleteOne(asFilter<TombstoneDoc>({ _id: incoming._id }));
+      if (tomb) await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).deleteOne(asFilter<TombstoneDoc>({ _id: incoming._id }));
 
-      const existing = await col<EdgeDoc>(`${spaceId}_edges`)
+      const existing = await col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
         .findOne(asFilter<EdgeDoc>({ _id: incoming._id })) as EdgeDoc | null;
       if (!existing || incoming.seq > existing.seq) {
         // The same absorption as the single-record route above. Worse here if it were missing: one duplicate
@@ -719,12 +720,12 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
        * uses. Skipped rather than 400d, because one bad record must not abandon the rest of a batch.
        */
       if (!allowedChronoTypes.has(incoming.type)) { chronoStats.unknownType++; continue; }
-      const tomb = await col<TombstoneDoc>(`${spaceId}_tombstones`)
+      const tomb = await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'))
         .findOne(asFilter<TombstoneDoc>({ _id: incoming._id, type: 'chrono' })) as TombstoneDoc | null;
       if (tomb && tomb.seq >= incoming.seq) { chronoStats.tombstoned++; continue; }
-      if (tomb) await col<TombstoneDoc>(`${spaceId}_tombstones`).deleteOne(asFilter<TombstoneDoc>({ _id: incoming._id }));
+      if (tomb) await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).deleteOne(asFilter<TombstoneDoc>({ _id: incoming._id }));
 
-      const existing = await col<ChronoEntry>(`${spaceId}_chrono`)
+      const existing = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono'))
         .findOne(asFilter<ChronoEntry>({ _id: incoming._id })) as ChronoEntry | null;
       if (!existing || incoming.seq > existing.seq) {
         await ingestBrainDoc<ChronoEntry>(spaceId, 'chrono', 'chrono', incoming);
@@ -753,12 +754,12 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
      */
     const linkStats = { upserted: 0, skipped: 0, tombstoned: 0 };
     for (const incoming of links) {
-      const tomb = await col<TombstoneDoc>(`${spaceId}_tombstones`)
+      const tomb = await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'))
         .findOne(asFilter<TombstoneDoc>({ _id: incoming._id, type: 'link' })) as TombstoneDoc | null;
       if (tomb && tomb.seq >= incoming.seq) { linkStats.tombstoned++; continue; }
-      if (tomb) await col<TombstoneDoc>(`${spaceId}_tombstones`).deleteOne(asFilter<TombstoneDoc>({ _id: incoming._id }));
+      if (tomb) await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).deleteOne(asFilter<TombstoneDoc>({ _id: incoming._id }));
 
-      const existing = await col<LinkDoc>(`${spaceId}_links`)
+      const existing = await col<LinkDoc>(spaceCollection(spaceId, 'links'))
         .findOne(asFilter<LinkDoc>({ _id: incoming._id })) as LinkDoc | null;
       if (!existing || incoming.seq > existing.seq) {
         await ingestBrainDoc<LinkDoc>(spaceId, null, 'links', incoming);
@@ -781,7 +782,7 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
      */
     const fileMetaStats = { upserted: 0, skipped: 0 };
     for (const incoming of fileMeta) {
-      const existing = await col<FileMetaDoc>(`${spaceId}_files`)
+      const existing = await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
         .findOne(asFilter<FileMetaDoc>({ _id: incoming._id }), { projection: { seq: 1 } }) as { seq?: number } | null;
       // `?? -1` so a record stamped before 4.0 — which has no seq — is overwritten by anything that arrives,
       // rather than winning for ever against every peer by comparing `undefined`.

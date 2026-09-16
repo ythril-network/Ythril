@@ -30,6 +30,7 @@ import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { ChronoEntry, ChronoType, ChronoStatus, TombstoneDoc } from '../config/types.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { wipeSpaceCollection } from './bulk-wipe.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 // Re-exported so existing importers (and the C5 tests) keep reaching it here; it lives in its own leaf
 // module only to keep chrono.ts ↔ recall.ts from importing each other. See chrono-status.ts.
@@ -146,7 +147,7 @@ export async function createChrono(
   // When an id is supplied, look for the entry it names first — the same shape as `upsertEntity` and
   // `saveFact`.
   const existing: ChronoEntry | null = fields.id
-    ? (await col<ChronoEntry>(`${spaceId}_chrono`).findOne(
+    ? (await col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).findOne(
       asFilter<ChronoEntry>({ _id: fields.id, spaceId }),
       { projection: NEVER_RETURNED_PROJECTION }) as ChronoEntry | null)
     : null;
@@ -230,7 +231,7 @@ export async function createChrono(
       { collection: 'chrono', existing: existing as unknown as Record<string, unknown> });
     const updateOp: Record<string, unknown> = { $set };
     if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
-    await col<ChronoEntry>(`${spaceId}_chrono`).updateOne(
+    await col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).updateOne(
       asFilter<ChronoEntry>({ _id: existing._id }), asUpdate<ChronoEntry>(updateOp),
     );
     const converged = { ...existing, ...($set as Partial<ChronoEntry>) } as ChronoEntry;
@@ -282,7 +283,7 @@ export async function createChrono(
   // Warn-not-refuse: a caller's own stamp checked against ours. Stored only when it disagrees beyond the space's
   // threshold, so presence is the signal. The write proceeds either way -- a backdated import is legitimate.
   stampSkewOnCreate(doc, getSpaceMeta(spaceId));
-  await col<ChronoEntry>(`${spaceId}_chrono`).insertOne(asDoc<ChronoEntry>(doc));
+  await col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).insertOne(asDoc<ChronoEntry>(doc));
   if (!embeddingFields.embedding && !suppressed) await enqueueEmbedJob(spaceId, 'chrono', doc._id);
   // A chrono entry is the only record kind that holds TWO classes, and they are told apart by the to-kind
   // rather than by a field name — which is why one reconcile call takes both.
@@ -304,7 +305,7 @@ export async function updateChrono(
   /** See `createChrono`'s: the classification, so a door never re-derives it for presentation. */
   onValidation?: (check: UpdateValidation) => void,
 ): Promise<ChronoEntry | null> {
-  const existing = await col<ChronoEntry>(`${spaceId}_chrono`)
+  const existing = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono'))
     .findOne(asFilter<ChronoEntry>({ _id: id, spaceId }),
       { projection: NEVER_RETURNED_PROJECTION }) as ChronoEntry | null;
   if (!existing) return null;
@@ -398,7 +399,7 @@ export async function updateChrono(
   // hands back the record as it was at WRITE time, so comparing its seq with the one read at the top of this
   // function is exactly the test for another writer landing in the window. Observation only — no write that
   // previously succeeded is now rejected.
-  const beforeWrite = await col<ChronoEntry>(`${spaceId}_chrono`).findOneAndUpdate(
+  const beforeWrite = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).findOneAndUpdate(
     asFilter<ChronoEntry>(writeFilterFor(id, ifMatchSeq)),
     asUpdate<ChronoEntry>(updateOp),
     { returnDocument: 'before' },
@@ -449,7 +450,7 @@ function withDerivedStatus(entry: ChronoEntry, now: Date = new Date()): ChronoEn
 }
 
 export async function getChronoById(spaceId: string, id: string): Promise<ChronoEntry | null> {
-  const entry = await col<ChronoEntry>(`${spaceId}_chrono`)
+  const entry = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono'))
     .findOne(asFilter<ChronoEntry>({ _id: id, spaceId }),
       { projection: NEVER_RETURNED_PROJECTION }) as ChronoEntry | null;
   return entry ? withDerivedStatus(entry) : null;
@@ -633,7 +634,7 @@ export async function listChrono(
   const { query, comparesAgainstTheClock } = buildChronoQuery(
     spaceId, filter, now, typesWhereDatePassedMeansNothing(getSpaceMeta(spaceId)));
 
-  const entries = await col<ChronoEntry>(`${spaceId}_chrono`)
+  const entries = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono'))
     .find(asFilter<ChronoEntry>(query), { projection: NEVER_RETURNED_PROJECTION })
     .maxTimeMS(comparesAgainstTheClock ? PROPERTIES_SCAN_MAX_MS : 60_000)
     .sort(sort ? toMongoSort(sort) : { createdAt: -1 })
@@ -649,10 +650,10 @@ export async function deleteChrono(
   chronoId: string,
   actor?: WebhookActor,
 ): Promise<boolean> {
-  const existing = await col<ChronoEntry>(`${spaceId}_chrono`)
+  const existing = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono'))
     .findOne(asFilter<ChronoEntry>({ _id: chronoId, spaceId }), { projection: { seq: 1 } }) as { seq?: number } | null;
   const seq = await nextSeq(spaceId);
-  const result = await col<ChronoEntry>(`${spaceId}_chrono`).deleteOne({
+  const result = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).deleteOne({
     _id: chronoId,
     spaceId,
   });
@@ -672,7 +673,7 @@ export async function deleteChrono(
     seq,
     ...(existing?.seq !== undefined ? { originalSeq: existing.seq } : {}),
   };
-  await col<TombstoneDoc>(`${spaceId}_tombstones`).replaceOne(
+  await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).replaceOne(
     asFilter<TombstoneDoc>({ _id: chronoId }),
     asDoc<TombstoneDoc>(tombstone),
     { upsert: true },

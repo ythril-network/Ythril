@@ -2,6 +2,7 @@ import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
 import { TOMBSTONE_COLLECTION } from '../config/types.js';
 import { log } from '../util/log.js';
 import type { TombstoneDoc } from '../config/types.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 /** Context for authorising a remote tombstone's deletion of a local document. */
 export interface TombstoneAuth {
@@ -21,7 +22,7 @@ export async function listTombstones(
 ): Promise<TombstoneDoc[]> {
   const filter: Record<string, unknown> = { seq: { $gt: sinceSeq } };
   if (type) filter['type'] = type;
-  return col<TombstoneDoc>(`${spaceId}_tombstones`)
+  return col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'))
     .find(asFilter<TombstoneDoc>(filter))
     .sort({ seq: 1 })
     .limit(limit)
@@ -33,7 +34,7 @@ export async function applyRemoteTombstone(tombstone: TombstoneDoc, auth: Tombst
   const { spaceId, _id, type, seq } = tombstone;
 
   // Idempotent upsert — only insert if not present or remote seq is higher
-  await col<TombstoneDoc>(`${spaceId}_tombstones`).updateOne(
+  await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).updateOne(
     asFilter<TombstoneDoc>({ _id }),
     asUpdate<TombstoneDoc>({ $setOnInsert: tombstone }),
     { upsert: true },
@@ -41,7 +42,7 @@ export async function applyRemoteTombstone(tombstone: TombstoneDoc, auth: Tombst
 
   // If the doc already exists locally with a strictly higher seq, the remote tombstone is stale — skip
   // Note: equal seq means we just inserted it above (or it already existed at same seq), so still apply.
-  const existing = await col<TombstoneDoc>(`${spaceId}_tombstones`).findOne(asFilter<TombstoneDoc>({ _id }));
+  const existing = await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).findOne(asFilter<TombstoneDoc>({ _id }));
   if (existing && (existing as TombstoneDoc).seq > seq) return;
 
   // Delete the underlying document — but only if it was authored by the same

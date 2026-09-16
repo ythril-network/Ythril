@@ -189,7 +189,7 @@ describe('the sweep runs where the flag is written', () => {
     // Leaving a queued embed job behind would have the worker write the vector straight back, which is the
     // whole defect returning by a different route within seconds.
     const sweep = src('server/src/brain/suppression-sweep.ts');
-    assert.match(sweep, /embed_jobs|cancelEmbedJobs|dequeue/i,
+    assert.match(sweep, /'embedJobs'|cancelEmbedJobs|dequeue/i,
       'a pending embed job would restore the vector the sweep just removed');
   });
 });

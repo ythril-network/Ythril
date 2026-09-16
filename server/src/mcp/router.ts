@@ -101,7 +101,16 @@ function createGlobalMcpServer(tokenId?: string, tokenLabel?: string,
   // are built per server instance rather than being static.
   const schemas: ToolSchemas = {
     requiredSpace: { type: 'string' as const, ...spaceEnumBase, description: 'Space ID to operate on. Use list_spaces to discover available spaces.' },
-    optionalSpace: { type: 'string' as const, ...spaceEnumBase, description: 'Optional space ID. Omit to search across all accessible spaces.' },
+    optionalSpace: {
+      oneOf: [
+        { type: 'string' as const, ...spaceEnumBase },
+        { type: 'array' as const, items: { type: 'string' as const, ...spaceEnumBase }, minItems: 1 },
+      ],
+      description: 'Optional space. ONE name searches that space; a LIST of names searches exactly those, '
+        + 'and one you cannot reach refuses the whole call rather than quietly returning less — a short '
+        + 'answer and a filtered one are indistinguishable. Omit it to search every space this token can '
+        + 'reach. An empty list is refused rather than read as "all".',
+    },
   };
 
   // Enforce each tool's advertised inputSchema on incoming args (not just the JSON-RPC envelope), so the
@@ -194,15 +203,54 @@ function createGlobalMcpServer(tokenId?: string, tokenLabel?: string,
       };
     }
 
-    // Validate space parameter
-    const rawSpace = typeof a['space'] === 'string' ? a['space'].trim() : '';
-    if (tool?.spaceRequired && !rawSpace) {
+    /*
+     * Validate the space parameter, which is one name, a LIST of names (5.0, search family only), or absent.
+     *
+     * Parsed into one shape — `rawSpaces` — before anything is checked. The existence check, the proxy
+     * expansion and the rung check then run over a list of one in the common case, so there is no branch
+     * where a check applies to a single space and not to a listed one.
+     */
+    const spaceArg = a['space'];
+    let rawSpaces: string[];
+    if (Array.isArray(spaceArg)) {
+      if (!tool?.spaceList) {
+        return { content: [{ type: 'text' as const, text: `Error: tool '${name}' takes one 'space', not a list` }], isError: true };
+      }
+      if (!spaceArg.every(v => typeof v === 'string')) {
+        return { content: [{ type: 'text' as const, text: `Error: every entry in 'space' must be a space name` }], isError: true };
+      }
+      if (spaceArg.length === 0) {
+        // NOT read as "no space named". An empty list is what a caller's own filter produces when it
+        // matches nothing, and widening that to every reachable space is the opposite of what they meant.
+        return { content: [{ type: 'text' as const, text: `Error: 'space' is an empty list. Name at least one space, or omit 'space' to search every space you can reach` }], isError: true };
+      }
+      rawSpaces = [...new Set(spaceArg.map(v => v.trim()).filter(v => v.length > 0))];
+      if (rawSpaces.length === 0) {
+        return { content: [{ type: 'text' as const, text: `Error: every entry in 'space' must be a space name` }], isError: true };
+      }
+    } else {
+      const one = typeof spaceArg === 'string' ? spaceArg.trim() : '';
+      rawSpaces = one ? [one] : [];
+    }
+    const rawSpace = rawSpaces[0] ?? '';
+    if (tool?.spaceRequired && rawSpaces.length === 0) {
       return { content: [{ type: 'text' as const, text: `Error: tool '${name}' requires a 'space' parameter` }], isError: true };
     }
-    if (rawSpace) {
-      if (!cfg.spaces.some(s => s.id === rawSpace)) {
-        return { content: [{ type: 'text' as const, text: `Error: Space '${rawSpace}' not found` }], isError: true };
+    /*
+     * EVERY named space, not the first. One unreachable name refuses the whole call — owner decision,
+     * 2026-09-16 — because dropping it would return a SHORTER answer, and a caller cannot tell a filtered
+     * result from a small one. The refusal names only the space that failed: listing the ones that WERE
+     * reachable hands an unauthorised caller an inventory of what exists.
+     */
+    for (const sid of rawSpaces) {
+      if (!cfg.spaces.some(s => s.id === sid)) {
+        return { content: [{ type: 'text' as const, text: `Error: Space '${sid}' not found` }], isError: true };
       }
+      if (memberSpacesWithin(sid, accessibleSpaceIds).length === 0) {
+        return { content: [{ type: 'text' as const, text: `Error: token does not have access to '${sid}' or any of its member spaces` }], isError: true };
+      }
+    }
+    if (rawSpace) {
       // Proxy scope check, mirroring `enforceSpaceScope` on the REST layer — and it has to keep mirroring it, or the
       // two surfaces answer one question differently, which is the defect #786 fixed one layer up.
       //
@@ -215,10 +263,9 @@ function createGlobalMcpServer(tokenId?: string, tokenLabel?: string,
       //
       // For a non-proxy space `resolveMemberSpaces` returns `[rawSpace]`, so "at least one of one" is the same
       // predicate as "all of one" and nothing changes there.
+      // The reach check moved into the loop above so it covers every named space. Kept here as a
+      // binding for the rights check below, which reads the members of the FIRST named space.
       const members = memberSpacesWithin(rawSpace, accessibleSpaceIds);
-      if (members.length === 0) {
-        return { content: [{ type: 'text' as const, text: `Error: token does not have access to '${rawSpace}' or any of its member spaces` }], isError: true };
-      }
       // The rights matrix, enforced on MCP. Until 3.0 this dispatcher gated on two BOOLEANS — `readOnly`
       // above, and the tool's `admin` flag — while REST enforced a per-space, per-area RUNG. One policy,
       // two implementations, and the weaker one was reachable. The decision lives in a pure function so it
@@ -260,6 +307,7 @@ function createGlobalMcpServer(tokenId?: string, tokenLabel?: string,
       const result = await tool.handle({
         args: a,
         callSpace,
+        callSpaces: rawSpaces,
         name,
         cfg,
         accessibleSpaces,

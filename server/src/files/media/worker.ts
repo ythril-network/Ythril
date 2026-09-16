@@ -72,6 +72,7 @@ import { providerHopMs } from './providers.js';
 import { slotTimeoutMs } from '../../config/model-slots.js';
 import { getModelSlots } from '../../config/loader.js';
 import { AUDIO_STEPS, VIDEO_STEPS } from './progress.js';
+import { spaceCollection } from '../../db/space-collection.js';
 
 let running = false;
 let stalledSweepTimer: NodeJS.Timeout | null = null;
@@ -448,7 +449,7 @@ async function processJob(
 
     // Mark file as "processing" in file meta
     const now = new Date().toISOString();
-    await col<FileMetaDoc>(`${spaceId}_files`).updateOne(
+    await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
       asFilter<FileMetaDoc>({ _id: fileId }),
       { $set: { embeddingStatus: 'processing', updatedAt: now } },
     ).catch(() => {}); // non-fatal — job tracking is the source of truth
@@ -560,7 +561,7 @@ async function processJob(
           //
           // Still not a throw: failing the job would retry a document whose analysis already succeeded and
           // re-pay for the model. What was missing is that the loss be VISIBLE.
-          await col<FileMetaDoc>(`${spaceId}_files`).updateOne(
+          await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
             asFilter<FileMetaDoc>({ _id: fileId }),
             { $set: metaUpdate },
           ).catch((err: unknown) => {
@@ -639,7 +640,7 @@ async function processJob(
       //
       // Logged rather than thrown for the same reason as the describe write: the job is already failing
       // permanently, and rethrowing would replace an honest terminal state with a retry loop.
-      await col<FileMetaDoc>(`${spaceId}_files`).updateOne(
+      await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
         asFilter<FileMetaDoc>({ _id: fileId }),
         { $set: { embeddingStatus: 'skipped' } },
       ).catch((err: unknown) => {
@@ -680,7 +681,7 @@ async function reconcileDeletedSource(spaceId: string, fileId: string): Promise<
       log.warn(`reconcileDeletedSource: flag file meta ${spaceId}/${fileId}: ${err instanceof Error ? err.message : String(err)}`),
     );
   } else {
-    await col<FileMetaDoc>(`${spaceId}_files`).deleteOne(asFilter<FileMetaDoc>({ _id: fileId })).catch(err =>
+    await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).deleteOne(asFilter<FileMetaDoc>({ _id: fileId })).catch(err =>
       log.warn(`reconcileDeletedSource: delete file meta ${spaceId}/${fileId}: ${err instanceof Error ? err.message : String(err)}`),
     );
   }

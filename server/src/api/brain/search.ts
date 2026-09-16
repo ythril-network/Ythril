@@ -32,7 +32,7 @@ import { col, asFilter } from '../../db/mongo.js';
 import { needsReindex } from '../../spaces/_shared.js';
 import { planReindex, startReindex } from '../../brain/reindex.js';
 import { log } from '../../util/log.js';
-import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
+import { memberSpacesForRequestAcross, memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
 import type { FactDoc, EntityDoc, EdgeDoc, ChronoEntry, FileMetaDoc } from '../../config/types.js';
 import { RECORD_TYPES } from '../../config/types.js';
 import { reindexInProgress } from '../../metrics/registry.js';
@@ -45,6 +45,7 @@ import { stripRecordMeta } from '../../brain/recall-record-meta.js';
 import { applyProjection, normaliseProjection, type NormalisedProjection } from '../../brain/projection.js';
 import { resolveBudget, resolvePaging, budgetedEnvelope, applyBudget, budgetFields, type BudgetRequest } from '../../brain/result-budget.js';
 import { sendReadFailure, statesRetryability } from './_read-failure.js';
+import { spaceCollection } from '../../db/space-collection.js';
 
 /**
  * The most graph nodes one response may expand to, however large `topK` is.
@@ -73,11 +74,11 @@ searchRouter.get('/spaces/:spaceId/stats', globalRateLimit, requireSpaceAuth, as
   const memberIds = memberSpacesForRequest(req, spaceId);
   const counts = await Promise.all(memberIds.map(async mid => ({
     facts: await countFacts(mid),
-    entities: await col(`${mid}_entities`).countDocuments(),
-    edges: await col(`${mid}_edges`).countDocuments(),
-    chrono: await col(`${mid}_chrono`).countDocuments(),
+    entities: await col(spaceCollection(mid, 'entities')).countDocuments(),
+    edges: await col(spaceCollection(mid, 'edges')).countDocuments(),
+    chrono: await col(spaceCollection(mid, 'chrono')).countDocuments(),
     // Exclude chunk records (parentFileId set) — count only top-level file records
-    files: await col(`${mid}_files`).countDocuments({ parentFileId: { $exists: false } }),
+    files: await col(spaceCollection(mid, 'files')).countDocuments({ parentFileId: { $exists: false } }),
     // How much of the above is not searchable YET. Writes no longer wait for the embedding model, so a
     // record can exist and be absent from recall for a moment — and a caller asking "is this space ready"
     // could not tell that from "the model is down and nothing has embedded for an hour". Same shape as the
@@ -308,7 +309,7 @@ searchRouter.post('/filter', globalRateLimit, requireBodyScopedSpace('knowledge'
     // A NAMED space may be a proxy and resolves to its members; an omitted one is already the list the
     // guard authorised — every space where this token actually holds `knowledge: read`, which is a stricter
     // question than reach.
-    const members = namedSpace ? memberSpacesForRequest(req, namedSpace) : authorised;
+    const members = namedSpace ? memberSpacesForRequest(req, namedSpace) : memberSpacesForRequestAcross(req, authorised);
     const page = await pageAcrossMembers({
       members,
       limit: safeLimit,
@@ -544,7 +545,7 @@ searchRouter.post('/recall', globalRateLimit, requireBodyScopedSpace('knowledge'
     // An omitted one is already that list: the guard filtered every reachable space to the ones where this
     // token actually holds `knowledge: read`, which is a stricter question than reach and the reason the
     // guard returns spaces rather than a boolean.
-    const memberIds = namedSpace ? memberSpacesForRequest(req, namedSpace) : authorised;
+    const memberIds = namedSpace ? memberSpacesForRequest(req, namedSpace) : memberSpacesForRequestAcross(req, authorised);
     // One collector across every member, deduped by `recall` itself, so a proxy space reports "the answer is
     // partial" once rather than once per member.
     // Opt-in scan of the newest records, for the case the index has not caught up yet. Rejected rather

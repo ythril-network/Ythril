@@ -33,6 +33,7 @@ import { PROPERTIES_SCAN_MAX_MS } from './tag-filter.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector } from './read-projection.js';
 import { wipeSpaceCollection } from './bulk-wipe.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 /** Store a new fact with semantic embedding */
 export async function saveFact(
@@ -83,7 +84,7 @@ export async function saveFact(
 ): Promise<FactDoc & { similar?: SimilarMatch[]; contradicts?: ContradictionWarning[] }> {
   // When an id is supplied, look for the record it names first — the same shape as `upsertEntity`.
   const existing: FactDoc | null = id
-    ? (await col<FactDoc>(`${spaceId}_facts`).findOne(asFilter<FactDoc>({ _id: id }),
+    ? (await col<FactDoc>(spaceCollection(spaceId, 'facts')).findOne(asFilter<FactDoc>({ _id: id }),
       { projection: NEVER_RETURNED_PROJECTION }) as FactDoc | null)
     : null;
 
@@ -192,7 +193,7 @@ export async function saveFact(
       { collection: 'fact', existing: existing as unknown as Record<string, unknown> });
     const updateOp: Record<string, unknown> = { $set };
     if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
-    await col<FactDoc>(`${spaceId}_facts`).updateOne(
+    await col<FactDoc>(spaceCollection(spaceId, 'facts')).updateOne(
       asFilter<FactDoc>({ _id: existing._id }), asUpdate<FactDoc>(updateOp),
     );
     const converged = { ...existing, ...($set as Partial<FactDoc>) } as FactDoc;
@@ -259,7 +260,7 @@ export async function saveFact(
   // Warn-not-refuse: a caller's own stamp checked against ours. Stored only when it disagrees beyond the space's
   // threshold, so presence is the signal. The write proceeds either way -- a backdated import is legitimate.
   stampSkewOnCreate(doc, getSpaceMeta(spaceId));
-  await col<FactDoc>(`${spaceId}_facts`).insertOne(asDoc<FactDoc>(doc));
+  await col<FactDoc>(spaceCollection(spaceId, 'facts')).insertOne(asDoc<FactDoc>(doc));
   if (!embResult && !suppressed) await enqueueEmbedJob(spaceId, 'fact', doc._id);
   // The link records for a new fact. One call whether the array is empty or not: `reconcileLinks` is a
   // reconcile, so "nothing to do" is a cheap answer rather than a decision this site has to make.
@@ -286,7 +287,7 @@ export async function updateFact(
   /** See `saveFact`'s: the classification, so a door never re-derives it for presentation. */
   onValidation?: (check: UpdateValidation) => void,
 ): Promise<FactDoc | null> {
-  const existing = await col<FactDoc>(`${spaceId}_facts`)
+  const existing = await col<FactDoc>(spaceCollection(spaceId, 'facts'))
     .findOne(asFilter<FactDoc>({ _id: memoryId, spaceId }),
       { projection: NEVER_RETURNED_PROJECTION }) as FactDoc | null;
   if (!existing) return null;
@@ -380,7 +381,7 @@ export async function updateFact(
   // succeeded, so the counter records and the write lands. With an `If-Match` the same operation ALSO
   // enforces it, because `seq` goes in this filter — see `write-precondition.ts` for why the check has to
   // live here rather than in a comparison made before the embed call above.
-  const before = await col<FactDoc>(`${spaceId}_facts`).findOneAndUpdate(
+  const before = await col<FactDoc>(spaceCollection(spaceId, 'facts')).findOneAndUpdate(
     asFilter<FactDoc>(writeFilterFor(memoryId, ifMatchSeq)),
     asUpdate<FactDoc>(updateOp),
     { returnDocument: 'before' },
@@ -426,10 +427,10 @@ export async function deleteFact(
   memoryId: string,
   actor?: WebhookActor,
 ): Promise<boolean> {
-  const existing = await col<FactDoc>(`${spaceId}_facts`)
+  const existing = await col<FactDoc>(spaceCollection(spaceId, 'facts'))
     .findOne(asFilter<FactDoc>({ _id: memoryId, spaceId }), { projection: { seq: 1 } }) as { seq?: number } | null;
   const seq = await nextSeq(spaceId);
-  const result = await col<FactDoc>(`${spaceId}_facts`).deleteOne({
+  const result = await col<FactDoc>(spaceCollection(spaceId, 'facts')).deleteOne({
     _id: memoryId,
     spaceId,
   });
@@ -449,7 +450,7 @@ export async function deleteFact(
     seq,
     ...(existing?.seq !== undefined ? { originalSeq: existing.seq } : {}),
   };
-  await col<TombstoneDoc>(`${spaceId}_tombstones`).replaceOne(
+  await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).replaceOne(
     asFilter<TombstoneDoc>({ _id: memoryId }),
     asDoc<TombstoneDoc>(tombstone),
     { upsert: true },
@@ -471,7 +472,7 @@ export async function listFacts(
   skip = 0,
   sort?: SortSpec,
 ) {
-  return col<FactDoc>(`${spaceId}_facts`)
+  return col<FactDoc>(spaceCollection(spaceId, 'facts'))
     .find(asFilter<FactDoc>(filter))
     .maxTimeMS(filter['$expr'] ? PROPERTIES_SCAN_MAX_MS : 60_000)
     .project({ embedding: 0 })
@@ -483,7 +484,7 @@ export async function listFacts(
 
 /** Count facts in a space */
 export async function countFacts(spaceId: string): Promise<number> {
-  return col<FactDoc>(`${spaceId}_facts`).countDocuments();
+  return col<FactDoc>(spaceCollection(spaceId, 'facts')).countDocuments();
 }
 
 /**

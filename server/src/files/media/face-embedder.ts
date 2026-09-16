@@ -43,6 +43,7 @@ import { faceDescriptorDimsFor } from '../../spaces/vector-index.js';
 import type { FileMetaDoc, AuthorRef, EntityDoc } from '../../config/types.js';
 import type { Config as HumanConfig, Result } from '@vladmandic/human';
 import { detectFacesExternal, externalFaceReady, inProcessFallbackAllowed } from './face-external.js';
+import { spaceCollection } from '../../db/space-collection.js';
 
 // ── Singleton Human instance (lazy init) ──────────────────────────────────
 
@@ -156,7 +157,7 @@ async function getHuman(): Promise<HumanInstance> {
  * through slow infrastructure tends to end up untested.
  */
 export async function labelStillResolves(spaceId: string, entityId: string): Promise<boolean> {
-  const person = await col<EntityDoc>(`${spaceId}_entities`)
+  const person = await col<EntityDoc>(spaceCollection(spaceId, 'entities'))
     .findOne(asFilter<EntityDoc>({ _id: entityId }), { projection: { _id: 1 } });
   if (person) return true;
   log.debug(`Face gallery match in ${spaceId} points at deleted entity ${entityId} — ignoring`);
@@ -201,7 +202,7 @@ async function gallerySearch(
       { $limit: 1 },
     ];
 
-    const results = await col<FileMetaDoc & { _score: number }>(`${spaceId}_files`)
+    const results = await col<FileMetaDoc & { _score: number }>(spaceCollection(spaceId, 'files'))
       .aggregate(pipeline)
       .toArray();
 
@@ -388,7 +389,7 @@ export async function embedFaces(
       ...(boxRaw !== undefined ? { faceBbox: boxRaw as [number, number, number, number] } : {}),
     };
 
-    await col<FileMetaDoc>(`${spaceId}_files`).replaceOne(
+    await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).replaceOne(
       asFilter<FileMetaDoc>({ _id: chunkId }),
       asDoc<FileMetaDoc>(chunkDoc as FileMetaDoc),
       { upsert: true },
@@ -398,7 +399,7 @@ export async function embedFaces(
   // ── 5. Auto-label parent file ───────────────────────────────────────────
   if (autoLabelEntityId) {
     try {
-      const parent = await col<FileMetaDoc>(`${spaceId}_files`).findOne(
+      const parent = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(
         asFilter<FileMetaDoc>({ _id: fileId }),
         { projection: { entityIds: 1 } },
       ) as FileMetaDoc | null;
@@ -434,7 +435,7 @@ export async function propagateFaceLabel(
 ): Promise<void> {
   try {
     const now = new Date().toISOString();
-    await col<FileMetaDoc>(`${spaceId}_files`).updateMany(
+    await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateMany(
       asFilter<FileMetaDoc>({ parentFileId: fileId, faceEmbedding: { $exists: true } }),
       { $set: { faceEntityId: entityId, updatedAt: now } },
     );

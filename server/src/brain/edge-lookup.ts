@@ -22,6 +22,7 @@ import { NEVER_RETURNED_PROJECTION } from './read-projection.js';
 import { storedEdgeKind } from './entity-refs.js';
 import type { EdgeDoc } from '../config/types.js';
 import type { RefKind } from '../config/types-knowledge.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 /**
  * The stored edge with this identity, or `null`.
@@ -44,7 +45,7 @@ export async function findEdgeByTriplet(
   spaceId: string, from: string, to: string, label: string,
   fromKind?: RefKind, toKind?: RefKind,
 ): Promise<EdgeDoc | null> {
-  return await col<EdgeDoc>(`${spaceId}_edges`)
+  return await col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
     .findOne(asFilter<EdgeDoc>({
       spaceId, from, to, label,
       fromKind: storedEdgeKind(fromKind) ?? null,

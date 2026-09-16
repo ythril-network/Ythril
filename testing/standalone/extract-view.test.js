@@ -98,7 +98,7 @@ describe('the extract route', () => {
     // and pinning the narrowed form keeps it honest, since reverting to the unnarrowed call would fail here too.
     assert.match(handler, /for \(const mid of memberSpacesForRequest\(req, spaceId\)\)/);
     assert.match(handler, /member = mid/);
-    assert.match(handler, /col<FileMetaDoc>\(`\$\{member\}_files`\)/);
+    assert.match(handler, /col<FileMetaDoc>\(spaceCollection\(member, 'files'\)\)/);
   });
 
   it('reports a missing sidecar as its own state, not as an empty document', () => {

@@ -211,13 +211,13 @@ describe('resolveFindSimilarScope (find_similar space resolution)', () => {
   const accessible = ['a', 'b', 'c'];
 
   it('with a space (no crossSpace): base is the resolved member, search stays in that space', () => {
-    const r = resolveFindSimilarScope('a', false, accessible, members);
+    const r = resolveFindSimilarScope(['a'], false, accessible, members);
     assert.deepEqual(r.candidateBases, ['a']);
     assert.equal(r.searchIds, undefined);
   });
 
   it('with a proxy space: base is the first member', () => {
-    const r = resolveFindSimilarScope('proxy', false, accessible, members);
+    const r = resolveFindSimilarScope(['proxy'], false, accessible, members);
     assert.deepEqual(r.candidateBases, ['m1']);
   });
 
@@ -227,8 +227,33 @@ describe('resolveFindSimilarScope (find_similar space resolution)', () => {
     assert.deepEqual(r.searchIds, accessible);
   });
 
+  it('SEVERAL spaces: the source is probed in each, and the search spans exactly those', () => {
+    /*
+     * The list case, 5.0. It is NOT the same as omitting the space — that searches everything reachable,
+     * this searches the three the caller named and nothing else. The difference matters most in the
+     * answer's SIZE: a byte budget spent on spaces nobody asked about is the cost this exists to remove.
+     */
+    const r = resolveFindSimilarScope(['a', 'c'], false, accessible, members);
+    assert.deepEqual(r.searchIds, ['a', 'c'], 'exactly the named spaces, not every accessible one');
+    assert.deepEqual(r.candidateBases, ['a', 'c'],
+      'the source may be in any of them, so each is a candidate base — first one holding the entry wins');
+  });
+
+  it('a proxy inside a list expands to its members', () => {
+    // A proxy holds no records of its own, so a list naming one and not expanding it searches an empty
+    // collection and answers "nothing found" for a space the caller explicitly named.
+    const r = resolveFindSimilarScope(['a', 'proxy'], false, accessible, members);
+    assert.deepEqual(r.searchIds, ['a', 'm1', 'm2']);
+  });
+
+  it('a one-element list means exactly what the single space meant', () => {
+    const one = resolveFindSimilarScope(['a'], false, accessible, members);
+    assert.equal(one.searchIds, undefined, 'still the narrow form — search only that space');
+    assert.deepEqual(one.candidateBases, ['a']);
+  });
+
   it('legacy crossSpace:true forces cross-space even when a space is given', () => {
-    const r = resolveFindSimilarScope('a', true, accessible, members);
+    const r = resolveFindSimilarScope(['a'], true, accessible, members);
     assert.deepEqual(r.candidateBases, accessible);
     assert.deepEqual(r.searchIds, accessible);
   });

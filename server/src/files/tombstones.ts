@@ -13,6 +13,7 @@ import { toDocId } from '../util/paths.js';
 import { col, asDoc } from '../db/mongo.js';
 import type { FileTombstoneDoc } from '../config/types.js';
 import { log } from '../util/log.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 /**
  * Insert a sync tombstone for each of `paths` so peers remove the files too.
@@ -25,7 +26,7 @@ export async function writeFileTombstones(spaceId: string, paths: string[]): Pro
   const now = new Date().toISOString();
   const docs: FileTombstoneDoc[] = unique.map(p => ({ _id: uuidv4(), spaceId, path: p, deletedAt: now }));
   try {
-    await col<FileTombstoneDoc>(`${spaceId}_file_tombstones`).insertMany(docs.map(d => asDoc<FileTombstoneDoc>(d)));
+    await col<FileTombstoneDoc>(spaceCollection(spaceId, 'fileTombstones')).insertMany(docs.map(d => asDoc<FileTombstoneDoc>(d)));
   } catch (err) {
     log.warn(`writeFileTombstones error for space ${spaceId} (${unique.length} paths): ${err instanceof Error ? err.message : String(err)}`);
   }

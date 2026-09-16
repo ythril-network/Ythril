@@ -50,6 +50,7 @@ import { log } from '../util/log.js';
 import { TYPE_FIELD } from './ttl.js';
 import { recordNotSuppressedFilter, RECORD_SUPPRESS_FIELD } from './suppress-embeddings.js';
 import type { KnowledgeType, SpaceMeta } from '../config/types.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 /** The collection suffix for each record kind, in the one place that has to agree with the schema keys. */
 const COLLECTION: Record<KnowledgeType, string> = {
@@ -112,7 +113,7 @@ export async function sweepSuppressedVectors(spaceId: string, meta: SpaceMeta): 
     if (ids.length === 0) continue;
 
     await coll.updateMany(asFilter(filter), { $unset: { embedding: '' } });
-    await col(`${spaceId}_embed_jobs`).deleteMany(
+    await col(spaceCollection(spaceId, 'embedJobs')).deleteMany(
       asFilter({ _id: { $in: ids.map(d => `${kind}:${String(d['_id'])}`) } }),
     );
     total += ids.length;
