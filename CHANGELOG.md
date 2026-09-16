@@ -15,6 +15,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`help()` told every caller the two doors reach the same things, and that was false in twenty-two
+  places.** `REST_ONLY_CAPABILITIES` was empty, its own comment called the emptiness *"the finished state
+  rather than an oversight"*, and the gate guarding it asserted both halves of every row — so with zero
+  rows it asserted nothing, for ever.
+
+  The list now names what is actually missing: **network governance** (create, join, fork, invite, manage
+  members, read the sync history, and cast a **vote** — an agent can belong to a governance process it
+  cannot take part in), **a file's original bytes** (`read_file` returns extracted text, which is right for
+  a document and wrong for a PNG), **the media embedding queue** (`retry_embed_media` can retry what no
+  tool can list), **the per-type schema write**, and **the rights catalogue**.
+
+  **What replaces the empty list is a derivation.** The build enumerates all 222 mounted routes and fails
+  unless each is answered by a named tool, declared here, or classified as something an agent would never
+  call — with the reason. A route in none of the three fails, so "I did not think about MCP" is no longer
+  expressible, and the published capability table is generated from the same classification a gate holds
+  true.
+
+  The README claimed *"every capability is on both doors… the exemption list for that check is empty"*. It
+  now claims what the build can keep: nothing is missing **silently**.
+
 - **`space` takes a LIST on `recall`, `filter` and `similar` — both doors.** Naming three of your twelve
   spaces used to mean three calls and a merge, or reading all twelve and paying for the nine you did not
   want. The byte budget is spent before a client-side merge, so that second option dropped results it never

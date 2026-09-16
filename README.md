@@ -131,7 +131,7 @@ That's it. Your assistant instantly sees the space's purpose, its schema, and ev
 
 A quick tour — every capability is also a callable **MCP tool** (45 of them), a REST endpoint, and a screen in the web UI.
 
-**Every capability is on both doors, not a subset** — a build fails if one reaches REST without its MCP tool, and the exemption list for that check is empty. Same parameters, same defaults, same refusals is the rule the project holds itself to on every change; the build enforces the capability half of it.
+**No capability is missing from a door SILENTLY** — the build enumerates every mounted REST route and fails unless each one is answered by a named MCP tool, declared as a published gap, or classified as something an agent would never call, with the reason. Twenty-two of two hundred and twenty-two are declared gaps today, chiefly network governance and a file's original bytes, and `help()` reports them to every caller rather than leaving absent and forbidden indistinguishable. Same parameters, same defaults, same refusals is the rule the project holds itself to on every change.
 
 A refused write comes back **machine-readable** rather than as a sentence: a schema violation arrives as `structuredContent`, separating what your write introduced from what was already stored, so an agent can decide whether to fix and retry without parsing prose.
 

@@ -115,17 +115,23 @@ const CLAIMS = [
     phrase: /parity|same parameters|both doors/i,
     mechanism: () => {
       /*
-       * Two things must hold: the gate exists, and its exemption list is EMPTY. The emptiness is the
-       * substance — a row in that list is a capability REST has and MCP does not, which is precisely what
-       * the claim would then be untrue about.
+       * THIS USED TO ASSERT THE EXEMPTION LIST WAS EMPTY, and that is how the README came to oversell.
+       * The list was empty and WRONG — two capabilities were REST-only the whole time — so a gate reading
+       * its length was measuring whether anybody had written a row, not whether the surfaces matched.
+       *
+       * The claim is now the one the build can actually keep: nothing is missing SILENTLY. What holds it
+       * up is the derivation, which enumerates every mounted route and refuses to let one go unclassified.
        */
       assert.match(readFileSync('testing/standalone/mcp-rest-parity.test.js', 'utf8'), /REST_ONLY_CAPABILITIES/,
         'the parity gate must still read the exemption list');
+      assert.match(
+        readFileSync('testing/standalone/every-rest-route-is-answered-or-declared.test.js', 'utf8'),
+        /mountedRoutes\(\)/,
+        'the derivation is what makes the claim true — without it an empty list means nobody looked');
       const parity = src('server/src/mcp/parity.ts');
-      const list = parity.match(/REST_ONLY_CAPABILITIES[^=]*=\s*\[([^\]]*)\]/)?.[1];
-      assert.notEqual(list, undefined, 'REST_ONLY_CAPABILITIES is gone from mcp/parity.ts');
-      assert.equal(list.trim(), '',
-        `the parity exemption list is not empty (${list.trim()}), so the README must not claim parity without `
+      assert.match(parity, /REST_ONLY_CAPABILITIES/, 'REST_ONLY_CAPABILITIES is gone from mcp/parity.ts');
+      assert.ok(!/why:\s*'',/.test(parity),
+        `a declared gap with no reason defeats the claim, because "declared" is what makes the gap honest `
         + 'qualification');
     },
   },
