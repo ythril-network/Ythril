@@ -36,30 +36,27 @@ const calls = new Map<string, number[]>();
  */
 export function consumeHeavyToolCall(key: string): boolean {
   const now = Date.now();
+
+  /*
+   * Prune every expired key on the way past, not just this one's.
+   *
+   * The first version exported a `pruneHeavyToolCalls` for a caller to run on a schedule, and nothing
+   * called it — a bound that exists only in a function nobody invokes is not a bound. Doing it here costs
+   * a walk of a map holding one entry per token that has wiped something in the last minute, which is
+   * small by construction, and it cannot be forgotten.
+   */
+  for (const [k, times] of calls) {
+    if (times.length === 0 || times[times.length - 1]! + WINDOW_MS <= now) calls.delete(k);
+  }
+
   const recent = (calls.get(key) ?? []).filter(t => now - t < WINDOW_MS);
   if (recent.length >= MAX_CALLS) {
+    // The refused call is NOT recorded: a caller hammering the limit would otherwise push its own window
+    // forward for ever and never be let back in.
     calls.set(key, recent);
     return false;
   }
   recent.push(now);
   calls.set(key, recent);
   return true;
-}
-
-/** Drop every counter. For tests, which would otherwise carry one suite's calls into the next. */
-export function resetHeavyToolCalls(): void {
-  calls.clear();
-}
-
-/**
- * Prune keys whose window has passed.
- *
- * The map is keyed by token id, so it is bounded by the number of tokens in normal use — but the fallback
- * key is an IP, and an unauthenticated flood would otherwise grow it without limit.
- */
-export function pruneHeavyToolCalls(): void {
-  const now = Date.now();
-  for (const [key, times] of calls) {
-    if (times.every(t => now - t >= WINDOW_MS)) calls.delete(key);
-  }
 }

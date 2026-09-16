@@ -11,7 +11,7 @@ import { arrayWriteError } from '../../brain/array-write-refusal.js';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { unknownFieldWarnings } from './unknown-fields.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
-import { createChrono, updateChrono, getChronoById, listChrono, deleteChrono, bulkDeleteChrono, parseRecurrence, ChronoFilter } from '../../brain/chrono.js';
+import { createChrono, updateChrono, getChronoById, listChrono, deleteChrono, parseRecurrence, ChronoFilter } from '../../brain/chrono.js';
 import { getConfig } from '../../config/loader.js';
 import { parseLimit, parseSkip, unsupportedPageParam } from '../../util/pagination.js';
 import { pageAcrossMembers } from '../../spaces/page-across-members.js';

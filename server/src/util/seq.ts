@@ -18,36 +18,22 @@ export async function nextSeq(spaceId: string): Promise<number> {
   return result.seq;
 }
 
-/**
- * Reserve a contiguous block of `count` sequence numbers in ONE round trip.
+/*
+ * `reserveSeqBlock` WAS HERE, and it went with its only caller (5.0).
  *
- * Returns the FIRST seq of the block; the caller owns `[first, first + count - 1]`.
+ * It reserved a contiguous range in one `$inc` for the bulk-delete paths, which wrote one tombstone per
+ * document and would otherwise have made a round trip each — 100k awaited round trips to wipe 100k facts,
+ * before the delete even started. Those paths were the five per-collection `DELETE` routes; emptying a
+ * space is one tool call now and `wipeSpace` does a `deleteMany` per collection, writing no tombstones.
  *
- * The bulk-delete paths write one tombstone per document and used to call `nextSeq()` inside
- * the loop — a sequential round trip per document, so wiping 100k facts cost 100k awaited
- * round trips *before the delete even started*. A single `$inc` by `count` reserves the whole
- * range atomically.
+ * **No tombstones is correct here and the reason is the vote, not an omission.** A wipe that empties a
+ * collection and writes none is one the next sync cycle would undo record by record from a peer's copy —
+ * which is exactly why `delete_space_data` opens a governed round on a networked space instead: every
+ * member wipes, so there is nothing for a peer to offer back. On a space in no network there is no peer.
  *
- * Gaps are safe, reuse is NOT. If the caller fails after reserving, the block is simply never
- * used — sync compares seqs with `>`, so a hole in the sequence is harmless, whereas handing
- * the same seq to two documents would corrupt the watermark logic. That is why this reserves
- * up-front rather than rolling back on error.
+ * Deleted rather than kept for a future caller: an unused allocator with a subtle contract (gaps are safe,
+ * REUSE is not) is the thing somebody reaches for without reading it.
  */
-export async function reserveSeqBlock(spaceId: string, count: number): Promise<number> {
-  if (!Number.isInteger(count) || count < 1) {
-    throw new Error(`reserveSeqBlock: count must be a positive integer, got ${count}`);
-  }
-  const counters = col<SpaceCounterDoc>('ythril_counters');
-  const result = await counters.findOneAndUpdate(
-    { _id: spaceId },
-    { $inc: { seq: count } },
-    { upsert: true, returnDocument: 'after' },
-  );
-  if (!result) throw new Error(`Failed to reserve ${count} sequence numbers for space ${spaceId}`);
-  // `result.seq` is the counter AFTER the increment, i.e. the LAST seq of our block.
-  return result.seq - count + 1;
-}
-
 /** Read the current counter for a space (0 when it does not exist yet). */
 export async function currentSeq(spaceId: string): Promise<number> {
   const doc = await col<SpaceCounterDoc>('ythril_counters')

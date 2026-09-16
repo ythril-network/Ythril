@@ -91,7 +91,7 @@ export const space_statsTool: ToolHandler = {
           properties: {
             space: s.requiredSpace,
           },
-          required: ['space', 'confirm'],
+          required: ['space'],
           additionalProperties: false,
         }),
   async handle(ctx: ToolContext): Promise<ToolResult> {

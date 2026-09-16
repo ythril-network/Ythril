@@ -28,7 +28,6 @@ import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import { log } from '../util/log.js';
 import type { EntityDoc, EdgeDoc, FactDoc, ChronoEntry, TombstoneDoc, FileMetaDoc } from '../config/types.js';
 import { PROPERTIES_SCAN_MAX_MS, textContains } from './tag-filter.js';
-import { wipeSpaceCollection } from './bulk-wipe.js';
 import { spaceCollection } from '../db/space-collection.js';
 
 /** An item that references a given entity, and — for an edge — which of its ends does. */
@@ -538,12 +537,6 @@ export async function deleteEntity(
  * treating them as identical drops. `the-bulk-wipe-writes-a-tombstone-per-record-db.test.js` asserts it here
  * and asserts its ABSENCE on a fact wipe, so a shared hook wired to the wrong callers fails too.
  */
-export async function bulkDeleteEntities(spaceId: string): Promise<number> {
-  return await wipeSpaceCollection(spaceId, 'entities', 'entity', {
-    afterDelete: () => unlabelAllFaces(spaceId).then(() => undefined),
-  });
-}
-
 /**
  * Find every item in a space that references the given entity — in EITHER direction.
  *

@@ -10,7 +10,7 @@ import { reportServerFailure } from '../../util/report-failure.js';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { unknownFieldWarnings } from './unknown-fields.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
-import { listEntities, deleteEntity, upsertEntity, getEntityById, updateEntityById, bulkDeleteEntities } from '../../brain/entities.js';
+import { listEntities, deleteEntity, upsertEntity, getEntityById, updateEntityById } from '../../brain/entities.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { deleteEntityCascade, previewEntityCascade } from '../../brain/entity-delete-cascade.js';
 import { computeMergePlan, applyResolutions, executeMerge, validateResolution, type PropertyResolution } from '../../brain/merge.js';

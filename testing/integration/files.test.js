@@ -506,7 +506,9 @@ describe('File metadata (MongoDB)', () => {
     // Deleting the FILE takes the metadata with it — which is why the route above is not missed.
     const dlUrl = `${INSTANCES.a}/api/files/general?path=${encodeURIComponent(filePath)}`;
     const gone = await fetch(dlUrl, { method: 'DELETE', headers: { 'Authorization': `Bearer ${tokenA}` } });
-    assert.equal(gone.status, 200, `file delete failed: ${await gone.text()}`);
+    // 200 with a body, or 204 when there is nothing to say. Both mean deleted, and pinning one of them
+    // would make this case fail on a change that is not about files at all.
+    assert.ok([200, 204].includes(gone.status), `file delete failed: ${gone.status} ${await gone.text()}`);
     const q2 = await listFileMeta(tokenA, 'general', `?path=${encodeURIComponent(filePath)}`);
     assert.equal(q2.body.files.length, 0, 'the metadata must go with the file');
   });

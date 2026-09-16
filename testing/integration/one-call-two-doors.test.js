@@ -111,7 +111,9 @@ describe('a write answers identically on both doors', () => {
     assert.equal(written.status, 200, JSON.stringify(written));
     assert.equal(written.ok, true);
 
-    const seen = await viaMcp('filter', { space: SPACE, collection: 'facts', limit: 10 });
+    // `filter` requires both `collection` and `filter` — an empty predicate is "every row", which is what
+    // this wants: the question is whether the OTHER door can see the write, not how well it filters.
+    const seen = await viaMcp('filter', { space: SPACE, collection: 'facts', filter: {}, limit: 10 });
     assert.equal(seen.isError, false, seen.text);
     assert.match(seen.text, new RegExp(`A fact from the HTTP door ${RUN}`),
       'a fact written through the HTTP door must be readable through MCP — one store, one handler');
@@ -150,6 +152,22 @@ describe('a refusal is the same refusal, and this is the half that used to diffe
     const { rest } = await bothDoors('delete_space_data', { space: SPACE });
     assert.match(rest.text, /confirm/);
     assert.ok(rest.status >= 400 && rest.status < 500, `expected a 4xx, got ${rest.status}`);
+  });
+
+  it('a body that is not an object, named as what it is', async () => {
+    /*
+     * A JSON array parses fine and answers every property lookup with `undefined`, so without a guard the
+     * first gate to read one reports the wrong thing — `space_stats` with a body of `[1,2]` was refused
+     * for "missing `space`", sending the caller after a field they never meant to send.
+     */
+    const res = await fetch(`${INSTANCES.a}/api/space_stats`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tokenA}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify([1, 2]),
+    });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.match(body.error, /must be an object/, `the refusal must name the BODY: ${body.error}`);
   });
 
   it('a tool that does not exist', async () => {

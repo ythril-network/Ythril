@@ -12,7 +12,6 @@ import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { unknownFieldWarnings } from './unknown-fields.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { listEdges, deleteEdge, upsertEdge, getEdgeById, updateEdgeById, EdgeSchemaViolation } from '../../brain/edges.js';
-import { bulkDeleteEdges } from '../../brain/edge-bulk-delete.js';
 import { EdgeIdentityTaken } from '../../brain/edge-rekey.js';
 import { validateDeleteFields, applyDeleteFields as applyDeleteFieldsPaths } from '../../brain/delete-fields.js';
 import { getConfig } from '../../config/loader.js';

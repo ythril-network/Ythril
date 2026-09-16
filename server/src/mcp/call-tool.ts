@@ -123,6 +123,18 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
   const accessibleSpaceIds = reachableSpaceIds(rights, cfg.spaces.map(s => s.id));
   const accessibleSpaces = cfg.spaces.filter(s => accessibleSpaceIds.includes(s.id));
 
+  /*
+   * The arguments must be an OBJECT, and this is refused before anything reads a field off them.
+   *
+   * A JSON array or a bare string parses fine and then answers every property lookup with `undefined`, so
+   * the first gate that reads one reports the wrong thing: `POST /api/space_stats` with a body of `[1,2]`
+   * was told it was missing `space`. That is a refusal naming a field the caller never meant to send, and
+   * the caller then goes looking for the field rather than at the body.
+   */
+  if (a === null || typeof a !== 'object' || Array.isArray(a)) {
+    return refuse(400, `Error: arguments for '${name}' must be an object`);
+  }
+
   // Unknown tools carry no flags and fall through the gates to be reported below, as they always did.
   const tool = TOOLS_BY_NAME.get(name);
 
@@ -138,21 +150,6 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
         ? `Error: tool '${name}' configures a space, and this token administers none — it needs the `
           + 'spaceAdmin grant on some space, or instance-admin rights'
         : `Error: tool '${name}' mutates, and this token holds no write rung in any space`);
-  }
-
-  /*
-   * The destructive-call throttle, and it counts ATTEMPTS rather than successes.
-   *
-   * It is IN here rather than in front of the REST route because that is where it used to be: express
-   * middleware on five routes, and nothing at all on the MCP door. An agent emptying a space in a loop met
-   * no limit a browser would have hit at the fifth call.
-   *
-   * Before the gates below, deliberately. A limiter that only counts calls which got past authorisation
-   * cannot slow a caller down while they are getting it wrong, and "wrong in a loop" is most of what a
-   * runaway agent does. Five a minute per token, refused or not.
-   */
-  if (tool?.heavy && !consumeHeavyToolCall(caller.tokenId ?? caller.ip)) {
-    return refuse(429, `Error: tool '${name}' is rate limited — too many destructive calls, try again shortly`);
   }
 
   /*
@@ -234,6 +231,24 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
     if (!tool.skipSchemaValidation) {
       const argErr = makeArgsValidator(toolSchemasFor(accessibleSpaceIds)).validate(tool, a);
       if (argErr) return refuse(400, `Error: ${argErr}`, callSpace);
+    }
+    /*
+     * The destructive-call throttle, immediately before the handler runs — which is the LAST point at
+     * which nothing has been destroyed, and therefore the right one.
+     *
+     * It is in this function rather than in front of the REST route because that is where it used to be:
+     * express middleware on five routes, and nothing at all on the MCP door. An agent emptying a space in
+     * a loop met no limit a browser would have hit at the fifth call.
+     *
+     * **It counts calls that REACH the handler, not attempts, and that is a reversal worth recording.**
+     * The first version sat above the gates on the reasoning that a caller getting it wrong in a loop
+     * should be slowed too. It does not survive contact: a refused call destroys nothing, so counting
+     * refusals turns a malformed-argument loop into a lockout and makes the API hostile to anyone probing
+     * it — five 400s and an integrator learning the shape of the call is locked out of the real one. The
+     * rail exists to bound DESTRUCTION, and destruction begins one line below this.
+     */
+    if (tool.heavy && !consumeHeavyToolCall(caller.tokenId ?? caller.ip)) {
+      return refuse(429, `Error: tool '${name}' is rate limited — too many destructive calls, try again shortly`, callSpace);
     }
     const startedAt = Date.now();
     const result = await tool.handle({

@@ -158,12 +158,18 @@ describe('the destructive-call throttle, on the tool door (5/min)', () => {
   });
 
   it('reaches the tool once, then 429s within the limit (5/min)', async () => {
-    // A non-existent space: the attempt is counted and can never delete anything. The throttle runs BEFORE
-    // the space checks precisely so that a caller getting it wrong in a loop is still slowed down.
+    /*
+     * A REACHABLE space with no `confirm`: the call gets past the gates, reaches the handler, is counted,
+     * and deletes nothing — the handler refuses it for want of the confirmation.
+     *
+     * A non-existent space would be the obvious probe and is the wrong one: the throttle sits immediately
+     * before the handler, so a call refused earlier costs no slot. That is deliberate — a refused call
+     * destroys nothing, and counting refusals would lock an integrator out after five malformed attempts.
+     */
     const bulkDelete = () => fetch(`${INSTANCES.c}/api/delete_space_data`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${tokenC}` },
-      body: JSON.stringify({ space: 'rl-bulkwipe-probe', confirm: true }),
+      body: JSON.stringify({ space: 'general' }),
     });
 
     // Positive control on a guaranteed-fresh window (consumes slot 1 of 5).

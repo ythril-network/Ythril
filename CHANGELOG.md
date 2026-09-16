@@ -71,6 +71,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `confirm: true` is required on both doors now, and the route is named after the tool with `space` as a
   body parameter — the shape the rest of the REST surface moves to.
 
+  **Two things the collapse changed that are worth knowing before you upgrade:**
+
+  - **Emptying a collection no longer writes a tombstone per record.** The five routes did; the tool never
+    has, because on a space belonging to a network it opens a governed round instead and every member
+    wipes — so there is nothing for a peer to offer back. On a space in no network there is no peer. The
+    tombstone-writing path had no caller left and is deleted rather than kept warm.
+  - **Wiping entities unlabels every face, on both doors.** A face descriptor is a file-meta record
+    carrying `faceEntityId`, and that cascade lived in the ROUTE — so the door being kept was the one
+    without it, and `types: ["entities"]` would have left every labelled face pointing at a person who no
+    longer exists. It is inside `wipeSpace` now, where neither door can drop it.
+
 - **Removed: the metadata-only file delete.** `DELETE /api/brain/spaces/:spaceId/files?path=` purged a
   metadata record without touching disk. Every file has metadata and `deleteFileCascade` removes both, and
   the orphan case — a record whose bytes went missing out of band — is already handled by the file delete,

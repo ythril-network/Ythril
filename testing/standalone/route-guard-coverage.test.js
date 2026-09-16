@@ -68,39 +68,68 @@ const MUTATING = new Set(['post', 'put', 'patch', 'delete']);
  * guard is invisible to a list, and the gate reports the route it guards as UNPROTECTED — a false alarm that
  * costs a debugging session, where the reverse (a guard nobody added, silently trusted) costs a breach.
  *
- * **The property, not the names:** an auth guard is an exported middleware in `auth/middleware.ts` whose body
- * reaches `resolveAuthOrFail`, directly or through another guard. Two passes, because `requireSpaceAuth` is
- * `requireSpaceAuthScoped('spaceId')` — a binding whose own body calls nothing.
+ * **The property, not the names:** an auth guard is an exported middleware in `auth/middleware.ts` that
+ * reaches `resolveAuthOrFail` — directly, through another guard, or through a private helper.
+ *
+ * **That last clause is the fix, and the bug it replaces is this gate's own failure mode.** The spans were
+ * cut between EXPORTS, so a private helper's body landed inside whichever exported span happened to precede
+ * it. `performAuth` is declared after `requireMcpAuth` and before the next export, so `requireMcpAuth` was
+ * recognised because the helper's `resolveAuthOrFail` fell inside its span — by accident of ordering, not
+ * by the rule. `requireAuth`, which calls the identical helper from a span that ends before it, was NOT
+ * recognised. The plainest guard in the codebase read as no guard at all, and a route carrying it reported
+ * as reachable without an identity.
+ *
+ * So the spans are cut between ALL top-level declarations, private ones included, and the closure runs over
+ * that graph. Only exported names are returned, because only those can appear in a route chain.
  */
 function deriveAuthGuards() {
   const src = stripComments(readFileSync(path.join(SERVER, 'auth/middleware.ts'), 'utf8'));
 
-  // Each exported binding, with the source span up to the next top-level export. A span rather than a
-  // brace-match: the question is only "does this definition reach the resolver", and a span cannot
-  // under-read it.
+  /*
+   * Every top-level binding, with the source span up to the NEXT top-level binding — exported or not.
+   *
+   * A span rather than a brace-match: the question is only "does this definition reach the resolver", and a
+   * span cannot under-read it. Cutting on every declaration is what stops a span over-reading into the next
+   * function's body, which is what made the old version accidentally right about one name and wrong about
+   * another.
+   */
   const spans = [];
-  const re = /^export\s+(?:async\s+)?(?:function|const)\s+([A-Za-z_$][\w$]*)/gm;
+  const re = /^(export\s+)?(?:async\s+)?(?:function|const)\s+([A-Za-z_$][\w$]*)/gm;
   const marks = [...src.matchAll(re)];
   for (let i = 0; i < marks.length; i++) {
     const start = marks[i].index;
     const end = i + 1 < marks.length ? marks[i + 1].index : src.length;
-    spans.push({ name: marks[i][1], body: src.slice(start, end) });
+    spans.push({ name: marks[i][2], exported: Boolean(marks[i][1]), body: src.slice(start, end) });
   }
-  assert.ok(spans.length > 5, `parsed ${spans.length} exports from auth/middleware.ts — the derivation broke`);
+  assert.ok(spans.length > 5, `parsed ${spans.length} declarations from auth/middleware.ts — the derivation broke`);
+  assert.ok(spans.some(x => !x.exported),
+    'no private declaration was parsed — the helper that actually calls the resolver is private, so a parse '
+    + 'that sees only exports is the bug this derivation was rewritten to fix');
 
-  const guards = new Set(spans.filter(x => x.body.includes('resolveAuthOrFail')).map(x => x.name));
-  // Second pass: a thin binding of a guard is a guard.
-  for (const x of spans) {
-    if (guards.has(x.name)) continue;
-    if ([...guards].some(g => new RegExp(`\\b${g}\\s*\\(`).test(x.body))) guards.add(x.name);
+  // Transitive closure: reaches the resolver, or calls something that does. Repeated to a fixed point
+  // rather than in two passes, because the chain is guard -> helper -> resolver and can grow a link.
+  const reaches = new Set(spans.filter(x => x.body.includes('resolveAuthOrFail')).map(x => x.name));
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const x of spans) {
+      if (reaches.has(x.name)) continue;
+      if ([...reaches].some(g => new RegExp(`\\b${g}\\s*\\(`).test(x.body))) { reaches.add(x.name); changed = true; }
+    }
   }
+
+  const guards = spans.filter(x => x.exported && reaches.has(x.name)).map(x => x.name);
 
   // The floor. An empty or tiny set passes every loop written over it, and this one decides whether a
   // mutating route counts as protected — the direction that fails OPEN.
-  assert.ok(guards.size >= 5,
-    `derived only ${guards.size} auth guards (${[...guards].join(', ')}) — expected at least the five that `
+  assert.ok(guards.length >= 5,
+    `derived only ${guards.length} auth guards (${guards.join(', ')}) — expected at least the five that `
     + 'predate this derivation, so the parse is wrong rather than the code');
-  return [...guards];
+  // Named explicitly because it was the one the old parse missed, and because a derivation that quietly
+  // stops finding the commonest guard would otherwise look like a clean run with a shorter list.
+  assert.ok(guards.includes('requireAuth'),
+    `requireAuth is not among the derived guards (${guards.join(', ')}) — it reaches the resolver through a `
+    + 'private helper, and a parse that cannot follow that reports every route carrying it as unprotected');
+  return guards;
 }
 
 const AUTH_GUARDS = deriveAuthGuards();
@@ -195,6 +224,26 @@ const WRITE_EXEMPT = new Map([
   // The quoted expression used to be `readOnly && tool?.mutating`. An exemption whose stated reason quotes
   // code that no longer exists is how a scanner ends up excusing a check nobody has verified in a year.
   ['mcpRouter', 'read-only is enforced per tool in the dispatcher, not per route'],
+  /*
+   * THE SAME REASON, AND NOW LITERALLY THE SAME CODE — which is why this entry can be trusted where a
+   * second exemption for a second door could not.
+   *
+   * `POST /api/<tool-name>` is one generic `/:tool` route that hands the body to `callTool`, the function
+   * the MCP dispatcher above also calls. The write-blocking is `toolIsVisible`, which refuses a mutating
+   * tool to a token holding no write rung anywhere, and `toolRightsRefusal`, which enforces the per-space
+   * rung on every named space at call time. Neither is visible to a per-route scanner: forty-five
+   * capabilities with forty-five different requirements all arrive as `POST /:tool`.
+   *
+   * A `denyReadOnly` here would be strictly worse than the exemption. It would refuse a read-only token
+   * `recall` — a read — while the tools that actually mutate are already refused one layer in, so it would
+   * break the safe half and add nothing to the dangerous half.
+   *
+   * `one-capability-is-one-shape.test.js` is what keeps this honest: it asserts the door performs no check
+   * of its own AND dispatches through `callTool`, so the enforcement named here cannot be quietly bypassed
+   * by a second handler growing beside it.
+   */
+  ['toolsRouter', 'read-only is enforced per tool by `callTool`, the same function the MCP door uses — a '
+    + 'per-route guard cannot express forty-five different requirements on one path'],
 ]);
 
 /**

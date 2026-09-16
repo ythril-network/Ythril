@@ -32,7 +32,6 @@ import type { DupeCheckOpts } from './write-options.js';
 import { PROPERTIES_SCAN_MAX_MS } from './tag-filter.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector } from './read-projection.js';
-import { wipeSpaceCollection } from './bulk-wipe.js';
 import { spaceCollection } from '../db/space-collection.js';
 
 /** Store a new fact with semantic embedding */
@@ -485,16 +484,4 @@ export async function listFacts(
 /** Count facts in a space */
 export async function countFacts(spaceId: string): Promise<number> {
   return col<FactDoc>(spaceCollection(spaceId, 'facts')).countDocuments();
-}
-
-/**
- * Bulk-delete every fact in a space, writing a tombstone per deleted doc.
- *
- * Deterministic newest-first ordering keeps recently written docs near the front of the generated tombstone seq
- * range even under very large datasets. Facts are the only type that asks for it, which is why the shared
- * helper takes it as an option rather than applying it to all four: the other three would change behaviour for
- * no stated reason, and this is a refactor.
- */
-export async function bulkDeleteFacts(spaceId: string): Promise<number> {
-  return await wipeSpaceCollection(spaceId, 'facts', 'fact', { sort: { createdAt: -1, _id: -1 } });
 }

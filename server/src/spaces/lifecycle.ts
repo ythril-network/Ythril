@@ -17,6 +17,7 @@ import type { SpaceConfig, SpaceMeta, FactDoc } from '../config/types.js';
 import { VECTOR_INDEXED_COLLECTIONS, buildSpaceVectorIndexes, finalizeSpaceIndexReady } from './vector-index.js';
 import { SPACE_COLLECTIONS, repairStaleSpaceIds, dropLegacyPrefixedIndexes, dropSupersededEdgeIdentityIndex, pendingOpConflictMessage , setReindexNeeded, beginSpaceOp, endSpaceOp, spaceOpInFlight } from './_shared.js';
 import { moveSpaceData, applySpaceRenameToConfig } from './rename.js';
+import { unlabelAllFaces } from '../brain/entities.js';
 import { ensureMediaJobIndexes } from '../files/media/job-queue.js';
 import { ensureEmbedJobIndexes } from '../brain/embed-queue.js';
 import { LINK_CLASSES } from '../brain/link-adjacency.js';
@@ -670,6 +671,25 @@ export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): 
     targets.has('files') ? col(spaceCollection(spaceId, 'files')).deleteMany({}) : zero,
     targets.has('links') ? col(spaceCollection(spaceId, 'links')).deleteMany({}) : zero,
   ]);
+
+  /*
+   * WIPING ENTITIES UNLABELS EVERY FACE, and this is the guard a hand-written wipe drops.
+   *
+   * A face descriptor is not a record in a face collection — it is a file-meta record carrying
+   * `faceEmbedding` and, once labelled, `faceEntityId` pointing at the person. Deleting the entities
+   * collection therefore leaves every labelled face pointing at a person who no longer exists: the label
+   * still renders, the link goes nowhere, and nothing reports it.
+   *
+   * **It is here because it was somewhere else.** `bulkDeleteEntities` passed `unlabelAllFaces` as an
+   * `afterDelete` to `wipeSpaceCollection`, so the five per-collection `DELETE` routes did this and the
+   * TOOL never did. When the routes collapsed into the tool at 5.0 the cascade would have gone with them
+   * — the one door left being the one that never had it. Two implementations of one rule, and the
+   * survivor was the weaker one, which is this repo's commonest defect arriving from the other direction.
+   *
+   * Unlabel, never delete: the face record belongs to the FILE, which the operator did not ask to remove.
+   * A full wipe takes the files too, so this matters most for `types: ['entities']`.
+   */
+  if (targets.has('entities')) await unlabelAllFaces(spaceId);
 
   // Clear tombstones for the wiped types.
   // Full wipe: drop everything (single deleteMany with no filter).

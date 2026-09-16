@@ -637,9 +637,35 @@ describe('Brain — bulk memory wipe', () => {
   const WIPE_SPACE = `wipe-${RUN}`;
   let seededIds;
   let seqBefore;
+  /*
+   * ITS OWN TOKEN, and the reason is a real rail rather than a test convenience.
+   *
+   * Emptying a space is throttled to five calls a minute PER TOKEN, on both doors, and the throttle counts
+   * calls that reach the handler — a refusal for a missing `confirm` still reaches it, because that is
+   * where the requirement lives. This describe makes six such calls, and the one above it makes two more
+   * against `general`, so sharing the instance token spent one caller's budget across unrelated cases and
+   * the last wipe got a 429.
+   *
+   * Raising the limit to fit the suite would loosen a rail to make a test pass. A token per caller is what
+   * an operator is told to do anyway (`06-connecting-an-ai-assistant.md`), so the suite does it too.
+   */
+  let wipeToken;
 
   before(async () => {
     tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+    // With the SPACE-ADMIN grant, because that is what emptying a space needs since 5.0 and a default mint
+    // gets `write` everywhere and administers nothing. The floor form rather than a named list: the space
+    // does not exist yet at this point, and a grant naming spaces is checked against the ones that do.
+    const minted = await post(INSTANCES.a, tokenA, '/api/tokens', {
+      name: `bulk-wipe-${RUN}`,
+      rights: {
+        instanceAdmin: false, createSpaces: false,
+        floor: { knowledge: 'admin', files: 'admin', schema: 'admin', dataQuality: 'admin' },
+        perSpace: {}, spaceAdmin: { floor: true, spaces: [] },
+      },
+    });
+    assert.equal(minted.status, 201, `minting the wipe token: ${JSON.stringify(minted.body)}`);
+    wipeToken = minted.body.plaintext;
     await post(INSTANCES.a, tokenA, '/api/spaces', { id: WIPE_SPACE, label: 'Bulk Wipe Test' });
 
     // Seed 10 memories for the wipe test
@@ -672,19 +698,19 @@ describe('Brain — bulk memory wipe', () => {
   });
 
   it('without confirm it returns 400', async () => {
-    const r = await post(INSTANCES.a, tokenA, '/api/delete_space_data', { space: WIPE_SPACE, types: ['facts'] });
+    const r = await post(INSTANCES.a, wipeToken, '/api/delete_space_data', { space: WIPE_SPACE, types: ['facts'] });
     assert.equal(r.status, 400, `expected 400, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 
   it('with confirm:false it returns 400', async () => {
-    const r = await post(INSTANCES.a, tokenA, '/api/delete_space_data', { space: WIPE_SPACE, types: ['facts'], confirm: false });
+    const r = await post(INSTANCES.a, wipeToken, '/api/delete_space_data', { space: WIPE_SPACE, types: ['facts'], confirm: false });
     assert.equal(r.status, 400, `expected 400, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 
   it('with confirm:true it returns the per-collection counts', async () => {
     // One envelope for every tool: `{ok, text, data}`. `data` is the structured result, `text` the prose
     // an agent reads — both carry the whole answer, so a caller may use either.
-    const r = await post(INSTANCES.a, tokenA, '/api/delete_space_data', { space: WIPE_SPACE, types: ['facts'], confirm: true });
+    const r = await post(INSTANCES.a, wipeToken, '/api/delete_space_data', { space: WIPE_SPACE, types: ['facts'], confirm: true });
     assert.equal(r.status, 200, `expected 200, got ${r.status}: ${JSON.stringify(r.body)}`);
     assert.equal(r.body.ok, true);
     assert.ok(typeof r.body.data.facts === 'number', 'facts must be a number');
@@ -700,33 +726,34 @@ describe('Brain — bulk memory wipe', () => {
     }
   });
 
-  it('Tombstones were written for wiped memories', async () => {
-    // Query tombstones created after our seq watermark; page until all IDs are found
-    const tombIds = new Set();
-    const pending = new Set(seededIds);
-    let sinceSeq = seqBefore;
-    for (let page = 0; page < 200; page++) {
-      const r = await get(INSTANCES.a, tokenA, `/api/sync/tombstones?spaceId=${WIPE_SPACE}&sinceSeq=${sinceSeq}&limit=5000`);
-      assert.equal(r.status, 200, JSON.stringify(r.body));
-      const batch = r.body.facts ?? [];
-      if (batch.length === 0) break;
-      for (const t of batch) {
-        tombIds.add(t._id);
-        pending.delete(t._id);
-      }
-      if (pending.size === 0) break;
-      // Advance past this page's highest seq; if no progress, stop to avoid loops
-      const maxSeq = Math.max(...batch.map(t => t.seq ?? 0));
-      if (maxSeq <= sinceSeq) break;
-      sinceSeq = maxSeq;
-    }
-    for (const id of seededIds) {
-      assert.ok(tombIds.has(id), `Tombstone for ${id} should exist (got ${tombIds.size} tombstones since seq ${seqBefore})`);
-    }
+  it('a space wipe writes NO tombstones, and the reason is the vote', async () => {
+    /*
+     * INVERTED AT 5.0, and the inversion is the point rather than a relaxation.
+     *
+     * The five per-collection `DELETE` routes wrote a tombstone per record, because a peer holding the
+     * record had to be told it was gone — without them the next sync cycle offers every record back and
+     * the wipe silently undoes itself.
+     *
+     * Emptying a space is one tool call now, and `wipeSpace` writes none: on a space belonging to a
+     * network it opens a governed round instead, every member wipes, and there is nothing for a peer to
+     * offer back. On a space in no network there is no peer to tell. `wiping-a-networked-space-votes`
+     * holds up the half this cannot see from here.
+     *
+     * Asserted rather than dropped, because "no tombstones" is indistinguishable from "the tombstone code
+     * broke" unless somebody wrote down which one is intended.
+     */
+    const r = await get(INSTANCES.a, tokenA, `/api/sync/tombstones?spaceId=${WIPE_SPACE}&sinceSeq=${seqBefore}&limit=5000`);
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const written = (r.body.facts ?? []).filter(t => seededIds.includes(t._id));
+    assert.deepEqual(written, [],
+      `the wipe wrote ${written.length} tombstone(s). If that is deliberate, the networked-space vote is `
+      + 'now redundant and should go with it — the two are alternatives, not layers.');
   });
 
-  it('Long-form route works: DELETE /api/brain/spaces/:spaceId/facts', async () => {
-    // Seed a couple of memories first
+  it('a second wipe on the same space works, and the seeded records go', async () => {
+    // Titled after `DELETE /api/brain/spaces/:spaceId/facts` until 5.0 — a test named for a route that no
+    // longer exists is one nobody can find when it fails. What it checks is unchanged: seed, wipe, count.
+    // Seed a couple of facts first
     let seqBase = Date.now();
     for (let i = 0; i < 3; i++) {
       await post(INSTANCES.a, tokenA, `/api/sync/facts?spaceId=${WIPE_SPACE}`, {
@@ -737,21 +764,21 @@ describe('Brain — bulk memory wipe', () => {
       });
     }
 
-    const r = await post(INSTANCES.a, tokenA, '/api/delete_space_data', { space: WIPE_SPACE, types: ['facts'], confirm: true });
+    const r = await post(INSTANCES.a, wipeToken, '/api/delete_space_data', { space: WIPE_SPACE, types: ['facts'], confirm: true });
     assert.equal(r.status, 200, `wipe: ${JSON.stringify(r.body)}`);
     assert.ok(typeof r.body.data.facts === 'number');
     assert.ok(r.body.data.facts >= 3, `Should have deleted at least 3, got ${r.body.data.facts}`);
   });
 
   it('Wipe on unknown space returns 404', async () => {
-    const r = await post(INSTANCES.a, tokenA, '/api/delete_space_data', { space: 'no-such-space', confirm: true });
+    const r = await post(INSTANCES.a, wipeToken, '/api/delete_space_data', { space: 'no-such-space', confirm: true });
     assert.equal(r.status, 404, `expected 404, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 
   it('and a LIST of spaces is refused, in the same words as the MCP door', async () => {
     // `delete_space_data` does not declare `spaceList`, so a list is a refusal rather than a loop. The
     // wording is the shared module's, which is why it can be asserted identically on both doors.
-    const r = await post(INSTANCES.a, tokenA, '/api/delete_space_data', { space: [WIPE_SPACE, 'general'], confirm: true });
+    const r = await post(INSTANCES.a, wipeToken, '/api/delete_space_data', { space: [WIPE_SPACE, 'general'], confirm: true });
     assert.equal(r.status, 400, `expected 400, got ${r.status}: ${JSON.stringify(r.body)}`);
     assert.match(r.body.error, /takes one 'space', not a list/);
   });

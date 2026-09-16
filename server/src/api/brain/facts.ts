@@ -15,7 +15,7 @@ import { assertRefsResolve } from '../../brain/entity-refs.js';
 import { requireSpaceAuth, requireBodyScopedSpace, denyReadOnly } from '../../auth/middleware.js';
 import { unknownFieldWarnings } from './unknown-fields.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
-import { listFacts, deleteFact, bulkDeleteFacts, saveFact, updateFact } from '../../brain/fact.js';
+import { listFacts, deleteFact, saveFact, updateFact } from '../../brain/fact.js';
 import { validateDeleteFields, applyDeleteFields as applyDeleteFieldsPaths } from '../../brain/delete-fields.js';
 import { getConfig } from '../../config/loader.js';
 import { col, asFilter } from '../../db/mongo.js';
