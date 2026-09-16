@@ -42,6 +42,7 @@ import type { DupeCandidateDoc, DupeScanStateDoc, DupeScanType, DupeActionRule }
 import { runExclusive } from '../util/single-flight.js';
 import { summariseRecall } from './recall-shape.js';
 import { armedSchedules } from '../util/armed-schedule.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 const DEFAULT_SCHEDULE = '0 3 * * *';   // 03:00 daily
 const DEFAULT_BATCH_SIZE = 200;
@@ -144,7 +145,7 @@ async function upsertCandidate(
 ): Promise<void> {
   const _id = pairKey(type, a._id, b._id);
   const now = new Date().toISOString();
-  await col<DupeCandidateDoc>(`${spaceId}_dupe_candidates`).updateOne(
+  await col<DupeCandidateDoc>(spaceCollection(spaceId, 'dupeCandidates')).updateOne(
     asFilter<DupeCandidateDoc>({ _id }),
     asUpdate<DupeCandidateDoc>({
       $setOnInsert: { spaceId, type, aId: a._id, bId: b._id, detectedAt: now },
@@ -246,7 +247,7 @@ async function handlePair(spaceId: string, type: DupeScanType, seed: RecallResul
   const bSeq = b.seq ?? 0;
   const _id = pairKey(type, a._id, b._id);
 
-  const existing = await col<DupeCandidateDoc>(`${spaceId}_dupe_candidates`).findOne(asFilter<DupeCandidateDoc>({ _id }));
+  const existing = await col<DupeCandidateDoc>(spaceCollection(spaceId, 'dupeCandidates')).findOne(asFilter<DupeCandidateDoc>({ _id }));
   if (existing) {
     if (existing.status === 'resolved' && existing.resolution === 'merged') return; // absorbed record gone
     if (existing.status === 'dismissed') {
@@ -259,7 +260,7 @@ async function handlePair(spaceId: string, type: DupeScanType, seed: RecallResul
       if (decideDismissed(existing, aSeq, bSeq, currentHash) !== 'reopen') {
         // Content unchanged (or a legacy baseline): stay dismissed, but advance the baseline + seqs so
         // we don't recompute the hash on every subsequent scan.
-        await col<DupeCandidateDoc>(`${spaceId}_dupe_candidates`).updateOne(
+        await col<DupeCandidateDoc>(spaceCollection(spaceId, 'dupeCandidates')).updateOne(
           asFilter<DupeCandidateDoc>({ _id }),
           asUpdate<DupeCandidateDoc>({ $set: { aSeq, bSeq, dismissedContentHash: currentHash, updatedAt: new Date().toISOString() } }),
         );

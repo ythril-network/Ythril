@@ -47,6 +47,7 @@ import { col, asFilter } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import type { LinkDoc } from '../config/types.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 /** One class of link: a record kind that names another record kind through one array field. */
 export interface LinkClass {
@@ -227,7 +228,7 @@ export interface LinkEnd { from: string; fromKind: RefKind; to: string; toKind: 
 export async function linksPointingAt(
   spaceId: string, ids: readonly string[], limit?: number,
 ): Promise<LinkEnd[]> {
-  const cursor = col<LinkDoc>(`${spaceId}_links`)
+  const cursor = col<LinkDoc>(spaceCollection(spaceId, 'links'))
     .find(asFilter<LinkDoc>({ to: { $in: [...ids] } }),
           { projection: { from: 1, fromKind: 1, to: 1, toKind: 1 } });
   if (limit !== undefined) cursor.limit(limit);
@@ -238,7 +239,7 @@ export async function linksPointingAt(
 export async function linksStartingFrom(
   spaceId: string, ids: readonly string[], limit?: number,
 ): Promise<LinkEnd[]> {
-  const cursor = col<LinkDoc>(`${spaceId}_links`)
+  const cursor = col<LinkDoc>(spaceCollection(spaceId, 'links'))
     .find(asFilter<LinkDoc>({ from: { $in: [...ids] } }),
           { projection: { from: 1, fromKind: 1, to: 1, toKind: 1 } });
   if (limit !== undefined) cursor.limit(limit);
@@ -256,7 +257,7 @@ export async function linksStartingFrom(
 export async function linkedFromIds(
   spaceId: string, cls: LinkClass, ids: readonly string[], limit?: number,
 ): Promise<string[]> {
-  const cursor = col<LinkDoc>(`${spaceId}_links`)
+  const cursor = col<LinkDoc>(spaceCollection(spaceId, 'links'))
     .find(asFilter<LinkDoc>({ to: { $in: [...ids] }, toKind: cls.toKind, fromKind: cls.kind }),
           { projection: { from: 1 } });
   if (limit !== undefined) cursor.limit(limit);
@@ -313,7 +314,7 @@ export async function docsFromCollection<T extends { _id: string }>(
 export async function linkedToPairs(
   spaceId: string, cls: LinkClass, ids: readonly string[], limit?: number,
 ): Promise<Array<{ from: string; to: string }>> {
-  const cursor = col<LinkDoc>(`${spaceId}_links`)
+  const cursor = col<LinkDoc>(spaceCollection(spaceId, 'links'))
     .find(asFilter<LinkDoc>({ from: { $in: [...ids] }, fromKind: cls.kind, toKind: cls.toKind }),
           { projection: { from: 1, to: 1 } });
   if (limit !== undefined) cursor.limit(limit);

@@ -60,6 +60,7 @@ import { contentTypeForDownload } from '../files/mime.js';
 import { hideDerivedTrees } from '../files/derived-trees.js';
 import { registerUploadRoute } from './files-upload.js';
 import { webhookToken, parseTtlDaysQuery, requireQueryPath, enforceSizeLimit } from './files-request.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 export const fileStoreRouter = Router();
 
@@ -150,7 +151,7 @@ async function dirAggregates(memberIds: string[], dirPath: string): Promise<Retu
   const fileMeta = new Map<string, DirFileMeta>();
   for (const mid of memberIds) {
     try {
-      const rows = await col<FileMetaDoc>(`${mid}_files`).find(
+      const rows = await col<FileMetaDoc>(spaceCollection(mid, 'files')).find(
         asFilter<FileMetaDoc>({
           parentFileId: { $exists: false },
           deletedAt: { $exists: false },
@@ -488,7 +489,7 @@ fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadO
       // If there is one, clean it up and return 204 so the UI can remove it.
       // If there is none, the path was never known — return 404.
       const normalisedPath = toDocId(filePath);
-      const orphan = await col<FileMetaDoc>(`${targetSpace}_files`).findOne(
+      const orphan = await col<FileMetaDoc>(spaceCollection(targetSpace, 'files')).findOne(
         asFilter<FileMetaDoc>({ _id: normalisedPath }),
       );
       if (orphan) {

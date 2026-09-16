@@ -14,6 +14,7 @@ import { log } from '../../util/log.js';
 import { withJitter } from '../../util/backoff.js';
 import { newClaimToken, stalledJobWarning } from './lease.js';
 import { createWorkSignal } from '../../util/work-signal.js';
+import { spaceCollection } from '../../db/space-collection.js';
 
 const MAX_ATTEMPTS = 3;
 
@@ -70,11 +71,11 @@ function nextClaimableAfter(nextAttempt: number): string {
 
 
 function jobCollection(spaceId: string) {
-  return col<MediaJobDoc>(`${spaceId}_media_jobs`);
+  return col<MediaJobDoc>(spaceCollection(spaceId, 'mediaJobs'));
 }
 
 function fileCollection(spaceId: string) {
-  return col<FileMetaDoc>(`${spaceId}_files`);
+  return col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
 }
 
 // ── Queue summary (F9 Overview embedding-queue panel) ────────────────────────

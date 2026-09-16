@@ -34,6 +34,7 @@ import type { EdgeDoc, EntityDoc, TombstoneDoc, ChronoEntry, FactDoc, FileMetaDo
 import type { RefKind } from '../config/types-knowledge.js';
 import { tagContains, textContains, propertiesValueContains, PROPERTIES_SCAN_MAX_MS } from './tag-filter.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 export interface TraverseNode {
   _id: string;
@@ -184,7 +185,7 @@ export async function upsertEdge(
     toKind?: RefKind;
   },
 ): Promise<EdgeDoc> {
-  const collection = col<EdgeDoc>(`${spaceId}_edges`);
+  const collection = col<EdgeDoc>(spaceCollection(spaceId, 'edges'));
   const existing = await findEdgeByTriplet(spaceId, from, to, label, opts?.fromKind, opts?.toKind);
 
   /*
@@ -370,7 +371,7 @@ export async function listEdges(
   // Freetext substring over the edge's text fields (2b-iii-a).
   const search = textSearchOr(filter.search, SEARCHABLE_FIELDS.edges);
   if (search) Object.assign(q, search);
-  return col<EdgeDoc>(`${spaceId}_edges`)
+  return col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
     .find(asFilter<EdgeDoc>(q), { projection: NEVER_RETURNED_PROJECTION })
     .maxTimeMS(q['$expr'] ? PROPERTIES_SCAN_MAX_MS : 60_000)
     .sort(sort ? toMongoSort(sort) : { seq: -1, createdAt: -1, _id: -1 })
@@ -381,10 +382,10 @@ export async function listEdges(
 
 /** Delete an edge by ID and write tombstone */
 export async function deleteEdge(spaceId: string, edgeId: string, actor?: WebhookActor): Promise<boolean> {
-  const existing = await col<EdgeDoc>(`${spaceId}_edges`)
+  const existing = await col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
     .findOne(asFilter<EdgeDoc>({ _id: edgeId, spaceId }), { projection: { seq: 1 } }) as { seq?: number } | null;
   const seq = await nextSeq(spaceId);
-  const result = await col<EdgeDoc>(`${spaceId}_edges`).deleteOne({
+  const result = await col<EdgeDoc>(spaceCollection(spaceId, 'edges')).deleteOne({
     _id: edgeId,
     spaceId,
   });
@@ -404,7 +405,7 @@ export async function deleteEdge(spaceId: string, edgeId: string, actor?: Webhoo
     seq,
     ...(existing?.seq !== undefined ? { originalSeq: existing.seq } : {}),
   };
-  await col<TombstoneDoc>(`${spaceId}_tombstones`).replaceOne(
+  await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).replaceOne(
     asFilter<TombstoneDoc>({ _id: edgeId }),
     asDoc<TombstoneDoc>(tombstone),
     { upsert: true },
@@ -415,7 +416,7 @@ export async function deleteEdge(spaceId: string, edgeId: string, actor?: Webhoo
 
 /** Find an edge by exact ID */
 export async function getEdgeById(spaceId: string, id: string): Promise<EdgeDoc | null> {
-  return col<EdgeDoc>(`${spaceId}_edges`)
+  return col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
     .findOne(asFilter<EdgeDoc>({ _id: id, spaceId }),
       { projection: NEVER_RETURNED_PROJECTION }) as Promise<EdgeDoc | null>;
 }
@@ -432,7 +433,7 @@ export async function updateEdgeById(
   /** See `upsertEdge`'s: the classification, so a door never re-derives it for presentation. */
   onValidation?: (check: UpdateValidation) => void,
 ): Promise<EdgeDoc | null> {
-  const collection = col<EdgeDoc>(`${spaceId}_edges`);
+  const collection = col<EdgeDoc>(spaceCollection(spaceId, 'edges'));
   const existing = await collection.findOne(asFilter<EdgeDoc>({ _id: id, spaceId }),
     { projection: NEVER_RETURNED_PROJECTION }) as EdgeDoc | null;
   if (!existing) return null;
@@ -808,7 +809,7 @@ export async function traverseGraph(
        */
       const hopBudget = Math.max(0, limit - resultNodes.length);
       const q = frontierEdgeQuery(mid, frontier, { edgeLabels, direction });
-      const edges = await col<EdgeDoc>(`${mid}_edges`)
+      const edges = await col<EdgeDoc>(spaceCollection(mid, 'edges'))
         .find(asFilter<EdgeDoc>(q), { projection: NEVER_RETURNED_PROJECTION })
         .limit(hopBudget + 1).toArray() as EdgeDoc[];
       if (edges.length > hopBudget) {
@@ -873,7 +874,7 @@ export async function traverseGraph(
     // Batch-fetch entity docs for all new neighbors
     const entityMap = new Map<string, EntityDoc>();
     for (const mid of memberIds) {
-      const entities = await col<EntityDoc>(`${mid}_entities`)
+      const entities = await col<EntityDoc>(spaceCollection(mid, 'entities'))
         .find(asFilter<EntityDoc>({ _id: { $in: newNeighborIds }, spaceId: mid }),
           { projection: NEVER_RETURNED_PROJECTION })
         .toArray() as EntityDoc[];

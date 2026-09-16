@@ -42,6 +42,7 @@ import { storedEdgeKind } from './entity-refs.js';
 import { REF_KINDS } from '../config/types-knowledge.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import { NEVER_RETURNED_PROJECTION } from './read-projection.js';
+import { spaceCollection } from '../db/space-collection.js';
 // DERIVED. These five were written out here, in `brain/bulk.ts`, and in the shared write-shape table —
 // three copies of one product fact, and the third had two of them wrong.
 const CHRONO_STATUS_SET = new Set<ChronoStatus>(CHRONO_STATUSES);
@@ -238,7 +239,7 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
       // The MERGED record, not the payload — an id that matches an existing entity makes this an
       // update, and the importer had the merge target in hand two lines later for its own counter.
       const existing = rawId
-        ? await col<EntityDoc>(`${spaceId}_entities`).findOne(asFilter<EntityDoc>({ _id: rawId, spaceId }),
+        ? await col<EntityDoc>(spaceCollection(spaceId, 'entities')).findOne(asFilter<EntityDoc>({ _id: rawId, spaceId }),
           { projection: NEVER_RETURNED_PROJECTION })
         : null;
       /*

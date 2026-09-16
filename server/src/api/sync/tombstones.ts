@@ -20,6 +20,7 @@ import type { TombstoneDoc, FileTombstoneDoc } from '../../config/types.js';
 
 import { spaceAllowed, isNonPeerSyncWrite, NON_PEER_WRITE_MESSAGE, isDirectionalWriteBlocked, callerPeerId } from './_shared.js';
 import { recordServedSeq } from '../../sync/served-watermark.js';
+import { spaceCollection } from '../../db/space-collection.js';
 
 export const syncTombstonesRouter = Router();
 
@@ -170,7 +171,7 @@ syncTombstonesRouter.get('/file-tombstones', syncRateLimit, requireAuth, async (
     const filter = since
       ? { spaceId, deletedAt: { $gt: since } }
       : { spaceId };
-    const tombstones = await col<FileTombstoneDoc>(`${spaceId}_file_tombstones`)
+    const tombstones = await col<FileTombstoneDoc>(spaceCollection(spaceId, 'fileTombstones'))
       .find(asFilter<FileTombstoneDoc>(filter))
       .sort({ deletedAt: 1 })
       .limit(5000)
@@ -222,7 +223,7 @@ syncTombstonesRouter.post('/file-tombstones', syncRateLimit, requireAuth, denyRe
         path: rel,
         deletedAt: typeof ts.deletedAt === 'string' ? ts.deletedAt : new Date().toISOString(),
       };
-      await col<FileTombstoneDoc>(`${spaceId}_file_tombstones`).updateOne(
+      await col<FileTombstoneDoc>(spaceCollection(spaceId, 'fileTombstones')).updateOne(
         asFilter<FileTombstoneDoc>({ _id: doc._id }),
         asUpdate<FileTombstoneDoc>({ $setOnInsert: doc }),
         { upsert: true },

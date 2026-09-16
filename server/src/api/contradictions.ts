@@ -29,6 +29,7 @@ import { nliConfigured } from '../brain/nli-client.js';
 import { upsertEdge } from '../brain/edges.js';
 import { webhookToken } from './brain/_shared.js';
 import type { ContradictionCandidateDoc } from '../config/types.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 export const contradictionsRouter = Router();
 
@@ -41,7 +42,7 @@ export const contradictionsRouter = Router();
  */
 export const SUPERSEDES_LABEL = 'supersedes';
 
-const collectionFor = (spaceId: string) => col<ContradictionCandidateDoc>(`${spaceId}_contradiction_candidates`);
+const collectionFor = (spaceId: string) => col<ContradictionCandidateDoc>(spaceCollection(spaceId, 'contradictionCandidates'));
 
 /** Space IDs the authenticated token may access (empty/absent allow-list = all spaces). */
 /**

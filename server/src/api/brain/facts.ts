@@ -34,6 +34,7 @@ import { mergePropertiesOrKeep } from '../../brain/merge-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { withoutListDiagnostics } from '../../brain/read-projection.js';
 import { listDiagnosticsAsked } from './_shared.js';
+import { spaceCollection } from '../../db/space-collection.js';
 
 export const memoriesRouter = Router();
 
@@ -202,7 +203,7 @@ memoriesRouter.get('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpaceAu
     return;
   }
   const doc = await findFirstAcrossMembers(spaceId,
-    mid => col<FactDoc>(`${mid}_facts`).findOne(asFilter<FactDoc>({ _id: id })));
+    mid => col<FactDoc>(spaceCollection(mid, 'facts')).findOne(asFilter<FactDoc>({ _id: id })));
   if (doc) { res.json(doc); return; }
   res.status(404).json({ error: 'Fact not found' });
 });

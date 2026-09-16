@@ -2,6 +2,7 @@ import { col } from '../db/mongo.js';
 import { validateEdge } from './schema-validation.js';
 import type { SpaceMeta } from '../config/types.js';
 import type { SchemaViolation } from './schema-validation.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 /** One stored edge, as much of it as validation reads. */
 interface StoredEdge {
@@ -52,14 +53,14 @@ export async function validateStoredEdges(
   scanLimit: number,
 ): Promise<StoredViolation[]> {
   const out: StoredViolation[] = [];
-  const edges = await col(`${spaceId}_edges`).find({}).limit(scanLimit).toArray();
+  const edges = await col(spaceCollection(spaceId, 'edges')).find({}).limit(scanLimit).toArray();
   const docs = edges as unknown as StoredEdge[];
   if (docs.length === 0) return out;
 
   const endpointIds = [...new Set(docs.flatMap(e => [e.from, e.to]).filter((x): x is string => !!x))];
   const typeOf = new Map<string, string | null>();
   if (endpointIds.length > 0) {
-    const ents = await col(`${spaceId}_entities`)
+    const ents = await col(spaceCollection(spaceId, 'entities'))
       .find({ _id: { $in: endpointIds } } as never, { projection: { _id: 1, type: 1 } })
       .toArray() as unknown as Array<{ _id: string; type?: string }>;
     for (const e of ents) typeOf.set(String(e._id), e.type ?? null);

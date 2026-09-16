@@ -167,7 +167,7 @@ describe('no reader re-derives a link class', () => {
       if (file === MODULE) continue;
       const src = stripComments(readFileSync(file, 'utf8'));
       for (const suffix of suffixes) {
-        const re = new RegExp(`\\$\\{\\w+\\}_${suffix}\``, 'g');
+        const re = new RegExp(`spaceCollection\\(\\w+, .${suffix}.\\)`, 'g');
         for (const m of src.matchAll(re)) {
           out.push({ file, suffix, stmt: statementAround(src, m.index, `${file} ${suffix} read`) });
         }

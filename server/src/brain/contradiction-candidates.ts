@@ -21,8 +21,9 @@ import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
 import { pairContentHash, decideDismissed } from './dupe-scanner.js';
 import type { ContradictionCandidateDoc, DupeScanType } from '../config/types.js';
 import type { Verdict, PropertyDisagreement } from './contradiction-judge.js';
+import { spaceCollection } from '../db/space-collection.js';
 
-const collectionFor = (spaceId: string) => col<ContradictionCandidateDoc>(`${spaceId}_contradiction_candidates`);
+const collectionFor = (spaceId: string) => col<ContradictionCandidateDoc>(spaceCollection(spaceId, 'contradictionCandidates'));
 
 /** Canonical pair id — order-independent, so A-vs-B and B-vs-A are the same candidate. */
 export function contradictionPairId(aId: string, bId: string): string {

@@ -15,6 +15,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A space's collection name is built in one place, and that place refuses an id it cannot vouch for.**
+
+  Every per-space collection is `{spaceId}_{suffix}`, and 298 call sites built that string by hand. They now
+  go through `spaceCollection(spaceId, part)`, which carries the check a template literal cannot: a space id
+  must match `^[a-z0-9-]+$`, because `_` is the separator and three operations select a space's collections
+  by that prefix — one of which DROPS them. An id containing `_` would make one space's collections carry
+  another's prefix, so deleting `work` would take `work_archive`'s data with it.
+
+  **Four collections turn out never to have been mapped at all** — `_file_tombstones`, `_media_jobs`,
+  `_link_violations` and `_file_hashes` — alongside six more that were spelled out at every call. Nothing is
+  renamed and no data moves; this is where the name comes from, not what it is.
+
 - **BREAKING — the knowledge type `memory` is now `fact`, everywhere, and 5.0 does not accept the old word.**
 
   | was | is |

@@ -10,6 +10,7 @@ import { getConfig } from '../config/loader.js';
 import { log } from '../util/log.js';
 import { resolveSafePath, spaceRoot } from '../files/sandbox.js';
 import type { ConflictDoc, LinkViolationDoc } from '../config/types.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 export const conflictsRouter = Router();
 
@@ -36,7 +37,7 @@ async function findConflict(
   spaces: string[],
 ): Promise<{ doc: ConflictDoc; spaceId: string } | null> {
   for (const spaceId of spaces) {
-    const doc = await col<ConflictDoc>(`${spaceId}_conflicts`)
+    const doc = await col<ConflictDoc>(spaceCollection(spaceId, 'conflicts'))
       .findOne(asFilter<ConflictDoc>({ _id: conflictId })) as ConflictDoc | null;
     if (doc) return { doc, spaceId };
   }
@@ -97,7 +98,7 @@ async function executeResolve(
   }
 
   // Remove the conflict record
-  await col<ConflictDoc>(`${spaceId}_conflicts`)
+  await col<ConflictDoc>(spaceCollection(spaceId, 'conflicts'))
     .deleteOne(asFilter<ConflictDoc>({ _id: doc._id }));
 }
 
@@ -115,7 +116,7 @@ conflictsRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
     const results: ConflictDoc[] = [];
     let truncated = false;
     for (const spaceId of spaces) {
-      const docs = await col<ConflictDoc>(`${spaceId}_conflicts`)
+      const docs = await col<ConflictDoc>(spaceCollection(spaceId, 'conflicts'))
         .find({})
         .sort({ detectedAt: -1 })
         .limit(PER_SPACE_CAP + 1)
@@ -156,7 +157,7 @@ conflictsRouter.get('/link-violations', globalRateLimit, requireAuth, async (_re
     const results: LinkViolationDoc[] = [];
     let truncated = false;
     for (const spaceId of spaces) {
-      const docs = await col<LinkViolationDoc>(`${spaceId}_link_violations`)
+      const docs = await col<LinkViolationDoc>(spaceCollection(spaceId, 'linkViolations'))
         .find({})
         .sort({ detectedAt: -1 })
         .limit(PER_SPACE_CAP + 1)
@@ -179,7 +180,7 @@ conflictsRouter.delete('/link-violations/:id', globalRateLimit, requireAuth, den
   try {
     const spaces = accessibleSpaces(req, 'write');
     for (const spaceId of spaces) {
-      const result = await col<LinkViolationDoc>(`${spaceId}_link_violations`)
+      const result = await col<LinkViolationDoc>(spaceCollection(spaceId, 'linkViolations'))
         .deleteOne(asFilter<LinkViolationDoc>({ _id: req.params['id'] }));
       if (result.deletedCount > 0) {
         res.status(204).end();
@@ -199,7 +200,7 @@ conflictsRouter.delete('/link-violations', globalRateLimit, requireAuth, denyRea
     const spaces = accessibleSpaces(_req, 'write');
     let total = 0;
     for (const spaceId of spaces) {
-      const result = await col<LinkViolationDoc>(`${spaceId}_link_violations`).deleteMany({});
+      const result = await col<LinkViolationDoc>(spaceCollection(spaceId, 'linkViolations')).deleteMany({});
       total += result.deletedCount;
     }
     res.json({ dismissed: total });
@@ -214,7 +215,7 @@ conflictsRouter.get('/:id', globalRateLimit, requireAuth, async (req, res) => {
   try {
     const spaces = accessibleSpaces(req, 'read');
     for (const spaceId of spaces) {
-      const doc = await col<ConflictDoc>(`${spaceId}_conflicts`)
+      const doc = await col<ConflictDoc>(spaceCollection(spaceId, 'conflicts'))
         .findOne(asFilter<ConflictDoc>({ _id: req.params['id'] })) as ConflictDoc | null;
       if (doc) {
         res.json({
@@ -241,7 +242,7 @@ conflictsRouter.delete('/:id', globalRateLimit, requireAuth, denyReadOnly, async
   try {
     const spaces = accessibleSpaces(req, 'write');
     for (const spaceId of spaces) {
-      const result = await col<ConflictDoc>(`${spaceId}_conflicts`)
+      const result = await col<ConflictDoc>(spaceCollection(spaceId, 'conflicts'))
         .deleteOne(asFilter<ConflictDoc>({ _id: req.params['id'] }));
       if (result.deletedCount > 0) {
         res.status(204).end();
@@ -329,7 +330,7 @@ conflictsRouter.post('/seed', globalRateLimit, requireAdmin, denyReadOnly, async
       peerInstanceLabel: peerInstanceLabel || 'Unknown',
       detectedAt: detectedAt || new Date().toISOString(),
     };
-    await col<ConflictDoc>(`${spaceId}_conflicts`).insertOne(asDoc<ConflictDoc>(doc));
+    await col<ConflictDoc>(spaceCollection(spaceId, 'conflicts')).insertOne(asDoc<ConflictDoc>(doc));
     res.status(201).json({ id: _id });
   } catch (err) {
     log.error(`POST /api/conflicts/seed: ${err}`);

@@ -42,6 +42,7 @@ import { isSpillPath } from './spill-path.js';
 import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import type { BrainEmbedJobDoc, BrainEmbedRecordType } from '../config/types.js';
 import { RECORD_TYPES } from '../config/types.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 /** Attempts before a job is left `failed` for an operator (or a rewrite) to deal with. */
 export const MAX_EMBED_ATTEMPTS = 5;
@@ -69,7 +70,7 @@ function nextClaimableAfter(nextAttempt: number): string {
 const _signal = createWorkSignal();
 
 function jobs(spaceId: string) {
-  return col<BrainEmbedJobDoc>(`${spaceId}_embed_jobs`);
+  return col<BrainEmbedJobDoc>(spaceCollection(spaceId, 'embedJobs'));
 }
 
 /** Composite id, so a rewrite of the same record replaces its job rather than adding one. */

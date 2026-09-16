@@ -35,6 +35,7 @@ import { RECORD_TYPES } from '../config/types.js';
 import { log } from '../util/log.js';
 import { recallDegradedTotal, recallFreshWritesFoundTotal } from '../metrics/registry.js';
 import { envInt } from '../config/env-num.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 /**
  * End-to-end budget for one recall call.
@@ -1034,7 +1035,7 @@ async function enrichFileChunksWithParent(spaceId: string, results: RecallResult
   const parentIds = [...new Set(fileChunks.map(r => r.parentFileId as string))];
 
   // Batch-fetch parent file docs — projection only (no embedding field)
-  const parents = (await col(`${spaceId}_files`)
+  const parents = (await col(spaceCollection(spaceId, 'files'))
     .find(asFilter({ _id: { $in: parentIds } }), { projection: { path: 1, description: 1, tags: 1 } })
     .toArray()) as unknown as Array<{ _id: string; path?: string; description?: string; tags?: string[] }>;
 

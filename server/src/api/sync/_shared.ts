@@ -51,7 +51,7 @@ export async function recordLinkViolation(
       peerInstanceId,
       detectedAt: new Date().toISOString(),
     };
-    await col<LinkViolationDoc>(`${spaceId}_link_violations`).insertOne(asDoc<LinkViolationDoc>(doc));
+    await col<LinkViolationDoc>(spaceCollection(spaceId, 'linkViolations')).insertOne(asDoc<LinkViolationDoc>(doc));
     emitWebhookEvent({ event: 'link_violation.created', spaceId, entry: doc as unknown as Record<string, unknown> });
   } catch (err) {
     log.error(`Failed to record link violation for ${docType} ${docId}: ${err}`);
@@ -263,6 +263,7 @@ import type { RefKind } from '../../config/types-knowledge.js';
 import { CHRONO_STATUSES } from '../../config/types.js';
 import { validateEntity, validateEdge, validateChrono, validateFact, getSpaceMeta, type SchemaViolation }
   from '../../spaces/schema-validation.js';
+import { spaceCollection } from '../../db/space-collection.js';
 
 export const AuthorRefSchema = z.object({
   instanceId: z.string().min(1),
@@ -390,10 +391,10 @@ export async function ingestFileMeta(spaceId: string, incoming: z.infer<typeof I
     if (v !== undefined) $set[k] = v;
   }
 
-  const existing = await col<FileMetaDoc>(`${spaceId}_files`)
+  const existing = await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
     .findOne(asFilter<FileMetaDoc>({ _id: incoming._id }), { projection: { sha256: 1, sizeBytes: 1 } });
 
-  await col<FileMetaDoc>(`${spaceId}_files`).updateOne(
+  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
     asFilter<FileMetaDoc>({ _id: incoming._id }),
     asUpdate<FileMetaDoc>({ $set }),
     { upsert: true },
@@ -587,7 +588,7 @@ export function decodeCursor(token: string): number {
  */
 export async function forkChainDepth(spaceId: string, docId: string | undefined): Promise<number> {
   if (!docId) return 0;
-  const coll = col<FactDoc>(`${spaceId}_facts`);
+  const coll = col<FactDoc>(spaceCollection(spaceId, 'facts'));
   const visited = new Set<string>();
   let depth = 0;
   let currentId: string | undefined = docId;

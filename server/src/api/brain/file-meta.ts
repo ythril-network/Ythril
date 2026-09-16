@@ -38,6 +38,7 @@ import { tagContains } from '../../brain/tag-filter.js';
 import { reachesSpace } from '../../auth/space-reach.js';
 import { canWriteAnywhere } from '../../auth/write-anywhere.js';
 import type { TokenRights } from '../../config/rights-shape.js';
+import { spaceCollection } from '../../db/space-collection.js';
 
 /**
  * The rights off a token record. A cast, for the same reason the MCP router needs one: the record is a
@@ -117,7 +118,7 @@ fileMetaRouter.get('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth, 
     members, limit, skip, ceiling: PROXY_PAGE_CEILING,
     compare: compareBySort(sortParse.sort ? toMongoSort(sortParse.sort) : { createdAt: -1, _id: -1 }),
     readMember: async (mid, lim, sk) => {
-      const rows = await col(`${mid}_files`)
+      const rows = await col(spaceCollection(mid, 'files'))
         .find(asFilter(filter))
         .sort(mongoSort)
         .skip(sk)
@@ -197,7 +198,7 @@ fileMetaRouter.get('/spaces/:spaceId/files/extract', globalRateLimit, requireSpa
     return;
   }
 
-  const files = col<FileMetaDoc>(`${member}_files`);
+  const files = col<FileMetaDoc>(spaceCollection(member, 'files'));
 
   // Chunks: everything carrying a chunkIndex, in document order. `chunkIndex` is the discriminator
   // rather than the path shape, because a chunk's id is `<parent>#chunk<n>` for text and
@@ -391,7 +392,7 @@ fileMetaRouter.delete('/spaces/:spaceId/files', globalRateLimit, requireSpaceAut
   // record is flagged deleted. Deleting the metadata of a file that still exists would
   // silently orphan a live file — refuse and tell the caller to delete the file itself.
   for (const mid of memberIds) {
-    const rec = await col<FileMetaDoc>(`${mid}_files`).findOne(asFilter<FileMetaDoc>({ _id: norm })) as FileMetaDoc | null;
+    const rec = await col<FileMetaDoc>(spaceCollection(mid, 'files')).findOne(asFilter<FileMetaDoc>({ _id: norm })) as FileMetaDoc | null;
     if (rec && !rec.deletedAt && await fileExists(mid, norm)) {
       res.status(409).json({
         error: 'Cannot delete metadata while the file still exists. Delete the file itself (which also removes its metadata), or enable softDeleteFileMeta and delete the file first.',

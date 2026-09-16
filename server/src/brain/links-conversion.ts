@@ -37,6 +37,7 @@ import { updateSpace } from '../spaces/spaces.js';
 import { reconcileLinksForDocument, LINK_BEARING_COLLECTIONS } from './links.js';
 import { LINK_CLASSES } from './link-adjacency.js';
 import { log } from '../util/log.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 /** What one space's conversion did, per collection and in total. */
 export interface ConversionReport {
@@ -82,14 +83,14 @@ const PAGE = 200;
 export async function stampFileMetaSeqs(spaceId: string): Promise<number> {
   let stamped = 0;
   for (;;) {
-    const doc = await col<{ _id: string }>(`${spaceId}_files`).findOne(
+    const doc = await col<{ _id: string }>(spaceCollection(spaceId, 'files')).findOne(
       asFilter<{ _id: string }>({ seq: { $exists: false }, parentFileId: { $exists: false } }),
       { projection: { _id: 1 } },
     ) as { _id: string } | null;
     if (!doc) break;
     // One seq PER RECORD. A shared seq at a page boundary would leave the rest of that group unreachable,
     // because the cursor continues from the last item with `seq > since` and would step straight over them.
-    await col(`${spaceId}_files`).updateOne(
+    await col(spaceCollection(spaceId, 'files')).updateOne(
       asFilter({ _id: doc._id }), { $set: { seq: await nextSeq(spaceId) } } as never,
     );
     stamped++;
@@ -137,7 +138,7 @@ export async function previewSpaceLinks(spaceId: string): Promise<ConversionPrev
     converted: getConfig().spaces.find(s => s.id === spaceId)?.completeLinkage === true,
     records: {},
     entries: {},
-    links: await col(`${spaceId}_links`).countDocuments(asFilter({ spaceId })),
+    links: await col(spaceCollection(spaceId, 'links')).countDocuments(asFilter({ spaceId })),
   };
 
   // DERIVED from the class table, so a seventh link class appears here on the day it is declared. A
@@ -177,10 +178,10 @@ export async function convertSpaceLinks(spaceId: string): Promise<ConversionRepo
 
       for (const doc of docs) {
         report.scanned[suffix] = (report.scanned[suffix] ?? 0) + 1;
-        const before = await col(`${spaceId}_links`).countDocuments(asFilter({ spaceId, from: doc._id }));
+        const before = await col(spaceCollection(spaceId, 'links')).countDocuments(asFilter({ spaceId, from: doc._id }));
         try {
           await reconcileLinksForDocument(spaceId, doc._id, fromKind, doc);
-          report.added += await col(`${spaceId}_links`).countDocuments(asFilter({ spaceId, from: doc._id })) - before;
+          report.added += await col(spaceCollection(spaceId, 'links')).countDocuments(asFilter({ spaceId, from: doc._id })) - before;
         } catch (err) {
           // One bad document must not stop the walk. It is counted, and the count is what withholds the
           // marker — a conversion that skipped a record and then claimed completeness is the failure this

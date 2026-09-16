@@ -12,6 +12,7 @@ import { getConfig, mutateConfig, getEmbeddingConfig, getFaceRecognitionConfig }
 import { resolveMetaRefs } from './schema-validation.js';
 import { log } from '../util/log.js';
 import type { KnowledgeType } from '../config/types.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 // Collections that have vector search indexes for semantic recall
 /*
@@ -829,7 +830,7 @@ export function resetFaceDimsCache(): void { faceDimsBySpace.clear(); }
 export async function faceIndexWidth(spaceId: string): Promise<number | null> {
   const indexName = `${spaceId}_files_faceEmbedding`;
   try {
-    const coll = getDb().collection(`${spaceId}_files`);
+    const coll = getDb().collection(spaceCollection(spaceId, 'files'));
     const indexes = await coll.listSearchIndexes().toArray() as Array<{
       name?: string; latestDefinition?: { fields?: SearchIndexField[] };
     }>;
@@ -851,7 +852,7 @@ export async function faceDescriptorDimsFor(spaceId: string): Promise<number> {
 
   const indexName = `${spaceId}_files_faceEmbedding`;
   try {
-    const coll = getDb().collection(`${spaceId}_files`);
+    const coll = getDb().collection(spaceCollection(spaceId, 'files'));
     const indexes = await coll.listSearchIndexes().toArray() as Array<{
       name?: string; latestDefinition?: { fields?: SearchIndexField[] };
     }>;

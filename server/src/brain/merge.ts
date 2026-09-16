@@ -27,6 +27,7 @@ import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
 import { validateEntity, getSpaceMeta, applyValidation, type SchemaViolation } from '../spaces/schema-validation.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { EntityDoc, EdgeDoc, FactDoc, ChronoEntry, FileMetaDoc, TombstoneDoc, SpaceMeta, PropertySchema } from '../config/types.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 // ── Public types ───────────────────────────────────────────────────────────
 
@@ -264,7 +265,7 @@ async function detectEndpointRuleBreaks(
   // Nothing declared, nothing to break — and this is the common case, so it costs one config read.
   if (!edgeSchemas || Object.keys(edgeSchemas).length === 0) return [];
 
-  const edgeColl = col<EdgeDoc>(`${spaceId}_edges`);
+  const edgeColl = col<EdgeDoc>(spaceCollection(spaceId, 'edges'));
   const moving = await edgeColl
     .find(asFilter<EdgeDoc>({ spaceId, $or: [{ from: absorbedId }, { to: absorbedId }] }))
     .toArray() as EdgeDoc[];
@@ -327,7 +328,7 @@ async function detectDuplicateEdges(
   survivorId: string,
   absorbedId: string,
 ): Promise<DuplicateEdgeWarning[]> {
-  const edgeColl = col<EdgeDoc>(`${spaceId}_edges`);
+  const edgeColl = col<EdgeDoc>(spaceCollection(spaceId, 'edges'));
 
   // All edges currently referencing the absorbed entity
   const absorbedEdges = await edgeColl
@@ -508,7 +509,7 @@ export async function executeMerge(
       const now = new Date().toISOString();
       const seq = await nextSeq(spaceId);
 
-      const edgeColl = col<EdgeDoc>(`${spaceId}_edges`);
+      const edgeColl = col<EdgeDoc>(spaceCollection(spaceId, 'edges'));
 
       // ── 1. Relink edges ────────────────────────────────────────────────
       // Unique compound index on (spaceId, from, to, label) means we must
@@ -550,7 +551,7 @@ export async function executeMerge(
           // This absorbed edge would collide — delete it as a duplicate.
           await edgeColl.deleteOne(asFilter<EdgeDoc>({ _id: edge._id }), { session });
           const tombSeq = await nextSeq(spaceId);
-          await col<TombstoneDoc>(`${spaceId}_tombstones`).replaceOne(
+          await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).replaceOne(
             asFilter<TombstoneDoc>({ _id: edge._id }),
             asDoc<TombstoneDoc>({ _id: edge._id, type: 'edge', spaceId, deletedAt: now, instanceId: getConfig().instanceId, seq: tombSeq }),
             { upsert: true, session },
@@ -606,7 +607,7 @@ export async function executeMerge(
       }
 
       // ── 2. Relink facts ─────────────────────────────────────────────
-      const memoryColl = col<FactDoc>(`${spaceId}_facts`);
+      const memoryColl = col<FactDoc>(spaceCollection(spaceId, 'facts'));
       const affectedMemories = await memoryColl
         .find(asFilter<FactDoc>({ spaceId, entityIds: absorbed._id }), { session })
         .toArray() as FactDoc[];
@@ -622,7 +623,7 @@ export async function executeMerge(
       }
 
       // ── 3. Relink chrono entries ───────────────────────────────────────
-      const chronoColl = col<ChronoEntry>(`${spaceId}_chrono`);
+      const chronoColl = col<ChronoEntry>(spaceCollection(spaceId, 'chrono'));
       const affectedChronos = await chronoColl
         .find(asFilter<ChronoEntry>({ spaceId, entityIds: absorbed._id }), { session })
         .toArray() as ChronoEntry[];
@@ -676,7 +677,7 @@ export async function executeMerge(
        * One pass over both, rather than a second loop: a face chunk may also carry `entityIds`, and two
        * updates would spend two `seq` values on one record and let the two halves drift apart later.
        */
-      const fileColl = col<FileMetaDoc>(`${spaceId}_files`);
+      const fileColl = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
       const affectedFiles = await fileColl
         .find(asFilter<FileMetaDoc>({
           spaceId,
@@ -702,7 +703,7 @@ export async function executeMerge(
 
       // ── 4. Update survivor entity ──────────────────────────────────────
       const mergedTags = mergeTags(survivor.tags, absorbed.tags);
-      const entityColl = col<EntityDoc>(`${spaceId}_entities`);
+      const entityColl = col<EntityDoc>(spaceCollection(spaceId, 'entities'));
 
       /*
        * The survivor's content changed, so its vector must be recomputed — UNLESS the type is suppressed.
@@ -780,7 +781,7 @@ export async function executeMerge(
       // ── 5. Delete absorbed entity + write tombstone ────────────────────
       const absorbedSeq = await nextSeq(spaceId);
       await entityColl.deleteOne(asFilter<EntityDoc>({ _id: absorbed._id, spaceId }), { session });
-      await col<TombstoneDoc>(`${spaceId}_tombstones`).replaceOne(
+      await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).replaceOne(
         asFilter<TombstoneDoc>({ _id: absorbed._id }),
         asDoc<TombstoneDoc>({ _id: absorbed._id, type: 'entity', spaceId, deletedAt: now, instanceId: getConfig().instanceId, seq: absorbedSeq }),
         { upsert: true, session },

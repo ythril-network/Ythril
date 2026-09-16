@@ -47,6 +47,7 @@ export const DELETABLE_FILE_META_FIELDS: readonly string[] = [
 import { applyDeleteFields } from '../brain/delete-fields.js';
 import { getConfig } from '../config/loader.js';
 import type { FileMetaDoc, AuthorRef, EntityDoc } from '../config/types.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 
 
@@ -70,7 +71,7 @@ export async function upsertFileMeta(
   const normalised = toDocId(filePath);
   const now = new Date().toISOString();
 
-  const existing = await col<FileMetaDoc>(`${spaceId}_files`).findOne(
+  const existing = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(
     asFilter<FileMetaDoc>({ _id: normalised }),
   );
 
@@ -99,7 +100,7 @@ export async function upsertFileMeta(
       const expireAt = expiryForCreate(spaceId, opts.ttlDays, { collection: 'file' });
       if (expireAt) $set['_expireAt'] = expireAt; else $unset['_expireAt'] = '';
     }
-    await col<FileMetaDoc>(`${spaceId}_files`).updateOne(
+    await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
       asFilter<FileMetaDoc>({ _id: normalised }),
       asUpdate<FileMetaDoc>({ $set, $unset }),
     );
@@ -123,7 +124,7 @@ export async function upsertFileMeta(
       seq: await nextSeq(spaceId),
       ...(expireAt ? { _expireAt: expireAt } : {}),
     };
-    await col<FileMetaDoc>(`${spaceId}_files`).insertOne(asDoc<FileMetaDoc>(doc));
+    await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).insertOne(asDoc<FileMetaDoc>(doc));
   }
 
   // Both branches, unconditionally. A create enqueues for the reason every brain create does — the write
@@ -169,7 +170,7 @@ export async function setDerivedDescriptionIfUnset(
   descriptionSource?: 'generated' | 'extracted',
 ): Promise<boolean> {
   const _id = toDocId(filePath);
-  const r = await col<FileMetaDoc>(`${spaceId}_files`).updateOne(
+  const r = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
     asFilter<FileMetaDoc>({
       _id,
       $or: [
@@ -198,7 +199,7 @@ export async function setDerivedDescriptionIfUnset(
  * changing that signature, so nothing else has to care.
  */
 export async function getFileMeta(spaceId: string, filePath: string): Promise<FileMetaDoc | null> {
-  return await col<FileMetaDoc>(`${spaceId}_files`)
+  return await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
     .findOne(asFilter<FileMetaDoc>({ _id: toDocId(filePath) })) as FileMetaDoc | null;
 }
 
@@ -243,7 +244,7 @@ export async function updateFileMeta(
   }
 
   const normalised = toDocId(filePath);
-  const existing = await col<FileMetaDoc>(`${spaceId}_files`).findOne(asFilter<FileMetaDoc>({ _id: normalised })) as FileMetaDoc | null;
+  const existing = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(asFilter<FileMetaDoc>({ _id: normalised })) as FileMetaDoc | null;
   if (!existing) return null;
 
   const now = new Date().toISOString();
@@ -323,7 +324,7 @@ export async function updateFileMeta(
   // `P-32`: the only writer of a file's three link arrays, its tags, its description and its properties —
   // every one of them authored, so this advances the space counter and pages the record to a peer.
   $set['seq'] = await nextSeq(spaceId);
-  await col<FileMetaDoc>(`${spaceId}_files`).updateOne(
+  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
     asFilter<FileMetaDoc>({ _id: normalised }),
     asUpdate<FileMetaDoc>(Object.keys($unset).length > 0 ? { $set, $unset } : { $set }),
   );
@@ -369,7 +370,7 @@ export async function updateFileMeta(
       const { getFaceRecognitionConfig } = await import('../config/loader.js');
       const faceCfg = getFaceRecognitionConfig();
       if (faceCfg.enabled) {
-        const faceChunkCount = await col<FileMetaDoc>(`${spaceId}_files`).countDocuments(
+        const faceChunkCount = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).countDocuments(
           asFilter<FileMetaDoc>({ parentFileId: normalised, faceEmbedding: { $exists: true } }),
         );
 
@@ -385,7 +386,7 @@ export async function updateFileMeta(
           }
         } else if (faceChunkCount === 1) {
           // Case B: face chunks exist — propagate label if exactly 1 person entity.
-          const entities = await col<EntityDoc>(`${spaceId}_entities`)
+          const entities = await col<EntityDoc>(spaceCollection(spaceId, 'entities'))
             .find(asFilter<EntityDoc>({ _id: { $in: opts.entityIds } }), { projection: { _id: 1, type: 1 } })
             .toArray() as Array<{ _id: string; type: string }>;
           const personEntities = entities.filter(e =>
@@ -400,7 +401,7 @@ export async function updateFileMeta(
     } catch { /* non-fatal — face side-effects must never block file meta write */ }
   }
 
-  return col<FileMetaDoc>(`${spaceId}_files`).findOne(asFilter<FileMetaDoc>({ _id: normalised })) as Promise<FileMetaDoc | null>;
+  return col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(asFilter<FileMetaDoc>({ _id: normalised })) as Promise<FileMetaDoc | null>;
 }
 
 /** Remove the metadata record when a file is deleted. */
@@ -409,7 +410,7 @@ export async function deleteFileMeta(
   filePath: string,
 ): Promise<void> {
   const normalised = toDocId(filePath);
-  await col<FileMetaDoc>(`${spaceId}_files`).deleteOne(
+  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).deleteOne(
     asFilter<FileMetaDoc>({ _id: normalised }),
   );
 }
@@ -428,7 +429,7 @@ export async function deleteFileMetaByPrefix(
   // Escape regex special characters in the prefix so a path like "my.dir/"
   // doesn't accidentally match "myXdir/" etc.
   const escaped = escapeRegex(prefix);
-  await col<FileMetaDoc>(`${spaceId}_files`).deleteMany(
+  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).deleteMany(
     asFilter<FileMetaDoc>({ _id: { $regex: `^${escaped}` } }),
   );
 }
@@ -443,7 +444,7 @@ export async function markFileMetaDeleted(
   filePath: string,
 ): Promise<void> {
   const normalised = toDocId(filePath);
-  await col<FileMetaDoc>(`${spaceId}_files`).updateOne(
+  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
     asFilter<FileMetaDoc>({ _id: normalised }),
     // `P-32`: a deletion is an authored change. The file TOMBSTONE carries the removal to a peer; this
     // seq is what pages the soft-deleted record itself, so a peer sees the flag rather than a record
@@ -465,7 +466,7 @@ export async function markFileMetaDeletedByPrefix(
   const norm = toDocId(dirPath).replace(/\/?$/, '');
   if (!norm) return; // guard: empty path would match everything
   const escaped = escapeRegex(norm + '/');
-  const coll = col<FileMetaDoc>(`${spaceId}_files`);
+  const coll = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
   // Flag the user-visible file records.
   await coll.updateMany(
     asFilter<FileMetaDoc>({ _id: { $regex: `^${escaped}` }, parentFileId: { $exists: false } }),
@@ -491,15 +492,15 @@ export async function renameFileMeta(
   const normDst = toDocId(dstPath);
   if (normSrc === normDst) return;
 
-  const existing = await col<FileMetaDoc>(`${spaceId}_files`).findOne(
+  const existing = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(
     asFilter<FileMetaDoc>({ _id: normSrc }),
   );
   if (!existing) return;
 
   const now = new Date().toISOString();
   // MongoDB does not allow updating _id; delete + re-insert with new path.
-  await col<FileMetaDoc>(`${spaceId}_files`).deleteOne(asFilter<FileMetaDoc>({ _id: normSrc }));
-  await col<FileMetaDoc>(`${spaceId}_files`).insertOne(asDoc<FileMetaDoc>({
+  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).deleteOne(asFilter<FileMetaDoc>({ _id: normSrc }));
+  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).insertOne(asDoc<FileMetaDoc>({
     ...existing,
     _id: normDst,
     path: normDst,
@@ -549,7 +550,7 @@ export async function renameFileMetaByPrefix(
   if (srcPrefix === dstPrefix) return;
 
   const escaped = escapeRegex(srcPrefix);
-  const docs = await col<FileMetaDoc>(`${spaceId}_files`)
+  const docs = await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
     .find(asFilter<FileMetaDoc>({ _id: { $regex: `^${escaped}` } }))
     .toArray() as FileMetaDoc[];
 
@@ -558,7 +559,7 @@ export async function renameFileMetaByPrefix(
   const now = new Date().toISOString();
   // Delete existing records and re-insert with updated paths.
   const oldIds = docs.map(d => d._id);
-  await col<FileMetaDoc>(`${spaceId}_files`).deleteMany(
+  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).deleteMany(
     asFilter<FileMetaDoc>({ _id: { $in: oldIds } }),
   );
   const updated = docs.map(d => ({
@@ -567,5 +568,5 @@ export async function renameFileMetaByPrefix(
     path: dstPrefix + d.path.slice(srcPrefix.length),
     updatedAt: now,
   }));
-  await col<FileMetaDoc>(`${spaceId}_files`).insertMany(updated.map(d => asDoc<FileMetaDoc>(d)));
+  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).insertMany(updated.map(d => asDoc<FileMetaDoc>(d)));
 }

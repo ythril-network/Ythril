@@ -2,6 +2,7 @@ import { col, asBulk } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
 import { reserveSeqBlock } from '../util/seq.js';
 import type { TombstoneDoc } from '../config/types.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 /**
  * Wiping every record of one type in a space, tombstone per document.
@@ -96,7 +97,7 @@ export async function wipeSpaceCollection(
     seq: seqCursor++,
   }));
 
-  await col<TombstoneDoc>(`${spaceId}_tombstones`).bulkWrite(asBulk<TombstoneDoc>(
+  await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).bulkWrite(asBulk<TombstoneDoc>(
     tombstones.map(t => ({ replaceOne: { filter: { _id: t._id }, replacement: t, upsert: true } })),
   ));
   await coll.deleteMany({});

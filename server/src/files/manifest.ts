@@ -17,6 +17,7 @@ import path from 'path';
 import { createHash } from 'crypto';
 import { getDataRoot } from '../config/loader.js';
 import { col, asFilter, asBulk } from '../db/mongo.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 export interface ManifestEntry {
   path: string;        // relative to space files root, e.g. "notes/2024.md"
@@ -56,7 +57,7 @@ export async function buildFileManifest(
   opts: { force?: boolean } = {},
 ): Promise<ManifestEntry[]> {
   const root = spaceFilesRoot(spaceId);
-  const cacheColl = col<HashCacheDoc>(`${spaceId}_file_hashes`);
+  const cacheColl = col<HashCacheDoc>(spaceCollection(spaceId, 'fileHashes'));
 
   // Load the existing hash cache once (empty on a forced rebuild).
   const cache = new Map<string, HashCacheDoc>();

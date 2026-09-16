@@ -21,6 +21,7 @@ import { ensureMediaJobIndexes } from '../files/media/job-queue.js';
 import { ensureEmbedJobIndexes } from '../brain/embed-queue.js';
 import { LINK_CLASSES } from '../brain/link-adjacency.js';
 import { envInt } from '../config/env-num.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 export async function initSpace(
   spaceId: string,
@@ -55,16 +56,16 @@ export async function initSpace(
   // boot rebuilds them, no `spaceId`-leading index remains, so the drop loop finds nothing and the
   // `createIndex` calls are no-ops. (The former standalone entity-unique-index migration is folded
   // in here — a stale `spaceId_1_name_1_type_1` unique index simply gets dropped like any other.)
-  const memoriesColl = db.collection(`${spaceId}_facts`);
-  const entitiesColl = db.collection(`${spaceId}_entities`);
-  const edgesColl = db.collection(`${spaceId}_edges`);
-  const chronoColl = db.collection(`${spaceId}_chrono`);
-  const linksColl = db.collection(`${spaceId}_links`);
-  const tombstonesColl = db.collection(`${spaceId}_tombstones`);
-  const conflictsColl = db.collection(`${spaceId}_conflicts`);
-  const dupeColl = db.collection(`${spaceId}_dupe_candidates`);
-  const contraColl = db.collection(`${spaceId}_contradiction_candidates`);
-  const filesColl = db.collection(`${spaceId}_files`);
+  const memoriesColl = db.collection(spaceCollection(spaceId, 'facts'));
+  const entitiesColl = db.collection(spaceCollection(spaceId, 'entities'));
+  const edgesColl = db.collection(spaceCollection(spaceId, 'edges'));
+  const chronoColl = db.collection(spaceCollection(spaceId, 'chrono'));
+  const linksColl = db.collection(spaceCollection(spaceId, 'links'));
+  const tombstonesColl = db.collection(spaceCollection(spaceId, 'tombstones'));
+  const conflictsColl = db.collection(spaceCollection(spaceId, 'conflicts'));
+  const dupeColl = db.collection(spaceCollection(spaceId, 'dupeCandidates'));
+  const contraColl = db.collection(spaceCollection(spaceId, 'contradictionCandidates'));
+  const filesColl = db.collection(spaceCollection(spaceId, 'files'));
 
   await Promise.all([
     dropLegacyPrefixedIndexes(memoriesColl), dropLegacyPrefixedIndexes(entitiesColl),
@@ -221,7 +222,7 @@ export async function initSpace(
   // Check for embedding model mismatch — if stored facts use a different
   // model than configured, recall results would be semantically invalid.
   const embCfg2 = getEmbeddingConfig();
-  const sample = await col<FactDoc>(`${spaceId}_facts`).findOne(
+  const sample = await col<FactDoc>(spaceCollection(spaceId, 'facts')).findOne(
     {},
     { projection: { embeddingModel: 1 } },
   );
@@ -662,12 +663,12 @@ export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): 
   // Run all applicable deletes in parallel.
   const zero = Promise.resolve({ deletedCount: 0 });
   const [memRes, entRes, edgeRes, chronoRes, fileRes, linkRes] = await Promise.all([
-    targets.has('facts') ? col(`${spaceId}_facts`).deleteMany({}) : zero,
-    targets.has('entities') ? col(`${spaceId}_entities`).deleteMany({}) : zero,
-    targets.has('edges') ? col(`${spaceId}_edges`).deleteMany({}) : zero,
-    targets.has('chrono') ? col(`${spaceId}_chrono`).deleteMany({}) : zero,
-    targets.has('files') ? col(`${spaceId}_files`).deleteMany({}) : zero,
-    targets.has('links') ? col(`${spaceId}_links`).deleteMany({}) : zero,
+    targets.has('facts') ? col(spaceCollection(spaceId, 'facts')).deleteMany({}) : zero,
+    targets.has('entities') ? col(spaceCollection(spaceId, 'entities')).deleteMany({}) : zero,
+    targets.has('edges') ? col(spaceCollection(spaceId, 'edges')).deleteMany({}) : zero,
+    targets.has('chrono') ? col(spaceCollection(spaceId, 'chrono')).deleteMany({}) : zero,
+    targets.has('files') ? col(spaceCollection(spaceId, 'files')).deleteMany({}) : zero,
+    targets.has('links') ? col(spaceCollection(spaceId, 'links')).deleteMany({}) : zero,
   ]);
 
   // Clear tombstones for the wiped types.
@@ -677,13 +678,13 @@ export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): 
   // copy for the review findings — the seventh and eighth of that map in the codebase. `files` is absent from
   // the derived one for the reason it was absent from this one: a deleted file has `FileTombstoneDoc`.
   if (isFullWipe) {
-    await col(`${spaceId}_tombstones`).deleteMany({});
+    await col(spaceCollection(spaceId, 'tombstones')).deleteMany({});
   } else {
     const tombstoneTypes = Array.from(targets)
       .map(t => TOMBSTONE_TYPE_OF[t])
       .filter((t): t is TombstoneType => t !== undefined);
     if (tombstoneTypes.length > 0) {
-      await col(`${spaceId}_tombstones`).deleteMany({ type: { $in: tombstoneTypes } });
+      await col(spaceCollection(spaceId, 'tombstones')).deleteMany({ type: { $in: tombstoneTypes } });
     }
   }
   // Clear review findings that reference the wiped types — BOTH candidate collections. See
@@ -694,20 +695,20 @@ export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): 
   // when the collection was added, so wiping a space's facts left its contradiction queue intact and
   // pointing at nothing.
   if (isFullWipe) {
-    await col(`${spaceId}_dupe_candidates`).deleteMany({});
-    await col(`${spaceId}_contradiction_candidates`).deleteMany({});
+    await col(spaceCollection(spaceId, 'dupeCandidates')).deleteMany({});
+    await col(spaceCollection(spaceId, 'contradictionCandidates')).deleteMany({});
   } else {
     const dupeTypes = candidateTypesForWipe(targets);
     if (dupeTypes.length > 0) {
       // Both collections key their rows by the same `type` vocabulary, so one map serves both.
-      await col(`${spaceId}_dupe_candidates`).deleteMany({ type: { $in: dupeTypes } });
-      await col(`${spaceId}_contradiction_candidates`).deleteMany({ type: { $in: dupeTypes } });
+      await col(spaceCollection(spaceId, 'dupeCandidates')).deleteMany({ type: { $in: dupeTypes } });
+      await col(spaceCollection(spaceId, 'contradictionCandidates')).deleteMany({ type: { $in: dupeTypes } });
     }
   }
 
   // File tombstones live in a separate collection — clear them when files is wiped.
   if (targets.has('files')) {
-    await col(`${spaceId}_file_tombstones`).deleteMany({});
+    await col(spaceCollection(spaceId, 'fileTombstones')).deleteMany({});
 
     // Delete the physical files directory, then recreate it empty.
     // Validate the resolved path stays within the expected data root to guard

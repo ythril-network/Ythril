@@ -81,9 +81,9 @@ describe('the claim matches the implementation', () => {
   it('wipeSpace really deletes tombstones rather than writing them', () => {
     // The assertion that keeps the description honest. If a future change starts WRITING tombstones here,
     // this fails and the warning above must come out.
-    assert.match(LIFECYCLE, /col\(`\$\{spaceId\}_tombstones`\)\.deleteMany/,
+    assert.match(LIFECYCLE, /col\(spaceCollection\(spaceId, 'tombstones'\)\)\.deleteMany/,
       'brain tombstones are cleared');
-    assert.match(LIFECYCLE, /col\(`\$\{spaceId\}_file_tombstones`\)\.deleteMany/,
+    assert.match(LIFECYCLE, /col\(spaceCollection\(spaceId, 'fileTombstones'\)\)\.deleteMany/,
       'file tombstones are cleared');
     const at = LIFECYCLE.indexOf('export async function wipeSpace');
     const body = LIFECYCLE.slice(at, LIFECYCLE.indexOf('\nexport ', at + 10));
@@ -101,8 +101,8 @@ describe('the claim matches the implementation', () => {
     // Stated in the description because a finding is a claim about two records: once they are gone the
     // Review tab lists something that cannot be opened.
     assert.match(WIPE, /review queues/i, 'say it');
-    assert.match(LIFECYCLE, /_dupe_candidates`\)\.deleteMany/, 'duplicates');
-    assert.match(LIFECYCLE, /_contradiction_candidates`\)\.deleteMany/, 'and contradictions');
+    assert.match(LIFECYCLE, /spaceCollection\([A-Za-z]+, 'dupeCandidates'\)\)\.deleteMany/, 'duplicates');
+    assert.match(LIFECYCLE, /spaceCollection\([A-Za-z]+, 'contradictionCandidates'\)\)\.deleteMany/, 'and contradictions');
   });
 
   it('omitting `types` really wipes everything', () => {

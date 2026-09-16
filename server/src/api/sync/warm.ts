@@ -10,6 +10,7 @@ import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { getConfig } from '../../config/loader.js';
 import { requireAuth } from '../../auth/middleware.js';
 import { log } from '../../util/log.js';
+import { spaceCollection } from '../../db/space-collection.js';
 
 export const syncWarmRouter = Router();
 
@@ -46,10 +47,10 @@ syncWarmRouter.post('/warm', syncRateLimit, requireAuth, async (req, res) => {
         log.warn(`Warm: embedding model failed: ${err}`),
       ),
       ...body.spaces.flatMap(sid => [
-        col(`${sid}_facts`).findOne(asFilter({}), { projection: { _id: 1 } }).catch(() => {}),
-        col(`${sid}_entities`).findOne(asFilter({}), { projection: { _id: 1 } }).catch(() => {}),
-        col(`${sid}_edges`).findOne(asFilter({}), { projection: { _id: 1 } }).catch(() => {}),
-        col(`${sid}_chrono`).findOne(asFilter({}), { projection: { _id: 1 } }).catch(() => {}),
+        col(spaceCollection(sid, 'facts')).findOne(asFilter({}), { projection: { _id: 1 } }).catch(() => {}),
+        col(spaceCollection(sid, 'entities')).findOne(asFilter({}), { projection: { _id: 1 } }).catch(() => {}),
+        col(spaceCollection(sid, 'edges')).findOne(asFilter({}), { projection: { _id: 1 } }).catch(() => {}),
+        col(spaceCollection(sid, 'chrono')).findOne(asFilter({}), { projection: { _id: 1 } }).catch(() => {}),
       ]),
     ]);
 

@@ -45,6 +45,7 @@ import { stripRecordMeta } from '../../brain/recall-record-meta.js';
 import { applyProjection, normaliseProjection, type NormalisedProjection } from '../../brain/projection.js';
 import { resolveBudget, resolvePaging, budgetedEnvelope, applyBudget, budgetFields, type BudgetRequest } from '../../brain/result-budget.js';
 import { sendReadFailure, statesRetryability } from './_read-failure.js';
+import { spaceCollection } from '../../db/space-collection.js';
 
 /**
  * The most graph nodes one response may expand to, however large `topK` is.
@@ -73,11 +74,11 @@ searchRouter.get('/spaces/:spaceId/stats', globalRateLimit, requireSpaceAuth, as
   const memberIds = memberSpacesForRequest(req, spaceId);
   const counts = await Promise.all(memberIds.map(async mid => ({
     facts: await countFacts(mid),
-    entities: await col(`${mid}_entities`).countDocuments(),
-    edges: await col(`${mid}_edges`).countDocuments(),
-    chrono: await col(`${mid}_chrono`).countDocuments(),
+    entities: await col(spaceCollection(mid, 'entities')).countDocuments(),
+    edges: await col(spaceCollection(mid, 'edges')).countDocuments(),
+    chrono: await col(spaceCollection(mid, 'chrono')).countDocuments(),
     // Exclude chunk records (parentFileId set) — count only top-level file records
-    files: await col(`${mid}_files`).countDocuments({ parentFileId: { $exists: false } }),
+    files: await col(spaceCollection(mid, 'files')).countDocuments({ parentFileId: { $exists: false } }),
     // How much of the above is not searchable YET. Writes no longer wait for the embedding model, so a
     // record can exist and be absent from recall for a moment — and a caller asking "is this space ready"
     // could not tell that from "the model is down and nothing has embedded for an hour". Same shape as the

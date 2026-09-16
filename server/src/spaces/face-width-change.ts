@@ -54,6 +54,7 @@ import type { FileMetaDoc } from '../config/types.js';
 import { FACE_DESCRIPTOR_DIMS } from '../files/media/face-descriptor.js';
 import { faceIndexWidth } from './vector-index.js';
 import { log } from '../util/log.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 /** Why a width change is refused, or `null` when it may proceed. */
 export interface FaceWidthRefusal {
@@ -70,7 +71,7 @@ export interface FaceWidthRefusal {
  * the two cannot disagree about what a face chunk is.
  */
 export async function storedFaceDescriptorCount(spaceId: string): Promise<number> {
-  return col<FileMetaDoc>(`${spaceId}_files`).countDocuments(
+  return col<FileMetaDoc>(spaceCollection(spaceId, 'files')).countDocuments(
     asFilter<FileMetaDoc>({ faceEmbedding: { $exists: true } }),
   );
 }
