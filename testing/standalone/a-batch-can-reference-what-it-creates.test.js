@@ -62,8 +62,8 @@ describe('what it resolves', () => {
      * already says what it is — so stating the kind becomes a check instead of an input.
      */
     const refs = new BatchRefs();
-    refs.declare('m-1', UUID, 'memory');
-    assert.deepEqual(resolveRef('$ref:m-1', refs, 'memory'), { id: UUID, kind: 'memory' });
+    refs.declare('m-1', UUID, 'fact');
+    assert.deepEqual(resolveRef('$ref:m-1', refs, 'fact'), { id: UUID, kind: 'fact' });
   });
 });
 
@@ -73,7 +73,7 @@ describe('and the three ways a naming scheme fails', () => {
     // at the second record while its author meant the first.
     const refs = new BatchRefs();
     assert.equal(refs.declare('x', UUID, 'entity'), null);
-    const err = refs.declare('x', '99999999-8888-4777-8666-555555555555', 'memory');
+    const err = refs.declare('x', '99999999-8888-4777-8666-555555555555', 'fact');
     assert.match(err, /duplicate \$ref "x"/);
     assert.match(err, /already names the entity/, 'the refusal must say what the key already means');
   });
@@ -88,8 +88,8 @@ describe('and the three ways a naming scheme fails', () => {
   it('a stated kind that disagrees is refused, not coerced', () => {
     const refs = new BatchRefs();
     refs.declare('post-1', UUID, 'entity');
-    const err = resolveRef('$ref:post-1', refs, 'memory').error;
-    assert.match(err, /names a entity, but the item says memory/);
+    const err = resolveRef('$ref:post-1', refs, 'fact').error;
+    assert.match(err, /names a entity, but the item says fact/);
     assert.match(err, /guessing which side is right/,
       'the reason has to be in the message: this is the hazard an explicit kind exists to remove');
   });

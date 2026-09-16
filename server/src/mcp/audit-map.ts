@@ -3,7 +3,7 @@
  *
  * ## Why this file exists
  *
- * MCP tool calls were not audited **at all**. Every write an agent made — `remember`, `save_entity`,
+ * MCP tool calls were not audited **at all**. Every write an agent made — `saveFact`, `save_entity`,
  * `save_bulk`, `delete_space_data` — left the audit log unchanged, while the REST equivalent of each one wrote
  * an entry. For a product whose primary write path is an agent, that is most of the trail missing.
  *
@@ -17,7 +17,7 @@
  *
  * ## Why the existing vocabulary, and not `mcp.tool_call`
  *
- * A compliance reader asks "who created this memory", not "who invoked a tool". Recording
+ * A compliance reader asks "who created this fact", not "who invoked a tool". Recording
  * `mcp.remember` would make the audit log unanswerable across surfaces: the same act, performed through
  * REST and through MCP, would appear under two names, and every query would have to know both. So a tool
  * records the operation its REST counterpart records, and the transport is a separate field.
@@ -36,9 +36,9 @@
 /** Tool name → the audit operation it performs, or `null` with the reason it is not one. */
 export const MCP_TOOL_OPERATIONS: Record<string, string | null> = {
   // ── Mutations. Each records exactly what its REST counterpart records. ──────────────────────────
-  save_fact: 'memory.create',
-  update_fact: 'memory.update',
-  delete_fact: 'memory.delete',
+  save_fact: 'fact.create',
+  update_fact: 'fact.update',
+  delete_fact: 'fact.delete',
   save_entity: 'entity.create',
   update_entity: 'entity.update',
   delete_entity: 'entity.delete',

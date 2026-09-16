@@ -41,12 +41,12 @@ const source = readFileSync(
 test('one space with a null status is still a missing index', () => {
   // The behaviour that must NOT change. A real absence has to keep reporting, or fixing the false positive
   // would hide the true one — which is the same trade the optional-index carve-out was careful about.
-  assert.equal(deriveLiveIndexState([{ collection: 'memories', indexName: 'x', status: null }], false), 'missing');
+  assert.equal(deriveLiveIndexState([{ collection: 'facts', indexName: 'x', status: null }], false), 'missing');
   assert.equal(isDrifted('ready', 'missing'), true);
 });
 
 test('a listing that THREW is already unknown, and unknown never drifts', () => {
-  assert.equal(deriveLiveIndexState([{ collection: 'memories', indexName: 'x', status: null }], true), 'unknown');
+  assert.equal(deriveLiveIndexState([{ collection: 'facts', indexName: 'x', status: null }], true), 'unknown');
   assert.equal(isDrifted('ready', 'unknown'), false,
     'an unanswerable probe must not flag drift, or the red badge means "we could not tell"');
 });

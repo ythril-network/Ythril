@@ -23,7 +23,7 @@ import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
 import { TimestampComponent } from '../../shared/timestamp.component';
 
 /**
- * The Edges record tab, extracted from BrainComponent (A17.9b-6f) following the memories pattern.
+ * The Edges record tab, extracted from BrainComponent (A17.9b-6f) following the facts pattern.
  * Owns the edge create form, the (drawer-superseded) inline edit, delete, and the tab's own search
  * (semantic-only top bar via `store.edgeSearch` + the docked Relation column freetext filter, 2b-iii-c)
  * + type-tag filter + pagination + loader. Self-loads via a `spaceId` effect.

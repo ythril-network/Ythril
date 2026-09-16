@@ -68,7 +68,7 @@ export interface ErEntityType {
   namingPattern?: string;
   properties: ErProperty[];
   /** Records of the other three kinds that point AT this type through their `entityIds`. */
-  linkedFrom: { memories: number; chrono: number; files: number };
+  linkedFrom: { facts: number; chrono: number; files: number };
 }
 
 export interface ErRelationship {
@@ -104,7 +104,7 @@ export interface ErInputs {
   entities: Array<{ _id: string; type?: string }>;
   edges: Array<{ from: string; to: string; label: string }>;
   /** `entityIds` arrays from the three linking collections. */
-  links: { memories: string[][]; chrono: string[][]; files: string[][] };
+  links: { facts: string[][]; chrono: string[][]; files: string[][] };
   declared: DeclaredTypes;
   totals: { entities: number; edges: number };
   truncated: ErModel['truncated'];
@@ -114,7 +114,7 @@ export interface ErInputs {
  * Turn what was read into the model. Pure — no I/O, no clock, no config.
  *
  * Split out because everything that can be WRONG here is arithmetic and set logic: which type a record
- * counts toward, whether a memory linking two services counts once or twice, what an unresolvable edge
+ * counts toward, whether a fact linking two services counts once or twice, what an unresolvable edge
  * endpoint means. Those deserve a test that runs in milliseconds against hand-built rows, not one that
  * needs a container and a seeded space.
  */
@@ -142,18 +142,18 @@ export function assembleErModel(input: ErInputs): ErModel {
     else rel.set(key, { from, to, label: e.label, count: 1 });
   }
 
-  const byType = new Map<string, { memories: number; chrono: number; files: number }>();
-  for (const [kind, rows] of Object.entries(input.links) as Array<['memories' | 'chrono' | 'files', string[][]]>) {
+  const byType = new Map<string, { facts: number; chrono: number; files: number }>();
+  for (const [kind, rows] of Object.entries(input.links) as Array<['facts' | 'chrono' | 'files', string[][]]>) {
     for (const ids of rows) {
-      // A record linking three entities of the SAME type counts ONCE for that type. "How many memories
-      // mention a service" must not double because one memory mentions two services.
+      // A record linking three entities of the SAME type counts ONCE for that type. "How many facts
+      // mention a service" must not double because one fact mentions two services.
       const seen = new Set<string>();
       for (const id of ids) {
         const t = typeOf.get(id);
         if (t !== undefined) seen.add(t);
       }
       for (const t of seen) {
-        const hit = byType.get(t) ?? { memories: 0, chrono: 0, files: 0 };
+        const hit = byType.get(t) ?? { facts: 0, chrono: 0, files: 0 };
         hit[kind]++;
         byType.set(t, hit);
       }
@@ -175,7 +175,7 @@ export function assembleErModel(input: ErInputs): ErModel {
         required: p.required === true,
         ...(p.enum ? { enumValues: p.enum } : {}),
       })),
-      linkedFrom: byType.get(type) ?? { memories: 0, chrono: 0, files: 0 },
+      linkedFrom: byType.get(type) ?? { facts: 0, chrono: 0, files: 0 },
     };
   });
 
@@ -219,7 +219,7 @@ export async function buildErModel(spaceId: string): Promise<ErModel> {
       .toArray() as Promise<Array<{ from: string; to: string; label: string }>>,
   ]);
 
-  const links: ErInputs['links'] = { memories: [], chrono: [], files: [] };
+  const links: ErInputs['links'] = { facts: [], chrono: [], files: [] };
   let linksTruncated = false;
   // Through the shared link classes, so the diagram counts what a traversal would reach. This scan had no
   // chunk exclusion of its own: a file split into forty passages could have contributed forty link rows and
@@ -227,7 +227,7 @@ export async function buildErModel(spaceId: string): Promise<ErModel> {
   /*
    * ENTITY classes only, and that is what an ER model IS rather than a narrowing.
    *
-   * `LINK_CLASSES` holds six since 4.0, three of which name a memory or a chrono entry. Those are real links
+   * `LINK_CLASSES` holds six since 4.0, three of which name a fact or a chrono entry. Those are real links
    * and a traversal reaches them — but this diagram draws ENTITY TYPES and the relationships between them,
    * so a file naming a chrono entry has no entity type at either end and no row to contribute. Included, the
    * three would each be counted under a `cls.collection` bucket that already has an entry, and `files`

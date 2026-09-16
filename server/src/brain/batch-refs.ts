@@ -3,7 +3,7 @@
  *
  * ## What it is for (`F-27` item 2)
  *
- * `save_bulk` takes memories, entities, chrono entries and edges in one payload, and its own contract says
+ * `save_bulk` takes facts, entities, chrono entries and edges in one payload, and its own contract says
  * why that is not enough: **you cannot reference a record this call creates**, because identities are minted
  * server-side. So a person, a document about them and the date it was signed is three ordered calls.
  *

@@ -76,11 +76,11 @@ describe('a synced-in record is queued for embedding', { skip }, () => {
   beforeEach(async () => { await jobs().deleteMany({}); });
 
   it('an arrival with no vector is queued', async () => {
-    await queue.enqueueIngestedRecord(SPACE, 'memory', { _id: 'm-1' });
-    const job = await jobs().findOne({ _id: 'memory:m-1' });
+    await queue.enqueueIngestedRecord(SPACE, 'fact', { _id: 'm-1' });
+    const job = await jobs().findOne({ _id: 'fact:m-1' });
     assert.ok(job, 'the peer stripped the embedding, so this instance must compute one');
     assert.equal(job.status, 'pending');
-    assert.equal(job.recordType, 'memory');
+    assert.equal(job.recordType, 'fact');
     assert.equal(job.recordId, 'm-1');
   });
 
@@ -133,8 +133,8 @@ describe('a synced-in record is queued for embedding', { skip }, () => {
   it('but `false` is "not stated" and still queues', async () => {
     // The tier resolution treats `false` as absent so it falls through to the schema and the space rather than
     // overriding them. That is stated in the field's own docblock, so it is worth one case.
-    await queue.enqueueIngestedRecord(SPACE, 'memory', { _id: 'm-2', suppressEmbeddings: false });
-    assert.ok(await jobs().findOne({ _id: 'memory:m-2' }), '`false` was read as a suppression');
+    await queue.enqueueIngestedRecord(SPACE, 'fact', { _id: 'm-2', suppressEmbeddings: false });
+    assert.ok(await jobs().findOne({ _id: 'fact:m-2' }), '`false` was read as a suppression');
   });
 
   /*

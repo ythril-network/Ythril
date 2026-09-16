@@ -34,7 +34,7 @@ const inputs = (over = {}) => ({
   spaceId: 'test',
   entities: [],
   edges: [],
-  links: { memories: [], chrono: [], files: [] },
+  links: { facts: [], chrono: [], files: [] },
   declared: {},
   totals: { entities: 0, edges: 0 },
   truncated: null,
@@ -171,31 +171,31 @@ describe('links from the other three record kinds', () => {
     // "How many memories mention a service" must not double because one memory mentions two services.
     const m = assembleErModel(inputs({
       entities,
-      links: { memories: [['s1', 's2']], chrono: [], files: [] },
+      links: { facts: [['s1', 's2']], chrono: [], files: [] },
     }));
-    assert.equal(typeNamed(m, 'service').linkedFrom.memories, 1);
+    assert.equal(typeNamed(m, 'service').linkedFrom.facts, 1);
   });
 
   it('one record spanning two types counts once for EACH', () => {
     const m = assembleErModel(inputs({
       entities,
-      links: { memories: [['s1', 'p1']], chrono: [], files: [] },
+      links: { facts: [['s1', 'p1']], chrono: [], files: [] },
     }));
-    assert.equal(typeNamed(m, 'service').linkedFrom.memories, 1);
-    assert.equal(typeNamed(m, 'person').linkedFrom.memories, 1);
+    assert.equal(typeNamed(m, 'service').linkedFrom.facts, 1);
+    assert.equal(typeNamed(m, 'person').linkedFrom.facts, 1);
   });
 
   it('the three kinds are counted separately', () => {
     const m = assembleErModel(inputs({
       entities,
-      links: { memories: [['s1']], chrono: [['s1'], ['s2']], files: [] },
+      links: { facts: [['s1']], chrono: [['s1'], ['s2']], files: [] },
     }));
-    assert.deepEqual(typeNamed(m, 'service').linkedFrom, { memories: 1, chrono: 2, files: 0 });
+    assert.deepEqual(typeNamed(m, 'service').linkedFrom, { facts: 1, chrono: 2, files: 0 });
   });
 
   it('a link to an entity that does not resolve is ignored rather than counted', () => {
-    const m = assembleErModel(inputs({ entities, links: { memories: [['GONE']], chrono: [], files: [] } }));
-    assert.equal(typeNamed(m, 'service').linkedFrom.memories, 0);
+    const m = assembleErModel(inputs({ entities, links: { facts: [['GONE']], chrono: [], files: [] } }));
+    assert.equal(typeNamed(m, 'service').linkedFrom.facts, 0);
   });
 });
 

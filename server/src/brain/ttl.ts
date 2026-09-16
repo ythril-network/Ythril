@@ -51,7 +51,7 @@ export const TTL_COLLECTIONS = BRAIN_COLLECTIONS.filter(c => c !== 'links');
  * `label`. Reading `type` for an edge finds a schema that is never there and looks like it worked.
  */
 export const TYPE_FIELD: Record<KnowledgeType, 'type' | 'label'> = {
-  entity: 'type', memory: 'type', edge: 'label', chrono: 'type',
+  entity: 'type', fact: 'type', edge: 'label', chrono: 'type',
 };
 
 /**

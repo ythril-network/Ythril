@@ -52,7 +52,7 @@ import {
 import type {
   NetworkConfig,
   NetworkMember,
-  MemoryDoc,
+  FactDoc,
   EntityDoc,
   EdgeDoc,
   ChronoEntry,
@@ -188,8 +188,8 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
   if (!net) throw new Error(`Network ${networkId} not found`);
 
   const triggeredAt = new Date().toISOString();
-  const pulled: SyncCounts = { memories: 0, entities: 0, edges: 0, files: 0, chrono: 0, links: 0 };
-  const pushed: SyncCounts = { memories: 0, entities: 0, edges: 0, files: 0, chrono: 0, links: 0 };
+  const pulled: SyncCounts = { facts: 0, entities: 0, edges: 0, files: 0, chrono: 0, links: 0 };
+  const pushed: SyncCounts = { facts: 0, entities: 0, edges: 0, files: 0, chrono: 0, links: 0 };
   const errorMessages: string[] = [];
 
   log.info(`Starting sync cycle for network '${net.label}' (${net.members.length} members)`);
@@ -199,12 +199,12 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
   for (const member of net.members) {
     try {
       const counts = await runSyncForMember(net, member);
-      pulled.memories += counts.pulled.memories;
+      pulled.facts += counts.pulled.facts;
       pulled.entities += counts.pulled.entities;
       pulled.edges += counts.pulled.edges;
       pulled.files += counts.pulled.files;
       pulled.chrono += counts.pulled.chrono;
-      pushed.memories += counts.pushed.memories;
+      pushed.facts += counts.pushed.facts;
       pushed.entities += counts.pushed.entities;
       pushed.edges += counts.pushed.edges;
       pushed.files += counts.pushed.files;
@@ -370,8 +370,8 @@ async function runSyncForMember(
   net: NetworkConfig,
   member: NetworkMember,
 ): Promise<{ pulled: SyncCounts; pushed: SyncCounts }> {
-  const pulled: SyncCounts = { memories: 0, entities: 0, edges: 0, files: 0, chrono: 0, links: 0 };
-  const pushed: SyncCounts = { memories: 0, entities: 0, edges: 0, files: 0, chrono: 0, links: 0 };
+  const pulled: SyncCounts = { facts: 0, entities: 0, edges: 0, files: 0, chrono: 0, links: 0 };
+  const pushed: SyncCounts = { facts: 0, entities: 0, edges: 0, files: 0, chrono: 0, links: 0 };
   const secrets = getSecrets();
   const peerToken = secrets.peerTokens[member.instanceId];
   if (!peerToken) {
@@ -413,7 +413,7 @@ async function runSyncForMember(
 
     const localWarm = Promise.all(
       net.spaces.flatMap(sid => [
-        col<MemoryDoc>(`${sid}_memories`)
+        col<FactDoc>(`${sid}_facts`)
           .findOne(asFilter({}), { projection: { _id: 1 } })
           .catch(() => {}),
         col<EntityDoc>(`${sid}_entities`)
@@ -490,11 +490,11 @@ async function runSyncForMember(
 
     if (shouldPull) {
       const pc = await pullFromPeer(member, spaceId, remoteSpaceId, net.id, headers, fetchOpts, batchFetchOpts);
-      pulled.memories += pc.memories; pulled.entities += pc.entities; pulled.edges += pc.edges; pulled.chrono += pc.chrono;
+      pulled.facts += pc.facts; pulled.entities += pc.entities; pulled.edges += pc.edges; pulled.chrono += pc.chrono;
     }
     if (shouldPush) {
       const pc = await pushToPeer(member, spaceId, remoteSpaceId, net.id, headers, fetchOpts, batchFetchOpts);
-      pushed.memories += pc.memories; pushed.entities += pc.entities; pushed.edges += pc.edges; pushed.chrono += pc.chrono;
+      pushed.facts += pc.facts; pushed.entities += pc.entities; pushed.edges += pc.edges; pushed.chrono += pc.chrono;
     }
 
     // Sync file manifest — respect direction guards like pull/push above
@@ -854,7 +854,7 @@ async function pullFromPeer(
   headers: Record<string, string>,
   opts: () => RequestInit,
   batchOpts: () => RequestInit,
-): Promise<{ memories: number; entities: number; edges: number; chrono: number; links: number }> {
+): Promise<{ facts: number; entities: number; edges: number; chrono: number; links: number }> {
   let pulledMemories = 0, pulledEntities = 0, pulledEdges = 0, pulledChrono = 0, pulledLinks = 0;
   const cfg = getConfig();
   const freshNet = cfg.networks.find(n => n.id === networkId);
@@ -865,7 +865,7 @@ async function pullFromPeer(
   // live in `sync/tombstone-transfer.ts`; its own doc block says why they belong together.
   const tombstones = await pullTombstones({ member, spaceId, remoteSpaceId, networkId, sinceSeq, requestInit: opts });
 
-  // Pull memories — use full=true to return complete docs in a single pass,
+  // Pull facts — use full=true to return complete docs in a single pass,
   // eliminating the N per-document secondary fetches that would be brutal over WAN.
   let highestSeq = sinceSeq;
   let overallMaxSeq = 0; // Track the highest seq seen across ALL items (used to bump local counter)
@@ -876,7 +876,7 @@ async function pullFromPeer(
    * document on this path. `links` is present — a collection missing here is one a peer never sends us,
    * and nothing reports that, because a peer holding no links hashes none either.
    */
-  async function pullType<T extends MemoryDoc | EntityDoc | EdgeDoc | ChronoEntry | LinkDoc | (FileMetaDoc & { seq: number })>(
+  async function pullType<T extends FactDoc | EntityDoc | EdgeDoc | ChronoEntry | LinkDoc | (FileMetaDoc & { seq: number })>(
     urlSuffix: string,
   ): Promise<PullResult> {
     let count = 0, highSeq = sinceSeq, maxSeq = 0;
@@ -908,10 +908,10 @@ async function pullFromPeer(
         // Refuse a document whose seq is too close to the protocol ceiling:
         // ingesting it would drag the counter there via the bumpSeq below,
         // eventually making our own writes unsyncable (see util/seq.ts).
-        if (isSeqImplausible((doc as MemoryDoc).seq)) {
+        if (isSeqImplausible((doc as FactDoc).seq)) {
           log.warn(
-            `Pull ${urlSuffix} from ${member.label}: skipped doc '${(doc as MemoryDoc)._id}' ` +
-            `with implausible seq ${(doc as MemoryDoc).seq} in space '${spaceId}'.`,
+            `Pull ${urlSuffix} from ${member.label}: skipped doc '${(doc as FactDoc)._id}' ` +
+            `with implausible seq ${(doc as FactDoc).seq} in space '${spaceId}'.`,
           );
           continue;
         }
@@ -926,9 +926,9 @@ async function pullFromPeer(
          */
         pageDocs.push(stripLocalOnly(doc));
         count++;
-        if ((doc as MemoryDoc).seq > maxSeq) maxSeq = (doc as MemoryDoc).seq;
-        if ((doc as MemoryDoc).seq > highSeq && (doc as MemoryDoc).author?.instanceId === member.instanceId) {
-          highSeq = (doc as MemoryDoc).seq;
+        if ((doc as FactDoc).seq > maxSeq) maxSeq = (doc as FactDoc).seq;
+        if ((doc as FactDoc).seq > highSeq && (doc as FactDoc).author?.instanceId === member.instanceId) {
+          highSeq = (doc as FactDoc).seq;
         }
       }
       await batchUpsertBySeq<T>(`${spaceId}_${urlSuffix}`, pageDocs, spaceId);
@@ -958,7 +958,7 @@ async function pullFromPeer(
     pulled[family.payloadKey] = await pullType(family.payloadKey);
   }
 
-  pulledMemories = pulled.memories.count;
+  pulledMemories = pulled.facts.count;
   pulledEntities = pulled.entities.count;
   pulledEdges = pulled.edges.count;
   pulledChrono = pulled.chrono.count;
@@ -1024,7 +1024,7 @@ async function pullFromPeer(
   }
 
   return {
-    memories: pulledMemories, entities: pulledEntities, edges: pulledEdges, chrono: pulledChrono,
+    facts: pulledMemories, entities: pulledEntities, edges: pulledEdges, chrono: pulledChrono,
     links: pulledLinks,
   };
 }
@@ -1039,7 +1039,7 @@ async function pushToPeer(
   headers: Record<string, string>,
   opts: () => RequestInit,
   batchOpts: () => RequestInit,
-): Promise<{ memories: number; entities: number; edges: number; chrono: number; links: number }> {
+): Promise<{ facts: number; entities: number; edges: number; chrono: number; links: number }> {
   let pushedMemories = 0, pushedEntities = 0, pushedEdges = 0, pushedChrono = 0, pushedLinks = 0;
   const cfg = getConfig();
   const freshNet = cfg.networks.find(n => n.id === networkId);
@@ -1050,7 +1050,7 @@ async function pushToPeer(
   const tombstones = await pushTombstones({ member, spaceId, remoteSpaceId, networkId, lastSeqPushed, requestInit: opts });
 
   // Fetch only docs changed since the last push — read and send in PUSH_BATCH_SIZE
-  // chunks directly from MongoDB without loading the whole result set into memory first.
+  // chunks directly from MongoDB without loading the whole result set into fact first.
   // This makes push O(changed) instead of O(total), and keeps heap usage flat regardless
   // of how many documents have accumulated since the last sync.
   // Braintree nodes relay docs from all peers; other topologies only push their own authored docs
@@ -1079,7 +1079,7 @@ async function pushToPeer(
    *   blob and the receiver makes its own, so sending one would ship passage text and a vector from a
    *   model the receiver may not run.
    */
-  async function pushCollection<T extends MemoryDoc | EntityDoc | EdgeDoc | ChronoEntry | LinkDoc | (FileMetaDoc & { seq: number })>(
+  async function pushCollection<T extends FactDoc | EntityDoc | EdgeDoc | ChronoEntry | LinkDoc | (FileMetaDoc & { seq: number })>(
     collName: string,
     payloadKey: PayloadKey,
     extraFilter: Record<string, unknown> = {},
@@ -1106,7 +1106,7 @@ async function pushToPeer(
        */
       log.debug(`Push ${payloadKey} to ${member.label ?? member.instanceId} space '${spaceId}': `
         + `${batch.length} doc(s) with seq > ${seqCursor}`
-        + (batch.length ? ` (through ${(batch[batch.length - 1] as MemoryDoc).seq})` : ''));
+        + (batch.length ? ` (through ${(batch[batch.length - 1] as FactDoc).seq})` : ''));
       if (batch.length === 0) break;
       const resp = await peerSafeFetch(batchEndpoint, {
         ...batchOpts(), method: 'POST',
@@ -1117,16 +1117,16 @@ async function pushToPeer(
         log.warn(truncationWarn(`Batch push ${payloadKey} to`, member.label ?? '', spaceId, resp.status, seqCursor));
         break;
       }
-      // A 200 does not mean every record landed: the peer can discard a memory whose fork chain is at its
+      // A 200 does not mean every record landed: the peer can discard a fact whose fork chain is at its
       // cap and still answer 200. `sync/push-refusals.ts` says what that costs and why the watermark still
       // advances anyway.
       await reportPushRefusals(resp, payloadKey, member.label ?? member.instanceId, spaceId);
       pushed += batch.length;
       for (const doc of batch) {
-        const d = doc as MemoryDoc;
+        const d = doc as FactDoc;
         if (d.author?.instanceId === cfg.instanceId && d.seq > localMaxSeq) localMaxSeq = d.seq;
       }
-      seqCursor = (batch[batch.length - 1] as MemoryDoc).seq;
+      seqCursor = (batch[batch.length - 1] as FactDoc).seq;
       if (batch.length < PUSH_BATCH_SIZE) break;
     }
     // `deliveredThrough` is `seqCursor` — the last seq the peer ACCEPTED — and not `localMaxSeq`, which is
@@ -1145,7 +1145,7 @@ async function pushToPeer(
       `${spaceId}_${family.collection}`, family.payloadKey, family.pushFilter ?? {});
   }
 
-  pushedMemories = pushed.memories.pushed;
+  pushedMemories = pushed.facts.pushed;
   pushedEntities = pushed.entities.pushed;
   pushedEdges = pushed.edges.pushed;
   pushedChrono = pushed.chrono.pushed;
@@ -1196,7 +1196,7 @@ async function pushToPeer(
   }
 
   return {
-    memories: pushedMemories, entities: pushedEntities, edges: pushedEdges, chrono: pushedChrono,
+    facts: pushedMemories, entities: pushedEntities, edges: pushedEdges, chrono: pushedChrono,
     links: pushedLinks,
   };
 }

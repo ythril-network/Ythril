@@ -64,7 +64,7 @@ export interface EdgeRekey {
  * `enqueueEmbedJob` and `retireEmbedJob` take no session, so inside `merge.ts`'s `withTransaction` they
  * commit immediately while the edge itself is still uncommitted — and `enqueueEmbedJob` then calls
  * `markSpaceMayHaveWork`, which wakes the worker synchronously. The merge transaction continues through
- * memory, chrono and file relinking and an `await embed(...)` round trip before it commits, so the woken
+ * fact, chrono and file relinking and an `await embed(...)` round trip before it commits, so the woken
  * worker has ample time to claim the job, fail to see the insert, report `gone`, and have that treated as
  * success — deleting the job. The transaction then commits an edge with no vector and no job, and nothing
  * re-enqueues it.

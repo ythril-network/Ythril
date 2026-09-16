@@ -31,7 +31,7 @@ export interface SortSpec {
 export const SORTABLE_FIELDS = {
   entities: new Set<string>(['createdAt', 'name', 'type']),
   edges: new Set<string>(['createdAt', 'label', 'from', 'to', 'type', 'weight']),
-  memories: new Set<string>(['createdAt', 'type']),
+  facts: new Set<string>(['createdAt', 'type']),
   chrono: new Set<string>(['createdAt', 'title', 'startsAt', 'endsAt', 'status', 'type']),
   files: new Set<string>(['createdAt', 'updatedAt', 'path']),
 } as const;

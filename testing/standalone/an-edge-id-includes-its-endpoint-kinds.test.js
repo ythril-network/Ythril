@@ -83,7 +83,7 @@ describe('a different KIND of endpoint is a different relationship', () => {
      */
     assert.notEqual(
       edgeIdFor(A, B, 'mentions', 'entity', 'entity'),
-      edgeIdFor(A, B, 'mentions', 'entity', 'memory'),
+      edgeIdFor(A, B, 'mentions', 'entity', 'fact'),
       'a memory endpoint and an entity endpoint with the same id derived one edge id',
     );
   });
@@ -91,7 +91,7 @@ describe('a different KIND of endpoint is a different relationship', () => {
   it('and every kind is distinct from every other, on both ends', () => {
     // All sixteen combinations, because a partial encoding — say, one that folded chrono and memory together —
     // would pass a single spot check and collide in production on the pair it folded.
-    const kinds = ['entity', 'memory', 'chrono', 'file'];
+    const kinds = ['entity', 'fact', 'chrono', 'file'];
     const ids = new Map();
     for (const fk of kinds) {
       for (const tk of kinds) {
@@ -156,7 +156,7 @@ describe('there is exactly ONE stored representation of an entity endpoint', () 
      */
     assert.equal(storedEdgeKind('entity'), undefined);
     assert.equal(storedEdgeKind(undefined), undefined);
-    assert.equal(storedEdgeKind('memory'), 'memory');
+    assert.equal(storedEdgeKind('fact'), 'fact');
     assert.equal(storedEdgeKind('file'), 'file');
   });
 

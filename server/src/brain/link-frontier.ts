@@ -9,7 +9,7 @@
  * one rule in one file.
  *
  * `CLAUDE.md` names that exact shape as the defect this repo produces most, and the three copies had already
- * started to differ in the small: chrono and memory read `doc.entityIds` directly, files read
+ * started to differ in the small: chrono and fact read `doc.entityIds` directly, files read
  * `(doc.entityIds ?? [])` because a filemeta record may have none. One of those is right for all three.
  *
  * ## What it deliberately does NOT do
@@ -25,7 +25,7 @@ import {
   LINK_CLASSES, linksToAny, usesLinkRecords, linksPointingAt, linksStartingFrom, docsFromCollection,
   type LinkClass, type LinkEnd,
 } from './link-adjacency.js';
-import type { ChronoEntry, MemoryDoc, FileMetaDoc } from '../config/types.js';
+import type { ChronoEntry, FactDoc, FileMetaDoc } from '../config/types.js';
 
 /**
  * The shape both scans read a FROM record as: an id plus whichever of the three arrays the class names.
@@ -43,7 +43,7 @@ export interface LinkedRecord {
   /** The synthetic edge's label, taken from the class so the two cannot drift. */
   label: string;
   /** The record, holding only its class's projection. */
-  doc: ChronoEntry | MemoryDoc | FileMetaDoc;
+  doc: ChronoEntry | FactDoc | FileMetaDoc;
   /** The frontier entity it hangs off — the `from` of the synthetic edge. */
   via: string;
 }
@@ -64,7 +64,7 @@ export interface LinkInclusion {
 /** Whether this class is switched on for this walk. */
 function included(cls: LinkClass, inc: LinkInclusion): boolean {
   if (cls.kind === 'chrono') return inc.includeChrono === true;
-  if (cls.kind === 'memory') return inc.includeMemories === true;
+  if (cls.kind === 'fact') return inc.includeMemories === true;
   return inc.includeFiles === true;
 }
 
@@ -225,7 +225,7 @@ export async function linkedRecordsAtFrontier(
       if (visited.has(doc._id)) continue;
       visited.add(doc._id);
       // `cls.field`, not `entityIds`: five of the six classes are named through a different field, and a
-      // hardcoded `entityIds` here would give every chrono-to-memory link a `via` of `frontier[0]` — a
+      // hardcoded `entityIds` here would give every chrono-to-fact link a `via` of `frontier[0]` — a
       // synthetic edge drawn from the wrong node, which reads as a real relationship.
       //
       // `?? []` because a projection is what decides whether the field comes BACK, which is a different
@@ -269,11 +269,11 @@ export interface OutboundLink {
  *
  * ## Why this direction exists at all
  *
- * A link is undirected in fact and one-way in storage: the memory holds the ids, the entity holds nothing. So
- * "which memories mention this entity" and "which entities does this memory mention" are two queries, and
+ * A link is undirected in fact and one-way in storage: the fact holds the ids, the entity holds nothing. So
+ * "which facts mention this entity" and "which entities does this fact mention" are two queries, and
  * until 3.6 the server only ever asked the first.
  *
- * That is what made a non-entity RECALL SEED a dead end. Edge endpoints are entity ids, so a memory that
+ * That is what made a non-entity RECALL SEED a dead end. Edge endpoints are entity ids, so a fact that
  * matched semantically had no edges to follow, and `recall(traverse: n)` returned it with an empty `_graph` at
  * any depth. Both doors documented the limit and told the caller to lift the `entityIds` off the match and
  * traverse from one of those by hand — which is this query, performed by the caller because the server
@@ -372,12 +372,12 @@ export async function entitiesLinkedFromRecords(
 /**
  * The display name for a linked record, by kind.
  *
- * A chrono has a `title`, a memory a `fact`, a file a `path` — three fields meaning one thing to a reader of
+ * A chrono has a `title`, a fact a `fact`, a file a `path` — three fields meaning one thing to a reader of
  * a graph, and the mapping was written out at each of the three emit sites.
  */
 export function linkedRecordName(rec: LinkedRecord): string {
   if (rec.kind === 'chrono') return (rec.doc as ChronoEntry).title;
-  if (rec.kind === 'memory') return (rec.doc as MemoryDoc).fact;
+  if (rec.kind === 'fact') return (rec.doc as FactDoc).fact;
   return (rec.doc as FileMetaDoc).path;
 }
 
@@ -385,10 +385,10 @@ export function linkedRecordName(rec: LinkedRecord): string {
  * The `type` a linked record reports.
  *
  * Empty for a file, which has none — borrowing `kind` for it would invent data. Empty for an undeclared
- * memory type for the same reason.
+ * fact type for the same reason.
  */
 export function linkedRecordType(rec: LinkedRecord): string {
   if (rec.kind === 'chrono') return (rec.doc as ChronoEntry).type;
-  if (rec.kind === 'memory') return (rec.doc as MemoryDoc).type ?? '';
+  if (rec.kind === 'fact') return (rec.doc as FactDoc).type ?? '';
   return '';
 }

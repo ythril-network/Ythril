@@ -59,7 +59,7 @@ describe('Space rename', () => {
     await post(INSTANCES.a, tokenA, '/api/spaces', { id: oldId, label: 'Data Rename' });
 
     // Write a memory
-    const writeR = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${oldId}/memories`, {
+    const writeR = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${oldId}/facts`, {
       fact: 'Rename survival test fact',
       tags: ['rename-test'],
     });
@@ -72,13 +72,13 @@ describe('Space rename', () => {
     createdSpaceIds.push(newId);
 
     // Old ID should 404
-    const oldR = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${oldId}/memories`);
+    const oldR = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${oldId}/facts`);
     assert.ok(oldR.status === 403 || oldR.status === 404, `Old space should be gone, got ${oldR.status}`);
 
     // New ID should have the memory
-    const newR = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${newId}/memories`);
+    const newR = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${newId}/facts`);
     assert.equal(newR.status, 200);
-    const found = newR.body.memories?.some(m => m._id === memId);
+    const found = newR.body.facts?.some(m => m._id === memId);
     assert.ok(found, 'Memory should exist under the renamed space');
   });
 
@@ -86,7 +86,7 @@ describe('Space rename', () => {
     // Regression: renaming a space renamed its collections but left the `spaceId` field
     // inside every document pointing at the OLD id. `listEntities` / `listEdges` filter on
     // that field, so the data silently vanished from the UI — while the counts (which read
-    // the collection) still showed it. `listMemories` does NOT filter on spaceId, which is
+    // the collection) still showed it. `listFacts` does NOT filter on spaceId, which is
     // exactly why the memory-only test above kept passing and this went unnoticed.
     const oldId = `ee-rename-${RUN_ID}`;
     const newId = `ee-renamed-${RUN_ID}`;
@@ -119,12 +119,12 @@ describe('Space rename', () => {
     assert.equal(edgR.body.edges?.length, 1, 'edges must still be LISTED after a rename');
 
     // The stale field also broke entity lookup BY NAME (the same spaceId filter), which is
-    // what `remember` uses to link to an existing entity rather than creating a duplicate.
+    // what `saveFact` uses to link to an existing entity rather than creating a duplicate.
     const byName = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${newId}/entities?name=Ada`);
     assert.equal(byName.status, 200);
     assert.equal(
       byName.body.entities?.length, 1,
-      'entity lookup by name must still work after a rename — otherwise `remember` stops ' +
+      'entity lookup by name must still work after a rename — otherwise `saveFact` stops ' +
       'matching existing entities and starts creating duplicates',
     );
   });
@@ -166,11 +166,11 @@ describe('Space rename', () => {
 
     // Burn some sequence numbers so the counter is unambiguously > 1.
     for (let i = 0; i < 3; i++) {
-      const w = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${oldId}/memories`, { fact: `seq burn ${i}` });
+      const w = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${oldId}/facts`, { fact: `seq burn ${i}` });
       assert.equal(w.status, 201, JSON.stringify(w.body));
     }
-    const beforeR = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${oldId}/memories`);
-    const seqBefore = Math.max(...beforeR.body.memories.map(m => m.seq));
+    const beforeR = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${oldId}/facts`);
+    const seqBefore = Math.max(...beforeR.body.facts.map(m => m.seq));
     assert.ok(seqBefore >= 3, `expected a burned-in seq, got ${seqBefore}`);
 
     const renameR = await patch(INSTANCES.a, tokenA, `/api/spaces/${oldId}/rename`, { newId });
@@ -178,7 +178,7 @@ describe('Space rename', () => {
     createdSpaceIds.push(newId);
 
     // The next write must continue the sequence, NOT restart at 1.
-    const afterW = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${newId}/memories`, { fact: 'after rename' });
+    const afterW = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${newId}/facts`, { fact: 'after rename' });
     assert.equal(afterW.status, 201, JSON.stringify(afterW.body));
     assert.ok(
       afterW.body.seq > seqBefore,

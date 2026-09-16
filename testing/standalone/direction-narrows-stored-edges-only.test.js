@@ -76,7 +76,7 @@ describe('and every surface that offers `direction` says so', () => {
     ['docs/integration-guide/04a-recall-api.md', /narrows stored edges only/i],
     ['docs/integration-guide/04b-graph-api.md', /narrows stored edges and never links/i],
     // The operator's own words — no jargon, and the one surface a UI user ever sees.
-    ['docs/userguide/02-brain.md', /not to the memories, timeline entries and files that merely MENTION/],
+    ['docs/userguide/02-brain.md', /not to the facts, timeline entries and files that merely MENTION/],
   ];
 
   for (const [file, pattern] of SURFACES) {
@@ -93,7 +93,7 @@ describe('and every surface that offers `direction` says so', () => {
      * what a caller needs to predict the response. The rule alone reads as a technicality.
      */
     for (const f of ['server/src/mcp/tools/search.ts', 'docs/integration-guide/04a-recall-api.md']) {
-      assert.match(read(f), /still return[s]? the entities that memory (NAMES|\*\*names\*\*)/i,
+      assert.match(read(f), /still return[s]? the entities that fact (NAMES|\*\*names\*\*)/i,
         `${f} states the rule without its consequence, which is the half a caller can act on`);
     }
   });

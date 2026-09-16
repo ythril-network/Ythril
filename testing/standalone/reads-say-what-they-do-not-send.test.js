@@ -70,7 +70,7 @@ describe('recall describes the record it actually returns', () => {
       seq: 7, matchedText: 'the passage again', embeddingModel: 'm', embedding: [0.1],
     };
     const rows = [
-      { ...base, type: 'memory', fact: 'f', entityIds: [] },
+      { ...base, type: 'fact', fact: 'f', entityIds: [] },
       { ...base, type: 'entity', name: 'n', entityType: 't' },
       { ...base, type: 'edge', from: 'a', to: 'b', label: 'l', weight: 1, edgeType: 't' },
       { ...base, type: 'chrono', title: 't', chronoType: 'event', startsAt: 's', status: 'upcoming' },

@@ -132,7 +132,7 @@ describe('ModelsTabComponent — person-types picker', () => {
   it('loads entity types from the library (entities only, deduped, sorted)', () => {
     const { c } = setup([
       { knowledgeType: 'entity', typeName: 'person' },
-      { knowledgeType: 'memory', typeName: 'note' },     // non-entity, excluded
+      { knowledgeType: 'fact', typeName: 'note' },     // non-entity, excluded
       { knowledgeType: 'entity', typeName: 'org' },
       { knowledgeType: 'entity', typeName: 'person' },    // dup
     ]);

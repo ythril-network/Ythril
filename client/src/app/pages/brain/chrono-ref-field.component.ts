@@ -10,7 +10,7 @@ export interface ChronoIdTarget { chronoIds: string[]; }
 /**
  * The chrono-reference field: linked-chrono chips + an inline title typeahead, in one element.
  *
- * The third sibling of `app-entity-ref-field` / `app-memory-ref-field` (slice 4d). Only file-meta links
+ * The third sibling of `app-entity-ref-field` / `app-fact-ref-field` (slice 4d). Only file-meta links
  * chrono entries, so this has a single consumer today — but it replaces file-meta's old click-to-open
  * `fm*` chrono flyout with the same always-inline shape the other two fields use, which is the visual-
  * consistency win the composite refactor exists for, and it mirrors the memory field one-for-one.

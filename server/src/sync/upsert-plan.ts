@@ -26,7 +26,7 @@
  * store it in OUR collection. Every read path filters on `spaceId` (`listEntities`,
  * `findEntityByName`, the edge-dedup lookup, cascade deletes), so leaving the remote id in place makes
  * a synced document invisible to list and lookup while still being counted. The data reads as lost,
- * and because `findEntityByName` stops matching, `remember` starts creating duplicates instead of
+ * and because `findEntityByName` stops matching, `saveFact` starts creating duplicates instead of
  * updating. The collection name is the only real scope: a document written into `{localSpaceId}_*`
  * belongs to `localSpaceId` by definition.
  */

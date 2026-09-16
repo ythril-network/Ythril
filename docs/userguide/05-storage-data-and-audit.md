@@ -74,7 +74,7 @@ Configure automatic backups and an optional offsite destination from **Settings 
 
 ### Encrypted backups
 
-A backup is a **complete plaintext copy of the database** by default — every memory, entity, edge, chrono entry,
+A backup is a **complete plaintext copy of the database** by default — every fact, entity, edge, chrono entry,
 file-meta record and audit entry. Note that an encrypted `mongod` does not protect it: the dump is read *through*
 mongod, so it comes out decrypted. Setting `encrypt: true` (or the toggle on **Settings → Database**) encrypts every
 record with the instance master secret, using the same AES-256-GCM envelope as the encrypted state files.
@@ -264,7 +264,7 @@ All endpoints must be HTTPS and are SSRF-checked (private/reserved addresses are
 
 ### Event types
 
-Beyond the per-collection write events (`memory.created`, `entity.updated`, `file.deleted`, … across memory, entity, edge, chrono, and file), the following are also emitted: `entity.merged`, `link_violation.created`, `duplicate.detected`, and `test.ping`.
+Beyond the per-collection write events (`fact.created`, `entity.updated`, `file.deleted`, … across fact, entity, edge, chrono, and file), the following are also emitted: `entity.merged`, `link_violation.created`, `duplicate.detected`, and `test.ping`.
 
 ---
 

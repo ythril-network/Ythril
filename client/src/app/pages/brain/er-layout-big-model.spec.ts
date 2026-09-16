@@ -12,7 +12,7 @@ function bigModel(): { types: ErEntityType[]; rels: ErRelationship[] } {
       declared: i % 3 !== 0,
       properties: Array.from({ length: i % 6 }, (_, j) => ({ name: `p${j}`, type: 'string' as const, required: j === 0 })),
       linkedFrom: {
-        memories: i % 2 === 0 ? (i + 1) * 3 : 0,
+        facts: i % 2 === 0 ? (i + 1) * 3 : 0,
         chrono: i % 5 === 0 ? i + 2 : 0,
         files: i % 7 === 0 ? i : 0,
       },
@@ -64,7 +64,7 @@ describe('the diagram survives a big, uneven space', () => {
 
   it('the three kind boxes are present and joined', () => {
     const kinds = out.boxes.filter(b => b.kind !== 'entity');
-    expect(kinds.map(b => b.kind).sort()).toEqual(['chrono', 'file', 'memory']);
+    expect(kinds.map(b => b.kind).sort()).toEqual(['chrono', 'fact', 'file']);
     for (const k of kinds) {
       expect(out.paths.some(p => p.from === k.type), `${k.type} has no joins`).toBe(true);
     }

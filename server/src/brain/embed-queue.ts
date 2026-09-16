@@ -1,11 +1,11 @@
 /**
- * The embedding job queue for brain records — memories, entities, edges, chrono entries.
+ * The embedding job queue for brain records — facts, entities, edges, chrono entries.
  *
  * ## Why writes stopped waiting for the model
  *
  * Every brain creator embedded inline, so the caller paid the model's latency on every write. Three of
  * the four then swallowed a failure (`try { embed } catch`) and stored the record without a vector;
- * `remember` did not, so a memory write failed outright whenever the embedder was down. Two behaviours,
+ * `saveFact` did not, so a fact write failed outright whenever the embedder was down. Two behaviours,
  * neither of them chosen by the caller, and no path back for a record that missed its vector short of a
  * manual whole-space `POST /reindex` that re-embeds *everything*.
  *
@@ -21,7 +21,7 @@
  *
  * A caller who needs the record searchable when the call returns says so — `waitForEmbedding: true` —
  * and gets exactly the old behaviour, including the old failure mode. It is opt-in rather than the
- * default because the common case (an agent writing a memory) does not care, and the uncommon case
+ * default because the common case (an agent writing a fact) does not care, and the uncommon case
  * (write-then-immediately-search) can no longer be silently wrong.
  *
  * ## One job per record, not one per write
@@ -562,7 +562,7 @@ export const _asEmbedJobDoc = asDoc<BrainEmbedJobDoc>;
  * > *"dont transfer embeddings... It CAN break so it WILL break. on transfer the receiver applies its rules...
  * > if it should embed use the receivers embedding mechanism. everything else makes no sense."*
  *
- * So no ingest schema declares `embedding` any more — memories were the last that did — and a vector cannot
+ * So no ingest schema declares `embedding` any more — facts were the last that did — and a vector cannot
  * arrive at all. The old branch would be unreachable, and worse than unreachable: it read as a statement that
  * a peer may send a usable vector, which is the belief being overturned. Two instances ranking one collection
  * against vectors from two different models is a failure that produces plausible-looking results, which is the

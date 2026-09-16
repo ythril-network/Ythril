@@ -25,7 +25,7 @@ export interface MemoryIdTarget { memoryIds: string[]; }
  * slice-4d File Meta rebuild rather than switching here.
  */
 @Component({
-  selector: 'app-memory-ref-field',
+  selector: 'app-fact-ref-field',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PhIconComponent, TranslocoPipe],
@@ -39,7 +39,7 @@ export interface MemoryIdTarget { memoryIds: string[]; }
       </div>
     }
     <div class="mem-pick">
-      <input type="search" [value]="picker.memPickQuery()" (input)="picker.onMemPickInput($any($event.target).value)" [placeholder]="'brain.chrono.form.searchMemories' | transloco" [attr.aria-label]="'brain.chrono.form.searchMemories' | transloco" />
+      <input type="search" [value]="picker.memPickQuery()" (input)="picker.onMemPickInput($any($event.target).value)" [placeholder]="'brain.chrono.form.searchFacts' | transloco" [attr.aria-label]="'brain.chrono.form.searchFacts' | transloco" />
       @if (picker.memPickResults().length) {
         <div class="mem-pick-menu">
           @for (mem of picker.memPickResults(); track mem._id) {
@@ -50,7 +50,7 @@ export interface MemoryIdTarget { memoryIds: string[]; }
     </div>
   `,
 })
-export class MemoryRefFieldComponent {
+export class FactRefFieldComponent {
   readonly picker = inject(EntityRefPicker);
   /** The caller's form object; adding/removing edits its `memoryIds`. */
   readonly target = input.required<MemoryIdTarget>();

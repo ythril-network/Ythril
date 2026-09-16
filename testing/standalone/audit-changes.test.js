@@ -79,7 +79,7 @@ describe('audit changes — every allowlist is actually reachable', () => {
     'server/src/api/spaces.ts', 'server/src/api/tokens.ts', 'server/src/api/media-config.ts',
     'server/src/api/networks/crud.ts', 'server/src/api/data.ts',
     // Brain record edits — the operations whose changes carry user content and expire early.
-    'server/src/api/brain/memories.ts', 'server/src/api/brain/entities.ts',
+    'server/src/api/brain/facts.ts', 'server/src/api/brain/entities.ts',
     'server/src/api/brain/edges.ts', 'server/src/api/brain/chrono.ts',
   ];
 
@@ -219,31 +219,31 @@ describe('audit changes — list fields record what moved, not the whole list', 
     // The bug this exists to prevent is silent: `scalarOrDrop` discards arrays, so before this the
     // entry appeared with `tags` simply missing from `changes` — and a reader concludes the tags were
     // untouched. No error, no empty value, just absence.
-    const changes = auditChanges('memory.update',
+    const changes = auditChanges('fact.update',
       { tags: ['a', 'b'] }, { tags: ['b', 'c'] });
     assert.deepEqual(changes, [{ field: 'tags', added: ['c'], removed: ['a'] }]);
   });
 
   it('treats an absent list as empty, so first-time tagging still records', () => {
-    assert.deepEqual(auditChanges('memory.update', {}, { tags: ['new'] }),
+    assert.deepEqual(auditChanges('fact.update', {}, { tags: ['new'] }),
       [{ field: 'tags', added: ['new'] }]);
   });
 
   it('records a cleared list as removals', () => {
-    assert.deepEqual(auditChanges('memory.update', { tags: ['gone'] }, { tags: [] }),
+    assert.deepEqual(auditChanges('fact.update', { tags: ['gone'] }, { tags: [] }),
       [{ field: 'tags', removed: ['gone'] }]);
   });
 
   it('says nothing when a list is merely reordered', () => {
     // Set semantics, not sequence — a reorder is not a change anyone needs explained, and recording
     // one would make every save look like an edit.
-    assert.deepEqual(auditChanges('memory.update', { tags: ['a', 'b'] }, { tags: ['b', 'a'] }), []);
+    assert.deepEqual(auditChanges('fact.update', { tags: ['a', 'b'] }, { tags: ['b', 'a'] }), []);
   });
 
   it('drops the whole field when a list contains a non-primitive', () => {
     // Fail-closed, same direction as everywhere else here: one object in the array and nothing is
     // recorded, rather than recording part of it or stringifying the object.
-    assert.deepEqual(auditChanges('memory.update',
+    assert.deepEqual(auditChanges('fact.update',
       { tags: ['a'] }, { tags: [{ nested: 'sk-live-AAA' }] }), []);
   });
 
@@ -263,7 +263,7 @@ describe('audit changes — list fields record what moved, not the whole list', 
 
   it('records the content fields the owner asked for', () => {
     // "Yes with a TTL" means content IS in scope — the TTL is the mitigation, not omission.
-    const changes = auditChanges('memory.update',
+    const changes = auditChanges('fact.update',
       { fact: 'old text' }, { fact: 'new text' });
     assert.deepEqual(changes, [{ field: 'fact', from: 'old text', to: 'new text' }]);
   });

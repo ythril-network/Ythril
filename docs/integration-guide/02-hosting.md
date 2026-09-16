@@ -55,7 +55,7 @@ or, if unavailable:
     Upgrade to MongoDB 8.2+, use Atlas Local, or connect to managed Atlas
 ```
 
-If `$vectorSearch` is unavailable, all non-search operations (storing memories, entities, edges, files, sync) continue to work normally.  Only the `recall` MCP tool returns an error until a supported MongoDB is connected.
+If `$vectorSearch` is unavailable, all non-search operations (storing facts, entities, edges, files, sync) continue to work normally.  Only the `recall` MCP tool returns an error until a supported MongoDB is connected.
 
 ### Startup Output
 
@@ -138,7 +138,7 @@ All persistent data lives in named Docker volumes:
 | Volume | Contents |
 |--------|----------|
 | `ythril-data` | File storage (`/data/files/{spaceId}/`), upload chunks, media/face-model files |
-| `ythril-mongo-data` | Brain data: memories, entities, edges, tombstones |
+| `ythril-mongo-data` | Brain data: facts, entities, edges, tombstones |
 | `ythril-mongo-configdb` | MongoDB replica set keyfile |
 
 The `config/` directory is a host bind mount — `config.json`, `secrets.json`, and `schema-library.json` are plain files that survive any container lifecycle event.
@@ -535,7 +535,7 @@ comes entirely from pointing each instance at distinct storage:
 
 | Axis | Env var | What collides if two instances share it |
 |---|---|---|
-| **Database** | `MONGO_URI` (database name in the path) | All knowledge collections. Spaces are stored as collections named `<spaceId>_memories`, `<spaceId>_entities`, etc. — there is **no** per-instance prefix, so two instances on the same database that both have a space called `default` read and write the *same* `default_memories`. |
+| **Database** | `MONGO_URI` (database name in the path) | All knowledge collections. Spaces are stored as collections named `<spaceId>_facts`, `<spaceId>_entities`, etc. — there is **no** per-instance prefix, so two instances on the same database that both have a space called `default` read and write the *same* `default_facts`. |
 | **Config directory** | `CONFIG_PATH` | `config.json`, `secrets.json`, `schema-library.json`, `schema-catalogs.json` all live in this directory. Sharing it means each instance's config writes overwrite the other's tokens, spaces, and networks. |
 | **Data root** | `DATA_ROOT` | File **bytes** live on the filesystem under `<DATA_ROOT>/files/<spaceId>/` (plus upload chunks and media/face-model files) — **not** in MongoDB. Sharing this directory collides the file stores the same way a shared database collides collections. |
 

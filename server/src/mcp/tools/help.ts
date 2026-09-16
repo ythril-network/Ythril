@@ -25,7 +25,7 @@ export const helpTool: ToolHandler = {
   name: 'help',
   description:
     'Explain this Ythril instance: the tools available to your token, the knowledge model (spaces, '
-    + 'memories, entities, edges, chrono, files), how to choose between query / recall / filtered recall, '
+    + 'facts, entities, edges, chrono, files), how to choose between query / recall / filtered recall, '
     + 'schema authoring, and the REST API map. Call this first when unsure.\n\n'
     + 'THE TOOL LIST IS FILTERED TO WHAT YOUR TOKEN CAN REACH, and that is the most important thing to know '
     + 'about this answer. A tool missing from it does NOT mean the instance lacks that capability — it means '
@@ -82,7 +82,7 @@ export const helpTool: ToolHandler = {
     const query = typeof rawQuery === 'string' ? rawQuery.trim() : '';
 
     const header = '# Ythril — system guide\n\n'
-      + 'Ythril is a self-hosted knowledge-graph memory server. This guide is generated for\n'
+      + 'Ythril is a self-hosted knowledge-graph fact server. This guide is generated for\n'
       + 'YOUR token: every tool listed below is callable with your current scope.';
 
     let text: string;

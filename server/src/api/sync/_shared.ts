@@ -22,7 +22,7 @@ import { isStrictLinkage } from '../../spaces/proxy.js';
 import { LINK_CLASSES } from '../../brain/link-adjacency.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
-import type { MemoryDoc, EntityDoc, EdgeDoc, LinkViolationDoc, BrainEmbedRecordType } from '../../config/types.js';
+import type { FactDoc, EntityDoc, EdgeDoc, LinkViolationDoc, BrainEmbedRecordType } from '../../config/types.js';
 
 export const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -98,7 +98,7 @@ export async function checkEdgeLinkViolations(
  *
  * ## What it used to check, and what that missed
  *
- * It took `entityIds` and a `docType` of `'memory' | 'chrono'`, and hardcoded the field name, the target
+ * It took `entityIds` and a `docType` of `'fact' | 'chrono'`, and hardcoded the field name, the target
  * collection and the UUID shape. So it saw ONE of the six link classes. `chrono.memoryIds` and all three of
  * a file's arrays were invisible to sync — and there was no file call site at all, so a file arriving with a
  * dangling `entityIds` was never reported even for the class that was implemented.
@@ -129,7 +129,7 @@ export async function checkEdgeLinkViolations(
 export async function checkLinkViolations(
   spaceId: string,
   docId: string,
-  docType: 'memory' | 'chrono',
+  docType: 'fact' | 'chrono',
   doc: object | undefined,
   peerInstanceId: string,
 ): Promise<void> {
@@ -176,7 +176,7 @@ export async function checkLinkViolations(
  *
  * ## `upsert: true`, always
  *
- * Three of the four types passed it and memories did not, which is a difference with no reason behind it: the
+ * Three of the four types passed it and facts did not, which is a difference with no reason behind it: the
  * caller has already decided the incoming document should land, and `replaceOne` without upsert silently
  * writes nothing when the local copy has been deleted in the meantime. It is a `replaceOne` rather than an
  * `insertOne` even on the no-local-copy path for the same reason — the two paths differ in what they REPORT,
@@ -261,7 +261,7 @@ export const MAX_FORK_DEPTH = 10;
 import { reconcileLinksForDocument } from '../../brain/links.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import { CHRONO_STATUSES } from '../../config/types.js';
-import { validateEntity, validateEdge, validateChrono, validateMemory, getSpaceMeta, type SchemaViolation }
+import { validateEntity, validateEdge, validateChrono, validateFact, getSpaceMeta, type SchemaViolation }
   from '../../spaces/schema-validation.js';
 
 export const AuthorRefSchema = z.object({
@@ -269,15 +269,15 @@ export const AuthorRefSchema = z.object({
   instanceLabel: z.string().min(1),
 });
 
-export const IncomingMemoryDoc = z.object({
+export const IncomingFactDoc = z.object({
   _id: z.string().min(1),
   /*
-   * A memory's TYPE, which was hashed by the divergence check and stripped on push — found by deriving the
+   * A fact's TYPE, which was hashed by the divergence check and stripped on push — found by deriving the
    * rule from `merkle.ts` rather than from a list kept by hand, 2026-09-01.
    *
-   * Not cosmetic: the type is what selects the memory's type schema, so a memory arriving without it is
+   * Not cosmetic: the type is what selects the fact's type schema, so a fact arriving without it is
    * validated against nothing on the receiver, misses every type filter, and hashes differently from the
-   * sender's copy for ever. Optional, because a memory is not required to have one.
+   * sender's copy for ever. Optional, because a fact is not required to have one.
    */
   type: z.string().optional(),
   /*
@@ -295,7 +295,7 @@ export const IncomingMemoryDoc = z.object({
    *
    * BOTH spellings, because a peer sends whichever its build knows and the resolver reads them together.
    * Optional, because absent means included — and requiring a field here is exactly how every suppressed
-   * memory came to be dropped from its batch in silence.
+   * fact came to be dropped from its batch in silence.
    */
   suppressEmbeddings: z.boolean().optional(),
   spaceId: z.string().min(1),
@@ -347,7 +347,7 @@ export const IncomingFileMetaDoc = z.object({
   memoryIds: z.array(z.string()).max(500).optional(),
   chronoIds: z.array(z.string()).max(500).optional(),
   properties: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
-  /** See `IncomingMemoryDoc`: the record tier of suppression, which the receiver needs to honour it. */
+  /** See `IncomingFactDoc`: the record tier of suppression, which the receiver needs to honour it. */
   suppressEmbeddings: z.boolean().optional(),
   author: AuthorRefSchema,
   createdAt: z.string(),
@@ -436,7 +436,7 @@ export async function applyFileMetaPage(
 
 export const IncomingEntityDoc = z.object({
   _id: z.string().min(1),
-  /** See `IncomingMemoryDoc`: the record tier of suppression, which the receiver needs in order to honour it. */
+  /** See `IncomingFactDoc`: the record tier of suppression, which the receiver needs in order to honour it. */
   suppressEmbeddings: z.boolean().optional(),
   spaceId: z.string().min(1),
   name: z.string().min(1),
@@ -460,7 +460,7 @@ const RefKindSchema = z.enum(REF_KINDS);
 
 export const IncomingEdgeDoc = z.object({
   _id: z.string().min(1),
-  /** See `IncomingMemoryDoc`: the record tier of suppression, which the receiver needs in order to honour it. */
+  /** See `IncomingFactDoc`: the record tier of suppression, which the receiver needs in order to honour it. */
   suppressEmbeddings: z.boolean().optional(),
   spaceId: z.string().min(1),
   from: z.string().min(1),
@@ -537,7 +537,7 @@ export const IncomingChronoDoc = z.object({
    */
   contentRedacted: z.boolean().optional(),
   contentRedactedAt: z.string().optional(),
-  /** See `IncomingMemoryDoc`: the record tier of suppression, which the receiver needs in order to honour it. */
+  /** See `IncomingFactDoc`: the record tier of suppression, which the receiver needs in order to honour it. */
   suppressEmbeddings: z.boolean().optional(),
   spaceId: z.string().min(1),
   title: z.string().min(1),
@@ -587,7 +587,7 @@ export function decodeCursor(token: string): number {
  */
 export async function forkChainDepth(spaceId: string, docId: string | undefined): Promise<number> {
   if (!docId) return 0;
-  const coll = col<MemoryDoc>(`${spaceId}_memories`);
+  const coll = col<FactDoc>(`${spaceId}_facts`);
   const visited = new Set<string>();
   let depth = 0;
   let currentId: string | undefined = docId;
@@ -595,7 +595,7 @@ export async function forkChainDepth(spaceId: string, docId: string | undefined)
   while (currentId && depth <= MAX_FORK_DEPTH) {
     if (visited.has(currentId)) break; // cycle guard
     visited.add(currentId);
-    const doc = await coll.findOne(asFilter<MemoryDoc>({ _id: currentId })) as MemoryDoc | null;
+    const doc = await coll.findOne(asFilter<FactDoc>({ _id: currentId })) as FactDoc | null;
     if (!doc?.forkOf) break;
     depth++;
     currentId = doc.forkOf;
@@ -824,7 +824,7 @@ export function isDirectionalWriteBlocked(spaceId: string, authToken: Record<str
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * GET /api/sync/memories?spaceId=&networkId=&sinceSeq=&limit=&cursor=&full=
+ * GET /api/sync/facts?spaceId=&networkId=&sinceSeq=&limit=&cursor=&full=
  * Returns paginated stubs by default.  Add ?full=true to return complete docs
  * in a single pass (eliminates the N per-document fetches on the pull side).
  */
@@ -870,8 +870,8 @@ export function violationsAgainstLocalSchema(
       return validateEdge(meta, { label: doc['label'] as string, properties });
     case 'chrono':
       return validateChrono(meta, { type, properties });
-    case 'memory':
-      return validateMemory(meta, { type, properties });
+    case 'fact':
+      return validateFact(meta, { type, properties });
   }
 }
 
@@ -881,7 +881,7 @@ export function violationsAgainstLocalSchema(
  * ## Why this is a function and not four inline spreads
  *
  * It was four inline spreads, and only one of them was written. `/chrono` carried
- * `...(v.length > 0 ? { schemaViolations: v } : {})` while `/memories`, `/entities` and `/edges` stored the
+ * `...(v.length > 0 ? { schemaViolations: v } : {})` while `/facts`, `/entities` and `/edges` stored the
  * peer's record and answered `{ status: 'ok' }` with nothing computed at all — so a peer shipping records one
  * at a time got silent acceptance while the same records through `batch-upsert` were counted. One rule, two
  * implementations, the weaker one winning silently, which `CLAUDE.md` names as the defect this repo produces

@@ -54,12 +54,12 @@ process.env['MODEL_CACHE_DIR'] = EMPTY_CACHE;
 let mongo, memory, queue, worker;
 
 const jobs = () => mongo.col(`${SPACE}_embed_jobs`);
-const memories = () => mongo.col(`${SPACE}_memories`);
+const memories = () => mongo.col(`${SPACE}_facts`);
 
 /** Write a record and return its job id, so a test reads as the situation it is about. */
 const writeRecord = async (fact) => {
-  const doc = await memory.remember(SPACE, fact, [], []);
-  return { id: doc._id, jobId: `memory:${doc._id}` };
+  const doc = await memory.saveFact(SPACE, fact, [], []);
+  return { id: doc._id, jobId: `fact:${doc._id}` };
 };
 
 describe('the embed queue is readable and retryable (real MongoDB, no reachable model)', { skip }, () => {
@@ -70,7 +70,7 @@ describe('the embed queue is readable and retryable (real MongoDB, no reachable 
     mongo = await openTestMongo('embedjobsvisible');
     const loader = await import('../../server/dist/config/loader.js');
     loader.loadConfig();
-    memory = await import('../../server/dist/brain/memory.js');
+    memory = await import('../../server/dist/brain/fact.js');
     queue = await import('../../server/dist/brain/embed-queue.js');
     worker = await import('../../server/dist/brain/embed-worker.js');
   });
@@ -97,7 +97,7 @@ describe('the embed queue is readable and retryable (real MongoDB, no reachable 
 
     const listed = await queue.listEmbedJobs(SPACE);
     assert.equal(listed.length, 1, 'the one queued job is reported');
-    assert.equal(listed[0].recordType, 'memory');
+    assert.equal(listed[0].recordType, 'fact');
     assert.equal(listed[0].recordId, id, 'the row names the record, which is what makes it actionable');
     assert.equal(listed[0].status, 'pending');
     assert.equal(listed[0].attempts, 0);
@@ -121,13 +121,13 @@ describe('the embed queue is readable and retryable (real MongoDB, no reachable 
 
     // Drain until the job stops coming back. Each pass is one failed attempt against an unreachable model, so this
     // walks the job to its terminal state the same way the worker would over minutes of backoff.
-    await jobs().updateOne({ _id: `memory:${id}` }, { $set: { attempts: 4, claimableAfter: null } });
+    await jobs().updateOne({ _id: `fact:${id}` }, { $set: { attempts: 4, claimableAfter: null } });
     let guard = 0;
     while (await worker.runOneEmbedJob() && guard++ < 10) {
-      await jobs().updateOne({ _id: `memory:${id}` }, { $set: { claimableAfter: null } });
+      await jobs().updateOne({ _id: `fact:${id}` }, { $set: { claimableAfter: null } });
     }
 
-    const stored = await jobs().findOne({ _id: `memory:${id}` });
+    const stored = await jobs().findOne({ _id: `fact:${id}` });
     assert.equal(stored.status, 'failed', `precondition: the job must be terminal, got ${stored.status}`);
     assert.ok(stored.lastError, 'and it must carry why');
 
@@ -210,7 +210,7 @@ describe('the embed queue is readable and retryable (real MongoDB, no reachable 
       $set: { status: 'failed', attempts: 5, lastError: 'model unreachable', claimedAt: '2026-01-01T00:00:00.000Z' },
     });
 
-    assert.equal(await queue.retryEmbedJob(SPACE, 'memory', id), 'ok');
+    assert.equal(await queue.retryEmbedJob(SPACE, 'fact', id), 'ok');
 
     const after = await jobs().findOne({ _id: jobId });
     assert.equal(after.status, 'pending', 'the worker will pick it up again');
@@ -228,7 +228,7 @@ describe('the embed queue is readable and retryable (real MongoDB, no reachable 
     const before = await jobs().findOne({ _id: jobId });
     await jobs().updateOne({ _id: jobId }, { $set: { status: 'failed', lastError: 'boom' } });
 
-    await queue.retryEmbedJob(SPACE, 'memory', id);
+    await queue.retryEmbedJob(SPACE, 'fact', id);
 
     const after = await jobs().findOne({ _id: jobId });
     assert.equal(after.recordType, before.recordType);
@@ -245,7 +245,7 @@ describe('the embed queue is readable and retryable (real MongoDB, no reachable 
       },
     });
 
-    assert.equal(await queue.retryEmbedJob(SPACE, 'memory', id), 'processing');
+    assert.equal(await queue.retryEmbedJob(SPACE, 'fact', id), 'processing');
 
     // Asserted on the STORED job, not on the return value: a function can return the right word and still have written.
     const after = await jobs().findOne({ _id: jobId });
@@ -255,7 +255,7 @@ describe('the embed queue is readable and retryable (real MongoDB, no reachable 
   });
 
   it('reports not_found for a record with no job, rather than inventing one', async () => {
-    assert.equal(await queue.retryEmbedJob(SPACE, 'memory', 'no-such-record'), 'not_found');
+    assert.equal(await queue.retryEmbedJob(SPACE, 'fact', 'no-such-record'), 'not_found');
     assert.equal(await jobs().countDocuments({}), 0,
       'a retry of an unknown record must not CREATE a job — nothing would ever satisfy it');
   });
@@ -265,7 +265,7 @@ describe('the embed queue is readable and retryable (real MongoDB, no reachable 
     const b = await writeRecord('second');
     await jobs().updateMany({}, { $set: { status: 'failed', attempts: 5, lastError: 'both failed' } });
 
-    await queue.retryEmbedJob(SPACE, 'memory', a.id);
+    await queue.retryEmbedJob(SPACE, 'fact', a.id);
 
     assert.equal((await jobs().findOne({ _id: a.jobId })).status, 'pending');
     const untouched = await jobs().findOne({ _id: b.jobId });

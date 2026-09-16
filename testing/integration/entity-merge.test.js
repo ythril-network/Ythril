@@ -48,7 +48,7 @@ async function createEdge(from, to, label, props = {}) {
 }
 
 async function createMemory(fact, entityIds, tags = []) {
-  const r = await post(A, token(), `/api/brain/spaces/${SPACE}/memories`, { fact, entityIds, tags });
+  const r = await post(A, token(), `/api/brain/spaces/${SPACE}/facts`, { fact, entityIds, tags });
   assert.equal(r.status, 201, `Memory create failed: ${JSON.stringify(r.body)}`);
   return r.body;
 }
@@ -242,7 +242,7 @@ describe('Entity Merge — integration', () => {
 
     await merge(survivor._id, absorbed._id);
 
-    const m = await get(A, token(), `/api/brain/spaces/${SPACE}/memories/${mem._id}`);
+    const m = await get(A, token(), `/api/brain/spaces/${SPACE}/facts/${mem._id}`);
     assert.equal(m.status, 200);
     assert.ok(m.body.entityIds.includes(survivor._id), 'Memory entityIds should contain survivor');
     assert.ok(!m.body.entityIds.includes(absorbed._id), 'Memory entityIds should NOT contain absorbed');

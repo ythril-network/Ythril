@@ -18,8 +18,8 @@ import type { TokenRights } from '../config/rights-shape.js';
  * Until 3.0 the MCP dispatcher gated on two booleans — `readOnly`, and the tool's `admin` flag — while REST
  * enforced a per-space, per-area rung. One policy, two implementations, and the weaker one was reachable.
  * Measured, not inferred: a token whose matrix said `perSpace.general.knowledge = 'write'` was refused
- * `DELETE /api/brain/spaces/general/memories/:id` with a 403, and the identical delete through
- * `delete_fact` answered "Memory deleted".
+ * `DELETE /api/brain/spaces/general/facts/:id` with a 403, and the identical delete through
+ * `delete_fact` answered "Fact deleted".
  *
  * ## The ONE way it deliberately does nothing, and the one it used to
  *

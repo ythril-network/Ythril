@@ -60,9 +60,9 @@ Four high-water marks are kept per member. The first two prevent redundant data 
 
 All four are stored per member in the config file. After a successful sync they are written through the coalesced asynchronous config flush (`saveConfigSoon`) rather than a blocking synchronous write — sync bookkeeping never stalls the event loop. If a sync fails mid-way, the watermark is not advanced past the failure — the next cycle retries from the last safe point, giving at-least-once delivery semantics (re-delivery is harmless: everything is re-derived from `seq`).
 
-**One watermark, seven transfers, and that is what "the last safe point" has to mean.** A cycle runs seven independent transfers under each watermark — tombstones plus memories, entities, edges, chrono, links and FILE METADATA — and any one of them can stop early: a non-`2xx` from the peer, or its page cap. **The watermark advances only as far as EVERY transfer in the cycle is complete through.** A transfer that finished places no limit; one that stopped early limits the advance to the last position it actually delivered, and the lowest such limit wins.
+**One watermark, seven transfers, and that is what "the last safe point" has to mean.** A cycle runs seven independent transfers under each watermark — tombstones plus facts, entities, edges, chrono, links and FILE METADATA — and any one of them can stop early: a non-`2xx` from the peer, or its page cap. **The watermark advances only as far as EVERY transfer in the cycle is complete through.** A transfer that finished places no limit; one that stopped early limits the advance to the last position it actually delivered, and the lowest such limit wins.
 
-Before 3.2.0 both watermarks were set to the *maximum* across the transfers, which is only correct when all of them finished. A memories push that failed at seq 300, in a cycle where the entities push succeeded to seq 500, moved the watermark to 500 — and the memory at seq 400 was behind it permanently, re-sent by nothing, while every later cycle reported success. A held-back cycle now says so in the log, naming which transfers stopped, because a watermark quietly staying put reads exactly like a cycle with nothing to do.
+Before 3.2.0 both watermarks were set to the *maximum* across the transfers, which is only correct when all of them finished. A facts push that failed at seq 300, in a cycle where the entities push succeeded to seq 500, moved the watermark to 500 — and the fact at seq 400 was behind it permanently, re-sent by nothing, while every later cycle reported success. A held-back cycle now says so in the log, naming which transfers stopped, because a watermark quietly staying put reads exactly like a cycle with nothing to do.
 
 ---
 
@@ -87,7 +87,7 @@ The sync engine uses two helpers to translate between remote and local space IDs
 
 **Watermark keys use the LOCAL space ID.** The sync loop iterates `net.spaces` (local IDs) and keys all three watermarks by that value, while sending `remoteSpaceId` on the wire — so an aliased space stores its watermarks under the name this instance uses, not the peer's. That is also what makes them survive a local rename, which rewrites the keys by local ID (`applySpaceRenameToConfig`).
 
-**API calls** (`GET /api/sync/memories?spaceId=...`) always use the **remote** space ID so the peer returns the correct data.
+**API calls** (`GET /api/sync/facts?spaceId=...`) always use the **remote** space ID so the peer returns the correct data.
 
 **Local storage** (collection names, file paths) uses the **local** space ID so documents land in the aliased collection.
 
@@ -99,7 +99,7 @@ Spaces without an entry in `spaceMap` pass through unchanged (identity mapping).
 
 ```http
 GET /api/sync/tombstones?spaceId=&networkId=&sinceSeq={lastSeqReceived}     (1 request)
-GET /api/sync/memories?spaceId=&...&full=true&limit=200                     (ceil(N/200) requests)
+GET /api/sync/facts?spaceId=&...&full=true&limit=200                     (ceil(N/200) requests)
 GET /api/sync/entities?...                                                  (ceil(N/200) requests)
 GET /api/sync/edges?...                                                     (ceil(N/200) requests)
 GET /api/sync/chrono?...                                                    (ceil(N/200) requests)
@@ -109,7 +109,7 @@ GET /api/sync/filemeta?...                                                  (cei
 
 ### Why `?full=true`
 
-Without `?full=true` the list endpoints return `{_id, seq}` stubs, and the caller would need a second `GET /api/sync/memories/:id` request per document to fetch the full content — **N additional round-trips** per sync cycle. Each family has that per-document route: `GET /api/sync/entities/:id`, `GET /api/sync/edges/:id`, `GET /api/sync/chrono/:id`, `GET /api/sync/links/:id` and `GET /api/sync/filemeta/:id`.
+Without `?full=true` the list endpoints return `{_id, seq}` stubs, and the caller would need a second `GET /api/sync/facts/:id` request per document to fetch the full content — **N additional round-trips** per sync cycle. Each family has that per-document route: `GET /api/sync/entities/:id`, `GET /api/sync/edges/:id`, `GET /api/sync/chrono/:id`, `GET /api/sync/links/:id` and `GET /api/sync/filemeta/:id`.
 
 With `?full=true` the full document payload is embedded in the paginated list response. The pull phase is `ceil(N/200)` requests regardless of how many documents exist.
 
@@ -140,11 +140,11 @@ Together this prevents a member from forging a tombstone with `instanceId` set t
 
 ### Document ID collision safety
 
-All document `_id` values (`memories`, `entities`, `edges`, `chrono`, `links`) are **UUIDv4** — 122 bits of cryptographic randomness from Node.js `uuid` v4. The probability of two independent instances generating the same `_id` is astronomically low (~2.7 × 10⁻²⁰ after 1 billion documents). In practice, a publisher's tombstone targeting `_id = X` will never match a subscriber-created document because the subscriber's documents will always have different UUIDv4 identifiers. The tombstone deletion-authorisation checks are a defence-in-depth layer on top of this structural guarantee.
+All document `_id` values (`facts`, `entities`, `edges`, `chrono`, `links`) are **UUIDv4** — 122 bits of cryptographic randomness from Node.js `uuid` v4. The probability of two independent instances generating the same `_id` is astronomically low (~2.7 × 10⁻²⁰ after 1 billion documents). In practice, a publisher's tombstone targeting `_id = X` will never match a subscriber-created document because the subscriber's documents will always have different UUIDv4 identifiers. The tombstone deletion-authorisation checks are a defence-in-depth layer on top of this structural guarantee.
 
 ### `lastSeqReceived` update
 
-After all five document types (memories, entities, edges, chrono, links) are pulled, `lastSeqReceived[spaceId]` is advanced to the highest `seq` seen **among documents authored by the peer** (`doc.author.instanceId === member.instanceId`) and written to config. On the next cycle the watermark is passed as `sinceSeq` so the peer returns only documents newer than that point.
+After all five document types (facts, entities, edges, chrono, links) are pulled, `lastSeqReceived[spaceId]` is advanced to the highest `seq` seen **among documents authored by the peer** (`doc.author.instanceId === member.instanceId`) and written to config. On the next cycle the watermark is passed as `sinceSeq` so the peer returns only documents newer than that point.
 
 Docs that originate from a third instance but were relayed through the peer (e.g. during braintree or pubsub fanout) deliberately do not advance the watermark. Those relayed docs may carry a `seq` assigned by their true author's counter, which can be much higher than the peer's own counter. Allowing them to advance `lastSeqReceived` would cause the engine to skip the peer's locally-written documents on the next pull.
 
@@ -198,16 +198,16 @@ If the peer has never been synced (`lastSeqPushed` = 0), the full history is sen
 
 ### `POST /batch-upsert`
 
-Accepts `{ memories?: MemoryDoc[], entities?: EntityDoc[], edges?: EdgeDoc[], chrono?: ChronoEntry[], links?: LinkDoc[], filemeta?: FileMetaDoc[] }` in a single request. **An array the receiver does not read is dropped with a `200`**, so a peer built without `filemeta` loses every file description, tag and link array at the boundary — and nothing says so at either end. Up to 500 documents per type per request. The server applies the same conflict rules as the individual `POST /memories`, `POST /entities`, `POST /edges`, `POST /chrono` endpoints:
+Accepts `{ facts?: MemoryDoc[], entities?: EntityDoc[], edges?: EdgeDoc[], chrono?: ChronoEntry[], links?: LinkDoc[], filemeta?: FileMetaDoc[] }` in a single request. **An array the receiver does not read is dropped with a `200`**, so a peer built without `filemeta` loses every file description, tag and link array at the boundary — and nothing says so at either end. Up to 500 documents per type per request. The server applies the same conflict rules as the individual `POST /facts`, `POST /entities`, `POST /edges`, `POST /chrono` endpoints:
 
 | Type | Rule |
 |------|------|
-| Memories | `incoming.seq > existing.seq` → overwrite; equal seq + different fact → **fork** (new `_id`); else skip |
+| Facts | `incoming.seq > existing.seq` → overwrite; equal seq + different fact → **fork** (new `_id`); else skip |
 | Entities | `incoming.seq > existing.seq` → overwrite (upsert); else skip |
 | Edges | same as entities |
 | Chrono | same as entities |
 
-Response: `{ status: 'ok', memories: {inserted,updated,forked,skipped,forkDepthRefused,tombstoned,schemaViolations}, entities: {upserted,skipped,tombstoned,schemaViolations}, edges: {upserted,skipped,tombstoned,schemaViolations,duplicateTriplets}, chrono: {upserted,skipped,tombstoned,schemaViolations,unknownType}, links: {upserted,skipped,tombstoned} }`
+Response: `{ status: 'ok', facts: {inserted,updated,forked,skipped,forkDepthRefused,tombstoned,schemaViolations}, entities: {upserted,skipped,tombstoned,schemaViolations}, edges: {upserted,skipped,tombstoned,schemaViolations,duplicateTriplets}, chrono: {upserted,skipped,tombstoned,schemaViolations,unknownType}, links: {upserted,skipped,tombstoned} }`
 
 **Four of those counters were undocumented, and one of them is the sender's only report of a PERMANENT loss.** `skipped` means the peer was already current, which is benign. `forkDepthRefused` means a record was DROPPED and will not be retried — the push path reads exactly that field to report a refusal, so a receiver that does not emit it makes the loss silent at both ends. `schemaViolations` counts documents stored despite failing the RECEIVER's schema (validated, counted and let in — see the ingest rule below); `duplicateTriplets` counts edges the unique index rejected; `unknownType` counts the case below.
 
@@ -233,16 +233,16 @@ Relayed docs (received from a third peer and stored locally) are pushed to other
 
 ## Conflict resolution
 
-### Memories — fork on equal sequence
+### Facts — fork on equal sequence
 
-Memories are the primary content type. If two brains independently edit the same document (same `_id`) and their changes produce the same `seq` counter:
+Facts are the primary content type. If two brains independently edit the same document (same `_id`) and their changes produce the same `seq` counter:
 
 ```text
 Brain A:  { _id: "abc", seq: 5, fact: "The sky is blue" }
 Brain B:  { _id: "abc", seq: 5, fact: "The sky is cerulean" }   ← concurrent edit
 ```
 
-The receiving brain detects `incoming.seq === existing.seq && incoming.fact !== existing.fact` and creates a **fork**: a new memory with a fresh UUID, `forkOf: "abc"`, and the next available `seq`. Both versions coexist and can be reviewed by the user.
+The receiving brain detects `incoming.seq === existing.seq && incoming.fact !== existing.fact` and creates a **fork**: a new fact with a fresh UUID, `forkOf: "abc"`, and the next available `seq`. Both versions coexist and can be reviewed by the user.
 
 ### Entities and edges — last-writer-wins
 
@@ -256,7 +256,7 @@ Entities and edges are structural metadata (names, relationships). They use a si
 |----------|-------|------------|
 | `FETCH_TIMEOUT_MS` | 10 s | Tombstone requests, individual per-doc requests (legacy), manifest requests |
 | *(whole-file transfer budget)* | 10 min | File UPLOADS to a peer. A source constant with no environment variable — naming it here would invite you to set something that is not settable |
-| `BATCH_FETCH_TIMEOUT_MS` | 60 s | `GET /memories?full=true`, `GET /entities?full=true`, `GET /edges?full=true`, `POST /batch-upsert` |
+| `BATCH_FETCH_TIMEOUT_MS` | 60 s | `GET /facts?full=true`, `GET /entities?full=true`, `GET /edges?full=true`, `POST /batch-upsert` |
 
 The separation prevents a single slow 800 KB batch payload from being aborted by the 10 s timeout while also preventing a timed-out offline peer from holding up a sync cycle for more than 10 s per non-batch call.
 
@@ -294,7 +294,7 @@ In a braintree, a child stores its **parent** with `direction='pull'` (the child
 
 The direction field controls not only which phases the sync *engine* runs on the initiating side, but also which writes the *receiving server* accepts.
 
-**The data-write surface is peer-only.** A POST to any write endpoint (`/api/sync/memories`, `/entities`, `/edges`, `/chrono`, `/batch-upsert`, `/tombstones`, `/file-tombstones`) — link records arrive through `/batch-upsert` and have no single-record write door — must be presented with a **peer token** (a PAT carrying `peerInstanceId` — issued by the invite handshake, or minted explicitly via `POST /api/tokens { peerInstanceId }` for manually-configured topologies) or an **admin token** (the local operator, who could write through the regular REST API anyway). A space-scoped user PAT is refused with `403 { error: 'Sync writes require a peer token (peerInstanceId) or an admin token — use the regular REST API for user writes' }`. Unlike the REST API, which assigns `seq`/`_id`/`author` server-side, sync writes carry raw stream metadata — accepting user PATs here would let anyone holding one forge sync state, e.g. a downstream operator pushing content upstream in a directional network.
+**The data-write surface is peer-only.** A POST to any write endpoint (`/api/sync/facts`, `/entities`, `/edges`, `/chrono`, `/batch-upsert`, `/tombstones`, `/file-tombstones`) — link records arrive through `/batch-upsert` and have no single-record write door — must be presented with a **peer token** (a PAT carrying `peerInstanceId` — issued by the invite handshake, or minted explicitly via `POST /api/tokens { peerInstanceId }` for manually-configured topologies) or an **admin token** (the local operator, who could write through the regular REST API anyway). A space-scoped user PAT is refused with `403 { error: 'Sync writes require a peer token (peerInstanceId) or an admin token — use the regular REST API for user writes' }`. Unlike the REST API, which assigns `seq`/`_id`/`author` server-side, sync writes carry raw stream metadata — accepting user PATs here would let anyone holding one forge sync state, e.g. a downstream operator pushing content upstream in a directional network.
 
 For an identified peer, the server then derives the direction check from **its own membership records covering the target space** — never from the caller-supplied `networkId` query parameter. The write is allowed only when at least one of the caller's network relationships carrying that space permits inbound flow (`direction` pull/both, or a non-directional network type). If every relationship covering the space is `push` — "we push to them, they should not write to us" — the server responds `403 { error: 'Directional network: write not permitted from this peer' }`. A peer that is a member of no local network carrying the space (asymmetric/single-side topologies, a braintree child receiving from its unlisted parent) is governed by token space scope and the pending-join hold instead.
 
@@ -329,7 +329,7 @@ Manifest requests use the 10 s timeout and batch-style transfers the 60 s one. A
 
 With `merkle: true` on the network config, the engine ends each per-space sync by comparing content roots with the peer: it computes the local Merkle root and fetches the peer's via `GET /api/sync/merkle?spaceId=&networkId=`.
 
-**The algorithm, because a root cannot be reproduced from a prose summary.** Each brain document contributes a leaf `SHA-256("doc:<collection>:<_id>:<seq>:<sha256(canonical JSON)>")` over **all six** collections — memories, entities, edges, chrono, links and files — and each file manifest entry contributes `SHA-256("file:<path>:<sha256>")`. Leaves are sorted lexicographically; an odd level duplicates its last node; an empty tree is `SHA-256("")`. File CHUNK records are excluded by a `parentFileId: {$exists: false}` filter, so a chunked file contributes its parent only.
+**The algorithm, because a root cannot be reproduced from a prose summary.** Each brain document contributes a leaf `SHA-256("doc:<collection>:<_id>:<seq>:<sha256(canonical JSON)>")` over **all six** collections — facts, entities, edges, chrono, links and files — and each file manifest entry contributes `SHA-256("file:<path>:<sha256>")`. Leaves are sorted lexicographically; an odd level duplicates its last node; an empty tree is `SHA-256("")`. File CHUNK records are excluded by a `parentFileId: {$exists: false}` filter, so a chunked file contributes its parent only.
 
 **What is left out of a document's hash is five fields, not "embeddings"** — `embedding`, `embeddingModel`, `matchedText`, `_expireAt` and `_contentExpireAt`. The first three are derived by the local embedding model and the last two by the local retention policy, so none of them can travel: peers running different models hold different vectors for identical content, and a retention stamp would let one instance decide when another deletes its data.
 
@@ -367,19 +367,19 @@ The two **governance relays** — `POST /networks/:networkId/members` and `POST 
 
 | Method | Path | Key params | Returns |
 |--------|------|------------|---------|
-| `GET` | `/api/sync/memories` | `spaceId`, `networkId`, `sinceSeq`, `limit`, `cursor`, `full` | `{ items[], nextCursor }` |
-| `GET` | `/api/sync/memories/:id` | `spaceId`, `networkId` | Full `MemoryDoc` |
-| `GET` | `/api/sync/entities` | same as memories | `{ items[], nextCursor }` |
+| `GET` | `/api/sync/facts` | `spaceId`, `networkId`, `sinceSeq`, `limit`, `cursor`, `full` | `{ items[], nextCursor }` |
+| `GET` | `/api/sync/facts/:id` | `spaceId`, `networkId` | Full `MemoryDoc` |
+| `GET` | `/api/sync/entities` | same as facts | `{ items[], nextCursor }` |
 | `GET` | `/api/sync/entities/:id` | `spaceId`, `networkId` | Full `EntityDoc` |
-| `GET` | `/api/sync/edges` | same as memories | `{ items[], nextCursor }` |
+| `GET` | `/api/sync/edges` | same as facts | `{ items[], nextCursor }` |
 | `GET` | `/api/sync/edges/:id` | `spaceId`, `networkId` | Full `EdgeDoc` |
-| `GET` | `/api/sync/chrono` | same as memories | `{ items[], nextCursor }` |
+| `GET` | `/api/sync/chrono` | same as facts | `{ items[], nextCursor }` |
 | `GET` | `/api/sync/chrono/:id` | `spaceId`, `networkId` | Full `ChronoEntry` |
-| `GET` | `/api/sync/links` | same as memories | `{ items[], nextCursor }` |
+| `GET` | `/api/sync/links` | same as facts | `{ items[], nextCursor }` |
 | `GET` | `/api/sync/links/:id` | `spaceId`, `networkId` | Full `LinkDoc` |
-| `GET` | `/api/sync/filemeta` | same as memories | `{ items[], nextCursor }` |
+| `GET` | `/api/sync/filemeta` | same as facts | `{ items[], nextCursor }` |
 | `GET` | `/api/sync/filemeta/:id` | `spaceId`, `networkId` | Full `FileMetaDoc` |
-| `GET` | `/api/sync/tombstones` | `spaceId`, `networkId`, `sinceSeq`, `limit` (default 1000, max 5000) | `{ memories[], entities[], edges[], chrono[], links[] }` |
+| `GET` | `/api/sync/tombstones` | `spaceId`, `networkId`, `sinceSeq`, `limit` (default 1000, max 5000) | `{ facts[], entities[], edges[], chrono[], links[] }` |
 | `GET` | `/api/sync/file-tombstones` | `spaceId`, `networkId`, `since` | `{ tombstones[] }` |
 | `GET` | `/api/sync/manifest` | `spaceId`, `networkId`, `since` | `{ manifest[{ path, sha256, size, modifiedAt }] }` |
 | `GET` | `/api/sync/merkle` | `spaceId`, `networkId` | `{ spaceId, root, leafCount, computedAt, networkId }` (only used when `network.merkle: true`) |
@@ -395,14 +395,14 @@ There is no dedicated identity endpoint — a peer that needs the instance's ide
 
 | Method | Path | Body | Returns |
 |--------|------|------|---------|
-| `POST` | `/api/sync/memories` | `MemoryDoc` | `200 { status: 'inserted'\|'updated'\|'forked'\|'skipped'\|'tombstoned' }` — the `'forked'` case also returns `forkId` (the new fork document's `_id`) |
+| `POST` | `/api/sync/facts` | `MemoryDoc` | `200 { status: 'inserted'\|'updated'\|'forked'\|'skipped'\|'tombstoned' }` — the `'forked'` case also returns `forkId` (the new fork document's `_id`) |
 | `POST` | `/api/sync/entities` | `EntityDoc` | `200 { status:'ok' }` (or `'tombstoned'`) |
 | `POST` | `/api/sync/edges` | `EdgeDoc` | `200 { status:'ok' }`, `'tombstoned'`, or **`'duplicate'`** when the unique `(from, fromKind, to, toKind)` index rejects the insert |
 | `POST` | `/api/sync/chrono` | `ChronoEntry` | `200 { status:'ok' }` (or `'tombstoned'`) |
-| `POST` | `/api/sync/batch-upsert` | `{ memories?, entities?, edges?, chrono?, links?, filemeta? }` | `200 { status:'ok', memories:{…}, entities:{…}, edges:{…}, chrono:{…}, links:{…} }` — six arrays in, five sets of counters out |
+| `POST` | `/api/sync/batch-upsert` | `{ facts?, entities?, edges?, chrono?, links?, filemeta? }` | `200 { status:'ok', facts:{…}, entities:{…}, edges:{…}, chrono:{…}, links:{…} }` — six arrays in, five sets of counters out |
 | `POST` | `/api/sync/tombstones` | `{ tombstones[] }` | `200 { applied: N }` |
 | `POST` | `/api/sync/file-tombstones` | **`{ spaceId, tombstones[] }`** — `spaceId` in the BODY, not the query; absent it answers `400 { error: 'spaceId required' }` | `200 { applied: N }` |
-| `POST` | `/api/sync/warm` | `{ networkId, spaces[] }` | `200` once the embedding model, token cache and collection handles are warm. It touches `memories`, `entities`, `edges` and `chrono` only, and results are discarded |
+| `POST` | `/api/sync/warm` | `{ networkId, spaces[] }` | `200` once the embedding model, token cache and collection handles are warm. It touches `facts`, `entities`, `edges` and `chrono` only, and results are discarded |
 
 **Direction is enforced on `braintree` and `pubsub` networks only**, and this paragraph used to state it of every write endpoint on every network. A peer whose `member.direction === 'push'` — we push to them, so they should not be writing to us — is refused with a `403` on those two types. On any other type carrying the space the write is allowed, which is deliberate: direction is a topology property of a tree and a publisher, and a `closed` or `club` network has no upstream to protect. See [Direction enforcement on inbound endpoints](#direction-enforcement-on-inbound-endpoints).
 
@@ -410,14 +410,14 @@ There is no dedicated identity endpoint — a peer that needs the instance's ide
 
 **There is no single-document route for `links` or `filemeta`.** Both arrive only through `batch-upsert`, so a peer implementation that only wires the per-type `POST` endpoints replicates neither.
 
-`POST /batch-upsert` is the primary push path used by the engine. The individual `POST /memories`, `/entities`, `/edges` endpoints remain for backwards compatibility and direct API usage.
+`POST /batch-upsert` is the primary push path used by the engine. The individual `POST /facts`, `/entities`, `/edges` endpoints remain for backwards compatibility and direct API usage.
 
 All incoming documents are validated against Zod schemas before any database write. Invalid documents are rejected with `400` (single endpoints) or silently filtered out (batch-upsert). Key constraints: `tags` max 100 items, `entityIds` max 500, all string fields validated for type safety. Unknown fields are stripped.
 
 Two additional ingest safety caps protect the local seq counter and fork chains from a malicious or corrupted peer:
 
 - **Implausible seq** — the schema bound on `seq` is 2^50, but ingest applies a stricter ceiling of `2^50 − 2^40` (`rejectImplausibleSeq`); a document above it is refused so a poisoned seq can never exhaust the counter's headroom.
-- **Fork limits** — fork chain depth is capped at 10 on both paths: exceeding it returns `400` on the single `POST /memories` endpoint and is silently skipped in `batch-upsert`. The additional per-document **fan-out** cap (no more than 10 forks pointing at the same parent) is enforced **only on the single endpoint** — `batch-upsert` checks chain depth alone, not sibling fan-out.
+- **Fork limits** — fork chain depth is capped at 10 on both paths: exceeding it returns `400` on the single `POST /facts` endpoint and is silently skipped in `batch-upsert`. The additional per-document **fan-out** cap (no more than 10 forks pointing at the same parent) is enforced **only on the single endpoint** — `batch-upsert` checks chain depth alone, not sibling fan-out.
 
 ### Gossip endpoints
 
@@ -484,7 +484,7 @@ silently-skipped `404` in step 2: a cast pushed for a round the peer has not yet
 2. **Push casts** — for each local vote round — including already-concluded ones, so that a round-concluding cast still reaches peers that have not concluded yet — each known vote cast is relayed to the peer via `POST /api/sync/networks/:networkId/votes/:roundId { vote, instanceId, sig, castAt }`, forwarding the voter's signature so the peer can verify and relay it onward. If the peer does not yet have the round (404), the push is silently skipped — the round will arrive on the peer's next pull cycle.
 3. **Round conclusion** — after all merges, `concludeRoundIfReady` is evaluated for every open local round. Unanimous-type networks (closed, braintree) require every listed remote member to have individually cast `yes`; a single outstanding member prevents conclusion. For **braintree** rounds the required-voter set (ancestor path) is recomputed from the local topology at conclusion, never trusted from the adopted round, so a peer cannot shrink it. Democratic networks use a simple majority count. Club networks conclude on the first `yes`.
 
-4. **Side effects** — if a `space_deletion` round concludes with zero vetoes, the space is removed from the local instance asynchronously. A `space_wipe` round behaves the same way but EMPTIES the space instead of removing it, wiping exactly the collections named on the round (**all six** when it names none — memories, entities, edges, chrono, files and links; this said five, and `links` was the one it left out). Both are applied through one function called from all three conclusion paths — an operator's own vote, a peer's vote arriving, and the gossip pass.
+4. **Side effects** — if a `space_deletion` round concludes with zero vetoes, the space is removed from the local instance asynchronously. A `space_wipe` round behaves the same way but EMPTIES the space instead of removing it, wiping exactly the collections named on the round (**all six** when it names none — facts, entities, edges, chrono, files and links; this said five, and `links` was the one it left out). Both are applied through one function called from all three conclusion paths — an operator's own vote, a peer's vote arriving, and the gossip pass.
 
 This means a vote cast on any peer propagates to all other peers within one gossip cycle per hop, and a round concludes independently on each instance as soon as it has received enough votes to satisfy its network's pass condition.
 
@@ -522,7 +522,7 @@ On the **receiving** end of a `member_removed` event:
 2. The network entry is removed from `cfg.networks`.
 3. Config is saved.
 
-Subsequently, any sync request scoped to an ejected network ID returns `401 { "error": "ejected" }` via early-exit middleware — both the gossip endpoints (`/api/sync/networks/:networkId/*`, network ID in the path) and the data endpoints (`/api/sync/memories`, `/entities`, `/edges`, `/chrono`, `/batch-upsert`, `/manifest`, `/files`, tombstones, merkle — network ID in the query string or body). Without the data-endpoint guard, ex-peers could keep syncing after an ejection because the network config is deleted locally and the space-scope check falls back to "space exists".
+Subsequently, any sync request scoped to an ejected network ID returns `401 { "error": "ejected" }` via early-exit middleware — both the gossip endpoints (`/api/sync/networks/:networkId/*`, network ID in the path) and the data endpoints (`/api/sync/facts`, `/entities`, `/edges`, `/chrono`, `/batch-upsert`, `/manifest`, `/files`, tombstones, merkle — network ID in the query string or body). Without the data-endpoint guard, ex-peers could keep syncing after an ejection because the network config is deleted locally and the space-scope check falls back to "space exists".
 
 > **Peer credential lifecycle**: when a member is removed (direct club/pubsub removal, a concluded
 > remove vote, a `member_departed` announcement, or deleting a network) — and, on the ejected side,

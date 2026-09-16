@@ -51,10 +51,10 @@ const code = (f) => stripComments(readFileSync(f, 'utf8'));
  * that matter, which is the same reason the writer-coverage gate names its five.
  */
 const DOORS = {
-  'server/src/api/brain/memories.ts': 'POST and PATCH — `memory.entityIds`',
+  'server/src/api/brain/facts.ts': 'POST and PATCH — `fact.entityIds`',
   'server/src/api/brain/chrono.ts': 'POST and PATCH — `chrono.entityIds` and `chrono.memoryIds`',
   'server/src/api/brain/file-meta.ts': "PATCH — a file's three arrays",
-  'server/src/mcp/tools/memory.ts': 'remember and update_memory',
+  'server/src/mcp/tools/fact.ts': 'save_fact and update_fact',
   'server/src/mcp/tools/chrono.ts': 'create_chrono and update_chrono',
   'server/src/mcp/tools/file.ts': 'update_file_meta',
   'server/src/brain/bulk.ts': 'the batch importer, which validates its own items',

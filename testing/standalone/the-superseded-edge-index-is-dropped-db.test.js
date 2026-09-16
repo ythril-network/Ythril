@@ -121,7 +121,7 @@ describe('the superseded edge identity index is dropped', { skip }, () => {
     await edges().createIndex({ from: 1, to: 1, label: 1, fromKind: 1, toKind: 1 }, { unique: true });
     const base = { spaceId: SPACE, from: 'x', to: 'y', label: 'mentions' };
     await edges().insertOne({ _id: 'as-entity', ...base });
-    await edges().insertOne({ _id: 'as-memory', ...base, toKind: 'memory' });
+    await edges().insertOne({ _id: 'as-memory', ...base, toKind: 'fact' });
     assert.equal(await edges().countDocuments({}), 2,
       'the two relationships did not both store, so the widened identity is not reachable');
   });

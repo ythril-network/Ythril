@@ -11,7 +11,7 @@ const rights = (over: Partial<TokenRights> = {}): TokenRights =>
 /** A stub catalog, so the grid's own tests never depend on the endpoint that explains it. */
 const CATALOG_ROUTES = [
   { area: 'knowledge', method: 'POST', route: '/api/x/recall', needs: 'read' as const },
-  { area: 'knowledge', method: 'DELETE', route: '/api/x/memories/:id', needs: 'write' as const },
+  { area: 'knowledge', method: 'DELETE', route: '/api/x/facts/:id', needs: 'write' as const },
   { area: 'files', method: 'GET', route: '/api/x/files', needs: 'read' as const },
 ];
 /** The server's own `RUNG_IMPLICATIONS`, as the catalog publishes them. */
@@ -302,7 +302,7 @@ describe('RightsMatrixComponent — what a right grants', () => {
     // knowledge has a read route AND a write route in the stub; both must appear, because admin contains both.
     expect(rows.length).toBe(2);
     expect(rows.map(r => r.textContent).join(' ')).toContain('/api/x/recall');
-    expect(rows.map(r => r.textContent).join(' ')).toContain('/api/x/memories/:id');
+    expect(rows.map(r => r.textContent).join(' ')).toContain('/api/x/facts/:id');
     // And each says which rung first reaches it, or the list cannot answer "what does write grant".
     expect(rows[0]!.querySelector('.needs')!.textContent).toContain('read');
   });

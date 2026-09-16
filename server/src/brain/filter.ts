@@ -1,7 +1,7 @@
 /**
  * Recall filter DSL — the `FilterExpression` grammar and its translations.
  *
- * Split out of brain/memory.ts (A17.4). Self-contained: validates a caller-supplied filter, and
+ * Split out of brain/fact.ts (A17.4). Self-contained: validates a caller-supplied filter, and
  * lowers it either to a Mongo filter (post-vector-search) or to a native $vectorSearch prefilter.
  */
 
@@ -142,4 +142,4 @@ export function toNativeVectorFilter(
 }
 
 
-/** Derive the text to embed for a memory (tags + entity names + fact + description + properties). */
+/** Derive the text to embed for a fact (tags + entity names + fact + description + properties). */

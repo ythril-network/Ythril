@@ -51,7 +51,7 @@ function pairKey(c: Pick<DupeCandidateDoc, 'aId' | 'bId'>): string {
  * The two lists have always held this between them and never been joined: a pair can sit in `open` on both,
  * and only the duplicates list is what a nightly merge pass reads. So a reversal of opinion arrives labelled
  * as redundancy, and merging it destroys the fact that someone changed their mind — the most valuable thing a
- * memory store holds.
+ * fact store holds.
  *
  * One batched `$in` per space, not a query per pair: the contradiction rows are keyed by exactly the pair key,
  * so this is an indexed lookup over at most 500 ids.

@@ -49,7 +49,7 @@ describe('JSON body size limits (application/json endpoints)', () => {
 
   it('Brain fact string exceeding 50 000 chars → 400', async () => {
     const hugeFact = 'X'.repeat(50_001);
-    const r = await fetch(`${INSTANCES.a}/api/brain/spaces/general/memories`, {
+    const r = await fetch(`${INSTANCES.a}/api/brain/spaces/general/facts`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body: JSON.stringify({ fact: hugeFact }),
@@ -61,7 +61,7 @@ describe('JSON body size limits (application/json endpoints)', () => {
 
   it('Brain fact string of 1MB → 400 (fact length limit is 50k)', async () => {
     const hugeFact = 'X'.repeat(1024 * 1024); // 1 MB string
-    const r = await fetch(`${INSTANCES.a}/api/brain/spaces/general/memories`, {
+    const r = await fetch(`${INSTANCES.a}/api/brain/spaces/general/facts`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body: JSON.stringify({ fact: hugeFact }),

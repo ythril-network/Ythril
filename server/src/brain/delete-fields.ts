@@ -2,7 +2,7 @@
  * deleteFields utility — validates and applies dot-notation path deletions
  * to documents during update operations.
  *
- * Used by entity, edge, and memory update endpoints to support the
+ * Used by entity, edge, and fact update endpoints to support the
  * `deleteFields` array parameter.
  */
 
@@ -16,7 +16,7 @@ const SYSTEM_FIELDS = new Set([
   // message naming it. "Nothing happened and nobody said so" is the failure this whole file exists to avoid.
   //
   // Harmless on the other three record types: the check is against the TOP-LEVEL segment only, so
-  // `properties.title` is still deletable everywhere, and no entity, edge or memory has a bare `title` or
+  // `properties.title` is still deletable everywhere, and no entity, edge or fact has a bare `title` or
   // `startsAt` to remove.
   'title', 'startsAt', 'status',
 ]);
@@ -127,7 +127,7 @@ export function applyDeleteFields(
  * deletes it has asked for the deletion last. The `in` test is what makes that expressible at all: with the old
  * guard, that combination did not resolve one way or the other — it produced a rejected write.
  *
- * `memory.ts` had this right by a different route (it writes the `$set` first, then `delete $set[field]` beside the
+ * `fact.ts` had this right by a different route (it writes the `$set` first, then `delete $set[field]` beside the
  * `$unset`), and both broken files used the correct idiom a few lines away for a different field: `'_expireAt' in
  * $unset`. The test that was missing is the one that drives the real write path; `delete-fields.test.js` covered
  * the pure helper above, which was never the broken part.
@@ -140,7 +140,7 @@ export function setUnlessDeleted(
   requested: boolean,
 ): void {
   if (field in $unset) {
-    // Defensive: the caller may have written the `$set` before deciding on the `$unset`, as `memory.ts` does.
+    // Defensive: the caller may have written the `$set` before deciding on the `$unset`, as `fact.ts` does.
     delete $set[field];
     return;
   }

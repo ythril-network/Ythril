@@ -140,7 +140,7 @@ function makeBrain(overrides: Record<string, any> = {}) {
     getEdge: vi.fn(() => of(null as any)),
     getMemory: vi.fn(() => of(null as any)),
     getChrono: vi.fn(() => of(null as any)),
-    listMemories: vi.fn(() => of({ memories: [] })),
+    listFacts: vi.fn(() => of({ facts: [] })),
     queryBrain: vi.fn(() => of({ results: [], collection: 'chrono', count: 0 })),
     ...overrides,
   } as any;
@@ -197,7 +197,7 @@ describe('GraphComponent — detail rows are derived, not stored', () => {
       'Analytical Engine note',
       'chrono description fallback',
     ]);
-    expect(rows.map((r: any) => r.kind)).toEqual(['memory', 'memory', 'chrono', 'chrono']);
+    expect(rows.map((r: any) => r.kind)).toEqual(['fact', 'fact', 'chrono', 'chrono']);
   });
 
   it('gives chrono rows an empty properties bag even when the record has properties', () => {
@@ -216,7 +216,7 @@ describe('GraphComponent — detail rows are derived, not stored', () => {
     const c = withRows();
     c.detailTypeFilter.set('chrono');
     expect(c.filteredDetails().map((r: any) => r.id)).toEqual(['c2', 'c1']);
-    c.detailTypeFilter.set('memory');
+    c.detailTypeFilter.set('fact');
     expect(c.filteredDetails().map((r: any) => r.id)).toEqual(['m2', 'm1']);
   });
 
@@ -526,7 +526,7 @@ describe('GraphComponent — selection written from cytoscape handlers', () => {
     const { c, brain } = withGraph();
     cy.fire('tap', 'node', tapTarget('a'));
     expect(c.selectedNode()).toMatchObject({ _id: 'a', depth: 1 });
-    expect(brain.listMemories).toHaveBeenCalled();
+    expect(brain.listFacts).toHaveBeenCalled();
   });
 
   it('reconstructs the ROOT node on tap — it is absent from the traversal list', () => {
@@ -601,13 +601,13 @@ describe('GraphComponent — selection written from cytoscape handlers', () => {
   });
 
   it('an edge panel lists only records referencing BOTH endpoints — asymmetrically', () => {
-    // Characterizing an asymmetry rather than endorsing it: memories are fetched for `from` and then
+    // Characterizing an asymmetry rather than endorsing it: facts are fetched for `from` and then
     // filtered on `to` only, while chrono is filtered on `from` AND `to`. A chrono row that omits `from`
     // is therefore dropped where the equivalent memory row is kept. Pinned so a "tidy-up" of these two
     // filters into one helper is a visible decision, not an accident.
     const brain: any = makeBrain({
       traverseGraph: vi.fn(() => of(traverseResult([['a', 1]], [['e1', 'root', 'a']]))),
-      listMemories: vi.fn(() => of({ memories: [
+      listFacts: vi.fn(() => of({ facts: [
         { _id: 'both', entityIds: ['root', 'a'] },
         { _id: 'to-only', entityIds: ['a'] },        // kept: only `to` is checked
         { _id: 'from-only', entityIds: ['root'] },   // dropped

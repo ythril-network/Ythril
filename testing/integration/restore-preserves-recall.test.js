@@ -5,7 +5,7 @@
  * it, and dropping a collection destroys its vector search index with it. Nothing rebuilt them, so
  * after a restore:
  *
- *   - `remember` kept working and kept storing real vectors;
+ *   - `saveFact` kept working and kept storing real vectors;
  *   - `recall` returned an empty result set FOREVER;
  *   - `/ready` still reported `vectorSearch: ok`, because that probes the capability, not whether a
  *     given space's index exists.
@@ -66,7 +66,7 @@ describe('restore preserves semantic recall', () => {
 
     // 1. Store something recallable and confirm it is actually recallable BEFORE the restore, so a
     //    failure afterwards cannot be blamed on the fact never having been indexed.
-    const stored = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/memories', { fact, tags: ['restore-test'] });
+    const stored = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/facts', { fact, tags: ['restore-test'] });
     assert.equal(stored.status, 201, `store failed: ${JSON.stringify(stored.body)}`);
 
     const before = await recallEventually(fact);

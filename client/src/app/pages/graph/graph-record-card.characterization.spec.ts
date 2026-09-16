@@ -184,7 +184,7 @@ describe('the node card, for every kind that reaches it', () => {
    * and the card now asks them. One rule, one implementation — the divergence was the defect.
    */
   for (const [kind, record, shown] of [
-    ['memory', { _id: 'm1', fact: 'rotate the vault quarterly', type: 'note', createdAt: '2026-08-30T09:05:00.000Z' }, 'rotate the vault quarterly'],
+    ['fact', { _id: 'm1', fact: 'rotate the vault quarterly', type: 'note', createdAt: '2026-08-30T09:05:00.000Z' }, 'rotate the vault quarterly'],
     ['chrono', { _id: 'c1', title: 'carrier lost the unit', type: 'event', createdAt: '2026-08-30T09:05:00.000Z' }, 'carrier lost the unit'],
   ] as const) {
     it(`a ${kind} node shows what the record actually says`, () => {
@@ -207,7 +207,7 @@ describe('the node card, for every kind that reaches it', () => {
     // implementation this fix exists to remove, so it is asserted here rather than re-derived there.
     const f = create();
     const c = f.componentInstance as any;
-    c.selectedNode.set(node({ _id: 'm2', kind: 'memory' }));
+    c.selectedNode.set(node({ _id: 'm2', kind: 'fact' }));
     c.selectedEntityRecord.set({ _id: 'm2', description: 'only a description', createdAt: '2026-08-30T09:05:00.000Z' });
     f.detectChanges();
     expect(rows(card(f))[0]?.value).toBe('only a description');

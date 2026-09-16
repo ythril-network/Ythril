@@ -236,7 +236,7 @@ contradictionsRouter.post('/:id/resolve', globalRateLimit, requireAuth, denyRead
             undefined, undefined, undefined, undefined, undefined, webhookToken(req));
           edge = { id: e._id, from: e.from, to: e.to, label: e.label };
         } else {
-          // An edge in Ythril connects ENTITIES. Drawing one between two memories or two chrono entries
+          // An edge in Ythril connects ENTITIES. Drawing one between two facts or two chrono entries
           // would produce exactly the accepted-dead-edge an integrator reported (#695): a link that is
           // stored, returned, and points at nothing traversable.
           //

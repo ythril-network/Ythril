@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { TranslocoPipe } from '@jsverse/transloco';
-import { Entity, Edge, TraverseEdge, Memory, ChronoEntry } from '../../core/api.types';
+import { Entity, Edge, TraverseEdge, Fact, ChronoEntry } from '../../core/api.types';
 import { PropertiesViewComponent } from '../../shared/properties-view.component';
 import { GRAPH_RECORD_CARD_STYLES } from './graph.styles';
 import { memoryText, chronoText } from './graph-details';
@@ -128,13 +128,13 @@ export class GraphNodeRecordCardComponent {
   /**
    * The fetched record, or null while it is in flight or could not be fetched.
    *
-   * Typed as the union it has always RECEIVED. `loadNodeDetails` fetches by kind — `getRecord(space, 'memory',
+   * Typed as the union it has always RECEIVED. `loadNodeDetails` fetches by kind — `getRecord(space, 'fact',
    * id)` for a memory node — and then cast the result to `Entity`, which is what let the template read a
    * `name` that a memory does not have.
    */
-  readonly record = input<Entity | Memory | ChronoEntry | null>(null);
+  readonly record = input<Entity | Fact | ChronoEntry | null>(null);
   /** Which collection the node came from. Absent for an entity, as `TraverseNode.kind` reports it. */
-  readonly kind = input<'chrono' | 'memory' | 'file' | null>(null);
+  readonly kind = input<'chrono' | 'fact' | 'file' | null>(null);
   /** Why no record can be fetched, when that is a fact rather than a failure. */
   readonly unavailable = input<'file' | 'derived' | null>(null);
 
@@ -152,14 +152,14 @@ export class GraphNodeRecordCardComponent {
   readonly displayName = computed(() => {
     const rec = this.record();
     if (!rec) return '';
-    if (this.kind() === 'memory') return memoryText(rec as Memory);
+    if (this.kind() === 'fact') return memoryText(rec as Fact);
     if (this.kind() === 'chrono') return chronoText(rec as ChronoEntry);
     return (rec as Entity).name;
   });
 
   /** The first row's LABEL, which has to move with its value or a fact is announced as a name. */
   readonly nameLabel = computed(() => {
-    if (this.kind() === 'memory') return 'brain.memories.table.fact';
+    if (this.kind() === 'fact') return 'brain.facts.table.fact';
     if (this.kind() === 'chrono') return 'brain.chrono.table.title';
     return 'brain.entities.table.name';
   });

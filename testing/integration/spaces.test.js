@@ -141,7 +141,7 @@ describe('Space management', () => {
     // Use the explicit-test-space created in this run
     const isolationSpace = `explicit-test-space-${RUN_ID}`;
     // Write a memory to the explicit-test-space (it was created above and pushed to createdSpaceIds)
-    const writeR = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${isolationSpace}/memories`, {
+    const writeR = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${isolationSpace}/facts`, {
       fact: 'Isolated space fact',
       tags: ['isolation-test'],
     });
@@ -149,15 +149,15 @@ describe('Space management', () => {
     const memId = writeR.body._id ?? writeR.body.id;
 
     // Should NOT appear in general space
-    const generalR = await get(INSTANCES.a, tokenA, '/api/brain/spaces/general/memories');
+    const generalR = await get(INSTANCES.a, tokenA, '/api/brain/spaces/general/facts');
     assert.equal(generalR.status, 200);
-    const found = generalR.body.memories?.some(m => m._id === memId);
+    const found = generalR.body.facts?.some(m => m._id === memId);
     assert.ok(!found, `Memory from ${isolationSpace} must not appear in general space`);
 
     // Should appear in the isolation space
-    const ownSpaceR = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${isolationSpace}/memories`);
+    const ownSpaceR = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${isolationSpace}/facts`);
     assert.equal(ownSpaceR.status, 200);
-    const ownFound = ownSpaceR.body.memories?.some(m => m._id === memId);
+    const ownFound = ownSpaceR.body.facts?.some(m => m._id === memId);
     assert.ok(ownFound, 'Memory should be visible in its own space');
   });
 

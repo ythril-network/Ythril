@@ -78,14 +78,14 @@ export const AUDIT_CHANGE_FIELDS: Readonly<Record<string, readonly string[]>> = 
   'data.backup_config.update': ['schedule', 'retention.keepLocal', 'offsite.destPath', 'offsite.retention.keepCount'],
   // ── Brain record edits ─────────────────────────────────────────────────────────────────────────
   //
-  // These carry USER CONTENT — a memory's old text, an entity's old description — which is why they
+  // These carry USER CONTENT — a fact's old text, an entity's old description — which is why they
   // were an owner decision rather than another slice, and why their `changes` expire on a much shorter
   // clock than the entry (see `change-retention.ts`, default 14 days).
   //
   // `properties` is deliberately absent from every one of them. It is a free-form bag whose keys the
   // user chooses, so it is the one field on a record that could hold a pasted credential, and the
   // allowlist cannot vet names it has never seen. Same reasoning that keeps webhook routes out.
-  'memory.update': ['fact', 'description', 'type', 'tags', 'entityIds'],
+  'fact.update': ['fact', 'description', 'type', 'tags', 'entityIds'],
   'entity.update': ['name', 'type', 'description', 'tags'],
   'edge.update': ['label', 'from', 'to', 'weight', 'type'],
   'chrono.update': ['title', 'description', 'type', 'status', 'startsAt', 'endsAt', 'tags', 'entityIds', 'memoryIds'],
@@ -129,7 +129,7 @@ function scalarOrDrop(v: unknown): string | number | boolean | null | undefined 
  *     is the same fail-closed direction as everywhere else in this module.
  *
  * Recording added/removed rather than the whole before/after list keeps the entry proportional to the
- * change. Re-tagging one memory should not copy forty tags into the audit log twice.
+ * change. Re-tagging one fact should not copy forty tags into the audit log twice.
  */
 const LIST_FIELDS: ReadonlySet<string> = new Set(['tags', 'entityIds', 'memoryIds', 'chronoIds']);
 

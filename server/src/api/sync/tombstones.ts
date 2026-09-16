@@ -53,8 +53,8 @@ syncTombstonesRouter.get('/tombstones', syncRateLimit, requireAuth, async (req, 
      * lives on there for ever. Nothing reports it — the peer got a 200 with a well-formed body, and the
      * record it still holds looks exactly like a record nobody deleted.
      *
-     * `M-2` is the fifth type, and the key each one takes is its COLLECTION name (`memory` is served under
-     * `memories`) — which is a mapping that already exists rather than a naming convention to re-derive
+     * `M-2` is the fifth type, and the key each one takes is its COLLECTION name (`fact` is served under
+     * `facts`) — which is a mapping that already exists rather than a naming convention to re-derive
      * here. The response keys are the same as before plus `links`; JSON has no key order, so nothing a peer
      * parses changes.
      */
@@ -133,7 +133,7 @@ syncTombstonesRouter.post('/tombstones', syncRateLimit, requireAuth, denyReadOnl
      *                                                          `tombstoned` with a 200
      *
      * The sender reads only `resp.ok`, so it advances past the record and never offers it again. Silent,
-     * permanent, and one-directional. It is reachable today wherever a caller supplies the id — memories,
+     * permanent, and one-directional. It is reachable today wherever a caller supplies the id — facts,
      * entities and chrono all take one — and it is what would make a derived edge id unsafe (P-23).
      *
      * Bumped on everything RECEIVED rather than on what `applyRemoteTombstone` accepted. A tombstone it

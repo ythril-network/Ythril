@@ -46,7 +46,7 @@ syncWarmRouter.post('/warm', syncRateLimit, requireAuth, async (req, res) => {
         log.warn(`Warm: embedding model failed: ${err}`),
       ),
       ...body.spaces.flatMap(sid => [
-        col(`${sid}_memories`).findOne(asFilter({}), { projection: { _id: 1 } }).catch(() => {}),
+        col(`${sid}_facts`).findOne(asFilter({}), { projection: { _id: 1 } }).catch(() => {}),
         col(`${sid}_entities`).findOne(asFilter({}), { projection: { _id: 1 } }).catch(() => {}),
         col(`${sid}_edges`).findOne(asFilter({}), { projection: { _id: 1 } }).catch(() => {}),
         col(`${sid}_chrono`).findOne(asFilter({}), { projection: { _id: 1 } }).catch(() => {}),

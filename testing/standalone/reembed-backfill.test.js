@@ -182,7 +182,7 @@ describe('the comment that promised a sweep that never existed', () => {
 describe('suppression is expressible as a query, which is what makes the sweep terminate', () => {
   it('excludes the record tier with $ne, not $exists', async () => {
     const { suppressionExclusion } = await import('../../server/dist/brain/reembed.js');
-    const { query } = suppressionExclusion(undefined, 'memory');
+    const { query } = suppressionExclusion(undefined, 'fact');
     assert.deepEqual(query['suppressEmbeddings'], { $ne: true },
       '$exists:false would also exclude a record that carries the flag as FALSE — an explicit opt-in');
     // The pre-3.1.0 spelling was asserted here too and went with `D-6` in 4.0. Its ABSENCE is asserted
@@ -196,11 +196,11 @@ describe('suppression is expressible as a query, which is what makes the sweep t
     const { suppressionExclusion } = await import('../../server/dist/brain/reembed.js');
     const meta = {
       typeSchemas: {
-        memory: { note: { suppressEmbeddings: false }, task: { suppressEmbeddings: true } },
+        fact: { note: { suppressEmbeddings: false }, task: { suppressEmbeddings: true } },
         edge: { blocks: { suppressEmbeddings: true } },
       },
     };
-    assert.deepEqual(suppressionExclusion(meta, 'memory').query['type'], { $nin: ['task'] });
+    assert.deepEqual(suppressionExclusion(meta, 'fact').query['type'], { $nin: ['task'] });
     // Edges key on `label`. Reading `type` for an edge finds no schema, looks like it worked, and excludes
     // nothing — for the one record kind suppression was specifically widened to cover.
     assert.deepEqual(suppressionExclusion(meta, 'edge').query['label'], { $nin: ['blocks'] });
@@ -209,15 +209,15 @@ describe('suppression is expressible as a query, which is what makes the sweep t
 
   it('says ALL when the space-wide tier is on and nothing can override it', async () => {
     const { suppressionExclusion } = await import('../../server/dist/brain/reembed.js');
-    assert.equal(suppressionExclusion({ suppressEmbeddings: true }, 'memory'), 'all',
+    assert.equal(suppressionExclusion({ suppressEmbeddings: true }, 'fact'), 'all',
       'a space that suppresses everything has NO WORK, which is a different report from work left over');
   });
 
   it('does NOT say ALL when a type schema releases a type', async () => {
     // `record > schema > space`: a schema saying false lifts its type back out, so the sweep still has work.
     const { suppressionExclusion } = await import('../../server/dist/brain/reembed.js');
-    const meta = { suppressEmbeddings: true, typeSchemas: { memory: { note: { suppressEmbeddings: false } } } };
-    const res = suppressionExclusion(meta, 'memory');
+    const meta = { suppressEmbeddings: true, typeSchemas: { fact: { note: { suppressEmbeddings: false } } } };
+    const res = suppressionExclusion(meta, 'fact');
     assert.notEqual(res, 'all', 'claiming ALL here would skip the types an operator explicitly released');
     assert.deepEqual(res.query['type'], { $in: ['note'] });
   });
@@ -225,13 +225,13 @@ describe('suppression is expressible as a query, which is what makes the sweep t
   it('treats a type schema that says NOTHING as falling through, not as false', async () => {
     // The tier rule is "absent means not stated". A silent type under space-wide suppression stays suppressed.
     const { suppressionExclusion } = await import('../../server/dist/brain/reembed.js');
-    const meta = { suppressEmbeddings: true, typeSchemas: { memory: { note: {} } } };
-    assert.equal(suppressionExclusion(meta, 'memory'), 'all');
+    const meta = { suppressEmbeddings: true, typeSchemas: { fact: { note: {} } } };
+    assert.equal(suppressionExclusion(meta, 'fact'), 'all');
   });
 
   it('a file has no type tier, so no type field appears in its exclusion', async () => {
     const { suppressionExclusion } = await import('../../server/dist/brain/reembed.js');
-    const meta = { typeSchemas: { memory: { task: { suppressEmbeddings: true } } } };
+    const meta = { typeSchemas: { fact: { task: { suppressEmbeddings: true } } } };
     const { query } = suppressionExclusion(meta, 'file');
     // One key since `D-6` retired the pre-3.1.0 spelling. A WHOLE-object comparison rather than a
     // presence check, deliberately: the property is that a file's exclusion has the record tier and

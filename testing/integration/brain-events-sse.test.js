@@ -2,7 +2,7 @@
  * Integration: live brain-change SSE stream (F12) — GET /api/brain/spaces/:spaceId/events
  *
  *  - a REST write on the space pushes a `data:` event to a subscribed EventSource-style client
- *  - the event names the collection (`memory.created`) so the client can refresh the right tab
+ *  - the event names the collection (`fact.created`) so the client can refresh the right tab
  *  - the stream authenticates via a single-use `?ticket=` minted by an authenticated POST (EventSource
  *    can't set headers; a raw token in the URL would leak into logs/history)
  *  - a raw `?token=` is REJECTED (the query-token fallback was removed from browser SSE)
@@ -75,14 +75,14 @@ describe('brain events SSE (F12)', () => {
       const eventP = nextEvent(res);
       await delay(300); // ensure the server-side subscription is active before we write
 
-      const w = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/memories', { fact: `sse-probe-${Date.now()}` });
+      const w = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/facts', { fact: `sse-probe-${Date.now()}` });
       assert.equal(w.status, 201, JSON.stringify(w.body));
 
       const ev = await Promise.race([eventP, delay(10_000).then(() => { throw new Error('no SSE event within 10s'); })]);
-      assert.equal(ev.event, 'memory.created', `unexpected event: ${JSON.stringify(ev)}`);
+      assert.equal(ev.event, 'fact.created', `unexpected event: ${JSON.stringify(ev)}`);
       assert.equal(ev.id, w.body._id, 'event should carry the new record id');
 
-      await del(INSTANCES.a, tokenA, `/api/brain/spaces/general/memories/${w.body._id}`).catch(() => {});
+      await del(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${w.body._id}`).catch(() => {});
     } finally {
       req.destroy();
     }

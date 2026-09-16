@@ -129,7 +129,7 @@ describe('the embedding suppression section', () => {
   const withMeta = (meta: Record<string, unknown>) => {
     const h = setup(true, {
       updateSpace: vi.fn().mockReturnValue(of({ space: { id: 'proj', label: 'Project' } })),
-      reembedSpace: vi.fn().mockReturnValue(of({ spaceId: 'proj', enqueued: 12, skippedSuppressed: 0, byKind: { memory: 12 }, remaining: 0, truncated: false })),
+      reembedSpace: vi.fn().mockReturnValue(of({ spaceId: 'proj', enqueued: 12, skippedSuppressed: 0, byKind: { fact: 12 }, remaining: 0, truncated: false })),
     });
     h.state.settingsSpace.set({ id: 'other', label: 'Other', meta } as never);
     TestBed.tick();
@@ -162,8 +162,8 @@ describe('the embedding suppression section', () => {
 
   it('lists only the types that STATE a value', () => {
     // A type that says nothing inherits; listing it would suggest an override that is not there.
-    const h = withMeta({ typeSchemas: { memory: { note: { suppressEmbeddings: true }, plain: {} }, entity: { row: { suppressEmbeddings: false } } } });
-    expect(h.c.declaredSuppression().map(r => r.key).sort()).toEqual(['entity.row', 'memory.note']);
+    const h = withMeta({ typeSchemas: { fact: { note: { suppressEmbeddings: true }, plain: {} }, entity: { row: { suppressEmbeddings: false } } } });
+    expect(h.c.declaredSuppression().map(r => r.key).sort()).toEqual(['entity.row', 'fact.note']);
   });
 
   it('keeps the backfill result, because the counts ARE the answer', () => {

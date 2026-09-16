@@ -495,7 +495,7 @@ export class AuditLogComponent implements OnInit, OnDestroy {
   }
 
   readonly operations = [
-    'memory.create', 'memory.update', 'memory.delete',
+    'fact.create', 'fact.update', 'fact.delete',
     'entity.create', 'entity.update', 'entity.delete',
     'edge.create', 'edge.update', 'edge.delete',
     'chrono.create', 'chrono.update', 'chrono.delete',
@@ -506,7 +506,7 @@ export class AuditLogComponent implements OnInit, OnDestroy {
     'config.reload',
     'auth.failed',
     'brain.recall', 'brain.recall_global', 'brain.query', 'brain.stats',
-    'chrono.list', 'memory.list', 'entity.list', 'edge.list',
+    'chrono.list', 'fact.list', 'entity.list', 'edge.list',
     'file.read', 'file.list', 'space.list',
   ];
 

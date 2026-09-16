@@ -206,7 +206,7 @@ docker compose up -d
 npm run test:integration
 ```
 
-Covers: setup gating, auth, files, spaces, brain CRUD (memories, entities, edges, chrono), schema validation (strict/warn/off, bulk, dry-run), networks, voting, invite handshake, MCP tools (including bulk_write), notifications, about endpoint, sync history, space rename, space deletion, space export, space wipe, conflict resolution, proxy spaces.
+Covers: setup gating, auth, files, spaces, brain CRUD (facts, entities, edges, chrono), schema validation (strict/warn/off, bulk, dry-run), networks, voting, invite handshake, MCP tools (including bulk_write), notifications, about endpoint, sync history, space rename, space deletion, space export, space wipe, conflict resolution, proxy spaces.
 
 #### Rate-limit kill-switches
 
@@ -400,7 +400,7 @@ The codebase targets production deployments with large datasets and high concurr
 - **No unbounded queries.** Every database query that could return an arbitrary number of documents uses a `limit`. Pagination is the default; fetching "all" is the exception and must be explicitly justified.
 - **No unbounded recursion or chain walks.** Any traversal (graphs, fork chains, nested structures) must have a hard depth cap with a visited-set cycle guard. The `forkChainDepth()` pattern in `sync.ts` is the reference implementation.
 - **Indexes exist for every query pattern.** When adding a new `find()` or `countDocuments()` call, ensure a supporting index exists or create one. Queries that scan entire collections are rejected in review.
-- **Streaming over buffering.** File transfers use streams. Large response sets are paginated. No endpoint loads an entire collection into memory.
+- **Streaming over buffering.** File transfers use streams. Large response sets are paginated. No endpoint loads an entire collection into fact.
 - **Rate limits protect every public surface.** The rate-limit middleware is applied to all route groups. Limits are tuned per-endpoint based on expected traffic, not a global catch-all.
 - **Background work uses bounded workers.** Retry queues, webhook delivery, and cleanup jobs use capped concurrency and MongoDB-backed scheduling — not in-memory timers or `setTimeout` chains.
 
@@ -447,7 +447,7 @@ Ythril ships under the PolyForm Small Business License 1.0.0. Every contribution
 
 Choose a migration strategy by **whether the data syncs across networks**, because sync applies pulled records with a **whole-document `replaceOne` (last-writer-wins by `seq`)**, not a field-level merge (`server/src/sync/engine.ts`).
 
-- **Synced data → self-healing (lazy), never a one-time boot migration.** The per-space MongoDB record collections that replicate across networks — memories, entities, edges, chrono, `{space}_files`, and their fields — can be silently reverted by a **mixed-version peer**: an older-version instance that rewrites a record with a higher `seq` replaces the *whole* document and undoes any boot migration. So don't migrate these on boot — **repair or derive the field on access**, so it re-heals after any cross-version clobber. Examples: token prefixes backfilled on first use (`index.ts`); a file's raw size (`sizeBytes`) re-`stat`'d from disk when a record lacks it.
+- **Synced data → self-healing (lazy), never a one-time boot migration.** The per-space MongoDB record collections that replicate across networks — facts, entities, edges, chrono, `{space}_files`, and their fields — can be silently reverted by a **mixed-version peer**: an older-version instance that rewrites a record with a higher `seq` replaces the *whole* document and undoes any boot migration. So don't migrate these on boot — **repair or derive the field on access**, so it re-heals after any cross-version clobber. Examples: token prefixes backfilled on first use (`index.ts`); a file's raw size (`sizeBytes`) re-`stat`'d from disk when a record lacks it.
 - **Local, non-synced state → an idempotent boot migration is fine.** State the single instance owns and no peer overwrites — `config.json` (loader migrations), at-rest state-file encryption, index creation (`createIndex`/TTL) — converges once on boot and stays. Keep it idempotent (a no-op once applied) so re-running is free.
 - **A stored-field rename on a synced collection is the fragile case.** It changes the wire format, so mixed-version peers see a blank for the name they don't know until everyone upgrades. Do it only at a major release, document it as breaking, and prefer pairing it with a self-healing field for anything that must stay correct.
 

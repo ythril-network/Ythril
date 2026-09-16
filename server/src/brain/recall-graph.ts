@@ -62,9 +62,9 @@ import { applyProjection, type NormalisedProjection } from './projection.js';
 export function graphNodeRecord(e: TraverseHopRecord): Record<string, unknown> {
   /*
    * A record reached through a LINK is not an entity and has no `name`. It arrives holding its class
-   * projection — `title`/`type` for a chrono, `fact`/`type` for a memory, `path`/`description`/`tags` for a
+   * projection — `title`/`type` for a chrono, `fact`/`type` for a fact, `path`/`description`/`tags` for a
    * file — plus `kind`, and that projection IS the contract: a structural walk must not pay for a file's
-   * passage text or a memory's whole body, which is why the projection exists in `LINK_CLASSES` at all.
+   * passage text or a fact's whole body, which is why the projection exists in `LINK_CLASSES` at all.
    *
    * So the allowlist below is the ENTITY allowlist, and running a chrono through it would return an object
    * with an id and nothing else — a node that looks empty rather than one that says what it is. Emitting

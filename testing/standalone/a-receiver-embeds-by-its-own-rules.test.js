@@ -56,7 +56,7 @@ const src = (p) => stripComments(readFileSync(p, 'utf8'));
 
 /** The four types, and the collection each lands in. */
 const TYPES = [
-  ['memory', 'memories'],
+  ['fact', 'facts'],
   ['entity', 'entities'],
   ['edge', 'edges'],
   ['chrono', 'chrono'],
@@ -66,7 +66,7 @@ describe('nothing writes an arriving record without offering it to the embedder'
   it('the ingest file is the one this gate thinks it is', () => {
     // Floors every assertion below: a moved file would read as an empty string and pass everything.
     const s = src(DOCS);
-    assert.ok(s.includes('IncomingMemoryDoc'), `${DOCS} is not the sync ingest router any more — re-anchor`);
+    assert.ok(s.includes('IncomingFactDoc'), `${DOCS} is not the sync ingest router any more — re-anchor`);
     assert.ok(s.length > 10_000, 'the ingest router is suspiciously small — re-anchor this gate');
   });
 
@@ -215,10 +215,10 @@ describe('the record tier of suppression reaches the receiver', () => {
   });
 
   it('and the flag is optional, because absent means included', async () => {
-    // Requiring it is the mistake this whole family of bugs is made of: `IncomingMemoryDoc` once required
+    // Requiring it is the mistake this whole family of bugs is made of: `IncomingFactDoc` once required
     // `embedding`, and every suppressed memory was silently dropped from the batch for it.
     const shared = await import('../../server/dist/api/sync/_shared.js');
-    const ok = shared.IncomingMemoryDoc.safeParse({
+    const ok = shared.IncomingFactDoc.safeParse({
       _id: '11111111-1111-4111-8111-111111111111',
       spaceId: 'demo',
       fact: 'no flag at all',

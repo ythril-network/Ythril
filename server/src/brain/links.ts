@@ -3,7 +3,7 @@
  *
  * ## What a link record is
  *
- * Six public array fields say that one record concerns others: `memory.entityIds`, `chrono.entityIds`,
+ * Six public array fields say that one record concerns others: `fact.entityIds`, `chrono.entityIds`,
  * `chrono.memoryIds`, and `file.entityIds`/`memoryIds`/`chronoIds`. `M-2` stores each entry as its own small
  * record in the space's `links` collection, so that the five adjacency readers — which each followed a
  * different subset of those six fields — have one place to look. Owner's design, 2026-08-29: *"make all
@@ -42,24 +42,31 @@ import { col, asFilter, asDoc } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
 import { nextSeq } from '../util/seq.js';
 import { edgeIdFor } from './edge-id.js';
+import { fieldFor } from './link-adjacency.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { AuthorRef, LinkDoc, TombstoneDoc } from '../config/types.js';
 // `RefKind` is re-exported by `types.ts` as a type only, so it comes from the leaf that DECLARES it —
 // the same import every other `brain/` module that needs it uses.
 import type { RefKind } from '../config/types-knowledge.js';
 
-/**
- * The array field a link of this kind came from — `entity` → `entityIds`.
+/*
+ * The array field a link of this kind came from is `fieldFor`, IMPORTED — this file held its own copy,
+ * spelled `` `${toKind}Ids` ``, and the copy was the one that WRITES.
  *
- * Derived rather than mapped, because the three names are the same word plus `Ids` and a three-entry map
- * would be a second place to state a rule the vocabulary already implies.
+ * It was correct while every kind's field was its own name plus `Ids`, and the 5.0 type rename ended that:
+ * the type became `fact` while the stored field stays `memoryIds`, because those six arrays replicate and
+ * are merkle-hashed and renaming one is a wire break on every peer. So the derived copy started answering
+ * `factIds` — a key nothing reads and nothing writes — and a link write would have `$addToSet`ed into it
+ * while every reader looked at `memoryIds`. No error: an array that is not there reads as no links.
+ *
+ * One rule, two implementations, and the weaker one winning silently. The surviving one is in
+ * `link-adjacency.ts` next to `STORED_FIELD`, which is where the exception is written down.
  */
-const fieldFor = (toKind: RefKind): string => `${toKind}Ids`;
 
 /**
  * The label a link carries in a traverse result — DERIVED, never stored.
  *
- * `LINK_CLASSES` prints `memory.entityIds`, `chrono.entityIds` and `file.entityIds` today, and the three
+ * `LINK_CLASSES` prints `fact.entityIds`, `chrono.entityIds` and `file.entityIds` today, and the three
  * classes with no reader yet extend the same pattern. Deriving it here means the label a reader shows and
  * the id a writer computes come from one expression: store it and the two can disagree, which is the defect
  * shape this migration exists to remove rather than to reproduce.
@@ -77,7 +84,7 @@ export type DesiredLinks = Partial<Record<RefKind, readonly string[]>>;
  * Make the link records for one record equal what its arrays now say.
  *
  * `desired` names only the classes the caller wrote. A class it omits is left alone entirely — which is the
- * distinction a `PATCH` needs, because omitting `memoryIds` means "leave the memory links" and not "remove
+ * distinction a `PATCH` needs, because omitting `memoryIds` means "leave the fact links" and not "remove
  * them". An empty array is the opposite and does mean remove: that is the caller having written `[]`.
  *
  * Returns how many rows were added and removed, so a caller can log it and the conversion script can report
@@ -102,7 +109,7 @@ export async function reconcileLinks(
     }
   }
 
-  // Only the classes this write TOUCHED. A `PATCH` that names `entityIds` alone must not disturb the memory
+  // Only the classes this write TOUCHED. A `PATCH` that names `entityIds` alone must not disturb the fact
   // links, so the existing set is read per class rather than per `from`.
   const existing = await col<LinkDoc>(`${spaceId}_links`)
     .find(asFilter<LinkDoc>({ spaceId, from, fromKind, toKind: { $in: classes } }), { projection: { _id: 1 } })
@@ -149,7 +156,7 @@ export async function reconcileLinks(
 /**
  * Remove every link record a deleted record was the FROM of.
  *
- * The other half of the cascade, and the one that is easy to forget: deleting a memory leaves its links to
+ * The other half of the cascade, and the one that is easy to forget: deleting a fact leaves its links to
  * entities describing a connection whose subject no longer exists. Links pointing AT the deleted record are
  * a different question and belong to the readers' slice — a dangling `to` is what `strictLinkage` already
  * refuses to create, and removing them here would silently delete another record's data.
@@ -168,13 +175,13 @@ function allClassesEmpty(fromKind: RefKind): DesiredLinks {
 /**
  * Which classes each record kind can hold — the six, keyed by the FROM side.
  *
- * Written out because it is a product fact rather than a derivable one: a memory names entities and nothing
- * else, a chrono entry names entities and memories, a file names all three. An entity is only ever a `to`.
+ * Written out because it is a product fact rather than a derivable one: a fact names entities and nothing
+ * else, a chrono entry names entities and facts, a file names all three. An entity is only ever a `to`.
  */
 const CLASSES_BY_FROM: Partial<Record<RefKind, readonly RefKind[]>> = {
-  memory: ['entity'],
-  chrono: ['entity', 'memory'],
-  file: ['entity', 'memory', 'chrono'],
+  fact: ['entity'],
+  chrono: ['entity', 'fact'],
+  file: ['entity', 'fact', 'chrono'],
 };
 
 /** A removal has no author to attribute; the tombstone carries the instance id instead. */
@@ -188,7 +195,7 @@ const NO_AUTHOR: AuthorRef = { instanceId: '', instanceLabel: '' };
  * name in scope when it needs this.
  */
 export const LINK_BEARING_COLLECTIONS: Record<string, RefKind | undefined> = {
-  memories: 'memory',
+  facts: 'fact',
   chrono: 'chrono',
   files: 'file',
 };
@@ -213,12 +220,12 @@ const idsOn = (doc: Record<string, unknown> | null, toKind: RefKind): string[] =
 /**
  * Tell a subscriber the RECORD changed, because it did — its array gained or lost an id.
  *
- * The door writes the array with an `updateOne` rather than through `updateMemory` and its two counterparts,
+ * The door writes the array with an `updateOne` rather than through `updateFact` and its two counterparts,
  * so nothing below it fires the event those writers fire. Left out, a link added through this door would be
  * invisible to a subscriber that hears about every other way the same field is written — one change, two
  * paths, and only one of them reported.
  *
- * `memory`, `chrono` and `file` are exactly the three FROM kinds, and `<kind>.updated` is a real event name
+ * `fact`, `chrono` and `file` are exactly the three FROM kinds, and `<kind>.updated` is a real event name
  * for each. An entity is only ever a `to`, so there is no fourth case to miss.
  */
 function emitRecordUpdated(spaceId: string, fromKind: RefKind, id: string, actor?: WebhookActor): void {
@@ -248,7 +255,7 @@ export const LINK_PAIRS: readonly (readonly [RefKind, RefKind])[] = Object.entri
  *
  * Because the row would not survive. `reconcileLinks` makes the stored rows equal what the arrays say, so a
  * row the array never claimed is deleted by the next ordinary write to that record — an unrelated PATCH of a
- * memory's `fact`, hours later, by somebody who has never heard of this link. The insert succeeds, the edit
+ * fact's `fact`, hours later, by somebody who has never heard of this link. The insert succeeds, the edit
  * succeeds, and the link is gone with nothing in between reporting anything.
  *
  * So the array is written first and the row is derived from it, which also means this door cannot disagree
@@ -353,7 +360,7 @@ export async function reconcileLinksForDocument(
   const ids = (k: string) => (Array.isArray(doc[k]) ? doc[k] as string[] : undefined);
   const desired: DesiredLinks = {
     ...(ids('entityIds') !== undefined ? { entity: ids('entityIds')! } : {}),
-    ...(ids('memoryIds') !== undefined ? { memory: ids('memoryIds')! } : {}),
+    ...(ids('memoryIds') !== undefined ? { fact: ids('memoryIds')! } : {}),
     ...(ids('chronoIds') !== undefined ? { chrono: ids('chronoIds')! } : {}),
   };
   if (Object.keys(desired).length === 0) return;

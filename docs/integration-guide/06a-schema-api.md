@@ -11,7 +11,7 @@ GET /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName
 Authorization: Bearer <token>
 ```
 
-Returns a single type definition from the space's `typeSchemas`. `:knowledgeType` must be one of `entity`, `memory`, `edge`, `chrono`.
+Returns a single type definition from the space's `typeSchemas`. `:knowledgeType` must be one of `entity`, `fact`, `edge`, `chrono`.
 
 **Response** `200`:
 
@@ -60,7 +60,7 @@ Before the new schema is written, the previous `typeSchemas` is automatically ba
       "service": { "namingPattern": "^[a-z][a-z0-9-]{1,60}$" },
       "person":  {}
     },
-    "memory": { "decision": {} },
+    "fact": { "decision": {} },
     "edge":   { "depends_on": {} },
     "chrono": { "release": {} }
   }
@@ -112,7 +112,7 @@ An empty object `{}` is valid and registers the type name as allowed (no extra c
 
 **Constraints:**
 
-- `:knowledgeType` must be one of `entity`, `memory`, `edge`, `chrono`.
+- `:knowledgeType` must be one of `entity`, `fact`, `edge`, `chrono`.
 - The body is validated with the same `TypeSchema` Zod rules as the full `PATCH /api/spaces/:id` endpoint (property schema `mergeFn`/`type` compatibility, field max lengths, etc.).
 - At most 200 type definitions per knowledge type. Adding a 201st type returns `400`.
 - The meta version counter is incremented and the previous version is pushed to history (same as full PATCH).
@@ -252,7 +252,7 @@ refused for properties that record already had.
 
 **Schema structure — `typeSchemas`:**
 
-The schema is expressed as a single `typeSchemas` object on the space `meta`. It groups configuration by knowledge type (`entity`, `edge`, `memory`, `chrono`) and then by type name (e.g. `"service"`, `"depends_on"`). Each entry is a `TypeSchema` object:
+The schema is expressed as a single `typeSchemas` object on the space `meta`. It groups configuration by knowledge type (`entity`, `edge`, `fact`, `chrono`) and then by type name (e.g. `"service"`, `"depends_on"`). Each entry is a `TypeSchema` object:
 
 ```typescript
 interface TypeSchema {
@@ -310,7 +310,7 @@ interface PropertySchema {
       "depends_on": {},
       "owns": {}
     },
-    "memory": {
+    "fact": {
       "default": {
         "propertySchemas": {
           "confidence": { "type": "number", "minimum": 0, "maximum": 1, "default": 1 }
@@ -330,7 +330,7 @@ What the schema enforces:
 - **Entity type allowlist** — the keys of `typeSchemas.entity` (e.g. `"service"`, `"team"`) define the allowed entity `type` values (max 200 per knowledge type).
 - **Edge label allowlist** — the keys of `typeSchemas.edge` define the allowed edge `label` values.
 - **Chrono type allowlist** — the keys of `typeSchemas.chrono` define the allowed `type` values.
-- **Memory type allowlist** — the keys of `typeSchemas.memory` define the allowed `type` values.
+- **Fact type allowlist** — the keys of `typeSchemas.fact` define the allowed `type` values.
 - **Naming patterns** (`namingPattern`) — per entity type, a regex for validating `name` (max 500 chars, ReDoS-protected).
 - **Property value constraints** (`propertySchemas`) — per type, define `type` (string/number/boolean/date), `enum`, `minimum`/`maximum`, `pattern` (regex, ReDoS-protected), `required`, `default`, and `mergeFn`.
 - **Tag suggestions** (`tagSuggestions`) — **removed in 3.0.** Both the per-type and the space-wide list
@@ -352,7 +352,7 @@ What the schema enforces:
 ### An edge label can declare its ends, and whether a subject may have more than one (3.7)
 
 Two fields on an **edge** type schema, refused on the other three collections rather than silently ignored —
-they name things an entity, a memory or a chrono entry does not have.
+they name things an entity, a fact or a chrono entry does not have.
 
 ```json
 { "typeSchemas": { "edge": {
@@ -374,7 +374,7 @@ pair — which you can already do. There is deliberately no pairs form.
 `UNTYPED` for entities that have no type. Untyped entities are ordinary, so they are admissible by SAYING so
 rather than by being refused in silence — and an untyped entity at an end that names a type IS a violation. A
 member may also be written `entity:<type>`; a bare name means the same thing. Any other knowledge-type prefix
-(`memory:`, `chrono:`, `edge:`) is refused with a message saying why: the grammar is reserved for if those
+(`fact:`, `chrono:`, `edge:`) is refused with a message saying why: the grammar is reserved for if those
 records can ever be edge endpoints, so it cannot later be read as a type name that happens to contain a colon.
 
 **`functional: true` means one `to` per `(from, label)`.** Not per `(from, to)` — that is already guaranteed by
@@ -393,7 +393,7 @@ schema can never make a record unmaintainable. Re-writing the same `(from, to, l
 **An endpoint that resolves to nothing is not a type violation.** With `strictLinkage: false` a dangling
 reference is a deliberate documented state, and `ErModel.danglingEdges` has a row for it; a `to` that cannot be
 resolved is left unchecked rather than refused, so one setting's escape hatch is not read as another setting's
-breach. Endpoint types are also only resolved for **entity** ends: a memory, chrono or file end has no type in
+breach. Endpoint types are also only resolved for **entity** ends: a fact, chrono or file end has no type in
 this vocabulary.
 
 **And the stored edges are still auditable.** [`POST /api/spaces/:id/validate-schema`](06-spaces-api.md) lists
@@ -406,7 +406,7 @@ number of spaces reference; a delete window belongs to a type in one space.
 
 Schema validation runs on:
 
-- Individual writes: `POST /entities`, `POST /edges`, `POST /memories`, `POST /chrono`
+- Individual writes: `POST /entities`, `POST /edges`, `POST /facts`, `POST /chrono`
 - Bulk writes: `POST /bulk` (per-item; strict skips violating items, warn records warnings)
 - MCP tools: `save_fact`, `save_entity`, `save_edge`, `save_chrono`, `save_bulk`
 

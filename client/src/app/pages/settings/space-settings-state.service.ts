@@ -230,7 +230,7 @@ export class SpaceSettingsState {
 
   readonly KINDS: readonly KnowledgeType[] = KNOWLEDGE_TYPES;
   readonly KIND_LABELS: Record<KnowledgeType, string> = {
-    entity: 'Entities', memory: 'Memories', edge: 'Edges', chrono: 'Chrono',
+    entity: 'Entities', fact: 'Memories', edge: 'Edges', chrono: 'Chrono',
   };
 
   // ── dialog shell ───────────────────────────────────────────────────────────
@@ -273,9 +273,9 @@ export class SpaceSettingsState {
    * retirement is reversible; silently destroying an operator's data to tidy up a field would not be.
    */
   schTypeSchemas:    Partial<Record<KnowledgeType, Record<string, TypeSchemaState>>> = {
-    entity: {}, memory: {}, edge: {}, chrono: {},
+    entity: {}, fact: {}, edge: {}, chrono: {},
   };
-  schNewTypeInputs:  Record<string, string> = { entity: '', memory: '', edge: '', chrono: '' };
+  schNewTypeInputs:  Record<string, string> = { entity: '', fact: '', edge: '', chrono: '' };
   /** The type shown in the master/detail editor pane (single-select — that's what master/detail is). */
   schSelectedType:   { kt: KnowledgeType; name: string } | null = null;
   /** Property editors open in the detail pane. Multiple may be open at once (U4). Keyed `kt|type|prop`. */
@@ -314,7 +314,7 @@ export class SpaceSettingsState {
     const meta = s.meta ?? {};
     this.schValidation     = meta.validationMode ?? 'off';
     this.schStrictLinkage  = meta.strictLinkage ?? false;
-    this.schNewTypeInputs  = { entity: '', memory: '', edge: '', chrono: '' };
+    this.schNewTypeInputs  = { entity: '', fact: '', edge: '', chrono: '' };
     this.schSelectedType   = null;
     this.schExpandedProps.clear();
     const loadKt = (kt: KnowledgeType): Record<string, TypeSchemaState> => {
@@ -357,7 +357,7 @@ export class SpaceSettingsState {
     };
     this.schTypeSchemas = {
       entity: loadKt('entity'),
-      memory: loadKt('memory'),
+      fact: loadKt('fact'),
       edge:   loadKt('edge'),
       chrono: loadKt('chrono'),
     };
@@ -628,7 +628,7 @@ export class SpaceSettingsState {
     const s = this.dangerWipeStats();
     if (!s) return [];
     return [
-      { label: this.transloco.translate('spaces.stats.memories'), value: s.memories },
+      { label: this.transloco.translate('spaces.stats.facts'), value: s.facts },
       { label: this.transloco.translate('spaces.stats.entities'), value: s.entities },
       { label: this.transloco.translate('spaces.stats.edges'),    value: s.edges    },
       { label: this.transloco.translate('spaces.stats.chrono'),   value: s.chrono   },

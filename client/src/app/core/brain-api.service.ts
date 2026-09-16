@@ -3,7 +3,7 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import type {
-  Memory, Entity, Edge, ChronoEntry, ChronoType, ChronoStatus,
+  Fact, Entity, Edge, ChronoEntry, ChronoType, ChronoStatus,
   QueryCollection, QueryResult, RecallKnowledgeType, RecallResponse, TraverseResult, EmbeddingQueue,
   TokenAccessEntry, ErModel, ErModelMembers,
 } from './api.types';
@@ -18,7 +18,7 @@ export interface ListSort {
   dir: 'asc' | 'desc';
 }
 
-/** Brain knowledge graph — memories, entities, edges, chrono, plus query/recall/traverse. */
+/** Brain knowledge graph — facts, entities, edges, chrono, plus query/recall/traverse. */
 /**
  * The body `POST /recall` takes — exported so ONE declaration serves both callers.
  *
@@ -99,7 +99,7 @@ export interface RecallRequestBody {
         /** Only follow edges carrying these labels. Absent means every label. */
         edgeLabels?: string[];
         /**
-         * Whether the walk also returns the chrono entries, memories and files it reached.
+         * Whether the walk also returns the chrono entries, facts and files it reached.
          *
          * All three arrived with A-2 INSIDE this object, which is why the mechanical five-places check did
          * not fire for them: it compares top-level request keys. They were reachable from an MCP call and
@@ -220,9 +220,9 @@ export class BrainApi {
     return this.http.post<RecallResponse>('/api/brain/recall', { ...body, space: spaceId });
   }
 
-  // ── Brain — memories ──────────────────────────────────────────────────────
+  // ── Brain — facts ──────────────────────────────────────────────────────
 
-  listMemories(spaceId: string, limit = 20, skip = 0, filters?: { tag?: string; entity?: string; type?: string; description?: string; properties?: string; entityName?: string }, sort?: ListSort, search?: string): Observable<{ memories: Memory[]; limit: number; skip: number }> {
+  listFacts(spaceId: string, limit = 20, skip = 0, filters?: { tag?: string; entity?: string; type?: string; description?: string; properties?: string; entityName?: string }, sort?: ListSort, search?: string): Observable<{ facts: Fact[]; limit: number; skip: number }> {
     let params = new HttpParams().set('limit', limit).set('skip', skip);
     if (filters?.tag) params = params.set('tag', filters.tag);
     if (filters?.entity) params = params.set('entity', filters.entity);
@@ -232,23 +232,23 @@ export class BrainApi {
     if (filters?.properties) params = params.set('properties', filters.properties);
     if (search) params = params.set('search', search);
     params = this.withSort(params, sort);
-    return this.http.get<any>(`/api/brain/spaces/${spaceId}/memories`, { params });
+    return this.http.get<any>(`/api/brain/spaces/${spaceId}/facts`, { params });
   }
 
-  deleteMemory(spaceId: string, id: string): Observable<void> {
-    return this.http.delete<void>(`/api/brain/spaces/${spaceId}/memories/${id}`);
+  deleteFact(spaceId: string, id: string): Observable<void> {
+    return this.http.delete<void>(`/api/brain/spaces/${spaceId}/facts/${id}`);
   }
 
-  createMemory(spaceId: string, body: { fact: string; type?: string; tags?: string[]; entityIds?: string[]; description?: string; properties?: Record<string, string | number | boolean> }): Observable<Memory> {
-    return this.http.post<Memory>(`/api/brain/spaces/${spaceId}/memories`, body);
+  createMemory(spaceId: string, body: { fact: string; type?: string; tags?: string[]; entityIds?: string[]; description?: string; properties?: Record<string, string | number | boolean> }): Observable<Fact> {
+    return this.http.post<Fact>(`/api/brain/spaces/${spaceId}/facts`, body);
   }
 
-  updateMemory(spaceId: string, id: string, body: Partial<{ fact: string; type: string; tags: string[]; entityIds: string[]; description: string; properties: Record<string, string | number | boolean>; deleteFields: string[] }>): Observable<Memory> {
-    return this.http.patch<Memory>(`/api/brain/spaces/${spaceId}/memories/${id}`, body);
+  updateFact(spaceId: string, id: string, body: Partial<{ fact: string; type: string; tags: string[]; entityIds: string[]; description: string; properties: Record<string, string | number | boolean>; deleteFields: string[] }>): Observable<Fact> {
+    return this.http.patch<Fact>(`/api/brain/spaces/${spaceId}/facts/${id}`, body);
   }
 
   wipeMemories(spaceId: string): Observable<{ deleted: number }> {
-    return this.http.delete<{ deleted: number }>(`/api/brain/spaces/${spaceId}/memories`, {
+    return this.http.delete<{ deleted: number }>(`/api/brain/spaces/${spaceId}/facts`, {
       body: { confirm: true },
     });
   }
@@ -350,8 +350,8 @@ export class BrainApi {
     return this.http.get<Edge>(`/api/brain/spaces/${spaceId}/edges/${id}`);
   }
 
-  getMemory(spaceId: string, id: string): Observable<Memory> {
-    return this.http.get<Memory>(`/api/brain/spaces/${spaceId}/memories/${id}`);
+  getMemory(spaceId: string, id: string): Observable<Fact> {
+    return this.http.get<Fact>(`/api/brain/spaces/${spaceId}/facts/${id}`);
   }
 
   getChrono(spaceId: string, id: string): Observable<ChronoEntry> {
@@ -367,10 +367,10 @@ export class BrainApi {
    * quietly requesting `/api/brain/spaces/x/undefined/y`, which 404s in a way that reads like a missing
    * record rather than a missing case.
    */
-  getRecord(spaceId: string, type: string, id: string): Observable<Entity | Memory | ChronoEntry | Edge> {
+  getRecord(spaceId: string, type: string, id: string): Observable<Entity | Fact | ChronoEntry | Edge> {
     switch (type) {
       case 'entity': return this.getEntity(spaceId, id);
-      case 'memory': return this.getMemory(spaceId, id);
+      case 'fact': return this.getMemory(spaceId, id);
       case 'chrono': return this.getChrono(spaceId, id);
       case 'edge':   return this.getEdge(spaceId, id);
       default: throw new Error(`getRecord: unknown record type '${type}'`);
@@ -380,7 +380,7 @@ export class BrainApi {
   /**
    * Walk the graph from an entity. The three `include*` flags decide what the answer CONTAINS, not what is
    * walked: edges are always followed, and `includeEdges: false` only drops the edge list from the response.
-   * `includeMemories` is opt-in because memories are usually the most numerous record type and every node
+   * `includeMemories` is opt-in because facts are usually the most numerous record type and every node
    * counts against `limit`.
    */
   traverseGraph(spaceId: string, body: {
@@ -426,7 +426,7 @@ export class BrainApi {
   // the same writer, so the record comes out identical; what the legacy verb skips is the two things a
   // multi-client operator cannot do without. It runs NO property validation (so the UI could write a record
   // the same space would reject on the create form next to it), and it stores NO audit snapshot (so every
-  // chrono edit made in this app was absent from the before/after trail that entities, memories and edges
+  // chrono edit made in this app was absent from the before/after trail that entities, facts and edges
   // all leave). An integrator found nine of their own flows on this route before we found one of ours.
   updateChrono(spaceId: string, id: string, body: Partial<{ title: string; type: ChronoType; startsAt: string; endsAt: string; status: ChronoStatus; confidence: number; tags: string[]; entityIds: string[]; memoryIds: string[]; description: string; properties: Record<string, string | number | boolean>; suppressEmbeddings: boolean }>): Observable<ChronoEntry> {
     return this.http.patch<ChronoEntry>(`/api/brain/spaces/${spaceId}/chrono/${id}`, body);

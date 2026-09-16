@@ -6,7 +6,7 @@ import { ModalDirective } from '../../shared/modal.directive';
 import { TagInputComponent } from '../../shared/tag-input.component';
 import { PropertiesEditorComponent } from '../../shared/properties-editor.component';
 import { EntityRefFieldComponent } from './entity-ref-field.component';
-import { MemoryRefFieldComponent } from './memory-ref-field.component';
+import { FactRefFieldComponent } from './fact-ref-field.component';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { BrainStore } from './brain-store.service';
 import { EntityRefPicker } from './entity-ref-picker.service';
@@ -27,7 +27,7 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
   selector: 'app-record-drawer',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, PropertiesEditorComponent, EntityRefFieldComponent, MemoryRefFieldComponent, PhIconComponent, ModalDirective],
+  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, PropertiesEditorComponent, EntityRefFieldComponent, FactRefFieldComponent, PhIconComponent, ModalDirective],
   styles: [BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES],
   template: `
       @if (state.drawerRecord(); as dr) {
@@ -35,12 +35,12 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
           <div class="drawer" [appModal]="'brain.drawer.recordDetailsAriaLabel' | transloco" (dismiss)="state.close()" (click)="$event.stopPropagation()">
             <div class="drawer-header">
               <div style="flex:1; min-width:0;">
-                @if (dr.kind === 'memory') { <span class="badge badge-blue" style="margin-bottom:6px; display:inline-block;">{{ 'brain.drawer.badge.memory' | transloco }}</span> }
+                @if (dr.kind === 'fact') { <span class="badge badge-blue" style="margin-bottom:6px; display:inline-block;">{{ 'brain.drawer.badge.fact' | transloco }}</span> }
                 @if (dr.kind === 'entity') { <span class="badge badge-purple" style="margin-bottom:6px; display:inline-block;">{{ 'brain.drawer.badge.entity' | transloco }}</span> }
                 @if (dr.kind === 'edge') { <span class="badge badge-blue" style="margin-bottom:6px; display:inline-block;">{{ 'brain.drawer.badge.edge' | transloco }}</span> }
                 @if (dr.kind === 'chrono') { <span class="badge" style="margin-bottom:6px; display:inline-block;">{{ 'brain.drawer.badge.chrono' | transloco }}</span> }
                 <div class="drawer-title">
-                  @if (dr.kind === 'memory') { {{ state.drawerEditMemory.fact.length > 80 ? (state.drawerEditMemory.fact | slice:0:80) + '\u2026' : state.drawerEditMemory.fact }} }
+                  @if (dr.kind === 'fact') { {{ state.drawerEditMemory.fact.length > 80 ? (state.drawerEditMemory.fact | slice:0:80) + '\u2026' : state.drawerEditMemory.fact }} }
                   @if (dr.kind === 'entity') { {{ state.drawerEditEntity.name || dr.record.name }} }
                   @if (dr.kind === 'edge') { {{ (dr.record.fromName || dr.record.from) + ' \u2192 ' + (dr.record.toName || dr.record.to) }} }
                   @if (dr.kind === 'chrono') { {{ state.drawerEditChrono.title || dr.record.title }} }
@@ -59,7 +59,7 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
 
             <form>
               <!-- ── MEMORY ── -->
-              @if (dr.kind === 'memory') {
+              @if (dr.kind === 'fact') {
                 <div class="drawer-field">
                   <div class="drawer-label">{{ 'common.form.fact' | transloco }} <span style="color:var(--error)">*</span></div>
                   <textarea [(ngModel)]="state.drawerEditMemory.fact" name="drwMemFact" rows="4"></textarea>
@@ -70,7 +70,7 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
                 </div>
                 <div class="drawer-field">
                   <!-- Matches the create form exactly, and for the same reason: since P-24 a space declaring
-                       typeSchemas.memory restricts memory types, so free text there would submit a value the
+                       typeSchemas.fact restricts memory types, so free text there would submit a value the
                        server refuses. A space declaring none is unrestricted and keeps the free-text input.
                        The two controls must agree — one door offering a type the other cannot write is the
                        shape this whole item was about. -->
@@ -258,7 +258,7 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
                 </div>
                 <div class="drawer-field">
                   <div class="drawer-label">{{ 'common.memoryIds' | transloco }}</div>
-                  <app-memory-ref-field [target]="state.drawerEditChrono" />
+                  <app-fact-ref-field [target]="state.drawerEditChrono" />
                 </div>
                 <div class="drawer-field">
                   <div class="drawer-label">{{ 'brain.chrono.table.properties' | transloco }}</div>

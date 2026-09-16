@@ -233,14 +233,14 @@ edgesRouter.get('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, asy
    *
    * Grouped BY KIND, one `$in` per kind that actually appears. It used to be a single lookup in
    * `${mid}_entities`, which was right while every endpoint was an entity and shows a bare UUID for a chrono
-   * or memory endpoint now that they can be one. The kind also decides which FIELD is the name — an entity
-   * has `name`, a chrono entry `title`, a memory `fact` — so one query could not have served them anyway.
+   * or fact endpoint now that they can be one. The kind also decides which FIELD is the name — an entity
+   * has `name`, a chrono entry `title`, a fact `fact` — so one query could not have served them anyway.
    *
    * A file needs no lookup at all: its id IS its path, and `fromName` stays absent so the client falls back
    * to showing that path, which is what a reader wants to see.
    */
   const nameMap = new Map<string, string>();
-  const byKind = new Map<'entity' | 'memory' | 'chrono', Set<string>>();
+  const byKind = new Map<'entity' | 'fact' | 'chrono', Set<string>>();
   for (const e of all) {
     for (const [id, kind] of [[e.from, edgeEndpointKind(e.fromKind)], [e.to, edgeEndpointKind(e.toKind)]] as const) {
       if (kind === 'file') continue;
@@ -413,7 +413,7 @@ edgesRouter.patch('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAut
      * The schema check moved into `updateEdgeById`, which validates the record it is about to store rather
      * than a rebuilt simulation of it. The 422 is preserved.
      */
-    // Snapshot for the audit change list, from the read above — see the note in memories.ts.
+    // Snapshot for the audit change list, from the read above — see the note in facts.ts.
     let updated;
     let updateCheck: UpdateValidation | undefined;
     try {
@@ -442,7 +442,7 @@ edgesRouter.patch('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAut
     }
     if (updated) {
       req.auditSnapshots = { before: existing ?? {}, after: updated };
-      // The `warnings` array an update response did not have — see the memories route, where the
+      // The `warnings` array an update response did not have — see the facts route, where the
       // reasoning is written out. A warn-mode space reported on a create and said nothing on an edit.
       const updateWarnings = [...(updateCheck?.warnings ?? []), ...unknownFieldWarnings(req.body, EDGES_UPDATE_BODY_KEYS)];
       res.json(updateWarnings.length > 0 ? { ...updated, warnings: updateWarnings } : updated);

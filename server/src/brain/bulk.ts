@@ -21,10 +21,10 @@ import { usesLinkRecords } from './link-adjacency.js';
 import { assertRefsResolve } from './entity-refs.js';
 import { getConfig } from '../config/loader.js';
 import {
-  resolveMetaRefs, getAllowedChronoTypes, validateMemory, validateEntity, validateEdge, validateChrono,
+  resolveMetaRefs, getAllowedChronoTypes, validateFact, validateEntity, validateEdge, validateChrono,
 } from '../spaces/schema-validation.js';
 import { isStrictLinkage } from '../spaces/proxy.js';
-import { remember } from './memory.js';
+import { saveFact } from './fact.js';
 import { upsertEntity } from './entities.js';
 import { upsertEdge, findEdgeByTriplet } from './edges.js';
 import { BatchRefs, resolveRef, refKeyDeclared } from './batch-refs.js';
@@ -47,10 +47,10 @@ import { NEVER_RETURNED_PROJECTION } from './read-projection.js';
 const CHRONO_STATUS_SET = new Set<ChronoStatus>(CHRONO_STATUSES);
 const MAX_FACT_LENGTH = 50_000;
 
-interface Counts { memories: number; entities: number; edges: number; chrono: number }
+interface Counts { facts: number; entities: number; edges: number; chrono: number }
 
 export interface BulkInput {
-  memories?: unknown;
+  facts?: unknown;
   entities?: unknown;
   edges?: unknown;
   chrono?: unknown;
@@ -95,8 +95,8 @@ function slice(v: unknown): Record<string, unknown>[] {
 }
 
 /**
- * Process a batch of memories/entities/edges/chrono for one space. Deterministic order
- * (memories → entities → chrono → EDGES LAST), which matters only for records the batch UPDATES: an entity
+ * Process a batch of facts/entities/edges/chrono for one space. Deterministic order
+ * (facts → entities → chrono → EDGES LAST), which matters only for records the batch UPDATES: an entity
  * addressed by an existing id is written before an edge below reads it. Per-item failures are collected,
  * never fatal. Returns counts + errors.
  *
@@ -146,8 +146,8 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
    */
   const refs = new BatchRefs();
 
-  const inserted: Counts = { memories: 0, entities: 0, edges: 0, chrono: 0 };
-  const updated: Counts = { memories: 0, entities: 0, edges: 0, chrono: 0 };
+  const inserted: Counts = { facts: 0, entities: 0, edges: 0, chrono: 0 };
+  const updated: Counts = { facts: 0, entities: 0, edges: 0, chrono: 0 };
   const errors: { type: string; index: number; reason: string }[] = [];
 
   const schemaFails = (type: string, index: number, violations: { field: string; reason: string }[]): boolean => {
@@ -157,46 +157,46 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
     return false;
   };
 
-  // ── memories ───────────────────────────────────────────────────────────────
-  const memories = slice(input.memories);
-  for (let i = 0; i < memories.length; i++) {
-    const item = memories[i]!;
+  // ── facts ───────────────────────────────────────────────────────────────
+  const facts = slice(input.facts);
+  for (let i = 0; i < facts.length; i++) {
+    const item = facts[i]!;
     const fact = typeof item['fact'] === 'string' ? item['fact'].trim() : '';
-    if (!fact) { errors.push({ type: 'memory', index: i, reason: 'missing required field: fact' }); continue; }
-    if (fact.length > MAX_FACT_LENGTH) { errors.push({ type: 'memory', index: i, reason: '`fact` must not exceed 50 000 characters' }); continue; }
+    if (!fact) { errors.push({ type: 'fact', index: i, reason: 'missing required field: fact' }); continue; }
+    if (fact.length > MAX_FACT_LENGTH) { errors.push({ type: 'fact', index: i, reason: '`fact` must not exceed 50 000 characters' }); continue; }
     const type = typeof item['type'] === 'string' && item['type'].trim() ? item['type'] : undefined;
     const properties = optProps(item['properties']);
     const ttlDays = bulkTtlDays(item['ttlDays']);
-    if (ttlDays === TTL_INVALID) { errors.push({ type: 'memory', index: i, reason: TTL_INVALID_MSG }); continue; }
+    if (ttlDays === TTL_INVALID) { errors.push({ type: 'fact', index: i, reason: TTL_INVALID_MSG }); continue; }
     const linkArrErr = arrayWriteError({ converted, spaceId, body: item, actor: input.actor });
-    if (linkArrErr) { errors.push({ type: 'memory', index: i, reason: linkArrErr }); continue; }
+    if (linkArrErr) { errors.push({ type: 'fact', index: i, reason: linkArrErr }); continue; }
     /*
      * `W-22`: THE CALLER-SUPPLIED `id`, which bulk ENTITIES read and these two ignored.
      *
      * A supplied id makes a create idempotent — a retried write converges on the same record instead of
      * producing a second one. Every single-record door reads it. These two dropped it, so a batch resent
-     * after a timeout DUPLICATED every memory and chrono entry in it, silently, while the same batch of
+     * after a timeout DUPLICATED every fact and chrono entry in it, silently, while the same batch of
      * entities was correctly idempotent.
      */
     const rawId = typeof item['id'] === 'string' ? item['id'].trim() : undefined;
-    if (rawId !== undefined && !UUID_V4_RE.test(rawId)) { errors.push({ type: 'memory', index: i, reason: '`id` must be a valid UUID v4' }); continue; }
+    if (rawId !== undefined && !UUID_V4_RE.test(rawId)) { errors.push({ type: 'fact', index: i, reason: '`id` must be a valid UUID v4' }); continue; }
     // `W-14`..`W-22`: the same value rules the single-record doors read. Bulk had its own, weaker set —
     // `strArray` DROPPED a non-string element silently and `optProps` cast the bag without looking inside,
     // so a batch stored what the single create refuses and reported nothing.
-    const shapeErr = shapeError('memory', item);
-    if (shapeErr) { errors.push({ type: 'memory', index: i, reason: shapeErr }); continue; }
-    // Memory items were the one bulk shape with no reference check at all — edges and chrono both
+    const shapeErr = shapeError('fact', item);
+    if (shapeErr) { errors.push({ type: 'fact', index: i, reason: shapeErr }); continue; }
+    // Fact items were the one bulk shape with no reference check at all — edges and chrono both
     // had one. Format only, like the rest of bulk: a payload may legitimately reference an entity
     // created earlier in the SAME payload, so an existence check here would reject valid forward
     // references. Staged imports that need dangling refs use the strictLinkage escape hatch.
     const memEntityIds = strArray(item['entityIds']);
     if (strict && memEntityIds.some(id => !UUID_V4_RE.test(id))) {
-      errors.push({ type: 'memory', index: i, reason: '`entityIds` must contain valid UUID v4 values (entity IDs), not names' });
+      errors.push({ type: 'fact', index: i, reason: '`entityIds` must contain valid UUID v4 values (entity IDs), not names' });
       continue;
     }
     try {
-      if (schemaFails('memory', i, validateMemory(meta ?? {}, { type, properties }))) continue;
-      const memDoc = await remember(spaceId, fact, memEntityIds, strArray(item['tags']),
+      if (schemaFails('fact', i, validateFact(meta ?? {}, { type, properties }))) continue;
+      const memDoc = await saveFact(spaceId, fact, memEntityIds, strArray(item['tags']),
         typeof item['description'] === 'string' ? item['description'] : undefined, properties, type,
         undefined, undefined, ttlDays, rawId);
       /*
@@ -208,12 +208,12 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
        */
       const keyMem = refKeyDeclared(item);
       if (keyMem) {
-        const dupe = refs.declare(keyMem, memDoc._id, 'memory');
-        if (dupe) errors.push({ type: 'memory', index: i, reason: dupe });
+        const dupe = refs.declare(keyMem, memDoc._id, 'fact');
+        if (dupe) errors.push({ type: 'fact', index: i, reason: dupe });
       }
 
-      inserted.memories++;
-    } catch (err) { errors.push({ type: 'memory', index: i, reason: err instanceof Error ? err.message : String(err) }); }
+      inserted.facts++;
+    } catch (err) { errors.push({ type: 'fact', index: i, reason: err instanceof Error ? err.message : String(err) }); }
   }
 
   // ── entities ───────────────────────────────────────────────────────────────
@@ -248,7 +248,7 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
        * the ITEM rather than the request, which is this endpoint's whole contract: one bad row is reported
        * and skipped, never a reason to abandon the rest of a batch.
        *
-       * Entity only, matching the single-record doors — `04-brain-api.md` states that the memory, edge and
+       * Entity only, matching the single-record doors — `04-brain-api.md` states that the fact, edge and
        * chrono paths deliberately do not reject non-primitives at the API layer, and changing that would
        * refuse writes that work today.
        */
@@ -293,7 +293,7 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
      *
      * A supplied id makes a create idempotent — a retried write converges on the same record instead of
      * producing a second one. Every single-record door reads it. These two dropped it, so a batch resent
-     * after a timeout DUPLICATED every memory and chrono entry in it, silently, while the same batch of
+     * after a timeout DUPLICATED every fact and chrono entry in it, silently, while the same batch of
      * entities was correctly idempotent.
      */
     const rawId = typeof item['id'] === 'string' ? item['id'].trim() : undefined;
@@ -318,7 +318,7 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
     const entityIds = optStrArray(item['entityIds']);
     const memoryIds = optStrArray(item['memoryIds']);
     if (strict && entityIds && entityIds.some(id => !UUID_V4_RE.test(id))) { errors.push({ type: 'chrono', index: i, reason: '`entityIds` must contain valid UUID v4 values (entity IDs), not names' }); continue; }
-    if (strict && memoryIds && memoryIds.some(id => !UUID_V4_RE.test(id))) { errors.push({ type: 'chrono', index: i, reason: '`memoryIds` must contain valid UUID v4 values (memory IDs), not names' }); continue; }
+    if (strict && memoryIds && memoryIds.some(id => !UUID_V4_RE.test(id))) { errors.push({ type: 'chrono', index: i, reason: '`memoryIds` must contain valid UUID v4 values (fact IDs), not names' }); continue; }
     const properties = optProps(item['properties']);
     // Normalise status to a known value (drop unknowns) — REST did this; MCP did not.
     const status = typeof item['status'] === 'string' && CHRONO_STATUS_SET.has(item['status'] as ChronoStatus)
@@ -464,7 +464,7 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
 
 /** Total records actually written (used to decide whether to fire the bulk.write webhook). */
 export function bulkWriteTotal(r: BulkResult): number {
-  return r.inserted.memories + r.inserted.entities + r.inserted.edges + r.inserted.chrono
+  return r.inserted.facts + r.inserted.entities + r.inserted.edges + r.inserted.chrono
     + r.updated.entities + r.updated.edges;
 }
 

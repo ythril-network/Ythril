@@ -115,7 +115,7 @@ describe('Protected routes without auth return 401 not 500', () => {
     ['GET', '/api/spaces'],
     ['GET', '/api/networks'],
     ['GET', '/api/files/general'],
-    ['GET', '/api/brain/spaces/general/memories'],
+    ['GET', '/api/brain/spaces/general/facts'],
   ];
   for (const [method, route] of ROUTES) {
     it(`${method} ${route} without auth → 401`, async () => {

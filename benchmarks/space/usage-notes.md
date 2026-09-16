@@ -55,7 +55,7 @@ name those entities are opt-in. Without that, an expansion returns nodes and not
 the graph is working and answers nothing.
 
 **Exclude files by asking for what you want.** Recall takes a list of knowledge types; pass
-`["memory", "entity", "chrono"]` for a normal question and `["file"]` when you want the verbatim passage. A
+`["fact", "entity", "chrono"]` for a normal question and `["file"]` when you want the verbatim passage. A
 per-type cap of zero is not the mechanism — it is refused, and the refusal says to use the type list.
 
 **Expansion is charged against the answer budget.** Records a walk brings back displace records that would

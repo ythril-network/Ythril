@@ -24,7 +24,7 @@ import { httpErrorReason } from '../../core/http-error';
 import {
   Space,
   Entity,
-  Memory,
+  Fact,
   ChronoEntry,
   Edge,
   TraverseNode,
@@ -160,9 +160,9 @@ import { lookupForNode, lookupForEdge } from './graph-record-lookup';
               [kind]="selectedNode()!.kind ?? null"
               [unavailable]="recordUnavailable()" />
 
-            <!-- Lists pane: memories + chrono -->
+            <!-- Lists pane: facts + chrono -->
             <app-graph-linked-records
-              [memories]="filteredMemories()"
+              [facts]="filteredMemories()"
               [chrono]="filteredChrono()"
               [(typeFilter)]="detailTypeFilter"
               [(descFilter)]="detailDescFilter"
@@ -193,9 +193,9 @@ import { lookupForNode, lookupForEdge } from './graph-record-lookup';
               [selected]="selectedEdge()"
               [unavailable]="recordUnavailable()" />
 
-            <!-- Lists pane: memories + chrono for both endpoints -->
+            <!-- Lists pane: facts + chrono for both endpoints -->
             <app-graph-linked-records
-              [memories]="filteredMemories()"
+              [facts]="filteredMemories()"
               [chrono]="filteredChrono()"
               [(typeFilter)]="detailTypeFilter"
               [(descFilter)]="detailDescFilter"
@@ -266,7 +266,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
       if (!saved) return;
       // Read `saved.record` inside each branch, not once above: the discriminant only narrows the
       // record while it is still reached through `saved`.
-      if (saved.kind === 'memory') {
+      if (saved.kind === 'fact') {
         const rec = saved.record;
         this.nodeMemories.update(list => list.map(m => m._id === rec._id ? rec : m));
       } else if (saved.kind === 'chrono') {
@@ -334,10 +334,10 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
    * is what the message is chosen by anyway.
    */
   recordUnavailable = signal<'file' | 'derived' | null>(null);
-  nodeMemories = signal<Memory[]>([]);
+  nodeMemories = signal<Fact[]>([]);
   nodeChrono = signal<ChronoEntry[]>([]);
 
-  detailTypeFilter = signal<'all' | 'memory' | 'chrono'>('all');
+  detailTypeFilter = signal<'all' | 'fact' | 'chrono'>('all');
   detailDescFilter = signal('');
   nodeCount = signal(0);
   edgeCount = signal(0);
@@ -378,14 +378,14 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
   /**
    * The surviving row ids, used to narrow the two lists.
    *
-   * The lists render `Memory`/`ChronoEntry` records, not `DetailRow`s, and that matters: a chrono row
+   * The lists render `Fact`/`ChronoEntry` records, not `DetailRow`s, and that matters: a chrono row
    * shows `startsAt` (when the thing happens) while a `DetailRow` only carries `createdAt` (when it was
    * written). Feeding rows straight through would silently swap the date on every chrono entry. So the
    * tested pipeline decides WHICH records survive, and the records themselves still supply what is drawn.
    */
   private visibleDetailIds = computed<Set<string>>(() => new Set(this.filteredDetails().map(r => r.id)));
 
-  filteredMemories = computed<Memory[]>(() => {
+  filteredMemories = computed<Fact[]>(() => {
     if (!this.detailFilterActive()) return this.nodeMemories();
     const ids = this.visibleDetailIds();
     return this.nodeMemories().filter(m => ids.has(m._id));
@@ -723,7 +723,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
   // ── Detail panel helpers ────────────────────────────────────────────────────
 
   /** `lookupForNode` decides which collection, or that there is none. `BrainApi.getRecord` owns the dispatch. */
-  private loadNodeDetails(entityId: string, kind?: 'chrono' | 'memory' | 'file'): void {
+  private loadNodeDetails(entityId: string, kind?: 'chrono' | 'fact' | 'file'): void {
     const spaceId = this.activeSpaceId();
     if (!spaceId) return;
     this.recordUnavailable.set(null);
@@ -735,8 +735,8 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
     ).subscribe(rec => { if (rec) this.selectedEntityRecord.set(rec as Entity); });
 
     forkJoin({
-      mems: this.brainApi.listMemories(spaceId, 100, 0, { entity: entityId }).pipe(
-        catchError(() => of({ memories: [] as Memory[] })),
+      mems: this.brainApi.listFacts(spaceId, 100, 0, { entity: entityId }).pipe(
+        catchError(() => of({ facts: [] as Fact[] })),
       ),
       chrono: this.brainApi.queryBrain(spaceId, {
         collection: 'chrono',
@@ -746,7 +746,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
         catchError(() => of({ results: [] as Record<string, unknown>[], collection: 'chrono' as const, count: 0 })),
       ),
     }).subscribe(({ mems, chrono }) => {
-      this.nodeMemories.set(mems.memories);
+      this.nodeMemories.set(mems.facts);
       this.nodeChrono.set(chrono.results as unknown as ChronoEntry[]);
     });
   }
@@ -783,8 +783,8 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
 
     // Load memories/chronos linked to BOTH endpoints
     forkJoin({
-      mems: this.brainApi.listMemories(spaceId, 100, 0, { entity: te.from }).pipe(
-        catchError(() => of({ memories: [] as Memory[] })),
+      mems: this.brainApi.listFacts(spaceId, 100, 0, { entity: te.from }).pipe(
+        catchError(() => of({ facts: [] as Fact[] })),
       ),
       chrono: this.brainApi.queryBrain(spaceId, {
         collection: 'chrono',
@@ -795,7 +795,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
       ),
     }).subscribe(({ mems, chrono }) => {
       // filter to those also referencing te.to
-      const filteredMems = mems.memories.filter(m =>
+      const filteredMems = mems.facts.filter(m =>
         Array.isArray(m.entityIds) && m.entityIds.includes(te.to)
       );
       const filteredChrono = (chrono.results as unknown as ChronoEntry[]).filter(c =>
@@ -811,9 +811,9 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
   openDetailPopup(row: DetailRef): void {
     const spaceId = this.activeSpaceId();
     if (!spaceId) return;
-    if (row.kind === 'memory') {
+    if (row.kind === 'fact') {
       this.brainApi.getMemory(spaceId, row.id).pipe(catchError(() => of(null))).subscribe(m => {
-        if (m) this.openBrainDrawer('memory', m);
+        if (m) this.openBrainDrawer('fact', m);
       });
     } else {
       this.brainApi.getChrono(spaceId, row.id).pipe(catchError(() => of(null))).subscribe(c => {
@@ -832,10 +832,10 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
    * kinds a graph node carries, and a single `(kind, record: any)` signature would let either one
    * through as the other.
    */
-  openBrainDrawer(kind: 'memory', record: Memory): void;
+  openBrainDrawer(kind: 'fact', record: Fact): void;
   openBrainDrawer(kind: 'chrono', record: ChronoEntry): void;
-  openBrainDrawer(kind: 'memory' | 'chrono', record: Memory | ChronoEntry): void {
-    if (kind === 'memory') this.drawerState.open(kind, record as Memory);
+  openBrainDrawer(kind: 'fact' | 'chrono', record: Fact | ChronoEntry): void {
+    if (kind === 'fact') this.drawerState.open(kind, record as Fact);
     else this.drawerState.open(kind, record as ChronoEntry);
   }
 

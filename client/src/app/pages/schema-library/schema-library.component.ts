@@ -560,7 +560,7 @@ export function entriesFromTypeSchemas(
               <select [(ngModel)]="form.knowledgeType" style="width:100%;">
                 <option value="entity">entity</option>
                 <option value="edge">edge</option>
-                <option value="memory">memory</option>
+                <option value="fact">memory</option>
                 <option value="chrono">chrono</option>
               </select>
             </div>

@@ -52,7 +52,7 @@ export interface DumpOptions {
    *
    * **Measured cost:** roughly 1.4x on large records and up to 3x on a database of very small ones (the fixed
    * envelope header dominates). Per-line is still the right shape — per-file would make restore load an entire
-   * collection into memory, which is unbounded rather than merely large.
+   * collection into fact, which is unbounded rather than merely large.
    *
    * Default **false** — plaintext, which is the owner's chosen default: a backup you cannot restore is not a
    * backup, and encrypting by default makes disaster recovery onto a fresh instance depend on having the old
@@ -95,7 +95,7 @@ export async function dumpDatabase(uri: string, destDir: string, opts: DumpOptio
 
   // 0700, and 0600 on every file below.
   //
-  // A dump is a COMPLETE PLAINTEXT COPY of the database — every memory, entity, edge, chrono entry, file-meta
+  // A dump is a COMPLETE PLAINTEXT COPY of the database — every fact, entity, edge, chrono entry, file-meta
   // record and audit entry, as NDJSON. It is written by reading THROUGH mongod, so an encrypted `mongod` (the
   // mitigation `02-hosting.md` recommends for brain data) protects nothing here: the dump comes out decrypted.
   //
@@ -146,7 +146,7 @@ export async function dumpDatabase(uri: string, destDir: string, opts: DumpOptio
           // it behaves exactly as `JSON.parse` did, so old backups still restore with their old semantics.
           //
           // Encryption, when enabled, wraps this ONE line — per record, not per file. Per-file would mean
-          // `restoreDatabase` loading an entire collection into memory to decrypt it, which is unbounded and
+          // `restoreDatabase` loading an entire collection into fact to decrypt it, which is unbounded and
           // only bites once the database is large. `dk` is derived once above, so this is a cheap AES call plus
           // a fresh IV, not a key derivation.
           const line = EJSON.stringify(doc, { relaxed: true });

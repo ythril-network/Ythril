@@ -67,7 +67,7 @@ describe('M2 — ?token= is accepted on no route at all', () => {
     '/api/spaces',
     '/api/tokens',
     '/api/networks',
-    '/api/brain/spaces/general/memories',
+    '/api/brain/spaces/general/facts',
     '/api/files/general?path=.',
     '/api/about',
     // The last exception. It authenticated a raw ?token= until 4.0 removed the SSE transport it existed for,

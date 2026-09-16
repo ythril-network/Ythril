@@ -20,7 +20,7 @@ export type TtlBucket = KnowledgeType | 'file';
 /** The space-wide retention window per bucket. Absent or `null` means no window for that bucket. */
 export interface RecordTtlWindows {
   entity?: number | null;
-  memory?: number | null;
+  fact?: number | null;
   edge?:   number | null;
   chrono?: number | null;
   file?:   number | null;
@@ -36,7 +36,7 @@ export interface RecordTtlWindows {
  * A tuple, for the same reason as the server's: a union cannot be iterated, and a template that renders one
  * chip per kind needs the values.
  */
-export const KNOWLEDGE_TYPES = ['entity', 'memory', 'edge', 'chrono'] as const;
+export const KNOWLEDGE_TYPES = ['entity', 'fact', 'edge', 'chrono'] as const;
 
 /**
  * Every record kind that can be embedded, recalled or retained — the knowledge types PLUS `file`.
@@ -298,7 +298,7 @@ export interface TokenRecord {
   };
 }
 
-export interface Memory {
+export interface Fact {
   _id: string;
   fact: string;
   type?: string;
@@ -311,7 +311,7 @@ export interface Memory {
    * Set on every write, by the server, always — and it was missing from this interface.
    *
    * `ChronoEntry` declared it and these three did not, so any client code that wanted it had to cast. The
-   * server's `MemoryDoc`/`EntityDoc`/`EdgeDoc` all declare it REQUIRED, which is the shape the API returns:
+   * server's `FactDoc`/`EntityDoc`/`EdgeDoc` all declare it REQUIRED, which is the shape the API returns:
    * one rule, two declarations, and the weaker one on the side that reads the response.
    */
   updatedAt: string;
@@ -331,7 +331,7 @@ export interface Entity {
    * Set on every write, by the server, always — and it was missing from this interface.
    *
    * `ChronoEntry` declared it and these three did not, so any client code that wanted it had to cast. The
-   * server's `MemoryDoc`/`EntityDoc`/`EdgeDoc` all declare it REQUIRED, which is the shape the API returns:
+   * server's `FactDoc`/`EntityDoc`/`EdgeDoc` all declare it REQUIRED, which is the shape the API returns:
    * one rule, two declarations, and the weaker one on the side that reads the response.
    */
   updatedAt: string;
@@ -354,7 +354,7 @@ export interface Edge {
    * Set on every write, by the server, always — and it was missing from this interface.
    *
    * `ChronoEntry` declared it and these three did not, so any client code that wanted it had to cast. The
-   * server's `MemoryDoc`/`EntityDoc`/`EdgeDoc` all declare it REQUIRED, which is the shape the API returns:
+   * server's `FactDoc`/`EntityDoc`/`EdgeDoc` all declare it REQUIRED, which is the shape the API returns:
    * one rule, two declarations, and the weaker one on the side that reads the response.
    */
   updatedAt: string;
@@ -408,7 +408,7 @@ export interface TokenAccessEntry {
 
 export interface SpaceStats {
   spaceId: string;
-  memories: number;
+  facts: number;
   entities: number;
   edges: number;
   chrono: number;
@@ -494,12 +494,12 @@ export interface CompletenessReport {
  * A tuple for the same reason the type lists are: a template that renders one option per collection needs
  * the values. The Brain's TABS are a different set and live in `brain-tabs.ts`, which says so.
  */
-export const BRAIN_COLLECTIONS = ['memories', 'entities', 'edges', 'chrono', 'files', 'links'] as const;
+export const BRAIN_COLLECTIONS = ['facts', 'entities', 'edges', 'chrono', 'files', 'links'] as const;
 
 /*
  * `links` is the sixth, and it is a COLLECTION only.
  *
- * A link record is what a `memory.entityIds`, `chrono.entityIds`/`memoryIds` or
+ * A link record is what a `fact.entityIds`, `chrono.entityIds`/`memoryIds` or
  * `file.entityIds`/`memoryIds`/`chronoIds` entry becomes when it is stored as a record. It is queryable and
  * countable; it has no tab of its own, no write door of its own, and never appears in a meaning-ranked
  * search. `brain-tabs.ts` holds that decision.
@@ -534,7 +534,7 @@ export interface ReembedResult {
   truncated: boolean;
 }
 
-export type RecallKnowledgeType = 'memory' | 'entity' | 'edge' | 'chrono' | 'file';
+export type RecallKnowledgeType = 'fact' | 'entity' | 'edge' | 'chrono' | 'file';
 
 export interface RecallResult {
   type: RecallKnowledgeType;
@@ -624,7 +624,7 @@ export interface TraverseNode {
    * follows `_id` needs to know where to look it up and `type` cannot say: a chrono's is `event`/`deadline`/…,
    * a memory's is optional entirely, and an entity's is whatever the space calls it.
    */
-  kind?: 'chrono' | 'memory' | 'file';
+  kind?: 'chrono' | 'fact' | 'file';
 }
 
 export interface TraverseEdge {
@@ -641,7 +641,7 @@ export interface TraverseResult {
 }
 
 export interface WipeResult {
-  memories: number;
+  facts: number;
   entities: number;
   edges: number;
   chrono: number;
@@ -649,8 +649,8 @@ export interface WipeResult {
   /**
    * Link records. Usually the largest number, and not a separate thing to clean up.
    *
-   * A link is one mention of one record by another, so a space whose memories name entities holds one per
-   * mention. A partial wipe that clears `memories` alone leaves those links pointing at records that are
+   * A link is one mention of one record by another, so a space whose facts name entities holds one per
+   * mention. A partial wipe that clears `facts` alone leaves those links pointing at records that are
    * gone — `WipeCollectionType` derives from the collection list, so `'links'` is already selectable.
    */
   links: number;
@@ -875,8 +875,8 @@ export interface SyncHistoryRecord {
   triggeredAt: string;
   completedAt: string;
   status: 'success' | 'partial' | 'failed';
-  pulled: { memories: number; entities: number; edges: number; files: number };
-  pushed: { memories: number; entities: number; edges: number; files: number };
+  pulled: { facts: number; entities: number; edges: number; files: number };
+  pushed: { facts: number; entities: number; edges: number; files: number };
   errors?: string[];
 }
 
@@ -1022,7 +1022,7 @@ export type WebhookEventType =
  * it is the test-button's internal event, not a real domain event a user would subscribe to.
  */
 export const WEBHOOK_EVENT_GROUPS: { group: string; events: WebhookEventType[] }[] = [
-  { group: 'memory', events: ['memory.created', 'memory.updated', 'memory.deleted'] },
+  { group: 'fact', events: ['memory.created', 'memory.updated', 'memory.deleted'] },
   { group: 'entity', events: ['entity.created', 'entity.updated', 'entity.deleted', 'entity.merged'] },
   { group: 'edge', events: ['edge.created', 'edge.updated', 'edge.deleted'] },
   { group: 'chrono', events: ['chrono.created', 'chrono.updated', 'chrono.deleted'] },
@@ -1089,7 +1089,7 @@ export interface ErEntityType {
   namingPattern?: string;
   properties: ErProperty[];
   /** Records of the other kinds pointing AT this type through their `entityIds`. */
-  linkedFrom: { memories: number; chrono: number; files: number };
+  linkedFrom: { facts: number; chrono: number; files: number };
 }
 
 export interface ErRelationship {

@@ -52,15 +52,15 @@ describe('record TTL (F10)', () => {
   // ── per-record ttlDays on create ──────────────────────────────────────────
 
   it('memory create with ttlDays > 0 stamps _expireAt', async () => {
-    const w = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/memories', {
+    const w = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/facts', {
       fact: `ttl-mem-${RUN}`, ttlDays: 30,
     });
     assert.equal(w.status, 201, JSON.stringify(w.body));
     assertAboutDaysFromNow(w.body._expireAt, 30);
     // surfaces on read too
-    const g = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/memories/${w.body._id}`);
+    const g = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${w.body._id}`);
     assertAboutDaysFromNow(g.body._expireAt, 30);
-    await del(INSTANCES.a, tokenA, `/api/brain/spaces/general/memories/${w.body._id}`).catch(() => {});
+    await del(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${w.body._id}`).catch(() => {});
   });
 
   it('entity create with ttlDays > 0 stamps _expireAt', async () => {
@@ -75,21 +75,21 @@ describe('record TTL (F10)', () => {
   });
 
   it('memory create with ttlDays = 0 gets no _expireAt', async () => {
-    const w = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/memories', {
+    const w = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/facts', {
       fact: `ttl-zero-${RUN}`, ttlDays: 0,
     });
     assert.equal(w.status, 201, JSON.stringify(w.body));
     assert.equal(w.body._expireAt, undefined);
-    await del(INSTANCES.a, tokenA, `/api/brain/spaces/general/memories/${w.body._id}`).catch(() => {});
+    await del(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${w.body._id}`).catch(() => {});
   });
 
   it('memory create with no ttlDays (space has no default) gets no _expireAt', async () => {
-    const w = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/memories', {
+    const w = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/facts', {
       fact: `ttl-none-${RUN}`,
     });
     assert.equal(w.status, 201, JSON.stringify(w.body));
     assert.equal(w.body._expireAt, undefined);
-    await del(INSTANCES.a, tokenA, `/api/brain/spaces/general/memories/${w.body._id}`).catch(() => {});
+    await del(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${w.body._id}`).catch(() => {});
   });
 
   // ── files (F12): per-record TTL on uploads, stamped on the file-level FileMeta record ────────────
@@ -138,17 +138,17 @@ describe('record TTL (F10)', () => {
     assert.equal(p.status, 200, JSON.stringify(p.body));
 
     // omitted ttlDays → space default 15d
-    const dflt = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${spaceId}/memories`, { fact: `dflt-${RUN}` });
+    const dflt = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${spaceId}/facts`, { fact: `dflt-${RUN}` });
     assert.equal(dflt.status, 201, JSON.stringify(dflt.body));
     assertAboutDaysFromNow(dflt.body._expireAt, 15);
 
     // per-record ttlDays wins over the space default
-    const over = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${spaceId}/memories`, { fact: `over-${RUN}`, ttlDays: 3 });
+    const over = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${spaceId}/facts`, { fact: `over-${RUN}`, ttlDays: 3 });
     assert.equal(over.status, 201, JSON.stringify(over.body));
     assertAboutDaysFromNow(over.body._expireAt, 3);
 
     // ttlDays: 0 opts a single record out of the space default
-    const opt = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${spaceId}/memories`, { fact: `opt-${RUN}`, ttlDays: 0 });
+    const opt = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${spaceId}/facts`, { fact: `opt-${RUN}`, ttlDays: 0 });
     assert.equal(opt.status, 201, JSON.stringify(opt.body));
     assert.equal(opt.body._expireAt, undefined);
   });
@@ -156,7 +156,7 @@ describe('record TTL (F10)', () => {
   // ── update precedence ─────────────────────────────────────────────────────
 
   it('update: ttlDays 0 clears, omitted does not re-slide, ttlDays > 0 re-sets', async () => {
-    const w = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/memories', {
+    const w = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/facts', {
       fact: `ttl-upd-${RUN}`, ttlDays: 20,
     });
     assert.equal(w.status, 201, JSON.stringify(w.body));
@@ -165,24 +165,24 @@ describe('record TTL (F10)', () => {
     assertAboutDaysFromNow(firstExpiry, 20);
 
     // omitted ttlDays on update must NOT re-slide the existing expiry
-    const u1 = await patch(INSTANCES.a, tokenA, `/api/brain/spaces/general/memories/${id}`, { fact: `ttl-upd-${RUN}-edited` });
+    const u1 = await patch(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${id}`, { fact: `ttl-upd-${RUN}-edited` });
     assert.equal(u1.status, 200, JSON.stringify(u1.body));
-    const g1 = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/memories/${id}`);
+    const g1 = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${id}`);
     assert.equal(new Date(g1.body._expireAt).getTime(), new Date(firstExpiry).getTime(), 'expiry must be unchanged');
 
     // ttlDays: 0 clears
-    const u2 = await patch(INSTANCES.a, tokenA, `/api/brain/spaces/general/memories/${id}`, { ttlDays: 0 });
+    const u2 = await patch(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${id}`, { ttlDays: 0 });
     assert.equal(u2.status, 200, JSON.stringify(u2.body));
-    const g2 = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/memories/${id}`);
+    const g2 = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${id}`);
     assert.equal(g2.body._expireAt, undefined);
 
     // ttlDays > 0 re-sets
-    const u3 = await patch(INSTANCES.a, tokenA, `/api/brain/spaces/general/memories/${id}`, { ttlDays: 5 });
+    const u3 = await patch(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${id}`, { ttlDays: 5 });
     assert.equal(u3.status, 200, JSON.stringify(u3.body));
-    const g3 = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/memories/${id}`);
+    const g3 = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${id}`);
     assertAboutDaysFromNow(g3.body._expireAt, 5);
 
-    await del(INSTANCES.a, tokenA, `/api/brain/spaces/general/memories/${id}`).catch(() => {});
+    await del(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${id}`).catch(() => {});
   });
 
   // ── REST contract on the space setting ────────────────────────────────────
@@ -214,7 +214,7 @@ describe('record TTL (F10)', () => {
   });
 
   it('rejects out-of-range per-record ttlDays on a write', async () => {
-    const neg = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/memories', { fact: `bad-${RUN}`, ttlDays: -5 });
+    const neg = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/facts', { fact: `bad-${RUN}`, ttlDays: -5 });
     assert.equal(neg.status, 400, JSON.stringify(neg.body));
   });
 });

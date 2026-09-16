@@ -68,7 +68,7 @@ describe('reference format validation (canonical helpers)', () => {
   });
 
   it('names the right record kind per field', () => {
-    assert.match(refs.invalidRefsMessage('memoryIds', 'memory', ['x']), /memory ID/);
+    assert.match(refs.invalidRefsMessage('memoryIds', 'fact', ['x']), /fact ID/);
     assert.match(refs.invalidRefsMessage('chronoIds', 'chrono', ['x']), /chrono ID/);
   });
 

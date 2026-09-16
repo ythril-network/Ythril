@@ -262,7 +262,7 @@ To unpublish, send `{ "published": false }`.
 
 **Response** `200 { "entry": { ... } }` (full updated entry). Returns `404` if the entry does not exist. Requires an **admin token**; returns `403` otherwise.
 
-> **Security note:** Publishing only exposes the schema definition (field types, constraints, naming patterns, tag suggestions). It never exposes space data, memories, or any other tenant information.
+> **Security note:** Publishing only exposes the schema definition (field types, constraints, naming patterns, tag suggestions). It never exposes space data, facts, or any other tenant information.
 
 #### Public listing
 

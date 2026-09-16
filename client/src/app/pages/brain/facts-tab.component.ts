@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { catchError, of } from 'rxjs';
-import { Memory } from '../../core/api.types';
+import { Fact } from '../../core/api.types';
 import { BrainApi } from '../../core/brain-api.service';
 import { httpErrorReason } from '../../core/http-error';
 import { TagInputComponent } from '../../shared/tag-input.component';
@@ -30,7 +30,7 @@ import { TimestampComponent } from '../../shared/timestamp.component';
  * RecordListState; uses EntityRefPicker for entity chips and RecordDrawerState to open the detail
  * drawer.
  *
- * Self-loading: the shell renders this behind `@if (activeTab() === 'memories')`, so it is created on
+ * Self-loading: the shell renders this behind `@if (activeTab() === 'facts')`, so it is created on
  * activation and destroyed on switch. An effect on the `spaceId` input loads on creation and reloads
  * on a space switch while mounted. Create/delete emit `mutated` so the shell can refresh the tab-count
  * stats (the one legitimate output — tab counts are parent view-state).
@@ -39,7 +39,7 @@ import { TimestampComponent } from '../../shared/timestamp.component';
  * signal write (`showMemoryForm`/`recordList.editingId`) happens in the same turn.
  */
 @Component({
-  selector: 'app-memories-tab',
+  selector: 'app-facts-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, PropertiesViewComponent, PropertiesEditorComponent, EntityRefFieldComponent, PhIconComponent, ErrorStateComponent, RecordSearchBarComponent, SortableHeaderComponent, HscrollTopDirective, TimestampComponent],
@@ -49,8 +49,8 @@ import { TimestampComponent } from '../../shared/timestamp.component';
           <div class="content-header">
             <app-record-search-bar
               [value]="store.memorySearch()" (valueChange)="onMemorySearch($event)"
-              placeholder="brain.memories.searchPlaceholder" />
-            <button class="btn-primary btn btn-sm" (click)="openMemoryForm()" [disabled]="showMemoryForm()">{{ 'brain.memories.addButton' | transloco }}</button>
+              placeholder="brain.facts.searchPlaceholder" />
+            <button class="btn-primary btn btn-sm" (click)="openMemoryForm()" [disabled]="showMemoryForm()">{{ 'brain.facts.addButton' | transloco }}</button>
           </div>
 
           <!-- Add memory form -->
@@ -73,7 +73,7 @@ import { TimestampComponent } from '../../shared/timestamp.component';
                   <!-- TYPE follows the SERVER, and which control appears depends on the space.
                        This was free text with suggestions on the stated reasoning that "the server does not
                        restrict it ... a <select> would be stricter than the API". That reasoning was correct
-                       and is now inverted: since P-24 (owner, 2026-08-30) declaring typeSchemas.memory makes
+                       and is now inverted: since P-24 (owner, 2026-08-30) declaring typeSchemas.fact makes
                        those names the allowed set, exactly as for entities, edges and chrono. Keeping free
                        text in such a space would let the form submit a value the server refuses, which is the
                        same defect the other way round. A space declaring NO memory types is unrestricted, and
@@ -81,12 +81,12 @@ import { TimestampComponent } from '../../shared/timestamp.component';
                   <label>{{ 'common.form.type' | transloco }}</label>
                   @if (store.memoryTypesAreRestricted()) {
                     <select [(ngModel)]="memoryForm.type" name="memFormType">
-                      <option value="">{{ 'brain.memories.form.typePlaceholder' | transloco }}</option>
+                      <option value="">{{ 'brain.facts.form.typePlaceholder' | transloco }}</option>
                       @for (t of store.memoryAllowedTypes(); track t) { <option [value]="t">{{ t }}</option> }
                     </select>
                   } @else {
                     <input type="text" [(ngModel)]="memoryForm.type" name="memFormType" list="memTypeOptions"
-                           [placeholder]="'brain.memories.form.typePlaceholder' | transloco" />
+                           [placeholder]="'brain.facts.form.typePlaceholder' | transloco" />
                     <datalist id="memTypeOptions">
                       @for (t of store.memoryTypeOptions(); track t) { <option [value]="t"></option> }
                     </datalist>
@@ -132,33 +132,33 @@ import { TimestampComponent } from '../../shared/timestamp.component';
             <table>
               <thead>
                 <tr>
-                  <th app-sort-th label="brain.memories.table.fact">
+                  <th app-sort-th label="brain.facts.table.fact">
                     <input class="col-filter-input" type="text" [ngModel]="search()" (ngModelChange)="setSearchFilter($event)"
                       [placeholder]="'brain.filter.searchPlaceholder' | transloco" [attr.aria-label]="'brain.filter.searchPlaceholder' | transloco" />
-                  </th><th app-sort-th label="brain.memories.table.description">
+                  </th><th app-sort-th label="brain.facts.table.description">
                     <input class="col-filter-input" type="text" [ngModel]="recordFilter().description" (ngModelChange)="setDescriptionFilter($event)"
                       [placeholder]="'brain.filter.descriptionPlaceholder' | transloco" [attr.aria-label]="'brain.filter.descriptionPlaceholder' | transloco" />
-                  </th><th app-sort-th field="type" label="brain.memories.table.type" [activeField]="sortField()" [dir]="sortDir()" (sort)="setSort($event)">
+                  </th><th app-sort-th field="type" label="brain.facts.table.type" [activeField]="sortField()" [dir]="sortDir()" (sort)="setSort($event)">
                     <select class="col-filter-select" [ngModel]="recordFilter().type" (ngModelChange)="setTypeFilter($event)" [attr.aria-label]="'brain.filter.label' | transloco">
                       <option value="">{{ 'brain.filter.allTypes' | transloco }}</option>
                       @for (t of store.memoryTypeOptions(); track t) { <option [value]="t">{{ t }}</option> }
                     </select>
-                  </th><th app-sort-th label="brain.memories.table.tags">
+                  </th><th app-sort-th label="brain.facts.table.tags">
                     <input class="col-filter-input" type="text" [ngModel]="recordFilter().tag" (ngModelChange)="setTagFilter($event)"
                       [attr.list]="tagListId" [placeholder]="'brain.filter.tagPlaceholder' | transloco" [attr.aria-label]="'brain.filter.tagPlaceholder' | transloco" />
                     <datalist [id]="tagListId">@for (s of store.memoryTagSuggestions(); track s) { <option [value]="s"></option> }</datalist>
                   </th>
-                  <th app-sort-th label="brain.memories.table.entities">
+                  <th app-sort-th label="brain.facts.table.entities">
                     <input class="col-filter-input" type="text" [ngModel]="recordFilter().entityName" (ngModelChange)="setNameFilter('entityName', $event)"
                       [placeholder]="'brain.filter.entityNamePlaceholder' | transloco" [attr.aria-label]="'brain.filter.entityNamePlaceholder' | transloco" />
-                  </th><th app-sort-th label="brain.memories.table.properties">
+                  </th><th app-sort-th label="brain.facts.table.properties">
                     <input class="col-filter-input" type="text" [ngModel]="recordFilter().properties" (ngModelChange)="setPropertiesFilter($event)"
                       [placeholder]="'brain.filter.propertiesPlaceholder' | transloco" [attr.aria-label]="'brain.filter.propertiesPlaceholder' | transloco" />
-                  </th><th app-sort-th field="createdAt" label="brain.memories.table.created" [activeField]="sortField()" [dir]="sortDir()" (sort)="setSort($event)"></th><th></th>
+                  </th><th app-sort-th field="createdAt" label="brain.facts.table.created" [activeField]="sortField()" [dir]="sortDir()" (sort)="setSort($event)"></th><th></th>
                 </tr>
               </thead>
               <tbody>
-                @for (mem of store.memories(); track mem._id) {
+                @for (mem of store.facts(); track mem._id) {
                   @if (recordList.editingId() === mem._id) {
                     <tr>
                       <td colspan="8">
@@ -220,15 +220,15 @@ import { TimestampComponent } from '../../shared/timestamp.component';
                       <td><app-properties-view [properties]="mem.properties" [schema]="store.memorySchema()" /></td>
                       <td><app-timestamp [value]="mem.createdAt"/></td>
                       <td style="white-space:nowrap;">
-                        <button class="icon-btn" [attr.title]="'common.viewDetails' | transloco" [attr.aria-label]="'common.viewDetails' | transloco" (click)="drawerState.open('memory', mem)"><ph-icon name="eye" [size]="16"/></button>
+                        <button class="icon-btn" [attr.title]="'common.viewDetails' | transloco" [attr.aria-label]="'common.viewDetails' | transloco" (click)="drawerState.open('fact', mem)"><ph-icon name="eye" [size]="16"/></button>
                         @if (recordList.confirmDeleteId() === mem._id) {
                           <span class="inline-confirm">
                             {{ 'common.deleteConfirm' | transloco }}
-                            <button class="btn btn-sm btn-danger" (click)="deleteMemory(mem._id)">{{ 'common.yes' | transloco }}</button>
+                            <button class="btn btn-sm btn-danger" (click)="deleteFact(mem._id)">{{ 'common.yes' | transloco }}</button>
                             <button class="btn btn-sm btn-secondary" (click)="cancelDelete()">{{ 'common.no' | transloco }}</button>
                           </span>
                         } @else {
-                          <button class="icon-btn danger" [attr.title]="'brain.memories.deleteTitle' | transloco" [attr.aria-label]="'brain.memories.deleteAriaLabel' | transloco" (click)="requestDelete(mem._id)"><ph-icon name="x" [size]="16"/></button>
+                          <button class="icon-btn danger" [attr.title]="'brain.facts.deleteTitle' | transloco" [attr.aria-label]="'brain.facts.deleteAriaLabel' | transloco" (click)="requestDelete(mem._id)"><ph-icon name="x" [size]="16"/></button>
                         }
                       </td>
                     </tr>
@@ -236,16 +236,16 @@ import { TimestampComponent } from '../../shared/timestamp.component';
                 } @empty {
                   <tr><td colspan="8">
                     @if (recordList.loadError() !== null) {
-                      <app-error-state [message]="'brain.error.loadMemories' | transloco" [reason]="recordList.loadError() ?? ''" (retry)="retryCurrentTab()" />
+                      <app-error-state [message]="'brain.error.loadFacts' | transloco" [reason]="recordList.loadError() ?? ''" (retry)="retryCurrentTab()" />
                     } @else {
                     <div class="empty-state" style="padding:32px">
                       <div class="empty-state-icon"><ph-icon name="brain" [size]="48"/></div>
                       @if (store.memorySearch()) {
                         <h3>{{ 'common.noMatches' | transloco }}</h3>
-                        <p>{{ 'brain.memories.empty.noMatchQuery' | transloco: { query: store.memorySearch() } }}</p>
+                        <p>{{ 'brain.facts.empty.noMatchQuery' | transloco: { query: store.memorySearch() } }}</p>
                       } @else {
-                        <h3>{{ 'brain.memories.empty.title' | transloco }}</h3>
-                        <p>{{ 'brain.memories.empty.body' | transloco }}</p>
+                        <h3>{{ 'brain.facts.empty.title' | transloco }}</h3>
+                        <p>{{ 'brain.facts.empty.body' | transloco }}</p>
                       }
                     </div>
                     }
@@ -257,13 +257,13 @@ import { TimestampComponent } from '../../shared/timestamp.component';
           @if (!store.memorySearch().trim()) {
             <div class="pagination">
               <button class="btn btn-sm btn-secondary" [disabled]="skip() === 0" (click)="prevPage()"><ph-icon name="arrow-left" [size]="14" style="display:inline-flex;vertical-align:middle;"/> {{ 'common.prev' | transloco }}</button>
-              <span class="pager-info">{{ store.memories().length ? (skip() + 1) + '–' + (skip() + store.memories().length) : '–' }}</span>
-              <button class="btn btn-sm btn-secondary" [disabled]="store.memories().length < pageSize" (click)="nextPage()">{{ 'common.next' | transloco }} <ph-icon name="arrow-right" [size]="14" style="display:inline-flex;vertical-align:middle;"/></button>
+              <span class="pager-info">{{ store.facts().length ? (skip() + 1) + '–' + (skip() + store.facts().length) : '–' }}</span>
+              <button class="btn btn-sm btn-secondary" [disabled]="store.facts().length < pageSize" (click)="nextPage()">{{ 'common.next' | transloco }} <ph-icon name="arrow-right" [size]="14" style="display:inline-flex;vertical-align:middle;"/></button>
             </div>
           }
   `,
 })
-export class MemoriesTabComponent extends RecordTabBase {
+export class FactsTabComponent extends RecordTabBase {
   readonly drawerState = inject(RecordDrawerState);
   private brainApi = inject(BrainApi);
 
@@ -297,10 +297,10 @@ export class MemoriesTabComponent extends RecordTabBase {
     if (this.recordFilter().description) filters.description = this.recordFilter().description;
     if (this.recordFilter().entityName) filters.entityName = this.recordFilter().entityName;
     if (this.recordFilter().properties) filters.properties = this.recordFilter().properties;
-    this.brainApi.listMemories(spaceId, this.pageSize, this.skip(), filters, this.sortParam(), this.searchParam()).subscribe({
-      next: ({ memories }) => {
-        this.store.memories.set(memories);
-        const ids = [...new Set(memories.flatMap(m => m.entityIds ?? []))];
+    this.brainApi.listFacts(spaceId, this.pageSize, this.skip(), filters, this.sortParam(), this.searchParam()).subscribe({
+      next: ({ facts }) => {
+        this.store.facts.set(facts);
+        const ids = [...new Set(facts.flatMap(m => m.entityIds ?? []))];
         if (ids.length) this.picker.resolveEntityNames(ids);
         this.recordList.loading.set(false);
       },
@@ -323,11 +323,11 @@ export class MemoriesTabComponent extends RecordTabBase {
   runSemanticMemorySearch(): void {
     const q = this.store.memorySearch().trim();
     const spaceId = this.spaceId();
-    if (!q || !spaceId) { this.store.memories.set([]); return; }
-    this.brainApi.recallBrain(spaceId, { query: q, types: ['memory'], topK: 20 }).pipe(
+    if (!q || !spaceId) { this.store.facts.set([]); return; }
+    this.brainApi.recallBrain(spaceId, { query: q, types: ['fact'], topK: 20 }).pipe(
       catchError(() => of({ results: [], count: 0 })),
     ).subscribe(res => {
-      this.store.memories.set(res.results.filter(r => r.type === 'memory').map(r => ({
+      this.store.facts.set(res.results.filter(r => r.type === 'fact').map(r => ({
         _id: r['_id'] as string,
         fact: (r['fact'] as string) ?? '',
         tags: (r['tags'] as string[]) ?? [],
@@ -337,7 +337,7 @@ export class MemoriesTabComponent extends RecordTabBase {
         createdAt: (r['createdAt'] as string) ?? '',
         seq: (r['seq'] as number) ?? 0,
         author: r['author'] as { instanceId: string } | undefined,
-      } as Memory)));
+      } as Fact)));
     });
   }
 
@@ -356,7 +356,7 @@ export class MemoriesTabComponent extends RecordTabBase {
   }
 
   openMemoryForm(): void {
-    this.memoryForm = { fact: '', type: '', tags: [], entityIds: '', description: '', properties: this.store.buildPropertiesObject('memory') };
+    this.memoryForm = { fact: '', type: '', tags: [], entityIds: '', description: '', properties: this.store.buildPropertiesObject('fact') };
     this.showMemoryForm.set(true);
   }
 
@@ -367,7 +367,7 @@ export class MemoriesTabComponent extends RecordTabBase {
     const entityIds = this.memoryForm.entityIds.split(',').map(s => s.trim()).filter(Boolean);
     const body: Parameters<BrainApi['createMemory']>[1] = { fact: this.memoryForm.fact.trim() };
     // Sent only when non-empty: an empty `type` must stay ABSENT rather than become the string "", which would
-    // select typeSchemas.memory[""], find nothing, and store a type nobody can filter for.
+    // select typeSchemas.fact[""], find nothing, and store a type nobody can filter for.
     if (this.memoryForm.type.trim()) body.type = this.memoryForm.type.trim();
     if (this.memoryForm.tags.length) body.tags = this.memoryForm.tags;
     if (entityIds.length) body.entityIds = entityIds;
@@ -385,7 +385,7 @@ export class MemoriesTabComponent extends RecordTabBase {
     });
   }
 
-  startEditMemory(mem: Memory): void {
+  startEditMemory(mem: Fact): void {
     this.recordList.editingId.set(mem._id);
     this.recordList.editError.set('');
     this.editMemory = {
@@ -393,7 +393,7 @@ export class MemoriesTabComponent extends RecordTabBase {
       tags: mem.tags ?? [],
       entityIds: (mem.entityIds ?? []).join(', '),
       description: mem.description ?? '',
-      properties: this.store.buildPropertiesObject('memory', mem.properties ?? {}),
+      properties: this.store.buildPropertiesObject('fact', mem.properties ?? {}),
     };
   }
 
@@ -401,7 +401,7 @@ export class MemoriesTabComponent extends RecordTabBase {
     this.recordList.editSaving.set(true);
     this.recordList.editError.set('');
     const memProps = this.editMemory.properties;
-    this.brainApi.updateMemory(this.spaceId(), id, {
+    this.brainApi.updateFact(this.spaceId(), id, {
       fact: this.editMemory.fact.trim(),
       tags: this.editMemory.tags,
       entityIds: this.editMemory.entityIds.split(',').map(s => s.trim()).filter(Boolean),
@@ -411,16 +411,16 @@ export class MemoriesTabComponent extends RecordTabBase {
       next: (updated) => {
         this.recordList.editSaving.set(false);
         this.recordList.editingId.set('');
-        this.store.memories.update(list => list.map(m => m._id === id ? updated : m));
+        this.store.facts.update(list => list.map(m => m._id === id ? updated : m));
       },
       error: (err) => { this.recordList.editSaving.set(false); this.recordList.editError.set(fmtApiError(err, 'Failed to save')); },
     });
   }
 
-  deleteMemory(id: string): void {
+  deleteFact(id: string): void {
     this.recordList.confirmDeleteId.set('');
-    this.brainApi.deleteMemory(this.spaceId(), id).subscribe({
-      next: () => { this.store.memories.update(list => list.filter(m => m._id !== id)); this.mutated.emit(); },
+    this.brainApi.deleteFact(this.spaceId(), id).subscribe({
+      next: () => { this.store.facts.update(list => list.filter(m => m._id !== id)); this.mutated.emit(); },
       error: () => {},
     });
   }

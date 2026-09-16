@@ -65,7 +65,7 @@ describe('ChronoTabComponent', () => {
   // and says outright that each column "needs BOTH the whitelist entry (or the route 400s) and a client
   // header" — but nothing pinned the header half, so a field could be sortable server-side and simply never
   // offered. `createdAt` was in exactly that state: allowed by the API, with no column on this tab at all,
-  // while entities, edges and memories all showed one.
+  // while entities, edges and facts all showed one.
   it('offers every column the server can sort chrono by', () => {
     const fixture = make();
     const fields = [...(fixture.nativeElement as HTMLElement).querySelectorAll('th[app-sort-th]')]

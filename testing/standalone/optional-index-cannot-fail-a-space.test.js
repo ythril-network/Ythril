@@ -152,7 +152,7 @@ describe('an index that does not exist is a terminal state, not a slow one', () 
  * decisions that only exist as code shape, and these pin the behaviour an operator actually sees.
  */
 describe('the admin health panel does not call a healthy space missing', () => {
-  const required = (status) => ['memories', 'entities', 'edges', 'chrono', 'files']
+  const required = (status) => ['facts', 'entities', 'edges', 'chrono', 'files']
     .map(c => ({ collection: c, indexName: `s_${c}_embedding`, status }));
   const face = (status) => ({ collection: 'files', indexName: 's_files_faceEmbedding', status, optional: true });
 

@@ -1,7 +1,7 @@
 /**
  * A shorter life for the `changes` payload than for the audit entry that carries it.
  *
- * Owner decision, 2026-07-28: brain RECORD edits (memories, entities, edges, chrono, file meta) may
+ * Owner decision, 2026-07-28: brain RECORD edits (facts, entities, edges, chrono, file meta) may
  * record old→new values, **with a TTL**. That TTL is the mitigation for what made the feature a
  * decision rather than a slice — recording record edits copies user content into a second store with
  * different access rules, and record writes are the hot bulk path.
@@ -15,7 +15,7 @@
  * and they want different lifetimes.
  *
  * So this sweep unsets `changes` in place. The entry survives its full `audit.retentionDays` and still
- * answers "who edited that memory, and when". Only "and here is what it used to say" expires early.
+ * answers "who edited that fact, and when". Only "and here is what it used to say" expires early.
  *
  * ── Redaction is recorded, not silent ───────────────────────────────────────────────────────────
  *
@@ -54,7 +54,7 @@ export const DEFAULT_RECORD_CHANGE_RETENTION_DAYS = 14;
  * Those keep the full retention.
  */
 export const RECORD_CHANGE_OPERATIONS: readonly string[] = [
-  'memory.update',
+  'fact.update',
   'entity.update',
   'edge.update',
   'chrono.update',

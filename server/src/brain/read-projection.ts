@@ -57,7 +57,7 @@ export const LIST_WITHHELD_FIELDS: readonly string[] = ['matchedText', 'embeddin
  *
  * Copies rather than deleting in place: the rows may be shared with a cache or a count, and a strip that
  * mutated its input would thin whatever else held a reference. Measured on the live stack before this
- * existed — `GET /entities` returned `matchedText`, `embeddingModel` AND `embedding`, and `GET /memories`
+ * existed — `GET /entities` returned `matchedText`, `embeddingModel` AND `embedding`, and `GET /facts`
  * the first two.
  *
  * A strip and not a projection, unlike the vector: this one is conditional on the request, and making it a
@@ -96,10 +96,10 @@ export const NEVER_RETURNED_PROJECTION: Record<string, 0> =
  * ## Why writes needed their own answer
  *
  * A projection fixes reads. A write that embeds INLINE has just computed the vector in memory, so there is
- * no read to project: `remember`, `save_entity`, `save_edge` and `save_chrono` assembled it into the
+ * no read to project: `saveFact`, `save_entity`, `save_edge` and `save_chrono` assembled it into the
  * document they stored AND into the document they returned, and the route sent that as its 201.
  *
- * Measured against the live stack 2026-08-19, all five leaked: entity, memory, chrono and edge creates with
+ * Measured against the live stack 2026-08-19, all five leaked: entity, fact, chrono and edge creates with
  * `waitForEmbedding: true`, **and any create with `checkDuplicates` — which DEFAULTS TO TRUE, because the
  * duplicate check needs the vector up front and therefore implies the wait.** So this was reachable with no
  * flag at all, on the commonest write there is.

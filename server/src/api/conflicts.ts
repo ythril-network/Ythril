@@ -122,7 +122,7 @@ conflictsRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
         .toArray() as ConflictDoc[];
       if (docs.length > PER_SPACE_CAP) { truncated = true; docs.length = PER_SPACE_CAP; }
       results.push(...docs);
-      if (results.length >= MAX_TOTAL) { truncated = true; break; } // bound cross-space memory
+      if (results.length >= MAX_TOTAL) { truncated = true; break; } // bound cross-space fact
     }
     results.sort((a, b) => b.detectedAt.localeCompare(a.detectedAt));
     if (results.length > MAX_TOTAL) { results.length = MAX_TOTAL; truncated = true; }

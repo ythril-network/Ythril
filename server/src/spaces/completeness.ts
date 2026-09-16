@@ -65,7 +65,7 @@ export interface CompletenessCheck {
    * A link record has no tab and will not get one: it is DERIVED from an array on another record, so a
    * "go and fix these" button pointing at it would open nothing an operator could act on. The owner's
    * ruling on how links surface says the same — *"on graph shown as info on click, and toggleable if
-   * memories and chronos appear"* — a graph affordance and a recall toggle, not a tab.
+   * facts and chronos appear"* — a graph affordance and a recall toggle, not a tab.
    *
    * So the exclusion lives in the type, where a check that tried to target links is a compiler error at the
    * point it is written. The client's mirror narrows to its own `CollectionTab`, which is the authority on
@@ -127,7 +127,7 @@ export const CHECK_WEIGHTS: Record<CompletenessCheckId, number> = {
 /** The four knowledge types that carry `typeSchemas`, and the collection + type field for each. */
 const SCHEMA_KINDS: { kind: KnowledgeType; collection: string; typeField: string; tab: CompletenessCheck['targetTab'] }[] = [
   { kind: 'entity', collection: 'entities', typeField: 'type', tab: 'entities' },
-  { kind: 'memory', collection: 'memories', typeField: 'type', tab: 'memories' },
+  { kind: 'fact', collection: 'facts', typeField: 'type', tab: 'facts' },
   // Edges are typed by their `label`, not a `type` field — `typeSchemas.edge` keys are label values.
   { kind: 'edge', collection: 'edges', typeField: 'label', tab: 'edges' },
   { kind: 'chrono', collection: 'chrono', typeField: 'type', tab: 'chrono' },
@@ -151,7 +151,7 @@ export interface CompletenessFacts {
 }
 
 function emptyByKind<T>(make: () => T): Record<KnowledgeType, T> {
-  return { entity: make(), memory: make(), edge: make(), chrono: make() };
+  return { entity: make(), fact: make(), edge: make(), chrono: make() };
 }
 
 /**

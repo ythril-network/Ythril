@@ -51,7 +51,7 @@ const KNOWLEDGE_MODEL = `An instance holds one or more **spaces** — isolated k
 storage quota, optional type schemas, and sync membership. Every record lives in
 exactly one space. There are five knowledge types:
 
-- **memories** — free-text facts with semantic embeddings; may reference entities via entityIds.
+- **facts** — free-text facts with semantic embeddings; may reference entities via entityIds.
 - **entities** — named things (people, projects, concepts) with a type, tags, and properties.
 - **edges** — directed, labelled relationships between two entities (from → label → to); the graph part of the knowledge graph.
 - **chrono** — time-anchored entries (event/deadline/plan/milestone) with a status lifecycle.
@@ -146,7 +146,7 @@ entities. Schema-declared property paths also unlock the fast filtered-recall pa
 (see retrieval guide above).`;
 
 const REST_SUMMARY = `The same functionality is exposed over REST with Bearer token auth (the token you
-are using now works there too). Route families: /api/brain (memories, entities,
+are using now works there too). Route families: /api/brain (facts, entities,
 edges, chrono, recall), /api/spaces, /api/files, /api/tokens, /api/networks,
 /api/sync, /api/conflicts, /api/duplicates, /api/schema-library, /api/mfa,
 /api/about, and admin-only /api/admin/* (audit-log, webhooks, data, local-agent,

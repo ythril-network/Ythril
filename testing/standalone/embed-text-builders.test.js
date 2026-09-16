@@ -14,7 +14,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  propsEmbedText, memoryEmbedText, entityEmbedText, edgeEmbedText, chronoEmbedText, fileEmbedText,
+  propsEmbedText, factEmbedText, entityEmbedText, edgeEmbedText, chronoEmbedText, fileEmbedText,
 } from '../../server/dist/brain/embed-text.js';
 
 describe('embed-text builders — property keys and field coverage', () => {
@@ -35,7 +35,7 @@ describe('embed-text builders — property keys and field coverage', () => {
      * guards the SHAPE — no parameter, no fold, no resolution in any of the three writers — and this guards
      * the output, so a rebuild of the prepend from some other source still fails here.
      */
-    const t = memoryEmbedText('the fact', ['t1'], 'desc', { occupation: 'pilot' });
+    const t = factEmbedText('the fact', ['t1'], 'desc', { occupation: 'pilot' });
     assert.match(t, /the fact/);
     assert.match(t, /occupation pilot/, `properties must fold key+value: ${t}`);
     assert.doesNotMatch(t, /Alice/, `a memory must not embed the names of what it links to: ${t}`);

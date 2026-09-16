@@ -3,7 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { TagInputComponent } from '../../shared/tag-input.component';
 import { EntityRefFieldComponent } from '../brain/entity-ref-field.component';
-import { MemoryRefFieldComponent } from '../brain/memory-ref-field.component';
+import { FactRefFieldComponent } from '../brain/fact-ref-field.component';
 import { ChronoRefFieldComponent } from '../brain/chrono-ref-field.component';
 import { FILE_META_EDITOR_STYLES } from './file-manager.styles';
 
@@ -48,7 +48,7 @@ export interface FileMetaModel {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [FormsModule, TranslocoPipe, TagInputComponent, EntityRefFieldComponent,
-    MemoryRefFieldComponent, ChronoRefFieldComponent],
+    FactRefFieldComponent, ChronoRefFieldComponent],
   styles: [FILE_META_EDITOR_STYLES],
   template: `
     @if (model(); as m) {
@@ -66,8 +66,8 @@ export interface FileMetaModel {
           <app-entity-ref-field [target]="m" [spaceId]="spaceId()" />
         </div>
         <div class="field">
-          <label>{{ 'brain.fileMeta.table.memories' | transloco }}</label>
-          <app-memory-ref-field [target]="m" />
+          <label>{{ 'brain.fileMeta.table.facts' | transloco }}</label>
+          <app-fact-ref-field [target]="m" />
         </div>
         <div class="field">
           <label>{{ 'brain.fileMeta.table.chrono' | transloco }}</label>

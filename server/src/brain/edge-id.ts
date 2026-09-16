@@ -77,9 +77,9 @@ const part = (s: string): string => `${s.length}:${s}`;
  *
  * ## The endpoint KINDS are part of the identity, and appended only when they have to be (M-3)
  *
- * Since M-1 an endpoint can be an entity, a memory, a chrono entry or a file, and **each collection assigns
- * its own UUIDs** — so a memory and an entity may hold the same id. Without the kinds in the key,
- * `(X) -[mentions]-> (Y as entity)` and `(X) -[mentions]-> (Y as memory)` are two relationships deriving one
+ * Since M-1 an endpoint can be an entity, a fact, a chrono entry or a file, and **each collection assigns
+ * its own UUIDs** — so a fact and an entity may hold the same id. Without the kinds in the key,
+ * `(X) -[mentions]-> (Y as entity)` and `(X) -[mentions]-> (Y as fact)` are two relationships deriving one
  * id: a duplicate key under the unique index, on every sync cycle, which is the defect deriving the id was
  * introduced to remove arriving back through the widened endpoint.
  *

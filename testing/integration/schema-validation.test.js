@@ -83,7 +83,7 @@ describe('Schema validation — strict mode', () => {
           },
           owns: {},
         },
-        memory: {
+        fact: {
           note: {
             propertySchemas: { source: { type: 'string', required: true } },
           },
@@ -151,7 +151,7 @@ describe('Schema validation — strict mode', () => {
   });
 
   it('rejects memory with missing required property', async () => {
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${TEST_SPACE}/memories`, {
+    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${TEST_SPACE}/facts`, {
       fact: `Schema strict test ${RUN}`,
       type: 'note',
     });
@@ -161,7 +161,7 @@ describe('Schema validation — strict mode', () => {
   });
 
   it('accepts valid memory', async () => {
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${TEST_SPACE}/memories`, {
+    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${TEST_SPACE}/facts`, {
       fact: `Schema strict test ${RUN} valid`,
       type: 'note',
       properties: { source: 'test-suite' },
@@ -273,7 +273,7 @@ describe('Schema validation — bulk write strict mode', () => {
             propertySchemas: { confidence: { type: 'number', required: true } },
           },
         },
-        memory: {
+        fact: {
           note: {
             propertySchemas: { source: { type: 'string', required: true } },
           },
@@ -291,15 +291,15 @@ describe('Schema validation — bulk write strict mode', () => {
 
   it('skips memories that violate schema, inserts valid ones', async () => {
     const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${TEST_SPACE}/bulk`, {
-      memories: [
+      facts: [
         { fact: `Bulk valid ${RUN}`, type: 'note', properties: { source: 'test' } },
         { fact: `Bulk invalid ${RUN}`, type: 'note' },  // missing required 'source'
         { fact: `Bulk valid2 ${RUN}`, type: 'note', properties: { source: 'test2' } },
       ],
     });
     assert.equal(r.status, 207, JSON.stringify(r.body));
-    assert.equal(r.body.inserted.memories, 2, 'two valid memories should be inserted');
-    assert.ok(r.body.errors.some(e => e.type === 'memory' && e.index === 1 && e.reason.includes('schema_violation')),
+    assert.equal(r.body.inserted.facts, 2, 'two valid memories should be inserted');
+    assert.ok(r.body.errors.some(e => e.type === 'fact' && e.index === 1 && e.reason.includes('schema_violation')),
       'violating memory should have schema_violation error');
   });
 

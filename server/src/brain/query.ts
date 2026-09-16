@@ -1,7 +1,7 @@
 /**
  * Structured read-only query (`queryBrain`) — the operator-whitelisted Mongo query surface.
  *
- * Split out of brain/memory.ts (A17.4). This is the raw-Mongo query path behind REST /query and the
+ * Split out of brain/fact.ts (A17.4). This is the raw-Mongo query path behind REST /query and the
  * MCP `query` tool; distinct from the recall filter DSL in filter.ts. Includes the operator
  * whitelist, the ReDoS-safe sanitiser, and the projection guard that never lets `embedding` out.
  */

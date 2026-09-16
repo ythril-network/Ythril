@@ -53,7 +53,7 @@ export function normaliseRecordTtl(
   // Object write: merge over the stored windows, widening a stored scalar first so the four buckets the caller
   // did not mention keep the number they were effectively already using.
   const base: RecordTtlWindows = typeof stored === 'number'
-    ? { entity: stored, memory: stored, edge: stored, chrono: stored, file: stored }
+    ? { entity: stored, fact: stored, edge: stored, chrono: stored, file: stored }
     : { ...(stored ?? {}) };
 
   const out: RecordTtlWindows = {};

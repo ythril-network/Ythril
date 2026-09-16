@@ -30,12 +30,12 @@ export interface RouteRule {
 }
 
 export const ROUTE_RULES: RouteRule[] = [
-  // ── Memory CRUD ──────────────────────────────────────────────────────────
-  { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/memories$/,   operation: 'memory.create',  spaceGroup: 1 },
-  { method: 'PATCH',  pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/memories\/([^/]+)$/, operation: 'memory.update', spaceGroup: 1, entryGroup: 2 },
-  { method: 'DELETE', pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/memories\/([^/]+)$/, operation: 'memory.delete', spaceGroup: 1, entryGroup: 2 },
-  { method: 'DELETE', pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/memories$/,   operation: 'memory.delete',  spaceGroup: 1 },
-  { method: 'GET',    pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/memories/,    operation: 'memory.list',    spaceGroup: 1, read: true },
+  // ── Fact CRUD ──────────────────────────────────────────────────────────
+  { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/facts$/,   operation: 'fact.create',  spaceGroup: 1 },
+  { method: 'PATCH',  pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/facts\/([^/]+)$/, operation: 'fact.update', spaceGroup: 1, entryGroup: 2 },
+  { method: 'DELETE', pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/facts\/([^/]+)$/, operation: 'fact.delete', spaceGroup: 1, entryGroup: 2 },
+  { method: 'DELETE', pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/facts$/,   operation: 'fact.delete',  spaceGroup: 1 },
+  { method: 'GET',    pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/facts/,    operation: 'fact.list',    spaceGroup: 1, read: true },
 
   // ── Entity CRUD ──────────────────────────────────────────────────────────
   { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/entities\/([^/]+)\/merge\/([^/]+)$/, operation: 'entity.merge', spaceGroup: 1, entryGroup: 2 },
@@ -67,7 +67,7 @@ export const ROUTE_RULES: RouteRule[] = [
   { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/chrono$/,     operation: 'chrono.create',  spaceGroup: 1 },
   { method: 'PATCH',  pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/chrono\/([^/]+)$/, operation: 'chrono.update', spaceGroup: 1, entryGroup: 2 },
   { method: 'DELETE', pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/chrono\/([^/]+)$/, operation: 'chrono.delete', spaceGroup: 1, entryGroup: 2 },
-  // Bulk chrono delete had no rule — memories/entities/edges all had one, chrono did not.
+  // Bulk chrono delete had no rule — facts/entities/edges all had one, chrono did not.
   { method: 'DELETE', pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/chrono$/,     operation: 'chrono.delete',  spaceGroup: 1 },
   { method: 'GET',    pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/chrono/,      operation: 'chrono.list',    spaceGroup: 1, read: true },
 
@@ -343,8 +343,8 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
 
   res.on('finish', () => {
     // Use originalUrl (strip query string) — req.path inside the 'finish'
-    // callback reflects the router-relative path (e.g. "/general/memories"
-    // instead of "/api/brain/general/memories") because Express strips the
+    // callback reflects the router-relative path (e.g. "/general/facts"
+    // instead of "/api/brain/general/facts") because Express strips the
     // mount prefix for sub-routers and the response finishes within that
     // router context.
     const fullPath = (req.originalUrl || req.url).split('?')[0];

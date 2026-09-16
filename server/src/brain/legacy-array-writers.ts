@@ -14,7 +14,7 @@
  * It already records these field names per entry with a token, a label, a space and a time. Two things kill
  * it, and both UNDER-REPORT IN SILENCE, which is worse than not answering at all:
  *
- *  - `AUDIT_CHANGE_FIELDS` covers `memory.update`, `chrono.update` and `file.meta.update`. **A create
+ *  - `AUDIT_CHANGE_FIELDS` covers `fact.update`, `chrono.update` and `file.meta.update`. **A create
  *    carrying `entityIds` records nothing** — and a freshly written caller is the one an operator most needs
  *    to hear about.
  *  - `changes` expire on a deliberately short clock (`DEFAULT_RECORD_CHANGE_RETENTION_DAYS`, 14) because

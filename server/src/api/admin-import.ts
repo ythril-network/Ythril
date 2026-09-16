@@ -59,7 +59,7 @@ export type ImportType = typeof IMPORT_TYPES[number];
  * collection a compiler error here instead of a record kind the importer silently skipped.
  */
 const RECORD_TYPE: Record<ImportType, BrainEmbedRecordType | null> = {
-  memories: 'memory',
+  facts: 'fact',
   entities: 'entity',
   edges: 'edge',
   chrono: 'chrono',

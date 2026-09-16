@@ -1,5 +1,5 @@
 ﻿import { createServer } from 'http';
-import { configExists, loadConfig, loadSecrets, loadSchemaLibrary, getMongoUri, flushConfig, migrateStateFilesAtRest, requireEncryptedAtRest, atRestEncryptionActive } from './config/loader.js';
+import { configExists, getConfig, loadConfig, loadSecrets, loadSchemaLibrary, getMongoUri, flushConfig, migrateStateFilesAtRest, requireEncryptedAtRest, atRestEncryptionActive } from './config/loader.js';
 import { beginShutdown } from './lifecycle.js';
 import { connectMongo, closeMongo, checkVectorSearchAvailability } from './db/mongo.js';
 import { createApp } from './app.js';
@@ -46,7 +46,23 @@ async function main(): Promise<void> {
     // At-rest encryption (PR-S2): if a master secret is configured, transparently encrypt any
     // still-plaintext state file in place BEFORE loading (round-trip verified; no plaintext left).
     migrateStateFilesAtRest();
+
     loadConfig();
+
+    /*
+     * And the one word in the config that 5.0 renamed. `recordTtlDays: { memory: 30 }` is a retention
+     * window, and after the type became `fact` the key is unread — so the records it governed would be
+     * kept for ever, with no error, no warning and no metric to say so.
+     *
+     * AFTER `loadConfig()`, not before: it rewrites what is already in memory, so reading the config
+     * first is not an ordering preference — `getConfig()` throws when nothing has been loaded, which is
+     * a boot that never reaches the migration it was added for.
+     */
+    {
+      const { migrateMemoryToFact } = await import('./config/migrate-memory-to-fact.js');
+      const moved = migrateMemoryToFact(getConfig().spaces);
+      if (moved.ttlWindows.length > 0) flushConfig();
+    }
     loadSecrets();
     loadSchemaLibrary();
 
@@ -103,6 +119,28 @@ async function main(): Promise<void> {
   // Always connect to MongoDB — needed on first run so the setup route can
   // initialise the general space immediately after writing the config.
   await connectMongo();
+
+  /*
+   * BEFORE ANY SERVICE READS A COLLECTION. 5.0 renamed the knowledge type `fact` to `fact`, and a
+   * collection is named after its type — so an instance that skipped this would look for
+   * `<space>_facts`, not find it, create an empty one, and report zero facts in a space holding
+   * thousands. Nothing would error: reading a collection that does not exist is an empty result, which
+   * is the same shape as a space nobody has written to.
+   *
+   * Safe as a BOOT migration, where a synced-content migration would have to be lazy: this renames a
+   * container and touches no document, so every `_id`, field and hash is unchanged and a peer cannot
+   * write the old shape back. The wire format changing in the same release is protected separately, by
+   * the peer floor refusing anything below 5.0.0 at the handshake.
+   */
+  {
+    const { renameMemoriesToFacts } = await import('./db/rename-memories-to-facts.js');
+    await renameMemoriesToFacts();
+    // AFTER the collections move, and it is a second migration because it answers a different question: the
+    // collection rename fixes where a fact is STORED, this fixes every id derived from the word `fact` —
+    // an edge or link endpoint kind. Both are silent failures and neither implies the other.
+    const { rekeyMemoryKindToFact } = await import('./db/rekey-memory-kind-to-fact.js');
+    await rekeyMemoryKindToFact();
+  }
 
   // Validate $vectorSearch support and log the result.
   {

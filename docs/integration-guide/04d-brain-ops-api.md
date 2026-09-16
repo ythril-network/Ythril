@@ -15,7 +15,7 @@ GET /api/brain/spaces/:spaceId/stats
 ```json
 {
   "spaceId": "general",
-  "memories": 1042,
+  "facts": 1042,
   "entities": 156,
   "edges": 89,
   "chrono": 23,
@@ -149,7 +149,7 @@ GET /api/brain/spaces/:spaceId/reindex-status
 { "spaceId": "general", "needsReindex": false }
 ```
 
-Returns `true` when the embedding model has changed and memories need re-embedding.
+Returns `true` when the embedding model has changed and facts need re-embedding.
 
 ---
 
@@ -250,7 +250,7 @@ appear.
 GET /api/brain/spaces/:spaceId/embedding-queue/media
 ```
 
-The **media** half of the queue — file chunks produced by the conversion pipeline. For brain records (memories, entities,
+The **media** half of the queue — file chunks produced by the conversion pipeline. For brain records (facts, entities,
 edges, chrono) see [Vectorless records](#vectorless-records--the-embed-queue-for-brain-records), which is a separate
 collection with a separate worker.
 
@@ -317,7 +317,7 @@ GET /api/brain/spaces/:spaceId/embedding-queue/records
   "counts": { "pending": 2, "processing": 0, "failed": 1 },
   "jobs": [
     {
-      "recordType": "memory",
+      "recordType": "fact",
       "recordId": "3f2c…",
       "spaceId": "general",
       "status": "failed",
@@ -353,12 +353,12 @@ POST /api/brain/spaces/:spaceId/embedding-queue/records/retry
 ```
 
 ```json
-{ "recordType": "memory", "recordId": "3f2c…" }
+{ "recordType": "fact", "recordId": "3f2c…" }
 ```
 
 | Field | Description |
 |-------|-------------|
-| `recordType` | `memory`, `entity`, `edge`, `chrono`, or `file`. Anything else is a `400` |
+| `recordType` | `fact`, `entity`, `edge`, `chrono`, or `file`. Anything else is a `400` |
 | `recordId` | The record's `_id`, as the listing reports it. Required |
 | `targetSpace` | Required when `:spaceId` is a **proxy** space: the member space holding the record |
 
@@ -368,7 +368,7 @@ untouched — this re-embeds what is already there rather than re-writing it.
 **Response** `202`:
 
 ```json
-{ "result": "ok", "recordType": "memory", "recordId": "3f2c…", "spaceId": "general" }
+{ "result": "ok", "recordType": "fact", "recordId": "3f2c…", "spaceId": "general" }
 ```
 
 | `result` | Status | Meaning |
@@ -396,7 +396,7 @@ POST /api/spaces/:spaceId/activity/reset
 ```
 
 Deletes the hourly usage buckets behind the Overview **usage** panel for this space. Admin + MFA, scoped to the
-space — clearing a usage record changes no memory, entity, edge or file, so it is an administrative act on the
+space — clearing a usage record changes no fact, entity, edge or file, so it is an administrative act on the
 space's own bookkeeping rather than a knowledge write, and it sits with the other destructive space operations.
 
 **Response** `200`:
@@ -457,8 +457,8 @@ POST /api/brain/spaces/:spaceId/bulk
 Content-Type: application/json
 ```
 
-Batch-upsert memories, entities, edges, and/or chrono entries in a single HTTP call. All four arrays are
-optional. Processing order: **memories → entities → edges → chrono**, which matters for records this call
+Batch-upsert facts, entities, edges, and/or chrono entries in a single HTTP call. All four arrays are
+optional. Processing order: **facts → entities → edges → chrono**, which matters for records this call
 UPDATES — an entity addressed by an id that already exists is written before an edge in the same batch reads
 it.
 
@@ -476,21 +476,21 @@ Each array is capped at 500 entries. Per-item validation failures are recorded i
 
 ```json
 {
-  "memories":  [ { "fact": "Oceans cover 71% of the Earth's surface.", "tags": ["science"] } ],
+  "facts":  [ { "fact": "Oceans cover 71% of the Earth's surface.", "tags": ["science"] } ],
   "entities":  [ { "name": "Earth", "type": "planet", "tags": ["science"] } ],
   "edges":     [ { "from": "<entity-id-A>", "to": "<entity-id-B>", "label": "orbits" } ],
   "chrono":    [ { "title": "Launch day", "type": "milestone", "startsAt": "2026-01-01T00:00:00Z" } ]
 }
 ```
 
-Each item accepts the same fields as its corresponding individual endpoint (`POST /memories`, `POST /entities`, `POST /edges`, `POST /chrono`), with one exception: **an entity's `type` is required in bulk** (an item missing it is skipped with `"missing required field: type"`), whereas the single `POST /entities` defaults `type` to empty.
+Each item accepts the same fields as its corresponding individual endpoint (`POST /facts`, `POST /entities`, `POST /edges`, `POST /chrono`), with one exception: **an entity's `type` is required in bulk** (an item missing it is skipped with `"missing required field: type"`), whereas the single `POST /entities` defaults `type` to empty.
 
 **Response** `207`:
 
 ```json
 {
-  "inserted": { "memories": 1, "entities": 1, "edges": 0, "chrono": 1 },
-  "updated":  { "memories": 0, "entities": 0, "edges": 1, "chrono": 0 },
+  "inserted": { "facts": 1, "entities": 1, "edges": 0, "chrono": 1 },
+  "updated":  { "facts": 0, "entities": 0, "edges": 1, "chrono": 0 },
   "errors":   [
     { "type": "edge", "index": 0, "reason": "missing required field: from" }
   ]
@@ -529,7 +529,7 @@ Run a constrained Mongo-style read query against one logical collection. Intende
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `collection` | ✅ | One of: `memories`, `entities`, `edges`, `chrono`, `files`, `links` |
+| `collection` | ✅ | One of: `facts`, `entities`, `edges`, `chrono`, `files`, `links` |
 | `filter` | — | Query filter object (defaults to `{}`) |
 | `projection` | — | Projection object (`1` include / `0` exclude) |
 | `limit` | — | Max rows (default `20`, capped at `100`) |
@@ -541,13 +541,13 @@ Run a constrained Mongo-style read query against one logical collection. Intende
 Any other field is a `400`. See **Unknown body fields are refused** below.
 
 **`links` is read-only through THIS route, and it does have write doors of its own** — `POST /api/brain/spaces/:spaceId/links` and `DELETE /api/brain/spaces/:spaceId/links/:id`, with `save_link` and `delete_link` on MCP. This said it had none, which was true before 4.0 and stopped being when links became records. A link record says that one
-record concerns another — it is what a `memory.entityIds`, `chrono.entityIds`/`memoryIds` or
+record concerns another — it is what a `fact.entityIds`, `chrono.entityIds`/`memoryIds` or
 `file.entityIds`/`memoryIds`/`chronoIds` entry becomes when it is stored as a record instead of an array
 element. You write one by writing that array on the record, exactly as before; querying this collection is how
 you read them back as rows.
 
 A link document is deliberately small: `from` and `to` with a `fromKind` and `toKind` (`entity`,
-`memory`, `chrono` or `file`), plus `author`, `createdAt`, `updatedAt` and `seq`. There is no label, type,
+`fact`, `chrono` or `file`), plus `author`, `createdAt`, `updatedAt` and `seq`. There is no label, type,
 weight or description, because the two kinds already say which of the six connections it is — and no
 embedding, so a link never competes in a meaning-ranked search.
 
@@ -578,7 +578,7 @@ When you pass `sort`, the applied `sort` and `dir` are echoed back too.
 |---|---|
 | `entities` | `createdAt`, `name`, `type` |
 | `edges` | `createdAt`, `label`, `from`, `to`, `type`, `weight` |
-| `memories` | `createdAt`, `type` |
+| `facts` | `createdAt`, `type` |
 | `chrono` | `createdAt`, `title`, `startsAt`, `endsAt`, `status`, `type` |
 | `files` | `createdAt`, `updatedAt`, `path` |
 
@@ -597,7 +597,7 @@ The result order is **total** — `seq`, then `updatedAt`, `createdAt`, `_id` �
 seen twice or missed. Concatenating `skip=0,5,10,…` gives you the collection exactly once, in order.
 
 ```json
-{ "results": [ … ], "collection": "memories", "count": 3, "limit": 3, "skip": 4 }
+{ "results": [ … ], "collection": "facts", "count": 3, "limit": 3, "skip": 4 }
 ```
 
 `limit` and `skip` are echoed back, so a paging loop can distinguish *the page you asked for* from *what the server

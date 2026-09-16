@@ -52,7 +52,7 @@ let instanceIdA;
  */
 const awaitOnB = (memId, expectStatus, what) =>
   syncUntil(INSTANCES.a, tokenA, networkId,
-    async () => (await get(INSTANCES.b, tokenB, `/api/brain/spaces/${testSpaceId}/memories/${memId}`)).status === expectStatus,
+    async () => (await get(INSTANCES.b, tokenB, `/api/brain/spaces/${testSpaceId}/facts/${memId}`)).status === expectStatus,
     `${what} (expected ${expectStatus} for ${memId} on B)`,
     {
       label: 'A',
@@ -139,7 +139,7 @@ describe('Pub/Sub topology (A -> B subscriber)', () => {
   });
 
   it('Publisher A: write propagates down to Subscriber B', async () => {
-    const write = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${testSpaceId}/memories`, {
+    const write = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${testSpaceId}/facts`, {
       fact: 'Published fact from A',
       tags: ['pubsub-test'],
     });
@@ -152,7 +152,7 @@ describe('Pub/Sub topology (A -> B subscriber)', () => {
   });
 
   it('Subscriber B: write does NOT propagate to Publisher A', async () => {
-    const write = await post(INSTANCES.b, tokenB, `/api/brain/spaces/${testSpaceId}/memories`, {
+    const write = await post(INSTANCES.b, tokenB, `/api/brain/spaces/${testSpaceId}/facts`, {
       fact: 'Subscriber-only fact from B',
       tags: ['pubsub-sub-local'],
     });
@@ -168,14 +168,14 @@ describe('Pub/Sub topology (A -> B subscriber)', () => {
     // Wait and verify the subscriber-local fact is NOT on A.
     // Negative assertion — fixed wait is correct; do NOT convert to waitFor (Q3).
     await new Promise(r => setTimeout(r, 3_000));
-    const r = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${testSpaceId}/memories/${subMemId}`);
+    const r = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${testSpaceId}/facts/${subMemId}`);
     assert.equal(r.status, 404, 'Subscriber fact should NOT appear on publisher');
     console.log(`  Subscriber fact correctly absent from A ✓`);
   });
 
   it('Subscriber-local content survives publisher tombstone', async () => {
     // B creates a local memory
-    const subWrite = await post(INSTANCES.b, tokenB, `/api/brain/spaces/${testSpaceId}/memories`, {
+    const subWrite = await post(INSTANCES.b, tokenB, `/api/brain/spaces/${testSpaceId}/facts`, {
       fact: 'Subscriber local fact for tombstone test',
       tags: ['pubsub-survivor'],
     });
@@ -183,7 +183,7 @@ describe('Pub/Sub topology (A -> B subscriber)', () => {
     const subMemId = subWrite.body._id ?? subWrite.body.id;
 
     // A creates and then deletes a memory — tombstone should propagate to B
-    const pubWrite = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${testSpaceId}/memories`, {
+    const pubWrite = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${testSpaceId}/facts`, {
       fact: 'Publisher fact to be deleted',
       tags: ['pubsub-delete-test'],
     });
@@ -200,14 +200,14 @@ describe('Pub/Sub topology (A -> B subscriber)', () => {
     await awaitOnB(pubMemId, 200, 'the publisher memory to arrive on B');
 
     // Now delete on A
-    const delR = await del(INSTANCES.a, tokenA, `/api/brain/spaces/${testSpaceId}/memories/${pubMemId}`);
+    const delR = await del(INSTANCES.a, tokenA, `/api/brain/spaces/${testSpaceId}/facts/${pubMemId}`);
     assert.equal(delR.status, 204, `Delete on A: expected 204, got ${delR.status}`);
 
     await awaitOnB(pubMemId, 404, "the publisher's tombstone to reach B");
     console.log(`  Publisher's deleted fact removed from B ✓`);
 
     // Verify subscriber's own memory still exists
-    const subCheck = await get(INSTANCES.b, tokenB, `/api/brain/spaces/${testSpaceId}/memories/${subMemId}`);
+    const subCheck = await get(INSTANCES.b, tokenB, `/api/brain/spaces/${testSpaceId}/facts/${subMemId}`);
     assert.equal(subCheck.status, 200, 'Subscriber local fact must survive publisher tombstone');
     console.log(`  Subscriber local fact survived publisher tombstone ✓`);
   });

@@ -232,7 +232,7 @@ export class SpaceDangerTabComponent {
    * cannot reach them), so folding them into one of the other four would have attached every file to whichever
    * bucket was picked.
    */
-  ttl: Record<TtlBucket, number | null> = { entity: null, memory: null, edge: null, chrono: null, file: null };
+  ttl: Record<TtlBucket, number | null> = { entity: null, fact: null, edge: null, chrono: null, file: null };
 
   readonly buckets = TTL_BUCKETS;
 

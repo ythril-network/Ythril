@@ -207,9 +207,9 @@ Base path: `/api/sync` — used by the sync engine between peers. All endpoints 
 
 | Endpoint | Method | Purpose |
 |---|---|---|
-| `/api/sync/memories` | GET | Page memory changes (`items`, `nextCursor`) |
-| `/api/sync/memories/:id` | GET | Fetch one full memory doc |
-| `/api/sync/memories` | POST | Upsert one remote memory |
+| `/api/sync/facts` | GET | Page fact changes (`items`, `nextCursor`) |
+| `/api/sync/facts/:id` | GET | Fetch one full fact doc |
+| `/api/sync/facts` | POST | Upsert one remote fact |
 | `/api/sync/entities` | GET | Page entity changes |
 | `/api/sync/entities/:id` | GET | Fetch one full entity doc |
 | `/api/sync/entities` | POST | Upsert one remote entity |
@@ -223,7 +223,7 @@ Base path: `/api/sync` — used by the sync engine between peers. All endpoints 
 | `/api/sync/links/:id` | GET | Fetch one full link doc |
 | `/api/sync/filemeta` | GET | Page a file's METADATA changes — parents only, never chunks |
 | `/api/sync/filemeta/:id` | GET | Fetch one full file metadata doc |
-| `/api/sync/batch-upsert` | POST | Bulk upsert memories/entities/edges/chrono/links/filemeta |
+| `/api/sync/batch-upsert` | POST | Bulk upsert facts/entities/edges/chrono/links/filemeta |
 | `/api/sync/tombstones` | GET | List tombstones by seq |
 | `/api/sync/tombstones` | POST | Apply remote tombstones |
 | `/api/sync/manifest` | GET | File manifest diff |
@@ -237,7 +237,7 @@ Base path: `/api/sync` — used by the sync engine between peers. All endpoints 
 | `/api/sync/warm` | POST | Pre-sync warm-up (auth/embedding/DB) |
 
 **Link records have no single-record `POST`, and that is deliberate.** A link is written by writing the array
-field it comes from on the record that holds it — `memory.entityIds`, `chrono.entityIds`/`memoryIds`,
+field it comes from on the record that holds it — `fact.entityIds`, `chrono.entityIds`/`memoryIds`,
 `file.entityIds`/`memoryIds`/`chronoIds` — so there is no independent create for a peer to mirror. Link
 records reach a peer through `batch-upsert`, which is what a sync cycle uses for every family anyway; the
 per-family `POST` routes are the older single-record path.
@@ -296,7 +296,7 @@ tombstone rather than a brain one, so the metadata page carries no tombstones of
 ### Incremental Collection Pull Example
 
 ```http
-GET /api/sync/memories?spaceId=general&sinceSeq=0&limit=200&full=true
+GET /api/sync/facts?spaceId=general&sinceSeq=0&limit=200&full=true
 ```
 
 Returns `{ items, nextCursor }`. Use `nextCursor` as `cursor` on the next request until `nextCursor` is `null`.
@@ -317,7 +317,7 @@ POST /api/sync/batch-upsert?spaceId=general&networkId=net-uuid
 
 ```json
 {
-  "memories": [ ... ],
+  "facts": [ ... ],
   "entities": [ ... ],
   "edges": [ ... ],
   "chrono": [ ... ]
@@ -328,7 +328,7 @@ Each array is capped at 500 items. Response includes per-type counters:
 
 ```json
 { "status": "ok",
-  "memories": { "inserted": 3, "updated": 1, "forked": 0, "skipped": 12, "forkDepthRefused": 0, "tombstoned": 0 },
+  "facts": { "inserted": 3, "updated": 1, "forked": 0, "skipped": 12, "forkDepthRefused": 0, "tombstoned": 0 },
   "entities": { "upserted": 5, "skipped": 2, "tombstoned": 0 },
   "edges":    { "upserted": 0, "skipped": 0, "tombstoned": 0 },
   "chrono":   { "upserted": 0, "skipped": 0, "tombstoned": 0 } }
@@ -340,7 +340,7 @@ which is the whole reason this paragraph exists.
 | counter | what happened | did the record land? |
 |---|---|---|
 | `skipped` | the receiver already holds that record at the same `seq` or newer | **nothing was lost** — this is ordinary conflict resolution and is by far the common case |
-| `forkDepthRefused` | memories only: content diverged at an identical `seq` and the record's fork chain is already at its cap, so the incoming version was **discarded** | **no — the record is gone** |
+| `forkDepthRefused` | facts only: content diverged at an identical `seq` and the record's fork chain is already at its cap, so the incoming version was **discarded** | **no — the record is gone** |
 
 **A `200` therefore does not mean every record was applied.** If you push, read `forkDepthRefused`: a non-zero
 value means those records did not land, and our own sync engine will **not** offer them again — it advances its
@@ -385,7 +385,7 @@ Owner's ruling, 2026-09-01. Three things follow from it, and a client that pushe
 **Send no embedding.** No ingest schema declares `embedding` or `embeddingModel`, so if you send them they
 are dropped. A vector is derived from the text by one particular model; two instances running different
 models — or different versions of one — hold legitimately different vectors for identical content, and
-ranking one against the other produces plausible-looking nonsense rather than an error. Memories were the
+ranking one against the other produces plausible-looking nonsense rather than an error. Facts were the
 last type that carried theirs; now none do.
 
 **The same holds when this instance PULLS from you, and until 4.0 it did not.** The schemas above run on the
@@ -414,7 +414,7 @@ because zod strips what a schema does not declare:
 
 | Field | On | Why losing it mattered |
 |---|---|---|
-| `type` | memory | it selects the memory's type schema, so an arriving memory was validated against nothing and missed every type filter |
+| `type` | fact | it selects the fact's type schema, so an arriving fact was validated against nothing and missed every type filter |
 | `contentRedacted` | chrono | it is what lets a reader tell *"this entry never had a description"* from *"it had one and its retention window lapsed"* |
 | `contentRedactedAt` | chrono | when that happened |
 
@@ -474,7 +474,7 @@ reader rather than merely non-conforming, and nothing else in the pipeline would
 
 ### Tombstones
 
-- `GET /api/sync/tombstones?spaceId=general&sinceSeq=0` returns grouped `{ entities, memories, edges, chrono, links }` tombstones. The keys are derived from the tombstone types, so a new record kind appears here without a protocol change; a client should read the keys it knows and ignore the rest.
+- `GET /api/sync/tombstones?spaceId=general&sinceSeq=0` returns grouped `{ entities, facts, edges, chrono, links }` tombstones. The keys are derived from the tombstone types, so a new record kind appears here without a protocol change; a client should read the keys it knows and ignore the rest.
 - `POST /api/sync/tombstones` accepts `{ tombstones: [...] }` and applies deletions.
 
 **The `sinceSeq` you send is recorded.** The serving instance stores it as `lastSeqServed` for your peer identity and prunes tombstones that every member has pulled past — that is the only retention bound on the collection, because an age-based one would let a long-absent peer resurrect a deleted record. Two consequences for an integrator:

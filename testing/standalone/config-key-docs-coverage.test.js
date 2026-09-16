@@ -85,7 +85,7 @@ function docFiles(dir = join(ROOT, 'docs'), prefix = '', out = []) {
 /** Maps whose keys the USER chooses — not config fields. */
 const FREE_FORM = new Set([
   'typeSchemas', 'properties', 'propertySchemas', 'spaceMap', 'headers', 'meta',
-  'entity', 'memory', 'edge', 'chrono',
+  'entity', 'fact', 'edge', 'chrono',
 ]);
 
 /**

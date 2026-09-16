@@ -363,7 +363,7 @@ export async function syncUntil(baseUrl, token, networkId, condition, what, { ti
  *  - **It has it and `lastSeqPushed` < its `seq`** — the sender should have sent it, so the record was lost on
  *    the wire or discarded by the receiver.
  */
-export async function whichSideLostIt(senderUrl, senderToken, networkId, spaceId, recordId, type = 'memories') {
+export async function whichSideLostIt(senderUrl, senderToken, networkId, spaceId, recordId, type = 'facts') {
   const rec = await get(senderUrl, senderToken, `/api/brain/spaces/${spaceId}/${type}/${recordId}`);
   if (rec.status !== 200) return `the SENDER does not have ${recordId} either (${rec.status}) — the write, not sync`;
   const seq = rec.body?.seq;
@@ -381,7 +381,7 @@ export async function whichSideLostIt(senderUrl, senderToken, networkId, spaceId
 
 /** Create a memory on an instance's general space */
 export async function createMemory(baseUrl, token, fact, tags = []) {
-  return post(baseUrl, token, '/api/brain/spaces/general/memories', { fact, tags });
+  return post(baseUrl, token, '/api/brain/spaces/general/facts', { fact, tags });
 }
 
 /**
@@ -389,19 +389,19 @@ export async function createMemory(baseUrl, token, fact, tags = []) {
  * Pages through the API (up to 500 per request) until exhausted so callers
  * never silently receive a truncated result.
  */
-export async function listMemories(baseUrl, token) {
+export async function listFacts(baseUrl, token) {
   const all = [];
   let skip = 0;
   const pageSize = 500;
   while (true) {
-    const r = await get(baseUrl, token, `/api/brain/spaces/general/memories?limit=${pageSize}&skip=${skip}`);
+    const r = await get(baseUrl, token, `/api/brain/spaces/general/facts?limit=${pageSize}&skip=${skip}`);
     if (r.status !== 200) return r; // surface errors to callers as-is
-    const page = r.body.memories ?? [];
+    const page = r.body.facts ?? [];
     all.push(...page);
     if (page.length < pageSize) break;
     skip += pageSize;
   }
-  return { status: 200, body: { memories: all } };
+  return { status: 200, body: { facts: all } };
 }
 
 /**

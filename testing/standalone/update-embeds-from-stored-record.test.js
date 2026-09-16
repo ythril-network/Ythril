@@ -50,7 +50,7 @@ const withoutComments = (text) =>
  */
 const UPDATES = [
   { type: 'entity', file: 'server/src/brain/entities.ts', fn: 'updateEntityById', builder: 'entityEmbedText' },
-  { type: 'memory', file: 'server/src/brain/memory.ts', fn: 'updateMemory', builder: 'memoryEmbedText' },
+  { type: 'fact', file: 'server/src/brain/fact.ts', fn: 'updateFact', builder: 'factEmbedText' },
   { type: 'edge', file: 'server/src/brain/edges.ts', fn: 'updateEdgeById', builder: 'edgeEmbedText' },
   { type: 'chrono', file: 'server/src/brain/chrono.ts', fn: 'updateChrono', builder: 'chronoEmbedText' },
   { type: 'file', file: 'server/src/files/file-meta.ts', fn: 'updateFileMeta', builder: 'fileEmbedText' },

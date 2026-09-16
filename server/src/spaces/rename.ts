@@ -26,7 +26,7 @@ export async function moveSpaceData(oldId: string, newId: string): Promise<strin
   //    under the old prefix remain after a partial run, so this is idempotent.
   //
   //    Prefix match with no boundary check — safe only because a space id is validated `^[a-z0-9-]+$`,
-  //    so `_` cannot occur inside an id and separates cleanly (`work-archive_memories` does not start with
+  //    so `_` cannot occur inside an id and separates cleanly (`work-archive_facts` does not start with
   //    `work_`). See the fuller note on the drop path in `lifecycle.ts`, which has the same dependency with
   //    worse consequences. Pinned by `space-id-prefix-safety.test.js`.
   const existingColls = await db.listCollections().toArray();
@@ -50,7 +50,7 @@ export async function moveSpaceData(oldId: string, newId: string): Promise<strin
   // and the read paths filter on that field (listEntities, findEntityByName, the edge-dedup
   // lookup, the cascade deletes). Without this the renamed space looks CATASTROPHIC but is
   // actually intact — counts still show the documents (counts read the collection) while
-  // every list comes back empty, and `findEntityByName` stops matching, so `remember` starts
+  // every list comes back empty, and `findEntityByName` stops matching, so `saveFact` starts
   // creating duplicates instead of linking to the existing entity.
   //
   // Idempotent, and safe on a partial re-run: a document living in `{newId}_*` belongs to

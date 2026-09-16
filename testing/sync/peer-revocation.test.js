@@ -10,7 +10,7 @@
  *  - Remove vote conclusion: same revocation on the vote path
  *  - Ejected side: after processing member_removed, the ejected instance
  *    revokes the ex-peers' credentials
- *  - Ejection guard: data endpoints (e.g. /api/sync/memories) refuse requests
+ *  - Ejection guard: data endpoints (e.g. /api/sync/facts) refuse requests
  *    scoped to an ejected network with 401 {"error":"ejected"} — previously
  *    only /api/sync/networks/:id/* was guarded
  *
@@ -262,13 +262,13 @@ describe('Peer credential revocation (H7)', () => {
     it('data endpoints refuse requests scoped to the ejected network (401 ejected)', async () => {
       // Previously only /api/sync/networks/:id/* was guarded; data endpoints
       // fell back to "space exists" because the network config was deleted.
-      const r = await get(INSTANCES.b, tokenB, `/api/sync/memories?spaceId=general&networkId=${nid}`);
+      const r = await get(INSTANCES.b, tokenB, `/api/sync/facts?spaceId=general&networkId=${nid}`);
       assert.equal(r.status, 401, `expected 401 ejected, got ${r.status}: ${JSON.stringify(r.body)}`);
       assert.equal(r.body?.error, 'ejected');
     });
 
     it('data endpoints for other networks still work on the ejected instance', async () => {
-      const r = await get(INSTANCES.b, tokenB, '/api/sync/memories?spaceId=general');
+      const r = await get(INSTANCES.b, tokenB, '/api/sync/facts?spaceId=general');
       assert.equal(r.status, 200, `expected 200, got ${r.status}: ${JSON.stringify(r.body)}`);
     });
   });

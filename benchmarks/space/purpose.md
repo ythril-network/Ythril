@@ -20,7 +20,7 @@ both remarks name the same subject and a search that finds one can reach the oth
 | **entities** | the stable things the conversation keeps returning to — a person, a place, an employer, a pet, a project |
 | **edges** | how two of those are related, and for how long — `works_at`, `family_of`, `lives_in`, `owns` |
 | **chrono** | anything that happened on a date, linked to the entities it concerns |
-| **memories** | the individual things said, each carrying who said it and when |
+| **facts** | the individual things said, each carrying who said it and when |
 | **files** | the verbatim transcript, one per session, so anything can be quoted exactly |
 
 ## Quoting the source
@@ -44,7 +44,7 @@ it concerns — not a field on an entity. The exception is a date that says how 
 which belongs on the edge that holds it.
 
 **Anything that tells a story.** How strongly someone likes a thing, how severe a condition became, how a role
-changed — those are claims somebody made, so they are memories or chrono entries. An edge says *that* two
+changed — those are claims somebody made, so they are facts or chrono entries. An edge says *that* two
 things are related and *when*; it does not narrate.
 
 ## Who it is for

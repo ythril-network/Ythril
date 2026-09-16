@@ -223,9 +223,9 @@ import { NetworkEnableWizardComponent } from './network-enable-wizard.component'
                         <span style="color:var(--text-muted);">{{ rec.completedAt | date:'dd.MM.yyyy HH:mm' }}</span>
                         <span class="status-badge" [ngClass]="'status-' + rec.status">{{ rec.status }}</span>
                         <span>
-                          ↓ {{ rec.pulled.memories + rec.pulled.entities + rec.pulled.edges }}
+                          ↓ {{ rec.pulled.facts + rec.pulled.entities + rec.pulled.edges }}
                           + {{ rec.pulled.files }} files &nbsp;
-                          ↑ {{ rec.pushed.memories + rec.pushed.entities + rec.pushed.edges }}
+                          ↑ {{ rec.pushed.facts + rec.pushed.entities + rec.pushed.edges }}
                           + {{ rec.pushed.files }} files
                         </span>
                         @if (rec.errors?.length) {

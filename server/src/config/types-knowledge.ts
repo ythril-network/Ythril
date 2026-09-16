@@ -73,7 +73,7 @@ export interface PropertySchema {
   default?: string | number | boolean;
 }
 
-/** Schema definition for a single entity type, edge label, memory type, or chrono type. */
+/** Schema definition for a single entity type, edge label, fact type, or chrono type. */
 export interface TypeSchema {
   /**
    * Reference to an instance-level schema library entry.
@@ -150,7 +150,7 @@ export interface TypeSchema {
   suppressEmbeddings?: boolean;
   /**
    * What KIND of thing may sit at each end of an edge with this label. **Edge collection only** — rejected on
-   * entity, memory and chrono the way `retention.contentDays` is rejected off chrono, rather than silently
+   * entity, fact and chrono the way `retention.contentDays` is rejected off chrono, rather than silently
    * ignored.
    *
    * ## Each side is independently optional, and that is what keeps it usable
@@ -176,7 +176,7 @@ export interface TypeSchema {
    * untyped entities are real and must be admissible by SAYING so rather than by being refused in silence.
    *
    * A member may be written `entity:<type>`; a bare name means `entity:`. Any other `KnowledgeType` prefix is
-   * refused at the Zod layer with a message naming why, so the set can widen if memory or chrono links ever
+   * refused at the Zod layer with a message naming why, so the set can widen if fact or chrono links ever
    * become edges without the grammar having to change.
    */
   endpoints?: { from?: string[]; to?: string[] };
@@ -231,12 +231,12 @@ export type ValidationMode = 'off' | 'warn' | 'strict';
  * `Record` key list all need the VALUES. The union is derived from it, so the two can never disagree.
  * `one-definition-of-the-knowledge-types.test.js` refuses the forty-fourth copy.
  *
- * **Order is meaningful and this is it**: entity, memory, edge, chrono — the order every UI already lists
+ * **Order is meaningful and this is it**: entity, fact, edge, chrono — the order every UI already lists
  * them in, so an iteration over the tuple renders the way the product already reads.
  *
  * Not to be confused with {@link RefKind}, which is what a reference points AT and deliberately differs.
  */
-export const KNOWLEDGE_TYPES = ['entity', 'memory', 'edge', 'chrono'] as const;
+export const KNOWLEDGE_TYPES = ['entity', 'fact', 'edge', 'chrono'] as const;
 
 /** Knowledge type keys used in typeSchemas. Derived, so it cannot drift from the tuple above. */
 export type KnowledgeType = typeof KNOWLEDGE_TYPES[number];
@@ -253,7 +253,7 @@ export type KnowledgeType = typeof KNOWLEDGE_TYPES[number];
  * and two of them JSON-schema enums an MCP caller reads. Only `TtlBucket` was already derived.
  *
  * **The order changed when this was extracted, and that was checked rather than assumed.** Most sites wrote
- * `memory` first; the retention buckets wrote `entity` first and said the order was the one the UI shows.
+ * `fact` first; the retention buckets wrote `entity` first and said the order was the one the UI shows.
  * Deriving makes every one of them entity-first. Verified before the change: recall's fan-out sorts by score
  * with a deterministic tiebreak and caps PER TYPE, so its result order does not depend on this; a JSON-schema
  * `enum` is a set, so no caller behaviour depends on it; and the one visible list — the Brain query tab's
@@ -280,7 +280,7 @@ export type RecordType = typeof RECORD_TYPES[number];
 // `BRAIN_COLLECTIONS` derives as `string[]` — which compiles and silently stops being a literal union, so
 // every `Record<BrainCollection, X>` downstream loses its keys.
 export const COLLECTION_SUFFIX = {
-  entity: 'entities', memory: 'memories', edge: 'edges', chrono: 'chrono',
+  entity: 'entities', fact: 'facts', edge: 'edges', chrono: 'chrono',
 } as const satisfies Record<KnowledgeType, string>;
 
 /**
@@ -326,7 +326,7 @@ export const TOMBSTONE_COLLECTION = {
  * The inverse: a COLLECTION name back to the tombstone type stored in it.
  *
  * Both directions are asked, so both exist — but only one is written down. A wipe knows the collection
- * (`memories`) and has to clear tombstones by their `type` (`memory`), and `wipeSpace` carried its own
+ * (`facts`) and has to clear tombstones by their `type` (`fact`), and `wipeSpace` carried its own
  * four-entry copy of exactly this, in the same function as a SECOND copy for the review findings. That is
  * the seventh and eighth copies of one mapping; `A-10` removed five and the shape kept coming back.
  *
@@ -411,7 +411,7 @@ export type BrainCollection = (typeof BRAIN_COLLECTIONS)[number];
  * drift at exactly the moment a kind is added, with the compiler silent because both are individually valid.
  * This is the first runtime value in an otherwise type-only module for that reason alone.
  */
-export const REF_KINDS = ['entity', 'memory', 'chrono', 'file'] as const;
+export const REF_KINDS = ['entity', 'fact', 'chrono', 'file'] as const;
 
 /** @see REF_KINDS — derived, never written out a second time. */
 export type RefKind = typeof REF_KINDS[number];
@@ -437,7 +437,7 @@ export interface StampSkew {
 }
 
 /**
- * Carried by every record type the stamp check runs on — memories, entities, edges and chrono.
+ * Carried by every record type the stamp check runs on — facts, entities, edges and chrono.
  *
  * Declared once here rather than as a field repeated in four interfaces, and not only to keep `config/types.ts` off the
  * god-file ratchet: a fifth record type added later gets the check by extending this, where a copied field would be
@@ -482,7 +482,7 @@ export interface SpaceMeta {
    * Per-type schemas for each knowledge collection.
    * Keys of typeSchemas.entity are the allowed entity type values (allowlist).
    * Keys of typeSchemas.edge are the allowed edge label values (allowlist).
-   * Keys of typeSchemas.memory / .chrono are the allowed type values.
+   * Keys of typeSchemas.fact / .chrono are the allowed type values.
    * When a collection's map is empty, all type/label values are accepted.
    */
   typeSchemas?: Partial<Record<KnowledgeType, Record<string, TypeSchema>>>;

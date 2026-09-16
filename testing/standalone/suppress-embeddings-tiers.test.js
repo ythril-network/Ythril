@@ -64,7 +64,7 @@ describe('the schema key', () => {
   });
 
   it('everything else keys on `type`', () => {
-    for (const kind of ['entity', 'memory', 'chrono']) {
+    for (const kind of ['entity', 'fact', 'chrono']) {
       assert.equal(schemaKeyFor(kind, { type: 'task', label: 'nope' }), 'task', `${kind} used the wrong field`);
     }
   });

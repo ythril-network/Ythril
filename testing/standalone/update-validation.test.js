@@ -220,11 +220,11 @@ describe('every update path runs the gate', () => {
   // record is the same bug one layer up. A constraint looks enforced right up until someone uses the
   // other door.
   const PATHS = [
-    'server/src/api/brain/memories.ts',
+    'server/src/api/brain/facts.ts',
     'server/src/api/brain/entities.ts',
     'server/src/api/brain/edges.ts',
     'server/src/api/brain/chrono.ts',
-    'server/src/mcp/tools/memory.ts',
+    'server/src/mcp/tools/fact.ts',
     'server/src/mcp/tools/entity.ts',
     'server/src/mcp/tools/edge.ts',
     'server/src/mcp/tools/chrono.ts',

@@ -44,9 +44,9 @@ describe('structured claims', () => {
   it('leaves types with no extra columns exactly as they were', () => {
     // Memory and entity claim only through `properties`; this must stay a pass-through so the write path
     // and the sweep keep judging them identically to before.
-    assert.equal(extraClaimFields('memory').length, 0);
+    assert.equal(extraClaimFields('fact').length, 0);
     const props = { port: 8080 };
-    assert.equal(structuredClaims('memory', { properties: props }), props);
+    assert.equal(structuredClaims('fact', { properties: props }), props);
     assert.equal(structuredClaims('entity', { properties: undefined }), undefined);
   });
 

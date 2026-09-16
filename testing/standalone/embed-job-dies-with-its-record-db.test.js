@@ -67,7 +67,7 @@ describe('an embed job dies with its record (real MongoDB, no reachable model)',
     mongo = await openTestMongo('joborphan');
     const loader = await import('../../server/dist/config/loader.js');
     loader.loadConfig();
-    memory = await import('../../server/dist/brain/memory.js');
+    memory = await import('../../server/dist/brain/fact.js');
     entities = await import('../../server/dist/brain/entities.js');
     edges = await import('../../server/dist/brain/edges.js');
     chrono = await import('../../server/dist/brain/chrono.js');
@@ -80,16 +80,16 @@ describe('an embed job dies with its record (real MongoDB, no reachable model)',
   });
 
   beforeEach(async () => {
-    for (const c of ['memories', 'entities', 'edges', 'chrono', 'embed_jobs']) {
+    for (const c of ['facts', 'entities', 'edges', 'chrono', 'embed_jobs']) {
       await mongo.col(`${SPACE}_${c}`).deleteMany({});
     }
   });
 
-  it('a memory: the FAILED job goes when the record goes', async () => {
-    const doc = await memory.remember(SPACE, 'delete me while failed', [], []);
-    const _id = await failJob('memory', doc._id);
+  it('a fact: the FAILED job goes when the record goes', async () => {
+    const doc = await memory.saveFact(SPACE, 'delete me while failed', [], []);
+    const _id = await failJob('fact', doc._id);
 
-    assert.equal(await memory.deleteMemory(SPACE, doc._id), true);
+    assert.equal(await memory.deleteFact(SPACE, doc._id), true);
     assert.equal(await jobs().findOne({ _id }), null,
       'the job outlived its record — nothing will ever claim it again, and the listing reports it for ever');
   });
@@ -119,11 +119,11 @@ describe('an embed job dies with its record (real MongoDB, no reachable model)',
 
   it('the counts and the listing stop reporting the phantom', async () => {
     // The user-visible symptom, asserted through the surface an operator actually reads rather than on the collection.
-    const doc = await memory.remember(SPACE, 'phantom failure', [], []);
-    await failJob('memory', doc._id);
+    const doc = await memory.saveFact(SPACE, 'phantom failure', [], []);
+    await failJob('fact', doc._id);
     assert.equal((await queue.getEmbedJobCounts(SPACE)).failed, 1, 'precondition: one failure is reported');
 
-    await memory.deleteMemory(SPACE, doc._id);
+    await memory.deleteFact(SPACE, doc._id);
 
     assert.equal((await queue.getEmbedJobCounts(SPACE)).failed, 0);
     assert.deepEqual(await queue.listEmbedJobs(SPACE), [],
@@ -133,18 +133,18 @@ describe('an embed job dies with its record (real MongoDB, no reachable model)',
   it('deleting a record with NO job is not an error', async () => {
     // The common case by far: a successfully embedded record has no job, because a completed job is deleted. The retire
     // must be a no-op rather than throwing on a missing row.
-    const doc = await memory.remember(SPACE, 'no job here', [], []);
+    const doc = await memory.saveFact(SPACE, 'no job here', [], []);
     await jobs().deleteMany({});
-    assert.equal(await memory.deleteMemory(SPACE, doc._id), true);
+    assert.equal(await memory.deleteFact(SPACE, doc._id), true);
   });
 
   it('a delete that matches NOTHING does not retire a job', async () => {
     // The guard: retirement must sit after the `deletedCount === 0` check, or deleting a nonexistent id would drop the
     // job of a record that is still there. Constructed by writing a record, then deleting a DIFFERENT id.
-    const doc = await memory.remember(SPACE, 'keep my job', [], []);
-    const _id = await failJob('memory', doc._id);
+    const doc = await memory.saveFact(SPACE, 'keep my job', [], []);
+    const _id = await failJob('fact', doc._id);
 
-    assert.equal(await memory.deleteMemory(SPACE, 'no-such-record-id'), false);
+    assert.equal(await memory.deleteFact(SPACE, 'no-such-record-id'), false);
     assert.ok(await jobs().findOne({ _id }),
       'a failed delete must not retire anything — the record and its job are both still there');
   });
@@ -152,10 +152,10 @@ describe('an embed job dies with its record (real MongoDB, no reachable model)',
   it('a PENDING job is retired too, not only a failed one', async () => {
     // The worker would have got to this one, but not for an unbounded time. Retiring both keeps one rule instead of
     // "eagerly for failed, lazily for pending", which is the kind of split nobody remembers.
-    const doc = await memory.remember(SPACE, 'pending then deleted', [], []);
-    const _id = `memory:${doc._id}`;
+    const doc = await memory.saveFact(SPACE, 'pending then deleted', [], []);
+    const _id = `fact:${doc._id}`;
     assert.equal((await jobs().findOne({ _id })).status, 'pending');
-    await memory.deleteMemory(SPACE, doc._id);
+    await memory.deleteFact(SPACE, doc._id);
     assert.equal(await jobs().findOne({ _id }), null);
   });
 });

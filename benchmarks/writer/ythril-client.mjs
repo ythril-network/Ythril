@@ -12,16 +12,16 @@
  *
  * ## Every endpoint below was read out of the source, not remembered
  *
- * A client written from memory is how a harness spends an hour reporting zero results, so each call names the
+ * A client written from fact is how a harness spends an hour reporting zero results, so each call names the
  * file it was checked against and the doc page that describes it. Paths verified 2026-08-29 against:
  *
  *   - `server/src/app.ts:302` — `app.use('/api/brain', brainRouter)`, so every brain path below is
  *     `/api/brain` + the sub-router's own full path. `app.ts:303` mounts spaces at `/api/spaces`.
- *   - `server/src/api/brain/memories.ts:34`  POST   `/spaces/:spaceId/memories`      (docs 04-brain-api.md:94)
+ *   - `server/src/api/brain/facts.ts:34`  POST   `/spaces/:spaceId/facts`      (docs 04-brain-api.md:94)
  *   - `server/src/api/brain/entities.ts:34`  POST   `/spaces/:spaceId/entities`
  *   - `server/src/api/brain/edges.ts:33`     POST   `/spaces/:spaceId/edges`
  *   - `server/src/api/brain/chrono.ts:38`    POST   `/spaces/:spaceId/chrono`
- *   - the four matching `PATCH .../:id` handlers (memories.ts:227, entities.ts:246, edges.ts:205,
+ *   - the four matching `PATCH .../:id` handlers (facts.ts:227, entities.ts:246, edges.ts:205,
  *     chrono.ts:154) — the only door `suppressEmbeddings` has; see `writeRecord`
  *   - `server/src/api/brain/search.ts:351`   POST   `/spaces/:spaceId/recall`        (docs 04a-recall-api.md)
  *   - `server/src/api/brain/search.ts:267`   POST   `/spaces/:spaceId/query`         (docs 04-brain-api.md:375)
@@ -144,9 +144,9 @@ function requireString(value, what) {
  *
  * ## Why this mapping exists rather than a refusal
  *
- * The write routes reject any `id` that is not a UUID v4 (`entities.ts:45`, `memories.ts:112`,
+ * The write routes reject any `id` that is not a UUID v4 (`entities.ts:45`, `facts.ts:112`,
  * `chrono.ts:121`), and with `strictLinkage` on — the default posture for a new space,
- * `spaces/space-create.ts:113` — an edge's `from`/`to` and a memory's `entityIds` must also RESOLVE.
+ * `spaces/space-create.ts:113` — an edge's `from`/`to` and a fact's `entityIds` must also RESOLVE.
  * Meanwhile a caller wanting a re-run to address the same records rather than mint duplicates needs an id
  * it can recompute, which is the one thing a server-minted UUID is not.
  *
@@ -183,14 +183,14 @@ function refIdFor(spaceId, localId) {
 /**
  * The four write routes, as data.
  *
- * `refs` and `refArrays` name the fields holding an entity/memory id, so the id mapping is applied in ONE
+ * `refs` and `refArrays` name the fields holding an entity/fact id, so the id mapping is applied in ONE
  * place. Writing it per method is how three of the four end up agreeing and the fourth stores a dangling
  * reference that only surfaces later as a traversal returning nothing.
  *
  * An edge has no `id`: its identity is (from, to, label), so a repeat POST merges — `edges.ts:88`.
  */
 const WRITE_ROUTES = {
-  memory: { segment: 'memories', idField: 'id', refs: [], refArrays: ['entityIds'] },
+  fact: { segment: 'facts', idField: 'id', refs: [], refArrays: ['entityIds'] },
   entity: { segment: 'entities', idField: 'id', refs: [], refArrays: [] },
   edge: { segment: 'edges', idField: null, refs: ['from', 'to'], refArrays: [] },
   chrono: { segment: 'chrono', idField: 'id', refs: [], refArrays: ['entityIds', 'memoryIds'] },
@@ -423,7 +423,7 @@ export function makeYthril({ baseUrl, token, totpCode, timeoutMs = DEFAULT_TIMEO
      *
      * ## Why it must not go into the record
      *
-     * A memory's embedded text is built from its fact, tags, description and PROPERTIES
+     * A fact's embedded text is built from its fact, tags, description and PROPERTIES
      * (`brain/embed-text.ts`), key and value both. So a rung recording which source turns a record covers as
      * `properties.turn` appends `turn D3:1,D3:2,D3:3,D3:4,D3:5` to the text that gets ranked — a dozen
      * meaningless tokens on every record in the corpus, diluting every vector by the same amount.
@@ -455,7 +455,7 @@ export function makeYthril({ baseUrl, token, totpCode, timeoutMs = DEFAULT_TIMEO
      * changing anything a results table shows.
      *
      * With one, the retry is an update instead. `remember` looks the id up before inserting and merges
-     * ("a supplied id makes a retry idempotent" — `memories.ts:110`; same shape in `upsertEntity` and
+     * ("a supplied id makes a retry idempotent" — `facts.ts:110`; same shape in `upsertEntity` and
      * `createChrono` at `chrono.ts:120`). An edge needs none: its identity IS (from, to, label), so the
      * repeat POST already merges — `edges.ts:88`.
      *
@@ -514,7 +514,7 @@ export function makeYthril({ baseUrl, token, totpCode, timeoutMs = DEFAULT_TIMEO
        * of silent benchmark corruption into a 400 at the first write.
        *
        * A new space defaults to `validationMode: 'strict'`, and the keys of each collection's map are an
-       * ALLOWLIST — `types-knowledge.ts:434`. So a rung that declares `memory: { utterance: … }` and then
+       * ALLOWLIST — `types-knowledge.ts:434`. So a rung that declares `fact: { utterance: … }` and then
        * writes `type: 'note'` is refused, and a property declared `required` that the rung forgets to send is
        * refused. Without a schema, strict mode validates nothing: there is no rule to violate.
        *
@@ -581,7 +581,7 @@ export function makeYthril({ baseUrl, token, totpCode, timeoutMs = DEFAULT_TIMEO
       return request('GET', `/api/brain/spaces/${encodeURIComponent(space)}/stats`);
     },
 
-    writeMemory: (space, record) => writeRecord(space, 'memory', record),
+    writeMemory: (space, record) => writeRecord(space, 'fact', record),
 
     /**
      * The record-to-source-turn map this client recorded while ingesting `space`.
@@ -680,7 +680,7 @@ export function makeYthril({ baseUrl, token, totpCode, timeoutMs = DEFAULT_TIMEO
      * ## Two layers, both of which look like poor recall
      *
      * 1. **The embed queue.** A write returns before its vector exists — the queue computes it moments
-     *    later (`memories.ts:117`). Recall cannot see a record with no vector, so a retrieval run started
+     *    later (`facts.ts:117`). Recall cannot see a record with no vector, so a retrieval run started
      *    early measures the queue.
      * 2. **The vector index itself.** A freshly created space comes back `indexStatus: "building"` and
      *    "semantic recall returns no results until the Atlas vector indexes finish building"
@@ -835,7 +835,7 @@ export function makeYthril({ baseUrl, token, totpCode, timeoutMs = DEFAULT_TIMEO
     // Not named `stats` — that is the module's own counters object, and shadowing it here would make
     // `stats.embedWaitMs` in the caller read like it belonged to this response.
     const spaceCounts = await request('GET', brain(space, '/stats'));
-    const held = (spaceCounts?.memories ?? 0) + (spaceCounts?.entities ?? 0) + (spaceCounts?.chrono ?? 0);
+    const held = (spaceCounts?.facts ?? 0) + (spaceCounts?.entities ?? 0) + (spaceCounts?.chrono ?? 0);
     if (held === 0) return true;
     const probe = await request('POST', brain(space, '/recall'),
       { body: { query: SEARCHABLE_PROBE, topK: 1 } });

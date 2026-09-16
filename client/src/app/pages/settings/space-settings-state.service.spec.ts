@@ -22,7 +22,7 @@ function space(over: Partial<Space> = {}): Space {
   return { id: 'work', label: 'Work', ...over } as Space;
 }
 
-const STATS = { spaceId: 'work', memories: 1, entities: 2, edges: 3, chrono: 4, files: 5 };
+const STATS = { spaceId: 'work', facts: 1, entities: 2, edges: 3, chrono: 4, files: 5 };
 
 function make(statsFails = false) {
   TestBed.resetTestingModule();
@@ -262,14 +262,14 @@ describe('SpaceSettingsState — buildMeta (what actually gets saved)', () => {
     expect(saved.namingPattern).toBe('^[a-z]');
   });
 
-  it('namingPattern is entity-only — the same state on a memory type is dropped', () => {
+  it('namingPattern is entity-only — the same state on a fact type is dropped', () => {
     const c = make();
     c.openSettings(space());
     c.schTypeSchemas.entity = { person: emptyTypeSchemaState({ namingPattern: '^A' }) };
-    c.schTypeSchemas.memory = { note: emptyTypeSchemaState({ namingPattern: '^A' }) };
+    c.schTypeSchemas.fact = { note: emptyTypeSchemaState({ namingPattern: '^A' }) };
     const meta = c.buildMeta();
     expect(meta.typeSchemas!.entity!['person']).toEqual({ namingPattern: '^A' });
-    expect(meta.typeSchemas!.memory!['note']).toEqual({});
+    expect(meta.typeSchemas!.fact!['note']).toEqual({});
   });
 
   it('maps a property schema field-by-field, omitting empty ones', () => {
@@ -364,7 +364,7 @@ describe('SpaceSettingsState — per-type retention', () => {
   it('contentDays is chrono-only — set on any other collection it is dropped, not stored dead', () => {
     const c = make();
     c.openSettings(space());
-    for (const kt of ['entity', 'memory', 'edge'] as const) {
+    for (const kt of ['entity', 'fact', 'edge'] as const) {
       c.schTypeSchemas[kt] = { thing: emptyTypeSchemaState({ retentionDays: 30, retentionContentDays: 10 }) };
       expect(c.buildMeta().typeSchemas![kt]!['thing']!.retention, kt).toEqual({ days: 30 });
     }

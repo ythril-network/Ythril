@@ -74,9 +74,9 @@ describe('Backlink detection for delete protection', () => {
       }
     }
     // Check memories referencing this entity in entityIds
-    for (const mem of (data.memories ?? [])) {
+    for (const mem of (data.facts ?? [])) {
       if ((mem.entityIds ?? []).includes(entityId)) {
-        backlinks.push({ type: 'memory', _id: mem._id });
+        backlinks.push({ type: 'fact', _id: mem._id });
       }
     }
     // Check chrono entries referencing this entity in entityIds
@@ -90,7 +90,7 @@ describe('Backlink detection for delete protection', () => {
 
   it('no backlinks → delete permitted', () => {
     const entityId = '550e8400-e29b-41d4-a716-446655440000';
-    const data = { edges: [], memories: [], chrono: [] };
+    const data = { edges: [], facts: [], chrono: [] };
     const backlinks = findBacklinks(entityId, data);
     assert.equal(backlinks.length, 0);
   });
@@ -99,7 +99,7 @@ describe('Backlink detection for delete protection', () => {
     const entityId = '550e8400-e29b-41d4-a716-446655440000';
     const data = {
       edges: [{ _id: 'edge-1', from: entityId, to: 'other-id', label: 'related' }],
-      memories: [],
+      facts: [],
       chrono: [],
     };
     const backlinks = findBacklinks(entityId, data);
@@ -111,7 +111,7 @@ describe('Backlink detection for delete protection', () => {
     const entityId = '550e8400-e29b-41d4-a716-446655440000';
     const data = {
       edges: [{ _id: 'edge-2', from: 'other-id', to: entityId, label: 'related' }],
-      memories: [],
+      facts: [],
       chrono: [],
     };
     const backlinks = findBacklinks(entityId, data);
@@ -119,23 +119,23 @@ describe('Backlink detection for delete protection', () => {
     assert.deepEqual(backlinks[0], { type: 'edge', _id: 'edge-2' });
   });
 
-  it('entity referenced by memory.entityIds → delete blocked', () => {
+  it('entity referenced by fact.entityIds → delete blocked', () => {
     const entityId = '550e8400-e29b-41d4-a716-446655440000';
     const data = {
       edges: [],
-      memories: [{ _id: 'mem-1', entityIds: [entityId] }],
+      facts: [{ _id: 'mem-1', entityIds: [entityId] }],
       chrono: [],
     };
     const backlinks = findBacklinks(entityId, data);
     assert.equal(backlinks.length, 1);
-    assert.deepEqual(backlinks[0], { type: 'memory', _id: 'mem-1' });
+    assert.deepEqual(backlinks[0], { type: 'fact', _id: 'mem-1' });
   });
 
   it('entity referenced by chrono.entityIds → delete blocked', () => {
     const entityId = '550e8400-e29b-41d4-a716-446655440000';
     const data = {
       edges: [],
-      memories: [],
+      facts: [],
       chrono: [{ _id: 'chrono-1', entityIds: [entityId] }],
     };
     const backlinks = findBacklinks(entityId, data);
@@ -150,14 +150,14 @@ describe('Backlink detection for delete protection', () => {
         { _id: 'edge-1', from: entityId, to: 'x', label: 'a' },
         { _id: 'edge-2', from: 'y', to: entityId, label: 'b' },
       ],
-      memories: [{ _id: 'mem-1', entityIds: [entityId] }],
+      facts: [{ _id: 'mem-1', entityIds: [entityId] }],
       chrono: [{ _id: 'chrono-1', entityIds: [entityId] }],
     };
     const backlinks = findBacklinks(entityId, data);
     assert.equal(backlinks.length, 4);
     const types = backlinks.map(b => b.type);
     assert.ok(types.includes('edge'));
-    assert.ok(types.includes('memory'));
+    assert.ok(types.includes('fact'));
     assert.ok(types.includes('chrono'));
   });
 });

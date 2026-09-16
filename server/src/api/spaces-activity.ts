@@ -35,7 +35,7 @@ export function registerActivityResetRoute(spacesRouter: Router): void {
    *
    * ## Why space ADMIN and not write
    *
-   * Clearing a usage record is not a knowledge write — it changes no memory, entity, edge or file. It is an
+   * Clearing a usage record is not a knowledge write — it changes no fact, entity, edge or file. It is an
    * administrative act on the space's own bookkeeping, so it sits with the other destructive space operations
    * behind `requireAdminMfaScoped`, exactly where rebuild-indexes and wipe already are.
    *

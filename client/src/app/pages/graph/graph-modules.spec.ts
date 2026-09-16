@@ -166,7 +166,7 @@ describe('graph-details — derivation boundaries', () => {
     expect(chronoText({ _id: 'c', title: '', description: 'fallback', tags: [], createdAt: '' })).toBe('fallback');
   });
 
-  it('puts memories before chrono — the tie-break that keeps the table stable', () => {
+  it('puts facts before chrono — the tie-break that keeps the table stable', () => {
     const rows = buildDetailRows(
       [{ _id: 'm1', fact: 'x', createdAt: 'same' }],
       [{ _id: 'c1', title: 'y', tags: [], createdAt: 'same' }],
@@ -199,7 +199,7 @@ describe('graph-details — derivation boundaries', () => {
        { _id: 'm2', fact: 'banana', createdAt: '2026-01-01' }],
       [{ _id: 'c1', title: 'apricot', tags: [], createdAt: '2026-01-03' }],
     );
-    const out = filterAndSortDetails(rows, { type: 'memory', text: 'a', field: 'description', asc: true });
+    const out = filterAndSortDetails(rows, { type: 'fact', text: 'a', field: 'description', asc: true });
     expect(out.map(r => r.id)).toEqual(['m1', 'm2']);
   });
 

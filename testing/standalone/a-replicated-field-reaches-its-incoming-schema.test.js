@@ -43,7 +43,7 @@
  *
  * Three fields, none of them suspected, all silently deleted on push and all hashed:
  *
- * - **`MemoryDoc.type`** — the field that selects a memory's type schema. A memory arriving without it is
+ * - **`FactDoc.type`** — the field that selects a memory's type schema. A memory arriving without it is
  *   validated against nothing on the receiver and misses every type filter.
  * - **`ChronoEntry.contentRedacted` / `contentRedactedAt`** — the marks that exist so a reader can tell *"this
  *   entry never had a description"* from *"it had one and its retention window lapsed"*. The description is

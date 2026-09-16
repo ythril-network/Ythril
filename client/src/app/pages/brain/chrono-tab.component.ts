@@ -8,7 +8,7 @@ import { BrainApi } from '../../core/brain-api.service';
 import { httpErrorReason } from '../../core/http-error';
 import { TagInputComponent } from '../../shared/tag-input.component';
 import { EntityRefFieldComponent } from './entity-ref-field.component';
-import { MemoryRefFieldComponent } from './memory-ref-field.component';
+import { FactRefFieldComponent } from './fact-ref-field.component';
 import { PropertiesEditorComponent } from '../../shared/properties-editor.component';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ErrorStateComponent } from '../../shared/error-state.component';
@@ -38,7 +38,7 @@ import { TimestampComponent } from '../../shared/timestamp.component';
   selector: 'app-chrono-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, EntityRefFieldComponent, MemoryRefFieldComponent, PropertiesEditorComponent, PhIconComponent, ErrorStateComponent, RecordSearchBarComponent, SortableHeaderComponent, HscrollTopDirective, TimestampComponent],
+  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, EntityRefFieldComponent, FactRefFieldComponent, PropertiesEditorComponent, PhIconComponent, ErrorStateComponent, RecordSearchBarComponent, SortableHeaderComponent, HscrollTopDirective, TimestampComponent],
   styles: [BRAIN_CHIP_STYLES, BRAIN_RECORD_TABLE_STYLES],
   template: `
 
@@ -89,8 +89,8 @@ import { TimestampComponent } from '../../shared/timestamp.component';
                   <app-entity-ref-field [target]="chronoForm" [spaceId]="spaceId()" />
                 </div>
                 <div class="field">
-                  <label>{{ 'brain.chrono.form.memories' | transloco }}</label>
-                  <app-memory-ref-field [target]="chronoForm" />
+                  <label>{{ 'brain.chrono.form.facts' | transloco }}</label>
+                  <app-fact-ref-field [target]="chronoForm" />
                 </div>
               </div>
               <div class="form-row rich">

@@ -104,8 +104,8 @@ before(async () => {
 
   ids.a = await createEntity('Vault Secret Service', 'Vault secret storage handling token rotation', { port: 8080 });
   ids.b = await createEntity('Vault Secrets Service', 'Vault secret storage handling token rotation', { port: 9090 });
-  const m1 = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/memories`, { fact: 'The service listens on 8080', tags: [] });
-  const m2 = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/memories`, { fact: 'The service does not listen on 8080', tags: [] });
+  const m1 = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/facts`, { fact: 'The service listens on 8080', tags: [] });
+  const m2 = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/facts`, { fact: 'The service does not listen on 8080', tags: [] });
   ready = !!(ids.a && ids.b && m1.body?._id && m2.body?._id);
   if (!ready) return;
 
@@ -126,7 +126,7 @@ before(async () => {
 
   ids.memoryPair = `${ids.m1}:${ids.m2}`;
   insertCandidate({
-    _id: ids.memoryPair, spaceId: SPACE, type: 'memory',
+    _id: ids.memoryPair, spaceId: SPACE, type: 'fact',
     aId: ids.m1, aSummary: 'listens on 8080', aSeq: 3,
     bId: ids.m2, bSummary: 'does not listen on 8080', bSeq: 4,
     basis: 'nli', confidence: 0.93,

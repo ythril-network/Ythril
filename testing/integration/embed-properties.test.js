@@ -11,7 +11,7 @@
  * entry — the edge
  * and chrono cases embedded no property data at all before the original fix, and the REST
  * memory-create path had *regressed* to values-only (it inlined its own embed-text derivation
- * instead of calling the shared `remember()` — fixed by routing it through the shared function).
+ * instead of calling the shared `saveFact()` — fixed by routing it through the shared function).
  *
  * Run: node --test testing/integration/embed-properties.test.js
  */
@@ -55,7 +55,7 @@ let embeddingAvailable = false;
  * The `matchedText != null` condition matters: an immediate read can arrive before the embed job has run, and
  * asserting on an absent value would turn this back into a race with a different clock.
  */
-const COLLECTION_PATH = { memory: 'memories', entity: 'entities', edge: 'edges', chrono: 'chrono' };
+const COLLECTION_PATH = { fact: 'facts', entity: 'entities', edge: 'edges', chrono: 'chrono' };
 
 async function embedTextOf(kind, id, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
@@ -101,16 +101,16 @@ describe('Property keys are embedded (B4)', () => {
     }).catch(() => {});
   });
 
-  it('memory embedding text includes the property key (REST create, via shared remember())', async (t) => {
+  it('memory embedding text includes the property key (REST create, via shared saveFact())', async (t) => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
-    const r = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/memories`,
+    const r = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/facts`,
       { fact: `MemPropKey-${RUN}`, properties: { occupation: 'pilot' } });
     assert.equal(r.status, 201, JSON.stringify(r.body));
-    // remember() stores matchedText on the doc, so the create response now exposes it directly —
+    // saveFact() stores matchedText on the doc, so the create response now exposes it directly —
     // before the fix the REST create set no matchedText and embedded values only ("pilot").
     assert.match(r.body.matchedText ?? '', /occupation pilot/,
       `memory create must fold "key value" into matchedText: ${r.body.matchedText}`);
-    const hit = await embedTextOf('memory', r.body._id);
+    const hit = await embedTextOf('fact', r.body._id);
     assert.ok(hit, `memory should have its embed text stored — ${lastProbe}`);
     assert.match(hit.matchedText ?? '', /occupation/,
       `memory embed text must include the property key: ${hit.matchedText}`);

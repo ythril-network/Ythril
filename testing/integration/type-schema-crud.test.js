@@ -201,14 +201,14 @@ describe('PUT /api/spaces/:id/meta/typeSchemas/:kt/:typeName — upsert', () => 
       'edge type schema persisted');
   });
 
-  it('adds a memory type', async () => {
-    const r = await put(INSTANCES.a, token(), `/api/spaces/${TEST_SPACE}/meta/typeSchemas/memory/note`, {
+  it('adds a fact type', async () => {
+    const r = await put(INSTANCES.a, token(), `/api/spaces/${TEST_SPACE}/meta/typeSchemas/fact/note`, {
       propertySchemas: { source: { type: 'string', required: true } },
     });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.typeName, 'note');
 
-    const getR = await get(INSTANCES.a, token(), `/api/spaces/${TEST_SPACE}/meta/typeSchemas/memory/note`);
+    const getR = await get(INSTANCES.a, token(), `/api/spaces/${TEST_SPACE}/meta/typeSchemas/fact/note`);
     assert.equal(getR.status, 200, 'memory type must be persisted');
     assert.deepEqual(getR.body.schema.propertySchemas?.source, { type: 'string', required: true },
       'memory type schema persisted');
@@ -472,7 +472,7 @@ describe('Round-trip: GET the space meta, then PATCH it back', () => {
     // whole response body as `meta` is making a real mistake, and being told is the correct outcome — the
     // tolerance is only for fields that genuinely belong to meta.
     const r = await patch(INSTANCES.a, token(), `/api/spaces/${TEST_SPACE}`, {
-      meta: { stats: { memories: 1 } },
+      meta: { stats: { facts: 1 } },
     });
     assert.equal(r.status, 400, `envelope fields must not be accepted inside meta: ${JSON.stringify(r.body)}`);
   });

@@ -77,7 +77,7 @@ const NOT_A_QUEUE = new Map([
   // Its boxes are the steps of the CURRENT job, not work in the queue. Reading them as items would demand a
   // verify line on "implement" and an index entry for "full suite" — and would make the ordered queue grow a
   // row every time a job started. Its own rule holds it instead: the branch must match and every box ticked.
-  ['_WORKING-ORDER.md', 'the current job\'s seven steps, not a queue — see the working-order rule'],
+  ['_WORKING-ORDER.md', 'the current job\'s own steps, not a queue — see the working-order rule'],
   ['_NEXT-PR-PLAN.md', 'the working plan for the PR in flight; cleared on push'],
 ]);
 

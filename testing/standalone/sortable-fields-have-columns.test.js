@@ -8,7 +8,7 @@
  * chrono — allowed by the API, with no column at all — while entities, edges and memories all showed one.
  *
  * That spec fixed chrono and stopped there, so the same check never reached the other three. Two of them were
- * in the same state: `SORTABLE_FIELDS.memories` and `.edges` both contain `type`, and **neither tab had a type
+ * in the same state: `SORTABLE_FIELDS.facts` and `.edges` both contain `type`, and **neither tab had a type
  * column**. Both tabs also read `recordFilter().type` and send it to the list endpoint
  * (`memories-tab.component.ts`, `edges-tab.component.ts`), and the store exposed `memoryTypeOptions()` and
  * `edgeTypeOptions()` — both unit-tested — with no template consumer. Request side, option list and tests all
@@ -34,7 +34,7 @@ const SORT_SOURCE = 'server/src/brain/list-sort.ts';
 const TABS = {
   entities: 'client/src/app/pages/brain/entities-tab.component.ts',
   edges: 'client/src/app/pages/brain/edges-tab.component.ts',
-  memories: 'client/src/app/pages/brain/memories-tab.component.ts',
+  facts: 'client/src/app/pages/brain/facts-tab.component.ts',
   chrono: 'client/src/app/pages/brain/chrono-tab.component.ts',
 };
 

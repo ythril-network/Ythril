@@ -43,7 +43,7 @@ const src = (p) => stripComments(readFileSync(p, 'utf8'));
 /** The three link classes, by the flag that admits each. */
 const FLAGS = [
   { flag: 'includeChrono', cls: 'chrono' },
-  { flag: 'includeMemories', cls: 'memory' },
+  { flag: 'includeMemories', cls: 'fact' },
   { flag: 'includeFiles', cls: 'file' },
 ];
 

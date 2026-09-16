@@ -119,7 +119,7 @@ describe('a scoped token is REFUSED on a space it is not scoped to', () => {
   });
 
   it('still cannot write to it either — the write path was never the problem', async () => {
-    const r = await post(INSTANCES.a, scopedToken, `/api/brain/spaces/${FORBIDDEN}/memories`, { fact: 'nope' });
+    const r = await post(INSTANCES.a, scopedToken, `/api/brain/spaces/${FORBIDDEN}/facts`, { fact: 'nope' });
     assert.equal(r.status, 403, JSON.stringify(r.body));
   });
 });

@@ -99,11 +99,11 @@ describe('the watermark stops at what the slowest stopped transfer can vouch for
 
   it('truncatedTransfers names them, so a held-back cycle is never silent', () => {
     const names = truncatedTransfers([
-      { ...stopped(1), label: 'memories' }, { ...done(), label: 'entities' },
+      { ...stopped(1), label: 'facts' }, { ...done(), label: 'entities' },
       { ...stopped(2), label: 'tombstones' },
     ]);
-    assert.deepEqual(names, ['memories', 'tombstones']);
-    assert.deepEqual(truncatedTransfers([{ ...done(), label: 'memories' }]), [],
+    assert.deepEqual(names, ['facts', 'tombstones']);
+    assert.deepEqual(truncatedTransfers([{ ...done(), label: 'facts' }]), [],
       'a healthy cycle must produce no message at all');
   });
 });

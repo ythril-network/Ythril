@@ -7,7 +7,7 @@
  * So the copies could have diverged — or the extraction could have dropped a list — with a fully
  * green suite. These tests close that hole.
  *
- * The empty-state key is deliberately an INPUT: a node with no memories and an edge whose endpoints
+ * The empty-state key is deliberately an INPUT: a node with no facts and an edge whose endpoints
  * share none are different sentences. The test below asserts the INPUT is used rather than a
  * hard-coded key, because collapsing the two copies is exactly when that distinction gets lost.
  * (`getTranslocoModule()` ships an empty dictionary, so a key renders as itself — which is what makes
@@ -26,7 +26,7 @@ import { isOnPush } from '../../testing/onpush';
   imports: [GraphLinkedRecordsComponent],
   template: `
     <app-graph-linked-records
-      [memories]="mems()"
+      [facts]="mems()"
       [chrono]="chrono()"
       [(typeFilter)]="typeFilter"
       [(descFilter)]="descFilter"
@@ -38,7 +38,7 @@ import { isOnPush } from '../../testing/onpush';
 class Host {
   mems = signal<any[]>([]);
   chrono = signal<any[]>([]);
-  typeFilter = signal<'all' | 'memory' | 'chrono'>('all');
+  typeFilter = signal<'all' | 'fact' | 'chrono'>('all');
   descFilter = signal('');
   opened: DetailRef[] = [];
 }
@@ -92,7 +92,7 @@ describe('GraphLinkedRecordsComponent', () => {
     rows[1].click();
 
     // The kind decides which endpoint the parent fetches; swapping them would open the wrong record.
-    expect(host.opened).toEqual([{ id: 'm1', kind: 'memory' }, { id: 'c1', kind: 'chrono' }]);
+    expect(host.opened).toEqual([{ id: 'm1', kind: 'fact' }, { id: 'c1', kind: 'chrono' }]);
   });
 
   it('shows the empty state from its INPUT key, per list', () => {
@@ -112,7 +112,7 @@ describe('GraphLinkedRecordsComponent', () => {
     const input = fixture.nativeElement.querySelector('.detail-filters input');
     expect(select, 'the type filter must be reachable').toBeTruthy();
     expect(input, 'the description filter must be reachable').toBeTruthy();
-    expect([...select.options].map((o: any) => o.value)).toEqual(['all', 'memory', 'chrono']);
+    expect([...select.options].map((o: any) => o.value)).toEqual(['all', 'fact', 'chrono']);
   });
 
   it('writes the user\'s typing back to the bound filter state', () => {

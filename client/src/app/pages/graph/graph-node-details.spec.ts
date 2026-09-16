@@ -48,7 +48,7 @@ function makeApi(calls: string[]) {
     getMe: () => of({ readOnly: false }),
     listSpaces: () => of({ spaces: [] }),
     getSpaceMeta: () => of({ typeSchemas: {} }),
-    listMemories: () => of({ memories: [] }),
+    listFacts: () => of({ facts: [] }),
     queryBrain: () => of({ results: [], collection: 'chrono', count: 0 }),
     getRecord: (_s: string, type: string, id: string) => {
       calls.push(`getRecord:${type}:${id}`);
@@ -93,7 +93,7 @@ describe('a graph node opens the record it is', () => {
     expect(calls.some(x => x.startsWith('getRecord:entity:e1') || x === 'getEntity:e1')).toBe(true);
   });
 
-  for (const kind of ['memory', 'chrono']) {
+  for (const kind of ['fact', 'chrono']) {
     it(`a ${kind} node fetches a ${kind}, not an entity`, () => {
       // The defect, stated per kind: every one of these used to issue `getEntity` and 404.
       const c = create().componentInstance as any;

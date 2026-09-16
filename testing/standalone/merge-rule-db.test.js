@@ -2,13 +2,13 @@
  * The four UPDATE paths really do agree — against a real MongoDB, through the real functions.
  *
  * `one-merge-rule.test.js` pins the rule and gates the source. Neither can tell live code from dead
- * code: a grep-based version of this check would have passed happily while `updateMemory` replaced the
+ * code: a grep-based version of this check would have passed happily while `updateFact` replaced the
  * properties map, because the replace was a `$set` and the merge helper it should have used was simply
  * absent. Only a write, then a read, settles it.
  *
  * ## The defect this exists for
  *
- * `update_fact`'s tool schema said `properties` were "to merge". `updateMemory` did
+ * `update_fact`'s tool schema said `properties` were "to merge". `updateFact` did
  * `$set['properties'] = updates.properties` — a whole-map REPLACE. An agent patching one key silently
  * destroyed every other property on the record: no error, no warning, and the REST validation
  * simulation mirrored the same replace so the schema check could not see it either. `updateChrono`
@@ -21,7 +21,7 @@
  *
  * The subject is the UPDATE path, and going through the creators made the test depend on a live
  * embedding model. Three of the four creators tolerate a missing embedder (`try { embed } catch`);
- * `remember` does not — it awaits `embed()` unguarded, so a memory is never stored without a vector.
+ * `saveFact` does not — it awaits `embed()` unguarded, so a memory is never stored without a vector.
  * That is defensible on its own terms (a memory with no embedding is invisible to recall), but it made
  * this suite pass on a laptop with a warm model cache and fail in CI with
  * `EACCES: permission denied, mkdir '/data'` — an environment difference reported as a merge defect.
@@ -98,10 +98,10 @@ const TYPES = [
     unrelated: { description: 'unrelated' },
   },
   {
-    name: 'memory',
-    collection: 'memories',
+    name: 'fact',
+    collection: 'facts',
     seed: (id) => ({ ...base(id), fact: 'node-7 runs the platform apps', entityIds: [] }),
-    update: (id, patch) => brain.memory.updateMemory(SPACE, id, patch),
+    update: (id, patch) => brain.fact.updateFact(SPACE, id, patch),
     unrelated: { description: 'unrelated' },
   },
   {
@@ -135,7 +135,7 @@ describe('one merge rule, four record types (real MongoDB)', { skip }, () => {
     brain = {
       entities: await import('../../server/dist/brain/entities.js'),
       edges: await import('../../server/dist/brain/edges.js'),
-      memory: await import('../../server/dist/brain/memory.js'),
+      fact: await import('../../server/dist/brain/fact.js'),
       chrono: await import('../../server/dist/brain/chrono.js'),
     };
   });
@@ -179,7 +179,7 @@ describe('one merge rule, four record types (real MongoDB)', { skip }, () => {
       results[t.name] = (await load(t, id)).properties;
     }
     assert.deepEqual(results, {
-      entity: MERGED_PROPS, edge: MERGED_PROPS, memory: MERGED_PROPS, chrono: MERGED_PROPS,
+      entity: MERGED_PROPS, edge: MERGED_PROPS, fact: MERGED_PROPS, chrono: MERGED_PROPS,
     });
   });
 

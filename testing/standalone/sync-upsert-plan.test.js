@@ -14,7 +14,7 @@
  *     the only evidence is records reverting;
  *   - drop the re-tag and synced documents land with the PEER's space id in our collection. Every read
  *     path filters on `spaceId`, so they are invisible to list and lookup while still being counted:
- *     the data reads as lost, and `findEntityByName` no longer matches, so `remember` starts creating
+ *     the data reads as lost, and `findEntityByName` no longer matches, so `saveFact` starts creating
  *     duplicates instead of updating.
  *
  * Run: node --test testing/standalone/sync-upsert-plan.test.js

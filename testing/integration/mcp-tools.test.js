@@ -145,7 +145,7 @@ describe('MCP brain tools — remember / recall / query', () => {
     const result = await session.callTool('save_fact', { space: 'general', fact: uniqueFact, tags: ['mcp-test'] });
     assert.ok(!result?.isError, `remember returned isError: ${JSON.stringify(result)}`);
     const text = result?.content?.[0]?.text ?? '';
-    assert.ok(text.includes('Stored memory'), `Expected "Stored memory" in: ${text}`);
+    assert.ok(text.includes('Stored fact'), `Expected "Stored fact" in: ${text}`);
     assert.ok(/seq \d+/.test(text) || /ID /.test(text), `Expected seq/ID in text: ${text}`);
   });
 
@@ -202,7 +202,7 @@ describe('MCP brain tools — remember / recall / query', () => {
   it('query with allowed operators returns results (no error)', async () => {
     const result = await session.callTool('filter', {
       space: 'general',
-      collection: 'memories',
+      collection: 'facts',
       filter: { fact: { $exists: true } },
       limit: 5,
     });
@@ -219,7 +219,7 @@ describe('MCP brain tools — remember / recall / query', () => {
 
   it('query projection include-mode returns only the named fields (S8.2)', async () => {
     // Seed a memory with a distinctive fact + tags, then project just {fact:1}.
-    const seed = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/memories', {
+    const seed = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/facts', {
       fact: `mcp-projection-${Date.now()}`, tags: ['mcp-proj'],
     });
     assert.equal(seed.status, 201, JSON.stringify(seed.body));
@@ -227,7 +227,7 @@ describe('MCP brain tools — remember / recall / query', () => {
     try {
       const result = await session.callTool('filter', {
         space: 'general',
-        collection: 'memories',
+        collection: 'facts',
         filter: { _id: seededId },
         projection: { fact: 1 },
         limit: 1,
@@ -240,14 +240,14 @@ describe('MCP brain tools — remember / recall / query', () => {
       assert.ok(!('tags' in doc), 'non-included field "tags" must be absent under include projection');
       assert.ok(!('embedding' in doc), 'embedding must never be exposed');
     } finally {
-      await del(INSTANCES.a, tokenA, `/api/brain/spaces/general/memories/${seededId}`).catch(() => {});
+      await del(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${seededId}`).catch(() => {});
     }
   });
 
   it('query with disallowed $where operator returns isError', async () => {
     const result = await session.callTool('filter', {
       space: 'general',
-      collection: 'memories',
+      collection: 'facts',
       filter: { $where: 'this.fact.length > 0' },
     });
     assert.ok(result?.isError, 'Disallowed operator $where must return isError');
@@ -258,7 +258,7 @@ describe('MCP brain tools — remember / recall / query', () => {
   it('query with disallowed $function operator returns isError', async () => {
     const result = await session.callTool('filter', {
       space: 'general',
-      collection: 'memories',
+      collection: 'facts',
       filter: { $function: { body: 'function() { return true; }', args: [], lang: 'js' } },
     });
     assert.ok(result?.isError, 'Disallowed operator $function must return isError');
@@ -270,7 +270,7 @@ describe('MCP brain tools — remember / recall / query', () => {
     for (let i = 0; i < 10; i++) deep = { $and: [deep] };
     const result = await session.callTool('filter', {
       space: 'general',
-      collection: 'memories',
+      collection: 'facts',
       filter: deep,
     });
     assert.ok(result?.isError, 'Filter too deeply nested must return isError');
@@ -670,7 +670,7 @@ describe('MCP recall_global — space-scoped token must only see its own spaces'
     tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
 
     // Write a secret fact into the 'general' space using the full-access token
-    await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/memories', {
+    await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/facts', {
       fact: secretFact,
       tags: ['scope-leak-test'],
     });
@@ -759,7 +759,7 @@ describe('MCP brain tools � update_memory / delete_memory / get_stats', () => 
     tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
     session = await openMcpSession(tokenA);
     // Create a memory via REST API so we have an ID to update/delete
-    const res = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/memories', {
+    const res = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/facts', {
       fact: factText,
       tags: ['mcp-update-test'],
     });
@@ -773,12 +773,12 @@ describe('MCP brain tools � update_memory / delete_memory / get_stats', () => 
     const text = result?.content?.[0]?.text ?? '';
     const parsed = JSON.parse(text);
     assert.ok(typeof parsed.spaceId === 'string', 'get_stats must return spaceId');
-    assert.ok(typeof parsed.memories === 'number', 'get_stats must return memories count');
+    assert.ok(typeof parsed.facts === 'number', 'get_stats must return memories count');
     assert.ok(typeof parsed.entities === 'number', 'get_stats must return entities count');
     assert.ok(typeof parsed.edges === 'number', 'get_stats must return edges count');
     assert.ok(typeof parsed.chrono === 'number', 'get_stats must return chrono count');
     assert.ok(typeof parsed.files === 'number', 'get_stats must return files count');
-    assert.ok(parsed.memories >= 0, 'memories count must be non-negative');
+    assert.ok(parsed.facts >= 0, 'memories count must be non-negative');
     assert.ok(parsed.files >= 0, 'files count must be non-negative');
   });
 
@@ -806,7 +806,7 @@ describe('MCP brain tools � update_memory / delete_memory / get_stats', () => 
 
     // Effect: re-read via REST and deep-equal the persisted value — the
     // confirmation text alone is satisfied by a handler that persists nothing.
-    const reread = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/memories/${storedMemoryId}`);
+    const reread = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${storedMemoryId}`);
     assert.equal(reread.status, 200, JSON.stringify(reread.body));
     assert.deepEqual(reread.body.tags, ['mcp-updated-tag'], 'updated tags must be persisted');
     assert.equal(reread.body.fact, factText, 'untouched fields must survive the update');
@@ -833,7 +833,7 @@ describe('MCP brain tools � update_memory / delete_memory / get_stats', () => 
       `update_memory still accepts the retired spelling: ${JSON.stringify(result)}`);
 
     // And nothing was written — an accepted-and-dropped field is the outcome this rules out.
-    const reread = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/memories/${storedMemoryId}`);
+    const reread = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${storedMemoryId}`);
     assert.equal(reread.status, 200, JSON.stringify(reread.body));
     assert.equal(reread.body.excludeFromVectorSearch, undefined,
       'a refused argument must not reach the stored record');
@@ -862,7 +862,7 @@ describe('MCP brain tools � update_memory / delete_memory / get_stats', () => 
       space: 'general', id: storedMemoryId, suppressEmbeddings: true,
     });
     assert.ok(!on?.isError, `update_memory rejected suppressEmbeddings: ${JSON.stringify(on)}`);
-    let reread = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/memories/${storedMemoryId}`);
+    let reread = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${storedMemoryId}`);
     assert.equal(reread.body.suppressEmbeddings, true, 'the name must persist');
     assert.equal(reread.body.excludeFromVectorSearch, undefined,
       'the retired key is still being written alongside');
@@ -872,7 +872,7 @@ describe('MCP brain tools � update_memory / delete_memory / get_stats', () => 
       space: 'general', id: storedMemoryId, suppressEmbeddings: false,
     });
     assert.ok(!off?.isError, JSON.stringify(off));
-    reread = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/memories/${storedMemoryId}`);
+    reread = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${storedMemoryId}`);
     assert.equal(reread.body.suppressEmbeddings, false, 'false must be stored, not dropped');
   });
   it('delete_memory with no id returns isError', async () => {
@@ -1204,9 +1204,9 @@ describe('MCP recall � types filter restricts result set', () => {
   });
   after(() => session?.close());
 
-  it('recall with types=["memory"] does not return isError', async (t) => {
+  it('recall with types=["fact"] does not return isError', async (t) => {
     if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack � skipping');
-    const result = await session.callTool('recall', { space: 'general', query: entityName, topK: 5, types: ['memory'] });
+    const result = await session.callTool('recall', { space: 'general', query: entityName, topK: 5, types: ['fact'] });
     assert.ok(!result?.isError, `recall types=memory returned isError: ${JSON.stringify(result)}`);
     const text = result?.content?.[0]?.text ?? '';
     assert.ok(text.length > 0, 'recall with types filter must return non-empty response');
@@ -1220,7 +1220,7 @@ describe('MCP recall � types filter restricts result set', () => {
 
   it('recall with multiple types does not return isError', async (t) => {
     if (!embeddingAvailable) return t.skip('Embedding server not configured in test stack � skipping');
-    const result = await session.callTool('recall', { space: 'general', query: entityName, topK: 5, types: ['memory', 'entity', 'edge'] });
+    const result = await session.callTool('recall', { space: 'general', query: entityName, topK: 5, types: ['fact', 'entity', 'edge'] });
     assert.ok(!result?.isError, `recall types=[memory,entity,edge] returned isError: ${JSON.stringify(result)}`);
   });
 
@@ -1266,7 +1266,7 @@ describe('MCP brain tools � remember with description and properties', () => {
     });
     assert.ok(!result?.isError, `remember with description/properties returned isError: ${JSON.stringify(result)}`);
     const text = result?.content?.[0]?.text ?? '';
-    assert.ok(text.includes('Stored memory') || text.includes('seq'), `Expected confirmation in: ${text}`);
+    assert.ok(text.includes('Stored fact') || text.includes('seq'), `Expected confirmation in: ${text}`);
   });
 
   it('remember description is stored and queryable', async (t) => {
@@ -1282,7 +1282,7 @@ describe('MCP brain tools � remember with description and properties', () => {
     // Query memories collection and verify description + properties are persisted
     const queryResult = await session.callTool('filter', {
       space: 'general',
-      collection: 'memories',
+      collection: 'facts',
       filter: { fact: uniqueFact },
       limit: 1,
     });
@@ -1349,7 +1349,7 @@ describe('MCP brain tools � bulk_write', () => {
     const entName2 = `BulkEnt2-${RUN}`;
     const result = await session.callTool('save_bulk', {
       space: 'general',
-      memories: [
+      facts: [
         { fact: `BulkMem-${RUN}`, tags: ['bulk-test'] },
       ],
       entities: [
@@ -1367,14 +1367,14 @@ describe('MCP brain tools � bulk_write', () => {
     const text = result?.content?.[0]?.text ?? '';
     assert.ok(text.includes('bulk_write complete'), `Expected summary in: ${text}`);
     // Verify counts
-    assert.ok(text.includes('"memories":1'), `Expected 1 memory inserted: ${text}`);
+    assert.ok(text.includes('"facts":1'), `Expected 1 memory inserted: ${text}`);
     assert.ok(text.includes('"entities":2') || text.includes('"entities":1'), `Expected entities inserted: ${text}`);
   });
 
   it('bulk_write with validation errors returns error entries without aborting batch', async () => {
     const result = await session.callTool('save_bulk', {
       space: 'general',
-      memories: [
+      facts: [
         { fact: '' },                                // invalid � empty fact
         { fact: `ValidBulkMem-${RUN}`, tags: [] },   // valid
       ],
@@ -1393,14 +1393,14 @@ describe('MCP brain tools � bulk_write', () => {
   it('bulk_write with empty arrays returns zero counts', async () => {
     const result = await session.callTool('save_bulk', {
       space: 'general',
-      memories: [],
+      facts: [],
       entities: [],
       edges: [],
       chrono: [],
     });
     assert.ok(!result?.isError, `bulk_write returned isError for empty: ${JSON.stringify(result)}`);
     const text = result?.content?.[0]?.text ?? '';
-    assert.ok(text.includes('"memories":0'), `Expected 0 memories: ${text}`);
+    assert.ok(text.includes('"facts":0'), `Expected 0 facts: ${text}`);
     assert.ok(text.includes('errors: 0'), `Expected 0 errors: ${text}`);
   });
 
@@ -1452,7 +1452,7 @@ describe('MCP security � read-only token cannot call bulk_write', () => {
   it('bulk_write is rejected with read-only token', async () => {
     const result = await readOnlySession.callTool('save_bulk', {
       space: 'general',
-      memories: [{ fact: 'This should be blocked' }],
+      facts: [{ fact: 'This should be blocked' }],
     });
     assert.ok(result?.isError, 'bulk_write must be rejected by read-only token');
     const text = result?.content?.[0]?.text ?? '';
@@ -1792,7 +1792,7 @@ describe('MCP file tools � write_file with properties metadata', () => {
 });
 
 describe('MCP schema validation — strict mode must actually block (parity with REST)', () => {
-  // Regression: MCP `remember` had no `type` parameter, and validateMemory() keys the entire
+  // Regression: MCP `save_fact` had no `type` parameter, and validateFact() keys the entire
   // per-type schema lookup off `memory.type`. With no type it found no schema and returned
   // ZERO violations — so the strict-mode gate could never fire and schema validation was a
   // total NO-OP on MCP, the surface agents actually use. REST enforced it all along.
@@ -1813,7 +1813,7 @@ describe('MCP schema validation — strict mode must actually block (parity with
       meta: {
         validationMode: 'strict',
         typeSchemas: {
-          memory: { note: { propertySchemas: { source: { type: 'string', required: true } } } },
+          fact: { note: { propertySchemas: { source: { type: 'string', required: true } } } },
         },
       },
     });
@@ -1853,9 +1853,9 @@ describe('MCP schema validation — strict mode must actually block (parity with
 
     // Effect assertion, not a status check: the type must actually be stored — otherwise
     // `type` is accepted and silently dropped, which is the bug in a different costume.
-    const list = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${spaceId}/memories`);
+    const list = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${spaceId}/facts`);
     assert.equal(list.status, 200);
-    const stored = list.body.memories.find(m => m.fact === fact);
+    const stored = list.body.facts.find(m => m.fact === fact);
     assert.ok(stored, 'the memory should have been stored');
     assert.equal(stored.type, 'note', '`type` must be persisted, not silently dropped');
   });
@@ -1863,7 +1863,7 @@ describe('MCP schema validation — strict mode must actually block (parity with
   it('bulk_write enforces the same schema (its memory items had no type either)', async () => {
     const r = await session.callTool('save_bulk', {
       space: spaceId,
-      memories: [{ fact: `mcp bulk strict ${Date.now()}`, type: 'note' }],
+      facts: [{ fact: `mcp bulk strict ${Date.now()}`, type: 'note' }],
     });
     assert.match(
       JSON.stringify(r), /schema_violation|source/,

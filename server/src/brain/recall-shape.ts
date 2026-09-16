@@ -44,7 +44,7 @@ import type { RecallResult, RecallKnowledgeType } from './recall.js';
  * They are diagnostics for one reason and belong in two PLACES. `matchedText`, `embeddingModel` and `seq`
  * are fields OF THE RECORD; the three scores describe how this result RANKED and sit beside `score`. REST
  * returns one flat object so the distinction is invisible there, but MCP nests the record inside the result
- * — putting `lexicalScore` in `record` would say it is a property of the memory, which it is not.
+ * — putting `lexicalScore` in `record` would say it is a property of the fact, which it is not.
  */
 export const RECALL_RECORD_DIAGNOSTICS = ['matchedText', 'embeddingModel', 'seq'] as const;
 
@@ -322,7 +322,7 @@ export function rankOf(r: RecallResult): number {
 /**
  * The text a cross-encoder is asked to judge against the query.
  *
- * Deliberately NOT `summariseRecall`, which truncates a memory to 120 characters for a one-line log or
+ * Deliberately NOT `summariseRecall`, which truncates a fact to 120 characters for a one-line log or
  * tool response. A reranker scoring a 117-character stub of the passage would be judging a different
  * text from the one that gets returned — worse than not reranking, because the error is invisible.
  * Capped anyway: cross-encoders have a token window, and a runaway document would be silently truncated
@@ -331,7 +331,7 @@ export function rankOf(r: RecallResult): number {
 export function rerankTextOf(r: RecallResult): string {
   const raw = (() => {
     switch (r.type) {
-      case 'memory': return r.fact;
+      case 'fact': return r.fact;
       case 'entity': return [r.name, r.entityType, r.description].filter(Boolean).join(' — ');
       case 'edge':   return [`${r.from} → ${r.label} → ${r.to}`, r.description].filter(Boolean).join(' — ');
       case 'chrono': return [r.title, r.description].filter(Boolean).join(' — ');
@@ -344,7 +344,7 @@ export function rerankTextOf(r: RecallResult): string {
 /** One-line human summary of a recall result, for duplicate feedback. */
 export function summariseRecall(r: RecallResult): string {
   switch (r.type) {
-    case 'memory': return r.fact.length > 120 ? `${r.fact.slice(0, 117)}…` : r.fact;
+    case 'fact': return r.fact.length > 120 ? `${r.fact.slice(0, 117)}…` : r.fact;
     case 'entity': return `${r.name} (${r.entityType})`;
     case 'edge': return `${r.from} → ${r.label} → ${r.to}`;
     case 'chrono': return r.title;

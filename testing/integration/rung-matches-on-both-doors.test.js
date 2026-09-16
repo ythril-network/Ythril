@@ -7,7 +7,7 @@
  *
  * | call | before | after |
  * |---|---|---|
- * | `DELETE /api/brain/spaces/general/memories/:id` | **403** `Token needs 'admin' on knowledge…` | 204 |
+ * | `DELETE /api/brain/spaces/general/facts/:id` | **403** `Token needs 'admin' on knowledge…` | 204 |
  * | MCP `delete_fact`, same record | deleted it | deletes it |
  *
  * One rule, two implementations, and the weaker one silently in charge — `mcp/router.ts` gates on the token's
@@ -53,12 +53,12 @@ async function mint(name, body) {
 }
 
 const writeMemory = async (tk) => {
-  const r = await post(INSTANCES.a, tk, '/api/brain/spaces/general/memories', { fact: `rung probe ${RUN} ${Math.random()}` });
-  assert.equal(r.status, 201, `writing a memory: ${JSON.stringify(r.body)}`);
+  const r = await post(INSTANCES.a, tk, '/api/brain/spaces/general/facts', { fact: `rung probe ${RUN} ${Math.random()}` });
+  assert.equal(r.status, 201, `writing a fact: ${JSON.stringify(r.body)}`);
   return r.body._id ?? r.body.id;
 };
 
-const restDelete = (tk, id) => fetch(`${INSTANCES.a}/api/brain/spaces/general/memories/${id}`, {
+const restDelete = (tk, id) => fetch(`${INSTANCES.a}/api/brain/spaces/general/facts/${id}`, {
   method: 'DELETE', headers: { Authorization: `Bearer ${tk}` },
 });
 
@@ -93,7 +93,7 @@ describe('a write token deletes one record on both doors', () => {
     try {
       const res = await session.callTool('delete_fact', { space: 'general', id });
       assert.doesNotMatch(JSON.stringify(res ?? {}), /isError/, `MCP delete failed: ${JSON.stringify(res).slice(0, 200)}`);
-      const after = await get(INSTANCES.a, admin, `/api/brain/spaces/general/memories/${id}`);
+      const after = await get(INSTANCES.a, admin, `/api/brain/spaces/general/facts/${id}`);
       assert.equal(after.status, 404, 'the record must be gone');
     } finally {
       session?.close();
@@ -102,7 +102,7 @@ describe('a write token deletes one record on both doors', () => {
 
   it('the collection WIPE still needs admin — levelling down was about single records', async () => {
     const tok = await mint(`rung-wipe-${RUN}`, { rights: WRITE_RIGHTS });
-    const r = await fetch(`${INSTANCES.a}/api/brain/spaces/general/memories`, {
+    const r = await fetch(`${INSTANCES.a}/api/brain/spaces/general/facts`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${tok.plaintext}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ confirm: true }),
@@ -140,7 +140,7 @@ describe('a token carrying a DERIVED matrix is not exempt from the rung', () => 
     // route was guarded at space-admin, so the rung was never what decided.
     assert.ok(r.status !== 500, `the derived matrix must not break the request: ${r.status}`);
 
-    const wipe = await fetch(`${INSTANCES.a}/api/brain/spaces/general/memories`, {
+    const wipe = await fetch(`${INSTANCES.a}/api/brain/spaces/general/facts`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${tok.plaintext}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ confirm: true }),

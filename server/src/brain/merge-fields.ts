@@ -6,7 +6,7 @@
  * Every brain write that lands on an existing record has to answer the same question: what do the
  * stored `tags`/`properties` become once the incoming ones are applied? The answer is two lines —
  * a de-duplicated tag union and a shallow property merge — and it was written **eleven times** across
- * six files before this module: in the entity writer, the edge writer, the memory writer, the chrono
+ * six files before this module: in the entity writer, the edge writer, the fact writer, the chrono
  * writer, three REST handlers and two MCP tools.
  *
  * A canonical version did exist (`mergedEntityWrite`, in `entities.ts`), and it was already generic —
@@ -17,7 +17,7 @@
  *
  * That promise is the reason this is correctness rather than tidiness. A stated guarantee with eleven
  * implementations is held together by nothing, and it was not in fact held: `update_fact`'s own tool
- * schema said `properties` were "to merge" while `updateMemory` **replaced** them, so an agent that
+ * schema said `properties` were "to merge" while `updateFact` **replaced** them, so an agent that
  * patched one property silently destroyed every other property on the record.
  *
  * ## The rule

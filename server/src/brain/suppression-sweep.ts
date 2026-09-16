@@ -53,7 +53,7 @@ import type { KnowledgeType, SpaceMeta } from '../config/types.js';
 
 /** The collection suffix for each record kind, in the one place that has to agree with the schema keys. */
 const COLLECTION: Record<KnowledgeType, string> = {
-  memory: 'memories', entity: 'entities', edge: 'edges', chrono: 'chrono',
+  fact: 'facts', entity: 'entities', edge: 'edges', chrono: 'chrono',
 };
 
 /**

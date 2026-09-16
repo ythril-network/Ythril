@@ -3,13 +3,13 @@
  *
  * ## The measurement this exists because of
  *
- * `maxChars` is a contract: it is how much of their context window a caller is willing to give to memory.
+ * `maxChars` is a contract: it is how much of their context window a caller is willing to give to fact.
  * Measured on a real corpus, **30% of what came back was content** — 3,314 characters of JSON carrying 986
  * characters of remembered fact. The rest described the record's place in the store: when it was written,
  * when it was last touched, the ids of everything it links to, and empty collections saying nothing.
  *
  * At the budgets this competes at that is not a rounding error. A caller asking for 2,600 characters of
- * memory got about a thousand characters of what they came for and paid for the rest.
+ * fact got about a thousand characters of what they came for and paid for the rest.
  *
  * ## Two rules, and only one of them is a choice
  *
@@ -20,7 +20,7 @@
  * **Storage bookkeeping is opt-in.** `createdAt`, `updatedAt` and `entityIds` describe the record rather
  * than what it says. `createdAt` is the worse of them: it is routinely read as when the remembered thing
  * happened, which is not what it means — that lives in the record's own properties, put there by whoever
- * wrote it. A caller who needs any of this asks for it; the common case, reading memory in order to answer
+ * wrote it. A caller who needs any of this asks for it; the common case, reading fact in order to answer
  * something, does not.
  *
  * ## What is deliberately never dropped

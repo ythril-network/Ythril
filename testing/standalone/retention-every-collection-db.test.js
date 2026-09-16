@@ -47,7 +47,7 @@ const POLICY = {
   meta: {
     typeSchemas: {
       entity: { ticket: { retention: { days: 365 } } },
-      memory: { note: { retention: { days: 30 } } },
+      fact: { note: { retention: { days: 30 } } },
       edge:   { 'depends-on': { retention: { days: 60 } } },
       chrono: { event: { retention: { days: 90, contentDays: 14 } } },
     },
@@ -67,7 +67,7 @@ const base = (id, createdAt) => ({
 
 const docs = {
   entities: (id, type, createdAt) => ({ ...base(id, createdAt), name: id, type, tags: [] }),
-  memories: (id, type, createdAt) => ({ ...base(id, createdAt), fact: `fact ${id}`, type, tags: [], entityIds: [] }),
+  facts: (id, type, createdAt) => ({ ...base(id, createdAt), fact: `fact ${id}`, type, tags: [], entityIds: [] }),
   // `label` is the schema key; `type` is set to something DIFFERENT on purpose, so a resolver reading the wrong
   // field cannot accidentally pass.
   edges:    (id, label, createdAt) => ({ ...base(id, createdAt), from: 'a', to: 'b', label, type: 'unrelated', tags: [] }),
@@ -92,7 +92,7 @@ describe('schema retention reaches every typed collection (real MongoDB)', { ski
 
   it('finds the policed types in each collection', () => {
     assert.deepEqual(policedTypes(POLICY, 'entity'), ['ticket']);
-    assert.deepEqual(policedTypes(POLICY, 'memory'), ['note']);
+    assert.deepEqual(policedTypes(POLICY, 'fact'), ['note']);
     assert.deepEqual(policedTypes(POLICY, 'edge'), ['depends-on']);
     assert.deepEqual(policedTypes(POLICY, 'chrono'), ['event']);
   });
@@ -108,10 +108,10 @@ describe('schema retention reaches every typed collection (real MongoDB)', { ski
 
   it('stamps a MEMORY', async () => {
     const created = ago(10);
-    await mongo.col(`${SPACE}_memories`).insertOne(docs.memories('m-1', 'note', created));
+    await mongo.col(`${SPACE}_facts`).insertOne(docs.facts('m-1', 'note', created));
 
-    assert.equal(await backfillTypedExpiry(SPACE, POLICY, 'memory'), 1);
-    assert.equal((await load('memories', 'm-1'))._expireAt.getTime(), Date.parse(created) + 30 * DAY);
+    assert.equal(await backfillTypedExpiry(SPACE, POLICY, 'fact'), 1);
+    assert.equal((await load('facts', 'm-1'))._expireAt.getTime(), Date.parse(created) + 30 * DAY);
   });
 
   it('stamps an EDGE by its label, not its type', async () => {
@@ -130,7 +130,7 @@ describe('schema retention reaches every typed collection (real MongoDB)', { ski
      * SET is derived. Asserted to cover every type first: an unnamed one would insert a record with an
      * undefined type, which no window matches either, so the case would pass while testing nothing.
      */
-    const unpoliced = { entity: 'person', memory: 'idea', edge: 'mentions', chrono: 'meeting' };
+    const unpoliced = { entity: 'person', fact: 'idea', edge: 'mentions', chrono: 'meeting' };
     for (const t of KNOWLEDGE_TYPES) {
       assert.ok(unpoliced[t], `no unpoliced ${t} type is named, so this case would assert nothing about it`);
       await mongo.col(`${SPACE}_${RECORD_COLLECTION[t]}`)

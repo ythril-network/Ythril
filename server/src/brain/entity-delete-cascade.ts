@@ -133,7 +133,7 @@ export async function deleteEntityCascade(
   /*
    * Anything blocking that is NOT an edge is left, and the delete below then refuses again.
    *
-   * That is deliberate rather than unfinished. `M-2` made a memory, a chrono entry or a file able to block a
+   * That is deliberate rather than unfinished. `M-2` made a fact, a chrono entry or a file able to block a
    * delete through its link arrays, and removing one of those is deleting somebody's RECORD — not the
    * relationship between two records, which is all an edge is. The owner's ruling is about edges: *"either
    * remove edges by hand or use A when you are sure."*
@@ -144,7 +144,7 @@ export async function deleteEntityCascade(
       ok: false,
       preview: await previewEntityCascade(spaceId, entityId),
       error: `Cannot delete: ${stillBlocking.map(b => `${b.type} ${b._id}`).join(', ')} still reference this `
-        + 'entity, and a cascade removes EDGES only — a memory, chrono entry or file that names it is a '
+        + 'entity, and a cascade removes EDGES only — a fact, chrono entry or file that names it is a '
         + 'record of its own, not a relationship. Edit those to drop the reference first.',
     };
   }

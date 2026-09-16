@@ -48,7 +48,7 @@ export interface DupeCheckOpts {
    * failure to embed should fail the write rather than be repaired in the background.
    *
    * Two consequences worth stating rather than discovering. With this true, a write **fails** when the
-   * embedder is unavailable — that was `remember`'s unconditional behaviour before the queue, now named
+   * embedder is unavailable — that was `saveFact`'s unconditional behaviour before the queue, now named
    * and opt-in. With it false, the write **succeeds** and the record is briefly unrecallable: a vectorless
    * record is invisible to BOTH recall channels, since the lexical one needs an embedding to compute a
    * real similarity and skips what it cannot score.
@@ -57,7 +57,7 @@ export interface DupeCheckOpts {
    * new record cannot self-match, and that is a question which cannot be answered later.
    *
    * It lives here, in the options object the write paths already take, rather than as another positional
-   * parameter: `remember` carries a note saying its twelfth was one too many.
+   * parameter: `saveFact` carries a note saying its twelfth was one too many.
    */
   waitForEmbedding?: boolean;
 }

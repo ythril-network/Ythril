@@ -108,6 +108,6 @@ describe('applyExpiryToUpdate — $set/$unset precedence', () => {
 
 describe('TTL_COLLECTIONS', () => {
   it('covers the five TTL-bearing collections (F12 added files)', () => {
-    assert.deepEqual([...TTL_COLLECTIONS].sort(), ['chrono', 'edges', 'entities', 'files', 'memories']);
+    assert.deepEqual([...TTL_COLLECTIONS].sort(), ['chrono', 'edges', 'entities', 'facts', 'files']);
   });
 });

@@ -12,7 +12,7 @@
  * ## What it is for
  *
  * An edge embeds `from label to` and nothing else, with the endpoints resolved to names: `ServiceA depends_on
- * ServiceB` IS the edge's content, which is why an edge resolves its endpoints while a memory deliberately
+ * ServiceB` IS the edge's content, which is why an edge resolves its endpoints while a fact deliberately
  * does not resolve the entities it links (measured at 1.5 points of strict evidence recall — see
  * `entity-names-are-not-in-the-embed-text.test.js`).
  *
@@ -32,10 +32,10 @@ import type { RefKind } from '../config/types-knowledge.js';
 /**
  * How much of an endpoint's name reaches the edge's embedding.
  *
- * An entity name and a chrono title are short by nature; a memory's `fact` is a sentence or several. An edge
+ * An entity name and a chrono title are short by nature; a fact's `fact` is a sentence or several. An edge
  * embeds `from label to` and nothing else, so an untruncated fact at one end would make the edge's vector
- * mostly that fact — the edge would then be recalled for queries about the memory rather than about the
- * relationship, which is the same dilution that cost 1.5 points when memories embedded their entity names.
+ * mostly that fact — the edge would then be recalled for queries about the fact rather than about the
+ * relationship, which is the same dilution that cost 1.5 points when facts embedded their entity names.
  */
 export const ENDPOINT_NAME_MAX = 200;
 
@@ -88,7 +88,7 @@ export async function resolveEdgeEndsForWrite(
   const out: ResolvedEdgeEnds = {};
 
   /*
-   * Types only for ENTITY endpoints. `endpoints` is a vocabulary of entity types plus `UNTYPED`, and a memory,
+   * Types only for ENTITY endpoints. `endpoints` is a vocabulary of entity types plus `UNTYPED`, and a fact,
    * chrono entry or file has no `type` in that vocabulary — so resolving one would invent a value the schema
    * cannot express. Left unresolved, which is never a violation.
    */

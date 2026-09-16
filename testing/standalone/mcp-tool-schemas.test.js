@@ -158,7 +158,7 @@ describe('MCP tool schemas — high-value enrichments', () => {
 
   it('bulk_write arrays advertise the 500-item cap', () => {
     const props = schemaOf('save_bulk').properties;
-    for (const k of ['memories', 'entities', 'edges', 'chrono']) {
+    for (const k of ['facts', 'entities', 'edges', 'chrono']) {
       assert.equal(props[k].maxItems, 500, `bulk_write.${k} must cap at 500`);
     }
   });

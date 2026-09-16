@@ -15,6 +15,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING — the knowledge type `memory` is now `fact`, everywhere, and 5.0 does not accept the old word.**
+
+  | was | is |
+  |---|---|
+  | `remember`, `update_memory`, `delete_memory` | `save_fact`, `update_fact`, `delete_fact` |
+  | `POST /api/brain/spaces/:id/memories` | `POST /api/brain/spaces/:id/facts` |
+  | `<space>_memories` | `<space>_facts` |
+  | `recordTtlDays: { memory }`, `memory.created` | `recordTtlDays: { fact }`, `fact.created` |
+  | `ythril_memories_total` | `ythril_facts_total` |
+
+  **The six array fields keep their spelling.** `memoryIds`, `includeMemories` and `chrono.memoryIds` are
+  replicated and merkle-hashed, so renaming them is a wire break this release did not take. A link's synthetic
+  edge LABEL does move, because its first half is the kind: `memory.entityIds` is now `fact.entityIds`.
+
+  **Three boot migrations run once, automatically, and there is nothing for an operator to do** — but read
+  what they cover, because every failure they prevent is SILENT and none of them would appear in a log:
+
+  | migration | what it moves | what happens without it |
+  |---|---|---|
+  | `db/rename-memories-to-facts.ts` | `<space>_memories` → `<space>_facts`, and `memory.*` webhook subscriptions | a space reports zero facts while holding thousands, because reading a collection that does not exist is an empty result |
+  | `config/migrate-memory-to-fact.ts` | `recordTtlDays: { memory }` → `{ fact }` | the retention window is unread, so those records are kept for ever |
+  | `db/rekey-memory-kind-to-fact.ts` | the `_id` of every edge and link, plus tombstone types and queued embed jobs | a fact's connections match no query; a peer hits the unique index; a deletion is never served; a record never enters search |
+
+  Each is idempotent, and each REPORTS a conflict rather than guessing: two collections with the same name,
+  or an id another row already holds, are logged and left for a human. Watch the boot log once on the first
+  5.0 start — a `WARN` there is the only case that needs you.
+
 - **BREAKING — three tools fold into others, and the MCP surface is 45 rather than 48.**
 
   | gone | use instead |

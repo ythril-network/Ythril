@@ -2,7 +2,7 @@
  * Merkle root computation for a space.
  *
  * The root is a SHA-256 hash over a binary Merkle tree whose leaves are:
- *   - For each memory / entity / edge / chrono document (excluding tombstones):
+ *   - For each fact / entity / edge / chrono document (excluding tombstones):
  *       SHA-256( "doc:<type>:<_id>:<seq>:<contentHash>" )
  *   - For each file in the space:
  *       SHA-256( "file:<relative-path>:<sha256>" )
@@ -162,7 +162,7 @@ const FILE_HASH_PROJECTION = {
  *
  * Documents are streamed with a cursor (not `toArray`) because the content hash
  * needs the full document, and a large space would otherwise be materialised in
- * memory all at once. Embedding vectors are excluded at the projection level, so
+ * fact all at once. Embedding vectors are excluded at the projection level, so
  * the biggest field never leaves MongoDB.
  */
 /**

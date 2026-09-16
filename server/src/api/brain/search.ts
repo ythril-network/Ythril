@@ -13,7 +13,7 @@ import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { parseSortParam, toMongoSort, SORTABLE_FIELDS } from '../../brain/list-sort.js';
 import { pageAcrossMembers } from '../../spaces/page-across-members.js';
 import { NotFoundError } from '../../util/errors.js';
-import { countMemories } from '../../brain/memory.js';
+import { countFacts } from '../../brain/fact.js';
 import { getEmbedJobCounts } from '../../brain/embed-queue.js';
 import {
   queryBrain, countBrain, QUERY_BODY_FIELDS, TRAVERSE_BODY_FIELDS, RECALL_BODY_FIELDS, FIND_SIMILAR_BODY_FIELDS,
@@ -33,7 +33,7 @@ import { needsReindex } from '../../spaces/_shared.js';
 import { planReindex, startReindex } from '../../brain/reindex.js';
 import { log } from '../../util/log.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
-import type { MemoryDoc, EntityDoc, EdgeDoc, ChronoEntry, FileMetaDoc } from '../../config/types.js';
+import type { FactDoc, EntityDoc, EdgeDoc, ChronoEntry, FileMetaDoc } from '../../config/types.js';
 import { RECORD_TYPES } from '../../config/types.js';
 import { reindexInProgress } from '../../metrics/registry.js';
 import { UUID_V4_RE } from './_shared.js';
@@ -72,7 +72,7 @@ searchRouter.get('/spaces/:spaceId/stats', globalRateLimit, requireSpaceAuth, as
   }
   const memberIds = memberSpacesForRequest(req, spaceId);
   const counts = await Promise.all(memberIds.map(async mid => ({
-    memories: await countMemories(mid),
+    facts: await countFacts(mid),
     entities: await col(`${mid}_entities`).countDocuments(),
     edges: await col(`${mid}_edges`).countDocuments(),
     chrono: await col(`${mid}_chrono`).countDocuments(),
@@ -84,7 +84,7 @@ searchRouter.get('/spaces/:spaceId/stats', globalRateLimit, requireSpaceAuth, as
     // defect the queue fixed: a state the system knew about and never reported.
     embedQueue: await getEmbedJobCounts(mid),
   })));
-  const memories = counts.reduce((s, c) => s + c.memories, 0);
+  const facts = counts.reduce((s, c) => s + c.facts, 0);
   const entities = counts.reduce((s, c) => s + c.entities, 0);
   const edges = counts.reduce((s, c) => s + c.edges, 0);
   const chrono = counts.reduce((s, c) => s + c.chrono, 0);
@@ -96,7 +96,7 @@ searchRouter.get('/spaces/:spaceId/stats', globalRateLimit, requireSpaceAuth, as
     processing: counts.reduce((s, c) => s + c.embedQueue.processing, 0),
     failed: counts.reduce((s, c) => s + c.embedQueue.failed, 0),
   };
-  res.json({ spaceId, memories, entities, edges, chrono, files, embedQueue });
+  res.json({ spaceId, facts, entities, edges, chrono, files, embedQueue });
 });
 
 
@@ -213,7 +213,7 @@ searchRouter.post('/spaces/:spaceId/traverse', globalRateLimit, requireSpaceAuth
   const effectiveLimit = Math.min(Math.max(1, rawLimit), 1000);
 
   // What the answer CONTAINS, as three flags rather than one. Chrono entries are reachable by default; a
-  // client that assumed every node is an entity opts out. Memories are opt-IN — they are usually the most
+  // client that assumed every node is an entity opts out. Facts are opt-IN — they are usually the most
   // numerous record type and every node counts against `limit`, so on by default they would truncate away the
   // entities the caller traversed for. Edges are always FOLLOWED (they are the graph); the flag only decides
   // whether the edge list rides along in the response.
@@ -999,7 +999,7 @@ searchRouter.get('/spaces/:spaceId/reindex-status', globalRateLimit, requireSpac
 
 
 // POST /api/brain/spaces/:spaceId/reindex
-// Re-embeds all memories in a space using the currently configured model.
+// Re-embeds all facts in a space using the currently configured model.
 // Long-running: may take minutes for large spaces. Progress is logged server-side.
 // POST /api/brain/spaces/:spaceId/reindex
 //

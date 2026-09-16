@@ -52,7 +52,7 @@ export async function syncSchemaFiles(spaceId: string, meta: SpaceMeta | undefin
  * `contradiction_candidates` shipped that way — no indexes at all, while the Review list filtered and
  * sorted over it — and `file_tombstones` had the same hole before it (see `repairStaleSpaceIds` below).
  */
-export const SPACE_COLLECTIONS = ['memories', 'entities', 'edges', 'chrono', 'links', 'tombstones', 'conflicts', 'files', 'dupe_candidates', 'contradiction_candidates'] as const;
+export const SPACE_COLLECTIONS = ['facts', 'entities', 'edges', 'chrono', 'links', 'tombstones', 'conflicts', 'files', 'dupe_candidates', 'contradiction_candidates'] as const;
 
 // ── Embedding model mismatch tracking ──────────────────────────────────────
 const _reindexNeeded = new Set<string>();
@@ -88,7 +88,7 @@ export function setReindexNeeded(spaceId: string, needed: boolean): void {
  * each document is redundant — but the read paths filter on it (`listEntities`,
  * `findEntityByName`, the edge-dedup lookup, the cascade deletes). If the field goes stale,
  * the data is still counted (counts read the collection) but becomes INVISIBLE to every
- * list and lookup — and worse, `findEntityByName` stops matching, so `remember` starts
+ * list and lookup — and worse, `findEntityByName` stops matching, so `saveFact` starts
  * creating duplicate entities instead of linking to the existing one.
  *
  * Two paths used to leave it stale:

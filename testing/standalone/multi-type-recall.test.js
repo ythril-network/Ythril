@@ -37,7 +37,7 @@ const { mergeRecallResults } = await import('../../server/dist/brain/recall-shap
 
 // ── Fixtures: the real RecallResult shapes ───────────────────────────────────
 
-const memory = (o = {}) => ({ type: 'memory', _id: 'm1', fact: 'the sky is blue', score: 0.9, ...o });
+const memory = (o = {}) => ({ type: 'fact', _id: 'm1', fact: 'the sky is blue', score: 0.9, ...o });
 const entity = (o = {}) => ({ type: 'entity', _id: 'e1', name: 'Alice', entityType: 'person', score: 0.8, ...o });
 const edge   = (o = {}) => ({ type: 'edge', _id: 'g1', from: 'Alice', label: 'knows', to: 'Bob', score: 0.7, ...o });
 const chrono = (o = {}) => ({ type: 'chrono', _id: 'c1', title: 'Launch', chronoType: 'event', startsAt: '2026-01-01', score: 0.6, ...o });
@@ -243,7 +243,7 @@ describe('mergeRecallResults — maxPerType, the ceiling to minPerType\'s floor'
     const out = mergeRecallResults([], all, 5, undefined, { file: 1 });
     assert.equal(out.length, 5, 'the freed slots must be filled, not dropped');
     assert.equal(out.filter(r => r.type === 'file').length, 1);
-    assert.equal(out.filter(r => r.type === 'memory').length, 4);
+    assert.equal(out.filter(r => r.type === 'fact').length, 4);
   });
 
   it('the capped result kept is the best one, not the first one walked', () => {

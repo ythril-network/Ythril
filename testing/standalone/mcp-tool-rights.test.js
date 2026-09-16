@@ -8,7 +8,7 @@
  * and the weaker one was reachable.
  *
  * That is not a reading of the code. It was measured against a running instance: a token whose matrix said
- * `perSpace.general.knowledge = 'write'` was refused `DELETE /api/brain/spaces/general/memories/:id` with a
+ * `perSpace.general.knowledge = 'write'` was refused `DELETE /api/brain/spaces/general/facts/:id` with a
  * **403**, and the identical delete through the `delete_fact` tool answered **"Memory deleted"**.
  *
  * ## Why the table is derived and not written

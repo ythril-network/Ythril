@@ -65,7 +65,7 @@ const status = (id) => get(INSTANCES.a, token, `/api/brain/spaces/${id}/reindex-
 
 /** One record of every kind that the loop has a branch for. */
 async function seedOneOfEach(id) {
-  const mem = await post(INSTANCES.a, token, `/api/brain/spaces/${id}/memories`,
+  const mem = await post(INSTANCES.a, token, `/api/brain/spaces/${id}/facts`,
     { fact: `Reindex fact ${RUN}`, tags: ['reindex'] });
   assert.equal(mem.status, 201, JSON.stringify(mem.body));
 
@@ -188,7 +188,7 @@ describe('reindex — what the API can actually attribute to it', () => {
     // The assertion that a branch used the RIGHT text is not observable here at all — the loop does not store
     // `matchedText` — and lives in `standalone/reindex-embeds-the-same-text.test.js`. Stated here so the pair is
     // read as one net rather than this file being mistaken for the whole of it.
-    const seeded = { memories: 1, entities: 2, edges: 1, chrono: 1, files: 1 };
+    const seeded = { facts: 1, entities: 2, edges: 1, chrono: 1, files: 1 };
 
     await reindex(SPACE);
     for (const [collection, atLeast] of Object.entries(seeded)) {
@@ -201,10 +201,10 @@ describe('reindex — what the API can actually attribute to it', () => {
   it('does NOT bump seq or updatedAt — a re-embed is not a write', async () => {
     // This one IS attributable, and it is the property an extraction is most likely to break: the loop writes the
     // embedding fields with a direct `$set`, deliberately not through the record update path. Routing it through
-    // `updateMemory`/`updateEntity` for tidiness would look correct and would bump `seq` on every record in the
+    // `updateFact`/`updateEntity` for tidiness would look correct and would bump `seq` on every record in the
     // space — which is a sync-visible change on every peer, for a local re-embed that changed no content. On the
     // reporting operator's instance that is 19 spaces of churn.
-    const before = await post(INSTANCES.a, token, '/api/brain/filter', { space: SPACE, ...({ collection: 'memories', filter: {}, projection: { _id: 1, seq: 1, updatedAt: 1 }, limit: 20 }) });
+    const before = await post(INSTANCES.a, token, '/api/brain/filter', { space: SPACE, ...({ collection: 'facts', filter: {}, projection: { _id: 1, seq: 1, updatedAt: 1 }, limit: 20 }) });
     assert.equal(before.status, 200, JSON.stringify(before.body));
     const snapshot = new Map((before.body.results ?? []).map(r => [r._id, `${r.seq}|${r.updatedAt}`]));
     assert.ok(snapshot.size > 0, 'nothing to compare — the space has no memories');
@@ -214,7 +214,7 @@ describe('reindex — what the API can actually attribute to it', () => {
     await waitFor(async () => (await status(SPACE)).status === 200, 10_000, 1_000);
     await new Promise(r => setTimeout(r, 5_000));
 
-    const after = await post(INSTANCES.a, token, '/api/brain/filter', { space: SPACE, ...({ collection: 'memories', filter: {}, projection: { _id: 1, seq: 1, updatedAt: 1 }, limit: 20 }) });
+    const after = await post(INSTANCES.a, token, '/api/brain/filter', { space: SPACE, ...({ collection: 'facts', filter: {}, projection: { _id: 1, seq: 1, updatedAt: 1 }, limit: 20 }) });
     for (const r of after.body.results ?? []) {
       const was = snapshot.get(r._id);
       if (!was) continue;

@@ -3,7 +3,7 @@
  *
  * ## Why this is worth a response field
  *
- * `POST /memories` had no body schema at all: it destructured the six keys it knew, hand-validated those, and
+ * `POST /facts` had no body schema at all: it destructured the six keys it knew, hand-validated those, and
  * dropped everything else. `"totallyMadeUpField": "xyzzy"` returned `200` and a record id.
  *
  * So a caller cannot tell *"this parameter is not implemented"* from *"this parameter was applied"* — both are
@@ -36,7 +36,7 @@ import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 
 const ROUTES = {
-  memories: 'server/src/api/brain/memories.ts',
+  facts: 'server/src/api/brain/facts.ts',
   entities: 'server/src/api/brain/entities.ts',
   edges: 'server/src/api/brain/edges.ts',
   chrono: 'server/src/api/brain/chrono.ts',

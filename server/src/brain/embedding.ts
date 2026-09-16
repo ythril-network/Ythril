@@ -393,8 +393,8 @@ export async function embed(
     // embed concurrency had made it worse, because the peak is set by one chunk's size.
     //
     // It was also silently WRONG beyond the model's position count, so this is a correctness fix as much as a
-    // memory one — and the chunker's cap does not make it redundant: this is the path every caller shares,
-    // including `remember` with a large fact and a query nobody bounded.
+    // fact one — and the chunker's cap does not make it redundant: this is the path every caller shares,
+    // including `saveFact` with a large fact and a query nobody bounded.
     if (input.length > MAX_LOCAL_EMBED_CHARS) {
       log.warn(`Embedding input is ${input.length} chars; the local model truncates to its context window. `
         + 'A vector over this much text averages away everything specific in it — chunk the source instead.');

@@ -59,8 +59,8 @@ import { bodyOf } from './_structural-window.mjs';
 const WRITERS = [
   { file: 'server/src/brain/entities.ts', fn: 'upsertEntity', classifier: /classifyEntityUpsertAgainst\(/ },
   { file: 'server/src/brain/entities.ts', fn: 'updateEntityById', classifier: /classifyEntityUpsertAgainst\(|classifyUpdateViolations\(/ },
-  { file: 'server/src/brain/memory.ts', fn: 'remember', classifier: /classifyMemoryUpsertAgainst\(/ },
-  { file: 'server/src/brain/memory.ts', fn: 'updateMemory', classifier: /classifyMemoryUpsertAgainst\(|classifyUpdateViolations\(/ },
+  { file: 'server/src/brain/fact.ts', fn: 'saveFact', classifier: /classifyFactUpsertAgainst\(/ },
+  { file: 'server/src/brain/fact.ts', fn: 'updateFact', classifier: /classifyFactUpsertAgainst\(|classifyUpdateViolations\(/ },
   { file: 'server/src/brain/chrono.ts', fn: 'createChrono', classifier: /classifyChronoUpsertAgainst\(/ },
   { file: 'server/src/brain/chrono.ts', fn: 'updateChrono', classifier: /classifyChronoUpsertAgainst\(|classifyUpdateViolations\(/ },
   { file: 'server/src/brain/edges.ts', fn: 'upsertEdge', classifier: /classifyEdgeUpsertAgainst\(/, resolvesEnds: true },
@@ -70,11 +70,11 @@ const WRITERS = [
 /** Every surface that CALLS a writer — a door. None of them may hold its own copy of the rule. */
 const DOORS = [
   'server/src/api/brain/entities.ts',
-  'server/src/api/brain/memories.ts',
+  'server/src/api/brain/facts.ts',
   'server/src/api/brain/chrono.ts',
   'server/src/api/brain/edges.ts',
   'server/src/mcp/tools/entity.ts',
-  'server/src/mcp/tools/memory.ts',
+  'server/src/mcp/tools/fact.ts',
   'server/src/mcp/tools/chrono.ts',
   'server/src/mcp/tools/edge.ts',
   'server/src/brain/bulk.ts',
@@ -245,7 +245,7 @@ describe('applying defaults must not manufacture properties nobody sent', () => 
    * suite needs Docker and does not run in preflight: the defect was pushed, not caught.
    */
   const CALLS = [
-    { file: 'server/src/brain/memory.ts', fn: 'remember' },
+    { file: 'server/src/brain/fact.ts', fn: 'saveFact' },
     { file: 'server/src/brain/chrono.ts', fn: 'createChrono' },
     { file: 'server/src/brain/entities.ts', fn: 'upsertEntity' },
     { file: 'server/src/brain/edges.ts', fn: 'upsertEdge' },

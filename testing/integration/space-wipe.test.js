@@ -46,7 +46,7 @@ describe('Space wipe — full wipe', () => {
     createdSpaceIds.push(spaceId);
 
     // Seed data in every collection
-    const memR = await post(INSTANCES.a, adminToken, `/api/brain/spaces/${spaceId}/memories`, { fact: 'Memory to wipe', tags: ['wipe-test'] });
+    const memR = await post(INSTANCES.a, adminToken, `/api/brain/spaces/${spaceId}/facts`, { fact: 'Memory to wipe', tags: ['wipe-test'] });
     assert.equal(memR.status, 201, `Memory: ${JSON.stringify(memR.body)}`);
 
     const entR = await post(INSTANCES.a, adminToken, `/api/brain/spaces/${spaceId}/entities`, { name: 'WipeEnt', type: 'concept' });
@@ -71,7 +71,7 @@ describe('Space wipe — full wipe', () => {
     // Verify pre-wipe stats
     const preStats = await get(INSTANCES.a, adminToken, `/api/brain/spaces/${spaceId}/stats`);
     assert.equal(preStats.status, 200);
-    assert.ok(preStats.body.memories >= 1, 'Should have at least 1 memory');
+    assert.ok(preStats.body.facts >= 1, 'Should have at least 1 memory');
     assert.ok(preStats.body.entities >= 2, 'Should have at least 2 entities');
     assert.ok(preStats.body.edges >= 1, 'Should have at least 1 edge');
     assert.ok(preStats.body.chrono >= 1, 'Should have at least 1 chrono entry');
@@ -81,7 +81,7 @@ describe('Space wipe — full wipe', () => {
     const wipeR = await post(INSTANCES.a, adminToken, `/api/admin/spaces/${spaceId}/wipe`, {});
     assert.equal(wipeR.status, 200, `Wipe: ${JSON.stringify(wipeR.body)}`);
     assert.ok(typeof wipeR.body.deleted === 'object', 'Response must have `deleted` object');
-    assert.ok(wipeR.body.deleted.memories >= 1, 'deleted.memories should reflect removed docs');
+    assert.ok(wipeR.body.deleted.facts >= 1, 'deleted.facts should reflect removed docs');
     assert.ok(wipeR.body.deleted.entities >= 2, 'deleted.entities should reflect removed docs');
     assert.ok(wipeR.body.deleted.edges >= 1, 'deleted.edges should reflect removed docs');
     assert.ok(wipeR.body.deleted.chrono >= 1, 'deleted.chrono should reflect removed docs');
@@ -94,7 +94,7 @@ describe('Space wipe — full wipe', () => {
     // Verify post-wipe stats are all zero
     const postStats = await get(INSTANCES.a, adminToken, `/api/brain/spaces/${spaceId}/stats`);
     assert.equal(postStats.status, 200);
-    assert.equal(postStats.body.memories, 0, 'memories should be 0 after wipe');
+    assert.equal(postStats.body.facts, 0, 'memories should be 0 after wipe');
     assert.equal(postStats.body.entities, 0, 'entities should be 0 after wipe');
     assert.equal(postStats.body.edges, 0, 'edges should be 0 after wipe');
     assert.equal(postStats.body.chrono, 0, 'chrono should be 0 after wipe');
@@ -120,7 +120,7 @@ describe('Space wipe — full wipe', () => {
      * So a new collection means one edit in this line, on purpose. If that ever feels like friction, the
      * friction is the check working.
      */
-    assert.deepEqual(wipeR.body.deleted, { memories: 0, entities: 0, edges: 0, chrono: 0, files: 0, links: 0 });
+    assert.deepEqual(wipeR.body.deleted, { facts: 0, entities: 0, edges: 0, chrono: 0, files: 0, links: 0 });
   });
 
   it('wipe on non-existent space returns 404', async () => {
@@ -220,18 +220,18 @@ describe('Space wipe — partial wipe (by type)', () => {
     partialWipeSpaceIds.push(spaceId);
 
     // Seed one of each type
-    await post(INSTANCES.a, adminTok, `/api/brain/spaces/${spaceId}/memories`, { fact: 'Mem to wipe', tags: [] });
+    await post(INSTANCES.a, adminTok, `/api/brain/spaces/${spaceId}/facts`, { fact: 'Mem to wipe', tags: [] });
     await post(INSTANCES.a, adminTok, `/api/brain/spaces/${spaceId}/entities`, { name: 'SurvivingEnt', type: 'concept' });
     await post(INSTANCES.a, adminTok, `/api/brain/spaces/${spaceId}/chrono`, { title: 'Surviving chrono', type: 'event', startsAt: new Date().toISOString() });
 
     const preMem = await get(INSTANCES.a, adminTok, `/api/brain/spaces/${spaceId}/stats`);
-    assert.ok(preMem.body.memories >= 1);
+    assert.ok(preMem.body.facts >= 1);
     assert.ok(preMem.body.entities >= 1);
 
     // Wipe memories only
-    const wipeR = await post(INSTANCES.a, adminTok, `/api/admin/spaces/${spaceId}/wipe`, { types: ['memories'] });
+    const wipeR = await post(INSTANCES.a, adminTok, `/api/admin/spaces/${spaceId}/wipe`, { types: ['facts'] });
     assert.equal(wipeR.status, 200, `Partial wipe: ${JSON.stringify(wipeR.body)}`);
-    assert.ok(wipeR.body.deleted.memories >= 1, 'Should have deleted at least 1 memory');
+    assert.ok(wipeR.body.deleted.facts >= 1, 'Should have deleted at least 1 memory');
     assert.equal(wipeR.body.deleted.entities, 0, 'Entities should not be affected');
     assert.equal(wipeR.body.deleted.edges, 0, 'Edges should not be affected');
     assert.equal(wipeR.body.deleted.chrono, 0, 'Chrono should not be affected');
@@ -239,7 +239,7 @@ describe('Space wipe — partial wipe (by type)', () => {
 
     // Verify stats
     const postStats = await get(INSTANCES.a, adminTok, `/api/brain/spaces/${spaceId}/stats`);
-    assert.equal(postStats.body.memories, 0, 'Memories should be 0 after partial wipe');
+    assert.equal(postStats.body.facts, 0, 'Memories should be 0 after partial wipe');
     assert.ok(postStats.body.entities >= 1, 'Entities must survive partial memories wipe');
     assert.ok(postStats.body.chrono >= 1, 'Chrono must survive partial memories wipe');
   });
@@ -250,18 +250,18 @@ describe('Space wipe — partial wipe (by type)', () => {
     assert.equal(createR.status, 201);
     partialWipeSpaceIds.push(spaceId);
 
-    await post(INSTANCES.a, adminTok, `/api/brain/spaces/${spaceId}/memories`, { fact: 'Surviving memory', tags: [] });
+    await post(INSTANCES.a, adminTok, `/api/brain/spaces/${spaceId}/facts`, { fact: 'Surviving memory', tags: [] });
     await post(INSTANCES.a, adminTok, `/api/brain/spaces/${spaceId}/entities`, { name: 'EntToWipe', type: 'concept' });
 
     // Wipe entities only
     const wipeR = await post(INSTANCES.a, adminTok, `/api/admin/spaces/${spaceId}/wipe`, { types: ['entities'] });
     assert.equal(wipeR.status, 200);
     assert.ok(wipeR.body.deleted.entities >= 1, 'Should have deleted at least 1 entity');
-    assert.equal(wipeR.body.deleted.memories, 0, 'Memories should not be affected');
+    assert.equal(wipeR.body.deleted.facts, 0, 'Memories should not be affected');
 
     const postStats = await get(INSTANCES.a, adminTok, `/api/brain/spaces/${spaceId}/stats`);
     assert.equal(postStats.body.entities, 0, 'Entities should be 0 after partial wipe');
-    assert.ok(postStats.body.memories >= 1, 'Memories must survive partial entities wipe');
+    assert.ok(postStats.body.facts >= 1, 'Memories must survive partial entities wipe');
   });
 
   it('partial wipe of files only clears file records and file storage, leaves brain intact', async () => {
@@ -279,21 +279,21 @@ describe('Space wipe — partial wipe (by type)', () => {
     assert.ok(fileR.status === 200 || fileR.status === 201 || fileR.status === 202, `Upload: ${fileR.status}`);
 
     // Seed a memory so we can check it survives
-    await post(INSTANCES.a, adminTok, `/api/brain/spaces/${spaceId}/memories`, { fact: 'Surviving memory', tags: [] });
+    await post(INSTANCES.a, adminTok, `/api/brain/spaces/${spaceId}/facts`, { fact: 'Surviving memory', tags: [] });
 
     const preStats = await get(INSTANCES.a, adminTok, `/api/brain/spaces/${spaceId}/stats`);
     assert.ok(preStats.body.files >= 1, 'Should have at least 1 file');
-    assert.ok(preStats.body.memories >= 1, 'Should have at least 1 memory');
+    assert.ok(preStats.body.facts >= 1, 'Should have at least 1 memory');
 
     // Wipe files only
     const wipeR = await post(INSTANCES.a, adminTok, `/api/admin/spaces/${spaceId}/wipe`, { types: ['files'] });
     assert.equal(wipeR.status, 200, `File-only wipe: ${JSON.stringify(wipeR.body)}`);
     assert.ok(wipeR.body.deleted.files >= 1, 'Should have deleted at least 1 file record');
-    assert.equal(wipeR.body.deleted.memories, 0, 'Memories should not be affected');
+    assert.equal(wipeR.body.deleted.facts, 0, 'Memories should not be affected');
 
     const postStats = await get(INSTANCES.a, adminTok, `/api/brain/spaces/${spaceId}/stats`);
     assert.equal(postStats.body.files, 0, 'Files should be 0 after partial wipe');
-    assert.ok(postStats.body.memories >= 1, 'Memories must survive partial files wipe');
+    assert.ok(postStats.body.facts >= 1, 'Memories must survive partial files wipe');
 
     // Physical file should be gone (directory was cleared)
     const fileRead = await reqJson(INSTANCES.a, adminTok, `/api/files/${spaceId}?path=partial-wipe.txt`);
@@ -306,20 +306,20 @@ describe('Space wipe — partial wipe (by type)', () => {
     assert.equal(createR.status, 201);
     partialWipeSpaceIds.push(spaceId);
 
-    await post(INSTANCES.a, adminTok, `/api/brain/spaces/${spaceId}/memories`, { fact: 'Memory to wipe', tags: [] });
+    await post(INSTANCES.a, adminTok, `/api/brain/spaces/${spaceId}/facts`, { fact: 'Memory to wipe', tags: [] });
     await post(INSTANCES.a, adminTok, `/api/brain/spaces/${spaceId}/entities`, { name: 'EntToWipe', type: 'concept' });
     await post(INSTANCES.a, adminTok, `/api/brain/spaces/${spaceId}/chrono`, { title: 'Surviving chrono', type: 'event', startsAt: new Date().toISOString() });
 
     // Wipe memories + entities, leave chrono
-    const wipeR = await post(INSTANCES.a, adminTok, `/api/admin/spaces/${spaceId}/wipe`, { types: ['memories', 'entities'] });
+    const wipeR = await post(INSTANCES.a, adminTok, `/api/admin/spaces/${spaceId}/wipe`, { types: ['facts', 'entities'] });
     assert.equal(wipeR.status, 200, `Multi-type wipe: ${JSON.stringify(wipeR.body)}`);
-    assert.ok(wipeR.body.deleted.memories >= 1, 'memories should be wiped');
+    assert.ok(wipeR.body.deleted.facts >= 1, 'memories should be wiped');
     assert.ok(wipeR.body.deleted.entities >= 1, 'entities should be wiped');
     assert.equal(wipeR.body.deleted.edges, 0, 'edges should be untouched');
     assert.equal(wipeR.body.deleted.chrono, 0, 'chrono should be untouched');
 
     const postStats = await get(INSTANCES.a, adminTok, `/api/brain/spaces/${spaceId}/stats`);
-    assert.equal(postStats.body.memories, 0, 'memories should be 0');
+    assert.equal(postStats.body.facts, 0, 'memories should be 0');
     assert.equal(postStats.body.entities, 0, 'entities should be 0');
     assert.ok(postStats.body.chrono >= 1, 'chrono must survive');
   });

@@ -7,7 +7,7 @@ import type { ContradictionRecord } from './api.types';
  * What a resolve call reports back.
  *
  * `note` is present when the decision was recorded but **no edge was drawn** — edges connect entities, so a
- * `supersedes` between two memories would be a link pointing at nothing traversable. The server says so
+ * `supersedes` between two facts would be a link pointing at nothing traversable. The server says so
  * rather than letting a reviewer believe the graph changed.
  */
 export interface ResolveResult {

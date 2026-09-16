@@ -54,7 +54,7 @@ describe('MCP args enforcement — breaking rejections', () => {
     rejects('similar', { entryId: UUID, entryType: 'entity', topK: 500 });
   });
   it('rejects the wrong maxTimeMS ceiling (filter.maxTimeMS > 10000)', () => {
-    rejects('filter', { space: 'general', collection: 'memories', filter: {}, maxTimeMS: 99999 });
+    rejects('filter', { space: 'general', collection: 'facts', filter: {}, maxTimeMS: 99999 });
   });
   it('rejects a bad enum value (wipe_space.types)', () => {
     rejects('delete_space_data', { space: 'general', types: ['bogus'] });

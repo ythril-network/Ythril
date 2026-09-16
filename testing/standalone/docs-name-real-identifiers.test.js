@@ -39,8 +39,8 @@
  *    `env-var-docs-coverage` already asserts *"every variable the docs name actually exists"*. Adding it here
  *    would be a second copy of a green check — one more place to edit, and the one that goes stale is
  *    whichever the editor did not have open.
- *  - **`snake_case`: 105 distinct, 2 unaccounted for, and both correct.** `default_memories` is the real
- *    `<spaceId>_memories` scheme with `spaceId` filled in; `validated_by` is an edge label in a use-case
+ *  - **`snake_case`: 105 distinct, 2 unaccounted for, and both correct.** `default_facts` is the real
+ *    `<spaceId>_facts` scheme with `spaceId` filled in; `validated_by` is an edge label in a use-case
  *    scenario. That is structural, not a fixable blind spot: in this product `snake_case` is the shape of
  *    **user data** — space ids, edge labels, type names — so every instantiated example reads as a ghost.
  *    camelCase does not have that problem, because our fields are camelCase and user data is not.

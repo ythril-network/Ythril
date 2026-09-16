@@ -104,8 +104,8 @@ describe('Entity upsert identity model', () => {
 
 // ── Remember entity linkage ────────────────────────────────────────────────
 //
-// The three tests that used to live here described `remember` resolving entity NAMES and silently
-// storing the memory unlinked when a name did not resolve. That behaviour is gone: `remember` takes
+// The three tests that used to live here described `saveFact` resolving entity NAMES and silently
+// storing the memory unlinked when a name did not resolve. That behaviour is gone: `saveFact` takes
 // `entityIds` (UUID v4) and refuses the write when an id is malformed or does not exist.
 //
 // They are not rewritten in place because they never exercised the product — each one rebuilt the

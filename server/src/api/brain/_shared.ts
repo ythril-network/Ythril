@@ -3,7 +3,7 @@
  *
  * Extracted when the 1734-line api/brain.ts monolith was split by resource (A17.3). These are the
  * pieces every sub-router needs: webhook token attribution, space-meta lookup, the schema
- * validation gate, the memory list filter, and the UUID matcher.
+ * validation gate, the fact list filter, and the UUID matcher.
  */
 import { tagContains, textContains, propertiesValueContains } from '../../brain/tag-filter.js';
 import { textSearchOr, SEARCHABLE_FIELDS } from '../../brain/text-search.js';
@@ -68,7 +68,7 @@ export function ttlDaysError(body: unknown): string | null {
 export { getSpaceMeta, applyValidation } from '../../spaces/schema-validation.js';
 
 /** Build a MongoDB filter from `tag` and `entity` query params */
-export function buildMemoryFilter(query: Record<string, unknown>): Record<string, unknown> {
+export function buildFactFilter(query: Record<string, unknown>): Record<string, unknown> {
   const filter: Record<string, unknown> = {};
   const tag = typeof query['tag'] === 'string' ? query['tag'] : undefined;
   const entity = typeof query['entity'] === 'string' ? query['entity'] : undefined;
@@ -85,7 +85,7 @@ export function buildMemoryFilter(query: Record<string, unknown>): Record<string
   if (props) Object.assign(filter, propertiesValueContains(props));
   // Freetext substring over fact + description (2b-iii-a).
   const search = typeof query['search'] === 'string' ? query['search'] : undefined;
-  const or = textSearchOr(search, SEARCHABLE_FIELDS.memories);
+  const or = textSearchOr(search, SEARCHABLE_FIELDS.facts);
   if (or) Object.assign(filter, or);
   return filter;
 }
@@ -112,7 +112,7 @@ export function buildMemoryFilter(query: Record<string, unknown>): Record<string
  *
  * ## Both flags are OPT-IN here, and that differs from MCP on purpose
  *
- * MCP's `remember` and `save_entity` default `checkDuplicates` ON. Copying that default to REST would be a
+ * MCP's `save_fact` and `save_entity` default `checkDuplicates` ON. Copying that default to REST would be a
  * silent latency regression for every integration that exists today, because **the check implies
  * `waitForEmbedding`** — it needs the vector before the insert so the new record cannot match itself. Every
  * REST write would start paying the embedding model synchronously, including bulk loaders, without anyone

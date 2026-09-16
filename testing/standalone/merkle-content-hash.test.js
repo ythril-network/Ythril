@@ -25,27 +25,27 @@ const base = () => ({
 
 describe('docLeaf — content sensitivity', () => {
   it('identical documents produce identical leaves', () => {
-    assert.equal(docLeaf('memories', base()), docLeaf('memories', base()));
+    assert.equal(docLeaf('facts', base()), docLeaf('facts', base()));
   });
 
   it('TAMPERED content under the same _id and seq changes the leaf', () => {
     const tampered = { ...base(), fact: 'The deploy key rotates on Mondays.' };
     assert.notEqual(
-      docLeaf('memories', base()),
-      docLeaf('memories', tampered),
+      docLeaf('facts', base()),
+      docLeaf('facts', tampered),
       'VULNERABILITY: a modified fact produced the same Merkle leaf',
     );
   });
 
   it('a changed nested field changes the leaf', () => {
     const tampered = { ...base(), author: { instanceId: 'attacker', instanceLabel: 'A' } };
-    assert.notEqual(docLeaf('memories', base()), docLeaf('memories', tampered));
+    assert.notEqual(docLeaf('facts', base()), docLeaf('facts', tampered));
   });
 
   it('a changed tag changes the leaf', () => {
     assert.notEqual(
-      docLeaf('memories', base()),
-      docLeaf('memories', { ...base(), tags: ['ops', 'secret'] }),
+      docLeaf('facts', base()),
+      docLeaf('facts', { ...base(), tags: ['ops', 'secret'] }),
     );
   });
 
@@ -58,8 +58,8 @@ describe('docLeaf — content sensitivity', () => {
       _id: 'mem-1',
     };
     assert.equal(
-      docLeaf('memories', base()),
-      docLeaf('memories', reordered),
+      docLeaf('facts', base()),
+      docLeaf('facts', reordered),
       'Mongo does not guarantee field order — the hash must not depend on it',
     );
   });
@@ -67,8 +67,8 @@ describe('docLeaf — content sensitivity', () => {
   it('the embedding vector is EXCLUDED (peers may run different models)', () => {
     const withVec = { ...base(), embedding: [0.1, 0.2], embeddingModel: 'nomic-v1.5', matchedText: 'x' };
     const otherVec = { ...base(), embedding: [0.9, 0.4], embeddingModel: 'other-model', matchedText: 'y' };
-    assert.equal(docLeaf('memories', base()), docLeaf('memories', withVec));
-    assert.equal(docLeaf('memories', withVec), docLeaf('memories', otherVec));
+    assert.equal(docLeaf('facts', base()), docLeaf('facts', withVec));
+    assert.equal(docLeaf('facts', withVec), docLeaf('facts', otherVec));
   });
 
   it('a RETENTION STAMP is excluded, because each instance computes its own', () => {
@@ -89,10 +89,10 @@ describe('docLeaf — content sensitivity', () => {
      */
     const mine = { ...base(), _expireAt: new Date('2026-10-01T00:00:00.000Z') };
     const theirs = { ...base(), _expireAt: new Date('2027-03-01T00:00:00.000Z') };
-    assert.equal(docLeaf('memories', base()), docLeaf('memories', mine),
+    assert.equal(docLeaf('facts', base()), docLeaf('facts', mine),
       'a record with a retention stamp hashes differently from the same record without one, so a peer that '
       + 'strips the stamp can never agree with the peer that set it');
-    assert.equal(docLeaf('memories', mine), docLeaf('memories', theirs),
+    assert.equal(docLeaf('facts', mine), docLeaf('facts', theirs),
       'two instances with different retention policies disagree about identical content');
   });
 
@@ -121,10 +121,10 @@ describe('docLeaf — content sensitivity', () => {
   });
 
   it('the same content in a different collection produces a different leaf', () => {
-    assert.notEqual(docLeaf('memories', base()), docLeaf('entities', base()));
+    assert.notEqual(docLeaf('facts', base()), docLeaf('entities', base()));
   });
 
   it('a changed seq still changes the leaf (regression — version skew)', () => {
-    assert.notEqual(docLeaf('memories', base()), docLeaf('memories', { ...base(), seq: 8 }));
+    assert.notEqual(docLeaf('facts', base()), docLeaf('facts', { ...base(), seq: 8 }));
   });
 });

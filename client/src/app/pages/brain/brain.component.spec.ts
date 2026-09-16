@@ -35,10 +35,10 @@ import { isOnPush } from '../../testing/onpush';
 function makeApi(spaceIds: readonly string[] = ['work']) {
   return {
     listSpaces: () => of({ spaces: spaceIds.map(id => ({ id, label: id })) }),
-    getSpaceStats: () => of({ memories: 0, entities: 0, edges: 0, chrono: 0, files: 0 }),
+    getSpaceStats: () => of({ facts: 0, entities: 0, edges: 0, chrono: 0, files: 0 }),
     getReindexStatus: () => of({ needsReindex: false }),
     getSpaceMeta: () => of({ tagSuggestions: [], typeSchemas: {} }),
-    listMemories: () => of({ memories: [] }),
+    listFacts: () => of({ facts: [] }),
     getEntitiesByIds: () => of({ entities: [] }),
     mintEventsTicket: () => of({ ticket: 't', expiresInMs: 60000 }),
     // Overview data-model panel. An empty model keeps the panel present but silent, which is what these
@@ -261,11 +261,11 @@ describe('BrainComponent (OnPush)', () => {
     expect(c.activeSpaceId()).toBe('work');
 
     // What the ER panel's count link does: navigate to /brain with a different space and a tab.
-    params.next(new Map<string, string>([['space', 'other'], ['tab', 'memories']]));
+    params.next(new Map<string, string>([['space', 'other'], ['tab', 'facts']]));
     await Promise.resolve();
 
     expect(c.activeSpaceId(), 'an ER count link to another space stopped working').toBe('other');
-    expect(c.activeTab()).toBe('memories');
+    expect(c.activeTab()).toBe('facts');
   });
 
   it('a query-param change that names no space leaves the space alone', async () => {
@@ -319,7 +319,7 @@ describe('BrainComponent (OnPush)', () => {
   it('File Meta is merged into one Files tab — no separate File Meta collection tab', () => {
     const c = create().componentInstance;
     expect(c.collectionTabs.some(t => t.key === 'filemeta' as never)).toBe(false);
-    expect(c.collectionTabs.map(t => t.key)).toEqual(['entities', 'edges', 'memories', 'chrono']);
+    expect(c.collectionTabs.map(t => t.key)).toEqual(['entities', 'edges', 'facts', 'chrono']);
     c.setTab('files');
     expect(c.activeTab()).toBe('files'); // the single Files tab still activates
   });
@@ -414,8 +414,8 @@ describe('BrainComponent (OnPush)', () => {
     expect(listEntities.mock.calls.length).toBe(afterActivate);
   });
 
-  // The memories table rendering (row-per-memory, signal re-render) moved to
-  // memories-tab.component.spec.ts when that tab became its own component (A17.9b-6d).
+  // The facts table rendering (row-per-memory, signal re-render) moved to
+  // facts-tab.component.spec.ts when that tab became its own component (A17.9b-6d).
 
   // The detail-drawer rendering tests (open + plain-model, multiline description) moved to
   // record-drawer.component.spec.ts when the drawer became its own component (A17.9b-5).

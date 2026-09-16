@@ -37,7 +37,7 @@ const V7 = {
   purpose: 'original purpose',
   usageNotes: 'original notes',
   strictLinkage: false,
-  typeSchemas: { memory: { note: { properties: { a: {} } } } },
+  typeSchemas: { fact: { note: { properties: { a: {} } } } },
   previousVersions: [{ version: 6, meta: {}, updatedAt: '2026-06-01T00:00:00.000Z' }],
 };
 
@@ -170,29 +170,29 @@ describe('meta_change round application', () => {
   describe('typeSchemas merge per knowledge-type', () => {
     it('keeps a type another round added', () => {
       const round = proposalFrom(V7, {
-        typeSchemas: { memory: { note: { properties: { a: {}, b: {} } } } },
+        typeSchemas: { fact: { note: { properties: { a: {}, b: {} } } } },
       });
       const current = {
         ...V7, version: 8,
-        typeSchemas: { memory: { note: { properties: { a: {} } }, task: { properties: {} } } },
+        typeSchemas: { fact: { note: { properties: { a: {} } }, task: { properties: {} } } },
       };
       const { meta } = applyMetaRound(current, round);
-      assert.ok(meta.typeSchemas.memory.task, 'a concurrently-added type must survive');
-      assert.deepEqual(meta.typeSchemas.memory.note.properties, { a: {}, b: {} }, 'and this round\'s edit applies');
+      assert.ok(meta.typeSchemas.fact.task, 'a concurrently-added type must survive');
+      assert.deepEqual(meta.typeSchemas.fact.note.properties, { a: {}, b: {} }, 'and this round\'s edit applies');
     });
 
     it('does not disturb a knowledge type the round never mentions', () => {
-      const round = proposalFrom(V7, { typeSchemas: { memory: { note: { properties: { z: {} } } } } });
+      const round = proposalFrom(V7, { typeSchemas: { fact: { note: { properties: { z: {} } } } } });
       const current = { ...V7, version: 8, typeSchemas: { ...V7.typeSchemas, entity: { person: {} } } };
       const { meta } = applyMetaRound(current, round);
       assert.deepEqual(meta.typeSchemas.entity, { person: {} });
     });
 
     it('reports the colliding knowledge type by name', () => {
-      const round = proposalFrom(V7, { typeSchemas: { memory: { note: { properties: { b: {} } } } } });
-      const current = { ...V7, version: 8, typeSchemas: { memory: { note: { properties: { c: {} } } } } };
+      const round = proposalFrom(V7, { typeSchemas: { fact: { note: { properties: { b: {} } } } } });
+      const current = { ...V7, version: 8, typeSchemas: { fact: { note: { properties: { c: {} } } } } };
       const { conflicts } = applyMetaRound(current, round);
-      assert.deepEqual(conflicts, ['typeSchemas.memory']);
+      assert.deepEqual(conflicts, ['typeSchemas.fact']);
     });
   });
 

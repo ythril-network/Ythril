@@ -4,8 +4,8 @@
  * ## What a "link class" is
  *
  * An edge is a record that says HOW two things relate. A **link** says only that one record is ABOUT
- * another, and there are six ways a record can say it: a memory names entities, a chrono entry names
- * entities and memories, a file names entities, memories and chrono entries.
+ * another, and there are six ways a record can say it: a fact names entities, a chrono entry names
+ * entities and facts, a file names entities, facts and chrono entries.
  *
  * A class is therefore a `(fromKind, toKind)` PAIR. It used to be keyed on the from kind alone, which was
  * exactly correct while `entityIds` was the only field anybody read and became wrong the moment a kind had
@@ -14,9 +14,9 @@
  * ## The three that had no reader, and what that cost
  *
  * `chrono.memoryIds`, `file.memoryIds` and `file.chronoIds` have been accepted, resolvability-checked,
- * stored, replicated and documented since 3.x. **Nothing walked them.** A traverse from a memory did not
+ * stored, replicated and documented since 3.x. **Nothing walked them.** A traverse from a fact did not
  * reach the chrono entry that named it; the scan that blocks a delete could not see them either, so deleting
- * a memory a chrono entry named was never refused, even under strict linkage.
+ * a fact a chrono entry named was never refused, even under strict linkage.
  *
  * That was not a policy. It was three fields nobody had written a reader for, and every reader following a
  * different subset of the six is what `M-2` exists to end.
@@ -25,7 +25,7 @@
  *
  * A link lives in two places during the transition:
  *
- *   - the **array** on the record (`memory.entityIds` and its five siblings) — the 3.x shape, still written,
+ *   - the **array** on the record (`fact.entityIds` and its five siblings) — the 3.x shape, still written,
  *     still replicated, and the only thing a peer on an older build understands.
  *   - a **link record** in the space's `links` collection — one small document per connection, indexed both
  *     ways, which is what makes "what points at this?" one indexed lookup instead of one collection scan per
@@ -51,11 +51,11 @@ import type { LinkDoc } from '../config/types.js';
 /** One class of link: a record kind that names another record kind through one array field. */
 export interface LinkClass {
   /** The record kind HOLDING the link. Matches `TraverseNode.kind`. */
-  kind: 'chrono' | 'memory' | 'file';
+  kind: 'chrono' | 'fact' | 'file';
   /** What it names. An entity is only ever a `to`; nothing hangs off an entity. */
   toKind: RefKind;
   /** Collection suffix of the FROM record: the collection is `${spaceId}_${collection}`. */
-  collection: 'chrono' | 'memories' | 'files';
+  collection: 'chrono' | 'facts' | 'files';
   /** The array field naming the linked records — the 3.x shape, and still the fallback. */
   field: 'entityIds' | 'memoryIds' | 'chronoIds';
   /**
@@ -81,43 +81,62 @@ export interface LinkClass {
   /**
    * What a STRUCTURAL read needs — never the record body.
    *
-   * A traverse or an ER scan asks about shape, so it must not pay for a file's passage text or a memory's
+   * A traverse or an ER scan asks about shape, so it must not pay for a file's passage text or a fact's
    * full fact. Each class names the smallest projection that answers "what is this, and what does it link to".
    */
   projection: Record<string, 1>;
 }
 
 /** The array field a kind is named through — `entity` → `entityIds`. Derived; see `brain/links.ts`. */
-const fieldFor = (toKind: RefKind): LinkClass['field'] => `${toKind}Ids` as LinkClass['field'];
+/*
+ * THE STORED FIELD NAME IS NOT ALWAYS `${kind}Ids`, AND THE EXCEPTION IS DELIBERATE.
+ *
+ * This derived the field from the kind, which held while every kind's name matched its field. 5.0 renamed
+ * the knowledge type `fact` to `fact` and the derivation silently followed: the code began reading and
+ * writing `factIds` while every stored document carries `memoryIds`. Every existing link array would have
+ * become invisible — no error, no migration, just empty arrays where the data still sits.
+ *
+ * It is NOT renamed to match, and that is the decision rather than an oversight. These six array fields
+ * are deprecated: they are refused on write in a converted space, they REPLICATE, and they are HASHED by
+ * `brain/merkle.ts`. Renaming one means migrating a hashed field on every peer — for a field whose
+ * removal is already scheduled. The vocabulary is inconsistent for as long as the fields survive, and
+ * that is the cheaper of the two wrongs.
+ *
+ * Found by `a-converted-space-refuses-an-array-write.test.js`, which derives the six from here. A grep
+ * could not have found it: the name is built, not written.
+ */
+const STORED_FIELD: Partial<Record<RefKind, LinkClass['field']>> = { fact: 'memoryIds' };
+export const fieldFor = (toKind: RefKind): LinkClass['field'] =>
+  STORED_FIELD[toKind] ?? (`${toKind}Ids` as LinkClass['field']);
 
 /** The projection each FROM kind needs, whatever it links to. */
 const PROJECTION: Record<LinkClass['kind'], Record<string, 1>> = {
   chrono: { title: 1, type: 1, entityIds: 1, memoryIds: 1 },
-  memory: { fact: 1, type: 1, entityIds: 1 },
+  fact: { fact: 1, type: 1, entityIds: 1 },
   file: { path: 1, description: 1, tags: 1, entityIds: 1, memoryIds: 1, chronoIds: 1 },
 };
 
 /** The collection each FROM kind lives in. */
 const COLLECTION: Record<LinkClass['kind'], LinkClass['collection']> = {
-  chrono: 'chrono', memory: 'memories', file: 'files',
+  chrono: 'chrono', fact: 'facts', file: 'files',
 };
 
 /** See `LinkClass.scope`: chunks share the file collection with the files they came from. */
 const SCOPE: Record<LinkClass['kind'], Record<string, unknown>> = {
-  chrono: {}, memory: {}, file: { parentFileId: { $exists: false } },
+  chrono: {}, fact: {}, file: { parentFileId: { $exists: false } },
 };
 
 /**
  * What each record kind can name — the product fact this whole module is keyed on.
  *
- * Written out rather than derived, because it is not derivable: a memory names entities and nothing else, a
- * chrono entry names entities and memories, a file names all three. The same table drives the write door in
+ * Written out rather than derived, because it is not derivable: a fact names entities and nothing else, a
+ * chrono entry names entities and facts, a file names all three. The same table drives the write door in
  * `brain/links.ts`, which reads it from there for the same reason.
  */
 const NAMES: Record<LinkClass['kind'], readonly RefKind[]> = {
-  chrono: ['entity', 'memory'],
-  memory: ['entity'],
-  file: ['entity', 'memory', 'chrono'],
+  chrono: ['entity', 'fact'],
+  fact: ['entity'],
+  file: ['entity', 'fact', 'chrono'],
 };
 
 /**
@@ -128,7 +147,7 @@ const NAMES: Record<LinkClass['kind'], readonly RefKind[]> = {
  * ordering of the three classes that already had readers.
  */
 export const LINK_CLASSES: readonly LinkClass[] =
-  (['chrono', 'memory', 'file'] as const).flatMap(kind =>
+  (['chrono', 'fact', 'file'] as const).flatMap(kind =>
     NAMES[kind].map((toKind): LinkClass => ({
       kind,
       toKind,
@@ -150,7 +169,7 @@ export function linkClassFor(kind: RefKind | 'edge', toKind: RefKind): LinkClass
   return LINK_CLASSES.find(c => c.kind === kind && c.toKind === toKind);
 }
 
-/** Every class a record of this kind holds — one for a memory, two for a chrono entry, three for a file. */
+/** Every class a record of this kind holds — one for a fact, two for a chrono entry, three for a file. */
 export function linkClassesFrom(kind: RefKind | 'edge'): readonly LinkClass[] {
   return LINK_CLASSES.filter(c => c.kind === kind);
 }

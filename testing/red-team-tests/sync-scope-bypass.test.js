@@ -68,7 +68,7 @@ describe('Space-scoped token cannot access sync endpoints of other spaces', () =
   // ── Reads ────────────────────────────────────────────────────────────────
 
   it('Scoped token cannot GET memories from out-of-scope space → 403', async () => {
-    const r = await get(INSTANCES.a, scopedToken, `/api/sync/memories?spaceId=${targetSpaceId}`);
+    const r = await get(INSTANCES.a, scopedToken, `/api/sync/facts?spaceId=${targetSpaceId}`);
     assert.equal(r.status, 403, `Should be 403, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 
@@ -98,7 +98,7 @@ describe('Space-scoped token cannot access sync endpoints of other spaces', () =
     const r = await post(
       INSTANCES.a,
       scopedToken,
-      `/api/sync/memories?spaceId=${targetSpaceId}`,
+      `/api/sync/facts?spaceId=${targetSpaceId}`,
       { _id: 'rt-bypass-mem-001', fact: 'injected', seq: 1 },
     );
     assert.equal(r.status, 403, `Should be 403, got ${r.status}: ${JSON.stringify(r.body)}`);
@@ -109,7 +109,7 @@ describe('Space-scoped token cannot access sync endpoints of other spaces', () =
       INSTANCES.a,
       scopedToken,
       `/api/sync/batch-upsert?spaceId=${targetSpaceId}`,
-      { memories: [{ _id: 'rt-bypass-mem-002', fact: 'batch-injected', seq: 1 }] },
+      { facts: [{ _id: 'rt-bypass-mem-002', fact: 'batch-injected', seq: 1 }] },
     );
     assert.equal(r.status, 403, `Should be 403, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
@@ -129,7 +129,7 @@ describe('Space-scoped token cannot access sync endpoints of other spaces', () =
       INSTANCES.a,
       scopedToken,
       `/api/sync/tombstones?spaceId=${targetSpaceId}`,
-      { _id: 'rt-bypass-tomb-001', type: 'memory', seq: 99 },
+      { _id: 'rt-bypass-tomb-001', type: 'fact', seq: 99 },
     );
     assert.equal(r.status, 403, `Should be 403, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
@@ -137,7 +137,7 @@ describe('Space-scoped token cannot access sync endpoints of other spaces', () =
   // ── Confirm in-scope access still works ──────────────────────────────────
 
   it('Scoped token CAN GET memories from its own space → 200', async () => {
-    const r = await get(INSTANCES.a, scopedToken, '/api/sync/memories?spaceId=general');
+    const r = await get(INSTANCES.a, scopedToken, '/api/sync/facts?spaceId=general');
     assert.equal(r.status, 200, `Scoped token should access its own space, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 
@@ -150,7 +150,7 @@ describe('Space-scoped token cannot access sync endpoints of other spaces', () =
       INSTANCES.a,
       scopedToken,
       '/api/sync/batch-upsert?spaceId=general',
-      { memories: [{ _id: 'rt-scope-allowed-001', fact: 'allowed write', seq: 1 }] },
+      { facts: [{ _id: 'rt-scope-allowed-001', fact: 'allowed write', seq: 1 }] },
     );
     assert.equal(r.status, 403, `Non-peer PAT must not write via /api/sync, got ${r.status}: ${JSON.stringify(r.body)}`);
     assert.ok(r.body.error?.includes('peer token'), `Error should demand a peer token: ${r.body.error}`);

@@ -16,7 +16,7 @@ import { COLLECTION_TABS } from './brain-tabs';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import type { Space, SpaceStats , SpaceActivity } from '../../core/api.types';
 
-const STATS: SpaceStats = { spaceId: 'general', memories: 5, entities: 12, edges: 30, chrono: 3, files: 7 };
+const STATS: SpaceStats = { spaceId: 'general', facts: 5, entities: 12, edges: 30, chrono: 3, files: 7 };
 function space(over: Partial<Space> = {}): Space {
   return { id: 'general', label: 'General', ...over } as Space;
 }

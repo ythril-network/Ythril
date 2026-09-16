@@ -1,7 +1,7 @@
 /**
  * The one definition of what a reference between brain records looks like.
  *
- * Every link field — a memory's `entityIds`, an edge's `from`/`to`, a chrono entry's
+ * Every link field — a fact's `entityIds`, an edge's `from`/`to`, a chrono entry's
  * `entityIds`/`memoryIds`, a file's `entityIds`/`chronoIds`/`memoryIds` — names another record by its
  * `_id`. For every record type but one that is a UUID v4 (`brain/entities.ts` assigns `uuidv4()` on insert);
  * a FILE's `_id` is its space-relative path, so `RefKind` decides which shape is meant. Anything else is not
@@ -39,7 +39,7 @@ export type { RefKind };
 
 const REF_NOUN: Record<RefKind, string> = {
   entity: 'entity ID',
-  memory: 'memory ID',
+  fact: 'fact ID',
   chrono: 'chrono ID',
   file: 'file path',
 };
@@ -116,7 +116,7 @@ export function assertRefs(field: string, kind: RefKind, values: readonly string
 
 const COLLECTION_FOR: Record<RefKind, string> = {
   entity: 'entities',
-  memory: 'memories',
+  fact: 'facts',
   chrono: 'chrono',
   // A file's meta record, keyed by the same space-relative path the reference carries — which is why the
   // existence check below works unchanged for files: it is still one `$in` on `_id`.
@@ -151,9 +151,9 @@ export function edgeEndpointKindSchema(endpoint: 'from' | 'to'): Record<string, 
     description:
       `What kind of record \`${endpoint}\` points at. Omit for an entity, which is what it has always meant `
       + 'and what almost every edge means — an omitted value is stored as nothing at all, not as "entity". '
-      + 'Set it to link a memory, a chrono entry or a file: the meta record of a party photo can point at '
+      + 'Set it to link a fact, a chrono entry or a file: the meta record of a party photo can point at '
       + 'the people in '
-      + `it (entity), the party (chrono) and what happened there (memory). An \`${endpoint}\` of kind \`file\` `
+      + `it (entity), the party (chrono) and what happened there (fact). An \`${endpoint}\` of kind \`file\` `
       + 'is the space-relative PATH, not a UUID; every other kind is a UUID v4. A kind that is stated and '
       + 'wrong is refused at the write rather than stored as a dead link.',
   };
@@ -167,7 +167,7 @@ export function edgeEndpointKindSchema(endpoint: 'from' | 'to'): Record<string, 
  */
 const NAME_FIELD: Record<Exclude<RefKind, 'file'>, string> = {
   entity: 'name',
-  memory: 'fact',
+  fact: 'fact',
   chrono: 'title',
 };
 

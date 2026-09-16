@@ -175,7 +175,7 @@ const LibraryEntryPutBodyZ = z.object({
  * which is a workaround for a missing merge.
  *
  * `deleteFields` rather than a new convention: the brain record routes already use dot-notation paths for
- * removal, so an integrator who has used `PATCH .../memories/:id` already knows this. Two vocabularies for
+ * removal, so an integrator who has used `PATCH .../facts/:id` already knows this. Two vocabularies for
  * one operation is how they diverge.
  */
 const LibraryEntryPatchBodyZ = z.object({

@@ -91,7 +91,7 @@ function typesWithEntityIds() {
  * first, with a message saying to add it, rather than passing silently.
  */
 const COLLECTION_SUFFIX = {
-  MemoryDoc: 'memories',
+  FactDoc: 'facts',
   ChronoEntry: 'chrono',
   FileMetaDoc: 'files',
 };
@@ -100,7 +100,7 @@ describe('the check itself works before it is trusted', () => {
   it('finds the record types that carry entityIds', () => {
     const types = typesWithEntityIds();
     assert.ok(types.length >= 3, `only found ${types.length} types with entityIds in ${TYPES}`);
-    assert.ok(types.includes('MemoryDoc') && types.includes('ChronoEntry') && types.includes('FileMetaDoc'),
+    assert.ok(types.includes('FactDoc') && types.includes('ChronoEntry') && types.includes('FileMetaDoc'),
       `expected the three known ones, got: ${types.join(', ')}`);
   });
 
@@ -136,7 +136,7 @@ describe('executeMerge relinks every collection that can reference an entity', (
        * which asks "are these two strings near each other". The question is "is the query aimed at the
        * collection that was opened", and the code answers it by name:
        *
-       *     const memoryColl = col<MemoryDoc>(`${spaceId}_memories`);
+       *     const memoryColl = col<FactDoc>(`${spaceId}_facts`);
        *     const affected  = await memoryColl.find(asFilter({ spaceId, entityIds: absorbed._id }), …)
        *
        * So the open declares a variable and the query uses it. Following that link proves what the window

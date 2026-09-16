@@ -24,7 +24,7 @@ export interface StoredViolation {
  *
  * ## Why edges are the one collection with a module of their own
  *
- * Entities, memories and chrono entries validate from the document. An edge does not: an `endpoints`
+ * Entities, facts and chrono entries validate from the document. An edge does not: an `endpoints`
  * declaration is about the TYPE of the entity at each end, and `functional` is about how many edges share a
  * subject. Neither is readable from the edge, and `validateEdge` is pure and synchronous — two gates import it
  * from `dist` and call it with plain objects — so the caller resolves and hands over what it found.

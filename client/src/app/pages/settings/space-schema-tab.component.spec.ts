@@ -300,22 +300,22 @@ describe('SpaceSchemaTabComponent — per-type retention', () => {
       expect(c.contentWindowNeverFires('chrono', 'event')).toBe(30);   // chrono's 30, not entity's 365
       expect(c.spaceWindow('chrono')).toBe(30);
       expect(c.spaceWindow('entity')).toBe(365);
-      expect(c.spaceWindow('memory')).toBeNull();
+      expect(c.spaceWindow('fact')).toBeNull();
     });
 
     it('reads a legacy scalar as every bucket', () => {
       // A space that set one number before the split still means all five, so the hint keeps naming it.
       const { c, state } = setup();
       state.settingsSpace.set({ id: 'work', label: 'Work', recordTtlDays: 90 } as never);
-      for (const kt of ['entity', 'memory', 'edge', 'chrono'] as const) {
+      for (const kt of ['entity', 'fact', 'edge', 'chrono'] as const) {
         expect(c.spaceWindow(kt), kt).toBe(90);
       }
     });
 
     it('says nothing for a collection that has no content tier', () => {
       const { c, state } = setup();
-      state.schTypeSchemas = { ...state.schTypeSchemas, memory: { note: mkType({ retentionDays: 30, retentionContentDays: 30 }) } };
-      expect(c.contentWindowNeverFires('memory', 'note')).toBeNull();
+      state.schTypeSchemas = { ...state.schTypeSchemas, fact: { note: mkType({ retentionDays: 30, retentionContentDays: 30 }) } };
+      expect(c.contentWindowNeverFires('fact', 'note')).toBeNull();
     });
   });
 });

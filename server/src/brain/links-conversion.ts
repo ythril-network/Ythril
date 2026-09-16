@@ -102,7 +102,7 @@ export interface ConversionPreview {
   spaceId: string;
   /** Already converted on this instance, so the arrays are no longer the write surface. */
   converted: boolean;
-  /** Records carrying a non-empty array, by class label (`memory.entityIds` and its five siblings). */
+  /** Records carrying a non-empty array, by class label (`fact.entityIds` and its five siblings). */
   records: Record<string, number>;
   /** Array entries across those records — the CEILING on links this space can gain, not the count. */
   entries: Record<string, number>;

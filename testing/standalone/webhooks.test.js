@@ -29,7 +29,7 @@ before(async () => {
 describe('Webhook event types (real ALL_WEBHOOK_EVENTS from the compiled build)', () => {
   it('contains exactly the documented event set', () => {
     const expected = [
-      'memory.created', 'memory.updated', 'memory.deleted',
+      'fact.created', 'fact.updated', 'fact.deleted',
       'entity.created', 'entity.updated', 'entity.deleted', 'entity.merged',
       'edge.created', 'edge.updated', 'edge.deleted',
       'chrono.created', 'chrono.updated', 'chrono.deleted',
@@ -53,15 +53,25 @@ describe('Webhook event types (real ALL_WEBHOOK_EVENTS from the compiled build)'
 
   it('rejects unknown event types', () => {
     assert.equal(ALL_WEBHOOK_EVENTS.has('unknown.event'), false);
-    assert.equal(ALL_WEBHOOK_EVENTS.has('memory.upserted'), false);
+    assert.equal(ALL_WEBHOOK_EVENTS.has('fact.upserted'), false);
     assert.equal(ALL_WEBHOOK_EVENTS.has(''), false);
+  });
+
+  it('and the PRE-5.0 spellings, which is the half a rename leaves behind', () => {
+    // The boot migration rewrites stored subscriptions, but an operator adding one by hand from an old
+    // runbook must be refused rather than left with a hook that is listed, enabled, and never delivers.
+    for (const old of ['memory.created', 'memory.updated', 'memory.deleted']) {
+      assert.equal(ALL_WEBHOOK_EVENTS.has(old), false,
+        `${old} is still accepted. Nothing emits it, so the subscription would be silently dead — the exact `
+        + 'failure `db/rename-memories-to-facts.ts` migrates existing hooks away from.');
+    }
   });
 });
 
 describe('Webhook event payload structure', () => {
-  it('a memory.created payload uses a documented event type', () => {
+  it('a fact.created payload uses a documented event type', () => {
     const payload = {
-      event: 'memory.created',
+      event: 'fact.created',
       timestamp: new Date().toISOString(),
       spaceId: 'dev-lessons',
       spaceName: 'Dev Lessons',
@@ -74,7 +84,7 @@ describe('Webhook event payload structure', () => {
   });
 
   it('delete events carry only { _id }', () => {
-    const payload = { event: 'memory.deleted', entry: { _id: 'deleted-id' } };
+    const payload = { event: 'fact.deleted', entry: { _id: 'deleted-id' } };
     assert.ok(ALL_WEBHOOK_EVENTS.has(payload.event));
     assert.deepEqual(Object.keys(payload.entry), ['_id']);
   });

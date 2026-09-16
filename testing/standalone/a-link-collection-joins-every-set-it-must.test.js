@@ -3,7 +3,7 @@
  *
  * ## What a link record is
  *
- * Six public array fields say that a record concerns others — `memory.entityIds`, `chrono.entityIds`,
+ * Six public array fields say that a record concerns others — `fact.entityIds`, `chrono.entityIds`,
  * `chrono.memoryIds`, and `file.entityIds`/`memoryIds`/`chronoIds`. `M-2` turns them into records, so the
  * five adjacency readers that each followed a different subset of them have one place to look. The owner's
  * ruling is that those records do NOT live in `_edges`: an edge is a modelled relationship with a label

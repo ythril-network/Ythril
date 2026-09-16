@@ -1,5 +1,5 @@
 import { Injectable, inject, signal } from '@angular/core';
-import { ChronoType, ChronoStatus, Memory, Entity, Edge, ChronoEntry, KnowledgeType } from '../../core/api.types';
+import { ChronoType, ChronoStatus, Fact, Entity, Edge, ChronoEntry, KnowledgeType } from '../../core/api.types';
 import { BrainApi } from '../../core/brain-api.service';
 import { BrainStore } from './brain-store.service';
 import { EntityRefPicker } from './entity-ref-picker.service';
@@ -27,15 +27,15 @@ export type DrawerKind = KnowledgeType;
 
 /**
  * What the drawer is holding — a discriminated union, so reading `record.fact` is only legal once
- * `kind` has been narrowed to `'memory'`.
+ * `kind` has been narrowed to `'fact'`.
  *
  * This used to be `{ kind: DrawerKind; record: any }`, and the `any` was load-bearing in the wrong
  * direction: `open()` reads `record.fact`, `record.name`, `record.label` and `record.title` on four
- * different shapes, so nothing stopped a caller passing an Edge as a `'memory'` and getting a drawer
+ * different shapes, so nothing stopped a caller passing an Edge as a `'fact'` and getting a drawer
  * with an undefined fact and no error anywhere.
  */
 export type DrawerRecord =
-  | { kind: 'memory'; record: Memory }
+  | { kind: 'fact'; record: Fact }
   | { kind: 'entity'; record: Entity }
   | { kind: 'edge'; record: Edge }
   | { kind: 'chrono'; record: ChronoEntry };
@@ -89,24 +89,24 @@ export class RecordDrawerState {
    *
    * Four overloads rather than one `(kind, record: any)`: the kind and the record are separate
    * arguments, and TypeScript will not narrow the second from the first on its own. Stating the four
-   * legal pairings is what makes `open('memory', someEdge)` a compile error at all eight call sites —
+   * legal pairings is what makes `open('fact', someEdge)` a compile error at all eight call sites —
    * four of which are templates, checked because the client builds with `strictTemplates`.
    */
-  open(kind: 'memory', record: Memory): void;
+  open(kind: 'fact', record: Fact): void;
   open(kind: 'entity', record: Entity): void;
   open(kind: 'edge', record: Edge): void;
   open(kind: 'chrono', record: ChronoEntry): void;
-  open(kind: DrawerKind, record: Memory | Entity | Edge | ChronoEntry): void {
+  open(kind: DrawerKind, record: Fact | Entity | Edge | ChronoEntry): void {
     // The one assertion in this method, and the overloads above are what make it sound: every caller
     // has already been checked against a single legal (kind, record) pairing.
     const target = { kind, record } as DrawerRecord;
     this.drawerRecord.set(target);
     this.drawerError.set('');
     this.drawerSaving.set(false);
-    // Only memories and chrono entries carry entity references — the other two kinds have no such field.
+    // Only facts and chrono entries carry entity references — the other two kinds have no such field.
     const ids: string[] = 'entityIds' in record ? (record.entityIds ?? []) : [];
     if (ids.length) this.picker.resolveEntityNames(ids);
-    if (target.kind === 'memory') {
+    if (target.kind === 'fact') {
       const r = target.record;
       this.drawerEditMemory = {
         fact: r.fact,
@@ -114,7 +114,7 @@ export class RecordDrawerState {
         tags: [...(r.tags ?? [])],
         entityIds: (r.entityIds ?? []).join(', '),
         description: r.description ?? '',
-        properties: this.store.buildPropertiesObject('memory', r.properties ?? {}),
+        properties: this.store.buildPropertiesObject('fact', r.properties ?? {}),
       };
     } else if (target.kind === 'entity') {
       const r = target.record;
@@ -168,9 +168,9 @@ export class RecordDrawerState {
     this.drawerError.set('');
     const id = dr.record._id;
     const spaceId = this.spaceId();
-    if (dr.kind === 'memory') {
+    if (dr.kind === 'fact') {
       const props = this.drawerEditMemory.properties;
-      this.brainApi.updateMemory(spaceId, id, {
+      this.brainApi.updateFact(spaceId, id, {
         fact: this.drawerEditMemory.fact.trim(),
         // Trimmed, and sent even when empty: on an UPDATE an absent field means "leave it alone", so clearing the
         // box has to reach the API as an explicit empty value or the type could be set and never unset.
@@ -182,9 +182,9 @@ export class RecordDrawerState {
       }).subscribe({
         next: (updated) => {
           this.drawerSaving.set(false);
-          this.drawerRecord.set({ kind: 'memory', record: updated });
-          this.store.memories.update(list => list.map(m => m._id === id ? updated : m));
-          this.lastSaved.set({ kind: 'memory', record: updated });
+          this.drawerRecord.set({ kind: 'fact', record: updated });
+          this.store.facts.update(list => list.map(m => m._id === id ? updated : m));
+          this.lastSaved.set({ kind: 'fact', record: updated });
         },
         error: (err) => { this.drawerSaving.set(false); this.drawerError.set(fmtApiError(err, 'Failed to save')); },
       });

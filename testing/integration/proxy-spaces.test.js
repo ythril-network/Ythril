@@ -124,7 +124,7 @@ describe('Proxy spaces', () => {
     let memIdA, memIdB;
 
     it('Write to proxy without targetSpace returns 400', async () => {
-      const r = await post(BASE, tokenA, `/api/brain/spaces/${PROXY}/memories`, {
+      const r = await post(BASE, tokenA, `/api/brain/spaces/${PROXY}/facts`, {
         fact: 'Should fail',
       });
       assert.equal(r.status, 400);
@@ -132,7 +132,7 @@ describe('Proxy spaces', () => {
     });
 
     it('Write to proxy with invalid targetSpace returns 400', async () => {
-      const r = await post(BASE, tokenA, `/api/brain/spaces/${PROXY}/memories?targetSpace=non-member`, {
+      const r = await post(BASE, tokenA, `/api/brain/spaces/${PROXY}/facts?targetSpace=non-member`, {
         fact: 'Should fail',
       });
       assert.equal(r.status, 400);
@@ -140,7 +140,7 @@ describe('Proxy spaces', () => {
     });
 
     it('Write memory to alpha via proxy', async () => {
-      const r = await post(BASE, tokenA, `/api/brain/spaces/${PROXY}/memories?targetSpace=${SPACE_A}`, {
+      const r = await post(BASE, tokenA, `/api/brain/spaces/${PROXY}/facts?targetSpace=${SPACE_A}`, {
         fact: 'Alpha fact from proxy',
         tags: ['alpha'],
       });
@@ -150,7 +150,7 @@ describe('Proxy spaces', () => {
     });
 
     it('Write memory to beta via proxy', async () => {
-      const r = await post(BASE, tokenA, `/api/brain/spaces/${PROXY}/memories?targetSpace=${SPACE_B}`, {
+      const r = await post(BASE, tokenA, `/api/brain/spaces/${PROXY}/facts?targetSpace=${SPACE_B}`, {
         fact: 'Beta fact from proxy',
         tags: ['beta'],
       });
@@ -160,43 +160,43 @@ describe('Proxy spaces', () => {
     });
 
     it('List memories via proxy aggregates both spaces', async () => {
-      const r = await get(BASE, tokenA, `/api/brain/spaces/${PROXY}/memories?limit=100`);
+      const r = await get(BASE, tokenA, `/api/brain/spaces/${PROXY}/facts?limit=100`);
       assert.equal(r.status, 200);
-      const facts = r.body.memories.map(m => m.fact);
+      const facts = r.body.facts.map(m => m.fact);
       assert.ok(facts.includes('Alpha fact from proxy'), 'Should include alpha memory');
       assert.ok(facts.includes('Beta fact from proxy'), 'Should include beta memory');
     });
 
     it('Get memory by ID via proxy finds it across members', async () => {
       // memIdA is in alpha, try to get via proxy
-      const r = await get(BASE, tokenA, `/api/brain/spaces/${PROXY}/memories/${memIdA}`);
+      const r = await get(BASE, tokenA, `/api/brain/spaces/${PROXY}/facts/${memIdA}`);
       assert.equal(r.status, 200);
       assert.equal(r.body.fact, 'Alpha fact from proxy');
     });
 
     it('Long-form list via /spaces/ prefix aggregates', async () => {
-      const r = await get(BASE, tokenA, `/api/brain/spaces/${PROXY}/memories?limit=100`);
+      const r = await get(BASE, tokenA, `/api/brain/spaces/${PROXY}/facts?limit=100`);
       assert.equal(r.status, 200);
-      assert.ok(r.body.memories.length >= 2, `Expected >=2 memories, got ${r.body.memories.length}`);
+      assert.ok(r.body.facts.length >= 2, `Expected >=2 memories, got ${r.body.facts.length}`);
     });
 
     it('Stats aggregate counts across member spaces', async () => {
       const r = await get(BASE, tokenA, `/api/brain/spaces/${PROXY}/stats`);
       assert.equal(r.status, 200);
-      assert.ok(r.body.memories >= 2, `Expected memories count >=2, got ${r.body.memories}`);
+      assert.ok(r.body.facts >= 2, `Expected memories count >=2, got ${r.body.facts}`);
     });
 
     it('Delete memory via proxy works (alpha memory)', async () => {
-      const r = await del(BASE, tokenA, `/api/brain/spaces/${PROXY}/memories/${memIdA}`);
+      const r = await del(BASE, tokenA, `/api/brain/spaces/${PROXY}/facts/${memIdA}`);
       assert.equal(r.status, 204);
 
       // Confirm it's gone
-      const r2 = await get(BASE, tokenA, `/api/brain/spaces/${PROXY}/memories/${memIdA}`);
+      const r2 = await get(BASE, tokenA, `/api/brain/spaces/${PROXY}/facts/${memIdA}`);
       assert.equal(r2.status, 404);
     });
 
     it('Delete memory via proxy works (long-form, beta memory)', async () => {
-      const r = await del(BASE, tokenA, `/api/brain/spaces/${PROXY}/memories/${memIdB}`);
+      const r = await del(BASE, tokenA, `/api/brain/spaces/${PROXY}/facts/${memIdB}`);
       assert.equal(r.status, 204);
     });
   });
@@ -339,7 +339,7 @@ describe('Proxy spaces', () => {
 
   describe('Regular spaces unaffected by proxy code', () => {
     it('Write memory to alpha directly (no targetSpace needed)', async () => {
-      const r = await post(BASE, tokenA, `/api/brain/spaces/${SPACE_A}/memories`, {
+      const r = await post(BASE, tokenA, `/api/brain/spaces/${SPACE_A}/facts`, {
         fact: 'Direct alpha fact',
       });
       assert.equal(r.status, 201, JSON.stringify(r.body));
@@ -359,11 +359,11 @@ describe('Proxy spaces', () => {
     let session;
     before(async () => {
       // Seed data: one memory in each member space for recall testing
-      await post(BASE, tokenA, `/api/brain/spaces/${SPACE_A}/memories`, {
+      await post(BASE, tokenA, `/api/brain/spaces/${SPACE_A}/facts`, {
         fact: 'Alpha MCP recall test fact about quantum physics',
         tags: ['mcp-test'],
       });
-      await post(BASE, tokenA, `/api/brain/spaces/${SPACE_B}/memories`, {
+      await post(BASE, tokenA, `/api/brain/spaces/${SPACE_B}/facts`, {
         fact: 'Beta MCP recall test fact about machine learning',
         tags: ['mcp-test'],
       });
@@ -397,7 +397,7 @@ describe('Proxy spaces', () => {
         targetSpace: SPACE_A,
       });
       assert.ok(!result.isError, `Expected success, got: ${JSON.stringify(result)}`);
-      assert.ok(result.content?.[0]?.text?.includes('Stored memory'));
+      assert.ok(result.content?.[0]?.text?.includes('Stored fact'));
     });
 
     it('recall aggregates across member spaces (or errors if index not ready)', async () => {
@@ -412,7 +412,7 @@ describe('Proxy spaces', () => {
     it('query tool aggregates across member spaces', async () => {
       // Use query (MongoDB find, no vector index needed) to verify aggregation
       const result = await session.callTool('filter', {
-        space: PROXY, collection: 'memories', filter: { tags: 'mcp-test' }, limit: 50,
+        space: PROXY, collection: 'facts', filter: { tags: 'mcp-test' }, limit: 50,
       });
       assert.ok(!result.isError, JSON.stringify(result));
       const docs = JSON.parse(result.content?.[0]?.text ?? '[]');

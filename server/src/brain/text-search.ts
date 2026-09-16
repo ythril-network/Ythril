@@ -3,7 +3,7 @@
  *
  * The docked column filters need a `?search=` that matches a substring of a record's text fields,
  * across the WHOLE paginated set (same reason the sort in 2a had to be server-side). Chrono already
- * had one; entities/edges/memories did not — their list `name` param was an EXACT match and memories
+ * had one; entities/edges/facts did not — their list `name` param was an EXACT match and facts
  * had no text param at all. This adds a uniform, escaped substring match to the ones that lacked it.
  *
  * The user's text is `escapeRegex`-ed before it reaches `$regex`: an un-escaped user string is a
@@ -16,7 +16,7 @@ import { escapeRegex } from '../util/redos.js';
 export const SEARCHABLE_FIELDS = {
   entities: ['name', 'description'],
   edges: ['label', 'description'],
-  memories: ['fact', 'description'],
+  facts: ['fact', 'description'],
   chrono: ['title', 'description'],
   files: ['path', 'description'],
 } as const;

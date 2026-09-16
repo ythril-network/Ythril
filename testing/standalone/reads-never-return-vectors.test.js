@@ -208,7 +208,7 @@ describe('the vector never leaves the database', () => {
   it('all four list routes apply the strip, and none of them forgot the flag', () => {
     // Counted rather than spot-checked: three of the four were wired in one pass, and the fourth is exactly
     // the kind of thing a one-route test would not notice.
-    const routes = ['entities', 'memories', 'edges', 'chrono'];
+    const routes = ['entities', 'facts', 'edges', 'chrono'];
     for (const r of routes) {
       const src = stripComments(readFileSync(`server/src/api/brain/${r}.ts`, 'utf8'));
       assert.match(src, /withoutListDiagnostics\(/,

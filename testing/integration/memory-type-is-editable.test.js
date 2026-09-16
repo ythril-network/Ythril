@@ -8,7 +8,7 @@
  * changing a memory's type got **200 and no change**.
  *
  * Found by driving the UI rather than by reading: the browser sent `{"type":"note", …}`, the request succeeded, and the
- * stored record still said `decision`. `updateMemory` had accepted `type` and written `$set.type` all along — the field
+ * stored record still said `decision`. `updateFact` had accepted `type` and written `$set.type` all along — the field
  * was plumbed the whole way down and lost at the door.
  *
  * That is the same shape as the `skip` parameter the fleet integrator reported on `POST /query`: a permissive body, a success status,
@@ -38,16 +38,16 @@ const SPACE = `memtype-${RUN}`;
 
 let token;
 
-const create = (body) => post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/memories`, body);
-const edit = (id, body) => patch(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/memories/${id}`, body);
-const read = async (id) => (await get(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/memories/${id}`)).body;
+const create = (body) => post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/facts`, body);
+const edit = (id, body) => patch(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/facts/${id}`, body);
+const read = async (id) => (await get(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/facts/${id}`)).body;
 
 before(async () => {
   token = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
   const r = await post(INSTANCES.a, token, '/api/spaces', {
     id: SPACE, label: SPACE,
     // `warn` rather than `strict`: this file is about the type FIELD, not about property validation refusing a write.
-    meta: { validationMode: 'warn', typeSchemas: { memory: { decision: {}, note: {} } } },
+    meta: { validationMode: 'warn', typeSchemas: { fact: { decision: {}, note: {} } } },
   });
   assert.equal(r.status, 201, `space create failed: ${JSON.stringify(r.body)}`);
 });
@@ -91,8 +91,8 @@ describe('a memory type survives create, update and clear', () => {
   });
 
   it('accepts a type the SCHEMA does not declare — there is no allowlist', async () => {
-    // Deliberate, and the reason the UI control is free text with suggestions rather than a closed select. `validateMemory`
-    // uses `type` only to look up `typeSchemas.memory[type]`; unlike chrono there is no `getAllowedMemoryTypes`. A UI
+    // Deliberate, and the reason the UI control is free text with suggestions rather than a closed select. `validateFact`
+    // uses `type` only to look up `typeSchemas.memory[type]`; unlike chrono there is no `getAllowedFactTypes`. A UI
     // that offered only declared types would be stricter than the API — so if this ever starts refusing, the control
     // must change with it.
     const r = await create({ fact: `undeclared type ${RUN}`, type: 'observation' });

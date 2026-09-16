@@ -45,7 +45,7 @@ let failNext = false;
 let server, mongo, memory, entities, edges, chrono, queue, worker;
 
 const jobs = () => mongo.col(`${SPACE}_embed_jobs`);
-const memories = () => mongo.col(`${SPACE}_memories`);
+const memories = () => mongo.col(`${SPACE}_facts`);
 
 /** A deterministic pseudo-vector, so an assertion can name the expected numbers. */
 const vectorFor = (text) => Array.from({ length: DIMS }, (_, i) => ((text.length + i) % 10) / 10);
@@ -76,7 +76,7 @@ describe('brain embedding queue drains (real MongoDB, real embed() over a stub e
     mongo = await openTestMongo('embeddrain');
     const loader = await import('../../server/dist/config/loader.js');
     loader.loadConfig();
-    memory = await import('../../server/dist/brain/memory.js');
+    memory = await import('../../server/dist/brain/fact.js');
     entities = await import('../../server/dist/brain/entities.js');
     edges = await import('../../server/dist/brain/edges.js');
     chrono = await import('../../server/dist/brain/chrono.js');
@@ -102,7 +102,7 @@ describe('brain embedding queue drains (real MongoDB, real embed() over a stub e
   });
 
   it('a queued memory gets its vector, and the job is gone', async () => {
-    const doc = await memory.remember(SPACE, 'node-7 runs the platform apps', [], ['prod']);
+    const doc = await memory.saveFact(SPACE, 'node-7 runs the platform apps', [], ['prod']);
     assert.equal((await memories().findOne({ _id: doc._id })).embedding, undefined,
       'precondition: the write did not embed');
 
@@ -119,7 +119,7 @@ describe('brain embedding queue drains (real MongoDB, real embed() over a stub e
     // The property that makes async embedding invisible to the searcher. If the worker built the text
     // differently, a record's vector would silently stop corresponding to its own content — no error,
     // nothing to grep for, only worse recall.
-    const doc = await memory.remember(SPACE, 'shared text check', ['e-missing'], ['a', 'b'], 'a description');
+    const doc = await memory.saveFact(SPACE, 'shared text check', ['e-missing'], ['a', 'b'], 'a description');
     const storedBefore = await memories().findOne({ _id: doc._id });
 
     await worker.runOneEmbedJob();
@@ -134,7 +134,7 @@ describe('brain embedding queue drains (real MongoDB, real embed() over a stub e
   it('the vector is stored WITHOUT advancing seq', async () => {
     // An embedding is a derived field, excluded from replication because each peer computes its own.
     // Bumping seq would broadcast a no-op change to every peer in every network, on every embedding.
-    const doc = await memory.remember(SPACE, 'seq must not move', [], []);
+    const doc = await memory.saveFact(SPACE, 'seq must not move', [], []);
     const before = await memories().findOne({ _id: doc._id });
 
     await worker.runOneEmbedJob();
@@ -145,8 +145,8 @@ describe('brain embedding queue drains (real MongoDB, real embed() over a stub e
   });
 
   it('a transient endpoint failure is retried and then succeeds', async () => {
-    const doc = await memory.remember(SPACE, 'flaky endpoint', [], []);
-    const id = `memory:${doc._id}`;
+    const doc = await memory.saveFact(SPACE, 'flaky endpoint', [], []);
+    const id = `fact:${doc._id}`;
 
     failNext = true;
     assert.equal(await worker.runOneEmbedJob(), true);
@@ -163,7 +163,7 @@ describe('brain embedding queue drains (real MongoDB, real embed() over a stub e
   });
 
   it('waitForEmbedding: true embeds inline and queues nothing', async () => {
-    const doc = await memory.remember(SPACE, 'searchable right now', [], [], undefined, undefined, undefined, { waitForEmbedding: true });
+    const doc = await memory.saveFact(SPACE, 'searchable right now', [], [], undefined, undefined, undefined, { waitForEmbedding: true });
 
     assert.ok(Array.isArray((await memories().findOne({ _id: doc._id })).embedding),
       'the record is searchable the moment the call returns');
@@ -179,8 +179,8 @@ describe('brain embedding queue drains (real MongoDB, real embed() over a stub e
   // them. A per-type test can be updated to match whatever that type does.
   const CREATORS = [
     {
-      name: 'memory', collection: 'memories',
-      create: (opts) => memory.remember(SPACE, 'creator table memory', [], ['prod'], undefined, undefined, undefined, opts),
+      name: 'fact', collection: 'facts',
+      create: (opts) => memory.saveFact(SPACE, 'creator table memory', [], ['prod'], undefined, undefined, undefined, opts),
     },
     {
       name: 'entity', collection: 'entities',
@@ -226,13 +226,13 @@ describe('brain embedding queue drains (real MongoDB, real embed() over a stub e
     // design and does not work: `ne` is not natively pushable (`brain/filter.ts:74`), so it would force
     // every recall onto an exhaustive scan, and the positive form would need a backfill of a synced
     // collection. No vector means no vector hit, natively, at zero query cost.
-    const doc = await memory.remember(SPACE, 'retired fact', [], [], undefined, undefined,
+    const doc = await memory.saveFact(SPACE, 'retired fact', [], [], undefined, undefined,
       undefined, { waitForEmbedding: true });
-    const coll = mongo.col(`${SPACE}_memories`);
+    const coll = mongo.col(`${SPACE}_facts`);
     assert.ok(Array.isArray((await coll.findOne({ _id: doc._id })).embedding),
       'precondition: it starts searchable');
 
-    await memory.updateMemory(SPACE, doc._id, { suppressEmbeddings: true });
+    await memory.updateFact(SPACE, doc._id, { suppressEmbeddings: true });
     assert.equal(await jobs().countDocuments({}), 1, 'the toggle queued a job');
     assert.equal(await worker.runOneEmbedJob(), true);
 
@@ -251,14 +251,14 @@ describe('brain embedding queue drains (real MongoDB, real embed() over a stub e
   it('clearing the flag gives the vector back', async () => {
     // The escape hatch that makes unsetting safe: re-including is one queued job away. That is only true
     // because the embedding queue exists — this design was not available before it.
-    const doc = await memory.remember(SPACE, 'temporarily retired', [], []);
-    const coll = mongo.col(`${SPACE}_memories`);
+    const doc = await memory.saveFact(SPACE, 'temporarily retired', [], []);
+    const coll = mongo.col(`${SPACE}_facts`);
 
-    await memory.updateMemory(SPACE, doc._id, { suppressEmbeddings: true });
+    await memory.updateFact(SPACE, doc._id, { suppressEmbeddings: true });
     await worker.runOneEmbedJob();
     assert.equal((await coll.findOne({ _id: doc._id })).embedding, undefined);
 
-    await memory.updateMemory(SPACE, doc._id, { suppressEmbeddings: false });
+    await memory.updateFact(SPACE, doc._id, { suppressEmbeddings: false });
     assert.equal(await worker.runOneEmbedJob(), true);
     const back = await coll.findOne({ _id: doc._id });
     assert.ok(Array.isArray(back.embedding),
@@ -278,12 +278,12 @@ describe('brain embedding queue drains (real MongoDB, real embed() over a stub e
      * the peer floor is what made it safe: a 4.x build refuses every pre-3.1.0 peer, so no such record
      * arrives. Written with the current key now, which is what a creator actually stores.
      */
-    const doc = await memory.remember(SPACE, 'born retired', [], []);
-    await mongo.col(`${SPACE}_memories`).updateOne({ _id: doc._id },
+    const doc = await memory.saveFact(SPACE, 'born retired', [], []);
+    await mongo.col(`${SPACE}_facts`).updateOne({ _id: doc._id },
       { $set: { suppressEmbeddings: true } });
 
     assert.equal(await worker.runOneEmbedJob(), true);
-    assert.equal((await mongo.col(`${SPACE}_memories`).findOne({ _id: doc._id })).embedding, undefined);
+    assert.equal((await mongo.col(`${SPACE}_facts`).findOne({ _id: doc._id })).embedding, undefined);
     assert.equal(await jobs().countDocuments({}), 0, 'and the job retires rather than retrying forever');
   });
   it('all four creators agree — none embeds inline by default', async () => {
@@ -295,6 +295,6 @@ describe('brain embedding queue drains (real MongoDB, real embed() over a stub e
       const stored = await mongo.col(`${SPACE}_${c.collection}`).findOne({ _id: doc._id });
       inline[c.name] = stored.embedding !== undefined;
     }
-    assert.deepEqual(inline, { memory: false, entity: false, edge: false, chrono: false });
+    assert.deepEqual(inline, { fact: false, entity: false, edge: false, chrono: false });
   });
 });

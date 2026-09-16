@@ -58,7 +58,7 @@ before(async () => {
   await makeSpace(SPACE);
   await makeSpace(MEMBER);
   await makeSpace(PROXY, { proxyFor: [MEMBER] });
-  const mem = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/memories`, { fact: `embed queue subject ${RUN}` });
+  const mem = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/facts`, { fact: `embed queue subject ${RUN}` });
   assert.equal(mem.status, 201, JSON.stringify(mem.body));
   session = await openMcpSession(token);
 });
@@ -131,12 +131,12 @@ describe('REST: the retry refuses what it cannot act on', () => {
   });
 
   it('rejects a missing or blank recordId', async () => {
-    assert.equal((await retryRest({ recordType: 'memory' })).status, 400);
-    assert.equal((await retryRest({ recordType: 'memory', recordId: '   ' })).status, 400);
+    assert.equal((await retryRest({ recordType: 'fact' })).status, 400);
+    assert.equal((await retryRest({ recordType: 'fact', recordId: '   ' })).status, 400);
   });
 
   it('404s for a record with no job, and says which space it looked in', async () => {
-    const r = await retryRest({ recordType: 'memory', recordId: `no-such-${RUN}` });
+    const r = await retryRest({ recordType: 'fact', recordId: `no-such-${RUN}` });
     assert.equal(r.status, 404, JSON.stringify(r.body));
     assert.equal(r.body.result, 'not_found', 'the outcome is machine-readable, not only prose');
     assert.match(r.body.error, new RegExp(SPACE), 'the space is named — a proxy retry can land in a member space');
@@ -144,13 +144,13 @@ describe('REST: the retry refuses what it cannot act on', () => {
 
   it('refuses a PROXY space without a target, and names the members', async () => {
     // A proxy space stores nothing of its own, so "retry this record here" has no meaning until a member is named.
-    const r = await retryRest({ recordType: 'memory', recordId: 'anything' }, PROXY);
+    const r = await retryRest({ recordType: 'fact', recordId: 'anything' }, PROXY);
     assert.equal(r.status, 400, JSON.stringify(r.body));
     assert.match(r.body.error, new RegExp(MEMBER), 'the refusal must say which member to retry in');
   });
 
   it('accepts a proxy retry that names the member', async () => {
-    const r = await retryRest({ recordType: 'memory', recordId: `no-such-${RUN}`, targetSpace: MEMBER }, PROXY);
+    const r = await retryRest({ recordType: 'fact', recordId: `no-such-${RUN}`, targetSpace: MEMBER }, PROXY);
     // 404 because that record has no job — the point is that it got PAST the proxy check and looked in the member.
     assert.equal(r.status, 404, JSON.stringify(r.body));
     assert.match(r.body.error, new RegExp(MEMBER), 'it looked in the member space, not in the proxy');
@@ -186,7 +186,7 @@ describe('MCP: the same two capabilities, through the other door', () => {
     // `not_found` is an ANSWER: the record has no job, which usually means it embedded fine. Reporting it as a tool
     // error would make an agent retry or escalate over the queue being healthy.
     const r = await session.callTool('retry_embed_record', {
-      space: SPACE, recordType: 'memory', recordId: `no-such-${RUN}`,
+      space: SPACE, recordType: 'fact', recordId: `no-such-${RUN}`,
     });
     assert.ok(!r?.isError, `a not_found outcome must not be a tool error: ${JSON.stringify(r)}`);
     assert.equal(r.structuredContent.result, 'not_found');
@@ -201,7 +201,7 @@ describe('MCP: the same two capabilities, through the other door', () => {
 
   it('refuses a proxy retry with no target, with the same message REST gives', async () => {
     const mcp = await session.callTool('retry_embed_record', {
-      space: PROXY, recordType: 'memory', recordId: 'anything',
+      space: PROXY, recordType: 'fact', recordId: 'anything',
     });
     assert.ok(mcp?.isError, JSON.stringify(mcp));
     const text = JSON.stringify(mcp);
@@ -246,12 +246,12 @@ describe('rights: reading the queue is knowledge:read, retrying is knowledge:wri
   });
 
   it('a knowledge:read token can NOT retry', async () => {
-    const r = await post(INSTANCES.a, readerToken, `${RECORDS}/retry`, { recordType: 'memory', recordId: 'x' });
+    const r = await post(INSTANCES.a, readerToken, `${RECORDS}/retry`, { recordType: 'fact', recordId: 'x' });
     assert.equal(r.status, 403, `a read token performed a write: ${JSON.stringify(r.body)}`);
   });
 
   it('a knowledge:write token CAN retry', async () => {
-    const r = await post(INSTANCES.a, writerToken, `${RECORDS}/retry`, { recordType: 'memory', recordId: `no-such-${RUN}` });
+    const r = await post(INSTANCES.a, writerToken, `${RECORDS}/retry`, { recordType: 'fact', recordId: `no-such-${RUN}` });
     assert.equal(r.status, 404, `expected to reach the queue and find no job, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 

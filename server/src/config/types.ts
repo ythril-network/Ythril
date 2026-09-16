@@ -127,7 +127,7 @@ export type TtlBucket = RecordType;
  */
 export interface RecordTtlWindows {
   entity?: number | null;
-  memory?: number | null;
+  fact?: number | null;
   edge?:   number | null;
   chrono?: number | null;
   file?:   number | null;
@@ -253,7 +253,7 @@ export interface SpaceConfig {
   dupeRulesOnInsert?: boolean;
   /**
    * Every link in this space is a link RECORD, not just an array entry — set by the conversion script when it
-   * has finished walking `memory.entityIds`, the two chrono arrays and the three file arrays.
+   * has finished walking `fact.entityIds`, the two chrono arrays and the three file arrays.
    *
    * **Local/operational, like `dupeRules` and `recordTtlDays`, and that placement is the whole point.** The
    * flag one word away, `strictLinkage`, lives on `SpaceMeta` because it states what the space MEANS and a
@@ -399,7 +399,7 @@ export interface MediaProviderConfig {
  *
  * Routes binary media (image / audio / video) through text-as-intermediate
  * captioning + STT so every embedding lands in the same vector space as
- * memories, entities and converted documents (`nomic-embed-text-v1.5`).
+ * facts, entities and converted documents (`nomic-embed-text-v1.5`).
  *
  * Always on — there is no master on/off switch. Each media class is controlled by its `levels` entry
  * (`off` takes that class offline instance-wide); the removed `MEDIA_EMBEDDING_ENABLED` /
@@ -569,7 +569,7 @@ export interface DocumentProcessingConfig {
   /** F11 — DPI for page rasterization in VLM modes. Default 150. */
   renderDpi?: number;
   /**
-   * F11 — max pages rasterized per RENDER CALL (memory/latency bound on one sidecar round trip).
+   * F11 — max pages rasterized per RENDER CALL (fact/latency bound on one sidecar round trip).
    * Default 50.
    *
    * This is no longer how much of a document gets read: long documents are walked in windows of this size
@@ -581,7 +581,7 @@ export interface DocumentProcessingConfig {
    * stops and says so, in the log and in the stored markdown.
    *
    * Deliberately separate from `maxPages`, because they bound different things: `maxPages` is one round
-   * trip's memory, this is the job's total cost. Every page is a VLM call, so an unbounded walk over a
+   * trip's fact, this is the job's total cost. Every page is a VLM call, so an unbounded walk over a
    * 600-page scan means 600 model calls and — with an external endpoint — 600 pages of content leaving the
    * instance, on an upload nobody is watching. Raise it deliberately.
    */
@@ -959,7 +959,7 @@ export interface AuditConfig {
   /**
    * Days a brain record edit's `changes` payload survives before being redacted. Default: 14.
    *
-   * Separate from `retentionDays` on purpose. Record-edit changes carry USER CONTENT — a memory's old
+   * Separate from `retentionDays` on purpose. Record-edit changes carry USER CONTENT — a fact's old
    * text, an entity's old description — so they get a short life, while the entry itself (who, when,
    * which route) keeps the full retention. A sweep unsets the payload and marks `changesRedacted`;
    * the audit trail is never shortened, only the content inside it.
@@ -993,7 +993,7 @@ export interface DupeScannerConfig {
   batchSize?: number;
   /** Max records scanned per space per run (bounds resource use; the rest is picked up next run). Default: 5000. */
   maxPerRun?: number;
-  /** Knowledge types to scan. Default: ['memory', 'entity', 'chrono']. */
+  /** Knowledge types to scan. Default: ['fact', 'entity', 'chrono']. */
   types?: DupeScanType[];
 }
 
@@ -1353,7 +1353,7 @@ export interface AuthorRef {
   instanceLabel: string;
 }
 
-export interface MemoryDoc extends StampSkewable {
+export interface FactDoc extends StampSkewable {
   /**
    * Keep this record stored, but stop it being EMBEDDED — the top tier of the switch a type schema and the
    * space also carry under this same name, resolving `record > schema > space`.
@@ -1382,10 +1382,10 @@ export interface MemoryDoc extends StampSkewable {
   _id: string;
   spaceId: string;
   fact: string;
-  /** Optional memory type — used to look up typeSchemas.memory for schema validation. */
+  /** Optional fact type — used to look up typeSchemas.fact for schema validation. */
   type?: string;
   /**
-   * Optional since the embedding queue landed — and it is the reason `remember` used to be the one
+   * Optional since the embedding queue landed — and it is the reason `saveFact` used to be the one
    * creator of four whose write FAILED when the embedder was down. `EntityDoc`, `EdgeDoc` and
    * `ChronoEntry` have always declared this optional and stored the record regardless; only this type
    * demanded a vector, so only this path had no choice but to throw. The asymmetry was in the type.
@@ -1449,7 +1449,7 @@ export interface EntityDoc extends StampSkewable {
   seq: number;
   embedding?: number[];
   embeddingModel?: string;
-  /** Absolute expiry (F10) — see MemoryDoc._expireAt. */
+  /** Absolute expiry (F10) — see FactDoc._expireAt. */
   _expireAt?: Date;
 }
 
@@ -1488,7 +1488,7 @@ export interface EdgeDoc extends StampSkewable {
    * an entity, and that stopped being true the moment a file's meta record could be one end of a link.
    *
    * The case that forced it: a photo taken at a party. Its file meta wants to link to the people in it
-   * (entities), to the party itself (a chrono event), and to what happened there (a memory). Three
+   * (entities), to the party itself (a chrono event), and to what happened there (a fact). Three
    * collections, and `to` carries a bare id, so nothing in the edge says which one to look in. Guessing by
    * trying each collection in turn is not a fix — two records in different collections may legitimately share
    * an id, and then the answer depends on the order the code happened to try them.
@@ -1519,7 +1519,7 @@ export interface EdgeDoc extends StampSkewable {
   seq: number;
   embedding?: number[];
   embeddingModel?: string;
-  /** Absolute expiry (F10) — see MemoryDoc._expireAt. */
+  /** Absolute expiry (F10) — see FactDoc._expireAt. */
   _expireAt?: Date;
 }
 
@@ -1529,7 +1529,7 @@ export interface EdgeDoc extends StampSkewable {
  * ## Why this is not an `EdgeDoc`, and not in `_edges`
  *
  * Owner's design, 2026-08-29: *"make all edges on 'index cards' and make everyone look there from now on"*.
- * Six public array fields say that a record concerns others — `memory.entityIds`, `chrono.entityIds`,
+ * Six public array fields say that a record concerns others — `fact.entityIds`, `chrono.entityIds`,
  * `chrono.memoryIds`, and `file.entityIds`/`memoryIds`/`chronoIds` — and each was scanned by a different
  * subset of five disagreeing adjacency readers. They become records, so there is one place to look.
  *
@@ -1540,7 +1540,7 @@ export interface EdgeDoc extends StampSkewable {
  *
  * ## The two kinds ARE the class, so nothing here stores which one it is
  *
- * The six classes are `memory→entity`, `chrono→entity`, `chrono→memory`, `file→entity`, `file→memory`,
+ * The six classes are `fact→entity`, `chrono→entity`, `chrono→fact`, `file→entity`, `file→fact`,
  * `file→chrono` — six distinct `(fromKind, toKind)` pairs, one per class. So the label a traverse shows
  * stays DERIVED, exactly as `LINK_CLASSES` prints it today (`chrono.entityIds`). Storing it would add a
  * degree of freedom the arrays never had, and two spellings of one fact is the defect shape this codebase
@@ -1559,7 +1559,7 @@ export interface EdgeDoc extends StampSkewable {
 export interface LinkDoc extends StampSkewable {
   _id: string;
   spaceId: string;
-  /** The record that HELD the array — a memory, a chrono entry or a file's meta record. */
+  /** The record that HELD the array — a fact, a chrono entry or a file's meta record. */
   from: string;
   /**
    * What kind of record `from` is.
@@ -1646,7 +1646,7 @@ export interface ChronoEntry extends StampSkewable {
   seq: number;
   embedding?: number[];
   embeddingModel?: string;
-  /** Absolute expiry (F10) — see MemoryDoc._expireAt. */
+  /** Absolute expiry (F10) — see FactDoc._expireAt. */
   _expireAt?: Date;
   /** When this entry's CONTENT should be dropped while the entry itself stays. Set from the type schema's
    *  `retention.contentDays` (see `TypeSchema.retention`); absent means never. */
@@ -1721,7 +1721,7 @@ export interface FileMetaDoc {
   tags: string[];       // tags for filtering and recall scoping
   entityIds?: string[];  // linked entity IDs
   chronoIds?: string[];  // linked chrono entry IDs
-  memoryIds?: string[];  // linked memory IDs
+  memoryIds?: string[];  // linked fact IDs
   properties?: Record<string, string | number | boolean>; // structured metadata (optional)
   /** Pre-embedding source text — the exact string fed to the embedding model. */
   matchedText?: string;
@@ -1842,7 +1842,7 @@ export interface ConflictDoc {
 export interface LinkViolationDoc {
   _id: string;            // UUID v4
   spaceId: string;
-  docId: string;          // ID of the violating document (entity/edge/memory/chrono)
+  docId: string;          // ID of the violating document (entity/edge/fact/chrono)
   docType: KnowledgeType;
   field: string;          // field name that violated (e.g. "from", "to", "entityIds")
   reason: string;         // human-readable explanation

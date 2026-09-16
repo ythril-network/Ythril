@@ -12,7 +12,7 @@ import { getConfig } from '../config/loader.js';
 import { log } from '../util/log.js';
 import type { WebhookActor } from '../webhooks/dispatcher.js';
 import { TTL_COLLECTIONS, ensureTtlIndex } from './ttl.js';
-import { deleteMemory } from './memory.js';
+import { deleteFact } from './fact.js';
 import { deleteEntity } from './entities.js';
 import { deleteEdge } from './edges.js';
 import { deleteChrono } from './chrono.js';
@@ -27,7 +27,7 @@ const SWEEP_BATCH = 500;              // max deletions per collection per cycle
 const TTL_ACTOR: WebhookActor = { tokenLabel: 'ttl-sweep' };
 
 const DELETERS: Record<(typeof TTL_COLLECTIONS)[number], (spaceId: string, id: string, actor?: WebhookActor) => Promise<boolean>> = {
-  memories: deleteMemory,
+  facts: deleteFact,
   entities: deleteEntity,
   edges: deleteEdge,
   chrono: deleteChrono,

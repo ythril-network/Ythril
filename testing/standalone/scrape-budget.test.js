@@ -201,15 +201,15 @@ describe('the scrape budget', () => {
 
   it('7. honours METRICS_SCRAPE_BUDGET_MS=0 as "no budget", restoring all-or-nothing', async () => {
     const mod = await loadRegistry(0);
-    slowCollector(mod, { name: 'memories_total', workMs: 250 });
+    slowCollector(mod, { name: 'facts_total', workMs: 250 });
 
     const started = performance.now();
     const text = await scrape(mod);
     const elapsed = performance.now() - started;
 
     assert.ok(elapsed >= 200, `budget 0 should not interrupt anything, but the scrape returned in ${Math.round(elapsed)}ms`);
-    assert.equal(valueOf(text, 'test_slow_memories_total{space="alpha"}'), 42, 'the collector must complete');
-    assert.equal(valueOf(text, 'ythril_metrics_collect_timeouts_total{collector="memories_total"}'), 0);
+    assert.equal(valueOf(text, 'test_slow_facts_total{space="alpha"}'), 42, 'the collector must complete');
+    assert.equal(valueOf(text, 'ythril_metrics_collect_timeouts_total{collector="facts_total"}'), 0);
   });
 
   it('8. falls back to the default when the budget is malformed, rather than to no budget', async () => {

@@ -69,7 +69,7 @@ describe('the walker reaches where the gaps were', () => {
     // 18 undescribed parameters sit one level down, which is how they survived X-2's first pass.
     const paths = walkProperties(ALL_TOOLS.find(t => t.name === 'save_bulk').inputSchema(SCHEMAS)).map(([p]) => p);
     assert.ok(paths.includes('chrono[].status'), 'array items must be walked');
-    assert.ok(paths.includes('memories[].properties'), 'and every collection, not just the first');
+    assert.ok(paths.includes('facts[].properties'), 'and every collection, not just the first');
 
     const chrono = walkProperties(ALL_TOOLS.find(t => t.name === 'update_chrono').inputSchema(SCHEMAS)).map(([p]) => p);
     assert.ok(chrono.includes('recurrence.freq'), 'nested objects must be walked');

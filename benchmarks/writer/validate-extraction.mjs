@@ -59,7 +59,7 @@ export function validateExtraction(extraction, schemaEntries) {
   const typesOf = kind => new Set(schemaEntries.filter(e => e.knowledgeType === kind).map(e => e.typeName));
   const entityTypes = typesOf('entity');
   const chronoTypes = typesOf('chrono');
-  const claimTypes = typesOf('memory');
+  const claimTypes = typesOf('fact');
   const edgeDefs = new Map(schemaEntries.filter(e => e.knowledgeType === 'edge')
     .map(e => [e.typeName, e.schema.endpoints]));
 

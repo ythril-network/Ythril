@@ -107,7 +107,7 @@ async function storedVersionOfB() {
 /** Does a marker record exist on B yet? */
 async function onB(marker) {
   const r = await post(INSTANCES.b, tokenB, '/api/brain/filter', { space: spaceId, ...({
-    collection: 'memories', filter: { fact: { $regex: marker } },
+    collection: 'facts', filter: { fact: { $regex: marker } },
   }) });
   return (r.body?.results ?? r.body?.rows ?? []).length;
 }
@@ -340,7 +340,7 @@ process.stdout.write('OK');
     // The end-to-end half, asserted where it CAN be asserted: on the positive case. A negative — "this
     // never arrives" — has no positive signal and, with a pin that self-heals, no stable window either.
     const marker = `floor-flows-${Date.now()}`;
-    const created = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${spaceId}/memories`, {
+    const created = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${spaceId}/facts`, {
       fact: `Written with both instances at or above the floor: ${marker}`,
       type: 'note', tags: [], properties: {},
     });

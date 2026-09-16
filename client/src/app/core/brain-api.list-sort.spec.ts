@@ -37,17 +37,17 @@ describe('BrainApi — list sort params (2b)', () => {
     r.flush({ entities: [] });
   });
 
-  it('listEdges / listMemories / listChrono all carry the sort', () => {
+  it('listEdges / listFacts / listChrono all carry the sort', () => {
     api.listEdges('work', 50, 0, undefined, { field: 'label', dir: 'desc' }).subscribe();
     const e = http.expectOne(req => req.url === '/api/brain/spaces/work/edges');
     expect(e.request.params.get('sort')).toBe('label');
     expect(e.request.params.get('dir')).toBe('desc');
     e.flush({ edges: [] });
 
-    api.listMemories('work', 20, 0, undefined, { field: 'createdAt', dir: 'desc' }).subscribe();
-    const m = http.expectOne(req => req.url === '/api/brain/spaces/work/memories');
+    api.listFacts('work', 20, 0, undefined, { field: 'createdAt', dir: 'desc' }).subscribe();
+    const m = http.expectOne(req => req.url === '/api/brain/spaces/work/facts');
     expect(m.request.params.get('sort')).toBe('createdAt');
-    m.flush({ memories: [], limit: 20, skip: 0 });
+    m.flush({ facts: [], limit: 20, skip: 0 });
 
     api.listChrono('work', 50, 0, undefined, { field: 'startsAt', dir: 'asc' }).subscribe();
     const c = http.expectOne(req => req.url === '/api/brain/spaces/work/chrono');
@@ -65,7 +65,7 @@ describe('BrainApi — list sort params (2b)', () => {
     r.flush({ entities: [] });
   });
 
-  it('the docked freetext filter sends ?search= on entities/edges/memories, omitted when empty', () => {
+  it('the docked freetext filter sends ?search= on entities/edges/facts, omitted when empty', () => {
     api.listEntities('work', 50, 0, undefined, undefined, 'kuber').subscribe();
     const e = http.expectOne(req => req.url === '/api/brain/spaces/work/entities');
     expect(e.request.params.get('search')).toBe('kuber');
@@ -76,10 +76,10 @@ describe('BrainApi — list sort params (2b)', () => {
     expect(g.request.params.get('search')).toBe('mentor');
     g.flush({ edges: [] });
 
-    api.listMemories('work', 20, 0, undefined, undefined, 'deadline').subscribe();
-    const m = http.expectOne(req => req.url === '/api/brain/spaces/work/memories');
+    api.listFacts('work', 20, 0, undefined, undefined, 'deadline').subscribe();
+    const m = http.expectOne(req => req.url === '/api/brain/spaces/work/facts');
     expect(m.request.params.get('search')).toBe('deadline');
-    m.flush({ memories: [], limit: 20, skip: 0 });
+    m.flush({ facts: [], limit: 20, skip: 0 });
 
     api.listEntities('work', 50, 0).subscribe();
     const none = http.expectOne(req => req.url === '/api/brain/spaces/work/entities');
@@ -116,7 +116,7 @@ describe('BrainApi — description column filter', () => {
 
   const CASES: Array<[string, () => void, string, string]> = [
     ['listEntities', () => api.listEntities('work', 50, 0, { description: 'quarterly' }).subscribe(), '/api/brain/spaces/work/entities', 'entities'],
-    ['listMemories', () => api.listMemories('work', 20, 0, { description: 'quarterly' }).subscribe(), '/api/brain/spaces/work/memories', 'memories'],
+    ['listFacts', () => api.listFacts('work', 20, 0, { description: 'quarterly' }).subscribe(), '/api/brain/spaces/work/facts', 'facts'],
     ['listEdges',    () => api.listEdges('work', 50, 0, { description: 'quarterly' }).subscribe(),    '/api/brain/spaces/work/edges',    'edges'],
     ['listChrono',   () => api.listChrono('work', 50, 0, { description: 'quarterly' }).subscribe(),   '/api/brain/spaces/work/chrono',   'chrono'],
   ];

@@ -64,7 +64,7 @@ describe('Space creation is asynchronous (B1)', () => {
       `listed indexStatus should be building/ready, got ${listed.indexStatus}`);
 
     // …and writable right away, even while indexes are still building.
-    const mem = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${id}/memories`,
+    const mem = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${id}/facts`,
       { fact: 'written while indexes were still building', tags: ['b1'] });
     assert.equal(mem.status, 201, `space must accept writes while building: ${JSON.stringify(mem.body)}`);
   });

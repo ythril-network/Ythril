@@ -1,7 +1,7 @@
 /**
  * `If-Match` preconditions on brain-record writes — the 412 path.
  *
- * `updateMemory` and its three siblings read a record, await `nextSeq`, embed, then `$set` only the fields
+ * `updateFact` and its three siblings read a record, await `nextSeq`, embed, then `$set` only the fields
  * the caller supplied. Two clients editing DIFFERENT fields both succeed and lose nothing; two editing the
  * SAME field means the loser's value disappears with a 200 and no trace. The counter shipped first, on the
  * owner's call to measure before building — this is the mechanism it was measuring for.
@@ -41,7 +41,7 @@ const withoutComments = (text) =>
 /** The four record types this feature is "all or none" across. */
 const RECORDS = [
   { name: 'entities', route: 'server/src/api/brain/entities.ts', store: 'server/src/brain/entities.ts', update: 'updateEntityById' },
-  { name: 'memories', route: 'server/src/api/brain/memories.ts', store: 'server/src/brain/memory.ts', update: 'updateMemory' },
+  { name: 'facts', route: 'server/src/api/brain/facts.ts', store: 'server/src/brain/fact.ts', update: 'updateFact' },
   { name: 'edges', route: 'server/src/api/brain/edges.ts', store: 'server/src/brain/edges.ts', update: 'updateEdgeById' },
   { name: 'chrono', route: 'server/src/api/brain/chrono.ts', store: 'server/src/brain/chrono.ts', update: 'updateChrono' },
 ];

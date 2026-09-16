@@ -38,12 +38,12 @@ export interface ErBox {
   /**
    * What this box represents.
    *
-   * `'entity'` for a declared or observed entity type — every box was one of these until memories, chrono and
+   * `'entity'` for a declared or observed entity type — every box was one of these until facts, chrono and
    * files joined the diagram. The other three are one box per KIND, carrying that kind's total, and they must
    * be drawn differently: they have no properties and no naming pattern, so styling them as an entity box
    * would present them as a type somebody declared.
    */
-  kind: 'entity' | 'memory' | 'chrono' | 'file';
+  kind: 'entity' | 'fact' | 'chrono' | 'file';
   /**
    * How many records this box stands for.
    *
@@ -169,7 +169,7 @@ export function heightBuckets(types: readonly ErEntityType[]): (t: ErEntityType)
 
 /** The three kinds that link INTO entities, and the label each one's box carries. */
 const KINDS = [
-  { key: 'memories', kind: 'memory' as const, label: 'Memories' },
+  { key: 'facts', kind: 'fact' as const, label: 'Memories' },
   { key: 'chrono', kind: 'chrono' as const, label: 'Chrono' },
   { key: 'files', kind: 'file' as const, label: 'Files' },
 ] as const;
@@ -179,16 +179,16 @@ const KINDS = [
  *
  * ## Why this exists at all
  *
- * The server scans three extra collections per space to count, for every entity type, how many memories,
+ * The server scans three extra collections per space to count, for every entity type, how many facts,
  * chrono entries and files point AT it through their `entityIds`. It has always sent that as `linkedFrom`, and
  * the client rendered it in **zero places** — so the diagram claimed to be the data model while showing one of
  * four record kinds, and the space paid for the scan on every Overview load and got nothing back.
  *
- * The owner asked the question that found it: *"are memories and chronotypes missing in the er diagram?"*
+ * The owner asked the question that found it: *"are facts and chronotypes missing in the er diagram?"*
  *
  * ## One box per KIND, not per record
  *
- * A space has thousands of memories and one idea of what a memory is. The box is the kind and its total; the
+ * A space has thousands of facts and one idea of what a memory is. The box is the kind and its total; the
  * joins carry the per-type counts. Drawing a box per record would be a different diagram and an unreadable one.
  *
  * ## A kind with no links gets NO box
@@ -206,12 +206,12 @@ const KINDS = [
 function syntheticKinds(realTypes: ErEntityType[]): {
   types: ErEntityType[];
   rels: ErRelationship[];
-  kindOf: Map<string, 'memory' | 'chrono' | 'file'>;
+  kindOf: Map<string, 'fact' | 'chrono' | 'file'>;
 } {
   const taken = new Set(realTypes.map(t => t.type));
   const types: ErEntityType[] = [];
   const rels: ErRelationship[] = [];
-  const kindOf = new Map<string, 'memory' | 'chrono' | 'file'>();
+  const kindOf = new Map<string, 'fact' | 'chrono' | 'file'>();
 
   for (const { key, kind, label } of KINDS) {
     const linked = realTypes.filter(t => (t.linkedFrom?.[key] ?? 0) > 0);
@@ -230,7 +230,7 @@ function syntheticKinds(realTypes: ErEntityType[]): {
       // No properties and no naming pattern: a memory has no schema of its own here, so the box is a name and
       // a count. `naturalHeight`'s floor of two rows is what keeps it a box rather than a line.
       properties: [],
-      linkedFrom: { memories: 0, chrono: 0, files: 0 },
+      linkedFrom: { facts: 0, chrono: 0, files: 0 },
     });
 
     for (const t of linked) {
@@ -287,8 +287,8 @@ export function layoutErModel(
   /**
    * The hub is the most connected type; ties break on record count, which the server already sorted by.
    *
-   * Chosen from the REAL types only. A memories box is frequently the most connected thing on the diagram —
-   * memories link to everything — and letting it win would put "Memories" in the centre of a picture that is
+   * Chosen from the REAL types only. A facts box is frequently the most connected thing on the diagram —
+   * facts link to everything — and letting it win would put "Memories" in the centre of a picture that is
    * supposed to describe the entity model. The kinds are context around that model, not the subject of it.
    */
   const hub = [...realTypes].sort((a, b) =>

@@ -3,7 +3,7 @@
  *
  * ## Why the edge wipe has a file of its own and the other three do not
  *
- * `bulkDeleteEntities`, `bulkDeleteMemories` and `bulkDeleteChrono` each sit in their type's own module.
+ * `bulkDeleteEntities`, `bulkDeleteFacts` and `bulkDeleteChrono` each sit in their type's own module.
  * `edges.ts` is frozen at its current size by `no-new-god-files.test.js`, whose message is the reason rather
  * than the rule — *"every change lands in the same place because that is where the code already is"* — so the
  * edge wipe came out when that file needed room, and it stays out.

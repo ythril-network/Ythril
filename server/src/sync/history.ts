@@ -2,7 +2,7 @@ import { col, asFilter, asDoc } from '../db/mongo.js';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface SyncCounts {
-  memories: number;
+  facts: number;
   entities: number;
   edges: number;
   files: number;

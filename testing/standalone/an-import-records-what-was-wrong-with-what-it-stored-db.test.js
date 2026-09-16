@@ -92,7 +92,7 @@ describe('the admin import records rather than refuses', { skip }, () => {
   });
 
   beforeEach(async () => {
-    for (const c of ['entities', 'memories', 'edges', 'chrono', 'files', 'embed_jobs', 'tombstones']) {
+    for (const c of ['entities', 'facts', 'edges', 'chrono', 'files', 'embed_jobs', 'tombstones']) {
       await coll(c).deleteMany({});
     }
   });
@@ -136,7 +136,7 @@ describe('the admin import records rather than refuses', { skip }, () => {
      */
     await importMod.importDocuments(SPACE, {
       entities: [{ _id: 'e-1', name: 'API', type: 'service', properties: { owner: 'x' }, tags: [], seq: 1 }],
-      memories: [{ _id: 'm-1', fact: 'a fact', tags: [], seq: 1 }],
+      facts: [{ _id: 'm-1', fact: 'a fact', tags: [], seq: 1 }],
     });
     assert.equal(await jobsFor('e-1'), 1, 'the imported entity will never be searchable');
     assert.equal(await jobsFor('m-1'), 1, 'the imported memory will never be searchable');

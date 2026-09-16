@@ -128,7 +128,7 @@ function createGlobalMcpServer(tokenId?: string, tokenLabel?: string,
    * Write one audit entry per tool call.
    *
    * Under the operation the tool's REST counterpart records, not `mcp.<tool>` — a compliance reader
-   * asks who created a memory, not who invoked a tool, and two names for one act makes every query
+   * asks who created a fact, not who invoked a tool, and two names for one act makes every query
    * have to know both. `path` carries the tool name so the transport is still recoverable.
    *
    * Reads follow the REST convention: recorded only when `logReads` is on. Fire-and-forget, like

@@ -38,7 +38,7 @@ import { stripComments } from './_strip-comments.mjs';
 const skip = await mongoSkipReason();
 
 const ROUTES = {
-  memories: 'server/src/api/brain/memories.ts',
+  facts: 'server/src/api/brain/facts.ts',
   entities: 'server/src/api/brain/entities.ts',
   edges: 'server/src/api/brain/edges.ts',
   chrono: 'server/src/api/brain/chrono.ts',
@@ -142,12 +142,12 @@ describe('a warn-mode space has something to be told', { skip }, () => {
         id: SPACE, label: 'General', builtIn: true, folders: [],
         meta: {
           validationMode: 'warn',
-          typeSchemas: { memory: { note: { propertySchemas: { owner: { type: 'string', required: true } } } } },
+          typeSchemas: { fact: { note: { propertySchemas: { owner: { type: 'string', required: true } } } } },
         },
       }],
     }, null, 2), { mode: 0o600 });
     loader.loadConfig();
-    mem = await import('../../server/dist/brain/memory.js');
+    mem = await import('../../server/dist/brain/fact.js');
   });
 
   after(async () => {
@@ -156,17 +156,17 @@ describe('a warn-mode space has something to be told', { skip }, () => {
   });
 
   beforeEach(async () => {
-    for (const c of ['memories', 'embed_jobs', 'tombstones']) await mongo.col(`${SPACE}_${c}`).deleteMany({});
+    for (const c of ['facts', 'embed_jobs', 'tombstones']) await mongo.col(`${SPACE}_${c}`).deleteMany({});
   });
 
   it('the writer hands the classification back, which is what the route now reports', async () => {
-    const created = await mem.remember(SPACE, 'a fact', [], [], undefined, undefined, 'note');
+    const created = await mem.saveFact(SPACE, 'a fact', [], [], undefined, undefined, 'note');
 
     let check;
-    await mem.updateMemory(SPACE, created._id, { description: 'edited' }, undefined, undefined, undefined,
+    await mem.updateFact(SPACE, created._id, { description: 'edited' }, undefined, undefined, undefined,
       undefined, c => { check = c; });
 
-    assert.ok(check, 'updateMemory called onValidation with nothing');
+    assert.ok(check, 'updateFact called onValidation with nothing');
     assert.ok(check.warnings.length > 0,
       `a warn-mode space produced no warnings for a record missing a required property: ${JSON.stringify(check)}`);
     assert.match(JSON.stringify(check.warnings), /owner/);
@@ -174,11 +174,11 @@ describe('a warn-mode space has something to be told', { skip }, () => {
 
   it('and a conformant record produces none', async () => {
     // The control: warnings on every edit would be warnings nobody reads.
-    const created = await mem.remember(SPACE, 'a fact', [], [], undefined, { owner: 'platform' }, 'note');
+    const created = await mem.saveFact(SPACE, 'a fact', [], [], undefined, { owner: 'platform' }, 'note');
     let check;
-    await mem.updateMemory(SPACE, created._id, { description: 'edited' }, undefined, undefined, undefined,
+    await mem.updateFact(SPACE, created._id, { description: 'edited' }, undefined, undefined, undefined,
       undefined, c => { check = c; });
-    assert.ok(check, 'updateMemory called onValidation with nothing');
+    assert.ok(check, 'updateFact called onValidation with nothing');
     assert.deepEqual(check.warnings, []);
   });
 });

@@ -76,7 +76,7 @@ function sourceFiles() {
  */
 function enumerationsIn(src) {
   const clean = stripComments(src);
-  const KINDS = ['entity', 'memory', 'edge', 'chrono'];
+  const KINDS = ['entity', 'fact', 'edge', 'chrono'];
   const hits = [];
   // A run of quoted kind names — `file` included, so a five-member run is recognised and then excluded.
   const run = /(['"])(?:entity|memory|edge|chrono|file)\1(?:\s*[,|]\s*(['"])(?:entity|memory|edge|chrono|file)\2)+/g;
@@ -148,7 +148,7 @@ describe('the knowledge types are named in one place per side', () => {
    * set makes the different sets look like debt.
    */
   function propertyEnumerationsIn(src) {
-    const KINDS = ['entity', 'memory', 'edge', 'chrono'];
+    const KINDS = ['entity', 'fact', 'edge', 'chrono'];
     // Strings blanked as well as comments: a sentence containing `entity:` is prose, not a key, and the
     // first version of this counted one.
     const clean = stripComments(src).replace(/(['"`])(?:\\.|(?!\1)[^\\])*\1/g, '""');
@@ -205,7 +205,7 @@ describe('the knowledge types are named in one place per side', () => {
     const before = [
       'export const TypeSchemasZ = z.object({',
       '  entity: z.record(k, T).optional(),',
-      '  memory: z.record(k, T).optional(),',
+      '  fact: z.record(k, T).optional(),',
       '  edge:   z.record(k, T).optional(),',
       '  chrono: z.record(k, T).optional(),',
       '}).strict();',
@@ -216,7 +216,7 @@ describe('the knowledge types are named in one place per side', () => {
   it('and does NOT flag a deliberately different set', () => {
     // `RefKind` is entity/memory/chrono/file — four names, three of them shared, and a different set on
     // purpose. Flagging it would make the way to quieten this gate be to widen a set that is correct.
-    const refKindShaped = 'const COLLECTION_FOR = { entity: \'entities\', memory: \'memories\', chrono: \'chrono\', file: \'files\' };';
+    const refKindShaped = 'const COLLECTION_FOR = { entity: \'entities\', fact: \'memories\', chrono: \'chrono\', file: \'files\' };';
     assert.deepEqual(propertyEnumerationsIn(refKindShaped), []);
   });
 

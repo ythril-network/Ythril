@@ -28,7 +28,7 @@ import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness
 
 const skip = await mongoSkipReason();
 
-const COLLECTIONS = ['memories', 'entities', 'edges', 'chrono'];
+const COLLECTIONS = ['facts', 'entities', 'edges', 'chrono'];
 const SPACE = `idxprobe${Date.now()}`;
 
 let mongo;

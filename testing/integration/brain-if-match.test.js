@@ -33,8 +33,8 @@ const A = () => INSTANCES.a;
 /** Each type: how to make one, where it lives, and a field a PATCH can move. */
 const TYPES = [
   {
-    name: 'memory',
-    collection: 'memories',
+    name: 'fact',
+    collection: 'facts',
     create: () => ({ fact: `if-match memory ${RUN}`, tags: ['if-match'] }),
     edit: (n) => ({ fact: `if-match memory ${RUN} v${n}` }),
     read: (body) => body.fact,

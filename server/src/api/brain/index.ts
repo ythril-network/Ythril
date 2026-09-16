@@ -7,7 +7,7 @@
  * (e.g. entities `/by-name` and `/by-ids` must stay ahead of `/:id`).
  */
 import { Router } from 'express';
-import { memoriesRouter } from './memories.js';
+import { memoriesRouter } from './facts.js';
 import { entitiesRouter } from './entities.js';
 import { edgesRouter } from './edges.js';
 import { linksRouter } from './links.js';

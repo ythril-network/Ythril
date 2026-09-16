@@ -7,7 +7,7 @@
  * not reproduce — both path shapes answer **404** — but the asymmetry underneath it was real and documented
  * nowhere. It read as a bug from either direction depending on which type you met first.
  *
- * The resolution was NOT to add `POST /memories/:id` for symmetry: that spreads a deprecated shape to a
+ * The resolution was NOT to add `POST /facts/:id` for symmetry: that spreads a deprecated shape to a
  * second type to make it look tidy. So the gate pinned "chrono has it, the other three do not" and the
  * chrono route was documented as legacy and listed for removal at the next major.
  *
@@ -44,12 +44,12 @@ const postById = (src, router, collection) =>
 describe('POST-as-update exists on no record type', () => {
   it('none of the four carries it, chrono included', () => {
     const found = {
-      memory: postById(code('server/src/api/brain/memories.ts'), 'memoriesRouter', 'memories'),
+      fact: postById(code('server/src/api/brain/facts.ts'), 'memoriesRouter', 'facts'),
       entity: postById(code('server/src/api/brain/entities.ts'), 'entitiesRouter', 'entities'),
       edge: postById(code('server/src/api/brain/edges.ts'), 'edgesRouter', 'edges'),
       chrono: postById(code('server/src/api/brain/chrono.ts'), 'chronoRouter', 'chrono'),
     };
-    assert.deepEqual(found, { memory: false, entity: false, edge: false, chrono: false },
+    assert.deepEqual(found, { fact: false, entity: false, edge: false, chrono: false },
       'POST-as-update was removed in 3.0. Re-adding it anywhere brings back a shape that duplicated the '
       + 'retry-safety design (a client-supplied UUID v4 in the collection POST) while skipping property '
       + 'validation and writing no audit snapshot. Update by PATCH.');
@@ -61,7 +61,7 @@ describe('POST-as-update exists on no record type', () => {
     // the codebase clean no matter what was in it. Three gates in this repo have passed on planted bugs.
     assert.equal(postById("chronoRouter.post('/spaces/:spaceId/chrono/:id', handler)", 'chronoRouter', 'chrono'), true,
       'the detector must still recognise the shape it is looking for');
-    assert.equal(postById("memoriesRouter.post('/spaces/:spaceId/memories', handler)", 'memoriesRouter', 'memories'), false,
+    assert.equal(postById("memoriesRouter.post('/spaces/:spaceId/facts', handler)", 'memoriesRouter', 'facts'), false,
       'a COLLECTION post must not be mistaken for an update-by-id route');
   });
 
@@ -70,7 +70,7 @@ describe('POST-as-update exists on no record type', () => {
     // to load. Asserting the routes that SHOULD be there proves the detector read real source.
     const patchById = (src, router, collection) =>
       new RegExp(`${router}\\.patch\\('/spaces/:spaceId/${collection}/:id'`).test(src);
-    assert.equal(patchById(code('server/src/api/brain/memories.ts'), 'memoriesRouter', 'memories'), true);
+    assert.equal(patchById(code('server/src/api/brain/facts.ts'), 'memoriesRouter', 'facts'), true);
     assert.equal(patchById(code('server/src/api/brain/entities.ts'), 'entitiesRouter', 'entities'), true);
     assert.equal(patchById(code('server/src/api/brain/edges.ts'), 'edgesRouter', 'edges'), true);
     assert.equal(patchById(code('server/src/api/brain/chrono.ts'), 'chronoRouter', 'chrono'), true);

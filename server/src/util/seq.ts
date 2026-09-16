@@ -24,7 +24,7 @@ export async function nextSeq(spaceId: string): Promise<number> {
  * Returns the FIRST seq of the block; the caller owns `[first, first + count - 1]`.
  *
  * The bulk-delete paths write one tombstone per document and used to call `nextSeq()` inside
- * the loop — a sequential round trip per document, so wiping 100k memories cost 100k awaited
+ * the loop — a sequential round trip per document, so wiping 100k facts cost 100k awaited
  * round trips *before the delete even started*. A single `$inc` by `count` reserves the whole
  * range atomically.
  *

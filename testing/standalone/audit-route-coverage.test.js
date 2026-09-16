@@ -143,7 +143,7 @@ describe('Audit coverage — every mutating route must resolve to an operation',
     const mounts = readMounts();
     for (const filePath of apiFiles()) {
       const src = fs.readFileSync(filePath, 'utf8');
-      // e.g.  memoriesRouter.post('/spaces/:spaceId/memories', ...)   (also multi-line)
+      // e.g.  memoriesRouter.post('/spaces/:spaceId/facts', ...)   (also multi-line)
       const re = /(\w+Router)\s*\.\s*(get|post|put|patch|delete)\s*\(\s*'([^']+)'/g;
       let m;
       while ((m = re.exec(src)) !== null) {
@@ -166,8 +166,8 @@ describe('Audit coverage — every mutating route must resolve to an operation',
     // assertion below would vacuously pass. Guard the guard.
     assert.ok(routes.length > 50, `expected to discover many routes, found ${routes.length}`);
     assert.ok(
-      routes.some(r => r.fullPath === '/api/brain/spaces/sample/memories' && r.method === 'POST'),
-      'sanity: POST /api/brain/spaces/:spaceId/memories should have been discovered',
+      routes.some(r => r.fullPath === '/api/brain/spaces/sample/facts' && r.method === 'POST'),
+      'sanity: POST /api/brain/spaces/:spaceId/facts should have been discovered',
     );
   });
 

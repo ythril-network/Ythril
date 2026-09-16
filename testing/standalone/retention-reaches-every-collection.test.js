@@ -34,7 +34,7 @@ const ROOT = process.cwd();
 /** file → the collection literal its TTL calls must pass. */
 const TYPED = {
   'server/src/brain/entities.ts': 'entity',
-  'server/src/brain/memory.ts':   'memory',
+  'server/src/brain/fact.ts':   'fact',
   'server/src/brain/edges.ts':    'edge',
   'server/src/brain/chrono.ts':   'chrono',
 };
@@ -105,7 +105,7 @@ describe('the schema retention tier reaches every typed collection', () => {
     /*
      * The DERIVATION, not a hand-written list — and this assertion got stronger when the list went away.
      *
-     * It used to require the four names in order: `['entity', 'memory', 'edge', 'chrono']`. That could only
+     * It used to require the four names in order: `['entity', 'fact', 'edge', 'chrono']`. That could only
      * ever check the list somebody had already typed, so a fifth knowledge type would leave it green while
      * the new type's records were never stamped — a retention policy an operator set and nothing applied.
      *

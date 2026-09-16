@@ -19,7 +19,7 @@
  *
  * ## It pins TWO different things, and conflating them is the mistake to avoid
  *
- * **1. What must not change.** Three link classes have a reader today — `memory.entityIds`,
+ * **1. What must not change.** Three link classes have a reader today — `fact.entityIds`,
  * `chrono.entityIds`, `file.entityIds`. For those, this file is a characterization test in the strict sense:
  * the exact set reached, from the exact seed, through the real query. Slice 2 must reproduce it. A different
  * answer here is a regression, full stop.
@@ -85,14 +85,14 @@ describe('the 3.x link baseline — what the array walk answered', { skip }, () 
   });
 
   beforeEach(async () => {
-    for (const c of ['entities', 'edges', 'memories', 'chrono', 'files', 'links']) await coll(c).deleteMany({});
+    for (const c of ['entities', 'edges', 'facts', 'chrono', 'files', 'links']) await coll(c).deleteMany({});
 
     // ONE entity, and three records that name it and each other — every one of the six classes, once.
     await coll('entities').insertOne({
       _id: ENT, spaceId: SPACE, name: 'Vault', type: 'service', tags: [], seq: 1,
       createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
     });
-    await coll('memories').insertOne({
+    await coll('facts').insertOne({
       _id: MEM, spaceId: SPACE, fact: 'Vault rotates its credentials nightly', tags: [],
       entityIds: [ENT], seq: 2, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
     });
@@ -136,7 +136,7 @@ describe('the 3.x link baseline — what the array walk answered', { skip }, () 
     // The whole file would pass vacuously against an empty space: every "reaches nothing" assertion in the
     // second half would be true for the wrong reason.
     assert.equal(await coll('entities').countDocuments({}), 1);
-    assert.equal(await coll('memories').countDocuments({}), 1);
+    assert.equal(await coll('facts').countDocuments({}), 1);
     assert.equal(await coll('chrono').countDocuments({}), 1);
     assert.equal(await coll('files').countDocuments({}), 2, 'the file AND one chunk of it');
     assert.equal(await coll('files').countDocuments({ parentFileId: { $exists: true } }), 1,
@@ -175,9 +175,9 @@ describe('the 3.x link baseline — what the array walk answered', { skip }, () 
     // writing it against a real database rather than from the signature.
     assert.deepEqual(await kindsWith(false, false, false), [], 'all off reaches NOTHING from a lone entity');
     assert.deepEqual(await kindsWith(true, false, false), ['chrono'], 'chrono only');
-    assert.deepEqual(await kindsWith(false, true, false), ['memory'], 'memories only');
+    assert.deepEqual(await kindsWith(false, true, false), ['fact'], 'memories only');
     assert.deepEqual(await kindsWith(false, false, true), ['file'], 'files only');
-    assert.deepEqual(await kindsWith(true, true, true), ['chrono', 'file', 'memory'], 'all three');
+    assert.deepEqual(await kindsWith(true, true, true), ['chrono', 'fact', 'file'], 'all three');
   });
 
   it('BASELINE: the START NODE is not in `nodes` — `nodes` is what was REACHED', async () => {
@@ -201,7 +201,7 @@ describe('the 3.x link baseline — what the array walk answered', { skip }, () 
     // endpoint kinds rather than storing it — so this is the string that must not move.
     const res = await edgesMod.traverseGraph([SPACE], ENT, 'both', undefined, 2, 100, true, true, true);
     const labels = [...new Set(res.edges.map(e => e.label))].sort();
-    assert.deepEqual(labels, ['chrono.entityIds', 'file.entityIds', 'memory.entityIds'],
+    assert.deepEqual(labels, ['chrono.entityIds', 'fact.entityIds', 'file.entityIds'],
       `the three derived labels are the contract: got ${JSON.stringify(labels)}`);
   });
 
@@ -218,7 +218,7 @@ describe('the 3.x link baseline — what the array walk answered', { skip }, () 
      */
     const refs = await entitiesMod.findEntityReferences(SPACE, ENT);
     const found = refs.map(r => `${r.type}:${r._id}`).sort();
-    assert.deepEqual(found, [`chrono:${CHR}`, `file:${FILE}`, `memory:${MEM}`],
+    assert.deepEqual(found, [`chrono:${CHR}`, `fact:${MEM}`, `file:${FILE}`],
       `the backlink scan returned ${JSON.stringify(found)} — each of the three collections must be read, and`
       + ' each must return the record from ITS OWN collection');
   });
@@ -228,8 +228,8 @@ describe('the 3.x link baseline — what the array walk answered', { skip }, () 
     const svc = er.entityTypes?.find(t => t.type === 'service');
     assert.ok(svc, `the seeded entity type is absent from the ER model: ${JSON.stringify(er.entityTypes)}`);
     assert.deepEqual(
-      { memories: svc.linkedFrom?.memories ?? 0, chrono: svc.linkedFrom?.chrono ?? 0, files: svc.linkedFrom?.files ?? 0 },
-      { memories: 1, chrono: 1, files: 1 },
+      { facts: svc.linkedFrom?.facts ?? 0, chrono: svc.linkedFrom?.chrono ?? 0, files: svc.linkedFrom?.files ?? 0 },
+      { facts: 1, chrono: 1, files: 1 },
       'one of each names the one entity, and the ER model reports all three',
     );
   });
@@ -292,7 +292,7 @@ describe('the 3.x link baseline — what the array walk answered', { skip }, () 
     // ASKED FOR THE RIGHT KIND. A memory id is not an entity id, so the two-argument call below still
     // correctly answers nothing — the kind is a parameter and not a guess, because a UUID cannot say which
     // collection it belongs to and inferring it would be a scan of four collections hoping for one hit.
-    const refs = await entitiesMod.findEntityReferences(SPACE, MEM, 'memory');
+    const refs = await entitiesMod.findEntityReferences(SPACE, MEM, 'fact');
     assert.deepEqual(refs.map(r => `${r.type}:${r._id}`).sort(), [`chrono:${CHR}`, `file:${FILE}`].sort(),
       'the scan still cannot see what references a memory. Asserted on IDENTITY rather than on a count, '
       + 'because a scan pointed at the wrong collection returns a plausible number.');

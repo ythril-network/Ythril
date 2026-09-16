@@ -10,13 +10,13 @@ Base path: `/api/brain`
 
 ### Route prefix
 
-Every memory endpoint lives under the `/spaces/:spaceId/` prefix — the same prefix used by all other brain resource types (entities, edges, chrono, stats). For example:
+Every fact endpoint lives under the `/spaces/:spaceId/` prefix — the same prefix used by all other brain resource types (entities, edges, chrono, stats). For example:
 
 ```http
-GET /api/brain/spaces/general/memories
+GET /api/brain/spaces/general/facts
 ```
 
-> **Breaking change (2.0):** the old two-segment shape `/api/brain/:spaceId/memories` (e.g. `/api/brain/general/memories`) has been **removed**. It previously duplicated these handlers under a second URL; it now returns `404`. Update any client still using it to the `/spaces/:spaceId/` prefix.
+> **Breaking change (2.0):** the old two-segment shape `/api/brain/:spaceId/facts` (e.g. `/api/brain/general/facts`) has been **removed**. It previously duplicated these handlers under a second URL; it now returns `404`. Update any client still using it to the `/spaces/:spaceId/` prefix.
 
 ## Retry Safety
 
@@ -27,7 +27,7 @@ anything an agent writes is retried.
 | type | retried create | how |
 |---|---|---|
 | **edge** | **idempotent** | the natural key `(from, to, label)` — a retry lands on the same edge |
-| **memory** | **not idempotent** | see below; a blind retry can produce a second record |
+| **fact** | **not idempotent** | see below; a blind retry can produce a second record |
 | **chrono** | **not idempotent** | same |
 | **entity** | **not idempotent** | same; reconcile by `name` if your space treats names as unique |
 
@@ -52,7 +52,7 @@ Use the duplicate check, which is on by default:
 ```js
 // checkDuplicates is TRUE by default: the response carries `similar` when the write matched
 // something already stored, so a retry that landed twice is detectable rather than silent.
-const res = await post('/api/brain/spaces/general/memories', { fact });
+const res = await post('/api/brain/spaces/general/facts', { fact });
 if (res.similar?.length) {
   // The first attempt probably succeeded and its response was lost. Reconcile instead of retrying:
   // read the match, and delete this one if it is a duplicate of it.
@@ -74,7 +74,7 @@ When `id` names a record that exists, the write lands on it:
 - `seq` and `updatedAt` advance, so it is a real write and appears in the audit log and in
   `ythril_brain_write_seq_total`;
 - **tags union and properties shallow-merge**, they do not replace;
-- the webhook event is `memory.updated` / `chrono.updated` / `entity.updated`, **not** the created event.
+- the webhook event is `fact.updated` / `chrono.updated` / `entity.updated`, **not** the created event.
 
 ### Rules
 
@@ -88,10 +88,10 @@ When `id` names a record that exists, the write lands on it:
 
 ---
 
-### Write a Memory
+### Write a Fact
 
 ```http
-POST /api/brain/spaces/:spaceId/memories
+POST /api/brain/spaces/:spaceId/facts
 ```
 
 ```json
@@ -108,10 +108,10 @@ POST /api/brain/spaces/:spaceId/memories
 
 #### A record and its relationships in ONE call
 
-Every create door — `memories`, `chrono`, `entities`, and their MCP twins — takes the relationships the
+Every create door — `facts`, `chrono`, `entities`, and their MCP twins — takes the relationships the
 record needs alongside the record itself. Two fields, and they behave differently on purpose.
 
-**`linkEntities`, `linkMemories`, `linkChronos`, `linkFiles`** create LINK records. A link is unlabelled and
+**`linkEntities`, `linkFacts`, `linkChronos`, `linkFiles`** create LINK records. A link is unlabelled and
 which way it runs follows from the kinds at its ends, so a bare id is the whole thing. `linkFiles` takes
 space-relative paths; the other three take UUIDs.
 
@@ -163,7 +163,7 @@ existence check instead, which is why that check is not optional.
 
 #### A batch that connects what it creates
 
-`POST /api/brain/spaces/:spaceId/bulk` and `save_bulk` take memories, entities, chrono entries and edges in
+`POST /api/brain/spaces/:spaceId/bulk` and `save_bulk` take facts, entities, chrono entries and edges in
 one payload. Until now they could not be joined up: identities are minted server-side, so an id you invent
 for a record in the payload is not the id it gets, and an edge naming it points at nothing.
 
@@ -259,7 +259,7 @@ there is something to say, with the schema violations and the unknown-field rows
 Their accepted-field lists differ from the creates', which is worth knowing before you copy one:
 `deleteFields` is an update field, and `id` is a path parameter rather than a body key.
 
-**Constraints**: `id` optional — a **UUID v4** naming an **existing** record to update. It is not a way to choose an id: identity is server-generated, so an id that matches nothing is ignored rather than adopted, and the record is created with a fresh one. Anything that is not a UUID v4 is a `400`. To carry your own reference, put it in `name` or `description`. See [Retry Safety](#retry-safety). **Constraints**: `fact` max 50 000 chars. `type` optional string — stored on the document and validated against the space's `typeSchemas.memory` allowlist when set. `tags` must be an array of strings. `description` optional string. `properties` optional object; property values should be a string, number, or boolean (unlike the ENTITY endpoints, the memory/edge/chrono write paths don't reject non-primitive values at the API layer — schema validation is the gate when the space defines the property). Every entity door does reject them: create, `PATCH`, `bulk` and both MCP tools, with one message. See [What a PATCH does to tags and properties](04f-write-semantics.md#what-a-patch-does-to-tags-and-properties) for why structure belongs in records and edges. Every id in `entityIds` must be a UUID v4 **and** name an entity that exists — passing a name, a malformed id, or an id that resolves to nothing returns `400` and stores nothing. This is the default; a space can opt out with `meta.strictLinkage: false` (see [Reference integrity](12-admin-api.md#reference-integrity)). `ttlDays` optional — see [Record Expiry (TTL)](04f-write-semantics.md#record-expiry-ttl). `waitForEmbedding` optional boolean — see below.
+**Constraints**: `id` optional — a **UUID v4** naming an **existing** record to update. It is not a way to choose an id: identity is server-generated, so an id that matches nothing is ignored rather than adopted, and the record is created with a fresh one. Anything that is not a UUID v4 is a `400`. To carry your own reference, put it in `name` or `description`. See [Retry Safety](#retry-safety). **Constraints**: `fact` max 50 000 chars. `type` optional string — stored on the document and validated against the space's `typeSchemas.fact` allowlist when set. `tags` must be an array of strings. `description` optional string. `properties` optional object; property values should be a string, number, or boolean (unlike the ENTITY endpoints, the fact/edge/chrono write paths don't reject non-primitive values at the API layer — schema validation is the gate when the space defines the property). Every entity door does reject them: create, `PATCH`, `bulk` and both MCP tools, with one message. See [What a PATCH does to tags and properties](04f-write-semantics.md#what-a-patch-does-to-tags-and-properties) for why structure belongs in records and edges. Every id in `entityIds` must be a UUID v4 **and** name an entity that exists — passing a name, a malformed id, or an id that resolves to nothing returns `400` and stores nothing. This is the default; a space can opt out with `meta.strictLinkage: false` (see [Reference integrity](12-admin-api.md#reference-integrity)). `ttlDays` optional — see [Record Expiry (TTL)](04f-write-semantics.md#record-expiry-ttl). `waitForEmbedding` optional boolean — see below.
 
 #### Catching a near-duplicate at write time (`checkDuplicates`, `checkContradictions`)
 
@@ -271,10 +271,10 @@ A write can tell you it looks like something you already have, before you have t
 
 ```json
 { "_id": "…", "fact": "…",
-  "similar": [ { "_id": "…", "type": "memory", "score": 0.94, "summary": "Deploys freeze Friday 14:00 UTC" } ] }
+  "similar": [ { "_id": "…", "type": "fact", "score": 0.94, "summary": "Deploys freeze Friday 14:00 UTC" } ] }
 ```
 
-Available on `POST …/memories`, `POST …/entities` and `POST …/chrono`, with the same meaning the MCP tools
+Available on `POST …/facts`, `POST …/entities` and `POST …/chrono`, with the same meaning the MCP tools
 have always had.
 
 | field | default on REST | effect |
@@ -302,7 +302,7 @@ have always had.
 A non-boolean flag (or a `dupeThreshold` outside 0–1) is a `400`, never a coercion: `"false"` is truthy, and
 a hygiene check that silently turns itself off is worse than one that was never asked for.
 
-#### When does a memory become searchable? (`waitForEmbedding`)
+#### When does a fact become searchable? (`waitForEmbedding`)
 
 **By default, a moment after the write returns.** The write stores the record and hands the embedding to a
 background queue, so it no longer pays the model's latency. A worker embeds it immediately afterwards, and a
@@ -346,12 +346,12 @@ does not take `waitForEmbedding`; if you need the new vector before you search, 
 Expiry, stamp integrity, `PATCH` semantics for `tags` and `properties`, optimistic concurrency,
 what a read never sends, retiring a record from semantic search, and partial updates with
 `deleteFields` are in **[Write & Read Semantics](04f-write-semantics.md)** — they apply to every
-brain record, not only to memories.
+brain record, not only to facts.
 
-### Get a Memory by ID
+### Get a Fact by ID
 
 ```http
-GET /api/brain/spaces/:spaceId/memories/:id
+GET /api/brain/spaces/:spaceId/facts/:id
 ```
 
 **Response** `200`: Full `MemoryDoc` (same shape as write response).
@@ -382,10 +382,10 @@ GET /api/brain/spaces/:spaceId/memories/:id
 
 ---
 
-### List Memories
+### List Facts
 
 ```http
-GET /api/brain/spaces/:spaceId/memories?limit=100&skip=0
+GET /api/brain/spaces/:spaceId/facts?limit=100&skip=0
 ```
 
 Optional filters:
@@ -395,7 +395,7 @@ Optional filters:
 | `tag` | Filter by tag — case-insensitive **substring** match, so `arch` finds `architecture` |
 | `description` | Filter by description — case-insensitive **substring**, this field ALONE (unlike `search`, which also spans the name/fact/title field) |
 | `properties` | Filter by property **value** (not key) — case-insensitive substring across every value in the bag. Values are stringified first, so `12` finds a numeric `12`. **Cannot use an index** (the keys are user-defined), so it is a bounded collection scan |
-| `entityName` | *(memories, chrono)* Filter by LINKED ENTITY name — case-insensitive substring. Resolved to ids server-side; a name matching nothing returns nothing |
+| `entityName` | *(facts, chrono)* Filter by LINKED ENTITY name — case-insensitive substring. Resolved to ids server-side; a name matching nothing returns nothing |
 | `fromName` / `toName` | *(edges)* Filter the From/To endpoint by entity name, same resolution |
 | `entity` | Filter by linked entity ID |
 | `limit` | Results per page (default 100, max 500) |
@@ -407,7 +407,7 @@ Both `tag` and `entity` can be combined (AND logic). Results are sorted newest-f
 
 ```json
 {
-  "memories": [ ... ],
+  "facts": [ ... ],
   "limit": 100,
   "skip": 0,
   "total": 4831,
@@ -443,27 +443,27 @@ exceeding the bound is a `400` naming the ceiling.
 > a chrono `confidence` all apply to both doors. What a create still demands and an update does not is that
 > a field be PRESENT.
 
-### Delete a Memory
+### Delete a Fact
 
 ```http
-DELETE /api/brain/spaces/:spaceId/memories/:id
+DELETE /api/brain/spaces/:spaceId/facts/:id
 ```
 
 **Response** `204`, or `409` when something still points at it and the space has
 `strictLinkage` on. The body carries `error`, `blocking` (what refused it) and
-`references` (everything pointing at it). A chrono entry listing this memory in `memoryIds`, or a file listing it, blocks the delete.
+`references` (everything pointing at it). A chrono entry listing this fact in `memoryIds`, or a file listing it, blocks the delete.
 
 > **This changed in 4.0 and a running script can hit it.** The same delete always succeeded before, because
 > those link fields had no reader anywhere in the server — the reference was stored and replicated and
-> nothing could see it, so the referring record was quietly left pointing at a memory that no longer
+> nothing could see it, so the referring record was quietly left pointing at a fact that no longer
 > existed. With `strictLinkage` off it still always succeeds.
 
 ---
 
-### Wipe All Memories
+### Wipe All Facts
 
 ```http
-DELETE /api/brain/spaces/:spaceId/memories
+DELETE /api/brain/spaces/:spaceId/facts
 Content-Type: application/json
 
 { "confirm": true }
@@ -485,10 +485,10 @@ A [Server-Sent Events](https://developer.mozilla.org/docs/Web/API/Server-sent_ev
 one message per brain mutation in the space, so a UI can refresh live instead of polling. Each message:
 
 ```text
-data: {"event":"memory.created","id":"a1b2c3d4-..."}
+data: {"event":"fact.created","id":"a1b2c3d4-..."}
 ```
 
-`event` is the change type (`memory.created` / `entity.updated` / `edge.deleted` / `chrono.created` / …,
+`event` is the change type (`fact.created` / `entity.updated` / `edge.deleted` / `chrono.created` / …,
 or `bulk.write` for a batch); `id` is the affected record's ID when applicable. Comments (`:\n\n`) are
 sent on connect and every 30 s as a keep-alive.
 
@@ -515,7 +515,7 @@ es.onmessage = (e) => { const { event, id } = JSON.parse(e.data); /* refresh the
 
 ### Sorting (all brain list endpoints)
 
-`GET` list endpoints — entities, edges, memories, chrono, and files — accept an optional
+`GET` list endpoints — entities, edges, facts, chrono, and files — accept an optional
 `?sort=<field>&dir=asc|desc`. The sort is applied server-side **before** pagination, so it orders the
 entire result set across every page, not just the rows on the page you fetch. `dir` defaults to `desc`
 (newest-first) when omitted.
@@ -527,7 +527,7 @@ fall-back to the default order:
 |------------|-----------------|
 | entities | `createdAt`, `name`, `type` |
 | edges | `createdAt`, `label`, `from`, `to`, `type` |
-| memories | `createdAt`, `type` |
+| facts | `createdAt`, `type` |
 | chrono | `createdAt`, `title`, `startsAt`, `type` |
 | files | `createdAt`, `updatedAt`, `path` |
 
@@ -536,7 +536,7 @@ With no `sort` the endpoint keeps its existing default order (entities: insertio
 
 ### Freetext search (`?search=`)
 
-The entities, edges, memories, chrono and file-meta list endpoints accept an optional `?search=<text>`
+The entities, edges, facts, chrono and file-meta list endpoints accept an optional `?search=<text>`
 that matches a **case-insensitive substring** of the record's text fields, applied server-side before
 pagination (so it spans the whole set, like sort). The value is treated as a **literal** — regex
 metacharacters are escaped, so `a.b` matches the three characters `a.b`, not "a, any char, b".
@@ -545,7 +545,7 @@ metacharacters are escaped, so `a.b` matches the three characters `a.b`, not "a,
 |------------|-----------------|
 | entities | `name`, `description` |
 | edges | `label`, `description` |
-| memories | `fact`, `description` |
+| facts | `fact`, `description` |
 | chrono | `title`, `description` |
 | files | `path`, `description` |
 

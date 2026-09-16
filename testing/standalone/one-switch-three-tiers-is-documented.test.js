@@ -38,11 +38,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 
-let embeddingSuppressed, recordSuppression, mirrorLegacySuppression, parseRecordSuppression;
+let embeddingSuppressed, recordSuppression, parseRecordSuppression;
 let recordNotSuppressedFilter, SUPPRESS_EMBEDDINGS_SCHEMA;
 before(async () => {
   ({
-    embeddingSuppressed, recordSuppression, mirrorLegacySuppression, parseRecordSuppression,
+    embeddingSuppressed, recordSuppression, parseRecordSuppression,
     recordNotSuppressedFilter,
   } = await import('../../server/dist/brain/suppress-embeddings.js'));
   ({ SUPPRESS_EMBEDDINGS_SCHEMA } = await import('../../server/dist/mcp/tools/shared.js'));

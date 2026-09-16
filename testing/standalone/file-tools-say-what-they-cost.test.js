@@ -76,7 +76,7 @@ describe('write_file states that it replaces', () => {
   });
 
   it('warns that embedding is asynchronous here too', () => {
-    // Same trap as `remember`, and a caller who learned it there should find it confirmed here rather than
+    // Same trap as `saveFact`, and a caller who learned it there should find it confirmed here rather than
     // having to assume it generalises.
     assert.match(WRITE, /ASYNCHRONOUS/, 'the write returns before the chunks are searchable');
     assert.match(WRITE, /Rewriting a file resets its embedding/,

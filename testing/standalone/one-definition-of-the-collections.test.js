@@ -65,7 +65,7 @@ const DECLARATIONS = ['server/src/config/types-knowledge.ts', 'client/src/app/co
 const DECLARED_SUBSET = /NOT ALL BRAIN COLLECTIONS/;
 
 /** The five knowledge collections, PLURAL — never the singular type names, which are a different list. */
-const COLS = ['memories', 'entities', 'edges', 'chrono', 'files'];
+const COLS = ['facts', 'entities', 'edges', 'chrono', 'files'];
 
 /**
  * How many of the five a run must name before it counts as writing the list out. **FOUR, not five.**
@@ -106,7 +106,7 @@ const STRING_PRECEDES = /['"]\s*,\s*$/;
  *
  * Two things make this structural rather than a count of names:
  *
- * **The plurals only.** `'entity', 'memory', 'edge', 'chrono'` is the TYPE list — a different enumeration
+ * **The plurals only.** `'entity', 'fact', 'edge', 'chrono'` is the TYPE list — a different enumeration
  * with its own gate — and a check that conflated them would report one as debt for looking like the other.
  *
  * **A run that continues into other strings is a PREFIX, not a list.** `SPACE_COLLECTIONS` writes all nine
@@ -119,7 +119,7 @@ const STRING_PRECEDES = /['"]\s*,\s*$/;
 function enumerationsIn(src) {
   const clean = stripComments(src);
   const hits = [];
-  const run = /(['"])(?:memories|entities|edges|chrono|files)\1(?:\s*[,|]\s*(['"])(?:memories|entities|edges|chrono|files)\2)+/g;
+  const run = /(['"])(?:facts|entities|edges|chrono|files)\1(?:\s*[,|]\s*(['"])(?:facts|entities|edges|chrono|files)\2)+/g;
   for (const m of clean.matchAll(run)) {
     const named = COLS.filter(c => m[0].includes(`'${c}'`) || m[0].includes(`"${c}"`));
     if (named.length < NEAR_COMPLETE) continue;
@@ -207,7 +207,7 @@ describe('a collection list derives from the one tuple, or declares itself a sub
     // The false-positive floor, and it is a real shape: `SPACE_COLLECTIONS` opens with these four and
     // continues into `tombstones`, `conflicts` and the two candidate queues. A gate that reported it would
     // be tuned away rather than fixed, which is how a signature list starts.
-    const nine = "const SPACE_COLLECTIONS = ['memories', 'entities', 'edges', 'chrono', 'tombstones', 'conflicts', 'files', 'dupe_candidates', 'contradiction_candidates'] as const;";
+    const nine = "const SPACE_COLLECTIONS = ['facts', 'entities', 'edges', 'chrono', 'tombstones', 'conflicts', 'files', 'dupe_candidates', 'contradiction_candidates'] as const;";
     assert.deepEqual(enumerationsIn(nine), [], 'a nine-member list must not read as a four-member subset');
     assert.deepEqual(enumerationsIn(readFileSync('server/src/spaces/_shared.ts', 'utf8')), [],
       'and the real file it was taken from must stay quiet for the same reason');
@@ -216,13 +216,13 @@ describe('a collection list derives from the one tuple, or declares itself a sub
   it('the detector actually detects', () => {
     // Mutation-proof for the threshold and the plurals both: a detector that never fires passes everything,
     // and one that cannot tell four from three would report `LINK_SCANNED` as debt.
-    assert.equal(enumerationsIn("x = ['memories', 'entities', 'edges', 'chrono'];").length, 1, 'four is the line');
-    assert.equal(enumerationsIn("x = ['memories', 'entities', 'edges', 'chrono', 'files'];").length, 1, 'five too');
-    assert.equal(enumerationsIn("t: 'memories' | 'entities' | 'edges' | 'chrono';").length, 1, 'a union counts');
-    assert.equal(enumerationsIn("x = ['memories', 'chrono', 'files'];").length, 0, 'three is a different concept');
-    assert.equal(enumerationsIn("x = ['entity', 'memory', 'edge', 'chrono', 'file'];").length, 0,
+    assert.equal(enumerationsIn("x = ['facts', 'entities', 'edges', 'chrono'];").length, 1, 'four is the line');
+    assert.equal(enumerationsIn("x = ['facts', 'entities', 'edges', 'chrono', 'files'];").length, 1, 'five too');
+    assert.equal(enumerationsIn("t: 'facts' | 'entities' | 'edges' | 'chrono';").length, 1, 'a union counts');
+    assert.equal(enumerationsIn("x = ['facts', 'chrono', 'files'];").length, 0, 'three is a different concept');
+    assert.equal(enumerationsIn("x = ['entity', 'fact', 'edge', 'chrono', 'file'];").length, 0,
       'the singular TYPE names are a different list with its own gate');
-    assert.equal(enumerationsIn("// ['memories', 'entities', 'edges', 'chrono']").length, 0,
+    assert.equal(enumerationsIn("// ['facts', 'entities', 'edges', 'chrono']").length, 0,
       'a comment explaining the rule must not trip it');
   });
 });

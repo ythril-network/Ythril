@@ -2,7 +2,7 @@
  * Error-state — the counterpart to the empty state, for when a list *failed to
  * load* rather than legitimately having no rows (UX U3).
  *
- * A failed request must never fall through to a friendly "No memories yet…"
+ * A failed request must never fall through to a friendly "No facts yet…"
  * empty state: that tells the user, in the app's own reassuring voice, that
  * their data does not exist — so they won't retry and may conclude the brain
  * was wiped. This renders a visually distinct state (warning icon, "Couldn't
@@ -11,7 +11,7 @@
  *
  * Usage:
  *   @if (loadError()) {
- *     <app-error-state [message]="'brain.error.loadMemories' | transloco"
+ *     <app-error-state [message]="'brain.error.loadFacts' | transloco"
  *                      [reason]="loadError()" (retry)="reload()" />
  *   } @else if (rows().length === 0) { ...empty state... }
  */

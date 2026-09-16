@@ -49,9 +49,9 @@ const jobs = (space) => mongo.col(`${space}_embed_jobs`);
 
 /** A job row as `failEmbedJob` leaves one when the attempt budget is spent. */
 const failedJob = (space, id, over = {}) => ({
-  _id: `memory:${id}`,
+  _id: `fact:${id}`,
   spaceId: space,
-  recordType: 'memory',
+  recordType: 'fact',
   recordId: id,
   status: 'failed',
   attempts: 5,
@@ -94,7 +94,7 @@ describe('failed embed jobs revive once per version (real MongoDB)', { skip }, (
     await jobs(SPACE).insertOne(failedJob(SPACE, 'a'));
     assert.equal(await queue.reviveFailedEmbedJobs([SPACE], '3.1.0'), 1);
 
-    const row = await jobs(SPACE).findOne({ _id: 'memory:a' });
+    const row = await jobs(SPACE).findOne({ _id: 'fact:a' });
     assert.equal(row.status, 'pending', 'a terminal job is never claimed again — it has to go back to pending');
     assert.equal(row.attempts, 0, 'kept at 5 it would fail once and go straight back to terminal');
     assert.equal(row.claimableAfter, null, 'and it must be claimable now, not after the old backoff');
@@ -104,7 +104,7 @@ describe('failed embed jobs revive once per version (real MongoDB)', { skip }, (
   it('KEEPS lastError, so an operator can still see what it died of', async () => {
     await jobs(SPACE).insertOne(failedJob(SPACE, 'a'));
     await queue.reviveFailedEmbedJobs([SPACE], '3.1.0');
-    assert.equal((await jobs(SPACE).findOne({ _id: 'memory:a' })).lastError, 'embedder unreachable');
+    assert.equal((await jobs(SPACE).findOne({ _id: 'fact:a' })).lastError, 'embedder unreachable');
   });
 
   it('does NOT revive the same job twice on the same version', async () => {
@@ -112,15 +112,15 @@ describe('failed embed jobs revive once per version (real MongoDB)', { skip }, (
     // is re-run on every boot for ever — which is the churn a plain boot sweep would have caused.
     await jobs(SPACE).insertOne(failedJob(SPACE, 'a'));
     assert.equal(await queue.reviveFailedEmbedJobs([SPACE], '3.1.0'), 1);
-    await jobs(SPACE).updateOne({ _id: 'memory:a' }, { $set: { status: 'failed', attempts: 5 } });
+    await jobs(SPACE).updateOne({ _id: 'fact:a' }, { $set: { status: 'failed', attempts: 5 } });
     assert.equal(await queue.reviveFailedEmbedJobs([SPACE], '3.1.0'), 0, 'the same version revived it again');
-    assert.equal((await jobs(SPACE).findOne({ _id: 'memory:a' })).status, 'failed');
+    assert.equal((await jobs(SPACE).findOne({ _id: 'fact:a' })).status, 'failed');
   });
 
   it('a NEW version revives it again — that is the owner\'s case', async () => {
     await jobs(SPACE).insertOne(failedJob(SPACE, 'a', { revivedForVersion: '3.1.0' }));
     assert.equal(await queue.reviveFailedEmbedJobs([SPACE], '3.2.0'), 1);
-    assert.equal((await jobs(SPACE).findOne({ _id: 'memory:a' })).status, 'pending');
+    assert.equal((await jobs(SPACE).findOne({ _id: 'fact:a' })).status, 'pending');
   });
 
   it('touches only FAILED jobs — pending and processing are somebody else\'s business', async () => {
@@ -132,10 +132,10 @@ describe('failed embed jobs revive once per version (real MongoDB)', { skip }, (
     ]);
     assert.equal(await queue.reviveFailedEmbedJobs([SPACE], '3.1.0'), 0);
 
-    const pending = await jobs(SPACE).findOne({ _id: 'memory:p' });
+    const pending = await jobs(SPACE).findOne({ _id: 'fact:p' });
     assert.equal(pending.attempts, 2, 'a pending job kept its attempt count');
     assert.equal(pending.claimableAfter, '2999-01-01T00:00:00.000Z', 'and its backoff');
-    assert.equal((await jobs(SPACE).findOne({ _id: 'memory:w' })).status, 'processing');
+    assert.equal((await jobs(SPACE).findOne({ _id: 'fact:w' })).status, 'processing');
   });
 
   it('sweeps every space it is given, and counts across all of them', async () => {

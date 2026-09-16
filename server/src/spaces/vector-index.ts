@@ -29,19 +29,19 @@ import type { KnowledgeType } from '../config/types.js';
  * So this list is written out rather than derived, on purpose. Deriving it would give a link collection a
  * vector index it must never have, which is a defect a refactor would have introduced silently.
  */
-export const VECTOR_INDEXED_COLLECTIONS = ['memories', 'entities', 'edges', 'chrono', 'files'] as const;
+export const VECTOR_INDEXED_COLLECTIONS = ['facts', 'entities', 'edges', 'chrono', 'files'] as const;
 export type VectorIndexedCollection = typeof VECTOR_INDEXED_COLLECTIONS[number];
 
 /**
  * The fixed (non-`properties`) fields declared as `$vectorSearch` filter fields per collection, so
  * that a recall filtering on them uses native ANN pre-filtering instead of the exhaustive ENN scan
  * (P6). Only fields that (a) exist on the document type and (b) are reachable through the recall
- * filter API (`ALLOWED_FILTER_KEY_PREFIXES` in brain/memory.ts: tags/type/name/status/label) are
+ * filter API (`ALLOWED_FILTER_KEY_PREFIXES` in brain/fact.ts: tags/type/name/status/label) are
  * listed. `properties.<key>` paths are added dynamically from the space's schema — see
  * `deriveVectorFilterFields`.
  */
 const FIXED_VECTOR_FILTER_FIELDS: Record<VectorIndexedCollection, string[]> = {
-  memories: ['tags', 'type'],
+  facts: ['tags', 'type'],
   entities: ['tags', 'type', 'name'],
   edges: ['tags', 'type', 'label'],
   chrono: ['tags', 'type', 'status'],
@@ -50,7 +50,7 @@ const FIXED_VECTOR_FILTER_FIELDS: Record<VectorIndexedCollection, string[]> = {
 
 /** Map a per-space collection suffix to the KnowledgeType whose schema governs its `properties`. */
 const COLLECTION_KNOWLEDGE_TYPE: Partial<Record<VectorIndexedCollection, KnowledgeType>> = {
-  memories: 'memory',
+  facts: 'fact',
   entities: 'entity',
   edges: 'edge',
   chrono: 'chrono',
@@ -199,7 +199,7 @@ export async function ensureVectorSearchIndex(
     indexes = await coll.listSearchIndexes().toArray() as typeof indexes;
   } catch (err) {
     // Search answered the probe but not for this collection — report it against the collection that
-    // actually failed. The old message hardcoded `_memories` for all five, which sent the diagnosis
+    // actually failed. The old message hardcoded `_facts` for all five, which sent the diagnosis
     // in the wrong direction for a long time.
     log.warn(
       `Could not list search indexes for ${spaceId}_${collectionSuffix}: ${err instanceof Error ? err.message : String(err)}. ` +
@@ -701,7 +701,7 @@ export async function waitForSpaceIndexesReady(
   // Poll CONCURRENTLY. These builds run independently inside the database, so waiting on them one after
   // another only adds up their timeouts: five collections at a 60s ceiling each meant a space could sit
   // at indexStatus='building' for five minutes when every index was in fact ready in seconds. That was
-  // masked for as long as only `memories` was ever indexed — fixing that made the serial wait visible.
+  // masked for as long as only `facts` was ever indexed — fixing that made the serial wait visible.
   const required = VECTOR_INDEXED_COLLECTIONS.map(suffix =>
     // The five text indexes: path `embedding`, at the configured embedding width.
     pollVectorIndexReady(spaceId, suffix, `${spaceId}_${suffix}_embedding`,

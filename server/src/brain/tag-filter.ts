@@ -9,7 +9,7 @@ import { escapeRegex } from '../util/redos.js';
  *
  * Worse, the five record types disagreed about what a tag match even was:
  *
- *   memories   `{ $regex: '^tag$', $options: 'i' }`   exact, case-INsensitive
+ *   facts   `{ $regex: '^tag$', $options: 'i' }`   exact, case-INsensitive
  *   entities   `filter.tags = tag`                    exact, case-sensitive
  *   file-meta  `filter.tags = tag`                    exact, case-sensitive
  *   chrono     `{ $all: [tag] }`                      exact, case-sensitive

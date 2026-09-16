@@ -1,8 +1,8 @@
 /**
  * MCP `save_bulk` tool — batch upsert across knowledge types in one call.
  *
- * A cross-type writer (memories + entities + edges + chrono), so it lives in its own file rather
- * than with memory CRUD. The actual batch logic is the shared `bulkWrite()` in `brain/bulk.ts`
+ * A cross-type writer (facts + entities + edges + chrono), so it lives in its own file rather
+ * than with fact CRUD. The actual batch logic is the shared `bulkWrite()` in `brain/bulk.ts`
  * (one source of truth with the REST `POST /bulk` route); this tool only coerces input, fires the
  * single `bulk.write` summary webhook, and shapes the response.
  */
@@ -18,7 +18,7 @@ import { refDeclareSchema } from '../../brain/batch-refs.js';
 
 export const save_bulkTool: ToolHandler = {
   name: 'save_bulk',
-  description: 'Write memories, entities, edges and chrono entries in one call. Every array is optional; send '
+  description: 'Write facts, entities, edges and chrono entries in one call. Every array is optional; send '
     + 'any combination.\n\n'
     + 'A SUCCESSFUL CALL MAY HAVE WRITTEN NOTHING. This is partial-success by design: a bad item is reported '
     + 'in `errors` and the rest of the batch proceeds, so there is no failure status to check. ALWAYS read '
@@ -27,7 +27,7 @@ export const save_bulkTool: ToolHandler = {
     + 'proof of success is the mistake this tool most invites.\n\n'
     + 'ANYTHING BEYOND 500 PER COLLECTION IS SILENTLY DROPPED. Not an error, not a warning, and not counted in '
     + '`errors` — items 501 and beyond are discarded before validation, so `inserted` plus `errors` can be far '
-    + 'short of what you sent and nothing in the reply says so. The cap is per collection, so 500 memories AND '
+    + 'short of what you sent and nothing in the reply says so. The cap is per collection, so 500 facts AND '
     + '500 entities in one call is fine. Split larger imports yourself and check the counts add up.\n\n'
     + 'REFERENCES ARE CHECKED FOR SHAPE, AND FOR EXISTENCE ONLY ON A CONVERTED SPACE — which differs from the '
     + 'single-record tools, where existence is always checked. On a space using link records a reference that '
@@ -36,12 +36,12 @@ export const save_bulkTool: ToolHandler = {
     + 'On an UNCONVERTED space this door can therefore still write a dangling link the single-record path '
     + 'would have refused — that is the deliberate trade for an import whose records arrive in an order '
     + 'nobody controls. Verify with `traverse` after a large import if linkage matters.\n\n'
-    + 'ORDER IS memories → entities → chrono → edges, EDGES LAST so that a `$ref` can name a record of any '
+    + 'ORDER IS facts → entities → chrono → edges, EDGES LAST so that a `$ref` can name a record of any '
     + 'kind. It also matters for records this call UPDATES: an entity '
-    + 'addressed by an id that already exists is written before an edge in the same batch reads it. Memories go '
-    + 'first of all, so a memory\'s `entityIds` cannot name an entity from this same call under any ordering.\n\n'
+    + 'addressed by an id that already exists is written before an edge in the same batch reads it. Facts go '
+    + 'first of all, so a fact\'s `entityIds` cannot name an entity from this same call under any ordering.\n\n'
     + 'A RECORD THIS CALL CREATES IS REFERENCED BY A CORRELATION KEY. Put `"$ref": "post-1"` on an item and later items name it as `"$ref:post-1"` — in an edge\'s `from`/`to`, or in a link field. The key is scoped to this call, is never stored, and is NOT the id: identities are still minted here. Every record array is written before any edge, so an edge can reference any record in the payload; within one array a reference cannot point FORWARDS. A key used twice is refused rather than resolved, and a stated kind that disagrees with the array the key was declared in is refused too — the array decides. A LITERAL id you invent is still not the id the record gets, and still points at nothing.\n\n'
-    + 'PARAMETERS: each collection takes the same fields as its single-record tool — `memories` as `remember`, '
+    + 'PARAMETERS: each collection takes the same fields as its single-record tool — `facts` as `saveFact`, '
     + '`entities` as `save_entity`, `edges` as `save_edge`, `chrono` as `save_chrono` — including '
     + '`ttlDays` per item. `targetSpace` is required when `space` is a proxy.\n\n'
     + 'RESPONSE: `inserted` (a count per collection) and `errors` (one entry per rejected item, with its '
@@ -55,36 +55,36 @@ export const save_bulkTool: ToolHandler = {
           type: 'object',
           properties: {
             space: s.requiredSpace,
-            memories: {
+            facts: {
               type: 'array',
               maxItems: 500,
-              description: 'Memory entries to insert (max 500; excess entries are dropped). Same fields as the `remember` tool.',
+              description: 'Fact entries to insert (max 500; excess entries are dropped). Same fields as the `saveFact` tool.',
               items: {
                 type: 'object',
                 additionalProperties: false,
                 properties: {
-                  '$ref': refDeclareSchema('memory'),
-                  fact:        { type: 'string', minLength: 1, maxLength: 50000, description: 'The fact or memory to store (1–50 000 characters).' },
+                  '$ref': refDeclareSchema('fact'),
+                  fact:        { type: 'string', minLength: 1, maxLength: 50000, description: 'The fact or fact to store (1–50 000 characters).' },
                   tags:        {
                     type: 'array', items: { type: 'string' },
-                    description: 'Categorisation tags. Every memory item is an INSERT, so there is nothing '
+                    description: 'Categorisation tags. Every fact item is an INSERT, so there is nothing '
                       + 'to merge with. They are embedded along with the fact, so a tag affects ranking as '
                       + 'well as being an exact filter.',
                   },
                   entityIds:   {
                     type: 'array', items: { type: 'string' },
-                    description: 'Entity IDs to link this memory to. NEVER checked for existence on this '
-                      + 'door — `remember` refuses an id that does not resolve, and here a well-formed UUID '
+                    description: 'Entity IDs to link this fact to. NEVER checked for existence on this '
+                      + 'door — `saveFact` refuses an id that does not resolve, and here a well-formed UUID '
                       + 'pointing at nothing is stored as a dangling link. The ids have to come from an '
-                      + 'EARLIER call: memories are written before the entities in this same payload, and an '
+                      + 'EARLIER call: facts are written before the entities in this same payload, and an '
                       + 'id you invent for one of them is not the id it gets — identities are minted here.',
                   },
                   description: {
                     type: 'string',
                     description: 'Optional prose context or rationale. Embedded with the fact, so it widens '
-                      + 'what a `recall` can match this memory on.',
+                      + 'what a `recall` can match this fact on.',
                   },
-                  type:        { type: 'string', description: 'Optional memory type — selects the per-type schema used to validate `properties`.' },
+                  type:        { type: 'string', description: 'Optional fact type — selects the per-type schema used to validate `properties`.' },
                   properties:  {
                     type: 'object',
                     description: 'Key-value metadata. String, number or boolean values only — a nested '
@@ -220,7 +220,7 @@ export const save_bulkTool: ToolHandler = {
                   description: { type: 'string', description: 'Optional longer description of the entry.' },
                   tags:        { type: 'array', items: { type: 'string' }, description: 'Categorisation tags. Every chrono item is an INSERT, so there is nothing to merge with.' },
                   entityIds:   { type: 'array', items: { type: 'string' }, description: 'Entity IDs this entry concerns — what lets `traverse` reach it from that entity. NEVER checked for existence on this door, and checked for UUID shape only when the space uses strict linkage, so a well-formed id pointing at nothing is stored as a dangling link.' },
-                  memoryIds:   { type: 'array', items: { type: 'string' }, description: 'Memory IDs this entry relates to. Shape-checked under strict linkage only, and never for existence — like `entityIds`.' },
+                  memoryIds:   { type: 'array', items: { type: 'string' }, description: 'Fact IDs this entry relates to. Shape-checked under strict linkage only, and never for existence — like `entityIds`.' },
                   properties:  {
                     type: 'object',
                     description: 'Key-value metadata (string, number or boolean values only), validated '
@@ -244,7 +244,7 @@ export const save_bulkTool: ToolHandler = {
     const ts = wt.target;
 
     const result = await bulkWrite(ts, {
-      memories: a['memories'], entities: a['entities'], edges: a['edges'], chrono: a['chrono'],
+      facts: a['facts'], entities: a['entities'], edges: a['edges'], chrono: a['chrono'],
       // `F-25`: who wrote it, for the conversion pre-flight.
       actor: ctx.actor,
     });

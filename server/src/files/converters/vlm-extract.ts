@@ -45,7 +45,7 @@ function explainMissing(vlm: VlmEndpoint, verify: VlmEndpoint, render: boolean):
  *
  * 200 rather than "no limit": every page is a VLM call, so the budget is the cost ceiling for a single
  * upload. Four times the old effective limit of 50, which was never a budget at all — it was one render
- * call's memory bound doing double duty as the document's reading limit.
+ * call's fact bound doing double duty as the document's reading limit.
  */
 const DEFAULT_MAX_TOTAL_PAGES = 200;
 
@@ -108,7 +108,7 @@ export async function vlmExtractDocument(
     // ── Segmented render + transcribe ─────────────────────────────────────────────────────────────
     //
     // A long document used to become its first `maxPages` pages, full stop. `maxPages` bounds ONE render
-    // call — memory and latency per call — which is a real constraint and is kept; what it should never
+    // call — fact and latency per call — which is a real constraint and is kept; what it should never
     // have been is the limit on how much of the document is read. The sidecars now take a `startPage`, so
     // the work is walked in windows of `maxPages` instead.
     //
@@ -126,7 +126,7 @@ export async function vlmExtractDocument(
     let pagesDone = 0;
     let segmented = false;
     // Kept ONLY for the single-window case, so the consensus pass below can re-read the same images.
-    // Holding every window's buffers would defeat the per-call memory bound that `maxPages` exists for.
+    // Holding every window's buffers would defeat the per-call fact bound that `maxPages` exists for.
     let firstWindowPages: Buffer[] = [];
 
     for (let startPage = 0; pagesRead < pageBudget; startPage += windowSize) {

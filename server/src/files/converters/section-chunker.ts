@@ -21,13 +21,13 @@
  *  - **Recall.** One vector averaged across ~4,500 words is not semantically sharp about anything in it. The
  *    reporter searched their own ingested docs for a retention feature, got unrelated smaller files three
  *    times, and was one step from concluding the feature did not exist. It did — in one of the coarse files.
- *  - **Memory.** Self-attention is quadratic in sequence length: ~7,000 tokens is ~196 MiB of attention
+ *  - **Fact.** Self-attention is quadratic in sequence length: ~7,000 tokens is ~196 MiB of attention
  *    scores *per head* in fp32, so one embed of one chunk cost gigabytes. Their instance went 3.98 → 9.996 GiB
  *    inside a single 15-second scrape window and was OOMKilled at a 16 GiB limit, then sat at 15.40 GiB at
  *    idle because the ONNX arena allocator keeps its high-water mark. Lowering embed concurrency had made it
  *    *worse*, because the peak is set by the size of one chunk, not by how many run at once.
  *
- * So the cap is a retrieval-quality rule that happens to also be the memory fix. `embed()` truncates as well —
+ * So the cap is a retrieval-quality rule that happens to also be the fact fix. `embed()` truncates as well —
  * belt and braces, because a chunk that slips through must never cost gigabytes again.
  */
 

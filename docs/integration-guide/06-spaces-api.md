@@ -17,7 +17,7 @@ Returns spaces accessible to the requesting token. Tokens with a `spaces`
 scope restriction only receive spaces in their allowlist; full-access tokens
 receive all spaces.
 
-Add `?counts=true` to include per-space document counts (memories, entities,
+Add `?counts=true` to include per-space document counts (facts, entities,
 edges, chrono). Useful for agents deciding which spaces are populated and
 worth querying.
 
@@ -31,7 +31,7 @@ worth querying.
       "label": "General",
       "builtIn": true,
       "description": "Default workspace space.",
-      "counts": { "memories": 42, "entities": 10, "edges": 5, "chrono": 3 },
+      "counts": { "facts": 42, "entities": 10, "edges": 5, "chrono": 3 },
       "usageGiB": 0.05
     }
   ],
@@ -166,12 +166,12 @@ POST /api/spaces
 - Creating the proxy is admin-gated (like any space creation); the create call validates only that each member exists and is not itself a proxy — it does **not** separately check the caller's space allowlist. (Per-space access is enforced at read/write time on the proxy's member spaces.)
 - The single-element wildcard `"proxyFor": ["*"]` creates an **all-spaces** proxy: it aggregates over every real space the caller can access (resolved dynamically), skipping per-member validation. The wildcard cannot be mixed with explicit member IDs.
 
-**Read operations** (GET memories, entities, edges, files, recall, query) aggregate results across all member spaces transparently.
+**Read operations** (GET facts, entities, edges, files, recall, query) aggregate results across all member spaces transparently.
 
-**Write operations** (POST memories, write_file, upsert_entity, etc.) require a `targetSpace` query parameter:
+**Write operations** (POST facts, write_file, upsert_entity, etc.) require a `targetSpace` query parameter:
 
 ```http
-POST /api/brain/spaces/all-research/memories?targetSpace=bio-research
+POST /api/brain/spaces/all-research/facts?targetSpace=bio-research
 ```
 
 ```json
@@ -198,7 +198,7 @@ Authorization: Bearer <admin-token>
 
 The rename atomically:
 
-- Moves all MongoDB collections (memories, entities, edges, chrono, tombstones, files, etc.) to the new prefix.
+- Moves all MongoDB collections (facts, entities, edges, chrono, tombstones, files, etc.) to the new prefix.
 - Moves the file directory from `/data/files/{old}` to `/data/files/{new}`.
 - Updates all network `spaces[]` arrays and adds a `spaceMap` entry so peers continue syncing.
 - Updates all token `spaces[]` scopes that referenced the old ID.
@@ -236,7 +236,7 @@ than failing the write, which leaves exactly this state.
 
 | Field | Description |
 |-------|-------------|
-| `kinds` | Narrow the sweep: any of `memory`, `entity`, `edge`, `chrono`, `file`. Omitted means all five. |
+| `kinds` | Narrow the sweep: any of `fact`, `entity`, `edge`, `chrono`, `file`. Omitted means all five. |
 | `limit` | Maximum records to queue in one call. Default 5000, maximum 50000. |
 
 An unknown field is a `400` rather than being ignored — a caller who meant to narrow the sweep and silently got
@@ -249,7 +249,7 @@ all of it would be worse off than one who got an error.
   "spaceId": "research",
   "enqueued": 1284,
   "skippedSuppressed": 0,
-  "byKind": { "memory": 900, "entity": 384 },
+  "byKind": { "fact": 900, "entity": 384 },
   "remaining": 0,
   "truncated": false
 }
@@ -436,7 +436,7 @@ A single space has no endpoint of its own: read it from the listing above, or re
 PATCH /api/spaces/flows
 { "typeSchemasMode": "replace",
   "meta": { "typeSchemas": { "entity": { "flow": { "namingPattern": "^f-" } },
-                             "memory": {}, "edge": {}, "chrono": {} } } }
+                             "fact": {}, "edge": {}, "chrono": {} } } }
 ```
 
 **A regex that cannot be evaluated is refused here, with a `400` naming the construct.** `namingPattern` and
@@ -477,7 +477,7 @@ so nothing was checked`, which points at the schema instead.
         "owns": {},
         "related_to": {}
       },
-      "memory": {
+      "fact": {
         "default": {
           "propertySchemas": {
             "count": { "type": "number", "mergeFn": "sum" }
@@ -568,7 +568,7 @@ type schemas are readable only by tokens that may reach the space.
       "owns": {}
     }
   },
-  "stats": { "memories": 142, "entities": 53, "edges": 87, "chrono": 12, "files": 31 },
+  "stats": { "facts": 142, "entities": 53, "edges": 87, "chrono": 12, "files": 31 },
   "needsReindex": false
 }
 ```
@@ -645,7 +645,7 @@ a number nobody can act on, so every point lost belongs to a named check with a 
 | `checks` | **Only checks that applied.** A check with no denominator is absent, not present with `total: 0` — a question this space cannot be asked is not one it failed. |
 | `id` | Which check. A check id appears **once per knowledge kind** — an unused entity type and an unused edge label are different findings. |
 | `severity` | `warn` = records are already wrong or invisible. `info` = the space is thinner than it declared. |
-| `scope` | `entity` / `memory` / `edge` / `chrono` / `file`, or `space` for a finding about the space itself. |
+| `scope` | `entity` / `fact` / `edge` / `chrono` / `file`, or `space` for a finding about the space itself. |
 | `affected` / `total` | How many of the checked things are wrong, out of how many were checked. |
 | `weight` / `earned` | The check's contribution to the score, and how much of it this space kept. Credit is proportional: 1 unlinked entity in 40 does not score like 40 in 40. |
 | `sample` | At most 5 identifiers — type names, `type.property` keys, or record ids/paths. |

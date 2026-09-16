@@ -133,7 +133,7 @@ export async function upsertFileMeta(
 
 /**
  * Partially update the metadata record for a file (tags, description,
- * entity/chrono/memory linkage, properties).  Re-embeds the record on
+ * entity/chrono/fact linkage, properties).  Re-embeds the record on
  * every successful update.  Returns the updated document, or null if the
  * record does not exist.
  */
@@ -238,7 +238,7 @@ export async function updateFileMeta(
    */
   if (isStrictLinkage(spaceId)) {
     await assertRefsResolve(spaceId, 'entityIds', 'entity', opts.entityIds);
-    await assertRefsResolve(spaceId, 'memoryIds', 'memory', opts.memoryIds);
+    await assertRefsResolve(spaceId, 'memoryIds', 'fact', opts.memoryIds);
     await assertRefsResolve(spaceId, 'chronoIds', 'chrono', opts.chronoIds);
   }
 
@@ -269,9 +269,9 @@ export async function updateFileMeta(
   /**
    * `properties` MERGES, as it does on all four brain record types (X-6).
    *
-   * It replaced until now, and `brain/memory.ts` records what that costs, because the same defect was found
+   * It replaced until now, and `brain/fact.ts` records what that costs, because the same defect was found
    * and fixed there first: *"An agent patching one key silently destroyed every other property on the record,
-   * with no error anywhere."* The sweep that reached memory, chrono, entity and edge did not reach this file,
+   * with no error anywhere."* The sweep that reached fact, chrono, entity and edge did not reach this file,
    * so five tools that take the same-looking arguments had one that behaved differently.
    *
    * Removing a key is `deleteFields`' job below — an absence never means "delete", here or anywhere else.
@@ -344,7 +344,7 @@ export async function updateFileMeta(
       || deleteFieldsPaths?.some(p => p.startsWith('entityIds') || p.startsWith('memoryIds') || p.startsWith('chronoIds'))) {
     await reconcileLinks(spaceId, normalised, 'file', {
       ...(opts.entityIds !== undefined ? { entity: ($set['entityIds'] as string[] | undefined) ?? [] } : {}),
-      ...(opts.memoryIds !== undefined ? { memory: ($set['memoryIds'] as string[] | undefined) ?? [] } : {}),
+      ...(opts.memoryIds !== undefined ? { fact: ($set['memoryIds'] as string[] | undefined) ?? [] } : {}),
       ...(opts.chronoIds !== undefined ? { chrono: ($set['chronoIds'] as string[] | undefined) ?? [] } : {}),
     }, existing.author ?? authorRef());
   }
@@ -521,7 +521,7 @@ export async function renameFileMeta(
   await removeLinksFrom(spaceId, normSrc, 'file');
   await reconcileLinks(spaceId, normDst, 'file', {
     entity: existing.entityIds ?? [],
-    memory: existing.memoryIds ?? [],
+    fact: existing.memoryIds ?? [],
     chrono: existing.chronoIds ?? [],
   }, existing.author ?? authorRef());
 }

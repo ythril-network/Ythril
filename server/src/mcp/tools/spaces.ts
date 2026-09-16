@@ -36,7 +36,7 @@ export const list_spacesTool: ToolHandler = {
       accessibleSpaces.map(async s => {
         const memberIds = memberSpacesWithin(s.id, accessibleSpaceIds);
         const perMember = await Promise.all(memberIds.map(async mid => ({
-          memories: await col(`${mid}_memories`).countDocuments(),
+          facts: await col(`${mid}_facts`).countDocuments(),
           entities: await col(`${mid}_entities`).countDocuments(),
           edges:    await col(`${mid}_edges`).countDocuments(),
           chrono:   await col(`${mid}_chrono`).countDocuments(),
@@ -44,7 +44,7 @@ export const list_spacesTool: ToolHandler = {
         return {
           id: s.id,
           counts: {
-            memories: perMember.reduce((n, c) => n + c.memories, 0),
+            facts: perMember.reduce((n, c) => n + c.facts, 0),
             entities: perMember.reduce((n, c) => n + c.entities, 0),
             edges:    perMember.reduce((n, c) => n + c.edges, 0),
             chrono:   perMember.reduce((n, c) => n + c.chrono, 0),
@@ -52,7 +52,7 @@ export const list_spacesTool: ToolHandler = {
         };
       }),
     );
-    const countsBySpaceId: Record<string, { memories: number; entities: number; edges: number; chrono: number }> = {};
+    const countsBySpaceId: Record<string, { facts: number; entities: number; edges: number; chrono: number }> = {};
     for (const r of spaceCountResults) {
       if (r.status === 'fulfilled') countsBySpaceId[r.value.id] = r.value.counts;
     }
@@ -62,7 +62,7 @@ export const list_spacesTool: ToolHandler = {
       id: s.id,
       label: s.label ?? null,
       purpose: spacePurpose(s) ?? null,
-      counts: countsBySpaceId[s.id] ?? { memories: 0, entities: 0, edges: 0, chrono: 0 },
+      counts: countsBySpaceId[s.id] ?? { facts: 0, entities: 0, edges: 0, chrono: 0 },
       // `null` rather than an omission: a space with no quota is a FACT about that space, and a missing key
       // reads as "this tool does not report quotas" — which is the misunderstanding this whole change fixes.
       maxGiB: s.maxGiB ?? null,
@@ -80,7 +80,7 @@ export const list_spacesTool: ToolHandler = {
 
 export const space_statsTool: ToolHandler = {
   name: 'space_stats',
-  description: 'Return counts of memories, entities, edges, chrono entries and files for one space — the cheapest call there is, and the right way to check whether a space holds anything before spending a recall on it.\n\n'
+  description: 'Return counts of facts, entities, edges, chrono entries and files for one space — the cheapest call there is, and the right way to check whether a space holds anything before spending a recall on it.\n\n'
     + 'These are TOTALS, not search coverage. A record retired from semantic ranking is counted here and cannot be reached by `recall`, and a record written seconds ago is counted before its embedding exists. So a count that exceeds what a search returns is normal and is not evidence of a broken index — `list_embed_jobs` is what answers "is anything still queued or failed".\n\n'
     + 'On a PROXY space the numbers are the members\' totals combined, so a per-member breakdown means asking each member by id.',
   spaceRequired: true,
@@ -96,13 +96,13 @@ export const space_statsTool: ToolHandler = {
     const { callSpace , accessibleSpaceIds } = ctx;
     const memberIds = memberSpacesWithin(callSpace, accessibleSpaceIds);
     const counts = await Promise.all(memberIds.map(async mid => ({
-      memories: await col(`${mid}_memories`).countDocuments(),
+      facts: await col(`${mid}_facts`).countDocuments(),
       entities: await col(`${mid}_entities`).countDocuments(),
       edges: await col(`${mid}_edges`).countDocuments(),
       chrono: await col(`${mid}_chrono`).countDocuments(),
       files: await col(`${mid}_files`).countDocuments(),
     })));
-    const memories = counts.reduce((s, c) => s + c.memories, 0);
+    const facts = counts.reduce((s, c) => s + c.facts, 0);
     const entities = counts.reduce((s, c) => s + c.entities, 0);
     const edges = counts.reduce((s, c) => s + c.edges, 0);
     const chrono = counts.reduce((s, c) => s + c.chrono, 0);
@@ -110,7 +110,7 @@ export const space_statsTool: ToolHandler = {
     return {
       content: [{
         type: 'text' as const,
-        text: JSON.stringify({ spaceId: callSpace, memories, entities, edges, chrono, files }),
+        text: JSON.stringify({ spaceId: callSpace, facts, entities, edges, chrono, files }),
       }],
     };
   },
@@ -175,7 +175,7 @@ export const space_metaTool: ToolHandler = {
     const metaBlock = resolveMetaRefs(metaSpace?.meta ?? {});
     const metaMemberIds = memberSpacesWithin(callSpace, accessibleSpaceIds);
     const metaCounts = await Promise.all(metaMemberIds.map(async mid => ({
-      memories: await col(`${mid}_memories`).countDocuments(),
+      facts: await col(`${mid}_facts`).countDocuments(),
       entities: await col(`${mid}_entities`).countDocuments(),
       edges: await col(`${mid}_edges`).countDocuments(),
       chrono: await col(`${mid}_chrono`).countDocuments(),
@@ -190,7 +190,7 @@ export const space_metaTool: ToolHandler = {
       spaceName: metaSpace?.label ?? callSpace,
       ...metaPublic,
       stats: {
-        memories: metaCounts.reduce((s, c) => s + c.memories, 0),
+        facts: metaCounts.reduce((s, c) => s + c.facts, 0),
         entities: metaCounts.reduce((s, c) => s + c.entities, 0),
         edges: metaCounts.reduce((s, c) => s + c.edges, 0),
         chrono: metaCounts.reduce((s, c) => s + c.chrono, 0),
@@ -367,7 +367,7 @@ async function runSpaceMetaUpdate(
  * ## The report
  *
  * The canary operator listed it among five capabilities a token could HOLD and not exercise, and gave the case that
- * makes it more than ergonomics: they designed an 11-entity / 7-memory / 13-edge / 10-chrono research model with an
+ * makes it more than ergonomics: they designed an 11-entity / 7-fact / 13-edge / 10-chrono research model with an
  * agent, and the agent could not apply it. `space_meta` reads the schema; nothing wrote it. A sixth instance
  * arrived on 2026-08-12 with the sharper consequence — under `validationMode: 'strict'` a stale enum makes every
  * write fail, and a schema write is the documented way out. So this is the recovery path for a wedged space.
@@ -417,7 +417,7 @@ export const schema_updateTool: ToolHandler = {
     + 'not grant this one. '
     + 'MERGES by default: types you do not mention are preserved, so editing one type does not require resending '
     + 'the others. Pass `typeSchemasMode: "replace"` to make the payload authoritative — that is the only way to '
-    + 'DELETE a type. Knowledge-type keys are singular: entity, memory, edge, chrono. A `$ref` to a schema-library '
+    + 'DELETE a type. Knowledge-type keys are singular: entity, fact, edge, chrono. A `$ref` to a schema-library '
     + 'entry that does not exist is refused (422) rather than silently stored as an empty schema. On a space whose '
     + 'network votes on meta changes this opens a vote round instead of writing — the reply says so, and nothing is '
     + 'stored until the round concludes.',
@@ -439,7 +439,7 @@ export const schema_updateTool: ToolHandler = {
       space: s.requiredSpace,
       typeSchemas: {
         type: 'object',
-        description: 'Per knowledge type, a map of type name to its schema. Keys are singular: `entity`, `memory`, '
+        description: 'Per knowledge type, a map of type name to its schema. Keys are singular: `entity`, `fact`, '
           + '`edge`, `chrono`. A schema is either `{"$ref": "library:<name>"}` or an inline definition. Its '
           + 'fields are collection-scoped and the complete, current list is the `TypeSchema` block in '
           + '`docs/integration-guide/06a-schema-api.md` — `namingPattern` (entity), `propertySchemas`, '
@@ -738,7 +738,7 @@ export const delete_space_dataTool: ToolHandler = {
     + 'merely stale, it is unopenable. Wiping `files` also deletes the space\'s file directory on disk and '
     + 'recreates it empty.\n\n'
     + 'PARAMETERS:\n'
-    + '- `types` — a subset of `memories`, `entities`, `edges`, `chrono`, `files`. OMIT IT TO WIPE ALL FIVE; '
+    + '- `types` — a subset of `facts`, `entities`, `edges`, `chrono`, `files`. OMIT IT TO WIPE ALL FIVE; '
     + 'an omitted `types` is not a safe default. A partial wipe clears only the tombstones and review findings '
     + 'belonging to the types you named.\n'
     + '- `space` — the space to empty. On a proxy this is the proxy\'s own id and there is no `targetSpace` '
@@ -794,7 +794,7 @@ export const delete_space_dataTool: ToolHandler = {
     }
 
     const result = await wipeSpace(callSpace, wipeTypes);
-    const summary = `Wiped [${typesLabel}] in space '${callSpace}': ${result.memories} memories, ${result.entities} entities, ${result.edges} edges, ${result.chrono} chrono, ${result.files} files.`;
+    const summary = `Wiped [${typesLabel}] in space '${callSpace}': ${result.facts} facts, ${result.entities} entities, ${result.edges} edges, ${result.chrono} chrono, ${result.files} files.`;
     return {
       content: [{ type: 'text' as const, text: summary }],
     };

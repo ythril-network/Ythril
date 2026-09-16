@@ -31,8 +31,8 @@ import type { RefKind } from '../config/types-knowledge.js';
  *
  * ## The KINDS are part of the identity too (M-3)
  *
- * Since M-1 an endpoint can be an entity, a memory, a chrono entry or a file, and each collection assigns its
- * own UUIDs — so `(X, Y, mentions)` with Y an entity and the same triplet with Y a memory are two
+ * Since M-1 an endpoint can be an entity, a fact, a chrono entry or a file, and each collection assigns its
+ * own UUIDs — so `(X, Y, mentions)` with Y an entity and the same triplet with Y a fact are two
  * relationships. Filtering on the triplet alone, an upsert would read one of them and write the other.
  *
  * **`null` rather than `undefined`, and that distinction is the whole of the filter.** A `undefined` value is

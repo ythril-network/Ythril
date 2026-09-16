@@ -22,12 +22,12 @@ import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
 import { TimestampComponent } from '../../shared/timestamp.component';
 
 /**
- * The Entities record tab, extracted from BrainComponent (A17.9b-6e) following the memories pattern.
+ * The Entities record tab, extracted from BrainComponent (A17.9b-6e) following the facts pattern.
  * Owns the entity create form, the (drawer-superseded) inline edit, delete, and the tab's own
  * entity-search / type-tag filter / pagination + loader. Self-loads via an effect on the `spaceId`
  * input; create/delete emit `mutated` so the shell refreshes tab-count stats.
  *
- * Entity delta from memories: both create AND inline-edit strip empty optional properties via the
+ * Entity delta from facts: both create AND inline-edit strip empty optional properties via the
  * entity schema. Search: the top bar is the semantic-only `<app-entity-search>` finder
  * (`[showModeToggle]="false"`, 2b-iii-d) — typing drives its own dropdown; picking a result feeds the
  * name into the docked Name column freetext filter (the list's plain-text `?search=` path), so there

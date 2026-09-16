@@ -1,7 +1,7 @@
 /**
  * Entity references end to end: a reference that cannot resolve is REFUSED, not stored.
  *
- * The reported defect was that the write paths disagreed — `remember` took entity names and silently
+ * The reported defect was that the write paths disagreed — `saveFact` took entity names and silently
  * stored the memory unlinked when a name did not resolve, `save_edge` demanded a UUID, and several
  * paths (update_memory, file metadata, bulk memory items) validated nothing at all. In a graph store a
  * dropped link is invisible: the write returns success and the gap only shows up later as a traversal
@@ -50,7 +50,7 @@ describe('entity references must resolve', () => {
   });
 
   it('a real entity id links, and the link is readable back', async () => {
-    const r = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/memories`, {
+    const r = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/facts`, {
       fact: 'links to a real entity', entityIds: [entityId],
     });
     assert.equal(r.status, 201, JSON.stringify(r.body));
@@ -58,7 +58,7 @@ describe('entity references must resolve', () => {
   });
 
   it('a NAME where an id belongs is refused, and the error names the value', async () => {
-    const r = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/memories`, {
+    const r = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/facts`, {
       fact: 'links by name', entityIds: [`Traefik-${RUN}`],
     });
     assert.equal(r.status, 400, `expected a refusal, got ${r.status}: ${JSON.stringify(r.body)}`);
@@ -68,7 +68,7 @@ describe('entity references must resolve', () => {
   it('a well-formed UUID that does not exist is refused too', async () => {
     // Format alone was never the point: a syntactically perfect id pointing at nothing stores just
     // as silently as a name did.
-    const r = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/memories`, {
+    const r = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/facts`, {
       fact: 'links to a ghost', entityIds: [NONEXISTENT_UUID],
     });
     assert.equal(r.status, 400, `expected a refusal, got ${r.status}: ${JSON.stringify(r.body)}`);
@@ -77,9 +77,9 @@ describe('entity references must resolve', () => {
   it('nothing was stored by the refused writes', async () => {
     // The point of a hard error is that the record does not exist afterwards. If a refusal still
     // wrote the row (minus the link), we would have swapped a silent unlinked write for a noisy one.
-    const list = await get(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/memories`);
+    const list = await get(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/facts`);
     assert.equal(list.status, 200);
-    const facts = (list.body.memories ?? []).map(m => m.fact);
+    const facts = (list.body.facts ?? []).map(m => m.fact);
     assert.ok(!facts.includes('links by name'), 'a refused write must not be stored');
     assert.ok(!facts.includes('links to a ghost'), 'a refused write must not be stored');
   });
@@ -128,7 +128,7 @@ describe('entity references must resolve', () => {
       const set = await patch(INSTANCES.a, token, `/api/spaces/${lax}`, { meta: { strictLinkage: false } });
       assert.equal(set.status, 200, JSON.stringify(set.body));
 
-      const r = await post(INSTANCES.a, token, `/api/brain/spaces/${lax}/memories`, {
+      const r = await post(INSTANCES.a, token, `/api/brain/spaces/${lax}/facts`, {
         fact: 'forward reference during an import', entityIds: ['created-later'],
       });
       assert.equal(r.status, 201, `the opt-out must still accept a dangling ref: ${JSON.stringify(r.body)}`);

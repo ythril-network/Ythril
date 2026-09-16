@@ -225,11 +225,11 @@ describe('ReviewTabComponent', () => {
   // Owner's call: the sub-tabs stay KINDS OF FINDING; record type is a filter INSIDE them. Splitting by
   // type as well would produce a duplicates×type / contradictions×type matrix that grows badly.
   describe('record-type filter', () => {
-    const mixed = [rec({ id: 'd1', type: 'entity' }), rec({ id: 'd2', type: 'memory' }), rec({ id: 'd3', type: 'chrono' })];
+    const mixed = [rec({ id: 'd1', type: 'entity' }), rec({ id: 'd2', type: 'fact' }), rec({ id: 'd3', type: 'chrono' })];
 
     it('offers only the types actually present, so no choice can yield nothing', () => {
       const { c } = setup({ listDuplicates: () => of({ duplicates: mixed }) });
-      expect(c.availableTypes()).toEqual(['chrono', 'entity', 'memory']);
+      expect(c.availableTypes()).toEqual(['chrono', 'entity', 'fact']);
     });
 
     it('hides the control entirely when everything is one type', () => {
@@ -245,7 +245,7 @@ describe('ReviewTabComponent', () => {
       // constraining the list — that leaves an empty view with no way to clear it.
       const { f, c } = setup({ listDuplicates: () => of({ duplicates: [rec({ type: 'entity' })] }) });
       expect((f.nativeElement as HTMLElement).querySelector('#review-type-filter')).toBeNull();
-      c.typeFilter.set('memory');
+      c.typeFilter.set('fact');
       f.detectChanges();
       expect(c.showTypeFilter()).toBe(true);
       expect((f.nativeElement as HTMLElement).querySelector('#review-type-filter')).not.toBeNull();
@@ -255,14 +255,14 @@ describe('ReviewTabComponent', () => {
       // Otherwise the <select> holds a value with no matching <option> and renders blank — looking unset
       // while still filtering.
       const { c } = setup({ listDuplicates: () => of({ duplicates: [rec({ type: 'entity' })] }) });
-      c.typeFilter.set('memory');
-      expect(c.typeOptions()).toContain('memory');
+      c.typeFilter.set('fact');
+      expect(c.typeOptions()).toContain('fact');
     });
 
     it('narrows the duplicate list to the chosen type', () => {
       const { c } = setup({ listDuplicates: () => of({ duplicates: mixed }) });
       expect(c.filteredRows().length).toBe(3);
-      c.typeFilter.set('memory');
+      c.typeFilter.set('fact');
       expect(c.filteredRows().map(r => r.id)).toEqual(['d2']);
     });
 
@@ -270,7 +270,7 @@ describe('ReviewTabComponent', () => {
       // One shared signal: "I am looking at chrono findings" should survive a tab switch rather than
       // meaning something different on each side.
       const { c } = setup({}, true, { listContradictions: () => of({ contradictions: [
-        { id: 'c1', type: 'memory' }, { id: 'c2', type: 'chrono' },
+        { id: 'c1', type: 'fact' }, { id: 'c2', type: 'chrono' },
       ] }) });
       c.typeFilter.set('chrono');
       expect(c.conFilteredRows().map((r: { id: string }) => r.id)).toEqual(['c2']);
@@ -278,11 +278,11 @@ describe('ReviewTabComponent', () => {
 
     it('combines with the search box rather than replacing it', () => {
       const { c } = setup({ listDuplicates: () => of({ duplicates: [
-        rec({ id: 'd1', type: 'memory', aSummary: 'kafka broker' }),
-        rec({ id: 'd2', type: 'memory', aSummary: 'postgres tuning' }),
+        rec({ id: 'd1', type: 'fact', aSummary: 'kafka broker' }),
+        rec({ id: 'd2', type: 'fact', aSummary: 'postgres tuning' }),
         rec({ id: 'd3', type: 'entity', aSummary: 'kafka broker' }),
       ] }) });
-      c.typeFilter.set('memory');
+      c.typeFilter.set('fact');
       c.query.set('kafka');
       expect(c.filteredRows().map(r => r.id)).toEqual(['d1']);
     });
@@ -290,7 +290,7 @@ describe('ReviewTabComponent', () => {
     it('says the queue is not empty when only the FILTER is', () => {
       // "Nothing to review" would be a lie — there are findings, just not of this type.
       const { f, c } = setup({ listDuplicates: () => of({ duplicates: mixed }) });
-      c.typeFilter.set('memory');
+      c.typeFilter.set('fact');
       c.query.set('nothing-matches-this');
       f.detectChanges();
       expect(c.filteredRows().length).toBe(0);
@@ -300,7 +300,7 @@ describe('ReviewTabComponent', () => {
     it('warns that filters only cover the first 500 when the server cap was hit', () => {
       // Both list endpoints cap at 500 per space with no pagination. A filter over a truncated set would
       // imply completeness it cannot have.
-      const many = Array.from({ length: 500 }, (_, i) => rec({ id: `d${i}`, type: i % 2 ? 'memory' : 'entity' }));
+      const many = Array.from({ length: 500 }, (_, i) => rec({ id: `d${i}`, type: i % 2 ? 'fact' : 'entity' }));
       const { c } = setup({ listDuplicates: () => of({ duplicates: many }) });
       expect(c.listCapped()).toBe(true);
     });
@@ -434,7 +434,7 @@ describe('ReviewTabComponent', () => {
     });
 
     it('hides the record-type filter: suggestions are findings about the schema, not about records', () => {
-      const { f, c } = setup({ listDuplicates: () => of({ duplicates: [rec(), rec({ id: 'd2', type: 'memory' })] }) });
+      const { f, c } = setup({ listDuplicates: () => of({ duplicates: [rec(), rec({ id: 'd2', type: 'fact' })] }) });
       f.detectChanges();
       expect(c.showTypeFilter()).toBe(true);       // two types on the duplicates side
       c.sub.set('suggestions');
@@ -449,7 +449,7 @@ describe('ReviewTabComponent', () => {
   // disagree on `port`" and "a model thinks these disagree" are the same statement. They are not.
   describe('contradictions sub-view', () => {
     const con = (over: Record<string, unknown> = {}) => ({
-      id: 'a:b', spaceId: 'work', type: 'memory',
+      id: 'a:b', spaceId: 'work', type: 'fact',
       aId: 'a', aSummary: 'runs on 8080', bId: 'b', bSummary: 'does not run on 8080',
       basis: 'structured-field', confidence: 1,
       fields: [{ key: 'port', aValue: 8080, bValue: 9090 }],
@@ -632,7 +632,7 @@ describe('ReviewTabComponent', () => {
       // Edges connect entities, so a memory pair gets the judgement and no link. A reviewer who believes
       // the graph changed when it did not will never go and fix it.
       const { c, toastInfos } = setup({}, true, {
-        listContradictions: () => of({ contradictions: [con({ type: 'memory' })], nliConfigured: true }),
+        listContradictions: () => of({ contradictions: [con({ type: 'fact' })], nliConfigured: true }),
         keepSide: () => of({ status: 'resolved', resolution: 'superseded', note: 'no edge drawn: ...' }),
       });
       c.sub.set('contradictions');

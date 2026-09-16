@@ -56,9 +56,8 @@ describe('the declaration answers for every link class', () => {
      */
     const pairs = LINK_CLASSES.map(c => `${c.kind}.${c.field}`).sort();
     assert.deepEqual(pairs, [
-      'chrono.entityIds', 'chrono.memoryIds',
+      'chrono.entityIds', 'chrono.memoryIds', 'fact.entityIds',
       'file.chronoIds', 'file.entityIds', 'file.memoryIds',
-      'memory.entityIds',
     ], 'the six link classes are the six public array fields, one class each');
 
     for (const c of LINK_CLASSES) {
@@ -128,7 +127,7 @@ describe('the declaration answers for every link class', () => {
     // And it filters on the class's OWN field. Hardcoded `entityIds` here is the bug that would leave the
     // three new classes looking implemented and answering about the wrong column.
     assert.deepEqual(
-      linksToAny('sp', linkClassFor('chrono', 'memory'), ['a']),
+      linksToAny('sp', linkClassFor('chrono', 'fact'), ['a']),
       { spaceId: 'sp', memoryIds: { $in: ['a'] } },
     );
   });
@@ -145,11 +144,11 @@ describe('the declaration answers for every link class', () => {
      * about a chrono entry's memory links got a filter on the wrong column, with no error anywhere and a
      * plausible empty result.
      */
-    assert.equal(linkClassFor('memory', 'memory'), undefined, 'a memory names entities and nothing else');
-    assert.equal(linkClassFor('memory', 'chrono'), undefined);
+    assert.equal(linkClassFor('fact', 'fact'), undefined, 'a memory names entities and nothing else');
+    assert.equal(linkClassFor('fact', 'chrono'), undefined);
     assert.equal(linkClassFor('chrono', 'chrono'), undefined, 'a chrono entry does not name chrono entries');
     assert.equal(linkClassFor('chrono', 'file'), undefined, 'a file names a chrono, never the other way');
-    assert.equal(linkClassFor('chrono', 'memory').field, 'memoryIds', 'and the pair that IS a class resolves');
+    assert.equal(linkClassFor('chrono', 'fact').field, 'memoryIds', 'and the pair that IS a class resolves');
   });
 });
 

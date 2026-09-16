@@ -124,7 +124,7 @@ describe('Space op crash recovery (A5)', () => {
     // Seed one of EVERY collection — a rename reconcile that only moves the
     // memories collection (and drops entities/edges/chrono) would otherwise pass
     // a memories-only check (S8.10).
-    const memR = await post(INSTANCES.a, token, `/api/brain/spaces/${oldId}/memories`, {
+    const memR = await post(INSTANCES.a, token, `/api/brain/spaces/${oldId}/facts`, {
       fact: 'survives an interrupted rename', tags: ['a5-recovery'],
     });
     assert.equal(memR.status, 201, JSON.stringify(memR.body));
@@ -161,9 +161,9 @@ describe('Space op crash recovery (A5)', () => {
     createdSpaceIds.push(newId);
 
     // Reconcile should have renamed EVERY collection to newId and cleared the marker.
-    const newR = await get(INSTANCES.a, token, `/api/brain/spaces/${newId}/memories`);
+    const newR = await get(INSTANCES.a, token, `/api/brain/spaces/${newId}/facts`);
     assert.equal(newR.status, 200, `renamed space should be live: ${newR.status}`);
-    assert.ok(newR.body.memories?.some(m => m._id === memId), 'memory should survive under the new id');
+    assert.ok(newR.body.facts?.some(m => m._id === memId), 'memory should survive under the new id');
 
     const newEnts = await get(INSTANCES.a, token, `/api/brain/spaces/${newId}/entities`);
     assert.equal(newEnts.status, 200, `entities listing should be live under new id: ${newEnts.status}`);
@@ -177,7 +177,7 @@ describe('Space op crash recovery (A5)', () => {
     assert.equal(newChrono.status, 200, `chrono listing should be live under new id: ${newChrono.status}`);
     assert.ok(newChrono.body.chrono?.some(c => c._id === chronoId), 'chrono should survive under the new id');
 
-    const oldR = await get(INSTANCES.a, token, `/api/brain/spaces/${oldId}/memories`);
+    const oldR = await get(INSTANCES.a, token, `/api/brain/spaces/${oldId}/facts`);
     assert.ok(oldR.status === 403 || oldR.status === 404, `old id should be gone, got ${oldR.status}`);
 
     const cfg = readConfig();
@@ -193,7 +193,7 @@ describe('Space op crash recovery (A5)', () => {
 
     const createR = await post(INSTANCES.a, token, '/api/spaces', { id: spaceId, label: 'Recovery Delete' });
     assert.equal(createR.status, 201, JSON.stringify(createR.body));
-    const memR = await post(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/memories`, {
+    const memR = await post(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/facts`, {
       fact: 'about to be deleted', tags: ['a5-recovery'],
     });
     assert.equal(memR.status, 201, JSON.stringify(memR.body));
@@ -204,7 +204,7 @@ describe('Space op crash recovery (A5)', () => {
     });
 
     // Reconcile should have finished the deletion and cleared the marker.
-    const listedR = await get(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/memories`);
+    const listedR = await get(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/facts`);
     assert.ok(listedR.status === 403 || listedR.status === 404, `deleted space should be gone, got ${listedR.status}`);
 
     const cfg = readConfig();

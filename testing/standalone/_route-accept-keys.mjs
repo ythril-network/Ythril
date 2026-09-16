@@ -31,7 +31,7 @@
  *     prefix argument — 117 registrations found against a real 216. Now `_router-mounts.mjs` (`Q-19`).
  *  2. **A row matched to another router's registration**, by asking whether the row's route ended with the
  *     registration's path. Four routers declare `/:id`. Also `_router-mounts.mjs`.
- *  3. **A partial destructure read as the whole contract.** `POST /memories` destructures six keys and then
+ *  3. **A partial destructure read as the whole contract.** `POST /facts` destructures six keys and then
  *     reads the body five more times through helpers, so taking the destructure as authoritative reported
  *     twelve gaps on `remember` alone. The tell: the same two keys missing from EVERY subject is a shared
  *     option behind a helper, never eleven independent defects.

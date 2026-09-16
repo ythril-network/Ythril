@@ -4,7 +4,7 @@
  * Covers:
  *  - No storage config → writes always succeed (quota disabled)
  *  - Files hard limit: POST /api/files returns 507 when limit already exceeded
- *  - Brain hard limit: POST /api/brain/:spaceId/memories returns 507 when limit exceeded
+ *  - Brain hard limit: POST /api/brain/:spaceId/facts returns 507 when limit exceeded
  *  - Soft limit: write succeeds with storageWarning:true in response
  *  - GET /api/spaces includes storage usage when quota configured
  *  - Config restored to original state after each test
@@ -90,7 +90,7 @@ async function uploadFile(t, filePath, content = 'hello quota test') {
 }
 
 async function writeMemory(t, fact = 'quota test memory') {
-  return post(INSTANCES.a, t, '/api/brain/spaces/general/memories', { fact });
+  return post(INSTANCES.a, t, '/api/brain/spaces/general/facts', { fact });
 }
 
 /** Upload one chunk of a Content-Range chunked upload (raw bytes). */
@@ -165,7 +165,7 @@ describe('Storage quota enforcement', () => {
     assert.ok(typeof r.body?.error === 'string', 'error message required');
   });
 
-  it('Brain hard limit exceeded → POST /api/brain/.../memories returns 507', async () => {
+  it('Brain hard limit exceeded → POST /api/brain/.../facts returns 507', async () => {
     await applyConfig({ ...originalConfig, storage: { brain: { softLimitGiB: 0, hardLimitGiB: 0 } } });
 
     const r = await writeMemory(token, `quota-hard-brain-${Date.now()}`);

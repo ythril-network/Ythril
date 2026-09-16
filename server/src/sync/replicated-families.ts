@@ -55,7 +55,7 @@ export type ReplicatedFamily = {
 };
 
 export const REPLICATED_FAMILIES: readonly ReplicatedFamily[] = [
-  { payloadKey: 'memories', collection: 'memories' },
+  { payloadKey: 'facts', collection: 'facts' },
   { payloadKey: 'entities', collection: 'entities' },
   { payloadKey: 'edges', collection: 'edges' },
   { payloadKey: 'chrono', collection: 'chrono' },

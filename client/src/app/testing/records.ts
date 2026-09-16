@@ -1,4 +1,4 @@
-import type { Memory, Entity, Edge, ChronoEntry } from '../core/api.types';
+import type { Fact, Entity, Edge, ChronoEntry } from '../core/api.types';
 
 /**
  * Valid record fixtures for component specs, with the server-assigned fields already filled in.
@@ -7,7 +7,7 @@ import type { Memory, Entity, Edge, ChronoEntry } from '../core/api.types';
  *
  * Every spec that needed a memory wrote `{ _id: 'm1', fact: 'x', tags: [] }` and left out `createdAt`,
  * `updatedAt` and `seq` — the fields the server always sets and the interfaces require. Twenty such literals
- * meant twenty type errors, and worse: adding a required field to `Memory` meant editing twenty specs, so the
+ * meant twenty type errors, and worse: adding a required field to `Fact` meant editing twenty specs, so the
  * pressure was always to loosen the type rather than complete the fixture. `updatedAt` had gone missing from
  * three client interfaces for exactly that reason.
  *
@@ -26,7 +26,7 @@ const CREATED = '2026-01-01T00:00:00.000Z';
 /** A day later, so "created" and "updated" are never interchangeable in an assertion. */
 const UPDATED = '2026-01-02T00:00:00.000Z';
 
-export function aMemory(over: Partial<Memory> = {}): Memory {
+export function aMemory(over: Partial<Fact> = {}): Fact {
   return {
     _id: 'm1',
     fact: 'a fact',

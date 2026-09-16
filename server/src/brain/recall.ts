@@ -7,9 +7,9 @@
 /**
  * Recall engine — semantic search across every knowledge type, plus duplicate detection.
  *
- * Split out of brain/memory.ts (A17.4). Owns recall/recallGlobal/findSimilar/checkDuplicates and
+ * Split out of brain/fact.ts (A17.4). Owns recall/recallGlobal/findSimilar/checkDuplicates and
  * the doc -> RecallResult mapping. Depends on the filter DSL; deliberately does NOT depend on
- * memory CRUD, so the dependency runs one way: memory.ts -> recall.ts -> filter.ts.
+ * fact CRUD, so the dependency runs one way: fact.ts -> recall.ts -> filter.ts.
  */
 import { col, isVectorSearchAvailable, asFilter } from '../db/mongo.js';
 import { NotFoundError } from '../util/errors.js';
@@ -143,7 +143,7 @@ interface RecallBase {
 }
 
 export interface RecallMemory extends RecallBase {
-  type: 'memory';
+  type: 'fact';
   fact: string;
   entityIds?: string[];
 }
@@ -254,7 +254,7 @@ export async function recall(
      *
      * ## Why this is opt-in
      *
-     * The lag is real and measured: an integrator's memory was not returned by `recall` for a distinctive
+     * The lag is real and measured: an integrator's fact was not returned by `recall` for a distinctive
      * nine-word phrase **within 150 seconds** of writing it, while insert-time duplicate detection saw the
      * same record immediately. That asymmetry IS the diagnosis — the vector is on the document the moment it
      * is written, and it is `$vectorSearch`'s index that lags. `exact: true` is not the fix and was measured
@@ -765,7 +765,7 @@ export async function checkDuplicates(
 
 /** Maps knowledge types to their MongoDB collection suffixes. */
 const KNOWLEDGE_COLLECTION: Record<RecallKnowledgeType, string> = {
-  memory: 'memories',
+  fact: 'facts',
   entity: 'entities',
   edge: 'edges',
   chrono: 'chrono',
@@ -785,7 +785,7 @@ function recallProjection(knowledgeType: RecallKnowledgeType): {
 } {
   const commonProject = { _id: 1, spaceId: 1, _knowledgeType: 1, score: 1, createdAt: 1, updatedAt: 1, seq: 1, embeddingModel: 1, matchedText: 1 };
   let typeProject: Record<string, number> = {};
-  if (knowledgeType === 'memory') {
+  if (knowledgeType === 'fact') {
     typeProject = { fact: 1, tags: 1, entityIds: 1, description: 1, properties: 1 };
   } else if (knowledgeType === 'entity') {
     typeProject = { name: 1, type: 1, tags: 1, description: 1, properties: 1 };
@@ -1006,8 +1006,8 @@ function mapToRecallResult(doc: Record<string, unknown>, knowledgeType: RecallKn
     matchedText: doc['matchedText'] as string | undefined,
   };
   switch (knowledgeType) {
-    case 'memory':
-      return { ...base, type: 'memory', fact: doc['fact'] as string, entityIds: doc['entityIds'] as string[] | undefined };
+    case 'fact':
+      return { ...base, type: 'fact', fact: doc['fact'] as string, entityIds: doc['entityIds'] as string[] | undefined };
     case 'entity':
       return { ...base, type: 'entity', name: doc['name'] as string, entityType: doc['type'] as string };
     case 'edge':

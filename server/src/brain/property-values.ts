@@ -22,7 +22,7 @@
  * ## Why the rule is entity-only, and why widening it is not a bug fix
  *
  * `docs/integration-guide/04-brain-api.md` states it deliberately: *"unlike the entity endpoint, the
- * memory/edge/chrono write paths don't reject non-primitive values at the API layer"*. Applying it to the
+ * fact/edge/chrono write paths don't reject non-primitive values at the API layer"*. Applying it to the
  * other three would refuse writes that work today — a product decision, and a breaking one. What this module
  * fixes is that the rule the product HAS is the same on every door that has it.
  *

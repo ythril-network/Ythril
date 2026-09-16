@@ -8,7 +8,7 @@
 // ── Event types ─────────────────────────────────────────────────────────────
 
 export type WebhookEventType =
-  | 'memory.created' | 'memory.updated' | 'memory.deleted'
+  | 'fact.created' | 'fact.updated' | 'fact.deleted'
   | 'entity.created' | 'entity.updated' | 'entity.deleted' | 'entity.merged'
   | 'edge.created'   | 'edge.updated'   | 'edge.deleted'
   | 'chrono.created'  | 'chrono.updated'  | 'chrono.deleted'
@@ -19,7 +19,7 @@ export type WebhookEventType =
   | 'test.ping';
 
 export const ALL_WEBHOOK_EVENTS: ReadonlySet<string> = new Set<WebhookEventType>([
-  'memory.created', 'memory.updated', 'memory.deleted',
+  'fact.created', 'fact.updated', 'fact.deleted',
   'entity.created', 'entity.updated', 'entity.deleted', 'entity.merged',
   'edge.created',   'edge.updated',   'edge.deleted',
   'chrono.created',  'chrono.updated',  'chrono.deleted',

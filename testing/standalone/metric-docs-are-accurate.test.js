@@ -35,15 +35,15 @@ const doc = readFileSync(join(ROOT, 'docs/integration-guide/11-setup-api.md'), '
 /**
  * Rows allowed to describe themselves by pointing at a sibling, with the row they point at.
  *
- * Three of the brain totals say "same estimate as above", which refers to `ythril_memories_total` — and that row
+ * Three of the brain totals say "same estimate as above", which refers to `ythril_facts_total` — and that row
  * does spell out "read from collection metadata, not counted per scrape". That is accurate **by reference**, and
  * forcing each row to repeat it would make the table worse to read. The exemption names the referent so the
  * pointer cannot rot silently.
  */
 const BY_REFERENCE = new Map([
-  ['ythril_entities_total', 'ythril_memories_total'],
-  ['ythril_edges_total', 'ythril_memories_total'],
-  ['ythril_chrono_entries_total', 'ythril_memories_total'],
+  ['ythril_entities_total', 'ythril_facts_total'],
+  ['ythril_edges_total', 'ythril_facts_total'],
+  ['ythril_chrono_entries_total', 'ythril_facts_total'],
   ['ythril_sync_items_pushed_total', 'ythril_sync_items_pulled_total'],
 ]);
 

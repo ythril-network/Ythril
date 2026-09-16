@@ -19,7 +19,7 @@ describe('duplicate scanner — swept types', () => {
     // Logging the same event twice is one of the commonest ways a knowledge base goes redundant, and
     // chrono was in neither scanner's defaults — so nothing was looking for it.
     assert.ok(DEFAULT_TYPES.includes('chrono'));
-    assert.ok(DEFAULT_TYPES.includes('memory') && DEFAULT_TYPES.includes('entity'));
+    assert.ok(DEFAULT_TYPES.includes('fact') && DEFAULT_TYPES.includes('entity'));
   });
 });
 

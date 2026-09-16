@@ -38,7 +38,7 @@ const src = (p) => stripComments(readFileSync(p, 'utf8'));
  * filtered by `spaceId` (so it is keyed by space).
  *
  * A per-space collection is excluded by construction: its name is built with the id in it
- * (`${spaceId}_memories`), so it never matches a constant-name declaration.
+ * (`${spaceId}_facts`), so it never matches a constant-name declaration.
  */
 function instanceWideSpaceKeyed() {
   const out = [];

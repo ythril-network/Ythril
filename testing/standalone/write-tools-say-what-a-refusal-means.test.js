@@ -15,7 +15,7 @@
  * ## The other two facts a write tool must state
  *
  * **What the write DOES to an existing record.** `save_entity` merges and validates the merged form, which
- * is why a partial upsert of a conformant record is accepted when the fragment alone would fail. `remember`
+ * is why a partial upsert of a conformant record is accepted when the fragment alone would fail. `saveFact`
  * is always an insert and deduplicates nothing, so the same fact stored twice competes with itself in recall.
  *
  * **That embedding is asynchronous.** The write returns before the vector exists, so a recall seconds later
@@ -37,7 +37,7 @@ const toolText = (file, name) => {
 };
 
 const UPSERT_ENTITY = toolText('server/src/mcp/tools/entity.ts', 'save_entity');
-const REMEMBER = toolText('server/src/mcp/tools/memory.ts', 'save_fact');
+const REMEMBER = toolText('server/src/mcp/tools/fact.ts', 'save_fact');
 const UPSERT_EDGE = toolText('server/src/mcp/tools/edge.ts', 'save_edge');
 const CREATE_CHRONO = toolText('server/src/mcp/tools/chrono.ts', 'save_chrono');
 
@@ -75,7 +75,7 @@ describe('each says what its write does to what is already there', () => {
 
   it('remember: an insert WITHOUT an id, convergence with one, and duplicates compete', () => {
     // This assertion used to require the bare phrase `Always an INSERT`, and its own failure message said
-    // "there is no id to update" — repeating the claim it was pinning. Both were wrong: `remember` takes an
+    // "there is no id to update" — repeating the claim it was pinning. Both were wrong: `saveFact` takes an
     // optional `id`, and a supplied one that already names a record CONVERGES rather than duplicating,
     // which is the retry-safety contract. A gate written from a description does not catch a wrong
     // description; it cements it. `remember-describes-its-idempotent-path.test.js` holds the prose to the

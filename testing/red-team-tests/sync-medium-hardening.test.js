@@ -146,17 +146,17 @@ describe('M3 — a peer may reach a space only via a network it belongs to', () 
   });
 
   it('peer X (member of net X) may write the shared space via net X', async () => {
-    const r = await syncPost(peerX, `/api/sync/memories?spaceId=${shared}&networkId=${netX}`, memoryDoc(shared, 1));
+    const r = await syncPost(peerX, `/api/sync/facts?spaceId=${shared}&networkId=${netX}`, memoryDoc(shared, 1));
     assert.equal(r.status, 200, `expected 200, got ${r.status}: ${r.text.slice(0, 200)}`);
   });
 
   it('peer X CANNOT use net Y (it is not a member of net Y) for the same space', async () => {
-    const r = await syncPost(peerX, `/api/sync/memories?spaceId=${shared}&networkId=${netY}`, memoryDoc(shared, 1));
+    const r = await syncPost(peerX, `/api/sync/facts?spaceId=${shared}&networkId=${netY}`, memoryDoc(shared, 1));
     assert.equal(r.status, 403, `VULNERABILITY: peer reached a space via a network it is not a member of (${r.status})`);
   });
 
   it('peer X reading the shared space via net Y is refused', async () => {
-    const r = await get(INSTANCES.a, peerX, `/api/sync/memories?spaceId=${shared}&networkId=${netY}`);
+    const r = await get(INSTANCES.a, peerX, `/api/sync/facts?spaceId=${shared}&networkId=${netY}`);
     assert.equal(r.status, 403, `VULNERABILITY: cross-network read via disjoint membership (${r.status})`);
   });
 });
@@ -183,7 +183,7 @@ describe('Directional-write regression — an identified push member is refused'
   });
 
   it('a push-direction member (identified by peerInstanceId) cannot write inbound', async () => {
-    const r = await syncPost(pushPeer, `/api/sync/memories?spaceId=${space}&networkId=${netId}`, memoryDoc(space, 1));
+    const r = await syncPost(pushPeer, `/api/sync/facts?spaceId=${space}&networkId=${netId}`, memoryDoc(space, 1));
     assert.equal(r.status, 403, `VULNERABILITY: push-side member wrote inbound (${r.status})`);
   });
 });
@@ -210,19 +210,19 @@ describe('M5 — implausible seq values are refused', () => {
   });
 
   it('a normal low-seq document is accepted', async () => {
-    const r = await syncPost(peer, `/api/sync/memories?spaceId=${space}&networkId=${netId}`, memoryDoc(space, 5));
+    const r = await syncPost(peer, `/api/sync/facts?spaceId=${space}&networkId=${netId}`, memoryDoc(space, 5));
     assert.equal(r.status, 200, `expected 200, got ${r.status}: ${r.text.slice(0, 200)}`);
   });
 
   it('a document with seq near the 2^50 ceiling is refused', async () => {
     const nearCeiling = 2 ** 50 - 1;
-    const r = await syncPost(peer, `/api/sync/memories?spaceId=${space}&networkId=${netId}`, memoryDoc(space, nearCeiling));
+    const r = await syncPost(peer, `/api/sync/facts?spaceId=${space}&networkId=${netId}`, memoryDoc(space, nearCeiling));
     assert.equal(r.status, 400, `VULNERABILITY: counter-poisoning seq accepted (${r.status})`);
     assert.match(r.text, /ceiling|refused/i);
   });
 
   it('after the poison attempt the counter is intact — a normal doc still lands', async () => {
-    const r = await syncPost(peer, `/api/sync/memories?spaceId=${space}&networkId=${netId}`, memoryDoc(space, 6));
+    const r = await syncPost(peer, `/api/sync/facts?spaceId=${space}&networkId=${netId}`, memoryDoc(space, 6));
     assert.equal(r.status, 200, `space should still accept normal writes after a rejected poison (${r.status})`);
   });
 
@@ -230,13 +230,13 @@ describe('M5 — implausible seq values are refused', () => {
     const good = memoryDoc(space, 7);
     const poison = memoryDoc(space, 2 ** 50 - 5);
     const r = await syncPost(peer, `/api/sync/batch-upsert?spaceId=${space}&networkId=${netId}`, {
-      memories: [good, poison],
+      facts: [good, poison],
     });
     assert.equal(r.status, 200, `batch-upsert should not 500: ${r.text.slice(0, 200)}`);
     // The good doc is retrievable; the poison one is not.
-    const fetchGood = await get(INSTANCES.a, adminToken, `/api/sync/memories/${good._id}?spaceId=${space}`);
+    const fetchGood = await get(INSTANCES.a, adminToken, `/api/sync/facts/${good._id}?spaceId=${space}`);
     assert.equal(fetchGood.status, 200, 'the plausible doc should have been stored');
-    const fetchPoison = await get(INSTANCES.a, adminToken, `/api/sync/memories/${poison._id}?spaceId=${space}`);
+    const fetchPoison = await get(INSTANCES.a, adminToken, `/api/sync/facts/${poison._id}?spaceId=${space}`);
     assert.equal(fetchPoison.status, 404, 'the poison doc must not have been stored');
   });
 });

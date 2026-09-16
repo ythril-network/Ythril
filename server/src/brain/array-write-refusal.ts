@@ -3,7 +3,7 @@
  *
  * ## What it refuses and why
  *
- * The six public array fields (`memory.entityIds`, `chrono.entityIds`/`memoryIds`,
+ * The six public array fields (`fact.entityIds`, `chrono.entityIds`/`memoryIds`,
  * `file.entityIds`/`memoryIds`/`chronoIds`) are the 3.x way of saying one record concerns another. `M-2`
  * replaced them with link records and gave a link a door of its own.
  *
@@ -30,7 +30,7 @@
  * validated these records against ITS schema, and a refusal here does not merely drop one record — it holds
  * the watermark, so the channel stops making progress and the space silently falls behind.
  *
- * **A write that does not MENTION an array.** A `PATCH` of a memory's `fact` on a record still carrying a
+ * **A write that does not MENTION an array.** A `PATCH` of a fact's `fact` on a record still carrying a
  * legacy array must succeed, or every unconverted record in a converted space becomes uneditable. Tightening
  * a rule freezes the records that no longer fit it — the same hazard the schema validator's
  * `introduced` / `preExisting` split exists for.

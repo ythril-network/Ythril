@@ -51,8 +51,8 @@ const ROOT = process.cwd();
  * regex state.
  */
 const ROUTES = {
-  memory: {
-    file: 'server/src/api/brain/memories.ts',
+  fact: {
+    file: 'server/src/api/brain/facts.ts',
     forward: () => /if \(sup\.value !== undefined\) updates\.suppressEmbeddings = sup\.value;/,
   },
   entity: {
@@ -78,7 +78,7 @@ const ROUTES = {
 
 /** The same four types on the MCP surface — the one an agent holds, where the flag reached none of them. */
 const MCP_TOOLS = {
-  memory: 'server/src/mcp/tools/memory.ts',
+  fact: 'server/src/mcp/tools/fact.ts',
   entity: 'server/src/mcp/tools/entity.ts',
   edge: 'server/src/mcp/tools/edge.ts',
   chrono: 'server/src/mcp/tools/chrono.ts',
@@ -169,7 +169,7 @@ describe('suppressEmbeddings is reachable on every surface that can set it', () 
     // Assert the scope before comparing within it. A "3 of 3 consistent" pass over four types is how the
     // reported defect stayed green, and a count cannot tell absent from unlooked.
     const considered = Object.keys(ROUTES).filter(t => /\.patch\(/.test(routeCode(t)));
-    assert.deepEqual(considered.sort(), ['chrono', 'edge', 'entity', 'memory'],
+    assert.deepEqual(considered.sort(), ['chrono', 'edge', 'entity', 'fact'],
       'a brain record type has no PATCH handler, so the consistency check below would compare a short list. '
       + 'Either it lost its update route, or the file moved — decide which, do not let the gate skip it.');
   });

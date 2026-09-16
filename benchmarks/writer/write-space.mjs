@@ -185,7 +185,7 @@ export async function writeSpace({ extraction, ythril, space }) {
  * schema renamed it — the writer would then send an undeclared type and every claim would 400.
  */
 function claimTypeName(entries) {
-  const claim = entries.find(e => e.knowledgeType === 'memory');
-  if (!claim) throw new Error('space/schema.json declares no memory type, so there is nowhere to put a claim');
+  const claim = entries.find(e => e.knowledgeType === 'fact');
+  if (!claim) throw new Error('space/schema.json declares no fact type, so there is nowhere to put a claim');
   return claim.typeName;
 }

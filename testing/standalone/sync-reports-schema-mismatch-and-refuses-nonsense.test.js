@@ -35,7 +35,7 @@ const SHARED = 'server/src/api/sync/_shared.ts';
 const docs = stripComments(readFileSync(DOCS, 'utf8'));
 const shared = stripComments(readFileSync(SHARED, 'utf8'));
 
-const TYPES = ['memory', 'entity', 'edge', 'chrono'];
+const TYPES = ['fact', 'entity', 'edge', 'chrono'];
 
 describe('sync reports a schema mismatch and refuses nonsense', () => {
   it('one helper answers for every record type', () => {

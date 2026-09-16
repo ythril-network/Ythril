@@ -46,7 +46,7 @@ import { trackedSources } from './_sources.mjs';
 const ROOT = process.cwd();
 
 /** The collections that replicate. Named in the contribution guide; this list must match it. */
-const SYNCED = ['memories', 'entities', 'edges', 'chrono', 'files'];
+const SYNCED = ['facts', 'entities', 'edges', 'chrono', 'files'];
 
 /** Mutating Mongo operations. A read never reverts anything, so a boot-time read is fine. */
 const WRITES = ['updateMany', 'updateOne', 'bulkWrite', 'deleteMany', 'deleteOne', 'insertMany', 'insertOne',
@@ -91,10 +91,10 @@ function functions(src) {
  * Does this function body write to a synced collection? Returns the offending fragment, or null.
  *
  * A WINDOW, converted, and the bound is the VARIABLE the open declares rather than 80 characters of proximity.
- * The old pattern found `_memories\`` and looked 80 characters ahead for a mutating call, which reaches a write
+ * The old pattern found `_facts\`` and looked 80 characters ahead for a mutating call, which reaches a write
  * on a DIFFERENT collection opened just after it, and misses the ordinary two-statement shape entirely:
  *
- *     const memoryColl = col<MemoryDoc>(`${spaceId}_memories`);
+ *     const memoryColl = col<FactDoc>(`${spaceId}_facts`);
  *     …
  *     await memoryColl.updateMany(filter, patch);
  *

@@ -73,7 +73,7 @@ Click the gear icon on any space row to open its settings panel. Changes save an
 
 **Settings tab:** Update the display name, purpose, usage notes for AI assistants, storage quota, auto-delete window, document-extraction mode, and per-space **media-analysis** levels — grouped into **Identity**, **Purpose**, **Limits**, **Document extraction**, and **Media analysis** cards. The Media analysis card lets you override, per space, how **images**, **audio**, **video**, and **text** are analysed on upload (each defaulting to **Inherit instance default**). As with extraction, each picker only offers the levels **the instance ceiling allows** (set per class under **Settings → Media Processing**) — a space can never analyse more than the instance permits, so higher levels are hidden and a note names the ceiling. When a storage quota, auto-delete window, or extraction override is left blank, the field's own placeholder (**Unlimited** / **No expiry**) or the **Use instance default** / **Inherit** option shows what the default will be.
 
-- **Delete records after (days)** — an optional space-wide expiry, **on the Danger tab** rather than here: it deletes data, so it sits with the other destructive settings. It is **one window per kind of record** — entities, memories, edges, chrono, files — because a space rarely holds one kind of thing. Leave a field blank or `0` to keep that kind forever. Deletion propagates over sync, so an expired record won't come back from a connected peer.
+- **Delete records after (days)** — an optional space-wide expiry, **on the Danger tab** rather than here: it deletes data, so it sits with the other destructive settings. It is **one window per kind of record** — entities, facts, edges, chrono, files — because a space rarely holds one kind of thing. Leave a field blank or `0` to keep that kind forever. Deletion propagates over sync, so an expired record won't come back from a connected peer.
 
   It is the **least** specific of three tiers — most specific first, a single record's own TTL (set by the API on the write), then that record *type's* window on the **Schema** tab, then this space-wide number. A type with its own window ignores this one.
 - **Extraction mode** — how thoroughly documents (PDF / DOCX / EPUB) uploaded to *this* space are read. Leave it on **Instance default** to follow the instance-wide setting (**Settings → Media Processing**), or choose one for this space: **Off**, **OCR** (fastest, text + layout), **VLM** (transcribe pages with a vision model, always falling back to OCR), **Repair** (adds a pass that reconciles the transcription against the OCR text), or **Auto** (as much as the instance can do). Useful when one space holds scanned archives that need the heavier path while the rest of the instance stays light. The dropdown only offers the modes **the instance ceiling allows** (set under **Settings → Media Processing**) — a space can never extract more than the instance permits, so higher modes are hidden with a note naming the ceiling.
@@ -82,7 +82,7 @@ Click the gear icon on any space row to open its settings panel. Changes save an
 
   **Off means documents are stored but never read.** No text is extracted, so nothing inside them can be found by search — those uploads are marked *skipped* rather than sitting in the processing queue. This override is local to your instance — it is never synced to connected peers.
 
-**Schema tab:** Define what data this space accepts. A **Schema validation** bar at the very top holds the space-wide **Validation mode** and **Strict linkage** controls — these govern *every* type in the space, not the collection you happen to be viewing. Below it, the entity / edge / memory / chrono collections each list their types on the left; click one to edit its rules in a stable panel on the right (you don't lose your place editing a type or property, and several property editors can be open at once).
+**Schema tab:** Define what data this space accepts. A **Schema validation** bar at the very top holds the space-wide **Validation mode** and **Strict linkage** controls — these govern *every* type in the space, not the collection you happen to be viewing. Below it, the entity / edge / fact / chrono collections each list their types on the left; click one to edit its rules in a stable panel on the right (you don't lose your place editing a type or property, and several property editors can be open at once).
 
 - **Validation mode** — `off` means anything goes; `warn` lets writes through but flags violations; `strict` blocks invalid writes entirely.
   > **Editing is checked too, as of 2.2.** Previously only *creating* a record was validated; an edit
@@ -99,7 +99,7 @@ Click the gear icon on any space row to open its settings panel. Changes save an
   > non-compliant before your change…"* — so you are not sent looking at the wrong field. Validation is of
   > the result, so fixing the named field in any later save repairs the record.
 - **Strict linkage** — when on, references between items must be valid IDs and deletion of referenced items is blocked.
-- **Type schemas** — define per-type rules under each knowledge type (entity, memory, edge, chrono). For each named type you can set:
+- **Type schemas** — define per-type rules under each knowledge type (entity, fact, edge, chrono). For each named type you can set:
   - **Naming pattern** — a regex the name must match. Refused on save if it could run exponentially
     (typically a repeated group like `(,abc)*`); the message names what to change.
   - **Retention** — how long records of *this type* are kept, overriding the space-wide window on the Danger tab. Leave **Delete records after** empty to inherit it; the hint names the number you would inherit. A type with a window carries a yellow **ttl** badge in the list, so what expires is visible without opening each type.
@@ -147,7 +147,7 @@ never put to a network vote.
 
 **Danger tab:** Set the space-wide retention window, rebuild search indexes, rename the space ID, wipe all data, or delete the space entirely.
 
-**Retention** is the space-wide default: **Delete records after (days)**, as **five fields** — Entities, Memories, Edges, Chrono, Files — each applying to records of that kind with no TTL of their own and no window on their type. Five, not one, because a `tickets` space keeps ticket entities for a year and their status-change chrono entries for a month; **Files** gets its own because uploads share this setting and have no type for the Schema tab to reach.
+**Retention** is the space-wide default: **Delete records after (days)**, as **five fields** — Entities, Facts, Edges, Chrono, Files — each applying to records of that kind with no TTL of their own and no window on their type. Five, not one, because a `tickets` space keeps ticket entities for a year and their status-change chrono entries for a month; **Files** gets its own because uploads share this setting and have no type for the Schema tab to reach.
 
 A space that set a single number before this split keeps working exactly as it did: it shows on all five fields, which is what it always meant.
 
@@ -269,7 +269,7 @@ Knowledge are different permissions:
 
 | Area | What it covers |
 |---|---|
-| **Knowledge** | Memories, entities, relationships and timeline entries — the records the space is made of, and searching them |
+| **Knowledge** | Facts, entities, relationships and timeline entries — the records the space is made of, and searching them |
 | **Files** | Documents stored in the space: reading them, writing them, and the folder structure they live in |
 | **Schema** | The shape the space expects its records to take — which types exist and which properties they carry |
 | **Data quality** | Finding and resolving duplicates, contradictions and gaps, and the review decisions that follow |
@@ -589,7 +589,7 @@ Click **Leave network** at the bottom of the network card. Your local data in th
 
 The page has **no heading of its own** — the left-hand navigation and the tab strip already tell you where you are, so there is nothing to look for at the top. This guide used to say the page was titled *Models & Media*, which was wrong twice over: there is no title, and the name it gave was not the one in the navigation.
 
-By default, Ythril ships with a bundled vision service (Ollama running `moondream`) and a bundled speech-to-text service (faster-whisper-server). When you upload a picture, Ythril writes a short caption of what's in it; when you upload audio or video, it transcribes the words. The result is added to the same search index as your memories, so you can find an attachment by what's *inside* it, not just its filename.
+By default, Ythril ships with a bundled vision service (Ollama running `moondream`) and a bundled speech-to-text service (faster-whisper-server). When you upload a picture, Ythril writes a short caption of what's in it; when you upload audio or video, it transcribes the words. The result is added to the same search index as your facts, so you can find an attachment by what's *inside* it, not just its filename.
 
 ### The three tabs, and where each control lives
 
@@ -618,7 +618,7 @@ tab and the picker simply does not offer anything above this line, with a note s
 
 - **Turn a class off.** There is no single on/off switch — each media class has its own **level**, and
   there are **four**: images, audio, video and **text**. Set a class to **Off** if you don't upload that
-  kind of media or your machine is tight on memory; its provider card then reads **off** and new uploads
+  kind of media or your machine is tight on fact; its provider card then reads **off** and new uploads
   of that class are stored as-is (existing files keep their captions). **All four have to be Off** to
   turn media embedding off entirely — this said three, so following it left Text running.
 - **Use an external provider.** Switch the **Provider** on the **Vision** or **Speech** card to *External* if you'd rather call OpenAI, Azure, or any other OpenAI-compatible service. Fill in the **Endpoint**, **Model**, and **API key (external only)** for that provider. API keys are stored in the encrypted secrets file, never alongside the rest of the configuration.
@@ -753,7 +753,7 @@ Deleting a person entity **removes their label from every face linked to it**, a
 
 The face records themselves are kept, with their label cleared. That is deliberate: the face belongs to the *photo*, which you did not delete — after removing the person, Ythril simply no longer claims to know whose face it is. If you want the face data itself gone, delete the image; that removes its face records along with every other derived artifact.
 
-> Under `strictLinkage`, face labels do **not** block deleting a person. Other references (edges, memories, chrono entries) still do. Faces are written automatically by the recogniser rather than created by you, and they are cleared safely by the deletion itself — so blocking on them would only make the person impossible to remove.
+> Under `strictLinkage`, face labels do **not** block deleting a person. Other references (edges, facts, chrono entries) still do. Faces are written automatically by the recogniser rather than created by you, and they are cleared safely by the deletion itself — so blocking on them would only make the person impossible to remove.
 
 #### Settings
 

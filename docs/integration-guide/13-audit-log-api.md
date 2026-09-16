@@ -9,8 +9,8 @@ Base path: `/api/admin/audit-log` — **requires admin token** on all endpoints.
 Ythril maintains an append-only, immutable audit log of every authenticated API operation. The log captures who performed what action, when, on which space, and the resulting HTTP status — providing a full access trail for compliance and security review.
 
 **MCP tool calls are in it, under the same operation names as REST.** An agent calling `save_fact`
-produces a `memory.create` entry, exactly as `POST /api/brain/spaces/:id/memories` does — so a query for
-"who created this memory" does not have to know which transport was used. The transport is recorded
+produces a `fact.create` entry, exactly as `POST /api/brain/spaces/:id/facts` does — so a query for
+"who created this fact" does not have to know which transport was used. The transport is recorded
 separately: `method` is `MCP` and `path` is `http:<tool>`. Entries written before 4.0 can also carry
 `sse:<tool>` — the SSE transport was removed in that release, so `sse:` is a fact about when an entry was
 written, not a transport a client can still use.
@@ -87,15 +87,15 @@ An audit entry answers *who changed what, when, and through which route*. For ad
 operations the `changes` payload is part of that answer — a label, a cron schedule, a `requireSignedVotes`
 boolean — and it keeps the full `retentionDays`.
 
-For **brain record edits** (`memory.update`, `entity.update`, `edge.update`, `chrono.update`,
+For **brain record edits** (`fact.update`, `entity.update`, `edge.update`, `chrono.update`,
 `file.meta.update`, `entity.merge`) the payload is different in kind: it contains user content, the old text
-of a memory or the previous description of an entity. That is a copy of your data in a second store with
+of a fact or the previous description of an entity. That is a copy of your data in a second store with
 different access rules — any admin can read the audit log, including for spaces their token could not
 otherwise reach.
 
 So the payload alone expires early. A background sweep unsets `changes` on those entries once they pass
 `recordChangeRetentionDays` and marks them `changesRedacted: true`. **The entry itself is never shortened** —
-who edited that memory and when remains answerable for the full retention period. Only "and here is what it
+who edited that fact and when remains answerable for the full retention period. Only "and here is what it
 used to say" ages out.
 
 `changesRedacted` exists so a reader can distinguish *"this operation records no changes"* from *"it did, and
@@ -116,7 +116,7 @@ they have expired"*. Without it an absent `changes` would quietly imply nothing 
 
 | Operation | Recorded fields |
 |---|---|
-| `memory.update` | `fact`, `description`, `type`, `tags`, `entityIds` |
+| `fact.update` | `fact`, `description`, `type`, `tags`, `entityIds` |
 | `entity.update` | `name`, `type`, `description`, `tags` |
 | `edge.update` | `label`, `from`, `to`, `weight`, `type` |
 | `chrono.update` | `title`, `description`, `type`, `status`, `startsAt`, `endsAt`, `tags`, `entityIds`, `memoryIds` |
@@ -132,7 +132,7 @@ is the one field on a record that could hold a pasted credential — and an allo
 never seen.
 
 List-valued fields (`tags`, `entityIds`, `memoryIds`) are recorded as what moved rather than as the whole
-list, so re-tagging one memory does not copy forty tags into the log twice:
+list, so re-tagging one fact does not copy forty tags into the log twice:
 
 ```json
 { "field": "tags", "added": ["urgent"], "removed": ["draft"] }
@@ -151,7 +151,7 @@ Audit entries are recorded for all write operations and (when `logReads` is enab
 
 | Category | Operations |
 |----------|-----------|
-| Memory | `memory.create`, `memory.update`, `memory.delete`, `memory.list` |
+| Fact | `fact.create`, `fact.update`, `fact.delete`, `fact.list` |
 | Entity | `entity.create`, `entity.update`, `entity.delete`, `entity.list` |
 | Edge | `edge.create`, `edge.update`, `edge.delete`, `edge.list` |
 | Chrono | `chrono.create`, `chrono.update`, `chrono.delete`, `chrono.list` |
@@ -190,7 +190,7 @@ All query params are optional:
 | `tokenId` | `string` | Filter by token ID |
 | `oidcSubject` | `string` | Filter by OIDC subject claim |
 | `spaceId` | `string` | Filter by space ID |
-| `operation` | `string` | Comma-separated operation names (e.g. `memory.create,entity.delete`) |
+| `operation` | `string` | Comma-separated operation names (e.g. `fact.create,entity.delete`) |
 | `status` | `number` | Filter by HTTP status code |
 | `ip` | `string` | Filter by client IP address |
 | `limit` | `number` | Results per page (1–1000, default 100) |
@@ -221,9 +221,9 @@ than rendering a blank, and an integration should do the same.
       "oidcSubject": null,
       "ip": "192.168.1.10",
       "method": "POST",
-      "path": "/api/brain/spaces/eng-kb/memories",
+      "path": "/api/brain/spaces/eng-kb/facts",
       "spaceId": "eng-kb",
-      "operation": "memory.create",
+      "operation": "fact.create",
       "status": 201,
       "entryId": "f7e6d5c4-...",
       "durationMs": 12
