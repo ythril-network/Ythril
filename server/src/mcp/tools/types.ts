@@ -21,6 +21,15 @@ export interface ToolContext {
   args: Record<string, unknown>;
   /** Validated space id for this call ('' for instance-level tools). */
   callSpace: string;
+  /**
+   * Every space this call resolved to: `[]` when none was named, one entry for a single name, several for
+   * a list. Only tools declaring `spaceList` can see more than one here.
+   *
+   * `callSpace` stays the first-or-empty string so the forty-odd single-space tools are untouched — but a
+   * tool that declares `spaceList` MUST read this instead, because `callSpace` on a three-space call names
+   * one of the three and looks entirely reasonable.
+   */
+  callSpaces: string[];
   /** The tool's own name (used in a few error messages). */
   name: string;
   cfg: Config;
@@ -102,6 +111,16 @@ export interface ToolHandler {
   spaceAdmin?: boolean;
   /** Requires a non-empty `space` argument. */
   spaceRequired?: boolean;
+  /**
+   * Accepts `space` as a LIST of names as well as one — the search family, since 5.0.
+   *
+   * OPT-IN PER TOOL, and refusing a list everywhere else is the point. Most tools act on exactly one space:
+   * `save_fact` writes a record somewhere, `update_chrono` edits one. Handed a list, a dispatcher that
+   * normalised centrally would pass them the first element, and the caller would be told their write
+   * succeeded in the space they named second. A refusal that says the tool takes one space is the only
+   * answer that cannot be mistaken for success.
+   */
+  spaceList?: boolean;
   /**
    * Skip the dispatcher's inputSchema arg-validation for this tool (it still appears in tools/list with
    * its full schema for discovery). For partial-success tools like `save_bulk`, whose contract is to

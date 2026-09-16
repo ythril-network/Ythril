@@ -119,7 +119,7 @@ to correct. The information is identical; only the envelope differs.
 |---|---|
 | 400 | Bad request / validation failure — **your request, and retrying it unchanged will fail identically** |
 | 401 | Missing or invalid token |
-| 403 | Token lacks access to this resource |
+| 403 | Token lacks access to this resource. **On a search naming spaces, one space you cannot read refuses the whole call** and the message names which — a partial answer would be indistinguishable from a small one. Omit `space` instead and the search silently covers only what you can read. |
 | 404 | Resource not found |
 | 409 | Conflict (duplicate ID) |
 | 413 | Payload too large (Express body limit: 10 MB for JSON) |

@@ -669,9 +669,21 @@ export function requireBodyScopedSpace(area: SpaceArea, needs: Exclude<Rung, 'no
 
     const named = (req.body as { space?: unknown } | undefined)?.space;
     const cfg = getConfig();
-    if (typeof named === 'string' && named.trim() && !cfg.spaces.some((sp: { id: string }) => sp.id === named.trim())) {
-      res.status(404).json({ error: `Space '${named.trim()}' not found` });
-      return;
+    /*
+     * EXISTENCE FIRST, and for every name — a list included.
+     *
+     * A space that does not exist is a 404 on both doors; a space that exists and is out of reach is a 403.
+     * Checking only the string form left a list naming a typo answering 403 here and 404 on MCP, which is
+     * one question with two answers depending on which door the caller picked.
+     */
+    const namedList = typeof named === 'string' ? [named] : Array.isArray(named) ? named : [];
+    for (const raw of namedList) {
+      if (typeof raw !== 'string') continue;   // shape is the resolver's refusal to make, with its wording
+      const sid = raw.trim();
+      if (sid && !cfg.spaces.some((sp: { id: string }) => sp.id === sid)) {
+        res.status(404).json({ error: `Space '${sid}' not found` });
+        return;
+      }
     }
 
     const rights = (record as { rights?: TokenRights }).rights;

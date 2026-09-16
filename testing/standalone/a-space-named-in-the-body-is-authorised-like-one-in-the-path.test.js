@@ -127,6 +127,88 @@ describe('no space named — the cross-space read', () => {
   });
 });
 
+describe('a LIST of spaces — 5.0, and one unreachable name refuses the whole call', () => {
+  /*
+   * Owner decision, 2026-09-16: *"A and refuse if unreachable"*.
+   *
+   * The asymmetry with the unnamed case is deliberate and is the same rule both times: **what the caller
+   * NAMED is what the caller gets, or they are told**. Naming nothing asks for "whatever I can see", so
+   * filtering answers the question. Naming five asks for those five, so quietly returning three answers a
+   * question nobody asked — and it answers it with a SHORTER result, which reads as "there is less there"
+   * rather than as "you cannot see all of it".
+   *
+   * That is the failure worth paying a 403 to avoid: a caller cannot tell a filtered list from a small one.
+   */
+  it('resolves every named space when the rung is held in all of them', () => {
+    const out = spacesForBodyScopedRequest({
+      named: ['a', 'b'], accessible: ACCESSIBLE, rights: READER_OF_A_AND_B, area: 'knowledge', needs: 'read',
+    });
+    assert.equal(out.refusal, null);
+    assert.deepEqual(out.spaces, ['a', 'b']);
+  });
+
+  it('REFUSES the whole call when one named space is unreachable, and names which', () => {
+    const out = spacesForBodyScopedRequest({
+      named: ['a', 'c'], accessible: ACCESSIBLE, rights: READER_OF_A, area: 'knowledge', needs: 'read',
+    });
+    assert.deepEqual(out.spaces, [], 'a partial answer is indistinguishable from a small one');
+    assert.match(out.refusal ?? '', /\bc\b/, 'the refusal must say WHICH space, or the caller has to bisect');
+    assert.doesNotMatch(out.refusal ?? '', /\ba\b(?![-\w])/,
+      'naming the spaces that WERE reachable tells an unauthorised caller what exists');
+  });
+
+  it('refuses a name outside what the connection can reach at all', () => {
+    const out = spacesForBodyScopedRequest({
+      named: ['a', 'nope'], accessible: ACCESSIBLE, rights: READER_OF_A, area: 'knowledge', needs: 'read',
+    });
+    assert.deepEqual(out.spaces, []);
+    assert.match(out.refusal ?? '', /nope/);
+  });
+
+  it('refuses an EMPTY list rather than reading it as "all spaces"', () => {
+    // The dangerous coercion. `[]` is falsy-ish in every shape a hand-written check takes, so an empty list
+    // read as "no space named" would silently widen the call to every space the token can reach — the
+    // opposite of what a caller who sent a list meant.
+    const out = spacesForBodyScopedRequest({
+      named: [], accessible: ACCESSIBLE, rights: READER_OF_A_AND_B, area: 'knowledge', needs: 'read',
+    });
+    assert.deepEqual(out.spaces, [], 'an empty list must not widen to every space');
+    assert.match(out.refusal ?? '', /empty|at least one/i);
+  });
+
+  it('deduplicates, so the same space named twice is read once', () => {
+    const out = spacesForBodyScopedRequest({
+      named: ['a', 'a'], accessible: ACCESSIBLE, rights: READER_OF_A, area: 'knowledge', needs: 'read',
+    });
+    assert.deepEqual(out.spaces, ['a'], 'a duplicate would double every match from that space');
+  });
+
+  it('trims, exactly as the single-string form does', () => {
+    const out = spacesForBodyScopedRequest({
+      named: [' a ', 'b'], accessible: ACCESSIBLE, rights: READER_OF_A_AND_B, area: 'knowledge', needs: 'read',
+    });
+    assert.deepEqual(out.spaces, ['a', 'b']);
+  });
+
+  it('a one-element list means the same as the bare string', () => {
+    const asList = spacesForBodyScopedRequest({
+      named: ['a'], accessible: ACCESSIBLE, rights: READER_OF_A, area: 'knowledge', needs: 'read',
+    });
+    const asString = spacesForBodyScopedRequest({
+      named: 'a', accessible: ACCESSIBLE, rights: READER_OF_A, area: 'knowledge', needs: 'read',
+    });
+    assert.deepEqual(asList, asString, 'two spellings of one request must not resolve differently');
+  });
+
+  it('refuses when the rung is held but too low in one of them', () => {
+    const out = spacesForBodyScopedRequest({
+      named: ['a', 'b'], accessible: ACCESSIBLE, rights: WRITER_OF_A, area: 'knowledge', needs: 'write',
+    });
+    assert.deepEqual(out.spaces, [], 'b holds no write, so the call cannot proceed on a alone');
+    assert.match(out.refusal ?? '', /\bb\b/);
+  });
+});
+
 describe('the value that was authorised is the value handed on', () => {
   it('returns the resolved spaces rather than expecting the caller to re-read the body', () => {
     // The whole point. A handler that reads `req.body.space` again can read something else — a second
@@ -138,8 +220,10 @@ describe('the value that was authorised is the value handed on', () => {
   });
 
   it('a non-string space is refused rather than coerced', () => {
-    // `{"space": ["a"]}` must not become the string "a" somewhere downstream.
-    for (const bad of [['a'], { id: 'a' }, 42, true]) {
+    // An ARRAY OF STRINGS is a legal value since 5.0 — see the space-list block below. Everything here is
+    // still refused, including an array whose members are not strings: `["a", 42]` must not become "a,42"
+    // or silently drop the 42.
+    for (const bad of [{ id: 'a' }, 42, true, ['a', 42], [null], [['a']]]) {
       const out = spacesForBodyScopedRequest({
         named: bad, accessible: ACCESSIBLE, rights: READER_OF_A, area: 'knowledge', needs: 'read',
       });

@@ -169,8 +169,19 @@ const RECLASSIFIED = 1;
  * Raised rather than absorbed, because the invariant below only means something if the total is the real
  * number of fan-out sites. Leaving it at 44 and letting the arithmetic balance elsewhere is how a
  * conservation check stops conserving anything.
+ *
+ * 45 -> 48 at 5.0: `space` became a LIST on recall, filter and similar, and a list is a fan-out the
+ * instant it has two entries. Three sites, all BORN narrowed:
+ *
+ *   - `mcp/router.ts` checks reach for EVERY named space rather than the first, in a loop.
+ *   - the two REST search doors expand the authorised list through `memberSpacesForRequestAcross`.
+ *
+ * That third name is also why the scan's pattern grew an alternative. `memberSpacesForRequest\(` does not
+ * match `memberSpacesForRequestAcross(` — the `\(` anchors it — so the new sites were invisible to the
+ * count while being exactly what it counts. The conserved total is what noticed: 46 against a TOTAL of 45,
+ * which is the whole reason this arithmetic exists.
  */
-const TOTAL = 45;
+const TOTAL = 48;
 
 /**
  * Fan-out sites that were REMOVED rather than converted, with the tool that owned them.
@@ -295,7 +306,7 @@ function narrowedCalls() {
   for (const f of files) {
     if (NOT_CALL_SITES.has(f) || f === 'server/src/spaces/proxy-scoped.ts') continue;
     const src = readFileSync(f, 'utf8');
-    for (const m of src.matchAll(/memberSpaces(?:ForRequest|ForRecord|Within)\(/g)) out.push({ file: f, at: m.index });
+    for (const m of src.matchAll(/memberSpaces(?:ForRequestAcross|ForRequest|ForRecord|Within)\(/g)) out.push({ file: f, at: m.index });
   }
   return out;
 }
