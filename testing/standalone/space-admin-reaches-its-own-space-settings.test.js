@@ -31,6 +31,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { dispatchSource } from './_tool-dispatch.mjs';
 import { statementFrom } from './_structural-window.mjs';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
@@ -176,7 +177,7 @@ describe('the MCP door widens with the REST one', () => {
   const MCP = stripComments(readFileSync('server/src/mcp/tools/spaces.ts', 'utf8'));
   const VIS = stripComments(readFileSync('server/src/mcp/tool-visibility.ts', 'utf8'));
   const GUARD = stripComments(readFileSync('server/src/mcp/tool-rights-guard.ts', 'utf8'));
-  const ROUTER = stripComments(readFileSync('server/src/mcp/router.ts', 'utf8'));
+  const ROUTER = dispatchSource();
 
   /** One tool object from the MCP module, `name:` to the next `export const`. */
   const mcpTool = (name) => {
@@ -260,8 +261,15 @@ describe('the MCP door widens with the REST one', () => {
     // Finance; precise alone cannot be evaluated at listing time.
     assert.match(GUARD, /export function spaceAdminRefusal/, 'the precise half must exist');
     assert.match(GUARD, /isSpaceAdminFor\(rights, space\)/, 'and ask about the space named in the call');
-    assert.match(ROUTER, /spaceAdminRefusal\(tool, rights, rawSpace\)/,
-      'the dispatcher must actually call it — a guard nobody calls is the failure this repo keeps hitting');
+    /*
+     * `sid`, inside the loop over every named space — not `rawSpaces[0]`.
+     *
+     * A space-admin tool takes one space today, so on paper the two are the same call. They are not the same
+     * RULE: "the space named" and "the first space named" only agree while no such tool accepts a list, and
+     * the day one does the weaker reading is already in place and reads as correct.
+     */
+    assert.match(ROUTER, /spaceAdminRefusal\(tool, rights, sid\)/,
+      'the dispatch must actually call it — a guard nobody calls is the failure this repo keeps hitting');
   });
 
   it('refusing names what is missing, not "you cannot write"', () => {

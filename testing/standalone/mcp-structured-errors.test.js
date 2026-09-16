@@ -28,6 +28,7 @@
  */
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { dispatchSource } from './_tool-dispatch.mjs';
 import { trackedSources } from './_sources.mjs';
 import { readFileSync } from 'node:fs';
 
@@ -59,11 +60,13 @@ describe('the refusal keeps its classification', () => {
     assert.equal(s.violations.length, 2);
   });
 
-  it('the router attaches it once, for every tool, rather than each tool doing it', () => {
+  it('the dispatch attaches it once, for every tool, rather than each tool doing it', () => {
     // Twelve-odd write tools funnel through one catch. Attaching per tool is how the REST routes came to
-    // report the split while this transport did not.
-    const router = strip(readFileSync('server/src/mcp/router.ts', 'utf8'));
-    assert.match(router, /err instanceof SchemaViolationError \? err\.toStructured\(\) : undefined/);
+    // report the split while this transport did not — and the catch is now shared by BOTH doors, so a
+    // schema refusal carries its arrays over HTTP as well.
+    const router = dispatchSource();
+    assert.match(router, /err instanceof SchemaViolationError/);
+    assert.match(router, /structuredContent: err\.toStructured\(\)/);
     /*
      * THE RULE, not one spelling of it: a failure that classifies as nothing must not grow an empty
      * `structuredContent`.
@@ -78,14 +81,28 @@ describe('the refusal keeps its classification', () => {
      * error carries no such key at all. Asserted by finding every spread of it and requiring each to be
      * conditional.
      */
-    const spreads = router.match(/\.\.\.\([^)]*structuredContent[^)]*\)/g) ?? [];
-    assert.ok(spreads.length >= 1, 'the router must still attach structuredContent in its own catch');
-    for (const spread of spreads) {
-      assert.match(spread, /\?/,
-        `an unconditional structuredContent spread gives every unclassified error an empty field: ${spread}`);
+    const catchAt = router.indexOf('} catch (err) {');
+    assert.ok(catchAt > -1, 'the shared catch is gone — re-anchor this gate');
+    /*
+     * Every RETURN in the catch, checked one at a time. The subject is the returned object, which is what
+     * the caller sees, so a return that carries the key must also carry the classification that earned it.
+     * That survives the shape changing from a conditional spread to a branch per classification, which is
+     * exactly what happened when the dispatch moved — and it is what a spelling-pinned gate could not.
+     */
+    const returns = router.slice(catchAt).split(/\breturn\b/).slice(1);
+    assert.ok(returns.length >= 2, 'the catch must still classify before it falls back');
+    let classified = 0;
+    for (const r of returns) {
+      if (!r.includes('structuredContent')) continue;
+      classified += 1;
+      assert.match(r, /toStructured\(|storeSideFailure/,
+        `a return carries structuredContent without a classification, so every unclassified error grows an `
+        + `empty field: ${r.slice(0, 120)}`);
     }
+    assert.ok(classified >= 2,
+      'both classifications must attach here — a schema violation and a store-side failure');
     assert.doesNotMatch(router, /structuredContent: undefined/,
-      'an explicit undefined is a present key in some serialisers — guard the spread instead');
+      'an explicit undefined is a present key in some serialisers — omit it instead');
   });
 
   it('assertUpdateAllowed throws the typed error, so no update tool has to know', () => {

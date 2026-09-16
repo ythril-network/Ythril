@@ -41,9 +41,38 @@ describe('the decision lives in one place, and both doors ask it', () => {
       'the wipe route must not decide for itself whether a space is governed');
   });
 
-  it('the MCP tool calls the same planner', () => {
-    assert.match(src('server/src/mcp/tools/spaces.ts'), /planSpaceWipe\(callSpace, wipeTypes\)/,
-      'both doors, one rule — a second copy is how one surface votes and the other does not');
+  it('the brain-side wipe asks it ONCE, in a module both doors call', () => {
+    /*
+     * THIS USED TO ASSERT THAT EACH DOOR MENTIONED THE PLANNER, and passing it was never the same as the
+     * rule holding — the five per-collection `DELETE` routes called `bulkDelete<Collection>` directly and
+     * were not read by this gate at all. On a networked space the tool opened a vote and those deleted the
+     * data, with nothing reporting it, because each door did exactly what its own code said.
+     *
+     * `spaces/delete-space-data.ts` is now the capability and both doors are adapters over it, so "one
+     * rule" is structural rather than something two greps agree about. What is asserted is that neither
+     * adapter has grown a copy back.
+     */
+    assert.match(src('server/src/spaces/delete-space-data.ts'), /planSpaceWipe\(space, types\)/,
+      'the shared module must be the thing that asks whether this space is governed');
+
+    assert.match(src('server/src/mcp/tools/spaces.ts'), /deleteSpaceData\(/,
+      'the tool must call the shared capability rather than wiping directly');
+
+    /*
+     * The REST side has no wipe code left to check, and that is the assertion.
+     *
+     * `POST /api/delete_space_data` is served by the generic tool door, which hands the body to `callTool`
+     * and therefore to the same tool handler. So there is no second place to put a wipe — and the gate
+     * asserts the ABSENCE, because the way this comes back is somebody adding a convenience route beside
+     * the generic one and calling the collection wipe from it, exactly as the five old routes did.
+     */
+    const restDoor = src('server/src/api/tools.ts');
+    assert.match(restDoor, /callTool\(/, 'the REST door must dispatch through the shared function');
+    for (const reachingPast of [/wipeSpace\(/, /bulkDelete/, /planSpaceWipe\(/, /deleteSpaceData\(/]) {
+      assert.doesNotMatch(restDoor, reachingPast,
+        'the REST door names the wipe directly — a door with its own path to the data is how the five old '
+        + 'routes came to skip the network vote the tool opened');
+    }
   });
 
   it('neither door reimplements "which networks hold this space"', () => {
@@ -139,10 +168,13 @@ describe('peers are told a round is open', () => {
       'both irreversible space-scoped rounds pull immediately rather than waiting for the schedule');
   });
 
-  it('both doors notify', () => {
-    for (const f of ['server/src/app.ts', 'server/src/mcp/tools/spaces.ts']) {
-      assert.match(src(f), /notifyPeersOfWipe\(/, `${f} must tell the peers`);
-    }
+  it('the peers are told, and from the one place that decides', () => {
+    // Notifying from an adapter would be a second copy of the same decision: the door that forgot would
+    // open a round its peers never heard about, and a round nobody sees is a vote nobody casts.
+    assert.match(src('server/src/spaces/delete-space-data.ts'), /notifyPeersOfWipe\(/,
+      'the shared capability must tell the peers');
+    assert.match(src('server/src/app.ts'), /notifyPeersOfWipe\(/,
+      'the admin-side space wipe is a different route and still notifies on its own');
   });
 });
 

@@ -107,6 +107,72 @@ describe('MCP security — every request is authorized on its own bearer', () =>
   });
 });
 
+/**
+ * THE SECOND DOOR ONTO THE SAME TOOLS, which is a new attack surface at 5.0.
+ *
+ * `POST /api/<tool-name>` reaches every tool with the arguments as the body. It is governed by `callTool`,
+ * the same function the MCP dispatcher calls — so in principle there is nothing separate to attack. That
+ * "in principle" is exactly what a red-team case is for: a door that forgets `requireAuth`, or that is
+ * reached before the gates because of where it is mounted, would hand every tool to anybody.
+ *
+ * The greedy mount is the specific worry. The route is `/:tool`, mounted at `/api` IN FRONT of every other
+ * router, and it declines a segment that is not a tool name by handing control back. If that decline ever
+ * broke, `POST /api/spaces` would be answered by the tool door instead of by space creation — with a 200,
+ * and nothing in a log to say so.
+ */
+describe('the HTTP tool door is governed by the same rights as MCP', () => {
+  let readOnlyToken;
+  before(async () => {
+    tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+    const r = await post(INSTANCES.a, tokenA, '/api/tokens',
+      { name: `tool-door-readonly-${Date.now()}`, rights: legacyRights({ readOnly: true }) });
+    readOnlyToken = r?.body?.plaintext;
+  });
+
+  const callDoor = (bearer, tool, args) => fetch(`${INSTANCES.a}/api/${tool}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}) },
+    body: JSON.stringify(args),
+  });
+
+  it('refuses an unauthenticated call', async () => {
+    const r = await callDoor(null, 'list_spaces', {});
+    assert.equal(r.status, 401, 'VULNERABILITY: the tool door answered without a bearer token');
+  });
+
+  it('refuses a garbage bearer', async () => {
+    const r = await callDoor('ythril_not_a_real_token_at_all', 'list_spaces', {});
+    assert.equal(r.status, 401);
+  });
+
+  it('refuses a read-only token a write, exactly as MCP does', async () => {
+    assert.ok(readOnlyToken?.startsWith('ythril_'), 'the read-only token must be minted');
+    const r = await callDoor(readOnlyToken, 'save_fact', { space: 'general', fact: 'tool-door write attempt' });
+    assert.ok(r.status >= 400, `VULNERABILITY: a read-only token wrote through the HTTP tool door (${r.status})`);
+    const body = await r.json();
+    assert.equal(body.ok, false);
+
+    // Control: the same call with a token that HAS the right succeeds, so the refusal is about rights and
+    // not about the door, the tool or the space being broken.
+    const ok = await callDoor(tokenA, 'save_fact', { space: 'general', fact: `tool-door control ${Date.now()}` });
+    assert.equal(ok.status, 200, `the control write must succeed: ${await ok.text()}`);
+  });
+
+  it('does not swallow a route that merely looks like a tool name', async () => {
+    // `POST /api/spaces` creates a space. If the tool door claimed it, this would answer in the tool
+    // envelope instead — a 200 that created nothing, with the caller told it worked.
+    const id = `door-probe-${Date.now()}`;
+    const r = await post(INSTANCES.a, tokenA, '/api/spaces', { id, label: 'door probe' });
+    assert.equal(r.status, 201, `VULNERABILITY: /api/spaces was answered by something else: ${JSON.stringify(r.body)}`);
+    assert.equal(r.body?.ok, undefined, 'the tool envelope must not appear on a router route');
+    await fetch(`${INSTANCES.a}/api/spaces/${id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokenA}` },
+      body: JSON.stringify({ confirm: true }),
+    }).catch(() => {});
+  });
+});
+
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 describe('MCP security — authentication', () => {

@@ -367,44 +367,18 @@ fileMetaRouter.get('/spaces/:spaceId/token-access', globalRateLimit, requireSpac
 });
 
 
-// DELETE /api/brain/spaces/:spaceId/files — delete file metadata record by path (does NOT delete the file on disk)
-fileMetaRouter.delete('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
-  const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` }); return;
-  }
-  const path = req.query['path'];
-  if (typeof path !== 'string' || !path.trim()) {
-    res.status(400).json({ error: '`path` query parameter required' }); return;
-  }
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
-  if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
-  // `M-2`: on a converted space the six arrays are no longer a write surface — see `arrayWriteError`.
-  // Checked against the WRITE TARGET, which on a proxy is the member space that will hold the record: the
-  // proxy itself holds nothing and its own marker would answer for a space it never writes to.
-  const linkArrErr = arrayWriteError({ converted: usesLinkRecords(wt.target), spaceId: wt.target, body: req.body,
-    actor: requestActor(req) });
-  if (linkArrErr) { res.status(400).json({ error: linkArrErr }); return; }
-  const memberIds = resolveMemberSpaces(wt.target);
-  const norm = toDocId(path);
-  // Guard: a metadata record may only be removed if its file is gone (orphan) or the
-  // record is flagged deleted. Deleting the metadata of a file that still exists would
-  // silently orphan a live file — refuse and tell the caller to delete the file itself.
-  for (const mid of memberIds) {
-    const rec = await col<FileMetaDoc>(spaceCollection(mid, 'files')).findOne(asFilter<FileMetaDoc>({ _id: norm })) as FileMetaDoc | null;
-    if (rec && !rec.deletedAt && await fileExists(mid, norm)) {
-      res.status(409).json({
-        error: 'Cannot delete metadata while the file still exists. Delete the file itself (which also removes its metadata), or enable softDeleteFileMeta and delete the file first.',
-      });
-      return;
-    }
-  }
-  for (const mid of memberIds) {
-    await deleteFileMeta(mid, path);
-  }
-  res.status(204).end();
-});
+/*
+ * THE METADATA-ONLY DELETE IS GONE, and it was redundant rather than merely awkward.
+ *
+ * Owner, 2026-09-16: *"that route deletes one file's metadata => thats not needed - all files should
+ * have meta-data and metadata is deleted when the file is deleted"*. Verified before removing it:
+ * `deleteFileCascade` unlinks the file AND removes its metadata record, and `DELETE /api/files/:spaceId`
+ * already handles the orphan — a record whose bytes went missing out of band is cleaned up there and
+ * answered `204`, which is the only case this route could still have served.
+ *
+ * So it was a second door onto half of one act, and the half it did alone left a file with no metadata —
+ * the state the File Meta tab cannot render and nothing else can repair.
+ */
 
 
 // PATCH /api/brain/spaces/:spaceId/files — update file metadata by path (query param ?path=)

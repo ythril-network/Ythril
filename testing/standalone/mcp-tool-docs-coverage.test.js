@@ -103,10 +103,19 @@ describe('MCP tool read-only classification matches the docs', () => {
     // place — and in `help.ts` a third time, under a comment claiming it was one source of truth. They are
     // now one function, so this asserts SHARING rather than two matching regexes. Two regexes could both
     // pass while the expressions had drifted, which is exactly the state they were in.
+    /*
+     * THE TWO HALVES NOW LIVE IN TWO FILES, and that is the change rather than a relocation.
+     *
+     * The LISTING is per connection and belongs to the MCP door — it is what `tools/list` advertises. The
+     * REJECTION is per call and belongs to `callTool`, which both doors dispatch through, so the HTTP door
+     * gets it without having a listing at all. Asserting them together is still one assertion about one
+     * predicate: what must hold is that the advisory half and the enforcing half are the SAME function.
+     */
     const router = readFileSync(join(ROOT, 'server', 'src', 'mcp', 'router.ts'), 'utf8');
+    const dispatch = readFileSync(join(ROOT, 'server', 'src', 'mcp', 'call-tool.ts'), 'utf8');
     assert.match(router, /ALL_TOOLS\.filter\(t => toolIsVisible\(t, rights\)\)/,
       'expected tools/list to filter through the shared predicate');
-    assert.match(router, /if \(tool && !toolIsVisible\(tool, rights\)\)/,
+    assert.match(dispatch, /if \(tool && !toolIsVisible\(tool, rights\)\)/,
       'expected a call-time rejection through the SAME predicate — filtering the list alone is advisory');
 
     // And the predicate must actually gate on something. A version returning `true` for everything would

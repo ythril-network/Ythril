@@ -15,6 +15,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING — every tool is `POST /api/<tool-name>`, and both doors call ONE function.** Owner,
+  2026-09-16: *"create modules that are used by both doors"*, then *"this shared module concept for both
+  doors should be applied to each and every tool"*.
+
+  ```http
+  POST /api/recall
+  { "space": ["work", "research"], "query": "quarterly targets", "limit": 5 }
+  ```
+
+  The body is the tool's arguments exactly — the same JSON you would send over MCP, `space` included. One
+  envelope comes back for every tool: `{ok: true, text, data}` on success, `{ok: false, error, data}` on a
+  refusal, with `error` word-for-word what MCP puts in `content`.
+
+  **It is one route, not forty-five.** `mcp/call-tool.ts` now holds everything between *a caller named a
+  tool* and *the tool answered* — the visibility gate, the space parse, existence, reach, the per-space
+  rung, the space-admin grant, argument validation against the published schema, the throttle, the error
+  classification and the audit entry. The MCP dispatcher and the HTTP route are translations of their own
+  envelope into it and back. A tool added tomorrow is reachable both ways on the day it is written, because
+  there is no per-tool code on either door to forget.
+
+  **Two real defects fell out of the extraction**, both the same shape — one rule, two implementations,
+  the weaker one deciding:
+
+  - **The rung was checked against the FIRST named space.** Since space lists landed, a three-space
+    `recall` over MCP was authorised against one of the three and read all three. The REST body-scoped
+    guard checked every one. The check is inside the per-space loop now.
+  - **The destructive-call throttle only existed on REST.** `bulkWipeRateLimit` was express middleware, so
+    a browser was held to five wipes a minute and an agent to none. It is declared by the tool
+    (`heavy: true`) and enforced in the shared function, before the gates — a caller getting it wrong in a
+    loop is slowed down too.
+
+  **`ythril_mcp_tool_calls_total` is renamed `ythril_tool_calls_total` and gains a `door` label** (`mcp` or
+  `rest`). It was about to start counting browser traffic under a name that says MCP, which an operator
+  reading a dashboard has no way to notice. `door="mcp"` is the old question, still answerable.
+
+  The older REST routes are unchanged and still work. They are the shapes this replaces.
+
+- **BREAKING — emptying a space is `POST /api/delete_space_data`, and both doors call one module.**
+
+  ```json
+  { "space": "work", "confirm": true, "types": ["facts", "chrono"] }
+  ```
+
+  It was FIVE routes — `DELETE /api/brain/spaces/:spaceId/facts` and one each for entities, edges, chrono
+  and files — against one MCP tool taking `types[]`. Different parameters, different response, and
+  different safety: the routes demanded `confirm: true` and the tool demanded nothing.
+
+  **They also did different things.** The routes called `bulkDelete<Collection>` directly while the tool
+  asked `planSpaceWipe` first — so on a space belonging to a network, **the tool opened a vote and the
+  routes deleted shared data immediately.** Nothing reported it, because each door did exactly what its own
+  code said. The capability now lives in `spaces/delete-space-data.ts` and both doors are adapters over it,
+  so the governance step is not something either can forget.
+
+  `confirm: true` is required on both doors now, and the route is named after the tool with `space` as a
+  body parameter — the shape the rest of the REST surface moves to.
+
+- **Removed: the metadata-only file delete.** `DELETE /api/brain/spaces/:spaceId/files?path=` purged a
+  metadata record without touching disk. Every file has metadata and `deleteFileCascade` removes both, and
+  the orphan case — a record whose bytes went missing out of band — is already handled by the file delete,
+  which answers `204` when it finds one. It was a second door onto half of one act, and the half it could
+  do alone left a file with no metadata.
+
 - **BREAKING — space administrator is a rung you GRANT, and four admin rungs are no longer it.**
 
   ```json

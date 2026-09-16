@@ -200,20 +200,18 @@ export const syncRateLimit = rateLimit({
   skip: () => skipRateLimit('SKIP_SYNC_RATE_LIMIT'),
 });
 
-/** 5 requests/minute per CLIENT — destructive bulk operations (fact wipe) */
-export const bulkWipeRateLimit = rateLimit({
-  windowMs: 60_000,
-  max: 5,
-  standardHeaders: 'draft-7',
-  legacyHeaders: false,
-  keyGenerator: clientRateLimitKey,
-  message: { error: 'Bulk delete rate limit exceeded, please try again later.' },
-  handler: (req, res, _next, options) => {
-    log.warn(`bulkWipeRateLimit hit: ${req.ip} on ${req.method} ${req.path}`);
-    res.status(options.statusCode).json(options.message);
-  },
-  skip: () => skipRateLimit('SKIP_GLOBAL_RATE_LIMIT'),
-});
+/*
+ * `bulkWipeRateLimit` WAS HERE, and it is deleted rather than left unused (5.0).
+ *
+ * Five a minute per client, mounted in front of the five `DELETE .../<collection>` wipe routes. Those became
+ * one tool call, and the limiter could not follow: middleware guards a ROUTE, and the same capability is
+ * reachable over MCP where there is no route to mount it on. So it throttled a browser and not an agent —
+ * the caller most likely to be emptying spaces in a loop was the one with no limit.
+ *
+ * The replacement is `rate-limit/heavy-tool.ts`: a plain counter that a tool declares (`heavy: true`) and
+ * `callTool` consumes, so both doors are held to the same five a minute from one place. Deleted rather than
+ * kept exported, because an unused limiter is what somebody reaches for next time and mounts on one door.
+ */
 
 /**
  * The PER-TOKEN quota, enforced after authentication.

@@ -68,11 +68,16 @@ export const CAPABILITIES = [
 
   ['Brain — bulk', 'save_bulk', 'POST /api/brain/spaces/:spaceId/bulk'],
 
-  ['Brain — wipe', 'delete_space_data', 'DELETE /api/brain/spaces/:spaceId/facts'],
-  ['Brain — wipe', 'delete_space_data', 'DELETE /api/brain/spaces/:spaceId/entities'],
-  ['Brain — wipe', 'delete_space_data', 'DELETE /api/brain/spaces/:spaceId/edges'],
-  ['Brain — wipe', 'delete_space_data', 'DELETE /api/brain/spaces/:spaceId/chrono'],
-  ['Brain — wipe', 'delete_space_data', 'DELETE /api/brain/spaces/:spaceId/files'],
+  // ONE route, because it was five — each hard-coding a collection against a tool taking `types[]`.
+  // `delete_space_data` had a row here and no longer needs one: it is reached through the generic tool
+  // door below, like every other tool. A row per tool would be forty-five hand-written copies of a
+  // mapping that is now the route's own definition.
+
+  /*
+   * `DELETE /api/brain/spaces/:spaceId/files?path=` deletes ONE file's metadata record, and `B-7` filed
+   * it here under the wipe — which is how it nearly went with the five, taking a real capability with it.
+   * It is `delete_file`'s metadata half and belongs beside the other file rows, not in a bulk wipe.
+   */
 
   ['Brain — ops', 'space_stats', 'GET /api/brain/spaces/:spaceId/stats'],
   ['Brain — ops', 'space_reindex', 'POST /api/brain/spaces/:spaceId/reindex'],
@@ -186,3 +191,16 @@ export const NOT_A_CAPABILITY = new Map(Object.entries({
  * exemption that quietly widens is the thing this file's reasons exist to prevent.
  */
 NOT_A_CAPABILITY.set('POST /api/tokens', NOT_A_CAPABILITY.get('/api/tokens/:id'));
+
+/**
+ * The generic tool door — the one route that answers EVERY tool.
+ *
+ * `POST /api/<tool-name>` is served by a single `/:tool` route that hands the body to `callTool`, the same
+ * function the MCP dispatcher calls. So it is neither one capability (it is all of them) nor an exemption
+ * (nothing about it is un-tooled), and classifying it as either would say something false in a file whose
+ * whole job is the classification.
+ *
+ * It gets its own bucket, and the sweep treats it as covering every tool at once. What keeps that honest is
+ * that the coverage is STRUCTURAL: there is no per-tool code behind this path to be missing.
+ */
+export const THE_TOOL_DOOR = 'POST /api/:tool';

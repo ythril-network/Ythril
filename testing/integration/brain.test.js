@@ -72,14 +72,15 @@ describe('Brain â€” memories', () => {
     assert.equal(lookup.status, 404, 'Deleted memory must return 404 on direct lookup');
   });
 
-  it('Wipe all memories requires confirm:true in body', async () => {
-    // No body → 400
-    const noBody = await del(INSTANCES.a, token(), '/api/brain/spaces/general/facts');
-    assert.equal(noBody.status, 400, `No body should 400, got ${noBody.status}`);
+  it('Emptying a space requires confirm:true, on the one door that does it', async () => {
+    // The five per-collection DELETEs are gone (5.0). `POST /api/delete_space_data` is the tool's own
+    // arguments as a body, and the same call an agent makes over MCP.
+    const noConfirm = await post(INSTANCES.a, token(), '/api/delete_space_data', { space: 'general' });
+    assert.equal(noConfirm.status, 400, `no confirm should 400, got ${noConfirm.status}`);
+    assert.match(noConfirm.body.error, /confirm/, 'the refusal must name what is missing');
 
-    // confirm:false → 400
-    const noConfirm = await delWithBody(INSTANCES.a, token(), '/api/brain/spaces/general/facts', { confirm: false });
-    assert.equal(noConfirm.status, 400, `confirm:false should 400, got ${noConfirm.status}`);
+    const falseConfirm = await post(INSTANCES.a, token(), '/api/delete_space_data', { space: 'general', confirm: false });
+    assert.equal(falseConfirm.status, 400, `confirm:false should 400, got ${falseConfirm.status}`);
   });
 
   it('Delete non-existent memory returns 404', async () => {
@@ -670,21 +671,24 @@ describe('Brain — bulk memory wipe', () => {
     }
   });
 
-  it('DELETE without body returns 400', async () => {
-    const r = await del(INSTANCES.a, tokenA, `/api/brain/spaces/${WIPE_SPACE}/facts`);
+  it('without confirm it returns 400', async () => {
+    const r = await post(INSTANCES.a, tokenA, '/api/delete_space_data', { space: WIPE_SPACE, types: ['facts'] });
     assert.equal(r.status, 400, `expected 400, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 
-  it('DELETE with confirm:false returns 400', async () => {
-    const r = await delWithBody(INSTANCES.a, tokenA, `/api/brain/spaces/${WIPE_SPACE}/facts`, { confirm: false });
+  it('with confirm:false it returns 400', async () => {
+    const r = await post(INSTANCES.a, tokenA, '/api/delete_space_data', { space: WIPE_SPACE, types: ['facts'], confirm: false });
     assert.equal(r.status, 400, `expected 400, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 
-  it('DELETE with confirm:true returns {deleted: N}', async () => {
-    const r = await delWithBody(INSTANCES.a, tokenA, `/api/brain/spaces/${WIPE_SPACE}/facts`, { confirm: true });
+  it('with confirm:true it returns the per-collection counts', async () => {
+    // One envelope for every tool: `{ok, text, data}`. `data` is the structured result, `text` the prose
+    // an agent reads — both carry the whole answer, so a caller may use either.
+    const r = await post(INSTANCES.a, tokenA, '/api/delete_space_data', { space: WIPE_SPACE, types: ['facts'], confirm: true });
     assert.equal(r.status, 200, `expected 200, got ${r.status}: ${JSON.stringify(r.body)}`);
-    assert.ok(typeof r.body.deleted === 'number', 'deleted must be a number');
-    assert.ok(r.body.deleted >= 10, `Should have deleted at least 10, got ${r.body.deleted}`);
+    assert.equal(r.body.ok, true);
+    assert.ok(typeof r.body.data.facts === 'number', 'facts must be a number');
+    assert.ok(r.body.data.facts >= 10, `Should have deleted at least 10, got ${r.body.data.facts}`);
   });
 
   it('Memories are gone after wipe', async () => {
@@ -733,15 +737,23 @@ describe('Brain — bulk memory wipe', () => {
       });
     }
 
-    const r = await delWithBody(INSTANCES.a, tokenA, `/api/brain/spaces/${WIPE_SPACE}/facts`, { confirm: true });
-    assert.equal(r.status, 200, `Long-form wipe: ${JSON.stringify(r.body)}`);
-    assert.ok(typeof r.body.deleted === 'number');
-    assert.ok(r.body.deleted >= 3, `Should have deleted at least 3, got ${r.body.deleted}`);
+    const r = await post(INSTANCES.a, tokenA, '/api/delete_space_data', { space: WIPE_SPACE, types: ['facts'], confirm: true });
+    assert.equal(r.status, 200, `wipe: ${JSON.stringify(r.body)}`);
+    assert.ok(typeof r.body.data.facts === 'number');
+    assert.ok(r.body.data.facts >= 3, `Should have deleted at least 3, got ${r.body.data.facts}`);
   });
 
   it('Wipe on unknown space returns 404', async () => {
-    const r = await delWithBody(INSTANCES.a, tokenA, '/api/brain/spaces/no-such-space/facts', { confirm: true });
-    assert.equal(r.status, 404, `expected 404, got ${r.status}`);
+    const r = await post(INSTANCES.a, tokenA, '/api/delete_space_data', { space: 'no-such-space', confirm: true });
+    assert.equal(r.status, 404, `expected 404, got ${r.status}: ${JSON.stringify(r.body)}`);
+  });
+
+  it('and a LIST of spaces is refused, in the same words as the MCP door', async () => {
+    // `delete_space_data` does not declare `spaceList`, so a list is a refusal rather than a loop. The
+    // wording is the shared module's, which is why it can be asserted identically on both doors.
+    const r = await post(INSTANCES.a, tokenA, '/api/delete_space_data', { space: [WIPE_SPACE, 'general'], confirm: true });
+    assert.equal(r.status, 400, `expected 400, got ${r.status}: ${JSON.stringify(r.body)}`);
+    assert.match(r.body.error, /takes one 'space', not a list/);
   });
 
   after(async () => {

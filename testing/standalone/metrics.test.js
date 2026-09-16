@@ -163,25 +163,32 @@ describe('GET /metrics — Prometheus endpoint', () => {
     const { text } = await getMetrics();
     assert.ok(!hasMetric(text, 'ythril_mcp_connections_active'),
       'ythril_mcp_connections_active is still registered — it can only read 0 now, which is a confidently '
-      + 'wrong answer rather than a missing one. ythril_mcp_tool_calls_total counts the work instead.');
+      + 'wrong answer rather than a missing one. ythril_tool_calls_total counts the work instead.');
   });
 
-  it('and still exposes ythril_mcp_tool_calls_total, which is the signal that survives', async () => {
+  it('and still exposes ythril_tool_calls_total, which is the signal that survives', async () => {
     /*
      * The inverse: the assertion above must not be satisfiable by dropping MCP metrics altogether.
      *
-     * Checked as REGISTRATION rather than as a sample line, because `mcp_tool_calls_total` is a Counter with
-     * `tool` and `space` labels and prom-client emits no sample for a labelled metric until some label
-     * combination has been observed. `hasMetric` only matches lines that START with the name, so this
-     * passed exactly when an earlier suite had happened to call a tool against this instance and failed
-     * when the offline subset ran on its own — an order dependency, not a signal.
+     * Checked as REGISTRATION rather than as a sample line, because it is a Counter with `tool`, `space`
+     * and `door` labels and prom-client emits no sample for a labelled metric until some label combination
+     * has been observed. `hasMetric` only matches lines that START with the name, so this passed exactly
+     * when an earlier suite had happened to call a tool against this instance and failed when the offline
+     * subset ran on its own — an order dependency, not a signal.
      *
      * `ythril_sync_cycles_total` below already makes this distinction for the same reason and says so.
+     *
+     * RENAMED from `ythril_mcp_tool_calls_total` at 5.0, with a `door` label. Every tool is reachable over
+     * plain HTTP as well now, so the old name would have counted browser traffic as MCP traffic — a wrong
+     * number an operator has no way to notice. `door="mcp"` is the old question, still answerable.
      */
     const { text } = await getMetrics();
-    const registered = text.split('\n').some(l => l.includes('ythril_mcp_tool_calls_total'));
-    assert.ok(registered, 'ythril_mcp_tool_calls_total is not registered — the absence assertion above must '
-      + 'not be satisfiable by dropping MCP metrics altogether');
+    const registered = text.split('\n').some(l => l.includes('ythril_tool_calls_total'));
+    assert.ok(registered, 'ythril_tool_calls_total is not registered — the absence assertion above must '
+      + 'not be satisfiable by dropping tool metrics altogether');
+    assert.ok(!text.includes('ythril_mcp_tool_calls_total'),
+      'the old name is still registered — two counters for one act is how a dashboard ends up reading half '
+      + 'the traffic and saying so confidently');
   });
 
   it('includes ythril_sync_cycles_total counter', async () => {

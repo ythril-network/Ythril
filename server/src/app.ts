@@ -11,6 +11,7 @@ import { tokensRouter } from './api/tokens.js';
 import { brainRouter } from './api/brain/index.js';
 import { spacesRouter } from './api/spaces.js';
 import { fileStoreRouter } from './api/files.js';
+import { toolsRouter } from './api/tools.js';
 import { conflictsRouter } from './api/conflicts.js';
 import { duplicatesRouter } from './api/duplicates.js';
 import { contradictionsRouter } from './api/contradictions.js';
@@ -301,6 +302,18 @@ export function createApp() {
   // ── API routes ───────────────────────────────────────────────────────────
   app.use('/api/theme', themeRouter);   // public — no auth required
   app.use('/api/tokens', tokensRouter);
+  /*
+   * THE TOOL DOOR: `POST /api/<tool-name>`, taking the tool's own arguments, dispatching through the same
+   * `callTool` the MCP door uses.
+   *
+   * Mounted at `/api` itself, which makes its position load-bearing in one direction only. It declares
+   * `/:tool` and therefore sees every single-segment `/api` path — but hands back anything that is not a
+   * tool name, so the routers below still serve `POST /api/spaces` and the rest. What it must come BEFORE
+   * is any future router that would claim a whole single segment a tool is named after; what it comes
+   * after here (`/api/theme`, `/api/tokens`) is safe because no tool bears those names, and
+   * `no-tool-name-shadows-a-mounted-router.test.js` is what keeps that true rather than this comment.
+   */
+  app.use('/api', toolsRouter);
   app.use('/api/brain', brainRouter);
   app.use('/api/spaces', spacesRouter);
   app.use('/api/files', fileStoreRouter);

@@ -79,8 +79,10 @@ grant admin unless the window genuinely administers the instance — an assistan
 
 **Verify by reading the token's own view, not by the absence of an error.** Call the **`help`** tool: it
 prints the spaces accessible to this token, and when the token is restricted it says so explicitly
-(*"some tools are hidden from this token by its scope"*) — admin-only tools such as `delete_space_data` and
-`update_space` disappear from the tool list. A cross-space `recall` will **not** reveal a collapsed scope: it
+(*"some tools are hidden from this token by its scope"*) — the tools that configure a space, such as
+`delete_space_data` and `update_space`, disappear from the list unless the token carries the **Space admin**
+grant for a space. (Space admin is its own switch on the token, not something you get by setting all four
+area rungs to admin.) A cross-space `recall` will **not** reveal a collapsed scope: it
 happily returns results from the one space still reachable, which reads like a successful search.
 
 **Attribution, once you are on per-caller tokens.** Every audited request records `tokenId`, `tokenLabel` and

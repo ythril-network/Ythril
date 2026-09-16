@@ -480,28 +480,35 @@ describe('File metadata (MongoDB)', () => {
     assert.equal(q.body.files[0].path, filePath, 'Returned path must be the normalised (no-slash) form');
   });
 
-  it('DELETE /api/brain/.../files refuses (409) to remove metadata while the file exists on disk', async () => {
-    // Contract: a metadata record may not be deleted while its file is present — doing so
-    // would silently orphan a live file. Delete the file itself instead (or soft-delete first).
+  it('the metadata-only delete is GONE, and deleting the file takes both', async () => {
+    /*
+     * `DELETE /api/brain/spaces/:spaceId/files?path=` removed a metadata record while leaving the bytes on
+     * disk, and answered 409 when it would have orphaned one. It had no tool, so an agent could not do it
+     * at all — one door offering a capability the other does not, which is the rule this release is about.
+     *
+     * It went rather than gaining a tool, because the 409 says what it was for: the only safe use was on
+     * metadata whose file was already gone, and `deleteFileCascade` removes the record with the file, so
+     * that state is not reachable through the API any more.
+     */
     const filePath = `meta-braindelete-${RUN}.txt`;
     await uploadFile(tokenA, 'general', filePath, 'keep me on disk');
 
     const q1 = await listFileMeta(tokenA, 'general', `?path=${encodeURIComponent(filePath)}`);
-    assert.ok(q1.body.files.length > 0, 'Must have metadata before brain-delete');
+    assert.ok(q1.body.files.length > 0, 'Must have metadata before the delete');
 
     const delUrl = `${INSTANCES.a}/api/brain/spaces/general/files?path=${encodeURIComponent(filePath)}`;
     const dr = await fetch(delUrl, {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${tokenA}` },
     });
-    assert.equal(dr.status, 409, `Expected 409 while file present, got ${dr.status}: ${await dr.text()}`);
+    assert.equal(dr.status, 404, `the metadata-only delete must be gone, got ${dr.status}: ${await dr.text()}`);
 
-    // Both the metadata and the file must still be there.
-    const q2 = await listFileMeta(tokenA, 'general', `?path=${encodeURIComponent(filePath)}`);
-    assert.equal(q2.body.files.length, 1, 'Metadata must remain after a refused delete');
+    // Deleting the FILE takes the metadata with it — which is why the route above is not missed.
     const dlUrl = `${INSTANCES.a}/api/files/general?path=${encodeURIComponent(filePath)}`;
-    const dlr = await fetch(dlUrl, { headers: { 'Authorization': `Bearer ${tokenA}` } });
-    assert.equal(dlr.status, 200, 'File on disk must still exist');
+    const gone = await fetch(dlUrl, { method: 'DELETE', headers: { 'Authorization': `Bearer ${tokenA}` } });
+    assert.equal(gone.status, 200, `file delete failed: ${await gone.text()}`);
+    const q2 = await listFileMeta(tokenA, 'general', `?path=${encodeURIComponent(filePath)}`);
+    assert.equal(q2.body.files.length, 0, 'the metadata must go with the file');
   });
 
   it('Brain stats endpoint includes files count', async () => {

@@ -22,6 +22,7 @@
  */
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { dispatchSource } from './_tool-dispatch.mjs';
 import { blockAfter } from './_structural-window.mjs';
 import { readFileSync } from 'node:fs';
 import { CAPABILITIES } from './_capability-map.mjs';
@@ -160,20 +161,23 @@ describe('the guard REFUSES and ALLOWS — behaviourally, not by reading the sou
       'a tool that needs an area rung cannot be checked without a space, and cannot-be-checked is not passes');
   });
 
-  it('the dispatcher RETURNS the refusal rather than computing and dropping it', () => {
+  it('the dispatch RETURNS the refusal rather than computing and dropping it', () => {
     // A lens computed and discarded is this repo's signature defect — it happened on three routes at once.
-    const src = readFileSync('server/src/mcp/router.ts', 'utf8')
-      .replace(/(^|[^:])\/\/.*/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
-    assert.match(src, /const rightsRefusal = toolRightsRefusal\(name, rights, rawSpace\);/);
+    const src = dispatchSource();
+    /*
+     * `sid`, not the first named space, and that is the part worth asserting.
+     *
+     * The check used to run once against `rawSpaces[0]`. On a one-space call that is the same thing, which
+     * is why it stood; on a three-space `recall` the token was authorised against one of the three and
+     * read all three. It is inside the per-space loop now, so the rung is checked wherever the call reads.
+     */
+    assert.match(src, /const rightsRefusal = toolRightsRefusal\(name, rights, sid\);/);
     // TWO WINDOWS in one pattern, converted: the subject is the BRANCH, bounded by its own brace, and the
     // claim is that the refusal is RETURNED from inside it. Neither cap could tell "inside the branch" from
     // "160 characters after it" — and "computed and dropped" versus "computed and returned" is exactly that
     // distinction. It is also the defect the test's own comment names as this repo's signature.
-    const at = src.indexOf('if (rightsRefusal) {');
-    assert.ok(at > -1, 'the refusal branch is gone — re-anchor this gate');
-    const branch = blockAfter(src, at, 'the rightsRefusal branch');
-    assert.match(branch, /return \{/, 'the branch must RETURN, not fall through');
-    assert.match(branch, /text: rightsRefusal/, 'and the returned object must carry the refusal text');
+    assert.match(src, /if \(rightsRefusal\) return refuse\(403, rightsRefusal\);/,
+      'the refusal must be RETURNED, carrying its own text and a 403 for the door that has a status');
   });
 });
 

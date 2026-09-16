@@ -23,6 +23,7 @@
  */
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { dispatchSource } from './_tool-dispatch.mjs';
 import { balancedFrom } from './_structural-window.mjs';
 import { readFileSync } from 'node:fs';
 
@@ -106,7 +107,7 @@ describe('the record actually carries it', () => {
   it('the MCP helper no longer claims OIDC records have no matrix', () => {
     // That comment was true when it was written and became the documentation of a hole. A stale sentence
     // next to a security decision is worse than no sentence.
-    const src = readFileSync('server/src/mcp/router.ts', 'utf8');
+    const src = dispatchSource();
     assert.ok(!/`OidcTokenRecord` has no `rights` field/.test(src),
       'the helper documents a shape that no longer exists');
   });

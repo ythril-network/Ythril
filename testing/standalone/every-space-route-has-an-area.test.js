@@ -44,6 +44,18 @@ const INVENTORY = 'server/src/auth/space-rights.ts';
  * `RouteRight` at all.
  */
 const SPACE_ROUTERS = [
+  /*
+   * THE TOOL DOOR, added 2026-09-17 — `POST /api/:tool`, the one route that serves every tool.
+   *
+   * It is space-scoped without a `:spaceId` in the path: the space is a BODY parameter, which is the shape
+   * `B-9` moves everything to. Leaving the file out would be the spaces-router mistake below arriving again
+   * for the same reason — "it does not look like the others" is not "it does not need an area", and the
+   * destructive capabilities are behind this path.
+   *
+   * It resolves to a `NOT_AREA_SCOPED` row rather than an area: forty-five capabilities cannot share one
+   * rung, so each is priced in `TOOL_RIGHTS` and enforced per call by `callTool`. The row says so.
+   */
+  { glob: 'server/src/api/tools.ts', mount: '/api' },
   { glob: 'server/src/api/brain', mount: '/api/brain' },
   /*
    * A PATTERN, for the same reason `spaces*.ts` is one: G-4 moved the upload route to `files-upload.ts`, and

@@ -247,12 +247,6 @@ export class BrainApi {
     return this.http.patch<Fact>(`/api/brain/spaces/${spaceId}/facts/${id}`, body);
   }
 
-  wipeMemories(spaceId: string): Observable<{ deleted: number }> {
-    return this.http.delete<{ deleted: number }>(`/api/brain/spaces/${spaceId}/facts`, {
-      body: { confirm: true },
-    });
-  }
-
   // ── Brain — entities ──────────────────────────────────────────────────────
 
   listEntities(spaceId: string, limit = 50, skip = 0, filters?: { search?: string; type?: string; tag?: string; description?: string; properties?: string }, sort?: ListSort, search?: string): Observable<{ entities: Entity[] }> {

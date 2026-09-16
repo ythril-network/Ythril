@@ -28,10 +28,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { balancedFrom, blockAfter } from './_structural-window.mjs';
+import { dispatchSource } from './_tool-dispatch.mjs';
 
 const MW = stripComments(readFileSync('server/src/audit/middleware.ts', 'utf8'));
 const AUDIT = stripComments(readFileSync('server/src/audit/audit.ts', 'utf8'));
-const MCP = stripComments(readFileSync('server/src/mcp/router.ts', 'utf8'));
+// The tool-call audit entry is written by the shared dispatch, not by either door — so this reads the
+// dispatch through `_tool-dispatch.mjs` rather than naming a file that has already moved once.
+const MCP = dispatchSource();
 const API = stripComments(readFileSync('server/src/api/audit.ts', 'utf8'));
 
 describe('all three writers carry it', () => {

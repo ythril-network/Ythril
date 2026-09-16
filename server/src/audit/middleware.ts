@@ -86,7 +86,9 @@ export const ROUTE_RULES: RouteRule[] = [
   { method: 'GET',    pattern: /^\/api\/files\/([^/]+)$/,                          operation: 'file.read',      spaceGroup: 1, read: true },
   { method: 'GET',    pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/files/,       operation: 'file.list',      spaceGroup: 1, read: true },
   // File METADATA mutations live on the brain router and had no rules at all.
-  { method: 'DELETE', pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/files$/,      operation: 'file.meta.delete', spaceGroup: 1 },
+  // `file.meta.delete` had a rule here and its route is gone (5.0): the metadata-only delete was a second
+  // door onto half of one act, and `deleteFileCascade` removes the record with the file. A rule for a route
+  // nobody serves is a classification about nothing, and it makes the coverage numbers read as complete.
   { method: 'PATCH',  pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/files$/,      operation: 'file.meta.update', spaceGroup: 1 },
   { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/reindex$/,    operation: 'space.reindex',  spaceGroup: 1 },
   { method: 'POST',   pattern: /^\/api\/brain\/spaces\/([^/]+)\/embedding-queue\/media\/retry-failed$/, operation: 'file.retry_embedding_all', spaceGroup: 1 },
@@ -121,6 +123,14 @@ export const ROUTE_RULES: RouteRule[] = [
   { method: 'DELETE', pattern: /^\/api\/spaces\/([^/]+)\/meta\/typeSchemas\//,     operation: 'space.schema.delete', spaceGroup: 1 },
   { method: 'DELETE', pattern: /^\/api\/spaces\/([^/]+)$/,                         operation: 'space.delete',   spaceGroup: 1 },
   { method: 'POST',   pattern: /^\/api\/admin\/spaces\/([^/]+)\/wipe$/,            operation: 'space.wipe',     spaceGroup: 1 },
+  /*
+   * NO ROWS FOR THE TOOL DOOR, and that is a decision rather than an omission.
+   *
+   * `POST /api/<tool-name>` is audited by `callTool`, which derives the operation from `mcpAuditOperation`
+   * — the same mapping the MCP door has always used, so one act is logged under one operation whichever
+   * door it came through. Forty-five patterns here would be forty-five copies of a derivation that already
+   * exists, and the copy nobody wrote is an unaudited mutation.
+   */
   { method: 'GET',    pattern: /^\/api\/spaces/,                                   operation: 'space.list',     read: true },
 
   // ── Token operations ─────────────────────────────────────────────────────
