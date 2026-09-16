@@ -69,7 +69,7 @@ describe('Webhook admin API — validation', () => {
 
   it('rejects an unknown event type (400)', async () => {
     const r = await post(INSTANCES.a, token, '/api/admin/webhooks', {
-      url: SINK, secret: 'whsec_12345678', events: ['memory.upserted'],
+      url: SINK, secret: 'whsec_12345678', events: ['fact.upserted'],
     });
     assert.equal(r.status, 400, `Expected 400, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
@@ -90,8 +90,8 @@ describe('Webhook admin API — validation', () => {
 
 describe('Webhook dispatch — real match + sign + deliver + log', () => {
   let spaceX, spaceY;
-  let hookMatch;   // subscribed to spaceX / memory.created
-  let hookOther;   // subscribed to spaceX / entity.created (must NOT get memory.created)
+  let hookMatch;   // subscribed to spaceX / fact.created
+  let hookOther;   // subscribed to spaceX / entity.created (must NOT get fact.created)
 
   before(async () => {
     token = fs.readFileSync(TOKEN_FILE, 'utf8').trim();
@@ -126,20 +126,20 @@ describe('Webhook dispatch — real match + sign + deliver + log', () => {
     }
   });
 
-  it('a matching memory.created fires a real delivery that is recorded', async () => {
+  it('a matching fact.created fires a real delivery that is recorded', async () => {
     const created = await post(INSTANCES.a, token, `/api/brain/spaces/${spaceX}/facts`, {
       fact: `webhook-match-${RUN}`, tags: ['wh'],
     });
     assert.equal(created.status, 201, `create fact: ${JSON.stringify(created.body)}`);
 
     // The dispatcher matched, signed, attempted delivery (DNS-fails on .invalid),
-    // and recorded the attempt. Poll the delivery log for the memory.created row.
+    // and recorded the attempt. Poll the delivery log for the fact.created row.
     let delivery;
     await waitFor(async () => {
       const r = await get(INSTANCES.a, token, `/api/admin/webhooks/${hookMatch}/deliveries`);
       delivery = r.body.deliveries?.find(d => d.event === 'fact.created');
       return Boolean(delivery);
-    }, 20_000, 500, 'no memory.created delivery was recorded — emit/match/dispatch path did not run');
+    }, 20_000, 500, 'no fact.created delivery was recorded — emit/match/dispatch path did not run');
 
     assert.equal(delivery.webhookId, hookMatch, 'delivery is attributed to the matching webhook');
     assert.equal(delivery.spaceId, spaceX, 'delivery records the originating space');
@@ -149,14 +149,14 @@ describe('Webhook dispatch — real match + sign + deliver + log', () => {
     assert.ok(delivery.error, 'a failed delivery must record an error');
   });
 
-  it('event-filter mismatch means NO memory.created delivery on the other hook', async () => {
-    // hookOther is subscribed to entity.created only; the memory.created above
+  it('event-filter mismatch means NO fact.created delivery on the other hook', async () => {
+    // hookOther is subscribed to entity.created only; the fact.created above
     // (same space) must not have matched it. getMatchingWebhooks is the real
     // filter under test.
     const r = await get(INSTANCES.a, token, `/api/admin/webhooks/${hookOther}/deliveries`);
     assert.equal(r.status, 200);
     const leaked = (r.body.deliveries ?? []).find(d => d.event === 'fact.created');
-    assert.ok(!leaked, 'a webhook filtered to entity.created must not receive memory.created');
+    assert.ok(!leaked, 'a webhook filtered to entity.created must not receive fact.created');
   });
 
   it('a REST entity create fires entity.created via the centralized upsertEntity emit', async () => {
@@ -186,7 +186,7 @@ describe('Webhook dispatch — real match + sign + deliver + log', () => {
     }, 20_000, 500, 'the test endpoint never produced a test.ping delivery record');
   });
 
-  it('a space-filter mismatch does not deliver (memory in an unsubscribed space)', async () => {
+  it('a space-filter mismatch does not deliver (a fact in an unsubscribed space)', async () => {
     const created = await post(INSTANCES.a, token, `/api/brain/spaces/${spaceY}/facts`, {
       fact: `webhook-nomatch-${RUN}`, tags: ['wh'],
     });

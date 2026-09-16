@@ -397,7 +397,7 @@ describe('Proxy spaces', () => {
         targetSpace: SPACE_A,
       });
       assert.ok(!result.isError, `Expected success, got: ${JSON.stringify(result)}`);
-      assert.ok(result.content?.[0]?.text?.includes('Stored memory'));
+      assert.ok(result.content?.[0]?.text?.includes('Stored fact'));
     });
 
     it('recall aggregates across member spaces (or errors if index not ready)', async () => {

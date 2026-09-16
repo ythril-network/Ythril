@@ -92,7 +92,7 @@ export class EntityRefPicker {
 
   // ── Inline memory picker (slice 3c "memoryIds searchable like entity") ───────────────────────
   //
-  // Backs app-memory-ref-field: an INLINE search + a title cache so chips show the memory's fact, not a
+  // Backs app-fact-ref-field: an INLINE search + a title cache so chips show the memory's fact, not a
   // truncated id. Server-searched via listFacts(?search=). Used by the chrono create form, the
   // drawer's chrono edit, and (since slice 4d) the file-meta edit form — only ever one open at a time.
 

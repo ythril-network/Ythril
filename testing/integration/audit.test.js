@@ -48,7 +48,7 @@ describe('Audit Log', () => {
 
   it('Audit log records THIS specific write, not just "some entry exists"', async () => {
     // A bare `entries.length > 0` passes on stale rows from a warm DB. Correlate
-    // to the exact operation: a memory.update carries entryId === the memory _id
+    // to the exact operation: a fact.update carries entryId === the fact _id
     // (entryGroup on the route), so we can prove THIS op was logged (S8.7).
     const beforeTs = new Date().toISOString();
 
@@ -68,18 +68,18 @@ describe('Audit Log', () => {
     let updateEntry;
     for (let i = 0; i < 20 && !updateEntry; i++) {
       await new Promise(r => setTimeout(r, 300));
-      const r = await get(INSTANCES.a, tokenA, `/api/admin/audit-log?operation=memory.update&spaceId=general&after=${encodeURIComponent(beforeTs)}&limit=50`);
+      const r = await get(INSTANCES.a, tokenA, `/api/admin/audit-log?operation=fact.update&spaceId=general&after=${encodeURIComponent(beforeTs)}&limit=50`);
       assert.equal(r.status, 200);
       updateEntry = r.body.entries.find(e => e.entryId === memId);
     }
-    assert.ok(updateEntry, `no memory.update audit entry with entryId === ${memId} — this op was not logged`);
+    assert.ok(updateEntry, `no fact.update audit entry with entryId === ${memId} — this op was not logged`);
     assert.equal(updateEntry.method, 'PATCH', 'update entry records the PATCH method');
     assert.equal(updateEntry.status, 200, 'update entry records the 200 result');
     assert.ok(updateEntry.tokenId || updateEntry.oidcSubject, 'entry attributes the caller');
 
     // The create is also logged in this window (create rows carry no entryId, so
     // correlate by operation + status + the after-timestamp window, not by id).
-    const createLog = await get(INSTANCES.a, tokenA, `/api/admin/audit-log?operation=memory.create&spaceId=general&after=${encodeURIComponent(beforeTs)}&limit=50`);
+    const createLog = await get(INSTANCES.a, tokenA, `/api/admin/audit-log?operation=fact.create&spaceId=general&after=${encodeURIComponent(beforeTs)}&limit=50`);
     assert.equal(createLog.status, 200);
     assert.ok(typeof createLog.body.total === 'number', 'total should be a number');
     assert.ok(typeof createLog.body.hasMore === 'boolean', 'hasMore should be a boolean');

@@ -258,7 +258,7 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
                 </div>
                 <div class="drawer-field">
                   <div class="drawer-label">{{ 'common.memoryIds' | transloco }}</div>
-                  <app-memory-ref-field [target]="state.drawerEditChrono" />
+                  <app-fact-ref-field [target]="state.drawerEditChrono" />
                 </div>
                 <div class="drawer-field">
                   <div class="drawer-label">{{ 'brain.chrono.table.properties' | transloco }}</div>

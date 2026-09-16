@@ -53,13 +53,23 @@ describe('Webhook event types (real ALL_WEBHOOK_EVENTS from the compiled build)'
 
   it('rejects unknown event types', () => {
     assert.equal(ALL_WEBHOOK_EVENTS.has('unknown.event'), false);
-    assert.equal(ALL_WEBHOOK_EVENTS.has('memory.upserted'), false);
+    assert.equal(ALL_WEBHOOK_EVENTS.has('fact.upserted'), false);
     assert.equal(ALL_WEBHOOK_EVENTS.has(''), false);
+  });
+
+  it('and the PRE-5.0 spellings, which is the half a rename leaves behind', () => {
+    // The boot migration rewrites stored subscriptions, but an operator adding one by hand from an old
+    // runbook must be refused rather than left with a hook that is listed, enabled, and never delivers.
+    for (const old of ['memory.created', 'memory.updated', 'memory.deleted']) {
+      assert.equal(ALL_WEBHOOK_EVENTS.has(old), false,
+        `${old} is still accepted. Nothing emits it, so the subscription would be silently dead — the exact `
+        + 'failure `db/rename-memories-to-facts.ts` migrates existing hooks away from.');
+    }
   });
 });
 
 describe('Webhook event payload structure', () => {
-  it('a memory.created payload uses a documented event type', () => {
+  it('a fact.created payload uses a documented event type', () => {
     const payload = {
       event: 'fact.created',
       timestamp: new Date().toISOString(),

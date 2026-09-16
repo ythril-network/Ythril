@@ -25,7 +25,7 @@ export interface MemoryIdTarget { memoryIds: string[]; }
  * slice-4d File Meta rebuild rather than switching here.
  */
 @Component({
-  selector: 'app-memory-ref-field',
+  selector: 'app-fact-ref-field',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PhIconComponent, TranslocoPipe],

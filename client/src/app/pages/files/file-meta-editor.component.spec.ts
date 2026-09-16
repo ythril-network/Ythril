@@ -60,7 +60,7 @@ describe('FileMetaEditorComponent', () => {
     // They are the reason the identity below matters; if the form stopped rendering them, that assertion
     // would go on passing while nothing could write to the model.
     const fixture = mount(model());
-    for (const tag of ['app-entity-ref-field', 'app-memory-ref-field', 'app-chrono-ref-field']) {
+    for (const tag of ['app-entity-ref-field', 'app-fact-ref-field', 'app-chrono-ref-field']) {
       expect(fixture.nativeElement.querySelector(tag), `${tag} did not render`).toBeTruthy();
     }
   });

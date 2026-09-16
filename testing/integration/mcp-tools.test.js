@@ -145,7 +145,7 @@ describe('MCP brain tools — remember / recall / query', () => {
     const result = await session.callTool('save_fact', { space: 'general', fact: uniqueFact, tags: ['mcp-test'] });
     assert.ok(!result?.isError, `remember returned isError: ${JSON.stringify(result)}`);
     const text = result?.content?.[0]?.text ?? '';
-    assert.ok(text.includes('Stored memory'), `Expected "Stored memory" in: ${text}`);
+    assert.ok(text.includes('Stored fact'), `Expected "Stored fact" in: ${text}`);
     assert.ok(/seq \d+/.test(text) || /ID /.test(text), `Expected seq/ID in text: ${text}`);
   });
 
@@ -1266,7 +1266,7 @@ describe('MCP brain tools � remember with description and properties', () => {
     });
     assert.ok(!result?.isError, `remember with description/properties returned isError: ${JSON.stringify(result)}`);
     const text = result?.content?.[0]?.text ?? '';
-    assert.ok(text.includes('Stored memory') || text.includes('seq'), `Expected confirmation in: ${text}`);
+    assert.ok(text.includes('Stored fact') || text.includes('seq'), `Expected confirmation in: ${text}`);
   });
 
   it('remember description is stored and queryable', async (t) => {

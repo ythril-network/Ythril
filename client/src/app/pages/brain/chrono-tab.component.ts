@@ -90,7 +90,7 @@ import { TimestampComponent } from '../../shared/timestamp.component';
                 </div>
                 <div class="field">
                   <label>{{ 'brain.chrono.form.facts' | transloco }}</label>
-                  <app-memory-ref-field [target]="chronoForm" />
+                  <app-fact-ref-field [target]="chronoForm" />
                 </div>
               </div>
               <div class="form-row rich">

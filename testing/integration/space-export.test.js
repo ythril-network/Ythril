@@ -55,7 +55,7 @@ describe('Space export — basic export', () => {
     assert.equal(body.spaceId, spaceId);
     assert.equal(body.spaceName, 'Export Struct Test');
     assert.ok(typeof body.version === 'string' && body.version.length > 0, 'version must be a non-empty string');
-    assert.ok(Array.isArray(body.facts), 'memories must be an array');
+    assert.ok(Array.isArray(body.facts), 'facts must be an array');
     assert.ok(Array.isArray(body.entities), 'entities must be an array');
     assert.ok(Array.isArray(body.edges), 'edges must be an array');
     assert.ok(Array.isArray(body.chrono), 'chrono must be an array');
@@ -332,7 +332,7 @@ describe('Space export/import — round-trip (export → wipe → import)', () =
     // Import the exported payload
     const importR = await post(INSTANCES.a, tok, `/api/admin/spaces/${spaceId}/import`, exportPayload);
     assert.equal(importR.status, 200, `Import: ${JSON.stringify(importR.body)}`);
-    assert.equal(importR.body.results.facts.errors, 0, 'No import errors for memories');
+    assert.equal(importR.body.results.facts.errors, 0, 'No import errors for facts');
     assert.equal(importR.body.results.entities.errors, 0, 'No import errors for entities');
     assert.equal(importR.body.results.edges.errors, 0, 'No import errors for edges');
     assert.equal(importR.body.results.chrono.errors, 0, 'No import errors for chrono');
@@ -425,19 +425,19 @@ describe('Space export/import — round-trip (export → wipe → import)', () =
 
     // Bulk-write so seeding N is fast. Include characters that MUST be JSON-escaped, so the
     // streamed output is exercised on escaping too, not just plain ASCII.
-    const memories = Array.from({ length: N }, (_, i) => ({
+    const facts = Array.from({ length: N }, (_, i) => ({
       fact: `stream doc ${i} — "quoted", \\backslash\\, newline\n, tab\t, unicode ☃`,
       tags: [`t${i % 5}`],
     }));
-    const bulk = await post(INSTANCES.a, tok, `/api/brain/spaces/${srcId}/bulk`, { memories });
+    const bulk = await post(INSTANCES.a, tok, `/api/brain/spaces/${srcId}/bulk`, { facts });
     assert.ok([200, 201, 207].includes(bulk.status), JSON.stringify(bulk.body)); // /bulk returns 207 Multi-Status
     assert.equal(bulk.body.errors?.length ?? 0, 0, `bulk seed must have no errors: ${JSON.stringify(bulk.body.errors)}`);
 
-    // Export must be syntactically valid JSON with all N memories present.
+    // Export must be syntactically valid JSON with all N facts present.
     const exp = await get(INSTANCES.a, tok, `/api/admin/spaces/${srcId}/export`);
     assert.equal(exp.status, 200);
-    assert.ok(Array.isArray(exp.body.facts), 'memories must be an array');
-    assert.equal(exp.body.facts.length, N, `all ${N} memories must be exported, got ${exp.body.facts.length}`);
+    assert.ok(Array.isArray(exp.body.facts), 'facts must be an array');
+    assert.equal(exp.body.facts.length, N, `all ${N} facts must be exported, got ${exp.body.facts.length}`);
     // The tricky-character doc must survive escaping intact.
     const doc0 = exp.body.facts.find(m => m.fact.startsWith('stream doc 0 '));
     assert.ok(doc0 && doc0.fact.includes('☃') && doc0.fact.includes('"quoted"'), 'special characters must round-trip through the stream');
@@ -446,6 +446,6 @@ describe('Space export/import — round-trip (export → wipe → import)', () =
     const imp = await post(INSTANCES.a, tok, `/api/admin/spaces/${dstId}/import`, exp.body);
     assert.ok([200, 201].includes(imp.status), JSON.stringify(imp.body));
     const stats = await get(INSTANCES.a, tok, `/api/brain/spaces/${dstId}/stats`);
-    assert.equal(stats.body.facts, N, `all ${N} memories must import into the target space`);
+    assert.equal(stats.body.facts, N, `all ${N} facts must import into the target space`);
   });
 });

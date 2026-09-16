@@ -2,7 +2,7 @@
  * Integration: live brain-change SSE stream (F12) — GET /api/brain/spaces/:spaceId/events
  *
  *  - a REST write on the space pushes a `data:` event to a subscribed EventSource-style client
- *  - the event names the collection (`memory.created`) so the client can refresh the right tab
+ *  - the event names the collection (`fact.created`) so the client can refresh the right tab
  *  - the stream authenticates via a single-use `?ticket=` minted by an authenticated POST (EventSource
  *    can't set headers; a raw token in the URL would leak into logs/history)
  *  - a raw `?token=` is REJECTED (the query-token fallback was removed from browser SSE)

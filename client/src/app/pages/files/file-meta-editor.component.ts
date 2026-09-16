@@ -67,7 +67,7 @@ export interface FileMetaModel {
         </div>
         <div class="field">
           <label>{{ 'brain.fileMeta.table.facts' | transloco }}</label>
-          <app-memory-ref-field [target]="m" />
+          <app-fact-ref-field [target]="m" />
         </div>
         <div class="field">
           <label>{{ 'brain.fileMeta.table.chrono' | transloco }}</label>
