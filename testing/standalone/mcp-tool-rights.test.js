@@ -70,8 +70,8 @@ describe('TOOL_RIGHTS agrees with ROUTE_RIGHTS, row for row', () => {
          * flag to a rung is a change to who can wipe a space.
          */
         const handler = ALL_TOOLS.find(t => t.name === tool);
-        assert.ok(handler?.admin,
-          `${tool}: absent from TOOL_RIGHTS, and not flag-governed either — its route ${route} is `
+        assert.ok(handler?.admin || handler?.spaceAdmin,
+          `${tool}: absent from TOOL_RIGHTS, and governed by neither flag — its route ${route} is `
           + 'area-scoped, so nothing prices it on the MCP door at all');
         continue;
       }
@@ -97,7 +97,9 @@ describe('TOOL_RIGHTS agrees with ROUTE_RIGHTS, row for row', () => {
     // the two cannot be wrong together.
     const covered = new Set(TOOL_RIGHTS.map(r => r.tool));
     const uncovered = ALL_TOOLS
-      .filter(t => t.spaceRequired && !covered.has(t.name) && !t.admin)
+      // `spaceAdmin` governs too, and by the STRICTER question of the two: `admin` asks whether the
+      // token administers the instance, `spaceAdmin` whether it administers the space in the call.
+      .filter(t => t.spaceRequired && !covered.has(t.name) && !t.admin && !t.spaceAdmin)
       .map(t => t.name);
     assert.deepEqual(uncovered, [],
       'a space-scoped tool with no rights row is ungoverned on MCP');

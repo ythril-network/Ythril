@@ -411,11 +411,17 @@ describe('RightsMatrixComponent — the Space Admin column', () => {
     expect(header!.textContent).toContain('tokens.rights.spaceAdmin');
   });
 
-  it('reads as ON only when all four areas are at admin', () => {
+  it('reads as ON for the GRANT, and OFF for four admin rungs', () => {
+    /*
+     * The 5.0 change, on the screen somebody audits access from. Administering a space is its own grant;
+     * four admin rungs are everything you can do to the DATA and are not administration. A column that
+     * still read them as ON would overstate access in exactly the place it must not.
+     */
     const on = (el: HTMLElement, row: number) =>
       [...toggleIn(el, row).querySelectorAll('button')][1]!.className.includes('on');
 
-    expect(on(render(rights({ perSpace: { qa: ALL_ADMIN } })), 1)).toBe(true);
+    expect(on(render(rights({ spaceAdmin: { floor: false, spaces: ['qa'] } })), 1)).toBe(true);
+    expect(on(render(rights({ perSpace: { qa: ALL_ADMIN } })), 1)).toBe(false);
     // Three of four is not a space administrator, and showing it as one would overstate access on the screen
     // somebody audits access from.
     expect(on(render(rights({
@@ -424,39 +430,57 @@ describe('RightsMatrixComponent — the Space Admin column', () => {
     expect(on(render(rights()), 1)).toBe(false);
   });
 
-  it('reads as ON when the FLOOR is what put every area at admin', () => {
+  it('reads as ON for the FLOOR form — every space, including ones created later', () => {
     /*
-     * The cell values are shown raised by the floor, and this column must agree with the four cells beside it. A
-     * row administered through the floor is administered — that is what the server enforces — so a column reading
-     * the STORED row would contradict the cells it sits next to.
+     * The canary operator's shape (`Q-12`), now expressed as the grant's own floor rather than four admin
+     * area floors. Every row reads as administered, because it is.
      */
-    const el = render(rights({ floor: { ...ALL_ADMIN } }));
+    const el = render(rights({ spaceAdmin: { floor: true, spaces: [] } }));
     expect([...toggleIn(el, 1).querySelectorAll('button')][1]!.className.includes('on')).toBe(true);
   });
 
-  it('granting writes all four areas in ONE emit', () => {
+  it('and four admin FLOORS read as OFF, for the same reason four rungs do', () => {
+    const el = render(rights({ floor: { ...ALL_ADMIN } }));
+    expect([...toggleIn(el, 1).querySelectorAll('button')][1]!.className.includes('on')).toBe(false);
+  });
+
+  it('granting writes the GRANT, in ONE emit', () => {
     /*
-     * Not four `setCell` calls. The parent persists on change, so four emits would let it observe three
-     * inconsistent intermediate rows — a token that briefly means something nobody asked for.
+     * Since 5.0 this writes `spaceAdmin` rather than four `admin` cells. The four cells looked the same to
+     * an operator and were not the same thing: what got stored was four rungs, so the INTENT was gone on
+     * save and editing one cell afterwards withdrew the rung with nothing saying so.
+     *
+     * Still one emit. The parent persists on change, so two would let it observe an intermediate state.
      */
     const el = render(rights());
     [...toggleIn(el, 1).querySelectorAll('button')][1]!.click();
     expect(emitted.length).toBe(1);
-    expect(emitted[0]!.perSpace['qa']).toEqual({ ...ALL_ADMIN });
+    expect(emitted[0]!.spaceAdmin).toEqual({ floor: false, spaces: ['qa'] });
   });
 
-  it('withdrawing clears all four, also in one emit', () => {
-    const el = render(rights({ perSpace: { qa: ALL_ADMIN } }));
+  it('withdrawing removes the grant', () => {
+    const el = render(rights({ spaceAdmin: { floor: false, spaces: ['qa'] } }));
     [...toggleIn(el, 1).querySelectorAll('button')][0]!.click();
     expect(emitted.length).toBe(1);
-    expect(emitted[0]!.perSpace['qa'])
-      .toEqual({ knowledge: 'none', files: 'none', schema: 'none', dataQuality: 'none' });
+    expect(emitted[0]!.spaceAdmin?.spaces ?? []).not.toContain('qa');
   });
 
-  it('granting on the floor row writes the FLOOR, not a space', () => {
+  it('a token granted the old way is migrated on the SERVER, not read as administered here', () => {
+    // `config/migrate-space-admin-grant.ts` writes the grant on boot for every token that held all four.
+    // The editor must not second-guess it, or the screen and the server would disagree for anything the
+    // migration deliberately left alone — a floor, or three rungs and a write.
+    const el = render(rights({ perSpace: { qa: ALL_ADMIN } }));
+    const on = [...toggleIn(el, 1).querySelectorAll('button')][1]!;
+    expect(on.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('granting on the floor row writes the grant FLOOR, not four area floors', () => {
+    // The area floors grant maximal rights over every space's DATA and administration of none. Writing
+    // them here would have silently stopped the canary operator's token administering anything.
     const el = render(rights());
     [...toggleIn(el, 0).querySelectorAll('button')][1]!.click();
-    expect(emitted[0]!.floor).toEqual({ ...ALL_ADMIN });
+    expect(emitted[0]!.spaceAdmin).toEqual({ floor: true, spaces: [] });
+    expect(emitted[0]!.floor).toBeNull();
     expect(Object.keys(emitted[0]!.perSpace)).toEqual([]);
   });
 

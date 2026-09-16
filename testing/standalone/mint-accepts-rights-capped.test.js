@@ -75,9 +75,16 @@ describe('minting with a rights matrix', () => {
      */
     assert.match(code, /REMOVED_MINT_OPTIONS/,
       'nothing refuses the legacy mint options by name');
+    /*
+     * A TOP-LEVEL declaration, anchored to the start of a line at exactly two spaces.
+     *
+     * `code.includes('  spaces: z.')` matched a NESTED field — `spaceAdmin: { floor, spaces }` is indented
+     * four, and four spaces contain two. The gate was reporting the legacy option restored by a field that
+     * is not it, which is the substring check matching the wrong thing while its title still reads right.
+     */
     for (const legacy of ['spaces', 'admin', 'readOnly']) {
-      assert.ok(code.includes(`${legacy}:`) === false || !code.includes(`  ${legacy}: z.`),
-        `CreateTokenBody still declares \`${legacy}\``);
+      assert.doesNotMatch(code, new RegExp(`^  ${legacy}: z\.`, 'm'),
+        `CreateTokenBody still declares \`${legacy}\` at the top level`);
     }
     assert.match(code, /rights\.perSpace|rights\.instanceAdmin|rights\.floor/,
       'the refusal does not say which `rights` field replaces each removed option');

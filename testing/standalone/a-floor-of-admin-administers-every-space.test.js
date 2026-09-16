@@ -37,11 +37,21 @@ import { SPACE_AREAS } from '../../server/dist/config/rights-shape.js';
 const allAreas = rung => Object.fromEntries(SPACE_AREAS.map(a => [a, rung]));
 
 /** Every area at `admin`, named by nothing — the canary's shape. */
+/*
+ * THE SHAPE MOVED AT 5.0 AND THE CONFIGURATION DID NOT. Space admin is its own grant now, and a floor of
+ * `admin` on the four AREAS grants maximal rights over every space's data — not administration of any.
+ * So the canary's token is `spaceAdmin.floor`, which is what the boot migration writes for exactly this
+ * matrix, and what the floor row's toggle writes from the editor.
+ *
+ * The incident this file is named for is unchanged: a token administering every space through the floor
+ * holds no per-space ROWS, so any check counting rows reads zero and refuses it.
+ */
 const FLOOR_ADMIN = { rights: { instanceAdmin: false, createSpaces: false,
-  floor: allAreas('admin'), perSpace: {} } };
+  floor: allAreas('admin'), perSpace: {}, spaceAdmin: { floor: true, spaces: [] } } };
 
 /** The same reach, spelled per space — what the gate already accepted. */
 const ROW_ADMIN = { rights: { instanceAdmin: false, createSpaces: false, floor: {},
+  spaceAdmin: { floor: false, spaces: ['work'] },
   perSpace: { work: allAreas('admin') } } };
 
 test('a floor of admin on all four areas administers every space', () => {

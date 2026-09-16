@@ -719,7 +719,9 @@ export const space_reindexTool: ToolHandler = {
 export const delete_space_dataTool: ToolHandler = {
   name: 'delete_space_data',
   description: 'Empty a space of its DATA while keeping the space itself — its id, label, purpose, schema, '
-    + 'rights and network membership all survive. Requires instance-admin rights. IRREVERSIBLE: there is no '
+    + 'rights and network membership all survive. Requires ADMIN on all four areas of the space named in '
+    + '`space` — the same rung `DELETE /api/brain/spaces/:spaceId/facts` and its four siblings ask for, '
+    + 'because one act should not need a different standing depending on the door. IRREVERSIBLE: there is no '
     + 'undo, no trash, and no confirmation step, so the call that arrives is the call that runs.\n\n'
     + 'ON A NETWORKED SPACE IT OPENS A VOTE AND WIPES NOTHING YET. Emptying a space the network shares is a '
     + 'governed act, like deleting one: a round opens in every network that holds the space, this instance '
@@ -747,7 +749,15 @@ export const delete_space_dataTool: ToolHandler = {
     + 'RESPONSE: a per-collection count of what was deleted. Zeroes mean the space was already empty, not '
     + 'that anything refused.',
   mutating: true,
-  admin: true,
+  /*
+   * SPACE-admin, not instance-admin. Owner, 2026-09-16: *"Sync both doors!!! Space admin to wipe space"*.
+   *
+   * The five REST routes this mirrors ask `<area>: admin` on the space in the path. `admin: true` here
+   * meant INSTANCE admin — not a stricter door, a DIFFERENT question, so the administrator of a space
+   * could empty it over REST and was refused over MCP. The two were recorded as agreeing; they agreed on
+   * the word and not on its scope.
+   */
+  spaceAdmin: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
           type: 'object',

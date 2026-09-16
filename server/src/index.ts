@@ -63,6 +63,19 @@ async function main(): Promise<void> {
       const moved = migrateMemoryToFact(getConfig().spaces);
       if (moved.ttlWindows.length > 0) flushConfig();
     }
+
+    /*
+     * And the tokens that administered a space under the rule 5.0 replaced.
+     *
+     * Space admin is its own grant now and the four area rungs no longer add up to it — so a token that
+     * manages its space's tokens and settings today would quietly stop, with nothing failing and nothing
+     * to read. This writes down the decision those grants already expressed.
+     */
+    {
+      const { migrateSpaceAdminGrant } = await import('./config/migrate-space-admin-grant.js');
+      const granted = migrateSpaceAdminGrant(getConfig().tokens);
+      if (granted.granted.length > 0) flushConfig();
+    }
     loadSecrets();
     loadSchemaLibrary();
 

@@ -15,6 +15,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING — space administrator is a rung you GRANT, and four admin rungs are no longer it.**
+
+  ```json
+  { "spaceAdmin": { "floor": false, "spaces": ["work"] } }
+  ```
+
+  It used to be derived: `admin` on all four areas of a space WAS administering it. Two things were wrong
+  with that. The capability could not be granted in one action — the canary operator asked twice — and the
+  equivalence is false: holding every DATA rung is not authority over the space's tokens and settings, so
+  the derivation handed the space's token surface to any token that happened to hold four rungs.
+
+  | | |
+  |---|---|
+  | `spaceAdmin` | ⟹ `admin` in all four areas of that space |
+  | `admin` in all four | ⟹̸ `spaceAdmin` |
+
+  **Nothing can disagree, for a better reason than before.** The grant is an INPUT to `grantedRung`, the
+  single funnel every per-space rung resolves through — not a second opinion checked beside the rungs,
+  which is what an earlier decision rejected a flag for.
+
+  **Two scopes, like everything else in the matrix.** `spaces` names them; `floor` reaches every space
+  including ones created later. The floor form exists because a real configuration needs it: a token
+  administering every space holds no per-space rows at all.
+
+  **Nobody is stranded.** A boot migration writes the grant for every token that held all four — under the
+  previous rule those tokens WERE administrators, and an upgrade is not the moment to reinterpret that. A
+  floor of all-admin migrates to the floor form, never to a list of the spaces that happen to exist today.
+
+- **`delete_space_data` asks what its REST routes ask.** It carried `admin: true` — instance admin — while
+  the wipe routes need admin on the space in the path, so a space's administrator could empty it over REST
+  and was refused over MCP.
+
 - **`help()` told every caller the two doors reach the same things, and that was false in twenty-two
   places.** `REST_ONLY_CAPABILITIES` was empty, its own comment called the emptiness *"the finished state
   rather than an oversight"*, and the gate guarding it asserted both halves of every row — so with zero

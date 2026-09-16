@@ -62,7 +62,21 @@ export type AreaRungs = Record<SpaceArea, Rung>;
  * nobody wrote down. If a transitive implication is ever wanted, it goes in as its own row, visibly.
  */
 /**
- * The DERIVED rungs — states the matrix expresses without naming, published so they can be found.
+ * The named rungs beyond the four areas, published so a caller can find and GRANT them.
+ *
+ * ## `spaceAdmin` stopped being derived at 5.0, and this docblock is where that shows
+ *
+ * It was `SPACE_AREAS.every(area => effectiveRung(...) === 'admin')` and nothing else — a real capability
+ * with no way to grant it in one action. The canary operator asked twice (2026-08-17T1910Z and 1916Z) and
+ * this list was the answer: a NAME, findable through `rights-catalog`, still assembled from four cells.
+ * Owner, 2026-09-16: *"Make space admin real and not derived"*.
+ *
+ * `TokenRights.spaceAdmin` is now a grant of its own, read by `grantedRung`. **`requires` below is still
+ * correct and is still computed** — it says what the grant RESOLVES TO, which is what a caller reading the
+ * catalogue needs in order to understand what it hands over, and it is what a token granted the old way
+ * still satisfies. The name of this array is the part that is now half-true, and it is kept: `derivedRungs`
+ * is a published response key that integrators branch on, and renaming it to correct a word would break
+ * them for no capability.
  *
  * ## Why this exists at all
  *
@@ -122,6 +136,43 @@ export interface TokenRights {
   /** The MINIMUM held in every space, including ones created later. `null` means no floor. */
   floor: AreaRungs | null;
   perSpace: Record<string, AreaRungs>;
+  /**
+   * Spaces this token ADMINISTERS outright — the rung an operator can grant in one action.
+   *
+   * ## Why this exists when the four rungs already expressed it
+   *
+   * They expressed it and nothing could GRANT it. `isSpaceAdminFor` is `every area === 'admin'`, so being
+   * a space's administrator was something you assembled out of four checkboxes and hoped you had got
+   * right. The canary operator asked twice — 2026-08-17T1910Z and 1916Z — and their words were about the
+   * surface: *"there is still no SPACE ADMIN rung in the rights matrix"*. Naming it in `DERIVED_RUNGS`
+   * made it findable and left it unassemblable in one click. Owner, 2026-09-16: *"Make space admin real
+   * and not derived"*.
+   *
+   * ## Why this is not the second source of truth that was rejected
+   *
+   * `editor-scope.ts` turned a flag down because *"it would then be a second thing that can disagree with
+   * them"* — true of a flag CHECKED BESIDE the rungs, false of one that GRANTS them. This is read by
+   * `grantedRung`, the single funnel every per-space rung already passes through, so a space named here
+   * holds `admin` in every area BY RESOLUTION. `isSpaceAdminFor` is unchanged and still asks
+   * `effectiveRung` four times; there is no comparison to get wrong because there are not two answers.
+   *
+   * ## Scope, exactly
+   *
+   * Per space, never the instance, and never the FLOOR — the floor reaches spaces that do not exist yet,
+   * and a per-space grant leaking into it would hand one space's administrator the whole instance.
+   *
+   * ## Two scopes, because everything else in this matrix has two
+   *
+   * `floor` reaches every space including ones created later; `spaces` names them. Administration needed
+   * both for a configuration that already exists: the canary operator's token holds `admin` on all four
+   * areas of every space through the FLOOR, with no `instanceAdmin`, and it runs their daily token
+   * inventory. A per-space list alone would have enumerated today's spaces and frozen a list that was
+   * never a list — and silently stopped that token administering anything, which is the incident `Q-12`
+   * already cost them once.
+   *
+   * Optional, so every matrix stored before it existed reads back unchanged and grants nothing new.
+   */
+  spaceAdmin?: { floor: boolean; spaces: string[] };
 }
 
 const isRung = (v: unknown): v is Rung => (RUNGS as readonly unknown[]).includes(v);
@@ -191,9 +242,47 @@ export function repairRights(value: unknown): { rights: TokenRights; changed: bo
   const createSpaces = value['createSpaces'] === true;
   if (typeof value['instanceAdmin'] !== 'boolean' || typeof value['createSpaces'] !== 'boolean') changed = true;
 
-  for (const k of Object.keys(value)) {
-    if (k !== 'instanceAdmin' && k !== 'createSpaces' && k !== 'floor' && k !== 'perSpace') changed = true;
+  /*
+   * The spaces this token administers. A non-string entry is DROPPED rather than kept or refused: this
+   * function exists because a malformed matrix reached disk once and made every save of that token fail
+   * validation, so the matrix could be looked at and never corrected. Refusing here would recreate that.
+   *
+   * Absent is the common case and is not a repair — a matrix stored before this field existed is correct
+   * as it stands and must not be reported as changed, or every old token would look edited on first read.
+   */
+  let spaceAdmin: { floor: boolean; spaces: string[] } | undefined;
+  if (value['spaceAdmin'] !== undefined) {
+    const raw = value['spaceAdmin'];
+    if (isPlainObject(raw)) {
+      const spaces: string[] = [];
+      if (Array.isArray(raw['spaces'])) {
+        for (const id of raw['spaces']) {
+          if (typeof id === 'string' && id.length > 0) spaces.push(id);
+          else changed = true;
+        }
+      } else if (raw['spaces'] !== undefined) {
+        changed = true;                                               // not an array: names nothing
+      }
+      const floor = raw['floor'] === true;
+      if (typeof raw['floor'] !== 'boolean') changed = true;
+      for (const k of Object.keys(raw)) if (k !== 'floor' && k !== 'spaces') changed = true;
+      spaceAdmin = { floor, spaces };
+    } else {
+      changed = true;                                                 // not an object: administers nothing
+    }
   }
 
-  return { rights: { instanceAdmin, createSpaces, floor, perSpace }, changed };
+  for (const k of Object.keys(value)) {
+    if (k !== 'instanceAdmin' && k !== 'createSpaces' && k !== 'floor' && k !== 'perSpace'
+      && k !== 'spaceAdmin') changed = true;
+  }
+
+  return {
+    // Emitted only when it grants something, so a matrix that predates the field round-trips unchanged.
+    rights: {
+      instanceAdmin, createSpaces, floor, perSpace,
+      ...(spaceAdmin && (spaceAdmin.floor || spaceAdmin.spaces.length) ? { spaceAdmin } : {}),
+    },
+    changed,
+  };
 }

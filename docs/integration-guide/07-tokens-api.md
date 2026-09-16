@@ -97,23 +97,40 @@ Three properties worth building against:
   inference, so the order of the array is not load-bearing.
 - **It is scoped to one space**, and applies to the all-spaces floor within the floor's own scope.
 
-#### `derivedRungs` — states the matrix expresses without naming
+#### `derivedRungs` — the rungs beyond the four areas
 
-**A token whose FOUR areas are all at `admin` for one space is that space's administrator.** That has been
-enforced since 3.0 and, until now, was named nowhere: the matrix showed four independent rungs and nothing
-said the all-four-at-`admin` state had a meaning. An operator could not find it, grant it in one action, or
-verify they held it — and neither could you.
+**A space administrator holds `admin` in all four areas of one space.** Since 5.0 that is something you can
+**grant directly**, with `spaceAdmin` on the rights matrix:
 
-`requires` is the condition, `grants` is what it unlocks **beyond** what the four rungs already give, and
-`excludes` is the containment. Read `excludes` if you are building against it: **it is never instance-wide.**
-It cannot grant `instanceAdmin` or `createSpaces`, cannot set an all-spaces floor, and cannot reach, mint for
-or edit tokens for any space it does not administer — it does not even list them. Those rules are red-teamed,
-not aspirational.
+```json
+{
+  "instanceAdmin": false,
+  "createSpaces": false,
+  "floor": null,
+  "perSpace": {},
+  "spaceAdmin": ["work"]
+}
+```
 
-**Derive the state, do not store it.** `requires` is computed server-side from the area list, so it stays
-correct if a fifth area is ever added; a copy of the four names in your own code would not. There is no
-`spaceAdmin: true` field on a token and there will not be — the four rungs already express it, and a second
-field could disagree with them.
+`requires` is what the grant RESOLVES TO, `grants` is what it unlocks **beyond** what the four rungs already
+give, and `excludes` is the containment. Read `excludes` if you are building against it: **it is never
+instance-wide.** It cannot grant `instanceAdmin` or `createSpaces`, cannot set an all-spaces floor, and
+cannot reach, mint for or edit tokens for any space it does not administer — it does not even list them.
+Those rules are red-teamed, not aspirational.
+
+**The four rungs still work and nothing was migrated.** A token whose four areas are all at `admin` for a
+space administers it exactly as before. The two spellings are one right: the server resolves `spaceAdmin`
+into `admin` in every area of the named space before any check runs, so no code compares the two and neither
+can disagree with the other. Send whichever you have; read both.
+
+**What it does NOT touch is the floor.** `spaceAdmin` names spaces. A floor reaches every space including
+ones created later, so it stays its own field — granting a space administrator the floor would be granting
+them the instance.
+
+> **This section used to say the opposite**, in as many words: *"There is no `spaceAdmin: true` field on a
+> token and there will not be — the four rungs already express it, and a second field could disagree with
+> them."* The second half of that was the real objection and it is what the design answers: a field
+> **checked beside** the rungs can disagree with them, and a field they are **resolved from** cannot.
 
 To show it in your own UI: read `derivedRungs`, then compare a token's effective rung per area (after
 `implications`) against `requires`.

@@ -172,6 +172,21 @@ const RightsMatrix = z.object({
   perSpace: z.record(z.string().min(1), z.record(z.enum(SPACE_AREAS), z.enum(RUNGS)))
     .refine(m => Object.keys(m).length <= MAX_SCOPED_SPACES,
       { message: `perSpace may name at most ${MAX_SCOPED_SPACES} spaces` }),
+  /*
+   * The spaces this token administers — the rung an operator grants in ONE action.
+   *
+   * Optional, because every matrix minted before it existed is still valid and must stay valid; `.strict()`
+   * below means an absent field is absent rather than silently dropped.
+   *
+   * Bounded by the same ceiling as `perSpace` and for the same reason: the array-bomb case. A cap on one
+   * list and not the other is the cap written twice with one of them forgotten.
+   */
+  spaceAdmin: z.object({
+    /** Administers every space, including ones created later — the floor form. */
+    floor: z.boolean(),
+    spaces: z.array(z.string().min(1)).max(MAX_SCOPED_SPACES,
+      { message: `spaceAdmin.spaces may name at most ${MAX_SCOPED_SPACES} spaces` }),
+  }).strict().optional(),
 }).strict();
 /**
  * `.strict()`, and it is the most important word in this file.

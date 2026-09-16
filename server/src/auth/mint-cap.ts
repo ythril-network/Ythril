@@ -50,7 +50,32 @@ export interface Excess {
  * Granted, not held: implications are applied on top of this by `effectiveRung`. Kept separate so an
  * implication is always evaluated against what an operator actually wrote, never against another inference.
  */
+/**
+ * Does this token ADMINISTER the space — by the floor, or by name?
+ *
+ * One reader for both scopes. Two call sites ask it (`grantedRung` here and `isSpaceAdminFor` in
+ * `editor-scope.ts`), and a second spelling of *"floor or list"* is how one of them ends up checking the
+ * list alone — which is the floor-admin token holding no rows, counted zero, and refused: `Q-12` exactly.
+ */
+export function administers(rights: TokenRights | null | undefined, space: string): boolean {
+  const sa = rights?.spaceAdmin;
+  if (!sa) return false;
+  return sa.floor || sa.spaces.includes(space);
+}
+
 function grantedRung(rights: TokenRights, space: string, area: SpaceArea): Rung {
+  /*
+   * ADMINISTERING THE SPACE IS THE TOP OF EVERY AREA IN IT, resolved here rather than checked anywhere.
+   *
+   * This one line is why `spaceAdmin` is not a second source of truth. A flag compared against the rungs
+   * could disagree with them; a flag that IS one of the inputs they resolve from cannot — `isSpaceAdminFor`
+   * asks `effectiveRung` four times and gets four `admin`s without knowing the flag exists.
+   *
+   * It is deliberately in `grantedRung` and not in `floorRung`: the floor reaches every space including
+   * ones created later, and a per-space grant reaching it would make one space's administrator the
+   * instance's.
+   */
+  if (administers(rights, space)) return 'admin';
   const floor = rights.floor?.[area] ?? 'none';
   const row = rights.perSpace[space]?.[area] ?? 'none';
   return rank(row) > rank(floor) ? row : floor;
@@ -132,6 +157,40 @@ export function capRights(minter: TokenRights, requested: TokenRights): Excess[]
       const have = effectiveRung(minter, space, area);
       if (rank(want) > rank(have)) {
         excess.push({ space, area, requested: want, allowed: have });
+      }
+    }
+  }
+
+  /*
+   * ADMINISTERING A SPACE IS A GRANT, so it is priced like one.
+   *
+   * Checked as the four rungs it resolves to rather than as a flag the minter also holds — which means a
+   * minter that holds all four the OLD way can delegate the new flag, and a minter holding the flag can
+   * delegate the four. The two spellings are one right, so neither may be a back door onto the other.
+   *
+   * `effectiveRung` already reads the minter's own `spaceAdmin`, so a space administrator minting another
+   * needs no special case here: it holds `admin` in every area of that space by resolution.
+   */
+  /*
+   * The FLOOR form first. It reaches every space including ones created later, so it is compared against
+   * the minter's own floor and never against an effective rung somewhere — the same rule the area floors
+   * above follow, and for the same reason: a minter with one admin row may delegate that row and may not
+   * delegate a floor, because a floor reaches spaces the minter cannot.
+   */
+  if (requested.spaceAdmin?.floor && !minter.spaceAdmin?.floor) {
+    for (const area of AREAS) {
+      const have = floorRung(minter, area);
+      if (rank('admin') > rank(have)) {
+        excess.push({ space: '*', area, requested: 'admin', allowed: have });
+      }
+    }
+  }
+
+  for (const space of requested.spaceAdmin?.spaces ?? []) {
+    for (const area of AREAS) {
+      const have = effectiveRung(minter, space, area);
+      if (rank('admin') > rank(have)) {
+        excess.push({ space, area, requested: 'admin', allowed: have });
       }
     }
   }

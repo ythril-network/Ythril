@@ -41,7 +41,7 @@
 import type { TokenRecord } from '../config/types.js';
 import { SPACE_AREAS } from '../config/rights-shape.js';
 import type { TokenRights } from '../config/rights-shape.js';
-import { effectiveRung } from './mint-cap.js';
+import { effectiveRung, administers } from './mint-cap.js';
 
 /**
  * The spaces an administrator is CONFINED to, read from the rights matrix rather than the legacy allowlist.
@@ -89,17 +89,33 @@ import { effectiveRung } from './mint-cap.js';
  * no space's data — and that is the honest answer, not an oversight.
  */
 /**
- * Is this token the administrator OF a space, per the rights matrix?
+ * Is this token the administrator OF a space?
  *
- * ## `admin` on ALL FOUR areas, and nothing less
+ * ## The GRANT, and only the grant — the four rungs are not equal to it
  *
- * The matrix has no "space administrator" checkbox and does not need one: holding the destructive rung in
- * every area of a space already says *"there is nothing here you cannot do"*. Requiring all four is what
- * stops the obvious escalation — `admin` on Files alone must not mint tokens, because a token is not a file.
+ * Owner, 2026-09-16: *"Space admin is more than the four area admin rungs. It must be its own"*, and
+ * *"It includes the four but the four do not equal space admin"*. So the implication runs one way:
  *
- * A per-space capability flag was the alternative and was rejected: it is a schema change and a migration to
- * express something the four rungs already express, and it would then be a second thing that can disagree
- * with them.
+ *     spaceAdmin  ⟹  admin in all four areas of that space     (resolved in `grantedRung`)
+ *     admin in all four  ⟹̸  spaceAdmin                         (this predicate refuses it)
+ *
+ * A token with the four rungs has everything you can do to the DATA in that space and is not its
+ * administrator: it does not manage the space's own tokens, and it does not change the space's settings.
+ * Those are not a fifth area — they are a different kind of authority over the same space, which is
+ * exactly why reading them off the data rungs was wrong.
+ *
+ * **This used to be `SPACE_AREAS.every(area => effectiveRung(...) === 'admin')`**, and the docblock here
+ * argued for it: a per-space flag *"would then be a second thing that can disagree with them"*. Two things
+ * were wrong with that. The capability could not be GRANTED, only assembled — which the canary operator
+ * reported twice. And the equivalence it rested on is false: maximal data rights are not administration,
+ * so the derivation handed the space's token surface to every token that happened to hold four rungs.
+ *
+ * Nothing can disagree now either, for a better reason than before: there is one statement of the right,
+ * and the rungs are RESOLVED from it rather than compared against it.
+ *
+ * **Existing tokens are migrated, not stranded.** `db/space-admin-becomes-a-grant.ts` writes the flag for
+ * every token that held all four — under the old rule those tokens WERE administrators, and dropping them
+ * silently on upgrade would take away access nobody asked to remove.
  *
  * ## What it unlocks, which is an owner ruling and not a derivation
  *
@@ -119,7 +135,7 @@ import { effectiveRung } from './mint-cap.js';
  */
 export function isSpaceAdminFor(rights: TokenRights | null | undefined, spaceId: string): boolean {
   if (!rights) return false;
-  return SPACE_AREAS.every(area => effectiveRung(rights, spaceId, area) === 'admin');
+  return administers(rights, spaceId);
 }
 
 /**
@@ -132,7 +148,17 @@ export function isSpaceAdminFor(rights: TokenRights | null | undefined, spaceId:
 export function spaceAdminSpacesFor(record: { rights?: TokenRights | null } | undefined): string[] {
   const rights = record?.rights;
   if (!rights) return [];
-  return Object.keys(rights.perSpace ?? {}).filter(id => isSpaceAdminFor(rights, id));
+  /*
+   * The grant's own list. It used to filter `perSpace` keys through the predicate, which was right while
+   * administration WAS four rungs on a row — and reads as zero for a token granted the right directly,
+   * because such a token needs no row at all.
+   *
+   * The FLOOR form is deliberately not expanded here. This answers *"which spaces does it administer by
+   * name"*, and a floor administers every space including ones that do not exist yet; enumerating the
+   * config would make the answer depend on how many spaces exist. `administersAnySpace` is the predicate
+   * for *"does it administer anything"*, and `Q-12` is what happens when the two get confused.
+   */
+  return [...(rights.spaceAdmin?.spaces ?? [])];
 }
 
 /**
@@ -163,8 +189,14 @@ export function spaceAdminSpacesFor(record: { rights?: TokenRights | null } | un
 export function administersAnySpace(record: { rights?: TokenRights | null } | undefined): boolean {
   const rights = record?.rights;
   if (!rights) return false;
-  // A floor of `admin` on all four areas administers every space, present and future, and names none of them.
-  if (SPACE_AREAS.every(area => rights.floor?.[area] === 'admin')) return true;
+  /*
+   * THE FLOOR FORM FIRST, and it is the whole reason this function is not `spaceAdminSpacesFor(...).length`.
+   *
+   * A token administering every space names NONE of them, so any check that counts named spaces reads zero
+   * and refuses it. That is `Q-12` exactly, and the shape survived the 5.0 change: it used to be four admin
+   * AREA floors and is now the grant's own floor, but it is still the configuration that holds no rows.
+   */
+  if (rights.spaceAdmin?.floor) return true;
   return spaceAdminSpacesFor(record).length > 0;
 }
 
@@ -184,9 +216,19 @@ export function editorScopeFor(
    * Owner, 2026-09-05: *"no matrix = refuse - no fallback no backwards compatibility anymore"*.
    */
   if (!rights) return [];
+  // Either floor reaches every space, so neither can be expressed as a list.
+  if (rights.spaceAdmin?.floor) return undefined;
   if (rights.floor && SPACE_AREAS.some(a => rights.floor?.[a] && rights.floor[a] !== 'none')) return undefined;
-  return Object.keys(rights.perSpace ?? {})
-    .filter(id => SPACE_AREAS.some(a => effectiveRung(rights, id, a) !== 'none'));
+  /*
+   * The UNION of rows and granted spaces. A token granted `spaceAdmin` for a space needs no `perSpace`
+   * row there — the grant resolves its rungs — so deriving the scope from rows alone would give the
+   * space's own administrator an empty scope and refuse it everything, including its own space.
+   */
+  const named = new Set(rights.spaceAdmin?.spaces ?? []);
+  for (const id of Object.keys(rights.perSpace ?? {})) {
+    if (SPACE_AREAS.some(a => effectiveRung(rights, id, a) !== 'none')) named.add(id);
+  }
+  return [...named];
 }
 
 /** The rights object as the API accepts it. */

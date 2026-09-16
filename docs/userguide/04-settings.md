@@ -288,10 +288,13 @@ down one.
 
 #### Administering one space, without administering the instance
 
-**A token with all four areas at `admin` for one space is that space's administrator.** There is no separate
-checkbox for it, and there deliberately is not: the four rungs already say it, and a second setting could
-disagree with them. But it *is* a real, named thing, and until now nothing on this page told you so — which
-is why it was asked for twice by an operator who already had it and could not tell.
+**A space administrator holds `admin` in all four areas of one space — and since 5.0 you grant it in one
+press**, with the **Space admin** column at the right-hand end of the matrix.
+
+The difference shows the day after. When that column wrote four rungs, four rungs were all that got saved:
+your intention was gone, and changing any single cell later took the role away with nothing saying so. The
+grant is now stored as itself, so it survives an edit to a neighbouring cell. A token set up the old way
+still administers its space and needs no attention.
 
 What it means in practice: that token can manage **that space's own tokens** — list, mint and edit them — and
 **that space's own settings**, schema and index rebuilds. Nothing wider.
@@ -328,18 +331,16 @@ shows `none` — both are correct, and the grid is showing you what the token ca
 > upgrading if you see one change; it never restores access from the pre-3.0 `admin` / `read-only` / spaces
 > fields.
 
-#### Setting all four areas to admin makes a space administrator
+#### The Space admin column
 
-**There is a `Space admin` column for this, at the right-hand end of the matrix.** Press **A** on a space's row
-and all four of its areas go to admin in one action; press **–** and they all clear. The column also shows the
-state: a row already at admin on all four areas reads as **A** whether you set it that way or reached it through
-**All spaces**.
+**Press A on a space's row to make that token the space's administrator; press – to take it back.** The
+column reads the state too: a row shows **A** whether you granted it here, set the four cells by hand, or
+reached it through **All spaces**. Two positions and not four, because administering a space is not a
+level — anything in between is still said with the four area cells.
 
-It is a shortcut and a read-out, not a fifth kind of right. Anything other than all-or-nothing is still said with
-the four area cells, and the column simply reflects them — which is why it has two positions and not four. Before
-3.2.0 the column did not exist, so the commonest grant meant setting four cells and hoping none was missed.
-
-Give a token **admin** on all four areas of one space and it becomes that space's administrator. It can then do
+**What changed at 5.0:** pressing **A** records *"this token administers this space"* rather than setting
+four cells and saving only those, which let the next edit remove the role unannounced. Taking it back also
+clears a row set the old way, so the column and the server cannot disagree about who administers what. It can then do
 two things it could not before:
 
 - **Manage that space's tokens** — create them, edit their rights, rotate and revoke them. It only ever sees
