@@ -16,6 +16,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { dispatchSource } from './_tool-dispatch.mjs';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 
@@ -198,7 +199,7 @@ describe('both doors, and all three routes', () => {
   });
 
   it('MCP carries the same classification, because it has no status to correct', () => {
-    const src = stripComments(readFileSync('server/src/mcp/router.ts', 'utf8'));
+    const src = dispatchSource();
     assert.match(src, /classifyReadFailure\(err\)/,
       'the MCP dispatcher must classify too, or an agent gets the truncated prose a REST caller no longer sees');
     assert.match(src, /storeSideFailure: true/,

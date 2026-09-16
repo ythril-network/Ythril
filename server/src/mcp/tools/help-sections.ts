@@ -145,12 +145,20 @@ declares entity/record types and their expected properties. Validation modes:
 entities. Schema-declared property paths also unlock the fast filtered-recall path
 (see retrieval guide above).`;
 
-const REST_SUMMARY = `The same functionality is exposed over REST with Bearer token auth (the token you
-are using now works there too). Route families: /api/brain (facts, entities,
-edges, chrono, recall), /api/spaces, /api/files, /api/tokens, /api/networks,
-/api/sync, /api/conflicts, /api/duplicates, /api/schema-library, /api/mfa,
-/api/about, and admin-only /api/admin/* (audit-log, webhooks, data, local-agent,
-media-config). Full reference: docs/integration-guide.md in the Ythril repository.`;
+const REST_SUMMARY = `EVERY TOOL ON THIS LIST IS ALSO "POST /api/<tool-name>", with the token you are
+using now as a Bearer header. The body is the tool's arguments exactly — the same
+JSON you would send here, "space" included, nothing renamed or wrapped. One
+envelope comes back for every tool: {"ok":true,"text":...,"data":...} on success
+and {"ok":false,"error":...,"data":...} on a refusal, where "error" is the same
+sentence you would read here. It is the same code: one function gates, resolves
+and runs the call, and the two doors only translate their own envelope into it.
+
+Older route families are still there and still work — /api/brain (facts,
+entities, edges, chrono, recall), /api/spaces, /api/files, /api/tokens,
+/api/networks, /api/sync, /api/conflicts, /api/duplicates, /api/schema-library,
+/api/mfa, /api/about, and admin-only /api/admin/* (audit-log, webhooks, data,
+local-agent, media-config). Full reference: docs/integration-guide.md in the
+Ythril repository.`;
 
 /**
  * Build the document for THIS token.
@@ -192,12 +200,24 @@ export function helpSections(
        * that complaint and a sentence cannot answer it. The mark comes from the same predicate the server
        * enforces with, so it cannot claim a rung the caller does not have.
        */
-      + 'ADMINISTERING A SPACE has a name and this list shows where you hold it. A token whose FOUR areas '
-      + '(knowledge, files, schema, dataQuality) are all at the `admin` rung for one space is that space’s '
-      + 'administrator: it manages that space’s own tokens and settings. It is never instance-wide — it '
-      + 'cannot grant `instanceAdmin` or `createSpaces`, cannot set a floor, and cannot see or edit tokens '
-      + 'for a space it does not administer. `GET /api/tokens/rights-catalog` publishes the definition as '
-      + '`derivedRungs`.',
+      /*
+       * REWRITTEN AT 5.0, and the old wording is the reason this paragraph is worth reading twice.
+       *
+       * It said a token with all four areas at `admin` for one space IS that space's administrator. That was
+       * true while the capability was DERIVED, and it stopped being true when space admin became its own
+       * grant — owner, 2026-09-16: *"Space admin is more than the four area admin rungs. It must be its own"*
+       * and *"It includes the four but the four do not equal space admin"*.
+       *
+       * A sentence telling a caller to set four rungs, when four rungs no longer grant it, is worse than no
+       * sentence: they follow it, are refused, and have been told to do the wrong thing by the authoritative
+       * reference.
+       */
+      + 'ADMINISTERING A SPACE is its own grant and this list shows where you hold it. It INCLUDES the admin '
+      + 'rung on all four areas (knowledge, files, schema, dataQuality) — but holding those four does not '
+      + 'give it to you, so setting them will not make this appear. A space administrator manages that '
+      + 'space’s own tokens and settings. It is never instance-wide — it cannot grant `instanceAdmin` or '
+      + '`createSpaces`, cannot set a floor, and cannot see or edit tokens for a space it does not '
+      + 'administer. `GET /api/tokens/rights-catalog` publishes the definition.',
     lines: ctx.accessibleSpaces.length > 0
       ? ctx.accessibleSpaces.map(s =>
         `- ${sanitizeDynamic(s.id)}${s.label ? ` ("${sanitizeDynamic(s.label)}")` : ''}`

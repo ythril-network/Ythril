@@ -110,6 +110,13 @@ export interface RouteRight {
  */
 export const ROUTE_RIGHTS: readonly RouteRight[] = [
   // ── Knowledge ────────────────────────────────────────────────────────────────────────────────────────
+  /*
+   * NO ROW FOR THE TOOL DOOR, and it is not an omission — see `POST /api/:tool` in `NOT_AREA_SCOPED`.
+   *
+   * The wipe briefly had one here, as `/api/delete_space_data`. It went when the door became generic:
+   * pricing one tool's path in this table and the other forty-four in `TOOL_RIGHTS` is the two-tables
+   * version of the defect the generic door exists to remove.
+   */
   { route: '/api/brain/recall', method: 'POST', area: 'knowledge', needs: 'read', scope: 'body' },
   { route: '/api/brain/filter', method: 'POST', area: 'knowledge', needs: 'read', scope: 'body' },
   { route: '/api/brain/spaces/:spaceId/traverse', method: 'POST', area: 'knowledge', needs: 'read', scope: 'path' },
@@ -157,10 +164,6 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   // COLLECTION-level deletes. Every one of these empties a whole record type in the space, and not one was
   // in the first draft of this list — the gate found them. They are the single most destructive thing in the
   // area and would have been the least governed.
-  { route: '/api/brain/spaces/:spaceId/facts', method: 'DELETE', area: 'knowledge', needs: 'admin', scope: 'path' },
-  { route: '/api/brain/spaces/:spaceId/entities', method: 'DELETE', area: 'knowledge', needs: 'admin', scope: 'path' },
-  { route: '/api/brain/spaces/:spaceId/edges', method: 'DELETE', area: 'knowledge', needs: 'admin', scope: 'path' },
-  { route: '/api/brain/spaces/:spaceId/chrono', method: 'DELETE', area: 'knowledge', needs: 'admin', scope: 'path' },
 
   // ── Files ────────────────────────────────────────────────────────────────────────────────────────────
   { route: '/api/files/:spaceId', method: 'GET', area: 'files', needs: 'read', scope: 'path' },
@@ -175,7 +178,6 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   { route: '/api/brain/spaces/:spaceId/embedding-queue/records', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/embedding-queue/records/retry', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/files', method: 'PATCH', area: 'files', needs: 'write', scope: 'path' },
-  { route: '/api/brain/spaces/:spaceId/files', method: 'DELETE', area: 'files', needs: 'admin', scope: 'path' },
   { route: '/api/files/:spaceId/mkdir', method: 'POST', area: 'files', needs: 'write', scope: 'path' },
   // These three were UNGOVERNED, and invisible to `every-space-route-has-an-area` because the gate strips block
   // comments before scanning and a region of `api/files.ts` was being swallowed with them — so the routes were
@@ -378,6 +380,22 @@ export const TOOL_RIGHTS: readonly ToolRight[] = [
  * matches the same way, and a gate below asserts the two agree rather than trusting that they do.
  */
 export const NOT_AREA_SCOPED: readonly { route: string; why: string }[] = [
+
+  /*
+   * THE TOOL DOOR, and this row is the one most worth reading before deciding it looks like a hole.
+   *
+   * `POST /api/:tool` serves every tool there is, so there is no single area or rung to price it at: each
+   * tool's requirement is its own `TOOL_RIGHTS` row, and `callTool` enforces it per named space — including
+   * the `spaceAdmin` grant, which this table cannot express at all.
+   *
+   * Giving it a row here would be strictly worse than none. One area and one rung for forty-five
+   * capabilities is either too weak for the wipe or too strong for a read, and whichever way it went the
+   * middleware would answer BEFORE the per-tool check and hide it. `TOOL_RIGHTS` is the table, and it is
+   * now the only one, for both doors.
+   */
+  { route: '/api/:tool', why: 'the generic tool door. Every tool is priced in `TOOL_RIGHTS` and enforced '
+    + 'per call by `callTool`, which is what both doors dispatch through. A single area/rung row here '
+    + 'would govern forty-five different capabilities with one number, and would run first.' },
 
   /*
    * THE SPACE'S SETTINGS AND ITS DESTRUCTION. Neither is a view of one area's data.

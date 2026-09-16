@@ -10,8 +10,8 @@ import { usesLinkRecords } from '../../brain/link-adjacency.js';
 import { arrayWriteError } from '../../brain/array-write-refusal.js';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { unknownFieldWarnings } from './unknown-fields.js';
-import { globalRateLimit, bulkWipeRateLimit } from '../../rate-limit/middleware.js';
-import { createChrono, updateChrono, getChronoById, listChrono, deleteChrono, bulkDeleteChrono, parseRecurrence, ChronoFilter } from '../../brain/chrono.js';
+import { globalRateLimit } from '../../rate-limit/middleware.js';
+import { createChrono, updateChrono, getChronoById, listChrono, deleteChrono, parseRecurrence, ChronoFilter } from '../../brain/chrono.js';
 import { getConfig } from '../../config/loader.js';
 import { parseLimit, parseSkip, unsupportedPageParam } from '../../util/pagination.js';
 import { pageAcrossMembers } from '../../spaces/page-across-members.js';
@@ -498,22 +498,3 @@ chronoRouter.delete('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpace
 });
 
 
-// DELETE /api/brain/spaces/:spaceId/chrono — bulk wipe all chrono entries
-chronoRouter.delete('/spaces/:spaceId/chrono', bulkWipeRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
-  const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
-  if (isProxySpace(spaceId)) {
-    res.status(400).json({ error: 'Bulk wipe not supported on proxy spaces — target member spaces individually' });
-    return;
-  }
-  if (req.body?.confirm !== true) {
-    res.status(400).json({ error: '`confirm: true` required in request body' });
-    return;
-  }
-  const deleted = await bulkDeleteChrono(spaceId);
-  res.json({ deleted });
-});

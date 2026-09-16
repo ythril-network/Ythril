@@ -42,10 +42,19 @@ describe('the lookup', () => {
   });
 
   it('distinguishes methods on the same path', () => {
-    // GET and DELETE on a collection are not the same permission, and a path-only lookup would say they are.
+    // GET and POST on a collection are not the same permission, and a path-only lookup would say they are.
     assert.equal(rungFor('GET', '/api/brain/spaces/:spaceId/facts').needs, 'read');
     assert.equal(rungFor('POST', '/api/brain/spaces/:spaceId/facts').needs, 'write');
-    assert.equal(rungFor('DELETE', '/api/brain/spaces/:spaceId/facts').needs, 'admin');
+    /*
+     * The bulk wipe left this table entirely at 5.0. Five per-collection DELETEs became one tool call, and
+     * a tool is priced in `TOOL_RIGHTS` — so the right answer here is "no row", and asserting it is what
+     * stops one being added back. A route row would run BEFORE the per-tool check and hide it.
+     */
+    assert.deepEqual(rungFor('POST', '/api/delete_space_data'), { kind: 'unclassified' },
+      'a tool must not also be priced as a route — `TOOL_RIGHTS` is the one table for both doors');
+    // What the mounted route resolves to, which is the row that says why: one area and one rung cannot
+    // govern forty-five capabilities, so the tool door is deliberately outside this table.
+    assert.equal(rungFor('POST', '/api/:tool').kind, 'not-area-scoped');
   });
 
   it('says UNCLASSIFIED for a route nobody decided about, NOT a permissive default', () => {

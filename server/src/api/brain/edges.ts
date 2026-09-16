@@ -10,9 +10,8 @@ import { REF_KINDS } from '../../config/types-knowledge.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { unknownFieldWarnings } from './unknown-fields.js';
-import { globalRateLimit, bulkWipeRateLimit } from '../../rate-limit/middleware.js';
+import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { listEdges, deleteEdge, upsertEdge, getEdgeById, updateEdgeById, EdgeSchemaViolation } from '../../brain/edges.js';
-import { bulkDeleteEdges } from '../../brain/edge-bulk-delete.js';
 import { EdgeIdentityTaken } from '../../brain/edge-rekey.js';
 import { validateDeleteFields, applyDeleteFields as applyDeleteFieldsPaths } from '../../brain/delete-fields.js';
 import { getConfig } from '../../config/loader.js';
@@ -459,22 +458,3 @@ edgesRouter.patch('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAut
 });
 
 
-// DELETE /api/brain/spaces/:spaceId/edges — bulk wipe all edges
-edgesRouter.delete('/spaces/:spaceId/edges', bulkWipeRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
-  const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
-  if (isProxySpace(spaceId)) {
-    res.status(400).json({ error: 'Bulk wipe not supported on proxy spaces — target member spaces individually' });
-    return;
-  }
-  if (req.body?.confirm !== true) {
-    res.status(400).json({ error: '`confirm: true` required in request body' });
-    return;
-  }
-  const deleted = await bulkDeleteEdges(spaceId);
-  res.json({ deleted });
-});

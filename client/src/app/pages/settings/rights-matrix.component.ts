@@ -85,11 +85,11 @@ const EMPTY = (): WireRungs => ({ knowledge: 'none', files: 'none', schema: 'non
                       (click)="toggleExplain(a)">?</button>
             </th>
           }
-          <!-- SPACE ADMIN, and it is a column rather than a hidden shortcut because that is what was asked for.
-               It is DERIVED: a space administrator is a token holding admin on all four areas of that space, and
-               the server has enforced it since #937. The matrix showed four independent rungs and nothing said
-               that all four at admin IS administering the space, so the commonest grant meant setting four cells
-               and hoping none was missed. -->
+          <!-- SPACE ADMIN. A REAL grant since 5.0, not four cells read together: the toggle writes
+               spaceAdmin and the server resolves it to admin in every area of that space. Before, what got
+               stored was the four rungs, so the INTENT was lost on save and changing one cell afterwards
+               withdrew the rung with nothing saying so. The column still reads the old spelling, so a token
+               granted before this keeps showing as administered. -->
           <th class="admincol">
             {{ 'tokens.rights.spaceAdmin' | transloco }}
             <button class="area-info" type="button"
@@ -306,34 +306,50 @@ export class RightsMatrixComponent implements OnInit {
    * there reads as administered. That is what the server enforces, and a column that disagreed with the four
    * cells beside it would be worse than no column.
    */
-  isSpaceAdmin = (space: string): boolean => this.areas.every(a => this.cellShown(space, a) === 'admin');
-
-  /** The same question for the floor row — every space, including ones created later. */
-  floorIsAdmin = (): boolean => this.areas.every(a => this.floorShown(a) === 'admin');
+  isSpaceAdmin = (space: string): boolean => {
+    const sa = this.rights().spaceAdmin;
+    return (sa?.floor ?? false) || (sa?.spaces ?? []).includes(space);
+  };
+  /** The floor row's toggle: administers EVERY space, including ones created later. */
+  floorIsAdmin = (): boolean => this.rights().spaceAdmin?.floor ?? false;
 
   /**
-   * Grant or withdraw space admin, writing the row WHOLESALE.
+   * Grant or withdraw space admin, writing the GRANT rather than four cells.
    *
-   * Not a loop over `setCell`: that would emit four times and let a listener observe three inconsistent
-   * intermediate states — a row that is briefly admin on knowledge and none on schema is a token that briefly
-   * means something nobody asked for, and the parent form persists on change.
+   * ## What changed at 5.0, and why the old behaviour was not enough
    *
-   * Withdrawing sets every area to `none` rather than restoring what was there before. There is nothing to
-   * restore to: the control expresses one state across four cells, so its off position is the empty row. The four
-   * pickers remain the way to express anything in between, which is the model this column is a shortcut for and
-   * must not replace.
+   * This column used to set the four rungs to `admin` and call that administering the space. It looked
+   * identical from the operator's side and it was not the same thing: what got stored was four rungs, so
+   * the intent was gone the moment it was saved. Changing one cell afterwards silently withdrew the rung
+   * with nothing saying so, and nothing in the matrix could answer *"was this token MEANT to administer
+   * this space"*.
+   *
+   * It now writes `spaceAdmin`, which the server resolves to `admin` in every area through `grantedRung`.
+   * One emit, whole object — a loop would let a listener observe three inconsistent intermediate states,
+   * and the parent form persists on change.
+   *
+   * The four rungs stay written as they were: a token granted the old way keeps working, and the column
+   * reads either spelling, so nothing has to be migrated.
    */
   setSpaceAdmin(space: string, on: boolean): void {
     const r = this.rights();
-    const row = Object.fromEntries(this.areas.map(a => [a, on ? 'admin' : 'none'])) as unknown as WireRungs;
-    this.changed.emit({ ...r, perSpace: { ...r.perSpace, [space]: row } });
+    const held = new Set(r.spaceAdmin?.spaces ?? []);
+    if (on) held.add(space); else held.delete(space);
+    this.changed.emit({ ...r, spaceAdmin: { floor: r.spaceAdmin?.floor ?? false, spaces: [...held] } });
   }
 
   /** Same, for the floor. One emit, whole object. */
   setFloorAdmin(on: boolean): void {
+    /*
+     * The FLOOR form of the grant — every space, including ones created later.
+     *
+     * It used to set the four area floors to admin, which is a different statement: that grants maximal
+     * rights over every space's DATA and, since 5.0, administration of none. The canary operator's token
+     * is exactly this shape and runs their token inventory, so writing rungs here would have stopped it
+     * working with nothing failing.
+     */
     const r = this.rights();
-    const floor = Object.fromEntries(this.areas.map(a => [a, on ? 'admin' : 'none'])) as unknown as WireRungs;
-    this.changed.emit({ ...r, floor });
+    this.changed.emit({ ...r, spaceAdmin: { floor: on, spaces: r.spaceAdmin?.spaces ?? [] } });
   }
 }
 

@@ -140,11 +140,19 @@ describe('face labels cascade when their person is deleted', { skip }, () => {
 
   // ── 2. Every delete path ───────────────────────────────────────────────────
 
-  it('the bulk wipe clears labels too, without an id-per-entity query', async () => {
+  it('the SPACE wipe clears labels too, without an id-per-entity query', async () => {
+    /*
+     * Through `unlabelAllFaces`, which is what `wipeSpace` calls when `entities` is among the types.
+     *
+     * It used to go through `bulkDeleteEntities`, which passed the cascade as an `afterDelete` to the
+     * per-collection wipe. That function and its five `DELETE .../<collection>` routes are gone at 5.0 —
+     * emptying a space is one tool call — and the cascade moved INTO `wipeSpace` with them, because the
+     * door that survived was the one that never had it.
+     */
     await files.insertOne(faceChunk('a.jpg#face-chunk0', 'a.jpg', ALICE));
     await files.insertOne(faceChunk('b.jpg#face-chunk0', 'b.jpg', BOB));
 
-    const n = await brain.bulkDeleteEntities(SPACE);
+    const n = await brain.unlabelAllFaces(SPACE);
     assert.equal(n, 2);
     assert.equal((await face('a.jpg#face-chunk0')).faceEntityId, undefined);
     assert.equal((await face('b.jpg#face-chunk0')).faceEntityId, undefined);

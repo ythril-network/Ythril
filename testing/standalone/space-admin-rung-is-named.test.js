@@ -32,6 +32,7 @@ import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
 
 const { DERIVED_RUNGS, SPACE_AREAS, RUNGS } = await import('../../server/dist/config/rights-shape.js');
+const { effectiveRung } = await import('../../server/dist/auth/mint-cap.js');
 const { isSpaceAdminFor } = await import('../../server/dist/auth/editor-scope.js');
 
 const spaceAdmin = DERIVED_RUNGS.find(r => r.id === 'spaceAdmin');
@@ -47,25 +48,38 @@ describe('the published definition IS the enforced predicate', () => {
     assert.ok(spaceAdmin.excludes, 'and what it does not, which is what the canary operator asked to be explicit');
   });
 
-  it('a token built from `requires` PASSES isSpaceAdminFor', () => {
-    // The whole point: the published definition is not prose about the predicate, it satisfies it.
-    assert.equal(isSpaceAdminFor(rightsFor('s1', spaceAdmin.requires), 's1'), true,
-      'the published requirement does not actually make a space admin — the two have drifted');
+  it('`requires` is what the GRANT CONFERS, and the grant really confers it', () => {
+    /*
+     * THE DIRECTION OF THIS CLAIM CHANGED AT 5.0, and the change is the point.
+     *
+     * It used to assert that a token built from `requires` passes `isSpaceAdminFor` — the two were the
+     * same statement, because administering a space WAS holding those four rungs. Owner, 2026-09-16:
+     * *"It includes the four but the four do not equal space admin"*.
+     *
+     * So `requires` is no longer a condition to satisfy; it is what the grant hands over, and that is what
+     * a caller reading the catalogue needs in order to know what they are giving away. Asserted against
+     * `effectiveRung` rather than against prose, so the published map cannot drift from the resolution.
+     */
+    const granted = { instanceAdmin: false, createSpaces: false, floor: null, perSpace: {},
+      spaceAdmin: { floor: false, spaces: ['s1'] } };
+    for (const [area, rung] of Object.entries(spaceAdmin.requires)) {
+      assert.equal(effectiveRung(granted, 's1', area), rung,
+        `the catalogue says spaceAdmin confers ${area}:${rung} and the grant does not resolve to it`);
+    }
   });
 
-  it('and it is EXACTLY sufficient — every area matters', () => {
-    // Drop each area to `write` in turn. If any one of them still passes, `requires` over-states the rule and a
-    // reader would grant more than necessary; if the predicate ignored an area, this catches that too.
-    for (const area of SPACE_AREAS) {
-      const weakened = { ...spaceAdmin.requires, [area]: 'write' };
-      assert.equal(isSpaceAdminFor(rightsFor('s1', weakened), 's1'), false,
-        `${area} at 'write' still counted as space admin — either requires or the predicate is wrong`);
-    }
+  it('and the four rungs alone do NOT make an administrator', () => {
+    // The inverse, stated because it is the half a reader will assume. A token holding everything
+    // `requires` names has maximal rights over the space's DATA and administers nothing.
+    assert.equal(isSpaceAdminFor(rightsFor('s1', spaceAdmin.requires), 's1'), false,
+      'the published requirement was read as a way to BECOME a space admin — it is what being one gives '
+      + 'you, and the two stopped being the same thing at 5.0');
   });
 
   it('and it is per-SPACE, never instance-wide', () => {
     // The containment rule that matters most: holding it on s1 must say nothing about s2.
-    const r = rightsFor('s1', spaceAdmin.requires);
+    const r = { instanceAdmin: false, createSpaces: false, floor: null, perSpace: {},
+      spaceAdmin: { floor: false, spaces: ['s1'] } };
     assert.equal(isSpaceAdminFor(r, 's1'), true);
     assert.equal(isSpaceAdminFor(r, 's2'), false,
       'administering one space must not administer another — this is the rule they asked to be part of the '

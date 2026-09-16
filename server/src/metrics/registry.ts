@@ -627,14 +627,26 @@ export const tokensActive = new Gauge({
  * connected while every client on the instance is busy. An absent metric is a question an operator asks
  * once; a gauge that is confidently wrong is one nobody asks at all.
  *
- * `ythril_mcp_tool_calls_total` is the signal that survives, and it was always the better one — it counts
+ * `ythril_tool_calls_total` is the signal that survives, and it was always the better one — it counts
  * work rather than sockets.
  */
 
-export const mcpToolCallsTotal = new Counter({
-  name: 'ythril_mcp_tool_calls_total',
-  help: 'MCP tool invocations by tool name and space',
-  labelNames: ['tool', 'space'] as const,
+/**
+ * Tool invocations, whichever door they arrived at.
+ *
+ * **Renamed from `ythril_mcp_tool_calls_total` at 5.0, and the rename is the point rather than tidying.**
+ * Every tool is also `POST /api/<tool-name>` now, and both doors dispatch through one function — so a
+ * counter with `mcp` in its name was about to start counting HTTP calls under a label that says otherwise.
+ * An operator reading "MCP tool invocations" off a dashboard would have drawn a conclusion about agent
+ * traffic from a number that includes a browser, with nothing anywhere to contradict it.
+ *
+ * `door` is what makes the old question still answerable: `sum by (door)` separates them, and filtering
+ * `door="mcp"` gives exactly what the old counter meant.
+ */
+export const toolCallsTotal = new Counter({
+  name: 'ythril_tool_calls_total',
+  help: 'Tool invocations by tool name, space and door (mcp or rest)',
+  labelNames: ['tool', 'space', 'door'] as const,
   registers: [register],
 });
 

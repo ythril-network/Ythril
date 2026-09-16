@@ -211,8 +211,12 @@ instead of removing it. Flagged records stay listed and searchable but are shown
 UI; re-uploading the same path clears the flag. Derived records (conversion chunks / `_converted` /
 `_extracted`) are always hard-removed regardless of the setting.
 
-**Metadata-only delete + guard.** `DELETE /api/brain/spaces/:spaceId/files?path=…` removes a metadata
-record *without* touching disk — but only when doing so is safe. If the file **still exists on disk**
-and the record is not flagged deleted, the request is refused with **`409`** (deleting the metadata
-would silently orphan a live file — delete the file itself instead). A flagged or already-orphaned
-record (its file gone) can be purged this way.
+**Deleting the file deletes its metadata.** There is no metadata-only delete and does not need to be:
+every file has a metadata record, and `DELETE /api/files/:spaceId?path=…` removes both. An **orphan** —
+a record whose bytes went missing out of band — is cleaned up by that same call, which answers `204`
+rather than `404` when it finds one.
+
+> **Removed at 5.0.** A `DELETE` on the file-meta path purged a metadata record without
+> touching disk, guarded by a `409` when the file was still there. It was a second door onto half of one
+> act, and the half it could do alone left a file with no metadata — the state the File Meta tab cannot
+> render and nothing else repairs.

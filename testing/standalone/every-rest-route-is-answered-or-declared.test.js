@@ -41,7 +41,7 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { mountedRoutes } from './_routes.mjs';
-import { CAPABILITIES, NOT_A_CAPABILITY } from './_capability-map.mjs';
+import { CAPABILITIES, NOT_A_CAPABILITY, THE_TOOL_DOOR } from './_capability-map.mjs';
 
 let ALL_TOOLS;
 let REST_ONLY_CAPABILITIES;
@@ -86,6 +86,8 @@ describe('every route is answered, declared, or classified', () => {
     const unclassified = [];
     for (const r of mountedRoutes()) {
       const k = key(r);
+      // The generic tool door answers every tool at once, so it is classified by being itself.
+      if (k === THE_TOOL_DOOR) continue;
       if (ANSWERED.has(k) || declared.has(k) || exemptionFor(r) !== undefined) continue;
       unclassified.push(k);
     }

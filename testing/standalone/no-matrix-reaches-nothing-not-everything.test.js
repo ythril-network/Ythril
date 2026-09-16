@@ -177,8 +177,17 @@ describe('and every other guard that can see an absent matrix answers the same w
     const tool = { name: 'schema_update', spaceAdmin: true };
     assert.notEqual(mcp.spaceAdminRefusal(tool, undefined, 'demo'), null,
       'a space-configuring tool was allowed to a token with no rights matrix');
-    assert.equal(mcp.spaceAdminRefusal(tool, GRANTING, 'demo'), null,
-      'the guard refuses admin on all four areas of the named space');
+    /*
+     * ADMITTED BY THE GRANT, and refused by four admin rungs — which is the 5.0 change, not a slip. Space
+     * admin is its own right: `GRANTING` holds every AREA at admin and is therefore able to do anything
+     * to that space's DATA, which is not the same as configuring the space.
+     */
+    const ADMINISTERS = { ...GRANTING, spaceAdmin: { floor: false, spaces: ['demo'] } };
+    assert.equal(mcp.spaceAdminRefusal(tool, ADMINISTERS, 'demo'), null,
+      'the guard refuses a token that actually holds the space-admin grant');
+    assert.notEqual(mcp.spaceAdminRefusal(tool, GRANTING, 'demo'), null,
+      'four admin rungs configured the space — administration is its own grant since 5.0, and reading it '
+      + "off the data rungs hands the space's settings to any token holding four of them");
   });
 
   it('and the REST area check refuses too — the same rule on the other door', () => {

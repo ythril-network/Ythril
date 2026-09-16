@@ -138,7 +138,7 @@ to correct. The information is identical; only the envelope differs.
 | Per token | 300 / min by default, **settable** | token id | All authenticated endpoints, once the token is resolved |
 | Sync | 2 000 / min | client (peer) | Sync API endpoints |
 | Notify | 60 / min | client | `GET /api/notify`, `POST /api/notify`, `POST /api/notify/trigger` |
-| Bulk wipe | 5 / min | client | `DELETE /api/brain/spaces/:spaceId/{facts,entities,edges,chrono}` |
+| Bulk wipe | 5 / min | client | `POST /api/delete_space_data` |
 | Flood backstop | 3 000 / min | source IP | Everything except `/health`, `/ready`, `/metrics` |
 
 **"Keyed by client" means your budget is your own.** The limiter buckets on the credential you present —

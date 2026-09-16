@@ -7,15 +7,11 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { getConfig } from '../config/loader.js';
-import { log, currentRequestId } from '../util/log.js';
+import { log } from '../util/log.js';
 import { reachableSpaceIds } from '../auth/space-reach.js';
-import { toolRightsRefusal, spaceAdminRefusal } from './tool-rights-guard.js';
 import type { TokenRights } from '../config/rights-shape.js';
-import { memberSpacesWithin } from '../spaces/proxy-scoped.js';
-import { classifyReadFailure } from '../brain/store-failure.js';
-import { ALL_TOOLS, TOOLS_BY_NAME, type ToolSchemas } from './tools/index.js';
-import { SchemaViolationError } from '../brain/write-validation.js';
-import { makeArgsValidator } from './validate-args.js';
+import { ALL_TOOLS, type ToolSchemas } from './tools/index.js';
+import { callTool, toolSchemasFor } from './call-tool.js';
 
 /** Create an MCP Server instance with tools operating across all accessible spaces.
  *
@@ -95,28 +91,10 @@ function createGlobalMcpServer(tokenId?: string, tokenLabel?: string,
     { capabilities: { tools: {} }, instructions },
   );
 
-  const spaceEnumBase = accessibleSpaceIds.length > 0 ? { enum: accessibleSpaceIds } : {};
-
-  // The `space` enum depends on this token's accessible spaces, so tool schemas
-  // are built per server instance rather than being static.
-  const schemas: ToolSchemas = {
-    requiredSpace: { type: 'string' as const, ...spaceEnumBase, description: 'Space ID to operate on. Use list_spaces to discover available spaces.' },
-    optionalSpace: {
-      oneOf: [
-        { type: 'string' as const, ...spaceEnumBase },
-        { type: 'array' as const, items: { type: 'string' as const, ...spaceEnumBase }, minItems: 1 },
-      ],
-      description: 'Optional space. ONE name searches that space; a LIST of names searches exactly those, '
-        + 'and one you cannot reach refuses the whole call rather than quietly returning less — a short '
-        + 'answer and a filtered one are indistinguishable. Omit it to search every space this token can '
-        + 'reach. An empty list is refused rather than read as "all".',
-    },
-  };
-
-  // Enforce each tool's advertised inputSchema on incoming args (not just the JSON-RPC envelope), so the
-  // schema tools/list publishes is the real contract. Built per connection because the `space` enum is
-  // token-scoped; handlers keep their semantic checks on top.
-  const argsValidator = makeArgsValidator(schemas);
+  // The `space` enum depends on this token's accessible spaces, so tool schemas are built per server
+  // instance. From the SAME builder `callTool` validates against — two builders is a schema advertised
+  // in `tools/list` that the validator does not enforce.
+  const schemas: ToolSchemas = toolSchemasFor(accessibleSpaceIds);
 
   // Tools this token may see: read-only tokens lose mutating tools, non-admin
   // tokens lose instance-level tools. Both gates are re-enforced on dispatch.
@@ -133,228 +111,35 @@ function createGlobalMcpServer(tokenId?: string, tokenLabel?: string,
     })),
   }));
 
-  /**
-   * Write one audit entry per tool call.
-   *
-   * Under the operation the tool's REST counterpart records, not `mcp.<tool>` — a compliance reader
-   * asks who created a fact, not who invoked a tool, and two names for one act makes every query
-   * have to know both. `path` carries the tool name so the transport is still recoverable.
-   *
-   * Reads follow the REST convention: recorded only when `logReads` is on. Fire-and-forget, like
-   * every other audit write — a failing log must never fail the operation it is describing.
-   */
-  function recordToolCall(toolName: string, spaceId: string, status: number, durationMs: number): void {
-    const operation = mcpAuditOperation(toolName);
-    if (!operation) return;                       // deliberately not an audited operation — see audit-map.ts
-    if (isMcpReadOperation(operation) && !getConfig().audit?.logReads) return;
-    logAuditEntry({
-      /*
-       * The id of the HTTP request carrying this tool call — which is the right one even over SSE, where the
-       * response leaves on a long-lived stream: the call arrived on a POST, and that POST is the request whose
-       * log lines describe this work.
-       *
-       * Read directly rather than captured, because this runs inside the dispatch that the request awaits.
-       */
-      requestId: currentRequestId() ?? null,
-      tokenId: tokenId ?? null,
-      tokenLabel: tokenLabel ?? null,
-      authMethod: audit?.authMethod ?? null,
-      oidcSubject: audit?.oidcSubject ?? null,
-      ip: audit?.ip ?? '',
-      method: 'MCP',
-      path: `${audit?.transport ?? 'http'}:${toolName}`,
-      spaceId: spaceId || null,
-      operation,
-      status,
-      durationMs,
-    });
-  }
-
   // ── tools/call ────────────────────────────────────────────────────────────
+  /*
+   * tools/call — an ADAPTER, and nothing else.
+   *
+   * Every gate that used to live here — visibility, the space parse, existence, reach, the rung, the
+   * space-admin question, arg validation, the throttle, the error classification, the audit entry — is in
+   * `callTool`, which `POST /api/<tool-name>` calls with the same arguments. Owner, 2026-09-16: *"create
+   * modules that are used by both doors"*, applied to every tool at once rather than one at a time.
+   *
+   * What is left is the JSON-RPC envelope: a name and an arguments object in, an MCP tool result out. The
+   * `status` the shared function also returns is discarded here because this transport answers 200 and
+   * carries the failure in `isError` — the specification's shape, not a difference of ours.
+   */
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
-    const a = (args ?? {}) as Record<string, unknown>;
-
-    // Unknown tools fall through the gates below (they carry no flags) and are
-    // reported inside the try block, preserving the original dispatch behaviour.
-    const tool = TOOLS_BY_NAME.get(name);
-
-    // Reachability, from the same predicate that built `tools/list` — so the listing cannot advertise a
-    // tool this refuses, which is what two hand-copied expressions could not guarantee. Filtering the list
-    // stays advisory; the dispatcher is still the enforcement point.
-    //
-    // An unknown tool carries no flags and falls through, as it always did, to be reported inside the try
-    // block below.
-    if (tool && !toolIsVisible(tool, rights)) {
-      return {
-        content: [{
-          type: 'text' as const,
-          text: tool.admin
-            ? `Error: tool '${name}' requires a token with instance-admin rights`
-            // Without its own branch a space-admin tool would be refused as "mutates, and this token holds no
-            // write rung", which names the wrong missing thing — a token can hold write everywhere and still
-            // administer nothing.
-            : tool.spaceAdmin
-              ? `Error: tool '${name}' configures a space, and this token administers none — it needs the admin `
-                + 'rung on all four areas (knowledge, files, schema, dataQuality) of some space, or instance-admin rights'
-              : `Error: tool '${name}' mutates, and this token holds no write rung in any space`,
-        }],
-        isError: true,
-      };
-    }
-
-    /*
-     * Validate the space parameter, which is one name, a LIST of names (5.0, search family only), or absent.
-     *
-     * Parsed into one shape — `rawSpaces` — before anything is checked. The existence check, the proxy
-     * expansion and the rung check then run over a list of one in the common case, so there is no branch
-     * where a check applies to a single space and not to a listed one.
-     */
-    const spaceArg = a['space'];
-    let rawSpaces: string[];
-    if (Array.isArray(spaceArg)) {
-      if (!tool?.spaceList) {
-        return { content: [{ type: 'text' as const, text: `Error: tool '${name}' takes one 'space', not a list` }], isError: true };
-      }
-      if (!spaceArg.every(v => typeof v === 'string')) {
-        return { content: [{ type: 'text' as const, text: `Error: every entry in 'space' must be a space name` }], isError: true };
-      }
-      if (spaceArg.length === 0) {
-        // NOT read as "no space named". An empty list is what a caller's own filter produces when it
-        // matches nothing, and widening that to every reachable space is the opposite of what they meant.
-        return { content: [{ type: 'text' as const, text: `Error: 'space' is an empty list. Name at least one space, or omit 'space' to search every space you can reach` }], isError: true };
-      }
-      rawSpaces = [...new Set(spaceArg.map(v => v.trim()).filter(v => v.length > 0))];
-      if (rawSpaces.length === 0) {
-        return { content: [{ type: 'text' as const, text: `Error: every entry in 'space' must be a space name` }], isError: true };
-      }
-    } else {
-      const one = typeof spaceArg === 'string' ? spaceArg.trim() : '';
-      rawSpaces = one ? [one] : [];
-    }
-    const rawSpace = rawSpaces[0] ?? '';
-    if (tool?.spaceRequired && rawSpaces.length === 0) {
-      return { content: [{ type: 'text' as const, text: `Error: tool '${name}' requires a 'space' parameter` }], isError: true };
-    }
-    /*
-     * EVERY named space, not the first. One unreachable name refuses the whole call — owner decision,
-     * 2026-09-16 — because dropping it would return a SHORTER answer, and a caller cannot tell a filtered
-     * result from a small one. The refusal names only the space that failed: listing the ones that WERE
-     * reachable hands an unauthorised caller an inventory of what exists.
-     */
-    for (const sid of rawSpaces) {
-      if (!cfg.spaces.some(s => s.id === sid)) {
-        return { content: [{ type: 'text' as const, text: `Error: Space '${sid}' not found` }], isError: true };
-      }
-      if (memberSpacesWithin(sid, accessibleSpaceIds).length === 0) {
-        return { content: [{ type: 'text' as const, text: `Error: token does not have access to '${sid}' or any of its member spaces` }], isError: true };
-      }
-    }
-    if (rawSpace) {
-      // Proxy scope check, mirroring `enforceSpaceScope` on the REST layer — and it has to keep mirroring it, or the
-      // two surfaces answer one question differently, which is the defect #786 fixed one layer up.
-      //
-      // A proxy is usable when the connection reaches AT LEAST ONE member; the tools then read only the members it
-      // reaches, via `memberSpacesWithin`. It used to require EVERY member, which is why a scoped token could not be
-      // given a proxy at all (Q-6).
-      //
-      // Safe now only because every MCP fan-out was narrowed first. With the wide fan-outs still in place, a token
-      // reaching one member of a `proxyFor: ['*']` wildcard would have read every space on the instance.
-      //
-      // For a non-proxy space `resolveMemberSpaces` returns `[rawSpace]`, so "at least one of one" is the same
-      // predicate as "all of one" and nothing changes there.
-      // The reach check moved into the loop above so it covers every named space. Kept here as a
-      // binding for the rights check below, which reads the members of the FIRST named space.
-      const members = memberSpacesWithin(rawSpace, accessibleSpaceIds);
-      // The rights matrix, enforced on MCP. Until 3.0 this dispatcher gated on two BOOLEANS — `readOnly`
-      // above, and the tool's `admin` flag — while REST enforced a per-space, per-area RUNG. One policy,
-      // two implementations, and the weaker one was reachable. The decision lives in a pure function so it
-      // can be exercised without a transport: a guard testable only by reading it is one whose test cannot
-      // tell live code from dead, and the first version of this check passed against `if (false && ...)`.
-      const rightsRefusal = toolRightsRefusal(name, rights, rawSpace);
-      if (rightsRefusal) {
-        return { content: [{ type: 'text' as const, text: rightsRefusal }], isError: true };
-      }
-      // And the space-admin question, for the tools that configure ONE space. `toolIsVisible` admitted anyone
-      // administering *a* space, because `tools/list` runs before a space is named; this is where the space
-      // exists, so this is where "administers THIS one" can be asked. Same two-width split as the REST guard,
-      // and for the same reason: the wider one alone would let the administrator of Research reconfigure
-      // Finance.
-      const adminRefusal = spaceAdminRefusal(tool, rights, rawSpace);
-      if (adminRefusal) {
-        return { content: [{ type: 'text' as const, text: adminRefusal }], isError: true };
-      }
-    }
-    const callSpace = rawSpace;
-
-    try {
-      mcpToolCallsTotal.inc({ tool: name, space: callSpace || 'global' });
-      if (!tool) {
-        return {
-          content: [{ type: 'text' as const, text: `Unknown tool: ${name}` }],
-          isError: true,
-        };
-      }
-      // Enforce the advertised inputSchema before the handler runs — except partial-success tools
-      // (bulk_write), which report per-item errors in the result rather than rejecting the whole call.
-      if (!tool.skipSchemaValidation) {
-        const argErr = argsValidator.validate(tool, a);
-        if (argErr) {
-          return { content: [{ type: 'text' as const, text: `Error: ${argErr}` }], isError: true };
-        }
-      }
-      const startedAt = Date.now();
-      const result = await tool.handle({
-        args: a,
-        callSpace,
-        callSpaces: rawSpaces,
-        name,
-        cfg,
-        accessibleSpaces,
-        accessibleSpaceIds,
-        // Populated, not merely declared. `toolIsVisible(t, undefined)` hides every mutating and admin
-        // tool, so an unpopulated `rights` here would empty `help`'s listing while `tools/list` stayed
-        // correct — the two disagreeing again, in the one mechanism built to stop that.
+    const outcome = await callTool({
+      name,
+      args: (args ?? {}) as Record<string, unknown>,
+      caller: {
         rights,
-        actor: { tokenId, tokenLabel },
-      });
-      // A tool that returns `isError` failed on its own terms — the transport still answered 200, so
-      // the audit status has to come from the RESULT or the log would record every rejected write as
-      // a success. 422 rather than 400: the call was well-formed and the handler refused it.
-      recordToolCall(name, callSpace, result?.isError ? 422 : 200, Date.now() - startedAt);
-      return result;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      log.warn(`MCP global tool '${name}' error in space '${callSpace || 'global'}': ${message}`);
-      // A refusal that carries its own classification keeps it. Attached HERE, once, rather than in each
-      // tool: every write tool funnels through this catch, and the alternative was editing a dozen throw
-      // sites — which is how the `introduced` / `preExisting` split came to survive on the REST routes and
-      // not on this one. The prose stays the whole answer for a client that reads only `content`.
-      const structuredContent = err instanceof SchemaViolationError ? err.toStructured() : undefined;
-      /**
-       * A STORE failure says so here too, and carries the same `retryable` the REST doors put in their body.
-       *
-       * This door has no status code to correct — the transport answers 200 with `isError: true` — so the
-       * parity is in the CONTENT, which is the rule in `CLAUDE.md`: when the doors must differ, the difference
-       * is the transport's shape and never what a caller is told. Without this, an agent on MCP would have got
-       * the truncated `caused by ::` prose that told fourteen personas nothing, while a REST caller alongside
-       * it got a 503 and a reason.
-       *
-       * Attached in this catch for the same reason `SchemaViolationError` is: every tool funnels through here,
-       * so a tool added tomorrow inherits it rather than needing to remember.
-       */
-      const readFailure = classifyReadFailure(err);
-      const failureContent = readFailure.retryable
-        ? { retryable: true, storeSideFailure: true, error: readFailure.error,
-            ...(readFailure.code !== undefined ? { code: readFailure.code } : {}),
-            ...(readFailure.codeName ? { codeName: readFailure.codeName } : {}) }
-        : undefined;
-      return {
-        content: [{ type: 'text' as const, text: `Error: ${readFailure.retryable ? readFailure.error : message}` }],
-        isError: true,
-        ...(structuredContent ? { structuredContent } : failureContent ? { structuredContent: failureContent } : {}),
-      };
-    }
+        tokenId,
+        tokenLabel,
+        ip: audit?.ip ?? '',
+        authMethod: audit?.authMethod ?? null,
+        oidcSubject: audit?.oidcSubject ?? null,
+        transport: 'mcp',
+      },
+    });
+    return outcome.result;
   });
 
   return server;
@@ -363,10 +148,7 @@ function createGlobalMcpServer(tokenId?: string, tokenLabel?: string,
 // ── Express router ───────────────────────────────────────────────────────────
 
 import { requireMcpAuth } from '../auth/middleware.js';
-import { logAuditEntry } from '../audit/audit.js';
 import { auditAuthMethod, auditOidcSubject } from '../audit/middleware.js';
-import { mcpAuditOperation, isMcpReadOperation } from './audit-map.js';
-import { mcpToolCallsTotal } from '../metrics/registry.js';
 import { toolIsVisible } from './tool-visibility.js';
 
 export const mcpRouter = Router();

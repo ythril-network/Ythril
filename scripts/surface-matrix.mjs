@@ -94,7 +94,16 @@ const EXEMPT_ROUTES = new Set(NOT_AREA_SCOPED.map(r => r.route));
  */
 const { TOOL_RIGHTS } = await import(`file://${join(ROOT, 'server/dist/auth/space-rights.js')}`);
 const TOOL_RUNG = new Map(TOOL_RIGHTS.map(r => [r.tool, r.needs]));
-const toolRung = t => TOOL_RUNG.get(t.name) ?? (t.admin ? 'admin' : t.mutating ? 'write' : 'read');
+/**
+ * What a token needs for this tool, in one word.
+ *
+ * `spaceAdmin` is checked BEFORE the mutating fallback, and the order is the whole point: since 5.0 it is
+ * its own grant rather than four area rungs read together, so a tool carrying it would otherwise render as
+ * `write` — which is both weaker than the truth and unreachable by setting the four rungs. Published, a
+ * reader would configure a token that cannot make the call.
+ */
+const toolRung = t => TOOL_RUNG.get(t.name)
+  ?? (t.admin ? 'instance-admin' : t.spaceAdmin ? 'space-admin' : t.mutating ? 'write' : 'read');
 
 /*
  * The mapping is IMPORTED, not kept here.
@@ -107,11 +116,29 @@ const toolRung = t => TOOL_RUNG.get(t.name) ?? (t.admin ? 'admin' : t.mutating ?
  * `every-rest-route-is-answered-or-declared.test.js` now asserts the same structure against every mounted
  * route, so what this renders is what a gate holds true rather than what somebody last remembered.
  */
-const MAP = CAPABILITIES;
+/**
+ * The hand-classified pairings, plus a row for every tool that has no OLDER route.
+ *
+ * Since 5.0 every tool is `POST /api/<tool-name>`, served by one generic `/:tool` route over the same
+ * `callTool` the MCP door uses — so a tool with no row in `CAPABILITIES` is not unmapped, it is a tool
+ * whose only shape is the canonical one. Demanding a hand-written row for each of those would be
+ * forty-five copies of a mapping the route's own definition already holds, and the row nobody wrote would
+ * stop the generator dead, which is how it stopped today.
+ *
+ * `section` is `Tools` for these: they are grouped by what they do in the guide, not here.
+ */
+const TOOL_DOOR = 'POST /api/:tool';
+const paired = new Set(CAPABILITIES.map(r => r[1]));
+const MAP = [
+  ...CAPABILITIES,
+  ...[...tools].filter(t => !paired.has(t)).sort().map(t => ['Tools — one shape only', t, `POST /api/${t}`]),
+];
 
 const missingTools = MAP.map(r => r[1]).filter(t => !tools.has(t));
 if (missingTools.length) throw new Error(`mapped tools that do not exist: ${missingTools.join(', ')}`);
-const missingRoutes = MAP.map(r => r[2]).filter(r => r && !routes.has(r));
+// A `POST /api/<tool-name>` row resolves to the generic mount, which is the route that serves it.
+const missingRoutes = MAP.map(r => r[2])
+  .filter(r => r && !routes.has(r) && !(/^POST \/api\/[a-z0-9_]+$/.test(r) && routes.has(TOOL_DOOR)));
 if (missingRoutes.length) throw new Error(`mapped routes that do not exist: ${missingRoutes.join(' | ')}`);
 const unmapped = [...tools].filter(t => !MAP.some(r => r[1] === t)).sort();
 if (unmapped.length) throw new Error(`tools missing from the map: ${unmapped.join(', ')}`);
@@ -151,6 +178,25 @@ const rows = MAP.map(([area, tool, route, note]) => {
 const cell = a => (a.length ? a.join(', ') : '**—**');
 
 /**
+ * The REST cell — the CANONICAL path first, and the older one named as older.
+ *
+ * This column used to print the mapped route and nothing else, which for `save_fact` meant
+ * `POST /api/brain/spaces/:spaceId/facts`. True, still mounted, and the wrong answer to the question a
+ * reader brings: since 5.0 every tool is `POST /api/<tool-name>` taking the space in the BODY, and a table
+ * showing only the path form being retired teaches the shape that is going away. The owner read it that way
+ * on sight — *"i see still space id in the route"* — which is the table failing, not the reader.
+ *
+ * Both are shown because both are true: the legacy route works until `B-9` deletes it, and a reader
+ * maintaining an existing integration needs to find their own path here.
+ */
+const routeCell = (r) => {
+  const canonical = `\`POST /api/${r.tool}\``;
+  if (!r.route) return canonical;
+  if (r.route === `POST /api/${r.tool}`) return canonical;
+  return `${canonical}<br>legacy: \`${r.route}\``;
+};
+
+/**
  * One cell for the token requirement.
  *
  * `read` / `write` / `admin` when both doors agree — the common case, and what a reader wants at a glance. When
@@ -159,6 +205,13 @@ const cell = a => (a.length ? a.join(', ') : '**—**');
  */
 function rungCell(r) {
   if (!r.route) return `${r.mcpRung} (MCP)`;
+  /*
+   * The canonical tool path. It has no `ROUTE_RIGHTS` row and is not instance-level either: one generic
+   * `/:tool` route serves every tool, so the requirement is the TOOL's and both doors read it from
+   * `TOOL_RIGHTS`. Labelling it "instance-level" — which the branch below would — tells a reader the
+   * opposite of the truth about a per-space capability.
+   */
+  if (/^POST \/api\/[a-z0-9_]+$/.test(r.route)) return `${r.mcpRung} · both doors`;
   // The per-space rights matrix governs SPACE-scoped areas. `/api/spaces`, `/api/tokens` and `/api/networks`
   // are instance-level and deliberately outside it, so 'no row' there is the design rather than a gap.
   if (r.restRung === null) return `${r.mcpRung} (MCP) · instance-level`;
@@ -174,7 +227,7 @@ out.push('|---|---|---|---|---|---|---|');
 let area = null;
 for (const r of rows) {
   if (r.area !== area) { area = r.area; out.push(`| **${area}** | | | | | | |`); }
-  out.push(`| | \`${r.tool}\` | ${r.route ? `\`${r.route}\`` : '**MCP only**'} | ${rungCell(r)} `
+  out.push(`| | \`${r.tool}\` | ${routeCell(r)} | ${rungCell(r)} `
     + `| ${cell(r.guide)} | ${cell(r.user)} | ${r.changelog ? 'y' : '**—**'} |`);
 }
 
@@ -208,7 +261,7 @@ pub.push('|---|---|---|---|');
 let pubArea = null;
 for (const r of rows) {
   if (r.area !== pubArea) { pubArea = r.area; pub.push(`| **${pubArea}** | | | |`); }
-  pub.push(`| | \`${r.tool}\` | ${r.route ? `\`${r.route}\`` : '**MCP only**'} | ${rungCell(r)} |`);
+  pub.push(`| | \`${r.tool}\` | ${routeCell(r)} | ${rungCell(r)} |`);
 }
 writeFileSync(join(ROOT, 'todo/_matrix-published.md'), pub.join('\n'), 'utf8');
 writeFileSync(join(ROOT, 'todo/_matrix-rest-only.md'), rest.join('\n'), 'utf8');
@@ -225,7 +278,15 @@ const rungMismatch = rows.filter(r => r.route && r.restRung && r.restRung !== 'e
  * exemptions into a list that then failed its own gate for naming routes that surface does not contain.
  * The question is scoped instead.
  */
-const SPACE_SCOPED = r => !/\/api\/(tokens|networks)(\/|$)/.test(r.route ?? '');
+/*
+ * ...and neither is the generic tool door, for a third reason worth its own clause: `POST /api/<tool-name>`
+ * is served by one `/:tool` route that answers forty-five capabilities, so one area and one rung could not
+ * describe it. Each tool is priced in `TOOL_RIGHTS` and enforced per call by `callTool`; the route carries
+ * a `NOT_AREA_SCOPED` row saying exactly that. Asking it the space question produces a finding whose only
+ * available fix would be to area-scope a route the design says is not.
+ */
+const SPACE_SCOPED = r => !/\/api\/(tokens|networks)(\/|$)/.test(r.route ?? '')
+  && !/^POST \/api\/[a-z0-9_]+$/.test(r.route ?? '');
 const noRightsRow = rows.filter(r => r.route && r.restRung === null && SPACE_SCOPED(r));
 console.log(JSON.stringify({
   capabilities: rows.length, routes: routes.size, restOnly: restOnly.length,

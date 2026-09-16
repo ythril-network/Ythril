@@ -194,12 +194,17 @@ const TOTAL = 48;
  * - **3, at 5.0: `list_chrono`.** It folded into `filter`, which reads across spaces through its own
  *   narrowed path. `server/src/mcp/tools/chrono.ts` left the NARROWED set with it: a file with no fan-out
  *   cannot claim a conversion.
+ * - **4, at 5.0: the dispatcher's duplicate member resolution.** `mcp/router.ts` resolved the members of
+ *   the first named space twice — once inside the reach loop and once into a `members` binding kept for a
+ *   rights check that does not read it. When the dispatch moved to `mcp/call-tool.ts` the second call went,
+ *   because the rung check now runs per named space inside the same loop. One call site fewer, and no
+ *   behaviour with it: the surviving call is the same call on the same space.
  */
-const REMOVED = 3;
+const REMOVED = 4;
 
 const GUARDS = {
   'server/src/auth/middleware.ts': 2,
-  // `mcp/router.ts` used to be here. Its guard is FLIPPED: it calls `memberSpacesWithin` and refuses only when the
+  // `mcp/call-tool.ts` (`mcp/router.ts` until 5.0) used to be here. Its guard is FLIPPED: it calls `memberSpacesWithin` and refuses only when the
   // connection reaches no member, so it is counted by `narrowedCalls()` now rather than as an un-flipped guard.
   // Leaving it in both places would double-count it, which the conserved total caught immediately (30 !== 29).
   //

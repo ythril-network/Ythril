@@ -29,7 +29,6 @@ import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { ChronoEntry, ChronoType, ChronoStatus, TombstoneDoc } from '../config/types.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
-import { wipeSpaceCollection } from './bulk-wipe.js';
 import { spaceCollection } from '../db/space-collection.js';
 
 // Re-exported so existing importers (and the C5 tests) keep reaching it here; it lives in its own leaf
@@ -682,9 +681,4 @@ export async function deleteChrono(
   await removeLinksFrom(spaceId, chronoId, 'chrono');
   if (actor) emitWebhookEvent({ event: 'chrono.deleted', spaceId, entry: { _id: chronoId }, ...actor });
   return true;
-}
-
-/** Bulk-delete every chrono entry in a space, writing a tombstone per deleted doc. */
-export async function bulkDeleteChrono(spaceId: string): Promise<number> {
-  return await wipeSpaceCollection(spaceId, 'chrono', 'chrono');
 }

@@ -20,6 +20,14 @@ export interface TokenRights {
   createSpaces: boolean;
   floor: WireRungs | null;
   perSpace: Record<string, WireRungs>;
+  /**
+   * Spaces this token administers outright — a REAL grant since 5.0.
+   *
+   * The server resolves it to `admin` in every area of the named space, so a reader that ignores this
+   * field under-reports what the token holds. Optional: a matrix minted before it existed has no key,
+   * which grants nothing.
+   */
+  spaceAdmin?: { floor: boolean; spaces: string[] };
 }
 
 const RANK: Record<Rung, number> = { none: 0, read: 1, write: 2, admin: 3 };

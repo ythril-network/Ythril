@@ -100,14 +100,20 @@ describe('a write token deletes one record on both doors', () => {
     }
   });
 
-  it('the collection WIPE still needs admin — levelling down was about single records', async () => {
+  it('emptying a space needs MORE than write — levelling down was about single records', async () => {
+    /*
+     * The five per-collection `DELETE` routes are gone (5.0); emptying a space is `delete_space_data`, and
+     * the rung went UP rather than down with the collapse: it is the `spaceAdmin` grant now, not `admin` on
+     * one area. A write token must still be refused, which is what this case was always about — the
+     * levelling-down ruling applied to deleting a row you could have created, and never to a wipe.
+     */
     const tok = await mint(`rung-wipe-${RUN}`, { rights: WRITE_RIGHTS });
-    const r = await fetch(`${INSTANCES.a}/api/brain/spaces/general/facts`, {
-      method: 'DELETE',
+    const r = await fetch(`${INSTANCES.a}/api/delete_space_data`, {
+      method: 'POST',
       headers: { Authorization: `Bearer ${tok.plaintext}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ confirm: true }),
+      body: JSON.stringify({ space: 'general', confirm: true }),
     });
-    assert.equal(r.status, 403, `emptying a collection is not deleting a row: ${r.status} ${await r.text()}`);
+    assert.equal(r.status, 403, `emptying a space is not deleting a row: ${r.status} ${await r.text()}`);
   });
 });
 
@@ -140,12 +146,18 @@ describe('a token carrying a DERIVED matrix is not exempt from the rung', () => 
     // route was guarded at space-admin, so the rung was never what decided.
     assert.ok(r.status !== 500, `the derived matrix must not break the request: ${r.status}`);
 
-    const wipe = await fetch(`${INSTANCES.a}/api/brain/spaces/general/facts`, {
-      method: 'DELETE',
+    /*
+     * Through the tool door since 5.0 — the five `DELETE .../<collection>` routes are gone and emptying a
+     * space is `delete_space_data`. The claim is unchanged and if anything stronger: a token whose matrix
+     * was DERIVED from the legacy `spaces` array holds `write`, and a wipe needs more than write, so the
+     * derivation must not be a way past the check. It was never about which HTTP verb asked.
+     */
+    const wipe = await fetch(`${INSTANCES.a}/api/delete_space_data`, {
+      method: 'POST',
       headers: { Authorization: `Bearer ${tok.plaintext}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ confirm: true }),
+      body: JSON.stringify({ space: 'general', confirm: true }),
     });
     assert.equal(wipe.status, 403,
-      `a derived write matrix must still be refused an admin-rung route: ${wipe.status} ${await wipe.text()}`);
+      `a derived write matrix must still be refused a wipe: ${wipe.status} ${await wipe.text()}`);
   });
 });

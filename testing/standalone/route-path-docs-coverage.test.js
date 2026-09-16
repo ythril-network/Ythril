@@ -52,7 +52,20 @@ function walk(dir, out = []) {
 }
 
 const VERBS = 'get|post|put|patch|delete';
-const norm = (p) => p.replace(/:[A-Za-z0-9_]+/g, ':P').replace(/\{[^}]+\}/g, ':P').replace(/\/+$/, '');
+/**
+ * One spelling for a path parameter, whichever convention the doc used.
+ *
+ * `<...>` is the third convention and it was NOT handled, which produced this file's sixth extractor
+ * defect: `POST /api/<tool-name>` — the generic tool door, the shape the whole REST surface is moving to —
+ * was truncated at the `<` by the character class below, normalised to `POST /api`, and reported as a
+ * documented endpoint no router declares. The finding was about the extractor, not the docs, exactly as
+ * this file's header warns.
+ */
+const norm = (p) => p
+  .replace(/:[A-Za-z0-9_]+/g, ':P')
+  .replace(/\{[^}]+\}/g, ':P')
+  .replace(/<[^>]+>/g, ':P')
+  .replace(/\/+$/, '');
 
 function knownRoutes() {
   const files = walk(join(ROOT, 'server', 'src')).filter(f => f.endsWith('.ts'));
@@ -171,7 +184,10 @@ function documentedEndpoints() {
       }
     };
     // Prose and fenced form: `POST /api/duplicates/scan`.
-    for (const m of src.matchAll(new RegExp(`\\b(GET|POST|PUT|PATCH|DELETE)\\s+(/api/[A-Za-z0-9_\\-/:{},.]*)`, 'g'))) {
+    // `<` and `>` are in the class because a path parameter is written three ways in these docs and this
+    // was the one nobody had met: truncating at the `<` turns `/api/<tool-name>` into `/api`, which is a
+    // real path and therefore a finding rather than a parse error.
+    for (const m of src.matchAll(new RegExp(`\\b(GET|POST|PUT|PATCH|DELETE)\\s+(/api/[A-Za-z0-9_\\-/:{},.<>]*)`, 'g'))) {
       record(m[1], m[2]);
     }
     // TABLE form, where the verb and the path are separate cells. The adjacency pattern above cannot see it: it requires
@@ -182,7 +198,7 @@ function documentedEndpoints() {
     // header warns about — and the one that produced a wrong customer-facing claim earlier the same day: a scanner that
     // under-detects usage manufactures findings, and a count from it is worse than no count.
     for (const m of src.matchAll(
-      /\|\s*`?(GET|POST|PUT|PATCH|DELETE)`?\s*\|\s*`?(\/api\/[A-Za-z0-9_\-/:{},.]*)/g,
+      /\|\s*`?(GET|POST|PUT|PATCH|DELETE)`?\s*\|\s*`?(\/api\/[A-Za-z0-9_\-/:{},.<>]*)/g,
     )) {
       record(m[1], m[2]);
     }

@@ -86,6 +86,48 @@ On connect, the server sends global instructions listing all available space IDs
 >
 > **Tool inputs are self-describing — and enforced.** Every tool's complete input contract — each parameter, its allowed values (`enum`), numeric bounds (`minimum`/`maximum`/`default`), string limits, the filter-operator allowlist, and `additionalProperties: false` — is published in its `inputSchema` via `tools/list`. The dispatcher **validates every call against that schema before running the tool**, rejecting a non-conforming call with an `isError` result — so unknown properties, out-of-range numbers, out-of-enum values, and malformed ids are hard errors, not silently ignored or clamped. Treat `tools/list` as the authoritative, machine-readable reference and read a tool's schema before constructing arguments; the `help` tool points here too.
 
+### The same tools over plain HTTP
+
+Every tool on this page is also `POST /api/<tool-name>`, and **the body is the tool's arguments exactly** —
+the same JSON you would put in `arguments` over MCP, including `space`. No renaming, no wrapper, no extra
+field.
+
+```http
+POST /api/recall
+Authorization: Bearer ythril_...
+Content-Type: application/json
+
+{ "space": ["work", "research"], "query": "quarterly targets", "limit": 5 }
+```
+
+It exists because the two doors are the same code. A single function gates the call, resolves the spaces,
+checks the rung on **each** one, validates the arguments against the published `inputSchema`, runs the tool
+and classifies any failure; MCP and HTTP are both thin translations of their own envelope into it. So a tool
+added tomorrow is reachable both ways on the day it is written, and the refusals are the same sentences.
+
+**The response envelope is one shape for every tool:**
+
+| | |
+|---|---|
+| success | `200 {"ok": true, "text": "...", "data": {...}}` |
+| refusal | `4xx {"ok": false, "error": "...", "data": {...}}` |
+
+`text` is the prose an agent reads; `data` is the structured result (`null` for a tool that has none).
+**Both carry the whole answer** — `data` is the structured form of the result, never a summary of it — so
+pick whichever suits your client and do not merge them.
+
+`error` is word-for-word what MCP puts in `content` for the same refusal. The one thing this door adds is a
+status code, because HTTP has one and JSON-RPC does not: `400` malformed, `403` the token may not,
+`404` no such space or tool, `422` the tool refused a well-formed call, `429` throttled, `503` the store
+could not answer (retry it). Over MCP the identical refusal arrives as `isError: true` on a `200`.
+
+> **When to use which.** MCP if your client speaks it — you get `tools/list`, the schemas and the
+> descriptions. This door for a script, a webhook, a language without an MCP client, or when you want an
+> HTTP status code. There is no capability difference and there is no performance difference.
+
+The older REST routes are still there (`/api/brain/spaces/:spaceId/facts` and the rest) and still work. They
+are the shapes this door replaces, and they are documented on their own pages.
+
 ### Read-Only Tokens
 
 When connecting with a `readOnly` token, mutating tools (`save_fact`, `update_fact`, `delete_fact`, `save_entity`, `update_entity`, `delete_entity`, `graph_merge`, `save_edge`, `update_edge`, `delete_edge`, `save_link`, `delete_link`, `save_chrono`, `update_chrono`, `delete_chrono`, `save_bulk`, `write_file`, `delete_file`, `create_dir`, `move_file`, `retry_embed_file`, `retry_embed_record`, `retry_embed_media`, `update_file_meta`, `network_sync`, `update_space`, `schema_update`, `save_space`, `space_reindex`, `delete_space_data`) are **hidden** from `tools/list` and rejected with an error if called directly. Read-only tools (`help`, `recall`, `similar`, `query`, `space_stats`, `space_meta`, `list_spaces`, `read_file`, `list_dir`, `traverse`, `list_embed_jobs`, `delete_entity_preview`, `graph_link_preflight`) work normally. `list_tokens` is read-only but **admin-gated**, like `network_peers`. `network_peers` is read-only but **admin-gated** — see the admin-only note below.
@@ -119,7 +161,7 @@ Each request is self-contained; no persistent connection or `sessionId` is neede
 > exception existed only for SSE clients that could not set a header, and a token in a URL lands in access
 > logs, proxy logs, browser history and `Referer`. And the `ythril_mcp_connections_active` metric is gone
 > rather than pinned at zero: a stateless transport holds no connections, and a gauge reading 0 forever is a
-> confidently wrong answer where an absent one is only a missing one. Count `ythril_mcp_tool_calls_total`
+> confidently wrong answer where an absent one is only a missing one. Count `ythril_tool_calls_total{door="mcp"}`
 > instead.
 
 #### Authentication
@@ -274,14 +316,19 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 | `space_reindex` | Re-embed every record in a space with the currently configured embedding model (admin only) — the recovery path after changing embedder or model. Returns as soon as the job STARTS; it runs in the background and may take minutes, so poll rather than waiting on the call. One job per instance at a time; a second call while one runs is refused. A PROXY space is refused by name, with its members listed so you can reindex those instead. Idempotent |
 | `save_space` | Create a space (admin only). The id is derived from the label when omitted. A new space is seeded `validationMode: strict` + `strictLinkage: true` unless `meta` says otherwise; a `proxyFor` space is left un-seeded because it stores nothing of its own. **`faceDescriptorDims` is create-only and permanent** — 128 for MobileFaceNet-class models, 512 for ArcFace / AdaFace / FaceNet / EdgeFace. Same refusals as `POST /api/spaces`, including `422` for a missing schema-library `$ref` and `409` when the id is taken |
 | `schema_update` | Write the space's type schemas and its other meta fields — `validationMode`, `strictLinkage`, `usageNotes`, `suppressEmbeddings`, `whenDuePasses` (needs `schema` `admin` on the space). **Merges** by default: types you do not name are preserved. `typeSchemasMode: "replace"` makes the payload authoritative, which is the only way to DELETE a type. Same refusals as `PATCH /api/spaces/:id`, including `422` for a `$ref` to a schema-library entry that does not exist. In a networked space it opens a meta vote rather than applying at once |
-| `delete_space_data` | Wipe all or specific collection types from the space (admin only) |
+| `delete_space_data` | Wipe all or specific collection types from the space. Needs the **space-admin** grant on the space named (or instance admin), and `confirm: true`. Throttled to five calls a minute per token, on both doors |
 | `network_peers` | List all configured peer instances (admin only) |
 | `network_sync` | Trigger immediate sync (all networks, or one peer via `peerId`) (admin only). `POST /api/notify/trigger` takes the same `peerId` since 4.4 |
 
-> **Instance-admin tools.** `network_peers`, `network_sync`, `save_space`, `space_reindex`, and `delete_space_data` require
+> **Instance-admin tools.** `network_peers`, `network_sync`, `save_space` and `space_reindex` require
 > instance-admin rights: they expose the whole peer topology, drive outbound connections to every peer, or
-> destroy data, and none of them is scoped to one space. They are hidden from `tools/list` for other tokens
-> and rejected if called directly.
+> create spaces, and none of them is scoped to one space. They are hidden from `tools/list` for other
+> tokens and rejected if called directly.
+>
+> **`delete_space_data` is SPACE-admin, not instance-admin** (5.0). It empties one named space, so
+> "administers that space" is the honest requirement, and demanding the instance was the old flag showing
+> through. Space admin is its own grant on the token — it includes the four area admin rungs but holding
+> those four is not the same as having it.
 
 <!-- markdownlint-disable-next-line MD028 -->
 
@@ -539,8 +586,10 @@ no row does today — `schema_update` was the last one, and 4.4 brought both doo
 `instance-level` means the
 route sits outside the per-space matrix by design — `/api/spaces`, `/api/tokens`, `/api/networks`.
 
-**MCP only** means the capability has no single REST route: `help` is the tool-caller's guide, and `delete_space_data`
-composes what REST exposes as one DELETE per collection.
+**There is no "MCP only" any more.** Every tool in this table is `POST /api/<tool-name>` as well — see
+[The same tools over plain HTTP](#the-same-tools-over-plain-http). The REST column names the OLDER route
+where one exists, because that is the one whose shape differs; where it is blank, the tool door is the
+only shape and the two are identical by construction.
 
 | capability | MCP tool | REST route | token needs |
 |---|---|---|---|
@@ -594,7 +643,7 @@ composes what REST exposes as one DELETE per collection.
 | | `update_space` | `PATCH /api/spaces/:id` | admin (MCP) · instance-level |
 | | `space_meta` | `GET /api/spaces/:id/meta` | read `schema` |
 | | `schema_update` | `PUT /api/spaces/:id/schema` | admin `schema` |
-| | `delete_space_data` | **MCP only** | admin (MCP) |
+| | `delete_space_data` | `POST /api/delete_space_data` | space-admin |
 | **Tokens** | | | |
 | | `list_tokens` | `GET /api/tokens` | admin (MCP) · instance-level |
 | **Networks / sync** | | | |

@@ -31,6 +31,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { dispatchSource } from './_tool-dispatch.mjs';
 import { statementFrom } from './_structural-window.mjs';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
@@ -176,7 +177,7 @@ describe('the MCP door widens with the REST one', () => {
   const MCP = stripComments(readFileSync('server/src/mcp/tools/spaces.ts', 'utf8'));
   const VIS = stripComments(readFileSync('server/src/mcp/tool-visibility.ts', 'utf8'));
   const GUARD = stripComments(readFileSync('server/src/mcp/tool-rights-guard.ts', 'utf8'));
-  const ROUTER = stripComments(readFileSync('server/src/mcp/router.ts', 'utf8'));
+  const ROUTER = dispatchSource();
 
   /** One tool object from the MCP module, `name:` to the next `export const`. */
   const mcpTool = (name) => {
@@ -212,12 +213,32 @@ describe('the MCP door widens with the REST one', () => {
   }
 
   it('the tools that are genuinely instance-shaped did NOT get swept along', () => {
-    // `save_space` has no space to scope to. `delete_space_data` destroys data and its REST counterpart was not
-    // widened either. `reindex` likewise. A sweep by flag name would have taken all three.
-    for (const name of ['save_space', 'delete_space_data', 'space_reindex']) {
+    // `save_space` has no space to scope to — creating one is not an act within a space. `space_reindex`
+    // likewise stays instance-admin.
+    //
+    // `delete_space_data` WAS in this list and is not any more. Owner, 2026-09-16: *"Sync both doors!!!
+    // Space admin to wipe space"*. Its five REST routes ask `<area>: admin` for ONE space, so the
+    // administrator of a space could empty it over REST and not over MCP — two doors agreeing on the word
+    // `admin` and not on its scope, which is the asymmetry that reads as agreement in a diff.
+    for (const name of ['save_space', 'space_reindex']) {
       assert.match(mcpTool(name), /\n {2}admin: true/, `${name} must stay instance-admin only`);
       assert.doesNotMatch(mcpTool(name), /spaceAdmin: true/, `${name} must stay instance-admin only`);
     }
+  });
+
+  it('delete_space_data is SPACE-admin, because its REST counterpart is', () => {
+    /*
+     * `admin: true` on a tool means INSTANCE admin. The wipe routes need `<area>: admin` on the space in
+     * the path. That is not a stricter door — it is a different question asked on each side.
+     *
+     * Both halves asserted: the flag that must be there and the one that must not. Carrying both would be
+     * two flags for one decision, and which one the dispatcher applies is not something a reader of the
+     * tool could guess.
+     */
+    assert.match(mcpTool('delete_space_data'), /\n {2}spaceAdmin: true/,
+      'the wipe tool must admit the administrator of the space it is wiping, as REST does');
+    assert.doesNotMatch(mcpTool('delete_space_data'), /\n {2}admin: true/,
+      'instance-admin ALONGSIDE space-admin is two flags for one decision');
   });
 
   it('visibility admits on ANY space, because tools/list runs before one is named', () => {
@@ -240,8 +261,15 @@ describe('the MCP door widens with the REST one', () => {
     // Finance; precise alone cannot be evaluated at listing time.
     assert.match(GUARD, /export function spaceAdminRefusal/, 'the precise half must exist');
     assert.match(GUARD, /isSpaceAdminFor\(rights, space\)/, 'and ask about the space named in the call');
-    assert.match(ROUTER, /spaceAdminRefusal\(tool, rights, rawSpace\)/,
-      'the dispatcher must actually call it — a guard nobody calls is the failure this repo keeps hitting');
+    /*
+     * `sid`, inside the loop over every named space — not `rawSpaces[0]`.
+     *
+     * A space-admin tool takes one space today, so on paper the two are the same call. They are not the same
+     * RULE: "the space named" and "the first space named" only agree while no such tool accepts a list, and
+     * the day one does the weaker reading is already in place and reads as correct.
+     */
+    assert.match(ROUTER, /spaceAdminRefusal\(tool, rights, sid\)/,
+      'the dispatch must actually call it — a guard nobody calls is the failure this repo keeps hitting');
   });
 
   it('refusing names what is missing, not "you cannot write"', () => {

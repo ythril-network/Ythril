@@ -28,6 +28,7 @@
  */
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { DISPATCH_SOURCES } from './_tool-dispatch.mjs';
 import { readFileSync } from 'node:fs';
 import { balancedFrom } from './_structural-window.mjs';
 
@@ -35,7 +36,12 @@ let MCP_TOOL_OPERATIONS, mcpAuditOperation, isMcpReadOperation;
 let ALL_TOOLS;
 
 const MIDDLEWARE = 'server/src/audit/middleware.ts';
-const ROUTER = 'server/src/mcp/router.ts';
+/*
+ * The DISPATCH, not the door. `recordToolCall` moved into `mcp/call-tool.ts` when both doors started
+ * calling one function — and an audit entry written by the dispatch is what makes a tool call logged
+ * identically whichever door it arrived at.
+ */
+const ROUTER = DISPATCH_SOURCES[0];
 
 describe('MCP audit coverage', () => {
   before(async () => {
@@ -101,16 +107,18 @@ describe('MCP audit coverage', () => {
   it('the dispatcher actually calls the recorder', () => {
     // The map is inert on its own. This is the wiring, and it is the line a refactor would drop.
     const src = readFileSync(ROUTER, 'utf8');
-    assert.match(src, /recordToolCall\(name, callSpace, result\?\.isError \? 422 : 200/,
-      'the tool dispatcher must record every call, with the status taken from the RESULT');
-    assert.match(src, /function recordToolCall\(/, 'the recorder must exist in the dispatcher');
+    assert.match(src, /const status = result\?\.isError \? 422 : 200;/,
+      'the audit status must be taken from the RESULT, not from the transport');
+    assert.match(src, /recordToolCall\(caller, name, callSpace, status,/,
+      'the dispatch must record every call, whichever door it arrived at');
+    assert.match(src, /function recordToolCall\(/, 'the recorder must exist in the dispatch');
   });
 
   it('a tool that fails is not recorded as a success', () => {
     // MCP answers 200 at the transport layer even when a tool refuses, so a status read from the HTTP
     // response would log every rejected write as successful. The status has to come from `isError`.
     const src = readFileSync(ROUTER, 'utf8');
-    const at = src.indexOf('recordToolCall(name, callSpace');
+    const at = src.indexOf('recordToolCall(caller, name, callSpace');
     assert.ok(at > 0);
     /*
      * The call expression, bounded by its own closing paren. This is the shape where a magic window is at its most

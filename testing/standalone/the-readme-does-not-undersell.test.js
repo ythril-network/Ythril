@@ -33,6 +33,7 @@
  */
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { dispatchSource } from './_tool-dispatch.mjs';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { stripComments } from './_strip-comments.mjs';
@@ -164,7 +165,7 @@ const CLAIMS = [
     what: 'a refused write comes back machine-readable, not as a sentence',
     phrase: /structuredContent|machine-readable/i,
     mechanism: () => {
-      assert.match(src('server/src/mcp/router.ts'), /structuredContent/,
+      assert.match(dispatchSource(), /structuredContent/,
         'the MCP dispatcher must still attach structured content to a refusal');
     },
   },

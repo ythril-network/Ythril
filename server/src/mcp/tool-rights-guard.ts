@@ -77,9 +77,16 @@ export function spaceAdminRefusal(
   if (!tool?.spaceAdmin) return null;
   if (rights?.instanceAdmin === true) return null;
   if (space && isSpaceAdminFor(rights, space)) return null;
+  /*
+   * The refusal names the GRANT, because since 5.0 the four rungs are not it.
+   *
+   * It used to say *"the admin rung on all four areas"*, and that is now a way to spend an afternoon: a
+   * caller reads it, sets four rungs, is refused again, and has been told to do the wrong thing by the
+   * error explaining what they may not do.
+   */
   return `Error: tool '${tool.name ?? 'unknown'}' configures a space, so it needs either instance-admin rights `
-    + `or the admin rung on all four areas (knowledge, files, schema, dataQuality) of space '${space}'. `
-    + 'Administering a different space does not grant this one.';
+    + `or SPACE ADMIN on '${space}' — the \`spaceAdmin\` grant, which is its own right and is not the same `
+    + 'as holding the admin rung on all four areas. Administering a different space does not grant this one.';
 }
 
 export function toolRightsRefusal(

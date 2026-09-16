@@ -143,18 +143,33 @@ async function waitForFreshWindow(makeRequest, timeoutMs = 70_000) {
   }
 }
 
-describe('bulkWipeRateLimit on bulk DELETE (5/min)', () => {
+describe('the destructive-call throttle, on the tool door (5/min)', () => {
+  /*
+   * IT MOVED, AND THAT IS THE POINT. `bulkWipeRateLimit` was express middleware on five `DELETE` routes, so
+   * it throttled a browser and not an agent — the MCP door had nothing in front of it, and the caller most
+   * likely to be emptying spaces in a loop was the one with no limit.
+   *
+   * It is a counter inside `callTool` now, declared by the tool as `heavy: true`, so both doors get it from
+   * one place. This probes the HTTP door because that is the one a test can drive with `fetch`; there is no
+   * second implementation for the MCP door to disagree with.
+   */
   before(() => {
     tokenC = fs.readFileSync(TOKEN_FILE_C, 'utf8').trim();
   });
 
-  it('reaches the route once, then 429s within the limit (5/min)', async () => {
-    // Non-existent space + missing confirm body: the request is counted by the
-    // limiter but can never delete anything.
-    const bulkDelete = () => fetch(`${INSTANCES.c}/api/brain/spaces/rl-bulkwipe-probe/facts`, {
-      method: 'DELETE',
+  it('reaches the tool once, then 429s within the limit (5/min)', async () => {
+    /*
+     * A REACHABLE space with no `confirm`: the call gets past the gates, reaches the handler, is counted,
+     * and deletes nothing — the handler refuses it for want of the confirmation.
+     *
+     * A non-existent space would be the obvious probe and is the wrong one: the throttle sits immediately
+     * before the handler, so a call refused earlier costs no slot. That is deliberate — a refused call
+     * destroys nothing, and counting refusals would lock an integrator out after five malformed attempts.
+     */
+    const bulkDelete = () => fetch(`${INSTANCES.c}/api/delete_space_data`, {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${tokenC}` },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ space: 'general' }),
     });
 
     // Positive control on a guaranteed-fresh window (consumes slot 1 of 5).
@@ -168,7 +183,8 @@ describe('bulkWipeRateLimit on bulk DELETE (5/min)', () => {
     for (let i = 0; i < 6; i++) rest.push((await bulkDelete()).status);
     assert.ok(rest.includes(429),
       `Expected a 429 within the limit (5/min), got first=${first} rest=${JSON.stringify(rest)}. ` +
-      `If none, bulkWipeRateLimit is not enforced on the bulk-delete routes.`);
+      `If none, the heavy-tool throttle is not reached — check that delete_space_data still declares ` +
+      `\`heavy: true\` and that callTool consumes it before the space gates.`);
   });
 });
 

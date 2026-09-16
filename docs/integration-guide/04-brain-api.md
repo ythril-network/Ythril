@@ -460,18 +460,37 @@ DELETE /api/brain/spaces/:spaceId/facts/:id
 
 ---
 
-### Wipe All Facts
+### Empty a space
 
 ```http
-DELETE /api/brain/spaces/:spaceId/facts
+POST /api/delete_space_data
 Content-Type: application/json
 
-{ "confirm": true }
+{ "space": "work", "confirm": true, "types": ["facts", "chrono"] }
 ```
 
-**Response** `200` `{ deleted: <count> }`. Rate-limited to 5 requests/minute.
+`types` is a subset of `facts`, `entities`, `edges`, `chrono`, `files`. **Omit it and all five go** — an
+omitted `types` is not a safe default. A partial wipe clears only the tombstones and review findings
+belonging to the types you named.
 
-Entities, edges, and chrono entries have the same bulk-wipe endpoint shape — `DELETE /api/brain/spaces/:spaceId/entities`, `.../edges`, and `.../chrono`, each requiring `{ "confirm": true }`, returning `{ deleted: <count> }`, and sharing the same 5/minute bulk-wipe limit. Bulk wipe is rejected on proxy spaces (`400`) — target member spaces individually.
+**Response** `200` `{ "ok": true, "text": "...", "data": { "facts": 12, "entities": 3, ... } }` — the
+[tool-door envelope](16-mcp.md#the-same-tools-over-plain-http), because this path IS the `delete_space_data`
+tool. Zeroes mean the space was already empty, not that anything refused. Throttled to 5 calls a minute per
+token **on both doors**, and rejected on a proxy space (`400`) — target member spaces individually.
+
+`confirm: true` is required. The act is irreversible: no undo, no trash.
+
+**On a space that belongs to a network nothing is deleted yet.** Emptying a shared space is a governed act:
+a round opens in every network holding the space, this instance votes yes, and the wipe happens on every
+member when a round passes — one veto stops it. The reply is still `200`, with
+`data.status: "vote_pending"` and the open rounds. **That is the success case** — do not retry it, and do
+not read the absence of counts as a failure. Branch on `data.status`, which is the same field MCP returns.
+
+> **This was FIVE routes until 5.0** — a `DELETE` on each per-collection path, one for facts and one for
+> entities, edges, chrono and files. Each hard-coded a collection and answered `{ deleted: <count> }`,
+> while the MCP tool took `types[]` and answered per-collection counts. One capability, two grammars, and
+> which one you got depended on the door you came through. The tool is `delete_space_data` and the route
+> is now named after it, takes its arguments, and calls what it calls.
 
 ---
 

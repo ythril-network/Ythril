@@ -15,6 +15,111 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING — every tool is `POST /api/<tool-name>`, and both doors call ONE function.** Owner,
+  2026-09-16: *"create modules that are used by both doors"*, then *"this shared module concept for both
+  doors should be applied to each and every tool"*.
+
+  ```http
+  POST /api/recall
+  { "space": ["work", "research"], "query": "quarterly targets", "limit": 5 }
+  ```
+
+  The body is the tool's arguments exactly — the same JSON you would send over MCP, `space` included. One
+  envelope comes back for every tool: `{ok: true, text, data}` on success, `{ok: false, error, data}` on a
+  refusal, with `error` word-for-word what MCP puts in `content`.
+
+  **It is one route, not forty-five.** `mcp/call-tool.ts` now holds everything between *a caller named a
+  tool* and *the tool answered* — the visibility gate, the space parse, existence, reach, the per-space
+  rung, the space-admin grant, argument validation against the published schema, the throttle, the error
+  classification and the audit entry. The MCP dispatcher and the HTTP route are translations of their own
+  envelope into it and back. A tool added tomorrow is reachable both ways on the day it is written, because
+  there is no per-tool code on either door to forget.
+
+  **Two real defects fell out of the extraction**, both the same shape — one rule, two implementations,
+  the weaker one deciding:
+
+  - **The rung was checked against the FIRST named space.** Since space lists landed, a three-space
+    `recall` over MCP was authorised against one of the three and read all three. The REST body-scoped
+    guard checked every one. The check is inside the per-space loop now.
+  - **The destructive-call throttle only existed on REST.** `bulkWipeRateLimit` was express middleware, so
+    a browser was held to five wipes a minute and an agent to none. It is declared by the tool
+    (`heavy: true`) and enforced in the shared function, before the gates — a caller getting it wrong in a
+    loop is slowed down too.
+
+  **`ythril_mcp_tool_calls_total` is renamed `ythril_tool_calls_total` and gains a `door` label** (`mcp` or
+  `rest`). It was about to start counting browser traffic under a name that says MCP, which an operator
+  reading a dashboard has no way to notice. `door="mcp"` is the old question, still answerable.
+
+  The older REST routes are unchanged and still work. They are the shapes this replaces.
+
+- **BREAKING — emptying a space is `POST /api/delete_space_data`, and both doors call one module.**
+
+  ```json
+  { "space": "work", "confirm": true, "types": ["facts", "chrono"] }
+  ```
+
+  It was FIVE routes — `DELETE /api/brain/spaces/:spaceId/facts` and one each for entities, edges, chrono
+  and files — against one MCP tool taking `types[]`. Different parameters, different response, and
+  different safety: the routes demanded `confirm: true` and the tool demanded nothing.
+
+  **They also did different things.** The routes called `bulkDelete<Collection>` directly while the tool
+  asked `planSpaceWipe` first — so on a space belonging to a network, **the tool opened a vote and the
+  routes deleted shared data immediately.** Nothing reported it, because each door did exactly what its own
+  code said. The capability now lives in `spaces/delete-space-data.ts` and both doors are adapters over it,
+  so the governance step is not something either can forget.
+
+  `confirm: true` is required on both doors now, and the route is named after the tool with `space` as a
+  body parameter — the shape the rest of the REST surface moves to.
+
+  **Two things the collapse changed that are worth knowing before you upgrade:**
+
+  - **Emptying a collection no longer writes a tombstone per record.** The five routes did; the tool never
+    has, because on a space belonging to a network it opens a governed round instead and every member
+    wipes — so there is nothing for a peer to offer back. On a space in no network there is no peer. The
+    tombstone-writing path had no caller left and is deleted rather than kept warm.
+  - **Wiping entities unlabels every face, on both doors.** A face descriptor is a file-meta record
+    carrying `faceEntityId`, and that cascade lived in the ROUTE — so the door being kept was the one
+    without it, and `types: ["entities"]` would have left every labelled face pointing at a person who no
+    longer exists. It is inside `wipeSpace` now, where neither door can drop it.
+
+- **Removed: the metadata-only file delete.** `DELETE /api/brain/spaces/:spaceId/files?path=` purged a
+  metadata record without touching disk. Every file has metadata and `deleteFileCascade` removes both, and
+  the orphan case — a record whose bytes went missing out of band — is already handled by the file delete,
+  which answers `204` when it finds one. It was a second door onto half of one act, and the half it could
+  do alone left a file with no metadata.
+
+- **BREAKING — space administrator is a rung you GRANT, and four admin rungs are no longer it.**
+
+  ```json
+  { "spaceAdmin": { "floor": false, "spaces": ["work"] } }
+  ```
+
+  It used to be derived: `admin` on all four areas of a space WAS administering it. Two things were wrong
+  with that. The capability could not be granted in one action — the canary operator asked twice — and the
+  equivalence is false: holding every DATA rung is not authority over the space's tokens and settings, so
+  the derivation handed the space's token surface to any token that happened to hold four rungs.
+
+  | | |
+  |---|---|
+  | `spaceAdmin` | ⟹ `admin` in all four areas of that space |
+  | `admin` in all four | ⟹̸ `spaceAdmin` |
+
+  **Nothing can disagree, for a better reason than before.** The grant is an INPUT to `grantedRung`, the
+  single funnel every per-space rung resolves through — not a second opinion checked beside the rungs,
+  which is what an earlier decision rejected a flag for.
+
+  **Two scopes, like everything else in the matrix.** `spaces` names them; `floor` reaches every space
+  including ones created later. The floor form exists because a real configuration needs it: a token
+  administering every space holds no per-space rows at all.
+
+  **Nobody is stranded.** A boot migration writes the grant for every token that held all four — under the
+  previous rule those tokens WERE administrators, and an upgrade is not the moment to reinterpret that. A
+  floor of all-admin migrates to the floor form, never to a list of the spaces that happen to exist today.
+
+- **`delete_space_data` asks what its REST routes ask.** It carried `admin: true` — instance admin — while
+  the wipe routes need admin on the space in the path, so a space's administrator could empty it over REST
+  and was refused over MCP.
+
 - **`help()` told every caller the two doors reach the same things, and that was false in twenty-two
   places.** `REST_ONLY_CAPABILITIES` was empty, its own comment called the emptiness *"the finished state
   rather than an oversight"*, and the gate guarding it asserted both halves of every row — so with zero

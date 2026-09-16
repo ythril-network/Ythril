@@ -42,8 +42,25 @@ const NONE = ALL('none');
 const rights = (over = {}) => ({ instanceAdmin: false, createSpaces: false, floor: null, perSpace: {}, ...over });
 
 describe('what makes a token a space administrator', () => {
-  it('admin on all four areas of a space', () => {
-    assert.equal(isSpaceAdminFor(rights({ perSpace: { qa: ALL('admin') } }), 'qa'), true);
+  /*
+   * THE GRANT, AND ONLY THE GRANT — the 5.0 change, and these cases are the inverse of what they said.
+   *
+   * Owner, 2026-09-16: *"Space admin is more than the four area admin rungs. It must be its own"* and
+   * *"It includes the four but the four do not equal space admin"*. Administering a space is authority
+   * over the space — its tokens, its settings — and holding every DATA rung is not that.
+   */
+  const ADMINS = (...spaces) => ({ floor: false, spaces });
+
+  it('the spaceAdmin grant, for that space', () => {
+    assert.equal(isSpaceAdminFor(rights({ spaceAdmin: ADMINS('qa') }), 'qa'), true);
+  });
+
+  it('NOT admin on all four areas — which is what this used to mean', () => {
+    const r = rights({ perSpace: { qa: ALL('admin') } });
+    assert.equal(isSpaceAdminFor(r, 'qa'), false,
+      "four admin rungs are everything you can do to the DATA; the space's own tokens and settings are a "
+      + 'different authority, and reading one off the other is what 5.0 stopped');
+    assert.deepEqual(spaceAdminSpacesFor({ rights: r }), []);
   });
 
   it('NOT admin on one area only — a token is not a file', () => {
@@ -52,20 +69,23 @@ describe('what makes a token a space administrator', () => {
     assert.deepEqual(spaceAdminSpacesFor({ rights: r }), []);
   });
 
-  it('NOT admin on three of four', () => {
-    // The near miss that a looser rule would admit. `dataQuality` at write is not "nothing you cannot do".
-    const r = rights({ perSpace: { qa: { knowledge: 'admin', files: 'admin', schema: 'admin', dataQuality: 'write' } } });
+  it('the FLOOR form administers every space, including ones created later', () => {
+    /*
+     * The canary operator's shape (`Q-12`). It is the grant's own floor now, not four area floors — those
+     * grant maximal rights over every space's data and administration of none.
+     */
+    const r = rights({ spaceAdmin: { floor: true, spaces: [] } });
+    assert.equal(isSpaceAdminFor(r, 'qa'), true);
+    assert.equal(isSpaceAdminFor(r, 'a-space-created-tomorrow'), true);
+  });
+
+  it('and four admin FLOORS do not, for the same reason four rungs do not', () => {
+    const r = rights({ floor: ALL('admin') });
     assert.equal(isSpaceAdminFor(r, 'qa'), false);
   });
 
-  it('counts a rung reached through the FLOOR, not only an explicit row', () => {
-    // `effectiveRung` resolves floor-or-row, so an admin floor plus a partial row is still admin everywhere.
-    const r = rights({ floor: ALL('admin'), perSpace: { qa: { ...NONE, files: 'read' } } });
-    assert.equal(isSpaceAdminFor(r, 'qa'), true);
-  });
-
   it('is per SPACE — administering one is not administering another', () => {
-    const r = rights({ perSpace: { qa: ALL('admin'), research: ALL('write') } });
+    const r = rights({ spaceAdmin: ADMINS('qa') });
     assert.equal(isSpaceAdminFor(r, 'qa'), true);
     assert.equal(isSpaceAdminFor(r, 'research'), false);
     assert.deepEqual(spaceAdminSpacesFor({ rights: r }), ['qa']);
@@ -85,7 +105,7 @@ describe('what makes a token a space administrator', () => {
 });
 
 describe('being admitted is not being unbounded', () => {
-  const spaceAdmin = rights({ perSpace: { qa: ALL('admin') } });
+  const spaceAdmin = rights({ spaceAdmin: { floor: false, spaces: ['qa'] } });
 
   it('the scope guard still confines it to its own space', () => {
     const scope = editorScopeFor({ rights: spaceAdmin });

@@ -10,11 +10,12 @@ import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { usesLinkRecords } from '../../brain/link-adjacency.js';
 import { arrayWriteError } from '../../brain/array-write-refusal.js';
 import { connectionInputError, applyConnections, CONNECTION_BODY_KEYS } from '../../brain/write-connections.js';
+import { WIPE_COLLECTION_TYPES, type WipeCollectionType, wipeSpace } from '../../spaces/lifecycle.js';
 import { assertRefsResolve } from '../../brain/entity-refs.js';
-import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
+import { requireSpaceAuth, requireBodyScopedSpace, denyReadOnly } from '../../auth/middleware.js';
 import { unknownFieldWarnings } from './unknown-fields.js';
-import { globalRateLimit, bulkWipeRateLimit } from '../../rate-limit/middleware.js';
-import { listFacts, deleteFact, bulkDeleteFacts, saveFact, updateFact } from '../../brain/fact.js';
+import { globalRateLimit } from '../../rate-limit/middleware.js';
+import { listFacts, deleteFact, saveFact, updateFact } from '../../brain/fact.js';
 import { validateDeleteFields, applyDeleteFields as applyDeleteFieldsPaths } from '../../brain/delete-fields.js';
 import { getConfig } from '../../config/loader.js';
 import { col, asFilter } from '../../db/mongo.js';
@@ -461,25 +462,4 @@ memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpace
     }
   }
   res.status(404).json({ error: 'Fact not found' });
-});
-
-
-// DELETE /api/brain/spaces/:spaceId/facts — bulk wipe (long-form)
-memoriesRouter.delete('/spaces/:spaceId/facts', bulkWipeRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
-  const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
-  if (isProxySpace(spaceId)) {
-    res.status(400).json({ error: 'Bulk wipe not supported on proxy spaces — target member spaces individually' });
-    return;
-  }
-  if (req.body?.confirm !== true) {
-    res.status(400).json({ error: '`confirm: true` required in request body' });
-    return;
-  }
-  const deleted = await bulkDeleteFacts(spaceId);
-  res.json({ deleted });
 });

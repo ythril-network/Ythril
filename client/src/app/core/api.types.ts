@@ -295,6 +295,12 @@ export interface TokenRecord {
     createSpaces: boolean;
     floor: Record<string, 'none' | 'read' | 'write' | 'admin'> | null;
     perSpace: Record<string, Record<string, 'none' | 'read' | 'write' | 'admin'>>;
+    /**
+     * Spaces this token administers outright — a real grant since 5.0, not four rungs read together.
+     *
+     * Optional: a matrix minted before it existed has no such key, and an absent one grants nothing.
+     */
+    spaceAdmin?: { floor: boolean; spaces: string[] };
   };
 }
 

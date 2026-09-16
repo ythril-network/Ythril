@@ -9,6 +9,7 @@ import type { TokenRights } from '../../config/rights-shape.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
 import { WIPE_COLLECTION_TYPES, type WipeCollectionType, wipeSpace } from '../../spaces/lifecycle.js';
 import { planSpaceWipe, notifyPeersOfWipe } from '../../spaces/wipe-vote.js';
+import { deleteSpaceData, wipeTypesLabel } from '../../spaces/delete-space-data.js';
 import { updateSpace, spacePurpose } from '../../spaces/spaces.js';
 import { SPACE_PURPOSE_MAX, needsReindex } from '../../spaces/_shared.js';
 import { measureSpaceUsage } from '../../spaces/space-usage.js';
@@ -719,8 +720,10 @@ export const space_reindexTool: ToolHandler = {
 export const delete_space_dataTool: ToolHandler = {
   name: 'delete_space_data',
   description: 'Empty a space of its DATA while keeping the space itself — its id, label, purpose, schema, '
-    + 'rights and network membership all survive. Requires instance-admin rights. IRREVERSIBLE: there is no '
-    + 'undo, no trash, and no confirmation step, so the call that arrives is the call that runs.\n\n'
+    + 'rights and network membership all survive. Requires SPACE ADMIN on the space named in `space` — the '
+    + 'grant, which is its own right and is not the same as holding the admin rung on all four areas. '
+    + 'IRREVERSIBLE: there is no undo and no trash, so `confirm: true` is required, and the call that '
+    + 'arrives carrying it is the call that runs. Throttled to five calls a minute, on both doors.\n\n'
     + 'ON A NETWORKED SPACE IT OPENS A VOTE AND WIPES NOTHING YET. Emptying a space the network shares is a '
     + 'governed act, like deleting one: a round opens in every network that holds the space, this instance '
     + 'votes yes, and the wipe happens on EVERY member when a round passes. A single veto stops it there. So '
@@ -747,12 +750,32 @@ export const delete_space_dataTool: ToolHandler = {
     + 'RESPONSE: a per-collection count of what was deleted. Zeroes mean the space was already empty, not '
     + 'that anything refused.',
   mutating: true,
-  admin: true,
+  /*
+   * SPACE-admin, not instance-admin. Owner, 2026-09-16: *"Sync both doors!!! Space admin to wipe space"*.
+   *
+   * The five REST routes this mirrors ask `<area>: admin` on the space in the path. `admin: true` here
+   * meant INSTANCE admin — not a stricter door, a DIFFERENT question, so the administrator of a space
+   * could empty it over REST and was refused over MCP. The two were recorded as agreeing; they agreed on
+   * the word and not on its scope.
+   */
+  spaceAdmin: true,
   spaceRequired: true,
+  /*
+   * Throttled, and declared HERE so both doors throttle it. `bulkWipeRateLimit` was express middleware on
+   * the five REST routes and on nothing at all over MCP — five wipes a minute from a browser, unlimited
+   * from the caller most likely to be doing it in a loop.
+   */
+  heavy: true,
   inputSchema: (s: ToolSchemas) => ({
           type: 'object',
           properties: {
             space: s.requiredSpace,
+            confirm: {
+              type: 'boolean' as const,
+              description: 'Must be `true`. REQUIRED since 5.0 — the REST route always demanded it and this '
+                + 'tool did not, so one irreversible act had two safety levels depending on the door. '
+                + 'Aligned on the safer side, which is the only direction that cannot cost somebody data.',
+            },
             types: {
               type: 'array',
               items: { type: 'string', enum: [...BRAIN_COLLECTIONS] },
@@ -762,42 +785,48 @@ export const delete_space_dataTool: ToolHandler = {
           required: ['space'],
           additionalProperties: false,
         }),
+  /**
+   * An ADAPTER over `deleteSpaceData`, which `POST /api/delete_space_data` also calls.
+   *
+   * It used to be an implementation, and the five REST routes beside it were another — so on a space
+   * belonging to a network this door opened a vote and those deleted the data immediately. Same act,
+   * same instance, and whether the other members got a say depended on which door you came through.
+   *
+   * So there is nothing here to get wrong: read the arguments, call the module, render what it returns.
+   * A CHECK added to this function would be the second implementation arriving again.
+   */
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    // Authorised by `admin: true` in the dispatcher, which refuses this tool unless the token's matrix says
-    // `instanceAdmin`. The `if (!isAdmin)` that stood here was a second copy of that rule, reading the legacy
-    // boolean — and a second copy of an authorization rule is what this codebase pays most for.
+    // Authorised by `spaceAdmin: true` in the dispatcher, which refuses this tool unless the token
+    // administers the space named in the call — the same rung its REST twin asks for.
     const { args: a, callSpace } = ctx;
-    const rawTypes = Array.isArray(a['types']) ? (a['types'] as unknown[]) : undefined;
-    if (rawTypes !== undefined && rawTypes.some(t => typeof t !== 'string' || !WIPE_COLLECTION_TYPES.includes(t as WipeCollectionType))) {
-      throw new Error(`types must be an array of: ${WIPE_COLLECTION_TYPES.join(', ')}`);
-    }
-    const wipeTypes = rawTypes as WipeCollectionType[] | undefined;
-    const typesLabel = wipeTypes && wipeTypes.length > 0 ? wipeTypes.join(', ') : 'all';
+    const out = await deleteSpaceData({ space: callSpace, confirm: a['confirm'], types: a['types'] });
 
-    // X-5: the SAME planner the REST route calls. Both doors ask one function whether this space is governed
-    // and it opens the rounds; neither decides for itself, because a second copy of that rule is how one
-    // surface ends up wiping immediately while the other votes.
-    const plan = planSpaceWipe(callSpace, wipeTypes);
-    if (plan.governed) {
-      notifyPeersOfWipe(callSpace, wipeTypes);
-      const where = plan.rounds.map(r => r.networkLabel).join(', ');
+    if (!out.ok) throw new Error(out.error);
+
+    const label = wipeTypesLabel(out.types);
+    if (out.outcome === 'vote_pending') {
+      const where = out.rounds.map(r => r.networkLabel).join(', ');
       return {
         content: [{
           type: 'text' as const,
-          text: `Nothing has been wiped yet. '${callSpace}' belongs to ${plan.rounds.length} network`
-            + `${plan.rounds.length === 1 ? '' : 's'} (${where}), so emptying it is a governed act: a vote is `
-            + `now open in each, and this instance has voted yes. [${typesLabel}] is wiped on every member `
+          text: `Nothing has been wiped yet. '${callSpace}' belongs to ${out.rounds.length} network`
+            + `${out.rounds.length === 1 ? '' : 's'} (${where}), so emptying it is a governed act: a vote is `
+            + `now open in each, and this instance has voted yes. [${label}] is wiped on every member `
             + 'when a round passes, and a single veto stops it there. Watch the rounds rather than expecting '
             + 'counts from this call.',
         }],
-        structuredContent: { status: 'vote_pending', rounds: plan.rounds, types: wipeTypes ?? null },
+        structuredContent: { status: 'vote_pending', rounds: out.rounds, types: out.types },
       };
     }
 
-    const result = await wipeSpace(callSpace, wipeTypes);
-    const summary = `Wiped [${typesLabel}] in space '${callSpace}': ${result.facts} facts, ${result.entities} entities, ${result.edges} edges, ${result.chrono} chrono, ${result.files} files.`;
+    const d = out.deleted;
     return {
-      content: [{ type: 'text' as const, text: summary }],
+      content: [{
+        type: 'text' as const,
+        text: `Wiped [${label}] in space '${callSpace}': ${d.facts} facts, ${d.entities} entities, `
+          + `${d.edges} edges, ${d.chrono} chrono, ${d.files} files.`,
+      }],
+      structuredContent: d as unknown as Record<string, unknown>,
     };
   },
 };

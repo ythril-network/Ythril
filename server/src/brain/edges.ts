@@ -4,7 +4,7 @@ import { brainWriteSeqTotal } from '../metrics/registry.js';
 import { authorRef } from '../config/author.js';
 import { col, getMongo, asFilter, asDoc, asUpdate, asBulk } from '../db/mongo.js';
 import type { ClientSession } from 'mongodb';
-import { nextSeq, reserveSeqBlock } from '../util/seq.js';
+import { nextSeq } from '../util/seq.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, type SortSpec } from './list-sort.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector } from './read-projection.js';

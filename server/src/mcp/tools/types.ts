@@ -122,6 +122,14 @@ export interface ToolHandler {
    */
   spaceList?: boolean;
   /**
+   * Destructive or expensive enough to be throttled — five calls a minute per token, both doors.
+   *
+   * Declared on the TOOL rather than mounted as middleware on a route, because middleware can only ever
+   * guard one of the two doors: `bulkWipeRateLimit` protected the five REST wipe routes and nothing at all
+   * on MCP, so the caller most likely to be looping was the one with no limit. `callTool` enforces it.
+   */
+  heavy?: boolean;
+  /**
    * Skip the dispatcher's inputSchema arg-validation for this tool (it still appears in tools/list with
    * its full schema for discovery). For partial-success tools like `save_bulk`, whose contract is to
    * process the valid items and report per-item errors in the RESULT rather than reject the whole call —

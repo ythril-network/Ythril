@@ -43,6 +43,27 @@ const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
  * without one is how the table rots.
  */
 const EXEMPT = new Map([
+  /*
+   * THE TOOL DOOR — audited, just not from `ROUTE_RULES`, and that distinction is the whole reason this
+   * entry needs a paragraph rather than a clause.
+   *
+   * `POST /api/:tool` serves every tool there is. A rule here would have to be one pattern standing for
+   * forty-five different operations, so the audit entry is written by `callTool` instead, which derives the
+   * operation from `mcpAuditOperation(toolName)` — the same mapping the MCP door has used all along. One
+   * act is therefore logged under one operation whichever door it came through, which is more than a rule
+   * here could have given.
+   *
+   * `mcp-audit-coverage.test.js` is what holds that up: it asserts every registered tool resolves to an
+   * operation, that no mutating tool is recorded as a read, and that the dispatch actually calls the
+   * recorder with a status taken from the result. So this is not an unaudited route wearing an exemption —
+   * it is a route whose coverage is proved somewhere the coverage actually lives.
+   */
+  // Keyed `/api/sample` because `samplePath` above substitutes every `:param` with `sample`, so the
+  // mounted `/api/:tool` reaches this comparison spelled that way. It is the only single-segment `/api`
+  // parameter route there is, and `no-tool-name-shadows-a-mounted-router.test.js` keeps it that way.
+  ['/api/sample', 'the generic tool door (`POST /api/:tool`) — audited by `callTool` from '
+    + '`mcpAuditOperation`, one entry per tool call on both doors. Proved by mcp-audit-coverage.test.js, '
+    + 'not by a rule here.'],
   // Machine-to-machine sync: peers write constantly and are authenticated as peers, not
   // users. Auditing every sync push would swamp the log and tell you nothing about a human.
   ['/api/sync', 'peer-to-peer sync traffic — not a user action'],
@@ -209,7 +230,10 @@ describe('Audit coverage — every mutating route must resolve to an operation',
       ['PATCH', '/api/spaces/sample/rename', 'space rename'],
       ['PUT', '/api/spaces/sample/schema', 'space schema write'],
       ['POST', '/api/spaces/reorder', 'space reorder'],
-      ['DELETE', '/api/brain/spaces/sample/files', 'file metadata delete'],
+      // `DELETE /api/brain/spaces/:spaceId/files` was pinned here and its ROUTE is gone (5.0) — the
+      // metadata-only delete was a second door onto half of one act. Pinning a rule for a route nobody
+      // serves would keep this list green while describing something unreachable, which is the opposite of
+      // what pinning is for.
       ['POST', '/api/mfa/setup', 'MFA enable / secret rotation'],
       ['DELETE', '/api/mfa', 'MFA disable'],
     ];
