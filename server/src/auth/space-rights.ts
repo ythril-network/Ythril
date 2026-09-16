@@ -378,6 +378,7 @@ export const TOOL_RIGHTS: readonly ToolRight[] = [
  * matches the same way, and a gate below asserts the two agree rather than trusting that they do.
  */
 export const NOT_AREA_SCOPED: readonly { route: string; why: string }[] = [
+
   /*
    * THE SPACE'S SETTINGS AND ITS DESTRUCTION. Neither is a view of one area's data.
    *

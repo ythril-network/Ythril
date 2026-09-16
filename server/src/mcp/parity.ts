@@ -30,8 +30,13 @@ export interface RestOnlyCapability {
   capability: string;
   /** The REST route, exactly as the router declares it. Asserted to exist. */
   restEndpoint: string;
-  /** HTTP method, for a caller building the request. */
-  method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  /**
+   * HTTP method, for a caller building the request.
+   *
+   * `PUT` was missing until 5.0 and the omission was invisible while the list was empty — the union
+   * described the methods the rows happened to use rather than the ones the API has.
+   */
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   /** The tool name it WOULD have, asserted NOT to exist while this row stands. */
   wouldBeTool: string;
   /** Why it is not on MCP yet — never "no reason", because that is what a blank invites. */
@@ -58,19 +63,167 @@ export interface RestOnlyCapability {
  * that name does — so a row cannot rot in either direction.
  */
 export const REST_ONLY_CAPABILITIES: readonly RestOnlyCapability[] = [
-  // EMPTY, and that is the finished state rather than an oversight.
-  //
-  // All five capabilities the canary operator reported now exist as MCP tools. Each left this list by being BUILT —
-  // `mcp-rest-parity.test.js` asserts both halves of every row, so a row cannot be deleted to quiet the gate: the day
-  // a tool of that name exists the row must go, and the day the REST route is renamed the row must be corrected.
-  //
-  // Two of the five were thin wrappers. The other three each needed their route's validation extracted into something
-  // both surfaces call first, because `updateSpace()`, `createSpace()` and the reindex loop already existed — which is
-  // exactly what made "just add a tool" dangerous rather than easy. Each of those took three PRs: characterization
-  // tests against the unmoved route, the extraction, then the tool. The history is in the CHANGELOG.
-  //
-  // **Add a row the moment a capability exists on one surface and not the other.** An empty list is a claim, and
-  // `help` reports it to every caller.
+  /*
+   * THE LIST WAS EMPTY AND THE EMPTINESS WAS FALSE. It said so itself — *"EMPTY, and that is the finished
+   * state rather than an oversight"* — and `help` published that to every caller as a promise that the two
+   * surfaces reach the same things.
+   *
+   * Two capabilities were missing the whole time, and nobody could have found them from here.
+   * `mcp-rest-parity.test.js` asserts both halves of every ROW, so with zero rows it asserted nothing, for
+   * ever. A gate whose title is a claim about a whole surface, reading a list that is empty.
+   *
+   * `every-rest-route-is-answered-or-declared.test.js` is the fix and it works the other way round: it
+   * DERIVES all 222 mounted routes and requires each to be answered by a named tool, declared here, or
+   * classified as not a capability with a reason. A route in none of the three fails. So this list can no
+   * longer be empty-and-wrong — it can only be wrong by somebody writing a reason they do not believe.
+   */
+  {
+    capability: "a file's ORIGINAL BYTES",
+    restEndpoint: '/api/files/:spaceId',
+    method: 'GET',
+    wouldBeTool: 'download_file',
+    why: '`read_file` returns EXTRACTED TEXT, which is the right answer for a document and the wrong one for a PNG, a zip or a signed PDF. There is no MCP route to the bytes at all, and the two are easy to mistake for each other because the text answer succeeds.',
+  },
+  {
+    capability: 'the MEDIA embedding queue',
+    restEndpoint: '/api/brain/spaces/:spaceId/embedding-queue/media',
+    method: 'GET',
+    wouldBeTool: 'list_media_jobs',
+    why: '`list_embed_jobs` lists RECORD jobs. Media — images, audio, video — is a separate queue with its own failures, and it is priced `files: read` where the record queue is `knowledge: read`, so the two are not one capability wearing two paths. `retry_embed_media` can RETRY what an MCP caller cannot list.',
+  },
+  {
+    capability: 'the rights catalogue',
+    restEndpoint: '/api/tokens/rights-catalog',
+    method: 'GET',
+    wouldBeTool: 'rights_catalog',
+    why: '`help` publishes WHICH spaces you reach and where you administer, and then points at this REST URL for the definition of the rungs — so our own help text tells an MCP caller to leave MCP.',
+  },
+  {
+    capability: 'write ONE type schema',
+    restEndpoint: '/api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName',
+    method: 'PUT',
+    wouldBeTool: 'schema_type_update',
+    why: 'MCP can only replace the WHOLE schema map, through `schema_update`. That needs `schema: admin` where this route needs `schema: write`, and it is a read-modify-write, so two agents editing different types can lose one of the edits. The narrow write has no tool.',
+  },
+  {
+    capability: 'read one network',
+    restEndpoint: '/api/networks/:id',
+    method: 'GET',
+    wouldBeTool: 'network_get',
+    why: 'governing a network is REST-only. An MCP caller can see peers and trigger a sync, and can do nothing else: not create a network, not join or fork one, not manage its members, and — the one that matters — not VOTE. A vote is how a networked space approves a destructive act, so an agent can be a member of a governance process it cannot take part in.',
+  },
+  {
+    capability: 'create a network',
+    restEndpoint: '/api/networks',
+    method: 'POST',
+    wouldBeTool: 'network_create',
+    why: 'governing a network is REST-only. An MCP caller can see peers and trigger a sync, and can do nothing else: not create a network, not join or fork one, not manage its members, and — the one that matters — not VOTE. A vote is how a networked space approves a destructive act, so an agent can be a member of a governance process it cannot take part in.',
+  },
+  {
+    capability: 'update a network',
+    restEndpoint: '/api/networks/:id',
+    method: 'PATCH',
+    wouldBeTool: 'network_update',
+    why: 'governing a network is REST-only. An MCP caller can see peers and trigger a sync, and can do nothing else: not create a network, not join or fork one, not manage its members, and — the one that matters — not VOTE. A vote is how a networked space approves a destructive act, so an agent can be a member of a governance process it cannot take part in.',
+  },
+  {
+    capability: 'delete a network',
+    restEndpoint: '/api/networks/:id',
+    method: 'DELETE',
+    wouldBeTool: 'network_delete',
+    why: 'governing a network is REST-only. An MCP caller can see peers and trigger a sync, and can do nothing else: not create a network, not join or fork one, not manage its members, and — the one that matters — not VOTE. A vote is how a networked space approves a destructive act, so an agent can be a member of a governance process it cannot take part in.',
+  },
+  {
+    capability: 'fork a network',
+    restEndpoint: '/api/networks/:id/fork',
+    method: 'POST',
+    wouldBeTool: 'network_fork',
+    why: 'governing a network is REST-only. An MCP caller can see peers and trigger a sync, and can do nothing else: not create a network, not join or fork one, not manage its members, and — the one that matters — not VOTE. A vote is how a networked space approves a destructive act, so an agent can be a member of a governance process it cannot take part in.',
+  },
+  {
+    capability: 'invite to a network',
+    restEndpoint: '/api/networks/:id/invite',
+    method: 'POST',
+    wouldBeTool: 'network_invite',
+    why: 'governing a network is REST-only. An MCP caller can see peers and trigger a sync, and can do nothing else: not create a network, not join or fork one, not manage its members, and — the one that matters — not VOTE. A vote is how a networked space approves a destructive act, so an agent can be a member of a governance process it cannot take part in.',
+  },
+  {
+    capability: 'join a network',
+    restEndpoint: '/api/networks/:id/join',
+    method: 'POST',
+    wouldBeTool: 'network_join',
+    why: 'governing a network is REST-only. An MCP caller can see peers and trigger a sync, and can do nothing else: not create a network, not join or fork one, not manage its members, and — the one that matters — not VOTE. A vote is how a networked space approves a destructive act, so an agent can be a member of a governance process it cannot take part in.',
+  },
+  {
+    capability: 'join a REMOTE network',
+    restEndpoint: '/api/networks/join-remote',
+    method: 'POST',
+    wouldBeTool: 'network_join_remote',
+    why: 'governing a network is REST-only. An MCP caller can see peers and trigger a sync, and can do nothing else: not create a network, not join or fork one, not manage its members, and — the one that matters — not VOTE. A vote is how a networked space approves a destructive act, so an agent can be a member of a governance process it cannot take part in.',
+  },
+  {
+    capability: 'add a member',
+    restEndpoint: '/api/networks/:id/members',
+    method: 'POST',
+    wouldBeTool: 'network_member_add',
+    why: 'governing a network is REST-only. An MCP caller can see peers and trigger a sync, and can do nothing else: not create a network, not join or fork one, not manage its members, and — the one that matters — not VOTE. A vote is how a networked space approves a destructive act, so an agent can be a member of a governance process it cannot take part in.',
+  },
+  {
+    capability: 'remove a member',
+    restEndpoint: '/api/networks/:id/members/:instanceId',
+    method: 'DELETE',
+    wouldBeTool: 'network_member_remove',
+    why: 'governing a network is REST-only. An MCP caller can see peers and trigger a sync, and can do nothing else: not create a network, not join or fork one, not manage its members, and — the one that matters — not VOTE. A vote is how a networked space approves a destructive act, so an agent can be a member of a governance process it cannot take part in.',
+  },
+  {
+    capability: 'adopt a member',
+    restEndpoint: '/api/networks/:id/members/:instanceId/adopt',
+    method: 'POST',
+    wouldBeTool: 'network_member_adopt',
+    why: 'governing a network is REST-only. An MCP caller can see peers and trigger a sync, and can do nothing else: not create a network, not join or fork one, not manage its members, and — the one that matters — not VOTE. A vote is how a networked space approves a destructive act, so an agent can be a member of a governance process it cannot take part in.',
+  },
+  {
+    capability: "revert a member's parent",
+    restEndpoint: '/api/networks/:id/members/:instanceId/revert-parent',
+    method: 'POST',
+    wouldBeTool: 'network_member_revert_parent',
+    why: 'governing a network is REST-only. An MCP caller can see peers and trigger a sync, and can do nothing else: not create a network, not join or fork one, not manage its members, and — the one that matters — not VOTE. A vote is how a networked space approves a destructive act, so an agent can be a member of a governance process it cannot take part in.',
+  },
+  {
+    capability: 'reparent this instance',
+    restEndpoint: '/api/networks/:id/reparent-self',
+    method: 'POST',
+    wouldBeTool: 'network_reparent_self',
+    why: 'governing a network is REST-only. An MCP caller can see peers and trigger a sync, and can do nothing else: not create a network, not join or fork one, not manage its members, and — the one that matters — not VOTE. A vote is how a networked space approves a destructive act, so an agent can be a member of a governance process it cannot take part in.',
+  },
+  {
+    capability: "set a member's signing key",
+    restEndpoint: '/api/networks/:id/members/:instanceId/signing-key',
+    method: 'PUT',
+    wouldBeTool: 'network_signing_key',
+    why: 'governing a network is REST-only. An MCP caller can see peers and trigger a sync, and can do nothing else: not create a network, not join or fork one, not manage its members, and — the one that matters — not VOTE. A vote is how a networked space approves a destructive act, so an agent can be a member of a governance process it cannot take part in.',
+  },
+  {
+    capability: 'read the sync history',
+    restEndpoint: '/api/networks/:id/sync-history',
+    method: 'GET',
+    wouldBeTool: 'network_sync_history',
+    why: 'governing a network is REST-only. An MCP caller can see peers and trigger a sync, and can do nothing else: not create a network, not join or fork one, not manage its members, and — the one that matters — not VOTE. A vote is how a networked space approves a destructive act, so an agent can be a member of a governance process it cannot take part in.',
+  },
+  {
+    capability: 'read open votes',
+    restEndpoint: '/api/networks/:id/votes',
+    method: 'GET',
+    wouldBeTool: 'network_votes',
+    why: 'governing a network is REST-only. An MCP caller can see peers and trigger a sync, and can do nothing else: not create a network, not join or fork one, not manage its members, and — the one that matters — not VOTE. A vote is how a networked space approves a destructive act, so an agent can be a member of a governance process it cannot take part in.',
+  },
+  {
+    capability: 'CAST a vote',
+    restEndpoint: '/api/networks/:id/votes/:roundId',
+    method: 'POST',
+    wouldBeTool: 'network_vote',
+    why: 'governing a network is REST-only. An MCP caller can see peers and trigger a sync, and can do nothing else: not create a network, not join or fork one, not manage its members, and — the one that matters — not VOTE. A vote is how a networked space approves a destructive act, so an agent can be a member of a governance process it cannot take part in.',
+  },
 ] as const;
 
 /**

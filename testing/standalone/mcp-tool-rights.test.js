@@ -24,18 +24,19 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { blockAfter } from './_structural-window.mjs';
 import { readFileSync } from 'node:fs';
+import { CAPABILITIES } from './_capability-map.mjs';
 
 let TOOL_RIGHTS, ROUTE_RIGHTS, ALL_TOOLS, effectiveRung, satisfies, toolRightsRefusal;
 
-/** The capability map: one MCP tool and the REST route that does the same thing. */
-function capabilityMap() {
-  const src = readFileSync('scripts/surface-matrix.mjs', 'utf8');
-  const at = src.indexOf('const MAP = [');
-  assert.ok(at > 0, 'the capability map moved — this gate derives its expectations from it');
-  const body = src.slice(at, src.indexOf('];', at) + 2).replace('const MAP =', '');
-  // eslint-disable-next-line no-eval
-  return eval(body);
-}
+/**
+ * The capability map: one MCP tool and the REST route that does the same thing.
+ *
+ * IMPORTED. This used to read `scripts/surface-matrix.mjs` as text, slice out `const MAP = [...]` and
+ * `eval` it — which worked until the map moved into a module and left this gate asserting nothing it could
+ * find. Reading another file's source to recover a value it could have exported is a copy with extra steps,
+ * and the copy broke the moment the original improved.
+ */
+const capabilityMap = () => CAPABILITIES;
 
 before(async () => {
   ({ TOOL_RIGHTS, ROUTE_RIGHTS } = await import('../../server/dist/auth/space-rights.js'));
@@ -57,7 +58,21 @@ describe('TOOL_RIGHTS agrees with ROUTE_RIGHTS, row for row', () => {
       if (!expected) continue;                    // not area-scoped (spaces/tokens/networks CRUD)
       const actual = byTool.get(tool);
       if (!actual) {
-        disagreements.push(`${tool}: absent from TOOL_RIGHTS but its route ${route} is area-scoped`);
+        /*
+         * A tool with no row is governed by its `admin` flag, and for a CROSS-AREA tool that is the only
+         * way it can be governed: `TOOL_RIGHTS` is one row per tool, so `delete_space_data` — which empties
+         * knowledge collections AND the file-meta collection — has no single area to name.
+         *
+         * THE ASYMMETRY THIS LEAVES IS REAL AND IS NOT A ROW HERE. `admin: true` means INSTANCE admin,
+         * while the routes need `<area>: admin` for ONE space — so a space administrator can empty their
+         * own space over REST and cannot over MCP. `space-rights.ts` records these two doors as agreeing;
+         * they agree on the WORD admin and not on its scope. Filed rather than fixed, because narrowing a
+         * flag to a rung is a change to who can wipe a space.
+         */
+        const handler = ALL_TOOLS.find(t => t.name === tool);
+        assert.ok(handler?.admin,
+          `${tool}: absent from TOOL_RIGHTS, and not flag-governed either — its route ${route} is `
+          + 'area-scoped, so nothing prices it on the MCP door at all');
         continue;
       }
       if (actual.area !== expected.area || actual.needs !== expected.needs) {

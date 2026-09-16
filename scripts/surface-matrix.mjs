@@ -11,6 +11,8 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
+import { mountedRoutes } from '../testing/standalone/_routes.mjs';
+import { CAPABILITIES } from '../testing/standalone/_capability-map.mjs';
 
 const ROOT = process.cwd();
 const read = p => readFileSync(join(ROOT, p), 'utf8');
@@ -45,59 +47,24 @@ const filesFor = file => {
 const API_ALL = execFileSync('git', ['ls-files', 'server/src/api'], { cwd: ROOT, encoding: 'utf8' })
   .split('\n').map(l => l.trim()).filter(l => l.endsWith('.ts'));
 
-/**
- * Router identifier -> mount path, following `use()` chains.
+/*
+ * The routes come from `mountedRoutes`, not from a fourth copy of the mount resolution.
  *
- * `app.use('/api/brain', brainRouter)` is only the first hop: `brainRouter.use(memoriesRouter)` and seven
- * siblings sit inside `api/brain/index.ts`, each with no prefix, so their routes are served under `/api/brain`
- * while nothing in `app.ts` names them. Stopping at the first hop attributed 115 of 207 routes and called the
- * other 92 unattributed.
+ * THIS SCRIPT HAD ITS OWN, AND IT HAD BEEN FAILING SINCE 2026-08-14 — a month of `todo/_matrix-published.md`
+ * sitting there looking current while the generator refused to write it. The refusal was correct and it was
+ * also invisible: nothing runs this in CI, so an abort and a success look identical to anyone who only ever
+ * reads the output file.
  *
- * A PREFIXED nesting (`x.use('/y', sub)`) would need the prefix carried; none exists, and the loop reports one
- * loudly if it appears rather than quietly mis-attributing its routes.
+ * What it could not resolve was `registerUploadRoute(router: Router)` — a route registered inside a
+ * function names its PARAMETER, and the copy here only understood `xRouter.use(...)` chains. That is
+ * exactly the case `routerMounts` was extracted for, one module down.
+ *
+ * So the copy is gone. The shared module throws below a floor rather than returning a short list, which is
+ * the guard a hand-written scan drops and the reason a stale table could look complete.
  */
-const mountFor = new Map();
-for (const m of APP.matchAll(/app\.use\('(\/[^']*)',\s*(\w+)\)/g)) mountFor.set(m[2], m[1]);
-
-const nestings = [];
-for (const f of API_ALL) {
-  let code;
-  try { code = strip(read(f)); } catch { continue; }
-  for (const m of code.matchAll(/\b(\w*[Rr]outer)\.use\(\s*(?:'([^']*)',\s*)?(\w*[Rr]outer)\s*\)/g)) {
-    nestings.push({ parent: m[1], prefix: m[2] ?? '', child: m[3] });
-  }
-}
-for (let pass = 0; pass < 8; pass++) {
-  let changed = false;
-  for (const { parent, prefix, child } of nestings) {
-    const base = mountFor.get(parent);
-    if (base === undefined || mountFor.has(child)) continue;
-    if (prefix) console.log(`note: ${parent}.use('${prefix}', ${child}) — prefixed nesting, mount is ${base}${prefix}`);
-    mountFor.set(child, `${base}${prefix}`);
-    changed = true;
-  }
-  if (!changed) break;
-}
-
-const routes = new Set();
-const routeArea = new Map();
-const unattributed = [];
-for (const f of API_ALL) {
-  let code;
-  try { code = strip(read(f)); } catch { continue; }
-  for (const m of code.matchAll(/\b(\w*[Rr]outer)\.(get|post|patch|put|delete)\(\s*'(\/[^']*)'/g)) {
-    const mount = mountFor.get(m[1]);
-    if (!mount) { unattributed.push(`${f}: ${m[1]}.${m[2]}('${m[3]}')`); continue; }
-    const key = `${m[2].toUpperCase()} ${mount}${m[3] === '/' ? '' : m[3]}`;
-    routes.add(key);
-    routeArea.set(key, mount);
-  }
-}
-if (unattributed.length) {
-  console.error(`route registrations on an unknown router (${unattributed.length}) — the table is INCOMPLETE:`);
-  for (const u of unattributed) console.error(`    ${u}`);
-  process.exit(1);
-}
+const allRoutes = mountedRoutes();
+const routes = new Set(allRoutes.map(r => `${r.method} ${r.path}`));
+const routeArea = new Map(allRoutes.map(r => [`${r.method} ${r.path}`, r.path]));
 
 const { ALL_TOOLS } = await import(`file://${join(ROOT, 'server/dist/mcp/tools/index.js')}`);
 const tools = new Set(ALL_TOOLS.map(t => t.name));
@@ -111,60 +78,36 @@ const EXEMPT_ROUTES = new Set(NOT_AREA_SCOPED.map(r => r.route));
 /**
  * What a TOKEN needs, per door.
  *
- * REST comes from `ROUTE_RIGHTS` — the per-space area and rung the middleware enforces. MCP has a coarser gate:
- * `mutating` tools are hidden from a read-only token and `admin` tools from a non-admin one, which maps onto the
- * same three rungs. Reporting both is the point: a tool hidden from a token whose REST route would have accepted
+ * REST comes from `ROUTE_RIGHTS`. MCP comes from `TOOL_RIGHTS` FIRST and from the coarse flags only for a tool
+ * that has no row — because a tool governed by a row is not governed by its flags, and reading the flags
+ * reports the rung it would have had.
+ *
+ * **That is what this line got wrong, and the mistake is instructive.** `schema_update` moved from a flag to
+ * a `TOOL_RIGHTS` row of `schema: admin`; a comment in `space-rights.ts` recorded that the two doors now
+ * agreed and that *"`surface-matrix.mjs` no longer reports it"*. It reported it again from that day on,
+ * because this function still read the flag — and nobody saw, because this script had been aborting on an
+ * unrelated error since 2026-08-14. A claim about a checker, in a file the checker does not read, verified
+ * by a checker nobody ran.
+ *
+ * Reporting both rungs is still the point: a tool hidden from a token whose REST route would have accepted
  * it (or the reverse) is a real asymmetry, and it is invisible unless the two are put side by side.
  */
-const toolRung = t => (t.admin ? 'admin' : t.mutating ? 'write' : 'read');
+const { TOOL_RIGHTS } = await import(`file://${join(ROOT, 'server/dist/auth/space-rights.js')}`);
+const TOOL_RUNG = new Map(TOOL_RIGHTS.map(r => [r.tool, r.needs]));
+const toolRung = t => TOOL_RUNG.get(t.name) ?? (t.admin ? 'admin' : t.mutating ? 'write' : 'read');
 
-// ── the mapping, by hand and verified ───────────────────────────────────────
-// `null` REST means the capability exists on MCP only; a note says why.
-const MAP = [
-  ['Brain — memories', 'save_fact', 'POST /api/brain/spaces/:spaceId/memories'],
-  ['Brain — memories', 'update_fact', 'PATCH /api/brain/spaces/:spaceId/memories/:id'],
-  ['Brain — memories', 'delete_fact', 'DELETE /api/brain/spaces/:spaceId/memories/:id'],
-  ['Brain — entities', 'save_entity', 'POST /api/brain/spaces/:spaceId/entities'],
-  ['Brain — entities', 'update_entity', 'PATCH /api/brain/spaces/:spaceId/entities/:id'],
-  ['Brain — entities', 'delete_entity', 'DELETE /api/brain/spaces/:spaceId/entities/:id'],
-  ['Brain — entities', 'graph_merge', 'POST /api/brain/spaces/:spaceId/entities/:survivorId/merge/:absorbedId'],
-  ['Brain — edges', 'save_edge', 'POST /api/brain/spaces/:spaceId/edges'],
-  ['Brain — edges', 'update_edge', 'PATCH /api/brain/spaces/:spaceId/edges/:id'],
-  ['Brain — edges', 'delete_edge', 'DELETE /api/brain/spaces/:spaceId/edges/:id'],
-  ['Brain — chrono', 'save_chrono', 'POST /api/brain/spaces/:spaceId/chrono'],
-  ['Brain — chrono', 'update_chrono', 'PATCH /api/brain/spaces/:spaceId/chrono/:id'],
-  ['Brain — chrono', 'delete_chrono', 'DELETE /api/brain/spaces/:spaceId/chrono/:id'],
-  ['Brain — search', 'recall', 'POST /api/brain/spaces/:spaceId/recall'],
-  ['Brain — search', 'query', 'POST /api/brain/spaces/:spaceId/query'],
-  ['Brain — search', 'find_similar', 'POST /api/brain/spaces/:spaceId/find-similar'],
-  ['Brain — search', 'graph_traverse', 'POST /api/brain/spaces/:spaceId/traverse'],
-  ['Brain — bulk', 'save_bulk', 'POST /api/brain/spaces/:spaceId/bulk'],
-  ['Brain — ops', 'space_stats', 'GET /api/brain/spaces/:spaceId/stats'],
-  ['Brain — ops', 'space_reindex', 'POST /api/brain/spaces/:spaceId/reindex'],
-  ['Brain — ops', 'list_embed_jobs', 'GET /api/brain/spaces/:spaceId/embedding-queue/records'],
-  ['Brain — ops', 'retry_embed_record', 'POST /api/brain/spaces/:spaceId/embedding-queue/records/retry'],
-  ['Brain — ops', 'retry_failed_embeddings', 'POST /api/brain/spaces/:spaceId/embedding-queue/retry-failed'],
-  ['Files', 'read_file', 'GET /api/files/:spaceId'],
-  ['Files', 'write_file', 'POST /api/files/:spaceId'],
-  ['Files', 'delete_file', 'DELETE /api/files/:spaceId'],
-  ['Files', 'move_file', 'PATCH /api/files/:spaceId'],
-  ['Files', 'list_dir', 'GET /api/files/:spaceId'],
-  ['Files', 'create_dir', 'POST /api/files/:spaceId/mkdir'],
-  ['Files', 'retry_embed_file', 'POST /api/files/:spaceId/retry_embedding'],
-  ['Files', 'update_file_meta', 'PATCH /api/brain/spaces/:spaceId/files'],
-  ['Spaces', 'list_spaces', 'GET /api/spaces'],
-  ['Spaces', 'save_space', 'POST /api/spaces'],
-  ['Spaces', 'update_space', 'PATCH /api/spaces/:id'],
-  ['Spaces', 'space_meta', 'GET /api/spaces/:id/meta'],
-  ['Spaces', 'schema_update', 'PUT /api/spaces/:id/schema'],
-  ['Spaces', 'delete_space_data', null, 'MCP wipes every collection in one call; REST has one DELETE per collection '
-    + '(`/memories`, `/entities`, `/edges`, `/chrono`), so the composite is MCP-only.'],
-  ['Tokens', 'list_tokens', 'GET /api/tokens'],
-  ['Networks / sync', 'network_peers', 'GET /api/networks'],
-  ['Networks / sync', 'network_sync', 'POST /api/networks/:id/sync'],
-  ['Meta', 'help', null, 'Self-documenting guide for tool callers. Its REST counterpart is the integration '
-    + 'guide itself, which is why there is no route.'],
-];
+/*
+ * The mapping is IMPORTED, not kept here.
+ *
+ * This file held its own and it was the copy nobody ran — it mapped `GET /api/files/:spaceId` to
+ * `read_file` and published that as covered for a month, while the bytes route has no MCP tool at all and
+ * `read_file` answers the extracted-TEXT route. One rule, three implementations, and the published one was
+ * the wrong one.
+ *
+ * `every-rest-route-is-answered-or-declared.test.js` now asserts the same structure against every mounted
+ * route, so what this renders is what a gate holds true rather than what somebody last remembered.
+ */
+const MAP = CAPABILITIES;
 
 const missingTools = MAP.map(r => r[1]).filter(t => !tools.has(t));
 if (missingTools.length) throw new Error(`mapped tools that do not exist: ${missingTools.join(', ')}`);
@@ -270,7 +213,20 @@ for (const r of rows) {
 writeFileSync(join(ROOT, 'todo/_matrix-published.md'), pub.join('\n'), 'utf8');
 writeFileSync(join(ROOT, 'todo/_matrix-rest-only.md'), rest.join('\n'), 'utf8');
 const rungMismatch = rows.filter(r => r.route && r.restRung && r.restRung !== 'exempt' && r.restRung !== r.mcpRung);
-const noRightsRow = rows.filter(r => r.route && r.restRung === null);
+/*
+ * A mapped route with no rights row.
+ *
+ * `ROUTE_RIGHTS` and `NOT_AREA_SCOPED` govern the SPACE-scoped surface — `every-space-route-has-an-area`
+ * enumerates that surface and holds both lists to it, and it rejects an exemption for a path outside it.
+ * So tokens and networks belong to neither: a token is governed by token administration and a network is
+ * instance-shaped, and neither has a space whose area could be checked.
+ *
+ * Asking them the space question produced five false findings, and "add a row to quiet it" put five
+ * exemptions into a list that then failed its own gate for naming routes that surface does not contain.
+ * The question is scoped instead.
+ */
+const SPACE_SCOPED = r => !/\/api\/(tokens|networks)(\/|$)/.test(r.route ?? '');
+const noRightsRow = rows.filter(r => r.route && r.restRung === null && SPACE_SCOPED(r));
 console.log(JSON.stringify({
   capabilities: rows.length, routes: routes.size, restOnly: restOnly.length,
   noGuide: rows.filter(r => !r.guide.length).length,
