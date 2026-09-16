@@ -40,7 +40,7 @@ describe('Space wipe — governed when the space is in a network', () => {
     const createR = await post(INSTANCES.a, token, '/api/spaces', { id: spaceId, label: 'Wipe Solo' });
     assert.equal(createR.status, 201, `create: ${JSON.stringify(createR.body)}`);
 
-    await post(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/memories`, { fact: 'solo wipe subject' });
+    await post(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/facts`, { fact: 'solo wipe subject' });
 
     const wipeR = await post(INSTANCES.a, token, `/api/admin/spaces/${spaceId}/wipe`, {});
     assert.equal(wipeR.status, 200, `Expected an immediate wipe, got ${wipeR.status}: ${JSON.stringify(wipeR.body)}`);
@@ -55,9 +55,9 @@ describe('Space wipe — governed when the space is in a network', () => {
     const createR = await post(INSTANCES.a, token, '/api/spaces', { id: spaceId, label: 'Wipe Networked' });
     assert.equal(createR.status, 201, `create: ${JSON.stringify(createR.body)}`);
 
-    const factR = await post(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/memories`,
+    const factR = await post(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/facts`,
       { fact: 'this must survive the vote being opened' });
-    assert.equal(factR.status, 201, `seed memory: ${JSON.stringify(factR.body)}`);
+    assert.equal(factR.status, 201, `seed fact: ${JSON.stringify(factR.body)}`);
 
     const netR = await post(INSTANCES.a, token, '/api/networks', {
       label: `Wipe-Net-${RUN_ID}`,
@@ -75,7 +75,7 @@ describe('Space wipe — governed when the space is in a network', () => {
 
     // The point of the whole change: the data is still there. A vote that emptied the space anyway would
     // pass every assertion above and be the exact bug this replaces.
-    const stillR = await post(INSTANCES.a, token, '/api/brain/filter', { space: spaceId, ...({ collection: 'memories', filter: {} }) });
+    const stillR = await post(INSTANCES.a, token, '/api/brain/filter', { space: spaceId, ...({ collection: 'facts', filter: {} }) });
     assert.equal(stillR.status, 200, `query after vote opened: ${JSON.stringify(stillR.body)}`);
     assert.ok((stillR.body?.results?.length ?? 0) > 0,
       'the memory must survive: the wipe happens when the round PASSES, not when it opens');

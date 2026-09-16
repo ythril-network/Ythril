@@ -141,7 +141,7 @@ const MEMORIES = [
 async function seedMemories() {
   let count = 0;
   for (const { space, fact, tags } of MEMORIES) {
-    await api('POST', `/api/brain/spaces/${space}/memories`, { fact, tags });
+    await api('POST', `/api/brain/spaces/${space}/facts`, { fact, tags });
     count++;
   }
   console.log(`  Created ${count} memories`);

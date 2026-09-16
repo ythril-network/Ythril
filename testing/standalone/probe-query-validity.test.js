@@ -87,7 +87,7 @@ describe('a rejected query is not an unready index', () => {
     // declaring an index usable while it is still being built.
     for (const msg of [
       'PlanExecutor error during aggregation :: caused by :: index not found',
-      'Index with name general_memories_embedding is currently building',
+      'Index with name general_facts_embedding is currently building',
       'connection 42 to 10.1.2.3:27017 timed out',
       'operation exceeded time limit',
     ]) {

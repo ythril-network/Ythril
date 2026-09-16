@@ -110,7 +110,7 @@ export function parseRecurrence(
 /**
  * Store a new chrono entry.
  *
- * `opts` is last rather than alongside `actor`/`ttlDays` (where `remember` and `upsertEntity` put it) purely
+ * `opts` is last rather than alongside `actor`/`ttlDays` (where `saveFact` and `upsertEntity` put it) purely
  * so the three existing positional call sites are untouched; it is the same `DupeCheckOpts` and behaves
  * identically.
  */
@@ -130,7 +130,7 @@ export async function createChrono(
     properties?: Record<string, string | number | boolean>;
     recurrence?: ChronoEntry['recurrence'];
     /**
-     * A caller-supplied UUID v4, which makes this write idempotent — see `remember()` for the full reasoning.
+     * A caller-supplied UUID v4, which makes this write idempotent — see `saveFact()` for the full reasoning.
      *
      * A retried create that names an existing entry CONVERGES on the same content instead of producing a
      * second calendar entry. Chrono is the type where the same thing most often gets logged twice even
@@ -144,7 +144,7 @@ export async function createChrono(
   opts?: DupeCheckOpts & { onValidation?: (check: UpdateValidation) => void },
 ): Promise<ChronoEntry & { similar?: SimilarMatch[]; contradicts?: ContradictionWarning[] }> {
   // When an id is supplied, look for the entry it names first — the same shape as `upsertEntity` and
-  // `remember`.
+  // `saveFact`.
   const existing: ChronoEntry | null = fields.id
     ? (await col<ChronoEntry>(`${spaceId}_chrono`).findOne(
       asFilter<ChronoEntry>({ _id: fields.id, spaceId }),
@@ -267,7 +267,7 @@ export async function createChrono(
     seq,
     ...embeddingFields,
   };
-  // Stored, not merely consulted — see the note in `remember`.
+  // Stored, not merely consulted — see the note in `saveFact`.
   if (opts?.suppressEmbeddings !== undefined) doc.suppressEmbeddings = opts.suppressEmbeddings;
   if (fields.description !== undefined) doc.description = fields.description;
   if (fields.endsAt !== undefined) doc.endsAt = fields.endsAt;
@@ -324,7 +324,7 @@ export async function updateChrono(
   if (updates.properties !== undefined) $set['properties'] = mergedUpdateProps;
 
   /**
-   * `deleteFields`, applied AFTER the merge — the same shape and the same order as `updateMemory`.
+   * `deleteFields`, applied AFTER the merge — the same shape and the same order as `updateFact`.
    *
    * Chrono was the one record type without it (X-4). Combined with merging `properties`, that meant a key
    * written once could never be removed: an absence never means "delete" here, deliberately, and there was
@@ -377,7 +377,7 @@ export async function updateChrono(
 
   /*
    * Validated after `deleteFields` has been folded in, so the document checked is the document written — the
-   * same ordering `updateEntityById` and `updateMemory` need, and for the same reason: a patch that REMOVES a
+   * same ordering `updateEntityById` and `updateFact` need, and for the same reason: a patch that REMOVES a
    * required property has only broken the record once the deletion is applied.
    */
   {
@@ -394,7 +394,7 @@ export async function updateChrono(
     { collection: 'chrono', existing: existing as unknown as Record<string, unknown> }); // F10
   const updateOp: Record<string, unknown> = { $set };
   if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
-  // Lost-update detection, identical to `updateMemory` and for the same reason: `returnDocument: "before"`
+  // Lost-update detection, identical to `updateFact` and for the same reason: `returnDocument: "before"`
   // hands back the record as it was at WRITE time, so comparing its seq with the one read at the top of this
   // function is exactly the test for another writer landing in the window. Observation only — no write that
   // previously succeeded is now rejected.
@@ -425,7 +425,7 @@ export async function updateChrono(
    * invisible.
    *
    * Both classes are passed only when the caller named one of them. Omitting `memoryIds` on a patch means
-   * "leave the memory links", not "remove them".
+   * "leave the fact links", not "remove them".
    */
   if (updates.entityIds !== undefined || updates.memoryIds !== undefined
       || deleteFieldsPaths?.some(p => p.startsWith('entityIds') || p.startsWith('memoryIds'))) {

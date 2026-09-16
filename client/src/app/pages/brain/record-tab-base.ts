@@ -78,7 +78,7 @@ export abstract class RecordTabBase {
   /**
    * The type/tag filter, shared by all four record tabs (2b-ii moved it out of the retired
    * `record-filter-bar` and into the column headers). The docked header controls bind to it, and the
-   * memories tab's tag-badge click writes it — so pushing a value in still reflects into the header
+   * facts tab's tag-badge click writes it — so pushing a value in still reflects into the header
    * control, the round-trip the old filter bar's `[value]` gave. Each tab's `load()` reads it.
    */
   recordFilter = signal<RecordFilter>(noRecordFilter());

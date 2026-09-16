@@ -439,13 +439,13 @@ entitiesRouter.patch('/spaces/:spaceId/entities/:id', globalRateLimit, requireSp
      * This route used to SIMULATE the merge here — rebuild `resultProps`, re-apply `deleteFields` to a
      * throwaway object, and validate that — which is the merge logic written a second time, twenty lines from
      * the one that actually runs. Two implementations of "what will this record look like" is precisely the
-     * defect that produced the memory-upsert bug, and the simulation is the copy that drifts, because nothing
+     * defect that produced the fact-upsert bug, and the simulation is the copy that drifts, because nothing
      * fails when it stops matching.
      *
      * The 422 below is preserved deliberately: this route has always answered 422 where the POST answers 400,
      * and a status code is part of a caller's contract even when the pair looks inconsistent.
      */
-    // Snapshot for the audit change list, from the read above — see the note in memories.ts.
+    // Snapshot for the audit change list, from the read above — see the note in facts.ts.
     // `properties` is deliberately not allowlisted, so handing the record over cannot publish it.
     let updated;
     let updateCheck: UpdateValidation | undefined;
@@ -467,7 +467,7 @@ entitiesRouter.patch('/spaces/:spaceId/entities/:id', globalRateLimit, requireSp
     }
     if (updated) {
       req.auditSnapshots = { before: existing ?? {}, after: updated };
-      // The `warnings` array an update response did not have — see the memories route, where the
+      // The `warnings` array an update response did not have — see the facts route, where the
       // reasoning is written out. A warn-mode space reported on a create and said nothing on an edit.
       const updateWarnings = [...(updateCheck?.warnings ?? []), ...unknownFieldWarnings(req.body, ENTITIES_UPDATE_BODY_KEYS)];
       res.json(updateWarnings.length > 0 ? { ...updated, warnings: updateWarnings } : updated);

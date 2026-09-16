@@ -44,20 +44,20 @@ describe('Bulk delete — seq allocation', () => {
     // Seed enough documents that the old code would have made one round trip each.
     const N = 12;
     for (let i = 0; i < N; i++) {
-      const r = await post(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/memories`, { fact: `seq block ${i}` });
+      const r = await post(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/facts`, { fact: `seq block ${i}` });
       assert.equal(r.status, 201, JSON.stringify(r.body));
     }
 
-    const before = await get(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/memories`);
-    const maxSeqBefore = Math.max(...before.body.memories.map(m => m.seq));
+    const before = await get(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/facts`);
+    const maxSeqBefore = Math.max(...before.body.facts.map(m => m.seq));
 
     // Wipe them — this is the path that reserves a contiguous tombstone block.
-    const wipe = await delWithBody(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/memories`, { confirm: true });
+    const wipe = await delWithBody(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/facts`, { confirm: true });
     assert.ok([200, 204].includes(wipe.status), `bulk delete: ${wipe.status} ${JSON.stringify(wipe.body)}`);
 
     // The next write must land STRICTLY above every seq handed to a tombstone. If the block
     // had been re-used (or the counter not advanced by the full count), this would collide.
-    const after = await post(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/memories`, { fact: 'after wipe' });
+    const after = await post(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/facts`, { fact: 'after wipe' });
     assert.equal(after.status, 201, JSON.stringify(after.body));
     assert.ok(
       after.body.seq > maxSeqBefore + N,
@@ -90,8 +90,8 @@ describe('Bulk delete — seq allocation', () => {
     assert.ok([200, 204].includes(wg.status), `entity wipe: ${wg.status}`);
 
     // A subsequent write must still get a fresh, strictly-increasing seq.
-    const a = await post(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/memories`, { fact: 'post-concurrent' });
-    const b = await post(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/memories`, { fact: 'post-concurrent 2' });
+    const a = await post(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/facts`, { fact: 'post-concurrent' });
+    const b = await post(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/facts`, { fact: 'post-concurrent 2' });
     assert.equal(a.status, 201);
     assert.equal(b.status, 201);
     assert.ok(b.body.seq > a.body.seq, 'seqs must remain strictly increasing after concurrent block reservations');

@@ -130,7 +130,7 @@ import { layoutErModel } from './er-layout';
             }
 
             @for (b of view().boxes; track b.type) {
-              <!-- A KIND box: memories, chrono or files, one per kind with that kind's total.
+              <!-- A KIND box: facts, chrono or files, one per kind with that kind's total.
                    Deliberately not styled as an entity box. It has no properties and no naming pattern, so
                    giving it the schema treatment would present it as a type somebody declared — and it has no
                    pencil, because there is no schema here to edit.
@@ -283,11 +283,11 @@ export class ErModelPanelComponent {
    *
    * A map rather than the kind string itself, because the two vocabularies are not the same and pretending
    * they are is how the first version of this panel shipped a count that navigated nowhere: the box kinds are
-   * singular (`memory`), the tabs are plural (`memories`). One of them is a route and changing it breaks a
+   * singular (`memory`), the tabs are plural (`facts`). One of them is a route and changing it breaks a
    * bookmark; the other is a layout concept. Named here so a rename on either side is a compile error.
    */
-  tabForKind(kind: 'memory' | 'chrono' | 'file'): 'memories' | 'chrono' | 'files' {
-    return kind === 'memory' ? 'memories' : kind === 'file' ? 'files' : 'chrono';
+  tabForKind(kind: 'fact' | 'chrono' | 'file'): 'facts' | 'chrono' | 'files' {
+    return kind === 'fact' ? 'facts' : kind === 'file' ? 'files' : 'chrono';
   }
 
   typeOf(name: string): ErEntityType | undefined {

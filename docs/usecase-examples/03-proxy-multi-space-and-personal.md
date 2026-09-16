@@ -245,7 +245,7 @@ graph LR
 
 ## 22. Market Analysis Desk — Analysts + Feeds + Broker Overlay
 
-**Use Case:** Trading desk where multiple analysts contribute research, market data gets ingested as memories, and a proxy space gives the desk head a unified view.
+**Use Case:** Trading desk where multiple analysts contribute research, market data gets ingested as facts, and a proxy space gives the desk head a unified view.
 
 **Network Topology:**
 
@@ -541,7 +541,7 @@ graph TD
    }
    ```
 
-4. **Execute** — the endpoint merges atomically: relinks all edges/memories/chrono to the survivor, applies resolved properties, deletes the absorbed entity.
+4. **Execute** — the endpoint merges atomically: relinks all edges/facts/chrono to the survivor, applies resolved properties, deletes the absorbed entity.
 
 **Aggregation variant:** Merge two metric entities using `fn:sum` on numeric fields to aggregate counts — same endpoint, same flow. Candidate selection is the caller's responsibility.
 

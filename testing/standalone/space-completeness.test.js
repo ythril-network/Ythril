@@ -32,8 +32,8 @@ before(async () => {
 
 /** Facts for a space with nothing in it — every counted check has a zero denominator. */
 const emptyFacts = () => ({
-  typeCounts: { entity: {}, memory: {}, edge: {}, chrono: {} },
-  propertyFilled: { entity: {}, memory: {}, edge: {}, chrono: {} },
+  typeCounts: { entity: {}, fact: {}, edge: {}, chrono: {} },
+  propertyFilled: { entity: {}, fact: {}, edge: {}, chrono: {} },
   entities: 0,
   entitiesWithEdges: 0,
   unlinkedEntitySample: [],
@@ -59,7 +59,7 @@ describe('space completeness — applicability', () => {
   it('every check in the report applied — `total` is never zero', () => {
     const r = scoreCompleteness('s', { typeSchemas: { entity: { service: {} } } }, {
       ...emptyFacts(),
-      typeCounts: { entity: { service: 3 }, memory: {}, edge: {}, chrono: {} },
+      typeCounts: { entity: { service: 3 }, fact: {}, edge: {}, chrono: {} },
       entities: 3, entitiesWithEdges: 1,
     });
     assert.ok(r.checks.length > 0);
@@ -84,14 +84,14 @@ describe('space completeness — applicability', () => {
 
 describe('space completeness — the allowlist checks', () => {
   it('an EMPTY typeSchemas map forbids nothing, so no record is an undeclared type', () => {
-    const facts = { ...emptyFacts(), typeCounts: { entity: { service: 30, runbook: 12 }, memory: {}, edge: {}, chrono: {} } };
+    const facts = { ...emptyFacts(), typeCounts: { entity: { service: 30, runbook: 12 }, fact: {}, edge: {}, chrono: {} } };
     const r = scoreCompleteness('s', { typeSchemas: { entity: {} } }, facts);
     assert.equal(check(r, 'undeclared-type-in-use'), undefined, 'an empty allowlist is not a denominator');
     assert.equal(check(r, 'declared-type-unused'), undefined);
   });
 
   it('a NON-EMPTY allowlist counts the records strict validation would now reject', () => {
-    const facts = { ...emptyFacts(), typeCounts: { entity: { service: 30, mystery: 4 }, memory: {}, edge: {}, chrono: {} } };
+    const facts = { ...emptyFacts(), typeCounts: { entity: { service: 30, mystery: 4 }, fact: {}, edge: {}, chrono: {} } };
     const c = check(scoreCompleteness('s', { typeSchemas: { entity: { service: {} } } }, facts), 'undeclared-type-in-use');
     assert.equal(c.affected, 4);
     assert.equal(c.total, 34);
@@ -100,14 +100,14 @@ describe('space completeness — the allowlist checks', () => {
   });
 
   it('an UNTYPED record is not an allowlist violation — validation only fires on a value that is present', () => {
-    const facts = { ...emptyFacts(), typeCounts: { entity: { service: 30, '': 7 }, memory: {}, edge: {}, chrono: {} } };
+    const facts = { ...emptyFacts(), typeCounts: { entity: { service: 30, '': 7 }, fact: {}, edge: {}, chrono: {} } };
     const c = check(scoreCompleteness('s', { typeSchemas: { entity: { service: {} } } }, facts), 'undeclared-type-in-use');
     assert.equal(c.affected, 0);
     assert.equal(c.total, 30, 'untyped records are out of scope entirely, not a passing 7');
   });
 
   it('a declared type with no records is unused, and is NOT also charged for unfilled properties', () => {
-    const facts = { ...emptyFacts(), typeCounts: { entity: { service: 5 }, memory: {}, edge: {}, chrono: {} } };
+    const facts = { ...emptyFacts(), typeCounts: { entity: { service: 5 }, fact: {}, edge: {}, chrono: {} } };
     const meta = {
       typeSchemas: {
         entity: {
@@ -130,8 +130,8 @@ describe('space completeness — the allowlist checks', () => {
   it('a filled property earns its point back', () => {
     const facts = {
       ...emptyFacts(),
-      typeCounts: { entity: { service: 5 }, memory: {}, edge: {}, chrono: {} },
-      propertyFilled: { entity: { service: { owner: 3 } }, memory: {}, edge: {}, chrono: {} },
+      typeCounts: { entity: { service: 5 }, fact: {}, edge: {}, chrono: {} },
+      propertyFilled: { entity: { service: { owner: 3 } }, fact: {}, edge: {}, chrono: {} },
     };
     const meta = { typeSchemas: { entity: { service: { propertySchemas: { owner: {} } } } } };
     const props = check(scoreCompleteness('s', meta, facts), 'declared-property-never-filled');
@@ -142,7 +142,7 @@ describe('space completeness — the allowlist checks', () => {
   it('flags truncation rather than silently checking the first N property keys', () => {
     const many = {};
     for (let i = 0; i < PROPERTY_KEY_CAP + 3; i++) many[`p${i}`] = {};
-    const facts = { ...emptyFacts(), typeCounts: { entity: { service: 1 }, memory: {}, edge: {}, chrono: {} } };
+    const facts = { ...emptyFacts(), typeCounts: { entity: { service: 1 }, fact: {}, edge: {}, chrono: {} } };
     const meta = { typeSchemas: { entity: { service: { propertySchemas: many } } } };
     const r = scoreCompleteness('s', meta, facts);
     assert.equal(r.truncated, true);
@@ -152,7 +152,7 @@ describe('space completeness — the allowlist checks', () => {
   it('reports per knowledge kind — an unused edge label is not an entity finding', () => {
     const facts = {
       ...emptyFacts(),
-      typeCounts: { entity: { service: 3 }, memory: {}, edge: { runs_on: 9, wat: 1 }, chrono: {} },
+      typeCounts: { entity: { service: 3 }, fact: {}, edge: { runs_on: 9, wat: 1 }, chrono: {} },
     };
     const meta = { typeSchemas: { entity: { service: {} }, edge: { runs_on: {}, ghost_label: {} } } };
     const r = scoreCompleteness('s', meta, facts);
@@ -179,7 +179,7 @@ describe('space completeness — partial credit and the boolean checks', () => {
   });
 
   it('schemas declared with validation off is a warning; turning validation on clears it', () => {
-    const facts = { ...emptyFacts(), typeCounts: { entity: { service: 1 }, memory: {}, edge: {}, chrono: {} } };
+    const facts = { ...emptyFacts(), typeCounts: { entity: { service: 1 }, fact: {}, edge: {}, chrono: {} } };
     const meta = { typeSchemas: { entity: { service: {} } } };
     const off = check(scoreCompleteness('s', meta, facts), 'schemas-declared-but-unenforced');
     assert.equal(off.affected, 1, 'default validationMode is off');
@@ -207,8 +207,8 @@ describe('space completeness — partial credit and the boolean checks', () => {
   it('a perfect space scores 100, a fully failing one scores 0, and a mixed one lands between', () => {
     const good = scoreCompleteness('s', { purpose: 'p', validationMode: 'strict', typeSchemas: { entity: { service: { propertySchemas: { owner: {} } } } } }, {
       ...emptyFacts(),
-      typeCounts: { entity: { service: 4 }, memory: {}, edge: {}, chrono: {} },
-      propertyFilled: { entity: { service: { owner: 4 } }, memory: {}, edge: {}, chrono: {} },
+      typeCounts: { entity: { service: 4 }, fact: {}, edge: {}, chrono: {} },
+      propertyFilled: { entity: { service: { owner: 4 } }, fact: {}, edge: {}, chrono: {} },
       entities: 4, entitiesWithEdges: 4,
       files: 2, filesNotRecallable: 0,
     });
@@ -218,7 +218,7 @@ describe('space completeness — partial credit and the boolean checks', () => {
     // carries an undeclared one; no entity is linked; no file is recallable; no purpose; schemas off.
     const bad = scoreCompleteness('s', { typeSchemas: { entity: { ghost: {} } } }, {
       ...emptyFacts(),
-      typeCounts: { entity: { mystery: 6 }, memory: {}, edge: {}, chrono: {} },
+      typeCounts: { entity: { mystery: 6 }, fact: {}, edge: {}, chrono: {} },
       entities: 6, entitiesWithEdges: 0,
       files: 3, filesNotRecallable: 3,
     });
@@ -226,7 +226,7 @@ describe('space completeness — partial credit and the boolean checks', () => {
 
     const mixed = scoreCompleteness('s', { typeSchemas: { entity: { service: {}, ghost: {} } } }, {
       ...emptyFacts(),
-      typeCounts: { entity: { service: 4, mystery: 2 }, memory: {}, edge: {}, chrono: {} },
+      typeCounts: { entity: { service: 4, mystery: 2 }, fact: {}, edge: {}, chrono: {} },
       entities: 6, entitiesWithEdges: 3,
       files: 3, filesNotRecallable: 1,
     });

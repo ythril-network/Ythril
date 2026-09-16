@@ -48,7 +48,7 @@ let mongo, linksMod, memoryMod;
 
 const coll = (n) => mongo.col(`${SPACE}_${n}`);
 const linkRows = () => coll('links').find({}).toArray();
-const memory = () => coll('memories').findOne({ _id: M1 });
+const memory = () => coll('facts').findOne({ _id: M1 });
 
 describe('a link door writes through the array', { skip }, () => {
   before(async () => {
@@ -60,7 +60,7 @@ describe('a link door writes through the array', { skip }, () => {
     const loader = await import('../../server/dist/config/loader.js');
     loader.loadConfig();
     linksMod = await import('../../server/dist/brain/links.js');
-    memoryMod = await import('../../server/dist/brain/memory.js');
+    memoryMod = await import('../../server/dist/brain/fact.js');
   });
 
   after(async () => {
@@ -69,14 +69,14 @@ describe('a link door writes through the array', { skip }, () => {
   });
 
   beforeEach(async () => {
-    for (const c of ['entities', 'edges', 'memories', 'chrono', 'files', 'links', 'tombstones']) {
+    for (const c of ['entities', 'edges', 'facts', 'chrono', 'files', 'links', 'tombstones']) {
       await coll(c).deleteMany({});
     }
     await coll('entities').insertMany([
       { _id: E1, spaceId: SPACE, name: 'One', type: 'thing', tags: [], seq: 1 },
       { _id: E2, spaceId: SPACE, name: 'Two', type: 'thing', tags: [], seq: 2 },
     ]);
-    await coll('memories').insertOne({
+    await coll('facts').insertOne({
       _id: M1, spaceId: SPACE, fact: 'a fact', type: '', tags: [], entityIds: [],
       author: AUTHOR, createdAt: new Date().toISOString(), seq: 3,
     });
@@ -90,10 +90,10 @@ describe('a link door writes through the array', { skip }, () => {
   });
 
   it('creates the row AND the array entry', async () => {
-    const link = await linksMod.addLink(SPACE, M1, 'memory', E1, 'entity', AUTHOR);
+    const link = await linksMod.addLink(SPACE, M1, 'fact', E1, 'entity', AUTHOR);
     assert.equal(link.from, M1);
     assert.equal(link.to, E1);
-    assert.equal(link.fromKind, 'memory');
+    assert.equal(link.fromKind, 'fact');
     assert.equal(link.toKind, 'entity');
 
     assert.equal((await linkRows()).length, 1, 'one link row');
@@ -106,11 +106,11 @@ describe('a link door writes through the array', { skip }, () => {
      * The whole point, asserted as the sequence that would expose the bug rather than as a property of the
      * write. A door writing only the row passes every check above this one and fails here.
      */
-    await linksMod.addLink(SPACE, M1, 'memory', E1, 'entity', AUTHOR);
+    await linksMod.addLink(SPACE, M1, 'fact', E1, 'entity', AUTHOR);
     assert.equal((await linkRows()).length, 1);
 
     // An unrelated edit, of the kind that happens all day and knows nothing about links.
-    await memoryMod.updateMemory(SPACE, M1, { fact: 'a revised fact' });
+    await memoryMod.updateFact(SPACE, M1, { fact: 'a revised fact' });
 
     const after = await linkRows();
     assert.equal(after.length, 1,
@@ -120,15 +120,15 @@ describe('a link door writes through the array', { skip }, () => {
   });
 
   it('is idempotent — the same link twice is one row and one array entry', async () => {
-    await linksMod.addLink(SPACE, M1, 'memory', E1, 'entity', AUTHOR);
-    await linksMod.addLink(SPACE, M1, 'memory', E1, 'entity', AUTHOR);
+    await linksMod.addLink(SPACE, M1, 'fact', E1, 'entity', AUTHOR);
+    await linksMod.addLink(SPACE, M1, 'fact', E1, 'entity', AUTHOR);
     assert.equal((await linkRows()).length, 1, 'the derived id makes a re-write a no-op, not a duplicate');
     assert.deepEqual((await memory()).entityIds, [E1], 'and the array must not gain a second copy either');
   });
 
   it('a second link on the same record does not disturb the first', async () => {
-    await linksMod.addLink(SPACE, M1, 'memory', E1, 'entity', AUTHOR);
-    await linksMod.addLink(SPACE, M1, 'memory', E2, 'entity', AUTHOR);
+    await linksMod.addLink(SPACE, M1, 'fact', E1, 'entity', AUTHOR);
+    await linksMod.addLink(SPACE, M1, 'fact', E2, 'entity', AUTHOR);
     assert.deepEqual((await linkRows()).map(l => l.to).sort(), [E1, E2].sort());
     assert.deepEqual([...(await memory()).entityIds].sort(), [E1, E2].sort());
   });
@@ -136,19 +136,19 @@ describe('a link door writes through the array', { skip }, () => {
   it('refuses a pair that is not one of the six', async () => {
     // `entity` is only ever a TO. A memory cannot hold `memoryIds`, so there is no array to write into and a
     // row alone would be exactly the orphan this gate exists for.
-    await assert.rejects(() => linksMod.addLink(SPACE, M1, 'memory', M1, 'memory', AUTHOR),
+    await assert.rejects(() => linksMod.addLink(SPACE, M1, 'fact', M1, 'fact', AUTHOR),
       /memory\.memoryIds|not a link class|cannot link/i);
     assert.equal((await linkRows()).length, 0, 'and nothing was written on the way to refusing');
   });
 
   it('refuses when the record it would hang off does not exist', async () => {
-    await assert.rejects(() => linksMod.addLink(SPACE, 'cccccccc-0000-4000-8000-000000000009', 'memory', E1, 'entity', AUTHOR),
+    await assert.rejects(() => linksMod.addLink(SPACE, 'cccccccc-0000-4000-8000-000000000009', 'fact', E1, 'entity', AUTHOR),
       /not found/i);
     assert.equal((await linkRows()).length, 0);
   });
 
   it('removing by id clears the array entry, the row, and leaves a tombstone', async () => {
-    const link = await linksMod.addLink(SPACE, M1, 'memory', E1, 'entity', AUTHOR);
+    const link = await linksMod.addLink(SPACE, M1, 'fact', E1, 'entity', AUTHOR);
     assert.equal(await linksMod.removeLink(SPACE, link._id), true);
 
     assert.equal((await linkRows()).length, 0, 'the row is gone');
@@ -165,11 +165,14 @@ describe('a link door writes through the array', { skip }, () => {
   });
 
   it('the six pairs are the six, and they agree with the labels the readers print', () => {
-    const pairs = linksMod.LINK_PAIRS.map(([f, t]) => `${f}.${t}Ids`).sort();
+    // Through `linkLabel`, NOT a `${t}Ids` written here. That spelling was a third copy of the field
+    // derivation, and it is wrong for exactly one kind: the type is `fact` while the stored array is still
+    // `memoryIds`, because the six arrays replicate and are merkle-hashed. A gate that re-derives the name
+    // asserts its own arithmetic — this one asserts the label the readers actually print.
+    const pairs = linksMod.LINK_PAIRS.map(([f, t]) => linksMod.linkLabel(f, t)).sort();
     assert.deepEqual(pairs, [
-      'chrono.entityIds', 'chrono.memoryIds',
+      'chrono.entityIds', 'chrono.memoryIds', 'fact.entityIds',
       'file.chronoIds', 'file.entityIds', 'file.memoryIds',
-      'memory.entityIds',
     ], 'the door accepts a different set of classes than the six the arrays actually are');
   });
 });

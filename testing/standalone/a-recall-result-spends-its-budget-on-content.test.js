@@ -29,7 +29,7 @@ const { stripRecordMeta, RECORD_META_KEYS } = await import('../../server/dist/br
 
 /** A memory result shaped the way the REST door flattens one. */
 const result = () => ({
-  _id: 'm1', spaceId: 's', score: 0.9312, type: 'memory',
+  _id: 'm1', spaceId: 's', score: 0.9312, type: 'fact',
   fact: 'Caroline attended an LGBTQ support group on 7 May 2023.',
   properties: { speaker: 'Caroline', statedOn: '2023-05-08' },
   tags: [], entityIds: ['e1', 'e2'],
@@ -72,7 +72,7 @@ describe('storage bookkeeping is opt-in', () => {
     assert.deepEqual(out.properties, { speaker: 'Caroline', statedOn: '2023-05-08' });
     assert.equal(out._id, 'm1');
     assert.equal(out.score, 0.9312);
-    assert.equal(out.type, 'memory');
+    assert.equal(out.type, 'fact');
   });
 
   test('it is worth doing — the default is materially smaller', () => {

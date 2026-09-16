@@ -8,7 +8,7 @@
  *     value accepted that should not be, or a bound off by one, is silent data loss on a timer.
  *  2. **`applyValidation` is where `validationMode: 'strict'` actually blocks.** If strict stops
  *     blocking, every schema in every space becomes advisory and nothing says so.
- *  3. **`buildMemoryFilter` turns query params into a Mongo filter.** Query strings are not necessarily
+ *  3. **`buildFactFilter` turns query params into a Mongo filter.** Query strings are not necessarily
  *     strings — `?tag[]=a&tag[]=b` parses to an array — and the `typeof === 'string'` guards are what
  *     keep a caller-shaped object out of the filter document.
  *
@@ -18,10 +18,10 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 
-let ttlDaysFromBody, ttlDaysError, applyValidation, buildMemoryFilter;
+let ttlDaysFromBody, ttlDaysError, applyValidation, buildFactFilter;
 
 before(async () => {
-  ({ ttlDaysFromBody, ttlDaysError, applyValidation, buildMemoryFilter } =
+  ({ ttlDaysFromBody, ttlDaysError, applyValidation, buildFactFilter } =
     await import('../../server/dist/api/brain/_shared.js'));
 });
 
@@ -114,9 +114,9 @@ describe('applyValidation — strict must actually block', () => {
   });
 });
 
-describe('buildMemoryFilter — only strings reach the filter document', () => {
+describe('buildFactFilter — only strings reach the filter document', () => {
   it('maps the simple equality params', () => {
-    const f = buildMemoryFilter({ entity: 'e1', type: 'decision' });
+    const f = buildFactFilter({ entity: 'e1', type: 'decision' });
     assert.equal(f['entityIds'], 'e1');
     assert.equal(f['type'], 'decision');
   });
@@ -125,16 +125,16 @@ describe('buildMemoryFilter — only strings reach the filter document', () => {
     // `?tag[]=a&tag[]=b` parses to an array, and an object-valued param is trivially forgeable. Either
     // reaching the filter document unchecked is how a caller-supplied operator gets into a query.
     for (const bad of [['a', 'b'], { $ne: null }, 7, true, null]) {
-      const f = buildMemoryFilter({ tag: bad, entity: bad, type: bad, search: bad, description: bad, properties: bad });
+      const f = buildFactFilter({ tag: bad, entity: bad, type: bad, search: bad, description: bad, properties: bad });
       assert.deepEqual(f, {}, `a ${typeof bad} param must be ignored, got ${JSON.stringify(f)}`);
     }
   });
 
   it('an empty query produces an empty filter, not a match-nothing one', () => {
-    assert.deepEqual(buildMemoryFilter({}), {});
+    assert.deepEqual(buildFactFilter({}), {});
   });
 
   it('an empty-string param is treated as absent', () => {
-    assert.deepEqual(buildMemoryFilter({ tag: '', entity: '', type: '', search: '' }), {});
+    assert.deepEqual(buildFactFilter({ tag: '', entity: '', type: '', search: '' }), {});
   });
 });

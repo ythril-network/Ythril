@@ -79,7 +79,7 @@ describe('which window applies', () => {
   it('an untyped record can only reach the space tier', () => {
     // Memories, edges and files may carry no type at all — which is why the space-wide number cannot be
     // replaced by the schema tier, only overridden by it.
-    assert.equal(retentionDays(TELEMETRY, 'memory', undefined), 90);
+    assert.equal(retentionDays(TELEMETRY, 'fact', undefined), 90);
     assert.equal(retentionDays({ recordTtlDays: 30 }, 'edge', undefined), 30);
   });
 
@@ -93,7 +93,7 @@ describe('which window applies', () => {
     assert.equal(retentionDays(space, 'entity', 'build-artifact'), 7);
     assert.equal(retentionDays(space, 'entity', 'person'), undefined);
     // And a type name is scoped to its collection: the same name elsewhere is unaffected.
-    assert.equal(retentionDays(space, 'memory', 'build-artifact'), undefined);
+    assert.equal(retentionDays(space, 'fact', 'build-artifact'), undefined);
   });
 
   it('a type with ONLY contentDays still deletes on the space schedule', () => {

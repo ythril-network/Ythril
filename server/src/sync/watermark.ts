@@ -4,11 +4,11 @@
  * ## The defect this exists to make impossible
  *
  * `lastSeqPushed` and `lastSeqReceived` are **one number per member per space**. Each sync cycle runs FIVE
- * independent transfers under that one number — tombstones plus memories, entities, edges and chrono — and each
+ * independent transfers under that one number — tombstones plus facts, entities, edges and chrono — and each
  * of them can stop early on its own: a non-`ok` response from the peer, or a page cap reached.
  *
- * Both watermarks were then set to the **maximum** across those transfers. So a memories push that failed at seq
- * 300, in a cycle where the entities push succeeded to seq 500, moved the watermark to 500 — and the memory at
+ * Both watermarks were then set to the **maximum** across those transfers. So a facts push that failed at seq
+ * 300, in a cycle where the entities push succeeded to seq 500, moved the watermark to 500 — and the fact at
  * seq 400 was behind it **for ever**. Nothing errored at the cycle level, nothing was logged past one warn, and
  * every subsequent cycle reported success while never sending that record again.
  *

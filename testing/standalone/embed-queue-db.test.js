@@ -4,7 +4,7 @@
  * ## The defect
  *
  * Every brain creator embedded inline. Three of the four swallowed a failure and stored the record
- * without a vector; `remember` did not — `MemoryDoc.embedding` was the only one of the four declared
+ * without a vector; `saveFact` did not — `FactDoc.embedding` was the only one of the four declared
  * REQUIRED, so that path had no choice but to throw. Two behaviours, neither chosen by the caller.
  *
  * And a record with no vector is not slightly worse, it is **invisible to recall**. Both channels drop
@@ -55,7 +55,7 @@ process.env['MODEL_CACHE_DIR'] = EMPTY_CACHE;
 let mongo, memory, queue, worker;
 
 const jobs = () => mongo.col(`${SPACE}_embed_jobs`);
-const memories = () => mongo.col(`${SPACE}_memories`);
+const memories = () => mongo.col(`${SPACE}_facts`);
 
 describe('brain embedding queue (real MongoDB, no reachable model)', { skip }, () => {
   before(async () => {
@@ -65,7 +65,7 @@ describe('brain embedding queue (real MongoDB, no reachable model)', { skip }, (
     mongo = await openTestMongo('embedqueue');
     const loader = await import('../../server/dist/config/loader.js');
     loader.loadConfig();
-    memory = await import('../../server/dist/brain/memory.js');
+    memory = await import('../../server/dist/brain/fact.js');
     queue = await import('../../server/dist/brain/embed-queue.js');
     worker = await import('../../server/dist/brain/embed-worker.js');
   });
@@ -88,8 +88,8 @@ describe('brain embedding queue (real MongoDB, no reachable model)', { skip }, (
   });
 
   it('a write succeeds with no embedder and leaves a job behind', async () => {
-    // This is the regression: `remember` used to throw here, because MemoryDoc.embedding was required.
-    const doc = await memory.remember(SPACE, 'node-7 runs the platform apps', [], ['prod']);
+    // This is the regression: `saveFact` used to throw here, because FactDoc.embedding was required.
+    const doc = await memory.saveFact(SPACE, 'node-7 runs the platform apps', [], ['prod']);
     assert.ok(doc._id, 'the write returned a record');
 
     const stored = await memories().findOne({ _id: doc._id });
@@ -97,10 +97,10 @@ describe('brain embedding queue (real MongoDB, no reachable model)', { skip }, (
     assert.equal(stored.matchedText, 'node-7 runs the platform apps'.length ? stored.matchedText : null);
     assert.ok(stored.matchedText, 'the exact text the vector will be built from is stored at write time');
 
-    const job = await jobs().findOne({ _id: `memory:${doc._id}` });
+    const job = await jobs().findOne({ _id: `fact:${doc._id}` });
     assert.ok(job, 'a job was enqueued');
     assert.equal(job.status, 'pending');
-    assert.equal(job.recordType, 'memory');
+    assert.equal(job.recordType, 'fact');
     assert.equal(job.recordId, doc._id);
     assert.equal(job.attempts, 0);
   });
@@ -109,7 +109,7 @@ describe('brain embedding queue (real MongoDB, no reachable model)', { skip }, (
     // The old behaviour, kept reachable on request rather than removed. A caller who needs the record
     // searchable when the call returns must hear that it is not.
     await assert.rejects(
-      () => memory.remember(SPACE, 'must be searchable now', [], [], undefined, undefined,
+      () => memory.saveFact(SPACE, 'must be searchable now', [], [], undefined, undefined,
         undefined, { waitForEmbedding: true }),
       'an explicit wait must surface the embedder failure, not swallow it',
     );
@@ -119,15 +119,15 @@ describe('brain embedding queue (real MongoDB, no reachable model)', { skip }, (
     // It needs the vector BEFORE the insert so the new record cannot self-match — a question that
     // cannot be answered later. So it must fail here rather than silently skip the check.
     await assert.rejects(
-      () => memory.remember(SPACE, 'is this a duplicate', [], [], undefined, undefined,
+      () => memory.saveFact(SPACE, 'is this a duplicate', [], [], undefined, undefined,
         undefined, { checkDuplicates: true }),
       'checkDuplicates cannot be honoured without a vector, so it must not report "no duplicates"',
     );
   });
 
   it('draining retries with backoff, then gives up at the budget', async () => {
-    const doc = await memory.remember(SPACE, 'retry me', [], []);
-    const id = `memory:${doc._id}`;
+    const doc = await memory.saveFact(SPACE, 'retry me', [], []);
+    const id = `fact:${doc._id}`;
 
     // Attempt 1: the embedder is down, so the job goes back to pending with a backoff.
     assert.equal(await worker.runOneEmbedJob(), true, 'a job was claimed');
@@ -158,11 +158,11 @@ describe('brain embedding queue (real MongoDB, no reachable model)', { skip }, (
   it('rewriting the record revives a failed job', async () => {
     // The operator's escape hatch: new content deserves a fresh attempt budget, so a job that gave up
     // on the OLD content must not pass that verdict on.
-    const doc = await memory.remember(SPACE, 'first version', [], []);
-    const id = `memory:${doc._id}`;
+    const doc = await memory.saveFact(SPACE, 'first version', [], []);
+    const id = `fact:${doc._id}`;
     await jobs().updateOne({ _id: id }, { $set: { status: 'failed', attempts: 99, lastError: 'old' } });
 
-    await memory.remember(SPACE, 'second version', [], [], undefined, undefined,
+    await memory.saveFact(SPACE, 'second version', [], [], undefined, undefined,
       undefined, undefined, undefined, undefined, doc._id);
 
     const job = await jobs().findOne({ _id: id });
@@ -172,9 +172,9 @@ describe('brain embedding queue (real MongoDB, no reachable model)', { skip }, (
   });
 
   it('one job per record, however many times it is written', async () => {
-    const doc = await memory.remember(SPACE, 'v1', [], []);
+    const doc = await memory.saveFact(SPACE, 'v1', [], []);
     for (const fact of ['v2', 'v3', 'v4']) {
-      await memory.remember(SPACE, fact, [], [], undefined, undefined,
+      await memory.saveFact(SPACE, fact, [], [], undefined, undefined,
         undefined, undefined, undefined, undefined, doc._id);
     }
     assert.equal(await jobs().countDocuments({}), 1,
@@ -182,7 +182,7 @@ describe('brain embedding queue (real MongoDB, no reachable model)', { skip }, (
   });
 
   it('a record deleted before its job runs retires the job', async () => {
-    const doc = await memory.remember(SPACE, 'short lived', [], []);
+    const doc = await memory.saveFact(SPACE, 'short lived', [], []);
     await memories().deleteOne({ _id: doc._id });
 
     queue.resetEmbedPendingHint();
@@ -192,8 +192,8 @@ describe('brain embedding queue (real MongoDB, no reachable model)', { skip }, (
   });
 
   it('a stalled job returns to the pool', async () => {
-    const doc = await memory.remember(SPACE, 'stalled', [], []);
-    const id = `memory:${doc._id}`;
+    const doc = await memory.saveFact(SPACE, 'stalled', [], []);
+    const id = `fact:${doc._id}`;
     // A process killed mid-claim leaves exactly this: processing, with an old sign of life.
     await jobs().updateOne({ _id: id }, {
       $set: { status: 'processing', progressAt: new Date(Date.now() - 600_000).toISOString() },

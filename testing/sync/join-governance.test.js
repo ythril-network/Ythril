@@ -549,7 +549,7 @@ describe('Join-path governance (S9) — invite key and RSA handshake respect vot
 
     it('the pending joiner PAT is refused on /api/sync/* (no sync possible)', async () => {
       const probe = await get(INSTANCES.b, joinerPat,
-        `/api/sync/memories?spaceId=${testSpaceId}&networkId=${networkId}`);
+        `/api/sync/facts?spaceId=${testSpaceId}&networkId=${networkId}`);
       assert.equal(probe.status, 403, `Expected 403 for pending joiner, got ${probe.status}: ${JSON.stringify(probe.body)}`);
     });
 
@@ -568,7 +568,7 @@ describe('Join-path governance (S9) — invite key and RSA handshake respect vot
       assert.equal(member.parentInstanceId, instanceIdB, 'admitted joiner must be a child of B');
 
       const probe = await get(INSTANCES.b, joinerPat,
-        `/api/sync/memories?spaceId=${testSpaceId}&networkId=${networkId}`);
+        `/api/sync/facts?spaceId=${testSpaceId}&networkId=${networkId}`);
       assert.equal(probe.status, 200, `Admitted joiner PAT must work, got ${probe.status}: ${JSON.stringify(probe.body)}`);
     });
   });

@@ -4,7 +4,7 @@
  * ## Why the conversations and the questions come out of separate doors
  *
  * `loadConversations` returns objects that carry no question data at all — not the evidence ids, not the
- * categories, not a count. That is not tidiness. The strongest way to overfit a memory benchmark is to shape
+ * categories, not a count. That is not tidiness. The strongest way to overfit a fact benchmark is to shape
  * extraction around the answer key, and it is invisible from a results table; nobody can tell that a prompt was
  * iterated thirty times against the gold answers. `benchmark-ingest-cannot-see-the-questions.test.js` makes it
  * structural by refusing an ingest module that so much as names the question set, and this file is the other
@@ -109,7 +109,7 @@ function monthNumber(name, where) {
 /**
  * Proof that a Y/M/D triple is a real calendar date, and the ISO text for it.
  *
- * `Date.UTC` accepts 31 February and silently rolls it into March — a coercion that would put a memory in the
+ * `Date.UTC` accepts 31 February and silently rolls it into March — a coercion that would put a fact in the
  * wrong month with nothing to notice it. Round-tripping the components back out is what turns that into a
  * refusal. The ISO string is then formatted from the validated components rather than from `toISOString()`,
  * which appends a `.000` millisecond field the corpus does not have.
@@ -328,7 +328,7 @@ function readSessions(conversation, conversationId, speakers) {
   });
 }
 
-/** One turn, refusing anything that would silently become an empty or misattributed memory record. */
+/** One turn, refusing anything that would silently become an empty or misattributed fact record. */
 function readTurn(turn, sessionIndex, position, where, speakers, seenIds) {
   if (turn === null || typeof turn !== 'object') refuse(`${where}: turn ${position} is not an object`);
 

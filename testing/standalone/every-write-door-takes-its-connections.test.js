@@ -10,7 +10,7 @@
  *
  * ## Derived, because "every door" is the claim
  *
- * The set is whoever calls a record CREATOR — `remember`, `createChrono`, `upsertEntity`. That is what makes
+ * The set is whoever calls a record CREATOR — `saveFact`, `createChrono`, `upsertEntity`. That is what makes
  * something a create door, and it is not a list anybody maintains. Their MCP twins are found the same way.
  *
  * The operator's own objection to this feature was *"writing edge support into six endpoints"*. This gate is
@@ -34,7 +34,7 @@ const code = (f) => stripComments(readFileSync(join(REPO_ROOT, f), 'utf8'));
  * Named as the three writers rather than as a list of doors — a door is whoever calls one, which is the
  * property, and a seventh door is caught by having called one rather than by being remembered.
  */
-const CREATORS = /\b(?:await remember\(|await createChrono\(|await upsertEntity\()/;
+const CREATORS = /\b(?:await saveFact\(|await createChrono\(|await upsertEntity\()/;
 
 const doors = trackedSources(['server/src/api/brain', 'server/src/mcp/tools'], { floor: 10 })
   .filter(f => CREATORS.test(code(f)));
@@ -43,7 +43,7 @@ describe('the create doors are found at all', () => {
   it('there are at least the six known ones', () => {
     // A FLOOR: an empty scan passes every loop below and reports a green tick about nothing.
     assert.ok(doors.length >= 6, `found ${doors.length} create door(s): ${doors.join(', ')}`);
-    for (const known of ['server/src/api/brain/memories.ts', 'server/src/mcp/tools/memory.ts']) {
+    for (const known of ['server/src/api/brain/facts.ts', 'server/src/mcp/tools/fact.ts']) {
       assert.ok(doors.includes(known), `${known} is not being seen as a create door — the scan is wrong`);
     }
   });

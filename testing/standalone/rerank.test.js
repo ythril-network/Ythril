@@ -170,7 +170,7 @@ describe('recall wiring', () => {
     // (`r.rerankScore ?? r.score`) broke the moment hybrid retrieval inserted `fusedScore` between the
     // two — a correct change failing a test that was only ever watching a string.
     const { mergeRecallResults } = await import('../../server/dist/brain/recall-shape.js');
-    const rec = (id, score, rerankScore) => ({ _id: id, type: 'memory', score, rerankScore, fact: id });
+    const rec = (id, score, rerankScore) => ({ _id: id, type: 'fact', score, rerankScore, fact: id });
 
     // Ordering follows the cross-encoder even when it inverts the vector order.
     const ordered = mergeRecallResults([], [rec('weak', 0.9, 0.1), rec('strong', 0.1, 0.9)], 10);

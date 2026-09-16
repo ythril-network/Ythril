@@ -10,7 +10,7 @@
  *     GET /api/spaces/other/meta                                  -> 200  purpose, usageNotes, typeSchemas
  *     GET /api/spaces/other/completeness                           -> 200  per-type counts
  *     GET /api/spaces/other/meta/typeSchemas/entity/SecretType     -> 200  the individual schema
- *     POST /api/brain/spaces/other/memories                        -> 403  (correct)
+ *     POST /api/brain/spaces/other/facts                        -> 403  (correct)
  *
  * The contrast is what made it a defect rather than a design choice: the same instance filtered that space out of
  * `GET /api/spaces` for the same token. It knew the scope perfectly well, and three sibling routes served the space's

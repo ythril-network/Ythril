@@ -3,7 +3,7 @@
  *
  * ## Measured, not argued
  *
- * `memoryEmbedText` and `fileEmbedText` prepended the linked entities' names to the content before embedding.
+ * `factEmbedText` and `fileEmbedText` prepended the linked entities' names to the content before embedding.
  * On a 199-question benchmark that cost **1.5 points of strict evidence recall** — the same turn scored 0.8528
  * with the names out and 0.8369 with them in. `chronoEmbedText` never did it, so chrono was already the control.
  *
@@ -37,7 +37,7 @@ const src = (p) => stripComments(readFileSync(p, 'utf8'));
 const BUILDERS = 'server/src/brain/embed-text.ts';
 
 describe('the two builders take no entity names', () => {
-  for (const fn of ['memoryEmbedText', 'fileEmbedText']) {
+  for (const fn of ['factEmbedText', 'fileEmbedText']) {
     it(`${fn} has no entityNames parameter`, () => {
       const s = src(BUILDERS);
       const at = s.indexOf(`export function ${fn}(`);
@@ -83,7 +83,7 @@ describe('the two builders take no entity names', () => {
 
 describe('and no writer resolves names for them', () => {
   it('the memory write path resolves none', () => {
-    assert.doesNotMatch(bodyOf(src('server/src/brain/memory.ts'), 'remember'), /resolveEntityNames/,
+    assert.doesNotMatch(bodyOf(src('server/src/brain/fact.ts'), 'saveFact'), /resolveEntityNames/,
       'the memory writer still resolves linked entity names — a round-trip whose only consumer is gone');
   });
 
@@ -101,7 +101,7 @@ describe('and no writer resolves names for them', () => {
     // The third path to a stored vector, and the one that has drifted from the other two before: it used to
     // embed raw entity IDs for edges and drop properties entirely.
     const s = src('server/src/brain/reindex.ts');
-    for (const call of ['memoryEmbedText', 'fileEmbedText']) {
+    for (const call of ['factEmbedText', 'fileEmbedText']) {
       const at = s.indexOf(`${call}(`);
       assert.ok(at > 0, `reindex no longer calls ${call} — re-anchor this gate`);
       const args = s.slice(at, s.indexOf(')', at));

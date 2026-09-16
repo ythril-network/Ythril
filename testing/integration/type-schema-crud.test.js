@@ -472,7 +472,7 @@ describe('Round-trip: GET the space meta, then PATCH it back', () => {
     // whole response body as `meta` is making a real mistake, and being told is the correct outcome — the
     // tolerance is only for fields that genuinely belong to meta.
     const r = await patch(INSTANCES.a, token(), `/api/spaces/${TEST_SPACE}`, {
-      meta: { stats: { memories: 1 } },
+      meta: { stats: { facts: 1 } },
     });
     assert.equal(r.status, 400, `envelope fields must not be accepted inside meta: ${JSON.stringify(r.body)}`);
   });

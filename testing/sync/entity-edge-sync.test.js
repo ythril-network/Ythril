@@ -156,7 +156,7 @@ describe('Entity/edge sync — cross-instance (A→B)', () => {
     assert.equal(tombBefore.status, 200, `Get tombstones on B: ${JSON.stringify(tombBefore.body)}`);
     assert.ok(Array.isArray(tombBefore.body?.entities), 'tombstones.entities must be an array');
     assert.ok(Array.isArray(tombBefore.body?.edges), 'tombstones.edges must be an array');
-    assert.ok(Array.isArray(tombBefore.body?.memories), 'tombstones.memories must be an array');
+    assert.ok(Array.isArray(tombBefore.body?.facts), 'tombstones.facts must be an array');
   });
 
   it('GET /api/sync/entities requires spaceId', async () => {
@@ -184,18 +184,18 @@ describe('Entity/edge sync — cross-instance (A→B)', () => {
     assert.ok('nextCursor' in r.body, 'nextCursor must be present in response');
   });
 
-  it('GET /api/sync/memories cursor pagination works', async () => {
+  it('GET /api/sync/facts cursor pagination works', async () => {
     // Write 3 memories to ensure we have data, then page with limit=2
     for (let i = 0; i < 3; i++) {
-      await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/memories', { fact: `cursor-test-${RUN}-${i}`, tags: ['cursor'] });
+      await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/facts', { fact: `cursor-test-${RUN}-${i}`, tags: ['cursor'] });
     }
 
-    const page1 = await reqJson(INSTANCES.a, tokenA, '/api/sync/memories?spaceId=general&limit=2');
+    const page1 = await reqJson(INSTANCES.a, tokenA, '/api/sync/facts?spaceId=general&limit=2');
     assert.equal(page1.status, 200);
     assert.ok(Array.isArray(page1.body.items));
 
     if (page1.body.nextCursor) {
-      const page2 = await reqJson(INSTANCES.a, tokenA, `/api/sync/memories?spaceId=general&limit=2&cursor=${page1.body.nextCursor}`);
+      const page2 = await reqJson(INSTANCES.a, tokenA, `/api/sync/facts?spaceId=general&limit=2&cursor=${page1.body.nextCursor}`);
       assert.equal(page2.status, 200, `Page 2: ${JSON.stringify(page2.body)}`);
       assert.ok(Array.isArray(page2.body.items), 'Page 2 items must be an array');
       // Page 2 items must not overlap with page 1
@@ -220,7 +220,7 @@ describe('POST /api/sync/tombstones — apply incoming tombstones', () => {
       tombstones: [
         {
           _id: `tomb-test-${RUN}`,
-          type: 'memory',
+          type: 'fact',
           spaceId: 'general',
           deletedAt: new Date().toISOString(),
           instanceId: 'test-instance',
@@ -256,8 +256,8 @@ describe('Sync API — new optional fields accepted by Zod schemas', () => {
     token = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
   });
 
-  it('POST /api/sync/memories accepts description and properties fields', async () => {
-    const r = await post(INSTANCES.a, token, '/api/sync/memories?spaceId=general', {
+  it('POST /api/sync/facts accepts description and properties fields', async () => {
+    const r = await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: `sync-mem-desc-${RUN}`,
       spaceId: 'general',
       fact: `Sync memory with description ${RUN}`,
@@ -277,7 +277,7 @@ describe('Sync API — new optional fields accepted by Zod schemas', () => {
 
   it('description and properties are persisted after sync upsert', async () => {
     const memId = `sync-mem-desc-verify-${RUN}`;
-    await post(INSTANCES.a, token, '/api/sync/memories?spaceId=general', {
+    await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: memId,
       spaceId: 'general',
       fact: `Verify desc/props after sync ${RUN}`,
@@ -293,8 +293,8 @@ describe('Sync API — new optional fields accepted by Zod schemas', () => {
       updatedAt: new Date().toISOString(),
     });
 
-    const r = await reqJson(INSTANCES.a, token, `/api/sync/memories/${memId}?spaceId=general`);
-    assert.equal(r.status, 200, `Fetch synced memory: ${JSON.stringify(r.body)}`);
+    const r = await reqJson(INSTANCES.a, token, `/api/sync/facts/${memId}?spaceId=general`);
+    assert.equal(r.status, 200, `Fetch synced fact: ${JSON.stringify(r.body)}`);
     assert.equal(r.body.description, 'Verified description', 'description must survive sync round-trip');
     assert.deepStrictEqual(r.body.properties, { key: 'synced-val' }, 'properties must survive sync round-trip');
   });

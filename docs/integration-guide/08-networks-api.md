@@ -307,8 +307,8 @@ GET /api/networks/:id/sync-history?limit=20
       "triggeredAt": "2026-03-26T12:00:00.000Z",
       "completedAt": "2026-03-26T12:00:02.500Z",
       "status": "success",
-      "pulled": { "memories": 5, "entities": 2, "edges": 1, "files": 0 },
-      "pushed": { "memories": 3, "entities": 0, "edges": 0, "files": 1 },
+      "pulled": { "facts": 5, "entities": 2, "edges": 1, "files": 0 },
+      "pushed": { "facts": 3, "entities": 0, "edges": 0, "files": 1 },
       "errors": []
     }
   ]

@@ -12,7 +12,7 @@ import type { RecallResult } from '../../core/api.types';
 const chunk = (parent: string, id: string, score: number, heading?: string, path = 'papers/study.pdf'): RecallResult =>
   ({ type: 'file', _id: id, score, parentFileId: parent, parentFile: { path }, ...(heading ? { headingText: heading } : {}) }) as unknown as RecallResult;
 const memory = (id: string, score: number): RecallResult =>
-  ({ type: 'memory', _id: id, score, fact: 'a fact' }) as unknown as RecallResult;
+  ({ type: 'fact', _id: id, score, fact: 'a fact' }) as unknown as RecallResult;
 const wholeFile = (id: string, score: number, path: string): RecallResult =>
   ({ type: 'file', _id: id, score, path }) as unknown as RecallResult;
 

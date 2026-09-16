@@ -63,7 +63,7 @@ Since 3.2.0 a host page can also go one step further and have Ythril's cards, di
 
 ## Spaces — what they are
 
-A **space** is a completely separate container of data — memories, entities, edges, chrono entries, and files. Think of it as a project folder or a context boundary.
+A **space** is a completely separate container of data — facts, entities, edges, chrono entries, and files. Think of it as a project folder or a context boundary.
 
 The `general` space is created automatically on first run. Admins can create additional spaces in **Settings → Spaces**. Your access token determines which spaces you can see; if a space is not in your token's scope it is invisible to you.
 

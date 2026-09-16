@@ -115,7 +115,7 @@ function pageBySeq<T extends { _id: string; seq: number }>(
  * it needs.
  *
  * **One of the four copies reported its 500 differently, and the stronger one is what shipped here.**
- * `memories/:id` logged `err` through `log.error`, the other three through `reportServerFailure` — which
+ * `facts/:id` logged `err` through `log.error`, the other three through `reportServerFailure` — which
  * carries the STACK, and exists because an operator on another team once reasoned for ten days from a log
  * that held no line for the 500 they were asking about. The message alone ("Cannot read properties of
  * undefined") sends that reader back to grep source they do not have. Four copies of one rule with the
@@ -146,7 +146,7 @@ function oneById<T extends { _id: string }>(collection: string) {
  * batch-upsert block below carry those differences. A collection missing from this router is one a peer can
  * never fetch, and nothing reports that, because a peer which never receives a link has none to hash either.
  */
-syncDocsRouter.get('/memories', syncRateLimit, requireAuth, pageBySeq<FactDoc>('facts', 'fact'));
+syncDocsRouter.get('/facts', syncRateLimit, requireAuth, pageBySeq<FactDoc>('facts', 'fact'));
 syncDocsRouter.get('/entities', syncRateLimit, requireAuth, pageBySeq<EntityDoc>('entities', 'entity'));
 syncDocsRouter.get('/edges', syncRateLimit, requireAuth, pageBySeq<EdgeDoc>('edges', 'edge'));
 syncDocsRouter.get('/chrono', syncRateLimit, requireAuth, pageBySeq<ChronoEntry>('chrono', 'chrono'));
@@ -174,7 +174,7 @@ syncDocsRouter.get('/filemeta', syncRateLimit, requireAuth,
    */
   pageBySeq<FileMetaDoc & { seq: number }>('files', null, { parentFileId: { $exists: false } }));
 
-syncDocsRouter.get('/memories/:id', syncRateLimit, requireAuth, oneById<FactDoc>('facts'));
+syncDocsRouter.get('/facts/:id', syncRateLimit, requireAuth, oneById<FactDoc>('facts'));
 syncDocsRouter.get('/entities/:id', syncRateLimit, requireAuth, oneById<EntityDoc>('entities'));
 syncDocsRouter.get('/edges/:id', syncRateLimit, requireAuth, oneById<EdgeDoc>('edges'));
 syncDocsRouter.get('/chrono/:id', syncRateLimit, requireAuth, oneById<ChronoEntry>('chrono'));
@@ -183,17 +183,17 @@ syncDocsRouter.get('/filemeta/:id', syncRateLimit, requireAuth, oneById<FileMeta
 
 
 /**
- * GET /api/sync/memories/:id?spaceId=
- * Fetch a single full memory document.
+ * GET /api/sync/facts/:id?spaceId=
+ * Fetch a single full fact document.
  */
 
 
 /**
- * POST /api/sync/memories?spaceId=&networkId=
- * Upsert a memory received from a peer.
+ * POST /api/sync/facts?spaceId=&networkId=
+ * Upsert a fact received from a peer.
  * Conflict rule: higher seq wins; equal seq forks.
  */
-syncDocsRouter.post('/memories', syncRateLimit, requireAuth, denyReadOnly, async (req, res) => {
+syncDocsRouter.post('/facts', syncRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
     const { spaceId, networkId } = req.query as Record<string, string>;
     if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
@@ -203,7 +203,7 @@ syncDocsRouter.post('/memories', syncRateLimit, requireAuth, denyReadOnly, async
 
     const parsed = IncomingFactDoc.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({ error: 'Invalid memory document' });
+      res.status(400).json({ error: 'Invalid fact document' });
       return;
     }
     const incoming = parsed.data as FactDoc;
@@ -511,7 +511,7 @@ syncDocsRouter.post('/chrono', syncRateLimit, requireAuth, denyReadOnly, async (
 
 /**
  * POST /api/sync/batch-upsert?spaceId=&networkId=
- * Accept arrays of memories, entities and/or edges and upsert them all in one
+ * Accept arrays of facts, entities and/or edges and upsert them all in one
  * request.  Same conflict rules as the individual POST endpoints.
  * Limits: 500 docs per type per request to cap payload size.
  */
@@ -531,7 +531,7 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
      * "batch ingest already skips invalid documents silently" as though that were harmless. It was not: the
      * document left the batch, was counted in no statistic, and the receiver answered 200 — after which the
      * sender advanced its watermark and never offered the record again. A required `embedding` on
-     * `IncomingFactDoc` made that the ordinary fate of every suppressed memory.
+     * `IncomingFactDoc` made that the ordinary fate of every suppressed fact.
      *
      * The schema is fixed; the silence is fixed separately, because the next mismatch between a stored document
      * and its `Incoming*` schema would otherwise lose records the same way and be just as invisible. Same
@@ -552,7 +552,7 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
         return [];
       });
 
-    const memoriesRaw = parsed<FactDoc>(Array.isArray(body?.facts) ? body.facts.slice(0, 500) : [], IncomingFactDoc, 'fact');
+    const factsRaw = parsed<FactDoc>(Array.isArray(body?.facts) ? body.facts.slice(0, 500) : [], IncomingFactDoc, 'fact');
     const entitiesRaw = parsed<EntityDoc>(Array.isArray(body?.entities) ? body.entities.slice(0, 500) : [], IncomingEntityDoc, 'entity');
     const edgesRaw = parsed<EdgeDoc>(Array.isArray(body?.edges) ? body.edges.slice(0, 500) : [], IncomingEdgeDoc, 'edge');
     const chronoRaw = parsed<ChronoEntry>(Array.isArray(body?.chrono) ? body.chrono.slice(0, 500) : [], IncomingChronoDoc, 'chrono');
@@ -582,14 +582,14 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
         );
         return false;
       });
-    const memories = plausible(memoriesRaw, 'fact');
+    const facts = plausible(factsRaw, 'fact');
     const entities = plausible(entitiesRaw, 'entity');
     const edges = plausible(edgesRaw, 'edge');
     const chrono = plausible(chronoRaw, 'chrono');
     const links = plausible(linksRaw, 'link');
     const fileMeta = plausible(fileMetaRaw, 'filemeta');
 
-    // ── Memories ─────────────────────────────────────────────────────────
+    // ── Facts ─────────────────────────────────────────────────────────
     // `skipped` = the peer is already current (benign). `forkDepthRefused` = a record was DROPPED. They were
     // one counter until 2026-08-19, which is why the lossy one had never been seen.
     const memStats = { inserted: 0, updated: 0, forked: 0, skipped: 0, forkDepthRefused: 0, tombstoned: 0, schemaViolations: 0 };
@@ -605,7 +605,7 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
      * The count goes back in the response rather than into a log line. That was the ruling's stated cost —
      * a report nobody reads is the do-nothing option with extra steps.
      */
-    for (const incoming of memories) {
+    for (const incoming of facts) {
       if (violationsAgainstLocalSchema(spaceId, 'fact', incoming as unknown as Record<string, unknown>).length > 0) memStats.schemaViolations++;
       const tomb = await col<TombstoneDoc>(`${spaceId}_tombstones`)
         .findOne(asFilter<TombstoneDoc>({ _id: incoming._id, type: 'fact' })) as TombstoneDoc | null;
@@ -639,7 +639,7 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
            * every cycle. The fix is visibility, exactly as the media-worker swallow was.
            */
           memStats.forkDepthRefused++;
-          log.warn(`sync batch-upsert: DROPPED memory ${incoming._id} in '${spaceId}' — divergent content at `
+          log.warn(`sync batch-upsert: DROPPED fact ${incoming._id} in '${spaceId}' — divergent content at `
             + `seq ${incoming.seq} and the fork chain is already ${depth} deep (MAX_FORK_DEPTH=${MAX_FORK_DEPTH}). `
             + 'The sender will not offer it again. Resolve the fork chain to accept it.');
           continue;
@@ -798,7 +798,7 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
      *
      * The sender's side is answered: with `DEBUG` on, its log shows it pushing the record and advancing its
      * watermark, so it is not stalling. Reproduced under CPU contention 2026-08-20 (2 runs in 10): A pushes the
-     * memory at seq 2, gets a 200, moves its watermark to 2 — and B never serves that id, so the record is
+     * fact at seq 2, gets a 200, moves its watermark to 2 — and B never serves that id, so the record is
      * marked sent and will never be offered again.
      *
      * **A 200 says the batch was accepted, not that a record was stored**, and this handler has four ways to
@@ -813,7 +813,7 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
     const range = (docs: { seq?: number }[]): string =>
       docs.length === 0 ? '-' : `${Math.min(...docs.map(d => d.seq ?? 0))}..${Math.max(...docs.map(d => d.seq ?? 0))}`;
     log.debug(`Batch-upsert accepted for space '${spaceId}': `
-      + `memories ${JSON.stringify(memStats)} seq ${range(memories)}; `
+      + `facts ${JSON.stringify(memStats)} seq ${range(facts)}; `
       + `entities ${JSON.stringify(entStats)} seq ${range(entities)}; `
       + `edges ${JSON.stringify(edgeStats)} seq ${range(edges)}; `
       + `chrono ${JSON.stringify(chronoStats)} seq ${range(chrono)}; `

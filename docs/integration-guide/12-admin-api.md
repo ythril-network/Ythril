@@ -6,7 +6,7 @@
 
 ## Reference integrity
 
-Every link between brain records — a memory's `entityIds`, an edge's `from`/`to`, a chrono entry's
+Every link between brain records — a fact's `entityIds`, an edge's `from`/`to`, a chrono entry's
 `entityIds`/`memoryIds`, a file's `entityIds`/`chronoIds`/`memoryIds` — names the target by its **id**,
 which is a **UUID v4**. A name is not a reference.
 
@@ -84,7 +84,7 @@ Dumps the entire knowledge base of a space as a single JSON document. Requires a
   "spaceId": "eng-kb",
   "spaceName": "Engineering Knowledge Base",
   "version": "1.0.0",
-  "memories": [ { "_id": "...", "fact": "...", "tags": [], "...": "..." } ],
+  "facts": [ { "_id": "...", "fact": "...", "tags": [], "...": "..." } ],
   "entities": [ { "_id": "...", "name": "...", "type": "...", "...": "..." } ],
   "edges":    [ { "_id": "...", "from": "...", "to": "...", "label": "...", "...": "..." } ],
   "chrono":   [ { "_id": "...", "title": "...", "type": "...", "...": "..." } ],
@@ -112,7 +112,7 @@ Upserts exported data into a space. Requires admin token + TOTP when MFA is enab
 
 ```json
 {
-  "memories": [ { "_id": "...", "fact": "...", "tags": [] } ],
+  "facts": [ { "_id": "...", "fact": "...", "tags": [] } ],
   "entities": [ { "_id": "...", "name": "...", "type": "..." } ]
 }
 ```
@@ -125,7 +125,7 @@ Each document must have a string `_id`. Documents with an existing `_id` in the 
 {
   "spaceId": "eng-kb",
   "results": {
-    "memories": { "inserted": 5, "updated": 2, "errors": 0 },
+    "facts": { "inserted": 5, "updated": 2, "errors": 0 },
     "entities": { "inserted": 3, "updated": 1, "errors": 0 },
     "edges":    { "inserted": 0, "updated": 0, "errors": 0 },
     "chrono":   { "inserted": 0, "updated": 0, "errors": 0 },
@@ -210,7 +210,7 @@ Content-Type: application/json
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `types` | `string[]` *(optional)* | Subset of collection types to wipe: `"memories"`, `"entities"`, `"edges"`, `"chrono"`, `"files"`, `"links"`. Omit (or send `{}`) to wipe **all** collections. |
+| `types` | `string[]` *(optional)* | Subset of collection types to wipe: `"facts"`, `"entities"`, `"edges"`, `"chrono"`, `"files"`, `"links"`. Omit (or send `{}`) to wipe **all** collections. |
 
 #### Full wipe (all collections)
 
@@ -221,13 +221,13 @@ Content-Type: application/json
 or explicitly:
 
 ```json
-{ "types": ["memories", "entities", "edges", "chrono", "files", "links"] }
+{ "types": ["facts", "entities", "edges", "chrono", "files", "links"] }
 ```
 
 #### Partial wipe (specific types only)
 
 ```json
-{ "types": ["memories"] }
+{ "types": ["facts"] }
 ```
 
 ```json
@@ -239,7 +239,7 @@ or explicitly:
 ```json
 {
   "deleted": {
-    "memories": 12,
+    "facts": 12,
     "entities": 8,
     "edges": 5,
     "chrono": 0,
@@ -253,8 +253,8 @@ Each field in `deleted` is the number of documents actually removed from that
 collection.  On a partial wipe the unaffected fields will be `0`.
 
 `"links"` is usually the largest number and it is not a separate thing to clean up. A link record is one
-mention of one record by another, so a space with a few hundred memories that name entities holds a link per
-mention. Wiping `"memories"` alone leaves those links behind pointing at records that are gone — include
+mention of one record by another, so a space with a few hundred facts that name entities holds a link per
+mention. Wiping `"facts"` alone leaves those links behind pointing at records that are gone — include
 `"links"`, or omit `types` entirely and wipe everything.
 
 #### Behaviour notes
@@ -380,7 +380,7 @@ Trigger an immediate point-in-time dump of the entire MongoDB database. The back
 
 > **A backup is an unencrypted copy of everything, and `requireEncryptedAtRest` does not cover it.**
 >
-> The dump is written by reading *through* `mongod`, so it comes out **decrypted**: every memory, entity, edge,
+> The dump is written by reading *through* `mongod`, so it comes out **decrypted**: every fact, entity, edge,
 > chrono entry, file-meta record and audit entry, as plaintext NDJSON on the data volume. If you followed
 > [Encryption at Rest](02-hosting.md#encryption-at-rest) and gave the instance a master key, that covers the app's
 > four state files — `config.json`, `secrets.json`, `schema-library.json`, `schema-catalogs.json`. It does not
@@ -419,7 +419,7 @@ X-TOTP-Code: <code>   # required when MFA is enabled
   "backup": {
     "id": "2026-04-23T10-00-00-000Z",
     "dir": "/data/backups/2026-04-23T10-00-00-000Z",
-    "manifest": { "createdAt": "2026-04-23T10:00:00.000Z", "collections": ["memories", "entities"] }
+    "manifest": { "createdAt": "2026-04-23T10:00:00.000Z", "collections": ["facts", "entities"] }
   }
 }
 ```
@@ -431,7 +431,7 @@ X-TOTP-Code: <code>   # required when MFA is enabled
   "backup": {
     "id": "2026-04-23T10-00-00-000Z",
     "dir": "/data/backups/2026-04-23T10-00-00-000Z",
-    "manifest": { "createdAt": "2026-04-23T10:00:00.000Z", "collections": ["memories", "entities"] }
+    "manifest": { "createdAt": "2026-04-23T10:00:00.000Z", "collections": ["facts", "entities"] }
   },
   "localPruned": 2,
   "offsite": {
@@ -464,7 +464,7 @@ Authorization: Bearer <admin-token>
       "id": "2026-04-23T10-00-00-000Z",
       "dir": "/data/backups/2026-04-23T10-00-00-000Z",
       "createdAt": "2026-04-23T10:00:00.000Z",
-      "collections": ["memories", "entities", "edges"]
+      "collections": ["facts", "entities", "edges"]
     }
   ]
 }

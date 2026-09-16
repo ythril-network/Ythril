@@ -202,7 +202,7 @@ describe('lost-update detection covers every brain record type', () => {
       for (const outcome of ['clean', 'collision']) {
         assert.notEqual(
           valueOf(text, `ythril_brain_write_seq_total{collection="${collection}",outcome="${outcome}"}`), null,
-          `${collection}/${outcome} is absent. The canary saw only collection="memories" and reasonably guessed `
+          `${collection}/${outcome} is absent. The canary saw only collection="facts" and reasonably guessed `
           + 'the labels were lazy; they were not, the other three were simply never instrumented.',
         );
       }
@@ -214,7 +214,7 @@ describe('lost-update detection covers every brain record type', () => {
     // reads as "no collisions here" when the truth is "not measured". That is the exact confusion pre-declaring
     // exists to prevent, so the two must move together.
     const files = {
-      memories: 'server/src/brain/memory.ts',
+      facts: 'server/src/brain/fact.ts',
       entities: 'server/src/brain/entities.ts',
       edges: 'server/src/brain/edges.ts',
       chrono: 'server/src/brain/chrono.ts',

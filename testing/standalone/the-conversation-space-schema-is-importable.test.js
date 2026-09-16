@@ -59,7 +59,7 @@ describe('the file is importable', () => {
   });
 
   test('every entry carries the envelope the import needs', () => {
-    const kinds = new Set(['entity', 'edge', 'memory', 'chrono']);
+    const kinds = new Set(['entity', 'edge', 'fact', 'chrono']);
     const seen = new Set();
     for (const e of entries) {
       assert.ok(kinds.has(e.knowledgeType), `${e.name} has knowledgeType '${e.knowledgeType}'`);
@@ -104,7 +104,7 @@ describe('it describes a graph', () => {
   });
 
   test('there is somewhere for a claim to go', () => {
-    assert.ok(of('memory').length > 0, 'no memory type — nothing can hold a thing that was said');
+    assert.ok(of('fact').length > 0, 'no fact type — nothing can hold a thing that was said');
   });
 });
 

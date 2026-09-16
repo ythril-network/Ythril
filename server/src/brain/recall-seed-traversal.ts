@@ -86,7 +86,7 @@ export interface SeedTraverseNeighbor {
   /**
    * The reached record (embedding stripped).
    *
-   * An entity arrives whole. A record reached through a LINK — a chrono entry, memory or file whose
+   * An entity arrives whole. A record reached through a LINK — a chrono entry, fact or file whose
    * `entityIds` names something on the frontier — arrives holding its class projection and carrying `kind`,
    * exactly as `TraverseNode.kind` reports it on the standalone tool. `kind` is absent on an entity, so
    * every response that existed before this is unchanged down to the byte.
@@ -157,13 +157,13 @@ export async function traverseFromSeeds(
 
   // ── A non-entity seed is no longer a dead end ──────────────────────────────────────────────────────────
   //
-  // Edge endpoints are entity ids, so a memory, chrono entry or file that MATCHED semantically had nothing to
+  // Edge endpoints are entity ids, so a fact, chrono entry or file that MATCHED semantically had nothing to
   // follow: `recall(traverse: n)` returned it with an empty `_graph` at any depth, and both doors documented
   // that and told the caller to lift the `entityIds` off the match and traverse from one of those by hand.
   //
   // That instruction was the query below, performed by the caller because the server declined to. Reading it
   // here makes the seed's own links a first hop, so the walk continues from the entities it names — which is
-  // what makes the rest of the traversal reachable from a matched memory at all.
+  // what makes the rest of the traversal reachable from a matched fact at all.
   //
   // Once, on the seeds. Everything reached afterwards is an entity or a leaf.
   if (narrowing?.includeChrono || narrowing?.includeMemories || narrowing?.includeFiles) {
@@ -284,7 +284,7 @@ export async function traverseFromSeeds(
       Math.max(0, limit - results.length));
     if (hopScanCapped) capped = true;
 
-    // `deferred` counts: a memory seed has no edges and links nothing backwards, so both counters above are
+    // `deferred` counts: a fact seed has no edges and links nothing backwards, so both counters above are
     // zero on its first pass — breaking there would discard the entities its own links reached and undo the
     // whole point of the pre-pass.
     if (newNeighborIds.length === 0 && linkedHere.length === 0 && deferred.length === 0) break;

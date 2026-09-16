@@ -70,7 +70,7 @@ describe('the link conversion is complete, idempotent and non-destructive', { sk
   });
 
   beforeEach(async () => {
-    for (const c of ['entities', 'edges', 'memories', 'chrono', 'files', 'links', 'tombstones']) {
+    for (const c of ['entities', 'edges', 'facts', 'chrono', 'files', 'links', 'tombstones']) {
       await coll(c).deleteMany({});
     }
     // A 3.x space: arrays everywhere, not one link record. Three of the six classes, so a walk that only
@@ -79,7 +79,7 @@ describe('the link conversion is complete, idempotent and non-destructive', { sk
       { _id: E1, spaceId: SPACE, name: 'One', type: 'thing', tags: [], seq: 1 },
       { _id: E2, spaceId: SPACE, name: 'Two', type: 'thing', tags: [], seq: 2 },
     ]);
-    await coll('memories').insertOne({
+    await coll('facts').insertOne({
       _id: M1, spaceId: SPACE, fact: 'a fact', type: '', tags: [], entityIds: [E1, E2], author: AUTHOR, seq: 3,
     });
     await coll('chrono').insertOne({
@@ -94,11 +94,11 @@ describe('the link conversion is complete, idempotent and non-destructive', { sk
 
   const EXPECTED = [
     `chrono:${C1}>entity:${E1}`,
-    `chrono:${C1}>memory:${M1}`,
+    `chrono:${C1}>fact:${M1}`,
     `file:notes/one.md>chrono:${C1}`,
     `file:notes/one.md>entity:${E2}`,
-    `memory:${M1}>entity:${E1}`,
-    `memory:${M1}>entity:${E2}`,
+    `fact:${M1}>entity:${E1}`,
+    `fact:${M1}>entity:${E2}`,
   ].sort();
 
   it('the module is the one this gate thinks it is', () => {
@@ -125,7 +125,7 @@ describe('the link conversion is complete, idempotent and non-destructive', { sk
 
   it('leaves every array exactly as it found it', async () => {
     await convertMod.convertSpaceLinks(SPACE);
-    assert.deepEqual((await coll('memories').findOne({ _id: M1 })).entityIds, [E1, E2]);
+    assert.deepEqual((await coll('facts').findOne({ _id: M1 })).entityIds, [E1, E2]);
     const chrono = await coll('chrono').findOne({ _id: C1 });
     assert.deepEqual(chrono.entityIds, [E1]);
     assert.deepEqual(chrono.memoryIds, [M1]);
@@ -139,11 +139,11 @@ describe('the link conversion is complete, idempotent and non-destructive', { sk
   it('a record with no arrays at all is walked and produces nothing', async () => {
     // A peer on an older build sends records with no `chronoIds` key. Reading that as "remove the chrono
     // links" would delete data on the strength of a field the sender never had.
-    await coll('memories').insertOne({ _id: 'dddddddd-0000-4000-8000-000000000001', spaceId: SPACE, fact: 'bare', seq: 9 });
+    await coll('facts').insertOne({ _id: 'dddddddd-0000-4000-8000-000000000001', spaceId: SPACE, fact: 'bare', seq: 9 });
     const report = await convertMod.convertSpaceLinks(SPACE);
     assert.equal(report.failed, 0);
     assert.deepEqual(await linkPairs(), EXPECTED);
-    assert.equal(report.scanned.memories, 2, 'the bare record must still be WALKED, not skipped');
+    assert.equal(report.scanned.facts, 2, 'the bare record must still be WALKED, not skipped');
   });
 
   it('convertAllLinks sets completeLinkage on a clean run', async () => {

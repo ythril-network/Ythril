@@ -75,7 +75,7 @@ describe('an entity cascade needs a token for the set', { skip }, () => {
   });
 
   beforeEach(async () => {
-    for (const c of ['entities', 'edges', 'memories', 'chrono', 'files', 'links', 'tombstones']) {
+    for (const c of ['entities', 'edges', 'facts', 'chrono', 'files', 'links', 'tombstones']) {
       await coll(c).deleteMany({});
     }
     await coll('entities').insertMany([

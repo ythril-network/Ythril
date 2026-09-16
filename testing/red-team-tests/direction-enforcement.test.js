@@ -131,9 +131,9 @@ describe('Directional network: push-only peer cannot write to sync endpoints', (
 
   // ── Write endpoints that must be blocked ─────────────────────────────────
 
-  it('Subscriber cannot POST /api/sync/memories → 403', async () => {
+  it('Subscriber cannot POST /api/sync/facts → 403', async () => {
     const r = await post(INSTANCES.a, subscriberToken,
-      `/api/sync/memories?spaceId=general&networkId=${networkId}`,
+      `/api/sync/facts?spaceId=general&networkId=${networkId}`,
       { _id: crypto.randomUUID(), fact: 'injected by subscriber', seq: 1 },
     );
     assert.equal(r.status, 403, `Expected 403, got ${r.status}: ${JSON.stringify(r.body)}`);
@@ -159,7 +159,7 @@ describe('Directional network: push-only peer cannot write to sync endpoints', (
   it('Subscriber cannot POST /api/sync/chrono → 403', async () => {
     const r = await post(INSTANCES.a, subscriberToken,
       `/api/sync/chrono?spaceId=general&networkId=${networkId}`,
-      { _id: crypto.randomUUID(), type: 'memory', targetId: 'x', seq: 1 },
+      { _id: crypto.randomUUID(), type: 'fact', targetId: 'x', seq: 1 },
     );
     assert.equal(r.status, 403, `Expected 403, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
@@ -167,7 +167,7 @@ describe('Directional network: push-only peer cannot write to sync endpoints', (
   it('Subscriber cannot POST /api/sync/batch-upsert → 403', async () => {
     const r = await post(INSTANCES.a, subscriberToken,
       `/api/sync/batch-upsert?spaceId=general&networkId=${networkId}`,
-      { memories: [{ _id: crypto.randomUUID(), fact: 'batch-injected', seq: 1 }] },
+      { facts: [{ _id: crypto.randomUUID(), fact: 'batch-injected', seq: 1 }] },
     );
     assert.equal(r.status, 403, `Expected 403, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
@@ -175,7 +175,7 @@ describe('Directional network: push-only peer cannot write to sync endpoints', (
   it('Subscriber cannot POST /api/sync/tombstones → 403', async () => {
     const r = await post(INSTANCES.a, subscriberToken,
       `/api/sync/tombstones?spaceId=general&networkId=${networkId}`,
-      [{ _id: crypto.randomUUID(), type: 'memory', instanceId: 'attacker', deletedAt: new Date().toISOString() }],
+      [{ _id: crypto.randomUUID(), type: 'fact', instanceId: 'attacker', deletedAt: new Date().toISOString() }],
     );
     assert.equal(r.status, 403, `Expected 403, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
@@ -190,9 +190,9 @@ describe('Directional network: push-only peer cannot write to sync endpoints', (
 
   // ── Read endpoints should still work (subscriber can pull) ───────────────
 
-  it('Subscriber CAN GET /api/sync/memories → 200', async () => {
+  it('Subscriber CAN GET /api/sync/facts → 200', async () => {
     const r = await get(INSTANCES.a, subscriberToken,
-      `/api/sync/memories?spaceId=general&networkId=${networkId}`,
+      `/api/sync/facts?spaceId=general&networkId=${networkId}`,
     );
     assert.equal(r.status, 200, `Expected 200, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
@@ -217,7 +217,7 @@ describe('Directional network: push-only peer cannot write to sync endpoints', (
 
   it('Subscriber cannot bypass the guard by OMITTING networkId → 403', async () => {
     const r = await post(INSTANCES.a, subscriberToken,
-      `/api/sync/memories?spaceId=general`,
+      `/api/sync/facts?spaceId=general`,
       { _id: crypto.randomUUID(), fact: 'injected without networkId', seq: 1 },
     );
     assert.equal(r.status, 403, `Expected 403, got ${r.status}: ${JSON.stringify(r.body)}`);
@@ -226,7 +226,7 @@ describe('Directional network: push-only peer cannot write to sync endpoints', (
 
   it('Subscriber cannot bypass the guard by naming a BOGUS networkId → 403', async () => {
     const r = await post(INSTANCES.a, subscriberToken,
-      `/api/sync/memories?spaceId=general&networkId=${crypto.randomUUID()}`,
+      `/api/sync/facts?spaceId=general&networkId=${crypto.randomUUID()}`,
       { _id: crypto.randomUUID(), fact: 'injected via bogus networkId', seq: 1 },
     );
     assert.equal(r.status, 403, `Expected 403, got ${r.status}: ${JSON.stringify(r.body)}`);
@@ -274,10 +274,10 @@ describe('S10: non-peer user PATs are refused on sync data writes', () => {
   });
 
   const WRITE_CASES = [
-    ['memories', { fact: 'user-pat injected', seq: 1 }],
+    ['facts', { fact: 'user-pat injected', seq: 1 }],
     ['entities', { name: 'user-pat entity', type: 'person', seq: 1 }],
     ['edges', { from: 'a', to: 'b', label: 'user-pat edge', seq: 1 }],
-    ['chrono', { type: 'memory', targetId: 'x', seq: 1 }],
+    ['chrono', { type: 'fact', targetId: 'x', seq: 1 }],
   ];
 
   for (const [endpoint, doc] of WRITE_CASES) {
@@ -294,7 +294,7 @@ describe('S10: non-peer user PATs are refused on sync data writes', () => {
   it('user PAT cannot POST /api/sync/batch-upsert → 403', async () => {
     const r = await post(INSTANCES.a, userPat,
       `/api/sync/batch-upsert?spaceId=general`,
-      { memories: [{ _id: crypto.randomUUID(), fact: 'user-pat batch', seq: 1 }] },
+      { facts: [{ _id: crypto.randomUUID(), fact: 'user-pat batch', seq: 1 }] },
     );
     assert.equal(r.status, 403, `Expected 403, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
@@ -302,7 +302,7 @@ describe('S10: non-peer user PATs are refused on sync data writes', () => {
   it('user PAT cannot POST /api/sync/tombstones → 403', async () => {
     const r = await post(INSTANCES.a, userPat,
       `/api/sync/tombstones?spaceId=general`,
-      { tombstones: [{ _id: crypto.randomUUID(), type: 'memory', instanceId: 'attacker', deletedAt: new Date().toISOString() }] },
+      { tombstones: [{ _id: crypto.randomUUID(), type: 'fact', instanceId: 'attacker', deletedAt: new Date().toISOString() }] },
     );
     assert.equal(r.status, 403, `Expected 403, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
@@ -317,15 +317,15 @@ describe('S10: non-peer user PATs are refused on sync data writes', () => {
 
   // ── What must still work ──────────────────────────────────────────────────
 
-  it('user PAT can still READ /api/sync/memories → 200', async () => {
-    const r = await get(INSTANCES.a, userPat, `/api/sync/memories?spaceId=general`);
+  it('user PAT can still READ /api/sync/facts → 200', async () => {
+    const r = await get(INSTANCES.a, userPat, `/api/sync/facts?spaceId=general`);
     assert.equal(r.status, 200, `Expected 200, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 
   it('admin token can still write (local operator override) → 200', async () => {
     const r = await post(INSTANCES.a, adminToken,
       `/api/sync/batch-upsert?spaceId=general`,
-      { memories: [{ _id: crypto.randomUUID(), fact: `s10 admin positive control ${Date.now()}`, seq: 1 }] },
+      { facts: [{ _id: crypto.randomUUID(), fact: `s10 admin positive control ${Date.now()}`, seq: 1 }] },
     );
     assert.equal(r.status, 200, `Expected 200, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
@@ -333,7 +333,7 @@ describe('S10: non-peer user PATs are refused on sync data writes', () => {
   it("peer with direction 'both' (closed network) can still write → 200", async () => {
     const r = await post(INSTANCES.a, closedPeerToken,
       `/api/sync/batch-upsert?spaceId=general&networkId=${closedNetworkId}`,
-      { memories: [{ _id: crypto.randomUUID(), fact: `s10 peer positive control ${Date.now()}`, seq: 1 }] },
+      { facts: [{ _id: crypto.randomUUID(), fact: `s10 peer positive control ${Date.now()}`, seq: 1 }] },
     );
     assert.equal(r.status, 200, `Expected 200, got ${r.status}: ${JSON.stringify(r.body)}`);
   });

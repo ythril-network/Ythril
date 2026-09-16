@@ -42,10 +42,10 @@ const SPACES = [
 function makeApi(over: Record<string, unknown> = {}) {
   return {
     listSpaces: () => of({ spaces: SPACES }),
-    getSpaceStats: () => of({ memories: 0, entities: 0, edges: 0, chrono: 0, files: 0 }),
+    getSpaceStats: () => of({ facts: 0, entities: 0, edges: 0, chrono: 0, files: 0 }),
     getReindexStatus: () => of({ needsReindex: true }),
     getSpaceMeta: () => of({ tagSuggestions: [], typeSchemas: {} }),
-    listMemories: () => of({ memories: [] }),
+    listFacts: () => of({ facts: [] }),
     getEntitiesByIds: () => of({ entities: [] }),
     mintEventsTicket: () => of({ ticket: 't', expiresInMs: 60000 }),
     getErModel: () => of({
@@ -59,7 +59,7 @@ function makeApi(over: Record<string, unknown> = {}) {
     getSpaceActivity: () => of({ spaceId: 'work', hours: 168, spaces: [] }),
     listVotes: () => of({ rounds: [] }),
     // What the route really answers: scheduled, with every counter at zero.
-    reindex: () => of({ memories: 0, entities: 0, edges: 0, chrono: 0, files: 0 }),
+    reindex: () => of({ facts: 0, entities: 0, edges: 0, chrono: 0, files: 0 }),
     ...over,
   } as any;
 }

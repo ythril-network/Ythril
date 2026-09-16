@@ -24,7 +24,7 @@ Recommended host minimums:
 
 > **Slimmer install:** Ythril ships with bundled image and audio/video understanding
 > services so attachments become searchable automatically. If your machine is tight
-> on memory, turn it off in **Settings → Media Processing** — no command line needed.
+> on fact, turn it off in **Settings → Media Processing** — no command line needed.
 
 Quick checks:
 

@@ -13,7 +13,7 @@ POST /api/brain/spaces/:spaceId/chrono
 **Body**:
 
 `id` is optional here too — a **UUID v4** naming an **existing** entry to update, exactly as for a
-memory. See [Retry Safety](04-brain-api.md#retry-safety).
+fact. See [Retry Safety](04-brain-api.md#retry-safety).
 
 ```json
 {
@@ -70,7 +70,7 @@ memory. See [Retry Safety](04-brain-api.md#retry-safety).
   immediately. Check it yourself if that matters.
 - `confidence` — `0`–`1` (optional, useful for predictions)
 - `entityIds` — array of UUID v4 entity IDs (not names); returns `400` if any value is not a valid UUID and `strictLinkage` is enabled
-- `memoryIds` — array of UUID v4 memory IDs (not names); returns `400` if any value is not a valid UUID and `strictLinkage` is enabled
+- `memoryIds` — array of UUID v4 fact IDs (not names); returns `400` if any value is not a valid UUID and `strictLinkage` is enabled
 
 **Response** `201` — the created `ChronoEntry`.
 

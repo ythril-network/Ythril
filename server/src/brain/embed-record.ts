@@ -17,7 +17,7 @@
 
 import { col, asFilter } from '../db/mongo.js';
 import { embed } from './embedding.js';
-import { memoryEmbedText, entityEmbedText, edgeEmbedText, chronoEmbedText, fileEmbedText } from './embed-text.js';
+import { factEmbedText, entityEmbedText, edgeEmbedText, chronoEmbedText, fileEmbedText } from './embed-text.js';
 import { resolveEdgeEndpointNames } from './edge-endpoint-names.js';
 import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
@@ -34,9 +34,9 @@ export const COLLECTION: Record<BrainEmbedRecordType, string> = {
   fact: 'facts', entity: 'entities', edge: 'edges', chrono: 'chrono', file: 'files',
 };
 
-// `entityNames` was here: it resolved a record's linked entity ids to names for the memory and file builders,
+// `entityNames` was here: it resolved a record's linked entity ids to names for the fact and file builders,
 // which is the round-trip A-3 removed along with the prepend. Both of its consumers are gone, so it goes rather
-// than sitting unused — and with it one Mongo query per embedded memory and per embedded file.
+// than sitting unused — and with it one Mongo query per embedded fact and per embedded file.
 
 /**
  * The exact string this record's vector is built from.
@@ -52,7 +52,7 @@ export async function buildEmbedText(
   switch (recordType) {
     case 'fact': {
       const m = doc as unknown as FactDoc;
-      return memoryEmbedText(m.fact, m.tags ?? [], m.description, m.properties);
+      return factEmbedText(m.fact, m.tags ?? [], m.description, m.properties);
     }
     case 'entity': {
       const e = doc as unknown as EntityDoc;
@@ -103,10 +103,10 @@ export type EmbedOutcome = 'embedded' | 'gone' | 'excluded' | 'unchanged';
  *
  * Two things fall out of the change that are worth knowing before "simplifying" it back:
  *
- *  - **It is the contract creates already have.** `upsertEntity` and `remember` have queued by default since
+ *  - **It is the contract creates already have.** `upsertEntity` and `saveFact` have queued by default since
  *    the embed queue shipped, and `waitForEmbedding` is the documented opt-out. Updates were the odd one out.
  *  - **It deletes four copies of the embed-text builder.** Each update function had its own inline call to
- *    `entityEmbedText` / `memoryEmbedText` / …; `buildEmbedText` above is the one the queue uses, and one
+ *    `entityEmbedText` / `factEmbedText` / …; `buildEmbedText` above is the one the queue uses, and one
  *    copy cannot drift from itself.
  *
  * ## Load the record, build its text, embed it, store the vector.

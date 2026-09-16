@@ -35,7 +35,7 @@ const SCHEMA = [
   { knowledgeType: 'entity', typeName: 'place', schema: { propertySchemas: {} } },
   { knowledgeType: 'edge', typeName: 'works_at', schema: { endpoints: { from: ['person'], to: ['organization'] } } },
   { knowledgeType: 'chrono', typeName: 'event', schema: { propertySchemas: {} } },
-  { knowledgeType: 'memory', typeName: 'utterance', schema: { propertySchemas: {} } },
+  { knowledgeType: 'fact', typeName: 'utterance', schema: { propertySchemas: {} } },
 ];
 
 /** A file with nothing wrong with it. Each test breaks exactly one thing. */

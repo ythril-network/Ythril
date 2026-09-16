@@ -13,7 +13,7 @@
  *
  * ## It was four writers, not one
  *
- * The report names `remember`. Every create path passed a TYPE-ONLY object to `embeddingSuppressedFor` —
+ * The report names `saveFact`. Every create path passed a TYPE-ONLY object to `embeddingSuppressedFor` —
  * `{ type }`, `{ label }`, `{ type: fields.type }` — so the schema and space tiers were consulted and the
  * record tier was simply not stated, on memories, entities, edges and chrono alike. Fixing the one that was
  * reported and leaving three is this repo's signature defect arriving as an omission, which is why the sweep
@@ -69,7 +69,7 @@ describe('a record can be created already retired from search', { skip }, () => 
       spaces: [{ id: SPACE, label: 'General', builtIn: true, folders: [], meta: {} }],
     }, null, 2), { mode: 0o600 });
     loader.loadConfig();
-    mem = await import('../../server/dist/brain/memory.js');
+    mem = await import('../../server/dist/brain/fact.js');
     ents = await import('../../server/dist/brain/entities.js');
     edges = await import('../../server/dist/brain/edges.js');
     chrono = await import('../../server/dist/brain/chrono.js');
@@ -81,7 +81,7 @@ describe('a record can be created already retired from search', { skip }, () => 
   });
 
   beforeEach(async () => {
-    for (const c of ['entities', 'edges', 'memories', 'chrono', 'embed_jobs', 'tombstones']) {
+    for (const c of ['entities', 'edges', 'facts', 'chrono', 'embed_jobs', 'tombstones']) {
       await coll(c).deleteMany({});
     }
     await coll('entities').insertMany([
@@ -98,7 +98,7 @@ describe('a record can be created already retired from search', { skip }, () => 
    * stale in silence.
    */
   const CREATES = {
-    memory: async (opts) => (await mem.remember(SPACE, 'a fact', [], [], undefined, undefined, 'note', opts))._id,
+    fact: async (opts) => (await mem.saveFact(SPACE, 'a fact', [], [], undefined, undefined, 'note', opts))._id,
     entity: async (opts) => (await ents.upsertEntity(SPACE, 'Thing', 'concept', [], {}, undefined, undefined, opts)).entity._id,
     edge: async (opts) => (await edges.upsertEdge(SPACE, A, B, 'knows', undefined, undefined, undefined, undefined, undefined, undefined, undefined, opts))._id,
     // `opts` is the FIFTH parameter here — `actor` and `ttlDays` sit between it and `fields`. Passing it
@@ -109,7 +109,7 @@ describe('a record can be created already retired from search', { skip }, () => 
     }, undefined, undefined, opts))._id,
   };
 
-  const COLLECTION = { memory: 'memories', entity: 'entities', edge: 'edges', chrono: 'chrono' };
+  const COLLECTION = { fact: 'facts', entity: 'entities', edge: 'edges', chrono: 'chrono' };
 
   it('every writer is reachable (the suite cannot pass by importing nothing)', () => {
     for (const [kind, fn] of Object.entries(CREATES)) {
@@ -152,9 +152,9 @@ describe('a record can be created already retired from search', { skip }, () => 
     }, null, 2), { mode: 0o600 });
     loader.loadConfig();
     try {
-      const id = await CREATES.memory({ suppressEmbeddings: false });
+      const id = await CREATES.fact({ suppressEmbeddings: false });
       assert.equal(await jobsFor(id), 0, 'a record-level false re-enabled embedding in a suppressed space');
-      const doc = await coll('memories').findOne({ _id: id });
+      const doc = await coll('facts').findOne({ _id: id });
       assert.equal(doc.suppressEmbeddings, false, 'a stated false was not stored');
     } finally {
       fs.writeFileSync(CONFIG_PATH, JSON.stringify({
@@ -188,7 +188,7 @@ describe('every create path states the record tier', () => {
    * all four writers while the field was documented and worked on update.
    */
   const WRITERS = [
-    { file: 'server/src/brain/memory.ts', fn: 'remember' },
+    { file: 'server/src/brain/fact.ts', fn: 'saveFact' },
     { file: 'server/src/brain/entities.ts', fn: 'upsertEntity' },
     { file: 'server/src/brain/edges.ts', fn: 'upsertEdge' },
     { file: 'server/src/brain/chrono.ts', fn: 'createChrono' },

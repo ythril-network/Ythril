@@ -7,14 +7,14 @@
  *  - batch-upsert returns per-type stats (inserted, updated, forked, skipped, tombstoned)
  *  - batch-upsert respects tombstone: tombstoned doc is not re-inserted
  *  - batch-upsert 500-doc cap per type (limit enforcement)
- *  - POST /api/sync/memories — equal-seq + same-fact returns {status:'skipped'}
- *  - POST /api/sync/memories — equal-seq + different-fact returns {status:'forked'}
- *  - POST /api/sync/memories — tombstone with seq >= incoming blocks insert
- *  - POST /api/sync/memories — tombstone with seq < incoming allows insert
- *  - POST /api/sync/memories — requires spaceId
- *  - GET /api/sync/memories — requires spaceId
- *  - GET /api/sync/memories — cursor pagination pages correctly
- *  - GET /api/sync/memories — full=true returns complete docs
+ *  - POST /api/sync/facts — equal-seq + same-fact returns {status:'skipped'}
+ *  - POST /api/sync/facts — equal-seq + different-fact returns {status:'forked'}
+ *  - POST /api/sync/facts — tombstone with seq >= incoming blocks insert
+ *  - POST /api/sync/facts — tombstone with seq < incoming allows insert
+ *  - POST /api/sync/facts — requires spaceId
+ *  - GET /api/sync/facts — requires spaceId
+ *  - GET /api/sync/facts — cursor pagination pages correctly
+ *  - GET /api/sync/facts — full=true returns complete docs
  *
  * Run: node --test testing/sync/sync-api.test.js
  */
@@ -38,12 +38,12 @@ before(() => {
   token = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
 });
 
-// ── POST /api/sync/memories — seq rules ──────────────────────────────────
+// ── POST /api/sync/facts — seq rules ──────────────────────────────────
 
-describe('POST /api/sync/memories — conflict rules', () => {
+describe('POST /api/sync/facts — conflict rules', () => {
   it('returns {status:"inserted"} for a new document', async () => {
     const id = `seq-test-new-${RUN}`;
-    const r = await post(INSTANCES.a, token, '/api/sync/memories?spaceId=general', {
+    const r = await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: id, spaceId: 'general', fact: 'inserted fact', seq: 1, embedding: [], tags: [],
       entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
@@ -55,13 +55,13 @@ describe('POST /api/sync/memories — conflict rules', () => {
   it('returns {status:"updated"} when incoming seq > existing seq', async () => {
     const id = `seq-test-update-${RUN}`;
     // Insert with seq 10
-    await post(INSTANCES.a, token, '/api/sync/memories?spaceId=general', {
+    await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: id, spaceId: 'general', fact: 'original fact', seq: 10, embedding: [], tags: [],
       entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
     });
     // Re-upsert with seq 20 (higher)
-    const r = await post(INSTANCES.a, token, '/api/sync/memories?spaceId=general', {
+    const r = await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: id, spaceId: 'general', fact: 'updated fact', seq: 20, embedding: [], tags: [],
       entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
@@ -73,12 +73,12 @@ describe('POST /api/sync/memories — conflict rules', () => {
   it('returns {status:"skipped"} for equal seq + identical fact', async () => {
     const id = `seq-test-skip-${RUN}`;
     const fact = 'same fact same seq';
-    await post(INSTANCES.a, token, '/api/sync/memories?spaceId=general', {
+    await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: id, spaceId: 'general', fact, seq: 50, embedding: [], tags: [],
       entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
     });
-    const r = await post(INSTANCES.a, token, '/api/sync/memories?spaceId=general', {
+    const r = await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: id, spaceId: 'general', fact, seq: 50, embedding: [], tags: [],
       entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
@@ -89,12 +89,12 @@ describe('POST /api/sync/memories — conflict rules', () => {
 
   it('returns {status:"skipped"} when incoming seq < existing seq (older remote)', async () => {
     const id = `seq-test-older-${RUN}`;
-    await post(INSTANCES.a, token, '/api/sync/memories?spaceId=general', {
+    await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: id, spaceId: 'general', fact: 'newer local', seq: 100, embedding: [], tags: [],
       entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
     });
-    const r = await post(INSTANCES.a, token, '/api/sync/memories?spaceId=general', {
+    const r = await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: id, spaceId: 'general', fact: 'older remote', seq: 5, embedding: [], tags: [],
       entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
@@ -105,12 +105,12 @@ describe('POST /api/sync/memories — conflict rules', () => {
 
   it('returns {status:"forked"} for equal seq + different fact', async () => {
     const id = `seq-test-fork-${RUN}`;
-    await post(INSTANCES.a, token, '/api/sync/memories?spaceId=general', {
+    await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: id, spaceId: 'general', fact: 'branch A fact', seq: 77, embedding: [], tags: [],
       entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
     });
-    const r = await post(INSTANCES.a, token, '/api/sync/memories?spaceId=general', {
+    const r = await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: id, spaceId: 'general', fact: 'branch B different fact', seq: 77, embedding: [], tags: [],
       entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
@@ -125,12 +125,12 @@ describe('POST /api/sync/memories — conflict rules', () => {
     const id = `seq-tomb-block-${RUN}`;
     await post(INSTANCES.a, token, '/api/sync/tombstones?spaceId=general', {
       tombstones: [{
-        _id: id, type: 'memory', spaceId: 'general',
+        _id: id, type: 'fact', spaceId: 'general',
         deletedAt: new Date().toISOString(), instanceId: 'test', seq: 999,
       }],
     });
     // Now try to insert the same id with a lower seq
-    const r = await post(INSTANCES.a, token, '/api/sync/memories?spaceId=general', {
+    const r = await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: id, spaceId: 'general', fact: 'should be blocked', seq: 500, embedding: [], tags: [],
       entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
@@ -144,12 +144,12 @@ describe('POST /api/sync/memories — conflict rules', () => {
     const id = `seq-tomb-allow-${RUN}`;
     await post(INSTANCES.a, token, '/api/sync/tombstones?spaceId=general', {
       tombstones: [{
-        _id: id, type: 'memory', spaceId: 'general',
+        _id: id, type: 'fact', spaceId: 'general',
         deletedAt: new Date().toISOString(), instanceId: 'test', seq: 10,
       }],
     });
     // Incoming has higher seq — should override tombstone
-    const r = await post(INSTANCES.a, token, '/api/sync/memories?spaceId=general', {
+    const r = await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: id, spaceId: 'general', fact: 'newer than tombstone', seq: 50, embedding: [], tags: [],
       entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
@@ -159,7 +159,7 @@ describe('POST /api/sync/memories — conflict rules', () => {
   });
 
   it('returns 400 without spaceId', async () => {
-    const r = await post(INSTANCES.a, token, '/api/sync/memories', {
+    const r = await post(INSTANCES.a, token, '/api/sync/facts', {
       _id: 'x', spaceId: 'general', fact: 'test', seq: 1, embedding: [], tags: [],
       entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
@@ -168,14 +168,14 @@ describe('POST /api/sync/memories — conflict rules', () => {
   });
 
   it('returns 400 for invalid memory document (missing seq)', async () => {
-    const r = await post(INSTANCES.a, token, '/api/sync/memories?spaceId=general', {
+    const r = await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: 'no-seq', spaceId: 'general', fact: 'no seq',
     });
     assert.equal(r.status, 400);
   });
 
   it('returns 400 for memory with non-numeric seq', async () => {
-    const r = await post(INSTANCES.a, token, '/api/sync/memories?spaceId=general', {
+    const r = await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: 'bad-seq', spaceId: 'general', fact: 'bad', seq: 'not-a-number',
       embedding: [], tags: [], entityIds: [],
       author: { instanceId: 'test', instanceLabel: 'Test' },
@@ -185,7 +185,7 @@ describe('POST /api/sync/memories — conflict rules', () => {
   });
 
   it('returns 400 for memory with MongoDB operator in tags', async () => {
-    const r = await post(INSTANCES.a, token, '/api/sync/memories?spaceId=general', {
+    const r = await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: 'inject-tags', spaceId: 'general', fact: 'injection', seq: 1,
       embedding: [], tags: [{ $ne: '' }], entityIds: [],
       author: { instanceId: 'test', instanceLabel: 'Test' },
@@ -195,7 +195,7 @@ describe('POST /api/sync/memories — conflict rules', () => {
   });
 
   it('returns 400 for memory with missing author', async () => {
-    const r = await post(INSTANCES.a, token, '/api/sync/memories?spaceId=general', {
+    const r = await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: 'no-author', spaceId: 'general', fact: 'test', seq: 1,
       embedding: [], tags: [], entityIds: [],
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
@@ -204,7 +204,7 @@ describe('POST /api/sync/memories — conflict rules', () => {
   });
 
   it('returns 400 for memory with seq exceeding safety limit', async () => {
-    const r = await post(INSTANCES.a, token, '/api/sync/memories?spaceId=general', {
+    const r = await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: 'huge-seq', spaceId: 'general', fact: 'huge', seq: Number.MAX_SAFE_INTEGER,
       embedding: [], tags: [], entityIds: [],
       author: { instanceId: 'test', instanceLabel: 'Test' },
@@ -236,7 +236,7 @@ describe('POST /api/sync/memories — conflict rules', () => {
 
 describe('POST /api/sync/batch-upsert', () => {
   it('returns 400 without spaceId', async () => {
-    const r = await post(INSTANCES.a, token, '/api/sync/batch-upsert', { memories: [] });
+    const r = await post(INSTANCES.a, token, '/api/sync/batch-upsert', { facts: [] });
     assert.equal(r.status, 400);
   });
 
@@ -246,7 +246,7 @@ describe('POST /api/sync/batch-upsert', () => {
     const edgeId = `batch-edge-${RUN}`;
 
     const r = await post(INSTANCES.a, token, '/api/sync/batch-upsert?spaceId=general', {
-      memories: [{
+      facts: [{
         _id: memId, spaceId: 'general', fact: `batch fact ${RUN}`, seq: Date.now(), embedding: [], tags: [],
         entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
@@ -264,10 +264,10 @@ describe('POST /api/sync/batch-upsert', () => {
     });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.status, 'ok');
-    assert.ok(r.body.memories, 'memories stats must be present');
+    assert.ok(r.body.facts, 'memories stats must be present');
     assert.ok(r.body.entities, 'entities stats must be present');
     assert.ok(r.body.edges, 'edges stats must be present');
-    assert.equal(r.body.memories.inserted, 1, `Expected 1 inserted memory, got: ${JSON.stringify(r.body.memories)}`);
+    assert.equal(r.body.facts.inserted, 1, `Expected 1 inserted memory, got: ${JSON.stringify(r.body.facts)}`);
   });
 
   it('batch-upsert respects existing tombstone — tombstoned doc not re-inserted', async () => {
@@ -275,36 +275,36 @@ describe('POST /api/sync/batch-upsert', () => {
     // Plant tombstone first
     await post(INSTANCES.a, token, '/api/sync/tombstones?spaceId=general', {
       tombstones: [{
-        _id: id, type: 'memory', spaceId: 'general',
+        _id: id, type: 'fact', spaceId: 'general',
         deletedAt: new Date().toISOString(), instanceId: 'test', seq: 999,
       }],
     });
     // Try to upsert the tombstoned id
     const r = await post(INSTANCES.a, token, '/api/sync/batch-upsert?spaceId=general', {
-      memories: [{
+      facts: [{
         _id: id, spaceId: 'general', fact: `should be blocked ${RUN}`, seq: 500, embedding: [], tags: [],
         entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
       }],
     });
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.equal(r.body.memories.tombstoned, 1, `Expected 1 tombstoned, got: ${JSON.stringify(r.body.memories)}`);
-    assert.equal(r.body.memories.inserted, 0);
+    assert.equal(r.body.facts.tombstoned, 1, `Expected 1 tombstoned, got: ${JSON.stringify(r.body.facts)}`);
+    assert.equal(r.body.facts.inserted, 0);
   });
 
   it('batch-upsert silently skips documents with missing _id or seq', async () => {
     const r = await post(INSTANCES.a, token, '/api/sync/batch-upsert?spaceId=general', {
-      memories: [{ fact: 'no id or seq' }, null, {}],
+      facts: [{ fact: 'no id or seq' }, null, {}],
     });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     // All three should be silently skipped
-    assert.equal(r.body.memories.inserted, 0);
+    assert.equal(r.body.facts.inserted, 0);
   });
 
   it('batch-upsert drops documents containing non-string tags (Zod filter)', async () => {
     const goodId = `batch-zod-good-${RUN}`;
     const r = await post(INSTANCES.a, token, '/api/sync/batch-upsert?spaceId=general', {
-      memories: [
+      facts: [
         // valid
         {
           _id: goodId, spaceId: 'general', fact: 'good', seq: Date.now(), embedding: [], tags: [],
@@ -321,7 +321,7 @@ describe('POST /api/sync/batch-upsert', () => {
       ],
     });
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.equal(r.body.memories.inserted, 1, 'Only the valid memory should be inserted');
+    assert.equal(r.body.facts.inserted, 1, 'Only the valid memory should be inserted');
   });
 
   it('batch-upsert caps memories at 500 per type', async () => {
@@ -332,40 +332,40 @@ describe('POST /api/sync/batch-upsert', () => {
       author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
     }));
-    const r = await post(INSTANCES.a, token, '/api/sync/batch-upsert?spaceId=general', { memories: many });
+    const r = await post(INSTANCES.a, token, '/api/sync/batch-upsert?spaceId=general', { facts: many });
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    const total = r.body.memories.inserted + r.body.memories.updated + r.body.memories.skipped + r.body.memories.forked + r.body.memories.tombstoned;
+    const total = r.body.facts.inserted + r.body.facts.updated + r.body.facts.skipped + r.body.facts.forked + r.body.facts.tombstoned;
     assert.ok(total <= 500, `Expected at most 500 docs processed, got ${total}`);
   });
 
   it('returns 403 for forbidden space', async () => {
-    const r = await post(INSTANCES.a, token, '/api/sync/batch-upsert?spaceId=nonexistent', { memories: [] });
+    const r = await post(INSTANCES.a, token, '/api/sync/batch-upsert?spaceId=nonexistent', { facts: [] });
     assert.equal(r.status, 403);
   });
 
   it('returns 401 without auth', async () => {
     const r = await reqJson(INSTANCES.a, null, '/api/sync/batch-upsert?spaceId=general', {
-      method: 'POST', body: JSON.stringify({ memories: [] }),
+      method: 'POST', body: JSON.stringify({ facts: [] }),
     });
     assert.equal(r.status, 401);
   });
 });
 
-// ── GET /api/sync/memories — listing & pagination ─────────────────────────
+// ── GET /api/sync/facts — listing & pagination ─────────────────────────
 
-describe('GET /api/sync/memories — listing and cursor pagination', () => {
+describe('GET /api/sync/facts — listing and cursor pagination', () => {
   it('requires spaceId', async () => {
-    const r = await reqJson(INSTANCES.a, token, '/api/sync/memories');
+    const r = await reqJson(INSTANCES.a, token, '/api/sync/facts');
     assert.equal(r.status, 400);
   });
 
   it('returns 403 for unknown spaceId', async () => {
-    const r = await reqJson(INSTANCES.a, token, '/api/sync/memories?spaceId=nonexistent');
+    const r = await reqJson(INSTANCES.a, token, '/api/sync/facts?spaceId=nonexistent');
     assert.equal(r.status, 403);
   });
 
   it('returns items and nextCursor for the general space', async () => {
-    const r = await reqJson(INSTANCES.a, token, '/api/sync/memories?spaceId=general&limit=10');
+    const r = await reqJson(INSTANCES.a, token, '/api/sync/facts?spaceId=general&limit=10');
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.ok(Array.isArray(r.body.items), 'items must be an array');
     assert.ok('nextCursor' in r.body, 'nextCursor field must be present');
@@ -375,13 +375,13 @@ describe('GET /api/sync/memories — listing and cursor pagination', () => {
     // Seed a known memory with a known seq
     const id = `fullmode-${RUN}`;
     const seedSeq = Date.now();
-    await post(INSTANCES.a, token, '/api/sync/memories?spaceId=general', {
+    await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: id, spaceId: 'general', fact: `full mode test ${RUN}`, seq: seedSeq, embedding: [], tags: ['fullmode'],
       entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
     });
     // Use sinceSeq to target just this item (avoids being buried by earlier batch items)
-    const r = await reqJson(INSTANCES.a, token, `/api/sync/memories?spaceId=general&full=true&sinceSeq=${seedSeq - 1}&limit=5`);
+    const r = await reqJson(INSTANCES.a, token, `/api/sync/facts?spaceId=general&full=true&sinceSeq=${seedSeq - 1}&limit=5`);
     assert.equal(r.status, 200);
     const item = r.body.items.find(i => i._id === id);
     assert.ok(item, `Seeded memory ${id} must appear in full=true response`);
@@ -391,18 +391,18 @@ describe('GET /api/sync/memories — listing and cursor pagination', () => {
   it('cursor from page 1 retrieves different items on page 2', async () => {
     // Seed enough memories to guarantee at least 2 pages at limit=3
     for (let i = 0; i < 5; i++) {
-      await post(INSTANCES.a, token, '/api/sync/memories?spaceId=general', {
+      await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
         _id: `cursor-page-${RUN}-${i}`, spaceId: 'general', fact: `cursor page test ${RUN} ${i}`,
         seq: Date.now() + i + 10000, embedding: [], tags: [], entityIds: [],
         author: { instanceId: 'test', instanceLabel: 'Test' },
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
       });
     }
-    const page1 = await reqJson(INSTANCES.a, token, '/api/sync/memories?spaceId=general&limit=3');
+    const page1 = await reqJson(INSTANCES.a, token, '/api/sync/facts?spaceId=general&limit=3');
     assert.equal(page1.status, 200);
 
     if (page1.body.nextCursor) {
-      const page2 = await reqJson(INSTANCES.a, token, `/api/sync/memories?spaceId=general&limit=3&cursor=${page1.body.nextCursor}`);
+      const page2 = await reqJson(INSTANCES.a, token, `/api/sync/facts?spaceId=general&limit=3&cursor=${page1.body.nextCursor}`);
       assert.equal(page2.status, 200, `Page 2 request: ${JSON.stringify(page2.body)}`);
       assert.ok(Array.isArray(page2.body.items));
       const p1Ids = new Set(page1.body.items.map(i => i._id));
@@ -414,13 +414,13 @@ describe('GET /api/sync/memories — listing and cursor pagination', () => {
   });
 
   it('sinceSeq=0 returns all memories', async () => {
-    const r = await reqJson(INSTANCES.a, token, '/api/sync/memories?spaceId=general&sinceSeq=0&limit=500');
+    const r = await reqJson(INSTANCES.a, token, '/api/sync/facts?spaceId=general&sinceSeq=0&limit=500');
     assert.equal(r.status, 200);
     assert.ok(r.body.items.length > 0, 'Should have at least one memory (seeded above)');
   });
 
   it('returns 401 without auth', async () => {
-    const r = await reqJson(INSTANCES.a, null, '/api/sync/memories?spaceId=general');
+    const r = await reqJson(INSTANCES.a, null, '/api/sync/facts?spaceId=general');
     assert.equal(r.status, 401);
   });
 });

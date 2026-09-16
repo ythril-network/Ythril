@@ -78,24 +78,24 @@ describe('a record with no vector is never selected', () => {
   it('there is nothing to strip', () => {
     // The filter is what a bulk `$unset` runs against, so a record with no vector would be a write that
     // changes nothing — and would make the reported count meaningless.
-    assert.equal(swept({ suppressEmbeddings: true }, 'memory', { type: 'note' }), false);
+    assert.equal(swept({ suppressEmbeddings: true }, 'fact', { type: 'note' }), false);
   });
 });
 
 describe('the space tier', () => {
   it('selects a record whose type says nothing', () => {
-    assert.equal(swept({ suppressEmbeddings: true }, 'memory', withVector({ type: 'note' })), true);
+    assert.equal(swept({ suppressEmbeddings: true }, 'fact', withVector({ type: 'note' })), true);
   });
 
   it('selects nothing when the space tier is off', () => {
-    assert.equal(swept({ suppressEmbeddings: false }, 'memory', withVector({ type: 'note' })), false);
-    assert.equal(swept({}, 'memory', withVector({ type: 'note' })), false);
+    assert.equal(swept({ suppressEmbeddings: false }, 'fact', withVector({ type: 'note' })), false);
+    assert.equal(swept({}, 'fact', withVector({ type: 'note' })), false);
   });
 });
 
 describe('the record tier overrides the space, and only `true` counts as stated', () => {
   it('a record flagged true is selected even with the space tier off', () => {
-    assert.equal(swept({}, 'memory', withVector({ type: 'note', suppressEmbeddings: true })), true);
+    assert.equal(swept({}, 'fact', withVector({ type: 'note', suppressEmbeddings: true })), true);
   });
 
   it('and the retired spelling does NOT count — it is a field like any other now', () => {
@@ -107,7 +107,7 @@ describe('the record tier overrides the space, and only `true` counts as stated'
      * Asserted rather than deleted, because the sweep reading a key nothing writes is not harmless — it
      * would strip vectors from records nobody suppressed, on a field left over from an old document.
      */
-    assert.equal(swept({}, 'memory', withVector({ type: 'note', excludeFromVectorSearch: true })), false,
+    assert.equal(swept({}, 'fact', withVector({ type: 'note', excludeFromVectorSearch: true })), false,
       'the sweep still honours the retired spelling, so a stale key strips a vector nobody asked to remove');
   });
 
@@ -118,35 +118,35 @@ describe('the record tier overrides the space, and only `true` counts as stated'
      * override would make the space-wide switch do nothing for any record anybody had ever explicitly
      * un-suppressed — which is the failure its own docblock warns about.
      */
-    assert.equal(swept({ suppressEmbeddings: true }, 'memory',
+    assert.equal(swept({ suppressEmbeddings: true }, 'fact',
       withVector({ type: 'note', suppressEmbeddings: false })), true);
   });
 });
 
 describe('the schema tier sits between them', () => {
-  const meta = (space, schemas) => ({ suppressEmbeddings: space, typeSchemas: { memory: schemas } });
+  const meta = (space, schemas) => ({ suppressEmbeddings: space, typeSchemas: { fact: schemas } });
 
   it('a type whose schema says true is selected even with the space tier off', () => {
     // The population the defect created: a schema flag set months ago, and every record written before it
     // still carrying a vector. A before/after diff would never reach these.
-    assert.equal(swept(meta(false, { note: { suppressEmbeddings: true } }), 'memory',
+    assert.equal(swept(meta(false, { note: { suppressEmbeddings: true } }), 'fact',
       withVector({ type: 'note' })), true);
   });
 
   it('a type whose schema says FALSE is spared, even with the space tier on', () => {
     // At the SCHEMA tier a `false` DOES override the space — the opposite of the record tier. This is the pair
     // of assertions that stops the two rules being conflated.
-    assert.equal(swept(meta(true, { note: { suppressEmbeddings: false } }), 'memory',
+    assert.equal(swept(meta(true, { note: { suppressEmbeddings: false } }), 'fact',
       withVector({ type: 'note' })), false);
   });
 
   it('a type the schema does not mention still follows the space', () => {
-    assert.equal(swept(meta(true, { other: { suppressEmbeddings: false } }), 'memory',
+    assert.equal(swept(meta(true, { other: { suppressEmbeddings: false } }), 'fact',
       withVector({ type: 'note' })), true);
   });
 
   it('a record flagged true beats a schema that says false', () => {
-    assert.equal(swept(meta(false, { note: { suppressEmbeddings: false } }), 'memory',
+    assert.equal(swept(meta(false, { note: { suppressEmbeddings: false } }), 'fact',
       withVector({ type: 'note', suppressEmbeddings: true })), true);
   });
 });

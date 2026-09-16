@@ -151,7 +151,7 @@ describe('bulkWipeRateLimit on bulk DELETE (5/min)', () => {
   it('reaches the route once, then 429s within the limit (5/min)', async () => {
     // Non-existent space + missing confirm body: the request is counted by the
     // limiter but can never delete anything.
-    const bulkDelete = () => fetch(`${INSTANCES.c}/api/brain/spaces/rl-bulkwipe-probe/memories`, {
+    const bulkDelete = () => fetch(`${INSTANCES.c}/api/brain/spaces/rl-bulkwipe-probe/facts`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${tokenC}` },
       body: JSON.stringify({}),
@@ -195,9 +195,9 @@ describe('syncRateLimit (2000/min)', () => {
     tokenC = fs.readFileSync(TOKEN_FILE_C, 'utf8').trim();
   });
 
-  it('Burst past 2000 GET /api/sync/memories → first reaches the route, at least one 429', async () => {
+  it('Burst past 2000 GET /api/sync/facts → first reaches the route, at least one 429', async () => {
     // No spaceId → fast 400 from the handler; the limiter counts it anyway.
-    const req = () => fetch(`${INSTANCES.c}/api/sync/memories`, { headers: { 'Authorization': `Bearer ${tokenC}` } });
+    const req = () => fetch(`${INSTANCES.c}/api/sync/facts`, { headers: { 'Authorization': `Bearer ${tokenC}` } });
     const first = await waitForFreshWindow(req);
     assert.equal(first, 400, `First request must reach the handler (positive control), got ${first}`);
 

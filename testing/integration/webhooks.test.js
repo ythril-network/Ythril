@@ -76,7 +76,7 @@ describe('Webhook admin API — validation', () => {
 
   it('accepts a valid https public-form URL (201) and never leaks the secret', async () => {
     const r = await post(INSTANCES.a, token, '/api/admin/webhooks', {
-      url: SINK, secret: 'whsec_valid_1234', events: ['memory.created'],
+      url: SINK, secret: 'whsec_valid_1234', events: ['fact.created'],
     });
     assert.equal(r.status, 201, `Expected 201, got ${r.status}: ${JSON.stringify(r.body)}`);
     assert.ok(r.body.id, 'created webhook must return an id');
@@ -104,7 +104,7 @@ describe('Webhook dispatch — real match + sign + deliver + log', () => {
 
     const m = await post(INSTANCES.a, token, '/api/admin/webhooks', {
       url: `${SINK}?w=match`, secret: 'whsec_match_1234',
-      spaces: [spaceX], events: ['memory.created'],
+      spaces: [spaceX], events: ['fact.created'],
     });
     assert.equal(m.status, 201, `create match hook: ${JSON.stringify(m.body)}`);
     hookMatch = m.body.id;
@@ -127,17 +127,17 @@ describe('Webhook dispatch — real match + sign + deliver + log', () => {
   });
 
   it('a matching memory.created fires a real delivery that is recorded', async () => {
-    const created = await post(INSTANCES.a, token, `/api/brain/spaces/${spaceX}/memories`, {
+    const created = await post(INSTANCES.a, token, `/api/brain/spaces/${spaceX}/facts`, {
       fact: `webhook-match-${RUN}`, tags: ['wh'],
     });
-    assert.equal(created.status, 201, `create memory: ${JSON.stringify(created.body)}`);
+    assert.equal(created.status, 201, `create fact: ${JSON.stringify(created.body)}`);
 
     // The dispatcher matched, signed, attempted delivery (DNS-fails on .invalid),
     // and recorded the attempt. Poll the delivery log for the memory.created row.
     let delivery;
     await waitFor(async () => {
       const r = await get(INSTANCES.a, token, `/api/admin/webhooks/${hookMatch}/deliveries`);
-      delivery = r.body.deliveries?.find(d => d.event === 'memory.created');
+      delivery = r.body.deliveries?.find(d => d.event === 'fact.created');
       return Boolean(delivery);
     }, 20_000, 500, 'no memory.created delivery was recorded — emit/match/dispatch path did not run');
 
@@ -155,7 +155,7 @@ describe('Webhook dispatch — real match + sign + deliver + log', () => {
     // filter under test.
     const r = await get(INSTANCES.a, token, `/api/admin/webhooks/${hookOther}/deliveries`);
     assert.equal(r.status, 200);
-    const leaked = (r.body.deliveries ?? []).find(d => d.event === 'memory.created');
+    const leaked = (r.body.deliveries ?? []).find(d => d.event === 'fact.created');
     assert.ok(!leaked, 'a webhook filtered to entity.created must not receive memory.created');
   });
 
@@ -187,7 +187,7 @@ describe('Webhook dispatch — real match + sign + deliver + log', () => {
   });
 
   it('a space-filter mismatch does not deliver (memory in an unsubscribed space)', async () => {
-    const created = await post(INSTANCES.a, token, `/api/brain/spaces/${spaceY}/memories`, {
+    const created = await post(INSTANCES.a, token, `/api/brain/spaces/${spaceY}/facts`, {
       fact: `webhook-nomatch-${RUN}`, tags: ['wh'],
     });
     assert.equal(created.status, 201);

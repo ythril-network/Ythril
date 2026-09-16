@@ -43,9 +43,9 @@ describe('the lookup', () => {
 
   it('distinguishes methods on the same path', () => {
     // GET and DELETE on a collection are not the same permission, and a path-only lookup would say they are.
-    assert.equal(rungFor('GET', '/api/brain/spaces/:spaceId/memories').needs, 'read');
-    assert.equal(rungFor('POST', '/api/brain/spaces/:spaceId/memories').needs, 'write');
-    assert.equal(rungFor('DELETE', '/api/brain/spaces/:spaceId/memories').needs, 'admin');
+    assert.equal(rungFor('GET', '/api/brain/spaces/:spaceId/facts').needs, 'read');
+    assert.equal(rungFor('POST', '/api/brain/spaces/:spaceId/facts').needs, 'write');
+    assert.equal(rungFor('DELETE', '/api/brain/spaces/:spaceId/facts').needs, 'admin');
   });
 
   it('says UNCLASSIFIED for a route nobody decided about, NOT a permissive default', () => {

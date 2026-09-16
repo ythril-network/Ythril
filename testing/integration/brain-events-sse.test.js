@@ -75,14 +75,14 @@ describe('brain events SSE (F12)', () => {
       const eventP = nextEvent(res);
       await delay(300); // ensure the server-side subscription is active before we write
 
-      const w = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/memories', { fact: `sse-probe-${Date.now()}` });
+      const w = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/facts', { fact: `sse-probe-${Date.now()}` });
       assert.equal(w.status, 201, JSON.stringify(w.body));
 
       const ev = await Promise.race([eventP, delay(10_000).then(() => { throw new Error('no SSE event within 10s'); })]);
-      assert.equal(ev.event, 'memory.created', `unexpected event: ${JSON.stringify(ev)}`);
+      assert.equal(ev.event, 'fact.created', `unexpected event: ${JSON.stringify(ev)}`);
       assert.equal(ev.id, w.body._id, 'event should carry the new record id');
 
-      await del(INSTANCES.a, tokenA, `/api/brain/spaces/general/memories/${w.body._id}`).catch(() => {});
+      await del(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${w.body._id}`).catch(() => {});
     } finally {
       req.destroy();
     }

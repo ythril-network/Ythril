@@ -9,7 +9,7 @@
  *
  * Probed against a running instance on 2026-08-13:
  *
- * | token | `DELETE /api/brain/spaces/general/memories/:id` |
+ * | token | `DELETE /api/brain/spaces/general/facts/:id` |
  * |---|---|
  * | minted with an explicit `rights` matrix (`knowledge: write`) | **403** `Token needs 'admin' on knowledge…` |
  * | minted with no rights at all | **204** — the rung was never consulted |

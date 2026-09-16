@@ -7,7 +7,7 @@
  * ## What slice 2a is, and what it deliberately is not
  *
  * Slice 1 gave a link record a collection, a hash, replication and a query door. **Nothing wrote one.** This
- * is the write half: every path that writes `memory.entityIds`, `chrono.entityIds`/`memoryIds` or
+ * is the write half: every path that writes `fact.entityIds`, `chrono.entityIds`/`memoryIds` or
  * `file.entityIds`/`memoryIds`/`chronoIds` also maintains the matching link records.
  *
  * **No reader changes in 2a.** `the-link-baseline-3x-answered-db.test.js` must stay green with no edits — if
@@ -23,9 +23,9 @@
  * **Clearing the array removes the records.** The direction nobody tests, and the one that rots data: a link
  * record surviving the array that produced it is a connection the graph reports and the record denies.
  *
- * **`remember`'s converge path is its own case.** `brain/memory.ts` writes `entityIds` UNCONDITIONALLY when
+ * **`saveFact`'s converge path is its own case.** `brain/fact.ts` writes `entityIds` UNCONDITIONALLY when
  * a caller supplies an `id` that already exists, from a parameter defaulting to `[]` — so a retried
- * `remember` with no `entityIds` wipes the stored links. `createChrono`'s equivalent is guarded and this one
+ * `saveFact` with no `entityIds` wipes the stored links. `createChrono`'s equivalent is guarded and this one
  * is not, so the link records have to follow that wipe rather than being left behind by it.
  *
  * **`updateChrono` writes through a COMPUTED KEY** — `$set[k] = v` over `Object.entries(updates)` — so no
@@ -74,7 +74,7 @@ describe('a link record follows the array that made it', { skip }, () => {
     }, null, 2), { mode: 0o600 });
     const loader = await import('../../server/dist/config/loader.js');
     loader.loadConfig();
-    memoryMod = await import('../../server/dist/brain/memory.js');
+    memoryMod = await import('../../server/dist/brain/fact.js');
     chronoMod = await import('../../server/dist/brain/chrono.js');
     fileMetaMod = await import('../../server/dist/files/file-meta.js');
     edgeIdMod = await import('../../server/dist/brain/edge-id.js');
@@ -87,7 +87,7 @@ describe('a link record follows the array that made it', { skip }, () => {
   });
 
   beforeEach(async () => {
-    for (const c of ['entities', 'edges', 'memories', 'chrono', 'files', 'links', 'tombstones']) {
+    for (const c of ['entities', 'edges', 'facts', 'chrono', 'files', 'links', 'tombstones']) {
       await coll(c).deleteMany({});
     }
     await coll('entities').insertMany([
@@ -99,8 +99,8 @@ describe('a link record follows the array that made it', { skip }, () => {
   it('the modules are the ones this gate thinks they are', () => {
     // Floors everything below: a renamed export makes each case throw rather than assert, and a file that
     // throws in `before` reports zero failures for the property it exists to pin.
-    assert.equal(typeof memoryMod.remember, 'function', 'remember');
-    assert.equal(typeof memoryMod.updateMemory, 'function', 'updateMemory');
+    assert.equal(typeof memoryMod.saveFact, 'function', 'saveFact');
+    assert.equal(typeof memoryMod.updateFact, 'function', 'updateFact');
     assert.equal(typeof chronoMod.createChrono, 'function', 'createChrono');
     assert.equal(typeof chronoMod.updateChrono, 'function', 'updateChrono');
     assert.equal(typeof fileMetaMod.updateFileMeta, 'function', 'updateFileMeta');
@@ -108,9 +108,9 @@ describe('a link record follows the array that made it', { skip }, () => {
   });
 
   it('remembering a memory that names two entities writes two link records', async () => {
-    const m = await memoryMod.remember(SPACE, 'One and Two are related', [E1, E2]);
+    const m = await memoryMod.saveFact(SPACE, 'One and Two are related', [E1, E2]);
     assert.ok(m?._id, `remember returned nothing usable: ${JSON.stringify(m)}`);
-    assert.deepEqual(await linkPairs(), [`memory:${m._id}>entity:${E1}`, `memory:${m._id}>entity:${E2}`]);
+    assert.deepEqual(await linkPairs(), [`fact:${m._id}>entity:${E1}`, `fact:${m._id}>entity:${E2}`]);
   });
 
   it('the link id is DERIVED, so the same connection is never stored twice', async () => {
@@ -119,12 +119,12 @@ describe('a link record follows the array that made it', { skip }, () => {
      * class, so re-writing the same array cannot produce a second row — and the script can be re-run over a
      * space it has already converted without checking whether it has.
      */
-    const m = await memoryMod.remember(SPACE, 'Stable', [E1]);
+    const m = await memoryMod.saveFact(SPACE, 'Stable', [E1]);
     const [first] = await links();
-    assert.equal(first._id, edgeIdMod.edgeIdFor(m._id, E1, 'memory.entityIds', 'memory', 'entity'),
+    assert.equal(first._id, edgeIdMod.edgeIdFor(m._id, E1, 'fact.entityIds', 'fact', 'entity'),
       'the id must come from `edgeIdFor`, or an idempotent re-run is impossible');
 
-    await memoryMod.updateMemory(SPACE, m._id, { entityIds: [E1] });
+    await memoryMod.updateFact(SPACE, m._id, { entityIds: [E1] });
     const after = await links();
     assert.equal(after.length, 1, `re-writing the same link made ${after.length} rows`);
     assert.equal(after[0]._id, first._id, 'and the id did not move');
@@ -133,49 +133,49 @@ describe('a link record follows the array that made it', { skip }, () => {
   it('CLEARING the array removes the link records — the direction that rots data', async () => {
     // A link record surviving the array that produced it is a connection the graph reports and the record
     // denies. Nothing reads links yet in 2a, so this is the only place that failure would be visible.
-    const m = await memoryMod.remember(SPACE, 'Then nothing', [E1, E2]);
+    const m = await memoryMod.saveFact(SPACE, 'Then nothing', [E1, E2]);
     assert.equal((await links()).length, 2);
-    await memoryMod.updateMemory(SPACE, m._id, { entityIds: [] });
+    await memoryMod.updateFact(SPACE, m._id, { entityIds: [] });
     assert.deepEqual(await linkPairs(), [], 'the links outlived the array that made them');
   });
 
   it('NARROWING the array removes only the link that went', async () => {
-    const m = await memoryMod.remember(SPACE, 'Two then one', [E1, E2]);
-    await memoryMod.updateMemory(SPACE, m._id, { entityIds: [E2] });
-    assert.deepEqual(await linkPairs(), [`memory:${m._id}>entity:${E2}`]);
+    const m = await memoryMod.saveFact(SPACE, 'Two then one', [E1, E2]);
+    await memoryMod.updateFact(SPACE, m._id, { entityIds: [E2] });
+    assert.deepEqual(await linkPairs(), [`fact:${m._id}>entity:${E2}`]);
   });
 
   it('remember\'s CONVERGE path takes the links with it when it wipes the array', async () => {
     /*
-     * `brain/memory.ts` writes `entityIds` unconditionally on the converge-on-supplied-id branch, from a
-     * parameter that defaults to `[]`. So a retried `remember` carrying the id and no entities wipes the
+     * `brain/fact.ts` writes `entityIds` unconditionally on the converge-on-supplied-id branch, from a
+     * parameter that defaults to `[]`. So a retried `saveFact` carrying the id and no entities wipes the
      * stored links — deliberate or not, the link records must follow, or they are left describing a
      * connection the memory no longer claims.
      *
      * `createChrono`'s equivalent branch is GUARDED and does not clear. The asymmetry is real, it is
      * recorded on the `M-2` row, and this case is what stops 2a papering over it.
      */
-    const m = await memoryMod.remember(SPACE, 'Converge', [E1, E2]);
+    const m = await memoryMod.saveFact(SPACE, 'Converge', [E1, E2]);
     assert.equal((await links()).length, 2);
     // The id is the ELEVENTH positional parameter, and its own docblock calls it the twelfth — so it is
-    // spread rather than counted out by hand. `remember`'s comment already says the tail should have
+    // spread rather than counted out by hand. `saveFact`'s comment already says the tail should have
     // become an options object; a test that miscounts it silently exercises the INSERT branch instead
     // and passes for the wrong reason, which is what happened on the first run of this case.
-    await memoryMod.remember(SPACE, 'Converge', ...Array(8).fill(undefined), m._id);
-    const stored = await coll('memories').findOne({ _id: m._id });
+    await memoryMod.saveFact(SPACE, 'Converge', ...Array(8).fill(undefined), m._id);
+    const stored = await coll('facts').findOne({ _id: m._id });
     assert.deepEqual(stored.entityIds, [], 'precondition: the converge path wiped the array');
     assert.deepEqual(await linkPairs(), [], 'so the link records must be gone with it');
   });
 
   it('a chrono entry writes BOTH its classes, and they are told apart by the to-kind', async () => {
-    const m = await memoryMod.remember(SPACE, 'Named by a chrono', []);
+    const m = await memoryMod.saveFact(SPACE, 'Named by a chrono', []);
     const ch = await chronoMod.createChrono(SPACE, {
       title: 'Incident', type: 'event', startsAt: '2026-01-01T00:00:00.000Z',
       entityIds: [E1], memoryIds: [m._id],
     });
     assert.ok(ch?._id, `createChrono returned nothing usable: ${JSON.stringify(ch)}`);
     assert.deepEqual(await linkPairs(),
-      [`chrono:${ch._id}>entity:${E1}`, `chrono:${ch._id}>memory:${m._id}`].sort());
+      [`chrono:${ch._id}>entity:${E1}`, `chrono:${ch._id}>fact:${m._id}`].sort());
   });
 
   it('updateChrono maintains them too — the writer whose $set key is COMPUTED', async () => {
@@ -189,7 +189,7 @@ describe('a link record follows the array that made it', { skip }, () => {
   });
 
   it('a file\'s three classes are maintained by updateFileMeta', async () => {
-    const m = await memoryMod.remember(SPACE, 'Named by a file', []);
+    const m = await memoryMod.saveFact(SPACE, 'Named by a file', []);
     const ch = await chronoMod.createChrono(SPACE, {
       title: 'Also named', type: 'event', startsAt: '2026-01-01T00:00:00.000Z',
     });
@@ -203,7 +203,7 @@ describe('a link record follows the array that made it', { skip }, () => {
     assert.deepEqual(await linkPairs(), [
       `file:notes/a.md>chrono:${ch._id}`,
       `file:notes/a.md>entity:${E1}`,
-      `file:notes/a.md>memory:${m._id}`,
+      `file:notes/a.md>fact:${m._id}`,
     ].sort());
   });
 
@@ -220,7 +220,7 @@ describe('a link record follows the array that made it', { skip }, () => {
      * A field promoted from optional to required, or a new required field, would have left this case
      * asserting the old nine and reporting that a link record carries everything a replicated document must.
      */
-    const m = await memoryMod.remember(SPACE, 'Complete', [E1]);
+    const m = await memoryMod.saveFact(SPACE, 'Complete', [E1]);
     const [l] = await links();
     const required = Object.entries(IncomingLinkDoc.shape)
       .filter(([, v]) => !v.isOptional())
@@ -249,7 +249,7 @@ describe('a link record follows the array that made it', { skip }, () => {
      * asserts the array is still the thing the walk follows, from inside the slice that could break it.
      */
     const edges = await import('../../server/dist/brain/edges.js');
-    const m = await memoryMod.remember(SPACE, 'Still arrays', [E1]);
+    const m = await memoryMod.saveFact(SPACE, 'Still arrays', [E1]);
     assert.equal((await links()).length, 1, 'precondition: a link record exists');
 
     // Memories are opt-in on the walk. With the flag OFF the memory must not be reached — which it would be

@@ -162,7 +162,7 @@ spacesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
    */
   const usageBySpaceId = await measureSpaceUsage(visibleSpaces.map(sp => sp.id));
 
-  // Optional per-space entity/memory/edge/chrono counts (?counts=true)
+  // Optional per-space entity/fact/edge/chrono counts (?counts=true)
   const includeCounts = req.query['counts'] === 'true';
   let countsBySpaceId: Record<string, { facts: number; entities: number; edges: number; chrono: number }> = {};
   if (includeCounts) {
@@ -537,7 +537,7 @@ spacesRouter.get('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
   const { id, knowledgeType, typeName } = req.params as { id: string; knowledgeType: string; typeName: string };
 
   if (!VALID_KNOWLEDGE_TYPES.has(knowledgeType)) {
-    res.status(400).json({ error: `Invalid knowledgeType '${knowledgeType}'. Must be one of: entity, memory, edge, chrono` });
+    res.status(400).json({ error: `Invalid knowledgeType '${knowledgeType}'. Must be one of: entity, fact, edge, chrono` });
     return;
   }
 
@@ -563,7 +563,7 @@ spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
   const { id, knowledgeType, typeName } = req.params as { id: string; knowledgeType: string; typeName: string };
 
   if (!VALID_KNOWLEDGE_TYPES.has(knowledgeType)) {
-    res.status(400).json({ error: `Invalid knowledgeType '${knowledgeType}'. Must be one of: entity, memory, edge, chrono` });
+    res.status(400).json({ error: `Invalid knowledgeType '${knowledgeType}'. Must be one of: entity, fact, edge, chrono` });
     return;
   }
 
@@ -642,7 +642,7 @@ spacesRouter.delete('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRate
   const { id, knowledgeType, typeName } = req.params as { id: string; knowledgeType: string; typeName: string };
 
   if (!VALID_KNOWLEDGE_TYPES.has(knowledgeType)) {
-    res.status(400).json({ error: `Invalid knowledgeType '${knowledgeType}'. Must be one of: entity, memory, edge, chrono` });
+    res.status(400).json({ error: `Invalid knowledgeType '${knowledgeType}'. Must be one of: entity, fact, edge, chrono` });
     return;
   }
 
@@ -741,7 +741,7 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
   const dryMeta = parsedMeta.data as SpaceMeta;
 
   // Import validation functions dynamically to avoid circular deps
-  const { validateEntity, validateEdge, validateMemory, validateChrono, resolveMetaRefs } = await import('../spaces/schema-validation.js');
+  const { validateEntity, validateEdge, validateFact, validateChrono, resolveMetaRefs } = await import('../spaces/schema-validation.js');
   const resolvedMeta = resolveMetaRefs(dryMeta);
 
   const violations: Array<{ collection: string; _id: string; violations: Array<{ field: string; value: unknown; reason: string }> }> = [];
@@ -761,11 +761,11 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
     // explains why they live in a module of their own rather than here.
     violations.push(...await validateStoredEdges(mid, resolvedMeta, SCAN_LIMIT));
 
-    // Memories
-    const memories = await col(`${mid}_facts`).find({}).limit(SCAN_LIMIT).toArray();
-    for (const mem of memories) {
+    // Facts
+    const facts = await col(`${mid}_facts`).find({}).limit(SCAN_LIMIT).toArray();
+    for (const mem of facts) {
       const doc = mem as unknown as { _id: string; properties?: Record<string, unknown> };
-      const v = validateMemory(resolvedMeta, doc);
+      const v = validateFact(resolvedMeta, doc);
       if (v.length) violations.push({ collection: 'facts', _id: String(doc._id), violations: v });
     }
 

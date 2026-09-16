@@ -2,7 +2,7 @@
  * What a record CLAIMS, for the structured contradiction judge.
  *
  * The judge compares two records key-by-key: same key, different value, single-valued ⇒ they disagree. For
- * memories and entities that map is simply `properties`. Chrono entries are the reason this module exists —
+ * facts and entities that map is simply `properties`. Chrono entries are the reason this module exists —
  * their most contradictable claim is not in `properties` at all but in a top-level column, so without this
  * the structured judge would have had nothing to compare and chrono would have been swept by a judge that
  * could only ever return "no structured conflict".

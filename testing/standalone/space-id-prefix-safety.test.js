@@ -10,7 +10,7 @@
  *
  * They are correct today for one reason: a space id is validated `^[a-z0-9-]+$`, so `_` cannot appear
  * inside an id and is an unambiguous separator. A sibling space `work-archive` owns
- * `work-archive_memories`, which does not start with `work_`.
+ * `work-archive_facts`, which does not start with `work_`.
  *
  * Nothing states that dependency at the validation site, and it is the kind of rule that gets relaxed for
  * a good-sounding reason — readability, or accepting an id from an external system. If `_` were ever
@@ -78,7 +78,7 @@ describe('wipe → review findings', () => {
 
   it('every wipeable collection either maps to a finding type or has none by construction', () => {
     /*
-     * The collection plural ("memories") and the finding type ("memory") are different vocabularies. A
+     * The collection plural ("facts") and the finding type ("fact") are different vocabularies. A
      * missing entry does not fail; it just leaves findings pointing at records that no longer exist.
      *
      * ## This asserted a COUNT, and the count stopped being the question
@@ -96,14 +96,14 @@ describe('wipe → review findings', () => {
     const mapped = candidateTypesForWipe(new Set(WIPE_COLLECTION_TYPES));
     assert.ok(mapped.every(t => typeof t === 'string' && t.length > 0),
       `a mapped finding type is empty or not a string: ${JSON.stringify(mapped)}`);
-    assert.deepEqual([...mapped].sort(), ['chrono', 'edge', 'entity', 'file', 'memory'],
+    assert.deepEqual([...mapped].sort(), ['chrono', 'edge', 'entity', 'fact', 'file'],
       `the collections that DO have findings must all still map; got ${JSON.stringify(mapped)}`);
     assert.ok(WIPE_COLLECTION_TYPES.length > mapped.length,
       'if every wipeable collection has findings again, this expectation is the thing to update');
   });
 
   it('clears only the wiped type', () => {
-    assert.deepEqual(candidateTypesForWipe(new Set(['memories'])), ['memory']);
+    assert.deepEqual(candidateTypesForWipe(new Set(['facts'])), ['fact']);
     assert.deepEqual(candidateTypesForWipe(new Set(['entities', 'chrono'])).sort(), ['chrono', 'entity']);
   });
 
@@ -120,18 +120,18 @@ describe('space id charset — the collision it prevents', () => {
 
   it('does not let a sibling space be caught by another space\'s prefix', () => {
     // Legal sibling ids under the current charset. Hyphen, not underscore, is what keeps them apart.
-    assert.equal(startsWithPrefix('work-archive_memories', 'work'), false);
-    assert.equal(startsWithPrefix('work2_memories', 'work'), false);
-    assert.equal(startsWithPrefix('workspace_memories', 'work'), false);
+    assert.equal(startsWithPrefix('work-archive_facts', 'work'), false);
+    assert.equal(startsWithPrefix('work2_facts', 'work'), false);
+    assert.equal(startsWithPrefix('workspace_facts', 'work'), false);
   });
 
   it('still matches the space\'s own collections', () => {
-    assert.equal(startsWithPrefix('work_memories', 'work'), true);
+    assert.equal(startsWithPrefix('work_facts', 'work'), true);
     assert.equal(startsWithPrefix('work_contradiction_candidates', 'work'), true);
   });
 
   it('WOULD collide if underscores were ever allowed — the thing being guarded', () => {
     // If `work_archive` were a legal id, this is what dropping `work` would take with it.
-    assert.equal(startsWithPrefix('work_archive_memories', 'work'), true);
+    assert.equal(startsWithPrefix('work_archive_facts', 'work'), true);
   });
 });

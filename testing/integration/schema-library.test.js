@@ -600,7 +600,7 @@ describe('GET /api/schema-library/:name/usages — link counter', () => {
   it('returns empty usages array for an entry with no $refs', async () => {
     // Create an unlinked entry
     const unlinkedName = `lib-test-${RUN}-unlinked`;
-    await createEntry({ name: unlinkedName, knowledgeType: 'memory', typeName: 'note', schema: {} });
+    await createEntry({ name: unlinkedName, knowledgeType: 'fact', typeName: 'note', schema: {} });
     const r = await get(INSTANCES.a, token(), `/api/schema-library/${encodeURIComponent(unlinkedName)}/usages`);
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.usages.length, 0, `Expected 0 usages, got ${r.body.usages.length}`);
@@ -1048,7 +1048,7 @@ describe('Schema group support — schemaGroup field, GET /groups, POST /export-
     });
     await createEntry({
       name: GROUP_ENTRY_B,
-      knowledgeType: 'memory',
+      knowledgeType: 'fact',
       typeName: 'note',
       schema: { namingPattern: '^note-' },
       schemaGroup: GROUP_NAME,
@@ -1096,7 +1096,7 @@ describe('Schema group support — schemaGroup field, GET /groups, POST /export-
 
   it('PUT clears schemaGroup with null', async () => {
     const r = await putEntry(GROUP_ENTRY_B, {
-      knowledgeType: 'memory',
+      knowledgeType: 'fact',
       typeName: 'note',
       schema: { namingPattern: '^note-' },
       schemaGroup: null,
@@ -1105,7 +1105,7 @@ describe('Schema group support — schemaGroup field, GET /groups, POST /export-
     assert.ok(!r.body.entry.schemaGroup, 'schemaGroup should be cleared with null');
     // Restore
     await putEntry(GROUP_ENTRY_B, {
-      knowledgeType: 'memory',
+      knowledgeType: 'fact',
       typeName: 'note',
       schema: { namingPattern: '^note-' },
       schemaGroup: GROUP_NAME,
@@ -1159,7 +1159,7 @@ describe('Schema group support — schemaGroup field, GET /groups, POST /export-
     assert.ok(typeof r.body.count === 'number' && r.body.count >= 2, `Expected count >= 2, got ${r.body.count}`);
     assert.ok(Array.isArray(r.body.applied), 'applied should be an array');
     const entityApplied = r.body.applied.find(a => a.knowledgeType === 'entity' && a.typeName === 'widget');
-    const memoryApplied = r.body.applied.find(a => a.knowledgeType === 'memory' && a.typeName === 'note');
+    const memoryApplied = r.body.applied.find(a => a.knowledgeType === 'fact' && a.typeName === 'note');
     assert.ok(entityApplied, 'entity widget should be in applied list');
     assert.ok(memoryApplied, 'memory note should be in applied list');
   });
@@ -1206,7 +1206,7 @@ describe('Schema group support — schemaGroup field, GET /groups, POST /export-
       meta: {
         typeSchemas: {
           entity: { server: { namingPattern: '^svc-' } },
-          memory: { alert: { propertySchemas: { severity: { type: 'string' } } } },
+          fact: { alert: { propertySchemas: { severity: { type: 'string' } } } },
         },
       },
     });

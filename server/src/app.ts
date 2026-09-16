@@ -386,7 +386,7 @@ export function createApp() {
   });
 
   // ── Admin: space export ───────────────────────────────────────────────────
-  // Returns a full JSON snapshot of the space — all memories, entities, edges,
+  // Returns a full JSON snapshot of the space — all facts, entities, edges,
   // chrono entries, and file metadata (binary file content excluded by default).
   // Vector embeddings are omitted from the export to keep the payload small;
   // run POST /api/brain/spaces/:spaceId/reindex after import to rebuild them.
@@ -403,13 +403,13 @@ export function createApp() {
     //
     // This used to `.toArray()` all five collections in parallel and then `res.json()` the
     // result — so the whole space sat on the heap TWICE (the documents, plus their serialised
-    // JSON string) at once. A 100k-memory space OOM'd the backup endpoint, exactly when losing
+    // JSON string) at once. A 100k-fact space OOM'd the backup endpoint, exactly when losing
     // data hurts most. We now walk each collection's cursor and write documents out one at a
     // time, respecting backpressure so the response buffer cannot grow unbounded either.
     //
     // The OUTPUT SHAPE is byte-for-byte identical to before — same object, same keys, same
     // order — so the import side and every existing consumer are untouched. (NDJSON would be
-    // cleaner but would break the import contract; not worth it for the memory win.)
+    // cleaner but would break the import contract; not worth it for the fact win.)
     const projection = { embedding: 0 };
 
     // Backpressure-aware write: pause the cursor walk when the socket buffer is full.

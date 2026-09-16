@@ -89,7 +89,7 @@ describe('the links conversion pre-flight names a writer that actually wrote', (
   });
 
   it('records a CREATE carrying entityIds — the case the audit log never sees', async () => {
-    const m = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/memories`, {
+    const m = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/facts`, {
       fact: 'Acme signed in March', entityIds: [entityId],
     });
     assert.equal(m.status, 201, JSON.stringify(m.body));
@@ -114,7 +114,7 @@ describe('the links conversion pre-flight names a writer that actually wrote', (
   });
 
   it('counts a second write from the same token rather than adding a second writer', async () => {
-    const m = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/memories`, {
+    const m = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/facts`, {
       fact: 'Acme renewed in April', entityIds: [entityId],
     });
     assert.equal(m.status, 201, JSON.stringify(m.body));

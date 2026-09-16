@@ -3,7 +3,7 @@
  *
  * ## What was silent
  *
- * `POST /api/sync/batch-upsert` refuses a memory whose content diverges at an identical `seq` once that
+ * `POST /api/sync/batch-upsert` refuses a fact whose content diverges at an identical `seq` once that
  * record's fork chain is at `MAX_FORK_DEPTH`: the incoming version is discarded and the request still answers
  * `200`. Until now that was counted in the same `skipped` integer as *"I already hold this record, at the same
  * seq or newer"* — which is the common case, is correct, and loses nothing.
@@ -37,7 +37,7 @@ type BatchUpsertReply = Record<string, { forkDepthRefused?: number } | undefined
  * Report records the peer accepted the request for and then discarded. Never throws.
  *
  * **`boundedJson` and not `resp.json()`**: this body comes from a peer, and `resp.json()` would read whatever
- * it sends into memory with no ceiling. The batch timeout does not help — it bounds duration, not size, and
+ * it sends into fact with no ceiling. The batch timeout does not help — it bounds duration, not size, and
  * `upstream-reads-are-bounded.test.js` refuses the unbounded form.
  *
  * **Every failure here is swallowed on purpose, and this is the one place that is right.** The push already

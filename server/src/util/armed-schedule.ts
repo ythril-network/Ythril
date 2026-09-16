@@ -11,7 +11,7 @@
  *
  * The fix is one rule: *arm only when the expression differs from the one already armed.* Written four times it
  * would be four chances to get the clear-on-stop half wrong, which is the half that fails CLOSED — leave the
- * memory set after a stop and the next `start` returns early, so the scheduler never runs again. `CLAUDE.md`
+ * fact set after a stop and the next `start` returns early, so the scheduler never runs again. `CLAUDE.md`
  * names that shape as the defect this repo produces most, so the rule lives here and each scheduler holds one
  * of these instead of its own bookkeeping.
  *
@@ -25,7 +25,7 @@
  * re-arming and restarting them would reset the phase of a six-hour timer for no gain.
  */
 
-/** One scheduler's memory of what it armed. Keyed, so a per-network scheduler uses one instance for all of them. */
+/** One scheduler's fact of what it armed. Keyed, so a per-network scheduler uses one instance for all of them. */
 export interface ArmedSchedules {
   /** True when `key` is already armed on exactly `cron` — the caller should return without touching the task. */
   isArmed(key: string, cron: string): boolean;
@@ -36,7 +36,7 @@ export interface ArmedSchedules {
 }
 
 /**
- * A fresh memory, empty.
+ * A fresh fact, empty.
  *
  * The single-task schedulers pass a constant key; `sync` passes the network id. There is no default key on
  * purpose — a scheduler that forgot to pass one would silently share a slot with another.

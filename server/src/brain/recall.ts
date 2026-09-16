@@ -7,9 +7,9 @@
 /**
  * Recall engine — semantic search across every knowledge type, plus duplicate detection.
  *
- * Split out of brain/memory.ts (A17.4). Owns recall/recallGlobal/findSimilar/checkDuplicates and
+ * Split out of brain/fact.ts (A17.4). Owns recall/recallGlobal/findSimilar/checkDuplicates and
  * the doc -> RecallResult mapping. Depends on the filter DSL; deliberately does NOT depend on
- * memory CRUD, so the dependency runs one way: memory.ts -> recall.ts -> filter.ts.
+ * fact CRUD, so the dependency runs one way: fact.ts -> recall.ts -> filter.ts.
  */
 import { col, isVectorSearchAvailable, asFilter } from '../db/mongo.js';
 import { NotFoundError } from '../util/errors.js';
@@ -254,7 +254,7 @@ export async function recall(
      *
      * ## Why this is opt-in
      *
-     * The lag is real and measured: an integrator's memory was not returned by `recall` for a distinctive
+     * The lag is real and measured: an integrator's fact was not returned by `recall` for a distinctive
      * nine-word phrase **within 150 seconds** of writing it, while insert-time duplicate detection saw the
      * same record immediately. That asymmetry IS the diagnosis — the vector is on the document the moment it
      * is written, and it is `$vectorSearch`'s index that lags. `exact: true` is not the fix and was measured

@@ -5,7 +5,7 @@
 
 # Ythril
 
-### Give your AI a memory that's actually yours.
+### Give your AI a fact that's actually yours.
 
 **Ythril is a private, self-hosted brain that every AI assistant can plug into** — so Claude, Cursor, Copilot, and anything that speaks [MCP](https://modelcontextprotocol.io) stops forgetting, and starts remembering *your* projects, files, people, and decisions. On your hardware. Under your control.
 
@@ -42,7 +42,7 @@ Your assistant remembers your projects, people, and past decisions across **ever
 <td width="50%" valign="top">
 
 ### One brain, every assistant
-Claude on the web, Cursor in your editor, Copilot in your IDE — all reading and writing the **same** memory over MCP. Switch tools freely; the knowledge stays put.
+Claude on the web, Cursor in your editor, Copilot in your IDE — all reading and writing the **same** fact over MCP. Switch tools freely; the knowledge stays put.
 
 </td>
 </tr>
@@ -64,19 +64,19 @@ Label a face once and every future photo of that person is tagged automatically.
 <td width="50%" valign="top">
 
 ### A team brain that syncs — without a cloud
-Everyone runs their own Ythril; share exactly the spaces you choose through **governed networks** (vote to admit members, push-only trees, publisher→subscriber). Institutional memory that no vendor holds hostage.
+Everyone runs their own Ythril; share exactly the spaces you choose through **governed networks** (vote to admit members, push-only trees, publisher→subscriber). Institutional fact that no vendor holds hostage.
 
 </td>
 <td width="50%" valign="top">
 
 ### One question, across everything
-A single semantic query crosses memories, notes, documents, speech, and pictures — because it *all* lands in the same vector space. Ask once; get the answer wherever it lives.
+A single semantic query crosses facts, notes, documents, speech, and pictures — because it *all* lands in the same vector space. Ask once; get the answer wherever it lives.
 
 </td>
 </tr>
 </table>
 
-> **For teams & managers:** stop paying per seat for assistants that forget your business by lunch. Ythril is the institutional-memory layer you *own* — onboard faster, keep decisions and context in one searchable place, and never hand your knowledge to a third party to train on.
+> **For teams & managers:** stop paying per seat for assistants that forget your business by lunch. Ythril is the institutional-fact layer you *own* — onboard faster, keep decisions and context in one searchable place, and never hand your knowledge to a third party to train on.
 
 ---
 
@@ -111,7 +111,7 @@ Then point any MCP client at your new brain:
 
 That's it. Your assistant instantly sees the space's purpose, its schema, and every tool it can call — and can start remembering.
 
-> Each **space** is an isolated container (its own memories, entities, files, and schema) with its own MCP endpoint at `/mcp/{spaceId}`. Keep *work* and *home* and *client-X* cleanly apart, or aggregate them with a proxy space.
+> Each **space** is an isolated container (its own facts, entities, files, and schema) with its own MCP endpoint at `/mcp/{spaceId}`. Keep *work* and *home* and *client-X* cleanly apart, or aggregate them with a proxy space.
 
 <div align="center">
 
@@ -137,7 +137,7 @@ A refused write comes back **machine-readable** rather than as a sentence: a sch
 
 | | |
 |---|---|
-| 🔎 **Four ways to look, and the docs say which is WRONG** | `recall` ranks by meaning across memories, entities, edges, timelines and files at once. `query` is an exact filter with total ordering, for when you need COMPLETENESS rather than the best few. `find_similar` reuses a record's stored vector — no re-embedding, which is cheaper and more accurate for finding near-duplicates. `traverse` walks the graph from a known node, or nested inside a `recall` for 0–5 hops. Picking the wrong one is the common mistake, so each read tool's own description carries a **blind-spots section** — what this door does NOT send you — which a caller reads while constructing the arguments rather than after being surprised. |
+| 🔎 **Four ways to look, and the docs say which is WRONG** | `recall` ranks by meaning across facts, entities, edges, timelines and files at once. `query` is an exact filter with total ordering, for when you need COMPLETENESS rather than the best few. `find_similar` reuses a record's stored vector — no re-embedding, which is cheaper and more accurate for finding near-duplicates. `traverse` walks the graph from a known node, or nested inside a `recall` for 0–5 hops. Picking the wrong one is the common mistake, so each read tool's own description carries a **blind-spots section** — what this door does NOT send you — which a caller reads while constructing the arguments rather than after being surprised. |
 | 🎛️ **Recall you can actually tune** | A filter that runs INSIDE the vector index rather than after it, so nothing is silently dropped by a `topK`. Per-type quotas (`minPerType` / `maxPerType`) so one noisy type cannot crowd out the rest. A time budget (`maxTimeMS`) that returns what it has with a `degraded` flag instead of hanging or erroring. `includeFreshWrites`, so a record written seconds ago and not yet vector-indexed is still found. Field projection applied recursively through traversal results. And the lexical, fused and rerank scores on request, so a bad ranking can be diagnosed rather than guessed at. |
 | 🕸️ **Knowledge graph** | Typed **entities**, labelled **edges**, and multi-hop **traversal** — model how things actually connect, then let the AI walk the graph. `er_model` reports the shape a space has ACTUALLY taken — which entity types exist, which edge labels connect which types, and how many of each — so an assistant can learn a space before writing into it instead of guessing from the declared schema. |
 | 📅 **Chrono timeline** | Events, deadlines, plans, milestones — with date ranges, tags, and full-text search built in. |
@@ -148,9 +148,9 @@ A refused write comes back **machine-readable** rather than as a sentence: a sch
 | 👯 **Duplicates, reviewed** | A background scanner proposes near-duplicate pairs with a similarity score; you dismiss or merge, and a dismissal sticks. Per-space rules can also act at INSERT time, so a duplicate can be caught on the way in rather than found later. |
 | 📐 **Schema validation** | Per-type rules (naming patterns, enums, ranges, required fields) in strict / warn / off modes, with a shared **schema library** (`$ref`), dry-run validation, and a backup taken before an overwrite. **`strict` blocks what your write BROKE, not what was already broken** — a violation is reported as introduced or pre-existing, and only the introduced ones refuse the write. Otherwise tightening a schema makes every later edit to an old record impossible, which is how a validation mode gets switched off and left off. |
 | 🔗 **Referential integrity** | Deleting an entity that anything still points at is refused with a `409` that NAMES the blockers — and says which end matched, `from`, `to` or both, because "an edge references this" does not tell you which one to fix. Upserts warn on a duplicate name instead of quietly creating a second record; properties shallow-merge and tags union, so a partial write cannot erase what it did not mention. |
-| ⏳ **Retention windows** | Per space, and per record type within it — chrono entries, files, memories, entities and edges can each have their own age limit, or none. A chrono entry can also lose its detail and keep its date, which is recorded on the entry so a redacted one cannot be mistaken for one that never had any. |
+| ⏳ **Retention windows** | Per space, and per record type within it — chrono entries, files, facts, entities and edges can each have their own age limit, or none. A chrono entry can also lose its detail and keep its date, which is recorded on the entry so a redacted one cannot be mistaken for one that never had any. |
 | 🔁 **Multi-brain sync** | Governed **networks** with signed votes, incremental replication, and conflict resolution. |
-| 🧾 **Audit log & webhooks** | An immutable trail of who, when, which route, and **what changed** — field-level before/after, on an allowlist rather than a redaction list, so a secret can never be written into a queryable store by forgetting to strip it. Every MCP tool call is recorded under the same operation name as its REST twin, so one query answers *"who created this memory"* without knowing which door they used. Plus HMAC-signed, SSRF-protected event delivery to your systems. |
+| 🧾 **Audit log & webhooks** | An immutable trail of who, when, which route, and **what changed** — field-level before/after, on an allowlist rather than a redaction list, so a secret can never be written into a queryable store by forgetting to strip it. Every MCP tool call is recorded under the same operation name as its REST twin, so one query answers *"who created this fact"* without knowing which door they used. Plus HMAC-signed, SSRF-protected event delivery to your systems. |
 | 🧩 **Bulk, proxy, export, find-similar** | Batch writes, virtual aggregate spaces, one-file backup/restore, and "more like this" dedup. |
 
 *(Full detail for every one of these lives in the [Integration Guide](docs/integration-guide.md).)*
@@ -218,5 +218,5 @@ Issues and PRs welcome — keep changes scoped and testable, and include a short
 
 <div align="center">
 <br/>
-<sub>Ythril — the memory layer your AI should have shipped with.</sub>
+<sub>Ythril — the fact layer your AI should have shipped with.</sub>
 </div>

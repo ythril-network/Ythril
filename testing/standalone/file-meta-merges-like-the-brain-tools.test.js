@@ -9,7 +9,7 @@
  * the time, and writing it down is what became X-6.
  *
  * `files/file-meta.ts` did `$set['properties'] = opts.properties`, a wholesale overwrite, while
- * `brain/memory.ts` carried the note explaining why the others had been changed: *"An agent patching one key
+ * `brain/fact.ts` carried the note explaining why the others had been changed: *"An agent patching one key
  * silently destroyed every other property on the record, with no error anywhere."* The sweep that reached
  * memory, chrono, entity and edge never reached the file path — five tools taking the same-looking arguments,
  * one behaving differently.
@@ -51,7 +51,7 @@ describe('all five record types now agree about properties', () => {
 
   it('and so do the four brain paths — the point is that they AGREE now', () => {
     for (const f of ['server/src/brain/entities.ts', 'server/src/brain/edges.ts',
-      'server/src/brain/memory.ts', 'server/src/brain/chrono.ts']) {
+      'server/src/brain/fact.ts', 'server/src/brain/chrono.ts']) {
       assert.match(src(f), /mergePropertiesOrKeep\(/, `${f} must still merge`);
     }
   });

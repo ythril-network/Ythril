@@ -18,7 +18,7 @@ const PAIR_LABELS = LINK_PAIRS.map(([f, t]) => linkLabel(f, t)).join(', ');
 
 /** The shared sentence, so the tool description and the parameter text cannot drift apart. */
 const WHAT_A_LINK_IS =
-  'A LINK IS NOT AN EDGE. A link says one record CONCERNS another — a memory about an entity, a file about '
+  'A LINK IS NOT AN EDGE. A link says one record CONCERNS another — a fact about an entity, a file about '
   + 'a chrono entry. It carries no label, no weight, no properties and no type, because those are what an '
   + 'edge is for. If you want to say HOW two things relate, use `save_edge`.';
 
@@ -45,7 +45,7 @@ export const save_linkTool: ToolHandler = {
     + 'class, so one connection has exactly one id for ever. Creating a link that already exists succeeds '
     + 'and changes nothing — safe to retry, and it can never produce a duplicate.\n\n'
     + 'IT WRITES THE RECORD\'S ARRAY TOO, which is what makes it durable: the same connection appears in '
-    + '`memory.entityIds` (or whichever of the six it is) and as a link record, and the two cannot disagree.\n\n'
+    + '`fact.entityIds` (or whichever of the six it is) and as a link record, and the two cannot disagree.\n\n'
     + 'UNDER STRICT LINKAGE BOTH ENDS MUST EXIST. Otherwise a well-formed id pointing at nothing is stored, '
     + 'and the dangling link only shows up later as a traversal that comes back empty.\n\n'
     + 'PARAMETERS:\n'
@@ -70,7 +70,7 @@ export const save_linkTool: ToolHandler = {
       to: {
         type: 'string', minLength: 1,
         description: 'The record the link points AT. It does not have to be an entity — a chrono entry '
-          + 'can concern a memory, and a file can concern all three. Under strict linkage it must exist, '
+          + 'can concern a fact, and a file can concern all three. Under strict linkage it must exist, '
           + 'because a well-formed id pointing at nothing stores silently and only shows up later as a '
           + 'traversal that comes back empty.',
       },
@@ -115,7 +115,7 @@ export const delete_linkTool: ToolHandler = {
   name: 'delete_link',
   description: 'Remove one link by its ID — the two records at either end are NOT touched.\n\n'
     + WHAT_A_LINK_IS + '\n\n'
-    + 'IT CLEARS THE ARRAY ENTRY TOO. The id comes out of `memory.entityIds` (or whichever of the six the '
+    + 'IT CLEARS THE ARRAY ENTRY TOO. The id comes out of `fact.entityIds` (or whichever of the six the '
     + 'link is) and the link record goes with it, so nothing is left claiming the connection. A delete that '
     + 'removed only the record would be undone by the next ordinary edit of the record it hangs off.\n\n'
     + 'A TOMBSTONE IS WRITTEN, so the deletion reaches peer instances on the next sync instead of being '

@@ -5,7 +5,7 @@
  *
  * It was two route bodies. The REST route answered
  * `409 {error: 'Cannot delete: entity has inbound references', backlinks: [{type, _id}]}`; the MCP tool threw
- * `Cannot delete entity '<id>': still referenced by edge <id>, memory <id>`. One rule, a different sentence
+ * `Cannot delete entity '<id>': still referenced by edge <id>, fact <id>`. One rule, a different sentence
  * each, structured rows on one door and prose on the other, and each door carrying its own copy of the
  * face-row exemption. A caller's experience of the same refusal depended on which client they had picked,
  * which is the defect this codebase produces most.
@@ -48,7 +48,7 @@ export interface EntityDeleteBlock {
   blocking: BacklinkEntry[];
 }
 
-/** Human phrase for one row — `edge abc at the from end`, `memory def`. */
+/** Human phrase for one row — `edge abc at the from end`, `fact def`. */
 function describe(b: BacklinkEntry): string {
   return b.end ? `${b.type} ${b._id} (at its ${b.end === 'both' ? 'both ends' : `${b.end} end`})`
     : `${b.type} ${b._id}`;
@@ -90,7 +90,7 @@ async function endsOfEdges(spaceId: string, entityId: string, ids: readonly stri
  * What stops this record being deleted, or `null` if nothing does.
  *
  * **`targetKind` since 4.0**, defaulting to `entity` because that is every existing caller. Until `M-2` gave
- * the three unread link fields a reader, deleting a memory that a chrono entry named was never refused —
+ * the three unread link fields a reader, deleting a fact that a chrono entry named was never refused —
  * even under `strictLinkage`, which is the strongest setting on offer — because nothing could see the
  * reference. The chrono entry was then left pointing at a record that does not exist, which is the outcome
  * the setting is bought to prevent.

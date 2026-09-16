@@ -31,7 +31,7 @@ const NOW = Date.UTC(2026, 6, 28, 12, 0, 0);
 const at = (daysAgo) => new Date(NOW - daysAgo * DAY).toISOString();
 
 const entry = (over = {}) => ({
-  operation: 'memory.update',
+  operation: 'fact.update',
   timestamp: at(30),
   changes: [{ field: 'fact', from: 'old', to: 'new' }],
   ...over,
@@ -90,7 +90,7 @@ describe('the redaction decision', () => {
   });
 
   it('is a no-op on an entry that never had changes', () => {
-    assert.equal(mod.shouldRedact({ operation: 'memory.update', timestamp: at(30) }, cutoff(mod)), false);
+    assert.equal(mod.shouldRedact({ operation: 'fact.update', timestamp: at(30) }, cutoff(mod)), false);
   });
 
   it('does not redact on a missing timestamp rather than treating it as ancient', () => {

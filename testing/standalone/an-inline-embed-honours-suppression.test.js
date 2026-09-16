@@ -13,7 +13,7 @@
  * the one they had just bypassed. The vector was stored and nothing ever came back to remove it.
  *
  * **It was the default write, not an edge case.** `checkDuplicates` defaults to `true` on the MCP tools, so an
- * ordinary `remember` or `save_entity` into a suppressed space stored a vector every time, and the
+ * ordinary `saveFact` or `save_entity` into a suppressed space stored a vector every time, and the
  * operator's setting did nothing they could observe.
  *
  * ## What this gate does NOT assume

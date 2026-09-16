@@ -52,35 +52,35 @@ describe('hasReDoSRisk — shared heuristic', () => {
 describe('queryBrain — $regex sanitisation (rejected before any db access)', () => {
   it('rejects a catastrophic $regex pattern', async () => {
     await assert.rejects(
-      queryBrain('anyspace', 'memories', { fact: { $regex: '(a+)+$' } }),
+      queryBrain('anyspace', 'facts', { fact: { $regex: '(a+)+$' } }),
       /catastrophic backtracking/,
     );
   });
 
   it('rejects a catastrophic $regex nested under $and', async () => {
     await assert.rejects(
-      queryBrain('anyspace', 'memories', { $and: [{ fact: { $regex: '(x*)*y' } }] }),
+      queryBrain('anyspace', 'facts', { $and: [{ fact: { $regex: '(x*)*y' } }] }),
       /catastrophic backtracking/,
     );
   });
 
   it('rejects a non-string $regex', async () => {
     await assert.rejects(
-      queryBrain('anyspace', 'memories', { fact: { $regex: { $gt: '' } } }),
+      queryBrain('anyspace', 'facts', { fact: { $regex: { $gt: '' } } }),
       /must be a string/,
     );
   });
 
   it(`rejects a $regex pattern longer than ${MAX_PATTERN_LENGTH} chars`, async () => {
     await assert.rejects(
-      queryBrain('anyspace', 'memories', { fact: { $regex: 'a'.repeat(MAX_PATTERN_LENGTH + 1) } }),
+      queryBrain('anyspace', 'facts', { fact: { $regex: 'a'.repeat(MAX_PATTERN_LENGTH + 1) } }),
       /exceeds/,
     );
   });
 
   it('still rejects disallowed operators (regression)', async () => {
     await assert.rejects(
-      queryBrain('anyspace', 'memories', { $where: 'sleep(1000)' }),
+      queryBrain('anyspace', 'facts', { $where: 'sleep(1000)' }),
       /not allowed/,
     );
   });
@@ -92,35 +92,35 @@ describe('queryBrain — $regex sanitisation (rejected before any db access)', (
 describe('queryBrain — $options sanitisation (compiled path, S8.9)', () => {
   it('rejects $options without an accompanying $regex', async () => {
     await assert.rejects(
-      queryBrain('anyspace', 'memories', { fact: { $options: 'i' } }),
+      queryBrain('anyspace', 'facts', { fact: { $options: 'i' } }),
       /only allowed alongside/,
     );
   });
 
   it('rejects $options with invalid regex flags', async () => {
     await assert.rejects(
-      queryBrain('anyspace', 'memories', { fact: { $regex: 'test', $options: 'ig' } }),
+      queryBrain('anyspace', 'facts', { fact: { $regex: 'test', $options: 'ig' } }),
       /valid regex flags/,
     );
   });
 
   it('rejects a non-string $options value', async () => {
     await assert.rejects(
-      queryBrain('anyspace', 'memories', { fact: { $regex: 'test', $options: 42 } }),
+      queryBrain('anyspace', 'facts', { fact: { $regex: 'test', $options: 42 } }),
       /valid regex flags/,
     );
   });
 
   it('rejects an empty-string $options value', async () => {
     await assert.rejects(
-      queryBrain('anyspace', 'memories', { fact: { $regex: 'test', $options: '' } }),
+      queryBrain('anyspace', 'facts', { fact: { $regex: 'test', $options: '' } }),
       /valid regex flags/,
     );
   });
 
   it('rejects $options carrying a null byte', async () => {
     await assert.rejects(
-      queryBrain('anyspace', 'memories', { fact: { $regex: 'test', $options: 'i\x00' } }),
+      queryBrain('anyspace', 'facts', { fact: { $regex: 'test', $options: 'i\x00' } }),
       /valid regex flags/,
     );
   });

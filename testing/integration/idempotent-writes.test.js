@@ -48,7 +48,7 @@ const uuid = () => crypto.randomUUID();
  * Identity, not count.
  *
  * The first version of these tests counted records through a list endpoint. It came back empty — the endpoint
- * was a POST /memories/query I had invented; listing is a GET — and the assertion then reported "the retry
+ * was a POST /facts/query I had invented; listing is a GET — and the assertion then reported "the retry
  * created a second memory (0 records with this fact)", which is the opposite of the truth.
  *
  * **A count cannot tell "no duplicate" from "I looked in the wrong place."** Comparing the ids the API returns
@@ -75,7 +75,7 @@ const idOf = (r) => r.body?._id ?? r.body?.entity?._id ?? r.body?.edge?._id;
 describe('memories: a supplied id is not adopted', () => {
   it('a create with an unused id mints a server id instead', async () => {
     const unused = uuid();
-    const r = await post(INSTANCES.a, tok, `/api/brain/spaces/general/memories`,
+    const r = await post(INSTANCES.a, tok, `/api/brain/spaces/general/facts`,
       { id: unused, fact: `unadopted-${Date.now()}` });
     assert.equal(r.status, 201, JSON.stringify(r.body));
     assert.notEqual(idOf(r), unused, 'the caller must not choose the identity');
@@ -87,8 +87,8 @@ describe('memories: a supplied id is not adopted', () => {
     // retry gets duplicates, which is exactly why the release note calls this breaking.
     const unused = uuid();
     const fact = `duplicating-${Date.now()}`;
-    const a = await post(INSTANCES.a, tok, `/api/brain/spaces/general/memories`, { id: unused, fact });
-    const b = await post(INSTANCES.a, tok, `/api/brain/spaces/general/memories`, { id: unused, fact });
+    const a = await post(INSTANCES.a, tok, `/api/brain/spaces/general/facts`, { id: unused, fact });
+    const b = await post(INSTANCES.a, tok, `/api/brain/spaces/general/facts`, { id: unused, fact });
     assert.equal(a.status, 201);
     assert.equal(b.status, 201);
     assert.notEqual(idOf(a), idOf(b), 'these are two records now, and that is the documented consequence');
@@ -97,12 +97,12 @@ describe('memories: a supplied id is not adopted', () => {
   it('an id that NAMES a record still updates it', async () => {
     // The surviving half. If this broke, every update would silently become a create — worse than the bug the
     // ruling removes, and invisible until a collection doubled.
-    const created = await post(INSTANCES.a, tok, `/api/brain/spaces/general/memories`,
+    const created = await post(INSTANCES.a, tok, `/api/brain/spaces/general/facts`,
       { fact: `addressable-${Date.now()}` });
     assert.equal(created.status, 201);
     const id = idOf(created);
 
-    const again = await post(INSTANCES.a, tok, `/api/brain/spaces/general/memories`,
+    const again = await post(INSTANCES.a, tok, `/api/brain/spaces/general/facts`,
       { id, fact: `addressable-${Date.now()}-v2` });
     assert.ok([200, 201].includes(again.status), JSON.stringify(again.body));
     assert.equal(idOf(again), id, 'an id naming a real record must land on it');
@@ -111,7 +111,7 @@ describe('memories: a supplied id is not adopted', () => {
   it('a malformed id is still refused with 400, not stored', async () => {
     // Unchanged, and worth keeping: the format check is what stops a corrupted id being stored at all, which
     // is the defect that started this whole audit.
-    const r = await post(INSTANCES.a, tok, `/api/brain/spaces/general/memories`,
+    const r = await post(INSTANCES.a, tok, `/api/brain/spaces/general/facts`,
       { id: 'not-a-uuid', fact: `malformed-${Date.now()}` });
     assert.equal(r.status, 400, JSON.stringify(r.body));
   });

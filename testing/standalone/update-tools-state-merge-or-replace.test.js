@@ -12,7 +12,7 @@
  * | `update_fact` | **replace** | merge | `deleteFields` |
  * | `update_chrono` | **replace** | merge | `deleteFields` |
  *
- * The memory/chrono split is deliberate and `brain/memory.ts` says so in as many words — both halves were
+ * The memory/chrono split is deliberate and `brain/fact.ts` says so in as many words — both halves were
  * documented, so both were kept and pinned rather than silently unified. That makes it permanent, which makes
  * it something a caller has to be TOLD: sending `tags: ["b"]` adds a tag on an entity and destroys the other
  * tags on a memory, with no error either way.
@@ -59,7 +59,7 @@ const description = (file, name) => {
 const TOOLS = {
   update_entity: description('server/src/mcp/tools/entity.ts', 'update_entity'),
   update_edge: description('server/src/mcp/tools/edge.ts', 'update_edge'),
-  update_memory: description('server/src/mcp/tools/memory.ts', 'update_fact'),
+  update_memory: description('server/src/mcp/tools/fact.ts', 'update_fact'),
   update_chrono: description('server/src/mcp/tools/chrono.ts', 'update_chrono'),
 };
 
@@ -74,7 +74,7 @@ describe('the store still behaves the way the descriptions claim', () => {
   });
 
   it('memory and chrono updates REPLACE tags', () => {
-    assert.match(stripComments(src('server/src/brain/memory.ts')),
+    assert.match(stripComments(src('server/src/brain/fact.ts')),
       /\$set\['tags'\] = updates\.tags/, 'memory tags are a straight overwrite');
     // Chrono writes every supplied field through a generic loop, and only `properties` is pulled out of it.
     const chrono = stripComments(src('server/src/brain/chrono.ts'));

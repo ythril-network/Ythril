@@ -50,7 +50,7 @@ export const write_fileTool: ToolHandler = {
   description: 'Write text content to a file in the space file store.\n\n'
     + 'IT REPLACES THE WHOLE FILE. There is no append and no patch: whatever you send becomes the entire content, so read first if you meant to add to it. Writing a path that already exists overwrites it without asking.\n\n'
     + 'The file is CHUNKED and each chunk is embedded separately, which is why `recall` returns a passage rather than a document and why `includeContent: false` is worth using — one long chunk can crowd out several one-line records. Structure the text with headings: a chunk that begins under a heading carries it, and that is what makes a recall hit locatable.\n\n'
-    + 'Embedding is ASYNCHRONOUS, as with `remember`: the write returns once the bytes are stored and a queued job computes the vectors afterwards, so a `recall` seconds later may not see it — pass `includeFreshWrites: true` on that recall. Rewriting a file resets its embedding: new content is new content, and a previous failure to embed it is not carried forward.',
+    + 'Embedding is ASYNCHRONOUS, as with `saveFact`: the write returns once the bytes are stored and a queued job computes the vectors afterwards, so a `recall` seconds later may not see it — pass `includeFreshWrites: true` on that recall. Rewriting a file resets its embedding: new content is new content, and a previous failure to embed it is not carried forward.',
   mutating: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
@@ -485,7 +485,7 @@ export const update_file_metaTool: ToolHandler = {
          * shape of that report predicts you find next door.
          *
          * The rule is the product's, not this tool's — `docs/userguide/02-brain.md` states it for every
-         * property bag, and the entity-only carve-out in `04-brain-api.md` names memory, edge and chrono,
+         * property bag, and the entity-only carve-out in `04-brain-api.md` names fact, edge and chrono,
          * not files. So the create door already agreed with the product and only this one did not.
          */
         additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
@@ -500,7 +500,7 @@ export const update_file_metaTool: ToolHandler = {
       },
       memoryIds: {
         type: 'array', items: { type: 'string' },
-        description: 'REPLACES the stored memory links — send the full list, because sending one drops the '
+        description: 'REPLACES the stored fact links — send the full list, because sending one drops the '
           + 'rest.',
       },
       chronoIds: {

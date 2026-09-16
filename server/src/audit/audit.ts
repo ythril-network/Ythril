@@ -234,7 +234,7 @@ export function buildAuditFilter(params: AuditQueryParams): Filter<AuditLogEntry
  *
  * No `limit`: the paged endpoint caps at 1,000 rows because a browser table has to stop somewhere, and that cap
  * is exactly what made "give me the whole record" a paging script. The cursor streams, so an unbounded result
- * set costs bounded memory.
+ * set costs bounded fact.
  */
 export function streamAuditEntries(params: AuditQueryParams): AsyncIterable<AuditLogEntry> {
   return col()

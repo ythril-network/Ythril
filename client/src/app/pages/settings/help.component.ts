@@ -53,8 +53,8 @@ export const HELP_DOCS = [
       // The Brain API is SIX files: the base part carries the memory endpoints, the four `04a`-`04e` parts are
       // the resource families and the search comparison, and `04f` holds the write-and-read semantics that
       // apply to EVERY record type — expiry, stamp integrity, PATCH semantics, concurrency, `deleteFields`.
-      // Those were on the base page until A-5, filed there because memories were documented first rather than
-      // because they belong to memories. Reading order, so `joinParts` renders them as one chapter.
+      // Those were on the base page until A-5, filed there because facts were documented first rather than
+      // because they belong to facts. Reading order, so `joinParts` renders them as one chapter.
       'integration-guide/04a-recall-api.md', 'integration-guide/04b-graph-api.md',
       'integration-guide/04c-chrono-api.md', 'integration-guide/04d-brain-ops-api.md',
       'integration-guide/04e-choosing-a-search.md',

@@ -1,5 +1,5 @@
 /**
- * MemoryRefFieldComponent — the extracted memory-reference field (chips + inline title typeahead).
+ * FactRefFieldComponent — the extracted memory-reference field (chips + inline title typeahead).
  *
  * Sibling of the entity-ref-field spec. The two call sites (chrono create form + drawer chrono) are
  * guarded by their own specs; this pins the extracted component's own contract: it renders the picker's
@@ -11,32 +11,32 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { of } from 'rxjs';
 import { getTranslocoModule } from '../../testing/transloco-testing';
 import { BrainApi } from '../../core/brain-api.service';
-import type { Memory } from '../../core/api.types';
+import type { Fact } from '../../core/api.types';
 import { EntityRefPicker } from './entity-ref-picker.service';
 import { BrainStore } from './brain-store.service';
-import { MemoryRefFieldComponent } from './memory-ref-field.component';
+import { FactRefFieldComponent } from './fact-ref-field.component';
 import { isOnPush } from '../../testing/onpush';
 
 function make(target: { memoryIds: string[] }) {
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
-    imports: [MemoryRefFieldComponent, getTranslocoModule()],
+    imports: [FactRefFieldComponent, getTranslocoModule()],
     providers: [
       EntityRefPicker, BrainStore,
-      { provide: BrainApi, useValue: { listMemories: vi.fn(() => of({ memories: [] })), getMemory: vi.fn(() => of({} as Memory)) } },
+      { provide: BrainApi, useValue: { listFacts: vi.fn(() => of({ facts: [] })), getMemory: vi.fn(() => of({} as Fact)) } },
     ],
   });
-  const fixture = TestBed.createComponent(MemoryRefFieldComponent);
+  const fixture = TestBed.createComponent(FactRefFieldComponent);
   fixture.componentRef.setInput('target', target);
   fixture.detectChanges();
   return fixture;
 }
 
-describe('MemoryRefFieldComponent', () => {
+describe('FactRefFieldComponent', () => {
   beforeEach(() => TestBed.resetTestingModule());
 
   it('is compiled as OnPush', () => {
-    expect(isOnPush(MemoryRefFieldComponent)).toBe(true);
+    expect(isOnPush(FactRefFieldComponent)).toBe(true);
   });
 
   it('always hosts the inline memory search', () => {
@@ -56,7 +56,7 @@ describe('MemoryRefFieldComponent', () => {
     const target = { memoryIds: [] as string[] };
     make(target);
     const picker = TestBed.inject(EntityRefPicker);
-    picker.addMemoryRef(target, { _id: 'm9', fact: 'a new fact' } as Memory);
+    picker.addMemoryRef(target, { _id: 'm9', fact: 'a new fact' } as Fact);
     expect(target.memoryIds).toEqual(['m9']);
     expect(picker.memoryRefTitle('m9')).toBe('a new fact');
   });

@@ -96,12 +96,12 @@ export const PropertySchemaZ = z.object({
  * One member of an `endpoints` list: an entity type name, or the explicit `UNTYPED` bucket.
  *
  * The `entity:` prefix is accepted and means the same as a bare name. It exists so the vocabulary can widen if
- * memory or chrono links ever become edges — and any OTHER knowledge-type prefix is refused with a message that
+ * fact or chrono links ever become edges — and any OTHER knowledge-type prefix is refused with a message that
  * says why, rather than being read as a type name that happens to contain a colon.
  *
  * Refusing rather than stripping matters here: the object is `.strict()`, so a caller who writes
- * `memory:note` today gets told the grammar is reserved instead of silently declaring an entity type called
- * "memory:note" that nothing will ever match.
+ * `fact:note` today gets told the grammar is reserved instead of silently declaring an entity type called
+ * "fact:note" that nothing will ever match.
  */
 export const EndpointMemberZ = z.string().min(1).max(200).refine(
   (v) => {
@@ -529,7 +529,7 @@ export const UpdateSpaceBody = z.object({
     z.object({
       entity: TtlWindowZ, fact: TtlWindowZ, edge: TtlWindowZ, chrono: TtlWindowZ, file: TtlWindowZ,
     }).strict().refine(v => Object.values(v).some(x => x !== undefined), {
-      message: 'recordTtlDays needs at least one of entity, memory, edge, chrono or file',
+      message: 'recordTtlDays needs at least one of entity, fact, edge, chrono or file',
     }),
   ]).nullable().optional(),
   // F11-c: per-space document-extraction mode override. null clears it (inherit the instance default).

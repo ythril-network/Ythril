@@ -80,7 +80,7 @@ describe('a traverse hop is bounded', { skip }, () => {
   });
 
   beforeEach(async () => {
-    for (const c of ['entities', 'edges', 'memories', 'chrono', 'files']) await coll(c).deleteMany({});
+    for (const c of ['entities', 'edges', 'facts', 'chrono', 'files']) await coll(c).deleteMany({});
   });
 
   it('the module is the one this gate thinks it is', () => {

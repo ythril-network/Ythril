@@ -430,7 +430,7 @@ fileMetaRouter.patch('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth
   // rather than ignored, because the failure mode of ignoring is the one this feature exists to prevent:
   // the client asked for a guarantee and would be told, with a 200, that it held.
   if (req.get('If-Match') !== undefined) {
-    res.status(400).json({ error: '`If-Match` is not supported on file metadata: these records carry no `seq` to condition a write on. It is honoured on `PATCH` for memories, entities, edges and chrono entries.' });
+    res.status(400).json({ error: '`If-Match` is not supported on file metadata: these records carry no `seq` to condition a write on. It is honoured on `PATCH` for facts, entities, edges and chrono entries.' });
     return;
   }
 
@@ -455,7 +455,7 @@ fileMetaRouter.patch('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth
 
   // A file carries THREE reference fields, and until now none of them was validated — not even under
   // strict linkage, which every other brain route already honoured. So this was the widest silent
-  // hole: attach a memory to a file with a name or a stale id and it stored clean, then the file
+  // hole: attach a fact to a file with a name or a stale id and it stored clean, then the file
   // simply never turned up in anything that traversed the link.
   if (isStrictLinkage(wt.target)) {
     try {
@@ -468,7 +468,7 @@ fileMetaRouter.patch('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth
     }
   }
 
-  // Snapshot for the audit change list — see the note in memories.ts. `properties` is not allowlisted,
+  // Snapshot for the audit change list — see the note in facts.ts. `properties` is not allowlisted,
   // so handing the record over cannot publish it.
   const prior = await findFirstAcrossMembers(wt.target, mid => getFileMeta(mid, path));
   const updated = await findFirstAcrossMembers(wt.target,

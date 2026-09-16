@@ -106,7 +106,7 @@ describe('the kill switch', () => {
 });
 
 describe('minScore stays on the VECTOR score', () => {
-  const rec = (id, score, fusedScore) => ({ _id: id, type: 'memory', score, fusedScore, fact: id });
+  const rec = (id, score, fusedScore) => ({ _id: id, type: 'fact', score, fusedScore, fact: id });
 
   it('orders by the fused score but filters by the vector score', () => {
     // `low` wins the fused order and is still dropped by a vector-similarity floor. Both halves matter:

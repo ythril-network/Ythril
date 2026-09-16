@@ -21,8 +21,8 @@ export const bulkRouter = Router();
 /**
  * POST /api/brain/spaces/:spaceId/bulk
  *
- * Batch upsert memories, entities, edges, and chrono entries in a single
- * request.  Processing order: memories → entities → edges → chrono, which matters
+ * Batch upsert facts, entities, edges, and chrono entries in a single
+ * request.  Processing order: facts → entities → edges → chrono, which matters
  * for records the batch UPDATES: an entity addressed by an existing id is written
  * before an edge in the same batch reads it.
  *

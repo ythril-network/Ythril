@@ -16,7 +16,7 @@
  *
  * `{ type: 1 }` on the four record collections. Measured with `explain()` against a live instance: a
  * `{type: …}` filter — which every list endpoint exposes and every `total` counts with — returned **COLLSCAN**
- * on memories, entities, edges and chrono. Entities look covered by `{ name: 1, type: 1 }` and are not: `type`
+ * on facts, entities, edges and chrono. Entities look covered by `{ name: 1, type: 1 }` and are not: `type`
  * is not a prefix of that index, so it cannot serve a query on `type` alone.
  *
  * Quality-neutral by construction. The same documents come back, in the same order, with the same counts; only
@@ -47,7 +47,7 @@ const TYPE_FILTERED = Object.values(COLLECTION_SUFFIX);
  *
  * `initSpace` creates these, and that only ever reaches a space NEW to the config — so an index added there
  * leaves every existing operator on the collection scan. That is the half this file exists for, and it is why
- * the two lists have to widen together: `entityIds` was created for memories alone, while
+ * the two lists have to widen together: `entityIds` was created for facts alone, while
  * `linkedRecordsAtFrontier` reads it on all three, once per class per member space per hop.
  *
  * **It said three collections and one field, and a link is a (collection, FIELD) pair.** M-2 gave a chrono

@@ -224,7 +224,7 @@ export async function createToken(opts: {
     //
     // It used to be omitted so the load-time backfill would derive it — but that backfill runs once, at load,
     // over the tokens already in the config. A token minted afterwards had no matrix until the next restart,
-    // and `enforceAreaRung` PASSES when `rights` is absent. Measured: a plain non-admin token deleted a memory
+    // and `enforceAreaRung` PASSES when `rights` is absent. Measured: a plain non-admin token deleted a fact
     // over REST with a 204 where a rights-bearing `write` token got a 403 for the same call. The hole was the
     // missing matrix, not the rung.
     rights: opts.rights ?? (migrateToken({

@@ -8,7 +8,7 @@ Ythril exposes a single global MCP server over Streamable HTTP. Each tool accept
 
 ### Server Instructions
 
-On connect, the server sends global instructions listing all available space IDs and noting that each tool requires a `space` parameter (except `recall`, and `similar`, where `space` is optional and enables cross-space results when omitted; and `network_peers`/`network_sync` which are global). Call `list_spaces` to get space IDs, purposes, and entry counts (memories, entities, edges, chrono) — useful for discovering which spaces are populated before querying. Call `space_meta` with a specific space to get its full schema, purpose, and usage notes.
+On connect, the server sends global instructions listing all available space IDs and noting that each tool requires a `space` parameter (except `recall`, and `similar`, where `space` is optional and enables cross-space results when omitted; and `network_peers`/`network_sync` which are global). Call `list_spaces` to get space IDs, purposes, and entry counts (facts, entities, edges, chrono) — useful for discovering which spaces are populated before querying. Call `space_meta` with a specific space to get its full schema, purpose, and usage notes.
 
 > **A refused write is machine-readable.** When a tool refuses a write on schema grounds, the result carries
 > `structuredContent` alongside the prose:
@@ -233,14 +233,14 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 | Tool | Description |
 |---|---|
 | `help` | Self-documenting system guide — the knowledge model, how to choose between `query` / `recall` / filtered recall, schema authoring, and the tools available to the calling token. Read-only, no `space` needed; scoped to the token so it never lists tools the token can't call. **Pass `query` to get only the matching sections** instead of the whole guide — a tool name returns just that tool's line, not the whole list. Matching is plain keyword (**all** words must appear) and **never semantic**, deliberately: `help` is the tool that must work when the embedder does not. A query matching nothing returns the **section index** rather than an empty answer, and `structuredContent.sections` always lists the ids and titles so a caller can see what there is to ask for |
-| `list_spaces` | List accessible space IDs with purposes and entry counts (memories, entities, edges, chrono). `purpose` is the space-level directive; `description` is returned alongside as its deprecated alias, always the same text |
-| `save_fact` | Store a memory with optional tags and entity links |
-| `update_fact` | Update an existing memory's fact, tags, entity links, or delete specific fields via `deleteFields`; `suppressEmbeddings` retires it from semantic search |
-| `delete_fact` | Delete a memory by ID |
-| `recall` | Semantic search across all knowledge types (memories, entities, edges, chrono entries, files). Searches the specified `space`; omit `space` to search across all accessible spaces |
-| `query` | Structured MongoDB filter query (read-only) — supports `memories`, `entities`, `edges`, `chrono`, and `files` collections |
+| `list_spaces` | List accessible space IDs with purposes and entry counts (facts, entities, edges, chrono). `purpose` is the space-level directive; `description` is returned alongside as its deprecated alias, always the same text |
+| `save_fact` | Store a fact with optional tags and entity links |
+| `update_fact` | Update an existing fact's fact, tags, entity links, or delete specific fields via `deleteFields`; `suppressEmbeddings` retires it from semantic search |
+| `delete_fact` | Delete a fact by ID |
+| `recall` | Semantic search across all knowledge types (facts, entities, edges, chrono entries, files). Searches the specified `space`; omit `space` to search across all accessible spaces |
+| `query` | Structured MongoDB filter query (read-only) — supports `facts`, `entities`, `edges`, `chrono`, and `files` collections |
 | `similar` | Find entries with high vector similarity to an existing entry by ID — no re-embedding step. Provide `space` to scope to one space, or omit it to search across all accessible spaces (like `recall`). Supports `traverse` (graph expansion) and `projection` (field selection, applied recursively through `_graph`). **Returns JSON at every depth since 3.1.0** — it answered plain text at `traverse: 0` before, so a client written against that must be updated; the per-result shape is `recall`'s, plus a `source` naming the entry you asked about. The legacy `crossSpace` flag is deprecated — omit `space` instead |
-| `space_stats` | Return counts of memories, entities, edges, chrono entries, and files |
+| `space_stats` | Return counts of facts, entities, edges, chrono entries, and files |
 | `space_meta` | Return the space's DECLARED schema, purpose, usage notes, stats, `needsReindex`, and `actualSchema` — what the space really holds, in the declared schema's own format, so a type can be promoted into it. Absorbed `er_model` at 5.0 — the field to poll after `space_reindex`, which returns as soon as the job starts |
 | `save_entity` | Create or update a named entity (with optional properties) |
 | `update_entity` | Update an existing entity by ID (name, type, description, tags, properties, `suppressEmbeddings`); supports `deleteFields` for field removal |
@@ -250,14 +250,14 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 | `save_edge` | Create or update a directed relationship |
 | `update_edge` | Update an existing edge by ID (label, type, weight, description, tags, properties, `suppressEmbeddings`); supports `deleteFields` for field removal |
 | `delete_edge` | Delete an edge by ID |
-| `save_link` | Record that one record CONCERNS another — a memory about an entity, a file about a chrono entry. Six classes, no label and no weight: an edge says how two things relate, a link says only that one is about the other. The id is derived from the connection, so re-running it is a no-op |
+| `save_link` | Record that one record CONCERNS another — a fact about an entity, a file about a chrono entry. Six classes, no label and no weight: an edge says how two things relate, a link says only that one is about the other. The id is derived from the connection, so re-running it is a no-op |
 | `delete_link` | Remove one link by ID. Clears the array entry too, so nothing is left claiming the connection |
 | `graph_link_preflight` | Which tokens still write the legacy `entityIds` / `memoryIds` / `chronoIds` to this space, and when each last did. Read before converting it |
-| `traverse` | BFS graph traversal — follow edges from a starting entity up to `maxDepth` hops. Chrono entries referencing a reached node come back too, marked `kind: "chrono"` (`includeChrono: false` for entity-only); `includeMemories: true` reaches memories the same way (opt-in — they are numerous and count against `limit`); `includeFiles: true` reaches files, returning **file meta only** — path, description, tags, never passage text, and one node per file rather than per chunk; `includeEdges: false` drops the edge list from the answer without changing the walk |
+| `traverse` | BFS graph traversal — follow edges from a starting entity up to `maxDepth` hops. Chrono entries referencing a reached node come back too, marked `kind: "chrono"` (`includeChrono: false` for entity-only); `includeMemories: true` reaches facts the same way (opt-in — they are numerous and count against `limit`); `includeFiles: true` reaches files, returning **file meta only** — path, description, tags, never passage text, and one node per file rather than per chunk; `includeEdges: false` drops the edge list from the answer without changing the walk |
 | `save_chrono` | Create a chrono entry (the five built-in types, or the space's own declared chrono types, which replace them) |
 | `update_chrono` | Update an existing chrono entry, including `suppressEmbeddings`. Requires at least one field beyond `id` |
 | `delete_chrono` | Delete a chrono entry by ID |
-| `save_bulk` | Batch-upsert memories, entities, edges, and/or chrono entries in a single call (schema-validated) |
+| `save_bulk` | Batch-upsert facts, entities, edges, and/or chrono entries in a single call (schema-validated) |
 | `read_file` | Read a text file from the space file store |
 | `write_file` | Write a text file to the space file store (optional `description` and `tags` stored as metadata) |
 | `list_dir` | List directory contents |
@@ -347,8 +347,8 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 The `save_fact`, `save_entity` and `save_chrono` tools run a **semantic near-duplicate check** before storing, using the same embedding the new record is stored with — so it costs a vector search, not a re-embed. When a highly similar record already exists, the tool's response flags it (id, a short summary, and the cosine score) so an agent can update or merge the existing record instead of accumulating redundant ones:
 
 ```text
-Stored memory (seq 1284, ID 7f3c…).
-⚠️ Possible duplicate — 1 existing memory is highly similar: "The Vault service stores secrets and rotates auth tokens" (ID 9a1b…, 0.97). This memory was still stored; pass checkDuplicates:false to skip this check, or update the existing one instead.
+Stored fact (seq 1284, ID 7f3c…).
+⚠️ Possible duplicate — 1 existing fact is highly similar: "The Vault service stores secrets and rotates auth tokens" (ID 9a1b…, 0.97). This fact was still stored; pass checkDuplicates:false to skip this check, or update the existing one instead.
 ```
 
 #### It sees the batch you are writing
@@ -379,8 +379,8 @@ redundant?"* but *"does this conflict with what we already believe?"*. When a ne
 single-valued property to a different value, the response names the property and **both** values:
 
 ```text
-Stored memory (seq 1290, ID 4c2e…).
-⚠️ Contradiction — 1 existing memory disagrees with this one: "Vault runs in the eu-west cluster" (ID 9a1b…: region eu-west vs us-east). This memory was still stored. If you are correcting an outdated fact, update or supersede the record above instead of leaving both.
+Stored fact (seq 1290, ID 4c2e…).
+⚠️ Contradiction — 1 existing fact disagrees with this one: "Vault runs in the eu-west cluster" (ID 9a1b…: region eu-west vs us-east). This fact was still stored. If you are correcting an outdated fact, update or supersede the record above instead of leaving both.
 ```
 
 Three deliberate limits:
@@ -400,7 +400,7 @@ file record "disagreeing" with another is not a meaningful claim.
 
 #### What counts as a claim
 
-The check compares **single-valued claims**. For memories and entities those are the entries in
+The check compares **single-valued claims**. For facts and entities those are the entries in
 `properties`. A **chrono** entry additionally claims its **`status`** — one entry saying an event
 `completed` and a near-identical one saying it was `cancelled` is a genuine conflict, and because status is
 part of a chrono entry's embedded text, a pair similar enough to be flagged *while disagreeing about it* is
@@ -435,7 +435,7 @@ would also be the same two records named twice under two different headings.
 }
 ```
 
-Omit `space` to search across all accessible spaces. `recall` searches all knowledge types — **memories**, **entities**, **edges**, **chrono entries**, and **files** — using vector similarity.
+Omit `space` to search across all accessible spaces. `recall` searches all knowledge types — **facts**, **entities**, **edges**, **chrono entries**, and **files** — using vector similarity.
 
 **Response format:**
 
@@ -447,7 +447,7 @@ The tool returns a JSON object with a `results` array and a `count`. Each result
     {
       "score": 0.91,
       "spaceId": "general",
-      "type": "memory",
+      "type": "fact",
       "record": {
         "_id": "a1b2c3d4-e5f6-4789-abcd-ef1234567890",
         "fact": "Traefik routing configuration uses path-prefix matchers",
@@ -483,7 +483,7 @@ The tool returns a JSON object with a `results` array and a `count`. Each result
 |-------|-------------|
 | `score` | Cosine similarity score (0.0–1.0). Higher is more relevant. |
 | `spaceId` | Space this result came from. Critical for cross-space recall (no `space` arg). |
-| `type` | Knowledge type discriminator: `memory`, `entity`, `edge`, `chrono`, or `file`. |
+| `type` | Knowledge type discriminator: `fact`, `entity`, `edge`, `chrono`, or `file`. |
 | `record` | The stored document with its user-visible fields. `_id` is always present and can be used directly in follow-up tool calls (`update_fact`, `save_entity`, `delete_fact`, etc.) without a second lookup. Embedding vector excluded. |
 
 For cross-space recall (omit `space`), `spaceId` on each result identifies which space it came from.
@@ -501,7 +501,7 @@ For cross-space recall (omit `space`), `spaceId` on each result identifies which
 
 | Data type | Embedded? | Fields included in the pre-embedding text (`matchedText`, on request via `includeDiagnostics`) | Returned by `recall`? |
 |-----------|:---------:|---------------------------------------------------|:---------------------:|
-| `memory` | ✅ | `tags` + entity names + `fact` + `description` + `properties` | ✅ |
+| `fact` | ✅ | `tags` + entity names + `fact` + `description` + `properties` | ✅ |
 | `entity` | ✅ | `name` + `type` + `tags` + `description` + `properties` | ✅ |
 | `edge` | ✅ | `tags` + `from` + `label` + `to` + `type` + `description` + `properties` | ✅ |
 | `chrono` | ✅ | `type` + `status` + `title` + `tags` + `description` + `properties` | ✅ |
@@ -515,9 +515,9 @@ For cross-space recall (omit `space`), `spaceId` on each result identifies which
 | `query` | `string` | ✅ | Natural language search query |
 | `topK` | `number` | — | Max results to return (default `10`) |
 | `tags` | `string[]` | — | Optional tag filter — only results bearing **all** of these tags are returned (applies to all knowledge types). Useful for scoping a semantic search to a specific service or ADR (e.g. `["portal-backend"]`) |
-| `types` | `string[]` | — | Optional knowledge-type filter — restrict results to one or more of `memory`, `entity`, `edge`, `chrono`, `file`. Omit to search all types. |
+| `types` | `string[]` | — | Optional knowledge-type filter — restrict results to one or more of `fact`, `entity`, `edge`, `chrono`, `file`. Omit to search all types. |
 | `minPerType` | `object` | — | Optional minimum result count per type. Guarantees at least that many results of each specified type if available (e.g. `{"entity": 2, "edge": 1}`). Uses two-phase search: guaranteed slots filled first, remaining slots filled by score. Omit to use pure score ranking. |
-| `maxPerType` | `object` | — | Optional **maximum** result count per type — the ceiling to `minPerType`'s floor (e.g. `{"file": 2, "memory": 4}`). A slot the cap frees goes to another type, so this is how you stop one long file passage from taking space several one-line records would have answered more cheaply. At least `1` per type (use `types` to exclude a type entirely) and clamped to `topK`; a value below `minPerType` for the same type is an error rather than a silent resolution. |
+| `maxPerType` | `object` | — | Optional **maximum** result count per type — the ceiling to `minPerType`'s floor (e.g. `{"file": 2, "fact": 4}`). A slot the cap frees goes to another type, so this is how you stop one long file passage from taking space several one-line records would have answered more cheaply. At least `1` per type (use `types` to exclude a type entirely) and clamped to `topK`; a value below `minPerType` for the same type is an error rather than a silent resolution. |
 | `maxTimeMS` | `number` | the instance budget | Deadline for this recall in ms. Can only **lower** the instance's budget, never raise it, and is clamped up to a 250 ms floor. On expiry the answer is **partial** rather than an error or a hang: collections that finished are returned and the response carries `degraded: ["search_timeout"]`. `degraded` is absent when nothing degraded, and also reports `rerank_skipped_budget` / `rerank_unavailable`. |
 | `minScore` | `number` | — | Minimum cosine similarity score (0.0–1.0). **`topK` is filled from records that CLEAR the threshold** — the same guarantee `filter` makes — so `topK=10, minScore=0.7` returns ten if ten records score above 0.7. Until 4.0 it was applied AFTER the cut, so that call could return three while forty records cleared it: the window was chosen from the unfiltered ranking and then thinned. Both search tools now agree on when it narrows. |
 | `includeContent` | `boolean` | — | Whether to return each file chunk's `content` — the passage body (default `true`). Set `false` for locations and metadata only (path, heading, chunk index, tags, properties), then read back only the chunk you decided you need. Passage bodies are by far the largest field in a response. |
@@ -544,10 +544,10 @@ composes what REST exposes as one DELETE per collection.
 
 | capability | MCP tool | REST route | token needs |
 |---|---|---|---|
-| **Brain — memories** | | | |
-| | `save_fact` | `POST /api/brain/spaces/:spaceId/memories` | write `knowledge` |
-| | `update_fact` | `PATCH /api/brain/spaces/:spaceId/memories/:id` | write `knowledge` |
-| | `delete_fact` | `DELETE /api/brain/spaces/:spaceId/memories/:id` | write `knowledge` |
+| **Brain — facts** | | | |
+| | `save_fact` | `POST /api/brain/spaces/:spaceId/facts` | write `knowledge` |
+| | `update_fact` | `PATCH /api/brain/spaces/:spaceId/facts/:id` | write `knowledge` |
+| | `delete_fact` | `DELETE /api/brain/spaces/:spaceId/facts/:id` | write `knowledge` |
 | **Brain — entities** | | | |
 | | `save_entity` | `POST /api/brain/spaces/:spaceId/entities` | write `knowledge` |
 | | `update_entity` | `PATCH /api/brain/spaces/:spaceId/entities/:id` | write `knowledge` |
@@ -622,7 +622,7 @@ composes what REST exposes as one DELETE per collection.
 
 All fields are optional — only provided fields are updated (partial update). If `fact` changes, re-embedding is triggered automatically. Requires a non-read-only token.
 
-To delete specific fields from a memory, entity, or edge, include a `deleteFields` array of dot-notation paths in the same request:
+To delete specific fields from a fact, entity, or edge, include a `deleteFields` array of dot-notation paths in the same request:
 
 ```json
 {
@@ -676,7 +676,7 @@ Response:
 ```json
 {
   "spaceId": "general",
-  "memories": 1042,
+  "facts": 1042,
   "entities": 156,
   "edges": 89,
   "chrono": 23,
@@ -695,7 +695,7 @@ Works with any valid token (including read-only). For proxy spaces, returns aggr
     "name": "query",
     "arguments": {
       "space": "general",
-      "collection": "memories",
+      "collection": "facts",
       "filter": { "tags": "traefik" },
       "limit": 20
     }
@@ -707,7 +707,7 @@ Works with any valid token (including read-only). For proxy spaces, returns aggr
 
 | Value | Contents |
 |-------|----------|
-| `memories` | Memory facts with tags, entity links, and embeddings |
+| `facts` | Fact facts with tags, entity links, and embeddings |
 | `entities` | Named entities in the knowledge graph |
 | `edges` | Directed relationship edges between entities |
 | `chrono` | Chronological entries (events, deadlines, plans, predictions, milestones) |

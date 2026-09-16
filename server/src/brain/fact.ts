@@ -1,8 +1,8 @@
 /**
- * Memory records — create (`remember`), update, delete, list, count, bulk-delete.
+ * Fact records — create (`saveFact`), update, delete, list, count, bulk-delete.
  *
  * The recall engine lives in recall.ts, the filter DSL in filter.ts, and the structured query
- * surface in query.ts (A17.4). `remember` reaches into recall.ts for the optional insert-time
+ * surface in query.ts (A17.4). `saveFact` reaches into recall.ts for the optional insert-time
  * duplicate check; nothing here is imported back by those modules.
  */
 import { v4 as uuidv4 } from 'uuid';
@@ -15,12 +15,12 @@ import { brainWriteSeqTotal } from '../metrics/registry.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, type SortSpec } from './list-sort.js';
 import { embed } from './embedding.js';
-import { memoryEmbedText } from './embed-text.js';
+import { factEmbedText } from './embed-text.js';
 import { getConfig } from '../config/loader.js';
 import { stampExpiryOnCreate, applyExpiryToUpdate } from './ttl.js';
 import { stampSkewOnCreate } from './stamp-skew.js';
 import { getSpaceMeta, applyPropertyDefaults } from '../spaces/schema-validation.js';
-import { classifyMemoryUpsertAgainst, SchemaViolationError, type UpdateValidation } from './write-validation.js';
+import { classifyFactUpsertAgainst, SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import { applyDeleteFields } from './delete-fields.js';
 import { mergeTags, mergeProperties, mergePropertiesOrKeep } from './merge-fields.js';
 import { enqueueEmbedJob, retireEmbedJob } from './embed-queue.js';
@@ -34,8 +34,8 @@ import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector } from './read-projection.js';
 import { wipeSpaceCollection } from './bulk-wipe.js';
 
-/** Store a new memory with semantic embedding */
-export async function remember(
+/** Store a new fact with semantic embedding */
+export async function saveFact(
   spaceId: string,
   fact: string,
   entityIds: string[] = [],
@@ -56,9 +56,9 @@ export async function remember(
    *
    * ## Why it exists
    *
-   * An MCP agent or an integrator whose request times out will retry — and before this, a retried memory create
-   * produced a **second memory**, silently. Entities already had this: a supplied `id` makes `upsertEntity` find
-   * by `_id` and update. Edges get it free from their `(from, to, label)` natural key. Memories and chrono had
+   * An MCP agent or an integrator whose request times out will retry — and before this, a retried fact create
+   * produced a **second fact**, silently. Entities already had this: a supplied `id` makes `upsertEntity` find
+   * by `_id` and update. Edges get it free from their `(from, to, label)` natural key. Facts and chrono had
    * neither, and they are the two highest-volume write types.
    *
    * The owner chose this mechanism over an `Idempotency-Key` header specifically because it reuses a path already
@@ -90,7 +90,7 @@ export async function remember(
   /*
    * THE SCHEMA IS ENFORCED HERE, so that no caller can reach the collection around it.
    *
-   * Owner's ruling, 2026-08-29: *"all upsert/update/insert things must validate btw."* Memory was the record
+   * Owner's ruling, 2026-08-29: *"all upsert/update/insert things must validate btw."* Fact was the record
    * kind with no classifier at all, so both doors validated the INCOMING payload rather than the record the
    * write would produce — the same defect the chrono classifier was written for, and it fails in both
    * directions: a required property present on the stored record and absent from a converging write reads as
@@ -103,14 +103,14 @@ export async function remember(
   const meta = getSpaceMeta(spaceId);
   const withDefaults = existing
     ? properties
-    : applyPropertyDefaults(type ? meta?.typeSchemas?.memory?.[type] : undefined, properties);
-  const check = classifyMemoryUpsertAgainst(meta, existing, { type, properties: withDefaults });
+    : applyPropertyDefaults(type ? meta?.typeSchemas?.fact?.[type] : undefined, properties);
+  const check = classifyFactUpsertAgainst(meta, existing, { type, properties: withDefaults });
   if (check.blocked) throw new SchemaViolationError(check);
   opts?.onValidation?.(check);
   properties = withDefaults;
 
-  // No entity names: a memory embeds its own content. See `memoryEmbedText` for the measurement.
-  const embedText = memoryEmbedText(fact, tags, description, properties);
+  // No entity names: a fact embeds its own content. See `factEmbedText` for the measurement.
+  const embedText = factEmbedText(fact, tags, description, properties);
 
   // ── Embed now, or hand it to the queue?
   //
@@ -207,15 +207,15 @@ export async function remember(
      * The link records, after the write and before the event.
      *
      * This branch writes `entityIds` UNCONDITIONALLY, from a parameter that defaults to `[]` — so a retried
-     * `remember` carrying the id and no entities WIPES the stored links. Whether that is right is not this
+     * `saveFact` carrying the id and no entities WIPES the stored links. Whether that is right is not this
      * change's question; what matters is that the link records follow it either way, because a link left
-     * behind describes a connection the memory itself no longer claims. `createChrono`'s equivalent branch
+     * behind describes a connection the fact itself no longer claims. `createChrono`'s equivalent branch
      * is guarded and does not clear, and that asymmetry is recorded on the `M-2` row rather than smoothed
      * over here.
      */
     await reconcileLinks(spaceId, converged._id, 'fact', { entity: entityIds }, converged.author);
-    // `memory.updated`, not `created` — a subscriber must be able to tell a converged retry from a new record.
-    if (actor) emitWebhookEvent({ event: 'memory.updated', spaceId, entry: { ...converged, embedding: undefined }, ...actor });
+    // `fact.updated`, not `created` — a subscriber must be able to tell a converged retry from a new record.
+    if (actor) emitWebhookEvent({ event: 'fact.updated', spaceId, entry: { ...converged, embedding: undefined }, ...actor });
     return withoutVector((similar || contradicts)
       ? { ...converged, ...(similar ? { similar } : {}), ...(contradicts ? { contradicts } : {}) }
       : converged);
@@ -261,7 +261,7 @@ export async function remember(
   stampSkewOnCreate(doc, getSpaceMeta(spaceId));
   await col<FactDoc>(`${spaceId}_facts`).insertOne(asDoc<FactDoc>(doc));
   if (!embResult && !suppressed) await enqueueEmbedJob(spaceId, 'fact', doc._id);
-  // The link records for a new memory. One call whether the array is empty or not: `reconcileLinks` is a
+  // The link records for a new fact. One call whether the array is empty or not: `reconcileLinks` is a
   // reconcile, so "nothing to do" is a cheap answer rather than a decision this site has to make.
   await reconcileLinks(spaceId, doc._id, 'fact', { entity: entityIds }, doc.author);
   // Real-time duplicate-rule evaluation (opt-in per space). Fire-and-forget; the
@@ -269,13 +269,13 @@ export async function remember(
   if (getConfig().spaces.find(s => s.id === spaceId)?.dupeRulesOnInsert) {
     import('./dupe-scanner.js').then(m => m.evaluateRecordForDuplicates(spaceId, 'fact', doc._id)).catch(() => { /* best-effort */ });
   }
-  if (actor) emitWebhookEvent({ event: 'memory.created', spaceId, entry: { ...doc, embedding: undefined }, ...actor });
+  if (actor) emitWebhookEvent({ event: 'fact.created', spaceId, entry: { ...doc, embedding: undefined }, ...actor });
   // Advisory only — the record is stored either way.
   return withoutVector((similar || contradicts) ? { ...doc, ...(similar ? { similar } : {}), ...(contradicts ? { contradicts } : {}) } : doc);
 }
 
-/** Update an existing memory's fact, tags, entityIds, description, or properties. Re-embeds when content fields change. */
-export async function updateMemory(
+/** Update an existing fact's fact, tags, entityIds, description, or properties. Re-embeds when content fields change. */
+export async function updateFact(
   spaceId: string,
   memoryId: string,
   updates: { fact?: string; tags?: string[]; entityIds?: string[]; description?: string; properties?: Record<string, string | number | boolean>; type?: string; suppressEmbeddings?: boolean },
@@ -283,7 +283,7 @@ export async function updateMemory(
   actor?: WebhookActor,
   ttlDays?: number | null,
   ifMatchSeq?: number,
-  /** See `remember`'s: the classification, so a door never re-derives it for presentation. */
+  /** See `saveFact`'s: the classification, so a door never re-derives it for presentation. */
   onValidation?: (check: UpdateValidation) => void,
 ): Promise<FactDoc | null> {
   const existing = await col<FactDoc>(`${spaceId}_facts`)
@@ -298,7 +298,7 @@ export async function updateMemory(
 
   // `properties` MERGES into the stored map. It used to replace it, which contradicted this tool's own
   // schema ("Key-value properties to merge"), the `deleteFields` contract ("applied AFTER the normal
-  // merge"), the entity and edge update paths, and `remember`'s own converge branch above. An agent
+  // merge"), the entity and edge update paths, and `saveFact`'s own converge branch above. An agent
   // patching one key silently destroyed every other property on the record, with no error anywhere.
   // Removing a key is `deleteFields`' job — an absence never means "delete".
   //
@@ -346,14 +346,14 @@ export async function updateMemory(
    * applied, so validating earlier would check something the caller is not about to store.
    *
    * The values come from `$set` where the patch touched a field and from `existing` where it did not — which
-   * is what "validate the merged record" means, and what neither door was doing for a memory before there was
+   * is what "validate the merged record" means, and what neither door was doing for a fact before there was
    * a classifier for one.
    */
   {
     const finalType = ('type' in $set ? $set['type'] : existing.type) as string | undefined;
     const finalProps = ('properties' in $unset ? {}
       : ('properties' in $set ? $set['properties'] : existing.properties)) as Record<string, string | number | boolean> | undefined;
-    const check = classifyMemoryUpsertAgainst(getSpaceMeta(spaceId), existing,
+    const check = classifyFactUpsertAgainst(getSpaceMeta(spaceId), existing,
       { type: finalType, properties: finalProps });
     if (check.blocked) throw new SchemaViolationError(check);
     onValidation?.(check);
@@ -416,12 +416,12 @@ export async function updateMemory(
   if (updates.entityIds !== undefined || deleteFieldsPaths?.some(p => p.startsWith('entityIds'))) {
     await reconcileLinks(spaceId, result._id, 'fact', { entity: result.entityIds ?? [] }, result.author);
   }
-  if (actor) emitWebhookEvent({ event: 'memory.updated', spaceId, entry: { ...result, embedding: undefined }, ...actor });
+  if (actor) emitWebhookEvent({ event: 'fact.updated', spaceId, entry: { ...result, embedding: undefined }, ...actor });
   return result;
 }
 
-/** Delete a memory and record a tombstone */
-export async function deleteMemory(
+/** Delete a fact and record a tombstone */
+export async function deleteFact(
   spaceId: string,
   memoryId: string,
   actor?: WebhookActor,
@@ -454,17 +454,17 @@ export async function deleteMemory(
     asDoc<TombstoneDoc>(tombstone),
     { upsert: true },
   );
-  // The cascade. A deleted memory's links describe a connection whose SUBJECT no longer exists, and nothing
+  // The cascade. A deleted fact's links describe a connection whose SUBJECT no longer exists, and nothing
   // else would ever remove them — the reconcile hook only runs on a write to the record that is now gone.
-  // Links pointing AT this memory are a different question and belong to the readers' slice: removing them
+  // Links pointing AT this fact are a different question and belong to the readers' slice: removing them
   // here would delete another record's data.
   await removeLinksFrom(spaceId, memoryId, 'fact');
-  if (actor) emitWebhookEvent({ event: 'memory.deleted', spaceId, entry: { _id: memoryId }, ...actor });
+  if (actor) emitWebhookEvent({ event: 'fact.deleted', spaceId, entry: { _id: memoryId }, ...actor });
   return true;
 }
 
-/** List memories (no embedding, paginated) */
-export async function listMemories(
+/** List facts (no embedding, paginated) */
+export async function listFacts(
   spaceId: string,
   filter: Record<string, unknown> = {},
   limit = 20,
@@ -481,19 +481,19 @@ export async function listMemories(
     .toArray();
 }
 
-/** Count memories in a space */
-export async function countMemories(spaceId: string): Promise<number> {
+/** Count facts in a space */
+export async function countFacts(spaceId: string): Promise<number> {
   return col<FactDoc>(`${spaceId}_facts`).countDocuments();
 }
 
 /**
- * Bulk-delete every memory in a space, writing a tombstone per deleted doc.
+ * Bulk-delete every fact in a space, writing a tombstone per deleted doc.
  *
  * Deterministic newest-first ordering keeps recently written docs near the front of the generated tombstone seq
- * range even under very large datasets. Memories are the only type that asks for it, which is why the shared
+ * range even under very large datasets. Facts are the only type that asks for it, which is why the shared
  * helper takes it as an option rather than applying it to all four: the other three would change behaviour for
  * no stated reason, and this is a refactor.
  */
-export async function bulkDeleteMemories(spaceId: string): Promise<number> {
+export async function bulkDeleteFacts(spaceId: string): Promise<number> {
   return await wipeSpaceCollection(spaceId, 'facts', 'fact', { sort: { createdAt: -1, _id: -1 } });
 }

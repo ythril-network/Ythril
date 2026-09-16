@@ -79,7 +79,7 @@ const DEFAULT_MAX_PER_RUN = 5000;
 const DEFAULT_STRUCTURED_THRESHOLD = DEFAULT_DUPE_THRESHOLD;
 /** Pairs a REMOTE judge may be asked per run by default. Bounds egress, not time. */
 const DEFAULT_REMOTE_PAIR_BUDGET = 2000;
-// Chrono is swept alongside memories and entities: a calendar is exactly where the same thing gets logged
+// Chrono is swept alongside facts and entities: a calendar is exactly where the same thing gets logged
 // twice with conflicting states, and its `status` is a single-valued claim the structured pass can settle
 // without a model. See structured-claims.ts for why its dates are deliberately not part of that.
 export const DEFAULT_TYPES: DupeScanType[] = ['fact', 'entity', 'chrono'];

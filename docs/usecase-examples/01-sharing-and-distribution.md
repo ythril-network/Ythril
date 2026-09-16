@@ -25,7 +25,7 @@ graph LR
 **Source:** Every device — notes, bookmarks, research captured on whichever device you're using.
 **Consumers:** You, on every other device.
 
-> A **closed** network with a single member auto-approves instantly. Add your second device, approve once from the first, and all future sync is automatic. Memories, entities, files, and chrono entries stay consistent everywhere.
+> A **closed** network with a single member auto-approves instantly. Add your second device, approve once from the first, and all future sync is automatic. Facts, entities, files, and chrono entries stay consistent everywhere.
 
 ---
 
@@ -125,7 +125,7 @@ graph TD
 **Additional benefits:**
 
 - Entity types (`material`, `algorithm`, `finding`) with edges (`validated_by`, `supersedes`) create a structured research graph that flows downstream intact.
-- Each tier adds their own memories to their local spaces — only the networked space syncs.
+- Each tier adds their own facts to their local spaces — only the networked space syncs.
 
 ---
 
@@ -242,7 +242,7 @@ graph LR
 **Source:** Data team curates raw datasets; ML team adds model configs and benchmark results; QA team adds evaluation criteria and test cases.
 **Consumers:** All three teams need the complete picture.
 
-> **Democratic** full-mesh ensures all three teams stay aligned. The knowledge graph tracks which datasets (`entity: dataset`) were used in which experiments (`edge: trained_on`), with chrono entries marking evaluation milestones. Memory fork-on-conflict preserves both versions when two teams annotate the same data point differently.
+> **Democratic** full-mesh ensures all three teams stay aligned. The knowledge graph tracks which datasets (`entity: dataset`) were used in which experiments (`edge: trained_on`), with chrono entries marking evaluation milestones. Fact fork-on-conflict preserves both versions when two teams annotate the same data point differently.
 
 **Additional benefits:**
 
@@ -251,15 +251,15 @@ graph LR
 
 ---
 
-## 9. LLM With Persistent Memory Across Conversations
+## 9. LLM With Persistent Fact Across Conversations
 
-**Use Case:** Give your AI assistant a real long-term memory that survives context windows, sessions, and even model switches.
+**Use Case:** Give your AI assistant a real long-term fact that survives context windows, sessions, and even model switches.
 
 **Network Topology:**
 
 ```mermaid
 graph LR
-    subgraph "AI Memory"
+    subgraph "AI Fact"
         You["🧑 You<br/>(Ythril + MCP Client)"]
     end
 ```
@@ -267,7 +267,7 @@ graph LR
 **Source:** Every conversation — your LLM calls `save_fact` to store decisions, preferences, project context, and learnings. It calls `save_entity` and `save_edge` to build a structured knowledge graph as it learns.
 **Consumers:** The same LLM (or any future LLM) in every future conversation.
 
-> This is the door-opener. Connect any MCP-compatible LLM client to Ythril and it gains: `recall` for semantic memory search, `query` for structured retrieval, `list_chrono` for time-awareness, and `read_file`/`write_file` for document access. **Switch from Claude to GPT to Llama — the memory stays.** The brain belongs to you, not the model provider. No vendor lock-in on your own knowledge.
+> This is the door-opener. Connect any MCP-compatible LLM client to Ythril and it gains: `recall` for semantic fact search, `query` for structured retrieval, `list_chrono` for time-awareness, and `read_file`/`write_file` for document access. **Switch from Claude to GPT to Llama — the fact stays.** The brain belongs to you, not the model provider. No vendor lock-in on your own knowledge.
 
 **Wow factor:**
 

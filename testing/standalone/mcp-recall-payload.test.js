@@ -120,7 +120,7 @@ describe('includeContent: false returns locations, not passages', () => {
   it('does not strip a record whose text IS the record', () => {
     // A memory's `fact` is not a passage — removing it would leave a result that says nothing. The
     // parameter governs file chunk bodies, which is what the tool description promises.
-    const mem = { _id: 'm1', spaceId: 's', type: 'memory', score: 0.9, fact: 'PKCE is required for all public clients.' };
+    const mem = { _id: 'm1', spaceId: 's', type: 'fact', score: 0.9, fact: 'PKCE is required for all public clients.' };
     assert.equal(toRecallRecord(mem, { includeContent: false }).fact, 'PKCE is required for all public clients.');
   });
 });

@@ -75,7 +75,7 @@ describe('the delete refusal names the end it checked', { skip }, () => {
   });
 
   beforeEach(async () => {
-    for (const c of ['entities', 'edges', 'memories', 'files']) await coll(c).deleteMany({});
+    for (const c of ['entities', 'edges', 'facts', 'files']) await coll(c).deleteMany({});
     await coll('entities').insertMany([entity(SUBJECT, 'Subject'), entity(OTHER, 'Other')]);
   });
 
@@ -117,11 +117,11 @@ describe('the delete refusal names the end it checked', { skip }, () => {
   it('a memory that holds the reference carries NO end, because it is not an endpoint', async () => {
     // The distinction is the point. An edge has ends; a memory has a list. Labelling the memory `to` would be
     // inventing a direction, and a caller would look for an edge that does not exist.
-    await coll('memories').insertOne({
+    await coll('facts').insertOne({
       _id: 'm-1', spaceId: SPACE, fact: 'about the subject', entityIds: [SUBJECT], tags: [], seq: 1,
     });
     const block = await guardMod.entityDeleteBlockers(SPACE, SUBJECT);
-    assert.deepEqual(block.backlinks, [{ type: 'memory', _id: 'm-1' }]);
+    assert.deepEqual(block.backlinks, [{ type: 'fact', _id: 'm-1' }]);
   });
 
   it('the message does not claim a direction', async () => {

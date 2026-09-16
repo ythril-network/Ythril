@@ -133,7 +133,7 @@ export async function upsertFileMeta(
 
 /**
  * Partially update the metadata record for a file (tags, description,
- * entity/chrono/memory linkage, properties).  Re-embeds the record on
+ * entity/chrono/fact linkage, properties).  Re-embeds the record on
  * every successful update.  Returns the updated document, or null if the
  * record does not exist.
  */
@@ -269,9 +269,9 @@ export async function updateFileMeta(
   /**
    * `properties` MERGES, as it does on all four brain record types (X-6).
    *
-   * It replaced until now, and `brain/memory.ts` records what that costs, because the same defect was found
+   * It replaced until now, and `brain/fact.ts` records what that costs, because the same defect was found
    * and fixed there first: *"An agent patching one key silently destroyed every other property on the record,
-   * with no error anywhere."* The sweep that reached memory, chrono, entity and edge did not reach this file,
+   * with no error anywhere."* The sweep that reached fact, chrono, entity and edge did not reach this file,
    * so five tools that take the same-looking arguments had one that behaved differently.
    *
    * Removing a key is `deleteFields`' job below — an absence never means "delete", here or anywhere else.

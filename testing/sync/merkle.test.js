@@ -60,7 +60,7 @@ async function getMerkle(instance, token, spaceId, networkId) {
 
 /** Write a memory document to the brain API (simulates a write). */
 async function writeMemory(instance, token, spaceId, text) {
-  return post(instance, token, `/api/brain/spaces/${spaceId}/memories`, {
+  return post(instance, token, `/api/brain/spaces/${spaceId}/facts`, {
     fact: text,
   });
 }

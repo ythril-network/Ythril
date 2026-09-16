@@ -61,7 +61,7 @@ const OWNER = 'server/src/brain/links.ts';
  * the two that matter.
  */
 const WRITERS = {
-  'server/src/brain/memory.ts': 'remember (both branches), updateMemory, and deleteMemory\'s cascade',
+  'server/src/brain/fact.ts': 'saveFact(both branches), updateFact, and deleteFact\'s cascade',
   'server/src/brain/chrono.ts': 'createChrono (both branches), updateChrono, and deleteChrono\'s cascade',
   'server/src/files/file-meta.ts': 'updateFileMeta — the only writer of a file\'s three arrays — and rename',
   'server/src/api/sync/_shared.ts': 'ingestBrainDoc: a record PUSHED by a peer, and the admin importer',

@@ -69,7 +69,7 @@ ythril_http_requests_total{method="GET",route="/health",status_code="200"} 42
 | `ythril_http_request_duration_seconds` | histogram | Request latency by method and route |
 | `ythril_http_request_size_bytes` | histogram | Request body size |
 | `ythril_http_response_size_bytes` | histogram | Response body size |
-| `ythril_memories_total` | gauge | Approximate memories by space — read from collection metadata, not counted per scrape |
+| `ythril_facts_total` | gauge | Approximate facts by space — read from collection metadata, not counted per scrape |
 | `ythril_entities_total` | gauge | Approximate entities by space (same estimate as above) |
 | `ythril_edges_total` | gauge | Approximate edges by space (same estimate as above) |
 | `ythril_chrono_entries_total` | gauge | Approximate chrono entries by space (same estimate as above) |
@@ -84,7 +84,7 @@ ythril_http_requests_total{method="GET",route="/health",status_code="200"} 42
 | `ythril_tokens_active` | gauge | Number of active (non-expired) tokens |
 | `ythril_mcp_tool_calls_total` | counter | Tool invocations by tool name and space |
 | `ythril_sync_cycles_total` | counter | Sync cycles by `network` and `status` — `success`, `partial`, `error`. |
-| `ythril_sync_items_pulled_total` | counter | Items received by `type` — `memories`, `entities`, `edges`, `files`, `chrono`. |
+| `ythril_sync_items_pulled_total` | counter | Items received by `type` — `facts`, `entities`, `edges`, `files`, `chrono`. |
 | `ythril_sync_items_pushed_total` | counter | Items sent by `type` — same set as pulled. |
 | `ythril_sync_duration_seconds` | histogram | Time per sync cycle |
 | `ythril_recall_degraded_total` | counter | Recalls answered with a **weaker pipeline than configured**, by `reason`. `rerank_unavailable` = the cross-encoder is configured but did not answer; `rerank_skipped_budget` = it was not attempted because the end-to-end `RECALL_BUDGET_MS` was already spent upstream. **This is the one to alert on**: these paths return HTTP 200 with a worse ranking, so they raise no error rate and barely move latency — a reranker down for a week is otherwise invisible. Both series report `0` from process start, so absent-vs-zero is never ambiguous. |

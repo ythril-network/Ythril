@@ -24,7 +24,7 @@
  * ## Two properties of the loops that are easy to lose
  *
  *  - **A re-embed is not a write.** The embedding fields go in with a direct `$set` rather than through the record
- *    update path, so `seq` and `updatedAt` do not move. Routing them through `updateMemory` would look tidier and
+ *    update path, so `seq` and `updatedAt` do not move. Routing them through `updateFact` would look tidier and
  *    would bump `seq` on every record in the space -- a sync-visible change on every peer, for a local re-embed that
  *    changed no content.
  *  - **Each collection embeds the text its WRITE path embeds.** These loops call the same `*EmbedText` builders the
@@ -39,7 +39,7 @@
 import { col, asFilter } from '../db/mongo.js';
 import { embed } from './embedding.js';
 import { embeddingSuppressedFor } from './suppress-embeddings.js';
-import { memoryEmbedText, entityEmbedText, edgeEmbedText, chronoEmbedText, fileEmbedText } from './embed-text.js';
+import { factEmbedText, entityEmbedText, edgeEmbedText, chronoEmbedText, fileEmbedText } from './embed-text.js';
 import { clearReindexFlag } from '../spaces/_shared.js';
 import { resolveEdgeEndpointNames } from './edge-endpoint-names.js';
 import { reindexInProgress } from '../metrics/registry.js';
@@ -155,7 +155,7 @@ export function startReindex(plan: ReindexPlan): void {
             for (const mid of memberIds) {
             const BATCH = 50;
 
-            // Re-embed memories
+            // Re-embed facts
             {
               let cursor: string | null = null;
               // eslint-disable-next-line no-constant-condition
@@ -170,7 +170,7 @@ export function startReindex(plan: ReindexPlan): void {
                 for (const doc of batch) {
                   try {
                     if (embeddingSuppressedFor(mid, 'fact', doc as unknown as Record<string, unknown>)) { suppressed++; continue; }
-                    const result = await embed(memoryEmbedText(doc.fact, doc.tags ?? [], doc.description, doc.properties));
+                    const result = await embed(factEmbedText(doc.fact, doc.tags ?? [], doc.description, doc.properties));
                     await col<FactDoc>(`${mid}_facts`).updateOne(
                       { _id: doc._id },
                       { $set: { embedding: result.vector, embeddingModel: result.model } },

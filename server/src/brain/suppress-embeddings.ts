@@ -142,14 +142,14 @@ export function schemaKeyFor(
  * ## Why this had to be extractable
  *
  * The comment below used to say *"this is the single place the flag has any effect. Every writer of a vector
- * reaches this function"* — and that was not true. The four creators (`memory.ts`, `entities.ts`, `chrono.ts`,
+ * reaches this function"* — and that was not true. The four creators (`fact.ts`, `entities.ts`, `chrono.ts`,
  * `edges.ts`) compute the vector INLINE when the caller asks for `waitForEmbedding`, `checkDuplicates` or
  * `checkContradictions`, and then skip the enqueue precisely because they already have one. The enqueue was
  * the only path that consulted suppression, so the inline path stored a vector the flag forbids and nothing
  * ever came back to remove it.
  *
  * **The default MCP write hit this**: `checkDuplicates` defaults to `true` on those tools, so an ordinary
- * `remember` into a suppressed space stored a vector, every time, and the operator's setting did nothing they
+ * `saveFact` into a suppressed space stored a vector, every time, and the operator's setting did nothing they
  * could see. `suppressEmbeddings` is implemented AS the absence of a vector — there is no query-time filter —
  * so a stored vector is not a cosmetic inconsistency, it is the feature not working.
  *

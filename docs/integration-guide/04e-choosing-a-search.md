@@ -24,7 +24,7 @@ If two of those are true at once, read on: the combinations are where the real c
 
 ## `recall` — when the words matter and the wording does not
 
-`recall` embeds your query and ranks by meaning, so *"the auth rewrite broke PKCE"* finds a memory phrased
+`recall` embeds your query and ranks by meaning, so *"the auth rewrite broke PKCE"* finds a fact phrased
 *"PKCE flow regressed during the authentication migration"*. Nothing else here does that.
 
 **It is the wrong tool when you need completeness.** `topK` is a cut, and a cut with a *rank* behind it: result 11

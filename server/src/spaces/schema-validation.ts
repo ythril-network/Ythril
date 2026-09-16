@@ -3,7 +3,7 @@
  *
  * Validates write operations against a space's `meta` block using the
  * per-type `typeSchemas` structure — each entity type / edge label /
- * memory type / chrono type owns its own property schemas, naming pattern,
+ * fact type / chrono type owns its own property schemas, naming pattern,
  * required flags. It does NOT constrain tags: `TypeSchema` has no tag field, and the space-wide
  * suggestion list was retired in #365 — see the note further down.
  *
@@ -218,7 +218,7 @@ const UNTYPED = 'UNTYPED';
  * Does `type` satisfy one side of an `endpoints` declaration?
  *
  * `entity:person` and `person` are the same member — the prefix is reserved so the vocabulary can widen if
- * memory or chrono links ever become edges, and accepting it now makes that widening a no-op for anyone already
+ * fact or chrono links ever become edges, and accepting it now makes that widening a no-op for anyone already
  * writing it.
  */
 function endpointAllows(allowed: readonly string[], type: string | null): boolean {
@@ -293,52 +293,52 @@ export function validateEdge(
 }
 
 /**
- * Validate a memory write against the space meta schema.
+ * Validate a fact write against the space meta schema.
  *
  * ## The allowlist, and why it took a ruling rather than a bugfix
  *
- * Entities, edges and chrono entries each refuse a type outside the set their space declares. Memories did
+ * Entities, edges and chrono entries each refuse a type outside the set their space declares. Facts did
  * not — while `types-knowledge.ts` stated the rule for both kinds it covers, and two integration-guide pages
  * said so outright. That reads like a documented-but-unimplemented feature, and it was nearly fixed as one.
  *
- * What stopped it: the absence was PINNED as deliberate, and the CHANGELOG carried a reason. The memories
+ * What stopped it: the absence was PINNED as deliberate, and the CHANGELOG carried a reason. The facts
  * tab's `type` control is free text with suggestions rather than a closed select **because** the server
  * accepted any string — a select would have been "stricter than the API", which is the mirror of the gap that
  * work was closing. Two shipped promises pointing opposite ways is a product decision, not a defect.
  *
  * **Owner ruled A on 2026-08-30:** the keys are the allowlist. The UI argument was a consequence of the gap
  * rather than a reason for it, and it inverts cleanly now the server constrains the type — so the control
- * becomes a select wherever a space declares memory types.
+ * becomes a select wherever a space declares fact types.
  *
  * ## What it can newly refuse, which is bounded
  *
- * The same condition the other three use: **only when the space declares at least one memory type schema.** A
- * space with no `typeSchemas.memory` is untouched, and a space with one had already been promised this.
+ * The same condition the other three use: **only when the space declares at least one fact type schema.** A
+ * space with no `typeSchemas.fact` is untouched, and a space with one had already been promised this.
  */
-export function validateMemory(
+export function validateFact(
   meta: SpaceMeta,
   fact: { type?: string; properties?: Record<string, unknown> },
 ): SchemaViolation[] {
   if (!meta) return [];
   const violations: SchemaViolation[] = [];
 
-  const memorySchemas = meta.typeSchemas?.memory;
+  const factSchemas = meta.typeSchemas?.fact;
 
-  // Memory type allowlist (if any types are defined, memory.type must be one of them)
-  if (memory.type && memorySchemas && Object.keys(memorySchemas).length > 0) {
-    if (!Object.prototype.hasOwnProperty.call(memorySchemas, memory.type)) {
+  // Fact type allowlist (if any types are defined, fact.type must be one of them)
+  if (fact.type && factSchemas && Object.keys(factSchemas).length > 0) {
+    if (!Object.prototype.hasOwnProperty.call(factSchemas, fact.type)) {
       violations.push({
         field: 'type',
-        value: memory.type,
-        reason: `not in memoryTypes allowlist: ${Object.keys(memorySchemas).join(', ')}`,
+        value: fact.type,
+        reason: `not in memoryTypes allowlist: ${Object.keys(factSchemas).join(', ')}`,
       });
     }
   }
 
-  const typeSchema = memory.type ? memorySchemas?.[memory.type] : undefined;
+  const typeSchema = fact.type ? factSchemas?.[fact.type] : undefined;
   const refViolations = checkUnresolvedRef(typeSchema);
   if (refViolations.length) return [...violations, ...refViolations];
-  return [...violations, ...validatePropertiesAgainstSchema(typeSchema, memory.properties)];
+  return [...violations, ...validatePropertiesAgainstSchema(typeSchema, fact.properties)];
 }
 
 /**
@@ -395,8 +395,8 @@ export function buildSchemaSummary(meta: SpaceMeta): string {
   if (ts?.edge && Object.keys(ts.edge).length > 0) {
     parts.push(`Edge labels: ${Object.keys(ts.edge).join(', ')}`);
   }
-  if (ts?.memory && Object.keys(ts.memory).length > 0) {
-    parts.push(`Memory types: ${Object.keys(ts.memory).join(', ')}`);
+  if (ts?.fact && Object.keys(ts.fact).length > 0) {
+    parts.push(`Fact types: ${Object.keys(ts.fact).join(', ')}`);
   }
   if (ts?.chrono && Object.keys(ts.chrono).length > 0) {
     parts.push(`Chrono types: ${Object.keys(ts.chrono).join(', ')}`);

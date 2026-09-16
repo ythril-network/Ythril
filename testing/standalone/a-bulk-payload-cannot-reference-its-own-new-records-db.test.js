@@ -118,7 +118,7 @@ const TRUTH = /mint|minted|not adopted|never adopted|from the response|in the re
  * The processing order, which every one of these surfaces states and which is the anchor the correction hangs
  * off — the false sentence was attached to it on all five copies.
  */
-const ORDER = /memories\s*(?:→|->|—>)\s*entities/i;
+const ORDER = /facts\s*(?:→|->|—>)\s*entities/i;
 
 /**
  * How much of the flattened text after the anchor counts as "the same passage" — 600 characters, which is

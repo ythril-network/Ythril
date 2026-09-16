@@ -37,7 +37,7 @@ function space(over: Partial<Space> = {}): Space {
   return { id: 'work', label: 'Work', ...over } as Space;
 }
 
-const STATS = { spaceId: 'work', memories: 1, entities: 2, edges: 3, chrono: 4, files: 5 };
+const STATS = { spaceId: 'work', facts: 1, entities: 2, edges: 3, chrono: 4, files: 5 };
 
 function makeApi(spaces: Space[] = []) {
   return {

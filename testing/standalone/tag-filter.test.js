@@ -82,7 +82,7 @@ describe('every single-tag call site uses the shared helper', () => {
   // Derived from the source, not asserted as a count: a count passes with a site still using the old
   // exact match, which is exactly the gap that shipped in #480 and had to be fixed in #481.
   const SITES = [
-    ['server/src/api/brain/_shared.ts', 'memories'],
+    ['server/src/api/brain/_shared.ts', 'facts'],
     ['server/src/api/brain/entities.ts', 'entities'],
     ['server/src/api/brain/file-meta.ts', 'file meta'],
     ['server/src/brain/edges.ts', 'edges'],

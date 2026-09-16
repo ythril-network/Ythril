@@ -334,7 +334,7 @@ async function measureUsageUncached(): Promise<UsageGiB> {
 /**
  * Check quota limits for a write operation.
  *
- * @param area  'files' for file writes; 'brain' for memory/entity/edge writes
+ * @param area  'files' for file writes; 'brain' for fact/entity/edge writes
  * @param incomingBytes  projected size of the write being checked — added to
  *        current usage before hard-limit comparison so an upload that would
  *        push usage past the limit is rejected up front, not after landing

@@ -3,8 +3,8 @@
  *
  * ## What this door is for, and why it is not an edge route
  *
- * A link says one record CONCERNS another — a memory about an entity, a file about a chrono entry. It is the
- * six public array fields (`memory.entityIds`, `chrono.entityIds`/`memoryIds`,
+ * A link says one record CONCERNS another — a fact about an entity, a file about a chrono entry. It is the
+ * six public array fields (`fact.entityIds`, `chrono.entityIds`/`memoryIds`,
  * `file.entityIds`/`memoryIds`/`chronoIds`) stored as records, so the five adjacency readers have one place
  * to look. It carries no label, no weight, no properties and no type: those are what an EDGE is for, and a
  * link that could carry them would be an edge with a different name.
@@ -48,7 +48,7 @@ export const linksRouter = Router();
  */
 const LINKS_CREATE_BODY_KEYS = ['from', 'fromKind', 'to', 'toKind'];
 
-/** Every legal class as `memory.entityIds`, for a refusal that names what the caller could have sent. */
+/** Every legal class as `fact.entityIds`, for a refusal that names what the caller could have sent. */
 const PAIR_LABELS = LINK_PAIRS.map(([f, t]) => linkLabel(f, t)).join(', ');
 
 /** A kind parameter that must be present and one of the four. Absent is refused, not defaulted. */

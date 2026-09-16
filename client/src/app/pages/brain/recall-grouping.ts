@@ -45,7 +45,7 @@ export interface RecallGroupFile {
 export interface RecallGroup {
   /** Best score in the group — what the list orders by, so grouping never reorders relative to other hits. */
   score?: number;
-  /** Set only for a grouped file. Absent for memories, entities, edges, chrono and ungroupable file rows. */
+  /** Set only for a grouped file. Absent for facts, entities, edges, chrono and ungroupable file rows. */
   file?: RecallGroupFile;
   /** The underlying hits, best first. Exactly one for a non-file group. */
   hits: RecallResult[];
@@ -178,7 +178,7 @@ export interface RelatedRecord {
 /** A match's neighbourhood, grouped the way a reader asks for it. */
 export interface RelatedGroups {
   entities: RelatedRecord[];
-  memories: RelatedRecord[];
+  facts: RelatedRecord[];
   chronos: RelatedRecord[];
   files: RelatedRecord[];
   total: number;
@@ -201,7 +201,7 @@ export interface RelatedGroups {
  * so the reader can see which is which without the tree being rebuilt in the markup.
  */
 export function relatedOf(match: RecallResult): RelatedGroups {
-  const out: RelatedGroups = { entities: [], memories: [], chronos: [], files: [], total: 0 };
+  const out: RelatedGroups = { entities: [], facts: [], chronos: [], files: [], total: 0 };
   const walk = (nodes: unknown): void => {
     if (!Array.isArray(nodes)) return;
     for (const raw of nodes) {
@@ -220,7 +220,7 @@ export function relatedOf(match: RecallResult): RelatedGroups {
         hops: Math.max(1, primary.length - 1),
         ...(typeof edge['label'] === 'string' ? { label: edge['label'] as string } : {}),
       };
-      const bucket = kind === 'memory' ? out.memories
+      const bucket = kind === 'fact' ? out.facts
         : kind === 'chrono' ? out.chronos
         : kind === 'file' ? out.files
         : out.entities;

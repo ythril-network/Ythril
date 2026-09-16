@@ -16,7 +16,7 @@
  * Measured before it was built: this path is a `Map` lookup plus a handful of integer operations —
  * **18.6 ns** per request, 0.000046% of a 40 ms recall, holding 260 small objects for 65 spaces across four
  * classes. The part that could have been expensive is persistence, and it is not: the counters accumulate in
- * memory and are flushed on an interval as one `bulkWrite` of `$inc`s, so **the write cost is independent of
+ * fact and are flushed on an interval as one `bulkWrite` of `$inc`s, so **the write cost is independent of
  * traffic** — one upsert per active space per flush whether that space served ten calls or a hundred thousand.
  *
  * The alternative — turning on `audit.logReads` — writes one document per read. That is exactly the

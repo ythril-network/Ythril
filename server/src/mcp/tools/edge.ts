@@ -307,7 +307,7 @@ export const graph_traverseTool: ToolHandler = {
   description: 'Follow edges from a starting entity and return reachable nodes up to `maxDepth` hops. For dependency analysis, impact assessment and lineage.\n\n'
     + 'NOT THE SAME AS `recall(traverse: n)`, and the difference decides which one you want:\n'
     + '• This starts from a node you ALREADY KNOW, by id. `recall`\'s expansion starts from whatever a search matched, so it answers "what is near the things about X" rather than "what is near THIS".\n'
-    + '• This can follow `entityIds` references — chrono entries, memories and files that point AT a node — which are not edges. `includeChrono`, `includeMemories` and `includeFiles` turn each kind on, and `includeChrono` is ON by default here because you came to explore a graph rather than to search. `recall` takes the SAME three flags inside its `traverse` object, all three defaulting OFF there because its answer is budgeted — so the difference between the two tools is the default, not the capability.\n'
+    + '• This can follow `entityIds` references — chrono entries, facts and files that point AT a node — which are not edges. `includeChrono`, `includeMemories` and `includeFiles` turn each kind on, and `includeChrono` is ON by default here because you came to explore a graph rather than to search. `recall` takes the SAME three flags inside its `traverse` object, all three defaulting OFF there because its answer is budgeted — so the difference between the two tools is the default, not the capability.\n'
     + '• This returns a flat node list with a depth on each; `recall` nests its walk under the match that reached it.\n\n'
     + 'It is also blind to meaning, which is the point: a node reached in three hops is reached whether or not it resembles anything, and nothing here is embedded or ranked. A record retired from semantic ranking is reached exactly as any other.\n\n'
     + 'THE RESPONSE: `nodes` — each with `id`, `name`, `type`, `kind` ("entity" unless it arrived via one of the include flags) and the `depth` it was found at, `startId` itself at depth 0. `edges` — the connecting relationships, unless `includeEdges` is false. `truncated` — true when `limit` cut the walk, and worth reading: a truncated walk is a PARTIAL graph, so an impact assessment run on one is answering a smaller question than it was asked.',
@@ -321,7 +321,7 @@ export const graph_traverseTool: ToolHandler = {
               type: 'string',
               enum: ['outbound', 'inbound', 'both'],
               default: 'outbound',
-              description: 'Follow edges from the node (outbound), to the node (inbound), or both directions. Default: outbound. It narrows STORED EDGES ONLY. A link is a record with a from and a to since 4.0, but which way it runs is fixed by the KINDS at its ends, not by the data: a memory names entities and entities name nothing, so there is no second direction to choose. includeChrono/includeMemories/includeFiles reach the records naming this entity whatever direction says. The traverse expansion inside recall behaves identically.',
+              description: 'Follow edges from the node (outbound), to the node (inbound), or both directions. Default: outbound. It narrows STORED EDGES ONLY. A link is a record with a from and a to since 4.0, but which way it runs is fixed by the KINDS at its ends, not by the data: a fact names entities and entities name nothing, so there is no second direction to choose. includeChrono/includeMemories/includeFiles reach the records naming this entity whatever direction says. The traverse expansion inside recall behaves identically.',
             },
             edgeLabels: {
               type: 'array',
@@ -331,7 +331,7 @@ export const graph_traverseTool: ToolHandler = {
             maxDepth: { type: 'number', minimum: 1, maximum: 10, default: 3, description: 'Maximum hops from startId (clamped to 1–10). Default 3.' },
             limit: { type: 'number', minimum: 1, maximum: 1000, default: 100, description: 'Maximum total nodes returned (clamped to 1–1000). Default 100.' },
             includeChrono: { type: 'boolean', default: true, description: 'Follow chrono.entityIds as inbound links, so chrono entries about a node are reached too. Chrono nodes carry kind:"chrono"; entity nodes are unchanged. Set false for entity-only results.' },
-            includeMemories: { type: 'boolean', default: false, description: 'Follow memory.entityIds as inbound links, so memories about a node are reached too. Memory nodes carry kind:"fact". Opt-IN rather than on by default, unlike includeChrono: memories are usually the most numerous record type and every node counts against `limit`, so enabling it on a memory-heavy space can truncate away the entities you traversed for. Raise `limit` with it.' },
+            includeMemories: { type: 'boolean', default: false, description: 'Follow fact.entityIds as inbound links, so facts about a node are reached too. Fact nodes carry kind:"fact". Opt-IN rather than on by default, unlike includeChrono: facts are usually the most numerous record type and every node counts against `limit`, so enabling it on a fact-heavy space can truncate away the entities you traversed for. Raise `limit` with it.' },
             includeFiles: { type: 'boolean', default: false, description: 'Follow file.entityIds as inbound links, so documents about a node are reached too. File nodes carry kind:"file" and file META ONLY — the path as `name`, plus `description` and `tags`. Never passage text: a file body is its chunks, they are the largest thing stored, and a structural walk must not pay for them. Read a chunk with the file API once you know which document you want. Opt-in, like includeMemories.' },
             includeEdges: { type: 'boolean', default: true, description: 'Whether the response carries the edge list. This does NOT change the walk — edges are how the graph is traversed, so declining to follow them would return different nodes rather than a smaller answer. Set false when you only want the reachable nodes and the connecting relationships would be wasted tokens.' },
           },
@@ -388,8 +388,8 @@ export const delete_edgeTool: ToolHandler = {
     + 'instead. Edges are searchable records and compete with knowledge for a recall `topK`; excluding one '
     + 'stops it being ranked while `traverse` still walks it and recall still expands through it. Deleting it '
     + 'removes it from the graph as well, which is a much larger change than "it was crowding my results".\n\n'
-    + 'IT IS NEVER REFUSED FOR BEING REFERENCED, and unlike memories and chrono entries that did not change '
-    + 'in 4.0: nothing can point AT an edge. Links run from a memory, chrono entry or file to what it is '
+    + 'IT IS NEVER REFUSED FOR BEING REFERENCED, and unlike facts and chrono entries that did not change '
+    + 'in 4.0: nothing can point AT an edge. Links run from a fact, chrono entry or file to what it is '
     + 'about, and an edge is never the target of one.\n\n'
     + 'A TOMBSTONE IS WRITTEN, so the deletion propagates to peer instances on the next sync and the edge is '
     + 'not quietly resurrected from a peer that still has it. That is also why re-creating it with the same '

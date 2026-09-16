@@ -80,9 +80,9 @@ import { SchemaTypeEditorComponent } from './schema-type-editor.component';
     {{ 'spaces.schema.tab.edges' | transloco }}
     @if (state.typeCount('edge')) { <span class="sch-cnt-badge">{{ state.typeCount('edge') }}</span> }
   </button>
-  <button class="sch-coll-tab" [class.active]="state.schemaCollTab()==='memory'" [attr.aria-selected]="state.schemaCollTab()==='memory'" role="tab" (click)="state.schemaCollTab.set('memory');schImportError.set('');schImportInfo.set('')">
-    {{ 'spaces.schema.tab.memories' | transloco }}
-    @if (state.typeCount('memory')) { <span class="sch-cnt-badge">{{ state.typeCount('memory') }}</span> }
+  <button class="sch-coll-tab" [class.active]="state.schemaCollTab()==='fact'" [attr.aria-selected]="state.schemaCollTab()==='fact'" role="tab" (click)="state.schemaCollTab.set('fact');schImportError.set('');schImportInfo.set('')">
+    {{ 'spaces.schema.tab.facts' | transloco }}
+    @if (state.typeCount('fact')) { <span class="sch-cnt-badge">{{ state.typeCount('fact') }}</span> }
   </button>
   <button class="sch-coll-tab" [class.active]="state.schemaCollTab()==='chrono'" [attr.aria-selected]="state.schemaCollTab()==='chrono'" role="tab" (click)="state.schemaCollTab.set('chrono');schImportError.set('');schImportInfo.set('')">
     {{ 'spaces.schema.tab.chrono' | transloco }}
@@ -333,7 +333,7 @@ export class SpaceSchemaTabComponent implements OnInit {
   readonly allowlistField = computed(() => {
     switch (this.state.schemaCollTab()) {
       case 'edge': return 'edge.label';
-      case 'memory': return 'memory.type';
+      case 'fact': return 'memory.type';
       case 'chrono': return 'chrono.type';
       default: return 'entity.type';
     }

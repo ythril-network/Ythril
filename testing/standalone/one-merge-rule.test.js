@@ -16,7 +16,7 @@
  * it is "applied **after** the normal merge" for entities, edges **and memories**; and
  * `update_fact`'s own tool schema said `properties` were "to merge".
  *
- * They did not agree. `updateMemory` and `updateChrono` **replaced** the properties map, so an agent
+ * They did not agree. `updateFact` and `updateChrono` **replaced** the properties map, so an agent
  * patching one key silently destroyed every other property on the record — no error, no warning, and
  * the REST validation simulation mirrored the same replace, so the schema check could not see it either.
  *
@@ -145,7 +145,7 @@ describe('one merge rule', () => {
       // gate below passes vacuously and reads like coverage it does not have.
       const files = sourceFiles();
       for (const f of [
-        'server/src/brain/entities.ts', 'server/src/brain/edges.ts', 'server/src/brain/memory.ts',
+        'server/src/brain/entities.ts', 'server/src/brain/edges.ts', 'server/src/brain/fact.ts',
         'server/src/brain/chrono.ts', 'server/src/api/brain/entities.ts', 'server/src/mcp/tools/entity.ts',
       ]) {
         assert.ok(files.includes(f), `${f} must be in the swept set`);
@@ -199,9 +199,9 @@ describe('one merge rule', () => {
         return m[1];
       };
 
-      assert.match(tagsDescriptionOf('server/src/mcp/tools/memory.ts'), /\breplaces?\b/i,
+      assert.match(tagsDescriptionOf('server/src/mcp/tools/fact.ts'), /\breplaces?\b/i,
         'update_fact still documents replace semantics for tags');
-      assert.doesNotMatch(tagsDescriptionOf('server/src/mcp/tools/memory.ts'), /\bmerged into\b/i,
+      assert.doesNotMatch(tagsDescriptionOf('server/src/mcp/tools/fact.ts'), /\bmerged into\b/i,
         'and must not also claim to merge them');
 
       assert.match(tagsDescriptionOf('server/src/mcp/tools/entity.ts'), /\bmerge[ds]?\b/i,
@@ -234,7 +234,7 @@ describe('one merge rule', () => {
        * reads as saving the memory system — while the knowledge TYPE is still `memory` until `A-2`
        * migrates it. One entry, and it disappears when A-2 lands rather than becoming permanent.
        */
-      const TOOL_NOUN = { memory: 'fact' };
+      const TOOL_NOUN = { fact: 'fact' };
       for (const t of KNOWLEDGE_TYPES) {
         const noun = TOOL_NOUN[t] ?? t;
         const file = toolFiles.find(f => new RegExp(`name: 'update_${noun}'`).test(schema(f)));

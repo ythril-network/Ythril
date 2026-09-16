@@ -62,7 +62,7 @@ describe('SpaceSettingsState — unsaved-changes (U4)', () => {
     // Half-typed new-type input, active tab, selected type — none of these persist.
     state.schNewTypeInputs['entity'] = 'draft';
     state.settingsTab.set('schema');
-    state.schemaCollTab.set('memory');
+    state.schemaCollTab.set('fact');
     state.schSelectedType = { kt: 'entity', name: 'whatever' };
     expect(state.isDirty()).toBe(false);
   });

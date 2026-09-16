@@ -55,7 +55,7 @@ describe('Space export — basic export', () => {
     assert.equal(body.spaceId, spaceId);
     assert.equal(body.spaceName, 'Export Struct Test');
     assert.ok(typeof body.version === 'string' && body.version.length > 0, 'version must be a non-empty string');
-    assert.ok(Array.isArray(body.memories), 'memories must be an array');
+    assert.ok(Array.isArray(body.facts), 'memories must be an array');
     assert.ok(Array.isArray(body.entities), 'entities must be an array');
     assert.ok(Array.isArray(body.edges), 'edges must be an array');
     assert.ok(Array.isArray(body.chrono), 'chrono must be an array');
@@ -69,7 +69,7 @@ describe('Space export — basic export', () => {
     createdSpaceIds.push(spaceId);
 
     // Seed one of each type
-    const memR = await post(INSTANCES.a, adminToken, `/api/brain/spaces/${spaceId}/memories`, { fact: 'Export memory fact', tags: ['export-tag'] });
+    const memR = await post(INSTANCES.a, adminToken, `/api/brain/spaces/${spaceId}/facts`, { fact: 'Export memory fact', tags: ['export-tag'] });
     assert.equal(memR.status, 201);
 
     const entR = await post(INSTANCES.a, adminToken, `/api/brain/spaces/${spaceId}/entities`, { name: 'ExportEnt', type: 'concept' });
@@ -92,13 +92,13 @@ describe('Space export — basic export', () => {
     assert.equal(exportR.status, 200);
 
     const body = exportR.body;
-    assert.ok(body.memories.length >= 1, 'Should export at least 1 memory');
+    assert.ok(body.facts.length >= 1, 'Should export at least 1 memory');
     assert.ok(body.entities.length >= 2, 'Should export at least 2 entities');
     assert.ok(body.edges.length >= 1, 'Should export at least 1 edge');
     assert.ok(body.chrono.length >= 1, 'Should export at least 1 chrono entry');
 
     // Verify embedding vectors are excluded
-    for (const mem of body.memories) {
+    for (const mem of body.facts) {
       assert.ok(!('embedding' in mem), `Memory ${mem._id} should not have embedding field`);
     }
     for (const ent of body.entities) {
@@ -112,7 +112,7 @@ describe('Space export — basic export', () => {
     }
 
     // Verify _id values are strings
-    for (const mem of body.memories) {
+    for (const mem of body.facts) {
       assert.equal(typeof mem._id, 'string', 'Memory _id must be a string');
     }
     for (const ent of body.entities) {
@@ -120,7 +120,7 @@ describe('Space export — basic export', () => {
     }
 
     // Verify specific seeded data is present
-    const exportedMem = body.memories.find(m => m.fact === 'Export memory fact');
+    const exportedMem = body.facts.find(m => m.fact === 'Export memory fact');
     assert.ok(exportedMem, 'Seeded memory must appear in export');
     assert.deepEqual(exportedMem.tags, ['export-tag']);
   });
@@ -183,7 +183,7 @@ describe('Space import — basic import', () => {
     importSpaceIds.push(spaceId);
 
     const payload = {
-      memories: [
+      facts: [
         { _id: 'import-mem-1', spaceId, fact: 'Imported memory', tags: [], entityIds: [], author: { instanceId: 'test', instanceLabel: 'test' }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), seq: 1, embeddingModel: 'none' },
       ],
       entities: [
@@ -198,9 +198,9 @@ describe('Space import — basic import', () => {
     assert.equal(importR.status, 200, `Import: ${JSON.stringify(importR.body)}`);
     assert.equal(importR.body.spaceId, spaceId);
     assert.ok(importR.body.results, 'Response must have results');
-    assert.equal(importR.body.results.memories.inserted, 1, 'Should insert 1 memory');
-    assert.equal(importR.body.results.memories.updated, 0);
-    assert.equal(importR.body.results.memories.errors, 0);
+    assert.equal(importR.body.results.facts.inserted, 1, 'Should insert 1 memory');
+    assert.equal(importR.body.results.facts.updated, 0);
+    assert.equal(importR.body.results.facts.errors, 0);
     assert.equal(importR.body.results.entities.inserted, 1, 'Should insert 1 entity');
     assert.equal(importR.body.results.entities.updated, 0);
     assert.equal(importR.body.results.entities.errors, 0);
@@ -208,7 +208,7 @@ describe('Space import — basic import', () => {
     // Verify data is retrievable
     const memList = await get(INSTANCES.a, tok, `/api/brain/spaces/${spaceId}/stats`);
     assert.equal(memList.status, 200);
-    assert.ok(memList.body.memories >= 1, 'Memory should be present after import');
+    assert.ok(memList.body.facts >= 1, 'Memory should be present after import');
     assert.ok(memList.body.entities >= 1, 'Entity should be present after import');
   });
 
@@ -222,17 +222,17 @@ describe('Space import — basic import', () => {
     const doc = { _id: 'update-mem-1', spaceId, fact: 'Original', tags: [], entityIds: [], author: { instanceId: 'test', instanceLabel: 'test' }, createdAt: now, updatedAt: now, seq: 1, embeddingModel: 'none' };
 
     // First import — inserts
-    const first = await post(INSTANCES.a, tok, `/api/admin/spaces/${spaceId}/import`, { memories: [doc] });
+    const first = await post(INSTANCES.a, tok, `/api/admin/spaces/${spaceId}/import`, { facts: [doc] });
     assert.equal(first.status, 200);
-    assert.equal(first.body.results.memories.inserted, 1);
+    assert.equal(first.body.results.facts.inserted, 1);
 
     // Second import with same _id — updates
     const updated = { ...doc, fact: 'Updated fact' };
-    const second = await post(INSTANCES.a, tok, `/api/admin/spaces/${spaceId}/import`, { memories: [updated] });
+    const second = await post(INSTANCES.a, tok, `/api/admin/spaces/${spaceId}/import`, { facts: [updated] });
     assert.equal(second.status, 200);
-    assert.equal(second.body.results.memories.inserted, 0, 'Should be 0 inserted on update');
-    assert.equal(second.body.results.memories.updated, 1, 'Should be 1 updated');
-    assert.equal(second.body.results.memories.errors, 0);
+    assert.equal(second.body.results.facts.inserted, 0, 'Should be 0 inserted on update');
+    assert.equal(second.body.results.facts.updated, 1, 'Should be 1 updated');
+    assert.equal(second.body.results.facts.errors, 0);
   });
 
   it('import rejects documents missing _id with error count', async () => {
@@ -243,16 +243,16 @@ describe('Space import — basic import', () => {
 
     // Document with missing _id
     const badDoc = { spaceId, fact: 'No id doc', tags: [] };
-    const importR = await post(INSTANCES.a, tok, `/api/admin/spaces/${spaceId}/import`, { memories: [badDoc] });
+    const importR = await post(INSTANCES.a, tok, `/api/admin/spaces/${spaceId}/import`, { facts: [badDoc] });
     assert.equal(importR.status, 200, `Expected 200 with error count, got ${importR.status}`);
-    assert.equal(importR.body.results.memories.errors, 1, 'Should count bad doc as error');
-    assert.equal(importR.body.results.memories.inserted, 0);
+    assert.equal(importR.body.results.facts.errors, 1, 'Should count bad doc as error');
+    assert.equal(importR.body.results.facts.inserted, 0);
   });
 
   it('import with non-array type returns 400', async () => {
-    const r = await post(INSTANCES.a, tok, '/api/admin/spaces/general/import', { memories: 'not-an-array' });
+    const r = await post(INSTANCES.a, tok, '/api/admin/spaces/general/import', { facts: 'not-an-array' });
     assert.equal(r.status, 400, `Expected 400, got ${r.status}`);
-    assert.ok(r.body?.error?.includes('memories'), `Error should mention 'memories': ${r.body?.error}`);
+    assert.ok(r.body?.error?.includes('facts'), `Error should mention 'facts': ${r.body?.error}`);
   });
 
   it('import on non-existent space returns 404', async () => {
@@ -288,7 +288,7 @@ describe('Space export/import — round-trip (export → wipe → import)', () =
     roundTripSpaceIds.push(spaceId);
 
     // Seed diverse data
-    const memR = await post(INSTANCES.a, tok, `/api/brain/spaces/${spaceId}/memories`, { fact: 'Round-trip memory', tags: ['rt-tag'] });
+    const memR = await post(INSTANCES.a, tok, `/api/brain/spaces/${spaceId}/facts`, { fact: 'Round-trip memory', tags: ['rt-tag'] });
     assert.equal(memR.status, 201);
     const memId = memR.body._id;
 
@@ -313,7 +313,7 @@ describe('Space export/import — round-trip (export → wipe → import)', () =
     const exportR = await get(INSTANCES.a, tok, `/api/admin/spaces/${spaceId}/export`);
     assert.equal(exportR.status, 200, `Export: ${JSON.stringify(exportR.body)}`);
     const exportPayload = exportR.body;
-    assert.ok(exportPayload.memories.length >= 1);
+    assert.ok(exportPayload.facts.length >= 1);
     assert.ok(exportPayload.entities.length >= 2);
     assert.ok(exportPayload.edges.length >= 1);
     assert.ok(exportPayload.chrono.length >= 1);
@@ -324,7 +324,7 @@ describe('Space export/import — round-trip (export → wipe → import)', () =
 
     // Verify all data is gone
     const postWipeStats = await get(INSTANCES.a, tok, `/api/brain/spaces/${spaceId}/stats`);
-    assert.equal(postWipeStats.body.memories, 0);
+    assert.equal(postWipeStats.body.facts, 0);
     assert.equal(postWipeStats.body.entities, 0);
     assert.equal(postWipeStats.body.edges, 0);
     assert.equal(postWipeStats.body.chrono, 0);
@@ -332,20 +332,20 @@ describe('Space export/import — round-trip (export → wipe → import)', () =
     // Import the exported payload
     const importR = await post(INSTANCES.a, tok, `/api/admin/spaces/${spaceId}/import`, exportPayload);
     assert.equal(importR.status, 200, `Import: ${JSON.stringify(importR.body)}`);
-    assert.equal(importR.body.results.memories.errors, 0, 'No import errors for memories');
+    assert.equal(importR.body.results.facts.errors, 0, 'No import errors for memories');
     assert.equal(importR.body.results.entities.errors, 0, 'No import errors for entities');
     assert.equal(importR.body.results.edges.errors, 0, 'No import errors for edges');
     assert.equal(importR.body.results.chrono.errors, 0, 'No import errors for chrono');
 
     // Verify data is restored with same IDs
     const postImportStats = await get(INSTANCES.a, tok, `/api/brain/spaces/${spaceId}/stats`);
-    assert.ok(postImportStats.body.memories >= 1, 'Memories should be restored');
+    assert.ok(postImportStats.body.facts >= 1, 'Memories should be restored');
     assert.ok(postImportStats.body.entities >= 2, 'Entities should be restored');
     assert.ok(postImportStats.body.edges >= 1, 'Edges should be restored');
     assert.ok(postImportStats.body.chrono >= 1, 'Chrono should be restored');
 
     // Verify the specific memory is restored with the same ID
-    const memCheck = await reqJson(INSTANCES.a, tok, `/api/brain/spaces/${spaceId}/memories/${memId}`);
+    const memCheck = await reqJson(INSTANCES.a, tok, `/api/brain/spaces/${spaceId}/facts/${memId}`);
     assert.equal(memCheck.status, 200, `Memory ${memId} should be retrievable after import`);
     assert.equal(memCheck.body.fact, 'Round-trip memory');
     assert.deepEqual(memCheck.body.tags, ['rt-tag']);
@@ -359,7 +359,7 @@ describe('Space export/import — round-trip (export → wipe → import)', () =
     //
     // The whole import suite missed this because it only ever round-trips into the SAME space
     // (so spaceId stays consistent) and only ever asserts via /stats (counts) and
-    // GET /memories/:id — the three read paths that do NOT filter on spaceId. Exactly the
+    // GET /facts/:id — the three read paths that do NOT filter on spaceId. Exactly the
     // trap that hid the space-rename bug.
     const srcId = `xspace-src-${RUN_ID}`;
     const dstId = `xspace-dst-${RUN_ID}`;
@@ -436,16 +436,16 @@ describe('Space export/import — round-trip (export → wipe → import)', () =
     // Export must be syntactically valid JSON with all N memories present.
     const exp = await get(INSTANCES.a, tok, `/api/admin/spaces/${srcId}/export`);
     assert.equal(exp.status, 200);
-    assert.ok(Array.isArray(exp.body.memories), 'memories must be an array');
-    assert.equal(exp.body.memories.length, N, `all ${N} memories must be exported, got ${exp.body.memories.length}`);
+    assert.ok(Array.isArray(exp.body.facts), 'memories must be an array');
+    assert.equal(exp.body.facts.length, N, `all ${N} memories must be exported, got ${exp.body.facts.length}`);
     // The tricky-character doc must survive escaping intact.
-    const doc0 = exp.body.memories.find(m => m.fact.startsWith('stream doc 0 '));
+    const doc0 = exp.body.facts.find(m => m.fact.startsWith('stream doc 0 '));
     assert.ok(doc0 && doc0.fact.includes('☃') && doc0.fact.includes('"quoted"'), 'special characters must round-trip through the stream');
 
     // And the whole thing must import back cleanly.
     const imp = await post(INSTANCES.a, tok, `/api/admin/spaces/${dstId}/import`, exp.body);
     assert.ok([200, 201].includes(imp.status), JSON.stringify(imp.body));
     const stats = await get(INSTANCES.a, tok, `/api/brain/spaces/${dstId}/stats`);
-    assert.equal(stats.body.memories, N, `all ${N} memories must import into the target space`);
+    assert.equal(stats.body.facts, N, `all ${N} memories must import into the target space`);
   });
 });

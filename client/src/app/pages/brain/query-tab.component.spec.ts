@@ -60,7 +60,7 @@ describe('QueryTabComponent', () => {
     const match = {
       _id: 'e1', type: 'entity', name: 'Vault', score: 0.9,
       _graph: [
-        { node: { _id: 'm1', kind: 'memory', fact: 'a note' }, edge: { label: 'memory.entityIds' }, paths: [['e1', 'm1']] },
+        { node: { _id: 'm1', kind: 'fact', fact: 'a note' }, edge: { label: 'fact.entityIds' }, paths: [['e1', 'm1']] },
         { node: { _id: 'c1', kind: 'chrono', title: 'an event' }, edge: { label: 'chrono.entityIds' }, paths: [['e1', 'c1']] },
       ],
     };
@@ -89,7 +89,7 @@ describe('QueryTabComponent', () => {
     // …and the record keeps its own graph, so what the panel shows is what the API returned.
     const rel = c.relatedOf(c.recallResults()[0]!);
     expect(rel.total).toBe(2);
-    expect(rel.memories.map(r => r.record['_id'])).toEqual(['m1']);
+    expect(rel.facts.map(r => r.record['_id'])).toEqual(['m1']);
     expect(rel.chronos.map(r => r.record['_id'])).toEqual(['c1']);
   });
 
@@ -233,7 +233,7 @@ describe('QueryTabComponent — recall parameter coverage', () => {
 
   it('graphTargetOf refuses a hit with no node, so no button is offered', () => {
     const c = create().componentInstance;
-    expect(c.graphTargetOf({ type: 'memory', _id: 'm1' } as never)).toBe(null);
+    expect(c.graphTargetOf({ type: 'fact', _id: 'm1' } as never)).toBe(null);
     expect(c.graphTargetOf({ type: 'chrono', _id: 'c1' } as never)).toBe(null);
     expect(c.graphTargetOf({ type: 'file', _id: 'f1' } as never)).toBe(null);
     expect(c.graphTargetOf({ type: 'entity' } as never)).toBe(null);      // no id at all
@@ -255,7 +255,7 @@ describe('QueryTabComponent — recall parameter coverage', () => {
 
   it('a memory hit renders NO view-in-graph button', () => {
     const fixture = create();
-    fixture.componentInstance.recallResults.set([{ type: 'memory', score: 0.9, _id: 'm1', fact: 'f' } as never]);
+    fixture.componentInstance.recallResults.set([{ type: 'fact', score: 0.9, _id: 'm1', fact: 'f' } as never]);
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('button[aria-label="common.viewInGraph"]')).toBeNull();
   });

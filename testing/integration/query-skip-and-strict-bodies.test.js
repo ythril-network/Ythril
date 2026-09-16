@@ -62,7 +62,7 @@ before(async () => {
 
   // Sequential, so `seq` is strictly increasing and the documented order is total.
   for (let i = 0; i < TOTAL; i++) {
-    const r = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/memories`, {
+    const r = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/facts`, {
       fact: `paged ${String(i).padStart(2, '0')} ${RUN}`,
     });
     assert.equal(r.status, 201, JSON.stringify(r.body));
@@ -70,7 +70,7 @@ before(async () => {
   // Half in each member, so a proxy page has to interleave rather than concatenate.
   for (let i = 0; i < 6; i++) {
     for (const m of [M1, M2]) {
-      await post(INSTANCES.a, token, `/api/brain/spaces/${m}/memories`, { fact: `${m} row ${i} ${RUN}` });
+      await post(INSTANCES.a, token, `/api/brain/spaces/${m}/facts`, { fact: `${m} row ${i} ${RUN}` });
     }
   }
   session = await openMcpSession(token);
@@ -85,8 +85,8 @@ after(async () => {
 
 describe('REST: skip paginates instead of being ignored', () => {
   it('page two does not start where page one did', async () => {
-    const p1 = await query({ collection: 'memories', filter: {}, limit: 5, skip: 0 });
-    const p2 = await query({ collection: 'memories', filter: {}, limit: 5, skip: 5 });
+    const p1 = await query({ collection: 'facts', filter: {}, limit: 5, skip: 0 });
+    const p2 = await query({ collection: 'facts', filter: {}, limit: 5, skip: 5 });
     assert.equal(p1.status, 200, JSON.stringify(p1.body));
     assert.equal(p2.status, 200, JSON.stringify(p2.body));
     assert.equal(p1.body.results.length, 5);
@@ -95,12 +95,12 @@ describe('REST: skip paginates instead of being ignored', () => {
   });
 
   it('the pages TILE the collection — no repeats, no gaps, same order', async () => {
-    const all = await query({ collection: 'memories', filter: {}, limit: 100 });
+    const all = await query({ collection: 'facts', filter: {}, limit: 100 });
     assert.equal(all.body.results.length, TOTAL);
 
     const stitched = [];
     for (let s = 0; s < TOTAL; s += 5) {
-      const page = await query({ collection: 'memories', filter: {}, limit: 5, skip: s });
+      const page = await query({ collection: 'facts', filter: {}, limit: 5, skip: s });
       stitched.push(...page.body.results);
     }
     assert.deepEqual(stitched.map(d => d._id), all.body.results.map(d => d._id));
@@ -109,7 +109,7 @@ describe('REST: skip paginates instead of being ignored', () => {
 
   it('echoes limit and skip, so a caller can tell what was applied', async () => {
     // The distinction the fabricated number came from: "the page I asked for" vs "what the server capped it to".
-    const r = await query({ collection: 'memories', filter: {}, limit: 3, skip: 4 });
+    const r = await query({ collection: 'facts', filter: {}, limit: 3, skip: 4 });
     assert.equal(r.body.limit, 3);
     assert.equal(r.body.skip, 4);
     assert.equal(r.body.count, 3);
@@ -117,14 +117,14 @@ describe('REST: skip paginates instead of being ignored', () => {
 
   it('a skip past the end is an empty page, not the last one', async () => {
     // Returning the tail here makes a paging loop run for ever.
-    const r = await query({ collection: 'memories', filter: {}, limit: 5, skip: TOTAL + 50 });
+    const r = await query({ collection: 'facts', filter: {}, limit: 5, skip: TOTAL + 50 });
     assert.equal(r.status, 200);
     assert.deepEqual(r.body.results, []);
   });
 
   it('refuses a negative or fractional skip rather than reading it as 0', async () => {
     for (const bad of [-1, 1.5, '3', null]) {
-      const r = await query({ collection: 'memories', filter: {}, skip: bad });
+      const r = await query({ collection: 'facts', filter: {}, skip: bad });
       assert.equal(r.status, 400, `skip=${JSON.stringify(bad)} was accepted: ${JSON.stringify(r.body)}`);
     }
   });
@@ -132,13 +132,13 @@ describe('REST: skip paginates instead of being ignored', () => {
   it('pages a PROXY space over the merged set, not per member', async () => {
     // The compounding defect: asking each member for [skip, skip+limit) and concatenating skips that many rows PER
     // MEMBER and orders the result by member. Twelve rows across two members must page exactly like twelve in one.
-    const all = await query({ collection: 'memories', filter: {}, limit: 100 }, PROXY);
+    const all = await query({ collection: 'facts', filter: {}, limit: 100 }, PROXY);
     assert.equal(all.status, 200, JSON.stringify(all.body));
     assert.equal(all.body.results.length, 12, 'both members are read');
 
     const stitched = [];
     for (let s = 0; s < 12; s += 4) {
-      const page = await query({ collection: 'memories', filter: {}, limit: 4, skip: s }, PROXY);
+      const page = await query({ collection: 'facts', filter: {}, limit: 4, skip: s }, PROXY);
       assert.ok(page.body.results.length <= 4,
         `a proxy page returned ${page.body.results.length} rows for limit 4 — the limit is per member, not per page`);
       stitched.push(...page.body.results);
@@ -154,10 +154,10 @@ describe('REST: the four read routes refuse a key they cannot honour', () => {
     // `orderBy`, not `sort`: this case originally used `sort` when it was unimplemented, and became a false alarm the day
     // it shipped. A plausible ALIAS is the better test anyway — it is what a caller actually reaches for, and it is the
     // one that would otherwise be accepted and ignored.
-    ['/filter', { collection: 'memories', filter: {}, orderBy: 'seq' }, 'orderBy'],
+    ['/filter', { collection: 'facts', filter: {}, orderBy: 'seq' }, 'orderBy'],
     ['/recall', { query: 'anything', topk: 5 }, 'topk'],
     ['/traverse', { startId: '00000000-0000-4000-8000-000000000000', depth: 2 }, 'depth'],
-    ['/similar', { entryId: '00000000-0000-4000-8000-000000000000', entryType: 'memory', limit: 5 }, 'limit'],
+    ['/similar', { entryId: '00000000-0000-4000-8000-000000000000', entryType: 'fact', limit: 5 }, 'limit'],
   ];
 
   for (const [route, body, offender] of cases) {
@@ -179,7 +179,7 @@ describe('REST: the four read routes refuse a key they cannot honour', () => {
   it('still accepts every documented key on /query', async () => {
     // The other half of strictness, and the one that breaks callers if it is wrong.
     const r = await query({
-      collection: 'memories', filter: {}, projection: { fact: 1 }, limit: 2, skip: 1, maxTimeMS: 3000,
+      collection: 'facts', filter: {}, projection: { fact: 1 }, limit: 2, skip: 1, maxTimeMS: 3000,
     });
     assert.equal(r.status, 200, JSON.stringify(r.body));
   });
@@ -188,7 +188,7 @@ describe('REST: the four read routes refuse a key they cannot honour', () => {
     // Refusing a key we deprecated but still accept elsewhere would be a worse contract than the permissive body this
     // replaces: we told callers to stop using it, not that it would start erroring.
     const r = await post(INSTANCES.a, token, '/api/brain/similar', { space: SPACE, ...({
-      entryId: '00000000-0000-4000-8000-000000000000', entryType: 'memory', crossSpace: false,
+      entryId: '00000000-0000-4000-8000-000000000000', entryType: 'fact', crossSpace: false,
     }) });
     assert.notEqual(r.status, 400, `crossSpace was refused: ${JSON.stringify(r.body)}`);
   });
@@ -203,7 +203,7 @@ describe('MCP: query offers skip too, rather than it becoming REST-only', () => 
   });
 
   it('honours it, and the pages tile', async () => {
-    const call = (args) => session.callTool('filter', { space: SPACE, collection: 'memories', filter: {}, ...args });
+    const call = (args) => session.callTool('filter', { space: SPACE, collection: 'facts', filter: {}, ...args });
     const all = JSON.parse((await call({ limit: 100 })).content[0].text);
     assert.equal(all.length, TOTAL);
 
@@ -215,14 +215,14 @@ describe('MCP: query offers skip too, rather than it becoming REST-only', () => 
   });
 
   it('refuses a fractional skip', async () => {
-    const r = await session.callTool('filter', { space: SPACE, collection: 'memories', filter: {}, skip: 1.5 });
+    const r = await session.callTool('filter', { space: SPACE, collection: 'facts', filter: {}, skip: 1.5 });
     assert.ok(r?.isError, `a fractional skip was accepted: ${JSON.stringify(r)}`);
   });
 
   it('already refused unknown arguments, and still does', async () => {
     // `additionalProperties: false` was always there. Asserted so that a future relaxation of the schema shows up here
     // rather than as a silently ignored argument, which is the REST defect arriving on the other surface.
-    const r = await session.callTool('filter', { space: SPACE, collection: 'memories', filter: {}, sort: { seq: 1 } });
+    const r = await session.callTool('filter', { space: SPACE, collection: 'facts', filter: {}, sort: { seq: 1 } });
     assert.ok(r?.isError, `MCP accepted an unknown argument: ${JSON.stringify(r)}`);
   });
 });
@@ -231,25 +231,25 @@ describe('the match TOTAL and a caller-chosen order, on both surfaces', () => {
   it('REST reports total separately from the page count', async () => {
     // The number the fleet integrator had to fabricate: `count` is the page, `total` is the match. Without the second one a sweep
     // cannot tell a short last page from a truncated one except by making a request that returns nothing.
-    const r = await query({ collection: 'memories', filter: {}, limit: 5 });
+    const r = await query({ collection: 'facts', filter: {}, limit: 5 });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.count, 5, 'count is the page');
     assert.equal(r.body.total, TOTAL, 'total is every match');
   });
 
   it('total is unaffected by skip', async () => {
-    const r = await query({ collection: 'memories', filter: {}, limit: 3, skip: 9 });
+    const r = await query({ collection: 'facts', filter: {}, limit: 3, skip: 9 });
     assert.equal(r.body.total, TOTAL);
     assert.equal(r.body.count, 3);
   });
 
   it('total respects the filter', async () => {
-    const r = await query({ collection: 'memories', filter: { fact: `paged 00 ${RUN}` } });
+    const r = await query({ collection: 'facts', filter: { fact: `paged 00 ${RUN}` } });
     assert.equal(r.body.total, 1, JSON.stringify(r.body));
   });
 
   it('REST orders by a chosen field and echoes it', async () => {
-    const r = await query({ collection: 'memories', filter: {}, sort: 'createdAt', dir: 'asc', limit: 100 });
+    const r = await query({ collection: 'facts', filter: {}, sort: 'createdAt', dir: 'asc', limit: 100 });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.sort, 'createdAt');
     assert.equal(r.body.dir, 'asc');
@@ -259,20 +259,20 @@ describe('the match TOTAL and a caller-chosen order, on both surfaces', () => {
 
   it('refuses an unsortable field and NAMES the sortable ones', async () => {
     // The same allowlist and the same message the brain list endpoints give, so a caller who knows one knows the other.
-    const r = await query({ collection: 'memories', filter: {}, sort: 'fact' });
+    const r = await query({ collection: 'facts', filter: {}, sort: 'fact' });
     assert.equal(r.status, 400, `sorting by an unlisted field was accepted: ${JSON.stringify(r.body)}`);
     assert.match(r.body.error, /Sortable fields/);
   });
 
   it('refuses a bad dir', async () => {
-    const r = await query({ collection: 'memories', filter: {}, sort: 'createdAt', dir: 'sideways' });
+    const r = await query({ collection: 'facts', filter: {}, sort: 'createdAt', dir: 'sideways' });
     assert.equal(r.status, 400, JSON.stringify(r.body));
   });
 
   it('pages a custom order on a PROXY space in that order', async () => {
     // The comparator is built from the sort handed to Mongo. Hardcoded to the default keys it would merge the members by
     // the wrong order and return a page nobody asked for -- with a 200.
-    const all = await query({ collection: 'memories', filter: {}, sort: 'createdAt', dir: 'asc', limit: 100 }, PROXY);
+    const all = await query({ collection: 'facts', filter: {}, sort: 'createdAt', dir: 'asc', limit: 100 }, PROXY);
     assert.equal(all.status, 200, JSON.stringify(all.body));
     const times = all.body.results.map(d => d.createdAt);
     assert.deepEqual(times, [...times].sort(), 'a proxy page must honour the caller order across members');
@@ -281,7 +281,7 @@ describe('the match TOTAL and a caller-chosen order, on both surfaces', () => {
 
   it('MCP carries the same total and takes the same sort', async () => {
     const r = await session.callTool('filter', {
-      space: SPACE, collection: 'memories', filter: {}, limit: 4, sort: 'createdAt', dir: 'asc',
+      space: SPACE, collection: 'facts', filter: {}, limit: 4, sort: 'createdAt', dir: 'asc',
     });
     assert.ok(!r?.isError, JSON.stringify(r));
     assert.equal(r.structuredContent.total, TOTAL, 'the total must be on the MCP surface too, not REST-only');
@@ -297,7 +297,7 @@ describe('the match TOTAL and a caller-chosen order, on both surfaces', () => {
     // while a tool returning no structuredContent rendered its whole body in the same session. That is the
     // worst shape available: the answer is absent while the metadata reports how many rows were returned,
     // so it reads as a thin page rather than as a dropped payload.
-    const r = await session.callTool('filter', { space: SPACE, collection: 'memories', filter: {}, limit: 3 });
+    const r = await session.callTool('filter', { space: SPACE, collection: 'facts', filter: {}, limit: 3 });
     assert.ok(!r?.isError, JSON.stringify(r));
     assert.ok(Array.isArray(r.structuredContent.results), 'structuredContent carries no rows at all');
     assert.equal(r.structuredContent.results.length, r.structuredContent.count,
@@ -307,7 +307,7 @@ describe('the match TOTAL and a caller-chosen order, on both surfaces', () => {
   });
 
   it('MCP refuses an unsortable field with the same message', async () => {
-    const r = await session.callTool('filter', { space: SPACE, collection: 'memories', filter: {}, sort: 'fact' });
+    const r = await session.callTool('filter', { space: SPACE, collection: 'facts', filter: {}, sort: 'fact' });
     assert.ok(r?.isError, `MCP accepted an unlisted sort field: ${JSON.stringify(r)}`);
     assert.match(JSON.stringify(r), /Sortable fields/);
   });
@@ -326,7 +326,7 @@ describe('paging PAST the window — the defect 2.8.0 shipped', () => {
   before(async () => {
     await makeSpace(DEEP);
     for (let i = 0; i < N; i++) {
-      const r = await post(INSTANCES.a, token, `/api/brain/spaces/${DEEP}/memories`, {
+      const r = await post(INSTANCES.a, token, `/api/brain/spaces/${DEEP}/facts`, {
         fact: `deep ${String(i).padStart(3, '0')} ${RUN}`,
       });
       assert.equal(r.status, 201, JSON.stringify(r.body));
@@ -336,13 +336,13 @@ describe('paging PAST the window — the defect 2.8.0 shipped', () => {
   const q = (body) => post(INSTANCES.a, token, '/api/brain/filter', { space: DEEP, ...(body) });
 
   it('reports the real total', async () => {
-    const r = await q({ collection: 'memories', filter: {}, limit: 5 });
+    const r = await q({ collection: 'facts', filter: {}, limit: 5 });
     assert.equal(r.body.total, N, 'the total must be the whole match, which is what made the empty pages contradictory');
   });
 
   it('returns rows past row 100', async () => {
     for (const skip of [95, 100, 105, 119]) {
-      const r = await q({ collection: 'memories', filter: {}, limit: 5, skip });
+      const r = await q({ collection: 'facts', filter: {}, limit: 5, skip });
       assert.ok(r.body.results.length > 0,
         `skip=${skip} returned nothing on a ${N}-row collection while total says ${r.body.total}`);
     }
@@ -353,7 +353,7 @@ describe('paging PAST the window — the defect 2.8.0 shipped', () => {
     // crosses the old window twice.
     const seen = [];
     for (let skip = 0; skip < N; skip += 25) {
-      const r = await q({ collection: 'memories', filter: {}, limit: 25, skip });
+      const r = await q({ collection: 'facts', filter: {}, limit: 25, skip });
       seen.push(...r.body.results.map(d => d._id));
     }
     assert.equal(seen.length, N, `expected ${N} rows across the pages, got ${seen.length}`);
@@ -361,13 +361,13 @@ describe('paging PAST the window — the defect 2.8.0 shipped', () => {
   });
 
   it('past the END is still empty, so a paging loop terminates', async () => {
-    const r = await q({ collection: 'memories', filter: {}, limit: 5, skip: N });
+    const r = await q({ collection: 'facts', filter: {}, limit: 5, skip: N });
     assert.deepEqual(r.body.results, []);
     assert.equal(r.body.total, N, 'and the total still tells the caller where the end was');
   });
 
   it('caps the caller-facing page at 100 rather than refusing it', async () => {
-    const r = await q({ collection: 'memories', filter: {}, limit: 500 });
+    const r = await q({ collection: 'facts', filter: {}, limit: 500 });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.results.length, 100, 'a page larger than the cap is clamped, not rejected');
     assert.equal(r.body.limit, 100, 'and the applied limit is echoed so the caller knows it was clamped');

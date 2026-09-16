@@ -566,8 +566,8 @@ export class EntryPopupComponent {
         return this.brainApi.updateEntity(this.spaceId, id, b);
       case 'edge':
         return this.brainApi.updateEdge(this.spaceId, id, b);
-      case 'memory':
-        return this.brainApi.updateMemory(this.spaceId, id, b);
+      case 'fact':
+        return this.brainApi.updateFact(this.spaceId, id, b);
       case 'chrono':
         return this.brainApi.updateChrono(this.spaceId, id, b);
       default: {

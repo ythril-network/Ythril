@@ -6,7 +6,7 @@
  *
  * ## What it used to do
  *
- * `save_chrono`, `remember`, `save_entity` and `save_bulk` all adopted a supplied id when it named nothing:
+ * `save_chrono`, `saveFact`, `save_entity` and `save_bulk` all adopted a supplied id when it named nothing:
  *
  *     _id: fields.id ?? uuidv4()
  *

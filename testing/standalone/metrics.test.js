@@ -108,11 +108,11 @@ describe('GET /metrics — Prometheus endpoint', () => {
     assert.ok(value !== null && value >= 1, `Expected ythril_tokens_active >= 1, got ${value}`);
   });
 
-  it('includes ythril_memories_total gauge for general space', async () => {
+  it('includes ythril_facts_total gauge for general space', async () => {
     const { text } = await getMetrics();
     assert.ok(
-      text.includes('ythril_memories_total{space="general"}'),
-      'ythril_memories_total{space="general"} not found',
+      text.includes('ythril_facts_total{space="general"}'),
+      'ythril_facts_total{space="general"} not found',
     );
   });
 

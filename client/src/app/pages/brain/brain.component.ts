@@ -7,7 +7,7 @@ import { RecordDrawerState } from './record-drawer-state.service';
 import { RecordDrawerComponent } from './record-drawer.component';
 import { QueryTabComponent } from './query-tab.component';
 import { RecordListState } from './record-list-state.service';
-import { MemoriesTabComponent } from './memories-tab.component';
+import { FactsTabComponent } from './facts-tab.component';
 import { EntitiesTabComponent } from './entities-tab.component';
 import { EdgesTabComponent } from './edges-tab.component';
 import { ChronoTabComponent } from './chrono-tab.component';
@@ -53,7 +53,7 @@ interface SpaceView {
   // or happens in a template event handler, both of which mark the view dirty. That coupling is
   // load-bearing and pinned by the specs (the drawer's own version lives in the drawer component).
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ProxySpaceBadgeComponent, CommonModule, FormsModule, GraphComponent, FileManagerComponent, PhIconComponent, RecordDrawerComponent, QueryTabComponent, MemoriesTabComponent, EntitiesTabComponent, EdgesTabComponent, ChronoTabComponent, OverviewTabComponent, ReviewTabComponent, ErrorStateComponent, TranslocoPipe, SpaceSettingsPopupComponent],
+  imports: [ProxySpaceBadgeComponent, CommonModule, FormsModule, GraphComponent, FileManagerComponent, PhIconComponent, RecordDrawerComponent, QueryTabComponent, FactsTabComponent, EntitiesTabComponent, EdgesTabComponent, ChronoTabComponent, OverviewTabComponent, ReviewTabComponent, ErrorStateComponent, TranslocoPipe, SpaceSettingsPopupComponent],
   providers: [BrainStore, EntityRefPicker, RecordDrawerState, RecordListState, OverviewDataService, SpacesStore, SpaceSettingsState],
   styles: [`
     .space-tabs {
@@ -336,7 +336,7 @@ interface SpaceView {
         }
 
         <!-- Memories -->
-        @if (activeTab() === 'memories') { <app-memories-tab [spaceId]="activeSpaceId()" (mutated)="loadStats(activeSpaceId())" /> }
+        @if (activeTab() === 'facts') { <app-facts-tab [spaceId]="activeSpaceId()" (mutated)="loadStats(activeSpaceId())" /> }
 
         <!-- Entities -->
         @if (activeTab() === 'entities') { <app-entities-tab [spaceId]="activeSpaceId()" (mutated)="loadStats(activeSpaceId())" (viewInGraph)="viewInGraph($event)" /> }
@@ -414,7 +414,7 @@ export class BrainComponent implements OnInit, OnDestroy {
     // `link` and not `graph`: the Graph tab already owns that glyph, and two different tabs wearing the
     // same icon in one strip is worse than a slightly less literal one.
     { key: 'edges', label: 'brain.tab.edges', icon: 'link', statsKey: 'edges' },
-    { key: 'memories', label: 'brain.tab.memories', icon: 'brain', statsKey: 'memories' },
+    { key: 'facts', label: 'brain.tab.facts', icon: 'brain', statsKey: 'facts' },
     { key: 'chrono', label: 'brain.tab.chrono', icon: 'timer', statsKey: 'chrono' },
   ];
 
@@ -481,7 +481,7 @@ export class BrainComponent implements OnInit, OnDestroy {
   }
 
   spaceTotal(stats: SpaceStats): number {
-    return stats.memories + stats.entities + stats.edges + stats.chrono + stats.files;
+    return stats.facts + stats.entities + stats.edges + stats.chrono + stats.files;
   }
 
   /** Tooltip for the space-chip network indicator (F8): the network name(s) plus
@@ -533,7 +533,7 @@ export class BrainComponent implements OnInit, OnDestroy {
   private liveReconnectTimer?: ReturnType<typeof setTimeout>;
   private static readonly LIVE_RECONNECT_MS = 3000;
   private static readonly TAB_FOR_COLLECTION: Record<string, CollectionTab> = {
-    memory: 'memories', entity: 'entities', edge: 'edges', chrono: 'chrono', file: 'files',
+    fact: 'facts', entity: 'entities', edge: 'edges', chrono: 'chrono', file: 'files',
   };
 
   /** (Re)open the live-change SSE stream for a space. EventSource can't send an Authorization header, and

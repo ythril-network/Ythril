@@ -68,7 +68,7 @@ before(async () => {
   ids.loneChrono = c2.body?._id;
 
   // A memory about the same incident, for the includeMemories flag.
-  const m1 = await P(`/api/brain/spaces/${SPACE}/memories`, {
+  const m1 = await P(`/api/brain/spaces/${SPACE}/facts`, {
     fact: 'The carrier lost the first replacement unit', entityIds: [ids.inc],
   });
   ids.memory = m1.body?._id;
@@ -220,11 +220,11 @@ describe('traverse — includeMemories and includeEdges', () => {
     assert.equal(r.status, 200, JSON.stringify(r.body));
     const mem = (r.body.nodes ?? []).find(n => n._id === ids.memory);
     assert.ok(mem, `the memory must be reachable through entityIds: ${JSON.stringify(r.body.nodes)}`);
-    assert.equal(mem.kind, 'memory');
+    assert.equal(mem.kind, 'fact');
     assert.equal(mem.name, 'The carrier lost the first replacement unit', 'the node name is the fact');
     const link = (r.body.edges ?? []).find(e => e.to === ids.memory);
     assert.ok(link, 'the synthetic link must be present');
-    assert.equal(link.label, 'memory.entityIds');
+    assert.equal(link.label, 'fact.entityIds');
   });
 
   it('an explicit edgeLabels filter excludes memories unless it names the label', async () => {
@@ -237,7 +237,7 @@ describe('traverse — includeMemories and includeEdges', () => {
 
     const named = await traverse({
       startId: ids.inc, direction: 'both', maxDepth: 2, includeMemories: true,
-      edgeLabels: ['depends_on', 'memory.entityIds'],
+      edgeLabels: ['depends_on', 'fact.entityIds'],
     });
     assert.ok((named.body.nodes ?? []).some(n => n._id === ids.memory),
       'naming the label must bring them back');

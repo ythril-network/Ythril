@@ -91,7 +91,7 @@ async function ensureReindexed(baseUrl, tok) {
  * 150 s index lag seen on CI.
  */
 const waitForIndexed = (space, ids, timeoutMs) =>
-  waitForIndexedShared(INSTANCES.a, token(), space, ids, ['entity', 'memory'], timeoutMs);
+  waitForIndexedShared(INSTANCES.a, token(), space, ids, ['entity', 'fact'], timeoutMs);
 
 async function syncEntity(space, id, name, seq) {
   const { post: syncPost } = await import('../sync/helpers.js');
@@ -105,7 +105,7 @@ async function syncEntity(space, id, name, seq) {
 async function syncMemory(space, id, fact, entityIds, seq) {
   const { post: syncPost } = await import('../sync/helpers.js');
   const now = new Date().toISOString();
-  await syncPost(INSTANCES.a, token(), `/api/sync/memories?spaceId=${space}`, {
+  await syncPost(INSTANCES.a, token(), `/api/sync/facts?spaceId=${space}`, {
     _id: id, spaceId: space, fact, entityIds, tags: [], embedding: [], embeddingModel: 'none',
     seq, author: { instanceId: 'test', instanceLabel: 'Test' }, createdAt: now, updatedAt: now,
   });
@@ -180,7 +180,7 @@ before(async () => {
    * failure reported is about traversal rather than about the fixture.
    */
   if (seedAId) {
-    const seedMem = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/memories`, {
+    const seedMem = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/facts`, {
       fact: `Wombat migration checklist ${RUN} covering marsupial burrow relocation`,
       entityIds: [seedAId], tags: [],
     });
@@ -198,7 +198,7 @@ before(async () => {
      * Deliberately worded not to match the seed's query: if it ranked on its own, its presence in the answer
      * would prove nothing about the walk.
      */
-    const sibling = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/memories`, {
+    const sibling = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/facts`, {
       fact: `Quarterly badge inventory ${RUN} for the north annexe`,
       entityIds: [seedAId], tags: [],
     });
@@ -346,11 +346,11 @@ describe('Recall traverse — links, which are not edges', () => {
     assert.ok(mem, `the linked memory must be reached: ${JSON.stringify(allNested(r.body.results).map(n => n.node?._id))}`);
     // `kind` is what tells a caller which collection to look in. Guessing from the shape does not work: a
     // memory has no `name`, so a consumer that assumed an entity renders an empty title rather than the fact.
-    assert.equal(mem.node.kind, 'memory');
+    assert.equal(mem.node.kind, 'fact');
     assert.equal(mem.node.fact, `Rotation runbook note ${RUN}`);
     // Synthetic: there is no stored edge record, so it carries what is derived and nothing invented.
-    assert.equal(mem.edge.label, 'memory.entityIds');
-    assert.equal(mem.edge._id, `memory.entityIds:${seedAId}:${memLinked}`);
+    assert.equal(mem.edge.label, 'fact.entityIds');
+    assert.equal(mem.edge._id, `fact.entityIds:${seedAId}:${memLinked}`);
     assert.equal(mem.edge.author, undefined, 'a derived edge must not carry a fabricated author');
     assert.equal(mem.edge.createdAt, undefined, 'a derived edge must not carry a fabricated timestamp');
   });
@@ -376,18 +376,18 @@ describe('Recall traverse — links, which are not edges', () => {
      * caller to lift the ids off the match and traverse from one of those by hand.
      */
     const mq = 'wombat marsupial burrow relocation checklist';
-    const off = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ query: mq, types: ['memory'], topK: 5, traverse: 1 }) });
+    const off = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ query: mq, types: ['fact'], topK: 5, traverse: 1 }) });
     assert.equal(off.status, 200, JSON.stringify(off.body));
     const seedOff = off.body.results.find(x => x._id === seedMemId);
     assert.ok(seedOff, 'the memory must match its own text');
     assert.equal(nested(off.body.results, seedAId), undefined, 'unflagged behaviour must be unchanged');
 
-    const on = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ query: mq, types: ['memory'], topK: 5, traverse: { depth: 1, includeMemories: true } }) });
+    const on = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ query: mq, types: ['fact'], topK: 5, traverse: { depth: 1, includeMemories: true } }) });
     assert.equal(on.status, 200, JSON.stringify(on.body));
     const a = nested(on.body.results, seedAId);
     assert.ok(a, `the entity the memory names must be hop 1: ${JSON.stringify(allNested(on.body.results).map(n => n.node?._id))}`);
     assert.equal(a.paths[0].length - 1, 1, 'the named entity is one hop from the match');
-    assert.equal(a.edge.label, 'memory.entityIds');
+    assert.equal(a.edge.label, 'fact.entityIds');
   });
 
   it('and the walk carries on from there — hop 2 is an ordinary edge', async (t) => {
@@ -396,7 +396,7 @@ describe('Recall traverse — links, which are not edges', () => {
     // everything the graph relates to it is now reachable from the memory that matched.
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'wombat marsupial burrow relocation checklist',
-      types: ['memory'], topK: 5, traverse: { depth: 2, includeMemories: true },
+      types: ['fact'], topK: 5, traverse: { depth: 2, includeMemories: true },
     }) });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     const b = nested(r.body.results, entB);
@@ -419,7 +419,7 @@ describe('Recall traverse — links, which are not edges', () => {
      */
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'wombat marsupial burrow relocation checklist',
-      types: ['memory'], topK: 1, traverse: { depth: 2, includeMemories: true },
+      types: ['fact'], topK: 1, traverse: { depth: 2, includeMemories: true },
     }) });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.results?.length, 1, 'more than one match makes this test unable to fail honestly');
@@ -427,7 +427,7 @@ describe('Recall traverse — links, which are not edges', () => {
     const reached = nested(r.body.results, siblingMemId);
     assert.ok(reached, 'the walk stopped at the entity: a memory naming the same entity was NOT returned. '
       + `Reached: ${JSON.stringify(allNested(r.body.results).map(n => `${n.node?.kind}:${n.node?._id}`))}`);
-    assert.equal(reached.node.kind, 'memory');
+    assert.equal(reached.node.kind, 'fact');
     assert.equal(reached.paths[0].length - 1, 2, 'the sibling memory is TWO hops from the match');
   });
 

@@ -3,7 +3,7 @@
  *
  * This file used to be ~20 KB of simulation: it re-implemented nine functions
  * (`safeRegexTest`, `hasReDoSRisk`, `validateValue`, `validateProperties`, `validateEntity`,
- * `validateEdge`, `validateMemory`, `validateChrono`, `buildSchemaSummary`) and then tested the
+ * `validateEdge`, `validateFact`, `validateChrono`, `buildSchemaSummary`) and then tested the
  * copies. It passed continuously while testing nothing about the product.
  *
  * Worse than the duplication: **it validated a data model production had deleted.** The fixtures
@@ -24,7 +24,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 const {
-  validateEntity, validateEdge, validateMemory, validateChrono,
+  validateEntity, validateEdge, validateFact, validateChrono,
   getAllowedChronoTypes, resolveMetaRefs, buildSchemaSummary,
 } = await import('../../server/dist/spaces/schema-validation.js');
 
@@ -48,7 +48,7 @@ const META = {
       depends_on: { propertySchemas: { since: { type: 'string', required: true } } },
       owns:       {},
     },
-    memory: {
+    fact: {
       note: { propertySchemas: { severity: { type: 'string', enum: ['low', 'high'], required: true } } },
     },
     chrono: {
@@ -144,17 +144,17 @@ describe('validateEdge', () => {
   });
 });
 
-describe('validateMemory', () => {
+describe('validateFact', () => {
   it('accepts a valid memory', () => {
-    ok(validateMemory(META, { type: 'note', properties: { severity: 'low' } }));
+    ok(validateFact(META, { type: 'note', properties: { severity: 'low' } }));
   });
 
   it('rejects a missing required property', () => {
-    has(validateMemory(META, { type: 'note', properties: {} }), 'properties.severity', 'required property');
+    has(validateFact(META, { type: 'note', properties: {} }), 'properties.severity', 'required property');
   });
 
   it('rejects an invalid enum value', () => {
-    has(validateMemory(META, { type: 'note', properties: { severity: 'medium' } }), 'properties.severity', 'must be one of');
+    has(validateFact(META, { type: 'note', properties: { severity: 'medium' } }), 'properties.severity', 'must be one of');
   });
 
   it('rejects a type outside the declared allowlist, like the other three', () => {
@@ -169,14 +169,14 @@ describe('validateMemory', () => {
      * Owner ruled A: the keys ARE the allowlist. So the asymmetry was ruled away rather than overlooked, and
      * that distinction is why this is rewritten rather than deleted.
      */
-    has(validateMemory(META, { type: 'not-declared' }), 'type', 'not in memoryTypes allowlist');
+    has(validateFact(META, { type: 'not-declared' }), 'type', 'not in memoryTypes allowlist');
   });
 
   it('but a space that declares NO memory types still accepts any string', () => {
     // The bound on what this can newly refuse, and the same condition the other three carry. A space with no
     // `typeSchemas.memory` never asked to constrain anything, and must not start refusing writes.
-    ok(validateMemory({ validationMode: 'strict', typeSchemas: {} }, { type: 'anything-at-all' }));
-    ok(validateMemory({ validationMode: 'strict' }, { type: 'anything-at-all' }));
+    ok(validateFact({ validationMode: 'strict', typeSchemas: {} }, { type: 'anything-at-all' }));
+    ok(validateFact({ validationMode: 'strict' }, { type: 'anything-at-all' }));
   });
 });
 

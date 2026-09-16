@@ -16,12 +16,12 @@ A background scanner can sweep a space for **semantically duplicate** records an
     "threshold": 0.92,          // cosine score at/above which a pair is a candidate
     "batchSize": 200,           // records fetched per DB batch
     "maxPerRun": 5000,          // max records scanned per space per run
-    "types": ["memory", "entity", "chrono"]   // the default set
+    "types": ["fact", "entity", "chrono"]   // the default set
   }
 }
 ```
 
-> **`types` defaults to `["memory", "entity", "chrono"]`.** Chrono joined the default sweep because logging
+> **`types` defaults to `["fact", "entity", "chrono"]`.** Chrono joined the default sweep because logging
 > the same event twice is one of the commonest ways a knowledge base goes redundant, and nothing was looking
 > for it. On an instance that already had the scanner enabled, the first run after upgrading starts chrono
 > from cursor zero — that is a normal first pass, bounded by `maxPerRun` like any other. Set `types`
@@ -39,7 +39,7 @@ Rules live on the space (local, not synced/governed) and are edited under **Sett
 {
   "dupeRules": [
     { "minScore": 0.98, "action": "automerge" },
-    { "minScore": 0.90, "action": "notify", "types": ["entity", "memory"] }
+    { "minScore": 0.90, "action": "notify", "types": ["entity", "fact"] }
   ],
   "dupeMergeSurvivor": "older"   // which record survives an automerge (default: older = lower seq)
 }
@@ -177,10 +177,10 @@ POST /api/contradictions/:id/resolve
 
   ```json
   { "status": "resolved", "resolution": "superseded", "supersededId": "…",
-    "note": "no edge drawn: edges connect entities, and this pair is of type 'memory'" }
+    "note": "no edge drawn: edges connect entities, and this pair is of type 'fact'" }
   ```
 
-  Edges in Ythril connect entities. Drawing one between two memories would be a link that is stored, returned,
+  Edges in Ythril connect entities. Drawing one between two facts would be a link that is stored, returned,
   and points at nothing traversable — so the judgement is kept and the absence of the edge is reported rather
   than left for you to discover. Check for `edge` in the response if your automation depends on the link.
 
@@ -264,7 +264,7 @@ purpose: deleting a **dismissed** finding would forget the dismissal and let the
 pair, and deleting a resolution whose records still exist invites the same. Findings are small; re-asking a
 settled question is expensive.
 
-**What the sweep covers.** Memories, entities and **chrono** entries. For a chrono pair the structured pass
+**What the sweep covers.** Facts, entities and **chrono** entries. For a chrono pair the structured pass
 compares the stored `status` as well as `properties` — the dates are deliberately not compared, for the
 reason given under [Duplicate Detection on Insert](16-mcp.md#what-counts-as-a-claim). Edges are excluded until edge
 labels can declare which relations are single-valued (without that, `knows` / `mentions` / `related-to` all
@@ -286,9 +286,9 @@ Webhooks allow external systems to receive real-time HTTP POST notifications whe
 
 | Event | Fired when |
 |-------|-----------|
-| `memory.created` | A new memory is stored |
-| `memory.updated` | An existing memory is updated |
-| `memory.deleted` | A memory is deleted |
+| `fact.created` | A new fact is stored |
+| `fact.updated` | An existing fact is updated |
+| `fact.deleted` | A fact is deleted |
 | `entity.created` | A new entity is created |
 | `entity.updated` | An existing entity is updated (including upsert of existing) |
 | `entity.deleted` | An entity is deleted |
@@ -308,7 +308,7 @@ Webhooks allow external systems to receive real-time HTTP POST notifications whe
 | `test.ping` | Synthetic test event sent via the test endpoint |
 
 > Events fire for **both** REST API and MCP (agent) writes — emission lives in the shared
-> brain/file functions, so an agent creating a memory or entity delivers the same events a REST
+> brain/file functions, so an agent creating a fact or entity delivers the same events a REST
 > client would. Internal writes (sync replication, space import) do not emit.
 
 ### Create Subscription
@@ -324,7 +324,7 @@ Content-Type: application/json
   "url": "https://n8n.example.com/webhook/ythril-events",
   "secret": "whsec_your_shared_secret",
   "spaces": ["dev-lessons", "dev-infrastructure"],
-  "events": ["memory.created", "entity.created"],
+  "events": ["fact.created", "entity.created"],
   "enabled": true
 }
 ```
@@ -344,7 +344,7 @@ Content-Type: application/json
   "id": "550e8400-e29b-41d4-a716-446655440000",
   "url": "https://n8n.example.com/webhook/ythril-events",
   "spaces": ["dev-lessons", "dev-infrastructure"],
-  "events": ["memory.created", "entity.created"],
+  "events": ["fact.created", "entity.created"],
   "enabled": true,
   "status": "active",
   "consecutiveFailures": 0,
@@ -439,7 +439,7 @@ Returns the last 100 deliveries for the subscription:
     {
       "id": "...",
       "webhookId": "...",
-      "event": "memory.created",
+      "event": "fact.created",
       "spaceId": "general",
       "timestamp": "2026-04-11T14:30:00.000Z",
       "responseStatus": 200,

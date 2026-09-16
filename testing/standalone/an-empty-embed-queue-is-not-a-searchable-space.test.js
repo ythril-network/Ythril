@@ -36,7 +36,7 @@ import { makeYthril } from '../../benchmarks/writer/ythril-client.mjs';
  * deterministic. Everything else answers as a healthy instance does from the first request: the queue is
  * empty, the index is ready, the space holds records.
  */
-function fakeInstance({ recallEmptyFor = 0, memories = 35 } = {}) {
+function fakeInstance({ recallEmptyFor = 0, facts = 35 } = {}) {
   const calls = { recall: 0, queue: 0, stats: 0 };
   const json = body => new Response(JSON.stringify(body), {
     status: 200, headers: { 'content-type': 'application/json' },
@@ -53,7 +53,7 @@ function fakeInstance({ recallEmptyFor = 0, memories = 35 } = {}) {
       }
       if (path.endsWith('/stats')) {
         calls.stats++;
-        return json({ memories, entities: 0, edges: 0, chrono: 0, files: 0 });
+        return json({ facts, entities: 0, edges: 0, chrono: 0, files: 0 });
       }
       if (path.endsWith('/recall')) {
         calls.recall++;
@@ -107,7 +107,7 @@ test('an EMPTY space is ready, rather than waiting for something that will never
    * run for a rung that legitimately wrote no records. The probe answers the question "is what is here
    * findable", and for an empty space the honest answer is yes, vacuously.
    */
-  const instance = fakeInstance({ recallEmptyFor: 99, memories: 0 });
+  const instance = fakeInstance({ recallEmptyFor: 99, facts: 0 });
   await withFetch(instance.fetch, () =>
     client().waitForEmbeddings('bench-x', { timeoutMs: 3_000, pollMs: 10 }));
 

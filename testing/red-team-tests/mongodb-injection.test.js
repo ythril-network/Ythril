@@ -26,7 +26,7 @@ let token;
 
 /** POST to brain memories with arbitrary body */
 async function postMemory(body) {
-  const r = await fetch(`${INSTANCES.a}/api/brain/spaces/general/memories`, {
+  const r = await fetch(`${INSTANCES.a}/api/brain/spaces/general/facts`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
     body: JSON.stringify(body),
@@ -44,7 +44,7 @@ async function postToken(body) {
   return { status: r.status, body: await r.json().catch(() => null) };
 }
 
-describe('MongoDB operator injection in Brain /memories', () => {
+describe('MongoDB operator injection in Brain /facts', () => {
   before(() => {
     token = fs.readFileSync(TOKEN_FILE, 'utf8').trim();
   });

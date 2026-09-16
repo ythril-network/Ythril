@@ -22,7 +22,7 @@
  *
  * The alternative was a gate that extracts each door's checks from source and diffs them. This repo has
  * burned on that repeatedly: a check written against a SPELLING goes red when the spelling improves, and
- * passes when the rule is reimplemented in different words. `linkClassFor('memory')` was matched literally
+ * passes when the rule is reimplemented in different words. `linkClassFor('fact')` was matched literally
  * by one gate and `from: entityId` by another, and both went red on refactors that made the code better.
  *
  * ## The three things the table must never do
@@ -62,11 +62,11 @@ const code = (f) => stripComments(readFileSync(f, 'utf8'));
  * miss the two that carried the worst of the nine.
  */
 const DOORS = {
-  'server/src/api/brain/memories.ts': ['memory'],
+  'server/src/api/brain/facts.ts': ['fact'],
   'server/src/api/brain/chrono.ts': ['chrono'],
   'server/src/api/brain/entities.ts': ['entity'],
   'server/src/api/brain/edges.ts': ['edge'],
-  'server/src/mcp/tools/memory.ts': ['memory'],
+  'server/src/mcp/tools/fact.ts': ['fact'],
   'server/src/mcp/tools/chrono.ts': ['chrono'],
   'server/src/mcp/tools/entity.ts': ['entity'],
   'server/src/mcp/tools/edge.ts': ['edge'],
@@ -80,7 +80,7 @@ describe('the table itself', () => {
     // Asserted as membership rather than as a count: a count of N is satisfied by any N fields, including a
     // duplicate and a missing one.
     for (const [type, fields] of Object.entries({
-      memory: ['fact', 'type', 'tags', 'entityIds', 'description', 'properties'],
+      fact: ['fact', 'type', 'tags', 'entityIds', 'description', 'properties'],
       chrono: ['title', 'startsAt', 'endsAt', 'status', 'confidence', 'tags', 'entityIds', 'memoryIds',
         'description', 'properties'],
       entity: ['name', 'type', 'tags', 'description', 'properties'],
@@ -134,7 +134,7 @@ describe('the table itself', () => {
     // not be told about the nine it did not send.
     assert.equal(shapeError('chrono', { title: 'ok' }), null);
     assert.equal(shapeError('chrono', {}), null);
-    assert.equal(shapeError('memory', undefined), null);
+    assert.equal(shapeError('fact', undefined), null);
   });
 
   it('treats `undefined` as absent and `null` as sent', () => {
@@ -143,8 +143,8 @@ describe('the table itself', () => {
      * no value — that is absence. `null` is a caller having sent something, and it is not a string. Reading
      * them the same way is how a PATCH comes to accept `null` into a field typed as a string.
      */
-    assert.equal(shapeError('memory', { description: undefined }), null);
-    assert.ok(shapeError('memory', { description: null }));
+    assert.equal(shapeError('fact', { description: undefined }), null);
+    assert.ok(shapeError('fact', { description: null }));
   });
 
   it('refuses each of the nine defects by example, not by name', () => {
@@ -157,8 +157,8 @@ describe('the table itself', () => {
       'a non-array entityIds — the one that damages READS, because it breaks every $in over that field');
 
     // W-15: the cap that only the create doors had
-    assert.ok(shapeError('memory', { fact: 'x'.repeat(MAX_FACT_LENGTH + 1) }), 'an oversized fact');
-    assert.equal(shapeError('memory', { fact: 'x'.repeat(MAX_FACT_LENGTH) }), null, 'exactly the cap is fine');
+    assert.ok(shapeError('fact', { fact: 'x'.repeat(MAX_FACT_LENGTH + 1) }), 'an oversized fact');
+    assert.equal(shapeError('fact', { fact: 'x'.repeat(MAX_FACT_LENGTH) }), null, 'exactly the cap is fine');
 
     // W-18: blank after trimming, both fields
     assert.ok(shapeError('entity', { name: '   ' }), 'a whitespace-only name');
@@ -180,7 +180,7 @@ describe('the table itself', () => {
      * value. Applying it to the other three would refuse writes that work today, which is a product decision
      * and not one a unification gets to take in passing.
      */
-    assert.equal(shapeError('memory', { properties: { nested: { a: 1 } } }), null,
+    assert.equal(shapeError('fact', { properties: { nested: { a: 1 } } }), null,
       'the memory property rule was widened — that is a breaking change, not a unification');
     assert.equal(shapeError('chrono', { properties: { nested: { a: 1 } } }), null);
     assert.equal(shapeError('edge', { properties: { nested: { a: 1 } } }), null);
@@ -223,9 +223,9 @@ describe('every door reads it', () => {
      * unguarded, and it is always the UPDATE that is missing: a create is written carefully and an update is
      * written to be permissive. That is the direction all nine defects ran in.
      */
-    for (const f of ['server/src/api/brain/memories.ts', 'server/src/api/brain/chrono.ts',
+    for (const f of ['server/src/api/brain/facts.ts', 'server/src/api/brain/chrono.ts',
       'server/src/api/brain/entities.ts', 'server/src/api/brain/edges.ts',
-      'server/src/mcp/tools/memory.ts', 'server/src/mcp/tools/chrono.ts',
+      'server/src/mcp/tools/fact.ts', 'server/src/mcp/tools/chrono.ts',
       'server/src/mcp/tools/entity.ts', 'server/src/mcp/tools/edge.ts']) {
       const calls = (code(f).match(/shapeError\(/g) ?? []).length;
       assert.ok(calls >= 2, `${f} calls shapeError ${calls} time(s) — it has a create door AND an update door`);

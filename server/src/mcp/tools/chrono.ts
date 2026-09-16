@@ -41,7 +41,7 @@ import { connectionSchemas, applyConnections } from '../../brain/write-connectio
 export const save_chronoTool: ToolHandler = {
   name: 'save_chrono',
   description: 'Create a chronological entry — something that happened, or is meant to. Default types are event, deadline, plan, prediction and milestone; a space with its own `typeSchemas.chrono` accepts ITS names INSTEAD, not in addition, so a custom schema that omits `event` refuses `event`.\n\n'
-    + 'THIS IS THE RECORD FOR ANYTHING DATED, and the reason the distinction matters: a memory saying "the migration is planned for March" is a fact whose truth expires, while a chrono entry carries `startsAt`/`endsAt` and a `status`, so it can be listed by date, found by `list_chrono` in a window, and closed rather than contradicted. If it has a date, it belongs here.\n\n'
+    + 'THIS IS THE RECORD FOR ANYTHING DATED, and the reason the distinction matters: a fact saying "the migration is planned for March" is a fact whose truth expires, while a chrono entry carries `startsAt`/`endsAt` and a `status`, so it can be listed by date, found by `list_chrono` in a window, and closed rather than contradicted. If it has a date, it belongs here.\n\n'
     + 'Link it with `entityIds` — that is what lets `traverse` reach it from the entity it is about (with `includeChrono`, on by default). Those references are NOT edges, so a chrono entry left unlinked is reachable only by search or by date, never from the thing it concerns.\n\n'
     + 'Always an INSERT; use `update_chrono` to change one, including to move its `status`. IF THE SPACE VALIDATES: `introduced` are violations this write caused and are what refuses it; `preExisting` were already stored, are reported, and do NOT block. Branch on `introduced`.',
   mutating: true,
@@ -99,8 +99,8 @@ export const save_chronoTool: ToolHandler = {
             },
             memoryIds: {
               type: 'array', items: { type: 'string' },
-              description: 'Memory IDs this entry relates to. References rather than edges, like '
-                + '`entityIds`; deleting a memory leaves the id here and nothing reports it.',
+              description: 'Fact IDs this entry relates to. References rather than edges, like '
+                + '`entityIds`; deleting a fact leaves the id here and nothing reports it.',
             },
             description: {
               type: 'string',
@@ -175,7 +175,7 @@ export const save_chronoTool: ToolHandler = {
       }
       if (chronoMemoryIds) {
         const invalidMIds = chronoMemoryIds.filter(id => !UUID_V4_RE.test(id));
-        if (invalidMIds.length > 0) throw new Error(`memoryIds must contain valid UUID v4 values (memory IDs), not names: ${invalidMIds.join(', ')}`);
+        if (invalidMIds.length > 0) throw new Error(`memoryIds must contain valid UUID v4 values (fact IDs), not names: ${invalidMIds.join(', ')}`);
       }
     }
 
@@ -367,7 +367,7 @@ export const update_chronoTool: ToolHandler = {
             },
             memoryIds: {
               type: 'array', items: { type: 'string' },
-              description: 'REPLACES the stored memory links — send the FULL list, because sending one id '
+              description: 'REPLACES the stored fact links — send the FULL list, because sending one id '
                 + 'drops the rest.',
             },
             description: {
@@ -448,7 +448,7 @@ export const update_chronoTool: ToolHandler = {
       const mIds = a['memoryIds'] as string[];
       if (isStrictLinkage(wt.target)) {
         const invalidMIds = mIds.filter(id => !UUID_V4_RE.test(id));
-        if (invalidMIds.length > 0) throw new Error(`memoryIds must contain valid UUID v4 values (memory IDs), not names: ${invalidMIds.join(', ')}`);
+        if (invalidMIds.length > 0) throw new Error(`memoryIds must contain valid UUID v4 values (fact IDs), not names: ${invalidMIds.join(', ')}`);
       }
       updates['memoryIds'] = mIds;
     }
@@ -529,7 +529,7 @@ export const delete_chronoTool: ToolHandler = {
       id: {
         type: 'string', minLength: 1,
         description: 'The entry\'s `_id`. An id that does not exist is an ERROR, not a silent success. '
-          + 'The entities and memories it links are NOT touched — those are references, and deleting the '
+          + 'The entities and facts it links are NOT touched — those are references, and deleting the '
           + 'entry only drops them. A tombstone is written, so re-creating it with the same id does not '
           + 'undo this.',
       },

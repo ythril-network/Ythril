@@ -123,7 +123,7 @@ describe('GraphComponent (OnPush)', () => {
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelectorAll('.list-row').length).toBe(3);
 
-    c.detailTypeFilter.set('memory');
+    c.detailTypeFilter.set('fact');
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelectorAll('.list-row').length, 'type filter').toBe(2);
 
@@ -178,7 +178,7 @@ describe('GraphComponent (OnPush)', () => {
     const c = fixture.componentInstance;
     expect(fixture.nativeElement.querySelector('.drawer')).toBeNull();
 
-    c.openBrainDrawer('memory', aMemory({ fact: 'a graph-drawer fact' }));
+    c.openBrainDrawer('fact', aMemory({ fact: 'a graph-drawer fact' }));
     fixture.detectChanges();
 
     const drawer = fixture.nativeElement.querySelector('.drawer');
@@ -188,7 +188,7 @@ describe('GraphComponent (OnPush)', () => {
   });
 
   it('patches the node panel list when the shared drawer saves (the store it patches is not this page\'s)', () => {
-    // The drawer updates `BrainStore.memories`, which this page never renders — it keeps its own
+    // The drawer updates `BrainStore.facts`, which this page never renders — it keeps its own
     // per-node arrays. Without the `lastSaved` bridge a save would succeed and leave the pre-save row
     // on screen: a silent staleness that no error and no drawer-side test can see.
     const fixture = create();
@@ -197,7 +197,7 @@ describe('GraphComponent (OnPush)', () => {
 
     // From the COMPONENT's injector, not TestBed's — the page provides its own drawer collaborators.
     const drawerState = fixture.debugElement.injector.get(RecordDrawerState);
-    drawerState.lastSaved.set({ kind: 'memory', record: aMemory({ fact: 'after' }) });
+    drawerState.lastSaved.set({ kind: 'fact', record: aMemory({ fact: 'after' }) });
     fixture.detectChanges();
 
     expect(c.nodeMemories()[0].fact).toBe('after');

@@ -2,7 +2,7 @@
  * Prometheus metrics registry for Ythril.
  *
  * Defines and exports all application metrics collected by prom-client.
- * Default process metrics (CPU, memory, event loop lag, GC) are registered
+ * Default process metrics (CPU, fact, event loop lag, GC) are registered
  * automatically via `collectDefaultMetrics()`.
  *
  * Async gauges (brain counts, storage usage) use the `collect` callback to
@@ -24,7 +24,7 @@ import { peekUsage, refreshUsageInBackground, usageMeasurementCount, usageIsComp
 
 export const register = new Registry();
 
-// ── Default process metrics (CPU, memory, event loop lag, GC) ──────────────
+// ── Default process metrics (CPU, fact, event loop lag, GC) ──────────────
 collectDefaultMetrics({ register });
 
 /**
@@ -74,7 +74,7 @@ const collectDuration = new Histogram({
  * name nobody enumerated would be invisible in exactly the situation this exists to make visible.
  */
 export const TIMED_COLLECTORS = [
-  'memories_total', 'entities_total', 'edges_total', 'chrono_entries_total', 'storage_used_bytes',
+  'facts_total', 'entities_total', 'edges_total', 'chrono_entries_total', 'storage_used_bytes',
   'media_jobs_pending', 'media_jobs_processing', 'media_jobs_failed', 'media_job_phase',
 ] as const;
 
@@ -344,13 +344,13 @@ export const httpResponseSizeBytes = new Histogram({
  * drift from the true count after an unclean shutdown, until the next validate; the help text says so, which
  * is cheaper than an O(n) scan every fifteen seconds to avoid saying it.)
  */
-export const memoriesTotal = new Gauge({
+export const factsTotal = new Gauge({
   name: 'ythril_facts_total',
-  help: 'Approximate number of memories by space (collection metadata, not a scan)',
+  help: 'Approximate number of facts by space (collection metadata, not a scan)',
   labelNames: ['space'] as const,
   registers: [register],
   async collect() {
-    await withCollectBudget('memories_total', async () => {
+    await withCollectBudget('facts_total', async () => {
       const cfg = getConfig();
       for (const space of cfg.spaces.filter(s => !s.proxyFor)) {
         const count = await col(`${space.id}_facts`).estimatedDocumentCount();
@@ -651,14 +651,14 @@ syncCyclesTotal.labels({ network: '', status: 'success' }).inc(0);
 
 export const syncItemsPulledTotal = new Counter({
   name: 'ythril_sync_items_pulled_total',
-  help: 'Items received during sync by type (memories, entities, edges, files, chrono)',
+  help: 'Items received during sync by type (facts, entities, edges, files, chrono)',
   labelNames: ['type'] as const,
   registers: [register],
 });
 
 export const syncItemsPushedTotal = new Counter({
   name: 'ythril_sync_items_pushed_total',
-  help: 'Items sent during sync by type (memories, entities, edges, files, chrono)',
+  help: 'Items sent during sync by type (facts, entities, edges, files, chrono)',
   labelNames: ['type'] as const,
   registers: [register],
 });
@@ -905,7 +905,7 @@ for (const reason of ['rerank_unavailable', 'rerank_skipped_budget', 'search_tim
 /**
  * Writes that overwrote a record another writer had changed since it was read — a LOST UPDATE.
  *
- * Brain records have no `If-Match` yet. `updateMemory` reads, awaits `nextSeq`, then `$set`s only the fields
+ * Brain records have no `If-Match` yet. `updateFact` reads, awaits `nextSeq`, then `$set`s only the fields
  * the caller supplied — so two clients editing DIFFERENT fields both succeed and lose nothing. What is exposed
  * is two clients editing the SAME field: the loser’s value disappears with a 200 and no trace anywhere.
  *
@@ -931,7 +931,7 @@ export const brainWriteSeqTotal = new Counter({
 });
 // Pre-declared for the same reason as above: absent and zero look identical in a graph and mean opposites.
 //
-// All FOUR record types, because all four are now instrumented. #674 shipped `memories` alone while the
+// All FOUR record types, because all four are now instrumented. #674 shipped `facts` alone while the
 // metric was named for brain records generally, and the canary spotted the gap from the outside — they saw
 // only `collection="facts"` and reasonably guessed the labels were lazy. Pre-declaring the other three
 // without instrumenting them would have been the worse fix: a permanent 0 on entities reads as "no

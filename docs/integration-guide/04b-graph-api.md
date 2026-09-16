@@ -124,7 +124,7 @@ DELETE /api/brain/spaces/:spaceId/entities/:id
 
 **BOTH ENDS OF AN EDGE COUNT, and the refusal used to say "inbound".** An edge pointing FROM this entity blocks the delete exactly as one pointing at it does, because either would be left dangling. The old message named a direction the check has never had, so a caller filtered on `to`, found nothing, and could not clear the block. It no longer names one, and each edge row carries the end that matched instead — `from`, `to`, or `both` for a self-loop.
 
-Everything that can reference an entity is checked: **edges** on either endpoint, and the `entityIds` of **memories**, **chrono entries** and **files**. Only an edge has ends, so `end` is absent on the other three — they HOLD a reference in a list rather than terminating at one, and labelling them would send you looking for an edge that does not exist.
+Everything that can reference an entity is checked: **edges** on either endpoint, and the `entityIds` of **facts**, **chrono entries** and **files**. Only an edge has ends, so `end` is absent on the other three — they HOLD a reference in a list rather than terminating at one, and labelling them would send you looking for an edge that does not exist.
 
 Face labels (`file.faceEntityId`) are reported too, with `type: "face"` — but they are deliberately **not blocking**, because a face label is something the system inferred rather than a link somebody wrote. `backlinks` is the blocking set; `references` is everything found, face rows included, so a UI can warn *"this will unlabel N faces"* while showing why the delete was refused.
 
@@ -132,16 +132,16 @@ Response body:
 
 ```json
 {
-  "error": "Cannot delete: entity still has references — edge e1b2c3d4-... (at its from end), memory m5f6a7b8-.... Delete or relink those first; there is no cascade delete for an entity.",
+  "error": "Cannot delete: entity still has references — edge e1b2c3d4-... (at its from end), fact m5f6a7b8-.... Delete or relink those first; there is no cascade delete for an entity.",
   "backlinks": [
     { "type": "edge", "_id": "e1b2c3d4-...", "end": "from" },
-    { "type": "memory", "_id": "m5f6a7b8-..." },
+    { "type": "fact", "_id": "m5f6a7b8-..." },
     { "type": "chrono", "_id": "c9d0e1f2-..." },
     { "type": "file", "_id": "f3a4b5c6-..." }
   ],
   "references": [
     { "type": "edge", "_id": "e1b2c3d4-...", "end": "from" },
-    { "type": "memory", "_id": "m5f6a7b8-..." },
+    { "type": "fact", "_id": "m5f6a7b8-..." },
     { "type": "chrono", "_id": "c9d0e1f2-..." },
     { "type": "file", "_id": "f3a4b5c6-..." },
     { "type": "face", "_id": "photo.jpg#face-chunk0" }
@@ -200,7 +200,7 @@ the `409` prints it.
 the relationships, not the records they join. A face label is not in the list either: the photo survives
 and is unlabelled, which an ordinary delete already does.
 
-**What it does NOT remove:** a memory, chrono entry or file that names the entity. Those are records of
+**What it does NOT remove:** a fact, chrono entry or file that names the entity. Those are records of
 their own rather than relationships, and they still block — the refusal names them, and you edit them to
 drop the reference.
 
@@ -290,7 +290,7 @@ Merge two entities into one. The **survivor** keeps its identity (ID, name, type
 | `boolean` | `"survivor"`, `"absorbed"`, `"fn:and"`, `"fn:or"`, `"fn:xor"` |
 | `string` / other | `"survivor"`, `"absorbed"`, `"custom"` (with `customValue`) |
 
-**Relinking:** All edges, memories, and chrono entries referencing the absorbed entity are unconditionally rewritten to reference the survivor. Edges where `(from, to, label)` become identical after relinking appear in `duplicateEdgeWarnings[]` — the agent resolves them via `DELETE /api/brain/spaces/:spaceId/edges/:id`.
+**Relinking:** All edges, facts, and chrono entries referencing the absorbed entity are unconditionally rewritten to reference the survivor. Edges where `(from, to, label)` become identical after relinking appear in `duplicateEdgeWarnings[]` — the agent resolves them via `DELETE /api/brain/spaces/:spaceId/edges/:id`.
 
 **`endpointRuleWarnings[]` — edges the relink moves onto an end their label forbids.** A merge is the only
 operation that can produce one: every path that CREATES an edge refuses a broken `endpoints` or `functional`
@@ -340,7 +340,7 @@ POST /api/brain/spaces/:spaceId/edges
 |-------|----------|-------------|
 | `from` | yes | Source record id — an entity UUID v4 unless `fromKind` says otherwise, and a space-relative PATH when `fromKind` is `file`. Returns `400` for the wrong shape, or for an id that names nothing, when `strictLinkage` is on. |
 | `to` | yes | Target record id, read the same way against `toKind`. |
-| `fromKind` | no | What kind of record `from` points at: `entity`, `memory`, `chrono` or `file`. **Omit for an entity** — see below. |
+| `fromKind` | no | What kind of record `from` points at: `entity`, `fact`, `chrono` or `file`. **Omit for an entity** — see below. |
 | `toKind` | no | The same for `to`. |
 | `label` | yes | Relationship label (e.g. `depends_on`, `related_to`) |
 | `weight` | no | Numeric weight (0–1). Defaults to none. |
@@ -368,7 +368,7 @@ which:
 ```
 
 The case it exists for: a photo taken at a party. Its file meta wants to point at the people in it
-(`entity`), at the party itself (`chrono`), and at what happened there (`memory`) — three collections, and a
+(`entity`), at the party itself (`chrono`), and at what happened there (`fact`) — three collections, and a
 bare `to` says nothing about which one to search. Guessing by trying each in turn is not an option, because
 two records in different collections may share an id and the answer would then depend on the order the code
 happened to try them.
@@ -378,11 +378,11 @@ omitted kind is stored as nothing at all, and every reader treats an absent kind
 written before 3.7, and every ordinary entity-to-entity edge written after it, is byte-identical. Nothing was
 migrated and nothing needs to be.
 
-| | `entity` | `memory` | `chrono` | `file` |
+| | `entity` | `fact` | `chrono` | `file` |
 |---|---|---|---|---|
 | **the id is** | UUID v4 | UUID v4 | UUID v4 | space-relative path |
 | **`400` on** | not a UUID | not a UUID | not a UUID | leading `/`, a `..` segment, or a backslash |
-| **looked up in** | entities | memories | chrono | file meta |
+| **looked up in** | entities | facts | chrono | file meta |
 
 A path is checked for shape on every write, and for existence only under `strictLinkage` — the same rule the
 UUID kinds have always had.
@@ -398,7 +398,7 @@ ISSUER's own content, so a peer-authored edge comes back. A corrected kind re-em
 the endpoint then resolves in the right collection.
 
 **What the edge embeds changes with the kind.** An edge's vector is built from `from label to` with the
-endpoints resolved to names: an entity's `name`, a chrono entry's `title`, a memory's `fact` (capped at 200
+endpoints resolved to names: an entity's `name`, a chrono entry's `title`, a fact's `fact` (capped at 200
 characters, so a long fact cannot crowd out the relationship itself), and for a file the path, which is
 already its name. An endpoint that resolves to nothing falls back to the raw id, as it always has.
 
@@ -410,8 +410,8 @@ kept on pull and deleted on push — same version, one direction, silently — w
 
 Since 3.6 an edge's `_id` is `uuidv5` over `(from, to, label)`, each part length-prefixed so no part can forge
 the separator — and since 3.7 over the endpoint KINDS as well, because each collection assigns its own UUIDs
-and a memory may hold the same id as an entity. `(X) -[mentions]-> (Y as entity)` and the same triplet with Y a
-memory are two relationships, so they must be two ids.
+and a fact may hold the same id as an entity. `(X) -[mentions]-> (Y as entity)` and the same triplet with Y a
+fact are two relationships, so they must be two ids.
 
 **An entity-to-entity edge derives exactly the id it did before**, and that is a requirement rather than a
 courtesy: a peer on an older build derives without the kinds, so appending them unconditionally would give the
@@ -490,11 +490,11 @@ DELETE /api/brain/spaces/:spaceId/edges/:id
 
 ## Links
 
-A **link** says one record CONCERNS another. A memory about an entity, a chrono entry about a memory, a
+A **link** says one record CONCERNS another. A fact about an entity, a chrono entry about a fact, a
 file about all three. It is not an edge and cannot become one: it carries no label, no weight, no
 properties and no type, because saying **how** two things relate is what an edge is for.
 
-These are the six public array fields — `memory.entityIds`, `chrono.entityIds`/`memoryIds` and
+These are the six public array fields — `fact.entityIds`, `chrono.entityIds`/`memoryIds` and
 `file.entityIds`/`memoryIds`/`chronoIds` — stored as records of their own, so that everything which
 asks *"what is adjacent to this?"* has one place to look instead of following a different subset of the six.
 
@@ -502,11 +502,11 @@ asks *"what is adjacent to this?"* has one place to look instead of following a 
 
 | from | to | the array it is |
 |---|---|---|
-| memory | entity | `memory.entityIds` |
+| fact | entity | `fact.entityIds` |
 | chrono | entity | `chrono.entityIds` |
-| chrono | memory | `chrono.memoryIds` |
+| chrono | fact | `chrono.memoryIds` |
 | file | entity | `file.entityIds` |
-| file | memory | `file.memoryIds` |
+| file | fact | `file.memoryIds` |
 | file | chrono | `file.chronoIds` |
 
 An entity is only ever the **to** end. Nothing hangs off an entity, which is why there is no `entity.…`
@@ -518,7 +518,7 @@ reader at all, so the ids were visible on the record and the graph returned noth
 to the scan that refuses a delete, and to the check sync runs on arriving records.
 
 **Writing a link also writes the array**, and reading one back is the same fact either way. That is what
-makes a link durable rather than a second opinion: an ordinary `PATCH` of the memory would otherwise
+makes a link durable rather than a second opinion: an ordinary `PATCH` of the fact would otherwise
 silently drop a link record the array never claimed.
 
 **On a CONVERTED space the arrays stop being a write surface.** Once `npm run links:convert` has finished a
@@ -532,7 +532,7 @@ Three things it deliberately never does:
   hung off it, every one of them would start refusing on upgrade.
 - **It never applies to records arriving from a peer.** Sync ingest is validated, counted and let in — a
   refusal there would hold the watermark and the channel would stop.
-- **It never applies to a write that does not MENTION an array.** A `PATCH` of a memory's `fact` on a record
+- **It never applies to a write that does not MENTION an array.** A `PATCH` of a fact's `fact` on a record
   still carrying a legacy array succeeds, or every unconverted record would become uneditable.
 
 ### Running the conversion: scope, preview, prerequisites, and undoing it
@@ -590,17 +590,17 @@ Content-Type: application/json
 ```json
 {
   "from": "3f2a…",
-  "fromKind": "memory",
+  "fromKind": "fact",
   "to": "8c41…",
   "toKind": "entity"
 }
 ```
 
-All four fields are required. `fromKind` and `toKind` are one of `entity`, `memory`, `chrono`, `file`, and
+All four fields are required. `fromKind` and `toKind` are one of `entity`, `fact`, `chrono`, `file`, and
 they are **not guessed from the id** — the same UUID could name records in two collections, and a wrong
 guess produces a link that reads as correct and points at nothing.
 
-**Response** `200` with the link record, including its `_id` and a derived `label` (`memory.entityIds`).
+**Response** `200` with the link record, including its `_id` and a derived `label` (`fact.entityIds`).
 
 **It is an upsert, and `200` rather than `201` says so.** A link's `_id` is a UUIDv5 over the two records
 and the class, so one connection has exactly one id for ever: creating a link that already exists succeeds
@@ -710,13 +710,13 @@ POST /api/brain/spaces/:spaceId/traverse
 | `maxDepth` | — | `3` | Maximum hops from `startId`; hard-capped at `10` |
 | `limit` | — | `100` | Maximum total nodes returned, **clamped to 1–1000 on both doors** — `limit: 5000` silently becomes 1000. The neighbouring `maxDepth` row states its ceiling and this one did not |
 | `includeChrono` | — | `true` | Also reach chrono entries whose `entityIds` reference a traversed node. Set `false` for entity-only results. A non-boolean is a `400`, never coerced |
-| `includeMemories` | — | `false` | Also reach memories whose `entityIds` reference a traversed node, marked `kind: "memory"`. **Opt-in, unlike `includeChrono`** — see the note below. A non-boolean is a `400` |
+| `includeMemories` | — | `false` | Also reach facts whose `entityIds` reference a traversed node, marked `kind: "fact"`. **Opt-in, unlike `includeChrono`** — see the note below. A non-boolean is a `400` |
 | `includeFiles` | — | `false` | Also reach files whose `entityIds` reference a traversed node, marked `kind: "file"` and carrying **file meta only**. Opt-in. A non-boolean is a `400` |
 | `includeEdges` | — | `true` | Whether the response carries the `edges` list. **This does not change the walk** — edges are how the graph is traversed. A non-boolean is a `400` |
 
 **`truncated: true` has three causes, and one of them is new in 3.7.** The node cap filled; a link scan spent
 its budget; or **a hop's EDGE read spent its budget**. The third used to be impossible to report because the
-read was unbounded — one hub entity pulled its entire edge set into memory per hop, and the node cap could not
+read was unbounded — one hub entity pulled its entire edge set into fact per hop, and the node cap could not
 prevent it, because that cap counts nodes EMITTED and a neighbour already visited or of a non-entity kind is
 skipped without spending any of it.
 
@@ -725,8 +725,8 @@ had paid a very large read for. Treat the flag as *"there was more graph than th
 than as *"the node cap filled"* — the two were the same thing until this release and are not any more.
 
 **`direction` narrows stored edges and never links.** A link is a **record** with a `from` and a `to` since 4.0 — but which way it runs is fixed by the
-KINDS at its ends rather than by the data. A memory names entities and an entity names nothing, so asking for
-a memory's outbound links and its inbound links is not a choice between two answers; for an entity one of the
+KINDS at its ends rather than by the data. A fact names entities and an entity names nothing, so asking for
+a fact's outbound links and its inbound links is not a choice between two answers; for an entity one of the
 two is always empty. There is nothing for `direction` to select between, so it selects nothing.
 
 Honouring it on links would empty the DEFAULT traverse: `outbound` from an entity would reach no linked records
@@ -782,17 +782,17 @@ field is. No schema change was needed; the link already existed and simply had n
   other chrono entries, so expanding would only walk back to entities already visited.
 - Set `includeChrono: false` for the previous entity-only behaviour.
 
-#### Memories are nodes too, on request
+#### Facts are nodes too, on request
 
-`memory.entityIds` is the same kind of link, and `includeMemories: true` follows it. A memory node carries
-`kind: "memory"`, its `name` is the memory's `fact`, and its `type` may be an empty string — a memory's type is
-optional, unlike a chrono's. The synthetic label is `memory.entityIds`, and like the chrono label it is filtered
-by an explicit `edgeLabels`. A memory is a leaf, for the same reason a chrono is.
+`fact.entityIds` is the same kind of link, and `includeMemories: true` follows it. A fact node carries
+`kind: "fact"`, its `name` is the fact's `fact`, and its `type` may be an empty string — a fact's type is
+optional, unlike a chrono's. The synthetic label is `fact.entityIds`, and like the chrono label it is filtered
+by an explicit `edgeLabels`. A fact is a leaf, for the same reason a chrono is.
 
 **Why this one is opt-in when `includeChrono` is not.** Chrono entries are sparse — an incident has ten, not ten
-thousand — and were invisible without traversal. Memories are usually the most numerous record type in a space,
-and every node returned counts against `limit`. On by default, a memory-heavy space would fill the answer with
-memories and truncate away the entities you traversed for. Turn it on deliberately, and raise `limit` with it.
+thousand — and were invisible without traversal. Facts are usually the most numerous record type in a space,
+and every node returned counts against `limit`. On by default, a fact-heavy space would fill the answer with
+facts and truncate away the entities you traversed for. Turn it on deliberately, and raise `limit` with it.
 
 #### Files are nodes too, and only their meta comes back
 
@@ -808,7 +808,7 @@ This also means **one node per file, not one per chunk**. Chunks live in the sam
 belong to and are distinguished only by `parentFileId`; the traversal excludes them explicitly. A forty-passage
 document is one node.
 
-Opt-in for the same reason as memories, and the synthetic label is `file.entityIds`.
+Opt-in for the same reason as facts, and the synthetic label is `file.entityIds`.
 
 #### Suppressing the edge list
 
@@ -851,7 +851,7 @@ nothing cached, every number a real count of records.
       "properties": [
         { "name": "tier", "type": "string", "required": true, "enumValues": ["gold", "silver"] }
       ],
-      "linkedFrom": { "memories": 412, "chrono": 0, "files": 89 }
+      "linkedFrom": { "facts": 412, "chrono": 0, "files": 89 }
     }
   ],
   "relationships": [

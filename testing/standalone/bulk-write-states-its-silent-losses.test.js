@@ -13,7 +13,7 @@
  * status: every rejection lands in `errors` and the call still returns normally. A caller who treats the
  * result as proof of success is wrong, and this tool invites exactly that.
  *
- * **3. References are checked for SHAPE, never existence** — unlike `remember` and `update_fact`, which
+ * **3. References are checked for SHAPE, never existence** — unlike `saveFact` and `update_fact`, which
  * call `assertRefsResolve` under strict linkage and refuse a link that points at nothing. Bulk deliberately
  * does not, and the cost is real and worth stating: bulk can store a dangling link the single-record path
  * would have refused.
@@ -36,7 +36,7 @@ import { stripComments } from './_strip-comments.mjs';
 
 const TOOL = stripComments(readFileSync('server/src/mcp/tools/bulk.ts', 'utf8'));
 const CORE = stripComments(readFileSync('server/src/brain/bulk.ts', 'utf8'));
-const MEMORY_TOOL = stripComments(readFileSync('server/src/mcp/tools/memory.ts', 'utf8'));
+const MEMORY_TOOL = stripComments(readFileSync('server/src/mcp/tools/fact.ts', 'utf8'));
 
 const DESC = (() => {
   const at = TOOL.indexOf("name: 'save_bulk'");
@@ -85,7 +85,7 @@ describe('partial success is stated as the trap it is', () => {
 
   it('and says errors are indexed, so a caller can map them back', () => {
     assert.match(DESC, /INDEX/, 'an error without a position is not actionable on a 500-item batch');
-    assert.match(CORE, /errors\.push\(\{ type: 'memory', index: i/, 'and they really are');
+    assert.match(CORE, /errors\.push\(\{ type: 'fact', index: i/, 'and they really are');
   });
 });
 
@@ -139,7 +139,7 @@ describe('the processing order is stated with its consequence', () => {
   it('names the order', () => {
     // EDGES LAST since `F-27` item 2: a reference cannot point forwards, so an edge to a chrono entry in
     // the same payload could never have resolved under the old order.
-    assert.match(DESC, /memories → entities → chrono → edges/, 'the order itself');
+    assert.match(DESC, /facts → entities → chrono → edges/, 'the order itself');
   });
 
   it('and says what it buys — an UPDATED record is written before an edge reads it', () => {
@@ -155,14 +155,14 @@ describe('the processing order is stated with its consequence', () => {
   });
 
   it('and the code really runs in that order', () => {
-    const iMem = CORE.indexOf('const memories = slice(input.memories)');
+    const iMem = CORE.indexOf('const facts = slice(input.facts)');
     const iEnt = CORE.indexOf('const entities = slice(input.entities)');
     const iEdge = CORE.indexOf('const edges = slice(input.edges)');
     const iChrono = CORE.indexOf('const chrono = slice(input.chrono)');
     // EDGES LAST since `F-27` item 2. A reference cannot point forwards, so under the old order an edge to
     // a chrono entry created in the same payload could never have resolved.
     assert.ok(iMem > 0 && iEnt > iMem && iChrono > iEnt && iEdge > iChrono,
-      `order changed: memories=${iMem} entities=${iEnt} chrono=${iChrono} edges=${iEdge}. Every record array `
+      `order changed: facts=${iMem} entities=${iEnt} chrono=${iChrono} edges=${iEdge}. Every record array `
       + 'must be written before any edge, or a batch reference to a record of a later kind cannot resolve.');
   });
 });

@@ -153,7 +153,7 @@ Three things are stored for each converted file (conversion artefacts are **hidd
    - `content` — the Markdown body of the chunk
    - An embedding derived from `headingText + " " + content`
 
-Chunk records and `_converted/` records share the same vector space as memories, entities, and edges. A standard `recall` query therefore covers document chunks alongside all other content — **no separate query path is required**.
+Chunk records and `_converted/` records share the same vector space as facts, entities, and edges. A standard `recall` query therefore covers document chunks alongside all other content — **no separate query path is required**.
 
 #### File manager and listing endpoints
 
@@ -371,7 +371,7 @@ They are never queued, so they do not sit at `pending` waiting for work that wil
 | `verifyModel` | `""` | Engages on the **`repair`** level, and on **`auto`** when a repair model is set (F11-d consensus). A *second* document VLM. When set, the repair level runs it as an independent second transcription of each page, reconciles it with the primary draft against the OCR text, and keeps the highest-coverage result — **never worse** than the primary. Empty ⇒ no consensus pass. Best set to a *different* model than `vlmModel`. Env override: `DOC_VERIFY_MODEL`. |
 | `verifyBaseUrl` | `""` | Endpoint for the verify model. Empty ⇒ reuses `vlmBaseUrl`. Env override: `DOC_VERIFY_URL`. |
 | `renderDpi` | `150` | Page rasterization DPI for the render sidecar (VLM modes only). |
-| `maxPages` | `50` | Pages rendered per **render call** — one sidecar round trip's memory/latency bound. Not how much of a document is read: longer documents are walked in windows of this size. |
+| `maxPages` | `50` | Pages rendered per **render call** — one sidecar round trip's fact/latency bound. Not how much of a document is read: longer documents are walked in windows of this size. |
 | `maxTotalPages` | `200` | Pages read from **one document** in total, across windows. Beyond this the extraction stops and says so, in the log and in the stored markdown. |
 | `pageTimeoutMs` | `60000` | Per-page VLM transcription timeout (VLM modes only). It is the DEFAULT for the four document model slots, not an override of them: a a `modelSlots.<document slot>.timeoutMs` you set wins for that model, and this value applies to every document call that has none. Until 4.2 it was passed as an override, so those four slot budgets were documented, patchable, pinnable and inert — both defaults being 60 s is why nothing disagreed. |
 | `concurrency` | `2` | How many pages are transcribed in parallel (VLM modes only). |

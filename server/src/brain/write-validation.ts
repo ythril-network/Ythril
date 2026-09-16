@@ -32,7 +32,7 @@
  * permanently out of conformance. And the record is not trapped — validation is of the *merged* result, so
  * a patch that repairs the pre-existing violation passes. The error names exactly what to include.
  */
-import { validateEntity, validateEdge, validateChrono, validateMemory, type SchemaViolation } from '../spaces/schema-validation.js';
+import { validateEntity, validateEdge, validateChrono, validateFact, type SchemaViolation } from '../spaces/schema-validation.js';
 import type { SpaceMeta, ChronoEntry } from '../config/types.js';
 import { col, asFilter } from '../db/mongo.js';
 import { resolveMemberSpaces } from '../spaces/proxy.js';
@@ -310,28 +310,28 @@ export function classifyEdgeUpsertAgainst(
 
 
 /**
- * As above, for a memory. The one that did not exist.
+ * As above, for a fact. The one that did not exist.
  *
- * Entities, edges and chrono each had a classifier; memory never did, so the memory write paths validated the
+ * Entities, edges and chrono each had a classifier; fact never did, so the fact write paths validated the
  * INCOMING payload rather than the record it would produce. That is the same defect the chrono classifier was
  * written for and it fails in both directions: a required property present on the stored record and absent
  * from a patch reads as a violation the merge would have supplied, and a property the patch removes is never
  * checked because it was not in the payload.
  *
- * `type` replaces rather than merges — it is a scalar, and re-typing a memory has to be validated against the
+ * `type` replaces rather than merges — it is a scalar, and re-typing a fact has to be validated against the
  * NEW type's schema, which is what `#1047` fixed on the update route and what this brings inside.
  */
-export function classifyMemoryUpsertAgainst(
+export function classifyFactUpsertAgainst(
   meta: SpaceMeta | undefined,
   existing: { type?: string; properties?: Record<string, string | number | boolean> } | null,
   incoming: { type?: string; properties?: Record<string, string | number | boolean> },
 ): UpdateValidation {
-  const after = validateMemory(meta ?? {}, {
+  const after = validateFact(meta ?? {}, {
     type: incoming.type ?? existing?.type,
     properties: mergePropertiesOrKeep(existing?.properties, incoming.properties) ?? {},
   });
   const before = existing
-    ? validateMemory(meta ?? {}, { type: existing.type, properties: existing.properties ?? {} })
+    ? validateFact(meta ?? {}, { type: existing.type, properties: existing.properties ?? {} })
     : INSERT_HAS_NO_PRIOR;
   return classifyUpdateViolations(meta, before, after);
 }

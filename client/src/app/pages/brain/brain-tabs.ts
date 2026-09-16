@@ -28,11 +28,11 @@
  * A tab exists because a person browses that kind of record, not because documents live there. The two lists
  * are equal today and the questions are not related: adding a collection does not earn it a tab, and the
  * owner's ruling on link records says how they surface — *"on graph shown as info on click, and toggleable
- * if memories and chronos appear"* — which is a graph affordance and a recall toggle, not a tab.
+ * if facts and chronos appear"* — which is a graph affordance and a recall toggle, not a tab.
  *
  * Written out rather than derived so that decision stays a decision.
  */
-export const COLLECTION_TABS = ['memories', 'entities', 'edges', 'chrono', 'files'] as const;
+export const COLLECTION_TABS = ['facts', 'entities', 'edges', 'chrono', 'files'] as const;
 
 /** A tab that shows a collection — the only kind a stat tile links to. */
 export type CollectionTab = typeof COLLECTION_TABS[number];

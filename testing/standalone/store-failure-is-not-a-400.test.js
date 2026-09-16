@@ -30,7 +30,7 @@ describe('the reported condition, verbatim from both reports', () => {
    * matches on a message at all — neither failing instance is ours to probe for a code.
    */
   const REPORTED = 'Executor error during aggregate command on namespace: '
-    + 'ythril_the fleet integrator.orchestrator_memories :: caused by :: ';
+    + 'ythril_the fleet integrator.orchestrator_facts :: caused by :: ';
 
   it('is a 503, is retryable, and stops reading as a complaint about the request', () => {
     const f = classifyReadFailure(mongoErr('MongoServerError', { message: REPORTED }));

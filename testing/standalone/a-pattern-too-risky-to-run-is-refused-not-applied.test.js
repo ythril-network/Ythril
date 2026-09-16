@@ -31,7 +31,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { PropertySchemaZ, TypeSchemaZ } from '../../server/dist/spaces/body-schemas.js';
-import { validateMemory, validateEntity } from '../../server/dist/spaces/schema-validation.js';
+import { validateFact, validateEntity } from '../../server/dist/spaces/schema-validation.js';
 
 /** The pattern that started this: one or more `D<session>:<turn>` ids, comma-joined. */
 const REPEATED_GROUP = '^D[0-9]+:[0-9]+(,D[0-9]+:[0-9]+)*$';
@@ -83,11 +83,11 @@ test('a stored risky pattern says it was not evaluated, rather than blaming the 
    */
   const meta = {
     validationMode: 'strict',
-    typeSchemas: { memory: { utterance: { propertySchemas: { turn: { type: 'string', pattern: REPEATED_GROUP } } } } },
+    typeSchemas: { fact: { utterance: { propertySchemas: { turn: { type: 'string', pattern: REPEATED_GROUP } } } } },
   };
   // `(meta, record)`, in that order — the arguments the other way round returns an empty list, which reads
   // exactly like "the schema is satisfied".
-  const violations = validateMemory(meta, { type: 'utterance', properties: { turn: 'D1:1,D1:2' } });
+  const violations = validateFact(meta, { type: 'utterance', properties: { turn: 'D1:1,D1:2' } });
 
   assert.equal(violations.length, 1, `expected exactly one violation, got ${JSON.stringify(violations)}`);
   assert.match(violations[0].reason, /not evaluated|not applied|refused|unsafe|redos/i,

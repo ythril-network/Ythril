@@ -6,8 +6,8 @@ How a brain record behaves when you write it, update it and read it back: expiry
 `PATCH` does to `tags` and `properties`, optimistic concurrency, what a read never sends, retiring a record
 from semantic search, and partial updates with `deleteFields`.
 
-**These rules are not about memories.** They apply to entities, edges and chrono entries the same way — they
-were documented on the memory page because memories were written up first. The endpoints themselves are in
+**These rules are not about facts.** They apply to entities, edges and chrono entries the same way — they
+were documented on the fact page because facts were written up first. The endpoints themselves are in
 [Brain API](04-brain-api.md), [Entities, Edges & Graph](04b-graph-api.md) and [Chrono](04c-chrono-api.md).
 
 ---
@@ -16,7 +16,7 @@ were documented on the memory page because memories were written up first. The e
 
 ### Record Expiry (TTL)
 
-Any record — memory, entity, edge, or chrono entry — can be given an expiry after which it is
+Any record — fact, entity, edge, or chrono entry — can be given an expiry after which it is
 **deleted automatically**. Deletion runs through the normal delete path, so it writes a tombstone that
 propagates over sync: an expired record cannot resurrect from a peer (which a raw MongoDB TTL index,
 deleting below the application, would allow).
@@ -99,12 +99,12 @@ durable `alert-rule` entities beside `episode` chronos that are pure telemetry. 
 either — it keys on a type *name*, and this is about a whole collection.
 
 ```json
-{ "recordTtlDays": { "entity": null, "memory": null, "edge": null, "chrono": 90, "file": 30 } }
+{ "recordTtlDays": { "entity": null, "fact": null, "edge": null, "chrono": 90, "file": 30 } }
 ```
 
 | | |
 |---|---|
-| buckets | `entity`, `memory`, `edge`, `chrono`, `file` — **five**, because files share this tier: they have no type, so the schema tier cannot reach them, and they are the largest and most obviously disposable of the five |
+| buckets | `entity`, `fact`, `edge`, `chrono`, `file` — **five**, because files share this tier: they have no type, so the schema tier cannot reach them, and they are the largest and most obviously disposable of the five |
 | a bucket set to `0` or `null` | no window for that kind. Same as absent — there is no tier above the space for a bucket to inherit from |
 | **a partial object MERGES** | `{"chrono":90}` sets chrono and leaves the other four alone. **This is the opposite of the `typeSchemas` rule**, where a named type is replaced wholesale — there the value is a whole definition you are holding, here each bucket is one independent number |
 | a bare number | the **legacy shape**, accepted forever, and it means all five. It also *replaces* a stored object: someone sending `90` means all five, and merging that would invent an intent they did not express |
@@ -182,7 +182,7 @@ presence the signal, and this the whole integrity check:
 
 ```http
 POST /api/brain/filter
-{ "collection": "memories", "filter": { "stampSkew": { "$exists": true } } }
+{ "collection": "facts", "filter": { "stampSkew": { "$exists": true } } }
 ```
 
 The compact form `2026-08-09T0942Z` — no colon, no seconds — is parsed, as are ordinary ISO 8601, an explicit offset, and
@@ -210,7 +210,7 @@ between two parties.
 
 **`properties` MERGE on every record type.** A patch that names one key keeps the others — the stored map with
 your keys laid over it, one level deep. This is the same rule as an upsert and the same rule a converged retry
-follows, so there is one thing to know across memories, entities, edges and chrono entries.
+follows, so there is one thing to know across facts, entities, edges and chrono entries.
 
 **`tags` differ by type, deliberately:**
 
@@ -218,7 +218,7 @@ follows, so there is one thing to know across memories, entities, edges and chro
 |---|---|---|
 | `PATCH .../entities/:id`, `update_entity` | merge | **union** with the stored tags |
 | `PATCH .../edges/:id`, `update_edge` | merge | **union** with the stored tags |
-| `PATCH .../memories/:id`, `update_fact` | merge | **replaces** the stored tags |
+| `PATCH .../facts/:id`, `update_fact` | merge | **replaces** the stored tags |
 | `PATCH .../chrono/:id`, `update_chrono` | merge | **replaces** the stored tags |
 
 **Removing a key is `deleteFields`' job, never an absence.** Omitting a property does not delete it, and sending
@@ -242,7 +242,7 @@ the phase. The second shape is also the one `traverse`, `er_model` and the backl
 > concluded nested properties were supported. If you have records carrying one, they are still there: nothing
 > rewrites stored data, and `deleteFields: ["properties.theKey"]` removes it.
 >
-> **Changed in 2.4.1.** `PATCH .../memories/:id` and chrono updates previously **replaced** the whole
+> **Changed in 2.4.1.** `PATCH .../facts/:id` and chrono updates previously **replaced** the whole
 > `properties` map, so a patch naming one key silently dropped the rest — while `update_fact`'s own schema
 > described the field as "properties to merge". If you were relying on the replace to clear keys, switch to
 > `deleteFields`.
@@ -254,7 +254,7 @@ the phase. The second shape is also the one `traverse`, `er_model` and the backl
 
 | type | update by id | POST-as-update |
 |---|---|---|
-| memory | `PATCH .../memories/:id` | **no** (404) |
+| fact | `PATCH .../facts/:id` | **no** (404) |
 | entity | `PATCH .../entities/:id` | no — but a collection POST with a matching `id` upserts |
 | edge | `PATCH .../edges/:id` | no — a collection POST upserts on `(from, to, label)` |
 | chrono | `PATCH .../chrono/:id` | **no** (404) — **removed in 3.0**, see below |
@@ -310,7 +310,7 @@ Notes:
 
 - **The header is optional.** Omit it and the write proceeds unconditionally, exactly as before. Every
   existing client and script is unaffected.
-- **All four record types**, on the `PATCH` route: `memories`, `entities`, `edges`, `chrono`.
+- **All four record types**, on the `PATCH` route: `facts`, `entities`, `edges`, `chrono`.
 - **`seq` is on every record** and is returned by every read. Treat it as an **opaque token**: it is a
   per-space counter, not a per-record version, so consecutive writes to one record will not give you
   `1, 2, 3`. Echo back what you read and do not reason about the gaps.
@@ -356,7 +356,7 @@ What you *can* control:
 | `projection` | `POST /query`, **and recall / find-similar** | any field you do not name. On recall it applies recursively, so a `traverse` answer's `_graph` is projected at every depth |
 | `includeContent: false` | recall, find-similar | file-passage **bodies**, keeping path, heading, chunk index, tags and properties |
 | `includeDiagnostics: false` *(the default)* | recall, find-similar | `matchedText`, `embeddingModel` and `seq` — **recursively**, so a `traverse` answer's `_graph` follows it at every depth. **NOT the per-stage scores** — see below |
-| `includeDiagnostics` *(query string, default off)* | the **list** routes — entities, memories, edges, chrono | `matchedText` and `embeddingModel`. **`seq` is NOT dropped here**, unlike on recall: it is the `If-Match` value, and withholding it would take away conditional writes. Send `?includeDiagnostics=true` to get the two fields back |
+| `includeDiagnostics` *(query string, default off)* | the **list** routes — entities, facts, edges, chrono | `matchedText` and `embeddingModel`. **`seq` is NOT dropped here**, unlike on recall: it is the `If-Match` value, and withholding it would take away conditional writes. Send `?includeDiagnostics=true` to get the two fields back |
 
 A projection is worth reaching for rather than skipping: a bare query over a dozen records with full
 descriptions and properties is the cheapest way to overrun a token budget, and naming the four fields you
@@ -371,13 +371,13 @@ What still differs is the **shape**, deliberately, because each is natural to it
 flat — record fields beside `score` — while an MCP result nests them under `record`. The *field set* a caller
 can read is identical, at the result level and at every depth of `_graph`, and a gate compares the two.
 
-The list routes (`GET /api/brain/spaces/:id/memories` and friends) still have **no** field selection — they are now the only read that does not. If that
+The list routes (`GET /api/brain/spaces/:id/facts` and friends) still have **no** field selection — they are now the only read that does not. If that
 is a constraint for your integration, say so — it is the one remaining asymmetry here rather than a
 preference somebody chose.
 
 ### Retiring a record from semantic search
 
-`suppressEmbeddings` is a boolean on **all four** record types (`memories`, `entities`, `edges`,
+`suppressEmbeddings` is a boolean on **all four** record types (`facts`, `entities`, `edges`,
 `chrono`), settable on the `PATCH` route and on the matching MCP `update_*` tool:
 
 ```http
@@ -465,12 +465,12 @@ record flag or the space setting.
 
 ### Partial Update with deleteFields
 
-**All five** `PATCH` update endpoints — entities, edges, memories, chrono entries and file metadata — accept an optional `deleteFields` array of dot-notation paths. This allows callers to remove specific fields from a document in the same atomic operation as normal property/tag updates.
+**All five** `PATCH` update endpoints — entities, edges, facts, chrono entries and file metadata — accept an optional `deleteFields` array of dot-notation paths. This allows callers to remove specific fields from a document in the same atomic operation as normal property/tag updates.
 
 ```http
 PATCH /api/brain/spaces/:spaceId/entities/:id
 PATCH /api/brain/spaces/:spaceId/edges/:id
-PATCH /api/brain/spaces/:spaceId/memories/:id
+PATCH /api/brain/spaces/:spaceId/facts/:id
 PATCH /api/brain/spaces/:spaceId/chrono/:id
 PATCH /api/brain/spaces/:spaceId/files?path=…
 ```

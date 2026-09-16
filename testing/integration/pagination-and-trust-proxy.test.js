@@ -42,7 +42,7 @@ before(async () => {
   const r = await post(INSTANCES.a, token(), '/api/spaces', { id: SPACE, label: `PgTrust ${RUN}` });
   assert.equal(r.status, 201, `create space: ${JSON.stringify(r.body)}`);
   for (let i = 0; i < 3; i++) {
-    await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/memories`, { fact: `pagination memory ${i} ${RUN}` });
+    await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/facts`, { fact: `pagination memory ${i} ${RUN}` });
   }
 });
 
@@ -52,47 +52,47 @@ after(async () => {
 
 describe('Pagination clamp (S4)', () => {
   it('non-numeric ?limit=abc is coerced to the default, not NaN/unbounded', async () => {
-    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/memories?limit=abc`);
+    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/facts?limit=abc`);
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.ok(Array.isArray(r.body.memories));
-    assert.equal(r.body.memories.length, 3, 'returns all 3 (default applied)');
+    assert.ok(Array.isArray(r.body.facts));
+    assert.equal(r.body.facts.length, 3, 'returns all 3 (default applied)');
   });
 
   it('?limit=1 returns exactly one', async () => {
-    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/memories?limit=1`);
+    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/facts?limit=1`);
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.equal(r.body.memories.length, 1);
+    assert.equal(r.body.facts.length, 1);
   });
 
   it('negative ?limit=-5 is clamped to >= 1', async () => {
-    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/memories?limit=-5`);
+    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/facts?limit=-5`);
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.equal(r.body.memories.length, 1, 'clamped to minimum 1');
+    assert.equal(r.body.facts.length, 1, 'clamped to minimum 1');
   });
 
   it('huge ?limit=1e9 does not error and stays bounded', async () => {
-    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/memories?limit=1e9`);
+    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/facts?limit=1e9`);
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.equal(r.body.memories.length, 3);
+    assert.equal(r.body.facts.length, 3);
   });
 
   it('non-numeric ?skip=abc is treated as 0', async () => {
-    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/memories?skip=abc&limit=100`);
+    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/facts?skip=abc&limit=100`);
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.equal(r.body.memories.length, 3, 'skip=abc → 0, all returned');
+    assert.equal(r.body.facts.length, 3, 'skip=abc → 0, all returned');
   });
 
   it('?skip=2 skips two', async () => {
-    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/memories?skip=2&limit=100`);
+    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/facts?skip=2&limit=100`);
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.equal(r.body.memories.length, 1);
+    assert.equal(r.body.facts.length, 1);
   });
 });
 
 describe('Trust proxy default (S1)', () => {
   it('a spoofed X-Forwarded-For does not become the audited client IP', async () => {
     // An audited write carrying a spoofed forwarded-for header.
-    const w = await raw('POST', `/api/brain/spaces/${SPACE}/memories`, {
+    const w = await raw('POST', `/api/brain/spaces/${SPACE}/facts`, {
       body: { fact: `trust-proxy probe ${RUN}` },
       headers: { 'X-Forwarded-For': SPOOFED_IP },
     });

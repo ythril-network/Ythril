@@ -10,7 +10,7 @@
  * retrying with the same id converges on the same record instead of writing a second one. An id no generator
  * would ever produce again cannot serve that purpose, so the retry it was there to enable can never fire.
  *
- * `save_entity` had it right, via a shared `uuidSchema()` helper. `save_chrono` and `remember` hand-rolled
+ * `save_entity` had it right, via a shared `uuidSchema()` helper. `save_chrono` and `saveFact` hand-rolled
  * the declaration and only **described** "Optional UUID v4" in prose, with no `pattern` at all — so the docs
  * promised a constraint the schema never applied.
  *

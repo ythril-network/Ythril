@@ -33,27 +33,27 @@ describe('contradiction scanner — cursor separation', () => {
   });
 
   it('gives the structured and NLI passes DIFFERENT cursors', () => {
-    const structured = cursorKey('work', 'memory', 'structured');
-    const nli = cursorKey('work', 'memory', 'nli');
+    const structured = cursorKey('work', 'fact', 'structured');
+    const nli = cursorKey('work', 'fact', 'nli');
     assert.notEqual(structured, nli,
       'one shared cursor would let an NLI outage permanently skip every pair the sweep touched');
   });
 
   it('scopes a cursor to its space and type, so spaces cannot advance each other', () => {
-    assert.notEqual(cursorKey('work', 'memory', 'nli'), cursorKey('other', 'memory', 'nli'));
-    assert.notEqual(cursorKey('work', 'memory', 'nli'), cursorKey('work', 'entity', 'nli'));
+    assert.notEqual(cursorKey('work', 'fact', 'nli'), cursorKey('other', 'fact', 'nli'));
+    assert.notEqual(cursorKey('work', 'fact', 'nli'), cursorKey('work', 'entity', 'nli'));
   });
 
   it('does not collide with the duplicate scanner\'s own cursors', () => {
     // The dupe scanner uses `${spaceId}:${type}` in the same collection. Colliding would make the two
     // scanners silently consume each other's progress.
     for (const pass of ['structured', 'nli']) {
-      assert.notEqual(cursorKey('work', 'memory', pass), 'work:memory');
+      assert.notEqual(cursorKey('work', 'fact', pass), 'work:memory');
     }
   });
 
   it('is stable — the key is derived, not generated', () => {
-    assert.equal(cursorKey('work', 'memory', 'nli'), cursorKey('work', 'memory', 'nli'));
+    assert.equal(cursorKey('work', 'fact', 'nli'), cursorKey('work', 'fact', 'nli'));
   });
 });
 
@@ -67,7 +67,7 @@ describe('contradiction scanner — cursor separation', () => {
  * NLI pass judged nothing at all while the sweep reported success.
  */
 describe('contradiction scanner — recall hit → judgeable record', () => {
-  const memoryHit = { _id: 'mem-1', type: 'memory', score: 0.97, fact: 'The server listens on 8080.' };
+  const memoryHit = { _id: 'mem-1', type: 'fact', score: 0.97, fact: 'The server listens on 8080.' };
 
   it('carries the record ID across, so a pair is stored under the pair it is about', () => {
     assert.equal(toJudgeable(memoryHit).id, 'mem-1',
@@ -95,7 +95,7 @@ describe('contradiction scanner — swept types', () => {
   it('sweeps chrono by default', () => {
     // Chrono was in neither scanner's defaults, so a calendar's contradictions were found by nothing.
     assert.ok(DEFAULT_TYPES.includes('chrono'));
-    assert.ok(DEFAULT_TYPES.includes('memory') && DEFAULT_TYPES.includes('entity'));
+    assert.ok(DEFAULT_TYPES.includes('fact') && DEFAULT_TYPES.includes('entity'));
   });
 });
 
@@ -110,7 +110,7 @@ describe('contradiction scanner — a pair is judged once per sweep', () => {
   before(async () => {
     ({ unjudgedNeighbours } = await import('../../server/dist/brain/contradiction-scanner.js'));
   });
-  const hit = (id) => ({ _id: id, type: 'memory', score: 0.97 });
+  const hit = (id) => ({ _id: id, type: 'fact', score: 0.97 });
 
   it('drops the neighbour whose pair was settled from the other side', () => {
     const seen = new Set(['mem-1:mem-2']);

@@ -60,7 +60,7 @@ describe('RecordDrawerComponent', () => {
     const fixture = create();
     const state = TestBed.inject(RecordDrawerState);
 
-    state.open('memory', aMemory({ fact: 'a load-bearing fact' }));
+    state.open('fact', aMemory({ fact: 'a load-bearing fact' }));
     fixture.detectChanges();
 
     const drawer = fixture.nativeElement.querySelector('.drawer');
@@ -82,7 +82,7 @@ describe('RecordDrawerComponent', () => {
     const state = TestBed.inject(RecordDrawerState);
     const multiline = 'line one\nline two\nline three';
 
-    state.open('memory', aMemory({ fact: 'f', description: multiline }));
+    state.open('fact', aMemory({ fact: 'f', description: multiline }));
     fixture.detectChanges();
     await fixture.whenStable();
 

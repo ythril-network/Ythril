@@ -70,12 +70,12 @@ describe('absent, empty and null are three different things', () => {
   it('an empty array detaches that kind, and leaves the others alone', () => {
     const desired = desiredLinksFrom({ linkEntities: [] });
     assert.deepEqual(desired, { entity: [] });
-    assert.ok(!('memory' in desired), 'a kind the caller did not name must not appear');
+    assert.ok(!('fact' in desired), 'a kind the caller did not name must not appear');
   });
 
   it('null is the caller writing "none", because JSON has no undefined', () => {
-    assert.deepEqual(desiredLinksFrom({ linkMemories: null }), { memory: [] });
-    assert.equal(linkInputError({ linkMemories: null }), null, 'null is a value, not a shape error');
+    assert.deepEqual(desiredLinksFrom({ linkFacts: null }), { fact: [] });
+    assert.equal(linkInputError({ linkFacts: null }), null, 'null is a value, not a shape error');
   });
 
   it('several kinds in one call, which is the point of the feature', () => {

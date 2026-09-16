@@ -59,7 +59,7 @@ function reindexLoops() {
  * property that matters.
  */
 const BUILDERS = [
-  ['memories', 'memoryEmbedText'],
+  ['facts', 'factEmbedText'],
   ['entities', 'entityEmbedText'],
   ['edges', 'edgeEmbedText'],
   ['chrono', 'chronoEmbedText'],

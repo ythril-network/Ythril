@@ -35,15 +35,15 @@ export interface TraverseOption {
   /**
    * Which way to walk STORED EDGES. It does not narrow links.
    *
-   * **A link's direction is fixed by the KINDS at its ends, not by how it is stored.** A memory names
+   * **A link's direction is fixed by the KINDS at its ends, not by how it is stored.** A fact names
    * entities; an entity names nothing. So from any starting point there is only one way a link can run,
    * and there is nothing for `direction` to select between. Both traversals reach what a record names,
    * whatever `direction` says — the standalone `traverse` tool has always done so and recall's expansion
    * matches it.
    *
    * The consequence worth stating, because it surprises: `{direction: 'inbound', includeMemories: true}` on a
-   * matched memory still returns the entities that memory NAMES, which is an outbound step from the record.
-   * Honouring direction on links would make `inbound` hide a memory's own links, which is not what anyone
+   * matched fact still returns the entities that fact NAMES, which is an outbound step from the record.
+   * Honouring direction on links would make `inbound` hide a fact's own links, which is not what anyone
    * asks for by narrowing.
    *
    * ## THE REASON ABOVE REPLACES A WRONG ONE, corrected 2026-09-05
@@ -71,7 +71,7 @@ export interface TraverseOption {
   direction?: 'outbound' | 'inbound' | 'both' | undefined;
   /** Follow `chrono.entityIds` as an inbound link, reaching timeline entries about a matched entity. */
   includeChrono?: boolean | undefined;
-  /** Follow `memory.entityIds` the same way. */
+  /** Follow `fact.entityIds` the same way. */
   includeMemories?: boolean | undefined;
   /** Follow `file.entityIds`, reaching file META — never chunk text. */
   includeFiles?: boolean | undefined;
@@ -90,7 +90,7 @@ export const TRAVERSE_OPTION_FIELDS =
  *
  * A recall caller asked for semantic matches, and expansion is decoration on top of them. The answer is
  * BUDGETED — a match is counted together with its whole nested subtree — so every linked record admitted by
- * default is paid for in matches that no longer fit. Memories are usually the most numerous record type in a
+ * default is paid for in matches that no longer fit. Facts are usually the most numerous record type in a
  * space, which is the same reason the standalone tool leaves that one off too.
  *
  * Off by default also means this change alters no existing response, which is what makes a change this wide
@@ -234,10 +234,10 @@ export function traverseOptionSchema(maxDepth: number): Record<string, unknown> 
             enum: ['outbound', 'inbound', 'both'],
             description: 'Which way to walk STORED EDGES; default both. It does NOT narrow links. A link is a '
               + 'record with a from and a to since 4.0, but which way it runs is fixed by the KINDS at its '
-              + 'ends rather than by the data — a memory names entities and entities name nothing — so there '
+              + 'ends rather than by the data — a fact names entities and entities name nothing — so there '
               + 'is nothing for direction to select between and both traversals reach the entity it names '
-              + 'whatever this says. So {direction: "inbound", includeMemories: true} on a matched memory '
-              + 'still returns the entities that memory NAMES.',
+              + 'whatever this says. So {direction: "inbound", includeMemories: true} on a matched fact '
+              + 'still returns the entities that fact NAMES.',
           },
           includeChrono: { type: 'boolean' },
           includeMemories: { type: 'boolean' },

@@ -15,6 +15,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING — the knowledge type `memory` is now `fact`, everywhere, and 5.0 does not accept the old word.**
+
+  | was | is |
+  |---|---|
+  | `remember`, `update_memory`, `delete_memory` | `save_fact`, `update_fact`, `delete_fact` |
+  | `POST /api/brain/spaces/:id/memories` | `POST /api/brain/spaces/:id/facts` |
+  | `<space>_memories` | `<space>_facts` |
+  | `recordTtlDays: { memory }`, `memory.created` | `recordTtlDays: { fact }`, `fact.created` |
+  | `ythril_memories_total` | `ythril_facts_total` |
+
+  **The six array fields keep their spelling.** `memoryIds`, `includeMemories` and `chrono.memoryIds` are
+  replicated and merkle-hashed, so renaming them is a wire break this release did not take. A link's synthetic
+  edge LABEL does move, because its first half is the kind: `memory.entityIds` is now `fact.entityIds`.
+
+  **Three boot migrations run once, and an upgrade needs all three**, because every failure here is silent —
+  an empty result reads exactly like a space nobody wrote to. They rename the collections and the webhook
+  subscriptions, rewrite `recordTtlDays`, and re-key every edge, link, tombstone and queued embed job whose
+  identity was derived from the word. See the 5.0 migration notes.
+
 - **BREAKING — three tools fold into others, and the MCP surface is 45 rather than 48.**
 
   | gone | use instead |

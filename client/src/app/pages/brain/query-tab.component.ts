@@ -404,7 +404,7 @@ import { BrainStore } from './brain-store.service';
                           <div class="rel-head">{{ 'brain.query.related' | transloco: { count: rel.total } }}</div>
                           @for (bucket of [
                             { label: 'brain.query.related.entities', items: rel.entities },
-                            { label: 'brain.query.related.memories', items: rel.memories },
+                            { label: 'brain.query.related.facts', items: rel.facts },
                             { label: 'brain.query.related.chronos', items: rel.chronos },
                             { label: 'brain.query.related.files', items: rel.files }
                           ]; track bucket.label) {
@@ -523,7 +523,7 @@ export class QueryTabComponent {
   // Query panel
   queryMode = signal<'search' | 'advanced'>('search');
   readonly queryCollections: readonly QueryCollection[] = BRAIN_COLLECTIONS;
-  queryForm = { collection: 'memories' as QueryCollection, filter: '', projection: '', limit: 20, maxTimeMS: 5000 };
+  queryForm = { collection: 'facts' as QueryCollection, filter: '', projection: '', limit: 20, maxTimeMS: 5000 };
   queryRunning = signal(false);
   queryResult = signal<QueryResult | null>(null);
   queryError = signal('');
@@ -582,8 +582,8 @@ export class QueryTabComponent {
     const ts = this.store.spaceMeta()?.typeSchemas;
     return [...new Set([
       ...Object.keys(ts?.entity ?? {}),
-      ...Object.keys(ts?.memory ?? {}),
-      ...this.store.memories().map(m => m.type),
+      ...Object.keys(ts?.fact ?? {}),
+      ...this.store.facts().map(m => m.type),
       ...this.store.entities().map(e => e.type),
       ...this.store.edges().map(e => e.type),
     ].filter((t): t is string => !!t))].sort();

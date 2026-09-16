@@ -29,7 +29,7 @@ before(async () => {
 describe('Webhook event types (real ALL_WEBHOOK_EVENTS from the compiled build)', () => {
   it('contains exactly the documented event set', () => {
     const expected = [
-      'memory.created', 'memory.updated', 'memory.deleted',
+      'fact.created', 'fact.updated', 'fact.deleted',
       'entity.created', 'entity.updated', 'entity.deleted', 'entity.merged',
       'edge.created', 'edge.updated', 'edge.deleted',
       'chrono.created', 'chrono.updated', 'chrono.deleted',
@@ -61,7 +61,7 @@ describe('Webhook event types (real ALL_WEBHOOK_EVENTS from the compiled build)'
 describe('Webhook event payload structure', () => {
   it('a memory.created payload uses a documented event type', () => {
     const payload = {
-      event: 'memory.created',
+      event: 'fact.created',
       timestamp: new Date().toISOString(),
       spaceId: 'dev-lessons',
       spaceName: 'Dev Lessons',
@@ -74,7 +74,7 @@ describe('Webhook event payload structure', () => {
   });
 
   it('delete events carry only { _id }', () => {
-    const payload = { event: 'memory.deleted', entry: { _id: 'deleted-id' } };
+    const payload = { event: 'fact.deleted', entry: { _id: 'deleted-id' } };
     assert.ok(ALL_WEBHOOK_EVENTS.has(payload.event));
     assert.deepEqual(Object.keys(payload.entry), ['_id']);
   });

@@ -4,7 +4,7 @@
  *
  * ## Why these exist and why now
  *
- * `bulkDeleteEntities`, `bulkDeleteMemories`, `bulkDeleteEdges` and `bulkDeleteChrono` are the same thirty
+ * `bulkDeleteEntities`, `bulkDeleteFacts`, `bulkDeleteEdges` and `bulkDeleteChrono` are the same thirty
  * lines four times, in four of the largest files in the server (`R-4`). Extracting them is the obvious move and
  * the repo rule is the reason it needs tests first: weak coverage plus a refactor means characterization tests
  * as their own change, proven green against the original code.
@@ -70,7 +70,7 @@ const doc = (id, extra = {}) => ({ _id: id, spaceId: SPACE, seq: 1, createdAt: '
  */
 const WIPES = [
   { name: 'entities', type: 'entity', collection: 'entities' },
-  { name: 'memories', type: 'memory', collection: 'memories' },
+  { name: 'facts', type: 'fact', collection: 'facts' },
   { name: 'edges', type: 'edge', collection: 'edges' },
   { name: 'chrono', type: 'chrono', collection: 'chrono' },
 ];
@@ -79,7 +79,7 @@ const WIPES = [
 function wipeFor(name) {
   const fns = {
     entities: () => entitiesMod.bulkDeleteEntities(SPACE),
-    memories: () => brain.bulkDeleteMemories(SPACE),
+    facts: () => brain.bulkDeleteFacts(SPACE),
     edges: () => edges.bulkDeleteEdges(SPACE),
     chrono: () => chronoMod.bulkDeleteChrono(SPACE),
   };
@@ -97,7 +97,7 @@ describe('a space wipe tombstones every record it deletes', { skip }, () => {
     }, null, 2), { mode: 0o600 });
     const loader = await import('../../server/dist/config/loader.js');
     loader.loadConfig();
-    brain = await import('../../server/dist/brain/memory.js');
+    brain = await import('../../server/dist/brain/fact.js');
     edges = await import('../../server/dist/brain/edge-bulk-delete.js');
     entitiesMod = await import('../../server/dist/brain/entities.js');
     chronoMod = await import('../../server/dist/brain/chrono.js');
@@ -187,14 +187,14 @@ describe('a space wipe tombstones every record it deletes', { skip }, () => {
      * dropped in the extraction, or quietly applied to all four, and no test would have moved. A documented
      * property with no test is a property that survives only as long as whoever wrote the comment is reading.
      */
-    await coll('memories').insertMany([
+    await coll('facts').insertMany([
       doc('oldest', { createdAt: '2026-01-01T00:00:00.000Z' }),
       doc('newest', { createdAt: '2026-06-01T00:00:00.000Z' }),
       doc('middle', { createdAt: '2026-03-01T00:00:00.000Z' }),
     ]);
-    await wipeFor('memories')();
+    await wipeFor('facts')();
 
-    const byId = new Map((await tombstones().find({ type: 'memory' }).toArray()).map(t => [t._id, t.seq]));
+    const byId = new Map((await tombstones().find({ type: 'fact' }).toArray()).map(t => [t._id, t.seq]));
     assert.ok(byId.get('newest') < byId.get('middle'), 'the newest record takes the lowest seq');
     assert.ok(byId.get('middle') < byId.get('oldest'), 'and the oldest takes the highest');
   });
@@ -260,8 +260,8 @@ describe('a space wipe tombstones every record it deletes', { skip }, () => {
       _id: 'b.jpg#face-chunk0', spaceId: SPACE, parentFileId: 'b.jpg',
       faceEntityId: 'carol', faceScore: 0.8,
     });
-    await coll('memories').insertOne(doc('m1'));
-    await wipeFor('memories')();
+    await coll('facts').insertOne(doc('m1'));
+    await wipeFor('facts')();
 
     const face = await coll('files').findOne({ _id: 'b.jpg#face-chunk0' });
     assert.equal(face.faceEntityId, 'carol', 'a memory wipe must not touch a face label');

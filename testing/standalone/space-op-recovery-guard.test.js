@@ -4,7 +4,7 @@
  * ## The failure this comes from
  *
  * CI went red once on `space-rename` with `MongoServerError: Source collection ythril.<old>_edges does not
- * exist` for three collections — on a rename that had otherwise worked, and with `_memories` renamed fine.
+ * exist` for three collections — on a rename that had otherwise worked, and with `_facts` renamed fine.
  *
  * `moveSpaceData` only renames collections that `listCollections()` just returned, so "does not exist" cannot
  * mean "was never created". It means the collection was moved by **someone else** between the listing and the

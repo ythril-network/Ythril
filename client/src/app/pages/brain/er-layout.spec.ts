@@ -18,7 +18,7 @@ import type { ErEntityType, ErRelationship } from '../../core/api.types';
 
 const type = (t: string, over: Partial<ErEntityType> = {}): ErEntityType => ({
   type: t, count: 1, declared: true, properties: [],
-  linkedFrom: { memories: 0, chrono: 0, files: 0 }, ...over,
+  linkedFrom: { facts: 0, chrono: 0, files: 0 }, ...over,
 });
 const rel = (from: string, to: string, label = 'rel', count = 1): ErRelationship => ({ from, to, label, count });
 
@@ -153,7 +153,7 @@ describe('er-layout with labels wider than the lane spacing', () => {
   const t = (name: string): ErEntityType => ({
     type: name, count: 9, declared: true,
     properties: [{ name: 'p0', type: 'string', required: true }],
-    linkedFrom: { memories: 0, chrono: 0, files: 0 },
+    linkedFrom: { facts: 0, chrono: 0, files: 0 },
   });
   const LABELS = ['implements', 'refines', 'conflicts', 'requires', 'supersedes', 'contradicts', 'elaborates'];
   const types = [t('hub'), ...LABELS.map((_, i) => t(`spoke${i}`))];
@@ -198,7 +198,7 @@ describe('er-layout on a big, lopsided model', () => {
     count,
     declared: true,
     properties: Array.from({ length: props }, (_, i) => ({ name: `p${i}`, type: 'string', required: i === 0 })),
-    linkedFrom: { memories: 0, chrono: 0, files: 0 },
+    linkedFrom: { facts: 0, chrono: 0, files: 0 },
   });
 
   const connected = Array.from({ length: 14 }, (_, i) => type(`joined${i}`, i % 10));
@@ -367,11 +367,11 @@ describe('er-layout on a big, lopsided model', () => {
  * ── Memories, chrono and files are boxes too ─────────────────────────────────────────────────────
  *
  * The server has always scanned three extra collections per space to count, for every entity type, how many
- * memories, chrono entries and files point AT it through their `entityIds` — and the client rendered that in
+ * facts, chrono entries and files point AT it through their `entityIds` — and the client rendered that in
  * ZERO places. So the diagram called itself the data model while showing one of four record kinds, and every
  * Overview load paid for the scan and got nothing back.
  *
- * The owner found it by asking: *"are memories and chronotypes missing in the er diagram?"*
+ * The owner found it by asking: *"are facts and chronotypes missing in the er diagram?"*
  *
  * These are placed by the SAME column/lane/shelf machinery as the entity types, deliberately. A second
  * placement algorithm is how the two would come to disagree about spacing, and the lane work that fixed
@@ -383,20 +383,20 @@ describe('kind boxes', () => {
   it('draws one box per kind that has links, and none for a kind with none', () => {
     // The floor of the whole feature: an empty box is a claim that something is there.
     const { boxes } = layoutErModel([
-      type('person', { linkedFrom: { memories: 4, chrono: 0, files: 0 } }),
+      type('person', { linkedFrom: { facts: 4, chrono: 0, files: 0 } }),
       type('service'),
     ], [rel('person', 'service')]);
 
     expect(kinds(boxes)).toEqual(['Memories']);
-    expect(boxes.find(b => b.type === 'Memories')!.kind).toBe('memory');
+    expect(boxes.find(b => b.type === 'Memories')!.kind).toBe('fact');
   });
 
   it('one box per KIND, not per linked type', () => {
-    // Three types linking memories is one Memories box with three joins, not three boxes.
+    // Three types linking facts is one Memories box with three joins, not three boxes.
     const { boxes, paths } = layoutErModel([
-      type('a', { linkedFrom: { memories: 1, chrono: 0, files: 0 } }),
-      type('b', { linkedFrom: { memories: 2, chrono: 0, files: 0 } }),
-      type('c', { linkedFrom: { memories: 3, chrono: 0, files: 0 } }),
+      type('a', { linkedFrom: { facts: 1, chrono: 0, files: 0 } }),
+      type('b', { linkedFrom: { facts: 2, chrono: 0, files: 0 } }),
+      type('c', { linkedFrom: { facts: 3, chrono: 0, files: 0 } }),
     ], [rel('a', 'b'), rel('b', 'c')]);
 
     expect(kinds(boxes)).toEqual(['Memories']);
@@ -404,11 +404,11 @@ describe('kind boxes', () => {
   });
 
   it('the box total is the SUM, and each join carries its own count', () => {
-    // Two numbers that must not be the same one: the box says how many memories link anywhere in this space,
+    // Two numbers that must not be the same one: the box says how many facts link anywhere in this space,
     // the join says how many link to that type. Showing the total on every join would be wrong three times.
     const { boxes, paths } = layoutErModel([
-      type('a', { linkedFrom: { memories: 2, chrono: 0, files: 0 } }),
-      type('b', { linkedFrom: { memories: 5, chrono: 0, files: 0 } }),
+      type('a', { linkedFrom: { facts: 2, chrono: 0, files: 0 } }),
+      type('b', { linkedFrom: { facts: 5, chrono: 0, files: 0 } }),
     ], [rel('a', 'b')]);
 
     expect(boxes.find(b => b.type === 'Memories')!.count).toBe(7);
@@ -418,7 +418,7 @@ describe('kind boxes', () => {
 
   it('all three kinds appear when all three link', () => {
     const { boxes } = layoutErModel([
-      type('a', { linkedFrom: { memories: 1, chrono: 2, files: 3 } }),
+      type('a', { linkedFrom: { facts: 1, chrono: 2, files: 3 } }),
     ], []);
     expect(kinds(boxes)).toEqual(['Memories', 'Chrono', 'Files']);
     expect(boxes.filter(b => b.kind === 'entity').map(b => b.type)).toEqual(['a']);
@@ -428,9 +428,9 @@ describe('kind boxes', () => {
     // Memories link to everything, so a kind box is often the most connected thing on the diagram. Letting it
     // win would put "Memories" in the middle of a picture that is about the entity model.
     const { boxes } = layoutErModel([
-      type('a', { linkedFrom: { memories: 9, chrono: 0, files: 0 } }),
-      type('b', { linkedFrom: { memories: 9, chrono: 0, files: 0 } }),
-      type('c', { linkedFrom: { memories: 9, chrono: 0, files: 0 } }),
+      type('a', { linkedFrom: { facts: 9, chrono: 0, files: 0 } }),
+      type('b', { linkedFrom: { facts: 9, chrono: 0, files: 0 } }),
+      type('c', { linkedFrom: { facts: 9, chrono: 0, files: 0 } }),
     ], [rel('a', 'b')]);
 
     const hub = boxes.find(b => b.col === 1)!;
@@ -442,20 +442,20 @@ describe('kind boxes', () => {
     // place one and draw both sets of joins into it, silently.
     const { boxes } = layoutErModel([
       type('Memories'),
-      type('a', { linkedFrom: { memories: 3, chrono: 0, files: 0 } }),
+      type('a', { linkedFrom: { facts: 3, chrono: 0, files: 0 } }),
     ], [rel('Memories', 'a')]);
 
     const named = boxes.filter(b => b.type.startsWith('Memories'));
     expect(named).toHaveLength(2);
     expect(named.filter(b => b.kind === 'entity')).toHaveLength(1);
-    expect(named.filter(b => b.kind === 'memory')).toHaveLength(1);
+    expect(named.filter(b => b.kind === 'fact')).toHaveLength(1);
   });
 
   it('a kind box is not a schema box: no properties, and a floor height', () => {
     const { boxes } = layoutErModel([
-      type('a', { linkedFrom: { memories: 1, chrono: 0, files: 0 } }),
+      type('a', { linkedFrom: { facts: 1, chrono: 0, files: 0 } }),
     ], []);
-    const box = boxes.find(b => b.kind === 'memory')!;
+    const box = boxes.find(b => b.kind === 'fact')!;
     expect(box.h).toBeGreaterThan(0);
     // Same floor an empty entity type gets — a box, not a line.
     expect(box.h).toBe(boxes.find(b => b.type === 'a')!.h);

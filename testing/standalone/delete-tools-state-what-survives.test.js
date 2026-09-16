@@ -49,7 +49,7 @@ const description = (file, name) => {
 const TOOLS = {
   delete_entity: description('server/src/mcp/tools/entity.ts', 'delete_entity'),
   delete_edge: description('server/src/mcp/tools/edge.ts', 'delete_edge'),
-  delete_fact: description('server/src/mcp/tools/memory.ts', 'delete_fact'),
+  delete_fact: description('server/src/mcp/tools/fact.ts', 'delete_fact'),
   delete_chrono: description('server/src/mcp/tools/chrono.ts', 'delete_chrono'),
 };
 
@@ -124,7 +124,7 @@ describe('which deletes can be refused, and each one says so where the caller is
   it('and the claims are true — source, not prose', () => {
     // Read from source, so a description and its behaviour cannot drift apart in either direction.
     const has = (f) => /entityDeleteBlockers\(/.test(stripComments(readFileSync(f, 'utf8')));
-    for (const f of ['server/src/mcp/tools/entity.ts', 'server/src/mcp/tools/memory.ts',
+    for (const f of ['server/src/mcp/tools/entity.ts', 'server/src/mcp/tools/fact.ts',
       'server/src/mcp/tools/chrono.ts']) {
       assert.ok(has(f), `${f} promises a reference guard and does not consult one`);
     }

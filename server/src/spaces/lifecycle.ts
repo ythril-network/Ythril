@@ -81,7 +81,7 @@ export async function initSpace(
   await memoriesColl.createIndex({ tags: 1 });
   // `{ type: 1 }` on all four record collections. MEASURED, not assumed: every list endpoint exposes a `type`
   // filter and `total` counts with it, and `explain()` on a live instance returned COLLSCAN for
-  // `{type: …}` on memories, entities, edges and chrono. Entities looked covered by `{ name: 1, type: 1 }` and
+  // `{type: …}` on facts, entities, edges and chrono. Entities looked covered by `{ name: 1, type: 1 }` and
   // are not — `type` is not a prefix of it, so that index cannot serve a query on `type` alone.
   //
   // Quality-neutral by construction: the same documents come back in the same order, the counts are identical,
@@ -94,8 +94,8 @@ export async function initSpace(
    * Unique within the (already per-space) collection — the leading constant `spaceId` distinguished no
    * documents, so dropping it preserved the identical guarantee.
    *
-   * `fromKind` and `toKind` joined the key in M-3. Each collection assigns its own UUIDs, so a memory and an
-   * entity may hold the same id: `(X, Y, mentions)` with Y an entity and the same triplet with Y a memory are
+   * `fromKind` and `toKind` joined the key in M-3. Each collection assigns its own UUIDs, so a fact and an
+   * entity may hold the same id: `(X, Y, mentions)` with Y an entity and the same triplet with Y a fact are
    * two relationships, and `edgeIdFor` derives two ids for them. Without the kinds here the index would refuse
    * the second as a duplicate — an id that is free and a row that cannot be stored, which is the identity
    * expressed two ways and disagreeing.
@@ -218,7 +218,7 @@ export async function initSpace(
   // Ensure files directory exists
   await ensureSpaceFilesDir(spaceId);
 
-  // Check for embedding model mismatch — if stored memories use a different
+  // Check for embedding model mismatch — if stored facts use a different
   // model than configured, recall results would be semantically invalid.
   const embCfg2 = getEmbeddingConfig();
   const sample = await col<FactDoc>(`${spaceId}_facts`).findOne(
@@ -594,7 +594,7 @@ export const WIPE_COLLECTION_TYPES: readonly WipeCollectionType[] = BRAIN_COLLEC
  * `contradiction_candidates` key their rows by the same singular vocabulary, so one map serves both.
  *
  * Pure, and exported, because it is the part with a decision in it: the collection-name plural
- * (`memories`) and the finding `type` (`memory`) are different vocabularies, and a missing entry here
+ * (`facts`) and the finding `type` (`fact`) are different vocabularies, and a missing entry here
  * silently orphans findings rather than failing.
  */
 export function candidateTypesForWipe(targets: ReadonlySet<WipeCollectionType>): string[] {
@@ -627,7 +627,7 @@ export interface WipeResult {
   links: number;
 }
 
-/** Wipe data from a space — by default wipes memories, entities, edges, chrono,
+/** Wipe data from a space — by default wipes facts, entities, edges, chrono,
  *  file metadata, and the physical files directory — while preserving the space
  *  itself (label, description, config, OIDC mappings, quota settings).
  *
@@ -691,7 +691,7 @@ export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): 
   //
   // A finding is a claim about two records. Once those records are gone the claim is not merely stale, it
   // is unopenable: the Review tab lists it, and following it leads nowhere. Contradictions were missed here
-  // when the collection was added, so wiping a space's memories left its contradiction queue intact and
+  // when the collection was added, so wiping a space's facts left its contradiction queue intact and
   // pointing at nothing.
   if (isFullWipe) {
     await col(`${spaceId}_dupe_candidates`).deleteMany({});
@@ -736,7 +736,7 @@ export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): 
     links: linkRes.deletedCount ?? 0,
   };
   const typesLabel = isFullWipe ? 'all' : Array.from(targets).join(', ');
-  log.info(`Wiped space '${spaceId}' [${typesLabel}]: ${result.facts} memories, ${result.entities} entities, ${result.edges} edges, ${result.chrono} chrono, ${result.files} files, ${result.links} links`);
+  log.info(`Wiped space '${spaceId}' [${typesLabel}]: ${result.facts} facts, ${result.entities} entities, ${result.edges} edges, ${result.chrono} chrono, ${result.files} files, ${result.links} links`);
   return result;
 }
 

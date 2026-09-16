@@ -27,7 +27,7 @@ function escapeHtml(s: string): string {
  * to hyphens. That is why this is not "some slug function" — an implementation that merely produced
  * *stable* ids would still leave every one of those links pointing at nothing.
  *
- * They read `](userguide/02-brain.md#memories)` since the guide was split into chapters, which changes
+ * They read `](userguide/02-brain.md#facts)` since the guide was split into chapters, which changes
  * nothing here: the Help page joins the chapters into one document and strips the file prefix, so the
  * fragment still has to resolve against a heading THIS function turned into an id.
  *

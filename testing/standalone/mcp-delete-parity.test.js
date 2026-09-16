@@ -40,7 +40,7 @@ function restSingleDeletes() {
     ['server/src/api/brain/entities.ts', 'entities'],
     ['server/src/api/brain/edges.ts', 'edges'],
     ['server/src/api/brain/chrono.ts', 'chrono'],
-    ['server/src/api/brain/memories.ts', 'memories'],
+    ['server/src/api/brain/facts.ts', 'facts'],
   ]) {
     let src;
     try { src = read(file); } catch { continue; }
@@ -54,7 +54,7 @@ const MCP_TOOL_FOR = {
   entities: 'delete_entity',
   edges: 'delete_edge',
   chrono: 'delete_chrono',
-  memories: 'delete_fact',
+  facts: 'delete_fact',
 };
 
 describe('MCP can delete everything REST can delete', () => {
@@ -81,7 +81,7 @@ describe('MCP can delete everything REST can delete', () => {
       ['server/src/mcp/tools/entity.ts', 'delete_entity'],
       ['server/src/mcp/tools/edge.ts', 'delete_edge'],
       ['server/src/mcp/tools/chrono.ts', 'delete_chrono'],
-      ['server/src/mcp/tools/memory.ts', 'delete_fact'],
+      ['server/src/mcp/tools/fact.ts', 'delete_fact'],
     ]) {
       const src = read(file);
       const at = src.indexOf(`name: '${tool}'`);

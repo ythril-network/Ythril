@@ -15,7 +15,7 @@ export const TTL_DAYS_SCHEMA = {
     'Auto-delete this record after N days. Retention resolves as RECORD > SCHEMA > SPACE: this field wins '
     + 'outright (a positive integer sets the expiry; 0 or null means never expire, overriding everything); '
     + 'omit it and the record type\'s own schema window applies; failing that, the space-wide window for THIS '
-    + 'KIND of record (the space sets one per kind: entities, memories, edges, chrono, files). '
+    + 'KIND of record (the space sets one per kind: entities, facts, edges, chrono, files). '
     + 'Setting it is how you keep one record that the space would otherwise expire, or expire one it would '
     + 'otherwise keep. For chrono types a schema may also drop a record\'s DETAIL earlier than the record '
     + 'itself, which removes it from semantic search while the fact that it happened remains.',

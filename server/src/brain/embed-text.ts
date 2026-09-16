@@ -1,9 +1,9 @@
 /**
  * Shared helper for turning a knowledge record's `properties` into embeddable text.
  *
- * The per-type embed-text builders (memory, entity, edge, chrono, and the entity-merge
+ * The per-type embed-text builders (fact, entity, edge, chrono, and the entity-merge
  * copy) all need to fold `properties` into the string that gets embedded. Keeping the
- * logic here means they cannot drift again — before this existed, memory/entity embedded
+ * logic here means they cannot drift again — before this existed, fact/entity embedded
  * only property VALUES (dropping the keys) while edge and chrono dropped properties
  * entirely, so semantic recall couldn't match on a property name and values lost their
  * field context (`{birthplace: "Paris"}` and `{currentCity: "Paris"}` embedded identically).
@@ -25,17 +25,17 @@ export function propsEmbedText(
 // path, AND the reindex job all call these, so the embedding of a record is identical
 // no matter which path produced it. Previously each lived privately in its domain
 // module and was hand-re-implemented inline in the reindex job, which had drifted
-// (values-only properties for memory/entity; properties dropped and raw entity IDs
+// (values-only properties for fact/entity; properties dropped and raw entity IDs
 // embedded for edges/chrono on reindex).
 
 /**
- * Memory: tags + fact + description + properties (key value). **NOT the names of what it links to.**
+ * Fact: tags + fact + description + properties (key value). **NOT the names of what it links to.**
  *
  * Those used to be prepended, and it cost 1.5 points of strict evidence recall on a 199-question benchmark —
  * the same turn scored 0.8528 without them and 0.8369 with them. `chronoEmbedText` never did it, so chrono was
  * the control that showed the difference was the names rather than the corpus.
  *
- * The reason is not subtle: a memory linked to five entities carried five names it does not say. A query naming
+ * The reason is not subtle: a fact linked to five entities carried five names it does not say. A query naming
  * any of them matched a record that never mentioned them, and the record's own sentence was diluted by tokens
  * its author did not write. An EDGE is the opposite case and still embeds its endpoints — `ServiceA
  * depends_on ServiceB` is the whole of what an edge says, and without them it is a bare label.
@@ -43,7 +43,7 @@ export function propsEmbedText(
  * Links are still how you REACH this record: `traverse`, and recall's own expansion with `includeMemories`,
  * both follow them. What changed is that they no longer pretend to be its content.
  */
-export function memoryEmbedText(
+export function factEmbedText(
   fact: string,
   tags: string[] = [],
   description?: string,

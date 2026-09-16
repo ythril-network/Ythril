@@ -8,7 +8,7 @@ import type { TombstoneDoc } from '../config/types.js';
  *
  * ## Why this is one function and was four
  *
- * `bulkDeleteEntities`, `bulkDeleteMemories`, `bulkDeleteEdges` and `bulkDeleteChrono` were the same thirty
+ * `bulkDeleteEntities`, `bulkDeleteFacts`, `bulkDeleteEdges` and `bulkDeleteChrono` were the same thirty
  * lines with a different collection name and a different tombstone `type` (`R-4`). Four copies of one rule in
  * four of the largest files in the server is the defect class this repo produces most, and the subtle part —
  * the seq-block reservation below — is exactly the kind that gets optimised correctly in one copy and left
@@ -38,12 +38,12 @@ import type { TombstoneDoc } from '../config/types.js';
  *    means "all of them". Dropping it leaves file-meta records pointing at entities that do not exist.
  *  - **`sort`** — the MEMORY wipe orders newest-first, so recently written records land near the front of the
  *    generated tombstone seq range even on a very large collection.
- *  - The projected fields differed and did not matter: only memory's sort key was ever read, so this projects
+ *  - The projected fields differed and did not matter: only fact's sort key was ever read, so this projects
  *    `_id` alone.
  */
 export interface WipeOptions {
   /**
-   * How to order the documents before their tombstone seqs are handed out. Only memories use it.
+   * How to order the documents before their tombstone seqs are handed out. Only facts use it.
    *
    * A sort of the ids, not of the delete: `deleteMany({})` takes the whole collection either way.
    *

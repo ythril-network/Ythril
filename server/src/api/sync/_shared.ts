@@ -176,7 +176,7 @@ export async function checkLinkViolations(
  *
  * ## `upsert: true`, always
  *
- * Three of the four types passed it and memories did not, which is a difference with no reason behind it: the
+ * Three of the four types passed it and facts did not, which is a difference with no reason behind it: the
  * caller has already decided the incoming document should land, and `replaceOne` without upsert silently
  * writes nothing when the local copy has been deleted in the meantime. It is a `replaceOne` rather than an
  * `insertOne` even on the no-local-copy path for the same reason — the two paths differ in what they REPORT,
@@ -261,7 +261,7 @@ export const MAX_FORK_DEPTH = 10;
 import { reconcileLinksForDocument } from '../../brain/links.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import { CHRONO_STATUSES } from '../../config/types.js';
-import { validateEntity, validateEdge, validateChrono, validateMemory, getSpaceMeta, type SchemaViolation }
+import { validateEntity, validateEdge, validateChrono, validateFact, getSpaceMeta, type SchemaViolation }
   from '../../spaces/schema-validation.js';
 
 export const AuthorRefSchema = z.object({
@@ -272,12 +272,12 @@ export const AuthorRefSchema = z.object({
 export const IncomingFactDoc = z.object({
   _id: z.string().min(1),
   /*
-   * A memory's TYPE, which was hashed by the divergence check and stripped on push — found by deriving the
+   * A fact's TYPE, which was hashed by the divergence check and stripped on push — found by deriving the
    * rule from `merkle.ts` rather than from a list kept by hand, 2026-09-01.
    *
-   * Not cosmetic: the type is what selects the memory's type schema, so a memory arriving without it is
+   * Not cosmetic: the type is what selects the fact's type schema, so a fact arriving without it is
    * validated against nothing on the receiver, misses every type filter, and hashes differently from the
-   * sender's copy for ever. Optional, because a memory is not required to have one.
+   * sender's copy for ever. Optional, because a fact is not required to have one.
    */
   type: z.string().optional(),
   /*
@@ -295,7 +295,7 @@ export const IncomingFactDoc = z.object({
    *
    * BOTH spellings, because a peer sends whichever its build knows and the resolver reads them together.
    * Optional, because absent means included — and requiring a field here is exactly how every suppressed
-   * memory came to be dropped from its batch in silence.
+   * fact came to be dropped from its batch in silence.
    */
   suppressEmbeddings: z.boolean().optional(),
   spaceId: z.string().min(1),
@@ -824,7 +824,7 @@ export function isDirectionalWriteBlocked(spaceId: string, authToken: Record<str
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * GET /api/sync/memories?spaceId=&networkId=&sinceSeq=&limit=&cursor=&full=
+ * GET /api/sync/facts?spaceId=&networkId=&sinceSeq=&limit=&cursor=&full=
  * Returns paginated stubs by default.  Add ?full=true to return complete docs
  * in a single pass (eliminates the N per-document fetches on the pull side).
  */
@@ -871,7 +871,7 @@ export function violationsAgainstLocalSchema(
     case 'chrono':
       return validateChrono(meta, { type, properties });
     case 'fact':
-      return validateMemory(meta, { type, properties });
+      return validateFact(meta, { type, properties });
   }
 }
 
@@ -881,7 +881,7 @@ export function violationsAgainstLocalSchema(
  * ## Why this is a function and not four inline spreads
  *
  * It was four inline spreads, and only one of them was written. `/chrono` carried
- * `...(v.length > 0 ? { schemaViolations: v } : {})` while `/memories`, `/entities` and `/edges` stored the
+ * `...(v.length > 0 ? { schemaViolations: v } : {})` while `/facts`, `/entities` and `/edges` stored the
  * peer's record and answered `{ status: 'ok' }` with nothing computed at all — so a peer shipping records one
  * at a time got silent acceptance while the same records through `batch-upsert` were counted. One rule, two
  * implementations, the weaker one winning silently, which `CLAUDE.md` names as the defect this repo produces

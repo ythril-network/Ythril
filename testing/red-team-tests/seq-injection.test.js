@@ -44,7 +44,7 @@ describe('seq injection — MAX_SAFE_INTEGER poisons the high-water mark', () =>
   });
 
   it('Memory with seq = MAX_SAFE_INTEGER must be rejected with 400', async () => {
-    const r = await post(INSTANCES.a, token, '/api/sync/memories?spaceId=general', {
+    const r = await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: `seq-poison-mem-${Date.now()}`,
       spaceId: 'general',
       fact: 'seq poison payload',
@@ -81,7 +81,7 @@ describe('seq injection — MAX_SAFE_INTEGER poisons the high-water mark', () =>
   it('Memory with a legitimate high-but-valid seq is accepted', async () => {
     // seq values up to e.g. 2^50 should be fine — only truly extreme values blocked
     const reasonableSeq = Math.floor(MAX_SAFE / 10); // still enormous but not MAX
-    const r = await post(INSTANCES.a, token, '/api/sync/memories?spaceId=general', {
+    const r = await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: `seq-valid-high-${Date.now()}`,
       spaceId: 'general',
       fact: 'high but valid seq',
@@ -102,7 +102,7 @@ describe('seq injection — MAX_SAFE_INTEGER poisons the high-water mark', () =>
     // This validates that even if a poisoned doc slips through, the nextSeq()
     // function does not start returning MAX_SAFE + 1 (which would overflow).
     // After a fix, the poison doc is rejected, so nextSeq should still be healthy.
-    const r = await post(INSTANCES.a, token, '/api/brain/spaces/general/memories', {
+    const r = await post(INSTANCES.a, token, '/api/brain/spaces/general/facts', {
       fact: `seq health check ${Date.now()}`,
     });
     assert.equal(r.status, 201, `Write after poison attempt: ${JSON.stringify(r.body)}`);
@@ -127,7 +127,7 @@ describe('forkOf depth bomb — fork chain must be capped', () => {
   });
 
   it('Seed the original document (seq=5000)', async () => {
-    const r = await post(INSTANCES.a, token2, '/api/sync/memories?spaceId=general', {
+    const r = await post(INSTANCES.a, token2, '/api/sync/facts?spaceId=general', {
       _id: TARGET_ID,
       spaceId: 'general',
       fact: 'fork-bomb original version',
@@ -148,7 +148,7 @@ describe('forkOf depth bomb — fork chain must be capped', () => {
   it(`After ${MAX_FORK_DEPTH + 1} conflicting forks, next one must be rejected with 400`, async () => {
     // Push MAX_FORK_DEPTH conflicting docs (different content, same seq, same _id)
     for (let i = 1; i <= MAX_FORK_DEPTH; i++) {
-      const r = await post(INSTANCES.a, token2, '/api/sync/memories?spaceId=general', {
+      const r = await post(INSTANCES.a, token2, '/api/sync/facts?spaceId=general', {
         _id: TARGET_ID,
         spaceId: 'general',
         fact: `fork-bomb variant ${i} — unique content to force fork ${Date.now()}-${i}`,
@@ -170,7 +170,7 @@ describe('forkOf depth bomb — fork chain must be capped', () => {
     }
 
     // The (MAX_FORK_DEPTH + 1)-th fork must now be blocked
-    const r = await post(INSTANCES.a, token2, '/api/sync/memories?spaceId=general', {
+    const r = await post(INSTANCES.a, token2, '/api/sync/facts?spaceId=general', {
       _id: TARGET_ID,
       spaceId: 'general',
       fact: `fork-bomb OVER LIMIT — this one must be rejected ${Date.now()}`,

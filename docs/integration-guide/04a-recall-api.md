@@ -12,7 +12,7 @@ Available as both — REST `POST /api/brain/recall`, MCP tool `recall`:
 {
   "query": "how does OAuth PKCE work?",
   "topK": 10,
-  "types": ["memory", "entity"],
+  "types": ["fact", "entity"],
   "minScore": 0.65
 }
 ```
@@ -31,7 +31,7 @@ Available as both — REST `POST /api/brain/recall`, MCP tool `recall`:
 | `maxTimeMS` | — | the instance budget | Deadline for this recall, in ms. **Can only lower the instance's `RECALL_BUDGET_MS`, never raise it** — a larger value is clamped to it, and a very small one is clamped up to a 250 ms floor. On expiry you get a **partial** answer with a `degraded` field, not an error and not a hang |
 | `traverse` | — | `0` | Graph expansion: an integer depth `0`–`5`, **or an object `{depth, edgeLabels, direction}`** — a `traverse` call without its start node, because the matches *are* the start nodes. `0` = classic recall. See [Graph-Augmented Recall](#graph-augmented-recall-traverse-parameter) |
 | `includeFreshWrites` | — | `false` | Also scan the newest records straight from each collection, so a record written seconds ago is findable before the vector index has ingested it. See below. A non-boolean is a `400`, never coerced |
-| `includeContent` | — | `true` | Whether file-chunk results carry `content` — the passage body. `false` returns locations and metadata only (path, heading, chunk index, tags, properties). **File chunks ONLY** — it does nothing on a search returning entities, memories, edges or chrono entries; use `projection` to trim those. A non-boolean is a `400`, never coerced |
+| `includeContent` | — | `true` | Whether file-chunk results carry `content` — the passage body. `false` returns locations and metadata only (path, heading, chunk index, tags, properties). **File chunks ONLY** — it does nothing on a search returning entities, facts, edges or chrono entries; use `projection` to trim those. A non-boolean is a `400`, never coerced |
 | `includeRecordMeta` | — | `false` | Add back the fields that describe where a record SITS rather than what it says: `createdAt`, `updatedAt` and the link-id arrays. Measured on a real corpus only **30%** of a recall answer was content and most of the rest was this, which at a tight `maxChars` is evidence you paid for and did not get. `createdAt` is the one to be careful of — it is when the RECORD was written, not when the remembered thing happened, which lives in the record's own properties. **Applies recursively**, so a `traverse` answer's `_graph` follows it at every depth. MCP takes the same parameter with the same default. A non-boolean is a `400`, never coerced |
 | `includeDiagnostics` | — | `false` | Add back the three fields a result carries for the SYSTEM rather than for you: `matchedText` (the exact pre-embedding source string — for a file chunk, the passage a SECOND time), `embeddingModel` and `seq`. **Applies recursively**, so a `traverse` answer's `_graph` nodes and edges follow it at every depth. Off by default since 3.1.0 — before then this door sent them unconditionally while MCP sent none. **It does NOT gate the per-stage scores.** `lexicalScore`, `fusedScore` and `rerankScore` are returned unconditionally on both doors, because the one that decided a result's position must not be the one you cannot read — and three floats are not a cost worth a flag. The embedding VECTOR is not among them and is never returned by anything. A non-boolean is a `400`, never coerced |
 | `projection` | — | none | Fields to include (1) or exclude (0), the same grammar `POST /query` takes, applied to each result's record. Dotted paths work: `{"name": 1, "properties.status": 1}`. **Applies recursively** — a `traverse` answer's `_graph` nodes and edges are projected at every depth, which is where a large answer's size actually comes from. Inclusion and exclusion cannot be mixed (the non-`_id` fields decide which you meant); `_id` survives an inclusion projection unless you send `_id: 0`; and the embedding VECTOR can never be projected back in — an explicit `embedding: 1` is dropped rather than honoured. The ranking envelope (`score`, `spaceId`, `type`, `_graph`) always survives, so a projection cannot lose the score you searched for |
@@ -47,7 +47,7 @@ Available as both — REST `POST /api/brain/recall`, MCP tool `recall`:
 ```json
 {
   "results": [
-    { "_id": "...", "type": "memory", "fact": "...", "score": 0.91 }
+    { "_id": "...", "type": "fact", "fact": "...", "score": 0.91 }
   ],
   "count": 1
 }
@@ -64,7 +64,7 @@ one that ran out of time contributes nothing and the response gains a `degraded`
 
 ```json
 {
-  "results": [ { "_id": "...", "type": "memory", "score": 0.83 } ],
+  "results": [ { "_id": "...", "type": "fact", "score": 0.83 } ],
   "count": 1,
   "degraded": ["search_timeout"]
 }
@@ -100,7 +100,7 @@ Floor-wins and ceiling-wins are both defensible, which is exactly why the reques
 A `maxPerType` value of `0` is refused for the same kind of reason — it would be a second, less obvious way to
 spell `types` without that type.
 
-Searches **all knowledge types** (memories, entities, edges, chrono entries, and files) and includes a
+Searches **all knowledge types** (facts, entities, edges, chrono entries, and files) and includes a
 `type` discriminator field on every result. No configuration needed — the defaults below are what a
 fresh instance does.
 
@@ -232,7 +232,7 @@ POST /api/brain/recall
 {
   "query": "PKCE failures on form NMK-SI-11 during the auth rewrite",
   "topK": 20,
-  "types": ["memory", "entity", "chrono", "file"],
+  "types": ["fact", "entity", "chrono", "file"],
   "tags": ["auth", "postmortem"],
   "minPerType": { "entity": 2, "chrono": 1 },
   "minScore": 0.55,
@@ -316,7 +316,7 @@ The MCP `recall` tool takes the same parameters, plus `space` (omit it to search
   "space": "dev-apps",
   "query": "PKCE failures on form NMK-SI-11 during the auth rewrite",
   "topK": 20,
-  "types": ["memory", "entity", "chrono", "file"],
+  "types": ["fact", "entity", "chrono", "file"],
   "tags": ["auth", "postmortem"],
   "minPerType": { "entity": 2, "chrono": 1 },
   "minScore": 0.55,
@@ -363,14 +363,14 @@ happened to keep, and nothing in the response distinguishes that from a delibera
 ask for the neighbourhood you meant.
 
 **`direction` narrows stored edges only, and never links.** A link is a **record** with a `from` and a `to` since 4.0 — but which way it runs is fixed by the
-KINDS at its ends rather than by the data. A memory names entities and an entity names nothing, so asking for
-a memory's outbound links and its inbound links is not a choice between two answers; for an entity one of the
+KINDS at its ends rather than by the data. A fact names entities and an entity names nothing, so asking for
+a fact's outbound links and its inbound links is not a choice between two answers; for an entity one of the
 two is always empty. There is nothing for `direction` to select between, so it selects nothing.
 Both walks treat a link as reaching the entity it names, whatever `direction` says: the standalone
 [`POST /traverse`](04b-graph-api.md#traverse-graph) has always done so, and recall's expansion matches it.
 
 The consequence worth knowing, because it surprises: `{"depth": 1, "direction": "inbound", "includeMemories":
-true}` on a matched memory still returns the entities that memory **names**, which is an outbound step from the
+true}` on a matched fact still returns the entities that fact **names**, which is an outbound step from the
 record. Consistency between the two walks is deliberate, and so is leaving it this way now that a link has two
 ends: honouring `direction` on links would make the DEFAULT traverse — `outbound` from an entity — return no
 linked records at all, because nothing hangs off an entity. That is a large silent change to the commonest
@@ -493,7 +493,7 @@ counting rows never double-counts a record, and no relationship is invisible.
   - It is **hidden from file browsing** (like `_converted/` and `_extracted/`) and is **never embedded**, so it
     cannot come back as a recall hit.
 - **`graphTruncated` can arrive WITHOUT `graphComplete`, and that is the honest case.** The link scans — the
-  ones that follow the `entityIds` a memory, chrono entry or file carries — are bounded per hop, and a hop can
+  ones that follow the `entityIds` a fact, chrono entry or file carries — are bounded per hop, and a hop can
   spend its whole budget on records it then discards as already-visited. The neighbourhood is short, and there
   is **no complete copy to offer**, because the records that are missing are exactly the ones never read. So
   the flag stands alone: you are told the graph is partial, and a narrower `edgeLabels` or a lower `traverse`
@@ -505,7 +505,7 @@ counting rows never double-counts a record, and no relationship is invisible.
 - **Cycle-safe:** each record is visited once, so a circular graph (A→B→C→A) never loops or produces duplicates. A record reachable by several routes is nested under the **shortest** one, with the rest in `paths`.
 - **Space-scoped:** traversal stays within the spaces the calling token may access. An edge pointing at a record in a space the token cannot see (or at an id that is not an entity) is silently skipped — no data and no `403` leak.
 - **Entities, and the records that mention them.** A walk follows two things: stored **edges**, whose endpoints
-  are always entities, and **links** — the `entityIds` field a memory, chrono entry or file carries naming what
+  are always entities, and **links** — the `entityIds` field a fact, chrono entry or file carries naming what
   it is about. Edges are followed always; links are opt-in, one flag per kind:
 
   ```json
@@ -518,18 +518,18 @@ counting rows never double-counts a record, and no relationship is invisible.
   matches that no longer fit. The standalone `graph_traverse` tool defaults `includeChrono` to **true** because its
   caller is explicitly exploring a graph rather than searching.
 
-  A linked node arrives carrying `kind` (`chrono`, `memory` or `file`) and the fields that say what it is — a
-  chrono's `title` and `type`, a memory's `fact`, a file's `path`, `description` and `tags`. **Never file chunk
+  A linked node arrives carrying `kind` (`chrono`, `fact` or `file`) and the fields that say what it is — a
+  chrono's `title` and `type`, a fact's `fact`, a file's `path`, `description` and `tags`. **Never file chunk
   text:** a file's body is its passages, they are the largest thing stored, and a structural walk must not pay
   for them. Read the content with the file API if you want it.
 
   The reaching `edge` is **synthetic** — there is no stored edge record for a link. It carries `_id` in the form
-  `<label>:<from>:<to>`, its two ends, and a label of `chrono.entityIds`, `memory.entityIds` or
+  `<label>:<from>:<to>`, its two ends, and a label of `chrono.entityIds`, `fact.entityIds` or
   `file.entityIds`. It has no `author`, `createdAt` or `seq`, because a derived edge has none; do not look one
   up by that id, and do use the label to tell a modelled relationship from a derived one. `edgeLabels` filters
   these exactly like any other label, so `{"edgeLabels": ["owns"]}` excludes them and
-  `{"edgeLabels": ["owns", "memory.entityIds"]}` keeps the memories.
-- **A non-entity seed reaches its own links.** An edge's endpoints are entity ids, so a memory, chrono entry or
+  `{"edgeLabels": ["owns", "fact.entityIds"]}` keeps the facts.
+- **A non-entity seed reaches its own links.** An edge's endpoints are entity ids, so a fact, chrono entry or
   file that matched semantically has no edges of its own. With the matching flag on, the walk instead starts
   from the entities that match's `entityIds` names — they are hop 1, and everything an edge reaches from there
   is hop 2.
@@ -657,7 +657,7 @@ not about thinning a result. The default is `true`, so no existing caller change
 
 `$vectorSearch` reads an index, and that index lags behind the collection. The vector is on the document the
 moment it is written — insert-time duplicate detection sees a brand-new record immediately — but recall does
-not see it until mongot has ingested it. **An integrator measured a memory still invisible to recall 150
+not see it until mongot has ingested it. **An integrator measured a fact still invisible to recall 150
 seconds after writing it**, polled every 5 s, for a distinctive nine-word phrase.
 
 `includeFreshWrites: true` also scans the newest records straight from each collection, which is exactly the
@@ -782,7 +782,7 @@ Multiple operators on the same key are AND-ed (range queries):
 
 | Data type | Embedded? | Fields included in embedding text | Returned by `recall`? |
 |-----------|:---------:|-----------------------------------|:---------------------:|
-| `memory` | ✅ | `tags` + entity names + `fact` + `description` + `properties` | ✅ |
+| `fact` | ✅ | `tags` + entity names + `fact` + `description` + `properties` | ✅ |
 | `entity` | ✅ | `name` + `type` + `tags` + `description` + `properties` | ✅ |
 | `edge` | ✅ | `tags` + `from` + `label` + `to` + `type` + `description` + `properties` | ✅ |
 | `chrono` | ✅ | `type` + `status` + `title` + `tags` + `description` + `properties` | ✅ |
@@ -814,8 +814,8 @@ Given an existing entry's `_id`, find other entries with high vector similarity.
 ```json
 {
   "entryId": "<UUID of the source entry>",
-  "entryType": "memory",
-  "targetTypes": ["memory", "entity"],
+  "entryType": "fact",
+  "targetTypes": ["fact", "entity"],
   "topK": 10,
   "minScore": 0.7,
   "traverse": 0,
@@ -827,7 +827,7 @@ Given an existing entry's `_id`, find other entries with high vector similarity.
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `entryId` | ✅ | — | UUID of the entry to use as the query vector |
-| `entryType` | ✅ | — | Knowledge type of the source entry (`memory`, `entity`, `edge`, `chrono`, `file`) |
+| `entryType` | ✅ | — | Knowledge type of the source entry (`fact`, `entity`, `edge`, `chrono`, `file`) |
 | `targetTypes` | — | all types | Which knowledge types to search in |
 | `topK` | — | `10` | Maximum results, minimum 1, no ceiling (see the note on the recall table above) |
 | `minScore` | — | `0.0` | Minimum cosine similarity threshold |
@@ -851,7 +851,7 @@ Given an existing entry's `_id`, find other entries with high vector similarity.
   "source": { "_id": "...", "type": "entity", "name": "auth-service", "score": 1.0 },
   "results": [
     { "_id": "...", "type": "entity", "name": "auth-gateway", "spaceId": "dev-apps", "score": 0.91 },
-    { "_id": "...", "type": "memory", "fact": "Auth service uses PKCE...", "spaceId": "dev-apps", "score": 0.84 }
+    { "_id": "...", "type": "fact", "fact": "Auth service uses PKCE...", "spaceId": "dev-apps", "score": 0.84 }
   ]
 }
 ```
@@ -895,4 +895,4 @@ absolute figure is what keeps an uncapped `topK` from turning a walk into an unb
 | Dedup scan | `entryType: "entity"`, `targetTypes: ["entity"]`, `minScore: 0.90` |
 | "More like this" | `topK: 5`, all target types |
 | Cross-space merge detection | `crossSpace: true`, `minScore: 0.85`, `targetTypes: ["entity"]` |
-| Memory consolidation | `entryType: "memory"`, `targetTypes: ["memory"]`, `minScore: 0.88` |
+| Fact consolidation | `entryType: "fact"`, `targetTypes: ["fact"]`, `minScore: 0.88` |

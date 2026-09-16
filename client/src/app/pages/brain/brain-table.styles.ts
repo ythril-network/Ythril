@@ -24,7 +24,7 @@ export const BRAIN_RECORD_TABLE_STYLES = `
       min-width: 180px;
       max-width: 400px; /* match the plain search input above (was 520 — the entities bar rendered wider) */
     }
-    /* A slim row above the table, now only carrying the memories tab's active ENTITY-filter chip
+    /* A slim row above the table, now only carrying the facts tab's active ENTITY-filter chip
        (the type/tag filters moved into the headers in 2b-ii). */
     .list-filter-row {
       display: flex;

@@ -112,11 +112,11 @@ describe("a file's metadata replicates", { skip }, () => {
   });
 
   beforeEach(async () => {
-    for (const c of ['entities', 'memories', 'chrono', 'files', 'links', 'tombstones', 'embed_jobs']) {
+    for (const c of ['entities', 'facts', 'chrono', 'files', 'links', 'tombstones', 'embed_jobs']) {
       await coll(c).deleteMany({});
     }
     await coll('entities').insertOne({ _id: ENT, spaceId: SPACE, name: 'One', type: 'thing', tags: [], seq: 1 });
-    await coll('memories').insertOne({ _id: MEM, spaceId: SPACE, fact: 'a fact', tags: [], entityIds: [], seq: 2 });
+    await coll('facts').insertOne({ _id: MEM, spaceId: SPACE, fact: 'a fact', tags: [], entityIds: [], seq: 2 });
     // The receiver's own record: a file it already has, with everything it derived from the bytes.
     await coll('files').insertOne({
       _id: FILE, spaceId: SPACE, path: FILE,
@@ -181,7 +181,7 @@ describe("a file's metadata replicates", { skip }, () => {
     await shared.ingestFileMeta(SPACE, shared.IncomingFileMetaDoc.parse(arriving()));
     const links = await coll('links').find({}).toArray();
     assert.deepEqual(links.map(l => `${l.fromKind}:${l.from}>${l.toKind}:${l.to}`).sort(),
-      [`file:${FILE}>entity:${ENT}`, `file:${FILE}>memory:${MEM}`].sort());
+      [`file:${FILE}>entity:${ENT}`, `file:${FILE}>fact:${MEM}`].sort());
   });
 
   it('a CHUNK is refused by the schema, not silently stored', async () => {

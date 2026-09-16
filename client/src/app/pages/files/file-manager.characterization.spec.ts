@@ -56,7 +56,7 @@ function makeApi() {
     deleteFile: () => of({}),
     moveFile: () => of({}),
     retryEmbedding: () => of({}),
-    getSpaceStats: () => of({ memories: 0, entities: 0, edges: 0, chrono: 0, files: 0 }),
+    getSpaceStats: () => of({ facts: 0, entities: 0, edges: 0, chrono: 0, files: 0 }),
     getSpaceMeta: () => of({ tagSuggestions: [], typeSchemas: {} }),
     getFileMeta: () => of(null),
     updateFileMeta: () => of({}),

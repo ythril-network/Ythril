@@ -155,7 +155,7 @@ describe('and every other guard that can see an absent matrix answers the same w
 
   it('the MCP tool-rights guard refuses, and still lets an instance-level tool through', () => {
     /*
-     * The site the ruling missed. `remember` is a write into the knowledge area, so a matrixless caller
+     * The site the ruling missed. `saveFact` is a write into the knowledge area, so a matrixless caller
      * asking for it is the plainest case there is.
      *
      * The second assertion is the one that made the ORDER of the fix matter: a tool with no `TOOL_RIGHTS`

@@ -36,7 +36,7 @@ export type VectorIndexedCollection = typeof VECTOR_INDEXED_COLLECTIONS[number];
  * The fixed (non-`properties`) fields declared as `$vectorSearch` filter fields per collection, so
  * that a recall filtering on them uses native ANN pre-filtering instead of the exhaustive ENN scan
  * (P6). Only fields that (a) exist on the document type and (b) are reachable through the recall
- * filter API (`ALLOWED_FILTER_KEY_PREFIXES` in brain/memory.ts: tags/type/name/status/label) are
+ * filter API (`ALLOWED_FILTER_KEY_PREFIXES` in brain/fact.ts: tags/type/name/status/label) are
  * listed. `properties.<key>` paths are added dynamically from the space's schema — see
  * `deriveVectorFilterFields`.
  */
@@ -701,7 +701,7 @@ export async function waitForSpaceIndexesReady(
   // Poll CONCURRENTLY. These builds run independently inside the database, so waiting on them one after
   // another only adds up their timeouts: five collections at a 60s ceiling each meant a space could sit
   // at indexStatus='building' for five minutes when every index was in fact ready in seconds. That was
-  // masked for as long as only `memories` was ever indexed — fixing that made the serial wait visible.
+  // masked for as long as only `facts` was ever indexed — fixing that made the serial wait visible.
   const required = VECTOR_INDEXED_COLLECTIONS.map(suffix =>
     // The five text indexes: path `embedding`, at the configured embedding width.
     pollVectorIndexReady(spaceId, suffix, `${spaceId}_${suffix}_embedding`,

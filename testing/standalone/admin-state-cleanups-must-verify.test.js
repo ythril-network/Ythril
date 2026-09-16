@@ -131,7 +131,7 @@ describe('the scan works before anything is concluded from it', () => {
 
     for (const ok of [
       // A record delete: swallowing is right, and there are hundreds of these.
-      "await del(A, tok, `/api/brain/spaces/general/memories/${id}`).catch(() => {});",
+      "await del(A, tok, `/api/brain/spaces/general/facts/${id}`).catch(() => {});",
       // An admin READ: a failure gives undefined and the assertion says so.
       "const r = await get(A, tok, '/api/admin/media-config').catch(() => {});",
       // The replacement.

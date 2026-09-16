@@ -58,7 +58,7 @@ brainEventsRouter.get('/spaces/:spaceId/events', globalRateLimit, requireSpaceAu
   const unsubscribe = subscribeBrainChanges(spaceId, (ev) => {
     if (res.destroyed) { unsubscribe(); return; }
     const id = (ev.entry as { _id?: unknown })?._id;
-    // Minimal payload — the client uses `event` (e.g. "memory.created") to refresh the right tab/badges.
+    // Minimal payload — the client uses `event` (e.g. "fact.created") to refresh the right tab/badges.
     res.write(`data: ${JSON.stringify({ event: ev.event, id: typeof id === 'string' ? id : undefined })}\n\n`);
   });
 

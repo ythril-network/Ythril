@@ -207,7 +207,7 @@ describe('groupStagesByEndpoint — one probe per endpoint, not per stage', () =
 });
 
 describe('deriveLiveIndexState — what the database actually says', () => {
-  const coll = (status) => ({ collection: 'memories', indexName: 'x', status });
+  const coll = (status) => ({ collection: 'facts', indexName: 'x', status });
 
   it('every index READY is ready', () => {
     assert.equal(deriveLiveIndexState([coll('READY'), coll('READY')], false), 'ready');

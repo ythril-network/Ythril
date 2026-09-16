@@ -455,7 +455,7 @@ describe('Sync history', () => {
     assert.ok(typeof rec.pulled === 'object', 'pulled must be an object');
     assert.ok(typeof rec.pushed === 'object', 'pushed must be an object');
     for (const dir of [rec.pulled, rec.pushed]) {
-      assert.ok(typeof dir.memories === 'number');
+      assert.ok(typeof dir.facts === 'number');
       assert.ok(typeof dir.entities === 'number');
       assert.ok(typeof dir.edges === 'number');
       assert.ok(typeof dir.files === 'number');

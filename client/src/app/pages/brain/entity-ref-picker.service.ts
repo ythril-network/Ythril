@@ -1,5 +1,5 @@
 import { Injectable, inject, signal } from '@angular/core';
-import { ChronoEntry, Entity, Memory } from '../../core/api.types';
+import { ChronoEntry, Entity, Fact } from '../../core/api.types';
 import { BrainApi } from '../../core/brain-api.service';
 import { BrainStore } from './brain-store.service';
 
@@ -93,13 +93,13 @@ export class EntityRefPicker {
   // ── Inline memory picker (slice 3c "memoryIds searchable like entity") ───────────────────────
   //
   // Backs app-memory-ref-field: an INLINE search + a title cache so chips show the memory's fact, not a
-  // truncated id. Server-searched via listMemories(?search=). Used by the chrono create form, the
+  // truncated id. Server-searched via listFacts(?search=). Used by the chrono create form, the
   // drawer's chrono edit, and (since slice 4d) the file-meta edit form — only ever one open at a time.
 
   memPickQuery = signal('');
-  memPickResults = signal<Memory[]>([]);
+  memPickResults = signal<Fact[]>([]);
   private _memPickTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Memory id → full fact, for chip display (fed on pick and by `resolveMemoryTitles`). */
+  /** Fact id → full fact, for chip display (fed on pick and by `resolveMemoryTitles`). */
   memoryTitleCache = signal<Record<string, string>>({});
 
   onMemPickInput(q: string): void {
@@ -107,15 +107,15 @@ export class EntityRefPicker {
     if (this._memPickTimer) clearTimeout(this._memPickTimer);
     if (!q.trim()) { this.memPickResults.set([]); return; }
     this._memPickTimer = setTimeout(() => {
-      this.brainApi.listMemories(this.spaceId(), 8, 0, {}, undefined, q).subscribe({
-        next: ({ memories }) => this.memPickResults.set(memories.slice(0, 6)),
+      this.brainApi.listFacts(this.spaceId(), 8, 0, {}, undefined, q).subscribe({
+        next: ({ facts }) => this.memPickResults.set(facts.slice(0, 6)),
         error: () => {},
       });
     }, 300);
   }
 
   /** Cache the picked memory's fact for chip display, append its id to the form, and clear the search. */
-  addMemoryRef(form: { memoryIds: string[] }, mem: Memory): void {
+  addMemoryRef(form: { memoryIds: string[] }, mem: Fact): void {
     this.memoryTitleCache.update(c => ({ ...c, [mem._id]: mem.fact }));
     if (!form.memoryIds.includes(mem._id)) form.memoryIds.push(mem._id);
     this.memPickQuery.set('');
@@ -126,9 +126,9 @@ export class EntityRefPicker {
     form.memoryIds = form.memoryIds.filter(m => m !== id);
   }
 
-  /** Chip label for a linked memory: cached fact → loaded list → truncated id, trimmed for display. */
+  /** Chip label for a linked fact: cached fact → loaded list → truncated id, trimmed for display. */
   memoryRefTitle(id: string): string {
-    const full = this.memoryTitleCache()[id] ?? this.store.memories().find(m => m._id === id)?.fact;
+    const full = this.memoryTitleCache()[id] ?? this.store.facts().find(m => m._id === id)?.fact;
     return full ? full.slice(0, 40) + (full.length > 40 ? '…' : '') : id.slice(0, 8) + '…';
   }
 

@@ -120,7 +120,7 @@ chronoRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, 
   if (memoryIds !== undefined) {
     if (isStrictLinkage(wt.target)) {
       const invalidMIds = (memoryIds as string[]).filter((id: string) => !UUID_V4_RE.test(id));
-      if (invalidMIds.length > 0) { res.status(400).json({ error: '`memoryIds` must contain valid UUID v4 values (memory IDs), not names', invalid: invalidMIds }); return; }
+      if (invalidMIds.length > 0) { res.status(400).json({ error: '`memoryIds` must contain valid UUID v4 values (fact IDs), not names', invalid: invalidMIds }); return; }
     }
   }
   if (description !== undefined && typeof description !== 'string') {
@@ -275,7 +275,7 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
   }
   if (memoryIds !== undefined && Array.isArray(memoryIds) && isStrictLinkage(wt.target)) {
     const invalidMIds = memoryIds.filter((id: string) => !UUID_V4_RE.test(id));
-    if (invalidMIds.length > 0) { res.status(400).json({ error: '`memoryIds` must contain valid UUID v4 values (memory IDs), not names', invalid: invalidMIds }); return; }
+    if (invalidMIds.length > 0) { res.status(400).json({ error: '`memoryIds` must contain valid UUID v4 values (fact IDs), not names', invalid: invalidMIds }); return; }
   }
   if (properties !== undefined && (typeof properties !== 'object' || properties === null || Array.isArray(properties))) {
     res.status(400).json({ error: '`properties` must be a plain object' }); return;
@@ -338,7 +338,7 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
     ? body['deleteFields'] as string[]
     : undefined;
 
-  // Snapshot for the audit change list — see the note in memories.ts. Read before the write, since
+  // Snapshot for the audit change list — see the note in facts.ts. Read before the write, since
   // `updateChrono` returns only the new document.
   const prior = await findFirstAcrossMembers(wt.target, mid => getChronoById(mid, id));
 
@@ -374,7 +374,7 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
   }
   if (updated) {
     req.auditSnapshots = { before: prior ?? {}, after: updated };
-    // The `warnings` array an update response did not have — see the memories route, where the
+    // The `warnings` array an update response did not have — see the facts route, where the
     // reasoning is written out. A warn-mode space reported on a create and said nothing on an edit.
     const updateWarnings = [...(updateCheck?.warnings ?? []), ...unknownFieldWarnings(req.body, CHRONO_UPDATE_BODY_KEYS)];
     res.json(updateWarnings.length > 0 ? { ...updated, warnings: updateWarnings } : updated);

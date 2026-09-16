@@ -50,7 +50,7 @@ before(async () => {
   await makeSpace(SPACE);
   await makeSpace(MEMBER);
   await makeSpace(PROXY, { proxyFor: [MEMBER] });
-  const mem = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/memories`, { fact: `reindex me ${RUN}` });
+  const mem = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/facts`, { fact: `reindex me ${RUN}` });
   assert.equal(mem.status, 201, JSON.stringify(mem.body));
   session = await openMcpSession(token);
 });

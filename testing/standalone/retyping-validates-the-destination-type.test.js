@@ -44,14 +44,14 @@ import { argumentsOf, bodyOf } from './_structural-window.mjs';
  * STORED type, which is what lets the classification tell an introduced violation from an inherited one.
  */
 const WRITERS = [
-  { name: 'memory', file: 'server/src/brain/memory.ts', fn: 'updateMemory' },
+  { name: 'fact', file: 'server/src/brain/fact.ts', fn: 'updateFact' },
   { name: 'entity', file: 'server/src/brain/entities.ts', fn: 'updateEntityById' },
 ];
 
 /** The two arguments of the writer's own classify call: `(meta, existing, incoming)`. */
 function comparisonArgs(src, fn) {
   const body = bodyOf(src, fn);
-  const m = /classify(?:Memory|Entity)UpsertAgainst\(/.exec(body);
+  const m = /classify(?:Fact|Entity)UpsertAgainst\(/.exec(body);
   assert.notEqual(m, null, `no classifier call in ${fn} — re-point this gate`);
   const args = argumentsOf(body, m.index + m[0].length - 1, 'the comparison');
   assert.equal(args.length, 3, `expected (meta, existing, incoming), got ${args.length} arguments`);
@@ -103,7 +103,7 @@ describe('re-typing validates the destination type', () => {
 
   it('both doors accept `type` on update — the capability exists on each', () => {
     // The MCP tool declared no `type` under additionalProperties:false, so it refused what REST applied.
-    const mcp = stripComments(readFileSync('server/src/mcp/tools/memory.ts', 'utf8'));
+    const mcp = stripComments(readFileSync('server/src/mcp/tools/fact.ts', 'utf8'));
     const at = mcp.indexOf("name: 'update_fact'");
     assert.notEqual(at, -1, 'update_memory is gone — re-point this gate');
     const tool = mcp.slice(at, mcp.indexOf("name: '", at + 10) === -1 ? undefined : mcp.indexOf("name: '", at + 10));

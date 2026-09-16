@@ -21,7 +21,7 @@ const envelope = {
       'linked-type': { $ref: 'library:some-shared-entry' }, // must be skipped
     },
     edge: { relatesTo: { propertySchemas: { note: { type: 'string' } } } },
-    memory: { fact: { propertySchemas: { confidence: { type: 'string' } } } },
+    fact: { fact: { propertySchemas: { confidence: { type: 'string' } } } },
     chrono: { 'ingest-log': { propertySchemas: { trigger: { type: 'string', required: true } } } },
   },
 } as unknown as { typeSchemas: Record<string, Record<string, TypeSchema>> };
@@ -30,7 +30,7 @@ describe('extractTypeSchemas', () => {
   it('returns the typeSchemas map from a { typeSchemas } export envelope', () => {
     const ts = extractTypeSchemas(envelope);
     expect(ts).not.toBeNull();
-    expect(Object.keys(ts!)).toEqual(['entity', 'edge', 'memory', 'chrono']);
+    expect(Object.keys(ts!)).toEqual(['entity', 'edge', 'fact', 'chrono']);
   });
 
   it('accepts a bare typeSchemas map (KT keys, no library-entry marker)', () => {

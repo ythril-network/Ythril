@@ -38,7 +38,7 @@ let mongo, dumpDatabase, restoreDatabase, dir, uri;
 
 /** A populated space: records with a vector, a Date, unicode, and an empty-but-present collection. */
 const SEED = {
-  [`${SPACE}_memories`]: [
+  [`${SPACE}_facts`]: [
     {
       _id: 'm1', spaceId: SPACE, fact: 'Ünïcode — em dash, quotes "x", emoji 🌍', tags: ['a', 'b'],
       seq: 1, createdAt: '2026-08-01T10:00:00.000Z', updatedAt: '2026-08-01T10:00:00.000Z',
@@ -115,7 +115,7 @@ describe('backup → restore round-trip', { skip }, () => {
   it('keeps `_expireAt` a Date — a string there silently disables the TTL', async () => {
     // NDJSON has no date type. Through a naive JSON round-trip this becomes a string, the TTL index stops
     // matching it, and records that should expire never do. Nothing errors, ever.
-    const m = await mongo.col(`${SPACE}_memories`).findOne({ _id: 'm1' });
+    const m = await mongo.col(`${SPACE}_facts`).findOne({ _id: 'm1' });
     assert.ok(m._expireAt instanceof Date, `_expireAt came back as ${typeof m._expireAt}`);
     assert.equal(m._expireAt.toISOString(), '2026-12-01T00:00:00.000Z');
   });
@@ -123,9 +123,9 @@ describe('backup → restore round-trip', { skip }, () => {
   it('keeps the embedding intact, to full precision', async () => {
     // Truncation or precision loss here does not throw — it degrades recall, which nobody attributes to a
     // restore weeks later.
-    const m = await mongo.col(`${SPACE}_memories`).findOne({ _id: 'm1' });
+    const m = await mongo.col(`${SPACE}_facts`).findOne({ _id: 'm1' });
     assert.equal(m.embedding.length, 768, 'vector width');
-    const expected = SEED[`${SPACE}_memories`][0].embedding;
+    const expected = SEED[`${SPACE}_facts`][0].embedding;
     for (let i = 0; i < expected.length; i++) {
       assert.equal(m.embedding[i], expected[i], `embedding[${i}]`);
     }
@@ -140,7 +140,7 @@ describe('backup → restore round-trip', { skip }, () => {
     // Each collection is dropped before insert. If that ever stops being true, a re-run doubles every record and
     // the duplicate-detector inherits the mess.
     await restoreDatabase(uri, dir);
-    assert.equal(await mongo.col(`${SPACE}_memories`).countDocuments({}), 2);
+    assert.equal(await mongo.col(`${SPACE}_facts`).countDocuments({}), 2);
   });
 
   it('refuses a directory with no manifest instead of restoring nothing quietly', async () => {

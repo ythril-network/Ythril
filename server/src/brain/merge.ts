@@ -463,7 +463,7 @@ function edgesIdentical(a: EdgeDoc, b: EdgeDoc): boolean {
 }
 
 /**
- * Execute the merge inside a MongoDB transaction: relink edges/memories/chronos,
+ * Execute the merge inside a MongoDB transaction: relink edges/facts/chronos,
  * auto-delete duplicate edges (when 100% identical except _id), apply resolved
  * properties to survivor, delete absorbed entity + write tombstone.
  *
@@ -605,7 +605,7 @@ export async function executeMerge(
         );
       }
 
-      // ── 2. Relink memories ─────────────────────────────────────────────
+      // ── 2. Relink facts ─────────────────────────────────────────────
       const memoryColl = col<FactDoc>(`${spaceId}_facts`);
       const affectedMemories = await memoryColl
         .find(asFilter<FactDoc>({ spaceId, entityIds: absorbed._id }), { session })
@@ -643,7 +643,7 @@ export async function executeMerge(
       // file is linked to an entity, and `assertRefsResolve` enforces at write time that every id in it names
       // a real entity.
       //
-      // This phase was missing. Edges, memories and chrono were relinked and files were not, so a merge left
+      // This phase was missing. Edges, facts and chrono were relinked and files were not, so a merge left
       // every file whose `entityIds` held the absorbed id pointing at an entity that phase 5 then DELETED.
       // The merge path broke the invariant the write path enforces.
       //
@@ -686,7 +686,7 @@ export async function executeMerge(
       for (const f of affectedFiles) {
         const set: Record<string, unknown> = { updatedAt: now, seq: await nextSeq(spaceId) };
         if ((f.entityIds ?? []).includes(absorbed._id)) {
-          // `?? []` because `entityIds` is OPTIONAL on a file record, unlike memories and chrono where it is
+          // `?? []` because `entityIds` is OPTIONAL on a file record, unlike facts and chrono where it is
           // required. The guard above already proves it is present — the fallback keeps the map total over
           // the type rather than relying on that.
           const newEntityIds = (f.entityIds ?? []).map(id => id === absorbed._id ? survivor._id : id);

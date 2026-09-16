@@ -3,7 +3,7 @@
  *
  * ## The report
  *
- * A memory created via `POST /memories` was not returned by `recall` for a distinctive nine-word phrase
+ * A memory created via `POST /facts` was not returned by `recall` for a distinctive nine-word phrase
  * **within 150 seconds**, polled every 5 — while insert-time duplicate detection saw the same record
  * immediately. That asymmetry is the diagnosis rather than a curiosity: the vector is on the document the
  * moment it is written, and it is `$vectorSearch`'s index that lags.
@@ -47,7 +47,7 @@ before(async () => {
   tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
   const sp = await P('/api/spaces', { id: SPACE, label: `Fresh Writes ${RUN}` });
   assert.equal(sp.status, 201, `create space: ${JSON.stringify(sp.body)}`);
-  const probe = await P(`/api/brain/spaces/${SPACE}/memories`, { fact: `probe ${RUN}`, tags: [], waitForEmbedding: true });
+  const probe = await P(`/api/brain/spaces/${SPACE}/facts`, { fact: `probe ${RUN}`, tags: [], waitForEmbedding: true });
   ready = probe.status === 201;
 });
 
@@ -64,14 +64,14 @@ describe('recall can reach past the vector index', () => {
     if (!ready) return t.skip('embedding unavailable');
     // A phrase with no semantic neighbourhood, so only this record can match it.
     const phrase = `quokka lantern brine cassette ${RUN}`;
-    const w = await P(`/api/brain/spaces/${SPACE}/memories`,
+    const w = await P(`/api/brain/spaces/${SPACE}/facts`,
       { fact: `The ${phrase} protocol was ratified.`, tags: [], waitForEmbedding: true });
     assert.equal(w.status, 201, JSON.stringify(w.body));
     const id = w.body._id;
 
     // Immediately — no wait. That is the whole point.
-    const plain = await recall({ query: phrase, topK: 20, types: ['memory'] });
-    const fresh = await recall({ query: phrase, topK: 20, types: ['memory'], includeFreshWrites: true });
+    const plain = await recall({ query: phrase, topK: 20, types: ['fact'] });
+    const fresh = await recall({ query: phrase, topK: 20, types: ['fact'], includeFreshWrites: true });
     assert.equal(fresh.status, 200, JSON.stringify(fresh.body));
 
     const inFresh = (fresh.body.results ?? []).some(r => r._id === id);
@@ -90,13 +90,13 @@ describe('recall can reach past the vector index', () => {
     // If a caller can tell which channel found a record, the flag stops being "search harder" and becomes a
     // second result type to handle.
     const phrase = `zither pumice halyard ${RUN}`;
-    const w = await P(`/api/brain/spaces/${SPACE}/memories`,
+    const w = await P(`/api/brain/spaces/${SPACE}/facts`,
       { fact: `A ${phrase} was recorded.`, tags: ['fresh-shape'], waitForEmbedding: true });
-    const fresh = await recall({ query: phrase, topK: 20, types: ['memory'], includeFreshWrites: true });
+    const fresh = await recall({ query: phrase, topK: 20, types: ['fact'], includeFreshWrites: true });
     const rec = (fresh.body.results ?? []).find(r => r._id === w.body._id);
     assert.ok(rec, `the record must be found: ${JSON.stringify(fresh.body.results)}`);
     assert.equal(typeof rec.score, 'number', 'carries a score');
-    assert.equal(rec.type, 'memory', 'carries its type');
+    assert.equal(rec.type, 'fact', 'carries its type');
     assert.equal(typeof rec.fact, 'string', 'carries its per-type content field');
     assert.ok(Array.isArray(rec.tags) && rec.tags.includes('fresh-shape'), 'carries its tags');
   });
@@ -105,7 +105,7 @@ describe('recall can reach past the vector index', () => {
     if (!ready) return t.skip('embedding unavailable');
     // The default is a decision, not an omission: recall is a path someone waits on, and the scan is paid
     // per knowledge type. Nothing about a plain recall may change.
-    const r = await recall({ query: 'probe', topK: 5, types: ['memory'] });
+    const r = await recall({ query: 'probe', topK: 5, types: ['fact'] });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.ok(Array.isArray(r.body.results));
   });

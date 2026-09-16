@@ -53,7 +53,7 @@ function typesWithEntityIds() {
 
 /** The collection suffix each record type lives in. */
 const COLLECTION_FOR = {
-  MemoryDoc: 'memories',
+  FactDoc: 'facts',
   ChronoEntry: 'chrono',
   FileMetaDoc: 'files',
 };
@@ -65,14 +65,14 @@ describe('backlinks cover every entity reference', () => {
     // A gate that derives nothing passes vacuously and would keep passing if the interfaces moved.
     const types = typesWithEntityIds();
     assert.ok(types.length >= 3, `only found ${types.length} types with entityIds in ${TYPES}`);
-    for (const t of ['MemoryDoc', 'ChronoEntry', 'FileMetaDoc']) {
+    for (const t of ['FactDoc', 'ChronoEntry', 'FileMetaDoc']) {
       assert.ok(types.includes(t), `expected ${t} to declare entityIds; got: ${types.join(', ')}`);
     }
   });
 
   it('the scan is DERIVED from the link classes, not three hand-written blocks', () => {
     /*
-     * This case used to assert that `findEntityReferences` names `_memories`, `_chrono` and `_files`
+     * This case used to assert that `findEntityReferences` names `_facts`, `_chrono` and `_files`
      * literally, and it was right to while the function held three near-identical query blocks. It now
      * loops `LINK_CLASSES`, so the collection names are not in it at all — and asserting the old spelling
      * would fail on the change that made the rule structural.

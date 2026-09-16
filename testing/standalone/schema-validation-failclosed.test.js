@@ -21,10 +21,10 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 
-let validateEntity, validateEdge, validateMemory, validateChrono;
+let validateEntity, validateEdge, validateFact, validateChrono;
 
 before(async () => {
-  ({ validateEntity, validateEdge, validateMemory, validateChrono } =
+  ({ validateEntity, validateEdge, validateFact, validateChrono } =
     await import('../../server/dist/spaces/schema-validation.js'));
 });
 
@@ -59,7 +59,7 @@ describe('an unresolved $ref fails closed, per knowledge type', () => {
   });
 
   it('memory: same', () => {
-    const vs = validateMemory(brokenRef('memory', 'decision'), { type: 'decision', properties: {} });
+    const vs = validateFact(brokenRef('fact', 'decision'), { type: 'decision', properties: {} });
     assert.ok(refViolation(vs));
   });
 

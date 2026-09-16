@@ -114,7 +114,7 @@ export interface ErInputs {
  * Turn what was read into the model. Pure — no I/O, no clock, no config.
  *
  * Split out because everything that can be WRONG here is arithmetic and set logic: which type a record
- * counts toward, whether a memory linking two services counts once or twice, what an unresolvable edge
+ * counts toward, whether a fact linking two services counts once or twice, what an unresolvable edge
  * endpoint means. Those deserve a test that runs in milliseconds against hand-built rows, not one that
  * needs a container and a seeded space.
  */
@@ -145,8 +145,8 @@ export function assembleErModel(input: ErInputs): ErModel {
   const byType = new Map<string, { facts: number; chrono: number; files: number }>();
   for (const [kind, rows] of Object.entries(input.links) as Array<['facts' | 'chrono' | 'files', string[][]]>) {
     for (const ids of rows) {
-      // A record linking three entities of the SAME type counts ONCE for that type. "How many memories
-      // mention a service" must not double because one memory mentions two services.
+      // A record linking three entities of the SAME type counts ONCE for that type. "How many facts
+      // mention a service" must not double because one fact mentions two services.
       const seen = new Set<string>();
       for (const id of ids) {
         const t = typeOf.get(id);
@@ -227,7 +227,7 @@ export async function buildErModel(spaceId: string): Promise<ErModel> {
   /*
    * ENTITY classes only, and that is what an ER model IS rather than a narrowing.
    *
-   * `LINK_CLASSES` holds six since 4.0, three of which name a memory or a chrono entry. Those are real links
+   * `LINK_CLASSES` holds six since 4.0, three of which name a fact or a chrono entry. Those are real links
    * and a traversal reaches them — but this diagram draws ENTITY TYPES and the relationships between them,
    * so a file naming a chrono entry has no entity type at either end and no row to contribute. Included, the
    * three would each be counted under a `cls.collection` bucket that already has an entry, and `files`

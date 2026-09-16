@@ -385,9 +385,9 @@ describe('Backup + Restore — round-trip', () => {
   it('backup → delete data → restore → data is back', async () => {
     // 1. Seed a uniquely-named memory
     const memName = `restore-test-memory-${RUN_ID}`;
-    const createR = await post(BASE, adminToken, '/api/brain/spaces/general/memories',
+    const createR = await post(BASE, adminToken, '/api/brain/spaces/general/facts',
       { fact: memName, tags: ['restore-test'] });
-    assert.equal(createR.status, 201, `seed memory: ${JSON.stringify(createR.body)}`);
+    assert.equal(createR.status, 201, `seed fact: ${JSON.stringify(createR.body)}`);
     const memId = createR.body._id ?? createR.body.id;
     assert.ok(memId, 'memory must have an _id');
 
@@ -397,11 +397,11 @@ describe('Backup + Restore — round-trip', () => {
     const backupId = backupR.body.backup.id;
 
     // 3. Delete the seeded memory
-    const delR = await del(BASE, adminToken, `/api/brain/spaces/general/memories/${memId}`);
-    assert.equal(delR.status, 204, `delete memory: ${JSON.stringify(delR.body)}`);
+    const delR = await del(BASE, adminToken, `/api/brain/spaces/general/facts/${memId}`);
+    assert.equal(delR.status, 204, `delete fact: ${JSON.stringify(delR.body)}`);
 
     // 4. Verify memory is gone
-    const goneR = await reqJson(BASE, adminToken, `/api/brain/spaces/general/memories/${memId}`);
+    const goneR = await reqJson(BASE, adminToken, `/api/brain/spaces/general/facts/${memId}`);
     assert.equal(goneR.status, 404, 'memory should be gone after delete');
 
     // 5. Restore from the backup (auto-manages maintenance)
@@ -410,13 +410,13 @@ describe('Backup + Restore — round-trip', () => {
     assert.equal(restoreR.body.ok, true, JSON.stringify(restoreR.body));
 
     // 6. Verify memory is back
-    const backR = await reqJson(BASE, adminToken, `/api/brain/spaces/general/memories/${memId}`);
+    const backR = await reqJson(BASE, adminToken, `/api/brain/spaces/general/facts/${memId}`);
     assert.equal(backR.status, 200, `memory should be back after restore: ${JSON.stringify(backR.body)}`);
     const restoredFact = backR.body.fact ?? backR.body.content;
     assert.equal(restoredFact, memName, `memory content mismatch: ${JSON.stringify(backR.body)}`);
 
     // 7. Clean up — delete the test memory again
-    await del(BASE, adminToken, `/api/brain/spaces/general/memories/${memId}`).catch(() => {});
+    await del(BASE, adminToken, `/api/brain/spaces/general/facts/${memId}`).catch(() => {});
   });
 
   it('restore with unknown backupId returns 404', async () => {

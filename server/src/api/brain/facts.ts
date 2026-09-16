@@ -1,5 +1,5 @@
 /**
- * Memory CRUD routes (/api/brain/spaces/:spaceId/memories).
+ * Fact CRUD routes (/api/brain/spaces/:spaceId/facts).
  *
  * Split out of the api/brain.ts monolith (A17.3); handlers are unchanged.
  */
@@ -14,7 +14,7 @@ import { assertRefsResolve } from '../../brain/entity-refs.js';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { unknownFieldWarnings } from './unknown-fields.js';
 import { globalRateLimit, bulkWipeRateLimit } from '../../rate-limit/middleware.js';
-import { listMemories, deleteMemory, bulkDeleteMemories, remember, updateMemory } from '../../brain/memory.js';
+import { listFacts, deleteFact, bulkDeleteFacts, saveFact, updateFact } from '../../brain/fact.js';
 import { validateDeleteFields, applyDeleteFields as applyDeleteFieldsPaths } from '../../brain/delete-fields.js';
 import { getConfig } from '../../config/loader.js';
 import { col, asFilter } from '../../db/mongo.js';
@@ -25,9 +25,9 @@ import { countBrain, compareBySort, PROXY_PAGE_CEILING } from '../../brain/query
 import { parseSortParam, SORTABLE_FIELDS, toMongoSort } from '../../brain/list-sort.js';
 import { checkQuota, QuotaError } from '../../quota/quota.js';
 import { resolveMemberSpaces, resolveWriteTarget, isProxySpace, isStrictLinkage, findFirstAcrossMembers, collectAcrossMembers } from '../../spaces/proxy.js';
-import { validateMemory } from '../../spaces/schema-validation.js';
+import { validateFact } from '../../spaces/schema-validation.js';
 import type { FactDoc } from '../../config/types.js';
-import { UUID_V4_RE, webhookToken, getSpaceMeta, applyValidation, buildMemoryFilter, ttlDaysFromBody, ttlDaysError, dupeCheckOptsFromBody, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
+import { UUID_V4_RE, webhookToken, getSpaceMeta, applyValidation, buildFactFilter, ttlDaysFromBody, ttlDaysError, dupeCheckOptsFromBody, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
 import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
 import { resolveEntityIdsByName } from '../../brain/entities.js';
 import { mergePropertiesOrKeep } from '../../brain/merge-fields.js';
@@ -37,9 +37,9 @@ import { listDiagnosticsAsked } from './_shared.js';
 
 export const memoriesRouter = Router();
 
-// POST /api/brain/spaces/:spaceId/memories — create a memory
+// POST /api/brain/spaces/:spaceId/facts — create a fact
 /**
- * The body keys the memories create reads.
+ * The body keys the facts create reads.
  *
  * Declared so the route can say what it did NOT understand — see `unknownFieldWarnings`. It is a
  * second list beside the destructure below, which is exactly the kind of pair that drifts, so
@@ -52,9 +52,9 @@ export const memoriesRouter = Router();
  */
 // `LINK_INPUT_NAMES` spread rather than listed: a fifth kind gets its field here on the day it is declared,
 // and a caller using a real field must never be told it is unknown.
-const MEMORIES_CREATE_BODY_KEYS = ['fact', 'tags', 'entityIds', 'description', 'properties', 'type', 'id',
+const FACTS_CREATE_BODY_KEYS = ['fact', 'tags', 'entityIds', 'description', 'properties', 'type', 'id',
   ...CONNECTION_BODY_KEYS];
-memoriesRouter.post('/spaces/:spaceId/memories', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
+memoriesRouter.post('/spaces/:spaceId/facts', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const cfg = getConfig();
   if (!cfg.spaces.some(s => s.id === spaceId)) {
@@ -115,19 +115,19 @@ memoriesRouter.post('/spaces/:spaceId/memories', globalRateLimit, requireSpaceAu
   const safeTags: string[] = Array.isArray(tags) ? tags : [];
 
   // Schema validation
-  const safeMemoryType: string | undefined = typeof memoryType === 'string' ? memoryType : undefined;
+  const safeFactType: string | undefined = typeof memoryType === 'string' ? memoryType : undefined;
   const meta = getSpaceMeta(wt.target);
-  const violations = validateMemory(meta ?? {}, { type: safeMemoryType, properties: safeProps });
+  const violations = validateFact(meta ?? {}, { type: safeFactType, properties: safeProps });
   const validation = applyValidation(meta, violations);
   if (validation.blocked) {
     res.status(400).json({ error: 'schema_violation', violations: validation.warnings });
     return;
   }
 
-  // Persist through the shared remember() so REST and MCP produce identical records: the same
+  // Persist through the shared saveFact() so REST and MCP produce identical records: the same
   // embed-text derivation (properties folded as `key value` via propsEmbedText, entity names
   // resolved consistently), the `matchedText` source string, the author, insert-time duplicate-
-  // rule evaluation, and the memory.created webhook. Previously inlined here, which had drifted
+  // rule evaluation, and the fact.created webhook. Previously inlined here, which had drifted
   // into three bugs: values-only property embedding, no `matchedText`, and no dupe-rule firing.
   const ttlErr = ttlDaysError(req.body);
   if (ttlErr) { res.status(400).json({ error: ttlErr }); return; }
@@ -161,16 +161,16 @@ memoriesRouter.post('/spaces/:spaceId/memories', globalRateLimit, requireSpaceAu
     res.status(400).json({ error: '`waitForEmbedding` must be a boolean' });
     return;
   }
-  // The insert-time near-duplicate / contradiction check MCP's `remember` has always taken. `remember`
+  // The insert-time near-duplicate / contradiction check MCP's `save_fact` has always taken. `saveFact`
   // already merges `similar` and `contradicts` into what it returns, so the spread below reports them with
   // no further work — the only thing missing on this surface was reading the flags off the body.
   const dupe = dupeCheckOptsFromBody(req.body);
   if ('error' in dupe) { res.status(400).json({ error: dupe.error }); return; }
   const writeOpts = { ...dupe.opts, ...(waitForEmbedding === true ? { waitForEmbedding: true } : {}) };
 
-  const doc = await remember(
+  const doc = await saveFact(
     targetSpace, fact, safeEntityIds, safeTags, safeDesc, safeProps,
-    safeMemoryType, Object.keys(writeOpts).length > 0 ? writeOpts : undefined,
+    safeFactType, Object.keys(writeOpts).length > 0 ? writeOpts : undefined,
     webhookToken(req), ttlDaysFromBody(req.body), safeId,
   );
 
@@ -186,14 +186,14 @@ memoriesRouter.post('/spaces/:spaceId/memories', globalRateLimit, requireSpaceAu
   if (quotaResult?.softBreached) body['storageWarning'] = true;
   // The schema warnings a `warn` space produces, plus the keys this route did not understand — one
   // array, one shape. A second channel for the second kind would be worse than the silence it replaces.
-  const warnings = [...validation.warnings, ...unknownFieldWarnings(req.body, MEMORIES_CREATE_BODY_KEYS)];
+  const warnings = [...validation.warnings, ...unknownFieldWarnings(req.body, FACTS_CREATE_BODY_KEYS)];
   if (warnings.length > 0) body['warnings'] = warnings;
   res.status(201).json(body);
 });
 
 
-// GET /api/brain/spaces/:spaceId/memories/:id — get single memory
-memoriesRouter.get('/spaces/:spaceId/memories/:id', globalRateLimit, requireSpaceAuth, async (req, res) => {
+// GET /api/brain/spaces/:spaceId/facts/:id — get single fact
+memoriesRouter.get('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const id = req.params['id'] as string;
   const cfg = getConfig();
@@ -204,12 +204,12 @@ memoriesRouter.get('/spaces/:spaceId/memories/:id', globalRateLimit, requireSpac
   const doc = await findFirstAcrossMembers(spaceId,
     mid => col<FactDoc>(`${mid}_facts`).findOne(asFilter<FactDoc>({ _id: id })));
   if (doc) { res.json(doc); return; }
-  res.status(404).json({ error: 'Memory not found' });
+  res.status(404).json({ error: 'Fact not found' });
 });
 
 
-// GET /api/brain/spaces/:spaceId/memories
-memoriesRouter.get('/spaces/:spaceId/memories', globalRateLimit, requireSpaceAuth, async (req, res) => {
+// GET /api/brain/spaces/:spaceId/facts
+memoriesRouter.get('/spaces/:spaceId/facts', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const cfg = getConfig();
   if (!cfg.spaces.some(s => s.id === spaceId)) {
@@ -228,7 +228,7 @@ memoriesRouter.get('/spaces/:spaceId/memories', globalRateLimit, requireSpaceAut
     res.status(400).json({ error: sortParse.error });
     return;
   }
-  const filter = buildMemoryFilter(req.query as Record<string, unknown>);
+  const filter = buildFactFilter(req.query as Record<string, unknown>);
   // The Entities column shows entity NAMES; records store ids. Resolved per member for the same reason
   // as edges: an id belongs to the member that owns it. An empty resolution filters to nothing, which is
   // correct — "no entity by that name" must not fall back to showing everything.
@@ -246,7 +246,7 @@ memoriesRouter.get('/spaces/:spaceId/memories', globalRateLimit, requireSpaceAut
     // The comparator is built FROM the sort handed to MongoDB, so a proxy merge cannot order by a different rule.
     compare: compareBySort(sortParse.sort ? toMongoSort(sortParse.sort) : { createdAt: -1, _id: -1 }),
     readMember: async (mid, lim, sk) =>
-      await listMemories(mid, await filterFor(mid), lim, sk, sortParse.sort) as Record<string, unknown>[],
+      await listFacts(mid, await filterFor(mid), lim, sk, sortParse.sort) as Record<string, unknown>[],
   });
   if (!page.ok) { res.status(400).json({ error: page.error }); return; }
 
@@ -265,14 +265,14 @@ memoriesRouter.get('/spaces/:spaceId/memories', globalRateLimit, requireSpaceAut
 });
 
 
-// DELETE /api/brain/spaces/:spaceId/memories/:id
-memoriesRouter.delete('/spaces/:spaceId/memories/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
+// DELETE /api/brain/spaces/:spaceId/facts/:id
+memoriesRouter.delete('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const id = req.params['id'] as string;
   /*
    * `M-2`: what points at this record can be SEEN now, so under strict linkage it can also block.
    *
-   * Until the three unread link fields gained readers, deleting a memory that another record named was
+   * Until the three unread link fields gained readers, deleting a fact that another record named was
    * never refused — the reference existed, was stored and replicated, and nothing could see it. The naming
    * record was then left pointing at something that does not exist, which is the outcome `strictLinkage` is
    * bought to prevent.
@@ -288,15 +288,15 @@ memoriesRouter.delete('/spaces/:spaceId/memories/:id', globalRateLimit, requireS
       res.status(409).json({ error: block.message, backlinks: block.blocking, references: block.backlinks });
       return;
     }
-    if (await deleteMemory(mid, id, webhookToken(req))) { res.status(204).end(); return; }
+    if (await deleteFact(mid, id, webhookToken(req))) { res.status(204).end(); return; }
   }
-  res.status(404).json({ error: 'Memory not found' });
+  res.status(404).json({ error: 'Fact not found' });
 });
 
 
-// PATCH /api/brain/spaces/:spaceId/memories/:id — partial update a memory (long-form)
+// PATCH /api/brain/spaces/:spaceId/facts/:id — partial update a fact (long-form)
 /**
- * The body keys the memories UPDATE reads.
+ * The body keys the facts UPDATE reads.
  *
  * Its own list, not the create's: `deleteFields` is an update field and `id` is a path parameter
  * here. Copying the create's would produce an "unknown field" warning about a parameter that works,
@@ -306,8 +306,8 @@ memoriesRouter.delete('/spaces/:spaceId/memories/:id', globalRateLimit, requireS
  * The shared write options — ttlDays, waitForEmbedding, the duplicate flags and the two suppression
  * spellings — are NOT listed: they are read by helpers, and live in `SHARED_WRITE_BODY_KEYS`.
  */
-const MEMORIES_UPDATE_BODY_KEYS = ['fact', 'tags', 'entityIds', 'description', 'properties', 'deleteFields', 'type'];
-memoriesRouter.patch('/spaces/:spaceId/memories/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
+const FACTS_UPDATE_BODY_KEYS = ['fact', 'tags', 'entityIds', 'description', 'properties', 'deleteFields', 'type'];
+memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const id = req.params['id'] as string;
   const cfg = getConfig();
@@ -346,7 +346,7 @@ memoriesRouter.patch('/spaces/:spaceId/memories/:id', globalRateLimit, requireSp
   const dfPaths: string[] | undefined = Array.isArray(deleteFields) && deleteFields.length > 0 ? deleteFields : undefined;
   const updates: { fact?: string; type?: string; tags?: string[]; entityIds?: string[]; description?: string; properties?: Record<string, string | number | boolean>; suppressEmbeddings?: boolean } = {};
   // `type` was accepted on CREATE and silently DROPPED here: this handler never destructured it, so a caller PATCHing
-  // a memory's type got 200 and no change. `updateMemory` has always accepted it and writes `$set.type`, so the field
+  // a fact's type got 200 and no change. `updateFact` has always accepted it and writes `$set.type`, so the field
   // was plumbed the whole way down and lost at the door. An empty string CLEARS it, which is how the UI unsets a type —
   // the store distinguishes `undefined` (leave alone) from `''` (write empty), and this route must preserve that.
   if (memoryType !== undefined) {
@@ -364,7 +364,7 @@ memoriesRouter.patch('/spaces/:spaceId/memories/:id', globalRateLimit, requireSp
   if (entityIds !== undefined) {
     if (!Array.isArray(entityIds) || entityIds.some((t: unknown) => typeof t !== 'string')) { res.status(400).json({ error: '`entityIds` must be an array of strings' }); return; }
     /*
-     * `W-16`: EXISTENCE, not just shape — the same `assertRefsResolve` the create route, `remember` and
+     * `W-16`: EXISTENCE, not just shape — the same `assertRefsResolve` the create route, `saveFact` and
      * `update_fact` all call. This door alone ran `UUID_V4_RE.test` and stopped, so a syntactically
      * perfect id pointing at nothing was stored.
      *
@@ -408,10 +408,10 @@ memoriesRouter.patch('/spaces/:spaceId/memories/:id', globalRateLimit, requireSp
     //
     // The read this needs is the same one the audit snapshot below needed, so it is done once and shared
     // rather than issued twice per patch.
-    const existing = await listMemories(mid, { _id: id }, 1, 0);
+    const existing = await listFacts(mid, { _id: id }, 1, 0);
     if (existing.length === 0) continue;
     /*
-     * The schema check moved into `updateMemory`.
+     * The schema check moved into `updateFact`.
      *
      * This block SIMULATED the merge — `mergePropertiesOrKeep` plus a throwaway `applyDeleteFieldsPaths` —
      * and validated that. Two implementations of "what will this record look like", twenty lines apart, and
@@ -424,7 +424,7 @@ memoriesRouter.patch('/spaces/:spaceId/memories/:id', globalRateLimit, requireSp
     let updated;
     let check: UpdateValidation | undefined;
     try {
-      updated = await updateMemory(mid, id, updates, dfPaths, webhookToken(req), ttlDaysFromBody(req.body), ifMatch.seq,
+      updated = await updateFact(mid, id, updates, dfPaths, webhookToken(req), ttlDaysFromBody(req.body), ifMatch.seq,
         c => { check = c; });
     } catch (err) {
       if (err instanceof SchemaViolationError) {
@@ -448,23 +448,23 @@ memoriesRouter.patch('/spaces/:spaceId/memories/:id', globalRateLimit, requireSp
        * The unknown-field rows ride in the same array, in the same shape, for the reason the creates give:
        * two warning channels on one response would be worse than the silence they replace.
        */
-      const warnings = [...(check?.warnings ?? []), ...unknownFieldWarnings(req.body, MEMORIES_UPDATE_BODY_KEYS)];
+      const warnings = [...(check?.warnings ?? []), ...unknownFieldWarnings(req.body, FACTS_UPDATE_BODY_KEYS)];
       res.json(warnings.length > 0 ? { ...updated, warnings } : updated);
       return;
     }
     // See the note in entities.ts: with a precondition in play, a write that matched nothing is a 412
     // and must not fall through to the next member space.
     if (ifMatch.seq !== undefined) {
-      res.status(412).json(preconditionFailedBody('fact', (await listMemories(mid, { _id: id }, 1, 0))[0]?.seq));
+      res.status(412).json(preconditionFailedBody('fact', (await listFacts(mid, { _id: id }, 1, 0))[0]?.seq));
       return;
     }
   }
-  res.status(404).json({ error: 'Memory not found' });
+  res.status(404).json({ error: 'Fact not found' });
 });
 
 
-// DELETE /api/brain/spaces/:spaceId/memories — bulk wipe (long-form)
-memoriesRouter.delete('/spaces/:spaceId/memories', bulkWipeRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
+// DELETE /api/brain/spaces/:spaceId/facts — bulk wipe (long-form)
+memoriesRouter.delete('/spaces/:spaceId/facts', bulkWipeRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const cfg = getConfig();
   if (!cfg.spaces.some(s => s.id === spaceId)) {
@@ -479,6 +479,6 @@ memoriesRouter.delete('/spaces/:spaceId/memories', bulkWipeRateLimit, requireSpa
     res.status(400).json({ error: '`confirm: true` required in request body' });
     return;
   }
-  const deleted = await bulkDeleteMemories(spaceId);
+  const deleted = await bulkDeleteFacts(spaceId);
   res.json({ deleted });
 });

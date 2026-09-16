@@ -64,7 +64,7 @@ describe('the rename moves every space, and only the spaces', { skip }, () => {
     await renameMemoriesToFacts();
     const names = (await db.listCollections({}, { nameOnly: true }).toArray()).map(c => c.name);
     assert.ok(names.includes('rn2_entities') && names.includes('rn2_chrono'),
-      'only the memories suffix moves — a rename that caught a neighbour would be worse than none');
+      'only the _memories suffix moves — a rename that caught a neighbour would be worse than none');
   });
 });
 
@@ -97,9 +97,54 @@ describe('a conflict is refused, never merged', { skip }, () => {
 after(async () => {
   if (skip) return;
   const db = getDb();
-  for (const n of ['rn1_facts', 'rn2_entities', 'rn2_chrono', 'rn3_memories', 'rn3_facts',
-    'rn4_memories', 'rn4_facts']) {
+  for (const n of ['rn1_memories', 'rn1_facts', 'rn2_entities', 'rn2_chrono', 'rn3_memories', 'rn3_facts',
+    'rn4_memories', 'rn4_facts', '_webhooks']) {
     await db.collection(n).drop().catch(() => {});
   }
   await closeTestMongo();
+});
+
+describe('a webhook subscribed to the old event name is rewritten, not left dead', { skip }, () => {
+  /*
+   * Subscriptions live in Mongo, not in the config file, which is why this rides with the collection
+   * rename rather than with the config one. The failure is the same silent shape: a hook subscribed to
+   * `memory.created` stays listed, stays enabled, and never delivers again, because nothing emits that
+   * name any more. No error, no warning, no metric.
+   */
+  it('renames memory.* to fact.* on every subscription that carries one', async () => {
+    const db = getDb();
+    await db.collection('_webhooks').insertOne({
+      _id: 'wh1', url: 'https://example.invalid/a', enabled: true,
+      events: ['memory.created', 'entity.updated', 'memory.deleted'],
+    });
+
+    await renameMemoriesToFacts();
+
+    const hook = await db.collection('_webhooks').findOne({ _id: 'wh1' });
+    assert.deepEqual(hook.events, ['fact.created', 'entity.updated', 'fact.deleted'],
+      'the renamed events must move and the untouched one must stay, in place');
+  });
+
+  it('does not end up with the new name twice when a hook carried both', async () => {
+    const db = getDb();
+    await db.collection('_webhooks').insertOne({
+      _id: 'wh2', url: 'https://example.invalid/b', enabled: true,
+      events: ['memory.updated', 'fact.updated'],
+    });
+
+    await renameMemoriesToFacts();
+
+    const hook = await db.collection('_webhooks').findOne({ _id: 'wh2' });
+    assert.deepEqual(hook.events, ['fact.updated'], 'a duplicate subscription is a double delivery');
+  });
+
+  it('leaves a subscription with no renamed event completely alone', async () => {
+    const db = getDb();
+    await db.collection('_webhooks').insertOne({
+      _id: 'wh3', url: 'https://example.invalid/c', enabled: true, events: ['edge.created'],
+    });
+    await renameMemoriesToFacts();
+    const hook = await db.collection('_webhooks').findOne({ _id: 'wh3' });
+    assert.deepEqual(hook.events, ['edge.created']);
+  });
 });

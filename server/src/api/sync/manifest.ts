@@ -47,7 +47,7 @@ syncManifestRouter.get('/manifest', syncRateLimit, requireAuth, async (req, res)
  * GET /api/sync/merkle?spaceId=&networkId=
  *
  * Returns the SHA-256 Merkle root for the given space.  The root covers all
- * memory / entity / edge documents (identified by their _id + seq) and all
+ * fact / entity / edge documents (identified by their _id + seq) and all
  * files in the space (identified by their relative path + sha256 hash).
  *
  * This endpoint is consumed by the sync engine when a network has

@@ -55,11 +55,11 @@ describe('query paging (real MongoDB)', { skip }, () => {
     const loader = await import('../../server/dist/config/loader.js');
     loader.loadConfig();
     query = await import('../../server/dist/brain/query.js');
-    memory = await import('../../server/dist/brain/memory.js');
+    memory = await import('../../server/dist/brain/fact.js');
 
-    await mongo.col(`${SPACE}_memories`).deleteMany({});
+    await mongo.col(`${SPACE}_facts`).deleteMany({});
     // Written one at a time so `seq` is strictly increasing — the primary sort key, and what makes the order total.
-    for (let i = 0; i < TOTAL; i++) await memory.remember(SPACE, `paged record ${String(i).padStart(2, '0')}`, [], []);
+    for (let i = 0; i < TOTAL; i++) await memory.saveFact(SPACE, `paged record ${String(i).padStart(2, '0')}`, [], []);
   });
 
   after(async () => {
@@ -67,10 +67,10 @@ describe('query paging (real MongoDB)', { skip }, () => {
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ }
   });
 
-  const page = (limit, skipN) => query.queryBrain(SPACE, 'memories', {}, undefined, limit, 5000, skipN);
+  const page = (limit, skipN) => query.queryBrain(SPACE, 'facts', {}, undefined, limit, 5000, skipN);
 
   it('the fixture is there (the precondition, not an assumption)', async () => {
-    assert.equal(await mongo.col(`${SPACE}_memories`).countDocuments({}), TOTAL);
+    assert.equal(await mongo.col(`${SPACE}_facts`).countDocuments({}), TOTAL);
   });
 
   it('skip ADVANCES the page — the defect was that it did not', async () => {
@@ -147,15 +147,15 @@ describe('query paging (real MongoDB)', { skip }, () => {
     // through HTTP, because that is the layer where the window exists. A test at the wrong layer is worse than none — it
     // reads like coverage.
     const EXTRA = 120 - TOTAL;
-    for (let i = 0; i < EXTRA; i++) await memory.remember(SPACE, `deep record ${String(i).padStart(3, '0')}`, [], []);
-    const all = await mongo.col(`${SPACE}_memories`).countDocuments({});
+    for (let i = 0; i < EXTRA; i++) await memory.saveFact(SPACE, `deep record ${String(i).padStart(3, '0')}`, [], []);
+    const all = await mongo.col(`${SPACE}_facts`).countDocuments({});
     assert.equal(all, 120, 'precondition: the fixture must exceed the 100-row window');
 
     for (const s of [95, 100, 110, 119]) {
-      const rows = await query.queryBrain(SPACE, 'memories', {}, undefined, 5, 5000, s);
+      const rows = await query.queryBrain(SPACE, 'facts', {}, undefined, 5, 5000, s);
       assert.ok(rows.length > 0, `skip=${s} returned nothing on a 120-row collection — the deep-page defect is back`);
     }
-    assert.equal((await query.queryBrain(SPACE, 'memories', {}, undefined, 5, 5000, 120)).length, 0,
+    assert.equal((await query.queryBrain(SPACE, 'facts', {}, undefined, 5, 5000, 120)).length, 0,
       'and past the END is still empty, which is how a paging loop terminates');
   });
 

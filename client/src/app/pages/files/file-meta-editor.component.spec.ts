@@ -20,7 +20,7 @@ import { getTranslocoModule } from '../../testing/transloco-testing';
 import { BrainApi } from '../../core/brain-api.service';
 import { EntityRefPicker } from '../brain/entity-ref-picker.service';
 import { EntityRefFieldComponent } from '../brain/entity-ref-field.component';
-import { MemoryRefFieldComponent } from '../brain/memory-ref-field.component';
+import { FactRefFieldComponent } from '../brain/fact-ref-field.component';
 import { ChronoRefFieldComponent } from '../brain/chrono-ref-field.component';
 import { BrainStore } from '../brain/brain-store.service';
 import { FileMetaEditorComponent, type FileMetaModel } from './file-meta-editor.component';
@@ -42,7 +42,7 @@ function mount(m: FileMetaModel | null) {
       EntityRefPicker, BrainStore,
       { provide: BrainApi, useValue: {
         listEntities: () => of({ entities: [] }), getEntitiesByIds: () => of({ entities: [] }),
-        listMemories: () => of({ memories: [] }), getMemoriesByIds: () => of({ memories: [] }),
+        listFacts: () => of({ facts: [] }), getMemoriesByIds: () => of({ facts: [] }),
         listChrono: () => of({ chrono: [] }), getChrono: () => of({}),
       } },
     ],
@@ -84,7 +84,7 @@ describe('FileMetaEditorComponent', () => {
      */
     const m = model();
     const fixture = mount(m);
-    for (const cls of [EntityRefFieldComponent, MemoryRefFieldComponent, ChronoRefFieldComponent]) {
+    for (const cls of [EntityRefFieldComponent, FactRefFieldComponent, ChronoRefFieldComponent]) {
       const widget = fixture.debugElement.query(By.directive(cls));
       expect(widget, `${cls.name} did not render`).toBeTruthy();
       expect(widget.componentInstance.target(), `${cls.name} was handed a COPY, so its edits never reach the page`)

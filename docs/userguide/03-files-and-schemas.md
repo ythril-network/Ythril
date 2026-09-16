@@ -66,7 +66,7 @@ against the space's own overrides.
 > **Editing a file's custom properties got safer in 3.1.** Saving used to replace the whole set, so an API
 > caller that changed one property silently lost the others — the four Brain record types had been fixed
 > years earlier and files had been missed. Properties are now **merged**: the ones you do not touch are kept.
-> Removing one still removes it. Tags and the entity / memory / chrono links are unchanged — those are
+> Removing one still removes it. Tags and the entity / fact / chrono links are unchanged — those are
 > replaced by whatever you save, so save the full list you want.
 
 ### Detail pane (preview + description ⇄ file meta)
@@ -100,7 +100,7 @@ Clicking a file opens a **docked detail pane** to the right of the list (the lis
   inside a file still finds it — even when the description is a generated summary that does not contain
   that phrase.
 
-- **File meta** *(in the Brain)* — the editable metadata record: **description**, **tags**, and links to **entities**, **memories** and **chrono** entries, plus a **Retry** action to re-queue embedding for a failed or partial file. This is where the former *File Meta* tab's editing now lives. (On the standalone Files page, outside the Brain, the pane shows preview + description only.)
+- **File meta** *(in the Brain)* — the editable metadata record: **description**, **tags**, and links to **entities**, **facts** and **chrono** entries, plus a **Retry** action to re-queue embedding for a failed or partial file. This is where the former *File Meta* tab's editing now lives. (On the standalone Files page, outside the Brain, the pane shows preview + description only.)
 
 - **Extract** *(in the Brain, and only for files that have been processed)* — **what retrieval actually
   sees.** This is the tab to open when a document is in the system and still answers questions badly:
@@ -211,7 +211,7 @@ Open **Schema Library** from the sidebar (under Workspace).
 
 This tab lists all schema definitions on this instance.
 
-**Browsing:** Use the search bar to filter by name or description. Use the type filter pills (entity / memory / edge / chrono) to narrow by knowledge type.
+**Browsing:** Use the search bar to filter by name or description. Use the type filter pills (entity / fact / edge / chrono) to narrow by knowledge type.
 
 **Creating an entry:** Click **+ New entry**. Fill in:
 

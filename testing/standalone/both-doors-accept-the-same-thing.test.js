@@ -9,7 +9,7 @@
  *
  * `includeFreshWrites` exists for one purpose: find the record you just wrote, before the vector index has
  * it. It was forwarded only on the space-scoped branch. Omitting `space` — which the tool's own text
- * promotes, and which `remember` and `write_file` both point callers at after a write — took the
+ * promotes, and which `saveFact` and `write_file` both point callers at after a write — took the
  * cross-space path, where the option was dropped and the underlying call had no such field. A 200, and the
  * flag did nothing.
  *

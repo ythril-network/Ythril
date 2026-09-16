@@ -334,8 +334,8 @@ describe('Route guards — every mutating route must be protected', () => {
 
     // Brain routes live on per-resource sub-routers since A17.3 (memoriesRouter et al, mounted on
     // brainRouter in api/brain/index.ts) — same URL, same chain, different router variable.
-    const sample = routes.find(r => r.router === 'memoriesRouter' && r.routePath === '/spaces/:spaceId/memories' && r.method === 'post');
-    assert.ok(sample, 'sanity: POST /spaces/:spaceId/memories should have been parsed');
+    const sample = routes.find(r => r.router === 'memoriesRouter' && r.routePath === '/spaces/:spaceId/facts' && r.method === 'post');
+    assert.ok(sample, 'sanity: POST /spaces/:spaceId/facts should have been parsed');
     assert.match(sample.chain, /requireSpaceAuth/, 'sanity: its chain should contain requireSpaceAuth');
   });
 

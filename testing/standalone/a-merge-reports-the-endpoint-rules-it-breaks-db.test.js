@@ -94,7 +94,7 @@ describe('a merge reports the endpoint rules it breaks', { skip }, () => {
   });
 
   beforeEach(async () => {
-    for (const c of ['entities', 'edges', 'memories', 'chrono', 'files', 'tombstones']) await coll(c).deleteMany({});
+    for (const c of ['entities', 'edges', 'facts', 'chrono', 'files', 'tombstones']) await coll(c).deleteMany({});
     await coll('entities').insertMany([
       entity(ALICE, 'Alice', 'person'),
       entity(BOB, 'Bob', 'person'),

@@ -13,7 +13,7 @@
  * Two behaviours below look like oversights and are deliberately preserved — the split is not the
  * place to change them, and each is characterized so changing it later is a visible decision:
  *
- *   - Memory and chrono rows read DIFFERENT primary fields (`fact` / `title`) with a shared fallback
+ *   - Fact and chrono rows read DIFFERENT primary fields (`fact` / `title`) with a shared fallback
  *     to `description`, which is why the two mappers are not collapsed into one.
  *   - Chrono rows always carry an EMPTY properties bag, even though chrono records can hold
  *     schema-defined properties (#397). Surfacing them is a feature decision.
@@ -22,7 +22,7 @@
 /** One row of the side panel's detail table. */
 export interface DetailRow {
   id: string;
-  kind: 'memory' | 'chrono';
+  kind: 'fact' | 'chrono';
   description: string;
   tags: string[];
   properties: Record<string, unknown>;
@@ -41,12 +41,12 @@ export interface DetailRow {
  */
 export interface DetailRef {
   id: string;
-  kind: 'memory' | 'chrono';
+  kind: 'fact' | 'chrono';
 }
 
 /** How the table is currently filtered and ordered. */
 export interface DetailView {
-  type: 'all' | 'memory' | 'chrono';
+  type: 'all' | 'fact' | 'chrono';
   text: string;
   field: 'description' | 'createdAt';
   asc: boolean;
@@ -80,16 +80,16 @@ export function chronoText(c: ChronoLike): string {
 }
 
 /**
- * All rows for the selected node, memories first.
+ * All rows for the selected node, facts first.
  *
  * Order matters: it is the tie-break whenever two records share a sort key, so it is the difference
  * between a stable table and one that reshuffles on re-render.
  */
-export function buildDetailRows(memories: readonly MemoryLike[], chrono: readonly ChronoLike[]): DetailRow[] {
+export function buildDetailRows(facts: readonly MemoryLike[], chrono: readonly ChronoLike[]): DetailRow[] {
   return [
-    ...memories.map((m): DetailRow => ({
+    ...facts.map((m): DetailRow => ({
       id: m._id,
-      kind: 'memory',
+      kind: 'fact',
       description: memoryText(m),
       tags: m.tags ?? [],
       properties: m.properties ?? {},

@@ -3,7 +3,7 @@
  *
  * ## Why the rule is ALL-OR-NONE rather than four separate checks
  *
- * `validateMemory` was the one that did not. Entities, edges and chrono each refuse a type outside the set
+ * `validateFact` was the one that did not. Entities, edges and chrono each refuse a type outside the set
  * their space declares; memories accepted any string — while `types-knowledge.ts` and two integration-guide
  * pages stated the opposite. Four implementations of one rule, and the odd one out was the ABSENCE of a
  * branch, which no comparison of two implementations can surface: there was nothing to disagree with.
@@ -45,7 +45,7 @@ const V = await import('../../server/dist/spaces/schema-validation.js');
 const KINDS = [
   { kind: 'entity', fn: 'validateEntity', field: 'type', rec: t => ({ name: 'n', type: t }) },
   { kind: 'edge', fn: 'validateEdge', field: 'label', rec: t => ({ label: t }) },
-  { kind: 'memory', fn: 'validateMemory', field: 'type', rec: t => ({ type: t }) },
+  { kind: 'fact', fn: 'validateFact', field: 'type', rec: t => ({ type: t }) },
   { kind: 'chrono', fn: 'validateChrono', field: 'type', rec: t => ({ type: t }) },
 ];
 
@@ -107,17 +107,17 @@ describe('every validator enforces its allowlist', () => {
 });
 
 describe('the memory allowlist is applied in one place', () => {
-  it('the branch lives in validateMemory, not at a door', () => {
+  it('the branch lives in validateFact, not at a door', () => {
     /*
      * `getAllowedChronoTypes` exists because chrono's allowlist is ALSO enforced at two doors, and that is a
      * shape worth not copying: a rule at the door is a rule every future door must remember. Memory's belongs
      * to the validator, which every write path already reaches.
      */
     const src = stripComments(readFileSync('server/src/spaces/schema-validation.ts', 'utf8'));
-    assert.match(bodyOf(src, 'validateMemory'), /memoryTypes allowlist/, 'the branch must be in the validator');
-    for (const door of ['server/src/api/brain/memories.ts', 'server/src/mcp/tools/memory.ts']) {
+    assert.match(bodyOf(src, 'validateFact'), /memoryTypes allowlist/, 'the branch must be in the validator');
+    for (const door of ['server/src/api/brain/facts.ts', 'server/src/mcp/tools/fact.ts']) {
       assert.doesNotMatch(
-        stripComments(readFileSync(door, 'utf8')), /getAllowedMemoryTypes/,
+        stripComments(readFileSync(door, 'utf8')), /getAllowedFactTypes/,
         `${door} enforces the memory allowlist itself — that is a second copy, and a third door would need a third`,
       );
     }

@@ -169,7 +169,7 @@ describe('a tool and its route take the same parameters', () => {
       const accepted = new Set(readable.flatMap(r => [
         ...r.keys,
         ...(r.queryKeys ?? []),
-        // PATH parameters. `delete_fact` declares `id` and the route spells it `/memories/:id` — the
+        // PATH parameters. `delete_fact` declares `id` and the route spells it `/facts/:id` — the
         // record is named in the URL rather than in a body, which is a transport difference and not a
         // parameter the route refuses. Reported as sixteen gaps before this was here.
         ...[...r.route.matchAll(/:(\w+)/g)].map(m => m[1]),

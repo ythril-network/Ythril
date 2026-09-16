@@ -603,7 +603,7 @@
   },
   {
     "name": "conversation.utterance",
-    "knowledgeType": "memory",
+    "knowledgeType": "fact",
     "typeName": "utterance",
     "schemaGroup": "conversation",
     "published": true,

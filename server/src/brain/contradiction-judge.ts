@@ -24,11 +24,11 @@
 import { classify, nliConfigured } from './nli-client.js';
 import type { TypeSchema } from '../config/types.js';
 
-/** One record as the judge sees it. Collection-agnostic on purpose: memories, entities and chrono entries
+/** One record as the judge sees it. Collection-agnostic on purpose: facts, entities and chrono entries
  *  all reduce to "some text, and some properties". */
 export interface JudgeableRecord {
   id: string;
-  /** The record's free text — a memory's fact, an entity's description, a chrono title. May be empty. */
+  /** The record's free text — a fact's fact, an entity's description, a chrono title. May be empty. */
   text: string;
   properties?: Record<string, string | number | boolean>;
 }

@@ -23,7 +23,7 @@ function makeApi() {
   return {
     getEntitiesByIds: () => of({ entities: [] }),
     getMemory: () => of({}),
-    updateMemory: (_s: string, id: string, body: any) => of({ _id: id, ...body, updatedAt: 'saved' }),
+    updateFact: (_s: string, id: string, body: any) => of({ _id: id, ...body, updatedAt: 'saved' }),
     updateChrono: (_s: string, id: string, body: any) => of({ _id: id, ...body, updatedAt: 'saved' }),
   } as any;
 }
@@ -46,16 +46,16 @@ describe('RecordDrawerState — lastSaved', () => {
 
   it('announces the SERVER copy of a saved memory, not the local edit model', () => {
     const state = create();
-    state.open('memory', aMemory({ _id: 'm1', fact: 'before' }));
+    state.open('fact', aMemory({ _id: 'm1', fact: 'before' }));
     state.drawerEditMemory.fact = 'after';
 
     state.save();
 
     const saved = state.lastSaved();
-    expect(saved?.kind).toBe('memory');
+    expect(saved?.kind).toBe('fact');
     // `DrawerRecord` is discriminated on `kind`, but `expect(...)` is a runtime assertion TypeScript cannot
     // follow — so the narrowing is explicit. A cast would compile and would also accept the wrong member.
-    if (saved?.kind !== 'memory') throw new Error('lastSaved did not announce a memory');
+    if (saved?.kind !== 'fact') throw new Error('lastSaved did not announce a memory');
     expect(saved.record._id).toBe('m1');
     expect(saved.record.fact).toBe('after');
     // The announced record is what the API returned — a consumer patching its own list with the edit
@@ -79,10 +79,10 @@ describe('RecordDrawerState — lastSaved', () => {
 
   it('announces nothing when the save fails', () => {
     const state = create();
-    state.open('memory', aMemory({ _id: 'm1', fact: 'before' }));
+    state.open('fact', aMemory({ _id: 'm1', fact: 'before' }));
     // A failing save must not announce: a consumer would otherwise patch its list with a record the
     // server rejected, showing the edit as persisted.
-    (TestBed.inject(BrainApi) as any).updateMemory = () => ({
+    (TestBed.inject(BrainApi) as any).updateFact = () => ({
       subscribe: (h: any) => h.error({ error: { error: 'nope' } }),
     });
 

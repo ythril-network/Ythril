@@ -3,9 +3,9 @@
  *
  * ## The mismatch
  *
- * `MemoryDoc.embedding` is **optional** — `config/types.ts:1350`, optional since the embedding queue landed —
+ * `FactDoc.embedding` is **optional** — `config/types.ts:1350`, optional since the embedding queue landed —
  * and `embedStoredRecord` `$unset`s both `embedding` and `embeddingModel` for any record whose type or space
- * suppresses embeddings (`brain/embed-record.ts:166-170`). `IncomingMemoryDoc` declares both **required**
+ * suppresses embeddings (`brain/embed-record.ts:166-170`). `IncomingFactDoc` declares both **required**
  * (`api/sync/_shared.ts:142,152`).
  *
  * So the sender puts a perfectly valid stored document on the wire and the receiver's `safeParse` rejects it.
@@ -51,7 +51,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { incomingSchemas } from '../_shared/incoming-sync-schemas.mjs';
 
-const { IncomingMemoryDoc } = await import('../../server/dist/api/sync/_shared.js');
+const { IncomingFactDoc } = await import('../../server/dist/api/sync/_shared.js');
 
 /** A stored memory as `embedStoredRecord` leaves it once suppression has unset the vector fields. */
 function suppressedMemory(overrides = {}) {
@@ -71,7 +71,7 @@ function suppressedMemory(overrides = {}) {
 
 describe('a memory with no vector survives the push door', () => {
   it('accepts a suppressed memory — no embedding, no embeddingModel', () => {
-    const r = IncomingMemoryDoc.safeParse(suppressedMemory());
+    const r = IncomingFactDoc.safeParse(suppressedMemory());
     assert.ok(
       r.success,
       'a suppressed memory is a valid stored document and must replicate. Rejecting it here removes it from '
@@ -82,7 +82,7 @@ describe('a memory with no vector survives the push door', () => {
 
   it('accepts a memory whose embed job has not run yet', () => {
     // Same shape: the queue writes the vector later, and `seq` is not bumped when it does.
-    const r = IncomingMemoryDoc.safeParse(suppressedMemory({ description: 'pending its first embed' }));
+    const r = IncomingFactDoc.safeParse(suppressedMemory({ description: 'pending its first embed' }));
     assert.ok(r.success, `a not-yet-embedded memory must replicate. Issues: ${JSON.stringify(r.error?.issues ?? [])}`);
   });
 
@@ -93,7 +93,7 @@ describe('a memory with no vector survives the push door', () => {
      * because it was computed by the sender's model. Zod strips what it does not declare, which gives both at
      * once: the record lands, the vector does not, and the receiver queues its own.
      */
-    const r = IncomingMemoryDoc.safeParse(suppressedMemory({
+    const r = IncomingFactDoc.safeParse(suppressedMemory({
       embedding: [0.1, 0.2, 0.3],
       embeddingModel: 'nomic-embed-text-v1.5',
     }));

@@ -44,9 +44,9 @@ export interface TraverseNode {
    * WHICH collection this node lives in.
    *
    * Absent on an entity — every node was one until chrono entries became reachable, so absence keeps every
-   * existing response byte-identical. Present and `'chrono'` on a chrono entry, or `'fact'` on a memory,
+   * existing response byte-identical. Present and `'chrono'` on a chrono entry, or `'fact'` on a fact,
    * because each is looked up in a different collection and a caller that follows `_id` needs to know where
-   * to look. Guessing from `type` does not work: a chrono's `type` is `event`/`deadline`/…, a memory's is
+   * to look. Guessing from `type` does not work: a chrono's `type` is `event`/`deadline`/…, a fact's is
    * optional entirely, and an entity's is whatever the space calls it.
    */
   kind?: 'chrono' | 'fact' | 'file';
@@ -74,7 +74,7 @@ export interface TraverseResult {
 }
 
 /**
- * The id of a SYNTHETIC traverse edge — the link from an entity to a chrono entry, memory or file.
+ * The id of a SYNTHETIC traverse edge — the link from an entity to a chrono entry, fact or file.
  *
  * ## What it replaces, and why that was wrong in both directions
  *
@@ -82,7 +82,7 @@ export interface TraverseResult {
  * edge id that does not exist — a caller looking it up finds the chrono, not a 404."*
  *
  * **The consumer half of that was the exact opposite of true.** `getEdgeById` queries `${spaceId}_edges` and
- * nothing else, and a chrono lives in `_chrono`, a memory in `_facts`, a file in `_files`. So the
+ * nothing else, and a chrono lives in `_chrono`, a fact in `_facts`, a file in `_files`. So the
  * "helpful" id 404s on every edge-lookup path the product actually has — `GET /edges/:id`, the PATCH, and
  * `update_edge`. The one lookup that does resolve is `GET /chrono/:id`, which needs an id the caller already
  * has from the NODE. The affordance was never delivered; only the collision was.
@@ -159,7 +159,7 @@ export async function upsertEdge(
   actor?: WebhookActor,
   ttlDays?: number | null,
   /**
-   * Write options. An object rather than a twelfth positional — `remember` already carries a note saying
+   * Write options. An object rather than a twelfth positional — `saveFact` already carries a note saying
    * its twelfth was one too many, and this is the same signature growing the same way.
    */
   /**
@@ -231,7 +231,7 @@ export async function upsertEdge(
   const effectiveType = type ?? (existing as EdgeDoc | null)?.type;
   const effectiveTags = mergeTagsOrKeep((existing as EdgeDoc | null)?.tags, tags);
   // `withDefaults`, not `properties` — the defaults were validated above and must be the values STORED.
-  // Validating one document and writing another is the shape that produced the memory-upsert defect.
+  // Validating one document and writing another is the shape that produced the fact-upsert defect.
   const effectiveProps = mergePropertiesOrKeep((existing as EdgeDoc | null)?.properties, withDefaults);
 
   // Embed the edge text (best-effort) — resolve entity names so the vector captures semantics
@@ -331,7 +331,7 @@ export async function upsertEdge(
     seq,
     ...embeddingFields,
   };
-  // Stored, not merely consulted — see the note in `remember`.
+  // Stored, not merely consulted — see the note in `saveFact`.
   if (opts?.suppressEmbeddings !== undefined) doc.suppressEmbeddings = opts.suppressEmbeddings;
   // `doc.label`, NOT `doc.type` — an edge has both, and the schema is keyed by label (see validateEdgeWrite).
   // Passing `type` here would look right and read a schema that is never there.
@@ -617,7 +617,7 @@ export async function updateEdgeById(
 
   const updateOp: Record<string, unknown> = { $set };
   if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
-  // Lost-update detection, identical to `updateMemory` and for the same reason: `returnDocument: "before"`
+  // Lost-update detection, identical to `updateFact` and for the same reason: `returnDocument: "before"`
   // hands back the record as it was at WRITE time, so comparing its seq with the one read at the top of this
   // function is exactly the test for another writer landing in the window. Observation only — no write that
   // previously succeeded is now rejected.
@@ -675,7 +675,7 @@ export async function updateEdgeById(
  */
 // `!` because `LINK_CLASSES` declares all three — a missing one is a programming error, not a runtime state.
 export const CHRONO_LINK_LABEL = linkClassFor('chrono', 'entity')!.label;
-export const MEMORY_LINK_LABEL = linkClassFor('fact', 'entity')!.label;
+export const FACT_LINK_LABEL = linkClassFor('fact', 'entity')!.label;
 export const FILE_LINK_LABEL = linkClassFor('file', 'entity')!.label;
 
 /**
@@ -733,19 +733,19 @@ export async function traverseGraph(
    */
   includeChrono = true,
   /**
-   * Follow `memory.entityIds` the same way, so a memory about an entity is reachable from it.
+   * Follow `fact.entityIds` the same way, so a fact about an entity is reachable from it.
    *
    * **Default OFF, unlike chrono, and the asymmetry is deliberate.** Chrono defaults on because chrono
-   * entries are both invisible otherwise and sparse — an incident has ten, not ten thousand. Memories are
+   * entries are both invisible otherwise and sparse — an incident has ten, not ten thousand. Facts are
    * usually the most numerous record type in a space, and every node emitted counts against `limit`: on by
-   * default, a memory-heavy space would fill the answer with memories and truncate away the entities the
+   * default, a fact-heavy space would fill the answer with facts and truncate away the entities the
    * caller traversed for. A flag that silently starves the primary result is worse than one you have to know
    * about, so this one is opt-in.
    */
   includeMemories = false,
   /**
    * Follow `file.entityIds`, so a document about an entity is reachable from it. Opt-in for the same reason as
-   * memories, and the node carries **file meta only** — path, description, tags. Never chunk text: a file's
+   * facts, and the node carries **file meta only** — path, description, tags. Never chunk text: a file's
    * body is its chunks, they are the largest thing the product stores, and a structural walk must not pay for
    * them.
    */
@@ -792,7 +792,7 @@ export async function traverseGraph(
       /*
        * BOUNDED, and the bound is documents rather than nodes (W-11).
        *
-       * This was `.find(...).toArray()` with no limit, so one hub entity read its entire edge set into memory
+       * This was `.find(...).toArray()` with no limit, so one hub entity read its entire edge set into fact
        * per hop per member space. `limit` reads as the ceiling and is not: it counts nodes EMITTED, and a
        * neighbour that is already visited or is not an entity is skipped without spending any of it. So the
        * flag stayed quiet in exactly the case where the read was largest — a hub whose edges mostly lead back

@@ -77,7 +77,7 @@ after(async () => {
  * The poll and its deadline live in `helpers.js` — this file used to carry its own copy with a 30 s timeout,
  * which is well under the 150 s index lag observed on CI and failed the whole suite from a `before` hook.
  */
-const waitForIndexed = (ids, types = ['entity', 'memory'], timeoutMs) =>
+const waitForIndexed = (ids, types = ['entity', 'fact'], timeoutMs) =>
   waitForIndexedIn(SPACE, ids, types, timeoutMs);
 
 // ── Validation tests (no embedding required) ─────────────────────────────
@@ -420,7 +420,7 @@ describe('Recall filter — numeric gt/gte/lt/lte on properties', () => {
 
   before(async (t) => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
-    const high = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/memories`, {
+    const high = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/facts`, {
       fact: `${desc} high-count`,
       description: desc,
       properties: { count: 50, label: 'high' },
@@ -429,7 +429,7 @@ describe('Recall filter — numeric gt/gte/lt/lte on properties', () => {
     assert.equal(high.status, 201, `Create high-count memory failed: ${JSON.stringify(high.body)}`);
     highId = high.body._id;
 
-    const low = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/memories`, {
+    const low = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/facts`, {
       fact: `${desc} low-count`,
       description: desc,
       properties: { count: 5, label: 'low' },
@@ -438,14 +438,14 @@ describe('Recall filter — numeric gt/gte/lt/lte on properties', () => {
     assert.equal(low.status, 201, `Create low-count memory failed: ${JSON.stringify(low.body)}`);
     lowId = low.body._id;
 
-    await waitForIndexed([highId, lowId], ['memory']);
+    await waitForIndexed([highId, lowId], ['fact']);
   });
 
   it('filter gt:10 returns high-count record, excludes low-count', async (t) => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: desc,
-      types: ['memory'],
+      types: ['fact'],
       topK: 20,
       filter: { 'properties.count': { gt: 10 } },
     }) });
@@ -459,7 +459,7 @@ describe('Recall filter — numeric gt/gte/lt/lte on properties', () => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: desc,
-      types: ['memory'],
+      types: ['fact'],
       topK: 20,
       filter: { 'properties.count': { lte: 10 } },
     }) });
@@ -473,7 +473,7 @@ describe('Recall filter — numeric gt/gte/lt/lte on properties', () => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: desc,
-      types: ['memory'],
+      types: ['fact'],
       topK: 20,
       filter: { 'properties.count': { gte: 5, lt: 100 } },
     }) });
@@ -492,7 +492,7 @@ describe('Recall filter — tags in (any-of)', () => {
 
   before(async (t) => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
-    const sec = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/memories`, {
+    const sec = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/facts`, {
       fact: `${desc} security-tagged`,
       description: desc,
       tags: ['security', 'auth'],
@@ -500,7 +500,7 @@ describe('Recall filter — tags in (any-of)', () => {
     assert.equal(sec.status, 201, `Create security memory failed: ${JSON.stringify(sec.body)}`);
     securityId = sec.body._id;
 
-    const infra = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/memories`, {
+    const infra = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/facts`, {
       fact: `${desc} infra-tagged`,
       description: desc,
       tags: ['infra'],
@@ -508,7 +508,7 @@ describe('Recall filter — tags in (any-of)', () => {
     assert.equal(infra.status, 201, `Create infra memory failed: ${JSON.stringify(infra.body)}`);
     infraId = infra.body._id;
 
-    const unrel = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/memories`, {
+    const unrel = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/facts`, {
       fact: `${desc} unrelated-tagged`,
       description: desc,
       tags: ['unrelated-tag-xyzzy'],
@@ -516,14 +516,14 @@ describe('Recall filter — tags in (any-of)', () => {
     assert.equal(unrel.status, 201, `Create unrelated memory failed: ${JSON.stringify(unrel.body)}`);
     unrelatedId = unrel.body._id;
 
-    await waitForIndexed([securityId, infraId, unrelatedId], ['memory']);
+    await waitForIndexed([securityId, infraId, unrelatedId], ['fact']);
   });
 
   it('filter tags in ["security","infra"] returns both security and infra records, not unrelated', async (t) => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: desc,
-      types: ['memory'],
+      types: ['fact'],
       topK: 20,
       filter: { 'tags': { in: ['security', 'infra'] } },
     }) });
@@ -542,7 +542,7 @@ describe('Recall filter — exists operator', () => {
 
   before(async (t) => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
-    const withProp = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/memories`, {
+    const withProp = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/facts`, {
       fact: `${desc} with-domain-prop`,
       description: desc,
       properties: { domain: 'infra' },
@@ -551,7 +551,7 @@ describe('Recall filter — exists operator', () => {
     assert.equal(withProp.status, 201, `Create with-prop memory failed: ${JSON.stringify(withProp.body)}`);
     withPropId = withProp.body._id;
 
-    const withoutProp = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/memories`, {
+    const withoutProp = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/facts`, {
       fact: `${desc} without-domain-prop`,
       description: desc,
       tags: ['exists-test'],
@@ -559,14 +559,14 @@ describe('Recall filter — exists operator', () => {
     assert.equal(withoutProp.status, 201, `Create without-prop memory failed: ${JSON.stringify(withoutProp.body)}`);
     withoutPropId = withoutProp.body._id;
 
-    await waitForIndexed([withPropId, withoutPropId], ['memory']);
+    await waitForIndexed([withPropId, withoutPropId], ['fact']);
   });
 
   it('filter exists:true on properties.domain returns only records that have that property', async (t) => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: desc,
-      types: ['memory'],
+      types: ['fact'],
       topK: 20,
       filter: { 'properties.domain': { exists: true } },
     }) });
@@ -580,7 +580,7 @@ describe('Recall filter — exists operator', () => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: desc,
-      types: ['memory'],
+      types: ['fact'],
       topK: 20,
       filter: { 'properties.domain': { exists: false } },
     }) });
@@ -593,7 +593,7 @@ describe('Recall filter — exists operator', () => {
 
 // Space-parameterized variant (the schema test uses a second space). Thin wrapper over the shared poll so both
 // spaces get the same measured deadline and the same diagnosis on failure.
-const waitForIndexedIn = (spaceId, ids, types = ['entity', 'memory'], timeoutMs) =>
+const waitForIndexedIn = (spaceId, ids, types = ['entity', 'fact'], timeoutMs) =>
   waitForIndexedShared(INSTANCES.a, token(), spaceId, ids, types, timeoutMs);
 
 // ── P6: tags param uses ALL-of semantics on the native filter fast path ────────
@@ -606,25 +606,25 @@ describe('Recall filter — tags param (must contain ALL; native fast path)', ()
     if (!embeddingAvailable) return t.skip('Embedding not available');
     // `tags` is a fixed declared filter field, so the `tags` recall param is pushed into the
     // $vectorSearch native filter as an $and of equalities — i.e. the record must carry EVERY tag.
-    const both = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/memories`, {
+    const both = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/facts`, {
       fact: `${desc} has-both-tags`, description: desc, tags: ['alpha-all', 'beta-all'],
     });
     assert.equal(both.status, 201, `create both-tags: ${JSON.stringify(both.body)}`);
     bothId = both.body._id;
 
-    const one = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/memories`, {
+    const one = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/facts`, {
       fact: `${desc} has-one-tag`, description: desc, tags: ['alpha-all'],
     });
     assert.equal(one.status, 201, `create one-tag: ${JSON.stringify(one.body)}`);
     oneId = one.body._id;
 
-    await waitForIndexed([bothId, oneId], ['memory']);
+    await waitForIndexed([bothId, oneId], ['fact']);
   });
 
   it('tags:[alpha,beta] returns only the record carrying BOTH tags', async (t) => {
     if (!embeddingAvailable) return t.skip('Embedding not available');
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
-      query: desc, types: ['memory'], topK: 20, tags: ['alpha-all', 'beta-all'],
+      query: desc, types: ['fact'], topK: 20, tags: ['alpha-all', 'beta-all'],
     }) });
     assert.equal(r.status, 200, `recall ${r.status}: ${JSON.stringify(r.body)}`);
     const ids = r.body.results.map(x => x.record?._id ?? x._id);

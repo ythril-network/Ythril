@@ -6,9 +6,9 @@
 
 ## Brain
 
-The Brain is where all your knowledge lives. It has nine tabs: **Overview**, **Query**, **Graph**, **Review**, **Entities**, **Edges**, **Memories**, **Chrono** and **Files**. This said eight and left out **Review**, which has its own section further down this page.
+The Brain is where all your knowledge lives. It has nine tabs: **Overview**, **Query**, **Graph**, **Review**, **Entities**, **Edges**, **Facts**, **Chrono** and **Files**. This said eight and left out **Review**, which has its own section further down this page.
 
-**Overview** is the **default landing tab** — opening a space lands here first. It is a per-space dashboard assembled from what the Brain already knows: a **Storage** panel (storage used against the space's quota — and when the instance could not read part of that space's file directory the figure is prefixed **≥** with a **partly unreadable** warning beside it, because a number that is silently short reads as a quota nowhere near its limit), an **Indexing** panel (the vector index's state, plus a **Reindex** button — behind a confirmation — when embeddings have gone stale), an **Embedding queue** panel (pending / processing / failed background-embedding job counts, with the file + reason for any failures, and a **Retry all failed** button — behind a confirmation — that re-queues every failed job in the space at once), a **Networks** panel (the networks this space syncs with and its aggregate sync status, or a note when it belongs to none), a **Governance** panel (open votes in this space's networks — subject, deadline, and tally — shown only when there are any), a **Data model** panel (the space’s entity types drawn as a diagram, with each type’s declared properties, how many records it actually holds, and the relationships between types — inferred from the schema AND from the records, so a type that has records but was never declared shows up rather than being silently left out; a record count is a link that opens that type in the Entities tab, and admins get a pencil on each type that opens the schema editor without leaving the page. **Memories, chrono entries and files appear as boxes too** — one per kind, carrying that kind’s total, joined to each entity type they link to with the per-type count on the join. They are drawn dashed and unfilled because they have no schema of their own, and a kind with no links anywhere gets no box rather than an empty one; their counts open the matching tab; **the boxes are drawn at one of three heights and a row of them shares a top and bottom edge**, and **the types that participate in no relationship are laid out along the bottom across the full width of the card** rather than wrapping after four however much room there is — a height per property count meant no horizontal line anywhere in the picture, which is most of what made a diagram of twenty types hard to follow), a **Usage** panel (how often this space was called over the last seven days, how many of those calls were recall, and what share of them actually answered — demand without the answer rate is not usefulness; admins get a **Reset usage** button there, which deletes the recorded history for this space behind a confirmation and is irreversible), and — **for admins only** — a **Token access** panel (which API tokens can reach this space and at what level: admin, read/write, or read-only, with network-peer and all-spaces tokens flagged and any expiry shown).
+**Overview** is the **default landing tab** — opening a space lands here first. It is a per-space dashboard assembled from what the Brain already knows: a **Storage** panel (storage used against the space's quota — and when the instance could not read part of that space's file directory the figure is prefixed **≥** with a **partly unreadable** warning beside it, because a number that is silently short reads as a quota nowhere near its limit), an **Indexing** panel (the vector index's state, plus a **Reindex** button — behind a confirmation — when embeddings have gone stale), an **Embedding queue** panel (pending / processing / failed background-embedding job counts, with the file + reason for any failures, and a **Retry all failed** button — behind a confirmation — that re-queues every failed job in the space at once), a **Networks** panel (the networks this space syncs with and its aggregate sync status, or a note when it belongs to none), a **Governance** panel (open votes in this space's networks — subject, deadline, and tally — shown only when there are any), a **Data model** panel (the space’s entity types drawn as a diagram, with each type’s declared properties, how many records it actually holds, and the relationships between types — inferred from the schema AND from the records, so a type that has records but was never declared shows up rather than being silently left out; a record count is a link that opens that type in the Entities tab, and admins get a pencil on each type that opens the schema editor without leaving the page. **Facts, chrono entries and files appear as boxes too** — one per kind, carrying that kind’s total, joined to each entity type they link to with the per-type count on the join. They are drawn dashed and unfilled because they have no schema of their own, and a kind with no links anywhere gets no box rather than an empty one; their counts open the matching tab; **the boxes are drawn at one of three heights and a row of them shares a top and bottom edge**, and **the types that participate in no relationship are laid out along the bottom across the full width of the card** rather than wrapping after four however much room there is — a height per property count meant no horizontal line anywhere in the picture, which is most of what made a diagram of twenty types hard to follow), a **Usage** panel (how often this space was called over the last seven days, how many of those calls were recall, and what share of them actually answered — demand without the answer rate is not usefulness; admins get a **Reset usage** button there, which deletes the recorded history for this space behind a confirmation and is irreversible), and — **for admins only** — a **Token access** panel (which API tokens can reach this space and at what level: admin, read/write, or read-only, with network-peer and all-spaces tokens flagged and any expiry shown).
 
 At the top of the page a row of **space chips** lets you switch space; each chip shows the space's total record count. The tab buttons themselves carry small count badges for the collection they open.
 
@@ -27,11 +27,11 @@ If the search index needs rebuilding (for example after the embedding model chan
 
 > **Reindex and rebuild are different repairs.** *Reindex* re-embeds your content against the current model. It does **not** help when the search index itself is missing or broken — the symptom there is search quietly returning nothing at all, with no error. That one needs **Rebuild search indexes** on the space's **Danger** tab (see below).
 
-### Memories
+### Facts
 
-Memories are the core knowledge unit — plain-language statements you want to remember.
+Facts are the core knowledge unit — plain-language statements you want to remember.
 
-**Creating a memory:** Click **+ Add memory**. Fill in:
+**Creating a fact:** Click **+ Add fact**. Fill in:
 
 | Field | Notes |
 |-------|-------|
@@ -41,16 +41,16 @@ Memories are the core knowledge unit — plain-language statements you want to r
 | **Entities** | Type in the inline entity search to find one (name or semantic) and click a result to link it — add several in a row. Linked items appear as chips above the search; click a chip's × to unlink. |
 | **Properties** | Click to open the JSON editor. Enter any key-value pairs you want to attach. |
 
-Click **Save**. The memory is indexed immediately and available for search.
+Click **Save**. The fact is indexed immediately and available for search.
 
 **Searching:** The top search bar is **Semantic** (meaning-based) — type and it returns a ranked, non-paginated set. Plain-text (substring) search moved into the column headers: use the **freetext box under the Fact column** (see Filtering). Clearing the top bar restores the normal paginated list.
 
 **Filtering:** Each column that can be filtered has its control docked directly under the column header — a **freetext box** under the main text column (Name / Relation / Fact) that matches a substring of the row's text, a type/kind dropdown under the **Type**/**Kind** column, and a tag box under the **Tags** column. Clicking a tag or entity badge on a row still fills the matching filter (the active entity filter shows as a chip above the table, with **×** to clear). Filtering happens on the server across the whole list, and clears back to everything when you empty the control.
 
-**Sorting:** Click a column header with a caret (▾) to sort the list by that column — click again to flip the direction, and a third time to return to the default order. The caret fills in and points up or down to show the active sort. Sorting happens on the server, so it orders the **whole** list across every page, not just the rows currently on screen. Sortable columns vary by tab: **Entities** — Name, Type, Created · **Edges** — From, Relation, To, Weight, Created · **Memories** — Created · **Chrono** — Title, Kind, Status, Starts, Ends, Created.
+**Sorting:** Click a column header with a caret (▾) to sort the list by that column — click again to flip the direction, and a third time to return to the default order. The caret fills in and points up or down to show the active sort. Sorting happens on the server, so it orders the **whole** list across every page, not just the rows currently on screen. Sortable columns vary by tab: **Entities** — Name, Type, Created · **Edges** — From, Relation, To, Weight, Created · **Facts** — Created · **Chrono** — Title, Kind, Status, Starts, Ends, Created.
 
 **Editing:** Click the **⊙ view-details** button on any row to open the full editable drawer — the same drawer
-the entity and edge tabs use. Every field you can set when creating a memory can be changed there, including
+the entity and edge tabs use. Every field you can set when creating a fact can be changed there, including
 tags, linked entities and properties.
 
 **Deleting:** Each row has a **✕** button. A small inline confirmation appears — click **Yes** to confirm, **No** to cancel.
@@ -85,7 +85,7 @@ When a **type** is selected and the space has a schema defined for that type, th
 - **Optional properties** — shown with a remove (×) button; any field left blank when you click Save is silently omitted from the stored record.
 - Switching the type dropdown **immediately rebuilds** the properties form for the newly selected type; values you have already filled in are preserved where the field name matches.
 
-**Searching:** The top search bar is a **semantic entity finder** — type to see meaning-ranked matches in a dropdown, then click one to narrow the list to it (it fills the Name column filter). For an **exact / partial name** lookup (e.g. a specific ID like `ADR002`), use the **freetext box under the Name column** — semantic recall is poor at exact IDs, so the column filter is the reliable path. Column filters and sorting work as on Memories.
+**Searching:** The top search bar is a **semantic entity finder** — type to see meaning-ranked matches in a dropdown, then click one to narrow the list to it (it fills the Name column filter). For an **exact / partial name** lookup (e.g. a specific ID like `ADR002`), use the **freetext box under the Name column** — semantic recall is poor at exact IDs, so the column filter is the reliable path. Column filters and sorting work as on Facts.
 
 **Editing:** Click the ⊙ view-details button on any row to open the full editable drawer.
 
@@ -102,7 +102,7 @@ afterwards, or widen the rule on the space's Schema tab.
 **Deleting:** Each row has an inline **✕ → confirm** flow.
 
 **A delete can be refused, and that is usually the right answer.** If anything else in the space still points
-at the entity — a link you drew, or a memory, timeline entry or file that names it — the delete is turned away
+at the entity — a link you drew, or a fact, timeline entry or file that names it — the delete is turned away
 and the message lists what is holding it. Clearing those first is deliberate: deleting the entity would leave
 every one of them pointing at a record that no longer exists.
 
@@ -130,18 +130,18 @@ Edges connect two records and describe the relationship between them (e.g. *serv
 
 Each edge has a **from** record, a **to** record, a **label** (the relationship name), and optional **type**, **weight**, **tags**, **description**, and **properties**.
 
-**From 3.7 an endpoint does not have to be an entity.** Either end can be an entity, a memory, a chrono entry
+**From 3.7 an endpoint does not have to be an entity.** Either end can be an entity, a fact, a chrono entry
 or a file, and the edge records which kind it is. Think of a photo taken at a party: the photo can point at
-the people in it (entities), at the party itself (a chrono event), and at what happened there (a memory) —
+the people in it (entities), at the party itself (a chrono event), and at what happened there (a fact) —
 three different kinds of record, from one file.
 
 > **The Edges tab still creates entity-to-entity edges only.** The pickers offer entities, and an edge you
 > create here has no kind recorded, which means entity — exactly what it meant before 3.7. Edges with other
 > kinds of endpoint are written through the API or by an agent. They **display** properly in this table: a
-> memory endpoint shows its fact, a chrono endpoint its title, a file endpoint its path. Pickers for the other
+> fact endpoint shows its fact, a chrono endpoint its title, a file endpoint its path. Pickers for the other
 > three kinds are not in this release.
 
-**Searching:** The top search bar is **Semantic** (ranks edges by meaning), same as Memories. Plain-text matching (label / endpoint names) is the **freetext box under the Relation column**.
+**Searching:** The top search bar is **Semantic** (ranks edges by meaning), same as Facts. Plain-text matching (label / endpoint names) is the **freetext box under the Relation column**.
 
 **Creating an edge:** Click **+ Add edge**. Use the entity pickers to select the source and target, choose or type a label, and click **Save**.
 
@@ -163,20 +163,20 @@ When a **label** is selected and the space has a schema defined for that label, 
 ### Links — the other kind of connection
 
 An edge says **how** two things relate. A link says only that one record **is about** another, and that is
-a different thing you already use every day: the entities you attach to a memory, the entities and memories
+a different thing you already use every day: the entities you attach to a fact, the entities and facts
 you attach to a chrono entry, the three lists on a file. Those attachments are links.
 
 They have always existed as lists on the record. From 4.0 each one is also a record of its own, so that
 everything asking *"what is connected to this?"* — the graph, search, the ER model — looks in one place
 instead of each following a different part of the lists.
 
-**Nothing you do changes — but you will see MORE.** Attach an entity to a memory the way you always have and
+**Nothing you do changes — but you will see MORE.** Attach an entity to a fact the way you always have and
 the link is made for you. Remove it and the link goes. There is no new box to tick and no new step.
 
 What is new is that three kinds of connection you could already record are finally followed: a timeline
-entry pointing at a **memory**, and a file pointing at a **memory** or at a **timeline entry**. Those
+entry pointing at a **fact**, and a file pointing at a **fact** or at a **timeline entry**. Those
 attachments have been saved and shown on the record since 3.x, and nothing that walked the graph looked at
-them — so a graph from a memory did not reach the timeline entry about it. It does now, on every space,
+them — so a graph from a fact did not reach the timeline entry about it. It does now, on every space,
 with nothing to run.
 
 **Where to see them:** the **Query** tab, Advanced mode, with the collection picker set to **links** — one
@@ -196,9 +196,9 @@ Converting a space (an administrator runs it once) turns the connection lists in
 things follow. **Nothing changes on a space nobody has converted.**
 
 **1. Deleting a record that something still points at is refused** — but only in a space with the strict
-reference setting on. Delete a memory that a timeline entry refers to and you get a message naming what refers
+reference setting on. Delete a fact that a timeline entry refers to and you get a message naming what refers
 to it, instead of the delete going through. This is a **change**: it always went through before, and the
-timeline entry was quietly left pointing at a memory that was no longer there.
+timeline entry was quietly left pointing at a fact that was no longer there.
 
 **2. Writing the old connection lists through the API is refused**, with the error naming the link endpoint to
 use instead. Nothing you have stored is lost — the lists are still read, still saved and still copied between
@@ -210,7 +210,7 @@ instances. The tabs are unaffected: attaching a record still works exactly as it
 
 Chrono stores time-anchored entries: events, deadlines, plans, predictions, and milestones.
 
-**Creating an entry:** Click **+ Add entry**. Required fields are **title**, **type**, and **starts at** (date and time). You can also add a description, tags, status, linked **entities**, linked **memories**, and **properties** — the memory field is a searchable picker (type to find a memory by its fact and click to link it; linked memories show as chips), and the properties editor lets you fill in any fields the chrono type's schema defines (switching the type reseeds its property fields). The same pickers and properties editor are available when editing an entry in its detail drawer.
+**Creating an entry:** Click **+ Add entry**. Required fields are **title**, **type**, and **starts at** (date and time). You can also add a description, tags, status, linked **entities**, linked **facts**, and **properties** — the fact field is a searchable picker (type to find a fact by its fact and click to link it; linked facts show as chips), and the properties editor lets you fill in any fields the chrono type's schema defines (switching the type reseeds its property fields). The same pickers and properties editor are available when editing an entry in its detail drawer.
 
 > **Clearing a property on a chrono entry works from 3.1.** Properties are *merged* when you save — the ones
 > you do not touch are kept — so before 3.1 an API caller had no way to remove one at all and a stale key
@@ -303,7 +303,7 @@ same as a reranker scoring nothing.
 instance was able to write one. What is missing from a short graph are records the walk never read; the
 results themselves are unaffected.
 
-**You can create a record and its relationships in one go.** Anything that writes a memory, an entity or a
+**You can create a record and its relationships in one go.** Anything that writes a fact, an entity or a
 timeline entry — the app, the API, or an AI assistant — can attach it to other records in the same action,
 rather than saving it and then connecting it four more times. Two kinds of connection, and they behave
 differently when you change them later:
@@ -335,7 +335,7 @@ Two options sit next to the query box:
 is a capability you do not know you have. Everything the API accepts is on screen, so a search you can
 describe is a search you can run without writing a request by hand:
 
-- **Types** — restrict the search to specific record types (memory, entity, edge, chrono). For each ticked type you can also set a per-type **minimum** number of results to guarantee.
+- **Types** — restrict the search to specific record types (fact, entity, edge, chrono). For each ticked type you can also set a per-type **minimum** number of results to guarantee.
 - **Max per type** — the ceiling to that floor. This is how you stop one long file passage from crowding out several one-line records that would answer the question more cheaply; a slot freed by the cap goes to another type.
 - **Tags** — a tag filter applied to results.
 - **Fields returned** — a JSON object choosing which fields each result carries, e.g. `{ "description": 1 }`; it can exclude as well as include. Leave it empty for whole records. Worth being careful with rather than clever: a selection that omits the field you are reading gives you a result that looks complete and is missing the answer.
@@ -359,7 +359,7 @@ the same answer. Two uses, and the second is the reason it is there:
   - **Follow edges** — outward, inward, or both. It is not a detail: outward from a person reaches what they own, inward reaches who named them, and a walk that ignores the difference answers a different question and looks identical. Leave it on *Server default* to let the instance decide.
   - **Only these edge labels** — follow just these relationship types, comma-separated. This matters most on a space where a few records are connected to almost everything: an unnarrowed hop off one of those returns whichever neighbours fitted, and nothing distinguishes that from a deliberate answer.
 
-  **The walk follows edges only, unless you ask for more.** A memory, timeline entry or file that names an entity is related to it — but that link is a field on the record, not an edge, so the hops above do not follow it. Three checkboxes turn each kind on: **Also return chrono entries / memories / files reached**. They are off by default because a search answer has a size budget and each match is counted together with everything hanging off it, so records nobody asked for are paid for in answers that no longer fit. With one on, a match that is itself a memory also stops coming back with an empty neighbourhood — the walk starts from the entities that memory names.
+  **The walk follows edges only, unless you ask for more.** A fact, timeline entry or file that names an entity is related to it — but that link is a field on the record, not an edge, so the hops above do not follow it. Three checkboxes turn each kind on: **Also return chrono entries / facts / files reached**. They are off by default because a search answer has a size budget and each match is counted together with everything hanging off it, so records nobody asked for are paid for in answers that no longer fit. With one on, a match that is itself a fact also stops coming back with an empty neighbourhood — the walk starts from the entities that fact names.
 - **When the surroundings do not fit** — a search that reaches more connected records than it can show returns
   the ones nearest your matches and writes the *whole* neighbourhood to a downloadable file in the space, valid
   for a day. The result says both: how many it showed, and where the complete set is. A short graph would
@@ -417,7 +417,7 @@ the same answer. Two uses, and the second is the reason it is there:
 - **Include fresh writes** — also scan the newest records directly, so something written seconds ago is findable before the index has caught up. It costs an extra scan per record type, so turn it on when you are looking for something you just wrote.
 - **Include content** — on by default. Turn it off to get passage *locations* without their text: useful when you want to find which document holds something and read only that part, since passage bodies are the largest thing a result carries.
 - **Include diagnostic fields** — off by default, and off is right for ordinary searching. Turn it on to see *why* a result ranked where it did: the exact text that was embedded, the embedding model, the sync counter, and the score from each ranking stage separately. It follows graph hops too, at every depth, so a search with **Graph hops** set shows the same detail on the connected records. The embedding vector itself is never returned and there is no option that asks for it.
-- **Include storage bookkeeping** — off by default, and off is what you want almost always. A result normally tells you what was remembered; this adds back where it is filed: when the record was written, when it was last changed, and the ids of everything it is linked to. Those fields are large and repeat on every result — measured on a real space, only about a third of an answer was the remembered content and most of the rest was this — so leaving it off gets you more actual memory inside the same size limit. One trap worth knowing: the creation date is when the RECORD was written, not when the thing you are remembering happened. That date lives in the record’s own properties, put there by whoever stored it.
+- **Include storage bookkeeping** — off by default, and off is what you want almost always. A result normally tells you what was remembered; this adds back where it is filed: when the record was written, when it was last changed, and the ids of everything it is linked to. Those fields are large and repeat on every result — measured on a real space, only about a third of an answer was the remembered content and most of the rest was this — so leaving it off gets you more actual fact inside the same size limit. One trap worth knowing: the creation date is when the RECORD was written, not when the thing you are remembering happened. That date lives in the record’s own properties, put there by whoever stored it.
 
 **If a search fails, read whether it says it can be retried.** Some failures are the question — a filter the
 system cannot parse, a value out of range — and those will fail the same way however many times you try. But a
@@ -429,7 +429,7 @@ and word-matching searches and the structured Query tab keep working throughout,
 same index.
 **Results that exist in the graph carry a graph button.** An entity result opens the Graph tab focused on that
 entity; an edge result opens it on the entity the relationship starts from — the same jump the Entities and Edges
-tabs offer. Memories, chrono entries and file passages have no node in the graph, so they show no button rather
+tabs offer. Facts, chrono entries and file passages have no node in the graph, so they show no button rather
 than one that lands nowhere.
 
 **File results are grouped by document.** Searching over files matches *passages*, not whole documents, so a
@@ -478,9 +478,9 @@ every other instance, the next time anybody rebuilt that space's search index.
 
 #### Advanced Query
 
-Runs a structured MongoDB-style query against one collection. Select a collection (`memories`, `entities`, `edges`, `chrono`, `files`, or `links`), optionally set a **limit** and **max time (ms)**, enter a filter as JSON, and click **Run**. Results appear below.
+Runs a structured MongoDB-style query against one collection. Select a collection (`facts`, `entities`, `edges`, `chrono`, `files`, or `links`), optionally set a **limit** and **max time (ms)**, enter a filter as JSON, and click **Run**. Results appear below.
 
-**`links` is the newest one and it is worth knowing what it holds.** When a memory, a chrono entry or a file
+**`links` is the newest one and it is worth knowing what it holds.** When a fact, a chrono entry or a file
 names other records — the "related entities" and similar fields — each of those mentions is also stored as its
 own small record in `links`. Nothing new to fill in: you still write the connection on the record itself, and
 this collection is where you can list them, count them, or find the ones pointing at something. A row is just
@@ -494,7 +494,7 @@ Example — find all entities of type `service`:
 { "type": "service" }
 ```
 
-Example — find memories tagged `infra`:
+Example — find facts tagged `infra`:
 
 ```json
 { "tags": "infra" }
@@ -504,7 +504,7 @@ Example — find memories tagged `infra`:
 
 ### File metadata (merged into Files)
 
-There is no longer a separate **File Meta** tab. The metadata Ythril keeps for each uploaded file — the searchable side of a file (its caption/extracted text, tags, and links to entities, memories, and chrono entries) as distinct from the raw bytes — lives in the **[Files](03-files-and-schemas.md#files)** tab, so files and their metadata are one explorer-style view. Each file row shows its **embedding status** (or a live stage bar while it is being processed) and its **tags** inline, and opening a file docks a detail pane beside the preview with the full metadata record — description, tags, entity/memory/chrono links. See [Files](03-files-and-schemas.md#files).
+There is no longer a separate **File Meta** tab. The metadata Ythril keeps for each uploaded file — the searchable side of a file (its caption/extracted text, tags, and links to entities, facts, and chrono entries) as distinct from the raw bytes — lives in the **[Files](03-files-and-schemas.md#files)** tab, so files and their metadata are one explorer-style view. Each file row shows its **embedding status** (or a live stage bar while it is being processed) and its **tags** inline, and opening a file docks a detail pane beside the preview with the full metadata record — description, tags, entity/fact/chrono links. See [Files](03-files-and-schemas.md#files).
 
 ---
 
@@ -526,8 +526,8 @@ you land on the neighbourhood rather than on a lone node — then adjust with th
 Edges table the view is centred on the edge's **from** endpoint; the `to` endpoint is one hop away, so the
 edge itself is always on the canvas.
 
-The Memories, Chrono and Files tables have no such button, because a graph always STARTS from an entity.
-Those records are reachable *within* a graph — turn on the matching toggle and a walk brings back the memories,
+The Facts, Chrono and Files tables have no such button, because a graph always STARTS from an entity.
+Those records are reachable *within* a graph — turn on the matching toggle and a walk brings back the facts,
 timeline entries and files that mention what it passes through, and from 4.0 the ones that mention each other
 as well. What they cannot be is the starting point. Use the **Entities** column in those tables to find the
 entity you want, then open the graph from there.
@@ -538,7 +538,7 @@ entity you want, then open the graph from there.
 |---------|-------------|
 | **Search** | Find and load an entity as the root node |
 | **Depth** | How many hops out from the root to show (1–10) |
-| **Direction** | Show outbound edges, inbound edges, or both. It applies to the edges you drew between entities — not to the memories, timeline entries and files that merely MENTION an entity. A mention runs one way, from the record to the entity, so there is no second direction to choose and those are always reached the same way |
+| **Direction** | Show outbound edges, inbound edges, or both. It applies to the edges you drew between entities — not to the facts, timeline entries and files that merely MENTION an entity. A mention runs one way, from the record to the entity, so there is no second direction to choose and those are always reached the same way |
 | **Labels** | Toggle edge labels. The pill is lit when labels are SHOWN, so switching it off hides them — this row called the control *Hide labels*, which is what it does rather than what it says. By default a label is shown only on the edges of the node you have selected, and on an edge you hover — labelling every edge at once is unreadable on a dense graph, because the labels overlap each other and the nodes |
 | **Fit** | Zoom to fit the whole graph in view |
 | **Reset** | Clear the graph |
@@ -550,9 +550,9 @@ entity you want, then open the graph from there.
 - **Click** an edge to see its details in a popup.
 - The **👁** icon on nodes and edges opens a full detail popup.
 
-The detail panel below the canvas shows all memories and chrono entries linked to the selected entity. Use the type filter and description filter to narrow what you see.
+The detail panel below the canvas shows all facts and chrono entries linked to the selected entity. Use the type filter and description filter to narrow what you see.
 
-**Editing from the graph:** click any memory or chrono row in that panel to open the same editable detail drawer used on the Brain tabs — including tag suggestions, the entity and memory pickers, and the property fields defined by the record type's schema. Saving updates the row in the panel behind it.
+**Editing from the graph:** click any fact or chrono row in that panel to open the same editable detail drawer used on the Brain tabs — including tag suggestions, the entity and fact pickers, and the property fields defined by the record type's schema. Saving updates the row in the panel behind it.
 
 ---
 
@@ -613,7 +613,7 @@ record, **link** the two as a contradiction, or pick a winner with **Keep A** / 
 **Keep A / Keep B** is usually what you actually mean: *this one is right, that one is stale*. It records who
 decided, marks the other record as superseded, and — for two entities — draws the `supersedes` edge for you.
 **Nothing is deleted.** The superseded record stays exactly where it was, now labelled, because it was true
-once and that history is often the reason you were looking. For a memory or chrono pair the decision is still
+once and that history is often the reason you were looking. For a fact or chrono pair the decision is still
 recorded, but no edge is drawn (edges connect entities) and the app tells you so rather than letting you
 assume the graph changed.
 
@@ -630,14 +630,14 @@ unreachable, it says so: nothing was judged, which is not the same answer as not
 An empty list tells you *which* empty it is. With no entailment model configured it says so and names what
 still ran — the deterministic field check runs regardless, so contradiction detection is never simply off.
 
-Memories, entities and **chrono entries** are reviewed. For a chrono pair, a field conflict includes its
+Facts, entities and **chrono entries** are reviewed. For a chrono pair, a field conflict includes its
 **status** — the same event logged twice, once as *completed* and once as *cancelled*, is exactly the kind of
 disagreement worth your attention. The **dates** are deliberately left out: two hand-logged occurrences of a
 repeating event ("Team sync", every Monday) would otherwise be reported as contradicting each other every
 single week, which is the fastest way to make a review queue not worth reading.
 
 **Filtering by record type:** a **Record type** dropdown under the sub-tabs narrows *both* views to one kind
-of record — handy once a space's queue mixes memories, entities and chrono entries. It lists only the types
+of record — handy once a space's queue mixes facts, entities and chrono entries. It lists only the types
 actually present, and disappears when everything is the same type. If a filter empties the list, the page
 says *no findings of this type* rather than pretending the queue is clear.
 
@@ -651,7 +651,7 @@ A summary row at the top shows how many pairs are **open**, the **average match 
 
 **Dismissed pairs stay dismissed** — a routine re-embed, a peer re-sync, or an index rebuild no longer drags them back onto the list the way they used to. A dismissed pair **only resurfaces on its own when its content materially changes** (a real edit to one of the records); a re-write that leaves the content the same keeps it dismissed. To bring one back for review sooner, switch the filter to **dismissed** (or **all**) and use **Re-rate** on the card.
 
-The scanner sweeps **memories, entities and chrono entries** by default — logging the same event twice is one of the commonest ways a knowledge base goes redundant.
+The scanner sweeps **facts, entities and chrono entries** by default — logging the same event twice is one of the commonest ways a knowledge base goes redundant.
 
 **Per-space rules:** how the scanner reacts is configured per space on the **Settings → Spaces → (space) → Duplicates** tab. Each rule pairs a **minimum-confidence slider** with an action — `flag` a pair for review, `automerge` it (asks for confirmation, since it's destructive and unattended), or `notify` a webhook. With no rules, pairs are simply flagged for review. You also choose which record survives a merge (older or newer). The scanner is opt-in and off by default.
 

@@ -58,7 +58,7 @@ describe('textContains', () => {
 
 describe('every record type filters its own description column', () => {
   const SITES = [
-    ['server/src/api/brain/_shared.ts', 'memories'],
+    ['server/src/api/brain/_shared.ts', 'facts'],
     ['server/src/api/brain/entities.ts', 'entities'],
     ['server/src/brain/edges.ts', 'edges'],
     ['server/src/brain/chrono.ts', 'chrono'],
@@ -75,7 +75,7 @@ describe('every record type filters its own description column', () => {
   it('leaves `search` spanning its documented field set', () => {
     // Narrowing `search` to one field would silently break every integration using it.
     const src = readFileSync(new URL('../../server/src/brain/text-search.js'.replace('.js', '.ts'), import.meta.url), 'utf8');
-    assert.ok(src.includes("memories: ['fact', 'description']"), 'search must still span both');
+    assert.ok(src.includes("facts: ['fact', 'description']"), 'search must still span both');
     assert.ok(src.includes("entities: ['name', 'description']"), 'search must still span both');
   });
 });
@@ -196,7 +196,7 @@ describe('entity-NAME column filters (From / To / Entities)', () => {
   it('resolves per MEMBER, not once for the whole proxy space', () => {
     // Ids belong to the member that owns them; resolving against another member's entities would match
     // nothing while looking like it worked.
-    for (const f of ['edges.ts', 'memories.ts', 'chrono.ts']) {
+    for (const f of ['edges.ts', 'facts.ts', 'chrono.ts']) {
       const src = readFileSync(new URL(`../../server/src/api/brain/${f}`, import.meta.url), 'utf8');
       // The PROPERTY, not the shape that used to express it. This line required
       // `collectAcrossMembers(spaceId, async mid =>` until the list routes moved onto the shared pager, at which point the

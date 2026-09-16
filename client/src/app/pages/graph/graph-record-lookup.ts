@@ -45,7 +45,7 @@ export type RecordLookup =
  * `kind` is the node's own, from `TraverseNode.kind`; absent means an entity, which is every node the graph
  * carried before chrono/memory/file links became reachable.
  */
-export function lookupForNode(kind: 'chrono' | 'memory' | 'file' | undefined): RecordLookup {
+export function lookupForNode(kind: 'chrono' | 'fact' | 'file' | undefined): RecordLookup {
   if (kind === 'file') return { unavailable: 'file' };
   return { fetch: kind ?? 'entity' };
 }

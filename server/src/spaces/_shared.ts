@@ -88,7 +88,7 @@ export function setReindexNeeded(spaceId: string, needed: boolean): void {
  * each document is redundant — but the read paths filter on it (`listEntities`,
  * `findEntityByName`, the edge-dedup lookup, the cascade deletes). If the field goes stale,
  * the data is still counted (counts read the collection) but becomes INVISIBLE to every
- * list and lookup — and worse, `findEntityByName` stops matching, so `remember` starts
+ * list and lookup — and worse, `findEntityByName` stops matching, so `saveFact` starts
  * creating duplicate entities instead of linking to the existing one.
  *
  * Two paths used to leave it stale:

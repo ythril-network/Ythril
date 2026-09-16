@@ -49,12 +49,14 @@ export interface RenameOutcome {
   renamed: string[];
   skipped: string[];
   conflicts: string[];
+  /** Webhook subscriptions whose `memory.*` events were rewritten to `fact.*`. */
+  webhookEvents: number;
 }
 
 export async function renameMemoriesToFacts(): Promise<RenameOutcome> {
   const db = getDb();
   const names = (await db.listCollections({}, { nameOnly: true }).toArray()).map(c => c.name);
-  const out: RenameOutcome = { renamed: [], skipped: [], conflicts: [] };
+  const out: RenameOutcome = { renamed: [], skipped: [], conflicts: [], webhookEvents: 0 };
 
   for (const from of names.filter(n => n.endsWith(OLD_SUFFIX))) {
     const to = from.slice(0, -OLD_SUFFIX.length) + NEW_SUFFIX;
@@ -81,5 +83,31 @@ export async function renameMemoriesToFacts(): Promise<RenameOutcome> {
   if (out.renamed.length > 0) {
     log.info(`Renamed ${out.renamed.length} collection(s) from ${OLD_SUFFIX} to ${NEW_SUFFIX}.`);
   }
+
+  /*
+   * AND THE WEBHOOK SUBSCRIPTIONS, which are stored here rather than in the config file.
+   *
+   * A hook subscribed to `memory.created` stops firing the moment nothing emits that name — and it stays
+   * listed, stays enabled, and never delivers again. No error, no warning, no metric: the same silent
+   * shape as the collection this file is named for, which is why it belongs in the same migration.
+   *
+   * Deduped through a Set, so a hook already carrying both spellings does not end up with the new one
+   * twice.
+   */
+  const RENAMED_EVENTS = { 'memory.created': 'fact.created', 'memory.updated': 'fact.updated',
+    'memory.deleted': 'fact.deleted' } as Record<string, string>;
+  const hooks = await db.collection('_webhooks')
+    .find({ events: { $in: Object.keys(RENAMED_EVENTS) } }).toArray();
+  for (const hook of hooks) {
+    const events = Array.isArray(hook['events']) ? (hook['events'] as string[]) : [];
+    const next = [...new Set(events.map(e => RENAMED_EVENTS[e] ?? e))];
+    await db.collection('_webhooks').updateOne({ _id: hook['_id'] }, { $set: { events: next } });
+    out.webhookEvents += 1;
+  }
+  if (out.webhookEvents > 0) {
+    log.info(`Renamed memory.* events to fact.* on ${out.webhookEvents} webhook subscription(s). `
+      + 'Nothing emits the old names, so they would never have fired again.');
+  }
+
   return out;
 }

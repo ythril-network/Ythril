@@ -2,12 +2,12 @@ import { ChangeDetectionStrategy, Component, input, model, output } from '@angul
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TranslocoPipe } from '@jsverse/transloco';
-import { Memory, ChronoEntry } from '../../core/api.types';
+import { Fact, ChronoEntry } from '../../core/api.types';
 import { DetailRef } from './graph-details';
 import { GRAPH_LINKED_RECORDS_STYLES } from './graph.styles';
 
 /**
- * The "linked memories + chrono entries" lists shown beneath a selected node or edge.
+ * The "linked facts + chrono entries" lists shown beneath a selected node or edge.
  *
  * Extracted because the graph page rendered this block TWICE — once in the node side panel, once in
  * the edge side panel — byte-identical apart from the two empty-state translation keys. Two copies of
@@ -33,7 +33,7 @@ import { GRAPH_LINKED_RECORDS_STYLES } from './graph.styles';
       <select [ngModel]="typeFilter()" (ngModelChange)="typeFilter.set($event)" name="detailType"
               [attr.aria-label]="'graph.panel.filterTypeAriaLabel' | transloco">
         <option value="all">{{ 'graph.panel.filterAll' | transloco }}</option>
-        <option value="memory">{{ 'graph.panel.memories' | transloco }}</option>
+        <option value="fact">{{ 'graph.panel.facts' | transloco }}</option>
         <option value="chrono">{{ 'graph.panel.chrono' | transloco }}</option>
       </select>
       <input type="search" [ngModel]="descFilter()" (ngModelChange)="descFilter.set($event)" name="detailDesc"
@@ -42,11 +42,11 @@ import { GRAPH_LINKED_RECORDS_STYLES } from './graph.styles';
     </div>
     <div class="list-section">
       <div class="list-section-header">
-        {{ 'graph.panel.memories' | transloco }} <span class="count-chip">{{ memories().length }}</span>
+        {{ 'graph.panel.facts' | transloco }} <span class="count-chip">{{ facts().length }}</span>
       </div>
       <div class="list-body">
-        @for (m of memories(); track m._id) {
-          <div class="list-row" (click)="open.emit({ id: m._id, kind: 'memory' })">
+        @for (m of facts(); track m._id) {
+          <div class="list-row" (click)="open.emit({ id: m._id, kind: 'fact' })">
             <span class="list-row-text" [title]="m.fact || m.description">{{ m.fact || m.description || '—' }}</span>
             <span class="list-row-date">{{ m.createdAt | date:'dd.MM.yy' }}</span>
           </div>
@@ -73,7 +73,7 @@ import { GRAPH_LINKED_RECORDS_STYLES } from './graph.styles';
   `,
 })
 export class GraphLinkedRecordsComponent {
-  memories = input.required<Memory[]>();
+  facts = input.required<Fact[]>();
   chrono = input.required<ChronoEntry[]>();
 
   /**
@@ -85,7 +85,7 @@ export class GraphLinkedRecordsComponent {
    *
    * Always rendered — both panels want it, so a `showFilters` toggle would be a knob with no caller.
    */
-  typeFilter = model<'all' | 'memory' | 'chrono'>('all');
+  typeFilter = model<'all' | 'fact' | 'chrono'>('all');
   descFilter = model<string>('');
 
   /** Translation key for "this node/edge has no memories". Differs per panel, on purpose. */

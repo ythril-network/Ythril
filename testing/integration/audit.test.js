@@ -52,14 +52,14 @@ describe('Audit Log', () => {
     // (entryGroup on the route), so we can prove THIS op was logged (S8.7).
     const beforeTs = new Date().toISOString();
 
-    const memR = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/memories', {
+    const memR = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/facts', {
       fact: 'Audit test fact ' + Date.now(),
       tags: ['audit-test'],
     });
     assert.equal(memR.status, 201, 'Memory creation should succeed');
     const memId = memR.body._id;
 
-    const patchR = await patch(INSTANCES.a, tokenA, `/api/brain/spaces/general/memories/${memId}`, {
+    const patchR = await patch(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${memId}`, {
       description: 'audited update',
     });
     assert.equal(patchR.status, 200, `update should succeed: ${JSON.stringify(patchR.body)}`);
@@ -83,7 +83,7 @@ describe('Audit Log', () => {
     assert.equal(createLog.status, 200);
     assert.ok(typeof createLog.body.total === 'number', 'total should be a number');
     assert.ok(typeof createLog.body.hasMore === 'boolean', 'hasMore should be a boolean');
-    const createEntry = createLog.body.entries.find(e => e.operation === 'memory.create' && e.status === 201 && e.method === 'POST');
+    const createEntry = createLog.body.entries.find(e => e.operation === 'fact.create' && e.status === 201 && e.method === 'POST');
     assert.ok(createEntry, 'a memory.create entry from THIS test window must exist (status 201, after our timestamp)');
   });
 

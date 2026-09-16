@@ -31,7 +31,7 @@ Five kinds of record come out:
 | **entities** | the stable things the conversation keeps returning to |
 | **edges** | how two of them are related, and for how long |
 | **chrono** | anything that happened on a date, linked to what it concerns |
-| **memories** | the individual things said, each with a speaker and a date |
+| **facts** | the individual things said, each with a speaker and a date |
 | **files** | the verbatim transcript, one per session, so anything can be quoted exactly |
 
 ## Order of writing

@@ -17,11 +17,11 @@
  */
 import { TestBed } from '@angular/core/testing';
 import { describe, it, expect } from 'vitest';
-import type { ChronoEntry, Edge, Entity, Memory, SpaceMetaResponse } from '../../core/api.types';
+import type { ChronoEntry, Edge, Entity, Fact, SpaceMetaResponse } from '../../core/api.types';
 import { BrainStore } from './brain-store.service';
 
-const mem = (fact: string, over: Partial<Memory> = {}): Memory =>
-  ({ _id: fact, fact, tags: [], createdAt: '', seq: 1, ...over } as Memory);
+const mem = (fact: string, over: Partial<Fact> = {}): Fact =>
+  ({ _id: fact, fact, tags: [], createdAt: '', seq: 1, ...over } as Fact);
 const ent = (name: string, over: Partial<Entity> = {}): Entity =>
   ({ _id: name, name, tags: [], createdAt: '', ...over } as Entity);
 const edge = (label: string, over: Partial<Edge> = {}): Edge =>
@@ -46,7 +46,7 @@ describe('BrainStore — tag suggestions', () => {
   it('suggests the tags present on loaded records, deduped — and ignores the retired space-wide list', () => {
     const c = create();
     c.spaceMeta.set(meta(['schema-tag', 'shared']));
-    c.memories.set([mem('a', { tags: ['shared', 'from-record'] })]);
+    c.facts.set([mem('a', { tags: ['shared', 'from-record'] })]);
     expect(c.memoryTagSuggestions()).toEqual(['shared', 'from-record']);
   });
 
@@ -55,7 +55,7 @@ describe('BrainStore — tag suggestions', () => {
     // back into the UI through this path.
     const c = create();
     c.spaceMeta.set(meta(['schema-tag']));
-    c.memories.set([]);
+    c.facts.set([]);
     expect(c.memoryTagSuggestions()).toEqual([]);
   });
 
@@ -79,15 +79,15 @@ describe('BrainStore — tag suggestions', () => {
 describe('BrainStore — type options for the filter bar', () => {
   it('unions schema type names with the types actually present, deduped and sorted', () => {
     const c = create();
-    c.spaceMeta.set({ typeSchemas: { memory: { note: {}, decision: {} } } } as unknown as SpaceMetaResponse);
-    c.memories.set([mem('a', { type: 'observation' }), mem('b', { type: 'note' })]);
+    c.spaceMeta.set({ typeSchemas: { fact: { note: {}, decision: {} } } } as unknown as SpaceMetaResponse);
+    c.facts.set([mem('a', { type: 'observation' }), mem('b', { type: 'note' })]);
     expect(c.memoryTypeOptions()).toEqual(['decision', 'note', 'observation']);
   });
 
   it('records with no type contribute nothing', () => {
     const c = create();
-    c.spaceMeta.set({ typeSchemas: { memory: { note: {} } } } as unknown as SpaceMetaResponse);
-    c.memories.set([mem('a')]);
+    c.spaceMeta.set({ typeSchemas: { fact: { note: {} } } } as unknown as SpaceMetaResponse);
+    c.facts.set([mem('a')]);
     expect(c.memoryTypeOptions()).toEqual(['note']);
   });
 
@@ -124,7 +124,7 @@ describe('BrainStore — the chrono type allowlist mirrors the server', () => {
 
   it('falls back to the five built-ins when the space declares none', () => {
     const c = create();
-    c.spaceMeta.set({ typeSchemas: { memory: { note: {} } } } as unknown as SpaceMetaResponse);
+    c.spaceMeta.set({ typeSchemas: { fact: { note: {} } } } as unknown as SpaceMetaResponse);
     expect(c.chronoAllowedTypes()).toEqual(['event', 'deadline', 'plan', 'prediction', 'milestone']);
   });
 
@@ -200,10 +200,10 @@ describe('BrainStore — buildPropertiesObject (schema-seeded defaults)', () => 
     c.spaceMeta.set({ typeSchemas: {
       entity: { Person: { propertySchemas: { age: { type: 'number' } } } },
       edge: { depends_on: { propertySchemas: { critical: { type: 'boolean' } } } },
-      memory: { decision: { propertySchemas: { rationale: { type: 'string' } } } },
+      fact: { decision: { propertySchemas: { rationale: { type: 'string' } } } },
     } } as unknown as SpaceMetaResponse);
     expect(c.buildPropertiesObject('edge', {}, 'depends_on')).toEqual({ critical: false });
-    expect(c.buildPropertiesObject('memory', {}, 'decision')).toEqual({ rationale: '' });
+    expect(c.buildPropertiesObject('fact', {}, 'decision')).toEqual({ rationale: '' });
   });
 
   it('a type whose schema declares no properties leaves the existing object alone', () => {

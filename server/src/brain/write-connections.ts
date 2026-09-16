@@ -36,7 +36,7 @@
  * The operator asked us to state whether an update replaces or adds, having been caught before by tags that
  * union-merge and can never be removed. The answer already exists in the writer and is worth naming: a
  * class the caller NAMES is replaced wholesale, a class they omit is untouched. So `linkEntities: []`
- * detaches every entity and leaves the memory links alone, and there is no add-only trap to fall into.
+ * detaches every entity and leaves the fact links alone, and there is no add-only trap to fall into.
  *
  * This module does not implement that. It maps input to the shape `reconcileLinks` already takes — see the
  * `CLAUDE.md` rule on reusing a module rather than writing the rule a second time.
@@ -55,7 +55,7 @@ import type { WebhookActor } from '../webhooks/dispatcher.js';
  * The write field for each kind — DERIVED from the kind vocabulary, so a fifth kind gets its field on the
  * day it is declared rather than whenever somebody notices.
  *
- * `entity` → `linkEntities`, `memory` → `linkMemories`, `chrono` → `linkChronos`, `file` → `linkFiles`.
+ * `entity` → `linkEntities`, `fact` → `linkFacts`, `chrono` → `linkChronos`, `file` → `linkFiles`.
  */
 export const LINK_INPUT_FIELDS: Readonly<Record<RefKind, string>> = Object.freeze(
   Object.fromEntries(REF_KINDS.map(k => [k, `link${plural(k)}`])) as Record<RefKind, string>,
@@ -157,7 +157,7 @@ export function linkInputSchemas(): Record<string, unknown> {
  * ## Why this exists beside `link*` rather than inside it (`F-27`)
  *
  * The operator drew the line and it is the right one: *"A link is unlabelled. Which way it runs is fixed by
- * the kinds at its ends — a memory names entities and entities name nothing — so `linkEntities: [uuid]` is
+ * the kinds at its ends — a fact names entities and entities name nothing — so `linkEntities: [uuid]` is
  * complete on its own. An edge carries a LABEL, a DIRECTION that is data rather than derivable, and
  * optionally properties, tags, weight and type. `posted_by` and `addressed_to` from the same post to two
  * parties are two different facts, and no array of bare UUIDs can say which is which."*

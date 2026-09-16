@@ -70,7 +70,7 @@ describe('stamp skew reaches the stored record (real MongoDB)', { skip }, () => 
     mongo = await openTestMongo('stampskew');
     const loader = await import('../../server/dist/config/loader.js');
     loader.loadConfig();
-    memory = await import('../../server/dist/brain/memory.js');
+    memory = await import('../../server/dist/brain/fact.js');
     entities = await import('../../server/dist/brain/entities.js');
     edges = await import('../../server/dist/brain/edges.js');
     chrono = await import('../../server/dist/brain/chrono.js');
@@ -83,15 +83,15 @@ describe('stamp skew reaches the stored record (real MongoDB)', { skip }, () => 
 
   beforeEach(async () => {
     for (const space of [SPACE, OFF]) {
-      for (const c of ['memories', 'entities', 'edges', 'chrono']) await col(space, c).deleteMany({});
+      for (const c of ['facts', 'entities', 'edges', 'chrono']) await col(space, c).deleteMany({});
     }
   });
 
   it('a memory stamped eight hours early carries the skew', async () => {
     const stamp = eightHoursEarly();
-    const doc = await memory.remember(SPACE, 'stamped from an estimate', [], [], undefined, { postedAt: stamp });
+    const doc = await memory.saveFact(SPACE, 'stamped from an estimate', [], [], undefined, { postedAt: stamp });
 
-    const stored = await col(SPACE, 'memories').findOne({ _id: doc._id });
+    const stored = await col(SPACE, 'facts').findOne({ _id: doc._id });
     assert.ok(stored.stampSkew, 'the stored record must carry the skew — this is the whole feature');
     assert.equal(stored.stampSkew.property, 'postedAt');
     assert.equal(stored.stampSkew.stamp, stamp, 'the stamp is quoted as written');
@@ -104,22 +104,22 @@ describe('stamp skew reaches the stored record (real MongoDB)', { skip }, () => 
   });
 
   it('leaves a record with an ACCURATE stamp alone', async () => {
-    const doc = await memory.remember(SPACE, 'stamped from a measurement', [], [], undefined,
+    const doc = await memory.saveFact(SPACE, 'stamped from a measurement', [], [], undefined,
       { postedAt: new Date().toISOString() });
-    const stored = await col(SPACE, 'memories').findOne({ _id: doc._id });
+    const stored = await col(SPACE, 'facts').findOne({ _id: doc._id });
     assert.equal(stored.stampSkew, undefined,
       'a correct stamp must leave no field — a flag on every record teaches a reader to ignore it');
   });
 
   it('leaves a record with no stamp property alone', async () => {
-    const doc = await memory.remember(SPACE, 'no stamp at all', [], []);
-    assert.equal((await col(SPACE, 'memories').findOne({ _id: doc._id })).stampSkew, undefined);
+    const doc = await memory.saveFact(SPACE, 'no stamp at all', [], []);
+    assert.equal((await col(SPACE, 'facts').findOne({ _id: doc._id })).stampSkew, undefined);
   });
 
   it('stores nothing in a space that switched the check OFF', async () => {
-    const doc = await memory.remember(OFF, 'off by eight hours, unchecked', [], [], undefined,
+    const doc = await memory.saveFact(OFF, 'off by eight hours, unchecked', [], [], undefined,
       { postedAt: eightHoursEarly() });
-    assert.equal((await col(OFF, 'memories').findOne({ _id: doc._id })).stampSkew, undefined,
+    assert.equal((await col(OFF, 'facts').findOne({ _id: doc._id })).stampSkew, undefined,
       'warnMinutes: 0 disables the check rather than making it strictest');
   });
 
@@ -150,11 +150,11 @@ describe('stamp skew reaches the stored record (real MongoDB)', { skip }, () => 
   it('the integrity QUERY returns exactly the wrong records', async () => {
     // This is the deliverable in their words: "a cheap integrity check". If presence were not the signal, this query
     // would match every record in the space and answer nothing.
-    const bad = await memory.remember(SPACE, 'wrong', [], [], undefined, { postedAt: eightHoursEarly() });
-    await memory.remember(SPACE, 'right', [], [], undefined, { postedAt: new Date().toISOString() });
-    await memory.remember(SPACE, 'unstamped', [], []);
+    const bad = await memory.saveFact(SPACE, 'wrong', [], [], undefined, { postedAt: eightHoursEarly() });
+    await memory.saveFact(SPACE, 'right', [], [], undefined, { postedAt: new Date().toISOString() });
+    await memory.saveFact(SPACE, 'unstamped', [], []);
 
-    const flagged = await col(SPACE, 'memories').find({ stampSkew: { $exists: true } }).toArray();
+    const flagged = await col(SPACE, 'facts').find({ stampSkew: { $exists: true } }).toArray();
     assert.equal(flagged.length, 1, `expected exactly one flagged record, got ${flagged.length}`);
     assert.equal(flagged[0]._id, bad._id);
   });

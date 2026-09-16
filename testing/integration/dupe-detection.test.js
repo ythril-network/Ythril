@@ -1,7 +1,7 @@
 /**
  * Integration tests: Insert-time semantic duplicate detection
  *
- * Covers the F4 feature — the `remember` and `save_entity` MCP tools run an
+ * Covers the F4 feature — the `saveFact` and `save_entity` MCP tools run an
  * opt-in (default-on) near-duplicate check using the freshly computed embedding
  * and flag highly similar existing records in the response:
  *  - remember a near-identical memory → response flags the existing one
@@ -82,7 +82,7 @@ describe('Duplicate detection — remember', () => {
     const r1 = await session.callTool('save_fact', { space: SPACE, fact: first });
     const id1 = idFrom(r1?.content?.[0]?.text);
     assert.ok(id1, `first remember returned an id: ${r1?.content?.[0]?.text}`);
-    await waitForIndexed([id1], ['memory']);
+    await waitForIndexed([id1], ['fact']);
 
     const r2 = await session.callTool('save_fact', { space: SPACE, fact: dup });
     const text2 = r2?.content?.[0]?.text ?? '';

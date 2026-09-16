@@ -43,7 +43,7 @@ const { TypeSchemasZ } = await import('../../server/dist/spaces/body-schemas.js'
 /** A `typeSchemas` map with one type of one collection carrying `schema`. */
 const under = (collection, schema) => ({ [collection]: { thing: schema } });
 
-const ALL = ['entity', 'memory', 'edge', 'chrono'];
+const ALL = ['entity', 'fact', 'edge', 'chrono'];
 
 /** The message of the first issue, or `null` when the value was accepted. */
 function reject(value) {
@@ -75,7 +75,7 @@ describe('endpoints and functional are EDGE only', () => {
    * A list-driven rule needs a case per ROW, not per mechanism: the mechanism was covered by contentDays and
    * the rows were not.
    */
-  for (const c of ['entity', 'memory', 'chrono']) {
+  for (const c of ['entity', 'fact', 'chrono']) {
     it(`endpoints is refused on ${c}`, () => {
       const msg = reject(under(c, { endpoints: { from: ['person'] } }));
       assert.ok(msg, `${c} accepted endpoints, which names ends that ${c} records do not have`);
@@ -104,10 +104,10 @@ describe('endpoints and functional are EDGE only', () => {
 
   it('a reserved knowledge-type prefix is refused with a REASON', () => {
     /*
-     * `memory:note` must not be read as an entity type that happens to contain a colon. Refused now so the
+     * `fact:note` must not be read as an entity type that happens to contain a colon. Refused now so the
      * vocabulary can widen later without the grammar changing under anybody already using it.
      */
-    const msg = reject(under('edge', { endpoints: { from: ['memory:note'] } }));
+    const msg = reject(under('edge', { endpoints: { from: ['fact:note'] } }));
     assert.ok(msg, 'a reserved prefix was accepted as a type name');
     assert.match(msg, /reserved/i, 'the refusal must say the grammar is reserved rather than that it is invalid');
     assert.match(msg, /UNTYPED/, 'and point at the member for entities with no type');
@@ -115,7 +115,7 @@ describe('endpoints and functional are EDGE only', () => {
 });
 
 describe('retention.contentDays is CHRONO only, which was promised and not done', () => {
-  for (const c of ['entity', 'memory', 'edge']) {
+  for (const c of ['entity', 'fact', 'edge']) {
     it(`contentDays is refused on ${c}`, () => {
       const msg = reject(under(c, { retention: { contentDays: 30 } }));
       assert.ok(msg,
@@ -145,7 +145,7 @@ describe('whenDuePasses is CHRONO only, because only a chrono entry has a due mo
    * and the rows were not, and a mutation run found that only after the fields had shipped. `F-26` adds a
    * row, so it adds cases.
    */
-  for (const c of ['entity', 'memory', 'edge']) {
+  for (const c of ['entity', 'fact', 'edge']) {
     it(`whenDuePasses is refused on ${c}`, () => {
       const msg = reject(under(c, { whenDuePasses: 'nothing' }));
       assert.ok(msg,

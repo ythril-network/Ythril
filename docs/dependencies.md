@@ -294,7 +294,7 @@ same way in Compose and in Kubernetes:
 | No privilege escalation | `security_opt: [no-new-privileges:true]` | `allowPrivilegeEscalation: false` |
 | All Linux capabilities dropped | `cap_drop: [ALL]` | `capabilities.drop: [ALL]` |
 | Read-only root filesystem | `read_only: true` + a `/tmp` tmpfs | `readOnlyRootFilesystem: true` + an `emptyDir` |
-| Memory / CPU ceiling | `mem_limit` / `cpus` | `resources.limits.memory` / `.cpu` |
+| Fact / CPU ceiling | `mem_limit` / `cpus` | `resources.limits.fact` / `.cpu` |
 | Process (thread) ceiling | `pids_limit` | pod-level (`podPidsLimit` on the kubelet) |
 | Network isolation | separate bridge networks (`ythril-media`, internal `ythril-convert`) | `media-netpol.yaml` egress rules |
 

@@ -80,17 +80,17 @@ export interface RouteRight {
  * ## Why seven destructive rows ask for `write` rather than `admin`
  *
  * Owner ruling, 2026-08-13, after the difference was MEASURED rather than argued. A token carrying
- * `rights.perSpace.general.knowledge = 'write'` was refused `DELETE /memories/:id` with
+ * `rights.perSpace.general.knowledge = 'write'` was refused `DELETE /facts/:id` with
  * `403 Token needs 'admin' on knowledge in space 'general'` — and deleted the same record through MCP
  * `delete_fact` seconds later, because `mcp/router.ts` gates on the token's `readOnly`/`admin` FLAGS and never
  * consults the rung. One rule, two implementations, and the weaker one silently in charge.
  *
  * The ruling was to level DOWN, not up: **`write` is the right rung for deleting a single record you could have
- * created.** The rows are `/memories/:id`, `/entities/:id`, `/edges/:id`, `/chrono/:id`, the entity merge, `/bulk`,
+ * created.** The rows are `/facts/:id`, `/entities/:id`, `/edges/:id`, `/chrono/:id`, the entity merge, `/bulk`,
  * and `DELETE /api/files/:spaceId`.
  *
  * **What deliberately did NOT move:**
- * - The **collection wipes** (`DELETE /memories`, `/entities`, `/edges`, `/chrono`) stay `admin`. Their MCP
+ * - The **collection wipes** (`DELETE /facts`, `/entities`, `/edges`, `/chrono`) stay `admin`. Their MCP
  *   counterpart `delete_space_data` is `admin: true`, so those two doors already agree — and emptying a collection is not
  *   the same act as deleting a row.
  * - `DELETE /api/brain/spaces/:spaceId/files` (the file-META record) stays `admin`. No tool mirrors it, so
@@ -112,11 +112,11 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   { route: '/api/brain/spaces/:spaceId/stats', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/events', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/events/ticket', method: 'POST', area: 'knowledge', needs: 'read', scope: 'path' },
-  { route: '/api/brain/spaces/:spaceId/memories', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
-  { route: '/api/brain/spaces/:spaceId/memories', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
-  { route: '/api/brain/spaces/:spaceId/memories/:id', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
-  { route: '/api/brain/spaces/:spaceId/memories/:id', method: 'PATCH', area: 'knowledge', needs: 'write', scope: 'path' },
-  { route: '/api/brain/spaces/:spaceId/memories/:id', method: 'DELETE', area: 'knowledge', needs: 'write', scope: 'path' },
+  { route: '/api/brain/spaces/:spaceId/facts', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
+  { route: '/api/brain/spaces/:spaceId/facts', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
+  { route: '/api/brain/spaces/:spaceId/facts/:id', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
+  { route: '/api/brain/spaces/:spaceId/facts/:id', method: 'PATCH', area: 'knowledge', needs: 'write', scope: 'path' },
+  { route: '/api/brain/spaces/:spaceId/facts/:id', method: 'DELETE', area: 'knowledge', needs: 'write', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/entities', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/entities', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/entities/by-ids', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
@@ -152,7 +152,7 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   // COLLECTION-level deletes. Every one of these empties a whole record type in the space, and not one was
   // in the first draft of this list — the gate found them. They are the single most destructive thing in the
   // area and would have been the least governed.
-  { route: '/api/brain/spaces/:spaceId/memories', method: 'DELETE', area: 'knowledge', needs: 'admin', scope: 'path' },
+  { route: '/api/brain/spaces/:spaceId/facts', method: 'DELETE', area: 'knowledge', needs: 'admin', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/entities', method: 'DELETE', area: 'knowledge', needs: 'admin', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/edges', method: 'DELETE', area: 'knowledge', needs: 'admin', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/chrono', method: 'DELETE', area: 'knowledge', needs: 'admin', scope: 'path' },
@@ -165,7 +165,7 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   { route: '/api/brain/spaces/:spaceId/files/extract', method: 'GET', area: 'files', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/embedding-queue/media', method: 'GET', area: 'files', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/embedding-queue/media/retry-failed', method: 'POST', area: 'files', needs: 'write', scope: 'path' },
-  // The RECORD half of the queue is `knowledge`, not `files`: it reports on memories, entities, edges and chrono.
+  // The RECORD half of the queue is `knowledge`, not `files`: it reports on facts, entities, edges and chrono.
   // A files-only token can read the media queue and must not read a listing of knowledge record ids.
   { route: '/api/brain/spaces/:spaceId/embedding-queue/records', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/embedding-queue/records/retry', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
@@ -265,7 +265,7 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
  *
  * MCP gated on two BOOLEANS — `readOnly` and `admin` — while REST enforced a per-space, per-area rung. Same
  * store, same policy, two enforcement models, and the weaker one was reachable: a token whose matrix said
- * `knowledge: write` was refused `DELETE /memories/:id` over REST with a 403 and allowed the identical
+ * `knowledge: write` was refused `DELETE /facts/:id` over REST with a 403 and allowed the identical
  * delete through `delete_fact`. That was measured against a running instance, not reasoned about.
  *
  * ## Why it is generated from ROUTE_RIGHTS rather than written

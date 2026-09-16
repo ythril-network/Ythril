@@ -200,7 +200,7 @@ export const syncRateLimit = rateLimit({
   skip: () => skipRateLimit('SKIP_SYNC_RATE_LIMIT'),
 });
 
-/** 5 requests/minute per CLIENT — destructive bulk operations (memory wipe) */
+/** 5 requests/minute per CLIENT — destructive bulk operations (fact wipe) */
 export const bulkWipeRateLimit = rateLimit({
   windowMs: 60_000,
   max: 5,

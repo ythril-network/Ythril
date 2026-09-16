@@ -29,11 +29,11 @@ const {
 const { spaceTtlDays } = await import('../../server/dist/brain/chrono-retention.js');
 
 const ROOT = process.cwd();
-const ALL5 = { entity: 90, memory: 90, edge: 90, chrono: 90, file: 90 };
+const ALL5 = { entity: 90, fact: 90, edge: 90, chrono: 90, file: 90 };
 
 describe('the space retention tier has five buckets', () => {
   it('names all five, with file last', () => {
-    assert.deepEqual([...TTL_BUCKETS], ['entity', 'memory', 'edge', 'chrono', 'file']);
+    assert.deepEqual([...TTL_BUCKETS], ['entity', 'fact', 'edge', 'chrono', 'file']);
   });
 
   it('reads a legacy scalar as every bucket — forever, not migrated', () => {
@@ -49,7 +49,7 @@ describe('the space retention tier has five buckets', () => {
     assert.equal(spaceTtlDays({ recordTtlDays: stored }, 'file'), 30);
     assert.equal(spaceTtlDays({ recordTtlDays: stored }, 'entity'), undefined);
     assert.deepEqual(recordTtlWindows(stored),
-      { entity: null, memory: null, edge: null, chrono: 90, file: 30 });
+      { entity: null, fact: null, edge: null, chrono: 90, file: 30 });
   });
 
   it('treats a 0, a null and an absent bucket the same: no window', () => {
@@ -78,14 +78,14 @@ describe('normaliseRecordTtl — what a write stores', () => {
   it('a partial object over a stored SCALAR keeps the other four on that number', () => {
     // The scalar meant "all five". Mentioning one bucket must not silently drop the other four to nothing.
     assert.deepEqual(normaliseRecordTtl(90, { chrono: 30 }),
-      { entity: 90, memory: 90, edge: 90, chrono: 30, file: 90 });
+      { entity: 90, fact: 90, edge: 90, chrono: 30, file: 90 });
   });
 
   it('a per-bucket 0 or null clears just that bucket', () => {
     assert.deepEqual(normaliseRecordTtl(ALL5, { chrono: 0 }),
-      { entity: 90, memory: 90, edge: 90, file: 90 });
+      { entity: 90, fact: 90, edge: 90, file: 90 });
     assert.deepEqual(normaliseRecordTtl(ALL5, { file: null }),
-      { entity: 90, memory: 90, edge: 90, chrono: 90 });
+      { entity: 90, fact: 90, edge: 90, chrono: 90 });
   });
 
   it('a bare number REPLACES the whole object', () => {
@@ -101,7 +101,7 @@ describe('normaliseRecordTtl — what a write stores', () => {
   it('collapses an all-cleared object to undefined — one representation of "no retention"', () => {
     // Two shapes that read differently in the UI and compare unequal in a dirty-check would be a bug factory.
     assert.equal(normaliseRecordTtl({ chrono: 90 }, { chrono: null }), undefined);
-    assert.equal(normaliseRecordTtl(undefined, { entity: 0, memory: 0, edge: 0, chrono: 0, file: 0 }), undefined);
+    assert.equal(normaliseRecordTtl(undefined, { entity: 0, fact: 0, edge: 0, chrono: 0, file: 0 }), undefined);
   });
 
   it('setting a first window on a space that had none stores only that bucket', () => {
@@ -120,7 +120,7 @@ describe('the API and the storage type agree', () => {
     // `UpdateSpaceBody` lives in `spaces/body-schemas.ts` with the rest of the space request bodies.
     const src = readFileSync(join(ROOT, 'server/src/spaces/body-schemas.ts'), 'utf8');
     assert.match(src, /recordTtlDays: z\.union\(\[/, 'recordTtlDays must accept a union of both shapes');
-    assert.match(src, /entity: TtlWindowZ, memory: TtlWindowZ, edge: TtlWindowZ, chrono: TtlWindowZ, file: TtlWindowZ/,
+    assert.match(src, /entity: TtlWindowZ, fact: TtlWindowZ, edge: TtlWindowZ, chrono: TtlWindowZ, file: TtlWindowZ/,
       'all five buckets must be accepted');
     assert.match(src, /recordTtlDays needs at least one of/,
       'an empty object must be refused: it would make "clear everything" and "change nothing" one request');

@@ -1,7 +1,7 @@
 /**
  * EntitiesTabComponent — entity create/edit/delete/load behaviour, relocated from
  * brain.component.records.spec.ts (A17.9b-6b) when the tab became its own component (A17.9b-6e), plus
- * the self-loading + `mutated` wiring the split introduced. Entity delta from memories: create AND
+ * the self-loading + `mutated` wiring the split introduced. Entity delta from facts: create AND
  * inline-edit strip empty optional properties via the entity schema.
  */
 import { TestBed } from '@angular/core/testing';

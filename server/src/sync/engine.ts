@@ -865,7 +865,7 @@ async function pullFromPeer(
   // live in `sync/tombstone-transfer.ts`; its own doc block says why they belong together.
   const tombstones = await pullTombstones({ member, spaceId, remoteSpaceId, networkId, sinceSeq, requestInit: opts });
 
-  // Pull memories — use full=true to return complete docs in a single pass,
+  // Pull facts — use full=true to return complete docs in a single pass,
   // eliminating the N per-document secondary fetches that would be brutal over WAN.
   let highestSeq = sinceSeq;
   let overallMaxSeq = 0; // Track the highest seq seen across ALL items (used to bump local counter)
@@ -1050,7 +1050,7 @@ async function pushToPeer(
   const tombstones = await pushTombstones({ member, spaceId, remoteSpaceId, networkId, lastSeqPushed, requestInit: opts });
 
   // Fetch only docs changed since the last push — read and send in PUSH_BATCH_SIZE
-  // chunks directly from MongoDB without loading the whole result set into memory first.
+  // chunks directly from MongoDB without loading the whole result set into fact first.
   // This makes push O(changed) instead of O(total), and keeps heap usage flat regardless
   // of how many documents have accumulated since the last sync.
   // Braintree nodes relay docs from all peers; other topologies only push their own authored docs
@@ -1117,7 +1117,7 @@ async function pushToPeer(
         log.warn(truncationWarn(`Batch push ${payloadKey} to`, member.label ?? '', spaceId, resp.status, seqCursor));
         break;
       }
-      // A 200 does not mean every record landed: the peer can discard a memory whose fork chain is at its
+      // A 200 does not mean every record landed: the peer can discard a fact whose fork chain is at its
       // cap and still answer 200. `sync/push-refusals.ts` says what that costs and why the watermark still
       // advances anyway.
       await reportPushRefusals(resp, payloadKey, member.label ?? member.instanceId, spaceId);

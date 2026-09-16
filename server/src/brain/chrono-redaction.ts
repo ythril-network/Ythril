@@ -9,7 +9,7 @@
  * **Backfill** just stamps `_expireAt` from a policy, which every typed collection has.
  *
  * It did not, until now. The schema tier is documented as reaching *"every record of that type, in any of the
- * four typed collections"*, and for entities, memories and edges nothing had ever stamped a record: the create
+ * four typed collections"*, and for entities, facts and edges nothing had ever stamped a record: the create
  * path never passed its collection to the resolver, so it silently fell through to the space default, and this
  * pass only ever walked chrono. `files` stays out on purpose — a file has no type, so it has no schema window.
  *

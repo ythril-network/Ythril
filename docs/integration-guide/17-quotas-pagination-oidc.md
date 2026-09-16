@@ -58,7 +58,7 @@ false against every usage figure and enforce nothing while looking configured.
 All list endpoints accept `limit` and `skip`:
 
 ```http
-GET /api/brain/spaces/general/memories?limit=100&skip=200
+GET /api/brain/spaces/general/facts?limit=100&skip=200
 ```
 
 ### Cursor Pagination (Sync API)
@@ -66,10 +66,10 @@ GET /api/brain/spaces/general/memories?limit=100&skip=200
 Sync endpoints return a `nextCursor` for efficient sequential reads:
 
 ```http
-GET /api/sync/memories?spaceId=general&sinceSeq=0&limit=200
+GET /api/sync/facts?spaceId=general&sinceSeq=0&limit=200
 → { "items": [...], "nextCursor": "eyJzZXEiOjIwMH0" }
 
-GET /api/sync/memories?spaceId=general&cursor=eyJzZXEiOjIwMH0&limit=200
+GET /api/sync/facts?spaceId=general&cursor=eyJzZXEiOjIwMH0&limit=200
 → { "items": [...], "nextCursor": null }
 ```
 

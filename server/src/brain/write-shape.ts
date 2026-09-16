@@ -36,7 +36,7 @@
  * that cannot see whether the request is a create is a door that will get it wrong.
  *
  * **It does not widen the property-value rule.** `04-brain-api.md` states the carve-out deliberately: only
- * entities refuse a nested property value. Memories, edges and chrono entries check the CONTAINER is a plain
+ * entities refuse a nested property value. Facts, edges and chrono entries check the CONTAINER is a plain
  * object and stop there. Widening it would refuse writes that work today, which is a product decision and
  * not this module's to take.
  *
@@ -61,7 +61,7 @@ export type ShapedType = KnowledgeType;
 /** One field's rule: a refusal, or `null` when the value is acceptable. Never called with `undefined`. */
 type Check = (v: unknown) => string | null;
 
-/** The cap on a memory's `fact`. Declared once — it was written out at three sites and absent from two more. */
+/** The cap on a fact's `fact`. Declared once — it was written out at three sites and absent from two more. */
 export const MAX_FACT_LENGTH = 50_000;
 
 

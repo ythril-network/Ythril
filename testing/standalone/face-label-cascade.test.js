@@ -16,7 +16,7 @@
  *   2. IT FIRES ON EVERY DELETE PATH. Single delete, bulk wipe, and the TTL sweep (which routes
  *      through `deleteEntity`, so a person entity can expire and detach its faces with no human
  *      action at all). This being fixed in one caller only is the exact shape of the original bug.
- *   3. THE BLIND SPOT THAT HID IT IS CLOSED. `findEntityReferences` scanned `_edges`/`_memories`/
+ *   3. THE BLIND SPOT THAT HID IT IS CLOSED. `findEntityReferences` scanned `_edges`/`_facts`/
  *      `_chrono` and not `_files`, so under `strictLinkage` — the strongest setting available — a
  *      person referenced *only* by face labels deleted cleanly and the "something still points at
  *      this" guard stayed silent about the one reference class holding biometric data.

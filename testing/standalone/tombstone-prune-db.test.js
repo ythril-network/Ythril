@@ -32,7 +32,7 @@ let mongo, pruneTombstonesToFloor, tombstoneFloor;
 const tombstone = (seq, spaceId = SPACE) => ({
   _id: `${spaceId}-doc-${seq}`,
   spaceId,
-  type: 'memory',
+  type: 'fact',
   deletedAt: '2026-08-01T00:00:00.000Z',
   instanceId: 'self',
   seq,
@@ -115,7 +115,7 @@ describe('tombstone prune (real MongoDB)', { skip }, () => {
     // a missing field against `$lte`, which is the behaviour relied on here — and precisely the kind of thing a
     // JS matcher gets wrong in the other direction.
     await mongo.col(`${SPACE}_tombstones`).insertOne({
-      _id: 'legacy', spaceId: SPACE, type: 'memory', deletedAt: '2026-01-01T00:00:00.000Z', instanceId: 'self',
+      _id: 'legacy', spaceId: SPACE, type: 'fact', deletedAt: '2026-01-01T00:00:00.000Z', instanceId: 'self',
     });
     await pruneTombstonesToFloor(SPACE, { prune: true, upTo: Number.MAX_SAFE_INTEGER, peers: 0 });
     const left = await mongo.col(`${SPACE}_tombstones`).find({}).toArray();

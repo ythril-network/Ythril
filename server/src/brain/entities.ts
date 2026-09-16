@@ -37,7 +37,7 @@ export interface BacklinkEntry {
   /**
    * Which end of the EDGE names the entity, and absent on every other type.
    *
-   * Absent rather than guessed: a memory, chrono entry or file HOLDS a reference in a list, so it has no
+   * Absent rather than guessed: a fact, chrono entry or file HOLDS a reference in a list, so it has no
    * ends, and labelling one `to` would send a caller looking for an edge that does not exist. Set by
    * `entityDeleteBlockers`, which is what the refusal is built from.
    */
@@ -172,7 +172,7 @@ export async function upsertEntity(
   // The duplicate/contradiction checks below compare THIS record's vector against its neighbours, so they
   // cannot run without one — and unlike the embedding itself, that question cannot be deferred and
   // answered later in a response that has already been sent. So they imply the wait, exactly as they do
-  // in `remember`. Implied rather than rejected as an invalid combination: a caller asking "is this a
+  // in `saveFact`. Implied rather than rejected as an invalid combination: a caller asking "is this a
   // duplicate?" would otherwise get a silent "no".
   // Suppression wins over all three — see `embeddingSuppressedFor`. Computing a vector here and skipping the
   // enqueue stored exactly what the flag forbids, with nothing to come back and remove it.
@@ -252,7 +252,7 @@ export async function upsertEntity(
     seq,
     ...embeddingFields,
   };
-  // Stored, not merely consulted — see the note in `remember`: everything that revisits a record later reads
+  // Stored, not merely consulted — see the note in `saveFact`: everything that revisits a record later reads
   // the tiers off the document.
   if (opts?.suppressEmbeddings !== undefined) doc.suppressEmbeddings = opts.suppressEmbeddings;
   if (description !== undefined) doc.description = description;
@@ -263,7 +263,7 @@ export async function upsertEntity(
   // threshold, so presence is the signal. The write proceeds either way -- a backdated import is legitimate.
   stampSkewOnCreate(doc, getSpaceMeta(spaceId));
   await collection.insertOne(asDoc<EntityDoc>(doc));
-  // Not queued when suppressed, for the reason `remember` states: a queued job stores the vector the flag
+  // Not queued when suppressed, for the reason `saveFact` states: a queued job stores the vector the flag
   // forbids moments later, and nothing revisits it.
   if (!embeddingFields.embedding && !suppressed) await enqueueEmbedJob(spaceId, 'entity', doc._id);
   // Real-time duplicate-rule evaluation (opt-in per space). Fire-and-forget; the
@@ -303,10 +303,10 @@ export async function findEntitiesByName(spaceId: string, name: string): Promise
  * embedded text wants names — an entity's name is what a semantic search actually matches on, so dropping it
  * from the embed text would quietly degrade recall for every linked record."* Measured on a 199-question
  * benchmark, the opposite is true: dropping the names IMPROVED strict evidence recall by 1.5 points (0.8369
- * with them, 0.8528 without). A memory linked to five entities carried five names it does not say.
+ * with them, 0.8528 without). A fact linked to five entities carried five names it does not say.
  *
  * Left in place because a projection-safe batch fetch by id is worth having and re-implementing it badly is
- * the likelier failure — but do not reach for it to build embed text. See `memoryEmbedText`.
+ * the likelier failure — but do not reach for it to build embed text. See `factEmbedText`.
  */
 export async function findEntitiesByIds(spaceId: string, ids: readonly string[]): Promise<EntityDoc[]> {
   if (ids.length === 0) return [];
@@ -388,7 +388,7 @@ export async function updateEntityById(
   /*
    * Validated HERE, after `deleteFields` has been applied, so the document checked is the document written.
    *
-   * The order matters and is the same one `updateMemory` needs: a patch that REMOVES a required property has
+   * The order matters and is the same one `updateFact` needs: a patch that REMOVES a required property has
    * only broken the record once the deletion is folded in, so validating before this point would check a
    * merged record the caller is not about to store. `newType` rather than `existing.type` for the same
    * reason — re-typing re-validates against the NEW type's schema, which is what #1047 fixed at the route and
@@ -415,7 +415,7 @@ export async function updateEntityById(
     { collection: 'entity', existing: existing as unknown as Record<string, unknown> }); // F10
   const updateOp: Record<string, unknown> = { $set };
   if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
-  // Lost-update detection, identical to `updateMemory` and for the same reason: `returnDocument: "before"`
+  // Lost-update detection, identical to `updateFact` and for the same reason: `returnDocument: "before"`
   // hands back the record as it was at WRITE time, so comparing its seq with the one read at the top of this
   // function is exactly the test for another writer landing in the window. Observation only — no write that
   // previously succeeded is now rejected.
@@ -535,7 +535,7 @@ export async function deleteEntity(
  *
  * It is also the one thing that makes this wipe different from the other three, and the thing an extraction
  * treating them as identical drops. `the-bulk-wipe-writes-a-tombstone-per-record-db.test.js` asserts it here
- * and asserts its ABSENCE on a memory wipe, so a shared hook wired to the wrong callers fails too.
+ * and asserts its ABSENCE on a fact wipe, so a shared hook wired to the wrong callers fails too.
  */
 export async function bulkDeleteEntities(spaceId: string): Promise<number> {
   return await wipeSpaceCollection(spaceId, 'entities', 'entity', {
@@ -556,7 +556,7 @@ export async function bulkDeleteEntities(spaceId: string): Promise<number> {
  *
  * This returns rows WITHOUT the `end` field. `entityDeleteBlockers` fills that in, so the coverage question
  * this function answers — is every kind of reference found — stays separate from how a refusal is worded.
- * Checks edges (from/to), memories (entityIds), chrono entries (entityIds), and labelled face
+ * Checks edges (from/to), facts (entityIds), chrono entries (entityIds), and labelled face
  * records (`faceEntityId`).
  * Returns a (possibly empty) list of backlink entries.
  *
@@ -632,14 +632,14 @@ async function referencesByClass(
  * What still points at a record — the scan that refuses a delete under strict linkage.
  *
  * **`targetKind` since 4.0**, defaulting to `entity` because that is every existing caller and the published
- * `backlinks` contract. A memory, a chrono entry and a file can all be pointed AT now, and until they could
+ * `backlinks` contract. A fact, a chrono entry and a file can all be pointed AT now, and until they could
  * be seen here, deleting one that something named was never refused.
  */
 export async function findEntityReferences(spaceId: string, targetId: string, targetKind: RefKind = 'entity'): Promise<BacklinkEntry[]> {
   const backlinks: BacklinkEntry[] = [];
 
   // Edges referencing this record as from or to. Edge endpoints carry their own kind since 3.7, so an edge
-  // whose `from` is a memory is found here too — and `fromKind`/`toKind` are absent on a pre-3.7 edge,
+  // whose `from` is a fact is found here too — and `fromKind`/`toKind` are absent on a pre-3.7 edge,
   // which means entity, which is why the kind is matched permissively for that case alone.
   const kindMatches = (side: string) => targetKind === 'entity'
     ? { $or: [{ [side]: targetId, [`${side}Kind`]: { $exists: false } }, { [side]: targetId, [`${side}Kind`]: 'entity' }] }
@@ -653,7 +653,7 @@ export async function findEntityReferences(spaceId: string, targetId: string, ta
    * Every class whose TO kind is the kind of thing being deleted — six of them now, where this was three
    * hand-written blocks that each knew one collection and one field.
    *
-   * **The three it could not see were the three nobody had written a reader for.** Deleting a memory that a
+   * **The three it could not see were the three nobody had written a reader for.** Deleting a fact that a
    * chrono entry named was never refused, even under strict linkage, because `chrono.memoryIds` had no
    * scan — and this is the scan that refuses. A class this cannot see is a delete it cannot block, which
    * makes coverage here a data-safety property rather than a completeness one.
@@ -668,7 +668,7 @@ export async function findEntityReferences(spaceId: string, targetId: string, ta
   }
 
   /*
-   * Files that reference this entity in `entityIds` — a modelled reference, exactly like a memory's.
+   * Files that reference this entity in `entityIds` — a modelled reference, exactly like a fact's.
    *
    * This was missing while the `faceEntityId` scan below was present, which is the interesting part: the same
    * collection had already been patched once, for the other field, and its sibling was not added alongside. So
@@ -683,7 +683,7 @@ export async function findEntityReferences(spaceId: string, targetId: string, ta
   // docs, which is why the class scans above miss them.
   //
   // ENTITIES ONLY, and the guard is not defensive tidiness: `faceEntityId` holds an entity id, so running
-  // this for a memory target would compare a memory id against a column of entity ids. It would find
+  // this for a fact target would compare a fact id against a column of entity ids. It would find
   // nothing, every time, which is exactly what a silently wrong scan looks like from the outside.
   if (targetKind === 'entity') {
     const faces = await col<FileMetaDoc>(`${spaceId}_files`)
