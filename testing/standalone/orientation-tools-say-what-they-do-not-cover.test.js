@@ -75,14 +75,24 @@ describe('help says its own tool list is filtered', () => {
   });
 });
 
-describe('get_space_meta distinguishes declared from actual', () => {
-  it('says DECLARED, NOT ACTUAL', () => {
-    assert.match(META, /DECLARED, NOT ACTUAL/,
-      'a declaration read as an inventory produces plans against empty types');
+describe('space_meta distinguishes declared from actual', () => {
+  /*
+   * THE RULE SURVIVED THE MERGE; THE SENTENCE DID NOT. This required the words *"DECLARED, NOT ACTUAL"*
+   * and a pointer at `er_model`, which was the right demand while the actual shape lived in a second
+   * tool: a declaration read as an inventory produces plans against empty types.
+   *
+   * At 5.0 `er_model` folded in, so the warning is no longer “this is not the inventory, go elsewhere” but
+   * “both are here and they are different things”. What must still be true is that a caller cannot read one
+   * as the other.
+   */
+  it('says both words, so neither half can be read as the other', () => {
+    assert.match(META, /DECLARED/, 'a declaration read as an inventory produces plans against empty types');
+    assert.match(META, /ACTUAL/i, 'and the actual shape must be named as its own thing');
   });
 
-  it('names er_model as the other half', () => {
-    assert.match(META, /er_model/, 'the caller needs to know where the actual shape lives');
+  it('names the field the actual shape arrives in', () => {
+    assert.match(META, /actualSchema/,
+      'the caller needs to know where the actual shape lives — it used to be a tool, now it is a field');
   });
 
   it('explains what each validation mode does to a WRITE', () => {

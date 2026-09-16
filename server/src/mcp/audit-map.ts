@@ -86,12 +86,9 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | null> = {
   // Audited for the same reason `space_stats` is: it reports what a space CONTAINS — type names, edge labels
   // and counts. The REST route was not audited while `stats` was, which was an asymmetry rather than a
   // decision; both are now.
-  er_model: 'brain.er_model',
-  list_chrono: 'chrono.list',
   list_spaces: 'space.list',
   list_dir: 'file.list',
   read_file: 'file.read',
-  find_entities_by_name: 'entity.list',
   /*
    * `brain.find_similar`, matching the REST route this tool mirrors.
    *
@@ -102,7 +99,7 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | null> = {
    * `brain.find_similar` saw only REST calls, and one filtering `entity.list` found similarity searches
    * mixed in with entity listings.
    *
-   * Every sibling already agreed with its route: `query`, `recall`, `traverse`, `space_stats`, `er_model`.
+   * Every sibling already agreed with its route: `filter`, `recall`, `graph_traverse`, `space_stats`.
    * This was the one that did not, and it was found by joining the two tables rather than by reading them.
    *
    * `get_space_meta: 'space.list'` below is NOT the same case and stays: `GET /api/spaces/:id/meta` has no

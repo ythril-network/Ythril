@@ -1,13 +1,13 @@
 import type { ToolHandler } from './types.js';
-import { list_spacesTool, space_statsTool, space_metaTool, er_modelTool, update_spaceTool, schema_updateTool, save_spaceTool, space_reindexTool, delete_space_dataTool , list_tokensTool } from './spaces.js';
+import { list_spacesTool, space_statsTool, space_metaTool, update_spaceTool, schema_updateTool, save_spaceTool, space_reindexTool, delete_space_dataTool , list_tokensTool } from './spaces.js';
 import { save_factTool, update_factTool, delete_factTool } from './memory.js';
 import { recallTool, find_similarTool, queryTool } from './search.js';
 import { save_bulkTool } from './bulk.js';
-import { graph_mergeTool, save_entityTool, find_entities_by_nameTool, update_entityTool, delete_entityTool } from './entity.js';
+import { graph_mergeTool, save_entityTool, update_entityTool, delete_entityTool } from './entity.js';
 import { save_edgeTool, graph_traverseTool, update_edgeTool, delete_edgeTool } from './edge.js';
 import { save_linkTool, delete_linkTool, graph_link_preflightTool } from './link.js';
 import { delete_entity_previewTool } from './entity-cascade.js';
-import { save_chronoTool, update_chronoTool, list_chronoTool, delete_chronoTool } from './chrono.js';
+import { save_chronoTool, update_chronoTool, delete_chronoTool } from './chrono.js';
 import { read_fileTool, write_fileTool, update_file_metaTool, list_dirTool, delete_fileTool, create_dirTool, move_fileTool, retry_embed_fileTool } from './file.js';
 import { network_peersTool, network_syncTool } from './sync.js';
 import { helpTool } from './help.js';
@@ -33,10 +33,8 @@ export const ALL_TOOLS: ToolHandler[] = [
   delete_factTool,
   space_statsTool,
   space_metaTool,
-  er_modelTool,
   queryTool,
   save_entityTool,
-  find_entities_by_nameTool,
   save_edgeTool,
   graph_traverseTool,
   update_entityTool,
@@ -52,7 +50,6 @@ export const ALL_TOOLS: ToolHandler[] = [
   save_chronoTool,
   update_chronoTool,
   delete_chronoTool,
-  list_chronoTool,
   read_fileTool,
   write_fileTool,
   update_file_metaTool,

@@ -8,7 +8,7 @@ Ythril exposes a single global MCP server over Streamable HTTP. Each tool accept
 
 ### Server Instructions
 
-On connect, the server sends global instructions listing all available space IDs and noting that each tool requires a `space` parameter (except `recall`, `list_chrono`, and `similar`, where `space` is optional and enables cross-space results when omitted; and `network_peers`/`network_sync` which are global). Call `list_spaces` to get space IDs, purposes, and entry counts (memories, entities, edges, chrono) — useful for discovering which spaces are populated before querying. Call `space_meta` with a specific space to get its full schema, purpose, and usage notes.
+On connect, the server sends global instructions listing all available space IDs and noting that each tool requires a `space` parameter (except `recall`, and `similar`, where `space` is optional and enables cross-space results when omitted; and `network_peers`/`network_sync` which are global). Call `list_spaces` to get space IDs, purposes, and entry counts (memories, entities, edges, chrono) — useful for discovering which spaces are populated before querying. Call `space_meta` with a specific space to get its full schema, purpose, and usage notes.
 
 > **A refused write is machine-readable.** When a tool refuses a write on schema grounds, the result carries
 > `structuredContent` alongside the prose:
@@ -88,7 +88,7 @@ On connect, the server sends global instructions listing all available space IDs
 
 ### Read-Only Tokens
 
-When connecting with a `readOnly` token, mutating tools (`save_fact`, `update_fact`, `delete_fact`, `save_entity`, `update_entity`, `delete_entity`, `graph_merge`, `save_edge`, `update_edge`, `delete_edge`, `save_link`, `delete_link`, `save_chrono`, `update_chrono`, `delete_chrono`, `save_bulk`, `write_file`, `delete_file`, `create_dir`, `move_file`, `retry_embed_file`, `retry_embed_record`, `retry_embed_media`, `update_file_meta`, `network_sync`, `update_space`, `schema_update`, `save_space`, `space_reindex`, `delete_space_data`) are **hidden** from `tools/list` and rejected with an error if called directly. Read-only tools (`help`, `recall`, `similar`, `query`, `space_stats`, `space_meta`, `list_spaces`, `find_entities_by_name`, `list_chrono`, `read_file`, `list_dir`, `traverse`, `list_embed_jobs`, `delete_entity_preview`, `graph_link_preflight`) work normally. `list_tokens` is read-only but **admin-gated**, like `network_peers`. `network_peers` is read-only but **admin-gated** — see the admin-only note below.
+When connecting with a `readOnly` token, mutating tools (`save_fact`, `update_fact`, `delete_fact`, `save_entity`, `update_entity`, `delete_entity`, `graph_merge`, `save_edge`, `update_edge`, `delete_edge`, `save_link`, `delete_link`, `save_chrono`, `update_chrono`, `delete_chrono`, `save_bulk`, `write_file`, `delete_file`, `create_dir`, `move_file`, `retry_embed_file`, `retry_embed_record`, `retry_embed_media`, `update_file_meta`, `network_sync`, `update_space`, `schema_update`, `save_space`, `space_reindex`, `delete_space_data`) are **hidden** from `tools/list` and rejected with an error if called directly. Read-only tools (`help`, `recall`, `similar`, `query`, `space_stats`, `space_meta`, `list_spaces`, `read_file`, `list_dir`, `traverse`, `list_embed_jobs`, `delete_entity_preview`, `graph_link_preflight`) work normally. `list_tokens` is read-only but **admin-gated**, like `network_peers`. `network_peers` is read-only but **admin-gated** — see the admin-only note below.
 
 ### Connecting
 
@@ -241,14 +241,12 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 | `query` | Structured MongoDB filter query (read-only) — supports `memories`, `entities`, `edges`, `chrono`, and `files` collections |
 | `similar` | Find entries with high vector similarity to an existing entry by ID — no re-embedding step. Provide `space` to scope to one space, or omit it to search across all accessible spaces (like `recall`). Supports `traverse` (graph expansion) and `projection` (field selection, applied recursively through `_graph`). **Returns JSON at every depth since 3.1.0** — it answered plain text at `traverse: 0` before, so a client written against that must be updated; the per-result shape is `recall`'s, plus a `source` naming the entry you asked about. The legacy `crossSpace` flag is deprecated — omit `space` instead |
 | `space_stats` | Return counts of memories, entities, edges, chrono entries, and files |
-| `space_meta` | Return the full space schema definition, purpose, usage notes, stats, and `needsReindex` — the field to poll after `space_reindex`, which returns as soon as the job starts |
-| `er_model` | The space's entity-relationship model: which entity types actually exist, which edge labels connect which types, and the counts — inferred from the stored records as well as the declared schema. `space_meta` says what MAY exist; this says what DOES. Same output as [`GET /er-model`](04b-graph-api.md) |
+| `space_meta` | Return the space's DECLARED schema, purpose, usage notes, stats, `needsReindex`, and `actualSchema` — what the space really holds, in the declared schema's own format, so a type can be promoted into it. Absorbed `er_model` at 5.0 — the field to poll after `space_reindex`, which returns as soon as the job starts |
 | `save_entity` | Create or update a named entity (with optional properties) |
 | `update_entity` | Update an existing entity by ID (name, type, description, tags, properties, `suppressEmbeddings`); supports `deleteFields` for field removal |
 | `delete_entity` | Delete an entity by ID. Refused when the space has `strictLinkage` and another record still references it — the same rule the REST route enforces. Face labels are unlabelled rather than blocking |
 | `delete_entity_preview` | What deleting an entity would remove, and the token that lets you do it. Reads only. `delete_entity` takes that token as `cascadeToken` and refuses it if the list has changed since — so a record created after you looked cannot be deleted by a decision taken before it existed |
 | `graph_merge` | Merge two entities — relink all references and resolve per-property conflicts |
-| `find_entities_by_name` | Find all entities with an exact name match (returns list regardless of type) |
 | `save_edge` | Create or update a directed relationship |
 | `update_edge` | Update an existing edge by ID (label, type, weight, description, tags, properties, `suppressEmbeddings`); supports `deleteFields` for field removal |
 | `delete_edge` | Delete an edge by ID |
@@ -259,7 +257,6 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 | `save_chrono` | Create a chrono entry (the five built-in types, or the space's own declared chrono types, which replace them) |
 | `update_chrono` | Update an existing chrono entry, including `suppressEmbeddings`. Requires at least one field beyond `id` |
 | `delete_chrono` | Delete a chrono entry by ID |
-| `list_chrono` | List chrono entries, optionally filtered by status, type, tags, date range, or text search |
 | `save_bulk` | Batch-upsert memories, entities, edges, and/or chrono entries in a single call (schema-validated) |
 | `read_file` | Read a text file from the space file store |
 | `write_file` | Write a text file to the space file store (optional `description` and `tags` stored as metadata) |
@@ -557,7 +554,6 @@ composes what REST exposes as one DELETE per collection.
 | | `delete_entity` | `DELETE /api/brain/spaces/:spaceId/entities/:id` | write `knowledge` |
 | | `graph_merge` | `POST /api/brain/spaces/:spaceId/entities/:survivorId/merge/:absorbedId` | write `knowledge` |
 | | `delete_entity_preview` | `GET /api/brain/spaces/:spaceId/entities/:id/cascade-preview` | read `knowledge` |
-| | `find_entities_by_name` | `GET /api/brain/spaces/:spaceId/entities/by-name` | read `knowledge` |
 | **Brain — edges** | | | |
 | | `save_edge` | `POST /api/brain/spaces/:spaceId/edges` | write `knowledge` |
 | | `update_edge` | `PATCH /api/brain/spaces/:spaceId/edges/:id` | write `knowledge` |
@@ -570,7 +566,6 @@ composes what REST exposes as one DELETE per collection.
 | | `save_chrono` | `POST /api/brain/spaces/:spaceId/chrono` | write `knowledge` |
 | | `update_chrono` | `PATCH /api/brain/spaces/:spaceId/chrono/:id` | write `knowledge` |
 | | `delete_chrono` | `DELETE /api/brain/spaces/:spaceId/chrono/:id` | write `knowledge` |
-| | `list_chrono` | `GET /api/brain/spaces/:spaceId/chrono` | read `knowledge` |
 | **Brain — search** | | | |
 | | `recall` | `POST /api/brain/recall` | read `knowledge` |
 | | `query` | `POST /api/brain/filter` | read `knowledge` |
@@ -580,7 +575,6 @@ composes what REST exposes as one DELETE per collection.
 | | `save_bulk` | `POST /api/brain/spaces/:spaceId/bulk` | write `knowledge` |
 | **Brain — ops** | | | |
 | | `space_stats` | `GET /api/brain/spaces/:spaceId/stats` | read `knowledge` |
-| | `er_model` | `GET /api/brain/spaces/:spaceId/er-model` | read `knowledge` |
 | | `space_reindex` | `POST /api/brain/spaces/:spaceId/reindex` | admin `knowledge` |
 | | `list_embed_jobs` | `GET /api/brain/spaces/:spaceId/embedding-queue/records` | read `knowledge` |
 | | `retry_embed_record` | `POST /api/brain/spaces/:spaceId/embedding-queue/records/retry` | write `knowledge` |

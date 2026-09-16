@@ -443,60 +443,6 @@ export const graph_mergeTool: ToolHandler = {
   },
 };
 
-export const find_entities_by_nameTool: ToolHandler = {
-  name: 'find_entities_by_name',
-  description: 'Look up entities by their EXACT name. Case-sensitive, whole-string: "Acme" does not find '
-    + '"acme", "Acme Corp" or " Acme". If you are not certain of the exact stored spelling, this is the wrong '
-    + 'tool — use `recall` for meaning, or `query` with a `$regex` filter for a pattern.\n\n'
-    + 'IT RETURNS A LIST, AND THE LIST IS THE POINT. Names are not unique in a space: the same name can exist '
-    + 'as several entities, often with different types, and that is usually a duplicate somebody should merge '
-    + 'rather than a fact about the world. Getting more than one back is the signal to look, not a result to '
-    + 'index into: taking `[0]` and moving on is how the second copy survives and goes on accumulating edges. '
-    + 'A token that may write will find a merge tool in `help()`; one that may not will not, because `help()` '
-    + 'lists only what your token can reach.\n\n'
-    + 'PREFER IT OVER FILTERING BY NAME AND TYPE TOGETHER. A name/type predicate silently misses the copy '
-    + 'stored under an unexpected type, which is exactly the copy you were looking for when you asked this '
-    + 'question. Look up by name, then read the types you get back.\n\n'
-    + 'PARAMETERS:\n'
-    + '- `name` — the exact stored name. Not trimmed for you and not case-folded.\n'
-    + '- `space` — required. This tool does not search across spaces; `recall` with `space` omitted does.\n\n'
-    + 'RESPONSE: every matching entity with its id, name, type, tags and properties. An empty list means no '
-    + 'entity carries that exact name — it is not an error, and it does NOT mean the thing is absent from the '
-    + 'space. It may be there under a different spelling, which is the case `recall` is for.',
-  spaceRequired: true,
-  inputSchema: (s: ToolSchemas) => ({
-          type: 'object',
-          properties: {
-            space: s.requiredSpace,
-            name: {
-              type: 'string', minLength: 1,
-              description: 'The name to look up, matched EXACTLY and case-sensitively — no substring, no '
-                + 'fuzzy, no synonym. An empty result therefore does NOT mean the entity is absent, only that '
-                + 'nothing carries that exact string; `recall` is what answers "is there anything about X". '
-                + 'Several results is the normal signal that duplicates exist.',
-            },
-          },
-          required: ['space', 'name'],
-          additionalProperties: false,
-        }),
-  async handle(ctx: ToolContext): Promise<ToolResult> {
-    const { args: a, callSpace, name } = ctx;
-    const searchName = String(a['name'] ?? '').trim();
-    if (!searchName) throw new Error('name must not be empty');
-    const all = await collectAcrossMembers(callSpace, mid => findEntitiesByName(mid, searchName));
-    if (all.length === 0) {
-      return { content: [{ type: 'text' as const, text: `No entities found with name '${searchName}'.` }] };
-    }
-    return {
-      content: [{
-        type: 'text' as const,
-        text: `Found ${all.length} entit${all.length === 1 ? 'y' : 'ies'} with name '${searchName}':\n` +
-          all.map((e, i) => `[${i + 1}] ${e.name} (${e.type}) — ID ${e._id}`).join('\n'),
-      }],
-    };
-  },
-};
-
 /**
  * Delete one entity — through the same guard the REST route uses, not a re-implementation of it.
  *

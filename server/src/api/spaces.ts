@@ -482,12 +482,32 @@ spacesRouter.get('/:id/meta', globalRateLimit, requireSpaceAuthScoped('id'), asy
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { previousVersions: _pv, ...metaPublic } = meta;
 
+  /*
+   * WHAT THE SPACE ACTUALLY HOLDS, beside what it declares — the other half of `GET /er-model`, which was
+   * folded in here at 5.0 along with its MCP twin.
+   *
+   * Both answer *"what is this space like before I write to it"*, and a caller needed both calls to get a
+   * true picture: a space can declare twenty types and hold three, or hold records of a type nobody
+   * declared. Together they do something neither did alone — `actualSchema` comes back in the DECLARED
+   * schema's own format, so a type the space really holds can be promoted into its declared schema without
+   * the JSON being written by hand.
+   *
+   * Per member on a proxy space, never merged: two types sharing a name mean different things in different
+   * spaces, and an edge cannot cross a space, so a union would invent relationships that cannot exist.
+   */
+  const { buildErModel } = await import('../brain/er-model.js');
+  const actualPerMember = await Promise.all(memberIds.map(mid => buildErModel(mid)));
+  const actualSchema = memberIds.length === 1 && memberIds[0] === id
+    ? actualPerMember[0]
+    : { spaceId: id, members: actualPerMember };
+
   res.json({
     spaceId: id,
     spaceName: space.label,
     ...metaPublic,
     stats,
     needsReindex: reindexNeeded,
+    actualSchema,
   });
 });
 

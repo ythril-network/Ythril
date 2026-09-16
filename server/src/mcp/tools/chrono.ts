@@ -328,7 +328,13 @@ export const update_chronoTool: ToolHandler = {
               type: 'string',
               description: 'Replaces the stored ISO 8601 start. With no `endsAt` it is the DUE MOMENT, so '
                 + 'moving it forward is what un-overdues an entry that has gone late — the status is derived '
-                + 'from this, not stored.',
+                + 'from this, not stored.\n\n'
+                + 'AND A FILTER ON `status: overdue` RETURNS BOTH KINDS: entries the clock made overdue, and '
+                + 'entries somebody STORED as overdue. `overdue` is a legal value to write, so the two are '
+                + 'mixed in any result. A caller who read only "derived from the clock" would not expect the '
+                + 'second kind, and would treat a marked entry as a clock artefact it could fix by moving the '
+                + 'date. This note lived on `list_chrono` until 5.0 folded that tool into `filter`, which is '
+                + 'generic and has no business describing chrono semantics.',
             },
             endsAt: {
               type: 'string',
@@ -484,115 +490,6 @@ export const update_chronoTool: ToolHandler = {
     const entry = await updateChrono(wt.target, id, updates as Parameters<typeof updateChrono>[2], dfPaths, ctx.actor, ttlDaysFromArgs(a));
     if (!entry) throw new Error(`Chrono entry '${id}' not found`);
     return { content: [{ type: 'text' as const, text: `Chrono entry '${entry.title}' updated (seq ${entry.seq}).` }] };
-  },
-};
-
-export const list_chronoTool: ToolHandler = {
-  name: 'list_chrono',
-  description: 'List chrono entries — the time-anchored records: events, deadlines, plans, predictions and '
-    + 'milestones. Every filter is optional and they AND together; no filters at all returns the most recent '
-    + '20.\n\n'
-    + '`after` AND `before` FILTER WHEN THE ENTRY WAS WRITTEN, NOT WHEN IT HAPPENS. This is the one that '
-    + 'catches people. An entry has `startsAt`/`endsAt` — the time it is ABOUT — and a `createdAt`, the time '
-    + 'someone recorded it. These two parameters read `createdAt`. To ask "what is scheduled next quarter" you '
-    + 'want `query` with a predicate on `startsAt`; `after`/`before` here answer "what did we write down last '
-    + 'week", which is a different question and usually not the one being asked.\n\n'
-    + '`overdue` IS NORMALLY DERIVED FROM THE CLOCK. An entry whose due moment (`endsAt`, or `startsAt` when '
-    + 'it has none) has passed and that is still `upcoming`/`active` is RETURNED as `overdue`, and the filter '
-    + 'is translated to match: `status: "overdue"` finds those, and `status: "upcoming"` EXCLUDES them rather '
-    + 'than including them. So both answer the truth about time, and you do not need a date predicate to ask '
-    + '"what is late".\n\n'
-    + '`status: "overdue"` ALSO RETURNS AN ENTRY SOMEBODY STORED AS `overdue`. Nothing writes that value on '
-    + 'its own, but every write door accepts it, so both kinds come back and neither is hidden. You still do '
-    + 'not need to set it: leaving an entry `upcoming` past its date is what makes it overdue, and a stored '
-    + '`overdue` never reverts when the entry is rescheduled.\n\n'
-    + 'THE STORED VALUE IS STILL WHAT SYNC AND `query` SEE. `query` reads documents as stored, so a filter of '
-    + '`status: "overdue"` there matches almost nothing while this tool returns plenty — the same records, two '
-    + 'answers, because only this path derives. Use this tool for status, and `query` for `startsAt`/`endsAt` '
-    + 'predicates.\n\n'
-    + 'OMIT `space` TO SEARCH EVERY SPACE THE TOKEN REACHES. That is unusual — most tools require one — and it '
-    + 'is what makes this the tool for "when did we ever say we would do this". Results carry their space.\n\n'
-    + 'PARAMETERS:\n'
-    + '- `status` — `upcoming`, `active`, `completed`, `overdue`, `cancelled`. Clock-aware for the first '
-    + 'three; see above.\n'
-    + '- `type` — `event`, `deadline`, `plan`, `prediction`, `milestone`, or any custom type the space schema '
-    + 'defines.\n'
-    + '- `tags` — entries carrying ALL of these. `tagsAny` — entries carrying ANY. Send both and both apply.\n'
-    + '- `after` / `before` — ISO 8601, against `createdAt`. See the warning above.\n'
-    + '- `search` — case-insensitive SUBSTRING match on title and description. Not meaning-ranked and not '
-    + 'tokenised: it will not find a synonym, and it WILL match inside a longer word. Use `recall` for meaning.\n'
-    + '- `limit` — 1 to 100, default 20. `skip` — for paging; combine with a stable `limit`.\n\n'
-    + 'RESPONSE: the matching entries, newest first, each with its id, title, type, status, dates and space. '
-    + 'An empty list means nothing matched, which is not an error.',
-  inputSchema: (s: ToolSchemas) => ({
-          type: 'object',
-          properties: {
-            space: s.optionalSpace,
-            status: {
-              type: 'string', enum: [...CHRONO_STATUSES],
-              description: 'Filter by status, CLOCK-AWARE for the first three. `overdue` returns BOTH kinds — '
-                + 'entries stored `upcoming`/`active` whose due moment has passed, AND entries somebody '
-                + 'stored as `overdue` — while `upcoming` and `active` EXCLUDE the ones that are now late. '
-                + '`completed` and `cancelled` are plain matches on the stored value. The same filter '
-                + 'against `query` is not translated and answers differently.',
-            },
-            type: { type: 'string', description: 'Filter by type (e.g. event, deadline, plan, prediction, milestone, or a custom type).' },
-            tags: { type: 'array', items: { type: 'string' }, description: 'Return entries containing ALL of these tags (AND semantics).' },
-            tagsAny: { type: 'array', items: { type: 'string' }, description: 'Return entries containing ANY of these tags (OR semantics).' },
-            after: { type: 'string', description: 'ISO 8601 timestamp — return entries created after this point in time.' },
-            before: { type: 'string', description: 'ISO 8601 timestamp — return entries created before this point in time.' },
-            search: { type: 'string', description: 'Case-insensitive substring match on title and description.' },
-            limit: { type: 'number', minimum: 1, maximum: 100, default: 20, description: 'Max results (clamped to 1–100). Default 20.' },
-            skip: { type: 'number', minimum: 0, default: 0, description: 'Number of results to skip for pagination (default 0).' },
-          },
-          required: [],
-          additionalProperties: false,
-        }),
-  async handle(ctx: ToolContext): Promise<ToolResult> {
-    const { args: a, callSpace, accessibleSpaceIds } = ctx;
-    const filter: ChronoFilter = {};
-    if (typeof a['status'] === 'string') filter.status = a['status'];
-    if (typeof a['type'] === 'string') filter.type = a['type'];
-    if (Array.isArray(a['tags']) && (a['tags'] as unknown[]).length > 0) {
-      filter.tags = a['tags'] as string[];
-    }
-    if (Array.isArray(a['tagsAny']) && (a['tagsAny'] as unknown[]).length > 0) {
-      filter.tagsAny = a['tagsAny'] as string[];
-    }
-    if (typeof a['after'] === 'string') filter.after = a['after'];
-    if (typeof a['before'] === 'string') filter.before = a['before'];
-    if (typeof a['search'] === 'string') filter.search = a['search'];
-    const limit = typeof a['limit'] === 'number' ? Math.min(a['limit'], 100) : 20;
-    const skip = typeof a['skip'] === 'number' ? Math.max(a['skip'], 0) : 0;
-
-    const memberIds = callSpace ? memberSpacesWithin(callSpace, accessibleSpaceIds) : accessibleSpaceIds;
-    // Fetch skip+limit from each member so the combined list has enough entries
-    // after global sort/slice. For large skip values this over-fetches slightly,
-    // but chrono lists are expected to be small in practice.
-    const all = (await Promise.all(memberIds.map(mid => listChrono(mid, filter, skip + limit)))).flat();
-    all.sort((x, y) => new Date(y.createdAt).getTime() - new Date(x.createdAt).getTime());
-    const results = all.slice(skip, skip + limit);
-    return {
-      content: [{
-        type: 'text' as const,
-        text: results.length === 0
-          ? 'No chrono entries found.'
-          /*
-           * THE SPACE IS ON EVERY ROW, and it was on none.
-           *
-           * This tool's own description promises *"Results carry their space"*, and cross-space triage is
-           * the reason it takes no `space` at all. Meanwhile `update_chrono` and `delete_chrono` both
-           * REQUIRE one — so every row it handed back was a row the caller could not act on, and the single
-           * field they needed was the one omitted. The record has always carried `spaceId`; nothing rendered
-           * it.
-           *
-           * `endsAt` too, which the description also lists: a row showing a start and no end reads as an
-           * instant rather than as an interval whose end was simply not shown.
-           */
-          : results.map((e, i) => `[${i + 1}] ${e.spaceId} | ${e.type} | ${e.status} | ${e.startsAt}`
-            + `${e.endsAt ? ` -> ${e.endsAt}` : ''} | ${e.title} (ID ${e._id})`).join('\n'),
-      }],
-    };
   },
 };
 

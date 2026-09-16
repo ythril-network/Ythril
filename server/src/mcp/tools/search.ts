@@ -667,11 +667,17 @@ export const queryTool: ToolHandler = {
     + '• `count` — how many rows are in THIS page. `total` — how many satisfy the filter overall. They differ whenever `limit` bit, and that difference is the only signal that there is more to page through.\n'
     + '• `limit`, `skip` — echoed back, so a pager can carry on without keeping its own state.\n\n'
     + 'A count with no rows is a BUG, not an empty page: `results` is carried in both `content` and `structuredContent`, and a client that reads only one of them gets the whole answer either way. Before 3.1 the rows were in `content` alone, so a client preferring `structuredContent` saw {"count":15,"total":40} and not a single row — reported independently by the canary operator and reproduced here. If you ever see a positive `count` with nothing in it, the instance predates that fix.',
-  spaceRequired: true,
+  // Optional since 5.0, matching `POST /api/brain/filter` and the rest of the search family. Omit it and
+  // the read runs across every space this token holds `knowledge: read` in.
+  //
+  // It was left REQUIRED here when the ROUTE was changed — this repo's signature defect happening
+  // inside the change that was fixing another instance of it: one rule, two doors, and the MCP one
+  // quietly narrower. Caught by an integration test calling `filter` without a space.
+  spaceRequired: false,
   inputSchema: (s: ToolSchemas) => ({
           type: 'object',
           properties: {
-            space: s.requiredSpace,
+            space: s.optionalSpace,
             collection: {
               type: 'string',
               enum: [...BRAIN_COLLECTIONS],
@@ -700,7 +706,7 @@ export const queryTool: ToolHandler = {
             charsPerToken: { type: 'number', exclusiveMinimum: 0, description: 'Per-call override of the characters-per-token ratio used by `maxTokens`. Default 3.5.' },
             maxTimeMS: { type: 'number', minimum: 1, maximum: 10000, default: 5000, description: 'Server-side query timeout in ms. Default 5000, hard-capped at 10000.' },
           },
-          required: ['space', 'collection', 'filter'],
+          required: ['collection', 'filter'],
           additionalProperties: false,
         }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
@@ -738,7 +744,11 @@ export const queryTool: ToolHandler = {
         : undefined;
 
     // The SAME function the REST route pages with, not the same shape written twice.
-    const members = memberSpacesWithin(callSpace, ctx.accessibleSpaces.map(sp => sp.id));
+    // A NAMED space resolves its proxy members; an OMITTED one is every space this connection can reach.
+    // `memberSpacesWithin('')` would answer nothing, which is how an optional parameter turns into a read
+    // that silently returns empty rather than the cross-space read it advertises.
+    const reachable = ctx.accessibleSpaces.map(sp => sp.id);
+    const members = callSpace ? memberSpacesWithin(callSpace, reachable) : reachable;
     const coll = collName as BrainCollection;
     const page = await pageAcrossMembers({
       members,

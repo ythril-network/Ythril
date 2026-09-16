@@ -116,52 +116,6 @@ export const space_statsTool: ToolHandler = {
   },
 };
 
-/**
- * The space's entity-relationship model — REST-only until now, and it is the question an agent asks first.
- *
- * `space_meta` returns the DECLARED schema: what may exist. This returns what DOES exist — which types are
- * actually present, which relationships actually occur between them, and how many of each. An agent deciding how
- * to write into an unfamiliar space wants both, and only one of them was reachable.
- *
- * Found by the capability matrix (`scripts/surface-matrix.mjs`), which put `GET /er-model` in the REST-only
- * column. Filed as B-21.
- *
- * **On a proxy space the members are reported SEPARATELY rather than merged**, exactly as the REST route does.
- * Merging would add up counts for two types that share a name and mean different things in different spaces, and
- * would invent relationships between types that can never be joined, because an edge cannot cross a space. A
- * union would look richer and be false — so the shape differs by design, not by omission.
- */
-export const er_modelTool: ToolHandler = {
-  name: 'er_model',
-  description:
-        'Return the space\'s entity-relationship model: which entity types actually exist, which edge labels '
-        + 'connect which types, and the counts of each — inferred from the stored records AND the declared '
-        + 'schema. Use it to learn how a space is actually shaped before writing into it; `space_meta` gives '
-        + 'the declared schema (what MAY exist), this gives what DOES. A type with zero records is reported '
-        + 'rather than omitted. On a proxy space each member is reported separately, because merging would '
-        + 'invent relationships that cannot exist across spaces.',
-  spaceRequired: true,
-  inputSchema: (s: ToolSchemas) => ({
-          type: 'object',
-          properties: {
-            space: s.requiredSpace,
-          },
-          required: ['space'],
-          additionalProperties: false,
-        }),
-  async handle(ctx: ToolContext): Promise<ToolResult> {
-    const { callSpace, accessibleSpaceIds } = ctx;
-    const { buildErModel } = await import('../../brain/er-model.js');
-    // The same narrowing every MCP read uses: the connection's accessible spaces, not the request's.
-    const memberIds = memberSpacesWithin(callSpace, accessibleSpaceIds);
-    const models = await Promise.all(memberIds.map(mid => buildErModel(mid)));
-    const output = memberIds.length === 1 && memberIds[0] === callSpace
-      ? models[0]
-      : { spaceId: callSpace, members: models };
-    return { content: [{ type: 'text' as const, text: JSON.stringify(output) }] };
-  },
-};
-
 export const space_metaTool: ToolHandler = {
   name: 'space_meta',
   description:
@@ -171,7 +125,15 @@ export const space_metaTool: ToolHandler = {
         'What this space DECLARES: its purpose, usage notes, per-type schemas, validation posture and entry '
         + 'counts. Call it before writing to an unfamiliar space, so the write is shaped to what the space '
         + 'expects instead of being refused by it.\n\n'
-        + 'DECLARED, NOT ACTUAL — and the difference matters. This returns what MAY exist: the types somebody '
+        + 'DECLARED **AND** ACTUAL, in one answer, because a caller needs both to know what a space is like. '
+        + '`declared` is what MAY exist: the types somebody defined, with their naming patterns and required '
+        + 'properties. `actualSchema` is what DOES exist: the entity types that actually hold records, the edge '
+        + 'labels that really connect which of them, and the count of each. A space can declare twenty types and '
+        + 'hold three, or hold records of a type nobody declared.\n\n'
+        + 'These were two tools until 5.0 and the split was the defect. Together they do something neither did '
+        + 'alone: `actualSchema` comes back in the DECLARED schema\u2019s own format, so a type the space really '
+        + 'holds can be PROMOTED into its declared schema without writing the JSON by hand.\n\n'
+        + 'This returns what MAY exist: the types somebody '
         + 'defined, with their naming patterns and required properties. `er_model` returns what DOES exist: '
         + 'the types that actually hold records, and which edge labels really connect which types. A space '
         + 'can declare twenty types and hold three, or hold records of a type nobody declared. Read this to '
@@ -220,6 +182,8 @@ export const space_metaTool: ToolHandler = {
       files: await col(`${mid}_files`).countDocuments(),
     })));
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { buildErModel: buildMetaErModel } = await import('../../brain/er-model.js');
+    const metaActual = await Promise.all(metaMemberIds.map(mid => buildMetaErModel(mid)));
     const { previousVersions: _pv, ...metaPublic } = metaBlock;
     const metaResult = {
       spaceId: callSpace,
@@ -236,6 +200,23 @@ export const space_metaTool: ToolHandler = {
       // route, so an MCP-only client could START a multi-minute job and never learn it had finished. Same
       // `.some()` over members the REST side uses: a proxy needs a reindex when any member does.
       needsReindex: metaMemberIds.some(mid => needsReindex(mid)),
+      /*
+       * WHAT THE SPACE ACTUALLY HOLDS, beside what it declares. This was its own tool, `er_model`, and the
+       * split was the defect: both answer *"what is this space like before I write to it"*, and a caller
+       * needed both to get a true picture — a space can declare twenty types and hold three, or hold
+       * records of a type nobody declared.
+       *
+       * It comes back in the DECLARED schema's own format, which is the reason to merge rather than keep
+       * two tools: a caller who sees a type the space really holds can promote it into the declared schema
+       * without writing the JSON by hand.
+       *
+       * Per member on a proxy space, never merged. Merging would add up counts for two types that share a
+       * name and mean different things in different spaces, and invent relationships that can never be
+       * joined — an edge cannot cross a space. A union here would look richer and be false.
+       */
+      actualSchema: metaMemberIds.length === 1 && metaMemberIds[0] === callSpace
+        ? metaActual[0]
+        : { spaceId: callSpace, members: metaActual },
     };
     return {
       content: [{
