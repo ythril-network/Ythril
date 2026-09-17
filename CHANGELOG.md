@@ -420,6 +420,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The conversion pre-flight claimed ninety days on an instance that had been recording for thirty
+  minutes.** Reported by the canary operator 2026-09-15 with a controlled measurement: the endpoint caught
+  a single `entityIds` write within two seconds and named the token and the field — it works — but the
+  space holds 270 chronos already carrying `entityIds`, `count` was 1, and `since` reported ninety days
+  back because that is `retentionDays`.
+
+  It is the second, quieter version of this endpoint's known worst failure. The first was an inert
+  recorder answering `writers: []` for a space being written to. This one is a HEALTHY recorder whose
+  window is younger than the field says — and our own guidance, *"read `since` before you read the
+  count"*, does not save a reader, because `since` is the misleading field. The risk is a sequence rather
+  than a value: upgrade, run the pre-flight, see `writers: []`, convert, and the writers surface
+  afterwards one at a time as `400`s.
+
+  `since` is clamped to when this instance began recording, and the new `recorderStartedAt` says why a
+  ninety-day request came back as half an hour. The stamp is written once when the instance's services start —
+  the path a first-run install goes through too, not only a restart — and it is **the oldest existing
+  note rather than `now`** — a note from sixty days ago is proof the recorder was running sixty
+  days ago, and stamping `now` would make an instance that has recorded for a year claim it started
+  today. `null` means it has not started since this shipped, so nothing can be clamped.
+
 - **Sorting `links` crashed instead of sorting, and on the REST door it crashed as a RETRYABLE 500.**
   Reported by the canary operator 2026-09-15 against the tool door, which answers
   `Cannot read properties of undefined (reading 'has')`. Measured here, the REST door is the worse half

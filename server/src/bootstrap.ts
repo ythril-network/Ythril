@@ -46,6 +46,20 @@ export async function startConfiguredInstanceServices(): Promise<void> {
     // collection in the instance, which is the standard way a metrics table stops being worth having.
     const { ensureActivityIndexes } = await import('./metrics/space-activity-store.js');
     await ensureActivityIndexes();
+
+    /*
+     * When this instance began recording legacy array writes — HERE rather than in `index.ts`, because a
+     * first-run instance never reaches the boot path at all.
+     *
+     * The conversion pre-flight clamps its `since` to this stamp, and an unstamped instance reports the
+     * full retention window whatever it was really watching. Put beside the boot-only migrations it was
+     * silently skipped for the entire first run of a freshly set-up instance — which is the install this
+     * was written for. Found by the integration suite against a rebuilt stack, not by reading.
+     *
+     * This is the function BOTH paths go through, so a third entry point gets it without being told.
+     */
+    const { stampRecorderStart } = await import('./brain/legacy-array-writers.js');
+    await stampRecorderStart();
   } catch (err) {
     log.error(`Instance DB initialisation failed (background services will still start): ${err}`);
   }

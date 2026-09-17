@@ -137,6 +137,10 @@ linksRouter.delete('/spaces/:spaceId/links/:id', globalRateLimit, requireSpaceAu
  *
  * `since` in the answer is not decoration: a count with no window on it cannot be told apart from a count
  * over a shorter one, and this is read by somebody about to make a decision on it.
+ *
+ * It is CLAMPED to when this instance began recording, and `recorderStartedAt` says when that was. Both
+ * doors get that from `legacyArrayWriters` rather than computing it, which is the only reason the two
+ * windows cannot drift apart.
  */
 linksRouter.get('/spaces/:spaceId/links/convert-preflight', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;

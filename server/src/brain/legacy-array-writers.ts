@@ -60,6 +60,18 @@ const COLLECTION = '_legacy_array_writers';
 /** One warning per process when the note write is failing — see the catch in `noteLegacyArrayWrite`. */
 let warnedOnce = false;
 
+/**
+ * The marker row that says WHEN this instance began recording — not a note, and deliberately in the same
+ * collection as the notes so it shares their lifetime and their locality.
+ *
+ * `_legacy_array_writers` is instance-wide (leading underscore, no space prefix) and does not replicate,
+ * so a row here is local observation state rather than data. That is what makes writing it at boot
+ * allowed where a synced collection would not be.
+ */
+const RECORDER_START_ID = '__recorder_started__';
+
+interface RecorderStart { _id: string; at: Date }
+
 interface WriterNote {
   _id: string;
   spaceId: string;
@@ -171,6 +183,21 @@ export interface ConvertPreflight {
    * failure — under-reporting with nothing to say it had.
    */
   since: string;
+  /**
+   * When this instance began RECORDING, which is the other half of what `since` claims.
+   *
+   * `since` was `now - windowDays` and nothing else, so a freshly-upgraded instance answered "ninety
+   * days" over a window thirty minutes wide. Reported by the canary operator 2026-09-15 with the
+   * measurement: a space holding 270 chronos that already carry `entityIds` returned `count: 1`, because
+   * one write had happened since the recorder started. `since` is clamped to this now, so the field a
+   * reader already reads is the honest one — and this is here so they can see WHY it was clamped rather
+   * than wondering why ninety days became half an hour.
+   *
+   * `null` on an instance that has never stamped: the stamp is written when a configured instance's
+   * services start, so this means the process has not started since the feature arrived, and `since`
+   * cannot be clamped.
+   */
+  recorderStartedAt: string | null;
   /** How far back a note can exist at all, whatever `since` was asked for. */
   retentionDays: number;
   /** Empty means nobody wrote an array in the window — which is what an operator is hoping to see. */
@@ -195,7 +222,17 @@ export async function legacyArrayWriters(input: {
   const windowDays = Number.isFinite(input.windowDays) && (input.windowDays ?? 0) > 0
     ? Math.min(input.windowDays as number, WRITER_NOTE_RETENTION_DAYS)
     : DEFAULT_WRITER_WINDOW_DAYS;
-  const since = new Date(Date.now() - windowDays * 86_400_000);
+  const asked = new Date(Date.now() - windowDays * 86_400_000);
+  /*
+   * CLAMPED to when the recorder began, because a window the recorder was not running for is not a window
+   * anybody searched. Without this the natural sequence — upgrade, run the pre-flight, see `writers: []`,
+   * convert — returns a clean answer from a window minutes wide, and the writers surface afterwards one
+   * at a time as 400s.
+   *
+   * The later of the two, so asking for a SHORTER window than the recorder's life still narrows it.
+   */
+  const startedAt = await recorderStartedAt();
+  const since = startedAt && startedAt > asked ? startedAt : asked;
 
   const rows = await col<WriterNote>(COLLECTION)
     .find(asFilter<WriterNote>({ spaceId, lastAt: { $gte: since } }))
@@ -216,7 +253,14 @@ export async function legacyArrayWriters(input: {
 
   const writers = [...byToken.values()].sort((a, b) => b.lastAt.localeCompare(a.lastAt));
   for (const w of writers) w.fields.sort();
-  return { spaceId, since: since.toISOString(), retentionDays: WRITER_NOTE_RETENTION_DAYS, writers, converted };
+  return {
+    spaceId,
+    since: since.toISOString(),
+    recorderStartedAt: startedAt ? startedAt.toISOString() : null,
+    retentionDays: WRITER_NOTE_RETENTION_DAYS,
+    writers,
+    converted,
+  };
 }
 
 /**
@@ -256,4 +300,57 @@ export async function sweepLegacyArrayWriterNotes(now: number = Date.now()): Pro
   const r = await col<WriterNote>(COLLECTION)
     .deleteMany(asFilter<WriterNote>({ lastAt: { $lt: cutoff } }));
   return r.deletedCount ?? 0;
+}
+
+/**
+ * Stamp when this instance began recording array writes, once, and never move it afterwards.
+ *
+ * ## The report this answers
+ *
+ * The canary operator, 2026-09-15T0027Z, fifteen minutes after reaching 4.4.0. The pre-flight caught a
+ * single `entityIds` write within two seconds and named the token and the field — it works. But that
+ * space holds 270 chronos already carrying `entityIds`, `count` was 1, and `since` reported ninety days
+ * back because that is `retentionDays`. **The honest coverage was about half an hour.**
+ *
+ * It is the second, quieter version of this endpoint's known worst failure. The first was an inert
+ * recorder answering `writers: []` for a space being written to. This one is a HEALTHY recorder whose
+ * window is younger than the field says — and our own guidance, *"read `since` before you read the
+ * count"*, does not save a reader, because `since` is the misleading field.
+ *
+ * The risk is a sequence rather than a value: upgrade, run the pre-flight, see `writers: []`, convert —
+ * and the writers surface one at a time afterwards, as 400s.
+ *
+ * ## Why it is not simply `now` on first boot
+ *
+ * An instance that has run the recorder for a year would then claim it began today — under-claiming,
+ * which is the safe direction but makes the field useless for exactly the instances where it was already
+ * right. So the stamp is the OLDEST NOTE if there is one, because a note from sixty days ago is proof
+ * the recorder was running sixty days ago, and `now` only when there is no evidence at all.
+ *
+ * `$setOnInsert`, so a later boot cannot move it. Never throws: this is an observation about the
+ * observer, and failing to record it must not take down a boot.
+ */
+export async function stampRecorderStart(): Promise<void> {
+  try {
+    const oldest = await col<WriterNote>(COLLECTION)
+      .find(asFilter<WriterNote>({ firstAt: { $exists: true } }))
+      .sort({ firstAt: 1 })
+      .limit(1)
+      .toArray();
+    const at = oldest[0]?.firstAt ?? new Date();
+    await col<RecorderStart>(COLLECTION).updateOne(
+      asFilter<RecorderStart>({ _id: RECORDER_START_ID }),
+      { $setOnInsert: { at } },
+      { upsert: true },
+    );
+  } catch (err) {
+    log.debug(`Could not stamp the array-write recorder start: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/** When this instance began recording, or `null` if it has never been stamped. */
+async function recorderStartedAt(): Promise<Date | null> {
+  const row = await col<RecorderStart>(COLLECTION)
+    .findOne(asFilter<RecorderStart>({ _id: RECORDER_START_ID }));
+  return row?.at ?? null;
 }
