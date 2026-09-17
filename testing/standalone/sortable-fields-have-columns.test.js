@@ -39,11 +39,19 @@ const TABS = {
 };
 
 /**
- * `files` is sortable by createdAt/updatedAt/path but is not a brain record tab — its table lives in the file
- * manager, which has its own column model and its own sort control. Named rather than silently skipped, and
- * asserted below to still be a real entry in SORTABLE_FIELDS so this note cannot outlive its subject.
+ * Collections that are sortable on the server and are not a brain record tab. Named rather than silently
+ * skipped, and asserted below to still be real entries in SORTABLE_FIELDS so a note cannot outlive its
+ * subject.
+ *
+ * - **`files`** — sortable by createdAt/updatedAt/path, but its table lives in the file manager, which has
+ *   its own column model and its own sort control.
+ * - **`links`** — not a list anybody reads. A link is a pair of endpoints with no name, title or type, so
+ *   there is nothing to put in a column; the graph renders the RECORDS it joins. It reached
+ *   `SORTABLE_FIELDS` at 5.0 because it was already in the `filter` tool's `collection` enum and sorting
+ *   it CRASHED — `allowed.has()` on an undefined set, a 500 on the REST door. An API caller paging links
+ *   by `createdAt` is the use, and that is not a tab.
  */
-const NOT_A_BRAIN_TAB = ['files'];
+const NOT_A_BRAIN_TAB = ['files', 'links'];
 
 /** Parse `SORTABLE_FIELDS` out of the server source: { collection: Set<field> }. */
 function serverSortableFields() {

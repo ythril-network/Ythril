@@ -536,7 +536,7 @@ Run a constrained Mongo-style read query against one logical collection. Intende
 | `projection` | — | Projection object (`1` include / `0` exclude) |
 | `limit` | — | Max rows (default `20`, capped at `100`) |
 | `skip` | — | Rows to discard before the page (default `0`) — see below |
-| `sort` | — | Field to order by. Per-collection allowlist; an unlisted field is a `400` naming the allowed ones. Omit for newest-first |
+| `sort` | — | Field to order by. Per-collection allowlist; an unlisted field is a `400` naming the allowed ones. Omit for newest-first  **`links` was missing from that allowlist until 5.0 and sorting it CRASHED** — a `500` with `retryable: true` on this door, which told a caller to retry a request that could never succeed. It sorts by `createdAt`, `updatedAt`, `from` and `to`; a link has no name, title or type of its own.|
 | `dir` | — | `asc` or `desc` (default `desc`). Only meaningful with `sort` |
 | `maxTimeMS` | — | Query timeout in milliseconds (default `5000`) |
 | `entityName` | — | *(facts, chrono)* Only records attached to an entity whose name CONTAINS this, case-insensitively. A JOIN rather than a predicate: the server resolves the name to ids per member space first, and reads BOTH shapes a link can take — the `entityIds` array and the link records. A name matching nothing returns nothing, never everything. On any other collection it is a `400` |
