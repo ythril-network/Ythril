@@ -1,5 +1,6 @@
 import { withEndpointNames } from './edge-endpoint-names.js';
 import { attachJobProgress } from '../files/file-job-progress.js';
+import { withDerivedStatusForPage } from './chrono.js';
 
 /**
  * What does a page of this collection gain AFTER the query?
@@ -49,13 +50,33 @@ export async function decorateMemberRows(
 }
 
 /** The merged page, once every member has contributed. */
+/** What the CALLER asked for, as distinct from what the collection always gets. */
+export interface PageDecorationAsks {
+  /**
+   * Present a chrono entry's DERIVED status rather than the stored one — `overdue` where a due moment
+   * has passed, unless the type's `whenDuePasses` says otherwise.
+   *
+   * Opt-in, and default OFF, so every existing `filter` caller sees exactly what it saw before. The list
+   * route derives unconditionally, so the client asks for `true` and its tab is unchanged too. Nothing
+   * moves for anybody who does not ask — which is what makes surfacing the difference safe rather than
+   * a behaviour change dressed as a feature.
+   */
+  deriveStatus?: boolean;
+}
+
 export async function decoratePage<T extends object>(
   collection: string,
   spaceId: string,
   rows: readonly T[],
   readAcrossMembers: (read: (memberId: string) => Promise<Record<string, unknown>[]>) => Promise<Record<string, unknown>[]>,
+  asks: PageDecorationAsks = {},
 ): Promise<T[]> {
-  if (collection !== 'edges' || rows.length === 0) return rows as T[];
+  if (rows.length === 0) return rows as T[];
+  // One `now` for the page, so two rows in one answer cannot straddle the instant that flips a status.
+  if (collection === 'chrono') {
+    return asks.deriveStatus ? withDerivedStatusForPage(rows) : rows as T[];
+  }
+  if (collection !== 'edges') return rows as T[];
   // The cast is the shape `withEndpointNames` needs and the rows already have: an edge row carries
   // `from`/`to`, and the optional kinds decide which collection holds each endpoint's name.
   return await withEndpointNames(
@@ -64,3 +85,24 @@ export async function decoratePage<T extends object>(
     readAcrossMembers,
   ) as unknown as T[];
 }
+
+/**
+ * The page-decoration asks as JSON-Schema properties, spread into `filter`'s `inputSchema`.
+ *
+ * DECLARED HERE rather than in the tool, so the name, what it means and what applies it live in one
+ * file. A tool spelling its own description is a second account of this module's behaviour — and a
+ * description is what a caller reads while constructing arguments, which makes it the copy that rots
+ * without anybody reporting it.
+ */
+export const PAGE_DECORATION_SCHEMA: Readonly<Record<string, { type: 'boolean'; default: boolean; description: string }>> = {
+  deriveStatus: {
+    type: 'boolean',
+    default: false,
+    description: 'CHRONO ONLY. Present the DERIVED status of each entry instead of the stored one: `overdue` where its due moment has passed, unless `whenDuePasses` on that type says a passed date means nothing. Default false, so this tool answers with what the COLLECTION holds — which is what you want when repairing data, and why the two are not the same question. The per-collection chrono list route derives unconditionally, so until 5.0 the meaning of `status` depended on which door you used and nothing said so. Sending it on any other collection is refused rather than ignored.',
+  },
+  includeDiagnostics: {
+    type: 'boolean',
+    default: false,
+    description: 'Add back the two fields a listed record carries for the SYSTEM rather than for you: `matchedText` (the pre-embedding source string, which for a file chunk is the passage a SECOND time) and `embeddingModel` (identical for every record in a space). Default false on both doors, and false is what you want almost always. It was honoured by the per-collection list routes and by neither door of this tool, so a caller could ask and be answered without it — silently.',
+  },
+};

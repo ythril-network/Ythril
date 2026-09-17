@@ -233,6 +233,14 @@ Chrono stores time-anchored entries: events, deadlines, plans, predictions, and 
 > every type that does not say otherwise, and those entries keep the status you gave them. Leave it alone and
 > nothing changes. *New in 4.3.*
 >
+> **What you see here is WORKED OUT; what is stored can differ, and that matters the moment you look
+> somewhere else.** This page shows *overdue* for an entry that is stored as *upcoming* or *active* —
+> the clock decides, on every read. A backup, an export, or anything reading the space through the API
+> sees what was STORED, so an entry this page calls overdue reads as active there. Neither is wrong;
+> they answer different questions, and nothing is out of step. One operator spent a while confirming a
+> suspicion against the stored value, got a clean answer every time, and had to find out from us why.
+> Anyone reading over the API can now ask for either.
+>
 > The status dropdown does offer **overdue**, and filtering by it finds those entries too. You rarely want
 > it: an entry marked overdue by hand stays overdue after you move its dates forward, where one left as
 > *upcoming* corrects itself.

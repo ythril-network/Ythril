@@ -15,6 +15,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A chrono entry's `status` meant two different things, and which one you got was decided by the DOOR
+  you read through.** The chrono list route returns the DERIVED status — `overdue` where a due moment has
+  passed, unless the type's `whenDuePasses` says otherwise — while `filter` and sync return the value the
+  collection holds. Both are correct, and a predicate read must see the stored one or it cannot be used
+  to repair anything. What was wrong is that the two were indistinguishable from outside.
+
+  Reported in substance by the canary operator, 2026-09-15, after a fortnight-old episode read `active`
+  through one door and `overdue` through the other: *"'I checked the status' is not a claim anyone can
+  evaluate without the door being named"*. Every attempt they made to confirm the suspicion queried the
+  collection, got `active`, and read as a clean bill of health. It degrades rather than breaking, too —
+  a record read shortly after it is written still says `active`, so code built against the stored literal
+  works the day it ships and starts failing only as records outlive their due moment.
+
+  `filter` takes `deriveStatus` now, on both doors, **defaulting false** — so every existing caller sees
+  exactly what it saw before, and the client asks for `true`, so the Brain page is unchanged too. Nothing
+  moves for anybody who does not ask. Sending it on any collection but `chrono` is refused rather than
+  ignored: a silently dropped flag is a caller who believes they asked for something.
+
+  It is the same derivation the list route uses, not a second one — `whenDuePasses` makes "what a passed
+  due moment means" a per-TYPE decision, and a copy of that rule would be a second answer to it. Proved
+  against a live instance on both doors, including that `deriveStatus: true` and the list route agree
+  about the same entry, which is the condition for ever retiring that route.
+
+  **And the operator page now says the status it shows is worked out rather than stored**, because that
+  is the half an operator meets: a backup or an export reads what was stored, so an entry the page calls
+  overdue reads as active there.
+
 - **`filter` returned an edge as two bare UUIDs, and a file with no job progress.** Two of the nine
   per-collection list routes do work on their rows AFTER the query, and the one call meant to replace all
   nine did neither: `GET .../edges` resolves both endpoints' display names — batched by endpoint KIND,

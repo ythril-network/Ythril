@@ -546,6 +546,7 @@ Run a constrained Mongo-style read query against one logical collection. Intende
 | `description` | — | Only records whose `description` CONTAINS this. Narrows that one field — `search` below also spans the record's name or title, which is why both exist. Refused on `links` |
 | `properties` | — | Only records where some property VALUE contains this. Keys are not matched. It SCANS, so prefer a predicate on the property you mean when you know its name. Refused on `links` |
 | `search` | — | Freetext substring over the collection's own text fields: `name`/`description` for entities, `fact`/`description` for facts, `label`/`description` for edges, `title`/`description` for chrono, `path`/`description` for files. The value is escaped, so it is a substring and never a regex. Refused on `links`, which has no text of its own |
+| `deriveStatus` | — | *(chrono)* Present each entry's DERIVED status instead of the stored one: `overdue` where its due moment has passed, unless `whenDuePasses` on that type says a passed date means nothing. Default `false`, so this call answers with what the collection HOLDS — which is what you want when repairing data. The chrono LIST route derives unconditionally, so until 5.0 the meaning of `status` depended on which door you used. On any other collection it is a `400` |
 | `includeDiagnostics` | — | Add back the two fields a listed record carries for the SYSTEM rather than for you: `matchedText` (the pre-embedding source string — for a file chunk, the passage a SECOND time) and `embeddingModel` (identical for every record in a space). Default `false`. The per-collection list routes honoured it and this call did not, so it was a `400` here and an `additionalProperties` refusal on the tool |
 
 Any other field is a `400`. See **Unknown body fields are refused** below.
@@ -677,7 +678,7 @@ keys:
 
 | Route | Accepted fields |
 |---|---|
-| `POST /filter` | `space`, `collection`, `filter`, `projection`, `limit`, `skip`, `sort`, `dir`, `maxTimeMS`, `entityName`, `fromName`, `toName`, `tag`, `type`, `description`, `properties`, `search`, `includeDiagnostics`, `maxChars`, `maxBytes`, `maxTokens` |
+| `POST /filter` | `space`, `collection`, `filter`, `projection`, `limit`, `skip`, `sort`, `dir`, `maxTimeMS`, `entityName`, `fromName`, `toName`, `tag`, `type`, `description`, `properties`, `search`, `includeDiagnostics`, `deriveStatus`, `maxChars`, `maxBytes`, `maxTokens` |
 | `POST /recall` | `space`, `query`, `topK`, `types`, `minScore`, `filter`, `traverse`, `tags`, `minPerType`, `maxPerType`, `maxTimeMS`, `includeFileContent`, `includeDiagnostics`, `includeRecordMeta`, `projection`, `maxChars`, `maxBytes`, `maxTokens`, `skip`, `remainderDump` |
 | `POST /traverse` | `startId`, `direction`, `edgeLabels`, `maxDepth`, `limit`, `includeChrono`, `includeMemories`, `includeFiles`, `includeEdges` |
 | `POST /similar` | `space`, `entryId`, `entryType`, `topK`, `minScore`, `targetTypes`, `traverse`, `includeFileContent`, `includeDiagnostics`, `projection`, `maxChars`, `maxBytes`, `maxTokens`, `skip`, `remainderDump`, `crossSpace` *(not deprecated: `space` pins the seed ENTRY here, `crossSpace` widens the SEARCH)* |
