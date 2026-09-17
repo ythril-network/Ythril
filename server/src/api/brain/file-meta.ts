@@ -29,12 +29,11 @@ import { parseLimit, parseSkip, unsupportedPageParam } from '../../util/paginati
 import { pageAcrossMembers } from '../../spaces/page-across-members.js';
 import { countBrain, compareBySort, PROXY_PAGE_CEILING } from '../../brain/query.js';
 import { parseSortParam, toMongoSort, SORTABLE_FIELDS } from '../../brain/list-sort.js';
-import { textSearchOr, SEARCHABLE_FIELDS } from '../../brain/text-search.js';
+import { conveniencePredicate, conveniencesFrom } from '../../brain/list-conveniences.js';
 import { resolveMemberSpaces, resolveWriteTarget, findFirstAcrossMembers, collectAcrossMembers, isStrictLinkage } from '../../spaces/proxy.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import { fetchJobProgress, getMediaJobCounts, FAILED_SAMPLE_LIMIT, FAILED_REASON_LIMIT, type MediaJobCounts } from '../../files/media/job-queue.js';
-import { tagContains } from '../../brain/tag-filter.js';
 import { reachesSpace } from '../../auth/space-reach.js';
 import { canWriteAnywhere } from '../../auth/write-anywhere.js';
 import type { TokenRights } from '../../config/rights-shape.js';
@@ -105,14 +104,17 @@ fileMetaRouter.get('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth, 
   // By default exclude chunk records (parentFileId set) so the file manager only shows
   // top-level files. Pass ?includeChunks=true to see all records (e.g. for debugging).
   const includeChunks = req.query['includeChunks'] === 'true';
-  const filter: Record<string, unknown> = {};
-  if (!includeChunks) filter['parentFileId'] = { $exists: false };
-  if (typeof req.query['tag'] === 'string') filter['tags'] = tagContains(req.query['tag']);
-  if (typeof req.query['path'] === 'string') filter['path'] = toDocId(req.query['path']);
-  // Freetext substring over path + description (escaped, mirrors 2b-iii-a on the other collections).
-  // Distinct from the exact `?path=` filter above; the client's docked freetext box feeds this.
-  const search = textSearchOr(req.query['search'] as string | undefined, SEARCHABLE_FIELDS.files);
-  if (search) Object.assign(filter, search);
+  /*
+   * `parentFileId` and `path` are this collection's own: the chunk filter, and an EXACT path, distinct
+   * from the `search` convenience which spans path and description as a substring. The rest goes through
+   * `conveniencePredicate`, the module the `filter` tool also calls.
+   */
+  const base: Record<string, unknown> = {};
+  if (!includeChunks) base['parentFileId'] = { $exists: false };
+  if (typeof req.query['path'] === 'string') base['path'] = toDocId(req.query['path']);
+  const merged = conveniencePredicate('files', conveniencesFrom(req.query as Record<string, unknown>), base);
+  if ('error' in merged) { res.status(400).json({ error: merged.error }); return; }
+  const filter = merged.predicate;
   const members = memberSpacesForRequest(req, spaceId);
   const page = await pageAcrossMembers<Record<string, unknown>>({
     members, limit, skip, ceiling: PROXY_PAGE_CEILING,

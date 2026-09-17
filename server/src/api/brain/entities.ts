@@ -21,12 +21,11 @@ import { parseLimit, parseSkip, unsupportedPageParam } from '../../util/paginati
 import { pageAcrossMembers } from '../../spaces/page-across-members.js';
 import { countBrain, compareBySort, PROXY_PAGE_CEILING } from '../../brain/query.js';
 import { parseSortParam, SORTABLE_FIELDS, toMongoSort } from '../../brain/list-sort.js';
-import { textSearchOr, SEARCHABLE_FIELDS } from '../../brain/text-search.js';
 import { resolveMemberSpaces, resolveWriteTarget, isProxySpace, isStrictLinkage, findFirstAcrossMembers, collectAcrossMembers } from '../../spaces/proxy.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
 import { UUID_V4_RE, webhookToken, getSpaceMeta, ttlDaysFromBody, ttlDaysError, dupeCheckOptsFromBody, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
 import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
-import { tagContains, textContains, propertiesValueContains } from '../../brain/tag-filter.js';
+import { conveniencePredicate, conveniencesFrom } from '../../brain/list-conveniences.js';
 import { mergePropertiesOrKeep, mergeTagsOrKeep } from '../../brain/merge-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { withoutListDiagnostics } from '../../brain/read-projection.js';
@@ -205,15 +204,16 @@ entitiesRouter.get('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAut
     res.status(400).json({ error: sortParse.error });
     return;
   }
-  const filter: Record<string, unknown> = {};
-  if (typeof req.query['name'] === 'string') filter['name'] = req.query['name'];
-  if (typeof req.query['type'] === 'string') filter['type'] = req.query['type'];
-  if (typeof req.query['tag'] === 'string') filter['tags'] = tagContains(req.query['tag']);
-  // Per-column description filter — narrows its own column, unlike `search` which also spans `name`.
-  if (typeof req.query['description'] === 'string') filter['description'] = textContains(req.query['description']);
-  if (typeof req.query['properties'] === 'string') Object.assign(filter, propertiesValueContains(req.query['properties']));
-  const search = textSearchOr(req.query['search'] as string | undefined, SEARCHABLE_FIELDS.entities);
-  if (search) Object.assign(filter, search);
+  /*
+   * `name` is the one filter only an entity has — an EXACT match, unlike `search`, which spans name and
+   * description as a substring. Everything else goes through `conveniencePredicate`, the module `filter`
+   * also calls, so the two doors cannot come to mean different things by `tag`.
+   */
+  const base: Record<string, unknown> = {};
+  if (typeof req.query['name'] === 'string') base['name'] = req.query['name'];
+  const merged = conveniencePredicate('entities', conveniencesFrom(req.query as Record<string, unknown>), base);
+  if ('error' in merged) { res.status(400).json({ error: merged.error }); return; }
+  const filter = merged.predicate;
   const members = memberSpacesForRequest(req, spaceId);
   const page = await pageAcrossMembers<Record<string, unknown>>({
     members, limit, skip, ceiling: PROXY_PAGE_CEILING,

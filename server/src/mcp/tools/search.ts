@@ -25,6 +25,7 @@ import {
   queryBrain, countBrain, compareBySort, DEFAULT_QUERY_SORT, QUERY_PAGE_MAX, PROXY_PAGE_CEILING,
 } from '../../brain/query.js';
 import { parseSortParam, toMongoSort, SORTABLE_FIELDS } from '../../brain/list-sort.js';
+import { conveniencePredicate, conveniencesFrom, CONVENIENCE_SCHEMA } from '../../brain/list-conveniences.js';
 import { type RecallKnowledgeType, type RecallResult, findSimilar, recall, recallGlobal } from '../../brain/recall.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
 import { pageAcrossMembers } from '../../spaces/page-across-members.js';
@@ -765,8 +766,17 @@ export const queryTool: ToolHandler = {
             maxBytes: { type: 'integer', minimum: 1000, description: 'Ceiling on the serialised response body, in real UTF-8 BYTES. **NO DEFAULT — opt-in.** Set it when your limit is genuinely a byte limit. Bytes are always >= characters, so a byte default equal to the character one would silently bind on every non-ASCII answer. When you set both, BOTH apply: the page stops at whichever ceiling it reaches first.' },
             maxTokens: { type: 'integer', minimum: 1, description: 'A convenience onto `maxChars`, converted at a fixed 3.5 characters per token — the conversion produces characters. If both are sent the SMALLER resulting character figure applies. An approximation: the server does not know your tokeniser.' },
             maxTimeMS: { type: 'number', minimum: 1, maximum: 10000, default: 5000, description: 'Server-side query timeout in ms. Default 5000, hard-capped at 10000.' },
+            // The five list conveniences, declared beside the module that assembles them — see
+            // `CONVENIENCE_SCHEMA` in `brain/list-conveniences.ts`. Spread rather than spelled so the
+            // names, their meanings and their assembly cannot drift into three descriptions.
+            ...CONVENIENCE_SCHEMA,
           },
-          required: ['collection', 'filter'],
+          /*
+           * `filter` is NOT required, since 5.0 and on both doors in the same change. A caller narrowing
+           * by `tag` alone had to send `filter: {}` to say "and no predicate", which is a shape you have
+           * to be told about. An omitted filter is the empty predicate, exactly as `{}` always was.
+           */
+          required: ['collection'],
           additionalProperties: false,
         }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
@@ -781,10 +791,18 @@ export const queryTool: ToolHandler = {
        */
       throw new Error(`collection must be one of: ${BRAIN_COLLECTIONS.join(', ')}`);
     }
-    const filter =
+    const rawFilter =
       a['filter'] != null && typeof a['filter'] === 'object'
         ? (a['filter'] as Record<string, unknown>)
         : {};
+    /*
+     * The conveniences are merged UNDER `$and`, by the module, never assigned over the caller's
+     * predicate — `search` produces an `$or` and so may the caller. See `brain/list-conveniences.ts`;
+     * the refusal branch is why it returns a result rather than a predicate.
+     */
+    const merged = conveniencePredicate(collName, conveniencesFrom(a), rawFilter);
+    if ('error' in merged) throw new Error(merged.error);
+    const filter = merged.predicate;
     const limit = Math.min(typeof a['limit'] === 'number' ? a['limit'] : 20, QUERY_PAGE_MAX);
     // Same refusal as the REST route: a non-integer or negative skip is an error, not a silent 0. Reading it as "start
     // from the beginning" returns a page that is not the page asked for, with no sign that anything went wrong.

@@ -5,11 +5,11 @@ import { brainWriteSeqTotal } from '../metrics/registry.js';
 import { authorRef } from '../config/author.js';
 import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
 import { nextSeq } from '../util/seq.js';
-import { tagContains, textContains, propertiesValueContains, PROPERTIES_SCAN_MAX_MS } from './tag-filter.js';
+import { PROPERTIES_SCAN_MAX_MS } from './tag-filter.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, type SortSpec } from './list-sort.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector } from './read-projection.js';
-import { textSearchOr, SEARCHABLE_FIELDS } from './text-search.js';
+import { conveniencePredicate } from './list-conveniences.js';
 import { embed } from './embedding.js';
 import { chronoEmbedText } from './embed-text.js';
 import { SimilarMatch, checkDuplicates } from './recall.js';
@@ -581,10 +581,28 @@ export function buildChronoQuery(
   }
   if (filter.type !== undefined) query['type'] = filter.type;
 
-  // Single-tag substring search (the UI box). Exclusive with the exact tags/tagsAny set below.
-  if (filter.tagLike) query['tags'] = tagContains(filter.tagLike);
-  if (filter.descriptionLike) query['description'] = textContains(filter.descriptionLike);
-  if (filter.propertiesLike) Object.assign(query, propertiesValueContains(filter.propertiesLike));
+  /*
+   * The four common conveniences, assembled by `conveniencePredicate` — the module the `filter` tool and
+   * every list route call — and pushed into the accumulator rather than assigned onto `query`, which is
+   * what the module does for its own clauses too.
+   *
+   * `tagLike` IS WITHHELD when the exact `tags`/`tagsAny` sets are present, and that preserves today's
+   * behaviour exactly rather than improving it here: the two have always been exclusive, resolved by
+   * `query['tags']` being overwritten below. Passing both to the module would AND them, which is
+   * arguably the better answer and is a behaviour change this row does not claim.
+   */
+  const exactTags = (filter.tags?.length ?? 0) > 0 || (filter.tagsAny?.length ?? 0) > 0;
+  const conveniences = {
+    ...(filter.tagLike && !exactTags ? { tag: filter.tagLike } : {}),
+    ...(filter.descriptionLike ? { description: filter.descriptionLike } : {}),
+    ...(filter.propertiesLike ? { properties: filter.propertiesLike } : {}),
+    ...(filter.search ? { search: filter.search } : {}),
+  };
+  const merged = conveniencePredicate('chrono', conveniences, {});
+  // `chrono` has searchable fields, so this cannot fire — thrown rather than ignored so that a future
+  // change removing them is a loud failure instead of a filter that silently matches everything.
+  if ('error' in merged) throw new Error(merged.error);
+  and.push(...((merged.predicate['$and'] as Record<string, unknown>[] | undefined) ?? []));
 
   // tags ALL (AND): every tag in the array must be present
   if (filter.tags && filter.tags.length > 0) {
@@ -611,10 +629,6 @@ export function buildChronoQuery(
     query['createdAt'] = range;
   }
 
-  // Full-text substring search on title and/or description. Escaped (2b-iii-a): the raw value used to
-  // reach `$regex` un-escaped, so a value like `(a+)+$` was a ReDoS / regex-injection vector.
-  const search = textSearchOr(filter.search, SEARCHABLE_FIELDS.chrono);
-  if (search) and.push({ $or: search.$or });
 
   if (and.length > 0) query['$and'] = and;
 

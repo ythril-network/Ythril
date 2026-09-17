@@ -5,8 +5,7 @@
  * pieces every sub-router needs: webhook token attribution, space-meta lookup, the schema
  * validation gate, the fact list filter, and the UUID matcher.
  */
-import { tagContains, textContains, propertiesValueContains } from '../../brain/tag-filter.js';
-import { textSearchOr, SEARCHABLE_FIELDS } from '../../brain/text-search.js';
+import { conveniencePredicate, conveniencesFrom } from '../../brain/list-conveniences.js';
 import type express from 'express';
 import { getConfig } from '../../config/loader.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
@@ -67,27 +66,25 @@ export function ttlDaysError(body: unknown): string | null {
  */
 export { getSpaceMeta, applyValidation } from '../../spaces/schema-validation.js';
 
-/** Build a MongoDB filter from `tag` and `entity` query params */
+/**
+ * Build a MongoDB filter for the facts list route.
+ *
+ * The five common conveniences — `tag`, `type`, `description`, `properties`, `search` — go through
+ * `conveniencePredicate`, the one module `filter` also calls, so the browser and an agent cannot come to
+ * mean different things by `tag`. What stays here is the one name only a fact has: `entity`, an id
+ * against the record's own link field.
+ *
+ * The refusal branch cannot fire for `facts` — it has searchable fields — so the throw is a structural
+ * assertion rather than a path: reaching it would mean `facts` had left `SEARCHABLE_FIELDS`, and a
+ * silent `{}` there is a full-collection read dressed as a filtered one.
+ */
 export function buildFactFilter(query: Record<string, unknown>): Record<string, unknown> {
-  const filter: Record<string, unknown> = {};
-  const tag = typeof query['tag'] === 'string' ? query['tag'] : undefined;
+  const base: Record<string, unknown> = {};
   const entity = typeof query['entity'] === 'string' ? query['entity'] : undefined;
-  const type = typeof query['type'] === 'string' ? query['type'] : undefined;
-  if (tag) filter['tags'] = tagContains(tag);
-  if (entity) filter['entityIds'] = entity;
-  if (type) filter['type'] = type;
-  // Per-COLUMN description filter. Distinct from `search` below, which spans fact+description: a column
-  // filter has to narrow its own column, or the header control lies about what it does.
-  const description = typeof query['description'] === 'string' ? query['description'] : undefined;
-  if (description) filter['description'] = textContains(description);
-  // Properties column filters on VALUE (owner's call). Scans — see `propertiesValueContains`.
-  const props = typeof query['properties'] === 'string' ? query['properties'] : undefined;
-  if (props) Object.assign(filter, propertiesValueContains(props));
-  // Freetext substring over fact + description (2b-iii-a).
-  const search = typeof query['search'] === 'string' ? query['search'] : undefined;
-  const or = textSearchOr(search, SEARCHABLE_FIELDS.facts);
-  if (or) Object.assign(filter, or);
-  return filter;
+  if (entity) base['entityIds'] = entity;
+  const merged = conveniencePredicate('facts', conveniencesFrom(query), base);
+  if ('error' in merged) throw new Error(merged.error);
+  return merged.predicate;
 }
 
 /**

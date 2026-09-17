@@ -11,7 +11,7 @@ import { NEVER_RETURNED_PROJECTION, withoutVector } from './read-projection.js';
 import { findEdgeByTriplet } from './edge-lookup.js';
 import { classifyEdgeUpsertAgainst, SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import { applyPropertyDefaults } from '../spaces/schema-validation.js';
-import { textSearchOr, SEARCHABLE_FIELDS } from './text-search.js';
+import { conveniencePredicate, conveniencesFrom } from './list-conveniences.js';
 import { embed } from './embedding.js';
 import { edgeEmbedText } from './embed-text.js';
 import { getConfig } from '../config/loader.js';
@@ -32,7 +32,7 @@ import { storedEdgeKind } from './entity-refs.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { EdgeDoc, EntityDoc, TombstoneDoc, ChronoEntry, FactDoc, FileMetaDoc } from '../config/types.js';
 import type { RefKind } from '../config/types-knowledge.js';
-import { tagContains, textContains, propertiesValueContains, PROPERTIES_SCAN_MAX_MS } from './tag-filter.js';
+import { PROPERTIES_SCAN_MAX_MS } from './tag-filter.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { spaceCollection } from '../db/space-collection.js';
 
@@ -354,23 +354,26 @@ export async function listEdges(
   skip = 0,
   sort?: SortSpec,
 ): Promise<EdgeDoc[]> {
-  const q: Record<string, unknown> = { spaceId };
-  if (filter.from) q['from'] = filter.from;
-  if (filter.to) q['to'] = filter.to;
-  if (filter.label) q['label'] = filter.label;
-  if (filter.type) q['type'] = filter.type;
-  // `tags` is an array field; a scalar match is Mongo array-contains (edge HAS this tag).
-  if (filter.tag) q['tags'] = tagContains(filter.tag);
-  // Per-column description filter. `search` below also spans `label`, so a column control needs its own.
-  if (filter.description) q['description'] = textContains(filter.description);
-  if (filter.properties) Object.assign(q, propertiesValueContains(filter.properties));
+  /*
+   * The edge's OWN filters: its endpoints and its label. The five common conveniences —
+   * `tag`, `type`, `description`, `properties`, `search` — go through `conveniencePredicate`, the module
+   * the `filter` tool also calls, so an agent and the Edges tab cannot come to mean different things.
+   */
+  const base: Record<string, unknown> = { spaceId };
+  if (filter.from) base['from'] = filter.from;
+  if (filter.to) base['to'] = filter.to;
+  if (filter.label) base['label'] = filter.label;
   // Name filters arrive already resolved to ids (per member). An EMPTY list means "no entity by that
   // name", so it must filter to nothing — not be skipped, which would silently show everything.
-  if (filter.fromIds) q['from'] = { $in: filter.fromIds };
-  if (filter.toIds) q['to'] = { $in: filter.toIds };
-  // Freetext substring over the edge's text fields (2b-iii-a).
-  const search = textSearchOr(filter.search, SEARCHABLE_FIELDS.edges);
-  if (search) Object.assign(q, search);
+  if (filter.fromIds) base['from'] = { $in: filter.fromIds };
+  if (filter.toIds) base['to'] = { $in: filter.toIds };
+  // `filter` already spells the five convenience names exactly as the module reads them, so it is passed
+  // whole rather than re-listed — a re-listing here is the sixth copy this module exists to remove.
+  const merged = conveniencePredicate('edges', conveniencesFrom(filter as Record<string, unknown>), base);
+  // `edges` has searchable fields, so the refusal branch is unreachable — throwing rather than falling
+  // back to `base` keeps a silent full-collection read from ever being the answer here.
+  if ('error' in merged) throw new Error(merged.error);
+  const q = merged.predicate;
   return col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
     .find(asFilter<EdgeDoc>(q), { projection: NEVER_RETURNED_PROJECTION })
     .maxTimeMS(q['$expr'] ? PROPERTIES_SCAN_MAX_MS : 60_000)

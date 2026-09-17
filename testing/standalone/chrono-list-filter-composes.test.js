@@ -163,7 +163,14 @@ describe('the unrelated filters still land', () => {
     assert.equal(query['type'], 'event');
     assert.equal(query['createdAt']['$gt'], '2026-01-01');
     assert.equal(query['createdAt']['$lt'], '2026-12-31');
-    assert.ok(query['tags'], 'the substring tag box writes the bare key, which nothing else claims');
+    /*
+     * The substring tag box narrows `tags`, and since the conveniences moved into
+     * `conveniencePredicate` it does so as a clause under `$and` rather than as a bare key — the module
+     * accumulates so that two conveniences, or a caller's own `$or`, cannot overwrite each other.
+     * Asserted wherever it lands: the rule is that the box narrows tags, not which key holds it.
+     */
+    assert.match(JSON.stringify(query), /"tags":\{"\$regex":"rel"/,
+      `the substring tag box did not narrow tags: ${JSON.stringify(query)}`);
   });
 
   it('tagsAny alone stays a bare $in rather than a one-element $and', () => {
