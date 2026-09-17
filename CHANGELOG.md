@@ -420,6 +420,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The link conversion runs itself at boot, because the documented way to run it could not be run.**
+  The canary operator, 2026-09-15: `npm run links:convert` on a deployed instance answers
+
+  ```
+  Error: Cannot find module '/app/scripts/convert-links.mjs'
+  ```
+
+  The npm script survives into the published image and resolves its path correctly; `scripts/` is not
+  copied. So it presents as a Node stack trace rather than `missing script`, and reads like a broken
+  installation of theirs. `04b-graph-api.md` documented that script as **the** mechanism and there was no
+  second route — the pre-flight only reports, and `POST /links` writes one link at a time. "Spaces
+  converted" was a set a container deployment could not join, and the 5.0 removal of the six link ARRAY
+  fields is gated on exactly that set.
+
+  Every start now converts each space not yet marked `completeLinkage` and marks the ones whose walk
+  finished cleanly. It is additive — links are created, no array is removed, a space reads correctly
+  before, during and after — so an interrupted run is fixed by the next boot, and an already-marked space
+  is skipped outright. Owner: *"make the script autorun at startup … remove that on 6.0"*, recorded as
+  `_DEPRECATIONS.md` row 6.1.
+
+  **A boot migration over synced data is normally forbidden, and the peer floor is what suspends it.**
+  `MIN_PEER_VERSION` derives from our own major, so a 5.0 instance refuses every 4.x peer at the
+  handshake and no peer can write the arrays back. `renameMemoriesToFacts` runs at boot in the same
+  release on the same argument.
+
+  **It does not refuse the boot on a failure**, deliberately: a space whose walk throws is left unmarked,
+  which is exactly its behaviour before this ran — it keeps reading its arrays and accepting array
+  writes. Exiting would turn a recoverable data problem into an instance nobody can log into to look at.
+  The space is named in an `ERROR` line and the next boot retries, so the array removal has a condition
+  it can check rather than an assumption: a space is either marked or named.
+
 - **BREAKING — `filter: {"type": "note"}` was accepted and silently DROPPED.** A bare scalar value was read
   as a malformed operator object — the grammar where a value is spelled `{"eq": "note"}` — so the
   translation produced no predicate and the recall answered `200` with the **unfiltered** ranking.

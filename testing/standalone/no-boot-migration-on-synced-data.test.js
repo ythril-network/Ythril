@@ -106,7 +106,19 @@ function writesSynced(body) {
   for (const coll of SYNCED) {
     for (const m of body.matchAll(/\bcol\s*(?:<[^>]*>)?\s*\(/g)) {
       const open = body.indexOf('(', m.index);
-      if (!new RegExp(`_${coll}\``).test(balancedFrom(body, open, 'the col() arguments'))) continue;
+      /*
+       * BOTH SPELLINGS of a collection name, and the second is now the majority.
+       *
+       * This matched `` col(`${spaceId}_facts`) `` alone. `A-5` gave collections one name via
+       * `spaceCollection(space, 'facts')`, and 70 of the 81 `col()` opens in the server use that form —
+       * so the detector had been reading 14% of the code and passing on the rest. It is the gate matching
+       * the wrong thing silently: nothing contradicted it, because a gate that finds nothing looks exactly
+       * like a codebase with nothing to find.
+       */
+      const args = balancedFrom(body, open, 'the col() arguments');
+      const named = new RegExp(`_${coll}\``).test(args)
+        || new RegExp('spaceCollection\\([^)]*\\b' + coll + '\\b').test(args);
+      if (!named) continue;
 
       // Chained on the open itself: `col(...).updateOne(...)`, one statement.
       const stmt = statementFrom(body, m.index, `the ${coll} open`);
@@ -133,8 +145,42 @@ function bootCallees() {
   const startup = listen > 0 ? src.slice(0, listen) : src;
   const names = new Set();
   for (const m of startup.matchAll(/(?:await\s+)?([a-z][\w$]*)\s*\(\s*\)/g)) names.add(m[1]);
+
+  /*
+   * IT DOES NOT FOLLOW A CALL, and that limit is now load-bearing rather than theoretical.
+   *
+   * `convertLinksOnBoot` walked straight past this gate on 2026-09-17. It writes `<space>_links` at boot
+   * and does it through `convertSpaceLinks()`, so the `col()` scan of its own body finds nothing. The gate
+   * passed on the exact shape of change it exists to notice.
+   *
+   * Two attempts at a one-hop expansion were written and both were withdrawn, which is why this comment
+   * exists instead of code. Collecting every call in a boot callee's body and matching those names
+   * tree-wide reported `wipeSpace()` — a destructive operator action nothing calls at boot. Narrowing the
+   * hop to the callee's own imports reported it too, because `functions()` is keyed by NAME and cannot
+   * tell one module's `startX` from another's. Resolving it properly means module-aware resolution, which
+   * is `Q-24`. A gate whose failures are mostly false gets its assertion deleted rather than its subject
+   * fixed, so the honest state is: this sees one level, `SANCTIONED` records what it cannot see, and the
+   * entry is a DECISION on the record rather than a suppression of a detection.
+   */
   return names;
 }
+
+/**
+ * Boot migrations over synced data that are DELIBERATE, each with the argument that makes it safe.
+ *
+ * The rule exists because a peer running older code writes the old shape back, and a boot migration
+ * cannot see that happen. **A version floor suspends the rule** — when the handshake refuses every peer
+ * below our own major, the network is homogeneous or it is not a network — and that is the only argument
+ * accepted here. "It seemed fine" is not one, and neither is "it is only additive": additive protects the
+ * DATA, not the migration's premise.
+ */
+const SANCTIONED = new Map([
+  ['convertLinksOnBoot', 'The 5.0 link-array migration, owner-directed 2026-09-17 after the canary operator '
+    + 'reported that `npm run links:convert` cannot run on a deployed instance (`scripts/` is not in the '
+    + 'image). `MIN_PEER_VERSION` derives from our own major, so a 5.0 instance refuses every 4.x peer at '
+    + 'the handshake and no peer can write the arrays back. Additive on top of that: it creates link '
+    + 'records and removes no array, and a space is correct before, during and after. Removed at 6.0.'],
+]);
 
 describe('the sweep works before it is trusted', () => {
   it('finds the migrate* functions', () => {
@@ -208,7 +254,7 @@ describe('no boot migration writes to a synced collection', () => {
     const offenders = [];
     for (const f of sourceFiles()) {
       for (const [name, body] of functions(code(f))) {
-        if (!callees.has(name)) continue;
+        if (!callees.has(name) || SANCTIONED.has(name)) continue;
         const hit = writesSynced(body);
         if (hit) offenders.push(`${f} → ${name}() writes ${hit}`);
       }

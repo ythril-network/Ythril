@@ -535,7 +535,15 @@ Three things it deliberately never does:
 - **It never applies to a write that does not MENTION an array.** A `PATCH` of a fact's `fact` on a record
   still carrying a legacy array succeeds, or every unconverted record would become uneditable.
 
-### Running the conversion: scope, preview, prerequisites, and undoing it
+### Running the conversion — it runs itself at boot since 5.0
+
+**You do not have to run anything.** Every start converts each space not yet marked `completeLinkage` and
+marks the ones whose walk finished cleanly — additive, so an interrupted run is fixed by the next boot and
+an already-marked space is skipped. A space that FAILS is left unmarked and named in an `ERROR` line,
+keeps reading its arrays and accepting array writes exactly as before, and the instance still serves.
+This replaced `npm run links:convert`: it is declared in `package.json` while `scripts/` is not in the
+published image, so a container deployment got `Cannot find module '/app/scripts/convert-links.mjs'`,
+reading like a broken installation of yours (2026-09-15). It still works from a source checkout.
 
 **Preview first. It reads and writes nothing**, and it answers the question you actually have before running
 a migration against live data — how much is there:
@@ -639,7 +647,7 @@ GET /api/brain/spaces/:spaceId/links/convert-preflight?windowDays=30
 
 MCP: `graph_link_preflight`, same parameter and same default.
 
-**Read this before running `links:convert`.** Conversion sets `completeLinkage`, after which the six array
+**Read this before a space is MARKED.** Conversion sets `completeLinkage`, after which the six array
 fields are refused on write. That refusal reaches a caller on its **next write**, not at conversion time — so
 without this you convert, and learn which of your writers still use the old surface when one of them breaks,
 possibly a week later.
