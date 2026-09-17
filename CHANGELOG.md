@@ -420,6 +420,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Sorting `links` crashed instead of sorting, and on the REST door it crashed as a RETRYABLE 500.**
+  Reported by the canary operator 2026-09-15 against the tool door, which answers
+  `Cannot read properties of undefined (reading 'has')`. Measured here, the REST door is the worse half
+  and was not in the report: `500 {"error":"Internal server error","retryable":true}` — telling a caller
+  to retry a request that can never succeed.
+
+  `SORTABLE_FIELDS` declared five collections while the `collection` enum offered six, so the lookup was
+  `undefined` and `allowed.has()` threw where the tool's own text promises the field "is refused and
+  names the allowed ones". `links` now sorts by `createdAt`, `updatedAt`, `from` and `to` — a link has no
+  name, title or type of its own, it IS a pair of endpoints.
+
+  **And `parseSortParam` accepts an absent set rather than assuming one.** Both doors index the map and
+  pass the result straight through, so the function that RECEIVES it is the only place that can hold
+  this: a collection somebody forgets is now a `400` saying sorting is not supported, not a crash. A gate
+  reads the enum out of the published schema and requires every member to be sortable-or-refused, because
+  what recurs is the PAIRING — a collection reaching the enum without reaching the map.
+
 - **The link conversion runs itself at boot, because the documented way to run it could not be run.**
   The canary operator, 2026-09-15: `npm run links:convert` on a deployed instance answers
 

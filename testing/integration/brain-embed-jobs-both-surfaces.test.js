@@ -165,11 +165,29 @@ describe('MCP: the same two capabilities, through the other door', () => {
   });
 
   it('list_embed_jobs reports the same counts REST does', async () => {
-    // Both surfaces call `getEmbedJobCounts`/`listEmbedJobs`. Asserting they AGREE is what makes that a fact rather
-    // than an intention: a second copy of the query would drift, and this is where it would show.
-    const rest = await listRest();
-    const mcp = await session.callTool('list_embed_jobs', { space: SPACE });
-    assert.ok(!mcp?.isError, `refused: ${JSON.stringify(mcp)}`);
+    /*
+     * Both surfaces call `getEmbedJobCounts`/`listEmbedJobs`. Asserting they AGREE is what makes that a fact rather
+     * than an intention: a second copy of the query would drift, and this is where it would show.
+     *
+     * SANDWICHED, because the subject is a live queue and the first version of this case compared two readings
+     * taken at two different instants. It failed on `main` with `processing: 1` from REST and `processing: 0`
+     * from MCP — a job retired between the two calls, which is the stack working, not a drifted query. A retry
+     * loop alone would not have fixed it either: the queue can move on every attempt.
+     *
+     * So: read REST, then MCP, then REST again. Only a window where the two REST readings AGREE says anything
+     * about the MCP one in the middle, and in such a window a second implementation still has nowhere to hide.
+     */
+    let rest, mcp, again;
+    for (let i = 0; i < 10; i++) {
+      rest = await listRest();
+      mcp = await session.callTool('list_embed_jobs', { space: SPACE });
+      again = await listRest();
+      assert.ok(!mcp?.isError, `refused: ${JSON.stringify(mcp)}`);
+      if (JSON.stringify(rest.body.counts) === JSON.stringify(again.body.counts)) break;
+      await new Promise(res => setTimeout(res, 300));
+    }
+    assert.deepEqual(again.body.counts, rest.body.counts,
+      'the queue moved on all ten attempts, so nothing here can be compared — the embedder is not settling');
     assert.deepEqual(mcp.structuredContent.counts, rest.body.counts,
       'the two surfaces must answer the same question with the same numbers');
     assert.match(mcp.content[0].text, /pending/i, 'and a human-readable line, because a model reads the text');

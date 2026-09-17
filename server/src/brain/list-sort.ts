@@ -34,6 +34,15 @@ export const SORTABLE_FIELDS = {
   facts: new Set<string>(['createdAt', 'type']),
   chrono: new Set<string>(['createdAt', 'title', 'startsAt', 'endsAt', 'status', 'type']),
   files: new Set<string>(['createdAt', 'updatedAt', 'path']),
+  /*
+   * `links` was MISSING while `query`'s `collection` enum already listed it, so the lookup was
+   * `undefined` and `allowed.has()` threw a 500 where the tool text promises a refusal naming the
+   * allowed fields. Reported by the canary operator 2026-09-15, reproduced with `sort: "createdAt"`.
+   *
+   * A link has no name, no title and no type of its own — it IS a pair of endpoints — so what is
+   * sortable is when it was written and which records it joins.
+   */
+  links: new Set<string>(['createdAt', 'updatedAt', 'from', 'to']),
 } as const;
 
 /** Result of parsing `?sort=&dir=`: a spec, an explicit no-sort, or a client error to 400 on. */
@@ -59,9 +68,22 @@ function parseDir(raw: unknown): 1 | -1 | null {
 export function parseSortParam(
   rawField: unknown,
   rawDir: unknown,
-  allowed: ReadonlySet<string>,
+  /**
+   * The collection's sortable set, or `undefined` for a collection that declares none.
+   *
+   * **`undefined` is accepted on purpose, and this is the forgettable part being put inside.** Both doors
+   * index `SORTABLE_FIELDS[collection]` and hand the result straight here. When `links` was missing from
+   * that map the value was `undefined`, `allowed.has()` threw, and a caller got a 500 where this function's
+   * own contract promises a refusal naming the allowed fields — two call sites, one rule, and neither of
+   * them the place to notice. A collection added to a `collection` enum and not to the map now REFUSES a
+   * sort instead of crashing on one.
+   */
+  allowed: ReadonlySet<string> | undefined,
 ): SortParse {
   if (rawField === undefined || rawField === '') return { sort: undefined };
+  if (!allowed) {
+    return { error: 'Sorting is not supported on this collection' };
+  }
   if (typeof rawField !== 'string') {
     return { error: '`sort` must be a single field name' };
   }
