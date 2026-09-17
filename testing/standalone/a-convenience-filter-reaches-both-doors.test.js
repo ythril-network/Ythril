@@ -171,7 +171,11 @@ describe('nobody assembles the conveniences a second time', () => {
     // The module itself, and the two files that DEFINE the primitives, are the legitimate holders.
     // `exclude` is EXACT PATHS, matched with `Array.includes` — a regex here is silently no exclusion
     // at all, and the gate then reports the definition site as an offender.
+    // `untracked: true`: a file the change ADDS is not in `git ls-files` until it is committed, so a
+    // pre-commit sweep without it cannot see a new copy — which is the copy a reviewer most needs
+    // flagged.
     const sources = trackedSources(['server/src'], {
+      untracked: true,
       exclude: [
         'server/src/brain/list-conveniences.ts',
         'server/src/brain/tag-filter.ts',

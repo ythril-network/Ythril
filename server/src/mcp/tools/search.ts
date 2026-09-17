@@ -26,6 +26,8 @@ import {
 } from '../../brain/query.js';
 import { parseSortParam, toMongoSort, SORTABLE_FIELDS } from '../../brain/list-sort.js';
 import { conveniencePredicate, conveniencesFrom, CONVENIENCE_SCHEMA } from '../../brain/list-conveniences.js';
+import { decorateMemberRows, decoratePage } from '../../brain/list-decorations.js';
+import { withoutListDiagnostics } from '../../brain/read-projection.js';
 import { type RecallKnowledgeType, type RecallResult, findSimilar, recall, recallGlobal } from '../../brain/recall.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
 import { pageAcrossMembers } from '../../spaces/page-across-members.js';
@@ -770,6 +772,11 @@ export const queryTool: ToolHandler = {
             // `CONVENIENCE_SCHEMA` in `brain/list-conveniences.ts`. Spread rather than spelled so the
             // names, their meanings and their assembly cannot drift into three descriptions.
             ...CONVENIENCE_SCHEMA,
+            includeDiagnostics: {
+              type: 'boolean',
+              default: false,
+              description: 'Add back the two fields a listed record carries for the SYSTEM rather than for you: `matchedText` (the pre-embedding source string, which for a file chunk is the passage a SECOND time) and `embeddingModel` (identical for every record in a space). Default false on both doors, and false is what you want almost always. It was honoured by the per-collection list routes and by neither door of this tool, so a caller could ask and be answered without it — silently.',
+            },
           },
           /*
            * `filter` is NOT required, since 5.0 and on both doors in the same change. A caller narrowing
@@ -888,14 +895,26 @@ export const queryTool: ToolHandler = {
       skip,
       ceiling: PROXY_PAGE_CEILING,
       compare: compareBySort(order),
-      readMember: async (mid, lim, sk) =>
-        queryBrain(mid, coll, await filterFor(mid), projection, lim, maxTimeMS, sk, order),
+      readMember: async (mid, lim, sk) => decorateMemberRows(coll, mid,
+        (await queryBrain(mid, coll, await filterFor(mid), projection, lim, maxTimeMS, sk, order)) as Array<Record<string, unknown>>),
     });
     if (!page.ok) throw new Error(page.error);
     // Resolved before the read, so a bad `maxBytes` is an error rather than a query that ran first.
     const queryBudget = resolveBudget(a as BudgetRequest, defaultBudgetChars(ctx.transport));
     if (!queryBudget.ok) throw new Error(queryBudget.error);
-    const docs = page.rows;
+    /*
+     * The same two DECORATIONS the REST door applies, through the same module: an edge's endpoint names,
+     * and a file's job step progress (joined per member above, before the page is merged). They were on
+     * the per-collection list routes and on neither door of `filter`, which is a capability the browser
+     * had and an agent did not — and a decoration is not a parameter, so nothing compared them.
+     *
+     * A NAMED space resolves its proxy members; an omitted one is every space this connection can reach,
+     * which is the same list the page was read from.
+     */
+    const decorated = await decoratePage(coll, ctx.callSpaces[0] ?? members[0] ?? '', page.rows,
+      async read => (await Promise.all(members.map(read))).flat());
+    // And the diagnostics projection, read from the tool argument rather than a query string.
+    const docs = withoutListDiagnostics(decorated, a['includeDiagnostics'] === true);
 
     let total = 0;
     for (const mid of members) total += await countBrain(mid, coll, filter, maxTimeMS);

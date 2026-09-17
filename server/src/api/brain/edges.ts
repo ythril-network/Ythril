@@ -5,7 +5,8 @@
  */
 import { Router } from 'express';
 import { shapeError } from '../../brain/write-shape.js';
-import { assertRefsResolve, edgeEndpointKind, collectionForRefKind, endpointNameField } from '../../brain/entity-refs.js';
+import { assertRefsResolve, edgeEndpointKind } from '../../brain/entity-refs.js';
+import { withEndpointNames } from '../../brain/edge-endpoint-names.js';
 import { REF_KINDS } from '../../config/types-knowledge.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
@@ -227,39 +228,10 @@ edgesRouter.get('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, asy
   // Names are resolved for the PAGE, not for a whole per-member fetch: enriching rows that the window discards is work
   // whose result is thrown away.
   const all = page.rows as unknown as Awaited<ReturnType<typeof listEdges>>;
-  /*
-   * Batch-resolve each endpoint's display name so the client shows a name rather than a raw id.
-   *
-   * Grouped BY KIND, one `$in` per kind that actually appears. It used to be a single lookup in
-   * `${mid}_entities`, which was right while every endpoint was an entity and shows a bare UUID for a chrono
-   * or fact endpoint now that they can be one. The kind also decides which FIELD is the name — an entity
-   * has `name`, a chrono entry `title`, a fact `fact` — so one query could not have served them anyway.
-   *
-   * A file needs no lookup at all: its id IS its path, and `fromName` stays absent so the client falls back
-   * to showing that path, which is what a reader wants to see.
-   */
-  const nameMap = new Map<string, string>();
-  const byKind = new Map<'entity' | 'fact' | 'chrono', Set<string>>();
-  for (const e of all) {
-    for (const [id, kind] of [[e.from, edgeEndpointKind(e.fromKind)], [e.to, edgeEndpointKind(e.toKind)]] as const) {
-      if (kind === 'file') continue;
-      if (!byKind.has(kind)) byKind.set(kind, new Set());
-      byKind.get(kind)!.add(id);
-    }
-  }
-  for (const [kind, ids] of byKind) {
-    if (ids.size === 0) continue;
-    const field = endpointNameField(kind);
-    const docs = await collectAcrossMembers(spaceId, mid =>
-      col<Record<string, unknown>>(`${mid}_${collectionForRefKind(kind)}`)
-        .find(asFilter<Record<string, unknown>>({ _id: { $in: [...ids] } }), { projection: { _id: 1, [field]: 1 } })
-        .toArray());
-    for (const d of docs) {
-      const value = d[field];
-      if (typeof value === 'string' && value.trim()) nameMap.set(String(d['_id']), value.trim());
-    }
-  }
-  const enriched = all.map(e => ({ ...e, fromName: nameMap.get(e.from), toName: nameMap.get(e.to) }));
+  // Through `withEndpointNames`, the one place that knows a chrono endpoint's name is its `title` and
+  // that a file needs no lookup at all. It was inline here, so `filter` answered with bare UUIDs.
+  const enriched = await withEndpointNames(spaceId, all,
+    read => collectAcrossMembers(spaceId, read));
   let total = 0;
   for (const mid of members) total += await countBrain(mid, 'edges', await filterFor(mid));
   res.json({ edges: withoutListDiagnostics(enriched, listDiagnosticsAsked(req)),

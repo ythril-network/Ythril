@@ -17,6 +17,7 @@
 import { col, asFilter } from '../db/mongo.js';
 import { REF_KINDS } from '../config/types-knowledge.js';
 import type { RefKind } from '../config/types-knowledge.js';
+import type { SpacePart } from '../db/space-collection.js';
 
 /** Canonical UUID v4 matcher. The only copy — import it, never re-declare it. */
 export const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -114,7 +115,11 @@ export function assertRefs(field: string, kind: RefKind, values: readonly string
   if (msg) throw new Error(msg);
 }
 
-const COLLECTION_FOR: Record<RefKind, string> = {
+// Typed as `SpacePart` rather than `string` so a caller can hand the result straight to
+// `spaceCollection` — the one place a collection is named — instead of casting. Every value here
+// already WAS a part; only the declared type said otherwise, and a cast at each call site is how
+// the second naming convention survives.
+const COLLECTION_FOR: Record<RefKind, SpacePart> = {
   entity: 'entities',
   fact: 'facts',
   chrono: 'chrono',
@@ -130,7 +135,7 @@ const COLLECTION_FOR: Record<RefKind, string> = {
  * endpoint up in `${spaceId}_entities` by name, so the collection to search was decided in two places. It is
  * decided here.
  */
-export function collectionForRefKind(kind: RefKind): string {
+export function collectionForRefKind(kind: RefKind): SpacePart {
   return COLLECTION_FOR[kind];
 }
 

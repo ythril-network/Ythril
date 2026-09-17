@@ -64,7 +64,10 @@ export const LIST_WITHHELD_FIELDS: readonly string[] = ['matchedText', 'embeddin
  * projection would put an `includeDiagnostics` parameter through five reader signatures to save two small
  * fields. The vector is unconditional and enormous, so it is worth projecting; these are neither.
  */
-export function withoutListDiagnostics<T extends Record<string, unknown>>(
+// `T extends object`, not `Record<string, unknown>`: a row carrying a real document type — an `EdgeDoc`
+// with its endpoint names spread on, for one — has no index signature, and requiring one pushes a cast to
+// every call site. The body only spreads and deletes, so the looser bound is the honest one.
+export function withoutListDiagnostics<T extends object>(
   rows: readonly T[],
   includeDiagnostics: boolean,
 ): T[] {

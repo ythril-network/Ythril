@@ -33,7 +33,8 @@ import { conveniencePredicate, conveniencesFrom } from '../../brain/list-conveni
 import { resolveMemberSpaces, resolveWriteTarget, findFirstAcrossMembers, collectAcrossMembers, isStrictLinkage } from '../../spaces/proxy.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
 import type { FileMetaDoc } from '../../config/types.js';
-import { fetchJobProgress, getMediaJobCounts, FAILED_SAMPLE_LIMIT, FAILED_REASON_LIMIT, type MediaJobCounts } from '../../files/media/job-queue.js';
+import { getMediaJobCounts, FAILED_SAMPLE_LIMIT, FAILED_REASON_LIMIT, type MediaJobCounts } from '../../files/media/job-queue.js';
+import { attachJobProgress } from '../../files/file-job-progress.js';
 import { reachesSpace } from '../../auth/space-reach.js';
 import { canWriteAnywhere } from '../../auth/write-anywhere.js';
 import type { TokenRights } from '../../config/rights-shape.js';
@@ -53,34 +54,6 @@ const rightsOf = (t: unknown): TokenRights | undefined =>
 
 export const fileMetaRouter = Router();
 
-/** Statuses worth a progress lookup. Anything else is finished and has nothing left to draw. */
-const IN_FLIGHT = new Set(['pending', 'processing']);
-
-/**
- * Decorate a page of file records with their job's step progress.
- *
- * The rule worth pinning is that a page with nothing in flight issues **no query at all**, so the
- * common case — a listing of finished files, which is most listings — does not pay for the rare one.
- * `lookup` is injectable purely so a test can observe that: asserting on the returned records cannot
- * distinguish "did not query" from "queried and got nothing", which is exactly the regression this
- * guards against.
- */
-export async function attachJobProgress(
-  memberId: string,
-  files: Array<Record<string, unknown>>,
-  lookup: typeof fetchJobProgress = fetchJobProgress,
-): Promise<Array<Record<string, unknown>>> {
-  const inFlight = files.filter(f => IN_FLIGHT.has(String(f['embeddingStatus'] ?? '')));
-  if (inFlight.length === 0) return files;
-  const byId = await lookup(memberId, inFlight.map(f => String(f['_id'])));
-  if (byId.size === 0) return files;
-  return files.map(f => {
-    const view = byId.get(String(f['_id']));
-    // A job row with no `progress` yet (claimed, first step not reported) adds nothing — leaving the
-    // field absent keeps "we do not know yet" distinct from "the route has no steps".
-    return view?.progress ? { ...f, progress: view.progress, progressAt: view.progressAt } : f;
-  });
-}
 
 
 // GET /api/brain/spaces/:spaceId/files — list file metadata records

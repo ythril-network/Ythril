@@ -64,6 +64,12 @@ export const QUERY_BODY_FIELDS: ReadonlySet<string> = new Set([
    */
   ...CONVENIENCE_KEYS,
   /*
+   * The diagnostics projection the four per-collection list routes honour. It was missing here, so a
+   * caller asking this door for diagnostics got a 400 for a parameter its twin accepts — and adding it
+   * without wiring the projection would have been the worse half: a 200 with the flag doing nothing.
+   */
+  'includeDiagnostics',
+  /*
    * The size budget, which this route had none of: `limit` caps ROWS and says nothing about how big one is,
    * so a page of file records had no ceiling on the one read route a fleet actually pages through.
    *
