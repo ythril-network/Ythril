@@ -142,3 +142,67 @@ export async function resolveEdgeEndpointNames(
     resolveEndpointName(spaceId, toId, edgeEndpointKind(toKind)),
   ]) as [string, string];
 }
+
+/** One edge, as far as endpoint-name resolution cares: two ids and the kind each one is. */
+export interface EdgeEndpoints {
+  from: string;
+  to: string;
+  fromKind?: RefKind;
+  toKind?: RefKind;
+}
+
+/**
+ * Give a PAGE of edges the display names of both endpoints, batched.
+ *
+ * ## Why this is a module and not four lines in the route
+ *
+ * It was inline in `GET .../edges` and nowhere else, so `filter` with `collection: 'edges'` answered with
+ * bare UUIDs — a capability the browser had and an agent did not, and one that step 3 of `B-9` would have
+ * deleted along with the route without anybody noticing, because a decoration applied AFTER the query does
+ * not look like a parameter and nothing compares it.
+ *
+ * ## What a hand-written copy drops, and it is not the query
+ *
+ * **The grouping by KIND.** A single lookup in `<space>_entities` was right while every endpoint was an
+ * entity, and shows a bare UUID for a chrono or fact endpoint now that they can be one. The kind also
+ * decides which FIELD carries the name — an entity has `name`, a chrono entry `title`, a fact `fact` — so
+ * one query could not have served them anyway.
+ *
+ * **And a file needs no lookup at all**: its id IS its path, so the name is left ABSENT rather than
+ * resolved, and a client falls back to showing that path. A copy that queried `<space>_files` for a `name`
+ * field would find nothing and silently blank the column.
+ *
+ * Returns the rows with `fromName`/`toName` spread on, rather than the map, so a caller cannot apply one
+ * and forget the other.
+ */
+export async function withEndpointNames<T extends EdgeEndpoints>(
+  spaceId: string,
+  edges: readonly T[],
+  /** Reads one member's collection — injected because a proxy space resolves across its members. */
+  readAcrossMembers: (read: (memberId: string) => Promise<Record<string, unknown>[]>) => Promise<Record<string, unknown>[]>,
+): Promise<Array<T & { fromName?: string; toName?: string }>> {
+  const byKind = new Map<'entity' | 'fact' | 'chrono', Set<string>>();
+  for (const e of edges) {
+    for (const [id, kind] of [[e.from, edgeEndpointKind(e.fromKind)], [e.to, edgeEndpointKind(e.toKind)]] as const) {
+      if (kind === 'file') continue;
+      if (!byKind.has(kind)) byKind.set(kind, new Set());
+      byKind.get(kind)!.add(id);
+    }
+  }
+
+  const nameMap = new Map<string, string>();
+  for (const [kind, ids] of byKind) {
+    if (ids.size === 0) continue;
+    const field = endpointNameField(kind);
+    const docs = await readAcrossMembers(async mid =>
+      await col<Record<string, unknown>>(spaceCollection(mid, collectionForRefKind(kind)))
+        .find(asFilter<Record<string, unknown>>({ _id: { $in: [...ids] } }), { projection: { _id: 1, [field]: 1 } })
+        .toArray());
+    for (const d of docs) {
+      const value = d[field];
+      if (typeof value === 'string' && value.trim()) nameMap.set(String(d['_id']), value.trim());
+    }
+  }
+
+  return edges.map(e => ({ ...e, fromName: nameMap.get(e.from), toName: nameMap.get(e.to) }));
+}

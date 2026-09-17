@@ -20,7 +20,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-const { attachJobProgress } = await import('../../server/dist/api/brain/file-meta.js');
+// Moved to `files/file-job-progress.ts` so `brain/` can reach it — `filter` with `collection: 'files'`
+// needs the same join, and a `brain/` module must not import from `api/`.
+const { attachJobProgress } = await import('../../server/dist/files/file-job-progress.js');
 
 const file = (id, status, extra = {}) => ({ _id: id, path: id, embeddingStatus: status, ...extra });
 

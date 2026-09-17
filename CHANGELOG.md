@@ -15,6 +15,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`filter` returned an edge as two bare UUIDs, and a file with no job progress.** Two of the nine
+  per-collection list routes do work on their rows AFTER the query, and the one call meant to replace all
+  nine did neither: `GET .../edges` resolves both endpoints' display names — batched by endpoint KIND,
+  because an entity's name is `name`, a chrono entry's is `title` and a fact's is `fact` — and
+  `GET .../files` joins the embedding job's step progress for rows still in flight. `filter` now does
+  both, on the tool and on `POST /api/brain/filter`, through one module.
+
+  **A decoration is not a parameter, which is why nothing had reported this.** It appears in no body
+  allowlist, no `inputSchema` and no capability map, so the two doors were never compared. The retirement
+  of those routes would have taken both with them silently — an agent reading edges would have started
+  getting ids where a browser gets names, and the Files tab would have shown a stage indicator that never
+  resolves.
+
+  **`includeDiagnostics` was the third, and it was refused rather than ignored.** Four list routes honour
+  it; `filter` accepted it nowhere — a `400` on the route, an `additionalProperties` refusal on the tool.
+  It is accepted and APPLIED on both doors now, defaulting false on each. Admitting it without wiring the
+  projection would have been the worse half: a `200` with the flag doing nothing.
+
+  **The file join moved out of a route file to make this possible at all.** `attachJobProgress` lived in
+  `api/brain/file-meta.ts`, and a `brain/` module may not import from `api/` — so no amount of care in
+  `filter` could have reached it where it was. It is `files/file-job-progress.ts` now, with its own gate
+  asserting exactly one declaration.
+
 - **An agent could not ask for "facts tagged release", and a browser could.** `filter` took a MongoDB
   predicate and knew nothing else, while the nine per-collection list routes it is meant to replace have
   always accepted five conveniences: `tag` (a case-insensitive SUBSTRING over the tag array, so `rel`

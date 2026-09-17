@@ -14,6 +14,9 @@ import { summariseActivity } from '../../metrics/space-activity-store.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { parseSortParam, toMongoSort, SORTABLE_FIELDS } from '../../brain/list-sort.js';
 import { conveniencePredicate, conveniencesFrom } from '../../brain/list-conveniences.js';
+import { decorateMemberRows, decoratePage } from '../../brain/list-decorations.js';
+import { withoutListDiagnostics } from '../../brain/read-projection.js';
+import { collectAcrossMembers } from '../../spaces/proxy.js';
 import { pageAcrossMembers } from '../../spaces/page-across-members.js';
 import { NotFoundError } from '../../util/errors.js';
 import { countFacts } from '../../brain/fact.js';
@@ -379,13 +382,23 @@ searchRouter.post('/filter', globalRateLimit, requireBodyScopedSpace('knowledge'
       ceiling: PROXY_PAGE_CEILING,
       compare: compareBySort(order),
       /** The caller's predicate, plus whatever the names resolve to IN THIS MEMBER. */
-      readMember: async (mid, lim, sk) => queryBrain(
+      readMember: async (mid, lim, sk) => decorateMemberRows(String(collection), mid, await queryBrain(
         mid, collection as typeof validCollections[number],
         await withNameScope(mid), safeProjection, lim, safeMaxTimeMS, sk, order,
-      ),
+      ) as Array<Record<string, unknown>>),
     });
     if (!page.ok) { res.status(400).json({ error: page.error }); return; }
-    const merged = page.rows;
+    /*
+     * The two DECORATIONS the per-collection list routes apply and this one did not: an edge's endpoint
+     * names, and a file's job step progress (joined per member above, before the page is merged and the
+     * owner is forgotten). A decoration is not a parameter, so nothing compared the doors and nobody
+     * reported the difference — see `brain/list-decorations.ts`.
+     */
+    const decorated = await decoratePage(String(collection), spaceId, page.rows,
+      read => collectAcrossMembers(spaceId, read));
+    // And the same diagnostics projection the four list routes honour. Absent here, `includeDiagnostics`
+    // was accepted by the body allowlist and did nothing, which is the silent no-op it exists to remove.
+    const merged = withoutListDiagnostics(decorated, body['includeDiagnostics'] === true);
 
     let total = 0;
     for (const mid of members) {
