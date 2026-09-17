@@ -13,6 +13,7 @@ import type { TokenRights } from '../../config/rights-shape.js';
 import { summariseActivity } from '../../metrics/space-activity-store.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { parseSortParam, toMongoSort, SORTABLE_FIELDS } from '../../brain/list-sort.js';
+import { conveniencePredicate, conveniencesFrom } from '../../brain/list-conveniences.js';
 import { pageAcrossMembers } from '../../spaces/page-across-members.js';
 import { NotFoundError } from '../../util/errors.js';
 import { countFacts } from '../../brain/fact.js';
@@ -307,10 +308,21 @@ searchRouter.post('/filter', globalRateLimit, requireBodyScopedSpace('knowledge'
       + `'${String(collection)}'. For facts and chrono use entityName.` });
     return;
   }
-  const safeFilter: Record<string, unknown> =
+  const rawFilter: Record<string, unknown> =
     filter != null && typeof filter === 'object' && !Array.isArray(filter)
       ? (filter as Record<string, unknown>)
       : {};
+  /*
+   * The five list CONVENIENCES, through the module both doors call — never assembled here.
+   *
+   * Merged UNDER `$and` rather than assigned, because `search` produces an `$or` and so may the caller's
+   * own predicate; assigning would replace theirs with ours and answer over the wrong set with nothing
+   * said. The module refuses a collection that cannot honour them (`links` has no text of its own), so
+   * this branch cannot be skipped by a caller who forgets it exists.
+   */
+  const merged = conveniencePredicate(String(collection), conveniencesFrom(body), rawFilter);
+  if ('error' in merged) { res.status(400).json({ error: merged.error }); return; }
+  const safeFilter = merged.predicate;
   const safeProjection: Record<string, unknown> | undefined =
     projection != null && typeof projection === 'object' && !Array.isArray(projection)
       ? (projection as Record<string, unknown>)

@@ -11,6 +11,7 @@ import { BUDGET_REQUEST_FIELDS } from './result-budget.js';
 import { BRAIN_COLLECTIONS, type BrainCollection } from '../config/types.js';
 import { normaliseProjection, toMongoProjection } from './projection.js';
 import { sanitizeFilter } from './filter-sanitizer.js';
+import { CONVENIENCE_KEYS } from './list-conveniences.js';
 
 /*
  * Re-exported, not re-implemented. Several callers and gates import `sanitizeFilter` from here because this
@@ -55,6 +56,13 @@ export const QUERY_BODY_FIELDS: ReadonlySet<string> = new Set([
    * defect this repo pays most for.
    */
   'entityName', 'fromName', 'toName',
+  /*
+   * The five list CONVENIENCES, spread from the module rather than spelled here — one list, so a
+   * sixth name cannot reach the tool and miss this set. The nine per-collection list routes have
+   * always taken them and `filter` did not, which is a capability the browser had and an agent did
+   * not. See `brain/list-conveniences.ts` for what each means and what it refuses.
+   */
+  ...CONVENIENCE_KEYS,
   /*
    * The size budget, which this route had none of: `limit` caps ROWS and says nothing about how big one is,
    * so a page of file records had no ceiling on the one read route a fleet actually pages through.

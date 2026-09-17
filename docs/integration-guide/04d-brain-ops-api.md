@@ -541,9 +541,16 @@ Run a constrained Mongo-style read query against one logical collection. Intende
 | `maxTimeMS` | — | Query timeout in milliseconds (default `5000`) |
 | `entityName` | — | *(facts, chrono)* Only records attached to an entity whose name CONTAINS this, case-insensitively. A JOIN rather than a predicate: the server resolves the name to ids per member space first, and reads BOTH shapes a link can take — the `entityIds` array and the link records. A name matching nothing returns nothing, never everything. On any other collection it is a `400` |
 | `fromName` / `toName` | — | *(edges)* Only edges whose FROM / TO end is an entity whose name contains this. Direction is data: an edge from Alice to Bob matches `fromName` and not `toName`. On any other collection it is a `400` |
+| `tag` | — | Only records carrying a tag that CONTAINS this, case-insensitively — `rel` finds `release`. For an EXACT tag use `filter: { tags: "release" }`. Refused on `links` |
+| `type` | — | Only records of this knowledge type, exactly. The same thing as `filter: { type: ... }`, offered because the list routes offer it. Refused on `links` |
+| `description` | — | Only records whose `description` CONTAINS this. Narrows that one field — `search` below also spans the record's name or title, which is why both exist. Refused on `links` |
+| `properties` | — | Only records where some property VALUE contains this. Keys are not matched. It SCANS, so prefer a predicate on the property you mean when you know its name. Refused on `links` |
+| `search` | — | Freetext substring over the collection's own text fields: `name`/`description` for entities, `fact`/`description` for facts, `label`/`description` for edges, `title`/`description` for chrono, `path`/`description` for files. The value is escaped, so it is a substring and never a regex. Refused on `links`, which has no text of its own |
 
 Any other field is a `400`. See **Unknown body fields are refused** below.
 
+> **The five CONVENIENCES were REST-only until 5.0**, on the nine per-collection list routes this call replaces. A browser could ask for "facts tagged release" and an agent could not — both doors present, one accepting less. They are assembled by one module now, so `tag` cannot come to mean different things on the two doors, and a collection that cannot honour one says so rather than ignoring it.
+>
 > **The three name fields are on the tool too** — `filter` takes them with the same meaning and the same refusals, and `POST /api/filter` is the same call. They were REST-only until 5.0, which meant an agent could not ask for “facts about Alice” by name at all.
 
 **`links` is read-only through THIS route, and it does have write doors of its own** — `POST /api/brain/spaces/:spaceId/links` and `DELETE /api/brain/spaces/:spaceId/links/:id`, with `save_link` and `delete_link` on MCP. This said it had none, which was true before 4.0 and stopped being when links became records. A link record says that one
@@ -669,7 +676,7 @@ keys:
 
 | Route | Accepted fields |
 |---|---|
-| `POST /filter` | `space`, `collection`, `filter`, `projection`, `limit`, `skip`, `sort`, `dir`, `maxTimeMS`, `entityName`, `fromName`, `toName`, `maxChars`, `maxBytes`, `maxTokens` |
+| `POST /filter` | `space`, `collection`, `filter`, `projection`, `limit`, `skip`, `sort`, `dir`, `maxTimeMS`, `entityName`, `fromName`, `toName`, `tag`, `type`, `description`, `properties`, `search`, `maxChars`, `maxBytes`, `maxTokens` |
 | `POST /recall` | `space`, `query`, `topK`, `types`, `minScore`, `filter`, `traverse`, `tags`, `minPerType`, `maxPerType`, `maxTimeMS`, `includeFileContent`, `includeDiagnostics`, `includeRecordMeta`, `projection`, `maxChars`, `maxBytes`, `maxTokens`, `skip`, `remainderDump` |
 | `POST /traverse` | `startId`, `direction`, `edgeLabels`, `maxDepth`, `limit`, `includeChrono`, `includeMemories`, `includeFiles`, `includeEdges` |
 | `POST /similar` | `space`, `entryId`, `entryType`, `topK`, `minScore`, `targetTypes`, `traverse`, `includeFileContent`, `includeDiagnostics`, `projection`, `maxChars`, `maxBytes`, `maxTokens`, `skip`, `remainderDump`, `crossSpace` *(not deprecated: `space` pins the seed ENTRY here, `crossSpace` widens the SEARCH)* |

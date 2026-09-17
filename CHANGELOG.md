@@ -15,6 +15,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **An agent could not ask for "facts tagged release", and a browser could.** `filter` took a MongoDB
+  predicate and knew nothing else, while the nine per-collection list routes it is meant to replace have
+  always accepted five conveniences: `tag` (a case-insensitive SUBSTRING over the tag array, so `rel`
+  finds `release`), `type`, `description` (that column only), `properties` (a value scan) and `search`
+  (freetext over the collection's own text fields). Both doors were present and one accepted less, which
+  is the half of the parity rule that hides — and it hid here for as long as the capability map paired
+  the tool with the routes and called the pair answered.
+
+  All five are arguments of `filter` now, on the tool and on `POST /api/brain/filter`, in the same
+  change. `filter` itself is no longer REQUIRED: narrowing by tag alone used to mean sending
+  `filter: {}` to say "and no predicate", which is a shape you have to be told about.
+
+  **They are assembled by one module, and that is the point rather than tidiness.** The same four-line
+  sequence existed five times — `buildFactFilter`, the entities route, `listEdges`, `buildChronoQuery`
+  and the file-meta route — each reading the same names into the same three primitives. `filter` would
+  have been the sixth, which is how the browser and an agent come to disagree about what `tag` means.
+
+  **The guard the module carries could not have survived a hand-written copy.** The old assemblies
+  merged the freetext `$or` by assignment, which is safe only because none of them has a caller-supplied
+  predicate to collide with. `filter` does: a caller passing `{$or: [...]}` beside `search` would have
+  had their disjunction silently REPLACED by ours — no error, no log, a plausible answer over the wrong
+  set. Everything accumulates under `$and` now, asserted against a live instance on both doors.
+
+  **`links` refuses rather than ignoring.** It is a pair of ids, with no tags, type, description or text
+  of its own, so `search` there would have matched every link in the space — and a filter that matched
+  everything is indistinguishable from a filter that was ignored. Both doors answer with the same
+  refusal naming the collection. Same shape as the `links` sort crash fixed earlier this release: the
+  answer lives in the function that RECEIVES the collection, not at a call site.
+
 - **`filter` takes `entityName`, `fromName` and `toName`.** They were REST-only, so an agent could not ask
   for “facts about Alice” by name — it had to filter entities, take the ids, then filter facts, and on a
   proxy space the ids differ per member. They are a JOIN rather than a predicate, which is why no Mongo

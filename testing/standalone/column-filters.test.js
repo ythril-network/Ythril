@@ -57,26 +57,51 @@ describe('textContains', () => {
 });
 
 describe('every record type filters its own description column', () => {
-  const SITES = [
-    ['server/src/api/brain/_shared.ts', 'facts'],
-    ['server/src/api/brain/entities.ts', 'entities'],
-    ['server/src/brain/edges.ts', 'edges'],
-    ['server/src/brain/chrono.ts', 'chrono'],
-  ];
+  /*
+   * THIS USED TO GREP FOUR FILES for `description = textContains(`, which was right while four routes
+   * each assembled their own list filter. They go through `conveniencePredicate` now, so the assertion
+   * can be the BEHAVIOUR instead of the spelling — and it runs over every collection the module will
+   * honour rather than over four names somebody remembered.
+   *
+   * The distinction it protects has not changed: the `description` column narrows THAT column, while
+   * `search` also spans the record's name or title. A column control that quietly matched the name
+   * would lie about what it does.
+   */
+  let conveniencePredicate, convenienceFieldsFor, SEARCHABLE_FIELDS;
 
-  for (const [file, label] of SITES) {
-    it(`${label} applies a substring filter to \`description\``, () => {
-      const src = readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8');
-      assert.match(src, /description'?\]?\s*=\s*textContains\(/,
-        `${file} must narrow description with the shared substring matcher`);
-    });
-  }
+  before(async () => {
+    ({ conveniencePredicate, convenienceFieldsFor } =
+      await import('../../server/dist/brain/list-conveniences.js'));
+    ({ SEARCHABLE_FIELDS } = await import('../../server/dist/brain/text-search.js'));
+  });
+
+  it('every collection that honours conveniences narrows `description` as a substring', () => {
+    const collections = Object.keys(SEARCHABLE_FIELDS);
+    assert.ok(collections.length >= 5, `only ${collections.length} collection(s) — the read broke`);
+    for (const c of collections) {
+      const r = conveniencePredicate(c, { description: 'review' }, {});
+      assert.ok(!('error' in r), `${c} refused a description filter: ${r.error}`);
+      const json = JSON.stringify(r.predicate);
+      assert.match(json, /"description"/, `${c} does not narrow the description column`);
+      assert.match(json, /\$regex/, `${c} narrows description with an exact match, not a substring`);
+      assert.ok(!json.includes('"^review"') && !json.includes('review$'),
+        `${c} anchors the description match, which is the bug this replaced`);
+    }
+  });
+
+  it('and `description` does NOT widen to the name, which is what `search` is for', () => {
+    // The two are separate controls on purpose. If the column filter spanned `name` there would be no
+    // way to ask "description contains X" at all, and nothing would report the loss.
+    const r = conveniencePredicate('entities', { description: 'review' }, {});
+    assert.ok(!JSON.stringify(r.predicate).includes('"name"'),
+      'the description column filter also matched `name`, so the two controls do the same thing');
+  });
 
   it('leaves `search` spanning its documented field set', () => {
-    // Narrowing `search` to one field would silently break every integration using it.
-    const src = readFileSync(new URL('../../server/src/brain/text-search.js'.replace('.js', '.ts'), import.meta.url), 'utf8');
-    assert.ok(src.includes("facts: ['fact', 'description']"), 'search must still span both');
-    assert.ok(src.includes("entities: ['name', 'description']"), 'search must still span both');
+    // Narrowing `search` to one field would silently break every integration using it. Read off the
+    // module rather than the source text, so it is the behaviour that is pinned.
+    assert.deepEqual([...convenienceFieldsFor('facts')], ['fact', 'description']);
+    assert.deepEqual([...convenienceFieldsFor('entities')], ['name', 'description']);
   });
 });
 
@@ -167,9 +192,13 @@ describe('entity-NAME column filters (From / To / Entities)', () => {
      * `if (ids.length)` is how an empty result turns into no filter at all. Bounded by the statement's own
      * semicolon rather than by a character count — a count spans different lines on CRLF than on LF.
      */
+    // The local the predicate is built into is `\w+`, not the literal `q`: it was renamed to `base` when
+    // the conveniences moved into their own module, and pinning the variable name made this fail for a
+    // rename while the rule it states was untouched. What matters is that the binding is UNCONDITIONAL
+    // on the list being non-empty.
     const edges = read('server/src/brain/edges.ts');
-    assert.match(edges, /if \(filter\.fromIds\) q\['from'\] = \{ \$in: filter\.fromIds \}/);
-    assert.match(edges, /if \(filter\.toIds\) q\['to'\] = \{ \$in: filter\.toIds \}/);
+    assert.match(edges, /if \(filter\.fromIds\) \w+\['from'\] = \{ \$in: filter\.fromIds \}/);
+    assert.match(edges, /if \(filter\.toIds\) \w+\['to'\] = \{ \$in: filter\.toIds \}/);
 
     const CALL = 'resolveEntityIdsByName(';
     const callers = serverSources()

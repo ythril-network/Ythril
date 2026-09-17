@@ -18,6 +18,7 @@
  */
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { trackedSources } from './_sources.mjs';
 import { readFileSync } from 'node:fs';
 
 let tagContains;
@@ -79,31 +80,48 @@ describe('tagContains', () => {
 });
 
 describe('every single-tag call site uses the shared helper', () => {
-  // Derived from the source, not asserted as a count: a count passes with a site still using the old
-  // exact match, which is exactly the gap that shipped in #480 and had to be fixed in #481.
-  const SITES = [
-    ['server/src/api/brain/_shared.ts', 'facts'],
-    ['server/src/api/brain/entities.ts', 'entities'],
-    ['server/src/api/brain/file-meta.ts', 'file meta'],
-    ['server/src/brain/edges.ts', 'edges'],
-    ['server/src/brain/chrono.ts', 'chrono'],
-  ];
+  /*
+   * THE SITES ARE NO LONGER FIVE FILES, and this block used to name them.
+   *
+   * Five hand-written paths, each asserted to contain `tagContains`, was the right gate while five
+   * routes each assembled their own list filter. They now go through `conveniencePredicate`, so the
+   * matcher is reached once — and a list of five names would have gone green on a sixth route that
+   * never appeared in it, which is the failure mode `CLAUDE.md` calls *a gate concluding about more
+   * than it checks*.
+   *
+   * So the rule is stated forwards: ONE module answers "what is a tag match", and nothing anywhere in
+   * the tree answers it a second time with an anchored regex.
+   */
+  const CONVENIENCES = 'server/src/brain/list-conveniences.ts';
 
-  for (const [file, label] of SITES) {
-    it(`${label} (${file}) matches tags via tagContains`, () => {
-      const src = readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8');
-      assert.ok(src.includes('tagContains'), `${file} must use the shared matcher`);
-    });
-  }
+  it('the one module that assembles list filters matches tags via tagContains', () => {
+    const src = readFileSync(new URL(`../../${CONVENIENCES}`, import.meta.url), 'utf8');
+    assert.ok(src.includes('tagContains'),
+      `${CONVENIENCES} must use the shared matcher — it is the only place the single-tag box is read`);
+  });
 
-  it('no call site still builds an anchored whole-tag regex', () => {
-    for (const [file] of SITES) {
-      const src = readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8');
-      assert.ok(
-        !/\$regex:\s*`\^\$\{escapeRegex\(tag\)\}\$`/.test(src),
-        `${file} still anchors its tag regex — partial search will not hit there`,
-      );
+  it('and both doors reach it, so an agent and the browser match tags the same way', () => {
+    // The parity half, which is why the module exists rather than five tidier copies. `filter` gained
+    // the conveniences in the same change that collapsed the five assemblies.
+    for (const door of ['server/src/mcp/tools/search.ts', 'server/src/api/brain/search.ts']) {
+      const src = readFileSync(new URL(`../../${door}`, import.meta.url), 'utf8');
+      assert.ok(src.includes('conveniencePredicate'),
+        `${door} does not reach the shared list-filter assembly, so its \`tag\` can drift`);
     }
+  });
+
+  it('no call site anywhere still builds an anchored whole-tag regex', () => {
+    /*
+     * DERIVED over the tree rather than over the five names above. An anchored `^tag$` is the original
+     * defect — "arch" finding nothing on a record tagged `architecture` — and the file that reintroduces
+     * it is by definition one nobody thought to list.
+     */
+    const sources = trackedSources(['server/src']);
+    assert.ok(sources.length >= 100, `only ${sources.length} sources scanned — the sweep broke`);
+    const anchored = sources.filter(f =>
+      /\$regex:\s*`\^\$\{escapeRegex\((?:tag|filter\.tag)\)\}\$`/.test(readFileSync(f, 'utf8')));
+    assert.deepEqual(anchored, [],
+      `these anchor a tag regex, so a partial tag search will not hit there: ${anchored.join(', ')}`);
   });
 
   it('the plural tags/tagsAny params keep their exact set semantics', () => {
