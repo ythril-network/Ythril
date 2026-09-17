@@ -381,10 +381,31 @@ describe('paging PAST the window — the defect 2.8.0 shipped', () => {
     assert.equal(r.body.total, N, 'and the total still tells the caller where the end was');
   });
 
-  it('caps the caller-facing page at 100 rather than refusing it', async () => {
+  it('HONOURS a page larger than the old cap, rather than clamping it silently', async () => {
+    /*
+     * INVERTED AT 5.0, deliberately. This case used to assert the clamp — `limit: 500` came back as
+     * 100 rows with `limit: 100` echoed — on the reasoning that echoing the applied value tells the
+     * caller it was clamped. It does not: `total` and `truncated` make a clamped page read exactly
+     * like a correct short one, and `filter` is replacing list routes that serve 200 and 500.
+     *
+     * Owner, 2026-09-17: *"cap should be a parameter and default to 200"*. So the assertion is that
+     * the caller gets what they asked for, against a space holding 120 real rows through HTTP —
+     * which the old code could not have answered, since it stopped at 100.
+     */
     const r = await q({ collection: 'facts', filter: {}, limit: 500 });
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.equal(r.body.results.length, 100, 'a page larger than the cap is clamped, not rejected');
-    assert.equal(r.body.limit, 100, 'and the applied limit is echoed so the caller knows it was clamped');
+    assert.equal(r.body.results.length, N,
+      `asked for 500 over ${N} rows and got ${r.body.results.length} — the clamp is back`);
+    assert.equal(r.body.limit, 500, 'the applied limit is echoed, and it is the one that was asked for');
+    assert.equal(r.body.truncated, false, 'the whole collection fits, so nothing was trimmed');
+  });
+
+  it('and an omitted `limit` defaults to 200, not 20', async () => {
+    // The other half of the owner's instruction. A default that is smaller than any door it replaces
+    // makes a caller page for no reason.
+    const r = await q({ collection: 'facts', filter: {} });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.limit, 200, 'the default page size is 200 on this door');
+    assert.equal(r.body.results.length, N, 'and 120 rows fit inside it');
   });
 });
