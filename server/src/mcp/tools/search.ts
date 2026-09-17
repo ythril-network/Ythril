@@ -26,7 +26,7 @@ import {
 } from '../../brain/query.js';
 import { parseSortParam, toMongoSort, SORTABLE_FIELDS } from '../../brain/list-sort.js';
 import { conveniencePredicate, conveniencesFrom, CONVENIENCE_SCHEMA } from '../../brain/list-conveniences.js';
-import { decorateMemberRows, decoratePage } from '../../brain/list-decorations.js';
+import { decorateMemberRows, decoratePage, PAGE_DECORATION_SCHEMA } from '../../brain/list-decorations.js';
 import { withoutListDiagnostics } from '../../brain/read-projection.js';
 import { type RecallKnowledgeType, type RecallResult, findSimilar, recall, recallGlobal } from '../../brain/recall.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
@@ -779,11 +779,10 @@ export const queryTool: ToolHandler = {
             // `CONVENIENCE_SCHEMA` in `brain/list-conveniences.ts`. Spread rather than spelled so the
             // names, their meanings and their assembly cannot drift into three descriptions.
             ...CONVENIENCE_SCHEMA,
-            includeDiagnostics: {
-              type: 'boolean',
-              default: false,
-              description: 'Add back the two fields a listed record carries for the SYSTEM rather than for you: `matchedText` (the pre-embedding source string, which for a file chunk is the passage a SECOND time) and `embeddingModel` (identical for every record in a space). Default false on both doors, and false is what you want almost always. It was honoured by the per-collection list routes and by neither door of this tool, so a caller could ask and be answered without it — silently.',
-            },
+            // The page-decoration asks, declared beside the module that applies them — see
+            // `PAGE_DECORATION_SCHEMA` in `brain/list-decorations.ts`. A tool spelling its own
+            // descriptions is a second account of that module's behaviour.
+            ...PAGE_DECORATION_SCHEMA,
           },
           /*
            * `filter` is NOT required, since 5.0 and on both doors in the same change. A caller narrowing
@@ -872,6 +871,12 @@ export const queryTool: ToolHandler = {
      * search. The refusal names what to use instead, because "unsupported" without an alternative is how a
      * caller ends up paging the whole collection by hand.
      */
+    // Refused on a collection it cannot mean, word for word what the route answers — a caller comparing
+    // the two doors should not have to work out that two wordings mean the same thing.
+    if (a['deriveStatus'] !== undefined && coll !== 'chrono') {
+      throw new Error(`\`deriveStatus\` applies to chrono only, not '${coll}'. `
+        + 'Only a chrono entry has a due moment for a status to be derived from.');
+    }
     const ENTITY_LINKED: readonly string[] = ['facts', 'chrono'];
     if (entityName && !ENTITY_LINKED.includes(coll)) {
       throw new Error(`entityName applies to ${ENTITY_LINKED.join(' and ')} only, not '${coll}'. `
@@ -920,7 +925,8 @@ export const queryTool: ToolHandler = {
      * which is the same list the page was read from.
      */
     const decorated = await decoratePage(coll, ctx.callSpaces[0] ?? members[0] ?? '', page.rows,
-      async read => (await Promise.all(members.map(read))).flat());
+      async read => (await Promise.all(members.map(read))).flat(),
+      { deriveStatus: a['deriveStatus'] === true });
     // And the diagnostics projection, read from the tool argument rather than a query string.
     const docs = withoutListDiagnostics(decorated, a['includeDiagnostics'] === true);
 

@@ -658,6 +658,26 @@ export async function listChrono(
   return entries.map(e => withDerivedStatus(e, now));
 }
 
+/**
+ * Apply the derived status to a PAGE of chrono entries that some other reader fetched.
+ *
+ * `listChrono` has always done this to its own rows. `filter` reads the collection directly and returns
+ * the STORED status, which is correct and is what a caller repairing data needs — but it meant the
+ * meaning of `status` was chosen by WHICH DOOR you picked, and a door is not a parameter. Reported in
+ * substance by the canary operator, 2026-09-15: *"'I checked the status' is not a claim anyone can
+ * evaluate without the door being named"*, after a fortnight-old episode read `active` through one door
+ * and `overdue` through the other.
+ *
+ * Exported so `filter`'s `deriveStatus` is the SAME derivation rather than a second one — this is the
+ * rule that `whenDuePasses` makes per-type, and a copy of it would be a second answer to what a passed
+ * due moment means.
+ *
+ * One `now` for the whole page, passed through, so two rows in one answer cannot straddle the instant.
+ */
+export function withDerivedStatusForPage<T extends object>(rows: readonly T[], now: Date = new Date()): T[] {
+  return rows.map(r => withDerivedStatus(r as unknown as ChronoEntry, now) as unknown as T);
+}
+
 export async function deleteChrono(
   spaceId: string,
   chronoId: string,

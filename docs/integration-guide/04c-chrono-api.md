@@ -42,6 +42,30 @@ fact. See [Retry Safety](04-brain-api.md#retry-safety).
   `completed`/`cancelled` is returned as `overdue` — **derived on read**, so you never need to set it
   yourself.
 
+  **WHICH DOOR YOU READ THROUGH USED TO DECIDE WHICH STATUS YOU GOT, and since 5.0 it is a parameter.**
+  The chrono list route derives; `filter` and sync return the value the collection HOLDS — both are
+  correct, and a predicate read must see the stored one or it cannot be used to repair anything. What
+  was wrong is that the two were indistinguishable from outside. Reported in substance by the canary
+  operator, 2026-09-15, after a fortnight-old episode read `active` through one door and `overdue`
+  through the other: *"'I checked the status' is not a claim anyone can evaluate without the door being
+  named"* — every attempt they made to confirm the suspicion queried the collection, got `active`, and
+  read as a clean bill of health.
+
+  | where | what `status` means |
+  |---|---|
+  | `GET .../chrono` (the list route) | DERIVED, always |
+  | `filter` / `POST /api/brain/filter` | STORED, unless you send `deriveStatus: true` |
+  | sync | STORED, always — a peer must replicate what was written, not a reading of it |
+
+  `deriveStatus` defaults **false** on both doors, so nothing an existing caller does changes. Sending it
+  on any collection but `chrono` is refused rather than ignored: a silently dropped flag is a caller who
+  believes they asked for something.
+
+  **And it degrades rather than breaking**, which is why nobody catches it in review. A record read
+  shortly after it is written still says `active`, so code built against the stored literal demonstrably
+  works the day it ships and starts failing only as records outlive their due moment. Theirs presented
+  as a change in alert volume.
+
   **Turn it off for a type whose records are events rather than deadlines.** Set `whenDuePasses: "nothing"`
   on a chrono type in `typeSchemas.chrono`, or on the space's `meta` to cover every type that says nothing,
   and those records return the status you STORED. For entries recording something that happened — a deploy,

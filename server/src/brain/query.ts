@@ -70,6 +70,12 @@ export const QUERY_BODY_FIELDS: ReadonlySet<string> = new Set([
    */
   'includeDiagnostics',
   /*
+   * Present a chrono entry's DERIVED status rather than the stored one. Opt-in and default OFF, so this
+   * door answers exactly as it did — the list route derives unconditionally, and that difference used to
+   * be settled by WHICH DOOR a caller picked rather than by anything they could ask for.
+   */
+  'deriveStatus',
+  /*
    * The size budget, which this route had none of: `limit` caps ROWS and says nothing about how big one is,
    * so a page of file records had no ceiling on the one read route a fleet actually pages through.
    *

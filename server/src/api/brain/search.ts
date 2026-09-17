@@ -299,6 +299,15 @@ searchRouter.post('/filter', globalRateLimit, requireBodyScopedSpace('knowledge'
    * Refused on a collection they cannot mean, never ignored — word for word what the tool answers, because
    * a caller comparing the two doors should not have to work out that two wordings mean the same thing.
    */
+  /*
+   * Refused on a collection it cannot mean, never ignored — a silently dropped flag is a caller who
+   * believes they asked. Same rule and the same wording as the tool, for the same reason.
+   */
+  if (body['deriveStatus'] !== undefined && collection !== 'chrono') {
+    res.status(400).json({ error: `\`deriveStatus\` applies to chrono only, not '${String(collection)}'. `
+      + 'Only a chrono entry has a due moment for a status to be derived from.' });
+    return;
+  }
   const ENTITY_LINKED: readonly string[] = ['facts', 'chrono'];
   if (entityName && !ENTITY_LINKED.includes(collection as string)) {
     res.status(400).json({ error: `entityName applies to ${ENTITY_LINKED.join(' and ')} only, not `
@@ -397,7 +406,7 @@ searchRouter.post('/filter', globalRateLimit, requireBodyScopedSpace('knowledge'
      * reported the difference — see `brain/list-decorations.ts`.
      */
     const decorated = await decoratePage(String(collection), spaceId, page.rows,
-      read => collectAcrossMembers(spaceId, read));
+      read => collectAcrossMembers(spaceId, read), { deriveStatus: body['deriveStatus'] === true });
     // And the same diagnostics projection the four list routes honour. Absent here, `includeDiagnostics`
     // was accepted by the body allowlist and did nothing, which is the silent no-op it exists to remove.
     const merged = withoutListDiagnostics(decorated, body['includeDiagnostics'] === true);

@@ -232,3 +232,75 @@ describe('the decorations arrive on both doors, against a real instance', () => 
     assert.equal(hasOnMcp, hasOnRest, 'one door restored the diagnostics and the other did not');
   });
 });
+
+describe('a chrono status is stored or derived, and the caller chooses which', () => {
+  /*
+   * The canary operator, 2026-09-15: a fortnight-old episode read `active` through a collection query
+   * and `overdue` through the list route, and every attempt to confirm the suspicion queried the
+   * collection and came back clean. Both answers are correct; the cost was that the meaning was chosen
+   * by WHICH DOOR you picked, and a door is not a parameter.
+   *
+   * Driven live because the derivation resolves `whenDuePasses` from the SPACE META per type — the one
+   * thing a unit test would have to stub, which would be asserting against a stub of the rule.
+   */
+  let overdueId;
+
+  before(async () => {
+    const past = new Date(Date.now() - 30 * 86_400_000).toISOString();
+    const r = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/chrono`, {
+      title: `late deadline ${RUN}`, type: 'deadline', startsAt: past, status: 'active',
+    });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    overdueId = r.body._id;
+  });
+
+  const chronoRow = (rows) => (rows ?? []).find(r => r._id === overdueId);
+
+  it('OFF by default, so `filter` still answers with what the collection HOLDS', async () => {
+    const args = { space: SPACE, collection: 'chrono' };
+    const rest = await viaRest(args);
+    const mcpAnswer = await viaMcp(args);
+    assert.equal(rest.status, 200, JSON.stringify(rest.body));
+    assert.equal(chronoRow(rest.body.results)?.status, 'active',
+      'the default changed — every existing caller of this door just started seeing something else');
+    assert.equal(chronoRow(mcpAnswer.body.results)?.status, 'active',
+      'the two doors default differently, which is the defect this parameter exists to remove');
+  });
+
+  it('ON gives the DERIVED status, on both doors', async () => {
+    const args = { space: SPACE, collection: 'chrono', deriveStatus: true };
+    const rest = await viaRest(args);
+    const mcpAnswer = await viaMcp(args);
+    assert.equal(rest.status, 200, JSON.stringify(rest.body));
+    assert.equal(chronoRow(rest.body.results)?.status, 'overdue',
+      'a deadline 30 days past its start is not derived as overdue on the REST door');
+    assert.ok(!mcpAnswer.isError, `the tool refused a flag the route served: ${mcpAnswer.text}`);
+    assert.equal(chronoRow(mcpAnswer.body.results)?.status, 'overdue',
+      'the tool door did not derive, so the two disagree about the same record');
+  });
+
+  it('and it agrees with the LIST route, which is what step 3 has to be able to delete', async () => {
+    // The route derives unconditionally. If `deriveStatus: true` and the route ever disagree about one
+    // record, deleting the route is a behaviour change nobody planned.
+    const res = await fetch(`${INSTANCES.a}/api/brain/spaces/${SPACE}/chrono`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const body = await res.json();
+    assert.equal(res.status, 200, JSON.stringify(body));
+    const viaList = (body.chrono ?? []).find(r => r._id === overdueId);
+    const viaFilter = chronoRow((await viaRest({ space: SPACE, collection: 'chrono', deriveStatus: true })).body.results);
+    assert.equal(viaList?.status, viaFilter?.status,
+      'the list route and `filter` disagree about the same entry, so the route cannot be retired');
+  });
+
+  it('a non-chrono collection REFUSES it rather than ignoring it', async () => {
+    // A silently dropped flag is a caller who believes they asked for something.
+    const args = { space: SPACE, collection: 'facts', deriveStatus: true };
+    const rest = await viaRest(args);
+    const mcpAnswer = await viaMcp(args);
+    assert.equal(rest.status, 400, JSON.stringify(rest.body));
+    assert.match(rest.body.error, /chrono/, 'the refusal must say what it applies to');
+    assert.ok(mcpAnswer.isError, `the tool served a flag the route refused: ${mcpAnswer.text}`);
+    assert.match(mcpAnswer.text, /chrono/, 'and the tool refusal must say the same thing');
+  });
+});
