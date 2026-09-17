@@ -170,11 +170,16 @@ export const graph_link_preflightTool: ToolHandler = {
     + 'enough to find whoever owns it. A token that no longer exists still appears, by the label it had.\n\n'
     + 'READ `since` BEFORE READING THE COUNT. It is the instant the answer starts from, and a count with no '
     + 'window on it cannot be told apart from a count over a shorter one. Nothing before `retentionDays` ago '
-    + 'is remembered at all, whatever `windowDays` you ask for.\n\n'
+    + 'is remembered at all, whatever `windowDays` you ask for — AND nothing before this instance began '
+    + 'recording, which on a freshly upgraded one can be minutes ago. `recorderStartedAt` is when that '
+    + 'was. An empty answer over half an hour means nothing like an empty answer over three months.\n\n'
     + 'PARAMETERS:\n'
     + `- \`windowDays\` — how far back to look. Default ${DEFAULT_WRITER_WINDOW_DAYS}, capped at `
     + `${WRITER_NOTE_RETENTION_DAYS} because nothing older is kept.\n\n`
-    + 'RESPONSE: `spaceId`, `since`, `retentionDays`, `converted`, and `writers`.',
+    + 'RESPONSE: `spaceId`, `since`, `recorderStartedAt`, `retentionDays`, `converted`, and `writers`.\n'
+    + 'GUARANTEE: `since` is never earlier than this instance began recording, so the window the count '
+    + 'was computed over is the window that was actually watched. `recorderStartedAt` is when that was, '
+    + 'or `null` on an instance that has not restarted since the recorder gained the stamp.',
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
     type: 'object',
@@ -196,7 +201,9 @@ export const graph_link_preflightTool: ToolHandler = {
         default: DEFAULT_WRITER_WINDOW_DAYS,
         description: `How many days back to look. Default ${DEFAULT_WRITER_WINDOW_DAYS}. Nothing older than `
           + `\`retentionDays\` (${WRITER_NOTE_RETENTION_DAYS}) is kept, so a larger number is CAPPED to it `
-          + 'rather than refused — read `since` in the answer for the window actually used.',
+          + 'rather than refused. Read `since` in the answer for the window actually used: it is capped to '
+          + 'retention AND clamped to when this instance began recording, so on a freshly upgraded instance '
+          + 'it can be far more recent than anything you asked for.',
       },
     },
     required: ['space'],
@@ -209,9 +216,19 @@ export const graph_link_preflightTool: ToolHandler = {
     const answer = await legacyArrayWriters({
       spaceId: callSpace, windowDays, converted: usesLinkRecords(callSpace),
     });
+    /*
+     * The empty answer is the dangerous one — it is the one an operator converts on — so when the window
+     * was CLAMPED it says so in the sentence rather than only in a field of the JSON beside it. A reader
+     * who sees "no token has written since 09:14" for a 90-day question needs the reason in the same
+     * breath, or the honest window reads as a bug in the timestamp.
+     */
+    const clamped = answer.recorderStartedAt !== null && answer.recorderStartedAt === answer.since;
+    const why = clamped
+      ? ` This instance only began recording at ${answer.recorderStartedAt}, so that is as far back as the answer goes.`
+      : '';
     const head = answer.writers.length === 0
-      ? `No token has written a link array to '${answer.spaceId}' since ${answer.since}.`
-      : `${answer.writers.length} token(s) have written link arrays to '${answer.spaceId}' since ${answer.since}.`;
+      ? `No token has written a link array to '${answer.spaceId}' since ${answer.since}.${why}`
+      : `${answer.writers.length} token(s) have written link arrays to '${answer.spaceId}' since ${answer.since}.${why}`;
     return {
       // Not pretty-printed: indentation is billed to the caller's context window and read by nothing.
       content: [{ type: 'text' as const, text: `${head}\n${JSON.stringify(answer)}` }],

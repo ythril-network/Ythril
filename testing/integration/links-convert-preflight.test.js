@@ -146,6 +146,50 @@ describe('the links conversion pre-flight names a writer that actually wrote', (
     assert.equal(zero.status, 400, JSON.stringify(zero.body));
   });
 
+  it('never reports a window it was not recording for', async () => {
+    /*
+     * `B-13`. The canary operator asked a freshly upgraded instance for the default window and was told
+     * ninety days, over a recorder that had been running for half an hour: a space holding 270 chronos
+     * that already carry `entityIds` answered `count: 1`, which is true of the window and nothing like
+     * true of the space.
+     *
+     * Asserted as the RULE — `since` is the later of what was asked for and when recording began — rather
+     * than against a number, because the right number depends on how long this container has been up.
+     * A case pinned to "about now" would pass on a stack that had just restarted and fail on one that had
+     * not, which is the shape of flake that gets a case deleted.
+     */
+    const r = await get(INSTANCES.a, token,
+      `/api/brain/spaces/${SPACE}/links/convert-preflight?windowDays=3650`);
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.ok('recorderStartedAt' in r.body,
+      `the answer does not say when recording began: ${JSON.stringify(r.body)}`);
+
+    const started = r.body.recorderStartedAt;
+    assert.ok(started !== null,
+      'this instance has never stamped its recorder start, so the boot stamp did not run');
+    assert.ok(Date.parse(started) > 0, `recorderStartedAt is not an instant: ${started}`);
+    assert.ok(Date.parse(r.body.since) >= Date.parse(started),
+      `a 3650-day window reported back to ${r.body.since}, before recording began at ${started} — `
+      + 'the count covers time nobody was watching');
+  });
+
+  it('but a window SHORTER than the recorder has been running still narrows', async () => {
+    // The other half of "the later of the two". Clamping to the stamp unconditionally would make
+    // `windowDays` do nothing on any instance that has been up a while, which is most of them.
+    const wide = await get(INSTANCES.a, token,
+      `/api/brain/spaces/${SPACE}/links/convert-preflight?windowDays=3650`);
+    const narrow = await get(INSTANCES.a, token,
+      `/api/brain/spaces/${SPACE}/links/convert-preflight?windowDays=1`);
+    assert.equal(narrow.status, 200, JSON.stringify(narrow.body));
+    assert.ok(Date.parse(narrow.body.since) >= Date.parse(wide.body.since),
+      `asking for one day looked further back than asking for 3650: ${narrow.body.since} vs ${wide.body.since}`);
+    // And whichever of the two bounds won, it is one of them and not a third number.
+    const asked = Date.now() - 86_400_000;
+    const expected = Math.max(asked, Date.parse(narrow.body.recorderStartedAt ?? 0));
+    assert.ok(Math.abs(Date.parse(narrow.body.since) - expected) < 5_000,
+      `since is neither the asked window nor the recorder start: ${narrow.body.since}`);
+  });
+
   it('404s for a space that does not exist, rather than answering about nothing', async () => {
     const r = await get(INSTANCES.a, token, `/api/brain/spaces/no-such-space-${RUN}/links/convert-preflight`);
     assert.equal(r.status, 404, JSON.stringify(r.body));

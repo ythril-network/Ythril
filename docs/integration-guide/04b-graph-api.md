@@ -539,11 +539,10 @@ Three things it deliberately never does:
 
 **You do not have to run anything.** Every start converts each space not yet marked `completeLinkage` and
 marks the ones whose walk finished cleanly — additive, so an interrupted run is fixed by the next boot and
-an already-marked space is skipped. A space that FAILS is left unmarked and named in an `ERROR` line,
-keeps reading its arrays and accepting array writes exactly as before, and the instance still serves.
-This replaced `npm run links:convert`: it is declared in `package.json` while `scripts/` is not in the
-published image, so a container deployment got `Cannot find module '/app/scripts/convert-links.mjs'`,
-reading like a broken installation of yours (2026-09-15). It still works from a source checkout.
+an already-marked space is skipped. A space that FAILS is left unmarked and named in an `ERROR` line, keeps
+reading its arrays and accepting array writes exactly as before, and the instance still serves. This
+replaced `npm run links:convert`, which is in `package.json` while `scripts/` is not in the published image
+— a container deployment got a missing-module stack trace (2026-09-15). It still works from a source checkout.
 
 **Preview first. It reads and writes nothing**, and it answers the question you actually have before running
 a migration against live data — how much is there:
@@ -668,6 +667,7 @@ possibly a week later.
 
 | field | meaning |
 |---|---|
+| `recorderStartedAt` | when THIS instance began recording, or `null` if it has not restarted since the feature arrived. `since` is clamped to it, so the window you are told about is one the recorder was actually running for |
 | `since` | the instant the answer starts from. **Read it before the count** — a count with no window on it cannot be told apart from a count over a shorter one |
 | `retentionDays` | how far back a note can exist at all. A larger `windowDays` cannot see past it, and is capped to it |
 | `writers` | one row per token, with the array fields it sent, when it last did, and how many times. Empty is what you are hoping for |

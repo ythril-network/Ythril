@@ -287,30 +287,41 @@ it. The two views disagreed, and which one you believed depended on where you lo
 the checksum, the extracted text and the search vector. Those are never overwritten by another instance,
 because each one computed them from its own copy of the bytes.
 
-> **Files uploaded before 4.0 need one command before their descriptions travel.** An administrator runs
-> `npm run links:convert` once; it is the same one-off that converts the connection lists, and running it
-> twice is safe.
+> **Files uploaded before 4.0 need one conversion before their descriptions travel — and from 5.0 the
+> instance runs it for you.** It is the same one-off that converts the connection lists. Every restart
+> checks each space and converts anything still holding the old lists, so an ordinary upgrade is enough
+> and there is nothing to run. A space that has already been converted is skipped, and a space that could
+> not be converted is named in an `ERROR` line in the server log rather than passed over quietly.
 >
-> **You can look before you run it, and you can undo the part that changes anything.** Three things about
-> that one-off, because it sounds bigger than it is:
+> **There is still a command, and it is for looking rather than doing.** An administrator running from
+> source can use `npm run links:convert`; on a container deployment that command is not present, which is
+> the reason the conversion moved into startup.
+>
+> **You can look before it happens, and you can undo the part that changes anything.** Three things about
+> that conversion, because it sounds bigger than it is:
 >
 > - **See the size of it first.** `npm run links:convert -- --preview` reads and writes nothing, and prints
 >   per space how many records carry connection lists and how many entries those lists hold. Run it again
 >   afterwards to see the link count rise and everything else stay put.
-> - **Find out who is still writing the old way, BEFORE you convert.** `--preview` tells you how much there
->   is to convert; this tells you who would be affected by the switch that comes with it. Ask a space for its
+> - **Find out who is still writing the old way.** `--preview` tells you how much there is to convert;
+>   this tells you who would be affected by the switch that comes with it. Ask a space for its
 >   **conversion pre-flight** and it answers with the access tokens that have sent a connection list to that
 >   space, what they sent, when each last did, and how many times — enough to find whoever owns them and move
 >   them across first. An empty answer is what you are hoping for.
 >
->   It matters because of *when* the refusal arrives. Converting does not break anything at the moment you run
->   it; a writer still using the old way finds out on its **next write**, which could be a minute later or a
+>   It matters because of *when* the refusal arrives. Converting does not break anything at the moment it
+>   happens; a writer still using the old way finds out on its **next write**, which could be a minute later or a
 >   week later, and by then the connection between the two events is not obvious. One operator converted with
 >   five such writers and knew about none of them.
 >
->   Read the **since** date in the answer before reading the count. It says how far back the answer looks —
->   a small number over a short window means something different from a small number over a long one — and
->   nothing older than 90 days is remembered at all.
+>   **Read the two dates in the answer before you read the count.** `since` says how far back the answer
+>   looks, and `recorderStartedAt` says when this instance began watching at all. An empty answer over
+>   half an hour means something very different from an empty answer over three months, and the half-hour
+>   case is the normal one right after an upgrade — the watching starts when the instance restarts, not
+>   when the records were written. Nothing older than 90 days is remembered in any case.
+>
+>   You will not be shown a window that was never watched: if you ask for 90 days on an instance that
+>   restarted this morning, `since` comes back as this morning rather than 90 days ago.
 >
 > - **Do one space first if you like.** Give the command a space id and only that space converts. Nothing
 >   starts being refused: the switch that makes a space reject the old way of writing connections is set only

@@ -43,7 +43,12 @@ import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { trackedSources } from './_sources.mjs';
 
+const { ALL_TOOLS } = await import('../../server/dist/mcp/tools/index.js');
+
 const src = (p) => stripComments(readFileSync(p, 'utf8'));
+/** The checkout's own line ending, so a block-close anchor works on CRLF and LF alike. */
+const nl = readFileSync('server/src/brain/legacy-array-writers.ts', 'utf8')
+  .includes(String.fromCharCode(13)) ? String.fromCharCode(13, 10) : String.fromCharCode(10);
 
 /**
  * Every tracked source that reaches the array-write inspection, from git rather than a list.
@@ -136,6 +141,166 @@ describe('a door that can refuse also records', () => {
     // count over a shorter window, and the operator is about to make an irreversible-feeling decision on it.
     const mod = src('server/src/brain/legacy-array-writers.ts');
     assert.match(mod, /since/i, 'the answer must carry the window it was computed over');
+  });
+});
+
+/**
+ * The fields of the answer, read out of the interface that defines it.
+ *
+ * Never a list here. The whole reason this section exists is that `recorderStartedAt` was added to the
+ * answer and the MCP schema's RESPONSE line kept naming the five fields it had known about — a list in a
+ * gate rots the same way, and a rotted list reports clean about the field nobody documented.
+ */
+function preflightFields() {
+  const mod = src('server/src/brain/legacy-array-writers.ts');
+  const at = mod.indexOf('export interface ConvertPreflight {');
+  assert.ok(at > -1, '`ConvertPreflight` is gone or renamed — re-anchor this derivation');
+  const body = mod.slice(at, mod.indexOf(nl + '}', at));
+  const fields = [...body.matchAll(/^ {2}(\w+)\s*\??\s*:/gm)].map(m => m[1]);
+  assert.ok(fields.length >= 5, `only ${fields.length} field(s) read off ConvertPreflight — the parse broke`);
+  return fields;
+}
+
+/** What the resolver is ASKED for, which a door legitimately spells because it is the call. */
+function preflightInputs() {
+  const mod = src('server/src/brain/legacy-array-writers.ts');
+  const at = mod.indexOf('export async function legacyArrayWriters(input: {');
+  assert.ok(at > -1, '`legacyArrayWriters` no longer takes a named input object — re-anchor this');
+  const body = mod.slice(at, mod.indexOf('}):', at));
+  const fields = [...body.matchAll(/^ {2}(\w+)\s*\??\s*:/gm)].map(m => m[1]);
+  assert.ok(fields.length >= 2, `only ${fields.length} input field(s) — the parse broke`);
+  return fields;
+}
+
+describe('the window in the answer is one that was actually watched', () => {
+  const mod = src('server/src/brain/legacy-array-writers.ts');
+
+  it('`since` is the LATER of what was asked for and when recording began', () => {
+    /*
+     * THE GUARANTEE, and it is the whole of `B-13`. `since` was `now - windowDays` and nothing else, so a
+     * freshly upgraded instance answered "ninety days" over a window thirty minutes wide. The canary
+     * operator, 2026-09-15: a space holding 270 chronos that already carry `entityIds` came back with
+     * `count: 1`, because exactly one write had happened since the process started.
+     *
+     * Our own guidance — read `since` before you read the count — could not save a reader, because `since`
+     * was the misleading field. And the sequence it breaks is the normal one: upgrade, run the pre-flight,
+     * see `writers: []`, convert, then meet the writers one at a time as 400s.
+     *
+     * LATER of the two rather than simply the stamp: asking for a window SHORTER than the recorder's life
+     * must still narrow the answer, or the parameter stops meaning anything on a long-lived instance.
+     */
+    assert.match(mod, /startedAt && startedAt > asked \? startedAt : asked/,
+      'the window is no longer clamped to when recording began, so a count can be reported over a window '
+      + 'nobody was watching — which reads exactly like a clean space');
+  });
+
+  it('the stamp cannot move once it is written', () => {
+    // `$setOnInsert`. A stamp that a later boot overwrites says the instance started recording today,
+    // however long it has really been running — and the clamp then narrows every answer to this boot.
+    const fn = mod.slice(mod.indexOf('export async function stampRecorderStart'));
+    assert.match(fn, /\$setOnInsert/, 'the recorder start is not write-once, so a restart moves it');
+    assert.doesNotMatch(fn.slice(0, fn.indexOf('catch')), /\$set\s*:/,
+      'a `$set` beside the `$setOnInsert` moves the stamp on every boot');
+  });
+
+  it('and it is the OLDEST NOTE rather than `now`', () => {
+    /*
+     * The half that is easy to leave out, and it is silent in the safe direction — which is why it needs a
+     * gate rather than a comment. An instance that has recorded for a year, upgrading to the build that
+     * added the stamp, would claim it began today: every answer then narrows to this boot and the operator
+     * is told nothing was written, over a window of minutes, for a space with a year of evidence in it.
+     *
+     * A note from sixty days ago is proof the recorder was running sixty days ago. `now` is the fallback
+     * for when there is no evidence at all, not the rule.
+     */
+    const fn = mod.slice(mod.indexOf('export async function stampRecorderStart'));
+    assert.match(fn, /sort\(\{\s*firstAt:\s*1\s*\}\)/,
+      'the stamp is not taken from the oldest note, so an instance with history claims it started today');
+    assert.match(fn, /firstAt\s*\?\?\s*new Date\(\)/,
+      '`now` must be the fallback when there are no notes, not the value');
+  });
+
+  it('stamping cannot take a boot down', () => {
+    // An observation about the observer. Failing to record it makes `recorderStartedAt` null, which the
+    // answer already has a meaning for; throwing makes the instance unbootable for the same problem.
+    const fn = mod.slice(mod.indexOf('export async function stampRecorderStart'));
+    const body = fn.slice(fn.indexOf('{') + 1);
+    assert.match(body.trimStart().slice(0, 6), /^try/, 'the stamp does work outside a try');
+  });
+
+  it('every path that configures an instance stamps it, not just the boot one', () => {
+    /*
+     * If nothing calls it, `recorderStartedAt` is null for ever and the clamp never happens — the defect
+     * ships again, with a field in the answer implying it did not.
+     *
+     * AND THE FIRST VERSION PUT IT IN `index.ts`, beside the two boot migrations, where a FIRST-RUN
+     * instance never reaches it: that path skips the whole block and the setup route starts the services
+     * itself. So a freshly installed instance went unstamped for its entire first run — which is exactly
+     * the install this clamp was written for, and the integration suite caught it against a rebuilt
+     * stack rather than anybody reading the code.
+     *
+     * `startConfiguredInstanceServices` is the one function both paths go through, so the assertion is
+     * that the stamp lives THERE and that no caller repeats it. A caller with its own copy is a path
+     * that can be added without one.
+     */
+    assert.match(src('server/src/bootstrap.ts'), /stampRecorderStart\(\)/,
+      'the stamp is not in the function both startup paths share, so one of them can miss it');
+    const callers = trackedSources(['server/src'])
+      .filter(f => !f.endsWith('bootstrap.ts'))
+      .filter(f => /startConfiguredInstanceServices\(\)/.test(src(f)));
+    assert.ok(callers.length >= 2, `only ${callers.length} startup path(s) found — the derivation broke`);
+    const duplicating = callers.filter(f => /stampRecorderStart/.test(src(f)));
+    assert.deepEqual(duplicating, [],
+      'these stamp the recorder themselves as well as going through the shared startup, so a third '
+      + `startup path would be written without one: ${duplicating.join(', ')}`);
+  });
+
+  it('every field of the answer is named in the MCP schema, which is what a caller reads', () => {
+    /*
+     * A tool's `inputSchema` description is the reference a caller reads WHILE constructing arguments, and
+     * `help()` says so. A field present in the answer and absent from that text is a capability nobody
+     * knows they have — the fleet integrator built around a stale sentence in one of these once.
+     *
+     * Derived from the interface, so a seventh field is covered by the commit that adds it. That is not
+     * hypothetical: the RESPONSE line named five fields for exactly as long as it took to notice.
+     *
+     * Read off the BUILT tool rather than out of the source: `link.ts` declares four tools and the first
+     * `RESPONSE:` in it belongs to `upsert_link`. That is the version this gate was first written with,
+     * and it failed on all six fields at once — loudly, because the description it was reading was the
+     * wrong one entirely. A gate that matched the wrong thing quietly is the version worth fearing.
+     */
+    const tool = ALL_TOOLS.find(t => t.name === 'graph_link_preflight');
+    assert.ok(tool, 'the pre-flight tool is gone or renamed — re-anchor this gate');
+    const undocumented = preflightFields().filter(f => !tool.description.includes(f));
+    assert.deepEqual(undocumented, [],
+      `these are in the pre-flight answer and not in the MCP schema a caller reads: ${undocumented.join(', ')}`);
+  });
+
+  it('and neither door builds the answer itself', () => {
+    /*
+     * The parity rule, asserted as one rather than by checking both doors say the same thing. `since` and
+     * `recorderStartedAt` are resolved once, in the module both doors call, and handed through whole — so
+     * a field added to the answer reaches both surfaces without anybody remembering to add it twice.
+     *
+     * A door that spells a response key is building a second answer, and the two drift in the direction
+     * nobody looks: the door somebody is not using.
+     *
+     * The INPUT names are subtracted, and derived rather than listed. `spaceId` and `converted` are both
+     * asked for and answered back, so a door writing `converted: usesLinkRecords(spaceId)` — which is the
+     * call itself — is not building anything. The first version of this case did not subtract them and
+     * reported both doors, which is a gate that would have been deleted rather than believed.
+     */
+    const doors = trackedSources(['server/src'])
+      .filter(f => /legacyArrayWriters/.test(stripComments(readFileSync(f, 'utf8'))))
+      .filter(f => !f.endsWith('legacy-array-writers.ts'));
+    assert.ok(doors.length >= 2, `only ${doors.length} door(s) call the pre-flight — the derivation broke`);
+    const inputs = new Set(preflightInputs());
+    const fields = preflightFields().filter(f => !inputs.has(f));
+    assert.ok(fields.length >= 3, `only ${fields.length} answer-only field(s) — the subtraction ate the set`);
+    const offenders = doors.filter(f => fields.some(k => new RegExp(`(^|[^.\\w])${k}\\s*:`).test(src(f))));
+    assert.deepEqual(offenders, [],
+      'these construct a pre-flight response field themselves instead of returning what the resolver '
+      + `computed, so the two doors can report different windows: ${offenders.join(', ')}`);
   });
 });
 
