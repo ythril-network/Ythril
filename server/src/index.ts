@@ -153,6 +153,7 @@ async function main(): Promise<void> {
     // an edge or link endpoint kind. Both are silent failures and neither implies the other.
     const { rekeyMemoryKindToFact } = await import('./db/rekey-memory-kind-to-fact.js');
     await rekeyMemoryKindToFact();
+
   }
 
   // Validate $vectorSearch support and log the result.
@@ -170,6 +171,25 @@ async function main(): Promise<void> {
   }
 
   if (!isFirstRun) {
+    /*
+     * INSIDE the first-run guard, and that placement is the whole of a bug this caught.
+     *
+     * It sat beside the two collection renames above, which need no config and run unconditionally. This
+     * one reads the space list, and on a FIRST RUN there is no config yet — so `getConfig()` threw
+     * `Config not loaded` from outside the function's own try, and a fresh instance could not boot at
+     * all. The module promises it cannot take a boot down; the promise was true of its body and false of
+     * its first line.
+     *
+     * A first-run instance has no spaces and therefore nothing to convert, so the guard is also the
+     * correct answer rather than only the safe one. `startConfiguredInstanceServices` is here for the
+     * same reason and the setup route calls it once the config is written.
+     *
+     * AFTER the two renames, because it walks `<space>_facts` and the collections have to be under their
+     * new names first. BEFORE the services, so nothing reads a space mid-conversion.
+     */
+    const { convertLinksOnBoot } = await import('./brain/links-convert-on-boot.js');
+    await convertLinksOnBoot();
+
     // Initialise spaces/indexes and start all background services. On a FIRST-run
     // boot this is skipped (config isn't written yet) — the setup route calls the
     // same function once it writes the config, so a freshly set-up instance is fully
