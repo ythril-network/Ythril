@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`filter` takes `entityName`, `fromName` and `toName`.** They were REST-only, so an agent could not ask
+  for “facts about Alice” by name — it had to filter entities, take the ids, then filter facts, and on a
+  proxy space the ids differ per member. They are a JOIN rather than a predicate, which is why no Mongo
+  filter a caller writes can express them. Refused on a collection they cannot mean rather than ignored.
+
 - **`space_reembed` — the embedding backfill now has a tool.** `POST /api/spaces/:id/reembed` has queued
   embeddings for records with no vector since 4.4, and had no MCP counterpart. It is also
   `POST /api/space_reembed`, takes `kinds` and `limit`, and returns the same counts the route does.
@@ -357,6 +362,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wrong, so the guard was wrong, and no gate could see it.
 
 ### Fixed
+
+- **`entityName` could not see a record linked the recommended way.** A fact or chrono entry attached with
+  `linkEntities` — the form the integration guide leads with — was invisible to `?entityName=`, on both
+  doors, and the filter said so by answering `{facts: [], total: 0}`. Not an error: it reads as *there are
+  none*.
+
+  | written with | `entityIds` array | link record | found before |
+  |---|---|---|---|
+  | `entityIds: [id]` | populated | written | yes |
+  | `linkEntities: [id]` | **empty** | written | **no** |
+
+  Both shapes are read now, through one predicate. **Neither side is complete on its own** — the arrays
+  miss what `linkEntities` wrote, the link records miss what predates the upgrade — and both coexist on
+  every space written to since. If you have been filtering by entity name and getting short answers, this
+  is why.
+
 
 - **The `filter` MCP tool required a space while its route did not — one rule, two doors, the MCP one
   narrower.** Introduced by the change that moved the search family off the space path: `POST

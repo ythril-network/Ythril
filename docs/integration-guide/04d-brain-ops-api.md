@@ -539,8 +539,12 @@ Run a constrained Mongo-style read query against one logical collection. Intende
 | `sort` | — | Field to order by. Per-collection allowlist; an unlisted field is a `400` naming the allowed ones. Omit for newest-first |
 | `dir` | — | `asc` or `desc` (default `desc`). Only meaningful with `sort` |
 | `maxTimeMS` | — | Query timeout in milliseconds (default `5000`) |
+| `entityName` | — | *(facts, chrono)* Only records attached to an entity whose name CONTAINS this, case-insensitively. A JOIN rather than a predicate: the server resolves the name to ids per member space first, and reads BOTH shapes a link can take — the `entityIds` array and the link records. A name matching nothing returns nothing, never everything. On any other collection it is a `400` |
+| `fromName` / `toName` | — | *(edges)* Only edges whose FROM / TO end is an entity whose name contains this. Direction is data: an edge from Alice to Bob matches `fromName` and not `toName`. On any other collection it is a `400` |
 
 Any other field is a `400`. See **Unknown body fields are refused** below.
+
+> **The three name fields are on the tool too** — `filter` takes them with the same meaning and the same refusals, and `POST /api/filter` is the same call. They were REST-only until 5.0, which meant an agent could not ask for “facts about Alice” by name at all.
 
 **`links` is read-only through THIS route, and it does have write doors of its own** — `POST /api/brain/spaces/:spaceId/links` and `DELETE /api/brain/spaces/:spaceId/links/:id`, with `save_link` and `delete_link` on MCP. This said it had none, which was true before 4.0 and stopped being when links became records. A link record says that one
 record concerns another — it is what a `fact.entityIds`, `chrono.entityIds`/`memoryIds` or
@@ -665,7 +669,7 @@ keys:
 
 | Route | Accepted fields |
 |---|---|
-| `POST /filter` | `space`, `collection`, `filter`, `projection`, `limit`, `skip`, `sort`, `dir`, `maxTimeMS`, `maxChars`, `maxBytes`, `maxTokens`, `charsPerToken` |
+| `POST /filter` | `space`, `collection`, `filter`, `projection`, `limit`, `skip`, `sort`, `dir`, `maxTimeMS`, `entityName`, `fromName`, `toName`, `maxChars`, `maxBytes`, `maxTokens`, `charsPerToken` |
 | `POST /recall` | `space`, `query`, `topK`, `types`, `minScore`, `filter`, `traverse`, `tags`, `minPerType`, `maxPerType`, `maxTimeMS`, `includeFreshWrites`, `includeContent`, `includeDiagnostics`, `includeRecordMeta`, `projection`, `maxChars`, `maxBytes`, `maxTokens`, `charsPerToken`, `skip`, `remainderDump` |
 | `POST /traverse` | `startId`, `direction`, `edgeLabels`, `maxDepth`, `limit`, `includeChrono`, `includeMemories`, `includeFiles`, `includeEdges` |
 | `POST /similar` | `space`, `entryId`, `entryType`, `topK`, `minScore`, `targetTypes`, `traverse`, `includeContent`, `includeDiagnostics`, `projection`, `maxChars`, `maxBytes`, `maxTokens`, `charsPerToken`, `skip`, `remainderDump`, `crossSpace` *(not deprecated: `space` pins the seed ENTRY here, `crossSpace` widens the SEARCH)* |

@@ -174,6 +174,17 @@ describe('entity-NAME column filters (From / To / Entities)', () => {
     const CALL = 'resolveEntityIdsByName(';
     const callers = serverSources()
       .filter(f => f !== 'server/src/brain/entities.ts')     // where the resolver is DECLARED
+      /*
+       * `entity-name-scope.ts` is the one place allowed to bind the list, because deciding what an EMPTY
+       * resolution means is its entire job — it returns `_id: { $in: [] }`, a predicate that matches
+       * nothing, and `a-name-filter-reads-both-link-shapes` asserts exactly that.
+       *
+       * The rule below is a shape check standing in for a behaviour, which is right everywhere the
+       * behaviour is implicit and wrong in the module that makes it explicit. Exempting it here rather
+       * than restructuring the module to please the pattern: the pattern exists to protect the property,
+       * and contorting correct code to match a proxy for it is how a gate starts shaping the design.
+       */
+      .filter(f => f !== 'server/src/brain/entity-name-scope.ts')
       .filter(f => read(f).includes(CALL));
     assert.ok(callers.length >= 3,
       `only ${callers.length} caller(s) of the resolver found; the three known doors are the minimum`);
@@ -204,8 +215,16 @@ describe('entity-NAME column filters (From / To / Entities)', () => {
       //
       // Asserting the ARGUMENT is stronger than asserting the enclosing loop: the old pattern would have passed a
       // `resolveEntityIdsByName(spaceId, …)` written inside the loop, which is the actual mistake being guarded against.
-      assert.match(src, /resolveEntityIdsByName\(mid,/, `${f} must resolve against the MEMBER id`);
-      assert.ok(!/resolveEntityIdsByName\(spaceId,/.test(src),
+      /*
+       * EITHER resolver, because the facts and chrono routes reach the name through
+       * `attachedToEntityNamed` now — the shared predicate that reads the link records as well as the
+       * legacy array (`B-10`). The property is unchanged and so is this assertion's subject: the first
+       * argument is the MEMBER id. Pinning the old spelling would have failed correct code and invited
+       * somebody to delete the case rather than read it.
+       */
+      assert.match(src, /(?:resolveEntityIdsByName|attachedToEntityNamed)\(mid,/,
+        `${f} must resolve against the MEMBER id`);
+      assert.ok(!/(?:resolveEntityIdsByName|attachedToEntityNamed)\(spaceId,/.test(src),
         `${f} resolves an entity name against the PROXY space id — ids belong to the member that owns them, so this `
         + 'matches nothing while looking like it worked');
     }

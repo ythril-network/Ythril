@@ -403,6 +403,8 @@ Optional filters:
 
 Both `tag` and `entity` can be combined (AND logic). Results are sorted newest-first.
 
+> **`entityName`, `fromName` and `toName` are on the tool door too, since 5.0.** `filter` (`POST /api/filter`, and the `filter` MCP tool) takes them alongside its predicate, with the same resolution. They had been REST-only, which meant an agent could not ask for “facts about Alice” by name at all — they are a JOIN rather than a predicate, so no Mongo filter a caller writes can express them, and on a proxy space the ids resolve per member. That is also why they cannot move to the client when these list routes are retired.
+
 **Response** `200`:
 
 ```json

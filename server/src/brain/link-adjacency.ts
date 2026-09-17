@@ -183,8 +183,18 @@ export function linkClassesFrom(kind: RefKind | 'edge'): readonly LinkClass[] {
  * what has happened on one disk must not be a thing a network votes on.
  *
  * A space that has not converted has link records only for what was written since the upgrade, so reading
- * records alone there would answer about recent data and silently drop the rest. The arrays are complete on
- * every space, always, which is what makes them the safe side of this branch.
+ * records alone there would answer about recent data and silently drop the rest.
+ *
+ * **THIS USED TO SAY the arrays are complete on every space, always, and that is what made them the
+ * safe side of this branch. It stopped being true and nothing noticed.** `linkEntities` on a create
+ * writes the link RECORD and leaves the array alone, so a record attached the way the integration
+ * guide leads with has an empty `entityIds` — and `entityName`, which read the array, answered
+ * `{facts: [], total: 0}` for it. Measured 2026-09-17; filed and fixed as `B-10`.
+ *
+ * So NEITHER side is complete on its own: the arrays miss what `linkEntities` wrote, the link records
+ * miss what predates the upgrade. A reader that must not drop records asks for both —
+ * `brain/entity-name-scope.ts` is that predicate. This branch remains right for ADJACENCY, where the
+ * question is which reader a converted space should use rather than which records exist.
  */
 export function usesLinkRecords(spaceId: string): boolean {
   return getConfig().spaces.find(s => s.id === spaceId)?.completeLinkage === true;
