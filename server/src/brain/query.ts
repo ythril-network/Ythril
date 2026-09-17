@@ -86,6 +86,15 @@ export const QUERY_BODY_FIELDS: ReadonlySet<string> = new Set([
   'space',
   'collection', 'filter', 'projection', 'limit', 'skip', 'sort', 'dir', 'maxTimeMS',
   /*
+   * The NAME conveniences, which are a JOIN rather than part of the predicate: the caller gives a name
+   * and the server resolves it to ids, per member space, before filtering. A client cannot express
+   * them in `filter` — ids belong to the space that owns them — which is why they are arguments.
+   *
+   * Added here and to the tool in one change, because a parameter on one door and not the other is the
+   * defect this repo pays most for.
+   */
+  'entityName', 'fromName', 'toName',
+  /*
    * The size budget, which this route had none of: `limit` caps ROWS and says nothing about how big one is,
    * so a page of file records had no ceiling on the one read route a fleet actually pages through.
    *

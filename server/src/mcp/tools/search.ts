@@ -28,6 +28,11 @@ import { type RecallKnowledgeType, type RecallResult, findSimilar, recall, recal
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
 import { pageAcrossMembers } from '../../spaces/page-across-members.js';
 import { NotFoundError } from '../../util/errors.js';
+// The SAME resolver the nine per-collection list routes use — not a second name lookup with its own cap
+// and its own idea of what 'contains' means. Two spellings of one join is how the doors start
+// disagreeing about which records a name matches.
+import { resolveEntityIdsByName } from '../../brain/entities.js';
+import { attachedToEntityNamed } from '../../brain/entity-name-scope.js';
 import {
   rankOf, byRankThenId, mergeRecallResults, rankingFields,
 } from '../../brain/recall-shape.js';
@@ -731,6 +736,24 @@ export const queryTool: ToolHandler = {
             skip: { type: 'number', minimum: 0, description: 'Rows to discard before the page, for paging. The result order is total (`_id` breaks every tie), so no row can be seen twice or missed between pages. On a proxy space the page is computed over the MERGED set, not per member.' },
             sort: { type: 'string', description: 'Field to order by. Allowed values depend on the collection (entities: createdAt, name, type; edges: createdAt, label, from, to, type, weight; facts: createdAt, type; chrono: createdAt, title, startsAt, endsAt, status, type; files: createdAt, updatedAt, path). An unknown field is refused and names the allowed ones. Omit for newest-first.' },
             dir: { type: 'string', enum: ['asc', 'desc'], description: "Sort direction, default desc. Only meaningful with `sort`." },
+            entityName: {
+              type: 'string',
+              description: 'Only records attached to an entity whose name CONTAINS this, case-insensitively. '
+                + 'For `facts` and `chrono` only — they carry entity ids, and this resolves the name to those '
+                + 'ids first. It is a join rather than a predicate, which is why `filter` cannot express it: '
+                + 'ids belong to the space that owns them, so on a proxy the resolution runs per member. A '
+                + 'name that matches nothing returns NOTHING rather than everything.',
+            },
+            fromName: {
+              type: 'string',
+              description: 'Only edges whose FROM end is an entity whose name contains this. For `edges` '
+                + 'only. Direction is data, not a guess — an edge from Alice to Bob matches `fromName: '
+                + '"Alice"` and not `toName: "Alice"`.',
+            },
+            toName: {
+              type: 'string',
+              description: 'Only edges whose TO end is an entity whose name contains this. For `edges` only.',
+            },
             maxChars: { type: 'integer', minimum: 1000, description: 'Ceiling on the serialised response body, in CHARACTERS. **DEFAULT 25000 ON THIS DOOR, and 50000 on REST.** `limit` caps ROWS and says nothing about how big one is, so a page of file records or of long-described entities had no size bound at all before 3.7 — on the read tool you are most likely to page through. When the budget bites, `results` is a PREFIX of the page, `truncated` says so, and `nextSkip` is where to continue: send it back as `skip`. `count` is what you were actually given and still matches `results.length`; `total` is unchanged and still the whole match.' },
             maxBytes: { type: 'integer', minimum: 1000, description: 'Ceiling on the serialised response body, in real UTF-8 BYTES. **NO DEFAULT — opt-in.** Set it when your limit is genuinely a byte limit. Bytes are always >= characters, so a byte default equal to the character one would silently bind on every non-ASCII answer. When you set both, BOTH apply: the page stops at whichever ceiling it reaches first.' },
             maxTokens: { type: 'integer', minimum: 1, description: 'A convenience onto `maxChars`, converted with `charsPerToken` — the conversion produces characters. If both are sent the SMALLER resulting character figure applies. An approximation: the server does not know your tokeniser.' },
@@ -783,13 +806,66 @@ export const queryTool: ToolHandler = {
       ? [...new Set(ctx.callSpaces.flatMap(sp => memberSpacesWithin(sp, reachable)))]
       : reachable;
     const coll = collName as BrainCollection;
+
+    /*
+     * THE NAME CONVENIENCES, and they are a JOIN rather than part of the predicate.
+     *
+     * A record stores entity IDS. The nine per-collection list routes have always accepted a NAME and
+     * resolved it server-side before filtering; `filter` took a Mongo predicate and could not, so an agent
+     * could not ask for "facts about Alice" by name while a browser could — a capability REST had and MCP
+     * did not, hidden by a capability-map pairing that called the two answered.
+     *
+     * RESOLVED PER MEMBER, which is the part a caller could not do for itself. An id belongs to the space
+     * that owns it, so resolving `Alice` against one member and querying another matches nothing while
+     * looking entirely correct. That is also why this cannot be pushed to the client when the routes go.
+     */
+    const nameArg = (k: string): string | undefined =>
+      typeof a[k] === 'string' && (a[k] as string).trim() ? (a[k] as string) : undefined;
+    const entityName = nameArg('entityName');
+    const fromName = nameArg('fromName');
+    const toName = nameArg('toName');
+
+    /*
+     * REFUSED on a collection it cannot mean, never ignored.
+     *
+     * `entityName` on `entities` has no meaning — the predicate for that is `filter: { name: ... }` — and
+     * dropping it silently hands back every entity in the space to a caller who believes they narrowed the
+     * search. The refusal names what to use instead, because "unsupported" without an alternative is how a
+     * caller ends up paging the whole collection by hand.
+     */
+    const ENTITY_LINKED: readonly string[] = ['facts', 'chrono'];
+    if (entityName && !ENTITY_LINKED.includes(coll)) {
+      throw new Error(`entityName applies to ${ENTITY_LINKED.join(' and ')} only, not '${coll}'. `
+        + `For entities themselves use filter: { name: ... }; for edges use fromName or toName.`);
+    }
+    if ((fromName || toName) && coll !== 'edges') {
+      throw new Error(`${fromName ? 'fromName' : 'toName'} applies to edges only, not '${coll}'. `
+        + `For facts and chrono use entityName.`);
+    }
+
+    /** The predicate for ONE member: the caller's filter, plus whatever the names resolve to there. */
+    const filterFor = async (mid: string): Promise<Record<string, unknown>> => {
+      if (!entityName && !fromName && !toName) return filter;
+      const per: Record<string, unknown> = { ...filter };
+      // `$in: []` when a name matches nothing, and that is the answer rather than a reason to widen: a
+      // typo must not become a full-collection read that looks like a successful search.
+      // Through the shared predicate, which covers BOTH the legacy array and link records — reading
+      // only the array misses every record written with `linkEntities`, which is the form the guide
+      // leads with. See `entity-name-scope.ts` for the measurement.
+      if (entityName) Object.assign(per, await attachedToEntityNamed(mid, coll === 'chrono' ? 'chrono' : 'fact', entityName));
+      if (fromName) per['from'] = { $in: await resolveEntityIdsByName(mid, fromName) };
+      if (toName) per['to'] = { $in: await resolveEntityIdsByName(mid, toName) };
+      return per;
+    };
+
     const page = await pageAcrossMembers({
       members,
       limit,
       skip,
       ceiling: PROXY_PAGE_CEILING,
       compare: compareBySort(order),
-      readMember: (mid, lim, sk) => queryBrain(mid, coll, filter, projection, lim, maxTimeMS, sk, order),
+      readMember: async (mid, lim, sk) =>
+        queryBrain(mid, coll, await filterFor(mid), projection, lim, maxTimeMS, sk, order),
     });
     if (!page.ok) throw new Error(page.error);
     // Resolved before the read, so a bad `maxBytes` is an error rather than a query that ran first.

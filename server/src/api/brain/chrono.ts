@@ -27,6 +27,7 @@ import type { ChronoStatus } from '../../config/types.js';
 import { UUID_V4_RE, webhookToken, getSpaceMeta, applyValidation, ttlDaysFromBody, ttlDaysError, dupeCheckOptsFromBody, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
 import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
 import { resolveEntityIdsByName } from '../../brain/entities.js';
+import { attachedToEntityNamed } from '../../brain/entity-name-scope.js';
 import { mergePropertiesOrKeep } from '../../brain/merge-fields.js';
 import {
   parseRecordSuppression, RECORD_SUPPRESS_FIELD,
@@ -455,7 +456,10 @@ chronoRouter.get('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, a
   const entityName = typeof req.query['entityName'] === 'string' ? req.query['entityName'] : undefined;
   const filterFor = async (mid: string): Promise<Record<string, unknown>> => {
     const perMember: Record<string, unknown> = { ...filter };
-    if (entityName) perMember['entityIds'] = { $in: await resolveEntityIdsByName(mid, entityName) };
+    // BOTH shapes, through the shared predicate. Reading the array alone missed every record written
+    // with `linkEntities` — the form the guide leads with — and answered with an empty list, which
+    // reads as "there are none" rather than "this filter cannot see them".
+    if (entityName) Object.assign(perMember, await attachedToEntityNamed(mid, 'chrono', entityName));
     return perMember;
   };
   const members = memberSpacesForRequest(req, spaceId);

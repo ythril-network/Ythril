@@ -21,6 +21,8 @@ import {
 } from '../../brain/query.js';
 import { findSimilar, recall, type RecallKnowledgeType, type RecallResult } from '../../brain/recall.js';
 import { type FilterExpression } from '../../brain/filter.js';
+import { resolveEntityIdsByName } from '../../brain/entities.js';
+import { attachedToEntityNamed } from '../../brain/entity-name-scope.js';
 import { resolveRecallFilter } from '../../brain/recall-filter.js';
 import { traverseGraph } from '../../brain/edges.js';
 import { MAX_RECALL_TRAVERSE } from '../../brain/recall-seed-traversal.js';
@@ -270,9 +272,39 @@ searchRouter.post('/filter', globalRateLimit, requireBodyScopedSpace('knowledge'
   if (bad) { res.status(400).json(bad); return; }
 
   const { collection, filter, projection, limit, maxTimeMS, skip } = body;
+
+  /*
+   * The NAME conveniences, same three the per-collection list routes take and the tool declares.
+   *
+   * They are here because a parameter on one door and not the other is the defect this repo pays most
+   * for — a caller reads the tool schema, switches door, and gets a 400 for a documented argument. The
+   * gate that caught it names that outcome exactly: *"a tool argument its route drops is a 200 with the
+   * value silently missing"*, and it is a 400 here only because this route refuses unknown fields.
+   */
+  const nameArg = (k: string): string | undefined =>
+    typeof body[k] === 'string' && (body[k] as string).trim() ? (body[k] as string) : undefined;
+  const entityName = nameArg('entityName');
+  const fromName = nameArg('fromName');
+  const toName = nameArg('toName');
   const validCollections = BRAIN_COLLECTIONS;
   if (!validCollections.includes(collection as typeof validCollections[number])) {
     res.status(400).json({ error: `collection must be one of: ${validCollections.join(', ')}` });
+    return;
+  }
+  /*
+   * Refused on a collection they cannot mean, never ignored — word for word what the tool answers, because
+   * a caller comparing the two doors should not have to work out that two wordings mean the same thing.
+   */
+  const ENTITY_LINKED: readonly string[] = ['facts', 'chrono'];
+  if (entityName && !ENTITY_LINKED.includes(collection as string)) {
+    res.status(400).json({ error: `entityName applies to ${ENTITY_LINKED.join(' and ')} only, not `
+      + `'${String(collection)}'. For entities themselves use filter: { name: ... }; for edges use `
+      + 'fromName or toName.' });
+    return;
+  }
+  if ((fromName || toName) && collection !== 'edges') {
+    res.status(400).json({ error: `${fromName ? 'fromName' : 'toName'} applies to edges only, not `
+      + `'${String(collection)}'. For facts and chrono use entityName.` });
     return;
   }
   const safeFilter: Record<string, unknown> =
@@ -303,6 +335,24 @@ searchRouter.post('/filter', globalRateLimit, requireBodyScopedSpace('knowledge'
   if ('error' in sortParse) { res.status(400).json({ error: sortParse.error }); return; }
   const order = sortParse.sort ? toMongoSort(sortParse.sort) : DEFAULT_QUERY_SORT;
 
+  /*
+   * Names resolved PER MEMBER, through the shared predicate.
+   *
+   * An id belongs to the space that owns it, so resolving against one member and querying another matches
+   * nothing while looking correct. `attachedToEntityNamed` also covers BOTH link shapes — the legacy array
+   * and the link records — which a hand-written `entityIds: { $in: ids }` here would not (`B-10`).
+   */
+  const withNameScope = async (mid: string): Promise<Record<string, unknown>> => {
+    if (!entityName && !fromName && !toName) return safeFilter;
+    const per: Record<string, unknown> = { ...safeFilter };
+    if (entityName) {
+      Object.assign(per, await attachedToEntityNamed(mid, collection === 'chrono' ? 'chrono' : 'fact', entityName));
+    }
+    if (fromName) per['from'] = { $in: await resolveEntityIdsByName(mid, fromName) };
+    if (toName) per['to'] = { $in: await resolveEntityIdsByName(mid, toName) };
+    return per;
+  };
+
   try {
     // One paging rule, shared with the embed-job listing. It used to be inline here, and being inline is how it shipped
     // a window capped at 100 that sliced deep pages to nothing — see `spaces/page-across-members.ts`.
@@ -316,9 +366,10 @@ searchRouter.post('/filter', globalRateLimit, requireBodyScopedSpace('knowledge'
       skip: safeSkip,
       ceiling: PROXY_PAGE_CEILING,
       compare: compareBySort(order),
-      readMember: (mid, lim, sk) => queryBrain(
+      /** The caller's predicate, plus whatever the names resolve to IN THIS MEMBER. */
+      readMember: async (mid, lim, sk) => queryBrain(
         mid, collection as typeof validCollections[number],
-        safeFilter, safeProjection, lim, safeMaxTimeMS, sk, order,
+        await withNameScope(mid), safeProjection, lim, safeMaxTimeMS, sk, order,
       ),
     });
     if (!page.ok) { res.status(400).json({ error: page.error }); return; }
