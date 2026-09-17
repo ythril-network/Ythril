@@ -199,8 +199,13 @@ const TOTAL = 48;
  *   rights check that does not read it. When the dispatch moved to `mcp/call-tool.ts` the second call went,
  *   because the rung check now runs per named space inside the same loop. One call site fewer, and no
  *   behaviour with it: the surviving call is the same call on the same space.
+ * - **6, at 5.0: `POST /api/brain/recall`'s two fan-outs.** The route held four hundred lines of its own
+ *   recall and collapsed onto `callTool`, so its member expansion went with the rest of the handler. The
+ *   fan-out did not stop happening — the tool does it, on the same spaces, through the same narrowed path,
+ *   and is already counted here. Two sites fewer because there is one implementation instead of two, which
+ *   is the outcome this inventory exists to make visible rather than to penalise.
  */
-const REMOVED = 4;
+const REMOVED = 6;
 
 const GUARDS = {
   'server/src/auth/middleware.ts': 2,

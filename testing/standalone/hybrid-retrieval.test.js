@@ -263,8 +263,18 @@ describe('every aggregation site orders by rankOf, not by raw score', () => {
   // asserting the absence of the tie-break, and this member merge is the LAST sort before the response, so a
   // tie left to the database order here is what a paging caller sees as a repeated record.
   it('the REST recall route merges member spaces by rank, not raw score', () => {
-    assert.ok(/all\.sort\(byRankThenId\)/.test(rest),
-      'the member merge must use the shared rank comparator');
+    /*
+     * The REST route merges NOTHING now — `POST /api/brain/recall` hands its body to `callTool`, so the
+     * member fan-out and its comparator live once, in the tool, and the case below is what checks them.
+     * Demanding `all.sort(byRankThenId)` in this file would be demanding the duplicate back.
+     *
+     * The second half of the claim survives the collapse and is the half worth keeping: whatever this file
+     * still does, none of it may sort by raw score. A route that grows a merge again is caught by it.
+     */
+    if (/all\.sort\(/.test(rest)) {
+      assert.ok(/all\.sort\(byRankThenId\)/.test(rest),
+        'the member merge must use the shared rank comparator');
+    }
     assert.equal(sortsByRawScore(rest), 0, 'no recall path in this file may sort by raw score');
   });
 

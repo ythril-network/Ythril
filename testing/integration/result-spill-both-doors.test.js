@@ -84,8 +84,9 @@ before(async () => {
     if (r.status !== 201) break;
     ids.push(r.body._id ?? r.body.id);
   }
-  // NO wait for the vector index. `includeFreshWrites: true` makes recall also scan the newest records
-  // directly — the flag exists for exactly this case — so the test does not depend on how warm the embedder is.
+  // NO wait for the vector index. Every recall also scans the newest records straight from the collection
+  // since 5.0, so the test does not depend on how warm the embedder is. This used to pass
+  // `includeFreshWrites: true` for the same reason; the flag is gone because the scan is unconditional.
   //
   // IT DOES DEPEND ON `DUPE_FRESH_WINDOW_MS`, which `testing/docker-compose.test.yml` sets to ten minutes —
   // the maximum `env-num.ts` accepts, and it refuses anything higher at boot rather than clamping.
@@ -133,7 +134,7 @@ before(async () => {
       try {
         const unbudgeted = JSON.parse((await probe.callTool('recall', {
           space: SPACE, query: QUERY, types: ['entity'], topK: COUNT,
-          includeFreshWrites: true, maxBytes: 5_000_000, maxChars: 5_000_000,
+          maxBytes: 5_000_000, maxChars: 5_000_000,
         }))?.content?.[0]?.text ?? '{}');
         if (unbudgeted.truncated === false && typeof unbudgeted.bytesReturned === 'number') {
           mcpBytes = unbudgeted.bytesReturned;
@@ -160,8 +161,8 @@ after(async () => {
   }).catch(() => {});
 });
 
-/** Always with `includeFreshWrites`, so the answer does not wait on the embedding queue. */
-const recall = (body) => post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ includeFreshWrites: true, ...body }) });
+/** The answer does not wait on the embedding queue: recall scans the newest records itself. */
+const recall = (body) => post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ ...body }) });
 
 /**
  * The full match total, measured NOW — never the `COUNT` constant.
@@ -254,8 +255,11 @@ describe('REST: a tight budget returns a prefix and a way to reach the rest', ()
 
     // Every returned record is WHOLE. A description cut in half would be the one failure the byte accounting
     // could otherwise hide.
+    // `.record.description`: a hit is `{score, spaceId, type, record}` on this door since 5.0, when the
+    // route collapsed onto the shared tool module. Reading `rec.description` would be `undefined` and the
+    // regex would fail for the wrong reason — which is what it did.
     for (const rec of r.body.results) {
-      assert.match(rec.description, /^Vault credential rotation service number \d+, scoping authentication tokens$/,
+      assert.match(rec.record?.description, /^Vault credential rotation service number \d+, scoping authentication tokens$/,
         `a returned record must be whole: ${JSON.stringify(rec).slice(0, 200)}`);
     }
 
@@ -350,7 +354,7 @@ describe('REST: a tight budget returns a prefix and a way to reach the rest', ()
     const r = await recall({ query: QUERY, types: ['entity'], topK: COUNT, maxBytes: 1000 });
     assert.equal(r.status, 200, JSON.stringify(r.body).slice(0, 200));
     assert.ok(r.body.returned >= 1, 'a caller must always be able to read at least one record');
-    assert.match(r.body.results[0].description, /scoping authentication tokens$/, 'and it must be whole');
+    assert.match(r.body.results[0].record?.description, /scoping authentication tokens$/, 'and it must be whole');
     assert.equal(r.body.truncated, true);
     assert.equal(r.body.nextSkip, r.body.returned, 'with the other 27 reachable');
   });
@@ -409,7 +413,7 @@ describe('REST: a tight budget returns a prefix and a way to reach the rest', ()
       const r = await recall({
         query: QUERY, types: ['entity'], topK: COUNT, maxBytes: 5_000_000, maxChars: 5_000_000,
       });
-      return r.status === 200 && r.body.truncated === false ? r.body.results.map(x => x._id).join(',') : null;
+      return r.status === 200 && r.body.truncated === false ? r.body.results.map(x => x.record?._id).join(',') : null;
     };
     const before = await orderOf();
     const total = await totalNow();
@@ -421,7 +425,7 @@ describe('REST: a tight budget returns a prefix and a way to reach the rest', ()
       const r = await recall({ query: QUERY, types: ['entity'], topK: COUNT, maxBytes: tightBytes, skip });
       assert.equal(r.status, 200, JSON.stringify(r.body).slice(0, 300));
       assert.equal(r.body.count, total, 'count stays the FULL total on every page, never the post-skip total');
-      seen.push(...r.body.results.map(x => x._id));
+      seen.push(...r.body.results.map(x => x.record?._id));
       pages++;
       assert.ok(pages <= COUNT, 'a page that returns nothing and still says truncated would loop forever');
       if (!r.body.truncated) { assert.equal(r.body.nextSkip, undefined, 'and the last page offers no next'); break; }
@@ -495,7 +499,7 @@ describe('MCP: the same answer through the other door', () => {
       const total = await totalNow();
       const res = await session.callTool('recall', {
         space: SPACE, query: QUERY, types: ['entity'], topK: COUNT,
-        includeFreshWrites: true, maxBytes: tightBytes,
+        maxBytes: tightBytes,
       });
       const text = res?.content?.[0]?.text ?? '';
       const out = JSON.parse(text);
@@ -522,7 +526,7 @@ describe('MCP: the same answer through the other door', () => {
        */
       const unbudgeted = JSON.parse((await session.callTool('recall', {
         space: SPACE, query: QUERY, types: ['entity'], topK: COUNT,
-        includeFreshWrites: true, maxBytes: 5_000_000, maxChars: 5_000_000,
+        maxBytes: 5_000_000, maxChars: 5_000_000,
       }))?.content?.[0]?.text ?? '{}');
       assert.equal(unbudgeted.truncated, false,
         'the reference call must not itself truncate, or the ranked length it supplies is a prefix');
@@ -546,7 +550,7 @@ describe('MCP: the same answer through the other door', () => {
       // Then the same call WITH the flag, on the same door — the second half of clause 6b.
       const dumped = JSON.parse((await session.callTool('recall', {
         space: SPACE, query: QUERY, types: ['entity'], topK: COUNT,
-        includeFreshWrites: true, maxBytes: tightBytes, remainderDump: true,
+        maxBytes: tightBytes, remainderDump: true,
       }))?.content?.[0]?.text ?? '{}');
       assert.notEqual(dumped.remainder, undefined, 'asked for and not delivered on the MCP door');
       assert.equal(dumped.remainder.matches, rankedLen - dumped.returned,
@@ -555,7 +559,7 @@ describe('MCP: the same answer through the other door', () => {
       // And `skip` continues here too, or the opt-in would strand an MCP caller specifically.
       const next = JSON.parse((await session.callTool('recall', {
         space: SPACE, query: QUERY, types: ['entity'], topK: COUNT,
-        includeFreshWrites: true, maxBytes: tightBytes, skip: out.nextSkip,
+        maxBytes: tightBytes, skip: out.nextSkip,
       }))?.content?.[0]?.text ?? '{}');
       assert.equal(next.count, total, 'count stays the full total on a skipped page');
       assert.ok(next.results.length > 0, 'the next page must not be empty');
@@ -589,7 +593,7 @@ describe('MCP: the same answer through the other door', () => {
       // 2000 tokens at the default 3.5 chars/token is 7000 bytes; the 3000-byte ceiling is smaller and must win.
       const res = await session.callTool('recall', {
         space: SPACE, query: QUERY, types: ['entity'], topK: COUNT,
-        includeFreshWrites: true, maxTokens: 2000, maxBytes: 3000,
+        maxTokens: 2000, maxBytes: 3000,
       });
       const out = JSON.parse(res?.content?.[0]?.text ?? '{}');
       assert.equal(out.budgetBytes, 3000,

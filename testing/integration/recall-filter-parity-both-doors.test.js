@@ -69,7 +69,7 @@ after(async () => {
 
 /** REST: did this filter produce an answer, or a refusal? */
 async function viaRest(filter) {
-  const r = await post(INSTANCES.a, token, '/api/brain/recall', { space: SPACE, ...({ query: 'board note about retrieval', filter, includeFreshWrites: true, topK: 10 }) });
+  const r = await post(INSTANCES.a, token, '/api/brain/recall', { space: SPACE, ...({ query: 'board note about retrieval', filter, topK: 10 }) });
   return { accepted: r.status === 200, detail: r.status === 200 ? '' : JSON.stringify(r.body).slice(0, 200) };
 }
 
@@ -78,7 +78,7 @@ async function viaMcp(filter) {
   const session = await openMcpSession(token);
   try {
     const res = await session.callTool('recall', {
-      space: SPACE, query: 'board note about retrieval', filter, includeFreshWrites: true, topK: 10,
+      space: SPACE, query: 'board note about retrieval', filter, topK: 10,
     });
     const text = res?.content?.[0]?.text ?? '';
     return { accepted: !res?.isError, detail: res?.isError ? text.slice(0, 200) : '' };
@@ -111,13 +111,28 @@ const CASES = [
   { what: 'legacy grammar with two keys, ANDed',
     filter: { type: { eq: 'message' }, 'properties.status': { eq: 'open' } }, expected: true },
 
+  /*
+   * THE FIELD ALLOWLIST IS GONE, so the two cases that asserted it now assert ACCEPTANCE.
+   *
+   * They read as injection guards — `spaceId`, `_id` — and they were not. A recall searches the space's own
+   * collections, so a `spaceId` predicate matches nothing rather than reaching anywhere: verified against a
+   * live instance, a recall in one space filtering on another space's id returns an empty result set. What
+   * the allowlist decided was the PATH, and an unusual field takes the exhaustive one, which is slower and
+   * equally correct. `recall-filter.test.js` holds the isolation claim directly, which is the stronger
+   * version of what these two were reaching for.
+   */
+  { what: 'a field the old allowlist refused, inside $or',
+    filter: { $or: [{ spaceId: 'other-space' }] }, expected: true },
+  { what: 'a field the old allowlist refused, at the top level',
+    filter: { _id: 'anything' }, expected: true },
+
   // ── Refusals. Both doors must refuse these, and for the same reason. ────────────────────────────────────
-  { what: 'a key outside the allowlist — the injection guard, which widening must NOT have loosened',
-    filter: { $or: [{ spaceId: 'other-space' }] }, expected: false },
-  { what: 'a key outside the allowlist at the top level',
-    filter: { _id: 'anything' }, expected: false },
   { what: 'a MIXED filter — raw and legacy together, which is a caller believing two things',
     filter: { $or: [{ type: 'message' }], 'properties.status': { eq: 'open' } }, expected: false },
+  { what: 'an operator that executes JavaScript in the database process',
+    filter: { $where: 'this.x' }, expected: false },
+  { what: 'a key that would rewrite the filter object rather than constrain it',
+    filter: { ['__proto__']: 1 }, expected: false },
 ];
 
 describe('recall filter: both doors accept and refuse the same things', () => {
@@ -144,17 +159,24 @@ describe('recall filter: both doors accept and refuse the same things', () => {
     // grammar reaches no records. `$not` on a value that is present is the reported shape, and the seeded
     // record's `readBy` is "the canary operator" — so `$not /ythril/` must return it.
     const r = await post(INSTANCES.a, token, '/api/brain/recall', { space: SPACE, ...({
-      query: 'board note about retrieval', includeFreshWrites: true, topK: 10,
+      query: 'board note about retrieval', topK: 10,
       filter: { type: 'message', 'properties.readBy': { $not: { $regex: 'ythril' } } },
     }) });
     assert.equal(r.status, 200, JSON.stringify(r.body).slice(0, 200));
     assert.ok(r.body.results.length >= 1,
       'the raw filter must reach the seeded record — an accepted filter returning nothing proves nothing');
-    // By NAME, not by `type`. On a REST recall result `type` is the KNOWLEDGE type — `entity` — and the
-    // entity's own `type` field (`message`, the thing the filter matched on) is shadowed by it in the flat
-    // envelope. Asserting `type === 'message'` here failed while the filter was working perfectly, which is
-    // the assertion being wrong rather than the product.
-    assert.equal(r.body.results[0].name, `parity-note-${RUN}`,
+    /*
+     * Both types are readable now, and that is the nested shape earning its keep.
+     *
+     * The flat envelope put the KNOWLEDGE type (`entity`) and the entity's own type (`message`, the thing
+     * the filter matched on) under the same key, so one shadowed the other and this case had to assert on
+     * the name instead. `{score, spaceId, type, record}` separates them: `type` is the knowledge type and
+     * `record.type` is the record's own.
+     */
+    const hit = r.body.results[0];
+    assert.equal(hit.record?.name, `parity-note-${RUN}`,
       'and it must be the record the filter selected, not merely some record');
+    assert.equal(hit.type, 'entity', 'the envelope carries the knowledge type');
+    assert.equal(hit.record?.type, 'message', "and the record carries its own, which the flat shape hid");
   });
 });

@@ -9,7 +9,7 @@
  * ## Cost, because a file is the largest thing stored
  *
  * A read is the whole file — no paging — and a passage body is by far the biggest field any result carries.
- * The cheap flow is `recall` with `includeContent: false` to find WHICH file and WHICH passage, then read
+ * The cheap flow is `recall` with `includeFileContent: false` to find WHICH file and WHICH passage, then read
  * only if the rest is needed. That flow already exists and `recall`'s own schema describes it; the file tool
  * never pointed at it, so a caller reaching for a file first pays for a document to answer a sentence.
  *
@@ -48,7 +48,7 @@ describe('read_file states the cost and points at the cheaper flow', () => {
   });
 
   it('names the two-phase alternative rather than just warning', () => {
-    assert.match(READ, /includeContent: false/,
+    assert.match(READ, /includeFileContent: false/,
       'point at the flow that answers the question cheaply — a warning with no remedy is half an answer');
   });
 

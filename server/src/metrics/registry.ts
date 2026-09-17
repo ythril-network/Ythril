@@ -885,7 +885,8 @@ embedChunksTotal.labels({ space: '' }).inc(0);
 /**
  * Records a recall returned that the vector index had NOT yet ingested.
  *
- * Only ever incremented when a caller asked for `includeFreshWrites`, and deliberately not a label on
+ * The scan that finds them runs on EVERY recall since 5.0, so this counts real index lag rather than how
+ * often somebody set a flag — which is what makes zero meaningful. It is deliberately not a label on
  * `ythril_recall_degraded_total`: finding more than the index could offer is the opposite of degradation,
  * and that counter's reason set is closed on purpose.
  *
@@ -898,7 +899,7 @@ embedChunksTotal.labels({ space: '' }).inc(0);
  */
 export const recallFreshWritesFoundTotal = new Counter({
   name: 'ythril_recall_fresh_writes_found_total',
-  help: 'Records returned by recall that the vector index had not yet ingested (includeFreshWrites only)',
+  help: 'Records returned by recall that the vector index had not yet ingested',
   registers: [register],
 });
 recallFreshWritesFoundTotal.inc(0);

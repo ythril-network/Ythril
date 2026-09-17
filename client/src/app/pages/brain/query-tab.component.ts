@@ -535,10 +535,9 @@ export class QueryTabComponent {
   // `recallKnowledgeTypes` was here and was DEAD: declared, never read, not by the template either. The
   // rendered list is `recallTypeOpts` below. Deleted rather than converted — a copy of an enumeration that
   // nothing reads is the cheapest kind to keep and the easiest to start believing in.
-  // `maxPerType: 0` and `includeContent: true` are the SERVER's defaults expressed as form state, not new policy:
-  // 0 means "no cap" and is omitted from the request, and `includeContent` starts true because sending false makes
-  // recall look as though it has stopped returning passages. `includeFreshWrites` starts false because it is an
-  // opt-in scan.
+  // `maxPerType: 0` and `includeFileContent: true` are the SERVER's defaults expressed as form state, not new policy:
+  // 0 means "no cap" and is omitted from the request, and `includeFileContent` starts true because sending false makes
+  // recall look as though it has stopped returning passages.
   /** Focus an entity in the graph tab — the shell switches tab and sets the focus id, exactly as it does
    *  for the entities and edges tabs. */
   viewInGraph = output<string>();
@@ -555,10 +554,10 @@ export class QueryTabComponent {
    */
   recallForm: RecallFormState = {
     query: '', topK: 10, minScore: 0, filter: '', projection: '', tags: '', type: '',
-    maxPerType: 0, includeFreshWrites: false, includeContent: true, includeDiagnostics: false, includeRecordMeta: false,
+    maxPerType: 0, includeFileContent: true, includeDiagnostics: false, includeRecordMeta: false,
     depth: 0, edgeLabels: '', direction: '',
     includeChrono: false, includeMemories: false, includeFiles: false,
-    maxTimeMS: 0, maxBytes: 0, maxChars: 0, maxTokens: 0, charsPerToken: 0,
+    maxTimeMS: 0, maxBytes: 0, maxChars: 0, maxTokens: 0,
     skip: 0, remainderDump: false,
   };
 

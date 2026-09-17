@@ -109,7 +109,7 @@ describe('recall describes the record it actually returns', () => {
       assert.ok(d.includes(k), `the description must name \`${k}\` as withheld — an absent statement reads `
         + 'as an undiscovered feature, which is the whole of this entry');
     }
-    assert.match(d, /includeContent/, 'and point at the one size lever the caller does hold');
+    assert.match(d, /includeFileContent/, 'and point at the one size lever the caller does hold');
   });
 });
 
@@ -126,7 +126,7 @@ describe('field selection is findable from where somebody would look', () => {
     const src = readFileSync('server/src/mcp/tools/help-sections.ts', 'utf8');
     assert.match(src, /never returned/i, 'help() must state the vector rule');
     assert.match(src, /projection/, 'and name the lever that does exist');
-    assert.match(src, /includeContent/, 'and the recall-side one');
+    assert.match(src, /includeFileContent/, 'and the recall-side one');
   });
 
   it('the REST reference states the vector rule too', () => {

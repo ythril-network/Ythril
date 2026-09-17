@@ -41,10 +41,9 @@
 import { Router, type RequestHandler } from 'express';
 import { requireAuth } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
-import { auditAuthMethod, auditOidcSubject } from '../audit/middleware.js';
+import { restToolCaller } from './rest-tool-caller.js';
 import { TOOLS_BY_NAME } from '../mcp/tools/index.js';
 import { callTool } from '../mcp/call-tool.js';
-import type { TokenRights } from '../config/rights-shape.js';
 
 export const toolsRouter = Router();
 
@@ -74,15 +73,7 @@ const serveTool: RequestHandler = async (req, res) => {
   const outcome = await callTool({
     name: toolNameOf(req),
     args: (req.body ?? {}) as Record<string, unknown>,
-    caller: {
-      rights: (req.authToken as { rights?: TokenRights } | undefined)?.rights,
-      tokenId: req.authToken?.id,
-      tokenLabel: req.authToken?.name,
-      ip: req.ip ?? '',
-      authMethod: auditAuthMethod(req.authToken),
-      oidcSubject: auditOidcSubject(req.authToken),
-      transport: 'rest',
-    },
+    caller: restToolCaller(req),
   });
 
   const text = outcome.result.content.map(c => c.text).join('\n');

@@ -15,11 +15,12 @@ import { MAX_RECALL_TRAVERSE } from '../../brain/recall-seed-traversal.js';
 import { mapGraphNodes, graphNodeRecord } from '../../brain/recall-graph.js';
 import { stripRecordMeta } from '../../brain/recall-record-meta.js';
 import { applyProjection, normaliseProjection } from '../../brain/projection.js';
-import { resolveBudget, resolvePaging, budgetedEnvelope, applyBudget, budgetFields, type BudgetRequest, MCP_DEFAULT_MAX_CHARS } from '../../brain/result-budget.js';
+import { resolveBudget, resolvePaging, budgetedEnvelope, applyBudget, budgetFields, type BudgetRequest, defaultBudgetChars } from '../../brain/result-budget.js';
 import { buildGraphWithSpill, spillResultSet, countGraphNodes } from '../../brain/graph-spill.js';
-import { parseTraverseOption, traverseOptionSchema } from '../../brain/traverse-option.js';
+import { parseTraverseOption, traverseOptionSchema, echoTraverse } from '../../brain/traverse-option.js';
 import { type FilterExpression } from '../../brain/filter.js';
 import { resolveRecallFilter, type RawMongoFilter } from '../../brain/recall-filter.js';
+import { observeRecallPath } from '../../brain/recall.js';
 import {
   queryBrain, countBrain, compareBySort, DEFAULT_QUERY_SORT, QUERY_PAGE_MAX, PROXY_PAGE_CEILING,
 } from '../../brain/query.js';
@@ -100,7 +101,7 @@ export const recallTool: ToolHandler = {
   description: 'Search all knowledge types (facts, entities, edges, chrono entries, files) by MEANING and by exact tokens: a semantic vector ranking is fused with a lexical (BM25) ranking, so identifiers such as article numbers or form ids rank even though their embeddings carry little meaning. A cross-encoder refines the top candidates when the operator has configured one. Searches the specified space if provided, otherwise across all accessible spaces.\n\n'
     + 'THE RESPONSE, because knowing the parameters is only half of it:\n'
     + '• `results` — the ranked matches. Each carries `_id`, its name/fact/title, type, tags, properties, `spaceId`, timestamps and `score` (vector similarity).\n'
-    + '• WHAT THIS DOOR DOES NOT SEND YOU, so you do not go looking for a flag to switch it off: the embedding VECTOR (never returned by anything here, and no parameter can ask for it), `matchedText` (the pre-embedding source string — for a file chunk it is the passage a SECOND time), `embeddingModel` (identical for every record in a space), and `seq` (a sync counter that is not an input to any tool). Withheld on REST too, with the same default, since 3.1.0 — `includeDiagnostics: true` restores them on either door and applies recursively, so a `traverse` answer\'s `_graph` follows it at every depth. Leave it off: each of these is multiplied by `topK` and paid for in your context, and you want them only to answer WHY something ranked where it did. The other size lever is `includeContent: false`, which drops file-passage bodies and keeps their locations.\n'
+    + '• WHAT THIS DOOR DOES NOT SEND YOU, so you do not go looking for a flag to switch it off: the embedding VECTOR (never returned by anything here, and no parameter can ask for it), `matchedText` (the pre-embedding source string — for a file chunk it is the passage a SECOND time), `embeddingModel` (identical for every record in a space), and `seq` (a sync counter that is not an input to any tool). Withheld on REST too, with the same default, since 3.1.0 — `includeDiagnostics: true` restores them on either door and applies recursively, so a `traverse` answer\'s `_graph` follows it at every depth. Leave it off: each of these is multiplied by `topK` and paid for in your context, and you want them only to answer WHY something ranked where it did. The other size lever is `includeFileContent: false`, which drops file-passage bodies and keeps their locations.\n'
     + '• `count` — the number of MATCHES. Traversed nodes are NOT counted in it.\n'
     + '• `graphNodes` — an integer COUNT of what a traversal reached, not the content. The content is nested per-result under `_graph`, and a result with no edges simply has no `_graph` at all: reading `results[0]` and concluding the feature is absent is the mistake to avoid.\n'
     + '• THE SIZE ANSWER, and it is a slope now rather than a cliff. `returned`, `count`, `truncated`, `budgetChars`, `budgetBytes`, `charsReturned` and `bytesReturned` are on EVERY response, so you never have to interpret an absence (`budgetBytes` is null unless you asked for a byte ceiling). `results` is a PREFIX of the ranked matches that fits BOTH ceilings you set, and every record in it is WHOLE — full body, full properties, its complete `_graph`, byte-identical to that record from an unbudgeted call. A match is counted together with its whole `_graph` subtree, so a deeper or wider traversal means fewer matches fit — they are absent, not shortened. When `truncated` is true, `nextSkip` says where to continue from — send it back as `skip` for the next prefix. The matches that did not fit are also written to the space as a JSON file (authenticated download, valid one day) and reported as `remainder`, but ONLY if you ask with `remainderDump: true`.\n'
@@ -145,8 +146,7 @@ export const recallTool: ToolHandler = {
               description: 'Optional deadline for this recall, in milliseconds. It can only LOWER the instance budget, never raise it, and is clamped to a small floor so a tiny value is not a guaranteed empty answer. On expiry you get a PARTIAL answer rather than an error or a hang: whichever collections finished are returned, and the response says it degraded. Use it when a slow recall would cost more than a thin one — a fact that can only ever delay you by a known amount is one you can put in a workflow.',
             },
             minScore: unitScoreSchema('Minimum COSINE SIMILARITY (0.0–1.0). It filters on `score` ONLY — never on the fused or the reranked ordering — so it is a vector-side gate rather than a relevance gate, and a result the reranker would have promoted can be cut by it before the reranker sees it.'),
-            includeFreshWrites: { type: 'boolean', default: false, description: 'Also scan the newest records straight from the collection, so a record written seconds ago is findable before the vector index has ingested it. Costs an extra scan per knowledge type — turn it on when searching for something you just wrote, not by default.' },
-            includeContent: {
+            includeFileContent: {
               type: 'boolean',
               default: true,
               description: 'Whether to return each file chunk’s `content` — the passage body (default true). '
@@ -188,12 +188,7 @@ export const recallTool: ToolHandler = {
             maxTokens: {
               type: 'integer',
               minimum: 1,
-              description: 'A convenience onto `maxBytes`, converted with `charsPerToken` (default 3.5). If you send both, the SMALLER resulting byte figure applies — stating two ceilings means you meant both. It is an approximation and cannot be anything else, because the server does not know your tokeniser: the realistic span across these payloads is 3.0–3.9 chars/token, and 3.5 was chosen because the customary 4.0 UNDER-counts tokens and is worst exactly on graph-heavy responses. Undershooting costs one more page; overshooting costs a blown context, and those are not symmetric.',
-            },
-            charsPerToken: {
-              type: 'number',
-              exclusiveMinimum: 0,
-              description: 'Override the chars-per-token ratio used to convert `maxTokens` into bytes (default 3.5). Only meaningful alongside `maxTokens`. Lower it if your tokeniser is denser than this payload shape assumes; there is no reason to raise it above ~4.',
+              description: 'A convenience onto `maxBytes`, converted at a fixed 3.5 characters per token. If you send both, the SMALLER resulting byte figure applies — stating two ceilings means you meant both. It is an approximation and cannot be anything else, because the server does not know your tokeniser: the realistic span across these payloads is 3.0–3.9 chars/token, and 3.5 was chosen because the customary 4.0 UNDER-counts tokens and is worst exactly on graph-heavy responses. Undershooting costs one more page; overshooting costs a blown context, and those are not symmetric.',
             },
             skip: {
               type: 'integer',
@@ -258,11 +253,11 @@ export const recallTool: ToolHandler = {
       ? (a['minPerType'] as Partial<Record<RecallKnowledgeType, number>>)
       : undefined;
     const minScore = typeof a['minScore'] === 'number' ? a['minScore'] : undefined;
-    const includeContent = a['includeContent'] !== false;
+    const includeFileContent = a['includeFileContent'] !== false;
     const includeDiagnostics = a['includeDiagnostics'] === true;
     const includeRecordMeta = a['includeRecordMeta'] === true;
     const recallProjection = normaliseProjection(a['projection'] as Record<string, unknown> | undefined);
-    const budget = resolveBudget(a as BudgetRequest, MCP_DEFAULT_MAX_CHARS);
+    const budget = resolveBudget(a as BudgetRequest, defaultBudgetChars(ctx.transport));
     if (!budget.ok) throw new Error(budget.error);
     const paging = resolvePaging(a as { skip?: unknown; remainderDump?: unknown });
     if (!paging.ok) throw new Error(paging.error);
@@ -296,6 +291,8 @@ export const recallTool: ToolHandler = {
     }
     /** Collected across every member/space so a partial answer is declared once, not per space. */
     const degraded: string[] = [];
+    /** Which path the filter took — observed, not predicted. Same field the REST door reports. */
+    const observePath = observeRecallPath();
 
     // A floor above its own ceiling is refused, not resolved. Same message as REST.
     if (minPerType && maxPerType) {
@@ -339,7 +336,7 @@ export const recallTool: ToolHandler = {
       // EVERY named space, deduplicated: a caller may name a proxy and one of its members, and reading a
       // space twice doubles every match it contributes to the merged ranking.
       const memberIds = [...new Set(ctx.callSpaces.flatMap(sp => memberSpacesWithin(sp, accessibleSpaceIds)))];
-      const all = (await Promise.all(memberIds.map(mid => recall(mid, query, topK, tags, types, minPerType, minScore, filter, { maxPerType, maxTimeMS: recallMaxTimeMS, degraded, includeFreshWrites: a['includeFreshWrites'] === true })))).flat();
+      const all = (await Promise.all(memberIds.map(mid => recall(mid, query, topK, tags, types, minPerType, minScore, filter, { maxPerType, maxTimeMS: recallMaxTimeMS, degraded, observePath })))).flat();
       // Same rule as everywhere else: rankOf, not `.score`. See the note on the REST recall route.
       all.sort(byRankThenId);
       // And the ceiling is re-applied to the merged set for the same reason it is on the REST route: each
@@ -350,17 +347,15 @@ export const recallTool: ToolHandler = {
       traverseSpaces = memberIds;
     } else {
       /*
-       * `includeFreshWrites` IS FORWARDED HERE, and it was not — so the one parameter whose entire
-       * purpose is *"find the record I just wrote"* did nothing on this branch, with a 200.
-       *
-       * This is the branch a caller takes by OMITTING `space`, which is the form this tool's own first
-       * paragraph promotes and the form `saveFact` and `write_file` both point at after a write. So the
-       * documented remedy for "I wrote it and cannot find it" was inert on the idiomatic call, and the
-       * existing test could not see it: it drives REST, where the space is in the path and this branch
-       * cannot be reached.
+       * EVERY option has to be forwarded here, and the fresh-write flag once was not — so the one
+       * parameter whose entire purpose was *"find the record I just wrote"* did nothing on this branch,
+       * with a 200. It is no longer a parameter (`recall` always scans), but the shape of the mistake is
+       * why this comment stays: this is the branch a caller takes by OMITTING `space`, which is the form
+       * this tool's own first paragraph promotes, and the test that should have caught it drove REST,
+       * where the space was in the path and this branch could not be reached.
        */
       seeds = await recallGlobal(accessibleSpaceIds, query, topK, tags, types, minPerType, minScore, filter,
-        { maxPerType, maxTimeMS: recallMaxTimeMS, degraded, includeFreshWrites: a['includeFreshWrites'] === true });
+        { maxPerType, maxTimeMS: recallMaxTimeMS, degraded, observePath });
       traverseSpaces = accessibleSpaceIds;
     }
 
@@ -374,7 +369,7 @@ export const recallTool: ToolHandler = {
         spaceId: r.spaceId,
         type: r.type,
         record: stripRecordMeta(
-          applyProjection(toRecallRecord(r, { includeContent, includeDiagnostics }), recallProjection),
+          applyProjection(toRecallRecord(r, { includeFileContent, includeDiagnostics }), recallProjection),
           { includeRecordMeta },
         ),
       }));
@@ -395,6 +390,9 @@ export const recallTool: ToolHandler = {
         // Only when something degraded — an always-present field that is almost always empty is one an agent
         // learns to skip, and this is the field that matters on the call where the answer came back thin.
         ...(degraded.length > 0 ? { degraded } : {}),
+        // Present ONLY when the recall scanned, like `degraded` above — see `api/brain/search.ts`
+        // for why the fast path says nothing: an agent pays for every byte out of its own context.
+        ...(observePath.path() === 'exhaustive' ? { filterPath: 'exhaustive' } : {}),
       };
       return { content: [{ type: 'text' as const, text: JSON.stringify(output) }] };
     }
@@ -418,7 +416,7 @@ export const recallTool: ToolHandler = {
         score: r.score,
         ...rankingFields(r as unknown as Record<string, unknown>),
         spaceId: r.spaceId, type: r.type,
-        record: applyProjection(toRecallRecord(r, { includeContent, includeDiagnostics }), recallProjection),
+        record: applyProjection(toRecallRecord(r, { includeFileContent, includeDiagnostics }), recallProjection),
         ...(nested ? { _graph: nested } : {}),
       };
     });
@@ -439,6 +437,16 @@ export const recallTool: ToolHandler = {
       results: budgeted.results,
       ...budgeted.fields,
       traverseDepth: traverse,
+      /*
+       * The NARROWING echoed back, beside the depth — a number when nothing was narrowed, an object when
+       * anything was, so an existing caller's assertion on `traverse` does not change shape for free.
+       *
+       * This lived on `POST /api/brain/recall` and nowhere else, and collapsing that route onto this
+       * module would have dropped it — a response field silently disappearing is the exact half of a
+       * collapse that nothing else notices. A narrowing the response does not mention is one the caller
+       * cannot verify was applied, which is the whole reason the parameter exists.
+       */
+      traverse: echoTraverse(traverseOpt),
       // Counted from the payload actually being sent, not from what the traversal REACHED.
       //
       // `graph.nodes` is the total across every seed the walk visited — including seeds the byte budget then
@@ -453,6 +461,10 @@ export const recallTool: ToolHandler = {
       ...(graphTruncated ? { graphTruncated: true } : {}),
       ...(spill ? { graphComplete: spill } : {}),
       ...(degraded.length > 0 ? { degraded } : {}),
+      // The TRAVERSED branch reports it too. A graph-augmented recall runs the same search first,
+      // so it pays the same scan — and a caller who only ever uses `traverse` would otherwise never
+      // be told, which is the half of a two-branch response that gets forgotten.
+      ...(observePath.path() === 'exhaustive' ? { filterPath: 'exhaustive' } : {}),
     };
     return { content: [{ type: 'text' as const, text: JSON.stringify(output) }] };
   },
@@ -463,7 +475,7 @@ export const find_similarTool: ToolHandler = {
   description: 'Find entries with high vector similarity to an EXISTING entry — deduplication, "more like this", merge detection. It uses that entry\'s STORED embedding rather than re-embedding anything, which is what separates it from `recall`: no query string, no BM25 half, no reranker. Pure cosine distance from one record to the rest.\n\n'
     + 'Two consequences of using the stored vector, and both are silent if you do not know them:\n'
     + '• A source entry retired from semantic ranking has NO vector, so there is nothing to be similar to and the answer is empty — not an error, and not evidence that nothing resembles it.\n'
-    + '• A record written seconds ago may not be indexed yet. There is no `includeFreshWrites` here as there is on `recall`, because the source entry\'s own embedding has to exist before this can start.\n\n'
+    + '• A record written seconds ago may not be indexed yet, and unlike `recall` this tool cannot see past that. `recall` also reads the newest records straight from the collection, so it finds what you just wrote; here the SOURCE entry\'s own embedding has to exist before there is anything to be similar TO. Wait for the embed queue, or search by text with `recall`.\n\n'
     + 'THE RESPONSE, and it is the same JSON at every depth — matching `recall`, which is the point:\n'
     + '• `source` — the entry you asked about, as {type, id, summary}. This tool has one and `recall` does not.\n'
     + '• `results` — the matches, each {score, spaceId, type, record}, the SAME per-result shape `recall` returns. With `traverse > 0` each carries its own `_graph`.\n'
@@ -471,7 +483,7 @@ export const find_similarTool: ToolHandler = {
     + '• `graphNodes` — a COUNT of what a traversal reached, not its content, and only when one ran.\n'
     + '• THE SIZE ANSWER, and it is the same envelope `recall` returns. `returned`, `count`, `truncated`, `budgetChars`, `budgetBytes`, `charsReturned` and `bytesReturned` are on EVERY response, so you never have to interpret an absence (`budgetBytes` is null unless you asked for a byte ceiling). `results` is a PREFIX of the ranked matches that fits both ceilings you set, and every record in it is WHOLE — a match is counted together with its whole `_graph` subtree, so a deeper or wider traversal means FEWER MATCHES fit: they are absent, not shortened. When `truncated` is true, `nextSkip` says where to continue from — send it back as `skip` for the next prefix. The matches that did not fit are also written to the space as a JSON file (authenticated download, valid one day) and reported as `remainder`, but ONLY if you ask with `remainderDump: true`. THIS PARAGRAPH USED TO NAME A `complete` FIELD — there is no such field, and has not been since the record cap became a byte budget, so a caller waiting for it waited for something nothing sends while `nextSkip` and `remainder` went unmentioned.\n'
     + '• `graphTruncated` + `graphComplete` — the same arrangement for an oversized neighbourhood. `graphTruncated` alone means the graph is short and no complete copy exists, because a bounded link scan stopped reading.\n\n'
-    + 'IT ANSWERED PLAIN TEXT AT `traverse: 0` UNTIL 3.1.0, and JSON only above it. If you built against that, this is the break: parse JSON at every depth now. Two things arrive with it — the default depth gains the size cap it never had, and `includeContent`/`includeDiagnostics` start doing something there, having been accepted and unobservable on a summary line.\n\n'
+    + 'IT ANSWERED PLAIN TEXT AT `traverse: 0` UNTIL 3.1.0, and JSON only above it. If you built against that, this is the break: parse JSON at every depth now. Two things arrive with it — the default depth gains the size cap it never had, and `includeFileContent`/`includeDiagnostics` start doing something there, having been accepted and unobservable on a summary line.\n\n'
     + 'Provide `space` to scope to one space, or omit it to search every space the token can reach. `score` is raw cosine similarity — the same number `recall` reports, but here it is the ONLY ranking, so `minScore` is a genuine relevance gate rather than the vector-side gate it is on `recall`.\n\n'
     + 'With `traverse: 0` the answer is a plain-text summary; above 0 it is JSON, because a graph does not summarise.',
   spaceRequired: false,
@@ -484,7 +496,7 @@ export const find_similarTool: ToolHandler = {
             space: s.optionalSpace,
             entryId: uuidSchema('UUID v4 of the source entry — the record everything else is compared AGAINST. It is never itself in the results.'),
             entryType: { type: 'string', enum: [...RECORD_TYPES], description: 'Knowledge type of the SOURCE entry, which is how the id is resolved — a wrong type is a not-found rather than a wrong answer. It does not constrain what comes back: use `targetTypes` for that, and note a fact can legitimately be most similar to an entity.' },
-            includeContent: { type: 'boolean', default: true, description: 'Whether to return each file chunk’s `content` (default true). Same meaning as on `recall`, including the limit: it is FILE CHUNKS ONLY and does nothing on a search returning entities, facts, edges or chrono entries. Use `projection` to trim those.' },
+            includeFileContent: { type: 'boolean', default: true, description: 'Whether to return each file chunk’s `content` (default true). Same meaning as on `recall`, including the limit: it is FILE CHUNKS ONLY and does nothing on a search returning entities, facts, edges or chrono entries. Use `projection` to trim those.' },
             targetTypes: {
               type: 'array',
               items: { type: 'string', enum: [...RECORD_TYPES] },
@@ -512,12 +524,7 @@ export const find_similarTool: ToolHandler = {
             maxTokens: {
               type: 'integer',
               minimum: 1,
-              description: 'A convenience onto `maxBytes`, converted with `charsPerToken` (default 3.5). If you send both, the SMALLER resulting byte figure applies — stating two ceilings means you meant both. It is an approximation and cannot be anything else, because the server does not know your tokeniser: the realistic span across these payloads is 3.0–3.9 chars/token, and 3.5 was chosen because the customary 4.0 UNDER-counts tokens and is worst exactly on graph-heavy responses. Undershooting costs one more page; overshooting costs a blown context, and those are not symmetric.',
-            },
-            charsPerToken: {
-              type: 'number',
-              exclusiveMinimum: 0,
-              description: 'Override the chars-per-token ratio used to convert `maxTokens` into bytes (default 3.5). Only meaningful alongside `maxTokens`. Lower it if your tokeniser is denser than this payload shape assumes; there is no reason to raise it above ~4.',
+              description: 'A convenience onto `maxBytes`, converted at a fixed 3.5 characters per token. If you send both, the SMALLER resulting byte figure applies — stating two ceilings means you meant both. It is an approximation and cannot be anything else, because the server does not know your tokeniser: the realistic span across these payloads is 3.0–3.9 chars/token, and 3.5 was chosen because the customary 4.0 UNDER-counts tokens and is worst exactly on graph-heavy responses. Undershooting costs one more page; overshooting costs a blown context, and those are not symmetric.',
             },
             skip: {
               type: 'integer',
@@ -584,10 +591,10 @@ export const find_similarTool: ToolHandler = {
     }
     if (!result || !usedBase) throw new NotFoundError(`Entry '${entryId}' not found in any accessible space (type: ${entryType}).`);
 
-    const includeContent = a['includeContent'] !== false;
+    const includeFileContent = a['includeFileContent'] !== false;
     const includeDiagnostics = a['includeDiagnostics'] === true;
     const recallProjection = normaliseProjection(a['projection'] as Record<string, unknown> | undefined);
-    const budget = resolveBudget(a as BudgetRequest, MCP_DEFAULT_MAX_CHARS);
+    const budget = resolveBudget(a as BudgetRequest, defaultBudgetChars(ctx.transport));
     if (!budget.ok) throw new Error(budget.error);
     const paging = resolvePaging(a as { skip?: unknown; remainderDump?: unknown });
     if (!paging.ok) throw new Error(paging.error);
@@ -601,7 +608,7 @@ export const find_similarTool: ToolHandler = {
       // Two things the text path could not have, and now does:
       //  - **a size cap.** The JSON answer spills past a size threshold and says `truncated`; the text answer
       //    was bounded by nothing but `topK`, so a large call returned everything inline.
-      //  - **`includeContent` and `includeDiagnostics` that DO something.** A summary line carried neither
+      //  - **`includeFileContent` and `includeDiagnostics` that DO something.** A summary line carried neither
       //    passage bodies nor system fields, so both flags were accepted here and unobservable.
       //
       // The shape is `recall`'s plain branch plus `source`, which is this tool's own — you asked about a
@@ -611,7 +618,7 @@ export const find_similarTool: ToolHandler = {
         ...rankingFields(r as unknown as Record<string, unknown>),
         spaceId: r.spaceId,
         type: r.type,
-        record: applyProjection(toRecallRecord(r, { includeContent, includeDiagnostics }), recallProjection),
+        record: applyProjection(toRecallRecord(r, { includeFileContent, includeDiagnostics }), recallProjection),
       }));
       const plainBudgeted = await budgetedEnvelope({
         results: plain,
@@ -649,7 +656,7 @@ export const find_similarTool: ToolHandler = {
         score: r.score,
         ...rankingFields(r as unknown as Record<string, unknown>),
         spaceId: r.spaceId, type: r.type,
-        record: applyProjection(toRecallRecord(r, { includeContent, includeDiagnostics }), recallProjection),
+        record: applyProjection(toRecallRecord(r, { includeFileContent, includeDiagnostics }), recallProjection),
         ...(nested ? { _graph: nested } : {}),
       };
     });
@@ -756,8 +763,7 @@ export const queryTool: ToolHandler = {
             },
             maxChars: { type: 'integer', minimum: 1000, description: 'Ceiling on the serialised response body, in CHARACTERS. **DEFAULT 25000 ON THIS DOOR, and 50000 on REST.** `limit` caps ROWS and says nothing about how big one is, so a page of file records or of long-described entities had no size bound at all before 3.7 — on the read tool you are most likely to page through. When the budget bites, `results` is a PREFIX of the page, `truncated` says so, and `nextSkip` is where to continue: send it back as `skip`. `count` is what you were actually given and still matches `results.length`; `total` is unchanged and still the whole match.' },
             maxBytes: { type: 'integer', minimum: 1000, description: 'Ceiling on the serialised response body, in real UTF-8 BYTES. **NO DEFAULT — opt-in.** Set it when your limit is genuinely a byte limit. Bytes are always >= characters, so a byte default equal to the character one would silently bind on every non-ASCII answer. When you set both, BOTH apply: the page stops at whichever ceiling it reaches first.' },
-            maxTokens: { type: 'integer', minimum: 1, description: 'A convenience onto `maxChars`, converted with `charsPerToken` — the conversion produces characters. If both are sent the SMALLER resulting character figure applies. An approximation: the server does not know your tokeniser.' },
-            charsPerToken: { type: 'number', exclusiveMinimum: 0, description: 'Per-call override of the characters-per-token ratio used by `maxTokens`. Default 3.5.' },
+            maxTokens: { type: 'integer', minimum: 1, description: 'A convenience onto `maxChars`, converted at a fixed 3.5 characters per token — the conversion produces characters. If both are sent the SMALLER resulting character figure applies. An approximation: the server does not know your tokeniser.' },
             maxTimeMS: { type: 'number', minimum: 1, maximum: 10000, default: 5000, description: 'Server-side query timeout in ms. Default 5000, hard-capped at 10000.' },
           },
           required: ['collection', 'filter'],
@@ -869,7 +875,7 @@ export const queryTool: ToolHandler = {
     });
     if (!page.ok) throw new Error(page.error);
     // Resolved before the read, so a bad `maxBytes` is an error rather than a query that ran first.
-    const queryBudget = resolveBudget(a as BudgetRequest, MCP_DEFAULT_MAX_CHARS);
+    const queryBudget = resolveBudget(a as BudgetRequest, defaultBudgetChars(ctx.transport));
     if (!queryBudget.ok) throw new Error(queryBudget.error);
     const docs = page.rows;
 

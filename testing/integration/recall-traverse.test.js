@@ -70,6 +70,16 @@ function allNested(results) {
 
 /** The nested node for `id`, or undefined. */
 const nested = (results, id) => allNested(results).find(n => n.node?._id === id);
+/**
+ * The id of a recall hit.
+ *
+ * `POST /api/brain/recall` returned one FLAT object until 5.0 and now returns `{score, spaceId, type,
+ * record}` — the shape the MCP tool has always used — because the route hands its body to the shared tool
+ * module instead of holding its own implementation. `_graph` stays on the HIT, beside the record, so a
+ * traversal assertion is unaffected.
+ */
+const hitId = (h) => h?.record?._id;
+
 
 async function ensureReindexed(baseUrl, tok) {
   const { body: spacesBody } = await get(baseUrl, tok, '/api/spaces');
@@ -254,7 +264,7 @@ describe('Recall traverse — graph expansion', () => {
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.traverseDepth, undefined, 'classic response must not carry traverseDepth');
     assert.ok(Array.isArray(r.body.results));
-    const seed = r.body.results.find(x => x._id === seedAId);
+    const seed = r.body.results.find(x => hitId(x) === seedAId);
     assert.ok(seed, 'seed entity must be recalled');
     assert.equal(seed.source, undefined, 'classic results must not carry a source annotation');
     assert.equal(typeof seed.score, 'number');
@@ -268,7 +278,7 @@ describe('Recall traverse — graph expansion', () => {
 
     // The seed is a RESULT, not an annotated wrapper: `count` is the number of matches, and a traversed node
     // is never in the ranked list to be counted or cut.
-    const seed = r.body.results.find(x => x._id === seedAId);
+    const seed = r.body.results.find(x => hitId(x) === seedAId);
     assert.ok(seed, 'seed present as a match');
     assert.equal(typeof seed.score, 'number', 'a match keeps its real score');
     assert.equal(r.body.count, r.body.results.length, 'count is the matches');
@@ -309,7 +319,7 @@ describe('Recall traverse — graph expansion', () => {
     // C→A closes a cycle. Depth 3 would revisit A without cycle detection.
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ query: q, types: ['entity'], topK: 10, traverse: 3 }) });
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    const ids = [...r.body.results.map(x => x._id), ...allNested(r.body.results).map(n => n.node?._id)];
+    const ids = [...r.body.results.map(hitId), ...allNested(r.body.results).map(n => n.node?._id)];
     const unique = new Set(ids);
     assert.equal(ids.length, unique.size, `no duplicate records (got ${JSON.stringify(ids)})`);
     assert.equal(ids.filter(id => id === seedAId).length, 1, 'the seed appears exactly once despite the cycle');
@@ -378,7 +388,7 @@ describe('Recall traverse — links, which are not edges', () => {
     const mq = 'wombat marsupial burrow relocation checklist';
     const off = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ query: mq, types: ['fact'], topK: 5, traverse: 1 }) });
     assert.equal(off.status, 200, JSON.stringify(off.body));
-    const seedOff = off.body.results.find(x => x._id === seedMemId);
+    const seedOff = off.body.results.find(x => hitId(x) === seedMemId);
     assert.ok(seedOff, 'the memory must match its own text');
     assert.equal(nested(off.body.results, seedAId), undefined, 'unflagged behaviour must be unchanged');
 
@@ -560,7 +570,7 @@ describe('Recall traverse — MCP tool', () => {
       assert.ok(text, 'MCP recall returned text content');
       const output = JSON.parse(text);
       assert.equal(output.traverseDepth, 1);
-      const seed = output.results.find(x => x.record?._id === seedAId);
+      const seed = output.results.find(x => hitId(x) === seedAId);
       assert.ok(seed, 'the seed is a match, with its record');
       // Same shape as REST, asserted through the other door in the same fixture: one nesting implementation
       // serves both, and this is what says so.

@@ -202,11 +202,20 @@ describe('similar documents the SAME envelope, because it returns the same one',
       'an empty answer from a vector-less source must not read as "nothing is similar"');
   });
 
-  it('says there is no includeFreshWrites here, and why', () => {
-    assert.match(FIND_SIMILAR, /includeFreshWrites/,
-      "a caller who knows recall's escape hatch will look for it here");
-    assert.match(FIND_SIMILAR, /has to exist before this can start/,
-      'say why it cannot exist rather than leaving its absence to be discovered');
+  it('says recall can see past index lag and this cannot, and why', () => {
+    /*
+     * The asymmetry a caller will otherwise discover the hard way: `recall` scans the newest records
+     * straight from the collection, so it finds what you just wrote; this tool needs the SOURCE entry's
+     * own embedding to exist before there is anything to be similar TO.
+     *
+     * It used to assert the name `includeFreshWrites`, which was recall's flag for that scan. The flag is
+     * gone — the scan is unconditional now — and pinning the NAME would have made this gate demand a
+     * parameter nobody can send. The behaviour is the subject, so the assertion names the behaviour.
+     */
+    assert.match(FIND_SIMILAR, /straight from the collection/,
+      "a caller who knows recall can see past index lag will look for the same here");
+    assert.match(FIND_SIMILAR, /before there is anything to be similar TO/,
+      'say why it cannot, rather than leaving the asymmetry to be discovered');
   });
 
   it('says minScore means something DIFFERENT here than on recall', () => {

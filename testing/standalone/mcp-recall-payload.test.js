@@ -31,11 +31,11 @@ const fileHit = i => ({
   headingText: HEADING, content: CHUNK, matchedText: `${HEADING} ${CHUNK}`,
 });
 
-const wrap = (r, includeContent) => ({
-  score: r.score, spaceId: r.spaceId, type: r.type, record: toRecallRecord(r, { includeContent }),
+const wrap = (r, includeFileContent) => ({
+  score: r.score, spaceId: r.spaceId, type: r.type, record: toRecallRecord(r, { includeFileContent }),
 });
-const respond = includeContent =>
-  JSON.stringify({ results: Array.from({ length: 10 }, (_, i) => wrap(fileHit(i), includeContent)), count: 10 });
+const respond = includeFileContent =>
+  JSON.stringify({ results: Array.from({ length: 10 }, (_, i) => wrap(fileHit(i), includeFileContent)), count: 10 });
 
 /** The payload as it stood before this change: pretty-printed, with the passage returned twice. */
 const BASELINE = JSON.stringify({
@@ -94,7 +94,7 @@ describe('the default response is much smaller, and loses nothing', () => {
   });
 });
 
-describe('includeContent: false returns locations, not passages', () => {
+describe('includeFileContent: false returns locations, not passages', () => {
   it('is at least 80% smaller than the old shape', () => {
     const saved = 1 - respond(false).length / BASELINE.length;
     assert.ok(saved >= 0.8, `expected ≥80% smaller, got ${(saved * 100).toFixed(0)}%`);
@@ -109,7 +109,7 @@ describe('includeContent: false returns locations, not passages', () => {
   });
 
   it('still identifies every hit, so the caller can fetch what it wants', () => {
-    const rec = toRecallRecord(fileHit(0), { includeContent: false });
+    const rec = toRecallRecord(fileHit(0), { includeFileContent: false });
     assert.equal(rec._id, 'f0#chunk3');
     assert.equal(rec.path, 'runbooks/NMK-SI-11.md');
     assert.equal(rec.headingText, HEADING);
@@ -121,7 +121,7 @@ describe('includeContent: false returns locations, not passages', () => {
     // A memory's `fact` is not a passage — removing it would leave a result that says nothing. The
     // parameter governs file chunk bodies, which is what the tool description promises.
     const mem = { _id: 'm1', spaceId: 's', type: 'fact', score: 0.9, fact: 'PKCE is required for all public clients.' };
-    assert.equal(toRecallRecord(mem, { includeContent: false }).fact, 'PKCE is required for all public clients.');
+    assert.equal(toRecallRecord(mem, { includeFileContent: false }).fact, 'PKCE is required for all public clients.');
   });
 });
 

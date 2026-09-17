@@ -5,7 +5,7 @@
  *
  * The canary operator, 2026-08-16T1358Z: with no projection on recall, a board sweep asking for fifteen names,
  * a `from`, a `kind` and a `status` returned **100,547 characters**. The data they wanted was about 1.5 KB.
- * Their client refused the response and spilled it to disk. `includeContent: false` reads like the answer and
+ * Their client refused the response and spilled it to disk. `includeFileContent: false` reads like the answer and
  * is not — it is scoped to file chunks, so on an entity search it changes nothing, and that gap between what
  * the parameter sounds like and what it covers cost them a call to find out.
  *
@@ -34,6 +34,7 @@
  */
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { routeBody, delegatesCleanly } from './_delegating-routes.mjs';
 import { readFileSync } from 'node:fs';
 
 let normaliseProjection, applyProjection, toMongoProjection, NEVER_PROJECTABLE;
@@ -156,9 +157,22 @@ describe('both doors take it, and the REST envelope survives', () => {
   const rest = readFileSync('server/src/api/brain/search.ts', 'utf8');
   const mcp = readFileSync('server/src/mcp/tools/search.ts', 'utf8');
 
-  it('REST parses it on recall AND find-similar, through one parser', () => {
-    assert.equal((rest.match(/projectionFromBody\(/g) ?? []).length >= 3, true,
-      'both routes must read it through the shared parser rather than each inlining the check');
+  it('every REST route that still reads a body parses the projection through one parser', () => {
+    /*
+     * The count was `>= 3` — recall, find-similar and query — and `POST /api/brain/recall` stopped reading
+     * its body at all when it collapsed onto `callTool`. So the floor comes from how many of those routes
+     * still build their own response, which is the question the claim was always making.
+     *
+     * The rule is unchanged and is the point: whoever DOES read a projection reads it through the shared
+     * parser. Two doors inlining the same check is how they start disagreeing about what a projection means.
+     */
+    const readers = ['/recall', '/similar', '/filter']
+      .filter(p => { const b = routeBody(rest, p); return b && !delegatesCleanly(b, `POST ${p}`); });
+    assert.ok(readers.length >= 2,
+      `only ${readers.length} REST read routes still build their own response — the scan is broken, not the code`);
+    assert.ok((rest.match(/projectionFromBody\(/g) ?? []).length >= readers.length,
+      `${readers.length} route(s) read a body and fewer parse the projection through the shared parser `
+      + '— an inlined check is how the two doors start disagreeing about what a projection means');
   });
 
   it('MCP advertises it on all three tools and reads it in both new handlers', () => {

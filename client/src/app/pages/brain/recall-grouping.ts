@@ -56,6 +56,27 @@ export interface RecallGroup {
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v : undefined);
 
 /**
+ * The RECORD inside a hit — its own fields, as opposed to how it placed.
+ *
+ * ## Why every field read goes through one accessor
+ *
+ * A recall hit is `{score, spaceId, type, record: {...}}`: the ranking metadata beside the record rather
+ * than mixed into it. `POST /api/brain/recall` used to return one FLAT object instead, and that difference
+ * between the two doors existed for no reason anybody could defend — `RECALL_ENVELOPE_KEYS` on the server
+ * existed solely to stop a projection eating the score on the flat side. The REST route collapsed onto the
+ * shared tool module at 5.0 and the shapes became one.
+ *
+ * Reading `record` at each use site would have been a dozen edits and a dozen chances to miss one, and the
+ * ones that got missed would read `undefined` rather than fail — a passage with no text, a file group with
+ * no path. One accessor is one place to be wrong, and the next shape change is one line.
+ *
+ * **It does NOT fall back to the hit itself.** A tolerant reader would keep working against either shape
+ * and hide the day the server stops sending one — which is how a client ends up quietly rendering nothing.
+ */
+const recordOf = (r: RecallResult): Record<string, unknown> =>
+  (r['record'] ?? {}) as Record<string, unknown>;
+
+/**
  * The key a file hit groups under: its parent document when it is a chunk, otherwise itself.
  *
  * Returning the file's own id for a NON-chunk hit is deliberate — it means a whole-file match and the
@@ -64,14 +85,14 @@ const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim
  */
 export function fileGroupKey(r: RecallResult): string | null {
   if (r.type !== 'file') return null;
-  const f = r as unknown as FileHitFields;
+  const f = recordOf(r) as FileHitFields;
   return str(f.parentFileId) ?? str(f._id) ?? null;
 }
 
 /** The parent document description for a group, from whichever hit carries it. */
 function fileOf(hits: RecallResult[], key: string): RecallGroupFile {
   for (const h of hits) {
-    const f = h as unknown as FileHitFields;
+    const f = recordOf(h) as FileHitFields;
     const p = str(f.parentFile?.path);
     if (p) {
       return {
@@ -83,7 +104,7 @@ function fileOf(hits: RecallResult[], key: string): RecallGroupFile {
   }
   // A non-chunk file hit has no `parentFile` — it IS the file, so its own path is the document's path.
   for (const h of hits) {
-    const p = str((h as unknown as FileHitFields).path);
+    const p = str((recordOf(h) as FileHitFields).path);
     if (p) return { id: key, path: p };
   }
   return { id: key, path: key };
@@ -124,7 +145,7 @@ export function groupRecallResults(results: readonly RecallResult[]): RecallGrou
 
 /** A short label for where in the document a chunk matched — its heading, when the chunker recorded one. */
 export function chunkLabel(r: RecallResult): string | undefined {
-  return str((r as unknown as FileHitFields).headingText);
+  return str((recordOf(r) as FileHitFields).headingText);
 }
 
 /** Longest passage rendered inline before it is cut. Long enough to judge relevance, short enough that six
@@ -142,7 +163,7 @@ const PASSAGE_MAX = 400;
  * Returns undefined when there is no text, so the caller can fall back rather than render an empty block.
  */
 export function passageText(r: RecallResult): string | undefined {
-  const f = r as unknown as FileHitFields & { content?: unknown; matchedText?: unknown };
+  const f = recordOf(r) as FileHitFields & { content?: unknown; matchedText?: unknown };
   const text = str(f.content) ?? str(f.matchedText);
   if (!text) return undefined;
   const clean = text.replace(/\s+/g, ' ').trim();

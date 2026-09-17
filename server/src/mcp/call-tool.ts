@@ -256,6 +256,11 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
       callSpace,
       callSpaces: rawSpaces,
       name,
+      // Handed to the handler as well as recorded in the audit trail, because the default byte budget
+      // depends on who is reading the answer rather than on which module produced it — see
+      // `defaultBudgetChars`. Before this the tool modules chose MCP's number themselves, so a caller on
+      // `POST /api/<tool>` got half the answer a caller on the legacy REST route got.
+      transport: caller.transport,
       cfg,
       accessibleSpaces,
       accessibleSpaceIds,

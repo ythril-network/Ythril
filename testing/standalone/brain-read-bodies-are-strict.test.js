@@ -15,7 +15,7 @@
  * ## It also checks that the allowed set covers what the handler READS, and that is not decoration
  *
  * The first version of this fix built `RECALL_BODY_FIELDS` from recall's destructuring line and so refused
- * `includeFreshWrites` and `includeContent` — both real parameters, read 120 lines further down as
+ * `includeFreshWrites` and `includeFileContent` — both real parameters, read 120 lines further down as
  * `(req.body as {...}).includeFreshWrites`. Making a body strict converts every key the author failed to notice into a
  * 400, so the allowed set has to be the keys the handler READS, and a handler that reads its body in two places is
  * described by whichever place you happened to look at.
@@ -35,6 +35,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { balancedFrom } from './_structural-window.mjs';
+import { delegatesCleanly } from './_delegating-routes.mjs';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -87,6 +88,20 @@ function postRoutes() {
   return out;
 }
 
+/*
+ * A route that hands its whole body to `callTool` — strict by a stronger mechanism than this gate checks.
+ *
+ * `callTool` validates the arguments against the tool's published `inputSchema`, which carries
+ * `additionalProperties: false`, so an unknown key is a refusal before the handler runs. That is better
+ * than `unknownBodyFields` and not merely equivalent: the key set is the SCHEMA rather than a list beside
+ * it, so it cannot fall behind a parameter somebody adds to the tool.
+ *
+ * NOT an exemption. An exemption says "this route is allowed to be loose" and is a promise nobody re-reads;
+ * this is re-derived from the route's source on every run, and `delegatesCleanly` THROWS on the half-done
+ * shape — a route that delegates and then reads one field itself is neither delegating nor strict.
+ */
+const delegatesToATool = (body) => delegatesCleanly(body, 'a search-router route');
+
 describe('brain read routes refuse unknown body keys', () => {
   it('finds the routes (the gate itself works)', () => {
     const paths = postRoutes().map(r => r.path);
@@ -104,7 +119,7 @@ describe('brain read routes refuse unknown body keys', () => {
   it('every POST route validates its body keys or is exempt with a reason', () => {
     const offenders = [];
     for (const { path, body } of postRoutes()) {
-      if (path in EXEMPT) continue;
+      if (path in EXEMPT || delegatesToATool(body)) continue;
       // By shape: the shared helper called against a named field set. The argument text is NOT constrained -- the first
       // version of this gate required a comma-free first argument and so flagged two routes that pass
       // `(req.body ?? {}) as Record<string, unknown>`, whose type parameter contains a comma. A gate that reports
@@ -127,7 +142,7 @@ describe('brain read routes refuse unknown body keys', () => {
     // The near-miss version of this fix: compute the unknown keys and forget to return. That is the proxy-lens defect
     // (a narrowed list computed and discarded) and it would satisfy the check above on its own.
     for (const { path, body } of postRoutes()) {
-      if (path in EXEMPT) continue;
+      if (path in EXEMPT || delegatesToATool(body)) continue;
       // The name is READ from the assignment rather than listed here, so a fifth route may call its variable anything
       // and still be covered. Hard-coding the four current names would make this gate stop working silently.
       const assigned = body.match(/const\s+(\w+)\s*=\s*unknownBodyFields\(/);
@@ -149,12 +164,12 @@ describe('brain read routes refuse unknown body keys', () => {
     // `stripComments` here too, not only on the route file. The sets carry long comments explaining why each key is
     // listed, and the member extraction below pairs single quotes — so one apostrophe in prose (`the MCP tool's
     // schema`) pairs with the next real quote and swallows every key after it. That is exactly how this gate reported
-    // `traverse` and `includeContent` as missing from a set that listed them.
+    // `traverse` and `includeFileContent` as missing from a set that listed them.
     const QUERY_SRC = stripComments(readFileSync(join(ROOT, 'server', 'src', 'brain', 'query.ts'), 'utf8'));
     const missing = [];
 
     for (const { path, body } of postRoutes()) {
-      if (path in EXEMPT) continue;
+      if (path in EXEMPT || delegatesToATool(body)) continue;
       // Same conversion, and the same reason: the field-set name is an ARGUMENT, so the argument list is
       // the bound.
       const nameAt = body.indexOf('unknownBodyFields(');
@@ -189,13 +204,47 @@ describe('brain read routes refuse unknown body keys', () => {
   });
 
   it('the read-key extraction actually finds keys (the check is not vacuous)', () => {
-    // Without this, a regex that matches nothing makes the assertion above pass for every route for ever — the shape of
-    // a green gate that measures nothing.
-    const recall = postRoutes().find(r => r.path === '/recall');
-    const found = [...recall.body.matchAll(/\(\s*req\.body\s+as\s*\{[^}]*\}\s*\)\s*\.\s*(\w+)/g)].map(m => m[1]);
-    assert.ok(found.includes('includeFreshWrites'),
-      'the cast-then-dot pattern must be detected — it is the one that was missed, and if this stops matching the '
-      + 'coverage check silently stops covering it');
+    /*
+     * Without this, a regex that matches nothing makes the assertion above pass for every route for ever —
+     * the shape of a green gate that measures nothing.
+     *
+     * TWO HALVES, because one of them stopped being possible and dropping it would have been the quiet kind
+     * of loss. This pinned the cast-then-dot regex to `/recall`'s `includeFreshWrites`, and when `/recall`
+     * collapsed onto the shared tool module that read went with it — leaving no route on this router using
+     * the shape. Re-pointing at whichever route happens to use it today would put the check back where it
+     * was: one hostage, lost again on the next refactor.
+     *
+     * So the REGEXES are exercised against a fixture, which cannot be refactored away, and the SWEEP is
+     * asserted to still find real keys in real routes. Neither half alone is enough: a fixture proves the
+     * patterns work and says nothing about the source, and a count over the source says nothing about which
+     * of the three shapes it came from.
+     */
+    const FIXTURE = [
+      "const { query, topK } = req.body ?? {};",
+      "const v = (req.body as Record<string, unknown>)['maxTimeMS'];",
+      "const w = (req.body as { includeFreshWrites?: unknown }).includeFreshWrites;",
+    ].join('\n');
+
+    const shapes = {
+      destructure: [...FIXTURE.matchAll(/const\s*\{([^}]+)\}\s*=\s*req\.body/g)]
+        .flatMap(m => m[1].split(',').map(n => n.trim().split(':')[0].trim())),
+      bracket: [...FIXTURE.matchAll(/(?:req\.body[^)]*\)|\bbody)\s*\[\s*'([^']+)'\s*\]/g)].map(m => m[1]),
+      castThenDot: [...FIXTURE.matchAll(/\(\s*req\.body\s+as\s*\{[^}]*\}\s*\)\s*\.\s*(\w+)/g)].map(m => m[1]),
+    };
+    assert.deepEqual(shapes.destructure, ['query', 'topK'], 'the destructure shape must be detected');
+    assert.deepEqual(shapes.bracket, ['maxTimeMS'], 'the bracket-access shape must be detected');
+    assert.deepEqual(shapes.castThenDot, ['includeFreshWrites'],
+      'the cast-then-dot shape must be detected — it is the one that was missed, and if this stops matching '
+      + 'the coverage check silently stops covering it');
+
+    // And the sweep still reads real keys off real handlers, so the loop above is not running over nothing.
+    const swept = postRoutes()
+      .filter(r => !(r.path in EXEMPT) && !delegatesToATool(r.body))
+      .flatMap(r => [...r.body.matchAll(/const\s*\{([^}]+)\}\s*=\s*req\.body/g)]
+        .flatMap(m => m[1].split(',').map(n => n.trim().split(':')[0].trim()).filter(Boolean)));
+    assert.ok(swept.length >= 5,
+      `the extraction found only ${swept.length} body keys across every non-delegating route — the regexes `
+      + 'match the fixture and not the code, which is a gate measuring itself');
   });
 
   it('every exemption carries a real reason', () => {

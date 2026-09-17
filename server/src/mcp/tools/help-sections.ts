@@ -106,8 +106,8 @@ What you CAN control, and where:
   two search tools it applies through the graph expansion as well. A bare query
   over a dozen records with descriptions and properties is the cheapest way to
   overrun a context budget. Reach for this on an entity search rather than
-  includeContent, which only drops file-passage bodies.
-- recall -> includeContent: false. Drops file-passage BODIES and keeps their
+  includeFileContent, which only drops file-passage bodies.
+- recall -> includeFileContent: false. Drops file-passage BODIES and keeps their
   locations, so you can find WHICH document holds something and then read only
   the part you decided you need. Passage bodies are by far the largest thing a
   result carries.

@@ -51,14 +51,13 @@ export interface RecallRequestBody {
        * A real boolean or absent — the route REJECTS a non-boolean rather than coercing, because `"false"` is truthy
        * and an opt-in that silently turns itself on is worse than one that errors.
        */
-      includeFreshWrites?: boolean;
       /**
        * Whether file-chunk hits carry their passage body. `false` returns locations and metadata only.
        *
        * Defaults to `true` server-side, and a caller should leave it alone unless it means it: sending `false` makes
        * recall look as though it has stopped returning passages.
        */
-      includeContent?: boolean;
+      includeFileContent?: boolean;
       /**
        * Add back the fields a result carries for the SYSTEM: `matchedText`, `embeddingModel`, `seq` and the
        * per-stage scores. Recursive — a `traverse` answer's `_graph` follows it at every depth.
@@ -144,7 +143,6 @@ export interface RecallRequestBody {
       /** The same ceiling in TOKENS — the unit an agent's budget is written in. Server floor 1. */
       maxTokens?: number;
       /** Characters per token, for converting `maxTokens`. Means nothing without one. */
-      charsPerToken?: number;
       /**
        * Skip this many ranked matches. Send back the response's `nextSkip` to continue a truncated answer.
        *

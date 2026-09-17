@@ -75,6 +75,32 @@ export const DEFAULT_MAX_CHARS = 50_000;
 /** The MCP door's default. See the note above `DEFAULT_MAX_CHARS` — lower, deliberately, and on one door. */
 export const MCP_DEFAULT_MAX_CHARS = 25_000;
 
+/**
+ * Which default a call gets, decided from the door that received it — and the ONE place that is decided.
+ *
+ * ## The bug this closes, which was invisible from inside either door
+ *
+ * The two constants above were read at the call site, and every tool module reached for the MCP one because
+ * MCP was the only door those modules had. Then `B-9` gave every tool a second: `POST /api/<tool-name>`,
+ * plain HTTP, the same modules. A curl caller's default silently halved depending on which URL they typed —
+ * 50 000 through `POST /api/brain/recall`, 25 000 through `POST /api/recall`, same server, same capability,
+ * nothing in either response saying why.
+ *
+ * ## Why the TRANSPORT decides and not the route
+ *
+ * The lower number is not a property of the code that answers. It is a property of who pays for the bytes:
+ * the canary operator's MCP client refused a 98 KB answer and spilled it to disk, because an agent carries
+ * the response in its own context. A script does not, whatever path it used to ask. `ToolCaller.transport`
+ * is already the one thing that records which door took the call, so the choice belongs to it — and a tool
+ * handler, which cannot see the door, has no business making it.
+ *
+ * `CLAUDE.md` holds this divergence to three conditions, and this function is how the second is met: every
+ * MCP call site resolves through it rather than one remembering to.
+ */
+export function defaultBudgetChars(transport: 'mcp' | 'rest'): number {
+  return transport === 'mcp' ? MCP_DEFAULT_MAX_CHARS : DEFAULT_MAX_CHARS;
+}
+
 /** Floor and ceiling on what a caller may ask for. A budget of zero would be a response with no results. */
 export const MIN_MAX_BYTES = 1_000;
 export const MAX_MAX_BYTES = 5_000_000;
@@ -111,14 +137,19 @@ export interface BudgetRequest {
    * bytes can say so and nobody else is affected.
    */
   maxBytes?: unknown;
-  /** A convenience, converted to CHARACTERS by `charsPerToken`. Never the authority. */
+  /**
+   * A convenience, converted to CHARACTERS at a FIXED 3.5 per token. Never the authority.
+   *
+   * The ratio used to be a parameter, `charsPerToken`, and it was removed at 5.0. It did nothing unless
+   * `maxTokens` was also set — a knob for a knob — and a caller who needs the ceiling to be exact should
+   * state `maxChars`, which is the unit the budget is actually applied in. What the override bought was
+   * the ability to make an estimate differently wrong.
+   */
   maxTokens?: unknown;
-  /** Per-call override of the conversion ratio. */
-  charsPerToken?: unknown;
 }
 
 /**
- * The four parameter names above, at RUNTIME, for every door that has to admit them.
+ * The parameter names above, at RUNTIME, for every door that has to admit them.
  *
  * ## Why this is exported rather than written out at each door
  *
@@ -133,7 +164,7 @@ export interface BudgetRequest {
  * is visible in this file rather than three routes away.
  */
 export const BUDGET_REQUEST_FIELDS: readonly string[] = Object.freeze([
-  'maxChars', 'maxBytes', 'maxTokens', 'charsPerToken',
+  'maxChars', 'maxBytes', 'maxTokens',
 ]);
 
 /** The two ceilings a response is held to. `bytes` is `null` when the caller did not ask for one. */
@@ -151,7 +182,7 @@ const posInt = (v: unknown): number | null =>
   typeof v === 'number' && Number.isFinite(v) && Number.isInteger(v) && v > 0 ? v : null;
 
 /**
- * Resolve `maxChars` / `maxBytes` / `maxTokens` / `charsPerToken` into TWO ceilings.
+ * Resolve `maxChars` / `maxBytes` / `maxTokens` into TWO ceilings.
  *
  * ## Why two and not one
  *
@@ -168,7 +199,7 @@ const posInt = (v: unknown): number | null =>
  * half becomes correct by being named correctly.
  */
 export function resolveBudget(req: BudgetRequest, operatorDefault = DEFAULT_MAX_CHARS): BudgetResolution {
-  const { maxChars, maxBytes, maxTokens, charsPerToken } = req;
+  const { maxChars, maxBytes, maxTokens } = req;
 
   if (maxChars !== undefined && posInt(maxChars) === null) {
     return { ok: false, error: '`maxChars` must be a positive integer number of characters' };
@@ -179,12 +210,7 @@ export function resolveBudget(req: BudgetRequest, operatorDefault = DEFAULT_MAX_
   if (maxTokens !== undefined && posInt(maxTokens) === null) {
     return { ok: false, error: '`maxTokens` must be a positive integer number of tokens' };
   }
-  if (charsPerToken !== undefined
-      && !(typeof charsPerToken === 'number' && Number.isFinite(charsPerToken) && charsPerToken > 0)) {
-    return { ok: false, error: '`charsPerToken` must be a positive number' };
-  }
-
-  const ratio = typeof charsPerToken === 'number' ? charsPerToken : DEFAULT_CHARS_PER_TOKEN;
+  const ratio = DEFAULT_CHARS_PER_TOKEN;
   const charCandidates: number[] = [];
   const mc = posInt(maxChars);
   const mt = posInt(maxTokens);

@@ -102,13 +102,24 @@ describe('Recall maxPerType — input validation over REST', () => {
     assert.equal(r.status, 400, `Expected 400, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 
-  it('a ceiling of 0 returns 400 and points at `types`', async () => {
-    // Deliberate: 0 would work, and it would be a second confusing way to spell "not this type".
+  it('a ceiling of 0 returns 400 naming the parameter and the bound', async () => {
+    /*
+     * 0 would work, and it would be a second confusing way to spell "not this type" — `types` is the one
+     * way, and the parameter's own description says so.
+     *
+     * This asserted that the REFUSAL TEXT contained the word `types`. That was the hand-written handler's
+     * prose, and the route hands its body to `callTool` now, so the message is the published schema's:
+     * `Invalid arguments for 'recall': /maxPerType/entity: must be >= 1`. Both doors give that same
+     * sentence, which is the point of the collapse — and the sentence a gate should hold is the one the
+     * server can actually produce. The advice lives where a caller reads it while writing the call, which
+     * is the schema description, and `search-tool-schemas-document-their-response` holds it there.
+     */
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'test', maxPerType: { entity: 0 },
     }) });
     assert.equal(r.status, 400, `Expected 400, got ${r.status}: ${JSON.stringify(r.body)}`);
-    assert.match(r.body.error, /types/, `the error should point at \`types\`: ${r.body.error}`);
+    assert.match(r.body.error, /maxPerType/, `the error must name the parameter: ${r.body.error}`);
+    assert.match(r.body.error, />= ?1/, `the error must state the bound: ${r.body.error}`);
   });
 
   it('minPerType above maxPerType for the same type returns 400 naming both values', async () => {
@@ -192,29 +203,45 @@ describe('Recall maxTimeMS — the per-call deadline over REST', () => {
 });
 
 describe('Recall filter — input validation', () => {
-  it('filter key not starting with properties./tags/type/name returns 400', async () => {
+  /*
+   * THESE THREE ASSERTED THE FIELD ALLOWLIST AND NOW ASSERT WHAT IT WAS STANDING IN FOR.
+   *
+   * `recall` refused any key outside `properties.*`, `tags`, `type`, `name`, `status` and `label`. That was
+   * a SPEED rule wearing a safety label — an unusual field takes the exhaustive path, which is slower and
+   * equally correct — and `filter`, the other read door, never had it. Owner, 2026-09-17: *"they need to be
+   * the same."*
+   *
+   * Two of the three were written as injection cases (`spaceId`, `_id`), so the claim worth keeping is the
+   * one they were really making: **a filter cannot reach another space.** Asserted directly now, which is
+   * stronger than asserting a refusal — a refusal says the door is shut, this says there is nothing behind
+   * it. Verified against a live instance: a recall in one space filtering on another space's id returns
+   * nothing, because each space's records live in their own collection.
+   */
+  it('an arbitrary field key is ACCEPTED — it decides the path, not admission', async () => {
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'test',
       filter: { 'injected.key': { eq: 'value' } },
     }) });
-    assert.equal(r.status, 400, `Expected 400 for invalid filter key, got ${r.status}: ${JSON.stringify(r.body)}`);
-    assert.ok(r.body.error, 'Response must have error field');
+    assert.equal(r.status, 200, `an unusual field must be accepted and scanned: ${JSON.stringify(r.body)}`);
   });
 
-  it('filter key with arbitrary top-level field returns 400', async () => {
+  it('and filtering on `spaceId` cannot reach another space', async () => {
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'test',
-      filter: { 'spaceId': { eq: 'anything' } },
+      filter: { 'spaceId': { eq: 'some-other-space' } },
     }) });
-    assert.equal(r.status, 400, `Expected 400 for disallowed top-level key, got ${r.status}: ${JSON.stringify(r.body)}`);
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.deepEqual(r.body.results, [],
+      'a spaceId filter matched something — the per-space collection boundary is what makes this safe');
   });
 
-  it('filter key with _id injection attempt returns 400', async () => {
+  it('nor can `_id`', async () => {
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'test',
       filter: { '_id': { eq: 'anything' } },
     }) });
-    assert.equal(r.status, 400, `Expected 400 for _id filter key, got ${r.status}: ${JSON.stringify(r.body)}`);
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.deepEqual(r.body.results, [], 'an `_id` that names nothing in this space must match nothing');
   });
 
   it('filter: non-object body returns 400', async () => {
@@ -374,14 +401,32 @@ describe('Recall filter — eq filter on properties.status', () => {
     assert.match(r.body.error, /mixes both grammars/);
   });
 
-  it('applies the key allowlist INSIDE $or, so the widening cannot smuggle a field', async (t) => {
+  it('refuses a JavaScript operator inside $or, at depth', async (t) => {
+    /*
+     * This asserted the FIELD allowlist inside `$or` — *"the widening cannot smuggle a field"*. There is
+     * nothing to smuggle since 2026-09-17: an unusual field is slow, not unsafe, and the response says
+     * `filterPath: "exhaustive"` rather than refusing.
+     *
+     * What the recursion still has to catch is the shape that cannot be a field at all, and it has to catch
+     * it AT DEPTH for the same reason the old rule did — a nested clause is exactly where a caller would
+     * put something a top-level scan would miss.
+     */
     if (!embeddingAvailable) return t.skip('Embedding not available');
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: sharedDesc,
-      filter: { $or: [{ embedding: { $exists: true } }] },
+      filter: { $or: [{ $where: 'this.x' }] },
     }) });
-    assert.equal(r.status, 400, `a disallowed key inside $or was accepted: ${JSON.stringify(r.body)}`);
-    assert.match(r.body.error, /embedding/);
+    assert.equal(r.status, 400, `$where inside $or was accepted: ${JSON.stringify(r.body)}`);
+    assert.match(r.body.error, /\$where/);
+  });
+
+  it('and accepts an ordinary field inside $or, which is what the widening was for', async (t) => {
+    if (!embeddingAvailable) return t.skip('Embedding not available');
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
+      query: sharedDesc,
+      filter: { $or: [{ description: { $exists: true } }] },
+    }) });
+    assert.equal(r.status, 200, `a plain field inside $or was refused: ${JSON.stringify(r.body)}`);
   });
 
   it('filter eq rejected — rejected entity appears, accepted does not', async (t) => {
@@ -751,13 +796,22 @@ describe('Recall filter — MCP recall tool accepts filter', () => {
     assert.ok(!ids.includes(rejectedId), `Rejected entity must NOT appear via MCP filter`);
   });
 
-  it('MCP recall with invalid filter key returns isError', async (t) => {
+  it('MCP recall accepts an arbitrary field key, and still refuses a JavaScript operator', async (t) => {
+    // Both halves on the MCP door, because the widening and the guard have to agree across both — the
+    // pair `CLAUDE.md`'s parity section was written from.
     if (!embeddingAvailable) return t.skip('Embedding not available');
-    const result = await session.callTool('recall', {
+    const ok = await session.callTool('recall', {
       space: SPACE,
       query: 'test',
       filter: { 'injected.field': { eq: 'value' } },
     });
-    assert.ok(result?.isError, `Invalid filter key must return isError=true`);
+    assert.ok(!ok?.isError, `an unusual field must be accepted on MCP too: ${JSON.stringify(ok)}`);
+
+    const refused = await session.callTool('recall', {
+      space: SPACE,
+      query: 'test',
+      filter: { $where: 'this.x' },
+    });
+    assert.ok(refused?.isError, 'an operator that executes JavaScript must be refused on MCP too');
   });
 });

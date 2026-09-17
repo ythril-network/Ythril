@@ -33,6 +33,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING — `POST /api/brain/recall` returns the same result SHAPE as the MCP tool.** A hit is
+  `{score, spaceId, type, record: {…}}` — the ranking beside the record rather than mixed into it. REST
+  returned one FLAT object until now.
+
+  ```json
+  { "score": 0.86, "spaceId": "work", "type": "fact",
+    "record": { "_id": "…", "fact": "…", "tags": ["…"] } }
+  ```
+
+  **This was a divergence with nothing behind it.** `RECALL_ENVELOPE_KEYS` existed only to stop a
+  `projection` on the flat door eating the `score` the caller searched for; with the record in its own
+  object the distinction is structural and needs no list. The two shapes are also not mechanically
+  inter-convertible — `toRecallRecord` puts an entity's own type under `record.type` while the envelope
+  `type` is the knowledge type — so a door translating between them would have to reimplement the mapping,
+  which is what collapsing the route removed.
+
+  **What to change:** read `hit.record.<field>` where you read `hit.<field>`. `score`, `spaceId`, `type`,
+  `_graph` and the per-stage scores stay where they were. Traversed neighbours under `_graph` are
+  unchanged — they were already `{edge, node, paths}`.
+
+  **And it fixes something rather than only costing.** The flat envelope put the knowledge type and the
+  record's own `type` under one key, so an entity matched by `filter: {type: 'message'}` came back reading
+  `type: 'entity'` with its real type unreachable. They are `type` and `record.type` now.
+
+  **`unrecognized_keys` is not on this route's 400 any more.** It came from `unknownBodyFields`, which a
+  route uses when it parses its own body; the refusal now comes from the shared dispatcher, which names the
+  offending key in `error` (`unexpected property 'topk'`). The other read routes are unchanged.
+
+- **BREAKING — the fresh-write scan honours `filter` and `tags`, and it did not.** The scan adds records
+  the vector index has not ingested yet, and it added them without applying the caller's predicate: a
+  recall with `filter: {"type": "note"}` could return a record whose type is not `note`, at `200`. It was
+  survivable while the scan was opt-in behind `includeFreshWrites`, because combining that flag with a
+  filter was rare; making the scan unconditional made it the common case, which is how it was found. A
+  filtered recall now excludes non-matching fresh records, as it always claimed to.
+
+- **BREAKING — three recall parameters renamed or removed.** 5.0 breaks every public name, and these three
+  were each lying in their own way.
+
+  | before | after | why |
+  |---|---|---|
+  | `includeFreshWrites` | **gone — the scan always runs** | the name read as *exclude recent records*, which is not what it did and not something anybody wants. Measured: a plain recall answered `count: 0` for **three seconds** after a write, then found the record. The cost of always scanning, on a space with 220 records inside the window: 91–101 ms against 159–167 ms, and nothing at all on a quiet space. Owner: *"if checking the parameter takes >10ms remove the parameter and just always do it."* A flag whose only function is to let a caller opt into a blind spot is not a performance feature |
+  | `includeContent` | `includeFileContent` | it gates one field on one record kind — a file chunk's `content` — and nothing else. Read as a general switch it looked like the way to trim a large answer; that is `projection` |
+  | `charsPerToken` | **gone — the ratio is fixed at 3.5** | it did nothing unless `maxTokens` was also set, and what the override bought was the ability to make an estimate differently wrong. A caller who needs the ceiling exact states `maxChars`, which is the unit the budget is applied in |
+
+  All three are unknown fields now, so a caller still sending one gets a `400` rather than silence.
+
+- **`POST /api/brain/recall` holds no implementation.** It was four hundred lines answering the same
+  question as the `recall` tool, kept in step by somebody checking both every time either changed — and
+  they had already drifted where nobody was looking (the byte budget, above). It hands its body to
+  `callTool` now and translates the envelope back, which is what every door is supposed to be. The response
+  shape is unchanged; `POST /api/recall` still returns the tool envelope.
+
+- **The filter sanitizer is its own module.** Owner: *"add the sanitizer and make it a real module."* The
+  operator refusals and the ReDoS guard lived in `brain/query.ts` beside the query builder that happened to
+  be their first caller, while the key-shape guard for the other filter grammar lived in `brain/filter.ts`
+  — one rule, two files, each grammar protected by a different subset of it. `brain/filter-sanitizer.ts`
+  answers the whole question for every door, and is where value coercion will go when it arrives.
+
 - **BREAKING — every tool is `POST /api/<tool-name>`, and both doors call ONE function.** Owner,
   2026-09-16: *"create modules that are used by both doors"*, then *"this shared module concept for both
   doors should be applied to each and every tool"*.
@@ -316,7 +374,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now falls back to the spaces the guard AUTHORISED, never to the body, because an audit trail that
   disagrees with what happened is worse than one that says nothing. A cross-space read logs `a,b,c`.
 
-
 - **A recall answer now spends the byte budget on what was remembered, not on where it is filed.**
 
   `maxChars` is a contract: it is how much of their context window a caller is willing to give to memory.
@@ -363,6 +420,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **BREAKING — `filter: {"type": "note"}` was accepted and silently DROPPED.** A bare scalar value was read
+  as a malformed operator object — the grammar where a value is spelled `{"eq": "note"}` — so the
+  translation produced no predicate and the recall answered `200` with the **unfiltered** ranking.
+  `{"type": "NOT-A-REAL-TYPE"}` returned every record. It is the defect the fleet integrator reported on
+  `/query` (*"it cost us a fabricated number"*), on the spelling the schema description now recommends, and
+  it went unbounded the moment the filter key allowlist was removed.
+
+  Which grammar a filter is in is now decided by the shape of its VALUES rather than by whether a `$`
+  appears anywhere: the operator-object form is every value being an object whose keys all come from the
+  eight names it has, and everything else — a scalar, an array, a `$`-operator, a sub-document — is
+  ordinary MongoDB. A filter that mixes the two is still refused rather than guessed at.
+
+- **`{"$where": {"eq": "x"}}` reached the database.** The operator-object path has no sanitizer between it
+  and Mongo, and the key check that had been incidentally blocking `$`-prefixed keys went with the field
+  allowlist. Anything `$`-prefixed now routes to the raw path where the sanitizer lives, with a floor under
+  it so a change to the classifier cannot reopen the hole. `__proto__`, `constructor` and `prototype` as
+  filter keys are refused on both grammars for a related reason: `out[key] = …` on a plain object would set
+  the prototype and add no key, so the constraint vanished from the filter and the query answered `200`
+  unfiltered.
+
+- **`POST /api/recall` answered to HALF the byte budget of `POST /api/brain/recall`.** 25 000 characters
+  against 50 000, same server, same capability, same transport — because the tool module picked MCP's
+  default itself, which was correct while MCP was the only door it had and stopped being correct when
+  `B-9` gave every tool an HTTP one. The lower default belongs to the TRANSPORT that received the call, not
+  to the module that answers it: `defaultBudgetChars(transport)` is the one place that is decided.
+
+- **A raw Mongo filter was always exhaustive, including when the index could serve it.** `{"type": "note"}`
+  is an equality on a declared field and pushes into `$vectorSearch` natively; it was taking the full scan
+  on the note that *"a raw filter is never declarable"* — true of `$or`, false of the common case, and
+  newly expensive because raw Mongo is now the recommended grammar. `$or`, `$not`, `$exists`, `$regex` and
+  anything nested still go exhaustive as a whole: half a filter pushed natively would restrict the
+  candidate set before scoring and silently change which records `topK` is filled from.
+
 - **`entityName` could not see a record linked the recommended way.** A fact or chrono entry attached with
   `linkEntities` — the form the integration guide leads with — was invisible to `?entityName=`, on both
   doors, and the filter said so by answering `{facts: [], total: 0}`. Not an error: it reads as *there are
@@ -377,7 +467,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   miss what `linkEntities` wrote, the link records miss what predates the upgrade — and both coexist on
   every space written to since. If you have been filtering by entity name and getting short answers, this
   is why.
-
 
 - **The `filter` MCP tool required a space while its route did not — one rule, two doors, the MCP one
   narrower.** Introduced by the change that moved the search family off the space path: `POST
@@ -429,7 +518,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reach rule is checked in the module it moved to. This is the argument for doing the whole rename at once
   rather than a name at a time — it moves every identifier together, so it finds these as a batch instead of
   one false alarm a year that somebody talks themselves past.
-
 
 - **A cross-door budget fixture was sized from the larger door, and only luck made it bind on the other.**
 
@@ -696,7 +784,6 @@ size-idempotent refresh skips a file whose byte size matches the stored copy, so
   reported a bigger number. The pattern in all of them is the same: the shape of the output gave it away,
   not the code under test.
 
-
 - Four sweeps each worked out where an Express router hangs, and two of them got it wrong. The graph is now
   `testing/standalone/_router-mounts.mjs` and the conclusions stay apart, because they genuinely differ:
   one asks whether a router is reachable at all, one wants the full path to match a rights row, one wants
@@ -715,11 +802,9 @@ size-idempotent refresh skips a file whose byte size matches the stored copy, so
   It throws below a floor rather than returning a thin map. A graph that resolves nothing makes every caller
   pass on an empty set, which is exactly how the gap stayed hidden.
 
-
 - An MCP tool now forwards the arguments its own schema declares, rather than a list of names written beside
   it. Two tools had that shape and one was already wrong — a field declared on the tool, accepted, and
   dropped before the write while the REST door stored it. A gate refuses a third.
-
 
 - `whenDuePasses` is now exercised end to end against a real store, not only asserted from source. The
   standalone gate reads the status filter's query SHAPE, and a query whose shape is plausible can still match
@@ -1051,9 +1136,6 @@ size-idempotent refresh skips a file whose byte size matches the stored copy, so
   how much comes back and in what shape. The filter and projection were previously buried below the question
   among the tag and type fields.
 
-
-
-
 - **Every benchmark ingest strategy declares what its corpus may contain, and the instance enforces it.**
   The spaces were created bare: `validationMode` defaults to strict, but with no `typeSchemas` there is
   nothing to validate, so every malformed record was accepted. A missing field then scores low and reads as a
@@ -1331,8 +1413,6 @@ size-idempotent refresh skips a file whose byte size matches the stored copy, so
   advanced-query side has always said "no documents"; this side kept only the result list, and an empty list
   cannot tell "found nothing" from "not asked yet". An error still reads as an error rather than as no
   matches, because a search that failed did not find nothing, it did not finish.
-
-
 
 - **Internal: shell scripts are pinned to LF in `.gitattributes`.** No deployment was affected — the
   committed bytes have always been LF, and a Linux or macOS checkout gets them unchanged. It bites a

@@ -5,7 +5,9 @@
  */
 import { Router } from 'express';
 import { BRAIN_COLLECTIONS } from '../../config/types.js';
-import { requireSpaceAuth, requireBodyScopedSpace, denyReadOnly } from '../../auth/middleware.js';
+import { requireSpaceAuth, requireBodyScopedSpace, denyReadOnly, requireAuth } from '../../auth/middleware.js';
+import { callTool } from '../../mcp/call-tool.js';
+import { restToolCaller } from '../rest-tool-caller.js';
 import { spacesWhereTokenMay } from '../../auth/reachable-spaces.js';
 import type { TokenRights } from '../../config/rights-shape.js';
 import { summariseActivity } from '../../metrics/space-activity-store.js';
@@ -16,18 +18,17 @@ import { NotFoundError } from '../../util/errors.js';
 import { countFacts } from '../../brain/fact.js';
 import { getEmbedJobCounts } from '../../brain/embed-queue.js';
 import {
-  queryBrain, countBrain, QUERY_BODY_FIELDS, TRAVERSE_BODY_FIELDS, RECALL_BODY_FIELDS, FIND_SIMILAR_BODY_FIELDS,
+  queryBrain, countBrain, QUERY_BODY_FIELDS, TRAVERSE_BODY_FIELDS, FIND_SIMILAR_BODY_FIELDS,
   unknownBodyFields, compareBySort, DEFAULT_QUERY_SORT, QUERY_PAGE_MAX, PROXY_PAGE_CEILING,
 } from '../../brain/query.js';
-import { findSimilar, recall, type RecallKnowledgeType, type RecallResult } from '../../brain/recall.js';
+import { findSimilar, type RecallKnowledgeType, type RecallResult } from '../../brain/recall.js';
 import { type FilterExpression } from '../../brain/filter.js';
 import { resolveEntityIdsByName } from '../../brain/entities.js';
 import { attachedToEntityNamed } from '../../brain/entity-name-scope.js';
-import { resolveRecallFilter } from '../../brain/recall-filter.js';
 import { traverseGraph } from '../../brain/edges.js';
 import { MAX_RECALL_TRAVERSE } from '../../brain/recall-seed-traversal.js';
 import { buildGraphWithSpill, spillResultSet, countGraphNodes } from '../../brain/graph-spill.js';
-import { parseTraverseOption, echoTraverse } from '../../brain/traverse-option.js';
+import { parseTraverseOption } from '../../brain/traverse-option.js';
 import { embed } from '../../brain/embedding.js';
 import { getConfig } from '../../config/loader.js';
 import { col, asFilter } from '../../db/mongo.js';
@@ -40,10 +41,9 @@ import { RECORD_TYPES } from '../../config/types.js';
 import { reindexInProgress } from '../../metrics/registry.js';
 import { UUID_V4_RE } from './_shared.js';
 import {
-  rankOf, byRankThenId, mergeRecallResults, withoutDiagnostics, RECALL_ENVELOPE_KEYS,
+  withoutDiagnostics, RECALL_ENVELOPE_KEYS, rankOf,
 } from '../../brain/recall-shape.js';
 import { mapGraphNodes, graphNodeRecord } from '../../brain/recall-graph.js';
-import { stripRecordMeta } from '../../brain/recall-record-meta.js';
 import { applyProjection, normaliseProjection, type NormalisedProjection } from '../../brain/projection.js';
 import { resolveBudget, resolvePaging, budgetedEnvelope, applyBudget, budgetFields, type BudgetRequest } from '../../brain/result-budget.js';
 import { sendReadFailure, statesRetryability } from './_read-failure.js';
@@ -172,8 +172,8 @@ function projectionFromBody(body: unknown): { ok: true; norm: NormalisedProjecti
   return { ok: true, norm: normaliseProjection(raw as Record<string, unknown>) };
 }
 
-function stripContentIfAsked(results: RecallResult[], includeContent: boolean): RecallResult[] {
-  if (includeContent) return results;
+function stripContentIfAsked(results: RecallResult[], includeFileContent: boolean): RecallResult[] {
+  if (includeFileContent) return results;
   return results.map(r => {
     if (r.type !== 'file' || r.content === undefined) return r;
     const { content: _dropped, ...rest } = r;
@@ -431,389 +431,88 @@ searchRouter.post('/filter', globalRateLimit, requireBodyScopedSpace('knowledge'
 /*
  * POST /api/brain/recall — meaning-ranked search, across one space or across every space you can read.
  *
- * ## The space is a parameter, not a path segment, and that is the whole reason this route moved
+ * ## It holds no implementation any more, and that is the point
  *
- * Owner ruling, 2026-09-15: *"filter should also be able to read cross space"* and *"in that case the route
- * has to change and space moved to parameter."* A path segment cannot be omitted, so `/spaces/:spaceId/recall`
- * could never express "search everything I can reach" — MCP's `recall` has taken an optional space since it
- * shipped, and REST callers had to point at a proxy space or make one call per space and merge by hand.
+ * This was four hundred lines answering the same question as the `recall` MCP tool, and the two stayed in
+ * step because somebody checked both every time either changed. They had already drifted where nobody was
+ * looking: a caller on `POST /api/recall` — the generic tool door added by `B-9`, same transport, same
+ * capability — got a 25 000-character budget where this route gave 50 000, because the tool module chose
+ * MCP's default itself. Same server, same parameters, half the answer, nothing saying why.
  *
- * ## Authorisation happens ONCE, in the guard, and this handler acts on what it returned
+ * So the capability lives in one place, `callTool` gates it for both doors, and what is left here is the
+ * translation between this route's envelope and that one's. That is what every door is supposed to be.
  *
- * `requireBodyScopedSpace` resolves `req.body.space` and hands back `req.authorisedSpaces`. This handler
- * never reads `req.body.space` again: a second reading is the defect the guard exists to prevent, because
- * the two readings are spelled identically and nothing in a diff shows that the value acted on is not the
- * value that was checked.
+ * ## Why the route survives its own handler
+ *
+ * `POST /api/recall` returns the tool envelope — `{ok, text, data}` — and this one returns the search result
+ * as the body, which is what every REST caller written against it reads. Keeping the older shape is a
+ * deprecation question rather than a code question, and answering it by deleting the route would break
+ * working integrations in a release that already breaks every public name. The two paths now differ in the
+ * envelope alone.
+ *
+ * ## The parse, and why it is not a smell worth removing
+ *
+ * `recall` returns its result as JSON inside `content`, because that is what an MCP client reads. Parsing it
+ * back here costs microseconds on an answer already bounded to tens of kilobytes, and it buys the one thing
+ * this change is for: there is no second construction of the response object to fall out of step. A shared
+ * builder returning the object, wrapped differently by each door, would be the same module count with an
+ * extra type — and it would let a door quietly add a field, which is how the drift above started.
+ *
+ * ## Authorisation moved with the implementation
+ *
+ * `requireBodyScopedSpace` is gone from this route, not bypassed: `callTool` parses `space`, checks that
+ * each named space exists and is reachable, and applies the `TOOL_RIGHTS` row for `recall` per space. One
+ * set of rights rows for both doors is what `B-9` was for — a `ROUTE_RIGHTS` row here as well would be a
+ * second answer to the same question, and the weaker one would win silently.
  */
-searchRouter.post('/recall', globalRateLimit, requireBodyScopedSpace('knowledge', 'read'), statesRetryability, async (req, res) => {
-  // Resolved and authorised by the guard. A named space narrows to itself; an omitted one means every space
-  // this token may read, which is the case a path segment could not express.
-  const authorised = req.authorisedSpaces ?? [];
-  const namedSpace = req.resolvedSpaceId;
-  const spaceId = namedSpace ?? authorised[0] ?? '';
-  // A mistyped `minScore` on recall silently returns the unfiltered ranking, which reads as a working search.
-  const badRecall = unknownBodyFields((req.body ?? {}) as Record<string, unknown>, RECALL_BODY_FIELDS);
-  if (badRecall) { res.status(400).json(badRecall); return; }
-  const { query, topK, types, minScore, filter, traverse, tags, minPerType, maxPerType, maxTimeMS } = req.body ?? {};
-  if (!query || typeof query !== 'string' || !query.trim()) {
-    res.status(400).json({ error: 'query must be a non-empty string' });
-    return;
-  }
-  /*
-   * NO CEILING ON `topK`, AT EITHER DOOR — owner's ruling on `P-34`, 2026-09-04: *"why do we need a cap?
-   * Only thing that matters is we only get full records and it warns when anything is truncated … And yes
-   * same treatment at both doors."*
-   *
-   * Both of those hold and were checked rather than assumed: `applyBudget` emits whole records only, and
-   * `truncated` is on EVERY response whether it bit or not, with `nextSkip` when it did. So the answer was
-   * never what a cap protected.
-   *
-   * This door clamped silently to 100 while MCP declared no maximum, so `topK: 500` returned 100 through
-   * one door and 500 through the other. A clamp is the worst of the three options: the caller is told
-   * nothing and believes they have the top 500.
-   *
-   * What a cap DID bound is WORK, and two internal figures scale off `topK` — the per-type over-fetch and
-   * the traversal node cap. Both now carry their own absolute ceiling, which is where such a bound
-   * belongs: an enormous `topK` costs a bounded amount of work instead of being refused or quietly
-   * rewritten.
-   */
-  const safeTopK = typeof topK === 'number' ? Math.max(topK, 1) : 10;
-  const safeTypes = Array.isArray(types) ? types.filter((t: unknown): t is RecallKnowledgeType => typeof t === 'string') : undefined;
-  const safeMinScore = typeof minScore === 'number' ? minScore : undefined;
-
-  // `tags` and `minPerType` are supported by recall() but were previously hardcoded to
-  // undefined here, so they were reachable only via MCP / the internal function.
-  let safeTags: string[] | undefined;
-  if (tags != null) {
-    if (!Array.isArray(tags) || tags.some((t: unknown) => typeof t !== 'string')) {
-      res.status(400).json({ error: 'tags must be an array of strings' });
-      return;
-    }
-    safeTags = (tags as string[]).filter(t => t.trim().length > 0);
-    if (safeTags.length === 0) safeTags = undefined;
-  }
-
-  // Per-type minimums: guarantee at least N hits of a given knowledge type. Each value
-  // is clamped to [0, topK] — asking for more of a type than the total result size is
-  // meaningless, and an unbounded value would widen the underlying per-type searches.
-  let safeMinPerType: Partial<Record<RecallKnowledgeType, number>> | undefined;
-  if (minPerType != null) {
-    if (typeof minPerType !== 'object' || Array.isArray(minPerType)) {
-      res.status(400).json({ error: 'minPerType must be an object mapping knowledge type -> minimum count' });
-      return;
-    }
-    const acc: Partial<Record<RecallKnowledgeType, number>> = {};
-    for (const [key, raw] of Object.entries(minPerType as Record<string, unknown>)) {
-      if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < 0) {
-        res.status(400).json({ error: `minPerType.${key} must be a non-negative integer` });
-        return;
-      }
-      acc[key as RecallKnowledgeType] = Math.min(raw, safeTopK);
-    }
-    if (Object.keys(acc).length > 0) safeMinPerType = acc;
-  }
-
-  // Per-type MAXIMUMS: the ceiling to the floor above (their top ask, A-L6-1). One long file chunk should
-  // not be able to crowd out four one-line principles that would have answered the query more cheaply.
-  //
-  // A ceiling of 0 is REFUSED rather than accepted as "none of this type". It would work, and it would be a
-  // second confusing way to spell `types` — with the difference that `types` says so in the parameter name.
-  let safeMaxPerType: Partial<Record<RecallKnowledgeType, number>> | undefined;
-  if (maxPerType != null) {
-    if (typeof maxPerType !== 'object' || Array.isArray(maxPerType)) {
-      res.status(400).json({ error: 'maxPerType must be an object mapping knowledge type -> maximum count' });
-      return;
-    }
-    const acc: Partial<Record<RecallKnowledgeType, number>> = {};
-    for (const [key, raw] of Object.entries(maxPerType as Record<string, unknown>)) {
-      if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < 1) {
-        res.status(400).json({ error: `maxPerType.${key} must be an integer of at least 1 (use \`types\` to exclude a knowledge type entirely)` });
-        return;
-      }
-      acc[key as RecallKnowledgeType] = Math.min(raw, safeTopK);
-    }
-    if (Object.keys(acc).length > 0) safeMaxPerType = acc;
-  }
-
-  // Per-call deadline. It can only LOWER `RECALL_BUDGET_MS`, never raise it — letting a request body extend
-  // the operator's ceiling is a denial-of-service lever. Clamped rather than refused, because a caller asking
-  // for 60 s on a 25 s instance wants "as long as you allow", and an error there teaches nothing.
-  let safeMaxTimeMS: number | undefined;
-  if (maxTimeMS != null) {
-    if (typeof maxTimeMS !== 'number' || !Number.isInteger(maxTimeMS) || maxTimeMS < 1) {
-      res.status(400).json({ error: '`maxTimeMS` must be a positive integer (milliseconds)' });
-      return;
-    }
-    safeMaxTimeMS = maxTimeMS;
-  }
-
-  // A floor above its own ceiling is REFUSED, not silently resolved.
-  //
-  // Floor-wins and ceiling-wins are both defensible, which is exactly why the caller has to say which they
-  // meant. Picking one here would answer 200 to a request that cannot be satisfied as written — the failure
-  // shape this release spent four fixes on, in config form.
-  if (safeMinPerType && safeMaxPerType) {
-    for (const [t, floor] of Object.entries(safeMinPerType) as [RecallKnowledgeType, number][]) {
-      const ceiling = safeMaxPerType[t];
-      if (ceiling !== undefined && floor > ceiling) {
-        res.status(400).json({
-          error: `minPerType.${t} (${floor}) is greater than maxPerType.${t} (${ceiling}) — the two contradict, so neither can be applied`,
-        });
-        return;
-      }
-    }
-  }
-
-  // Graph-traversal expansion: a depth, or a whole traversal minus its start node — the results ARE the start
-  // nodes. `traverse: 2` still means what it always meant; `{ depth, edgeLabels, direction }` narrows it the way
-  // the standalone `/traverse` route always could and this one could not. See `brain/traverse-option.ts`.
-  //
-  // Rejected rather than clamped or coerced, in every direction: a depth past the cap, a string where a number
-  // belongs, an unknown key inside the object. Each of those silently downgraded returns a SHALLOWER OR WIDER
-  // GRAPH WITH A 200, which is the defect shape `/traverse` and `/query` already refuse unknown fields for.
-  const parsedTraverse = parseTraverseOption(traverse, MAX_RECALL_TRAVERSE);
-  if (!parsedTraverse.ok) {
-    res.status(400).json({ error: parsedTraverse.error });
-    return;
-  }
-  const traverseOpt = parsedTraverse.value;
-  const safeTraverse = traverseOpt.depth;
-
-  // EITHER grammar. The operator-object form is passed through untouched so it keeps the native pre-filter path; a raw
-  // MongoDB filter is validated with the same parser `query` uses and goes down the exhaustive path.
-  // One channel: `recall` takes either grammar in the same parameter, so there is nothing here to keep in step.
-  const resolved = resolveRecallFilter(filter);
-  if (!resolved.ok) {
-    res.status(400).json({ error: resolved.error });
-    return;
-  }
-  const safeFilter = resolved.kind === 'expression' ? resolved.expression
-    : resolved.kind === 'mongo' ? resolved.filter
-      : undefined;
-
-  try {
-    // A NAMED space may be a proxy, so it resolves to its members and is narrowed to this request's reach.
-    // An omitted one is already that list: the guard filtered every reachable space to the ones where this
-    // token actually holds `knowledge: read`, which is a stricter question than reach and the reason the
-    // guard returns spaces rather than a boolean.
-    const memberIds = namedSpace ? memberSpacesForRequest(req, namedSpace) : memberSpacesForRequestAcross(req, authorised);
-    // One collector across every member, deduped by `recall` itself, so a proxy space reports "the answer is
-    // partial" once rather than once per member.
-    // Opt-in scan of the newest records, for the case the index has not caught up yet. Rejected rather
-    // than coerced: `includeFreshWrites: "false"` is truthy, and an opt-in that silently turns itself on is
-    // worse than one that errors.
-    const includeFreshRaw = (req.body as { includeFreshWrites?: unknown }).includeFreshWrites;
-    if (includeFreshRaw !== undefined && typeof includeFreshRaw !== 'boolean') {
-      res.status(400).json({ error: '`includeFreshWrites` must be a boolean' });
-      return;
-    }
-    const safeIncludeFresh = includeFreshRaw === true;
-
-    // `includeContent: false` drops the passage BODY from file chunks, leaving where they are and what they
-    // are about. MCP `recall` has had this since it shipped; REST had no way to ask for it, and an integrator
-    // pointed out the asymmetry — the same two-surfaces-one-rule shape as four defects fixed the day before.
-    //
-    // Why it is worth a flag: a passage body is by far the largest field a result carries, and every field is
-    // paid for `topK` times. Dropping it turns one expensive call into a cheap two-phase flow — recall to
-    // find WHERE something is, then read only the chunk you chose. Default true, so no existing caller
-    // changes; only an explicit `false` opts out, and a non-boolean is refused rather than coerced.
-    const includeContentRaw = (req.body as { includeContent?: unknown }).includeContent;
-    if (includeContentRaw !== undefined && typeof includeContentRaw !== 'boolean') {
-      res.status(400).json({ error: '`includeContent` must be a boolean' });
-      return;
-    }
-    const safeIncludeContent = includeContentRaw !== false;
-
-    // `includeDiagnostics` (default FALSE) restores the three RECORD fields a recall result carries for the
-    // system rather than for the caller: `matchedText`, `embeddingModel` and `seq`.
-    //
-    // IT NO LONGER GOVERNS THE PER-STAGE SCORES. `lexicalScore`/`fusedScore`/`rerankScore` are unconditional
-    // on both doors: precedence in a fused recall is `rerankScore > fusedScore > score`, so gating them meant
-    // the number that DECIDED a result's position was the one a caller could not read — while `minScore`
-    // filters on `score` alone. Three floats are not a cost and do not belong behind a cost flag.
-    //
-    // This door used to return all six unconditionally while MCP returned none, and neither said so. Owner
-    // ruled 2026-08-16 that the two surfaces match and that the fields are off by default on both — so this
-    // is a BREAKING change to the REST response, and deliberately: `matchedText` is the pre-embedding source
-    // string, which for a file chunk is the passage a SECOND time, so the old default sent a large field
-    // nobody had asked for `topK` times.
+searchRouter.post('/recall', globalRateLimit, requireAuth, statesRetryability, async (req, res) => {
+  const outcome = await callTool({
+    name: 'recall',
+    args: (req.body ?? {}) as Record<string, unknown>,
+    caller: restToolCaller(req),
+  });
+  const text = outcome.result.content.map(c => c.text).join('\n');
+  if (outcome.result.isError) {
     /*
-     * `includeRecordMeta` (default FALSE) restores `createdAt`, `updatedAt` and the link-id arrays.
+     * The refusal sentence is the tool's, word for word, under this route's own key — a door that rewords a
+     * refusal makes the two surfaces disagree about what happened for callers comparing them.
      *
-     * They describe where a record SITS rather than what it says, and measured on a real corpus they were
-     * most of the answer: 30% of a recall response was content, the rest this. `createdAt` is the worst of
-     * them because it reads as when the remembered thing happened, which is not what it means.
-     *
-     * Refused rather than coerced, like every other flag here.
+     * `structuredContent` is SPREAD, and leaving it out was a real loss when this route was first collapsed.
+     * It is where `callTool` puts `retryable`, `storeSideFailure` and the driver's error code on a store
+     * failure, and a REST caller who cannot tell "retry this" from "your query is wrong" is the defect
+     * `_read-failure.ts` exists to prevent. `statesRetryability` above still fills the field in on the
+     * refusals that carry no structured body at all, so it is on every failure either way.
      */
-    const includeMetaRaw = (req.body as { includeRecordMeta?: unknown }).includeRecordMeta;
-    if (includeMetaRaw !== undefined && typeof includeMetaRaw !== 'boolean') {
-      res.status(400).json({ error: '`includeRecordMeta` must be a boolean' });
-      return;
-    }
-    const safeIncludeRecordMeta = includeMetaRaw === true;
-
-    const includeDiagRaw = (req.body as { includeDiagnostics?: unknown }).includeDiagnostics;
-    if (includeDiagRaw !== undefined && typeof includeDiagRaw !== 'boolean') {
-      res.status(400).json({ error: '`includeDiagnostics` must be a boolean' });
-      return;
-    }
-    const safeIncludeDiagnostics = includeDiagRaw === true;
-
-    // `projection`, the same grammar `/query` takes and the same reading of it — see `brain/projection.ts`.
-    // The canary operator measured the cost of its absence: 100,547 characters for ~1.5 KB of wanted data.
-    const projParse = projectionFromBody(req.body);
-    if (!projParse.ok) { res.status(400).json({ error: projParse.error }); return; }
-    const safeProjection = projParse.norm;
-
-    // The byte budget (X-17), replacing the record cap that collapsed a large answer to three inline records
-    // plus a whole-set dump — a shape that roughly DOUBLED the caller's cost rather than reducing it.
-    const budget = resolveBudget(req.body as BudgetRequest);
-    if (!budget.ok) { res.status(400).json({ error: budget.error }); return; }
-    // `skip` (clause 6a) and `remainderDump` (6b), resolved together and by ONE function for both doors —
-    // a `skip` that 400s here and silently floors to zero on MCP would make the behaviour depend on which
-    // client the caller happened to pick, which is the parity defect `CLAUDE.md` calls the half that hides.
-    const paging = resolvePaging(req.body as { skip?: unknown; remainderDump?: unknown });
-    if (!paging.ok) { res.status(400).json({ error: paging.error }); return; }
-
-    const degraded: string[] = [];
-    const all = (await Promise.all(
-      memberIds.map(mid => recall(mid, query.trim(), safeTopK, safeTags, safeTypes, safeMinPerType, safeMinScore, safeFilter, { maxPerType: safeMaxPerType, maxTimeMS: safeMaxTimeMS, degraded, includeFreshWrites: safeIncludeFresh })),
-    )).flat();
-    // rankOf, NOT `.score`. `recall()` has already ordered each space's results by the best signal it
-    // has — cross-encoder, then RRF fusion, then vector similarity. Re-sorting the merged list by raw
-    // vector score here silently threw both away, so hybrid ranking and reranking were undone at the
-    // last step on every REST recall — including a single-space one, which still passes through this
-    // merge with one member.
-    all.sort(byRankThenId);
-    // A proxy space fans out to N members, and each one honoured `maxPerType` for itself — so without this
-    // second pass a ceiling of 2 across three members would return six. The ceiling describes the ANSWER,
-    // so it is enforced where the answer is assembled, using the same function rather than a second cap
-    // loop. `minScore` is not re-applied: each member already filtered on it.
-    const seeds = safeMaxPerType
-      ? mergeRecallResults([], all, safeTopK, undefined, safeMaxPerType)
-      : all.slice(0, safeTopK);
-
-    // Tell the per-space counters whether this recall actually answered, and how good the best hit was.
-    //
-    // This is the difference between "this space is asked a lot" and "this space is useful": a space queried
-    // five hundred times that returns nothing is not popular, and in a call count the two are identical. Only
-    // this handler knows what came back, so it hands the outcome to the audit middleware, which owns the
-    // duration and the space attribution.
-    //
-    // `rankOf` rather than `.score` for the same reason the sort above uses it — it is the best signal
-    // available for the result, after reranking and fusion.
-    req.recallOutcome = {
-      answered: seeds.length > 0,
-      ...(seeds.length > 0 ? { topScore: rankOf(seeds[0]!) } : {}),
-    };
-
-    if (safeTraverse === 0) {
-      // `degraded` is present only when something degraded. An empty array on every healthy response is
-      // noise, and a field that is almost always empty is a field readers learn to skip — which is exactly
-      // when it needs to be noticed. The requester asked for the flag in the BODY rather than only a status,
-      // because a 200 that is quietly short is indistinguishable from a 200 that found everything.
-      // A large answer spills even with NO traversal: `topK: 100` is 100 records, and this branch used to
-      // return all of them because the spill lived in the graph branch alone. That was the bug the E2E caught —
-      // the rule is about the size of the result set, not about whether a graph is attached.
-      const plain = projectResults(
-        withoutDiagnostics(stripContentIfAsked(seeds, safeIncludeContent), safeIncludeDiagnostics),
-        safeProjection);
-      const plainBudgeted = await budgetedEnvelope({
-        results: plain,
-        budget,
-        skip: paging.skip,
-        remainderDump: paging.remainderDump,
-        spillRemainder: remainder => spillResultSet({
-          memberSpaceId: seeds[0]?.spaceId ?? spaceId,
-          results: remainder,
-          request: { query: query.trim(), topK: safeTopK, traverse: 0, types: safeTypes ?? null },
-        }),
-      });
-      res.json({
-        results: plainBudgeted.results,
-        ...plainBudgeted.fields,
-        ...(degraded.length > 0 ? { degraded } : {}),
-      });
-      return;
-    }
-
-    // Graph-augmented recall: expand seeds along edges, cap the traversed NODES, and nest each one under the
-    // seed that reached it. `count` is the number of MATCHES — it used to be matches plus neighbours, so a
-    // caller asking for `topK: 1` was told `count: 6` and could not use the number they page on.
-    const totalCap = safeTopK * (safeTraverse + 1) * 4;
-    // The cap is now the SPILL point rather than the truncation point: past it the whole neighbourhood is
-    // written to the space's `_tmp/` and the response carries an authenticated download link. A short graph
-    // reads as "this record has few relationships", which is a wrong conclusion about the DATA.
-    const { graph, spill, truncated: graphTruncated } = await buildGraphWithSpill(
-      memberIds,
-      seeds.map(s => ({ _id: s._id, spaceId: s.spaceId })),
-      safeTraverse,
-      Math.max(0, totalCap - seeds.length),
-      traverseOpt,
-    );
-    // The flag applies here too. A caller who asked not to be sent passage bodies did not stop meaning it
-    // because they also asked for graph expansion — and an option that silently lapses on one code path is
-    // the same shape of defect as one that reaches only one surface.
-    // Through `mapGraphNodes` rather than attaching `graph.bySeed` raw. It was the raw attach that let the
-    // whole edge document — vector included, until the projection added beside this change — reach a REST
-    // caller while MCP's copy of the same tree went through a shaping function. One nesting implementation
-    // is the point of that function; this door had been going round it.
-    const withGraph = withoutDiagnostics(stripContentIfAsked(seeds, safeIncludeContent), safeIncludeDiagnostics)
-      .map(s => {
-        const nested = mapGraphNodes(
-          graph.bySeed.get(s._id), graphNodeRecord, safeIncludeDiagnostics, safeProjection);
-        return nested ? { ...s, _graph: nested } : s;
-      });
-    // Storage bookkeeping is opt-in, and it goes BEFORE the byte budget is measured — trimming after
-    // would shrink the response without letting the caller spend what it saved on more evidence, which is
-    // the whole point of the change.
-    const results = projectResults(withGraph as RecallResult[], safeProjection)
-      .map(r => stripRecordMeta(r as object, { includeRecordMeta: safeIncludeRecordMeta }));
-    // `graphNodes` reports what `count` used to conflate: how much graph came back. Two numbers, each meaning
-    // one thing, rather than one number meaning whichever the reader assumes.
-    // The WHOLE result set spills, not the graph alone: `topK: 100, traverse: 2` is a large answer even when
-    // every graph inside it is complete, and a caller cannot page a recall. Past the threshold the response
-    // carries a SAMPLE — three matches — and the link to all of it. Embeddings are stripped from the file.
-    const budgeted = await budgetedEnvelope({
-      results,
-      budget,
-      skip: paging.skip,
-      remainderDump: paging.remainderDump,
-      spillRemainder: remainder => spillResultSet({
-        memberSpaceId: seeds[0]?.spaceId ?? spaceId,
-        results: remainder,
-        request: { query: query.trim(), topK: safeTopK, traverse: safeTraverse, types: safeTypes ?? null },
-      }),
-    });
-    res.json({
-      results: budgeted.results,
-      ...budgeted.fields,
-      traverseDepth: safeTraverse,
-      // What the server actually walked. A number when nothing was narrowed — so an existing caller's assertion
-      // still holds — and the object when it was, because a narrowing the response does not mention is one the
-      // caller cannot verify was applied.
-      traverse: echoTraverse(traverseOpt),
-      // Counted from the payload actually being sent, not from what the traversal REACHED.
-      //
-      // `graph.nodes` is the total across every seed the walk visited — including seeds the byte budget then
-      // evicted, so the number described an answer the caller did not receive. The integration guide already
-      // said this field is "how many traversed nodes came back", which was simply false.
-      //
-      // `countGraphNodes` walks the emitted structure, so it is correct for both doors' shapes by
-      // construction — flat with `_graph` alongside on REST, nested under `record` on MCP — and it is the
-      // same function the spill file uses to describe itself, for the same reason: a count passed in
-      // alongside a payload can describe a different set of records than the payload does.
-      graphNodes: countGraphNodes(budgeted.results),
-      ...(graphTruncated ? { graphTruncated: true } : {}),
-      ...(spill ? { graphComplete: spill } : {}),
-      ...(degraded.length > 0 ? { degraded } : {}),
-    });
-  } catch (err: unknown) {
-    // A store failure is not a client error. See `brain/store-failure.ts` — this used to answer 400 for every
-    // throw, which told fourteen personas not to retry a condition that cleared in seconds.
-    sendReadFailure(res, err);
+    res.status(outcome.status).json({ error: text, ...(outcome.result.structuredContent ?? {}) });
+    return;
   }
+
+  /*
+   * Typed as the RANKING envelope, not as `RecallResult`. A hit is `{score, spaceId, type, record}` — the
+   * record is nested, and only the ranking fields sit at the top level. Calling it a `RecallResult` would
+   * compile (the ranking fields overlap) and would tell the next reader the record's fields are here.
+   */
+  const answer = JSON.parse(text) as {
+    count?: number;
+    results?: { score?: number; fusedScore?: number; rerankScore?: number }[];
+  };
+  /*
+   * The space-activity signal, and it is NOT part of the response — which is why collapsing this route
+   * dropped it silently and no comparison of the two bodies would have found it.
+   *
+   * `audit/middleware.ts` reads `req.recallOutcome` to record whether a recall ANSWERED and how well, and
+   * that is what separates a space worth keeping from one that is merely asked a lot. The old handler
+   * stashed it because it was the only code that knew; the tool knows now, and has no `req` to put it on.
+   *
+   * `rankOf` rather than `.score`, for the reason it exists: precedence is rerank > fused > vector, so on
+   * an instance with a reranker `.score` is the one number that did NOT decide the result's position.
+   */
+  const top = answer.results?.[0];
+  req.recallOutcome = {
+    answered: (answer.count ?? 0) > 0,
+    ...(top ? { topScore: rankOf(top) } : {}),
+  };
+  res.status(outcome.status).json(answer);
 });
 
 
@@ -861,8 +560,8 @@ searchRouter.post('/similar', globalRateLimit, requireBodyScopedSpace('knowledge
     ? (body['targetTypes'] as unknown[]).filter((t): t is RecallKnowledgeType => typeof t === 'string' && VALID_ENTRY_TYPES.has(t))
     : undefined;
 
-  // `traverse` and `includeContent`: MCP `find_similar` has implemented both since it shipped — the tool schema
-  // advertises them and the handler reads them — while this route read neither. Same shape as the `includeContent`
+  // `traverse` and `includeFileContent`: MCP `find_similar` has implemented both since it shipped — the tool schema
+  // advertises them and the handler reads them — while this route read neither. Same shape as the `includeFileContent`
   // asymmetry an integrator reported on `recall`, one route over.
   //
   // Strictness is what made it visible: before the body was strict, sending `traverse: 2` here returned an unexpanded
@@ -878,12 +577,12 @@ searchRouter.post('/similar', globalRateLimit, requireBodyScopedSpace('knowledge
   }
   const fsTraverseOpt = parsedFsTraverse.value;
   const safeTraverse = fsTraverseOpt.depth;
-  const includeContentRaw = body['includeContent'];
-  if (includeContentRaw !== undefined && typeof includeContentRaw !== 'boolean') {
-    res.status(400).json({ error: '`includeContent` must be a boolean' });
+  const includeFileContentRaw = body['includeFileContent'];
+  if (includeFileContentRaw !== undefined && typeof includeFileContentRaw !== 'boolean') {
+    res.status(400).json({ error: '`includeFileContent` must be a boolean' });
     return;
   }
-  const safeIncludeContent = includeContentRaw !== false;
+  const safeIncludeFileContent = includeFileContentRaw !== false;
   // The same flag, on the same rule: find-similar returns recall RESULTS, so it carried the same six
   // system fields REST's recall did while MCP's `find_similar` — which builds its records through
   // `toRecallRecord` — has never sent any of them. Fixing recall alone would leave the identical
@@ -953,7 +652,7 @@ searchRouter.post('/similar', globalRateLimit, requireBodyScopedSpace('knowledge
     );
     if (safeTraverse === 0) {
       const plainItems = projectResults(withoutDiagnostics(
-        stripContentIfAsked(result.results, safeIncludeContent), safeIncludeDiagnostics), safeProjection);
+        stripContentIfAsked(result.results, safeIncludeFileContent), safeIncludeDiagnostics), safeProjection);
       const plainItemsBudgeted = await budgetedEnvelope({
         results: plainItems,
         budget,
@@ -990,7 +689,7 @@ searchRouter.post('/similar', globalRateLimit, requireBodyScopedSpace('knowledge
       fsTraverseOpt,
     );
     const itemsWithGraph = withoutDiagnostics(
-      stripContentIfAsked(result.results, safeIncludeContent), safeIncludeDiagnostics)
+      stripContentIfAsked(result.results, safeIncludeFileContent), safeIncludeDiagnostics)
       .map(r => {
         const nested = mapGraphNodes(
           graph.bySeed.get(r._id), graphNodeRecord, safeIncludeDiagnostics, safeProjection);

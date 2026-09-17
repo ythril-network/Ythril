@@ -144,6 +144,51 @@ describe('everything we refuse ourselves is UNCHANGED — the direction that mus
   });
 });
 
+describe('a delegating route keeps what the response does not carry', () => {
+  it('recall still stashes its outcome for the space-activity signal', () => {
+    /*
+     * The half of a route collapse that NO comparison of the two response bodies can find, because it is
+     * not in the body.
+     *
+     * `audit/middleware.ts` reads `req.recallOutcome` — did this recall answer, and how well — and records
+     * it per space. That is the signal separating a space worth keeping from one that is merely asked a
+     * lot. The old handler set it because it was the only code that knew; when `POST /api/brain/recall`
+     * collapsed onto `callTool` the assignment went with the handler, and every recall through that route
+     * recorded `undefined` for both fields. Nothing failed, nothing logged, and the number an operator
+     * reads would have drifted quietly toward zero.
+     *
+     * Asserted against the CONSUMER rather than as a literal, so a rename moves both or fails here.
+     */
+    const audit = stripComments(readFileSync('server/src/audit/middleware.ts', 'utf8'));
+    const routes = stripComments(readFileSync('server/src/api/brain/search.ts', 'utf8'));
+    const reads = [...audit.matchAll(/req\.recallOutcome\?\.(\w+)/g)].map(m => m[1]);
+    assert.ok(reads.length >= 2, `the audit hook reads only ${reads.length} outcome field(s) — re-point this gate`);
+
+    const at = routes.indexOf("searchRouter.post('/recall'");
+    assert.ok(at > 0, '/recall is no longer registered — re-anchor this gate');
+    const body = routes.slice(at, routes.indexOf('searchRouter.', at + 20));
+    assert.match(body, /req\.recallOutcome\s*=/,
+      'the recall route no longer stashes its outcome, so the space-activity signal records nothing');
+    for (const field of new Set(reads)) {
+      // `\\b`, doubled: a single `\b` in a template literal is a BACKSPACE character, not a word boundary,
+      // so the first version built a regex that matched nothing and reported every field as missing.
+      assert.match(body, new RegExp(`\\b${field}\\b`),
+        `the audit hook reads \`${field}\` and the route never sets it — the field is silently undefined`);
+    }
+  });
+
+  it('and derives the score through the shared comparator, not from `.score`', () => {
+    // Precedence is rerank > fused > vector. On an instance with a reranker, `.score` is the one number
+    // that did NOT decide the result's position, so recording it would make the activity signal describe
+    // an ordering nobody saw.
+    const routes = stripComments(readFileSync('server/src/api/brain/search.ts', 'utf8'));
+    const at = routes.indexOf('req.recallOutcome');
+    const stmt = routes.slice(at, routes.indexOf('};', at));
+    assert.match(stmt, /rankOf\(/,
+      'topScore must come from rankOf — `.score` is the vector half alone');
+  });
+});
+
 describe('both doors, and all three routes', () => {
   it('`retryable` is on EVERY failure body, not only the retryable ones', () => {
     // A field that appears only when it is true is a field whose absence has to be interpreted, and the caller
@@ -182,6 +227,20 @@ describe('both doors, and all three routes', () => {
         `${path} does not carry statesRetryability, so its early refusals omit \`retryable\``);
     }
 
+    /*
+     * A DELEGATING route needs the wrapper AND the tool's structured body, and the second half is the one
+     * that was dropped. `/recall` hands its arguments to `callTool`, which classifies a store failure and
+     * returns `retryable`, `storeSideFailure` and the driver code in `structuredContent`; a route that
+     * answers `{error}` alone throws all of that away and leaves the wrapper to guess from the status.
+     */
+    const recallAt = routes.indexOf("searchRouter.post('/recall'");
+    const recallBody = routes.slice(recallAt, routes.indexOf('searchRouter.', recallAt + 20));
+    if (/callTool\(/.test(recallBody)) {
+      assert.match(recallBody, /\.\.\.\(outcome\.result\.structuredContent \?\? \{\}\)/,
+        'a route delegating to callTool must forward the structured error body, or `retryable` and the '
+        + 'driver code are lost between the classifier and the caller');
+    }
+
     const helper = stripComments(readFileSync('server/src/api/brain/_read-failure.ts', 'utf8'));
     assert.match(helper, /res\.statusCode >= 500 \|\| res\.statusCode === 429/,
       '429 is retryable by definition and already documents Retry-After — defaulting it to false would lie');
@@ -189,11 +248,22 @@ describe('both doors, and all three routes', () => {
       'a body that already states retryable must be left alone, so the classifier always wins over the default');
   });
 
-  it('all three read routes answer through the one helper', () => {
-    // Three separate two-line catches is how one of them keeps the old behaviour. Counted, not spot-checked.
+  it('every read route that catches its own failures answers through the one helper', () => {
+    /*
+     * Counted, not spot-checked: separate two-line catches are how one route keeps the old behaviour.
+     *
+     * The count is DERIVED rather than written down, because `/recall` stopped catching anything when it
+     * collapsed onto `callTool` — which classifies the failure itself and hands back a status. Pinning the
+     * number at three turned that into a red gate about a route that had got safer, and the obvious repair
+     * (change 3 to 2) would have to be made again after the next collapse. So the subject is *every route
+     * that still has a `catch`*, and the rule is that none of them rolls its own answer.
+     */
     const src = stripComments(readFileSync('server/src/api/brain/search.ts', 'utf8'));
-    assert.equal((src.match(/sendReadFailure\(res, err\)/g) ?? []).length, 3,
-      '/query, /recall and /find-similar must all answer through it');
+    const catches = (src.match(/\}\s*catch\s*\(/g) ?? []).length;
+    const delegated = (src.match(/sendReadFailure\(res, err\)/g) ?? []).length;
+    assert.ok(catches >= 2, `only ${catches} catch blocks on the search router — the scan is broken, not the code`);
+    assert.equal(delegated, catches,
+      `${catches} routes catch a failure and only ${delegated} answer through sendReadFailure`);
     assert.doesNotMatch(src, /res\.status\(400\)\.json\(\{ error: msg \}\)/,
       'a surviving hand-rolled 400 catch is the drift this replaced');
   });

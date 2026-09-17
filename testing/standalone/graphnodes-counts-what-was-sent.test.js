@@ -33,12 +33,14 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { routeBody, delegatesCleanly } from './_delegating-routes.mjs';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { statementAround } from './_structural-window.mjs';
 
 const { countGraphNodes } = await import('../../server/dist/brain/graph-spill.js');
 
+/** REST first: the derivation below subtracts the REST routes that no longer build their own response. */
 const DOORS = ['server/src/api/brain/search.ts', 'server/src/mcp/tools/search.ts'];
 
 describe('countGraphNodes reads both doors shapes', () => {
@@ -59,13 +61,30 @@ describe('countGraphNodes reads both doors shapes', () => {
 });
 
 describe('every door counts what it sent', () => {
-  it('finds all four report sites, so an empty sweep cannot pass', () => {
+  it('finds a report site for every surface that BUILDS a response, so an empty sweep cannot pass', () => {
+    /*
+     * The expected count is DERIVED, not written down, and the reason is what happened to it.
+     *
+     * It read `4` — recall and find_similar on each of two doors — and went red when
+     * `POST /api/brain/recall` collapsed onto `callTool`. That route builds no response any more, so it
+     * emits no `graphNodes` and needs none: the count was right and then the world changed under it. The
+     * obvious repair is to write `3`, and the next collapse makes that wrong too.
+     *
+     * So: two capabilities on two doors, MINUS the REST routes that delegate. A gate that derives its own
+     * number cannot be made stale by a refactor that is doing the right thing.
+     */
+    const restSrc = stripComments(readFileSync(DOORS[0], 'utf8'));
+    const delegated = ['/recall', '/similar']
+      .filter(p => { const b = routeBody(restSrc, p); return b && delegatesCleanly(b, `POST ${p}`); });
+    const expected = 4 - delegated.length;
+
     const sites = DOORS.flatMap(d =>
       [...stripComments(readFileSync(d, 'utf8')).matchAll(/graphNodes:/g)].map(m => `${d}@${m.index}`));
     assert.equal(
-      sites.length, 4,
-      `expected four graphNodes emitters — recall and find_similar on each door — found ${sites.length}. `
-      + 'The scan has broken, or a fifth search surface exists and needs the same treatment.',
+      sites.length, expected,
+      `expected ${expected} graphNodes emitters — recall and find_similar on each door, less the `
+      + `${delegated.length} REST route(s) that delegate (${delegated.join(', ') || 'none'}) — found `
+      + `${sites.length}. The scan has broken, or a fifth search surface exists and needs the same treatment.`,
     );
   });
 

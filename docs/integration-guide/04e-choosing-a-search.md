@@ -88,7 +88,7 @@ space schema is what keeps it on the fast path.
   "topK": 10 }
 ```
 
-**Locate, then read.** `includeContent: false` returns file-chunk locations and metadata without the passage
+**Locate, then read.** `includeFileContent: false` returns file-chunk locations and metadata without the passage
 bodies — by far the largest field in a result, paid for `topK` times. Find *where* something is, then read only the
 chunk you chose.
 
@@ -123,7 +123,7 @@ wanted: lower `traverse` or narrow the seeds rather than raising the budget.
 In order of effect:
 
 1. **Narrow before ranking** — a `filter` or `tags` cuts the candidate set the vector search scores.
-2. **Drop the passages** — `includeContent: false`.
+2. **Drop the passages** — `includeFileContent: false`.
 3. **Lower `traverse`** — each hop multiplies the frontier.
 4. **Lower `topK`** — this is last on purpose: with a reranker configured, a wider net is cast *before* the cut, so
    `topK` costs less than it looks.
@@ -138,8 +138,13 @@ In order of effect:
 
 ### "I wrote it a second ago and cannot find it"
 
-`includeFreshWrites: true`. Writes do not wait for the embedding model, so a record can exist and be unindexed for
-a moment. It costs an extra scan per type, so it is opt-in rather than the default.
+Nothing to do — `recall` already handles it. Writes do not wait for the embedding model, and the vector index
+lags the collection by a few seconds after that, so every recall also scans the newest records straight from
+each collection. Measured: a plain recall used to answer `count: 0` for three seconds after a write.
+
+This was the `includeFreshWrites` flag until 5.0. **Delete it if you send it** — it is an unknown field and a
+`400` now. What it does not cover is a record still QUEUED for embedding: the scan compares vectors, so there
+has to be one.
 
 ## The mistakes worth naming
 

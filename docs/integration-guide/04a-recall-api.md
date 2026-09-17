@@ -30,24 +30,28 @@ Available as both — REST `POST /api/brain/recall`, MCP tool `recall`:
 | `maxPerType` | — | none | Object mapping knowledge type → **maximum** hits, e.g. `{ "file": 2 }` — the ceiling to `minPerType`'s floor. A slot the cap frees goes to another type. Each value must be at least `1` and is clamped to `topK`; a value below `minPerType` for the same type is a `400` (see below) |
 | `maxTimeMS` | — | the instance budget | Deadline for this recall, in ms. **Can only lower the instance's `RECALL_BUDGET_MS`, never raise it** — a larger value is clamped to it, and a very small one is clamped up to a 250 ms floor. On expiry you get a **partial** answer with a `degraded` field, not an error and not a hang |
 | `traverse` | — | `0` | Graph expansion: an integer depth `0`–`5`, **or an object `{depth, edgeLabels, direction}`** — a `traverse` call without its start node, because the matches *are* the start nodes. `0` = classic recall. See [Graph-Augmented Recall](#graph-augmented-recall-traverse-parameter) |
-| `includeFreshWrites` | — | `false` | Also scan the newest records straight from each collection, so a record written seconds ago is findable before the vector index has ingested it. See below. A non-boolean is a `400`, never coerced |
-| `includeContent` | — | `true` | Whether file-chunk results carry `content` — the passage body. `false` returns locations and metadata only (path, heading, chunk index, tags, properties). **File chunks ONLY** — it does nothing on a search returning entities, facts, edges or chrono entries; use `projection` to trim those. A non-boolean is a `400`, never coerced |
+| `includeFileContent` | — | `true` | Whether file-chunk results carry `content` — the passage body. `false` returns locations and metadata only (path, heading, chunk index, tags, properties). **File chunks ONLY** — it does nothing on a search returning entities, facts, edges or chrono entries; use `projection` to trim those. A non-boolean is a `400`, never coerced |
 | `includeRecordMeta` | — | `false` | Add back the fields that describe where a record SITS rather than what it says: `createdAt`, `updatedAt` and the link-id arrays. Measured on a real corpus only **30%** of a recall answer was content and most of the rest was this, which at a tight `maxChars` is evidence you paid for and did not get. `createdAt` is the one to be careful of — it is when the RECORD was written, not when the remembered thing happened, which lives in the record's own properties. **Applies recursively**, so a `traverse` answer's `_graph` follows it at every depth. MCP takes the same parameter with the same default. A non-boolean is a `400`, never coerced |
 | `includeDiagnostics` | — | `false` | Add back the three fields a result carries for the SYSTEM rather than for you: `matchedText` (the exact pre-embedding source string — for a file chunk, the passage a SECOND time), `embeddingModel` and `seq`. **Applies recursively**, so a `traverse` answer's `_graph` nodes and edges follow it at every depth. Off by default since 3.1.0 — before then this door sent them unconditionally while MCP sent none. **It does NOT gate the per-stage scores.** `lexicalScore`, `fusedScore` and `rerankScore` are returned unconditionally on both doors, because the one that decided a result's position must not be the one you cannot read — and three floats are not a cost worth a flag. The embedding VECTOR is not among them and is never returned by anything. A non-boolean is a `400`, never coerced |
 | `projection` | — | none | Fields to include (1) or exclude (0), the same grammar `POST /query` takes, applied to each result's record. Dotted paths work: `{"name": 1, "properties.status": 1}`. **Applies recursively** — a `traverse` answer's `_graph` nodes and edges are projected at every depth, which is where a large answer's size actually comes from. Inclusion and exclusion cannot be mixed (the non-`_id` fields decide which you meant); `_id` survives an inclusion projection unless you send `_id: 0`; and the embedding VECTOR can never be projected back in — an explicit `embedding: 1` is dropped rather than honoured. The ranking envelope (`score`, `spaceId`, `type`, `_graph`) always survives, so a projection cannot lose the score you searched for |
 | `maxChars` | — | `50000` REST / `25000` MCP | Ceiling on the serialised response body, in **characters**, and the ceiling that carries the defaults. **The default differs by DOOR: 50000 over REST, 25000 over MCP.** Both doors accept this parameter identically — same floor, same ceiling, same refusal — and only the number applied when you send nothing differs, because an MCP tool result meets a hard per-result ceiling inside the client that the caller cannot raise while a REST body lands in a buffer its caller allocated. Measured: a correct, in-budget 98356-character answer was refused outright by an MCP client. Raise it if yours can take more. **This is the parameter that used to be called `maxBytes`**: that name always counted characters, which equal bytes only for ASCII. **The answer is a PREFIX of the ranked results and every record in it is WHOLE** — full body, full properties, complete `_graph`, byte-identical to that record from an unbudgeted call. Truncation is atomic at the match: the first match whose subtree would not fit is omitted and so is everything after it, so no answer has a gap and none carries a record with half its graph. **That is what the guarantee costs** — the budgeted unit is a match TOGETHER WITH its subtree, so a deeper or wider `traverse` means fewer matches fit, and the ones that do not are absent rather than shortened. `returned`, `count`, `truncated`, `budgetChars`, `budgetBytes`, `charsReturned` and `bytesReturned` are on EVERY response, so absence never has to be interpreted; a truncated one adds `nextSkip`, which you send back as `skip` |
 | `maxBytes` | — | **none** | Ceiling on the serialised response body, in **real UTF-8 bytes**. **BREAKING IN 3.7: this used to bound characters** while its name, its refusal message, its response field and this table all said bytes — true for ASCII and wrong for everything else. `Grüße aus Köln — ąćę` counts 31 characters against 39 bytes; three emoji count 17 against 23. A transport or client limit IS in bytes, so a German or Polish space was overrunning its stated budget by about a quarter. If you set this before and want the old behaviour, send the same number as `maxChars`. **It has no default**, deliberately: bytes are always ≥ characters, so a byte default equal to the character one would silently become the binding constraint on every non-ASCII answer. **When you set both, both apply** — the answer stops at whichever ceiling it reaches first |
-| `maxTokens` | — | none | A convenience onto **`maxChars`**, converted with `charsPerToken` — the conversion produces characters, which is what it was always compared against. If both are sent the **smaller** resulting character figure applies. It is an approximation — the server does not know your tokeniser |
-| `charsPerToken` | — | `3.5` | Ratio used to convert `maxTokens` to CHARACTERS — the row above says so, and this one said bytes. 3.5 rather than the customary 4.0 because 4.0 UNDER-counts tokens and is worst on graph-heavy responses: undershooting costs one page, overshooting costs a blown context |
+| `maxTokens` | — | none | A convenience onto **`maxChars`**, converted at a fixed 3.5 characters per token — the conversion produces characters, which is what it was always compared against. The ratio was a `charsPerToken` parameter until 5.0; it did nothing unless `maxTokens` was also set, and a caller who needs the ceiling exact should state `maxChars`. If both are sent the **smaller** resulting character figure applies. It is an approximation — the server does not know your tokeniser |
 | `skip` | — | `0` | How many of the ranked matches to skip before filling the byte budget. **This is how you read a truncated answer**: a response with `truncated: true` carries `nextSkip`, and sending it back gets you the next prefix — no match repeated, none missed. The ranking is recomputed per call, so it is a continuation over one ordered answer rather than a cursor over a snapshot |
 | `remainderDump` | — | `false` | Also write the matches that did not fit to the space as JSON and report it as `remainder`. Only meaningful when the answer truncates. Off by default because it is a write on a read path that counts against space storage — page with `skip` to reach the same records without one |
+
+**Response** `200`. **BREAKING IN 5.0: a hit is `{score, spaceId, type, record}`** — this door returned one
+flat object before, the MCP tool always nested, and the two became one shape. **Read `hit.record.<field>`
+where you read `hit.<field>`**; `score`, `spaceId`, `type`, `_graph` and the per-stage scores are unmoved, and
+`_graph` neighbours are unchanged. `POST /api/brain/similar` is still flat until it collapses too.
 
 **Response** `200`:
 
 ```json
 {
   "results": [
-    { "_id": "...", "type": "fact", "fact": "...", "score": 0.91 }
+    { "score": 0.91, "spaceId": "work", "type": "fact",
+      "record": { "_id": "...", "fact": "..." } }
   ],
   "count": 1
 }
@@ -64,7 +68,7 @@ one that ran out of time contributes nothing and the response gains a `degraded`
 
 ```json
 {
-  "results": [ { "_id": "...", "type": "fact", "score": 0.83 } ],
+  "results": [ { "score": 0.83, "spaceId": "work", "type": "fact", "record": { "_id": "..." } } ],
   "count": 1,
   "degraded": ["search_timeout"]
 }
@@ -201,11 +205,12 @@ did:
 {
   "results": [
     {
-      "_id": "...", "type": "file", "path": "specs/NMK-240C.md",
       "score": 0.71,
       "lexicalScore": 4.83,
       "fusedScore": 0.0325,
-      "rerankScore": 0.94
+      "rerankScore": 0.94,
+      "spaceId": "work", "type": "file",
+      "record": { "_id": "...", "path": "specs/NMK-240C.md" }
     }
   ],
   "count": 1
@@ -268,9 +273,12 @@ off the match that reached it:
 {
   "results": [
     {
-      "_id": "…", "type": "file", "path": "runbooks/NMK-SI-11.md",
       "score": 0.71, "lexicalScore": 4.83, "fusedScore": 0.0325, "rerankScore": 0.94,
-      "matchedText": "Form NMK-SI-11 must be filed within 6 hours…",
+      "spaceId": "work", "type": "file",
+      "record": {
+        "_id": "…", "path": "runbooks/NMK-SI-11.md",
+        "matchedText": "Form NMK-SI-11 must be filed within 6 hours…"
+      },
       "_graph": [
         {
           "edge": {
@@ -417,7 +425,8 @@ actually reached was the weaker.
 {
   "results": [
     {
-      "_id": "adr-0042", "name": "Token Scoping", "type": "decision", "score": 0.91,
+      "score": 0.91, "spaceId": "work", "type": "entity",
+      "record": { "_id": "adr-0042", "name": "Token Scoping", "type": "decision" },
       "_graph": [
         {
           "edge": {
@@ -636,14 +645,14 @@ reachable through an authenticated download, and reported as `remainder`:
 > contained the three records already sent. A budget with a prefix and a remainder gives the caller the same
 > ceiling without the duplication.
 
-#### Recall without passage bodies (`includeContent`)
+#### Recall without passage bodies (`includeFileContent`)
 
 A file result's `content` is the passage body, and it is by far the largest field a result carries — paid for
-`topK` times, in tokens. `includeContent: false` omits it and returns everything needed to decide *which*
+`topK` times, in tokens. `includeFileContent: false` omits it and returns everything needed to decide *which*
 passage you want: path, heading, chunk index, tags, properties.
 
 ```json
-{ "query": "retention policy", "types": ["file"], "includeContent": false }
+{ "query": "retention policy", "types": ["file"], "includeFileContent": false }
 ```
 
 That turns one expensive call into a cheap two-phase flow — recall to find **where** something is, then read
@@ -653,33 +662,27 @@ flag with the same meaning since they shipped; REST had no way to ask, which an 
 It drops `content` and nothing else, on file results and nothing else — the flag is about the passage body,
 not about thinning a result. The default is `true`, so no existing caller changes.
 
-#### Searching for something you just wrote (`includeFreshWrites`)
+#### Searching for something you just wrote (no parameter — it is automatic)
 
-`$vectorSearch` reads an index, and that index lags behind the collection. The vector is on the document the
-moment it is written — insert-time duplicate detection sees a brand-new record immediately — but recall does
-not see it until mongot has ingested it. **An integrator measured a fact still invisible to recall 150
-seconds after writing it**, polled every 5 s, for a distinctive nine-word phrase.
+`$vectorSearch` reads an index, and that index lags behind the collection: the vector is on the document the
+moment it is written, but recall does not see it until mongot has ingested it. **An integrator measured a
+fact still invisible to recall 150 seconds after writing it.** So every recall **also scans the newest
+records straight from each collection** — write a fact and search for it in the next breath and you find it.
 
-`includeFreshWrites: true` also scans the newest records straight from each collection, which is exactly the
-set the index has not caught up with:
-
-```json
-{ "query": "the phrase I just stored", "includeFreshWrites": true }
-```
-
-- **A fresh hit is indistinguishable from an indexed one** — same shape, same `score`, same per-type fields.
-  You cannot tell which channel found a record, and should not need to.
-- **It is off by default**, and that is a decision rather than an omission. The scan is paid per knowledge
-  type, and recall is a path somebody is waiting on. Turn it on for the case it exists for: searching for
-  something you just wrote. Bounded by a time window and a document cap, so its cost tracks how much has been
-  written recently rather than how large the space is (~9 ms with an empty window, ~52 ms with a full one, at
-  20k records).
-- **`exact: true` is not an alternative** and was measured not to be. It scans the index exhaustively rather
-  than the collection, so it skips the approximate traversal, not mongot: on the same insert, ANN first saw
-  the record after 1088 ms and ENN after 1083 ms.
-
-Operators can see whether the lag is biting on their instance: `ythril_recall_fresh_writes_found_total`
-counts records returned that the index had not yet ingested. Zero means the index is keeping up with writes.
+- **It was the `includeFreshWrites` flag until 5.0. If you send it, delete it** — unknown field, `400`.
+  Measured before removing it: a plain recall answered `count: 0` for three seconds after a write, and
+  always scanning costs 159–167 ms against 91–101 ms on a space with 220 records inside the window, and
+  nothing at all on a quiet one. A flag whose only function was to let a caller opt into a blind spot is not
+  a performance feature.
+- **A fresh hit is indistinguishable from an indexed one** — same shape, same `score`, same fields — and it
+  honours `filter` and `tags` like the rest of the search.
+- **Bounded, which is why it can be unconditional**: the newest 200 records of the last 180 seconds, per
+  knowledge type, so cost tracks recent writes rather than the size of the space.
+- **It does not help a record still QUEUED for embedding.** The scan compares vectors, so one whose job has
+  not run has nothing to compare. What it closes is the gap between *embedded* and *indexed*.
+- **`exact: true` is not an alternative**: it scans the index exhaustively rather than the collection, and
+  reports the same lag (ANN 1088 ms, ENN 1083 ms on the same insert). `ythril_recall_fresh_writes_found_total`
+  counts what the scan found — zero means the index is keeping up on this instance.
 
 #### Prefiltered Recall (`filter` parameter)
 
@@ -805,7 +808,7 @@ POST /api/brain/similar
 
 Given an existing entry's `_id`, find other entries with high vector similarity. Unlike `recall` (which re-embeds a text query), `similar` uses the entry's **stored embedding vector** directly — no re-embedding step. Ideal for deduplication, "more like this", and merge detection.
 
-> **Also available as MCP tool:** `similar` — note the MCP tool makes `space` optional (omit it to search all accessible spaces, like `recall`); its `crossSpace` flag is deprecated in favour of omitting `space`. This REST endpoint keeps `spaceId` in the path and the `crossSpace` body flag. Every other parameter, including `traverse`, `includeContent` and `includeDiagnostics`, is identical on both doors.
+> **Also available as MCP tool:** `similar` — note the MCP tool makes `space` optional (omit it to search all accessible spaces, like `recall`); its `crossSpace` flag is deprecated in favour of omitting `space`. This REST endpoint keeps `spaceId` in the path and the `crossSpace` body flag. Every other parameter, including `traverse`, `includeFileContent` and `includeDiagnostics`, is identical on both doors.
 >
 > **The MCP tool returned plain TEXT at `traverse: 0` until 3.1.0**, and JSON only above it. It is now JSON at every depth, with the same per-result shape `recall` uses plus a `source` naming the entry you asked about. This REST endpoint has always returned JSON at every depth and is unchanged by that.
 
@@ -819,7 +822,7 @@ Given an existing entry's `_id`, find other entries with high vector similarity.
   "topK": 10,
   "minScore": 0.7,
   "traverse": 0,
-  "includeContent": true,
+  "includeFileContent": true,
   "crossSpace": false
 }
 ```
@@ -832,14 +835,13 @@ Given an existing entry's `_id`, find other entries with high vector similarity.
 | `topK` | — | `10` | Maximum results, minimum 1, no ceiling (see the note on the recall table above) |
 | `minScore` | — | `0.0` | Minimum cosine similarity threshold |
 | `traverse` | — | `0` | Graph-expansion depth (0–5). With `traverse > 0` each match is expanded along edges and the connected entities come back alongside it — see the response shape below |
-| `includeContent` | — | `true` | Whether file-chunk results carry their passage `content`. `false` returns locations and metadata only, exactly as on `recall` |
+| `includeFileContent` | — | `true` | Whether file-chunk results carry their passage `content`. `false` returns locations and metadata only, exactly as on `recall` |
 | `includeRecordMeta` | — | `false` | Add back the fields that describe where a record SITS rather than what it says: `createdAt`, `updatedAt` and the link-id arrays. Measured on a real corpus only **30%** of a recall answer was content and most of the rest was this, which at a tight `maxChars` is evidence you paid for and did not get. `createdAt` is the one to be careful of — it is when the RECORD was written, not when the remembered thing happened, which lives in the record's own properties. **Applies recursively**, so a `traverse` answer's `_graph` follows it at every depth. MCP takes the same parameter with the same default. A non-boolean is a `400`, never coerced |
 | `includeDiagnostics` | — | `false` | Add back the three fields a result carries for the SYSTEM rather than for you: `matchedText` (the exact pre-embedding source string — for a file chunk, the passage a SECOND time), `embeddingModel` and `seq`. **Applies recursively**, so a `traverse` answer's `_graph` nodes and edges follow it at every depth. Off by default since 3.1.0 — before then this door sent them unconditionally while MCP sent none. **It does NOT gate the per-stage scores.** `lexicalScore`, `fusedScore` and `rerankScore` are returned unconditionally on both doors, because the one that decided a result's position must not be the one you cannot read — and three floats are not a cost worth a flag. The embedding VECTOR is not among them and is never returned by anything. A non-boolean is a `400`, never coerced |
 | `projection` | — | none | Fields to include (1) or exclude (0), the same grammar `POST /query` takes, applied to each result's record. Dotted paths work: `{"name": 1, "properties.status": 1}`. **Applies recursively** — a `traverse` answer's `_graph` nodes and edges are projected at every depth, which is where a large answer's size actually comes from. Inclusion and exclusion cannot be mixed (the non-`_id` fields decide which you meant); `_id` survives an inclusion projection unless you send `_id: 0`; and the embedding VECTOR can never be projected back in — an explicit `embedding: 1` is dropped rather than honoured. The ranking envelope (`score`, `spaceId`, `type`, `_graph`) always survives, so a projection cannot lose the score you searched for |
 | `maxChars` | — | `50000` REST / `25000` MCP | Ceiling on the serialised response body, in **characters**, and the ceiling that carries the defaults. **The default differs by DOOR: 50000 over REST, 25000 over MCP.** Both doors accept this parameter identically — same floor, same ceiling, same refusal — and only the number applied when you send nothing differs, because an MCP tool result meets a hard per-result ceiling inside the client that the caller cannot raise while a REST body lands in a buffer its caller allocated. Measured: a correct, in-budget 98356-character answer was refused outright by an MCP client. Raise it if yours can take more. **This is the parameter that used to be called `maxBytes`**: that name always counted characters, which equal bytes only for ASCII. **The answer is a PREFIX of the ranked results and every record in it is WHOLE** — full body, full properties, complete `_graph`, byte-identical to that record from an unbudgeted call. Truncation is atomic at the match: the first match whose subtree would not fit is omitted and so is everything after it, so no answer has a gap and none carries a record with half its graph. **That is what the guarantee costs** — the budgeted unit is a match TOGETHER WITH its subtree, so a deeper or wider `traverse` means fewer matches fit, and the ones that do not are absent rather than shortened. `returned`, `count`, `truncated`, `budgetChars`, `budgetBytes`, `charsReturned` and `bytesReturned` are on EVERY response, so absence never has to be interpreted; a truncated one adds `nextSkip`, which you send back as `skip` |
 | `maxBytes` | — | **none** | Ceiling on the serialised response body, in **real UTF-8 bytes**. **BREAKING IN 3.7: this used to bound characters** while its name, its refusal message, its response field and this table all said bytes — true for ASCII and wrong for everything else. `Grüße aus Köln — ąćę` counts 31 characters against 39 bytes; three emoji count 17 against 23. A transport or client limit IS in bytes, so a German or Polish space was overrunning its stated budget by about a quarter. If you set this before and want the old behaviour, send the same number as `maxChars`. **It has no default**, deliberately: bytes are always ≥ characters, so a byte default equal to the character one would silently become the binding constraint on every non-ASCII answer. **When you set both, both apply** — the answer stops at whichever ceiling it reaches first |
-| `maxTokens` | — | none | A convenience onto **`maxChars`**, converted with `charsPerToken` — the conversion produces characters, which is what it was always compared against. If both are sent the **smaller** resulting character figure applies. It is an approximation — the server does not know your tokeniser |
-| `charsPerToken` | — | `3.5` | Ratio used to convert `maxTokens` to CHARACTERS — the row above says so, and this one said bytes. 3.5 rather than the customary 4.0 because 4.0 UNDER-counts tokens and is worst on graph-heavy responses: undershooting costs one page, overshooting costs a blown context |
+| `maxTokens` | — | none | A convenience onto **`maxChars`**, converted at a fixed 3.5 characters per token — the conversion produces characters, which is what it was always compared against. The ratio was a `charsPerToken` parameter until 5.0; it did nothing unless `maxTokens` was also set, and a caller who needs the ceiling exact should state `maxChars`. If both are sent the **smaller** resulting character figure applies. It is an approximation — the server does not know your tokeniser |
 | `skip` | — | `0` | How many of the ranked matches to skip before filling the byte budget. **This is how you read a truncated answer**: a response with `truncated: true` carries `nextSkip`, and sending it back gets you the next prefix — no match repeated, none missed. The ranking is recomputed per call, so it is a continuation over one ordered answer rather than a cursor over a snapshot |
 | `remainderDump` | — | `false` | Also write the matches that did not fit to the space as JSON and report it as `remainder`. Only meaningful when the answer truncates. Off by default because it is a write on a read path that counts against space storage — page with `skip` to reach the same records without one |
 | `crossSpace` | — | `false` | If `true`, search across all spaces the token can access |
