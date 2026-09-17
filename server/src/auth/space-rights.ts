@@ -320,6 +320,9 @@ export const TOOL_RIGHTS: readonly ToolRight[] = [
   { tool: 'save_bulk', area: 'knowledge', needs: 'write' },
   { tool: 'space_stats', area: 'knowledge', needs: 'read' },
   { tool: 'space_reindex', area: 'knowledge', needs: 'admin' },
+  // The BACKFILL, priced with its route rather than with the other `write` mutations: it rewrites what
+  // recall can find, and the route has sat at `knowledge: admin` beside `rebuild-indexes` since 4.4.
+  { tool: 'space_reembed', area: 'knowledge', needs: 'admin' },
   { tool: 'list_embed_jobs', area: 'knowledge', needs: 'read' },
   { tool: 'retry_embed_record', area: 'knowledge', needs: 'write' },
   { tool: 'retry_embed_media', area: 'files', needs: 'write' },

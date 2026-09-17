@@ -129,7 +129,7 @@ That's it. Your assistant instantly sees the space's purpose, its schema, and ev
 
 ## What's inside
 
-A quick tour — every capability is also a callable **MCP tool** (45 of them), a REST endpoint, and a screen in the web UI.
+A quick tour — every capability is also a callable **MCP tool** (46 of them), a REST endpoint, and a screen in the web UI.
 
 **No capability is missing from a door SILENTLY** — the build enumerates every mounted REST route and fails unless each one is answered by a named MCP tool, declared as a published gap, or classified as something an agent would never call, with the reason. Twenty-two of two hundred and twenty-two are declared gaps today, chiefly network governance and a file's original bytes, and `help()` reports them to every caller rather than leaving absent and forbidden indistinguishable. Same parameters, same defaults, same refusals is the rule the project holds itself to on every change.
 

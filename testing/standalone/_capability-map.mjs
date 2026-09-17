@@ -108,7 +108,15 @@ export const CAPABILITIES = [
   // `schema_update` replaces the whole map at `schema: admin`; this route edits ONE type at
   // `schema: write`. An agent reaching it through the whole-map replace needs a higher rung and a
   // read-modify-write, which can lose a concurrent edit. Declared as a gap in `parity.ts`.
-  ['Spaces', 'space_reindex', 'POST /api/spaces/:id/reembed'],
+  /*
+   * PAIRED WITH `space_reembed`, NOT `space_reindex`, and the correction is the point.
+   *
+   * This row said `space_reindex` and the docblock above flags exactly this as the judgement that cannot
+   * be derived. It was the wrong one: reindex re-embeds EVERY record with the configured model and
+   * returns immediately; this backfills records with NO vector and the counts it returns are the answer.
+   * So the route was REST-only, and the parity gate read a covered capability because the map said so.
+   */
+  ['Spaces', 'space_reembed', 'POST /api/spaces/:id/reembed'],
 
   ['Tokens', 'list_tokens', 'GET /api/tokens'],
   ['Tokens', 'list_tokens', 'GET /api/brain/spaces/:spaceId/token-access'],

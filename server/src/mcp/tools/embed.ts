@@ -14,6 +14,9 @@
  * drifts. What these handlers own is the MCP-shaped part: argument validation and text a model can act on.
  */
 import { resolveWriteTarget } from '../../spaces/proxy.js';
+import { getConfig } from '../../config/loader.js';
+import { reembedSpace, REEMBED_KINDS, REEMBED_DEFAULT_LIMIT, REEMBED_MAX_LIMIT } from '../../brain/reembed.js';
+import type { BrainEmbedRecordType } from '../../config/types.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
 import {
   listEmbedJobs, getEmbedJobCounts, retryEmbedJob, EMBED_RECORD_TYPES, isEmbedRecordType,
@@ -206,6 +209,163 @@ export const retry_embed_mediaTool: ToolHandler = {
     return {
       content: [{ type: 'text' as const, text }],
       structuredContent: { retried, space: callSpace },
+    };
+  },
+};
+
+/*
+ * ── The WHOLE-SPACE embedding operations, moved here from `spaces.ts` on 2026-09-17 ─────────────────────
+ *
+ * They lived beside `list_spaces` and `delete_space_data` because they take a space id, which is the wrong
+ * reason to share a file: every tool here takes a space id. What they have in common with the three above
+ * is the SUBJECT — embeddings and the queue that produces them — and `spaces.ts` crossed its god-file
+ * ceiling when the second of them was written, which is the gate asking the question rather than the move
+ * being cosmetic.
+ *
+ * They are also the pair most easily confused with each other, and putting them in one file next to each
+ * other is the cheapest thing that makes the difference visible to whoever edits one.
+ */
+
+/**
+ * Re-embed a space — the LAST of the five REST-only capabilities, and the one their workaround measured best.
+ *
+ * They reindexed 14 spaces plus 5 personal ones by curl in a shell loop, by hand, because the agent that planned their
+ * embedder migration could not run it. That is the whole case: the surface that plans a migration was the surface that
+ * could not execute it.
+ *
+ * ## Why it took three PRs
+ *
+ * There was nothing to wrap. The re-embedding work was inline in the route handler as five near-identical batch loops,
+ * so it was pinned by characterization tests, extracted to `brain/reindex.ts`, and only then given a tool. A tool that
+ * had re-implemented the loops would have been a second copy of five embed-text call sites, and the copy that drifts is
+ * the one nobody watches.
+ *
+ * ## The one argument that differs per surface
+ *
+ * `memberIds`. REST narrows by request; here it comes from the token's accessible spaces via `memberSpacesWithin`.
+ * Getting that wrong is how a tool would re-embed a member of a proxy that the token cannot reach — so the planner
+ * takes it as an argument rather than resolving it, and each surface supplies the list it is entitled to.
+ */
+
+export const space_reindexTool: ToolHandler = {
+  name: 'space_reindex',
+  description: 'Re-embed every record in a space with the currently configured embedding model — the recovery path '
+    + 'after changing embedder or model. Requires an admin token. Returns as soon as the job STARTS: it runs in the '
+    + 'background and may take minutes, so poll `space_meta` — its `needsReindex` field — rather than waiting '
+    + 'on this call. One job per instance at a time; a second call while one is running is refused. A PROXY space is '
+    + 'refused by name — it has no index of its own, and its members are listed in the error so you can reindex them '
+    + 'instead. Idempotent: re-embedding a record that is already current is harmless.',
+  mutating: true,
+  admin: true,
+  spaceRequired: true,
+  inputSchema: (s: ToolSchemas) => ({
+    type: 'object',
+    properties: { space: s.requiredSpace },
+    required: ['space'],
+    additionalProperties: false,
+  }),
+  async handle(ctx: ToolContext): Promise<ToolResult> {
+    // Authorised by `admin: true` in the dispatcher, which refuses this tool unless the token's matrix says
+    // `instanceAdmin`. The `if (!isAdmin)` that stood here was a second copy of that rule, reading the legacy
+    // boolean — and a second copy of an authorization rule is what this codebase pays most for.
+    const { callSpace, accessibleSpaceIds } = ctx;
+
+    const { planReindex, startReindex } = await import('../../brain/reindex.js');
+    const space = getConfig().spaces.find(s => s.id === callSpace);
+
+    // The member list comes from what this TOKEN may reach, not from the space's full membership. A proxy is refused
+    // below regardless, but a scoped admin reindexing a normal space must never walk a member it cannot see.
+    const decision = planReindex({
+      spaceId: callSpace,
+      space,
+      memberIds: memberSpacesWithin(callSpace, accessibleSpaceIds),
+    });
+    if (!decision.ok) {
+      // The status is reported alongside the message: 409 means "one is already running, try later" and 400 means
+      // "this can never work, reindex the members instead". An agent that cannot tell those apart retries the wrong one.
+      return {
+        content: [{ type: 'text' as const, text: `Error (${decision.refusal.status}): ${decision.refusal.body.error}` }],
+        isError: true,
+        ...(decision.refusal.body.proxyFor ? { structuredContent: { proxyFor: decision.refusal.body.proxyFor } } : {}),
+      };
+    }
+
+    startReindex(decision.plan);
+    return {
+      content: [{ type: 'text' as const, text:
+        `Reindex STARTED for '${callSpace}' (${decision.plan.memberIds.length === 1 ? '1 space' : `${decision.plan.memberIds.length} member spaces`}). `
+        + 'It runs in the background — this reply does not mean it finished. Progress is in the server log, and '
+        + 'get_space_meta reflects the result once it completes.' }],
+      structuredContent: { status: 'started', spaceId: callSpace, memberSpaces: decision.plan.memberIds },
+    };
+  },
+};
+
+/**
+ * The BACKFILL, and it is a different capability from `space_reindex` — see the description.
+ *
+ * It exists because `POST /api/spaces/:id/reembed` had no tool and nobody could see that: the capability
+ * map paired the route with `space_reindex`, so the parity gate read a covered capability where there was
+ * a REST-only one. The two touch the same vectors and do opposite things, which is the shape a map keyed on
+ * DATA cannot tell apart.
+ */
+export const space_reembedTool: ToolHandler = {
+  name: 'space_reembed',
+  description: 'Queue embeddings for records in a space that have NONE — the way back from '
+    + '`suppressEmbeddings`, and the repair after an embedding run stopped partway.\n\n'
+    // NAMING THE OTHER TOOL WOULD BE THE DEFECT HERE. Rebuilding every vector is instance-admin, this is
+    // not, so a standard token sees this description and cannot see that tool — and a description that
+    // sends a caller to something they will be refused is worse than one that describes the boundary.
+    // `readonly-tool-descriptions-cannot-name-mutating-tools` is the same rule one rung down.
+    + 'IT DOES NOT TOUCH WHAT ALREADY HAS A VECTOR, and that is the distinction to get right. Rebuilding '
+    + 'every vector in a space — the recovery path after changing embedder or model — is a separate and '
+    + 'more privileged operation; `help()` lists it if your token can reach it. This one touches only '
+    + 'records with no vector at all, is AWAITED, and the counts it returns are the answer rather than a '
+    + 'receipt.\n\n'
+    + 'SUPPRESSION IS EXCLUDED IN THE QUERY, not filtered afterwards, so a suppressed record is reported '
+    + 'under `skippedSuppressed` rather than queued again on every call. A record suppressed at any tier — '
+    + 'record, type schema or space — stays suppressed; releasing it is a separate act, and this is what you '
+    + 'run AFTER releasing it because nothing backfills on its own.\n\n'
+    + 'BOUNDED, AND `truncated: true` MEANS CALL AGAIN. `limit` defaults to '
+    + `${REEMBED_DEFAULT_LIMIT} and cannot exceed ${REEMBED_MAX_LIMIT}, so one call can never enqueue `
+    + 'unbounded work. `remaining` is what is left after this page.\n\n'
+    + 'RESPONSE: `enqueued`, `skippedSuppressed`, `byKind`, `remaining`, `truncated`. A run that enqueues '
+    + 'nothing and skips nothing means every record already has a vector — not that it failed.',
+  mutating: true,
+  spaceRequired: true,
+  inputSchema: (s: ToolSchemas) => ({
+    type: 'object',
+    properties: {
+      space: s.requiredSpace,
+      kinds: {
+        type: 'array',
+        items: { type: 'string', enum: [...REEMBED_KINDS] },
+        minItems: 1,
+        description: 'Record types to sweep. Omit to sweep all of them.',
+      },
+      limit: {
+        type: 'integer', minimum: 1, maximum: REEMBED_MAX_LIMIT, default: REEMBED_DEFAULT_LIMIT,
+        description: 'Most records to enqueue in this call. `remaining` reports what is left.',
+      },
+    },
+    required: ['space'],
+    additionalProperties: false,
+  }),
+  async handle(ctx: ToolContext): Promise<ToolResult> {
+    // An ADAPTER over `reembedSpace`, which the REST route calls. The sweep, the suppression exclusion and
+    // the bounding all live there, because they are rules the write path has to agree with too.
+    const { args: a, callSpace } = ctx;
+    const out = await reembedSpace(callSpace, {
+      ...(Array.isArray(a['kinds']) ? { kinds: a['kinds'] as BrainEmbedRecordType[] } : {}),
+      ...(typeof a['limit'] === 'number' ? { limit: a['limit'] } : {}),
+    });
+    const per = Object.entries(out.byKind).map(([k, n]) => `${k}: ${n}`).join(', ') || 'nothing';
+    return {
+      content: [{ type: 'text' as const, text:
+        `Queued ${out.enqueued} embedding job(s) in '${callSpace}' (${per}). `
+        + `${out.skippedSuppressed} record(s) skipped as suppressed. `
+        + (out.truncated ? `${out.remaining} left — call again to continue.` : 'Nothing left to sweep.') }],
+      structuredContent: out as unknown as Record<string, unknown>,
     };
   },
 };

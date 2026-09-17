@@ -145,7 +145,7 @@ Turn it on when duplicates must not exist even briefly; leave it off when writes
 Rules are evaluated highest-threshold first, and these settings are local: they apply at once and are
 never put to a network vote.
 
-**Danger tab:** Set the space-wide retention window, rebuild search indexes, rename the space ID, wipe all data, or delete the space entirely.
+**Danger tab:** Set the space-wide retention window, rebuild search indexes, rename the space ID, wipe all data, or delete the space entirely. It also holds **Backfill embeddings**, which is what you press after turning **Suppress embeddings** off: suppression leaves records unembedded and nothing revisits them, so search stays blind to whatever was written while it was on. It queues a job per record with no vector and reports how many it found — bounded, so a large space may say there are more left and you run it again. Not the same as **Rebuild search indexes**, which rebuilds the index over vectors you already have. Integrators: `POST /api/space_reembed`.
 
 **Retention** is the space-wide default: **Delete records after (days)**, as **five fields** — Entities, Facts, Edges, Chrono, Files — each applying to records of that kind with no TTL of their own and no window on their type. Five, not one, because a `tickets` space keeps ticket entities for a year and their status-change chrono entries for a month; **Files** gets its own because uploads share this setting and have no type for the Schema tab to reach.
 

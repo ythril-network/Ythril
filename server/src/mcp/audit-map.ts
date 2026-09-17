@@ -58,6 +58,9 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | null> = {
   schema_update: 'space.update',
   save_space: 'space.create',
   space_reindex: 'space.reindex',
+  // Under the operation its REST twin already records, not a new one: a compliance reader asks who
+  // backfilled a space's embeddings, and two names for one act makes every query have to know both.
+  space_reembed: 'space.embeddings.reembed',
   delete_space_data: 'space.wipe',
   write_file: 'file.create',
   move_file: 'file.update',
