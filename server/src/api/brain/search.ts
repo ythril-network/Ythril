@@ -23,7 +23,7 @@ import { countFacts } from '../../brain/fact.js';
 import { getEmbedJobCounts } from '../../brain/embed-queue.js';
 import {
   queryBrain, countBrain, QUERY_BODY_FIELDS, TRAVERSE_BODY_FIELDS, FIND_SIMILAR_BODY_FIELDS,
-  unknownBodyFields, compareBySort, DEFAULT_QUERY_SORT, QUERY_PAGE_MAX, PROXY_PAGE_CEILING,
+  unknownBodyFields, compareBySort, DEFAULT_QUERY_SORT, DEFAULT_QUERY_LIMIT, PROXY_PAGE_CEILING,
 } from '../../brain/query.js';
 import { findSimilar, type RecallKnowledgeType, type RecallResult } from '../../brain/recall.js';
 import { type FilterExpression } from '../../brain/filter.js';
@@ -332,7 +332,9 @@ searchRouter.post('/filter', globalRateLimit, requireBodyScopedSpace('knowledge'
       : undefined;
   // The caller-facing page cap. It used to live inside `queryBrain`, where it also bounded the proxy merge's internal
   // fetch and silently truncated deep pages to nothing.
-  const safeLimit = Math.min(typeof limit === 'number' ? limit : 20, QUERY_PAGE_MAX);
+  // A DEFAULT, not a clamp: see `DEFAULT_QUERY_LIMIT`. What bounds the answer is the byte budget, the
+  // `maxTimeMS` ceiling and — on a proxy space — `PROXY_PAGE_CEILING`, which refuses out loud.
+  const safeLimit = typeof limit === 'number' ? limit : DEFAULT_QUERY_LIMIT;
   const safeMaxTimeMS = typeof maxTimeMS === 'number' ? maxTimeMS : 5000;
 
   // A non-integer or negative `skip` is refused rather than floored to 0. Silently reading it as "start from the

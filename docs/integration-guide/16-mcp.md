@@ -770,7 +770,7 @@ Works with any valid token (including read-only). For proxy spaces, returns aggr
 | `collection` | `string` | ✅ | One of the five values above |
 | `filter` | `object` | ✅ | MongoDB filter document |
 | `projection` | `object` | — | Fields to include (`1`) or exclude (`0`) |
-| `limit` | `number` | — | Max documents (default `20`, max `100`) |
+| `limit` | `number` | — | Max documents, default `200`, no maximum. The schema carries no `maximum` on purpose: the MCP dispatcher enforces it before the handler, so one would refuse a page the REST door serves |
 | `maxTimeMS` | `number` | — | Query timeout in ms (max `30000`) |
 
 **Security**: The `query` tool rejects `$where`, `$function`, and deeply nested filters (>8 levels). Only safe read-only operators are allowed.

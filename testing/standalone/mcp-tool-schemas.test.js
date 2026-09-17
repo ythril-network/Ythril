@@ -114,11 +114,26 @@ describe('MCP tool schemas — high-value enrichments', () => {
     assert.equal(m.default, 5000);
   });
 
-  it('filter.limit carries real bounds', () => {
+  it('filter.limit carries a real floor and a real default, and NO maximum', async () => {
+    /*
+     * The `maximum: 100` this used to require was removed deliberately at 5.0, with the default raised
+     * to 200 — owner, 2026-09-17: *"cap should be a parameter and default to 200"*.
+     *
+     * The dispatcher enforces this schema BEFORE the handler runs, so a `maximum` here REFUSES a page the
+     * REST door serves: a 400 on one door and an answer on the other, which is the parity defect
+     * `CLAUDE.md` names as worse than either alone. And a silent clamp was the worse half of that — a
+     * caller asking for 200 got 100, with `truncated` making it read as a correct short page, while the
+     * per-collection list routes `filter` replaces serve 200 or 500.
+     *
+     * The floor stays: zero and negatives have no honest answer, so both doors refuse them.
+     */
     const l = schemaOf('filter').properties.limit;
     assert.equal(l.minimum, 1);
-    assert.equal(l.maximum, 100);
-    assert.equal(l.default, 20);
+    assert.equal(l.maximum, undefined,
+      'a `maximum` here refuses a page the REST door serves — the bound is the byte budget, not a row count');
+    // Read from the resolver rather than restated, so the two cannot default differently.
+    const { DEFAULT_QUERY_LIMIT } = await import('../../server/dist/brain/query.js');
+    assert.equal(l.default, DEFAULT_QUERY_LIMIT);
   });
 
   it('recall.filter carries NO structural constraint, and traverse/minScore still carry bounds', () => {
