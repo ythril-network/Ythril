@@ -17,6 +17,7 @@
 import { Component, ChangeDetectionStrategy, inject, signal, ElementRef, ViewChild, OnInit, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { SchemaTypeNameComponent } from './schema-type-name.component';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ModalDirective } from '../../shared/modal.directive';
@@ -34,7 +35,7 @@ import { SchemaTypeEditorComponent } from './schema-type-editor.component';
 @Component({
   selector: 'app-space-schema-tab',
   standalone: true,
-  imports: [SchemaTypeEditorComponent, CommonModule, FormsModule, TranslocoPipe, PhIconComponent, ModalDirective, ErrorStateComponent],
+  imports: [SchemaTypeEditorComponent, SchemaTypeNameComponent, CommonModule, FormsModule, TranslocoPipe, PhIconComponent, ModalDirective, ErrorStateComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [SPACE_DIALOG_STYLES, SCHEMA_MD_STYLES],
   template: `
@@ -183,7 +184,8 @@ import { SchemaTypeEditorComponent } from './schema-type-editor.component';
     <div class="sch-detail">
       @if (selectedTypeName(kt); as name) {
         <div class="sch-detail-head">
-          <span class="dt">{{ name }}</span>
+          <!-- The name and its rename are one question, in their own component (B-18). -->
+          <app-schema-type-name [name]="name" [rename]="renamerFor(kt, name)" />
           <span class="acts">
             <button class="btn btn-ghost btn-sm" type="button" (click)="exportTypeSchema(kt,name)"
               style="padding:2px 6px;" [attr.title]="'spaces.schema.exportTypeTitle' | transloco"><ph-icon name="upload" [size]="13"/></button>
@@ -350,6 +352,15 @@ export class SpaceSchemaTabComponent implements OnInit {
   showLibPickerDialog = signal(false);
 
   /** "Export whole schema to library" dialog state (null = closed). */
+  /**
+   * The rename this type would perform, as a closure. The component owns the INTERACTION and the
+   * host owns what a rename means to its state — the same split `app-schema-type-editor` uses, and
+   * the reason neither of them injects the settings service.
+   */
+  renamerFor(kt: KnowledgeType, from: string): (to: string) => 'empty' | 'exists' | 'missing' | null {
+    return (to: string) => this.state.renameType(kt, from, to);
+  }
+
   exportLibDialog = signal<{ groupName: string; namePrefix: string; saving: boolean; error: string } | null>(null);
 
   libPickerLoading    = signal(false);

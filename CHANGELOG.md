@@ -523,6 +523,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The space editor could reach a state where saving was IMPOSSIBLE, and the only way out read as
+  discard.** Owner-reported, and it was two defects that made each other worse.
+
+  The footer swapped **Save changes** for the close-and-finish button whenever any notice was set. That
+  was written for the vote-pending path, where it is right — a networked space answers `202`, the change
+  IS submitted, and a button still offering to submit invites a second proposal for the same change. But
+  the same signal carries *"nothing to save"*, which is not a submission. One Save that reported doing
+  nothing retired the Save button for the rest of the session: the form stayed editable and the only
+  control left closed the dialog.
+
+  And *"nothing to save"* was easy to reach by accident, because **the diff could not see a key being
+  removed**. It walked the keys of the CURRENT payload, while `strictLinkage` is emitted only when true
+  and `purpose`/`usageNotes` only when non-empty — so turning strict linkage off, or clearing the
+  purpose, produced an empty diff. The unsaved-changes guard said there were changes and the save said
+  there were none; both were right about their own question, which is why neither looked wrong.
+
+  The diff walks the union of both key sets now and sends a vanished key as its cleared value, and a
+  finished state ends the moment there is another edit. **The server was never wrong** — its merge
+  guards on "present", so `''` and `false` always cleared correctly; only the client failed to send
+  them. It had bitten once before and been fixed for `typeSchemas` alone, which is why the rule now
+  lives in the diff rather than in each key's emission.
+
+- **A declared edge end could not be REMOVED once its entity type was deleted.** Owner-reported. The
+  ends picker listed one checkbox per entity type the space currently declares, so a name stored on the
+  edge and no longer declared had no checkbox at all — nothing to untick, still enforced, invisible on a
+  control that looked complete. It lists the union of the vocabulary and what is already picked now, and
+  marks the strays, so an operator meeting a name they do not recognise can tell what it is.
+
+- **A property `default` kept its string type after the property became a number.** Owner-reported. The
+  detail pane binds the default to a text input, so it is always text; change the type afterwards and
+  the schema was saved with `default: "5"` for a numeric property. That is not cosmetic — the default is
+  written into records that omit the property, so a strict space starts refusing records it created
+  itself. The emitted schema carries a default of the DECLARED type now, or omits it when the text
+  cannot be one: a default that cannot be honoured is worse than none.
+
+- **A schema type can be RENAMED, on every knowledge type.** Owner-reported: *"i created an entity with
+  full property definitions but made a spelling mistake in the entity name — had to redo all"*. A type's
+  name is a map key and the editor offered add and delete and nothing between. The rename keeps every
+  property and the type's position in the list, and follows the name into every edge-endpoint list that
+  named it — leaving those behind would break the declaration exactly the way a deletion did. Records
+  already written keep the old type: a schema rename does not migrate them, and the case this is for is
+  a type built minutes ago.
+
 - **The conversion pre-flight claimed ninety days on an instance that had been recording for thirty
   minutes.** Reported by the canary operator 2026-09-15 with a controlled measurement: the endpoint caught
   a single `entityIds` write within two seconds and named the token and the field — it works — but the

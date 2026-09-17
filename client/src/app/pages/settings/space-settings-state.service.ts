@@ -95,6 +95,32 @@ export function emptyTypeSchemaState(over: Partial<TypeSchemaState> = {}): TypeS
 }
 
 /**
+ * A property default, as the DECLARED type — or `undefined` when the text cannot be one.
+ *
+ * Dropped rather than sent as a string, because a numeric property carrying `default: "5"` is written
+ * into every record that omits it and then fails that record's own type check on the next validated
+ * write. A default that cannot be honoured is worse than none: the first is a space refusing records it
+ * created, the second is a property with no default.
+ *
+ * A number that does not parse, or a boolean that is neither word, is the operator mid-edit as often as
+ * it is a mistake — so it is simply not emitted, and the input keeps what they typed.
+ */
+export function defaultForType(raw: unknown, type: string | undefined): string | number | boolean | undefined {
+  if (type === 'number' || type === 'integer') {
+    const n = typeof raw === 'number' ? raw : Number(String(raw).trim());
+    if (!Number.isFinite(n)) return undefined;
+    return type === 'integer' && !Number.isInteger(n) ? undefined : n;
+  }
+  if (type === 'boolean') {
+    if (typeof raw === 'boolean') return raw;
+    const t = String(raw).trim().toLowerCase();
+    return t === 'true' ? true : t === 'false' ? false : undefined;
+  }
+  // `string`, and anything the schema does not constrain, round-trips as written.
+  return typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean' ? raw : undefined;
+}
+
+/**
  * Editor state → the wire `TypeSchema`, in one place.
  *
  * There were three copies of this: the save path, the per-type JSON export, and "save this type to the
@@ -166,7 +192,19 @@ export function typeSchemaFromState(
       if (s.pattern?.trim()) schema.pattern = s.pattern.trim();
       if (s.mergeFn)         schema.mergeFn = s.mergeFn;
       if (s.required)        schema.required = s.required;
-      if (s.default != null) schema.default  = s.default;
+      // COERCED to the type the property declares, and this is the un-skippable place for it.
+      // `B-17`: the detail pane binds the default to a text input, so it is always a string — set one
+      // and then change the type to `number` and the schema said `default: "5"` for a numeric
+      // property. That is not cosmetic: the default is written into records that omit the property, so
+      // a strict space starts refusing records it created itself.
+      //
+      // Here rather than on the type-change handler alone, because an operator can set the type first
+      // and the default second, or edit the type through the API — whatever the input holds, what is
+      // EMITTED has to match the declaration.
+      if (s.default != null) {
+        const coerced = defaultForType(s.default, s.type);
+        if (coerced !== undefined) schema.default = coerced;
+      }
       ps[key] = schema;
     }
     ts.propertySchemas = ps;
@@ -204,6 +242,25 @@ function positiveDays(v: number | null): number | undefined {
  * a diff would otherwise catch (it already hid three here: a wrong `minScore` default, two missing
  * `dupeSaved.set(false)` calls, and hardcoded English where transloco belonged).
  */
+/**
+ * The value that CLEARS a field, given what it used to hold.
+ *
+ * A key vanishing from the payload means the operator emptied it, and an omitted key tells the server
+ * nothing — its merge guards on `!== undefined`, so only an explicit value clears. Derived from the
+ * previous value's type rather than from a per-key table: a table is a second list of the editor's
+ * fields, and the next field added would not be in it.
+ *
+ * `null` for anything else, which the server reads as "unset" for the object-valued fields and which no
+ * current key reaches.
+ */
+function clearedValueOf(was: unknown): unknown {
+  if (typeof was === 'boolean') return false;
+  if (typeof was === 'string') return '';
+  if (Array.isArray(was)) return [];
+  if (was !== null && typeof was === 'object') return {};
+  return null;
+}
+
 @Injectable()
 export class SpaceSettingsState {
   private spacesApi = inject(SpacesApi);
@@ -244,6 +301,19 @@ export class SpaceSettingsState {
    * accepted, and colouring it red would send an operator looking for a problem that does not exist.
    */
   settingsNotice = signal('');
+  /**
+   * The edit was SUBMITTED and there is nothing left to send — the only state that may retire Save.
+   *
+   * Separate from `settingsNotice`, and `B-15` is why. The footer used to swap Save for the
+   * close-and-finish button on ANY notice, which was written for the vote-pending path: a networked
+   * space answers 202, the change IS submitted, and a button still offering to submit invites a second
+   * proposal for the same change. But the same signal carries "nothing to save", which is not a
+   * submission and not a finished state — so one Save that reported doing nothing took the Save button
+   * away for the rest of the session, leaving an editable form whose only control closes the dialog.
+   *
+   * Owner-reported, 2026-09-17, alongside the diff bug that made an empty diff easy to reach.
+   */
+  settingsSubmitted = signal(false);
   schemaCollTab = signal<KnowledgeType>('entity');
 
   // ── settings tab ───────────────────────────────────────────────────────────
@@ -302,6 +372,7 @@ export class SpaceSettingsState {
     this.schemaCollTab.set('entity');
     this.settingsError.set('');
     this.settingsNotice.set('');
+    this.settingsSubmitted.set(false);
     this.settingsSaving.set(false);
     this.stForm = { label: s.label, purpose: s.meta?.purpose ?? '', usageNotes: s.meta?.usageNotes ?? '', maxGiB: s.maxGiB ?? null, documentExtraction: s.documentExtraction ?? '',
       imageAnalysis: s.imageAnalysis ?? '', audioAnalysis: s.audioAnalysis ?? '', videoAnalysis: s.videoAnalysis ?? '', textAnalysis: s.textAnalysis ?? '' };
@@ -450,11 +521,23 @@ export class SpaceSettingsState {
     // `meta` is diffed per KEY rather than whole: sending the object because one field inside it moved
     // would put `purpose` (space-admin) and `suppressEmbeddings` (knowledge admin) into a request that
     // meant to change a validation mode.
+    //
+    // OVER THE UNION OF BOTH KEY SETS, and that is `B-15`. This loop read `Object.keys(nowMeta)` alone,
+    // so a key that WAS there and is not any more was never compared: `buildMeta` emits `strictLinkage`
+    // only when true and `purpose`/`usageNotes` only when non-empty, so turning strict linkage off or
+    // clearing the purpose produced an EMPTY diff. `isDirty()` said there were changes and the save said
+    // there was nothing to save — both right about their own question, which is why neither looked wrong.
+    // Owner-reported; it had already bitten once for `typeSchemas` and been fixed for that key alone.
     const nowMeta = (now['meta'] ?? {}) as Record<string, unknown>;
     const wasMeta = (was['meta'] ?? {}) as Record<string, unknown>;
     const meta: Record<string, unknown> = {};
-    for (const key of Object.keys(nowMeta)) {
-      if (JSON.stringify(nowMeta[key]) !== JSON.stringify(wasMeta[key])) meta[key] = nowMeta[key];
+    for (const key of new Set([...Object.keys(nowMeta), ...Object.keys(wasMeta)])) {
+      if (JSON.stringify(nowMeta[key]) === JSON.stringify(wasMeta[key])) continue;
+      // An absent key has to be SENT as the cleared value, or the server keeps what it has: its merge
+      // guards on `!== undefined`, so `''` and `false` clear correctly and omission does nothing. The
+      // empty is taken from what the value WAS, rather than from a per-key list that a new field would
+      // not be in.
+      meta[key] = key in nowMeta ? nowMeta[key] : clearedValueOf(wasMeta[key]);
     }
     if (Object.keys(meta).length) {
       out['meta'] = meta;
@@ -571,6 +654,75 @@ export class SpaceSettingsState {
     };
     this.schNewTypeInputs = { ...this.schNewTypeInputs, [kt]: '' };
     this.schSelectedType  = { kt, name: raw };
+  }
+
+  /**
+   * Rename a declared type, keeping everything on it and everything pointing AT it.
+   *
+   * ## Why this exists
+   *
+   * Owner-reported, `B-18`: *"i created an entity with full property definitions but made a spelling
+   * mistake in the entity name — had to redo all"*. Types are keyed by name, and the editor offered add
+   * and delete and nothing between, so the only route from `Prsson` to `Person` was to rebuild every
+   * property, every enum value, every pattern. Every knowledge type, not only entities.
+   *
+   * ## The re-key is the easy half
+   *
+   * **An edge label's `endpoints.from`/`.to` name ENTITY TYPES.** Renaming an entity type that an edge
+   * declares and leaving those lists alone breaks the declaration exactly the way a deletion did in
+   * `B-16` — silently, and on a control that looks complete. So the rename follows the name into every
+   * edge's endpoint lists.
+   *
+   * **The insertion ORDER is preserved rather than appending.** `typeNames()` reads `Object.keys`, so
+   * rebuilding the map with the renamed entry on the end would reorder the list under the operator's
+   * cursor while they are looking at it.
+   *
+   * ## What it deliberately does NOT do
+   *
+   * Records already written carry the old type string, and a schema rename does not migrate them. That
+   * is the caller's to say out loud — see the confirmation in the tab — because the case this is for is
+   * a type built minutes ago with nothing written against it yet, and pretending otherwise would be
+   * worse than refusing.
+   *
+   * Returns an error key when the rename cannot be done, so the caller decides how to say it.
+   */
+  renameType(kt: KnowledgeType, from: string, to: string): 'empty' | 'exists' | 'missing' | null {
+    const trimmed = to.trim();
+    if (!trimmed) return 'empty';
+    if (trimmed === from) return null;
+    const map = this.schTypeSchemas[kt] ?? {};
+    if (!(from in map)) return 'missing';
+    if (trimmed in map) return 'exists';
+
+    // Rebuilt in the SAME order, with the renamed entry in the old one's place.
+    const next: Record<string, TypeSchemaState> = {};
+    for (const [name, state] of Object.entries(map)) next[name === from ? trimmed : name] = state;
+
+    const all = { ...this.schTypeSchemas, [kt]: next };
+
+    /*
+     * Follow the name into every edge endpoint list that used it. Only an ENTITY rename can be pointed
+     * at this way — an edge's ends are entity types — but the walk is written over whatever
+     * `endpoints` holds rather than gated on `kt === 'entity'`, so a second kind of reference would be
+     * carried by the same code rather than by a second copy of it.
+     */
+    const edges = all['edge'] ?? {};
+    const renamedEdges: Record<string, TypeSchemaState> = {};
+    for (const [label, state] of Object.entries(edges)) {
+      const swap = (list?: string[]): string[] | undefined =>
+        list?.map(n => (n === from ? trimmed : n));
+      const ends = state.endpoints;
+      renamedEdges[label] = ends
+        ? { ...state, endpoints: { ...(ends.from ? { from: swap(ends.from)! } : {}), ...(ends.to ? { to: swap(ends.to)! } : {}) } }
+        : state;
+    }
+    all['edge'] = renamedEdges;
+
+    this.schTypeSchemas = all;
+    if (this.schSelectedType?.kt === kt && this.schSelectedType.name === from) {
+      this.schSelectedType = { kt, name: trimmed };
+    }
+    return null;
   }
 
   removeType(kt: KnowledgeType, name: string): void {

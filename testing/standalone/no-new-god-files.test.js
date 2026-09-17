@@ -169,7 +169,15 @@ const FROZEN = {
   // which is what made this a one-line change instead of a fifty-line one. What remains is the tab's own
   // shell: the collection sub-tabs, the type list, the import/export toolbar and the save. 685 code lines
   // is not a god file, and splitting a page this size again costs a reader more than it saves.
-  'client/src/app/pages/settings/space-schema-tab.component.ts': 685,
+  //
+  // 685 -> 690 (2026-09-17, `B-18`). A type could not be RENAMED — the name is a map key, so the
+  // editor offered add and delete and nothing between, and a spelling mistake cost every property on
+  // the type. THE DECOMPOSITION THIS GATE ASKS FOR WAS DONE: the name and its edit affordance are
+  // `schema-type-name.component.ts`, which took the edit mode, the draft, the refusal message and the
+  // commit rules out of here. What is left is five lines of wiring — one element in the template and
+  // the closure that tells it what a rename means to this host — and those cannot be split from the
+  // thing they wire. Raised rather than worked around.
+  'client/src/app/pages/settings/space-schema-tab.component.ts': 690,
   // 839 -> 843: `typeSchemasMode` on the update body and the replace branch in `mergeSpaceMeta`. Both are
   // small and belong beside the merge they qualify — splitting a two-branch decision across files would
   // make the contract harder to read, not easier.

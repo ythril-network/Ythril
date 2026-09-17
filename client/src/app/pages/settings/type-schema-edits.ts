@@ -112,6 +112,36 @@ export function isAnyEnd(state: TypeSchemaState, side: EndpointSide): boolean {
 }
 
 /**
+ * The names an ends picker must OFFER: the vocabulary, plus whatever is already picked.
+ *
+ * Owner-reported, `B-16`: the picker listed the entity types the space CURRENTLY declares, so deleting
+ * a type that an edge named as an end left the stored name with no checkbox — nothing to untick, still
+ * enforced, and invisible on a control that looked complete. The declaration became permanent.
+ *
+ * **The shape recurs wherever a picker's OPTIONS come from a vocabulary and its VALUES come from a
+ * record.** Those are different sets, and rendering only the first hides the difference rather than
+ * reporting it. Here rather than in the component so it can be tested without a fixture — and because
+ * the union is a rule about the data, not about the view.
+ *
+ * `UNTYPED_END` is appended last: it is a real choice ("an entity carrying no type at all") but the
+ * unusual one, and at the top of a list it reads as a header or as the default.
+ */
+export function endNamesFor(declared: readonly string[], state: TypeSchemaState): string[] {
+  const picked = [...endpointsFor(state, 'from'), ...endpointsFor(state, 'to')].filter(n => n !== UNTYPED_END);
+  return [...new Set([...declared, ...picked])].sort((a, b) => a.localeCompare(b)).concat(UNTYPED_END);
+}
+
+/**
+ * True for an offered name that the space no longer declares — shown as such.
+ *
+ * An operator meeting a name they do not recognise cannot otherwise tell whether it is a type they
+ * forgot or one somebody deleted out from under the edge.
+ */
+export function isStaleEndName(declared: readonly string[], name: string): boolean {
+  return name !== UNTYPED_END && !declared.includes(name);
+}
+
+/**
  * Add or remove one type name at one end, keeping the "empty means absent" invariant.
  *
  * Removing the last name deletes the side, and deleting the last side deletes the object — because

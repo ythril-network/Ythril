@@ -46,7 +46,7 @@ import type { KnowledgeType, PropertySchema } from '../../core/api.types';
 import type { TypeSchemaState } from './space-settings-state.service';
 import {
   addProp, removeProp, addEnumVal, removeEnumVal,
-  toggleEndpoint, endpointsFor, isAnyEnd, endpointPairs, UNTYPED_END, type EndpointSide,
+  toggleEndpoint, endpointsFor, isAnyEnd, endpointPairs, endNamesFor, isStaleEndName, UNTYPED_END, type EndpointSide,
 } from './type-schema-edits';
 import { SCHEMA_MD_STYLES } from './schema-styles';
 import { CHIP_STYLES } from '../../shared/chip.styles';
@@ -219,6 +219,11 @@ import { mergeFnsFor, mergeFnAfterTypeChange } from '../../shared/merge-fns';
                 <input type="checkbox" [checked]="isPicked(side, name)" (change)="onToggleEnd(side, name)" />
                 @if (name === UNTYPED_END) {
                   <span class="any">{{ 'spaces.schema.ends.untyped' | transloco }}</span>
+                } @else if (isStaleEnd(name)) {
+                  <!-- Declared on this edge and no longer a type the space has. Ticked, enforced, and
+                       until B-16 there was no checkbox for it at all — so it could not be removed. -->
+                  <span class="nm">{{ name }}</span>
+                  <span class="sch-hint">{{ 'spaces.schema.ends.deletedType' | transloco }}</span>
                 } @else {
                   <span class="nm">{{ name }}</span>
                 }
@@ -433,7 +438,22 @@ export class SchemaTypeEditorComponent {
    * Last rather than first deliberately. It is a real choice — "an entity carrying no type at all" — but it
    * is the unusual one, and at the top of the list it reads as a header or as the default.
    */
-  readonly endNames = computed<string[]>(() => [...this.entityTypeNames()].sort((a, b) => a.localeCompare(b)).concat(UNTYPED_END));
+  readonly endNames = computed<string[]>(() => {
+    /*
+     * THE UNION OF THE VOCABULARY AND WHAT IS ALREADY PICKED — see `endNamesFor`, which holds the rule
+     * and the reason. `B-16`, owner-reported: a name stored on the edge but no longer declared by the
+     * space had no checkbox, so the declaration could not be removed.
+     *
+     * `endsTick()` because the draft is mutated in place, so unticking a stale name drops it from the
+     * list for good. That is the intent rather than a wrinkle: it is not a type this space declares,
+     * so it was never available to add in the first place.
+     */
+    this.endsTick();
+    return endNamesFor(this.entityTypeNames(), this.draft());
+  });
+
+  /** True for a picked end the space no longer declares. Shown as such — see `isStaleEndName`. */
+  isStaleEnd(name: string): boolean { return isStaleEndName(this.entityTypeNames(), name); }
 
   picked(side: EndpointSide): string[] { return endpointsFor(this.draft(), side); }
   isPicked(side: EndpointSide, name: string): boolean { return this.picked(side).includes(name); }
