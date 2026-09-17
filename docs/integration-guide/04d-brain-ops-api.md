@@ -159,7 +159,9 @@ Returns `true` when the embedding model has changed and facts need re-embedding.
 POST /api/brain/spaces/:spaceId/reindex
 ```
 
-Re-computes all embeddings with the current model. **Runs asynchronously** — the call returns immediately and the job proceeds in the background (it may take minutes for large spaces). Poll `GET /api/brain/spaces/:spaceId/reindex-status` for progress.
+Re-computes **all** embeddings with the current model. **Runs asynchronously** — the call returns immediately and the job proceeds in the background (it may take minutes for large spaces). Poll `GET /api/brain/spaces/:spaceId/reindex-status` for progress.
+
+> **Not the same as the backfill, and this is the pair people pick wrong.** [`POST /api/spaces/:id/reembed`](06-spaces-api.md#re-embed-backfill) touches only records that have **no** vector, is awaited, and returns counts — it is the way back from `suppressEmbeddings`. This one rewrites every vector in the space, which is what you want after changing embedder or model and a great deal of work if you only meant to fill a gap. Tools: `space_reindex` and `space_reembed`.
 
 **Response** `200` — the job was *accepted*; `reindexed`/`errors` are always `0` here (the real counts land on the status endpoint), and `status` is `"started"`:
 

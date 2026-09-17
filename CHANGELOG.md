@@ -13,6 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > upgrades together or not at all. Read the migration section of the 5.0 notes before upgrading one instance
 > of several.
 
+### Added
+
+- **`space_reembed` — the embedding backfill now has a tool.** `POST /api/spaces/:id/reembed` has queued
+  embeddings for records with no vector since 4.4, and had no MCP counterpart. It is also
+  `POST /api/space_reembed`, takes `kinds` and `limit`, and returns the same counts the route does.
+
+  **It was invisible rather than forgotten, which is the part worth reading.** The capability map paired
+  that route with `space_reindex` and the parity gate reads the map, so a REST-only capability was recorded
+  as covered — inside the file built to end exactly that. The two do opposite things: `space_reindex`
+  re-embeds EVERY record with the configured model and returns as soon as the job starts; `space_reembed`
+  touches only records with no vector, is awaited, and the counts are the answer. A map keyed on which
+  DATA a door touches cannot tell those apart; the question is what makes a pairing true.
+
 ### Changed
 
 - **BREAKING — every tool is `POST /api/<tool-name>`, and both doors call ONE function.** Owner,

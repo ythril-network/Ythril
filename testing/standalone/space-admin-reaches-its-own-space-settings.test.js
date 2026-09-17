@@ -35,6 +35,7 @@ import { dispatchSource } from './_tool-dispatch.mjs';
 import { statementFrom } from './_structural-window.mjs';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
+import { trackedSources } from './_sources.mjs';
 
 const { TOOL_RIGHTS } = await import('../../server/dist/auth/space-rights.js');
 const { SPACE_FIELD_RIGHTS, refusalsForSpaceUpdate, describeFieldRequirement } =
@@ -174,7 +175,16 @@ describe('the MCP door widens with the REST one', () => {
   // their space through the REST door and is refused through the MCP one.
   // Stripped, all four: each of these assertions would otherwise fire on the comment EXPLAINING the rule.
   // The `if (!isAdmin)` check below caught its own note saying that check must not be here.
-  const MCP = stripComments(readFileSync('server/src/mcp/tools/spaces.ts', 'utf8'));
+  /*
+   * EVERY tool source concatenated, not `spaces.ts`.
+   *
+   * This named that one file and broke the day `space_reindex` moved to `embed.ts` — reporting *"the
+   * scanner is wrong, not the code"*, which was exactly right and still cost a run to read. A gate about
+   * what a TOOL declares has no business knowing which file it sits in, and tools move as files reach
+   * their size ceiling.
+   */
+  const MCP = trackedSources('server/src/mcp/tools', { floor: 10, untracked: true })
+    .map(f => stripComments(readFileSync(f, 'utf8'))).join('\n');
   const VIS = stripComments(readFileSync('server/src/mcp/tool-visibility.ts', 'utf8'));
   const GUARD = stripComments(readFileSync('server/src/mcp/tool-rights-guard.ts', 'utf8'));
   const ROUTER = dispatchSource();

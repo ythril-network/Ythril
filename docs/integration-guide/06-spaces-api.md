@@ -225,12 +225,28 @@ POST /api/spaces/:id/reembed
 Authorization: Bearer <token with knowledge:admin on the space>
 ```
 
+**Also `POST /api/space_reembed` and the `space_reembed` MCP tool** — same arguments, same rung, same
+procedure. The tool arrived at 5.0: the capability had existed on REST since 4.4 and was invisible to the
+parity check because the capability map paired this route with `space_reindex`, which does the opposite
+thing. If you are choosing between them, read the next paragraph but one.
+
 Queues an embedding job for every record in the space that **has no vector**. This is the way back from
 `suppressEmbeddings`: suppression leaves records unembedded, and nothing revisits them on its own, so recall stays
 blind to whatever was written while it was on.
 
 It is also the repair for an embedding that never got queued — an enqueue failure is deliberately swallowed rather
 than failing the write, which leaves exactly this state.
+
+> **This is not `reindex`, and the two are easy to confuse because both re-embed.**
+>
+> | | this | [`POST /api/brain/spaces/:spaceId/reindex`](04d-brain-ops-api.md) |
+> |---|---|---|
+> | touches | only records with **no** vector | **every** record |
+> | for | the way back from `suppressEmbeddings` | recovery after changing embedder or model |
+> | returns | counts, awaited — the counts are the answer | `status: "started"`, fire-and-forget |
+> | bounded | `limit`, and `truncated` tells you to call again | runs to completion in the background |
+>
+> Reaching for `reindex` when you wanted this one re-embeds the whole space to fix a handful of records.
 
 **Body — all fields optional.** An empty body sweeps every record kind at the default limit.
 

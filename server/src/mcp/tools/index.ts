@@ -1,5 +1,5 @@
 import type { ToolHandler } from './types.js';
-import { list_spacesTool, space_statsTool, space_metaTool, update_spaceTool, schema_updateTool, save_spaceTool, space_reindexTool, delete_space_dataTool , list_tokensTool } from './spaces.js';
+import { list_spacesTool, space_statsTool, space_metaTool, update_spaceTool, schema_updateTool, save_spaceTool, delete_space_dataTool , list_tokensTool } from './spaces.js';
 import { save_factTool, update_factTool, delete_factTool } from './fact.js';
 import { recallTool, find_similarTool, queryTool } from './search.js';
 import { save_bulkTool } from './bulk.js';
@@ -11,7 +11,7 @@ import { save_chronoTool, update_chronoTool, delete_chronoTool } from './chrono.
 import { read_fileTool, write_fileTool, update_file_metaTool, list_dirTool, delete_fileTool, create_dirTool, move_fileTool, retry_embed_fileTool } from './file.js';
 import { network_peersTool, network_syncTool } from './sync.js';
 import { helpTool } from './help.js';
-import { list_embed_jobsTool, retry_embed_recordTool, retry_embed_mediaTool } from './embed.js';
+import { list_embed_jobsTool, retry_embed_recordTool, retry_embed_mediaTool, space_reindexTool, space_reembedTool } from './embed.js';
 
 export type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 
@@ -62,6 +62,7 @@ export const ALL_TOOLS: ToolHandler[] = [
   schema_updateTool,
   save_spaceTool,
   space_reindexTool,
+  space_reembedTool,
   delete_space_dataTool,
   list_tokensTool,
   save_bulkTool,

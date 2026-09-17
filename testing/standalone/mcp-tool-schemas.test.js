@@ -36,7 +36,13 @@ function traverseBounds(prop) {
 }
 
 describe('MCP tool schemas — universal invariants', () => {
-  it('exposes exactly 45 tools', () => {
+  it('exposes exactly 46 tools', () => {
+    // 45 -> 46: `space_reembed`. It is not a NEW capability — `POST /api/spaces/:id/reembed` has always
+    // backfilled records with no vector. It had no tool, and nobody could see that because the capability
+    // map paired the route with `space_reindex`, which does the opposite thing. Prerequisites done: a
+    // `TOOL_RIGHTS` row matching the route's rung, an audit-map entry under the route's own operation,
+    // and the map pairing corrected.
+    //
     // 48 -> 45: `er_model`, `find_entities_by_name` and `list_chrono` FOLDED into others at 5.0.
     // Prerequisites done for each: their audit-map entries and rights rows are gone, their docs rows are
     // gone, and each has a `_DEPRECATIONS.md` row naming what replaces it. `er_model`'s answer lives on as
@@ -79,7 +85,7 @@ describe('MCP tool schemas — universal invariants', () => {
     // `link.convert_preflight`, it is READ-ONLY and visible to a readOnly token (it writes nothing and
     // answers a question about writes that already happened), and `16-mcp.md` carries its row. It ships
     // WITH its REST route rather than after it.
-    assert.equal(ALL_TOOLS.length, 45);
+    assert.equal(ALL_TOOLS.length, 46);
   });
 
   it('every tool advertises a closed object schema (type:object, additionalProperties:false)', () => {

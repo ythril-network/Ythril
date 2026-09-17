@@ -126,8 +126,6 @@ const NOT_YET_ONE_SHAPE = new Map(Object.entries({
     + 'space. Possibly two questions rather than one capability — decide that before merging them.',
   network_sync: 'B-9. By network id and by peer id. One route taking either is the likely answer, and it '
     + 'sits behind the network governance work rather than ahead of it.',
-  space_reindex: 'B-9. `POST /api/brain/spaces/:id/reindex` and `POST /api/spaces/:id/reembed` are two '
-    + 'spellings of one act, and one of them simply goes.',
 }));
 
 const routesByTool = () => {
@@ -153,9 +151,10 @@ describe('one capability, one shape', () => {
   it('and the exemption list only shrinks', () => {
     // Every entry is a divergence somebody decided to keep for now. A new one is a decision, not a diff.
     const known = [...NOT_YET_ONE_SHAPE.keys()].sort();
-    assert.deepEqual(known, ['filter', 'list_tokens', 'network_sync', 'space_reindex'],
+    assert.deepEqual(known, ['filter', 'list_tokens', 'network_sync'],
       'the exemption list changed. Removing an entry is the work; ADDING one needs the owner, because it '
-      + 'is a capability whose shape depends on the door');
+      + 'is a capability whose shape depends on the door. `space_reindex` left on 2026-09-17: its second '
+      + 'route was never a second shape, it was a second CAPABILITY, and it has its own tool now.');
   });
 
   it('every exemption names the row that closes it', () => {
