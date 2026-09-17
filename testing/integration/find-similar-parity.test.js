@@ -3,7 +3,7 @@
  *
  * ## What was wrong
  *
- * The MCP tool has advertised `traverse` and `includeContent` since it shipped, and its handler reads both.
+ * The MCP tool has advertised `traverse` and `includeFileContent` since it shipped, and its handler reads both.
  * The REST route read neither. A caller who read the tool schema and switched door got a 400 for a
  * documented parameter — and before the body was made strict, got a 200 with an unexpanded answer, which is
  * worse.
@@ -31,7 +31,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, waitForIndexed } from '../sync/helpers.js';
+import { INSTANCES, post, get, waitForSimilarityIndex } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -106,7 +106,16 @@ before(async () => {
   // The edge hangs off the MATCH, not the source: traversal expands the results of the similarity search.
   if (matchId) await syncPostEdge(matchId, NEIGHBOUR, 'depends_on', seq++);
 
-  if (embeddingAvailable && sourceId && matchId) await waitForIndexed(INSTANCES.a, token(), SPACE, [sourceId, matchId], ['entity']);
+  /*
+   * `waitForSimilarityIndex`, not `waitForIndexed`. Since 5.0 every recall also scans the newest records
+   * straight from the collection, so the recall-based poll returns as soon as the record is WRITTEN —
+   * correct for a caller that only needs recall, and a green light that means nothing here, because
+   * `find_similar` searches the index and has no such scan. The symptom was an empty `results` in a test
+   * whose fixture had "finished waiting".
+   */
+  if (embeddingAvailable && sourceId && matchId) {
+    await waitForSimilarityIndex(INSTANCES.a, token(), SPACE, sourceId, 'entity', matchId);
+  }
 });
 
 after(async () => {
@@ -129,12 +138,12 @@ describe('REST find-similar refuses a bad value rather than coercing it', () => 
     assert.equal(r.status, 400, JSON.stringify(r.body));
   });
 
-  it('a non-boolean includeContent is a 400, in recall’s words', async () => {
+  it('a non-boolean includeFileContent is a 400, in recall’s words', async () => {
     // `"false"` is truthy. A flag whose whole purpose is to make a response smaller must not silently do
     // nothing, and the message is recall's verbatim so the two routes cannot disagree about a bad value.
-    const r = await findSimilar({ entryId: sourceId, entryType: 'entity', includeContent: 'no' });
+    const r = await findSimilar({ entryId: sourceId, entryType: 'entity', includeFileContent: 'no' });
     assert.equal(r.status, 400, JSON.stringify(r.body));
-    assert.match(r.body.error, /`includeContent` must be a boolean/);
+    assert.match(r.body.error, /`includeFileContent` must be a boolean/);
   });
 });
 

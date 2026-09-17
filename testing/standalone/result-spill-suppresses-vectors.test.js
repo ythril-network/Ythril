@@ -18,6 +18,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { routeBody, delegatesCleanly } from './_delegating-routes.mjs';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
@@ -27,6 +28,23 @@ const {
 } = await import('../../server/dist/brain/graph-spill.js');
 
 const read = p => stripComments(readFileSync(p, 'utf8'));
+
+/**
+ * How many response-building sites a door should have: TWO per route, with and without `traverse`.
+ *
+ * Derived rather than written down. It was `4` on each door — recall and find_similar, two branches each —
+ * and `POST /api/brain/recall` then collapsed onto `callTool`, so REST builds no recall response and has no
+ * branches to wire. Writing `2` would be the same mistake with a later expiry date.
+ *
+ * The 2-per-route factor is the part worth keeping literal: the first version of this feature wired only the
+ * graph branch, so the plainest large call — `topK: 100`, no traversal — returned everything uncapped. It
+ * happened twice, on both doors, which is why the branches are counted rather than assumed.
+ */
+function expectedSites(name, src) {
+  if (name === 'MCP') return 4;
+  return 2 * ['/recall', '/similar']
+    .filter(p => { const b = routeBody(src, p); return b && !delegatesCleanly(b, `POST ${p}`); }).length;
+}
 
 describe('vectors never reach the file', () => {
   it('strips every vector key, at every depth', () => {
@@ -124,7 +142,9 @@ describe('the remainder is written out, with a TTL', () => {
     // spill there and only its graph branch was wired; returning JSON at every depth gave the default depth
     // a size cap it had never had. That is the second time a "plainest large call" went uncapped, which is
     // why this counts sites rather than trusting that a new branch remembered.
-    assert.equal((rest.match(/spillResultSet\(\{/g) ?? []).length, 4, 'REST recall + find-similar, both branches');
+    const restExpected = expectedSites('REST', rest);
+    assert.equal((rest.match(/spillResultSet\(\{/g) ?? []).length, restExpected,
+      `REST: ${restExpected} site(s) expected — two branches for each route that still builds its own response`);
     assert.equal((mcp.match(/spillResultSet\(\{/g) ?? []).length, 4, 'MCP recall + find_similar, both branches each');
     // This used to assert `slice(0, SPILL_INLINE_RESULTS)` — the three-record sample. X-17 replaced that cap
     // with a byte budget, so the rule it was protecting has changed shape rather than gone: the response
@@ -136,8 +156,10 @@ describe('the remainder is written out, with a TTL', () => {
     // would actually reintroduce the shape is any fixed-count slice of the results before they are returned,
     // whatever the number is spelled as — so that is what is refused.
     for (const [name, src] of [['REST', rest], ['MCP', mcp]]) {
-      assert.ok((src.match(/budgetedEnvelope\(\{/g) ?? []).length >= 4,
-        `${name} must bound every result path through the shared budget rather than returning what it has`);
+      const floor = expectedSites(name, src);
+      assert.ok((src.match(/budgetedEnvelope\(\{/g) ?? []).length >= floor,
+        `${name} must bound every result path through the shared budget rather than returning what it has `
+        + `— ${floor} path(s) expected`);
       // A CONSTANT second argument is the tell: `slice(0, SPILL_INLINE_RESULTS)` and `slice(0, 3)` both cut
       // the answer to a number nobody asked for, while `slice(0, safeTopK)` cuts it to what the caller did
       // ask for and is right. Screaming-snake or a bare digit, therefore — not any identifier.
@@ -156,8 +178,9 @@ describe('the remainder is written out, with a TTL', () => {
     for (const [name, src] of [['REST', restSrc], ['MCP', mcpSrc]]) {
       const callbacks = (src.match(/spillRemainder: remainder => spillResultSet\(\{/g) ?? []).length;
       const remainders = (src.match(/results: remainder,/g) ?? []).length;
-      assert.equal(callbacks, 4, `${name}: expected four spill callbacks, found ${callbacks}`);
-      assert.equal(remainders, 4,
+      const want = expectedSites(name, src);
+      assert.equal(callbacks, want, `${name}: expected ${want} spill callback(s), found ${callbacks}`);
+      assert.equal(remainders, want,
         `${name} spills something other than the remainder on ${callbacks - remainders} path(s) — a dump that `
         + 'repeats what was already sent is the defect this replaced');
     }

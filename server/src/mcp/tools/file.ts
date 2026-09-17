@@ -17,7 +17,7 @@ import { log } from '../../util/log.js';
 
 export const read_fileTool: ToolHandler = {
   name: 'read_file',
-  description: 'Read the text contents of a file in the space file store. Whole file, no paging — a large document arrives entire and is paid for in tokens, so prefer `recall` with `includeContent: false` to find WHICH file and WHICH passage first, then read only if you need the rest.\n\n'
+  description: 'Read the text contents of a file in the space file store. Whole file, no paging — a large document arrives entire and is paid for in tokens, so prefer `recall` with `includeFileContent: false` to find WHICH file and WHICH passage first, then read only if you need the rest.\n\n'
     + 'It reads the STORED TEXT, which for an uploaded PDF or image is the extracted text rather than the original bytes. A file whose extraction has not finished, or whose type yields no text, reads as empty — that is a pending or unextractable document, not an empty file. `list_dir` shows what is present, and `list_embed_jobs` shows whether its indexing is still queued or failed.\n\n'
     + 'This is a path lookup, not a search: an unknown path is an error, not an empty result.',
   spaceRequired: true,
@@ -49,8 +49,8 @@ export const write_fileTool: ToolHandler = {
   name: 'write_file',
   description: 'Write text content to a file in the space file store.\n\n'
     + 'IT REPLACES THE WHOLE FILE. There is no append and no patch: whatever you send becomes the entire content, so read first if you meant to add to it. Writing a path that already exists overwrites it without asking.\n\n'
-    + 'The file is CHUNKED and each chunk is embedded separately, which is why `recall` returns a passage rather than a document and why `includeContent: false` is worth using — one long chunk can crowd out several one-line records. Structure the text with headings: a chunk that begins under a heading carries it, and that is what makes a recall hit locatable.\n\n'
-    + 'Embedding is ASYNCHRONOUS, as with `saveFact`: the write returns once the bytes are stored and a queued job computes the vectors afterwards, so a `recall` seconds later may not see it — pass `includeFreshWrites: true` on that recall. Rewriting a file resets its embedding: new content is new content, and a previous failure to embed it is not carried forward.',
+    + 'The file is CHUNKED and each chunk is embedded separately, which is why `recall` returns a passage rather than a document and why `includeFileContent: false` is worth using — one long chunk can crowd out several one-line records. Structure the text with headings: a chunk that begins under a heading carries it, and that is what makes a recall hit locatable.\n\n'
+    + 'Embedding is ASYNCHRONOUS, as with `saveFact`: the write returns once the bytes are stored and a queued job computes the vectors afterwards. `recall` always scans the newest records straight from the collection, so a chunk the vector index has not ingested yet is still found — but a chunk whose embedding job has not RUN yet has no vector to compare and stays invisible until it does; `list_embed_jobs` says whether the queue is behind. Rewriting a file resets its embedding: new content is new content, and a previous failure to embed it is not carried forward.',
   mutating: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({

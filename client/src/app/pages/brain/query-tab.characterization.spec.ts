@@ -138,23 +138,26 @@ describe('QueryTabComponent — the recall request (characterization for U-1)', 
 
   // ── the flags, and the one that is inverted on purpose ───────────────────────────────────────────────────
 
-  it('includeFreshWrites and includeDiagnostics are sent ONLY when turned on', () => {
+  it('includeDiagnostics is sent ONLY when turned on', () => {
+    /*
+     * `includeFreshWrites` was asserted here too, and it is gone rather than merely unchecked: the scan it
+     * gated now always runs, so there is no flag to send. Measured before removing it — a plain recall
+     * could not see a just-written record for three seconds, and the parameter's only function was to let
+     * a caller opt into that blind spot.
+     */
     const c = create();
     c.runRecall();
-    expect(sent[0]['includeFreshWrites']).toBeUndefined();
     expect(sent[0]['includeDiagnostics']).toBeUndefined();
 
-    c.recallForm.includeFreshWrites = true;
     c.recallForm.includeDiagnostics = true;
     c.runRecall();
-    expect(sent[1]['includeFreshWrites']).toBe(true);
     expect(sent[1]['includeDiagnostics']).toBe(true);
   });
 
-  it('includeContent is the other way round — sent only when turned OFF', () => {
+  it('includeFileContent is the other way round — sent only when turned OFF', () => {
     /*
      * Deliberately inverted, and the reason is in the code: the server default is to include content, so a
-     * request that spelled out `includeContent: true` would carry a parameter meaning exactly what its absence
+     * request that spelled out `includeFileContent: true` would carry a parameter meaning exactly what its absence
      * means. Only an operator who switched it off is saying something.
      *
      * This is the case a split is most likely to "fix" into consistency with the three flags above, and doing
@@ -162,11 +165,11 @@ describe('QueryTabComponent — the recall request (characterization for U-1)', 
      */
     const c = create();
     c.runRecall();
-    expect(sent[0]['includeContent']).toBeUndefined();
+    expect(sent[0]['includeFileContent']).toBeUndefined();
 
-    c.recallForm.includeContent = false;
+    c.recallForm.includeFileContent = false;
     c.runRecall();
-    expect(sent[1]['includeContent']).toBe(false);
+    expect(sent[1]['includeFileContent']).toBe(false);
   });
 
   // ── the two lists derived from the same rows ─────────────────────────────────────────────────────────────

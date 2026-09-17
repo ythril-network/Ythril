@@ -230,13 +230,13 @@ export function formatRecallSummary(r: RecallResult): string {
  *    Checked before removing: audio, video and image chunks all write the transcript/caption to BOTH
  *    `content` and `matchedText`, so nothing is only in the blob.
  *
- * `includeContent: false` additionally drops the passage body itself — see the tool schema.
+ * `includeFileContent: false` additionally drops the passage body itself — see the tool schema.
  */
 export function toRecallRecord(
   r: RecallResult,
-  opts: { includeContent?: boolean; includeDiagnostics?: boolean } = {},
+  opts: { includeFileContent?: boolean; includeDiagnostics?: boolean } = {},
 ): Record<string, unknown> {
-  const includeContent = opts.includeContent !== false;
+  const includeFileContent = opts.includeFileContent !== false;
   // The three RECORD-level diagnostics, off by default on both doors since 3.1.0 — see
   // `RECALL_RECORD_DIAGNOSTICS` for why they are withheld and why the list is shared. The ranking scores are
   // NOT added here: they describe how this result placed, not what the record is, so they sit beside `score`
@@ -262,7 +262,7 @@ export function toRecallRecord(
       return { ...common, title: r.title, type: r.chronoType, startsAt: r.startsAt, ...(r.status !== undefined ? { status: r.status } : {}), ...(r.entityIds !== undefined ? { entityIds: r.entityIds } : {}) };
     case 'file': {
       // `content` is the passage. It is what a caller asked for unless they said otherwise.
-      const keepContent = includeContent && r.content !== undefined;
+      const keepContent = includeFileContent && r.content !== undefined;
       return { ...common, path: r.path, ...(r.sizeBytes !== undefined ? { sizeBytes: r.sizeBytes } : {}), ...(r.parentFileId !== undefined ? { parentFileId: r.parentFileId } : {}), ...(r.chunkIndex !== undefined ? { chunkIndex: r.chunkIndex } : {}), ...(r.headingText !== undefined ? { headingText: r.headingText } : {}), ...(keepContent ? { content: r.content } : {}) };
     }
   }

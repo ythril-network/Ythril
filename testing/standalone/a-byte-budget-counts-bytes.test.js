@@ -99,14 +99,22 @@ describe('resolving a budget', () => {
   });
 
   it('`maxTokens` resolves against CHARACTERS, which is what the conversion produces', () => {
-    const r = mod.resolveBudget({ maxTokens: 1_000, charsPerToken: 4 });
-    assert.equal(r.chars, 4_000);
+    /*
+     * The RATIO comes from the module rather than from a `charsPerToken` argument, which was removed at
+     * 5.0 — it did nothing unless `maxTokens` was also set, and a caller who needs the ceiling exact states
+     * `maxChars`. Read from `DEFAULT_CHARS_PER_TOKEN` rather than written as 3.5 here: a number in an
+     * assertion is a second copy of a fact the module already holds.
+     */
+    const ratio = mod.DEFAULT_CHARS_PER_TOKEN;
+    const r = mod.resolveBudget({ maxTokens: 1_000 });
+    assert.equal(r.chars, Math.floor(1_000 * ratio));
     assert.equal(r.bytes, null, 'a token ceiling produced a BYTE ceiling, which it cannot know anything about');
   });
 
   it('and the lower of `maxChars` and `maxTokens` wins, as it always did within one unit', () => {
-    assert.equal(mod.resolveBudget({ maxChars: 3_000, maxTokens: 1_000, charsPerToken: 4 }).chars, 3_000);
-    assert.equal(mod.resolveBudget({ maxChars: 9_000, maxTokens: 1_000, charsPerToken: 4 }).chars, 4_000);
+    const converted = Math.floor(1_000 * mod.DEFAULT_CHARS_PER_TOKEN);
+    assert.equal(mod.resolveBudget({ maxChars: converted - 500, maxTokens: 1_000 }).chars, converted - 500);
+    assert.equal(mod.resolveBudget({ maxChars: converted + 500, maxTokens: 1_000 }).chars, converted);
   });
 
   it('a bad value in either unit is refused, and says which', () => {
@@ -116,7 +124,6 @@ describe('resolving a budget', () => {
       [{ maxBytes: -1 }, 'maxBytes'],
       [{ maxBytes: 'lots' }, 'maxBytes'],
       [{ maxTokens: 0 }, 'maxTokens'],
-      [{ charsPerToken: 0 }, 'charsPerToken'],
     ]) {
       const r = mod.resolveBudget(req);
       assert.equal(r.ok, false, `${JSON.stringify(req)} was accepted`);

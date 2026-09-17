@@ -80,10 +80,24 @@ describe('the old grammar still works — a parser swap would have broken every 
     assert.deepEqual(r.expression, { 'properties.status': { eq: 'accepted' }, 'properties.count': { gt: 10 } });
   });
 
-  it('still refuses a disallowed key in the old grammar, with the message it always gave', () => {
-    const r = resolveRecallFilter({ secretField: { eq: 'x' } });
-    assert.ok(!r.ok);
-    assert.match(r.error, /not allowed/);
+  it('ACCEPTS a field the old allowlist refused, in either grammar', () => {
+    /*
+     * This asserted the refusal. The field allowlist was removed on 2026-09-17 because it was a SPEED rule
+     * wearing a safety label: a key outside `properties.*`/`tags`/`type`/`name`/`status`/`label` takes the
+     * exhaustive path, which is slower and equally correct — and refusing it made the capability absent on
+     * `recall` while `filter` accepted the same predicate through the other door. Owner: *"they need to be
+     * the same."*
+     *
+     * Flipped rather than deleted, because the acceptance is the thing worth holding: restoring the
+     * allowlist would break the parity this change exists for, and a deleted case says nothing about that.
+     */
+    const legacy = resolveRecallFilter({ secretField: { eq: 'x' } });
+    assert.ok(legacy.ok, `the operator-object grammar refused a plain field: ${legacy.error}`);
+    assert.equal(legacy.kind, 'expression');
+
+    const raw = resolveRecallFilter({ description: { $regex: 'platform' } });
+    assert.ok(raw.ok, `raw Mongo refused a plain field: ${raw.error}`);
+    assert.equal(raw.kind, 'mongo');
   });
 
   it('treats no filter and an empty filter as unfiltered', () => {
@@ -95,16 +109,39 @@ describe('the old grammar still works — a parser swap would have broken every 
   });
 });
 
-describe('the key allowlist survives the widening', () => {
-  it('refuses a disallowed key nested inside $or — the smuggling route', () => {
-    // The failure this prevents: widening the grammar becomes a way to filter on fields the vector index cannot serve,
-    // which is a performance cliff rather than a feature.
+describe('what the widening did NOT open, at every depth', () => {
+  /*
+   * THE KEY ALLOWLIST IS GONE and these cases were rewritten rather than deleted.
+   *
+   * They asserted that an undeclared field was refused inside `$or` — *"the smuggling route"*. There is
+   * nothing to smuggle any more: an unusual field is slow, not unsafe, and the response says so with
+   * `filterPath: 'exhaustive'` instead of refusing the query.
+   *
+   * What the recursion still has to catch is the shape that cannot be a field at all, and it has to catch
+   * it at depth for the same reason the old rule did — a nested clause is exactly where a caller would put
+   * something the top-level scan would miss.
+   */
+  it('accepts an arbitrary field nested inside $or, and says it will scan', () => {
     const r = resolveRecallFilter({ $or: [{ type: 'message' }, { embedding: { $exists: true } }] });
-    assert.ok(!r.ok, 'a key inside $or must be checked too');
-    assert.match(r.error, /embedding/);
+    assert.ok(r.ok, `a plain field inside $or was refused: ${r.error}`);
+    assert.equal(r.kind, 'mongo');
   });
 
-  it('allows every documented prefix, at depth', () => {
+  it('but still refuses a JavaScript operator nested inside $or', () => {
+    const r = resolveRecallFilter({ $or: [{ type: 'message' }, { $where: 'this.x' }] });
+    assert.ok(!r.ok, 'an operator that executes code must be refused at any depth');
+    assert.match(r.error, /\$where/);
+  });
+
+  it('and a prototype-shaped key nested inside $or', () => {
+    // A computed key: written literally, `__proto__:` sets the prototype and `Object.keys` never sees it,
+    // so the case would pass without the guard existing.
+    const r = resolveRecallFilter({ $or: [{ type: 'message' }, { ['__proto__']: 1 }] });
+    assert.ok(!r.ok, 'a key that rewrites the filter object must be refused at any depth');
+    assert.match(r.error, /__proto__/);
+  });
+
+  it('every field the old allowlist named still works, at depth', () => {
     const r = resolveRecallFilter({
       $or: [{ tags: 'rma' }, { 'properties.a.b': 1 }, { name: 'x' }, { status: 'open' }, { label: 'l' }, { type: 't' }],
     });

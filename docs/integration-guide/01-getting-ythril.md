@@ -23,7 +23,7 @@ section has been there since 2.0.0 or earlier. `GET /api/about` reports the vers
 | Lifecycle | Graceful shutdown actually drains; `/ready` fails first (`SHUTDOWN_DRAIN_MS`, `SHUTDOWN_READY_GRACE_MS`) |
 | Recall | An end-to-end budget (`RECALL_BUDGET_MS`, `RERANK_MIN_BUDGET_MS`) and a `ythril_recall_degraded_total` metric |
 | Brain | Space completeness scoring; Review → Suggestions |
-| MCP | Roughly half-size recall responses; `includeContent: false` for a fifth |
+| MCP | Roughly half-size recall responses; `includeFileContent: false` for a fifth |
 | Posture | `mcp.publicUrl`; endpoint classes no longer imply a DNS resolution that did not happen |
 
 Full detail in [CHANGELOG.md](https://github.com/ythril-network/Ythril/blob/main/CHANGELOG.md).

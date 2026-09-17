@@ -9,12 +9,26 @@ import { describe, it, expect } from 'vitest';
 import { groupRecallResults, fileGroupKey, chunkLabel, passageText } from './recall-grouping';
 import type { RecallResult } from '../../core/api.types';
 
+/**
+ * A hit as the server sends one: the RECORD nested under `record`, the ranking beside it.
+ *
+ * The fixtures spread the record fields at the top level until 5.0, because `POST /api/brain/recall`
+ * returned one flat object while the MCP door nested. The route collapsed onto the shared tool module and
+ * the two shapes became one — so a fixture in the old shape would now be testing a payload the server
+ * cannot send, and every field read would come back `undefined` in production while the spec stayed green.
+ */
+const asHit = (type: string, score: number, record: Record<string, unknown>): RecallResult =>
+  ({ type, score, spaceId: 'general', record }) as unknown as RecallResult;
+
+/** The id of a hit, read the way the module reads it — through `record`, not off the hit. */
+const idOf = (h: RecallResult): unknown => (h['record'] as Record<string, unknown>)['_id'];
+
 const chunk = (parent: string, id: string, score: number, heading?: string, path = 'papers/study.pdf'): RecallResult =>
-  ({ type: 'file', _id: id, score, parentFileId: parent, parentFile: { path }, ...(heading ? { headingText: heading } : {}) }) as unknown as RecallResult;
+  asHit('file', score, { _id: id, parentFileId: parent, parentFile: { path }, ...(heading ? { headingText: heading } : {}) });
 const memory = (id: string, score: number): RecallResult =>
-  ({ type: 'fact', _id: id, score, fact: 'a fact' }) as unknown as RecallResult;
+  asHit('fact', score, { _id: id, fact: 'a fact' });
 const wholeFile = (id: string, score: number, path: string): RecallResult =>
-  ({ type: 'file', _id: id, score, path }) as unknown as RecallResult;
+  asHit('file', score, { _id: id, path });
 
 describe('recall grouping — chunk hits collapse to their document', () => {
   it('turns five passages of one paper into one row that says five', () => {
@@ -62,7 +76,7 @@ describe('recall grouping — it must not change the answer', () => {
     // The server has already ranked these. Re-sorting here would make the UI disagree with every other
     // consumer of the same endpoint, for no reason the reader could see.
     const groups = groupRecallResults([memory('m1', 0.99), chunk('p', 'c1', 0.5), memory('m2', 0.98)]);
-    expect(groups.map(g => g.hits[0]!['_id'])).toEqual(['m1', 'c1', 'm2']);
+    expect(groups.map(g => idOf(g.hits[0]!))).toEqual(['m1', 'c1', 'm2']);
   });
 
   it('orders a group by its first (best) hit, not its last', () => {
@@ -74,17 +88,17 @@ describe('recall grouping — it must not change the answer', () => {
     const input = [memory('m1', 0.9), chunk('p', 'c1', 0.8), chunk('p', 'c2', 0.7), memory('m2', 0.6)];
     const flat = groupRecallResults(input).flatMap(g => g.hits);
     expect(flat).toHaveLength(input.length);
-    expect(flat.map(h => h['_id']).sort()).toEqual(['c1', 'c2', 'm1', 'm2']);
+    expect(flat.map(idOf).sort()).toEqual(['c1', 'c2', 'm1', 'm2']);
   });
 
   it('names the document even when the first hit of a group did not carry the parent', () => {
-    const a = { type: 'file', _id: 'c1', score: 0.9, parentFileId: 'p' } as unknown as RecallResult;
+    const a = asHit('file', 0.9, { _id: 'c1', parentFileId: 'p' });
     const b = chunk('p', 'c2', 0.8, 'Results', 'papers/late.pdf');
     expect(groupRecallResults([a, b])[0]!.file?.path).toBe('papers/late.pdf');
   });
 
   it('falls back to the key rather than rendering an empty document name', () => {
-    const orphan = { type: 'file', _id: 'c1', score: 0.9, parentFileId: 'ghost' } as unknown as RecallResult;
+    const orphan = asHit('file', 0.9, { _id: 'c1', parentFileId: 'ghost' });
     expect(groupRecallResults([orphan])[0]!.file?.path).toBe('ghost');
   });
 });
@@ -106,7 +120,7 @@ describe('recall grouping — helpers', () => {
 });
 
 describe('recall grouping — passage text', () => {
-  const hit = (fields: Record<string, unknown>) => ({ type: 'file', _id: 'c1', ...fields }) as unknown as RecallResult;
+  const hit = (fields: Record<string, unknown>) => asHit('file', 0.9, { _id: 'c1', ...fields });
 
   it('prefers the chunk content', () => {
     expect(passageText(hit({ content: 'Mean shoreline retreat was 1.4 metres per year.' })))

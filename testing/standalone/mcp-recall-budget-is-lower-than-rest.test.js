@@ -97,21 +97,34 @@ describe('the two defaults', () => {
 });
 
 describe('every call site uses its own door\'s default', () => {
-  it('both MCP recall paths pass the MCP default', () => {
-    // Counted, because one site left on the REST default is the defect: the same instance would answer a
-    // different size depending on which tool was called, which is worse than either number alone.
+  it('every tool call site resolves the default from the DOOR, never from a constant', () => {
+    /*
+     * This case used to read *"both MCP recall paths pass the MCP default"*, and asserted that each
+     * `resolveBudget` in the tool module named `MCP_DEFAULT_MAX_CHARS`. That was right while MCP was the
+     * only door those modules had, and `B-9` ended it: every tool is also `POST /api/<tool-name>`, the same
+     * module reached by plain HTTP. Naming the constant then meant a curl caller's answer silently halved
+     * depending on which URL they typed — 50 000 through `POST /api/brain/recall`, 25 000 through
+     * `POST /api/recall`.
+     *
+     * So the claim inverted, and this is the positive half of it: not merely that nobody hard-codes a
+     * number (`the-byte-budget-follows-the-door-not-the-module` asserts that), but that every site
+     * genuinely goes through the resolver. `CLAUDE.md` holds the divergence to three conditions and this is
+     * the second — *every MCP call site resolves through it rather than one remembering to*.
+     */
     const calls = [...MCP.matchAll(/resolveBudget\(/g)];
-    assert.ok(calls.length >= 2, `expected the MCP door to resolve a budget in several tools, found ${calls.length}`);
+    assert.ok(calls.length >= 2, `expected the tool module to resolve a budget in several tools, found ${calls.length}`);
     const missing = calls
-      .filter(m => !/MCP_DEFAULT_MAX_CHARS/.test(statementFrom(MCP, m.index, 'a resolveBudget call')))
+      .filter(m => !/defaultBudgetChars\(\s*ctx\.transport\s*\)/.test(statementFrom(MCP, m.index, 'a resolveBudget call')))
       .map(m => `line ${MCP.slice(0, m.index).split('\n').length}`);
     assert.deepEqual(missing, [],
-      'these MCP call sites take the REST default, so the size a caller gets depends on which tool they '
-      + `picked:\n  ${missing.join('\n  ')}`);
+      'these tool call sites choose a budget default themselves instead of asking which door called, so the '
+      + `size a caller gets depends on the URL rather than on who is reading:\n  ${missing.join('\n  ')}`);
   });
 
   it('REST keeps the operator default, and does not reach for the MCP one', () => {
-    assert.ok([...REST.matchAll(/resolveBudget\(/g)].length >= 2, 'the REST door must still resolve a budget');
+    // `POST /api/brain/recall` delegates to `callTool` and resolves nothing of its own, so the count is
+    // lower than it was. The claim is unchanged: no REST handler may name the agent's number.
+    assert.ok([...REST.matchAll(/resolveBudget\(/g)].length >= 1, 'the REST door must still resolve a budget');
     assert.doesNotMatch(REST, /MCP_DEFAULT_MAX_CHARS/,
       'the REST door must not take the MCP default — 100 KB is unremarkable in a REST body');
   });

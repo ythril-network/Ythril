@@ -32,14 +32,27 @@ import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
 const {
-  QUERY_BODY_FIELDS, RECALL_BODY_FIELDS, TRAVERSE_BODY_FIELDS, FIND_SIMILAR_BODY_FIELDS,
+  QUERY_BODY_FIELDS, TRAVERSE_BODY_FIELDS, FIND_SIMILAR_BODY_FIELDS,
 } = await import('../../server/dist/brain/query.js');
 const { ALL_TOOLS } = await import('../../server/dist/mcp/tools/index.js');
 
-/** The four strict routes, each pointing at the set the route actually gates on. */
+/** A tool's published parameter names — the contract for any route that delegates to it. */
+const toolParams = name => new Set(
+  Object.keys(ALL_TOOLS.find(t => t.name === name).inputSchema({ requiredSpace: {}, optionalSpace: {} }).properties));
+
+/**
+ * The four strict routes, each pointing at the set the route actually gates on.
+ *
+ * **`recall` points somewhere different from the other three, and that is the whole reason this comment is
+ * here.** `POST /api/brain/recall` no longer keeps a body-key list: it hands its body to `callTool`, which
+ * validates against the `recall` tool's published `inputSchema`. So the client is checked against the
+ * schema, and `RECALL_BODY_FIELDS` was deleted rather than left pointing at nothing — a list that gates no
+ * request still reads like the contract to whoever finds it next, and the client would have been compared
+ * against a set the server had stopped enforcing.
+ */
 const SETS = new Map([
   ['filter', QUERY_BODY_FIELDS],
-  ['recall', RECALL_BODY_FIELDS],
+  ['recall', toolParams('recall')],
   ['traverse', TRAVERSE_BODY_FIELDS],
   ['similar', FIND_SIMILAR_BODY_FIELDS],
 ]);
@@ -172,7 +185,7 @@ const TRANSPORT_ONLY = new Set(['space']);
 describe('MCP advertises the same parameters the REST route accepts', () => {
   // The owner's standing rule is that the two doors take the same params, and `mcp-rest-parity` checks which
   // TOOLS exist, not which parameters they take. This half was unenforced, and it was hiding a real gap:
-  // `similar` advertised `traverse` and `includeContent` — implemented in its handler — while the REST
+  // `similar` advertised `traverse` and `includeFileContent` — implemented in its handler — while the REST
   // route read neither, so a caller who read the tool schema got a 400 from the other door.
   for (const [route, tool] of MCP_TOOL) {
     it(`${route} ↔ ${tool}`, () => {

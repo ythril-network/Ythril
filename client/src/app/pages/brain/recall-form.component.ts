@@ -28,8 +28,7 @@ export interface RecallFormState {
   tags: string;
   type: string;
   maxPerType: number;
-  includeFreshWrites: boolean;
-  includeContent: boolean;
+  includeFileContent: boolean;
   includeDiagnostics: boolean;
   /** Storage bookkeeping — when a record was written and what it links to. Off by default; see the tooltip. */
   includeRecordMeta: boolean;
@@ -46,7 +45,6 @@ export interface RecallFormState {
   maxBytes: number;
   maxChars: number;
   maxTokens: number;
-  charsPerToken: number;
   skip: number;
   /** WRITES A FILE into the space. The control has to say so, which is why it is not just another checkbox. */
   remainderDump: boolean;
@@ -94,12 +92,15 @@ export interface RecallTypeOpt {
  * They reflow by available width rather than in one stacked column, so the whole form is visible at once on
  * a normal screen. The question spans the full width because it is the only field always used.
  *
- * ## Two groups reveal their own detail, and that is not a disclosure
+ * ## One group reveals its own detail, and that is not a disclosure
  *
- * The five traversal qualifiers appear once the depth is above 0, and `charsPerToken` once there is a token
- * ceiling for it to convert. The difference from a Show-advanced button is who opened it: the operator did,
- * by asking for hops or for a token budget. A control that cannot affect the request yet is not hidden — it
- * does not exist yet.
+ * The five traversal qualifiers appear once the depth is above 0. The difference from a Show-advanced
+ * button is who opened it: the operator did, by asking for hops. A control that cannot affect the request
+ * yet is not hidden — it does not exist yet.
+ *
+ * There used to be a second: `charsPerToken`, shown once a token ceiling existed for it to convert. The
+ * parameter was removed at 5.0 — it did nothing unless `maxTokens` was also set, and an operator who needs
+ * the ceiling exact should state `maxChars`, which is the unit the server applies.
  *
  * ## Every parameter, and the one that is deliberately absent
  *
@@ -373,9 +374,9 @@ export interface RecallTypeOpt {
         [placeholder]="'brain.query.recallMaxTimeMs.none' | transloco" />
     </div>
     <label class="rf-check">
-      <input type="checkbox" [(ngModel)]="form().includeContent" name="recallIncludeContent" />
-      <span>{{ 'brain.query.includeContent' | transloco }}</span>
-      <span class="rf-hint" [attr.title]="'brain.query.includeContent.tooltip' | transloco"><ph-icon name="info" [size]="11"/></span>
+      <input type="checkbox" [(ngModel)]="form().includeFileContent" name="recallIncludeContent" />
+      <span>{{ 'brain.query.includeFileContent' | transloco }}</span>
+      <span class="rf-hint" [attr.title]="'brain.query.includeFileContent.tooltip' | transloco"><ph-icon name="info" [size]="11"/></span>
     </label>
     <label class="rf-check">
       <input type="checkbox" [(ngModel)]="form().includeDiagnostics" name="recallIncludeDiagnostics" />
@@ -386,11 +387,6 @@ export interface RecallTypeOpt {
       <input type="checkbox" [(ngModel)]="form().includeRecordMeta" name="recallIncludeRecordMeta" />
       <span>{{ 'brain.query.includeRecordMeta' | transloco }}</span>
       <span class="rf-hint" [attr.title]="'brain.query.includeRecordMeta.tooltip' | transloco"><ph-icon name="info" [size]="11"/></span>
-    </label>
-    <label class="rf-check">
-      <input type="checkbox" [(ngModel)]="form().includeFreshWrites" name="recallFresh" />
-      <span>{{ 'brain.query.includeFreshWrites' | transloco }}</span>
-      <span class="rf-hint" [attr.title]="'brain.query.includeFreshWrites.tooltip' | transloco"><ph-icon name="info" [size]="11"/></span>
     </label>
   </div>
 
@@ -416,16 +412,6 @@ export interface RecallTypeOpt {
       <input type="number" [(ngModel)]="form().maxTokens" name="recallMaxTokens" min="0" step="100"
         [placeholder]="'brain.query.recallMaxBytes.default' | transloco" />
     </div>
-    <!-- Only means anything with a token ceiling, so it appears with one rather than sitting there as a
-         number with no stated effect. -->
-    @if (form().maxTokens > 0) {
-      <div class="rf-field">
-        <label>{{ 'brain.query.charsPerToken' | transloco }}
-          <span class="rf-hint" [attr.title]="'brain.query.charsPerToken.tooltip' | transloco"><ph-icon name="info" [size]="11"/></span>
-        </label>
-        <input type="number" [(ngModel)]="form().charsPerToken" name="recallCharsPerToken" min="0" step="0.1" />
-      </div>
-    }
     <div class="rf-field">
       <label>{{ 'brain.query.skip' | transloco }}
         <span class="rf-hint" [attr.title]="'brain.query.skip.tooltip' | transloco"><ph-icon name="info" [size]="11"/></span>

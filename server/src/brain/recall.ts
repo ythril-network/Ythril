@@ -21,19 +21,21 @@ import { needsReindex } from '../spaces/_shared.js';
 // god-file ratchet raise; see recall-shape.ts for why the type import back here is not a cycle.
 import { mergeRecallResults, rankOf, byIdAsc, byRankThenId, rerankTextOf, summariseRecall } from './recall-shape.js';
 import { vectorFilterFieldsFor } from '../spaces/vector-index.js';
-import { FilterExpression, buildMongoFilter, toNativeVectorFilter } from './filter.js';
-import { isRawFilter, type RecallFilter } from './recall-filter.js';
+import { FilterExpression, buildMongoFilter, toNativeVectorFilter, rawToNativeVectorFilter } from './filter.js';
+import { isRawFilter, recallPredicate, type RecallFilter } from './recall-filter.js';
+import { observeRecallPath, type RecallPathObservation } from './recall-path.js';
+export { observeRecallPath, type RecallPathObservation };
 import { deriveChronoStatus } from './chrono-status.js';
 import { datePassedPolicy } from './chrono-date-policy.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
 import { rerank, rerankConfigured, candidateMultiplier, MAX_CANDIDATES } from './rerank-client.js';
 import { lexicalSearch, rrfFuse, hybridSearchEnabled, LEXICAL_LIMIT_MULTIPLIER, type LexicalHit } from './lexical-search.js';
 import { atlasVectorScore, scoresAgree } from './vector-score.js';
-import { matchFreshWrites } from './fresh-writes.js';
+import { matchFreshWrites, addFreshWrites } from './fresh-writes.js';
 import type { ChronoStatus, RecordType } from '../config/types.js';
 import { RECORD_TYPES } from '../config/types.js';
 import { log } from '../util/log.js';
-import { recallDegradedTotal, recallFreshWritesFoundTotal } from '../metrics/registry.js';
+import { recallDegradedTotal } from '../metrics/registry.js';
 import { envInt } from '../config/env-num.js';
 import { spaceCollection } from '../db/space-collection.js';
 
@@ -240,6 +242,15 @@ export async function recall(
      */
     degraded?: string[];
     /**
+     * Collector for WHICH path the filter took, on the same reasoning as `degraded` above: a mutable
+     * container rather than a widened return type, because `RecallResult[]` flows into traverse,
+     * findSimilar and two response builders that have nothing to do with this.
+     *
+     * Created by the caller with `observeRecallPath()` and read after. Absent means the caller did not
+     * ask, which is different from a recall that took no path because it had no filter.
+     */
+    observePath?: RecallPathObservation & { path(): 'prefilter' | 'exhaustive' | undefined };
+    /**
      * The query, already embedded — set by `recallGlobal` so a fan-out over N spaces costs ONE embedding
      * instead of N identical ones.
      *
@@ -249,31 +260,23 @@ export async function recall(
      * because this signature was already eight parameters long.
      */
     embedded?: EmbeddingResult;
-    /**
-     * Also scan the newest records straight from each collection, so a record written seconds ago is
-     * findable before the index has ingested it.
+    /*
+     * `includeFreshWrites` WAS HERE, AND IT IS NOT A PARAMETER ANY MORE — the scan always runs.
      *
-     * ## Why this is opt-in
+     * Measured on 2026-09-17, writing a fact and recalling it once a second: a plain recall answered
+     * `count: 0` for THREE SECONDS and then found it. Three seconds of a confident empty answer, on the
+     * commonest agent loop there is — write something, then look for it.
      *
-     * The lag is real and measured: an integrator's fact was not returned by `recall` for a distinctive
-     * nine-word phrase **within 150 seconds** of writing it, while insert-time duplicate detection saw the
-     * same record immediately. That asymmetry IS the diagnosis — the vector is on the document the moment it
-     * is written, and it is `$vectorSearch`'s index that lags. `exact: true` is not the fix and was measured
-     * not to be: it scans the INDEX exhaustively, not the collection, and reports the same lag to the
-     * millisecond (ANN 1088 ms, ENN 1083 ms on the same insert).
+     * The cost, measured the same day on a space with 220 records inside the window: 91–101 ms without
+     * the scan, 159–167 ms with it. On a quiet space it is unmeasurable, because the time filter matches
+     * nothing and no vector maths runs — so the cost is paid only in a space being actively written to,
+     * which is the only space where the hole exists.
      *
-     * `matchFreshWrites` reads the collection instead, which is the one place the missing record certainly
-     * is. It is bounded by a time window and a document cap, so its cost tracks churn rather than collection
-     * size — but `recall` searches every requested type, so a busy space pays it per type.
-     *
-     * Default OFF, by the project's own rule for this trade: **when a person is waiting, performance; when
-     * the work is in the background, accuracy.** Recall is the path someone waits on. The write half of this
-     * (duplicate detection) is not opt-in precisely because it is not — it runs while a write is being
-     * processed and correctness there is what stops a batch duplicating itself.
-     *
-     * Turn it on for the case it exists for: searching for something you just wrote.
+     * Owner, given those two numbers: *"if checking the parameter takes >10ms remove the parameter and
+     * just always do it."* A flag whose only function is to let a caller opt into a wrong answer is not a
+     * performance feature. The name made it worse — `includeFreshWrites: false` reads as *exclude recent
+     * records*, which is not what it did and is not something anybody wants.
      */
-    includeFreshWrites?: boolean;
   },
 ): Promise<RecallResult[]> {
   if (!isVectorSearchAvailable()) {
@@ -324,6 +327,16 @@ export async function recall(
     ? types
     : [...RECORD_TYPES];
 
+  /*
+   * WHICH PATH the filter took, observed across every collection this call searches.
+   *
+   * It exists because the key allowlist went: a filter on an index-servable field is restricted before
+   * scoring, and anything else scores the space exhaustively and filters after. Both are correct and
+   * one is far more expensive, so a caller who cannot tell them apart blames recall rather than the
+   * filter they wrote. Refusing the key made that impossible to hit and the capability absent with it.
+   */
+  const pathObs = opts?.observePath ?? observeRecallPath();
+
   // Phase 1: for each type with a minPerType floor > 0, guarantee that many results
   const guaranteed: RecallResult[] = [];
   const guaranteedIds = new Set<string>();
@@ -331,7 +344,7 @@ export async function recall(
     const floorSearches = Object.entries(minPerType)
       .filter(([t, floor]) => activeTypes.includes(t as RecallKnowledgeType) && (floor ?? 0) > 0)
       .map(([t, floor]) =>
-        recallByType(spaceId, t as RecallKnowledgeType, embResult.vector, floor!, tags, filter, searchDeadline()),
+        recallByType(spaceId, t as RecallKnowledgeType, embResult.vector, floor!, tags, filter, pathObs, searchDeadline()),
       );
     const floorResults = (await settleSearches(floorSearches, noteDegraded)).flat();
     for (const r of floorResults) {
@@ -352,36 +365,26 @@ export async function recall(
   // stays — but `topK` has no ceiling of its own since `P-34`, and a per-type fetch that scales without
   // one is how an oversized request becomes an oversized query rather than a slow answer.
   const perTypeK = Math.min(Math.ceil(topK * (reranking ? candidateMultiplier() : 1.5)), MAX_PER_TYPE_CANDIDATES);
-  const searches = activeTypes.map(t => recallByType(spaceId, t, embResult.vector, perTypeK, tags, filter, searchDeadline()));
+  const searches = activeTypes.map(t => recallByType(spaceId, t, embResult.vector, perTypeK, tags, filter, pathObs, searchDeadline()));
   const allResults = (await settleSearches(searches, noteDegraded)).flat();
 
-  // Phase 2a: the records the INDEX has not ingested yet, read straight from each collection.
-  //
-  // Opt-in — see `includeFreshWrites`. Best-effort in the strongest sense: a failure here returns nothing
-  // rather than taking the index results down with it, because a search that answers less is a worse
-  // outcome than a search that answers without the newest few seconds.
-  if (opts?.includeFreshWrites) {
-    const seen = new Set(allResults.map(r => r._id));
-    const freshPerType = await Promise.all(activeTypes.map(async t => {
-      const collName = `${spaceId}_${KNOWLEDGE_COLLECTION[t]}`;
-      const matches = await matchFreshWrites(collName, embResult.vector).catch(() => []);
-      return { type: t, matches };
-    }));
-    const missingIds = freshPerType.flatMap(({ type, matches }) =>
-      matches.filter(m => !seen.has(m._id)).map(m => ({ type, id: m._id, score: m.score })));
-    if (missingIds.length > 0) {
-      // Hydrate through the same path the index results came from, so a fresh hit and an indexed hit are
-      // the same shape — a caller must not be able to tell which channel found a record.
-      const hydrated = await hydrateFreshHits(spaceId, missingIds);
-      allResults.push(...hydrated);
-      // Counted, NOT reported as `degraded`. This search found MORE than the index could offer, which is the
-      // opposite of degradation, and `ythril_recall_degraded_total` documents its own reason set as closed
-      // precisely so it does not accumulate labels that mean unrelated things. What the count is worth is
-      // turning "the index lags" from an anecdote into a measurement: every increment is a record a plain
-      // recall would have missed.
-      recallFreshWritesFoundTotal.inc(hydrated.length);
-    }
-  }
+  /*
+   * Phase 2a: the records the INDEX has not ingested yet, read straight from each collection.
+   *
+   * ALWAYS, since 5.0 — see the note where the opt-in used to be declared. The orchestration lives in
+   * `fresh-writes.ts`, beside the scan it is built on, because "what has the index not caught up with" is
+   * one question and this file is not where a reader looks for it.
+   */
+  /*
+   * The recall's OWN predicate goes with it. The scan adds records the index has not ingested, and adding
+   * them unfiltered turned `filter: {type: 'x'}` into an answer containing a record whose type is not `x`
+   * — at 200, with nothing to distinguish it from a correct result.
+   *
+   * It was survivable while the scan was opt-in, because a caller combining the flag with a filter was
+   * rare. Making the scan unconditional made it the common case, which is how it was found.
+   */
+  await addFreshWrites(spaceId, activeTypes, embResult.vector, allResults,
+    t => KNOWLEDGE_COLLECTION[t], hydrateFreshHits, recallPredicate(tags, filter));
 
   allResults.sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || byIdAsc(a, b));
 
@@ -801,6 +804,11 @@ function recallProjection(knowledgeType: RecallKnowledgeType): {
 }
 
 /** Run $vectorSearch against a single collection and map results to RecallResult. */
+/*
+ * `RecallPathObservation` and `observeRecallPath` moved to `brain/recall-path.ts`. Three callers, none of
+ * which owns the concept: this file writes to the channel and both doors read it.
+ */
+
 async function recallByType(
   spaceId: string,
   knowledgeType: RecallKnowledgeType,
@@ -808,6 +816,8 @@ async function recallByType(
   topK: number,
   tags?: string[],
   filter?: RecallFilter,
+  /** Records which path this collection took. See `RecallPathObservation`. */
+  observe?: RecallPathObservation,
   /**
    * Server-side deadline for this collection's search, in ms.
    *
@@ -847,8 +857,10 @@ async function recallByType(
   const exhaustivePipeline = (): object[] => {
     const ennLimit = Math.min(10000, Math.max(topK * 100, 1000));
     const p: object[] = [{ $vectorSearch: { index: indexName, path: 'embedding', queryVector, exact: true, limit: ennLimit } }];
-    if (hasTags) p.push({ $match: { tags: { $all: tags } } });
-    if (hasFilter) p.push({ $match: isRawFilter(filter!) ? filter.__raw : buildMongoFilter(filter as FilterExpression) });
+    // ONE predicate, shared with the fresh-write scan. Written separately at the two sites, the second one
+    // was written without the filter at all — see `recallPredicate`.
+    const predicate = recallPredicate(tags, filter);
+    if (predicate) p.push({ $match: predicate });
     p.push({ $limit: topK });
     return [...p, ...tail];
   };
@@ -864,16 +876,32 @@ async function recallByType(
     primary = [annStage(), ...tail];
   } else {
     const declared = new Set(vectorFilterFieldsFor(spaceId, collSuffix));
-    // A raw filter is never declarable: `toNativeVectorFilter` speaks the operator-object grammar, and `$or` has no
-    // native `$vectorSearch` equivalent. Passing `undefined` sends it down the exhaustive branch below.
-    const nativeFilter = isRawFilter(filter) ? null : toNativeVectorFilter(tags, filter, declared);
+    /*
+     * A raw filter IS declarable when it is a flat conjunction of pushable field constraints — which
+     * `{type: 'note'}` is, and which the raw grammar could not express natively until 2026-09-17.
+     *
+     * It used to read *"a raw filter is never declarable"*: true of `$or`, false of the common case.
+     * That stopped being acceptable the day raw Mongo became the RECOMMENDED grammar — the `filterPath`
+     * disclosure added in the same change showed every such caller buying an exhaustive scan while the
+     * older operator-object spelling of the same filter stayed fast.
+     *
+     * `tags` keeps the operator-object path: a raw filter carries its own tag constraint if it wants
+     * one, and combining the two here would push half a filter and apply the rest AFTER scoring —
+     * which changes which records `topK` is filled from, the one failure this path must never have.
+     */
+    const nativeFilter = isRawFilter(filter)
+      ? ((tags && tags.length > 0) ? null : rawToNativeVectorFilter(filter.__raw, declared))
+      : toNativeVectorFilter(tags, filter, declared);
     if (nativeFilter) {
       usedNativeFilter = true;
+      observe?.prefilter();
       primary = [
         { $vectorSearch: { index: indexName, path: 'embedding', queryVector, exact: true, filter: nativeFilter, limit: topK } },
         ...tail,
       ];
     } else {
+      // Observed, not predicted: this is the branch that actually scans.
+      observe?.scanned();
       primary = exhaustivePipeline();
     }
   }
@@ -909,6 +937,13 @@ async function recallByType(
     // keeps recall correct through the brief window after a schema change while the index rebuilds.
     if (usedNativeFilter) {
       try {
+        /*
+         * NOT observed as a scan, and the reason is in `RecallPathObservation`'s docblock.
+         *
+         * This retry is not about the filter — it fires when the index is still building or the collection
+         * is empty and has none. Counting it reported `exhaustive` on almost every recall in a space that
+         * does not hold all five record kinds, which is most of them, for a cost nobody paid.
+         */
         const docs = await run(exhaustivePipeline());
         return docs.map(d => mapToRecallResult(d, knowledgeType));
       } catch (err2) {
@@ -1082,12 +1117,13 @@ export async function recallGlobal(
     maxTimeMS?: number;
     degraded?: string[];
     /*
-     * The fresh-write scan, which this signature did not declare — so the MCP tool's cross-space branch
-     * had nowhere to put it and the flag was silently inert on the idiomatic call. `recall`'s own options
-     * have always had it; the fan-out spreads `opts` into every per-space call below, so declaring it
-     * here is the whole fix.
+     * Every option this signature does not name is silently DROPPED on the cross-space branch while
+     * working perfectly on the single-space one, because the fan-out spreads `opts` into each per-space
+     * call. The fresh-write flag was inert on the idiomatic call for exactly that reason before it stopped
+     * being a flag at all, and this would be how the filter path came back `undefined` for the callers
+     * most likely to be searching several spaces.
      */
-    includeFreshWrites?: boolean;
+    observePath?: RecallPathObservation & { path(): 'prefilter' | 'exhaustive' | undefined };
   },
 ): Promise<RecallResult[]> {
   // Embed ONCE for the whole fan-out. Every space below searches the same text, so without this the query is

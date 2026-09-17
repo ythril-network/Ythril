@@ -41,7 +41,7 @@ export type RecallRequest =
  *
  * They are not uniform, and that is the point of pinning them in one place:
  *
- * - **three flags are sent only when ON**, and `includeContent` only when OFF, because the server includes
+ * - **three flags are sent only when ON**, and `includeFileContent` only when OFF, because the server includes
  *   content by default — spelling out `true` would put a parameter in every request meaning what its absence
  *   means;
  * - **the zeros are all "say nothing", for four different reasons**: `depth: 0` IS no expansion,
@@ -108,8 +108,7 @@ export function recallRequestFrom(form: RecallFormState, typeOpts: readonly Reca
       ...(tags.length ? { tags } : {}),
       ...(filter ? { filter } : {}),
       ...(form.maxPerType > 0 ? { maxPerType: form.maxPerType } : {}),
-      ...(form.includeFreshWrites ? { includeFreshWrites: true } : {}),
-      ...(form.includeContent ? {} : { includeContent: false }),
+      ...(form.includeFileContent ? {} : { includeFileContent: false }),
       ...(form.includeDiagnostics ? { includeDiagnostics: true } : {}),
       ...(form.includeRecordMeta ? { includeRecordMeta: true } : {}),
       ...(traverse ? { traverse } : {}),
@@ -122,7 +121,6 @@ export function recallRequestFrom(form: RecallFormState, typeOpts: readonly Reca
       ...(form.maxTokens > 0 ? { maxTokens: form.maxTokens } : {}),
       // Only with a token ceiling: on its own it converts nothing, and the control is hidden for the same
       // reason. Guarded so a 0 cannot reach a divisor.
-      ...(form.maxTokens > 0 && form.charsPerToken > 0 ? { charsPerToken: form.charsPerToken } : {}),
       ...(form.skip > 0 ? { skip: form.skip } : {}),
       ...(form.remainderDump ? { remainderDump: true } : {}),
     },

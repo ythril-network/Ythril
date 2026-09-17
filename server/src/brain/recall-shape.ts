@@ -302,6 +302,21 @@ export function byIdAsc(a: { _id: string }, b: { _id: string }): number {
 }
 
 /**
+ * The three numbers `rankOf` reads, and nothing else.
+ *
+ * Widened from `RecallResult` because the RANKING is not a property of the record: a result is
+ * `{score, fusedScore?, rerankScore?, …}` on the flat REST shape and on the nested `{…, record}` envelope
+ * alike, and the delegating recall route holds the second. Demanding the whole record to read three
+ * optional floats forced a cast at that call site, and a cast is how a function ends up reading a field
+ * that is not there.
+ */
+export interface RankedLike {
+  score?: number;
+  fusedScore?: number;
+  rerankScore?: number;
+}
+
+/**
  * THE ranking comparator — effective rank descending, then `_id`.
  *
  * One implementation rather than the eleven hand-written comparators this replaced — seven in `recall.ts`, two
@@ -315,7 +330,7 @@ export function byRankThenId(a: RecallResult, b: RecallResult): number {
   return rankOf(b) - rankOf(a) || byIdAsc(a, b);
 }
 
-export function rankOf(r: RecallResult): number {
+export function rankOf(r: RankedLike): number {
   return r.rerankScore ?? r.fusedScore ?? r.score ?? 0;
 }
 

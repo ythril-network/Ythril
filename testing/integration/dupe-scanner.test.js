@@ -23,7 +23,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, waitForIndexed as waitForIndexedShared } from '../sync/helpers.js';
+import { INSTANCES, post, get, waitForIndexed as waitForRecallable, waitForSimilarityIndex } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -68,8 +68,19 @@ async function createEntity(space, name, description) {
  * "Timed out indexing:" instead of "Timed out waiting for indexing of:". It was caught by a gate that matches the
  * SHAPE of the poll rather than any of its names.
  */
+/**
+ * Wait until `$vectorSearch` can see the pair — NOT until `recall` can find them.
+ *
+ * The recall-based poll stopped answering this question at 5.0: every recall also scans the newest records
+ * straight from the collection, so it returns as soon as a record is WRITTEN. Duplicate detection has no
+ * such scan — it searches the index — so the old wait became a green light that means nothing here, and
+ * the symptom was a scan finding no candidate pairs in a fixture that had "finished waiting".
+ *
+ * A pair is the right unit for this file anyway: every case needs BOTH records visible to the index, which
+ * is exactly what a similarity search proves.
+ */
 const waitForIndexed = (space, ids, timeoutMs) =>
-  waitForIndexedShared(INSTANCES.a, token(), space, ids, ['entity'], timeoutMs);
+  waitForSimilarityIndex(INSTANCES.a, token(), space, ids[0], 'entity', ids[1], timeoutMs);
 
 async function scan(space) {
   return raw('POST', `/api/duplicates/scan?space=${space}`);
@@ -232,7 +243,23 @@ describe('Duplicate scanner — real-time (on insert)', () => {
 
     const i1 = await createEntity(SPACE_INSERT, `Support Ticket Router ${RUN}`, 'Support ticket routing service assigning incoming tickets to on-call engineers by topic');
     assert.ok(i1, 'first entity created');
-    await waitForIndexed(SPACE_INSERT, [i1]);
+    /*
+     * `i1` must be visible to the INDEX before `i2` is written, and proving that needs a THIRD record.
+     *
+     * Insert-time evaluation runs `evalOneRecord` → `findSimilar`, which searches `$vectorSearch` and has
+     * no fresh-write scan of its own. So the hook fires once, at i2's insert, and finds nothing if i1 has
+     * not been ingested yet — which is exactly what happened when the recall-based poll stopped proving
+     * indexing (every recall now also reads the newest records straight from the collection, so it returns
+     * as soon as a record is WRITTEN).
+     *
+     * A similarity search proves it, and a similarity search needs a seed that is not the record under
+     * test: the self-match is excluded. Hence the probe — written first, used only as a vantage point.
+     * Its own indexing does not matter, because its vector is read from the collection.
+     */
+    const probe = await createEntity(SPACE_INSERT, `Index Probe ${RUN}`,
+      'Support ticket routing service assigning incoming tickets to queues');
+    assert.ok(probe, 'index probe created');
+    await waitForSimilarityIndex(INSTANCES.a, token(), SPACE_INSERT, probe, 'entity', i1);
 
     // Insert a near-duplicate; the fire-and-forget insert-time hook should record it.
     const i2 = await createEntity(SPACE_INSERT, `Support Ticket Routing ${RUN}`, 'Support ticket routing service assigning incoming tickets to on-call engineers based on topic');

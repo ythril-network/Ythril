@@ -47,36 +47,82 @@ const HELP = 'server/src/mcp/tools/help-sections.ts';
 const I18N = 'client/public/assets/i18n/en.json';
 const code = (f) => stripComments(readFileSync(f, 'utf8'));
 
-describe('includeFreshWrites reaches the cross-space path', () => {
-  it('the CROSS-SPACE call forwards it', () => {
-    /*
-     * SCOPED TO THAT CALL, and my first version was not — it counted occurrences in the file and required
-     * four. There are four already: the schema, the prose, and TWO on the space-scoped branch, which spells
-     * it `includeFreshWrites: a['includeFreshWrites'] === true`. So the count was satisfied by the branch
-     * that already worked, and the gate passed on the defect it was written for.
-     *
-     * A count over a file cannot tell which branch has the thing. The subject is the `recallGlobal(` call.
-     */
+describe('the cross-space branch forwards every option the space-scoped one does', () => {
+  /*
+   * WHAT THIS USED TO BE, and why the rule outlived its example.
+   *
+   * It asserted that `includeFreshWrites` reached the `recallGlobal(` call. That parameter is gone — the
+   * scan it gated runs on every recall since 5.0 — but the defect it was written for is structural and
+   * still live: `recallGlobal` spreads `opts` into each per-space call, so a field its signature does not
+   * declare is silently dropped on the cross-space branch while working perfectly on the single-space one.
+   *
+   * And the cross-space branch is the one a caller takes by OMITTING `space`, which is the form this tool's
+   * own first paragraph promotes. So the wrong half is the half most people use, and it answers 200.
+   *
+   * The rule, derived rather than exemplified: the two calls pass the same option keys, and `recallGlobal`
+   * declares every key it is passed.
+   */
+  /**
+   * The keys of the OPTIONS literal — the last `{…}` in the call, which is where `opts` always sits.
+   *
+   * Anchored on the last brace rather than on a neighbouring word. The first version started at the first
+   * `{` after `filter`, and the space-scoped call is inside a `.map(mid => recall(…))`, so it found a brace
+   * belonging to the arrow function and parsed one key. A gate that reports "the parser is stale" about
+   * correct code is the failure this whole file is about, one level up.
+   */
+  const optionKeys = (call) => {
+    const open = call.lastIndexOf('{');
+    if (open < 0) return new Set();
+    let depth = 0;
+    const keys = new Set();
+    for (let i = open; i < call.length; i++) {
+      const c = call[i];
+      if (c === '{') depth++;
+      else if (c === '}') { if (--depth === 0) break; }
+      else if (depth === 1 && /[a-zA-Z]/.test(c)) {
+        /*
+         * Only at the START of a property — the preceding non-space character is `{` or `,`.
+         *
+         * Without that test, `maxTimeMS: recallMaxTimeMS` contributes BOTH names: the scan resumes on the
+         * value and `recallMaxTimeMS` matches the same pattern. It was then reported as an option
+         * `recallGlobal` does not accept, which is a finding about a variable name.
+         */
+        const before = call.slice(open, i).trimEnd().slice(-1);
+        if (before !== '{' && before !== ',') continue;
+        const m = /^([a-zA-Z][a-zA-Z0-9]*)\s*[,:}]/.exec(call.slice(i));
+        // A bare `{ maxPerType, … }` shorthand counts as passing that key, same as `maxPerType: x`.
+        if (m) { keys.add(m[1]); i += m[1].length - 1; }
+      }
+    }
+    return keys;
+  };
+
+  it('both recall calls in the tool pass the same options', () => {
     const src = code(MCP_SEARCH);
-    const at = src.indexOf('recallGlobal(');
-    assert.ok(at > 0, 'the cross-space recall call is gone — re-point this gate');
-    const call = src.slice(at, src.indexOf(');', at) + 2);
-    assert.match(call, /includeFreshWrites/,
-      'the cross-space branch drops the option, so the one parameter whose purpose is "find what I just '
-      + 'wrote" does nothing on the idiomatic MCP call — omitting `space` is the form the tool promotes');
+    const scoped = src.indexOf('recall(mid,');
+    const global = src.indexOf('recallGlobal(');
+    assert.ok(scoped > 0 && global > 0, 'one of the two recall calls is gone — re-point this gate');
+    const a = optionKeys(src.slice(scoped, src.indexOf(');', scoped) + 2));
+    const b = optionKeys(src.slice(global, src.indexOf(');', global) + 2));
+    assert.ok(a.size >= 3, `parsed only ${a.size} options off the space-scoped call — the parser is stale`);
+    assert.deepEqual([...a].filter(k => !b.has(k)), [],
+      'the cross-space branch drops an option the space-scoped one passes, so it does nothing on the '
+      + 'idiomatic MCP call — omitting `space` is the form the tool promotes');
   });
 
-  it('and recallGlobal ACCEPTS it, so forwarding is not a silent drop', () => {
-    /*
-     * Also scoped, for the same reason: `recall`'s own options already declare this field, so matching the
-     * file would have passed on the wrong function. The subject is `recallGlobal`'s signature.
-     */
+  it('and recallGlobal DECLARES every one of them, so forwarding is not a silent drop', () => {
     const src = code(RECALL);
     const at = src.indexOf('export async function recallGlobal');
     assert.ok(at > 0, 'recallGlobal is gone — re-point this gate');
     const sig = src.slice(at, src.indexOf('): Promise', at));
-    assert.match(sig, /includeFreshWrites/,
-      'recallGlobal does not accept the option, so forwarding it drops it on the floor');
+    const mcp = code(MCP_SEARCH);
+    const global = mcp.indexOf('recallGlobal(');
+    const passed = optionKeys(mcp.slice(global, mcp.indexOf(');', global) + 2));
+    // `\\b` and `\\s`, doubled: inside a template literal a single `\b` is a BACKSPACE character, so the
+    // first version built a regex that could never match and reported every option as undeclared.
+    const undeclared = [...passed].filter(k => !new RegExp(`\\b${k}\\s*[?:]`).test(sig));
+    assert.deepEqual(undeclared, [],
+      `recallGlobal does not accept ${undeclared.join(', ')}, so forwarding drops it on the floor`);
   });
 });
 
@@ -199,7 +245,7 @@ describe('a tool that promises a field returns it', () => {
 describe('help() does not narrow what the caller has', () => {
   it('projection is named on every tool that takes it', () => {
     // It said `projection` was "the only field-selection lever there is" about `query`; recall and
-    // find_similar both take it and apply it through `_graph`. A caller reached for `includeContent: false`
+    // find_similar both take it and apply it through `_graph`. A caller reached for `includeFileContent: false`
     // on an entity search, where it does nothing.
     assert.doesNotMatch(readFileSync(HELP, 'utf8'), /The only field-selection lever there is/,
       'help() still claims projection exists only on query');

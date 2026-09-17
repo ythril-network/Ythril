@@ -135,8 +135,17 @@ describe('remember says the embedding is asynchronous', () => {
   it('warns that a recall seconds later can miss the write', () => {
     // Measurable as a broken feature: write, search, find nothing, conclude search is down.
     assert.match(REMEMBER, /ASYNCHRONOUS/, 'the write returns before the vector exists');
-    assert.match(REMEMBER, /includeFreshWrites: true/,
-      'name the escape hatch — knowing about the delay without the remedy is half an answer');
+    /*
+     * Say what covers the delay and what does not — knowing about it without the remedy is half an answer.
+     *
+     * This asserted the literal `includeFreshWrites: true`, which was the remedy until 5.0. The scan runs
+     * on every recall now, so the remedy is "nothing, it is handled" — and the half that ISN'T handled
+     * became the thing worth naming: a record whose embedding job has not run has no vector to compare.
+     */
+    assert.match(REMEMBER, /scans the newest records straight from the collection/,
+      'say that recall covers the index-lag half of the delay');
+    assert.match(REMEMBER, /list_embed_jobs/,
+      'name what does NOT cover it — a record still queued for embedding — and where to see that queue');
   });
 
   it('tells the caller to write a self-contained sentence', () => {

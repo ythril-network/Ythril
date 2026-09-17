@@ -231,6 +231,51 @@ function warnIfTight(elapsed, timeout) {
  */
 export const INDEX_LAG_TIMEOUT_MS = 300_000;
 
+/**
+ * Wait until `$vectorSearch` ITSELF can see a record — the question `waitForIndexed` stopped answering.
+ *
+ * ## Why a second poll rather than a flag on the first
+ *
+ * `waitForIndexed` polls `recall`, and since 5.0 every recall also scans the newest records straight from
+ * the collection. So it now returns as soon as the record is WRITTEN, which is what most callers actually
+ * want and is why it stays as it is: a test that only needs "recall can find this" is now unblocked sooner
+ * and is not lying to itself.
+ *
+ * But `find_similar` and duplicate detection do NOT have that scan — they search the index and nothing else.
+ * For them the old poll became a green light that means nothing, and the symptom is an empty `results` in a
+ * test whose fixture "finished waiting": exactly the kind of pass-shaped failure this file exists to stop.
+ *
+ * So this asks the question those callers depend on, using the capability they are about to use. A seed id
+ * whose similarity search returns `expectedId` proves BOTH records reached the index, because the seed's
+ * vector is read from the collection and the match can only come from `$vectorSearch`.
+ *
+ * @param seedId     the entry whose stored vector drives the search
+ * @param expectedId the record that must come back — the proof the index has ingested
+ */
+export async function waitForSimilarityIndex(
+  baseUrl, token, spaceId, seedId, entryType, expectedId, timeoutMs = INDEX_LAG_TIMEOUT_MS,
+) {
+  const started = Date.now();
+  const deadline = started + timeoutMs;
+  let last = null;
+  let polls = 0;
+  while (Date.now() < deadline) {
+    const r = await post(baseUrl, token, '/api/brain/similar',
+      { space: spaceId, entryId: seedId, entryType, topK: 50 });
+    polls++;
+    last = r.status;
+    const ids = (r.body?.results ?? []).map(x => x.record?._id ?? x._id);
+    if (r.status === 200 && ids.includes(expectedId)) return;
+    await new Promise(res => setTimeout(res, 500));
+  }
+  const how = last === 200
+    ? `find_similar answered 200 every time and never listed it, over ${polls} polls`
+    : `the last find_similar returned ${last} — this is not index lag, the endpoint itself is failing`;
+  throw new Error(
+    `Timed out after ${Math.round((Date.now() - started) / 1000)}s waiting for $vectorSearch to see `
+    + `${expectedId} from seed ${seedId} in space ${spaceId}: ${how}`);
+}
+
 export async function waitForIndexed(baseUrl, token, spaceId, ids, types, timeoutMs = INDEX_LAG_TIMEOUT_MS) {
   const pending = new Set(ids);
   const started = Date.now();

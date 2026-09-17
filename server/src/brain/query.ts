@@ -2,74 +2,35 @@
  * Structured read-only query (`queryBrain`) — the operator-whitelisted Mongo query surface.
  *
  * Split out of brain/fact.ts (A17.4). This is the raw-Mongo query path behind REST /query and the
- * MCP `query` tool; distinct from the recall filter DSL in filter.ts. Includes the operator
- * whitelist, the ReDoS-safe sanitiser, and the projection guard that never lets `embedding` out.
+ * MCP `query` tool; distinct from the recall filter DSL in filter.ts. Holds the query builder, the paging
+ * rules and the projection guard that never lets `embedding` out — the operator refusals and the ReDoS
+ * guard moved to `brain/filter-sanitizer.ts`, which both filter grammars now share.
  */
 import { col } from '../db/mongo.js';
 import { BUDGET_REQUEST_FIELDS } from './result-budget.js';
 import { BRAIN_COLLECTIONS, type BrainCollection } from '../config/types.js';
-import { hasReDoSRisk, MAX_PATTERN_LENGTH } from '../util/redos.js';
 import { normaliseProjection, toMongoProjection } from './projection.js';
+import { sanitizeFilter } from './filter-sanitizer.js';
 
-// Allowed top-level query operators for the structured query tool
-const ALLOWED_OPERATORS = new Set([
-  '$eq', '$ne', '$gt', '$gte', '$lt', '$lte', '$in', '$nin',
-  '$and', '$or', '$nor', '$not', '$exists', '$type', '$regex', '$options',
-  '$all', '$elemMatch', '$size', '$mod',
-]);
-
-// Valid MongoDB regex flags (i=case-insensitive, m=multiline, s=dotAll, x=extended)
-const VALID_OPTIONS_RE = /^[imsx]+$/;
-
-/**
- * Exported so `recall` can validate a raw-Mongo filter with the SAME parser, allowlist and depth cap `query` uses.
- *
- * The fleet integrator, 2026-08-13T1035Z §2: recall's filter is one operator object per key, ANDed, while query's takes
- * `$or`/`$and`/`$not`/`$regex`/`$elemMatch` nested to depth 8 — so a caller wanting meaning-ranking AND a real predicate
- * had to make two calls. Two filter languages against one store is a fork of the same policy, and the narrower one keeps
- * being the reason a caller reaches for the wrong tool.
- *
- * One parser, not two similar ones.
+/*
+ * Re-exported, not re-implemented. Several callers and gates import `sanitizeFilter` from here because this
+ * is where it lived; repointing all of them in the same change would bury the move in unrelated diff. The
+ * module is the definition, this is an alias, and there is one implementation either way.
  */
-export function sanitizeFilter(filter: unknown, depth = 0): unknown {
-  if (depth > 8) throw new Error('Filter too deeply nested');
-  if (Array.isArray(filter)) return filter.map(v => sanitizeFilter(v, depth + 1));
-  if (filter !== null && typeof filter === 'object') {
-    const entries = Object.entries(filter as Record<string, unknown>);
-    const out: Record<string, unknown> = {};
-    for (const [key, val] of entries) {
-      if (key.startsWith('$') && !ALLOWED_OPERATORS.has(key)) {
-        throw new Error(`Operator '${key}' is not allowed in queries`);
-      }
-      // $regex must be a plain string and pass the shared ReDoS heuristic —
-      // a catastrophic pattern would otherwise pin Mongo CPU for the full
-      // maxTimeMS budget per call (multiplied per member space on proxies).
-      if (key === '$regex') {
-        if (typeof val !== 'string') {
-          throw new Error("'$regex' must be a string pattern");
-        }
-        if (val.length > MAX_PATTERN_LENGTH) {
-          throw new Error(`'$regex' pattern exceeds ${MAX_PATTERN_LENGTH} characters`);
-        }
-        if (hasReDoSRisk(val)) {
-          throw new Error("'$regex' pattern rejected: potential catastrophic backtracking (nested or alternating quantifiers)");
-        }
-      }
-      out[key] = sanitizeFilter(val, depth + 1);
-    }
-    // $options must only appear alongside $regex and contain valid flags
-    if ('$options' in out) {
-      if (!('$regex' in out)) {
-        throw new Error("'$options' is only allowed alongside '$regex'");
-      }
-      if (typeof out['$options'] !== 'string' || !VALID_OPTIONS_RE.test(out['$options'] as string)) {
-        throw new Error("'$options' must be a string of valid regex flags (i, m, s, x)");
-      }
-    }
-    return out;
-  }
-  return filter;
-}
+export { sanitizeFilter };
+
+/*
+ * THE SANITIZER MOVED to `brain/filter-sanitizer.ts`, and this note is here because it was the reason to
+ * open this file.
+ *
+ * It was the operator refusals, the ReDoS guard and the depth cap, living beside the query builder that
+ * happened to be their first caller — while the key-shape guard for the OTHER filter grammar lived in
+ * `brain/filter.ts`. One rule, two files, and each grammar protected by a different subset of it.
+ *
+ * Owner, 2026-09-17: *"add the sanitizer and make it a real module."* It is also where value coercion
+ * will go — casting a string `_id` to an `ObjectId`, for one — because the walk is the only place that
+ * sees every value in context.
+ */
 
 const ALLOWED_COLLECTIONS = new Set<string>(BRAIN_COLLECTIONS);
 
@@ -120,37 +81,29 @@ export const TRAVERSE_BODY_FIELDS: ReadonlySet<string> = new Set([
   'includeChrono', 'includeMemories', 'includeFiles', 'includeEdges',
 ]);
 
-export const RECALL_BODY_FIELDS: ReadonlySet<string> = new Set([
-  // `space` is a BODY field since 5.0 — the route dropped its `/spaces/:spaceId` segment so the search can
-  // run across every space the token reads. Omitting it is the cross-space call, not an error. The guard
-  // (`requireBodyScopedSpace`) consumes it; the handler never reads it again.
-  'space',
-  'query', 'topK', 'types', 'minScore', 'filter', 'traverse', 'tags',
-  'minPerType', 'maxPerType', 'maxTimeMS',
-  // NOT on the destructuring line — these two are read 120 lines further down the handler as
-  // `(req.body as {...}).includeFreshWrites` / `.includeContent`. The first version of this set was built from the
-  // destructuring alone and refused both, which `recall-fresh-writes.test.js` caught immediately.
-  //
-  // That is the standing hazard of making a body strict: the allowed set has to be the keys the handler READS, and a
-  // handler that reads its body in two places will be described by whichever place you looked at. Grep for `req.body`
-  // across the whole handler, not for the destructure.
-  'includeFreshWrites', 'includeContent', 'includeDiagnostics', 'includeRecordMeta', 'projection',
-  // `maxChars` is the ceiling that carries the defaults, and `maxBytes` now means real UTF-8 bytes — both
-  // apply when both are set. See `result-budget.ts`.
-  ...BUDGET_REQUEST_FIELDS, 'skip', 'remainderDump',
-
-]);
-
+/*
+ * `RECALL_BODY_FIELDS` WAS HERE, AND IT WAS DELETED RATHER THAN LEFT UNUSED.
+ *
+ * `POST /api/brain/recall` keeps no key list any more: it hands its whole body to `callTool`, which
+ * validates against the `recall` tool's published `inputSchema` and its `additionalProperties: false`.
+ * That is stricter than this set ever was, and it cannot fall behind a parameter added to the tool,
+ * because it IS the tool's parameters.
+ *
+ * The note is here because the list looked harmless once it stopped being read. It gated no request and
+ * still read like the contract: `client-bodies-match-server.test.js` was comparing the Angular client
+ * against it, so the client could have drifted from what the server enforces while a green gate said the
+ * two agreed. A list nothing consults is not dead weight, it is a second answer nobody is checking.
+ */
 export const FIND_SIMILAR_BODY_FIELDS: ReadonlySet<string> = new Set([
   // `space` is a BODY field since 5.0. It has a NARROWER job here than on recall: it says where the SEED
   // ENTRY lives, not where to search. Omit it and the entry is located across every readable space;
   // `crossSpace` is the separate axis that widens the SEARCH, which is why both exist.
   'space',
   'entryId', 'entryType', 'topK', 'minScore', 'targetTypes', 'crossSpace',
-  // `traverse` and `includeContent` were on the MCP tool's schema and read by its handler while this route read
+  // `traverse` and `includeFileContent` were on the MCP tool's schema and read by its handler while this route read
   // neither. Found by the gate that compares every declared surface against these sets, not by a report — the
   // strict body turned a silently-ignored parameter into a 400, which is how it surfaced at all.
-  'traverse', 'includeContent', 'includeDiagnostics', 'projection',
+  'traverse', 'includeFileContent', 'includeDiagnostics', 'projection',
   ...BUDGET_REQUEST_FIELDS,
   'skip', 'remainderDump',
 ]);

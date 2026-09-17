@@ -172,7 +172,22 @@ describe('REST: the four read routes refuse a key they cannot honour', () => {
       const r = await post(INSTANCES.a, token, url, moved ? { space: SPACE, ...body } : body);
       assert.equal(r.status, 400, `${route} accepted '${offender}': ${JSON.stringify(r.body)}`);
       assert.ok(JSON.stringify(r.body).includes(offender), `the 400 must name '${offender}': ${JSON.stringify(r.body)}`);
-      assert.deepEqual(r.body.unrecognized_keys, [offender]);
+      /*
+       * `unrecognized_keys` comes from `unknownBodyFields`, which a route uses when it parses its own body.
+       * `/recall` stopped doing that at 5.0 — it hands its body to `callTool`, whose schema validation
+       * refuses the key and names it in the message. The machine-readable list is not produced there, and
+       * synthesising one by parsing the prose would be worse than not having it.
+       *
+       * The claim above survives either way and is the one with the value in it: the refusal NAMES the
+       * offending key, which is what shortens the caller's search to zero. The array is asserted only where
+       * the route still builds it, so this case cannot pass by the field quietly disappearing everywhere.
+       */
+      if (route === '/recall') {
+        assert.match(r.body.error, /unexpected property 'topk'/,
+          'the shared dispatcher must name the key it refused');
+      } else {
+        assert.deepEqual(r.body.unrecognized_keys, [offender]);
+      }
     });
   }
 

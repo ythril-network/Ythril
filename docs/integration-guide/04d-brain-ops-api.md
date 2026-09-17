@@ -619,7 +619,7 @@ page therefore costs more on a proxy space than on a plain one, but it is the sa
 `recall` and `similar` bound the response by **`maxChars`** (default **50 000 over REST, 25 000 over MCP** — the one
 place the two doors deliberately differ) and, if you set it, by **`maxBytes`**, which has NO default and counts real
 UTF-8 bytes. Set both and both apply: the answer stops at whichever it reaches first. `maxTokens` is a convenience
-onto `maxChars`, converted with `charsPerToken`.
+onto `maxChars`, converted at a fixed 3.5 characters per token (the `charsPerToken` override was removed in 5.0).
 
 > **This paragraph named `maxBytes` as the defaulting parameter, at 100 000.** Neither half was right: the
 > defaulting parameter is `maxChars` at 50 000, and `maxBytes` defaults to nothing. A caller sizing to 100 KB
@@ -669,14 +669,14 @@ keys:
 
 | Route | Accepted fields |
 |---|---|
-| `POST /filter` | `space`, `collection`, `filter`, `projection`, `limit`, `skip`, `sort`, `dir`, `maxTimeMS`, `entityName`, `fromName`, `toName`, `maxChars`, `maxBytes`, `maxTokens`, `charsPerToken` |
-| `POST /recall` | `space`, `query`, `topK`, `types`, `minScore`, `filter`, `traverse`, `tags`, `minPerType`, `maxPerType`, `maxTimeMS`, `includeFreshWrites`, `includeContent`, `includeDiagnostics`, `includeRecordMeta`, `projection`, `maxChars`, `maxBytes`, `maxTokens`, `charsPerToken`, `skip`, `remainderDump` |
+| `POST /filter` | `space`, `collection`, `filter`, `projection`, `limit`, `skip`, `sort`, `dir`, `maxTimeMS`, `entityName`, `fromName`, `toName`, `maxChars`, `maxBytes`, `maxTokens` |
+| `POST /recall` | `space`, `query`, `topK`, `types`, `minScore`, `filter`, `traverse`, `tags`, `minPerType`, `maxPerType`, `maxTimeMS`, `includeFileContent`, `includeDiagnostics`, `includeRecordMeta`, `projection`, `maxChars`, `maxBytes`, `maxTokens`, `skip`, `remainderDump` |
 | `POST /traverse` | `startId`, `direction`, `edgeLabels`, `maxDepth`, `limit`, `includeChrono`, `includeMemories`, `includeFiles`, `includeEdges` |
-| `POST /similar` | `space`, `entryId`, `entryType`, `topK`, `minScore`, `targetTypes`, `traverse`, `includeContent`, `includeDiagnostics`, `projection`, `maxChars`, `maxBytes`, `maxTokens`, `charsPerToken`, `skip`, `remainderDump`, `crossSpace` *(not deprecated: `space` pins the seed ENTRY here, `crossSpace` widens the SEARCH)* |
+| `POST /similar` | `space`, `entryId`, `entryType`, `topK`, `minScore`, `targetTypes`, `traverse`, `includeFileContent`, `includeDiagnostics`, `projection`, `maxChars`, `maxBytes`, `maxTokens`, `skip`, `remainderDump`, `crossSpace` *(not deprecated: `space` pins the seed ENTRY here, `crossSpace` widens the SEARCH)* |
 
 ```json
 {
-  "error": "Unknown field(s): orderBy. Allowed: collection, filter, projection, limit, skip, sort, dir, maxTimeMS, maxChars, maxBytes, maxTokens, charsPerToken",
+  "error": "Unknown field(s): orderBy. Allowed: collection, filter, projection, limit, skip, sort, dir, maxTimeMS, maxChars, maxBytes, maxTokens",
   "unrecognized_keys": ["orderBy"]
 }
 ```

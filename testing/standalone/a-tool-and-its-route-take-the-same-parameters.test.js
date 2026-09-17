@@ -41,7 +41,6 @@ const bodySchemas = await import('../../server/dist/spaces/body-schemas.js');
 function exportedSets() {
   const sets = {
     QUERY_BODY_FIELDS: query.QUERY_BODY_FIELDS,
-    RECALL_BODY_FIELDS: query.RECALL_BODY_FIELDS,
     TRAVERSE_BODY_FIELDS: query.TRAVERSE_BODY_FIELDS,
     FIND_SIMILAR_BODY_FIELDS: query.FIND_SIMILAR_BODY_FIELDS,
   };
@@ -120,7 +119,7 @@ describe('a tool and its route take the same parameters', () => {
      * because a BROKEN parser does not land near the real ratio, it lands near zero, so the gap between
      * 40% and 49% is slack for the surface changing rather than tolerance for a defect.
      */
-    const readable = paired.filter(p => p.routes.some(r => r.keys));
+    const readable = paired.filter(p => p.routes.some(r => r.keys || r.delegatesTo));
     assert.ok(readable.length > paired.length * 0.4,
       `only ${readable.length} of ${paired.length} tools reached a route whose parameters could be read `
       + '— the parser is wrong, not the code');
@@ -141,12 +140,52 @@ describe('a tool and its route take the same parameters', () => {
     const stillCovered = [];
     for (const name of ['filter', 'recall', 'graph_traverse', 'similar']) {
       const entry = paired.find(p => p.tool.name === name);
-      const ok = entry && entry.routes.length && entry.routes.every(r => r.keys);
-      if (!ok) stillCovered.push(`${name}: ${entry ? (entry.routes[0]?.unresolved ?? 'no route') : 'not paired'}`);
+      /*
+       * `delegatesTo` counts, and counts as the strongest of the three answers rather than as a let-off.
+       * A route that hands its whole body to `callTool` has no parameter list to compare, because the
+       * tool's `inputSchema` IS the list it is validated against — so there is nothing left that could
+       * drift. `POST /api/brain/recall` became one of these when its four hundred lines collapsed onto the
+       * shared module, and reading that as lost coverage would be exactly backwards.
+       */
+      const ok = entry && entry.routes.length && entry.routes.every(r => r.keys || r.delegatesTo);
+      if (!ok) {
+        const why = entry ? (entry.routes[0]?.unresolved ?? 'no route registered for it') : 'not paired';
+        stillCovered.push(`${name}: ${why}`);
+      }
     }
     assert.deepEqual(stillCovered, [],
       'these were compared before this gate existed and are not being compared now: '
       + stillCovered.join('; '));
+  });
+
+  it('a route that delegates to a tool delegates to the RIGHT tool', () => {
+    /*
+     * The one thing a delegating route can still get wrong, and the one thing nothing else would catch.
+     *
+     * Every check above stops comparing the moment a route says `delegatesTo`, on the argument that the
+     * tool's schema is the route's contract. That argument holds only if the named tool is the capability
+     * the route claims to be: `POST /api/brain/recall` forwarding to `filter` would validate cleanly,
+     * answer 200, and be wrong about everything — with the parity sweep reporting it as covered.
+     *
+     * Derived from the registry rather than from a list of the routes that delegate today, so the second
+     * and third collapses are checked by the commit that makes them.
+     */
+    const wrong = [];
+    for (const row of rows) {
+      if (!row.delegatesTo) continue;
+      if (!ALL_TOOLS.some(t => t.name === row.delegatesTo)) {
+        wrong.push(`${row.method} ${row.route} forwards to '${row.delegatesTo}', which is not a tool`);
+        continue;
+      }
+      // The route's last path segment is the capability it advertises. A delegation to anything else is a
+      // door answering a question nobody asked it.
+      const segment = row.route.split('/').filter(Boolean).pop();
+      if (segment !== row.delegatesTo) {
+        wrong.push(`${row.method} ${row.route} forwards to the '${row.delegatesTo}' tool`);
+      }
+    }
+    assert.deepEqual(wrong, [],
+      `a delegating route is only in parity if it delegates to its own capability:\n  ${wrong.join('\n  ')}`);
   });
 
   it('no tool declares a parameter its route will not accept', () => {

@@ -22,6 +22,18 @@
  * so the drift was invisible until it wasn't. Consolidating without a gate just resets the clock on the next
  * copy — and the next copy will be written by whoever adds the fifth suite that needs to wait for the index.
  *
+ * ## There are TWO questions now, and telling them apart is the point
+ *
+ * Since 5.0 every recall also scans the newest records straight from the collection, so `waitForIndexed`
+ * returns as soon as a record is **written** — which is what most callers want and makes them faster. But
+ * `find_similar` and duplicate detection search the index and have no such scan, so for them the old poll
+ * became a green light that means nothing: the symptom was an empty `results` in a fixture that had
+ * "finished waiting", which reads as a broken feature rather than as a wait that stopped waiting.
+ *
+ * `waitForSimilarityIndex` is the second question — *can `$vectorSearch` itself see this record* — and it
+ * is asserted here for the same reason as the first: the next person who needs it will otherwise write a
+ * fifth copy, and a copy that asks the wrong one of the two is invisible until CI is red for a day.
+ *
  * Run: node --test testing/standalone/index-lag-wait-is-shared.test.js
  */
 import { describe, it } from 'node:test';
@@ -63,6 +75,19 @@ describe('the vector-index wait is shared, and its deadline is the measured one'
     const src = readFileSync(join(ROOT, HELPERS), 'utf8');
     assert.match(src, /result\.record\?\._id \?\? result\._id/,
       'a poll that matches only one of the two recall result shapes never matches and always times out');
+  });
+
+  it('the SECOND question has a shared answer too', () => {
+    /*
+     * `waitForIndexed` answers "can recall find it", which since 5.0 means "is it embedded". The index
+     * question is separate and has its own poll, because the two were the same answer for years and then
+     * quietly stopped being.
+     */
+    const src = readFileSync(join(ROOT, HELPERS), 'utf8');
+    assert.match(src, /export async function waitForSimilarityIndex\(/,
+      'the index-visibility poll must live beside the recall one, or the next caller writes a fifth copy');
+    assert.match(src, /api\/brain\/similar/,
+      'it must ask the capability that actually needs the index — polling recall is the question it replaces');
   });
 
   it('no test file re-implements the poll', () => {

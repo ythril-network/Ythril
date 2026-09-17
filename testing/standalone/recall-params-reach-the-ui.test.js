@@ -31,6 +31,8 @@ import assert from 'node:assert/strict';
 import { balancedFrom } from './_structural-window.mjs';
 import { readFileSync } from 'node:fs';
 
+const { ALL_TOOLS } = await import('../../server/dist/mcp/tools/index.js');
+
 const ROUTE = 'server/src/api/brain/search.ts';
 const API = 'client/src/app/core/brain-api.service.ts';
 /**
@@ -91,12 +93,25 @@ function paramsOf(path) {
   return names;
 }
 
+/**
+ * Every parameter `recall` accepts, read from the TOOL's published schema.
+ *
+ * It used to be parsed out of the REST handler's destructure, and that stopped existing when
+ * `POST /api/brain/recall` collapsed onto `callTool`. Re-pointing at the schema is not a workaround — it is
+ * the better source, and was all along: the schema is what the dispatcher validates against, what
+ * `tools/list` publishes, and what a caller reads while constructing arguments. A destructure was a
+ * SYMPTOM of the contract that happened to be greppable.
+ */
 function routeParams() {
-  const names = paramsOf('/recall');
+  const recall = ALL_TOOLS.find(t => t.name === 'recall');
+  assert.ok(recall, 'the recall tool is not in the registry — re-anchor this gate');
+  const names = new Set(Object.keys(recall.inputSchema({ requiredSpace: {}, optionalSpace: {} }).properties));
 
-  // `space` is the path parameter, not a body field, and `query` is required rather than optional.
-  assert.ok(names.has('query'), 'the parsed set does not contain `query` — the parser is reading the wrong statement');
+  assert.ok(names.has('query'), 'the parsed set does not contain `query` — the parser is reading the wrong schema');
   assert.ok(names.size >= 10, `parsed only ${names.size} recall params — the parser is stale`);
+  // `space` is transport on the client side: the UI picks it from a selector rather than putting it in the
+  // request body it builds, so it is not a field the typed body has to declare.
+  names.delete('space');
   return names;
 }
 

@@ -166,18 +166,20 @@ describe('the size ceiling is reachable from the form', () => {
      * space about a quarter over its limit, which was a real bug (B-1). A UI that offers only bytes cannot
      * express the ceiling those operators actually want.
      */
-    for (const unit of ['maxBytes', 'maxChars', 'maxTokens', 'charsPerToken']) {
+    for (const unit of ['maxBytes', 'maxChars', 'maxTokens']) {
       expect(api).toMatch(new RegExp(`${unit}\\?: number;`));
       expect(form).toMatch(new RegExp(`form\\(\\)\\.${unit}`));
       expect(request).toMatch(new RegExp(`form\\.${unit}`));
     }
-    // And the one dependency between them is enforced rather than merely documented: charsPerToken
-    // converts a token ceiling, so it is sent only when there is one.
-    //
-    // The first version of this line asserted that the source SAYS the server applies the smallest
-    // ceiling — and `api` here is comment-STRIPPED, so it was asking for a fact that only exists in a
-    // comment. A rule a caller reads is documentation; a rule a gate holds has to be behaviour.
-    expect(request).toMatch(/maxTokens > 0 && form\.charsPerToken > 0/);
+    /*
+     * `charsPerToken` was the fourth unit and is gone at 5.0. It did nothing unless `maxTokens` was also
+     * set — a knob for a knob — and an operator who needs the ceiling exact states `maxChars`, which is
+     * the unit the server applies. The dependency this line used to assert (sent only alongside a token
+     * ceiling) went with the parameter rather than being weakened into something vaguer.
+     *
+     * The ratio is fixed at 3.5 in `result-budget.ts` and is not a client concern any more, so there is
+     * nothing here to assert about it — which is the point of removing it rather than defaulting it.
+     */
   });
 
   it('the form has the control, bound and defaulted to "unset"', () => {

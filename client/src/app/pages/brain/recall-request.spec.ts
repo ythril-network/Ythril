@@ -20,10 +20,10 @@ import type { RecallFormState, RecallTypeOpt } from './recall-form.component';
 function form(over: Partial<RecallFormState> = {}): RecallFormState {
   return {
     query: 'who reports to whom', topK: 10, minScore: 0, filter: '', projection: '', tags: '', type: '',
-    maxPerType: 0, includeFreshWrites: false, includeContent: true, includeDiagnostics: false, includeRecordMeta: false,
+    maxPerType: 0, includeFileContent: true, includeDiagnostics: false, includeRecordMeta: false,
     depth: 0, edgeLabels: '', direction: '',
     includeChrono: false, includeMemories: false, includeFiles: false,
-    maxTimeMS: 0, maxBytes: 0, maxChars: 0, maxTokens: 0, charsPerToken: 0,
+    maxTimeMS: 0, maxBytes: 0, maxChars: 0, maxTokens: 0,
     skip: 0, remainderDump: false,
     ...over,
   };

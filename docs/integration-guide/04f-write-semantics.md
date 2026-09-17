@@ -354,7 +354,7 @@ What you *can* control:
 | lever | where | what it drops |
 |---|---|---|
 | `projection` | `POST /query`, **and recall / find-similar** | any field you do not name. On recall it applies recursively, so a `traverse` answer's `_graph` is projected at every depth |
-| `includeContent: false` | recall, find-similar | file-passage **bodies**, keeping path, heading, chunk index, tags and properties |
+| `includeFileContent: false` | recall, find-similar | file-passage **bodies**, keeping path, heading, chunk index, tags and properties |
 | `includeDiagnostics: false` *(the default)* | recall, find-similar | `matchedText`, `embeddingModel` and `seq` — **recursively**, so a `traverse` answer's `_graph` follows it at every depth. **NOT the per-stage scores** — see below |
 | `includeDiagnostics` *(query string, default off)* | the **list** routes — entities, facts, edges, chrono | `matchedText` and `embeddingModel`. **`seq` is NOT dropped here**, unlike on recall: it is the `If-Match` value, and withholding it would take away conditional writes. Send `?includeDiagnostics=true` to get the two fields back |
 

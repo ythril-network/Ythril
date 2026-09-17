@@ -68,7 +68,9 @@ describe('the query route takes a budget', () => {
      * present and nothing describing the gap.
      */
     const { BUDGET_REQUEST_FIELDS } = await import('../../server/dist/brain/result-budget.js');
-    assert.ok(BUDGET_REQUEST_FIELDS.length >= 4,
+    // A floor of three, not four: `charsPerToken` was removed at 5.0 — it did nothing unless `maxTokens`
+    // was also set. The floor exists so an empty import cannot pass the loop below, not to pin the count.
+    assert.ok(BUDGET_REQUEST_FIELDS.length >= 3,
       `only ${BUDGET_REQUEST_FIELDS.length} budget field(s) — the import is stale and this loop checks little`);
     for (const k of BUDGET_REQUEST_FIELDS) {
       assert.ok(QUERY_BODY_FIELDS.has(k), `POST /filter refuses \`${k}\`, which every other read route takes`);
@@ -139,14 +141,23 @@ describe('the query route takes a budget', () => {
 });
 
 describe('the guide says so', () => {
-  it('the accepted-field row lists the budget parameters', () => {
+  it('the accepted-field row lists the budget parameters', async () => {
     // `client-bodies-match-server.test.js` checks this table against the field set; asserted here too because
     // that gate reports the row as a whole and this one names the reason.
     const doc = readFileSync('docs/integration-guide/04d-brain-ops-api.md', 'utf8');
     const row = doc.split('\n').find(l => l.startsWith('| `POST /filter` |'));
     assert.ok(row, 'no accepted-fields row for POST /filter');
-    for (const k of ['maxChars', 'maxBytes', 'maxTokens', 'charsPerToken']) {
+    /*
+     * DERIVED from the module rather than listed, which is the whole point of `BUDGET_REQUEST_FIELDS`
+     * existing. This spelled the four names out and went red when `charsPerToken` was removed — reporting
+     * a documentation gap about a parameter that no longer exists.
+     */
+    const { BUDGET_REQUEST_FIELDS: fields } = await import('../../server/dist/brain/result-budget.js');
+    for (const k of fields) {
       assert.ok(row.includes(`\`${k}\``), `the table does not list ${k} for POST /filter`);
     }
+    assert.ok(!row.includes('`charsPerToken`'),
+      'the table still lists charsPerToken, which is an unknown field since 5.0 — a documented parameter '
+      + 'that 400s is worse than an undocumented one');
   });
 });

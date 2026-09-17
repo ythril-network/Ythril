@@ -177,6 +177,25 @@ export function bodyKeysFrom(body, exportedSets, fileSrc = '') {
     return { keys: de[1].split(',').map(k => k.trim().split(/[:=]/)[0].trim()).filter(Boolean), via: 'destructure' };
   }
 
+  /*
+   * A route that hands the whole body to `callTool` and reads none of it itself.
+   *
+   * This is not an unresolved route and it is not an exempt one — it is the ANSWER the parity gate is
+   * looking for. `callTool` validates the arguments against the named tool's published `inputSchema`, which
+   * has `additionalProperties: false`, so the route's accepted keys ARE the tool's parameters and cannot
+   * drift from them: there is no second list to update. `POST /api/brain/recall` became one of these when
+   * its four hundred lines collapsed onto the shared module.
+   *
+   * **The condition that makes it true is the single `req.body`**, and it is the whole of the check. A
+   * delegating route that also peeks at one field — a `space` read for a log line, a `topK` clamped "just
+   * here" — is back to two implementations of one contract, with the second one invisible because the
+   * route looks delegated. So the count is asserted rather than the shape.
+   */
+  const viaTool = body.match(/callTool\(\s*\{\s*name:\s*'([a-z_0-9]+)'/);
+  if (viaTool && [...body.matchAll(/req\.body/g)].length === 1) {
+    return { delegatesTo: viaTool[1], via: 'callTool' };
+  }
+
   const fwd = body.match(/\b(\w+)\s*\(\s*req\.body\s*(?:as [^)]*)?\)/);
   if (fwd) return { unresolved: `the body is forwarded whole to ${fwd[1]}()` };
   if (/req\.body/.test(body)) return { unresolved: 'the body is read field by field rather than gathered' };
@@ -186,9 +205,14 @@ export function bodyKeysFrom(body, exportedSets, fileSrc = '') {
 /**
  * Every route registration in the API tree, with its full path and what it accepts.
  *
- * A row is either `{ keys, queryKeys, via }` or `{ unresolved }`. **Never both, and never an empty `keys`
- * standing in for "we could not tell"** — that equivalence is how a sweep reports clean about something
- * nobody checked.
+ * A row is `{ keys, queryKeys, via }`, `{ delegatesTo, via }` or `{ unresolved }`. **Never two of them, and
+ * never an empty `keys` standing in for "we could not tell"** — that equivalence is how a sweep reports
+ * clean about something nobody checked.
+ *
+ * `delegatesTo` names the tool a route hands its whole body to. It is the strongest row of the three: the
+ * route has no parameter list of its own to compare, because the tool's `inputSchema` IS its parameter
+ * list. A caller must treat it as covered, not as exempt — an exemption is a promise nobody re-reads,
+ * while this one is re-derived from the route's source on every run.
  *
  * `exportedSets` maps a symbol name to an iterable of keys, for schemas the caller can import and this
  * cannot see. A symbol that is not supplied comes back unresolved.

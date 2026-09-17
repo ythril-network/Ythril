@@ -122,9 +122,24 @@ describe('no ranking sort is written by hand', () => {
     }
   });
 
-  it('and the comparator is actually used, in both files', () => {
-    // The mirror of the check above: satisfying it by deleting the sorts would be worse than the defect.
-    for (const f of FILES) {
+  it('and the comparator is actually used, wherever a ranking is still assembled', () => {
+    /*
+     * The mirror of the check above: satisfying it by deleting the sorts would be worse than the defect.
+     *
+     * Scoped to the files that still RANK, rather than to all four by name. `api/brain/search.ts` stopped
+     * ranking anything when `POST /api/brain/recall` collapsed onto `callTool` — it has no results to
+     * merge, so it references no comparator and correctly should not. Demanding the name there is
+     * demanding the deleted duplicate back, and that is a gate arguing against its own subject.
+     *
+     * A file is "still ranking" if it sorts or merges results at all. A file that does neither has nothing
+     * to be non-deterministic about, and the check above already refuses it a bare comparator if it grows
+     * one.
+     */
+    const ranks = code => /\.sort\(|mergeRecallResults/.test(code);
+    const ranking = FILES.filter(f => ranks(stripComments(readFileSync(f, 'utf8'))));
+    assert.ok(ranking.length >= 2,
+      `only ${ranking.length} of the recall files still assemble a ranking — the scan is broken, not the code`);
+    for (const f of ranking) {
       const code = stripComments(readFileSync(f, 'utf8'));
       assert.match(code, /byRankThenId/,
         `${f} no longer references the shared comparator — satisfying the check above by deleting the sort `

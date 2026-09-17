@@ -23,6 +23,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { routeBody, delegatesCleanly } from './_delegating-routes.mjs';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf, balancedFrom } from './_structural-window.mjs';
@@ -135,15 +136,23 @@ describe('the narrowing reaches the database', () => {
       'buildGraphWithSpill accepts the narrowing and does not pass it on, so it never reaches the query');
   });
 
-  it('every recall-side expansion passes it — all four call sites', () => {
+  it('every recall-side expansion passes it, at every site that still has one', () => {
     /*
-     * Four: recall and find_similar, on each door. Counted rather than spot-checked, because the failure mode
-     * is one call site left un-threaded — which looks identical to the others in review and silently ignores
-     * the caller's narrowing on exactly one path.
+     * Counted rather than spot-checked, because the failure mode is one call site left un-threaded — which
+     * looks identical to the others in review and silently ignores the caller's narrowing on exactly one
+     * path.
+     *
+     * The count is DERIVED. It was `2` per door — recall and find_similar — and `POST /api/brain/recall`
+     * then collapsed onto `callTool`, so REST builds one response instead of two and expands one graph
+     * instead of two. Writing `1` would make the same mistake with a later expiry date; the honest number
+     * is *how many routes on this door still build a response of their own*.
      */
     for (const [name, src] of [['REST', REST], ['MCP', MCP]]) {
+      const expected = name === 'MCP' ? 2 : ['/recall', '/similar']
+        .filter(p => { const b = routeBody(src, p); return b && !delegatesCleanly(b, `POST ${p}`); }).length;
       const calls = [...src.matchAll(/buildGraphWithSpill\(/g)];
-      assert.equal(calls.length, 2, `${name} should have two expansion call sites, found ${calls.length}`);
+      assert.equal(calls.length, expected,
+        `${name} should have ${expected} expansion call site(s), found ${calls.length}`);
       for (const m of calls) {
         const args = balancedFrom(src, src.indexOf('(', m.index), `${name} buildGraphWithSpill`);
         assert.match(args, /TraverseOpt|traverseOpt/,
@@ -154,10 +163,25 @@ describe('the narrowing reaches the database', () => {
 });
 
 describe('the response says what was actually walked', () => {
-  it('REST echoes the traverse it applied', () => {
-    // A narrowing the response does not mention is one the caller cannot verify was applied — and the whole
-    // point of the parameter is that the caller stops having to trust an unnarrowed walk.
-    assert.match(REST, /traverse: echoTraverse\(/,
+  it('every surface that builds a response echoes the traverse it applied', () => {
+    /*
+     * A narrowing the response does not mention is one the caller cannot verify was applied — and the whole
+     * point of the parameter is that the caller stops having to trust an unnarrowed walk.
+     *
+     * Asserted on whichever surface BUILDS RECALL's response rather than on REST by name.
+     * `POST /api/brain/recall` delegates now, so the echo a REST caller reads is the tool's — and demanding
+     * `echoTraverse` in the REST file would be demanding that the duplicate come back.
+     *
+     * RECALL's, specifically: `similar` reports `traverseDepth` on both doors and never used this helper,
+     * so a check written as "every response-builder echoes" fails on a route that was never in scope. That
+     * was the first draft of this case, and it read as a finding.
+     */
+    const restBuild = routeBody(REST, '/recall');
+    if (restBuild && !delegatesCleanly(restBuild, 'POST /recall')) {
+      assert.match(REST, /traverse: echoTraverse\(/,
+        'the REST recall builds its own response and does not echo the traverse');
+    }
+    assert.match(MCP, /traverse: echoTraverse\(/,
       'the response does not echo the traverse, so a caller cannot confirm their narrowing took effect');
   });
 

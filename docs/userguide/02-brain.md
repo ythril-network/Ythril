@@ -414,8 +414,14 @@ the same answer. Two uses, and the second is the reason it is there:
     it or not, which quietly grew the space's storage and slowed the usage figures an operator reads. Now
     nothing is written unless it was asked for.
 - **maxTimeMS** — a time limit for this one search. It can only make the search stricter than the instance's own budget, never looser. When the limit is reached you get a **partial** answer rather than an error or a hang: whatever finished is returned, and the result says it was cut short.
-- **Include fresh writes** — also scan the newest records directly, so something written seconds ago is findable before the index has caught up. It costs an extra scan per record type, so turn it on when you are looking for something you just wrote.
-- **Include content** — on by default. Turn it off to get passage *locations* without their text: useful when you want to find which document holds something and read only that part, since passage bodies are the largest thing a result carries.
+- **Something you wrote seconds ago is findable, and there is no longer a box for it.** Meaning-matching
+  reads an index, and that index takes a few seconds to catch up after a write — measured here at about
+  three. Every search now also scans the newest records directly, so the gap is covered without you doing
+  anything. This used to be an **Include fresh writes** checkbox, off by default; it was removed because
+  the only thing turning it off bought was a search that confidently found nothing. One limit worth
+  knowing: a record still WAITING to be processed for meaning-matching has nothing to match against yet,
+  and the Embedding queue on this page is where you see whether that queue is behind.
+- **Include passage text** — on by default. Turn it off to get passage *locations* without their text: useful when you want to find which document holds something and read only that part, since passage bodies are the largest thing a result carries.
 - **Include diagnostic fields** — off by default, and off is right for ordinary searching. Turn it on to see *why* a result ranked where it did: the exact text that was embedded, the embedding model, the sync counter, and the score from each ranking stage separately. It follows graph hops too, at every depth, so a search with **Graph hops** set shows the same detail on the connected records. The embedding vector itself is never returned and there is no option that asks for it.
 - **Include storage bookkeeping** — off by default, and off is what you want almost always. A result normally tells you what was remembered; this adds back where it is filed: when the record was written, when it was last changed, and the ids of everything it is linked to. Those fields are large and repeat on every result — measured on a real space, only about a third of an answer was the remembered content and most of the rest was this — so leaving it off gets you more actual fact inside the same size limit. One trap worth knowing: the creation date is when the RECORD was written, not when the thing you are remembering happened. That date lives in the record’s own properties, put there by whoever stored it.
 

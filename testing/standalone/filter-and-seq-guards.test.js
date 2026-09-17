@@ -5,8 +5,10 @@
  * here because both are *guards*, and a guard with no test is indistinguishable from a guard that has
  * quietly stopped guarding.
  *
- *  - `brain/filter.ts` decides which record fields a caller may filter on. It is the allowlist standing
- *    between a user-supplied filter expression and a MongoDB query document.
+ *  - `brain/filter.ts` decides which filter keys can never be fields at all. It stopped being a FIELD
+ *    allowlist on 2026-09-17 — that was a speed rule wearing a safety label, and it made `recall` refuse
+ *    predicates `filter` accepted. What it still stands between is a user-supplied key and an object
+ *    assignment that would rewrite the filter rather than add a constraint to it.
  *  - `util/seq.ts` decides which `seq` values may be ingested from a peer. It exists to stop one hostile
  *    or broken document from stranding a space's counter near the protocol ceiling, after which every
  *    local write is rejected by every peer — silent, unrecoverable write loss.
@@ -17,11 +19,11 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 
-let validateFilterExpression, buildMongoFilter, ALLOWED_FILTER_KEY_PREFIXES;
+let validateFilterExpression, buildMongoFilter;
 let isSeqImplausible, MAX_INGEST_SEQ, MAX_SYNC_SEQ, SEQ_CEILING_RESERVE;
 
 before(async () => {
-  ({ validateFilterExpression, buildMongoFilter, ALLOWED_FILTER_KEY_PREFIXES } =
+  ({ validateFilterExpression, buildMongoFilter } =
     await import('../../server/dist/brain/filter.js'));
   ({ isSeqImplausible, MAX_INGEST_SEQ, MAX_SYNC_SEQ, SEQ_CEILING_RESERVE } =
     await import('../../server/dist/util/seq.js'));
@@ -30,40 +32,63 @@ before(async () => {
 const ok = f => assert.equal(validateFilterExpression(f), null);
 const rejected = f => assert.match(validateFilterExpression(f) ?? '', /not allowed/);
 
-describe('filter key allowlist — what a caller may filter on', () => {
-  it('accepts each allowed key, bare and dotted', () => {
-    // The allowlist itself, exported by the module under test -- the bare prefixes, since the dotted forms
-    // are exercised by the three cases below. Written out here, a sixth allowed key would be untested.
-    for (const k of ALLOWED_FILTER_KEY_PREFIXES.filter(p => !p.endsWith('.'))) ok({ [k]: { eq: 'x' } });
+describe('filter key shape — what a caller may never filter on', () => {
+  /*
+   * THE FIELD ALLOWLIST IS GONE, and the cases that asserted it went with it rather than being weakened.
+   *
+   * `validateFilterExpression` used to refuse any key outside `properties.*`, `tags`, `type`, `name`,
+   * `status` and `label`. That was a SPEED rule wearing a safety label: a key outside the set takes the
+   * exhaustive path, which is slower and equally correct, and refusing it made the capability absent on
+   * `recall` while `filter` accepted the same predicate. Owner, 2026-09-17: *"same for the recall with
+   * filter … they need to be the same."*
+   *
+   * What stays is the shape that cannot be a field at all. Keeping the old cases and merely deleting the
+   * ones that turned red would have left a gate whose title still said "allowlist" over a body checking
+   * something else — which is the failure `CLAUDE.md` gives its own section to.
+   */
+  it('accepts a field the old allowlist refused', () => {
+    // The capability the removal was for. `description` is a real field on every record type, and it was
+    // refused here while `filter` accepted it — one rule, two implementations, the weaker one winning.
+    ok({ description: { eq: 'x' } });
+    ok({ fact: { eq: 'x' } });
     ok({ 'properties.owner': { eq: 'x' } });
-    ok({ 'properties.a.b.c': { eq: 'x' } });
-    ok({ 'tags.0': { eq: 'x' } });
+    ok({ 'anything.at.all': { eq: 'x' } });
   });
 
-  it('rejects Mongo operators at the top level — the injection this exists to stop', () => {
+  it('refuses the three keys that would change the filter instead of constraining it', () => {
+    /*
+     * Not fields — the names that make `out[key] = …` do something other than add a key. Handed
+     * `__proto__`, a plain-object assignment sets the PROTOTYPE, so the constraint never reaches the
+     * database and the query answers 200 over an unfiltered collection.
+     *
+     * The distinction from the removed allowlist is the whole point of this case: an unusual FIELD is
+     * slow, and one of these is silently absent.
+     */
+    for (const k of ['__proto__', 'constructor', 'prototype']) rejected({ [k]: { eq: 1 } });
+  });
+
+  it('refuses a Mongo operator in the operator-object grammar', () => {
+    /*
+     * `{$where: {eq: 'x'}}` is a caller writing raw MongoDB into the old grammar, and it used to build
+     * `{$where: {$eq: 'x'}}` and hand it to the database — the expression path has no `sanitizeFilter`
+     * between it and Mongo, so the operator that executes JavaScript arrived unexamined.
+     *
+     * `grammarOf` routes anything `$`-prefixed to the raw path now, where that sanitizer lives. This is
+     * the floor under that, so a change to the classifier cannot reopen the hole on its own.
+     */
     for (const k of ['$where', '$or', '$and', '$expr', '$function', '$nor']) {
       rejected({ [k]: { eq: 1 } });
     }
   });
 
-  it('rejects prototype-pollution shaped keys', () => {
-    for (const k of ['__proto__', 'constructor', 'prototype']) rejected({ [k]: { eq: 1 } });
-  });
-
-  it('rejects near-misses — a prefix must end at a segment boundary', () => {
-    // The bug this guards: a `startsWith` without the dot would let `typeface`, `namely` and
-    // `tagsSecret` through, and with them any field whose name happens to begin with an allowed word.
-    for (const k of ['typeface', 'namely', 'tagsSecret', 'labelled', 'statusy', 'embedding']) {
-      rejected({ [k]: { eq: 1 } });
-    }
-  });
-
-  it('rejects bare `properties` — only its sub-keys are filterable', () => {
-    rejected({ properties: { eq: 1 } });
-  });
-
-  it('rejects the whole expression if ANY key is disallowed', () => {
+  it('refuses the whole expression if ANY key is refused', () => {
     rejected({ tags: { eq: 'a' }, $where: { eq: 'b' } });
+    /*
+     * A COMPUTED key, and it has to be. Written literally as `__proto__:` in an object literal, JavaScript
+     * sets the prototype instead of creating a property — so `Object.keys` never sees it and the case
+     * would pass without the guard existing. The first version of this line did exactly that.
+     */
+    rejected({ tags: { eq: 'a' }, ['__proto__']: { eq: 'b' } });
   });
 
   it('an empty expression is valid and constrains nothing', () => {
