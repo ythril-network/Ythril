@@ -22,7 +22,7 @@ import { type FilterExpression } from '../../brain/filter.js';
 import { resolveRecallFilter, type RawMongoFilter } from '../../brain/recall-filter.js';
 import { observeRecallPath } from '../../brain/recall.js';
 import {
-  queryBrain, countBrain, compareBySort, DEFAULT_QUERY_SORT, QUERY_PAGE_MAX, PROXY_PAGE_CEILING,
+  queryBrain, countBrain, compareBySort, DEFAULT_QUERY_SORT, DEFAULT_QUERY_LIMIT, PROXY_PAGE_CEILING,
 } from '../../brain/query.js';
 import { parseSortParam, toMongoSort, SORTABLE_FIELDS } from '../../brain/list-sort.js';
 import { conveniencePredicate, conveniencesFrom, CONVENIENCE_SCHEMA } from '../../brain/list-conveniences.js';
@@ -742,7 +742,14 @@ export const queryTool: ToolHandler = {
               type: 'object',
               description: 'Fields to include (1) or exclude (0). The `embedding` field is always excluded and cannot be re-included. Worth using rather than skipping: a bare query over a dozen records with full bodies is the cheapest way to overrun a token budget, and a projection of the four fields you actually branch on turns that into a page you can read.',
             },
-            limit: { type: 'number', minimum: 1, maximum: 100, default: 20, description: 'Max documents in this page, clamped to 1–100. Default 20. Compare `count` against `total` in the response to know whether more rows satisfy the filter — a full page is not evidence that it is the last one.' },
+            /*
+             * `minimum` and NO `maximum`, and the asymmetry is deliberate — the same one `windowDays`
+             * carries on `graph_link_preflight`, for the same reason. The MCP dispatcher enforces this
+             * schema BEFORE the handler runs, so a `maximum` here would REFUSE a page the REST door
+             * serves: a 400 on one door and an answer on the other, which `CLAUDE.md` names in those
+             * words as worse than either alone.
+             */
+            limit: { type: 'number', minimum: 1, default: DEFAULT_QUERY_LIMIT, description: `Max documents in this page. Default ${DEFAULT_QUERY_LIMIT}, and NOT capped — it was silently clamped to 100 until 5.0, so a caller asking for 200 got 100 with \`truncated\` making it read as a correct short page. What bounds an answer instead: the byte budget (\`maxChars\`/\`maxBytes\`) trims it and hands you \`nextSkip\`, \`maxTimeMS\` bounds the query's duration, and on a PROXY space \`skip + limit\` past the merge ceiling is an explicit 400 naming the limit. Compare \`count\` against \`total\` to know whether more rows satisfy the filter — a full page is not evidence that it is the last one.` },
             skip: { type: 'number', minimum: 0, description: 'Rows to discard before the page, for paging. The result order is total (`_id` breaks every tie), so no row can be seen twice or missed between pages. On a proxy space the page is computed over the MERGED set, not per member.' },
             sort: { type: 'string', description: 'Field to order by. Allowed values depend on the collection (entities: createdAt, name, type; edges: createdAt, label, from, to, type, weight; facts: createdAt, type; chrono: createdAt, title, startsAt, endsAt, status, type; files: createdAt, updatedAt, path). An unknown field is refused and names the allowed ones. Omit for newest-first.' },
             dir: { type: 'string', enum: ['asc', 'desc'], description: "Sort direction, default desc. Only meaningful with `sort`." },
@@ -810,7 +817,8 @@ export const queryTool: ToolHandler = {
     const merged = conveniencePredicate(collName, conveniencesFrom(a), rawFilter);
     if ('error' in merged) throw new Error(merged.error);
     const filter = merged.predicate;
-    const limit = Math.min(typeof a['limit'] === 'number' ? a['limit'] : 20, QUERY_PAGE_MAX);
+    // A DEFAULT, not a clamp — same value and same reasoning as the route. See `DEFAULT_QUERY_LIMIT`.
+    const limit = typeof a['limit'] === 'number' ? a['limit'] : DEFAULT_QUERY_LIMIT;
     // Same refusal as the REST route: a non-integer or negative skip is an error, not a silent 0. Reading it as "start
     // from the beginning" returns a page that is not the page asked for, with no sign that anything went wrong.
     if (a['skip'] !== undefined && (typeof a['skip'] !== 'number' || !Number.isInteger(a['skip']) || a['skip'] < 0)) {

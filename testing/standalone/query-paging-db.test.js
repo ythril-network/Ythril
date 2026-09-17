@@ -26,7 +26,7 @@
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
+import fs, { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
@@ -157,14 +157,58 @@ describe('query paging (real MongoDB)', { skip }, () => {
     }
     assert.equal((await query.queryBrain(SPACE, 'facts', {}, undefined, 5, 5000, 120)).length, 0,
       'and past the END is still empty, which is how a paging loop terminates');
+
+    /*
+     * AND ONE PAGE NOW HOLDS ALL 120, which is the whole of the `limit` change asserted against real
+     * rows rather than against a constant. Under the old clamp this returned 100 — a short page that
+     * `truncated` made look correct, on the read a fleet pages through.
+     */
+    const wholeCollection = await query.queryBrain(SPACE, 'facts', {}, undefined, 120, 5000, 0);
+    assert.equal(wholeCollection.length, 120,
+      `a 120-row page came back with ${wholeCollection.length} rows — the caller's \`limit\` is being clamped`);
   });
 
-  it('the page size cap lives with the CALLERS now, not inside queryBrain', () => {
-    // The clamp used to be `.limit(Math.min(limit, 100))` inside queryBrain, which also bounded the proxy merge's
-    // internal fetch — that is what truncated deep pages to nothing. The routes cap the caller-facing page instead.
-    assert.equal(query.QUERY_PAGE_MAX, 100);
-    assert.ok(query.PROXY_PAGE_CEILING > query.QUERY_PAGE_MAX,
-      'a proxy page needs skip+limit per member, so its ceiling must exceed the per-page cap or deep pages break again');
+  it('`limit` is a DEFAULT on both doors, not a clamp on either', async () => {
+    /*
+     * Owner, 2026-09-17: *"cap should be a parameter and default to 200"*.
+     *
+     * It was a hard clamp of 100, applied silently — and `filter` is replacing the nine per-collection
+     * list routes, which cap at 200 (`edges`, `files`) and 500 (`facts`, `entities`, `chrono`). So the
+     * replacement returned LESS than every door it replaces, and `total`/`truncated` made a clamped page
+     * read as a correct short one. That is the shape this asserts against: not a number, but that
+     * neither door silently reduces what was asked for.
+     *
+     * Read out of the built tool and the route source rather than restated, so the two cannot default
+     * differently — which is the parity defect one door's number would otherwise hide.
+     */
+    const { DEFAULT_QUERY_LIMIT } = query;
+    assert.equal(typeof DEFAULT_QUERY_LIMIT, 'number');
+    assert.ok(DEFAULT_QUERY_LIMIT >= 200,
+      `the default page is ${DEFAULT_QUERY_LIMIT}, below the 200 the list routes it replaces serve`);
+    assert.ok(query.PROXY_PAGE_CEILING > DEFAULT_QUERY_LIMIT,
+      'a proxy page needs skip+limit per member, so its ceiling must exceed the default or deep pages break');
+
+    const { ALL_TOOLS } = await import('../../server/dist/mcp/tools/index.js');
+    const tool = ALL_TOOLS.find(t => t.name === 'filter');
+    assert.ok(tool, 'the `filter` tool is gone or renamed — re-anchor this');
+    const limitProp = tool.inputSchema({ requiredSpace: {}, optionalSpace: {} }).properties?.limit;
+    assert.equal(limitProp?.default, DEFAULT_QUERY_LIMIT,
+      'the tool and the resolver disagree about the default page size');
+    /*
+     * NO `maximum`, and this is the half that would bite hardest. The MCP dispatcher enforces the schema
+     * BEFORE the handler runs, so a `maximum` here refuses a page the REST door serves — a 400 on one
+     * door and an answer on the other, which is worse than either alone.
+     */
+    assert.equal(limitProp?.maximum, undefined,
+      'a `maximum` on the tool refuses a page REST serves; the bound belongs to the byte budget');
+
+    // And neither door may quietly reduce it. `Math.min(..., SOMETHING)` on the limit is the clamp
+    // coming back, whatever the constant is called.
+    for (const door of ['server/src/mcp/tools/search.ts', 'server/src/api/brain/search.ts']) {
+      const text = readFileSync(new URL(`../../${door}`, import.meta.url), 'utf8');
+      assert.ok(!/(?:const\s+(?:safeLimit|limit)\s*=\s*)Math\.min\(/.test(text),
+        `${door} clamps the caller's \`limit\` again — a page smaller than asked for, with no way to tell`);
+    }
   });
 
   it('QUERY_BODY_FIELDS names skip, or the route would refuse the parameter it just gained', async () => {

@@ -143,7 +143,28 @@ export function unknownBodyFields(
 }
 
 /**
- * The caller-facing page cap for `/query`, and the ceiling on a PROXY space's merged window.
+ * How many rows `filter` returns when the caller does not say — A DEFAULT, NOT A CAP.
+ *
+ * Owner, 2026-09-17: *"cap should be a parameter and default to 200"*. It WAS a hard clamp of 100, applied
+ * silently: a caller asking for 200 got 100 back, with `total` and `truncated` making it read as a correct
+ * short page. That mattered because `filter` is replacing the nine per-collection list routes, which cap at
+ * 200 (`edges`, `files`) and 500 (`facts`, `entities`, `chrono`) — so the replacement returned LESS than
+ * every door it replaces, and the three it replaces did not agree with each other either.
+ *
+ * **What actually bounds an answer, now that the row count does not.** The clamp was never the protection:
+ *   - the BYTE budget (`maxChars` / `maxBytes`) trims the page and says so, with `nextSkip` to continue;
+ *   - `maxTimeMS`, hard-capped at 10 000, bounds the query's duration whatever `limit` says;
+ *   - on a PROXY space `skip + limit` must stay under `PROXY_PAGE_CEILING`, which is an explicit 400 naming
+ *     the limit rather than a silent trim.
+ *
+ * So an absurd `limit` is refused loudly on a proxy, bounded in time on a single space, and trimmed with
+ * disclosure either way. A silent clamp added nothing those three do not do, and hid the one thing they
+ * report.
+ */
+export const DEFAULT_QUERY_LIMIT = 200;
+
+/**
+ * The ceiling on a PROXY space's merged window.
  *
  * A proxy page needs `skip + limit` rows from EACH member, so a deep page on a fleet multiplies. The ceiling makes that
  * cost bounded and, more importantly, makes exceeding it an explicit 400 naming the limit — the alternative, which shipped
@@ -151,7 +172,6 @@ export function unknownBodyFields(
  *
  * A single space is not subject to it: `skip` goes to MongoDB and is correct at any depth.
  */
-export const QUERY_PAGE_MAX = 100;
 export const PROXY_PAGE_CEILING = 1000;
 
 /**

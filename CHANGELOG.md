@@ -85,6 +85,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`filter` silently returned 100 rows to a caller who asked for 200.** `limit` was clamped, not
+  defaulted — so a page came back short and `total` with `truncated` made it read as a correct short
+  page. It matters because `filter` is replacing the nine per-collection list routes, which serve 200
+  (`edges`, `files`) and 500 (`facts`, `entities`, `chrono`): the replacement returned LESS than every
+  door it replaces, and those three did not agree with each other either.
+
+  Owner, 2026-09-17: *"cap should be a parameter and default to 200"*. `limit` is that parameter on both
+  doors, it defaults to **200**, and there is no maximum. The MCP schema carries no `maximum` for the
+  same reason `windowDays` carries none: the dispatcher enforces the schema before the handler, so one
+  would refuse a page the REST door serves.
+
+  **What bounds an answer now that a row count does not** — and none of it is new, which is why the
+  clamp was never the protection:
+
+  | | |
+  |---|---|
+  | the byte budget | `maxChars` / `maxBytes` trims the page, says `truncated`, and hands back `nextSkip` |
+  | `maxTimeMS` | hard-capped at 10 000, so an absurd `limit` is bounded in time |
+  | a PROXY space | `skip + limit` past the merge ceiling is an explicit `400` naming the limit |
+
+  So an oversized request is refused out loud on a proxy, bounded in time on a single space, and trimmed
+  with disclosure either way. The clamp added nothing those three do not do, and hid the one thing they
+  all report.
+
 - **BREAKING — `POST /api/brain/recall` returns the same result SHAPE as the MCP tool.** A hit is
   `{score, spaceId, type, record: {…}}` — the ranking beside the record rather than mixed into it. REST
   returned one FLAT object until now.

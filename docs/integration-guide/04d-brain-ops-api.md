@@ -534,7 +534,7 @@ Run a constrained Mongo-style read query against one logical collection. Intende
 | `collection` | ✅ | One of: `facts`, `entities`, `edges`, `chrono`, `files`, `links` |
 | `filter` | — | Query filter object (defaults to `{}`) |
 | `projection` | — | Projection object (`1` include / `0` exclude) |
-| `limit` | — | Max rows (default `20`, capped at `100`) |
+| `limit` | — | Max rows, default `200` and NOT capped. It was silently clamped to 100 until 5.0, so a caller asking for 200 got 100 with `truncated` making it read as a correct short page — and the per-collection list routes this call replaces serve 200 or 500. What bounds an answer instead: the byte budget (`maxChars`/`maxBytes`) trims it and returns `nextSkip`, `maxTimeMS` bounds the query's duration, and on a PROXY space a `skip + limit` past the merge ceiling is an explicit `400` naming the limit |
 | `skip` | — | Rows to discard before the page (default `0`) — see below |
 | `sort` | — | Field to order by. Per-collection allowlist; an unlisted field is a `400` naming the allowed ones. Omit for newest-first  **`links` was missing from that allowlist until 5.0 and sorting it CRASHED** — a `500` with `retryable: true` on this door, which told a caller to retry a request that could never succeed. It sorts by `createdAt`, `updatedAt`, `from` and `to`; a link has no name, title or type of its own.|
 | `dir` | — | `asc` or `desc` (default `desc`). Only meaningful with `sort` |
