@@ -194,6 +194,20 @@ types allowed at the **From** end and at the **To** end — and a checkbox for t
 untouched means *any entity type*, which is not the same as an empty one: unticking the last box returns that
 end to *any* rather than forbidding every edge of the label.
 
+**A type you deleted still shows in the ends lists if an edge names it, marked *(deleted type)*.** That is
+so you can untick it: the edge still enforces the name, and until 5.0 there was no checkbox for it at all,
+so the declaration was stuck and invisible. Untick it and it is gone for good — it is not a type this
+space declares, so there is nothing to tick it back on to.
+
+**A type can be renamed without losing what is on it.** Use the pencil beside the name in the detail pane
+and press Enter, or click away; Escape abandons it. Every property, pattern and enum value comes with it,
+and so does every edge that names the type as a permitted end. This is the fix for a spelling mistake
+noticed after the properties are in — the name used to be the one thing about a type you could not change.
+
+> **Records already written keep the OLD type name.** A rename changes what the space DECLARES, not what
+> is stored, so records created before it will not match the renamed type until they are updated. If you
+> are renaming a type you have just built and not yet used, there is nothing to update.
+
 **The two lists are not paired.** Every combination of a From type with a To type is allowed, so two on the
 left and three on the right permits six kinds of link, not two. The tab states the number and shows the
 combinations under the lists, because a pair of lists side by side reads like pairing to most people.

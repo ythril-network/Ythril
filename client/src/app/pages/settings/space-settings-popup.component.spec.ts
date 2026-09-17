@@ -136,8 +136,11 @@ describe('SpaceSettingsPopup — settings dialog rendering', () => {
     expect(text(fixture)).toContain('spaces.popup.footer.saveChanges');
     expect(text(fixture)).not.toContain('spaces.popup.footer.done');
 
-    // A governed save sets the notice and keeps the dialog open.
+    // A governed save SUBMITS and keeps the dialog open. The flag is `settingsSubmitted`, not the
+    // notice: `B-15` found that any notice retired Save, and "nothing to save" sets one — so a Save
+    // that reported doing nothing took the button away for the rest of the session.
     c.state.settingsNotice.set('submitted for a vote');
+    c.state.settingsSubmitted.set(true);
     fixture.detectChanges();
     expect(text(fixture)).toContain('spaces.popup.footer.done');
     expect(text(fixture)).not.toContain('spaces.popup.footer.saveChanges');
@@ -149,6 +152,7 @@ describe('SpaceSettingsPopup — settings dialog rendering', () => {
     const c = fixture.componentInstance;
     c.state.openSettings(s);
     c.state.settingsNotice.set('submitted for a vote');
+    c.state.settingsSubmitted.set(true);
     fixture.detectChanges();
     const btn = (fixture.nativeElement as HTMLElement).querySelector('.sp-footer .btn-primary') as HTMLButtonElement;
     expect(btn).toBeTruthy();
@@ -254,4 +258,31 @@ describe('SpaceSettingsPopup — Save sends the difference, not the form', () =>
     expect(lastUpdateBody).toBeNull();
     expect(c.state.settingsSaving()).toBe(false);
   });
+});
+
+/**
+ * B-15 — owner-reported 2026-09-17. A Save that reported doing NOTHING retired the Save button for the
+ * rest of the session: the footer swapped it for the close-and-finish button on any notice, and
+ * "nothing to save" sets one. The form stayed editable and the only control left closed the dialog.
+ */
+describe('SpaceSettingsPopup — a notice is not a submission', () => {
+  const s = space({ id: 'work', label: 'Work' });
+  const text = (f: { nativeElement: HTMLElement }) => f.nativeElement.textContent ?? '';
+
+  it('keeps Save when the notice reports that nothing was sent', () => {
+    const fixture = create([s]);
+    const c = fixture.componentInstance;
+    c.state.openSettings(s);
+    c.state.settingsNotice.set('nothing to save');
+    fixture.detectChanges();
+    expect(text(fixture)).toContain('spaces.popup.footer.saveChanges');
+    expect(text(fixture)).not.toContain('spaces.popup.footer.done');
+  });
+
+  /*
+   * The OTHER half of this rule — that a finished state ENDS on a new edit — is pinned in the state
+   * spec instead, as `isDirty()` flipping after `markPristine`. The template reads exactly that, and
+   * asserting it through a fixture meant driving an OnPush view by hand, which tests the fixture.
+   */
+
 });

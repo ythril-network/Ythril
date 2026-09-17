@@ -13,7 +13,7 @@ import { describe, it, expect } from 'vitest';
 import { emptyTypeSchemaState, typeSchemaFromState, type TypeSchemaState } from './space-settings-state.service';
 import {
   addProp, removeProp, addEnumVal, removeEnumVal, canAddProp,
-  toggleEndpoint, endpointsFor, isAnyEnd, endpointPairs,
+  toggleEndpoint, endpointsFor, isAnyEnd, endpointPairs, endNamesFor, isStaleEndName, UNTYPED_END,
 } from './type-schema-edits';
 
 const state = (over: Partial<TypeSchemaState> = {}): TypeSchemaState => emptyTypeSchemaState(over);
@@ -257,5 +257,55 @@ describe('enum values', () => {
     removeEnumVal(s, 'tier', 'gold');
     expect(s.propertySchemas[0]!.s).not.toBe(original);
     expect(original.enum).toEqual(['gold', 'silver']);
+  });
+});
+
+/**
+ * B-16 — a declared edge end must stay REMOVABLE after its entity type is deleted. Owner-reported
+ * 2026-09-17: the picker listed the types the space currently declares, so a stored name that was no
+ * longer one of them had no checkbox at all. Nothing to untick, still enforced, invisible.
+ */
+describe('endNamesFor — the picker offers what is declared AND what is picked', () => {
+  const withEnds = (from: string[], to: string[] = []) =>
+    ({ endpoints: { from, to }, propertySchemas: [] }) as never;
+
+  it('offers a picked name the space no longer declares', () => {
+    const names = endNamesFor(['org'], withEnds(['person']));
+    expect(names).toContain('person');
+    expect(names).toContain('org');
+  });
+
+  it('offers each name ONCE when it is both declared and picked', () => {
+    const names = endNamesFor(['person', 'org'], withEnds(['person']));
+    expect(names.filter(n => n === 'person')).toHaveLength(1);
+  });
+
+  it('keeps UNTYPED last, and does not duplicate it when it is picked', () => {
+    const names = endNamesFor(['org'], withEnds([UNTYPED_END, 'person']));
+    expect(names[names.length - 1]).toBe(UNTYPED_END);
+    expect(names.filter(n => n === UNTYPED_END)).toHaveLength(1);
+  });
+
+  it('covers BOTH sides — a stale name on `to` alone is still offered', () => {
+    expect(endNamesFor(['org'], withEnds([], ['ghost']))).toContain('ghost');
+  });
+
+  it('is the declared vocabulary when nothing is picked', () => {
+    expect(endNamesFor(['b', 'a'], { propertySchemas: [] } as never)).toEqual(['a', 'b', UNTYPED_END]);
+  });
+});
+
+describe('isStaleEndName — an offered name the space no longer declares', () => {
+  it('is true for a picked name that was deleted', () => {
+    expect(isStaleEndName(['org'], 'person')).toBe(true);
+  });
+
+  it('is false for a declared name', () => {
+    expect(isStaleEndName(['person'], 'person')).toBe(false);
+  });
+
+  it('is false for UNTYPED, which is never a declared type', () => {
+    // It is a real choice rather than a stray, so marking it as deleted would be a lie.
+    expect(isStaleEndName([], UNTYPED_END)).toBe(false);
   });
 });

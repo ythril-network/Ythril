@@ -118,7 +118,9 @@ import { SPACE_DIALOG_STYLES } from './space-dialog.styles';
               @if (state.settingsError()) {
                 <div class="alert alert-error" style="flex:1;margin:0;padding:6px 12px;font-size:13px;">{{ state.settingsError() }}</div>
               }
-              @if (state.settingsNotice()) {
+              <!-- Hidden once a new edit lands: a stale "nothing to save" beside a form the
+                   operator is actively editing says the opposite of the truth. -->
+              @if (state.settingsNotice() && !state.isDirty()) {
                 <div class="alert alert-info" style="flex:1;margin:0;padding:6px 12px;font-size:13px;">{{ state.settingsNotice() }}</div>
               }
               <!-- Once the outcome is TERMINAL, the button says so.
@@ -129,7 +131,11 @@ import { SPACE_DIALOG_STYLES } from './space-dialog.styles';
                    That is a wrong-action risk, not a wobble: read as cancel, someone looks for another way to
                    confirm, saves again, and creates a SECOND proposal for the same change. A button that
                    submitted successfully must not still be offering to submit. -->
-              @if (state.settingsNotice()) {
+              <!-- A finished state ends the moment there is a NEW edit. Without the dirty check a
+                   vote-pending submission would keep Save hidden while the operator typed the next
+                   change, which is the same trap B-15 was reported for by a different route. NOTE: no backticks
+                   in a template comment -- one ends the template string and the error points at @Component. -->
+              @if (state.settingsSubmitted() && !state.isDirty()) {
                 <button class="btn btn-primary" type="button" (click)="state.closeSettings()">
                   {{ 'spaces.popup.footer.done' | transloco }}
                 </button>
@@ -202,6 +208,8 @@ export class SpaceSettingsPopupComponent {
     const body = this.state.changedSettings();
     if (!Object.keys(body).length) {
       this.state.settingsSaving.set(false);
+      // A notice and NOT a submission: nothing was sent, so Save has to stay. Before `B-15` this
+      // retired the button for the rest of the session.
       this.state.settingsNotice.set(this.transloco.translate('spaces.settings.nothingToSave'));
       return;
     }
@@ -220,6 +228,7 @@ export class SpaceSettingsPopupComponent {
             networks: result.rounds.map(r => r.networkLabel).join(', '),
           }));
           this.state.markPristine();   // it is submitted; it is not an unsaved edit any more
+          this.state.settingsSubmitted.set(true);  // ...and Save must stop offering to submit it again
           return;                      // stay open so the notice is read, unlike the applied path
         }
         this.store.applySpace(result.space);

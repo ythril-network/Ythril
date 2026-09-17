@@ -542,3 +542,171 @@ describe('the settings save sends only what changed', () => {
     expect(s.settingsPayload()).not.toHaveProperty('recordTtlDays');
   });
 });
+
+/**
+ * The four owner-reported schema-editor bugs of 2026-09-17, each pinned by the case that was red.
+ *
+ * They share one shape: **a control reflecting one source while the record holds another.** The diff
+ * reads the CURRENT payload's keys while the pristine copy holds one that was cleared; the ends picker
+ * lists the CURRENT types while the edge holds a deleted one; the default input holds text while the
+ * property declares a number; and a type's NAME is a map key, so there was no control for it at all.
+ */
+describe('B-15 — an edit the diff cannot see (owner-reported)', () => {
+  it('sends `strictLinkage: false` when it is turned OFF', () => {
+    /*
+     * `buildMeta` emits the key only when true, and the diff looped over the CURRENT payload's keys —
+     * so turning it off produced an empty diff. `isDirty()` said there were changes and the save said
+     * there was nothing to save, and the footer then retired the Save button on that notice.
+     */
+    const s = make();
+    s.openSettings(space({ meta: { strictLinkage: true } as never }));
+    expect(s.isDirty()).toBe(false);
+    s.schStrictLinkage = false;
+    expect(s.isDirty()).toBe(true);
+    const body = s.changedSettings();
+    expect((body['meta'] as Record<string, unknown>)?.['strictLinkage']).toBe(false);
+  });
+
+  it('sends an EMPTY purpose when it is cleared', () => {
+    // Same defect, different type: the cleared value has to come back as `''`, because the server's
+    // merge guards on `!== undefined` and an omitted key leaves what it had.
+    const s = make();
+    s.openSettings(space({ meta: { purpose: 'the old directive' } as never }));
+    s.stForm.purpose = '';
+    expect(s.isDirty()).toBe(true);
+    expect((s.changedSettings()['meta'] as Record<string, unknown>)?.['purpose']).toBe('');
+  });
+
+  it('and an untouched form still sends nothing', () => {
+    // The union walk must not invent changes: an empty diff is the honest answer here, and it is what
+    // makes "nothing to save" a true statement rather than a symptom.
+    const s = make();
+    s.openSettings(space({ meta: { purpose: 'kept', strictLinkage: true } as never }));
+    expect(s.changedSettings()).toEqual({});
+  });
+});
+
+describe('B-17 — a default keeps the property type (owner-reported)', () => {
+  it('a numeric property emits a NUMBER default, not the text that was typed', () => {
+    /*
+     * The detail pane binds the default to a text input, so it is always a string. Set one and then
+     * change the type to `number` and the schema said `default: "5"` — which is written into every
+     * record that omits the property, so a strict space starts refusing records it created itself.
+     */
+    const s = make();
+    s.openSettings(space());
+    s.schTypeSchemas = { entity: { person: emptyTypeSchemaState({
+      propertySchemas: [{ key: 'age', s: { type: 'number', default: '5' } as never, _enumInput: '' }],
+    }) } } as never;
+    const ts = (s.buildMeta().typeSchemas as never as Record<string, Record<string, { propertySchemas: Record<string, { default: unknown }> }>>);
+    expect(ts['entity']['person'].propertySchemas['age'].default).toBe(5);
+  });
+
+  it('a boolean property emits a BOOLEAN default', () => {
+    const s = make();
+    s.openSettings(space());
+    s.schTypeSchemas = { entity: { person: emptyTypeSchemaState({
+      propertySchemas: [{ key: 'active', s: { type: 'boolean', default: 'true' } as never, _enumInput: '' }],
+    }) } } as never;
+    const ts = (s.buildMeta().typeSchemas as never as Record<string, Record<string, { propertySchemas: Record<string, { default: unknown }> }>>);
+    expect(ts['entity']['person'].propertySchemas['active'].default).toBe(true);
+  });
+
+  it('and a default that cannot BE the declared type is dropped rather than sent wrong', () => {
+    // Dropped, because a default that cannot be honoured is worse than none: the first is a space
+    // refusing records it created, the second is a property with no default.
+    const s = make();
+    s.openSettings(space());
+    s.schTypeSchemas = { entity: { person: emptyTypeSchemaState({
+      propertySchemas: [{ key: 'age', s: { type: 'number', default: 'not a number' } as never, _enumInput: '' }],
+    }) } } as never;
+    const ts = (s.buildMeta().typeSchemas as never as Record<string, Record<string, { propertySchemas: Record<string, unknown> }>>);
+    expect('default' in (ts['entity']['person'].propertySchemas['age'] as object)).toBe(false);
+  });
+
+  it('a string property is untouched', () => {
+    const s = make();
+    s.openSettings(space());
+    s.schTypeSchemas = { entity: { person: emptyTypeSchemaState({
+      propertySchemas: [{ key: 'name', s: { type: 'string', default: '5' } as never, _enumInput: '' }],
+    }) } } as never;
+    const ts = (s.buildMeta().typeSchemas as never as Record<string, Record<string, { propertySchemas: Record<string, { default: unknown }> }>>);
+    expect(ts['entity']['person'].propertySchemas['name'].default).toBe('5');
+  });
+});
+
+describe('B-18 — a type can be renamed (owner-reported)', () => {
+  it('keeps everything on the type, in the same position', () => {
+    // A typo used to cost every property on the type: name is a map key, and the editor offered add
+    // and delete and nothing between.
+    const s = make();
+    s.openSettings(space());
+    s.schTypeSchemas = { entity: {
+      alpha: emptyTypeSchemaState({ namingPattern: '^A' }),
+      prsson: emptyTypeSchemaState({ namingPattern: '^P' }),
+      zulu: emptyTypeSchemaState({ namingPattern: '^Z' }),
+    } } as never;
+    expect(s.renameType('entity', 'prsson', 'person')).toBe(null);
+    expect(s.typeNames('entity')).toEqual(['alpha', 'person', 'zulu']);
+    expect(s.typeState('entity', 'person').namingPattern).toBe('^P');
+  });
+
+  it('carries the name into every edge endpoint list that used it', () => {
+    /*
+     * The half that is not a re-key. An edge label's ends name ENTITY types, so a rename that left
+     * them alone would break the declaration exactly the way a deletion did in `B-16` — silently.
+     */
+    const s = make();
+    s.openSettings(space());
+    s.schTypeSchemas = {
+      entity: { prsson: emptyTypeSchemaState() },
+      edge: { knows: emptyTypeSchemaState({ endpoints: { from: ['prsson'], to: ['prsson', 'org'] } }) },
+    } as never;
+    expect(s.renameType('entity', 'prsson', 'person')).toBe(null);
+    expect(s.typeState('edge', 'knows').endpoints).toEqual({ from: ['person'], to: ['person', 'org'] });
+  });
+
+  it('refuses a name that is already taken, and changes nothing', () => {
+    const s = make();
+    s.openSettings(space());
+    s.schTypeSchemas = { entity: { a: emptyTypeSchemaState(), b: emptyTypeSchemaState() } } as never;
+    expect(s.renameType('entity', 'a', 'b')).toBe('exists');
+    expect(s.typeNames('entity')).toEqual(['a', 'b']);
+  });
+
+  it('refuses an empty name', () => {
+    const s = make();
+    s.openSettings(space());
+    s.schTypeSchemas = { entity: { a: emptyTypeSchemaState() } } as never;
+    expect(s.renameType('entity', 'a', '   ')).toBe('empty');
+    expect(s.typeNames('entity')).toEqual(['a']);
+  });
+
+  it('works on every knowledge type, not only entities', () => {
+    // Owner, same message: "(also on other knowledge types)".
+    const s = make();
+    s.openSettings(space());
+    s.schTypeSchemas = { chrono: { deadlien: emptyTypeSchemaState({ namingPattern: '^D' }) } } as never;
+    expect(s.renameType('chrono', 'deadlien', 'deadline')).toBe(null);
+    expect(s.typeState('chrono', 'deadline').namingPattern).toBe('^D');
+  });
+});
+
+describe('B-15 — a finished state ends on the next edit (owner-reported)', () => {
+  it('isDirty flips back to true after a submission has re-baselined', () => {
+    /*
+     * The footer reads exactly this: it shows the close-and-finish button only while a submission is
+     * outstanding AND nothing has been edited since. Without the second half, a vote-pending save kept
+     * Save hidden while the operator typed the next change — the same trap as the "nothing to save"
+     * one, reached by a different route.
+     */
+    const s = make();
+    s.openSettings(space());
+    s.stForm.purpose = 'submitted';
+    expect(s.isDirty()).toBe(true);
+    s.markPristine();                       // what the vote-pending path does
+    expect(s.isDirty()).toBe(false);
+    s.stForm.purpose = 'and then a NEW edit';
+    expect(s.isDirty()).toBe(true);
+  });
+});
