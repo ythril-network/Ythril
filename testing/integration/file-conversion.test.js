@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, delWithBody } from '../sync/helpers.js';
+import { INSTANCES, post, get, delWithBody, readCollection } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE_A = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
@@ -36,9 +36,9 @@ async function uploadJson(token, spaceId, filePath, body) {
 
 /** All file+chunk records in a space (chunks carry parentFileId). */
 async function listAllFiles(token, spaceId) {
-  const r = await get(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/files?includeChunks=true&limit=200`);
+  const r = await readCollection(INSTANCES.a, token, spaceId, 'files', { limit: 200 });
   assert.equal(r.status, 200, `files listing failed: ${JSON.stringify(r.body)}`);
-  return r.body.files ?? [];
+  return r.results ?? [];
 }
 
 /** Count chunk records whose parent is the file at `parentPath`. */
@@ -198,12 +198,8 @@ describe('Media/text job queue — the worker actually claims work (P12)', () =>
     const start = Date.now();
     let last = 'pending';
     while (Date.now() - start < timeoutMs) {
-      const r = await fetch(
-        `${INSTANCES.a}/api/brain/spaces/${spaceId}/files?path=${encodeURIComponent(filePath)}`,
-        { headers: { Authorization: `Bearer ${tokenA}` } },
-      );
-      const body = await r.json().catch(() => null);
-      const meta = Array.isArray(body?.files) ? body.files.find(f => f.path === filePath) : null;
+      const r = await readCollection(INSTANCES.a, tokenA, spaceId, 'files', { path: filePath, limit: 1 });
+      const meta = (r.results ?? []).find(f => f.path === filePath);
       last = meta?.embeddingStatus ?? last;
       // Any terminal-ish state proves the worker picked the job up.
       if (last && last !== 'pending') return { status: last, elapsedMs: Date.now() - start };

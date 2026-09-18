@@ -198,20 +198,15 @@ describe('the decorations arrive on both doors, against a real instance', () => 
     assert.equal(mrow?.toName, row.toName, 'the tool door returned a different toName');
   });
 
-  it('and the same edge through the LIST route agrees, so the two shapes are one answer', async () => {
-    // The route is what `B-9` step 3 deletes. If the names it produces and the ones `filter` produces
-    // ever differ, deleting it is a behaviour change nobody planned.
-    const res = await fetch(`${INSTANCES.a}/api/brain/spaces/${SPACE}/edges`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const body = await res.json();
-    assert.equal(res.status, 200, JSON.stringify(body));
-    const [viaList] = body.edges ?? [];
-    const [viaFilter] = (await viaRest({ space: SPACE, collection: 'edges' })).body.results ?? [];
-    assert.equal(viaList?.fromName, viaFilter?.fromName, 'the route and the tool disagree about fromName');
-    assert.equal(viaList?.toName, viaFilter?.toName, 'the route and the tool disagree about toName');
-  });
-
+  /*
+   * THE SECOND CASE THAT HAS DONE ITS JOB. It read the edges LIST route and asserted the endpoint names
+   * it produced matched the ones `filter` produces — the precondition for deleting it. `B-9` step 3b
+   * deleted it, so there is no second producer of those names left to disagree.
+   *
+   * Recorded rather than silently dropped, for the same reason as the chrono one below: a case that
+   * vanishes in the same commit as its subject reads, from a diff, exactly like one deleted to make a
+   * failure stop. What it protected is asserted above, against both doors of `filter`.
+   */
   it('`includeDiagnostics` adds the withheld fields back on both doors, and is off by default', async () => {
     /*
      * The flag was honoured by the list routes and accepted by NEITHER door of `filter` — a 400 on the
@@ -280,20 +275,15 @@ describe('a chrono status is stored or derived, and the caller chooses which', (
       'the tool door did not derive, so the two disagree about the same record');
   });
 
-  it('and it agrees with the LIST route, which is what step 3 has to be able to delete', async () => {
-    // The route derives unconditionally. If `deriveStatus: true` and the route ever disagree about one
-    // record, deleting the route is a behaviour change nobody planned.
-    const res = await fetch(`${INSTANCES.a}/api/brain/spaces/${SPACE}/chrono`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const body = await res.json();
-    assert.equal(res.status, 200, JSON.stringify(body));
-    const viaList = (body.chrono ?? []).find(r => r._id === overdueId);
-    const viaFilter = chronoRow((await viaRest({ space: SPACE, collection: 'chrono', deriveStatus: true })).body.results);
-    assert.equal(viaList?.status, viaFilter?.status,
-      'the list route and `filter` disagree about the same entry, so the route cannot be retired');
-  });
-
+  /*
+   * THE CASE THAT WAS HERE HAS DONE ITS JOB AND IS GONE. It read the chrono LIST route and asserted it
+   * agreed with `deriveStatus: true` about one record — the precondition for deleting it. `B-9` step 3b
+   * deleted it, so the case had no second door left to compare against.
+   *
+   * Recorded rather than silently dropped: a case that disappears in the same commit as its subject looks
+   * from a diff exactly like one deleted to make a failure stop. The rule it protected is the one above,
+   * which does not need the route to state it.
+   */
   it('a non-chrono collection REFUSES it rather than ignoring it', async () => {
     // A silently dropped flag is a caller who believes they asked for something.
     const args = { space: SPACE, collection: 'facts', deriveStatus: true };
@@ -306,47 +296,65 @@ describe('a chrono status is stored or derived, and the caller chooses which', (
   });
 });
 
-describe('B-19 — the two doors return the SAME ROWS for the same status question', () => {
+describe('B-19 — `deriveStatus` decides which rows come back, not which door', () => {
   /*
-   * `B-8` made the displayed status askable. This is the half that changes which records come back: the
-   * list route puts the clock in its status query, so `status: "active"` excludes what is now
-   * derived-overdue, while `filter` matched the stored value.
+   * `B-8` made the displayed status askable. This is the half that changes which records COME BACK:
+   * `status: "active"` has to exclude what is now derived-overdue when the clock was asked for, and
+   * include it when it was not.
    *
-   * Compared record for record against the LIST ROUTE, because that is the door whose answer the Brain
-   * page has always shown — and the one `B-9` step 3 deletes. If the two ever disagree, deleting it is a
-   * behaviour change nobody planned.
+   * ## This used to be compared against the LIST ROUTE, and now it cannot be
+   *
+   * The route put the clock in its status query unconditionally, so it was the reference answer: whatever
+   * it returned was what the Brain page had always shown, and `filter` had to match it row for row. `B-9`
+   * step 3b deleted it. A gate whose reference no longer exists has to state the BEHAVIOUR instead, which
+   * is what these cases do — and that is stronger, because the route was only ever a proxy for it.
+   *
+   * The fixture is what makes it checkable: `overdueId` is stored `active` with a due moment in the past.
+   * So the two readings disagree about exactly one record, by construction, and a case that could not tell
+   * them apart would have to return the same set for both.
    */
-  const listRoute = async (query) => {
-    const res = await fetch(`${INSTANCES.a}/api/brain/spaces/${SPACE}/chrono?${query}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    return { status: res.status, body: await res.json() };
-  };
   const ids = (rows) => (rows ?? []).map(r => r._id).sort();
 
-  it('`active` EXCLUDES a passed entry on both doors', async () => {
-    const route = await listRoute('status=active&limit=200');
-    const viaFilter = await viaRest({
-      space: SPACE, collection: 'chrono', filter: { status: 'active' }, deriveStatus: true, limit: 200,
-    });
-    assert.equal(viaFilter.status, 200, JSON.stringify(viaFilter.body));
-    assert.deepEqual(ids(viaFilter.body.results), ids(route.body.chrono),
-      'the overdue entry is stored `active`, so a filter without the clock returns it and the route does not');
-    // And it really is excluded, rather than both doors returning everything.
-    assert.ok(!ids(route.body.chrono).includes(overdueId),
-      'precondition: the route excludes the passed entry from `active`');
+  it('`active` EXCLUDES a passed entry when the clock is asked for', async () => {
+    const args = { space: SPACE, collection: 'chrono', filter: { status: 'active' }, deriveStatus: true, limit: 200 };
+    const rest = await viaRest(args);
+    assert.equal(rest.status, 200, JSON.stringify(rest.body));
+    assert.ok(!ids(rest.body.results).includes(overdueId),
+      'the entry is past its due moment, so it is no longer `active` once the clock is read');
+
+    const mcpAnswer = await viaMcp(args);
+    assert.equal(mcpAnswer.isError, false, mcpAnswer.text);
+    assert.deepEqual(ids(mcpAnswer.body.results), ids(rest.body.results),
+      'the two doors disagree about which rows `active` means');
   });
 
-  it('`overdue` FINDS the derived one on both doors', async () => {
-    const route = await listRoute('status=overdue&limit=200');
-    const viaFilter = await viaRest({
-      space: SPACE, collection: 'chrono', filter: { status: 'overdue' }, deriveStatus: true, limit: 200,
+  it('`overdue` FINDS it, on both doors', async () => {
+    const args = { space: SPACE, collection: 'chrono', filter: { status: 'overdue' }, deriveStatus: true, limit: 200 };
+    const rest = await viaRest(args);
+    assert.equal(rest.status, 200, JSON.stringify(rest.body));
+    assert.ok(ids(rest.body.results).includes(overdueId),
+      'the entry is stored `active` and past due, so the derived reading has to find it under `overdue`');
+
+    const mcpAnswer = await viaMcp(args);
+    assert.equal(mcpAnswer.isError, false, mcpAnswer.text);
+    assert.deepEqual(ids(mcpAnswer.body.results), ids(rest.body.results),
+      'the two doors disagree about which rows `overdue` means');
+  });
+
+  it('and the two readings really do differ, so neither case above passes on a tie', async () => {
+    /*
+     * The floor. Both cases would pass if `deriveStatus` did nothing AND the fixture happened to have no
+     * passed entry — each would be asserting about an empty set. This is the precondition stated as an
+     * assertion: asked and unasked return DIFFERENT sets for the same predicate.
+     */
+    const derived = await viaRest({
+      space: SPACE, collection: 'chrono', filter: { status: 'active' }, deriveStatus: true, limit: 200,
     });
-    assert.equal(viaFilter.status, 200, JSON.stringify(viaFilter.body));
-    assert.ok(ids(route.body.chrono).includes(overdueId),
-      'precondition: the route finds the derived-overdue entry');
-    assert.deepEqual(ids(viaFilter.body.results), ids(route.body.chrono),
-      'the entry is stored `active`, so a filter without the clock finds nothing here');
+    const stored = await viaRest({
+      space: SPACE, collection: 'chrono', filter: { status: 'active' }, limit: 200,
+    });
+    assert.notDeepEqual(ids(derived.body.results), ids(stored.body.results),
+      'the fixture no longer contains a stored-active entry past its due moment, so every case here is vacuous');
   });
 
   it('and WITHOUT the flag `filter` still matches the stored value, unchanged', async () => {
@@ -360,6 +368,47 @@ describe('B-19 — the two doors return the SAME ROWS for the same status questi
       'the stored-active entry must still come back when the clock was not asked for');
   });
 
+  it('a derived status COMBINES with a convenience, on both doors', async () => {
+    /*
+     * The combination the list route served and `filter` refused until 5.0. `?status=overdue&search=…`
+     * was an ordinary query there; here the conveniences accumulate under `$and`, so running them before
+     * the status rewrite buried the caller's top-level `status` in one — and the rewrite's refusal, which
+     * exists for a `status` the CALLER nested, fired on the server's own transformation instead. The
+     * error told the caller to put `status` at the top level, which is exactly where they had put it.
+     */
+    const args = {
+      space: SPACE, collection: 'chrono', deriveStatus: true,
+      filter: { status: 'overdue' }, search: 'overdue-with-search',
+    };
+    const rest = await viaRest(args);
+    assert.equal(rest.status, 200, JSON.stringify(rest.body));
+
+    const mcpAnswer = await viaMcp(args);
+    assert.equal(mcpAnswer.isError, false, mcpAnswer.text);
+    assert.deepEqual(
+      (mcpAnswer.body.results ?? []).map(r => r._id).sort(),
+      (rest.body.results ?? []).map(r => r._id).sort(),
+      'the two doors disagree once a status and a convenience are combined');
+  });
+
+  it('and the SEARCH half still narrows, so the case above cannot pass on an empty answer', async () => {
+    // The floor. A 200 proves the combination is accepted and nothing about whether both halves applied.
+    // `overdueId` is stored `active` and past due, so the derived reading finds it and a search for a
+    // word it does not contain must not.
+    const found = await viaRest({
+      space: SPACE, collection: 'chrono', deriveStatus: true, filter: { status: 'overdue' }, limit: 200,
+    });
+    assert.ok((found.body.results ?? []).some(r => r._id === overdueId),
+      'precondition: the derived reading finds the entry at all');
+
+    const narrowed = await viaRest({
+      space: SPACE, collection: 'chrono', deriveStatus: true, filter: { status: 'overdue' },
+      search: 'a-word-no-entry-contains', limit: 200,
+    });
+    assert.equal(narrowed.status, 200, JSON.stringify(narrowed.body));
+    assert.ok(!(narrowed.body.results ?? []).some(r => r._id === overdueId),
+      'the convenience was swallowed: the status clause answered and the search did nothing');
+  });
   it('a nested `status` is refused on both doors', async () => {
     const args = {
       space: SPACE, collection: 'chrono', deriveStatus: true,

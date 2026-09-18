@@ -99,7 +99,20 @@ export function unsafeFilterKey(key: string): string | null {
 /** Valid MongoDB regex flags (i=case-insensitive, m=multiline, s=dotAll, x=extended). */
 const VALID_OPTIONS_RE = /^[imsx]+$/;
 
-/** How deep a filter may nest. A bound on the walk, and on what the database is asked to plan. */
+/**
+ * How deep a CALLER's filter may nest. A bound on the walk, and on what the database is asked to plan.
+ *
+ * **It bounds the caller's filter and nothing else, which is a correction rather than a clarification.**
+ * The check used to run at the last moment before Mongo, by which point the caller's filter had the
+ * server's own clauses composed around it and the two were counted against one budget. The budget was
+ * already spent: a derived chrono `overdue` clause is itself depth 8, so `deriveStatus` plus any
+ * convenience reached 9 and was refused — naming a depth the caller had not used. See
+ * `CallerCheckedFilter` below for where it runs now and what keeps it there.
+ *
+ * **8 STAYS.** Owner, 2026-09-18, on being told the derived clause spends the whole budget: *"Keep as is
+ * while it works"*. So this is not a number to raise the next time something composes one level deeper —
+ * the thing to fix then is the composition, or to come back and ask.
+ */
 export const MAX_FILTER_DEPTH = 8;
 
 /**
@@ -174,4 +187,56 @@ export function sanitizeFilter(filter: unknown, depth = 0): unknown {
     return out;
   }
   return filter;
+}
+
+declare const CALLER_CHECKED: unique symbol;
+
+/**
+ * A predicate whose CALLER-SUPPLIED part has been through `sanitizeFilter`.
+ *
+ * ## Why a brand rather than a convention
+ *
+ * `MAX_FILTER_DEPTH` bounds what a CALLER may ask for. It was enforced at the last moment before Mongo —
+ * inside `queryBrain` and `countBrain` — which is the safest-looking place and the wrong one, because by
+ * then the predicate is the caller's filter with the SERVER's clauses composed around it. The two were
+ * counted against one budget.
+ *
+ * That budget turned out to be entirely spent. A derived chrono `overdue` clause is itself depth 8: an
+ * `$or` over a `$expr` over a `$toDate` over an `$ifNull`. So `deriveStatus: true` plus ANY convenience —
+ * which the list route served as `?status=overdue&search=…` — composed to depth 9 and was refused with
+ * `Filter too deeply nested`, about a filter the caller had written one level deep.
+ *
+ * So the check moved to where the caller's filter is still identifiable, and this type is what stops it
+ * drifting back: `queryBrain` cannot be handed a plain object any more. A future read path either passes
+ * something `sanitizeFilter` produced, or it does not compile.
+ */
+export type CallerCheckedFilter = Record<string, unknown> & { readonly [CALLER_CHECKED]?: true };
+
+/**
+ * The caller's filter, checked — or the refusal, worded once for both doors.
+ *
+ * `sanitizeFilter` throws, which is right for a programming error and wrong for a caller's input: each
+ * door would have to catch it and turn it into its own status code, which is two chances to word one
+ * refusal differently. This returns it.
+ */
+export function checkCallerFilter(
+  raw: Record<string, unknown>,
+): { predicate: CallerCheckedFilter } | { error: string } {
+  try {
+    return { predicate: sanitizeFilter(raw) as CallerCheckedFilter };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * The server's own clauses, composed around a checked filter.
+ *
+ * The ONE place the brand is applied to something `sanitizeFilter` did not produce, and it is safe for the
+ * reason the brand exists: what this wraps is already checked, and what wraps it is ours. A second such
+ * function would be the hole — if you are reaching for one, the thing you are composing is probably the
+ * caller's and belongs on the other side of `checkCallerFilter`.
+ */
+export function composedByServer(predicate: Record<string, unknown>): CallerCheckedFilter {
+  return predicate as CallerCheckedFilter;
 }

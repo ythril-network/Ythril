@@ -55,11 +55,19 @@ false against every usage figure and enforce nothing while looking configured.
 
 ### Offset Pagination (Brain API)
 
-All list endpoints accept `limit` and `skip`:
+One read pages a collection, and it takes `limit` and `skip` in its body:
 
 ```http
-GET /api/brain/spaces/general/facts?limit=100&skip=200
+POST /api/brain/filter
+Content-Type: application/json
+
+{ "space": "general", "collection": "facts", "limit": 100, "skip": 200 }
 ```
+
+`limit` defaults to 200 and has no maximum; what bounds an answer is the byte budget, `maxTimeMS`, and a
+proxy space's merge ceiling — all three of which say so in the response. The body is strictly allowlisted,
+so `offset`, `page`, `per_page`, `pageSize`, `sortBy`, `orderBy`, `order` and `direction` are a `400`
+naming the parameter to use instead of being accepted and ignored.
 
 ### Cursor Pagination (Sync API)
 

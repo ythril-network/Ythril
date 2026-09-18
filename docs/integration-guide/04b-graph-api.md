@@ -82,25 +82,23 @@ old route gave you — it is refused on any other collection rather than ignored
 
 ---
 
-### List Entities
+### List entities
+
+There is no `GET .../entities`, and there has not been since 5.0 — listing a collection is one shape for
+all of them:
 
 ```http
-GET /api/brain/spaces/:spaceId/entities?limit=50&skip=0&sort=name&dir=asc
+POST /api/brain/filter
+Content-Type: application/json
+
+{ "space": "work", "collection": "entities", "limit": 50, "sort": "name", "dir": "asc" }
 ```
 
-**Response** `200`:
+The answer is `{ results, count, total, limit, skip, truncated }` — `results` where the route said
+`entities`, and `total` so a pager can tell a short page from the end of the match set.
 
-```json
-{
-  "entities": [ ... ],
-  "limit": 50,
-  "skip": 0
-}
-```
-
-Default limit: 50, max: 500.
-
-`sort` and `?search=` work the same way on every brain list endpoint — see [Sorting](04-brain-api.md#sorting-all-brain-list-endpoints) and [Freetext search](04-brain-api.md#freetext-search-search).
+`limit` defaults to 200 and has no maximum; the route's 50/500 are gone. Every narrowing parameter and
+what each refuses is documented once in [the filter body](04d-brain-ops-api.md).
 
 ---
 
@@ -454,21 +452,19 @@ id only has to be agreed on by peers creating an edge from now on.
 
 ---
 
-### List Edges
+### List edges
+
+Same shape, different collection — and the same since 5.0:
 
 ```http
-GET /api/brain/spaces/:spaceId/edges?limit=50&skip=0
+POST /api/brain/filter
+Content-Type: application/json
+
+{ "space": "work", "collection": "edges", "limit": 50, "fromName": "Ada" }
 ```
 
-**Response** `200`:
-
-```json
-{
-  "edges": [ ... ],
-  "limit": 50,
-  "skip": 0
-}
-```
+Each row carries `fromName` and `toName` — the endpoint entities' names, resolved per member space. That
+is a JOIN rather than a field, which is why a client holding ids cannot produce it and why `filter` does.
 
 ---
 

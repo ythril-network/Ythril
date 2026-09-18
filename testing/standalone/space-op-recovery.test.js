@@ -26,7 +26,7 @@ import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, delWithBody, waitFor } from '../sync/helpers.js';
+import { INSTANCES, post, get, delWithBody, waitFor, readCollection } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CANDIDATE_CONFIGS = [
@@ -161,23 +161,23 @@ describe('Space op crash recovery (A5)', () => {
     createdSpaceIds.push(newId);
 
     // Reconcile should have renamed EVERY collection to newId and cleared the marker.
-    const newR = await get(INSTANCES.a, token, `/api/brain/spaces/${newId}/facts`);
+    const newR = await readCollection(INSTANCES.a, token, newId, 'facts');
     assert.equal(newR.status, 200, `renamed space should be live: ${newR.status}`);
-    assert.ok(newR.body.facts?.some(m => m._id === memId), 'memory should survive under the new id');
+    assert.ok(newR.results?.some(m => m._id === memId), 'memory should survive under the new id');
 
-    const newEnts = await get(INSTANCES.a, token, `/api/brain/spaces/${newId}/entities`);
+    const newEnts = await readCollection(INSTANCES.a, token, newId, 'entities');
     assert.equal(newEnts.status, 200, `entities listing should be live under new id: ${newEnts.status}`);
-    assert.ok(newEnts.body.entities?.some(e => e._id === entFromId), 'entity should survive under the new id');
+    assert.ok(newEnts.results?.some(e => e._id === entFromId), 'entity should survive under the new id');
 
-    const newEdges = await get(INSTANCES.a, token, `/api/brain/spaces/${newId}/edges`);
+    const newEdges = await readCollection(INSTANCES.a, token, newId, 'edges');
     assert.equal(newEdges.status, 200, `edges listing should be live under new id: ${newEdges.status}`);
-    assert.ok(newEdges.body.edges?.some(e => e._id === edgeId), 'edge should survive under the new id');
+    assert.ok(newEdges.results?.some(e => e._id === edgeId), 'edge should survive under the new id');
 
-    const newChrono = await get(INSTANCES.a, token, `/api/brain/spaces/${newId}/chrono`);
+    const newChrono = await readCollection(INSTANCES.a, token, newId, 'chrono');
     assert.equal(newChrono.status, 200, `chrono listing should be live under new id: ${newChrono.status}`);
-    assert.ok(newChrono.body.chrono?.some(c => c._id === chronoId), 'chrono should survive under the new id');
+    assert.ok(newChrono.results?.some(c => c._id === chronoId), 'chrono should survive under the new id');
 
-    const oldR = await get(INSTANCES.a, token, `/api/brain/spaces/${oldId}/facts`);
+    const oldR = await readCollection(INSTANCES.a, token, oldId, 'facts');
     assert.ok(oldR.status === 403 || oldR.status === 404, `old id should be gone, got ${oldR.status}`);
 
     const cfg = readConfig();
@@ -204,7 +204,7 @@ describe('Space op crash recovery (A5)', () => {
     });
 
     // Reconcile should have finished the deletion and cleared the marker.
-    const listedR = await get(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/facts`);
+    const listedR = await readCollection(INSTANCES.a, token, spaceId, 'facts');
     assert.ok(listedR.status === 403 || listedR.status === 404, `deleted space should be gone, got ${listedR.status}`);
 
     const cfg = readConfig();

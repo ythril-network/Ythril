@@ -11,29 +11,21 @@ import { arrayWriteError } from '../../brain/array-write-refusal.js';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { unknownFieldWarnings } from './unknown-fields.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
-import { createChrono, updateChrono, getChronoById, listChrono, deleteChrono, parseRecurrence, ChronoFilter } from '../../brain/chrono.js';
+import { createChrono, updateChrono, getChronoById, deleteChrono, parseRecurrence } from '../../brain/chrono.js';
 import { getConfig } from '../../config/loader.js';
-import { parseLimit, parseSkip, unsupportedPageParam } from '../../util/pagination.js';
-import { pageAcrossMembers } from '../../spaces/page-across-members.js';
-import { countBrain, compareBySort, PROXY_PAGE_CEILING } from '../../brain/query.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
-import { parseSortParam, SORTABLE_FIELDS, toMongoSort } from '../../brain/list-sort.js';
-import { resolveWriteTarget, isProxySpace, isStrictLinkage, findFirstAcrossMembers, collectAcrossMembers } from '../../spaces/proxy.js';
+import { resolveWriteTarget, isStrictLinkage, findFirstAcrossMembers } from '../../spaces/proxy.js';
 import { validateChrono, getAllowedChronoTypes } from '../../spaces/schema-validation.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { CHRONO_STATUSES } from '../../config/types.js';
 import type { ChronoStatus } from '../../config/types.js';
 import { UUID_V4_RE, webhookToken, getSpaceMeta, applyValidation, ttlDaysFromBody, ttlDaysError, dupeCheckOptsFromBody, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
 import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
-import { resolveEntityIdsByName } from '../../brain/entities.js';
-import { attachedToEntityNamed } from '../../brain/entity-name-scope.js';
 import { mergePropertiesOrKeep } from '../../brain/merge-fields.js';
 import {
   parseRecordSuppression, RECORD_SUPPRESS_FIELD,
 } from '../../brain/suppress-embeddings.js';
-import { withoutListDiagnostics } from '../../brain/read-projection.js';
-import { listDiagnosticsAsked } from './_shared.js';
 import { connectionInputError, applyConnections, CONNECTION_BODY_KEYS } from '../../brain/write-connections.js';
 
 export const chronoRouter = Router();
@@ -391,78 +383,6 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
     return;
   }
   res.status(404).json({ error: 'Chrono entry not found' });
-});
-
-
-// GET /api/brain/spaces/:spaceId/chrono
-chronoRouter.get('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, async (req, res) => {
-  const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
-  const limit = parseLimit(req.query['limit'], 50, 500);
-  // A pagination name we do not have is a 400 naming the one we do — the fleet integrator paged with `offset`, which was accepted
-  // and ignored, and summed 67 identical pages into a count 67x the truth.
-  const badParam = unsupportedPageParam(req.query as Record<string, unknown>);
-  if (badParam) { res.status(400).json(badParam); return; }
-  const skip = parseSkip(req.query['skip']);
-  const sortParse = parseSortParam(req.query['sort'], req.query['dir'], SORTABLE_FIELDS.chrono);
-  if ('error' in sortParse) {
-    res.status(400).json({ error: sortParse.error });
-    return;
-  }
-  const filter: ChronoFilter = {};
-  if (typeof req.query['status'] === 'string') filter.status = req.query['status'];
-  if (typeof req.query['type'] === 'string') filter.type = req.query['type'];
-
-  // tags — comma-separated or repeated — AND semantics
-  if (Array.isArray(req.query['tags'])) {
-    filter.tags = (req.query['tags'] as string[]).flatMap(t => t.split(',').map(s => s.trim())).filter(Boolean);
-  } else if (typeof req.query['tags'] === 'string') {
-    filter.tags = req.query['tags'].split(',').map(s => s.trim()).filter(Boolean);
-  } else if (typeof req.query['tag'] === 'string') {
-    // Singular `?tag=` is the UI's search box: substring, not an exact set.
-    filter.tagLike = req.query['tag'];
-  }
-  if (typeof req.query['description'] === 'string') filter.descriptionLike = req.query['description'];
-  if (typeof req.query['properties'] === 'string') filter.propertiesLike = req.query['properties'];
-
-  // tagsAny — comma-separated or repeated — OR semantics
-  if (Array.isArray(req.query['tagsAny'])) {
-    filter.tagsAny = (req.query['tagsAny'] as string[]).flatMap(t => t.split(',').map(s => s.trim())).filter(Boolean);
-  } else if (typeof req.query['tagsAny'] === 'string') {
-    filter.tagsAny = req.query['tagsAny'].split(',').map(s => s.trim()).filter(Boolean);
-  }
-
-  if (typeof req.query['after'] === 'string') filter.after = req.query['after'];
-  if (typeof req.query['before'] === 'string') filter.before = req.query['before'];
-  if (typeof req.query['search'] === 'string') filter.search = req.query['search'];
-
-  // The Entities column shows entity NAMES; records store ids. Resolved per member for the same reason
-  // as edges: an id belongs to the member that owns it. An empty resolution filters to nothing, which is
-  // correct — "no entity by that name" must not fall back to showing everything.
-  const entityName = typeof req.query['entityName'] === 'string' ? req.query['entityName'] : undefined;
-  const filterFor = async (mid: string): Promise<Record<string, unknown>> => {
-    const perMember: Record<string, unknown> = { ...filter };
-    // BOTH shapes, through the shared predicate. Reading the array alone missed every record written
-    // with `linkEntities` — the form the guide leads with — and answered with an empty list, which
-    // reads as "there are none" rather than "this filter cannot see them".
-    if (entityName) Object.assign(perMember, await attachedToEntityNamed(mid, 'chrono', entityName));
-    return perMember;
-  };
-  const members = memberSpacesForRequest(req, spaceId);
-  const page = await pageAcrossMembers<Record<string, unknown>>({
-    members, limit, skip, ceiling: PROXY_PAGE_CEILING,
-    compare: compareBySort(sortParse.sort ? toMongoSort(sortParse.sort) : { createdAt: -1, _id: -1 }),
-    readMember: async (mid, lim, sk) => await listChrono(mid, await filterFor(mid), lim, sk, sortParse.sort) as unknown as Record<string, unknown>[],
-  });
-  if (!page.ok) { res.status(400).json({ error: page.error }); return; }
-  let total = 0;
-  for (const mid of members) total += await countBrain(mid, 'chrono', await filterFor(mid));
-  res.json({ chrono: withoutListDiagnostics(page.rows, listDiagnosticsAsked(req)),
-    limit, skip, total, truncated: skip + page.rows.length < total });
 });
 
 

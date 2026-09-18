@@ -30,7 +30,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, delWithBody, reqJson, readRecord } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, delWithBody, reqJson, readRecord, readCollection } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -160,9 +160,9 @@ describe('Proxy spaces', () => {
     });
 
     it('List memories via proxy aggregates both spaces', async () => {
-      const r = await get(BASE, tokenA, `/api/brain/spaces/${PROXY}/facts?limit=100`);
+      const r = await readCollection(BASE, tokenA, PROXY, 'facts', { limit: 100 });
       assert.equal(r.status, 200);
-      const facts = r.body.facts.map(m => m.fact);
+      const facts = r.results.map(m => m.fact);
       assert.ok(facts.includes('Alpha fact from proxy'), 'Should include alpha memory');
       assert.ok(facts.includes('Beta fact from proxy'), 'Should include beta memory');
     });
@@ -175,9 +175,9 @@ describe('Proxy spaces', () => {
     });
 
     it('Long-form list via /spaces/ prefix aggregates', async () => {
-      const r = await get(BASE, tokenA, `/api/brain/spaces/${PROXY}/facts?limit=100`);
+      const r = await readCollection(BASE, tokenA, PROXY, 'facts', { limit: 100 });
       assert.equal(r.status, 200);
-      assert.ok(r.body.facts.length >= 2, `Expected >=2 memories, got ${r.body.facts.length}`);
+      assert.ok(r.results.length >= 2, `Expected >=2 memories, got ${r.results.length}`);
     });
 
     it('Stats aggregate counts across member spaces', async () => {
@@ -218,9 +218,9 @@ describe('Proxy spaces', () => {
       });
       assert.equal(rB.status, 200, `Seed beta entity: ${JSON.stringify(rB.body)}`);
 
-      const r = await get(BASE, tokenA, `/api/brain/spaces/${PROXY}/entities?limit=100`);
+      const r = await readCollection(BASE, tokenA, PROXY, 'entities', { limit: 100 });
       assert.equal(r.status, 200);
-      const names = r.body.entities.map(e => e.name);
+      const names = r.results.map(e => e.name);
       assert.ok(names.includes('AlphaEnt'), 'Should include alpha entity');
       assert.ok(names.includes('BetaEnt'), 'Should include beta entity');
     });
@@ -232,9 +232,9 @@ describe('Proxy spaces', () => {
       });
       assert.equal(rE.status, 200, `Seed alpha edge: ${JSON.stringify(rE.body)}`);
 
-      const r = await get(BASE, tokenA, `/api/brain/spaces/${PROXY}/edges?limit=100`);
+      const r = await readCollection(BASE, tokenA, PROXY, 'edges', { limit: 100 });
       assert.equal(r.status, 200);
-      assert.ok(r.body.edges.some(e => e.label === 'alpha-link'), 'Should include alpha edge');
+      assert.ok(r.results.some(e => e.label === 'alpha-link'), 'Should include alpha edge');
     });
 
     it('Delete entity via proxy finds it across members', async () => {

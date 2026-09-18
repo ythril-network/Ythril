@@ -30,6 +30,7 @@ import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { stripComments } from './_strip-comments.mjs';
 import { trackedSources } from './_sources.mjs';
+import { REST_SEARCH, MCP_FILTER, doorSource } from '../_shared/search-doors.mjs';
 
 const { NEVER_RETURNED_PROJECTION, LIST_WITHHELD_FIELDS } =
   await import('../../server/dist/brain/read-projection.js');
@@ -205,16 +206,22 @@ describe('the vector never leaves the database', () => {
       'seq must stay — the canary operator asked for it by name, and it is the conditional-write token');
   });
 
-  it('all four list routes apply the strip, and none of them forgot the flag', () => {
-    // Counted rather than spot-checked: three of the four were wired in one pass, and the fourth is exactly
-    // the kind of thing a one-route test would not notice.
-    const routes = ['entities', 'facts', 'edges', 'chrono'];
-    for (const r of routes) {
-      const src = stripComments(readFileSync(`server/src/api/brain/${r}.ts`, 'utf8'));
+  it('both doors of `filter` apply the strip, and neither forgot the flag', () => {
+    /*
+     * This case named four list routes until `B-9` step 3b deleted all four. Listing a collection is
+     * `filter` now: ONE place a page of brain records is built, and two doors onto it.
+     *
+     * Counting both doors rather than one is what survives the deletion, and the asymmetry it protects
+     * against is still available: the REST door reads `body['includeDiagnostics']` and the MCP door reads
+     * `a['includeDiagnostics']`. Two spellings of one flag, and a door that dropped it would return the
+     * passage a second time to every caller who happened to pick it.
+     */
+    for (const [door, file] of [['REST', REST_SEARCH], ['MCP', MCP_FILTER]]) {
+      const src = stripComments(doorSource(file));
       assert.match(src, /withoutListDiagnostics\(/,
-        `the ${r} list route returns its rows unfiltered — matchedText is the passage a second time`);
-      assert.match(src, /listDiagnosticsAsked\(req\)/,
-        `the ${r} list route strips unconditionally, so a caller cannot ask for the diagnostics back`);
+        `the ${door} door returns its rows unfiltered — matchedText is the passage a second time`);
+      assert.match(src, /withoutListDiagnostics\([^)]*\['includeDiagnostics'\] === true\)/,
+        `the ${door} door must strip unless the caller asked, and read the flag to decide`);
     }
   });
 });

@@ -42,7 +42,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, dockerExec, readRecord } from '../sync/helpers.js';
+import { INSTANCES, post, get, dockerExec, readRecord, readCollection } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -190,10 +190,10 @@ describe('Contradiction resolve — picking a winner', () => {
 
     // The edge must be FINDABLE, not merely reported. A stored edge that the edges API does not return is
     // the accepted-dead-edge shape, and it looks identical to success from the resolve response alone.
-    const edges = await get(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/edges?label=supersedes`);
+    const edges = await readCollection(INSTANCES.a, token(), SPACE, 'edges', { filter: { label: 'supersedes' } });
     assert.equal(edges.status, 200);
-    const drawn = (edges.body.edges ?? []).find(e => e.from === winnerId && e.to === loserId);
-    assert.ok(drawn, `the supersedes edge must be listed: ${JSON.stringify(edges.body.edges)}`);
+    const drawn = (edges.results ?? []).find(e => e.from === winnerId && e.to === loserId);
+    assert.ok(drawn, `the supersedes edge must be listed: ${JSON.stringify(edges.results)}`);
 
     // NOTHING is deleted. That is the line between this and a duplicate merge.
     for (const id of [winnerId, loserId]) {
@@ -223,8 +223,8 @@ describe('Contradiction resolve — picking a winner', () => {
     assert.match(r.body.note ?? '', /no edge drawn/, `the response must explain: ${JSON.stringify(r.body)}`);
     assert.equal(r.body.supersededId, ids.m1, 'the decision is still recorded');
 
-    const edges = await get(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/edges?label=supersedes`);
-    const strays = (edges.body.edges ?? []).filter(e => [e.from, e.to].some(x => x === ids.m1 || x === ids.m2));
+    const edges = await readCollection(INSTANCES.a, token(), SPACE, 'edges', { filter: { label: 'supersedes' } });
+    const strays = (edges.results ?? []).filter(e => [e.from, e.to].some(x => x === ids.m1 || x === ids.m2));
     assert.deepEqual(strays, [], 'no edge may reference a memory');
   });
 
@@ -235,8 +235,8 @@ describe('Contradiction resolve — picking a winner', () => {
     const again = await raw('POST', `/api/contradictions/${c.id}/resolve`, { resolution: 'superseded', winner: 'a' });
     assert.equal(again.status, 200, JSON.stringify(again.body));
 
-    const edges = await get(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/edges?label=supersedes`);
-    const matching = (edges.body.edges ?? []).filter(e => e.from === c.aId && e.to === c.bId);
+    const edges = await readCollection(INSTANCES.a, token(), SPACE, 'edges', { filter: { label: 'supersedes' } });
+    const matching = (edges.results ?? []).filter(e => e.from === c.aId && e.to === c.bId);
     assert.equal(matching.length, 1,
       `(from, to, label) is an edge's identity, so a second resolve must upsert: ${JSON.stringify(matching)}`);
   });

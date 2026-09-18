@@ -17,6 +17,7 @@ import { trackedSources } from './_sources.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { FILTER_DOORS, doorSource } from '../_shared/search-doors.mjs';
 
 /** Every tracked server source, read out of git rather than named — see the derived cases below. */
 function serverSources() {
@@ -215,8 +216,15 @@ describe('entity-NAME column filters (From / To / Entities)', () => {
        */
       .filter(f => f !== 'server/src/brain/entity-name-scope.ts')
       .filter(f => read(f).includes(CALL));
-    assert.ok(callers.length >= 3,
-      `only ${callers.length} caller(s) of the resolver found; the three known doors are the minimum`);
+    /*
+     * THE FLOOR IS THE TWO DOORS OF `filter`, derived rather than counted. It read `>= 3` for the three
+     * list routes that resolved a name; `B-9` step 3b deleted them, and the gate went red for the deletion
+     * SUCCEEDING — a number in a gate is a second copy of a fact with its own expiry date.
+     */
+    for (const door of FILTER_DOORS) {
+      assert.ok(callers.includes(door),
+        `${door} does not resolve a name at all — the column filter cannot work on that door`);
+    }
 
     for (const f of callers) {
       const src = read(f);
@@ -236,8 +244,13 @@ describe('entity-NAME column filters (From / To / Entities)', () => {
   it('resolves per MEMBER, not once for the whole proxy space', () => {
     // Ids belong to the member that owns them; resolving against another member's entities would match
     // nothing while looking like it worked.
-    for (const f of ['edges.ts', 'facts.ts', 'chrono.ts']) {
-      const src = readFileSync(new URL(`../../server/src/api/brain/${f}`, import.meta.url), 'utf8');
+    /*
+     * THE TWO DOORS OF `filter`, not the three list routes this used to name. Those routes are gone
+     * (`B-9` step 3b) and the resolution they did lives on both doors now — which is the stronger place
+     * for it, because a per-member resolution that only one door performs is this repo's signature defect.
+     */
+    for (const f of FILTER_DOORS) {
+      const src = doorSource(f);
       // The PROPERTY, not the shape that used to express it. This line required
       // `collectAcrossMembers(spaceId, async mid =>` until the list routes moved onto the shared pager, at which point the
       // resolution moved into a `filterFor(mid)` helper — still per member, and the gate failed on correct code.

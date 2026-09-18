@@ -356,7 +356,7 @@ What you *can* control:
 | `projection` | `POST /query`, **and recall / find-similar** | any field you do not name. On recall it applies recursively, so a `traverse` answer's `_graph` is projected at every depth |
 | `includeFileContent: false` | recall, find-similar | file-passage **bodies**, keeping path, heading, chunk index, tags and properties |
 | `includeDiagnostics: false` *(the default)* | recall, find-similar | `matchedText`, `embeddingModel` and `seq` — **recursively**, so a `traverse` answer's `_graph` follows it at every depth. **NOT the per-stage scores** — see below |
-| `includeDiagnostics` *(query string, default off)* | the **list** routes — entities, facts, edges, chrono | `matchedText` and `embeddingModel`. **`seq` is NOT dropped here**, unlike on recall: it is the `If-Match` value, and withholding it would take away conditional writes. Send `?includeDiagnostics=true` to get the two fields back |
+| `includeDiagnostics` *(body field, default off)* | `POST /filter` | `matchedText` and `embeddingModel`. **`seq` is NOT dropped here**, unlike on recall: it is the `If-Match` value, and withholding it would take away conditional writes. Send `includeDiagnostics: true` to get the two fields back. It was a query string on the per-collection list routes until 5.0, when those routes went |
 
 A projection is worth reaching for rather than skipping: a bare query over a dozen records with full
 descriptions and properties is the cheapest way to overrun a token budget, and naming the four fields you
@@ -371,9 +371,10 @@ What still differs is the **shape**, deliberately, because each is natural to it
 flat — record fields beside `score` — while an MCP result nests them under `record`. The *field set* a caller
 can read is identical, at the result level and at every depth of `_graph`, and a gate compares the two.
 
-The list routes (`GET /api/brain/spaces/:id/facts` and friends) still have **no** field selection — they are now the only read that does not. If that
-is a constraint for your integration, say so — it is the one remaining asymmetry here rather than a
-preference somebody chose.
+**The asymmetry this paragraph used to describe is gone.** It said the per-collection list routes had no
+field selection and were the only read that did not — true until 5.0 deleted them. Listing a collection is
+`POST /filter` now, which takes `projection` like every other read, so there is one answer for every read on
+this surface rather than one exception.
 
 ### Retiring a record from semantic search
 

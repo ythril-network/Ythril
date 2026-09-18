@@ -52,6 +52,14 @@ export function capPage<T>(rows: T[], limit: number, sort?: { field: string; dir
  * Their words, and the reason this is a refusal rather than an alias: *"accepting a parameter and ignoring it is worse
  * than rejecting it, because the caller writes a loop around it."*
  *
+ * **ITS READER IS THE STRICT BODY NOW, not a query string.** `B-9` step 3b deleted the per-collection list
+ * routes, so the only door that pages is `filter` — and a JSON body IS strictly allowlisted, which the
+ * query string could not be. `unknownBodyFields` refuses an unknown key either way; this list is what makes
+ * the refusal say `use 'skip'` rather than leaving the caller to spot it in the allowed names.
+ *
+ * The paragraph below explains why the query-string version could not be strict, and is kept because it is
+ * the reason the list is these names and not every name:
+ *
  * DELIBERATELY NOT a strict allowlist over the whole query string. A GET is reached by browsers, proxies and cache
  * busters (`?_=1699…`), so refusing every unknown key would break traffic that never asked for pagination. This list is
  * the plausible-but-wrong names a caller reaches for on purpose — each one a loop waiting to be written.
@@ -68,14 +76,3 @@ export const UNSUPPORTED_PAGE_PARAMS: Readonly<Record<string, string>> = {
   direction: 'dir',
 };
 
-/** The 400 body for an unsupported pagination alias, or `null` when the query is clean. */
-export function unsupportedPageParam(
-  query: Record<string, unknown>,
-): { error: string; unrecognized_keys: string[] } | null {
-  const bad = Object.keys(UNSUPPORTED_PAGE_PARAMS).filter(k => query[k] !== undefined);
-  if (bad.length === 0) return null;
-  return {
-    error: bad.map(k => `'${k}' is not a parameter of this endpoint — use '${UNSUPPORTED_PAGE_PARAMS[k]}'`).join('; '),
-    unrecognized_keys: bad,
-  };
-}

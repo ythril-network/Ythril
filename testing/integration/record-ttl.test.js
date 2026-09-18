@@ -20,7 +20,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, delWithBody, patch, readRecord } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, delWithBody, patch, readRecord, readCollection } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -105,7 +105,7 @@ describe('record TTL (F10)', () => {
     });
   }
   async function fileMeta(pathName) {
-    return get(INSTANCES.a, tokenA, `/api/brain/spaces/general/files?path=${encodeURIComponent(pathName)}`);
+    return readCollection(INSTANCES.a, tokenA, 'general', 'files', { path: pathName });
   }
 
   it('file upload with ttlDays > 0 stamps _expireAt on the file record', async () => {
@@ -113,7 +113,7 @@ describe('record TTL (F10)', () => {
     const up = await uploadWithTtl(p, 10);
     assert.ok([200, 201, 202].includes(up.status), `upload status ${up.status}`);
     const g = await fileMeta(p);
-    assertAboutDaysFromNow(g.body.files?.[0]?._expireAt, 10);
+    assertAboutDaysFromNow(g.results?.[0]?._expireAt, 10);
     await del(INSTANCES.a, tokenA, `/api/files/general?path=${encodeURIComponent(p)}`).catch(() => {});
   });
 
@@ -122,7 +122,7 @@ describe('record TTL (F10)', () => {
     const up = await uploadWithTtl(p, 0);
     assert.ok([200, 201, 202].includes(up.status), `upload status ${up.status}`);
     const g = await fileMeta(p);
-    assert.equal(g.body.files?.[0]?._expireAt, undefined);
+    assert.equal(g.results?.[0]?._expireAt, undefined);
     await del(INSTANCES.a, tokenA, `/api/files/general?path=${encodeURIComponent(p)}`).catch(() => {});
   });
 

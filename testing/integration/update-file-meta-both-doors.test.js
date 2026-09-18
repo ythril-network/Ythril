@@ -23,7 +23,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get } from '../sync/helpers.js';
+import { INSTANCES, post, get, readCollection } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -93,9 +93,12 @@ describe('update_file_meta edits metadata and leaves the bytes alone', () => {
       assert.equal(await readFileBytes(), BODY, 'a metadata edit must not rewrite the file');
 
       // And the field nobody mentioned survives.
-      const meta = await get(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/files?path=${encodeURIComponent(FILE)}`);
+      const meta = await readCollection(INSTANCES.a, token(), SPACE, 'files', { path: FILE });
       assert.equal(meta.status, 200, JSON.stringify(meta.body));
-      const record = Array.isArray(meta.body?.files) ? meta.body.files[0] : meta.body;
+      // One shape now. The two-shape read was for the list route's `{files}` beside a single-record
+      // answer, and `filter` has neither: it is always a page, and an empty one is a real outcome.
+      const [record] = meta.results;
+      assert.ok(record, `no metadata record came back: ${JSON.stringify(meta.body)}`);
       assert.deepEqual(record.tags, ['edited-by-mcp'], `tags must be replaced: ${JSON.stringify(record)}`);
       assert.equal(record.description, 'the original description',
         'a field the patch did not mention must survive — silently clearing it is the failure mode here');

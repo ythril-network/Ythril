@@ -37,7 +37,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, patch, get, delWithBody, readRecord } from '../sync/helpers.js';
+import { INSTANCES, post, patch, get, delWithBody, readRecord, readCollection } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
@@ -51,11 +51,20 @@ let token;
 let derivingId;
 let exemptId;
 
-/** The entries this space holds, by type, as the API reports them right now. */
-async function statusByType(query = '') {
-  const r = await get(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/chrono?limit=20${query}`);
+/**
+ * The entries this space holds, by type, as the API reports them right now.
+ *
+ * `deriveStatus: true` IS THE SUBJECT, not a detail. The list route this replaced derived the status
+ * unconditionally, so a conversion that dropped the flag would compare the STORED value against an
+ * expectation written about the derived one — and pass for the exempt type, which is the half that was
+ * already correct.
+ */
+async function statusByType(status) {
+  const r = await readCollection(INSTANCES.a, token, SPACE, 'chrono', {
+    limit: 20, deriveStatus: true, ...(status ? { filter: { status } } : {}),
+  });
   assert.equal(r.status, 200, JSON.stringify(r.body));
-  return Object.fromEntries((r.body.chrono ?? []).map(e => [e.type, e.status]));
+  return Object.fromEntries((r.results ?? []).map(e => [e.type, e.status]));
 }
 
 describe('a passed date means what the chrono type says', () => {
@@ -112,7 +121,7 @@ describe('a passed date means what the chrono type says', () => {
   });
 
   it('filtering by overdue does not match the exempt type', async () => {
-    assert.deepEqual(await statusByType('&status=overdue'), { invoice: 'overdue' });
+    assert.deepEqual(await statusByType('overdue'), { invoice: 'overdue' });
   });
 
   it('filtering by active still FINDS the exempt type — the direction that hides records', async () => {
@@ -122,7 +131,7 @@ describe('a passed date means what the chrono type says', () => {
      * silently, from an operator asking for their open ones — and the reporter's own monitor did precisely
      * this comparison against a past-dated record and found nothing, for 1 687 of 1 806 entries.
      */
-    assert.deepEqual(await statusByType('&status=active'), { deploy: 'active' });
+    assert.deepEqual(await statusByType('active'), { deploy: 'active' });
   });
 
   it('a terminal status is untouched by either policy', async () => {

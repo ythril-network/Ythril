@@ -29,7 +29,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { INSTANCES, post, get, del } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, readCollection } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -151,8 +151,8 @@ describe('recall and similar take it too, not just filter', () => {
   });
 
   it('similar accepts a list on both doors', async () => {
-    const seed = await get(INSTANCES.a, token, '/api/brain/spaces/general/facts?limit=1');
-    const id = seed.body?.facts?.[0]?._id;
+    const seed = await readCollection(INSTANCES.a, token, 'general', 'facts', { limit: 1 });
+    const id = seed.results?.[0]?._id;
     if (!id) return;   // nothing embedded in this run; the parse is what matters and recall covered it
     const rest = await post(INSTANCES.a, token, '/api/brain/similar', {
       entryId: id, entryType: 'fact', space: ['general'],

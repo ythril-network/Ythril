@@ -3,7 +3,6 @@ import { HttpClient, HttpParams, HttpHeaders } from '@angular/common/http';
 import { Observable, Subscription } from 'rxjs';
 import { map } from 'rxjs/operators';
 import type { FileEntry, FileMeta, FileExtract, UploadProgress, ConflictRecord } from './api.types';
-import type { ListSort } from './brain-api.service';
 
 /** File store (listing, upload, download), brain file-metadata, and sync file conflicts. */
 @Injectable({ providedIn: 'root' })
@@ -169,21 +168,24 @@ export class FilesApi {
 
   // ── File metadata (brain) ─────────────────────────────────────────────────
 
-  listFileMeta(spaceId: string, limit = 50, skip = 0, filters?: { search?: string; tag?: string }, sort?: ListSort): Observable<{ files: FileMeta[]; limit: number; skip: number }> {
-    let params = new HttpParams().set('limit', limit).set('skip', skip);
-    // `search` → the server's freetext `?search=` (substring over path + description, slice 4b).
-    if (filters?.search) params = params.set('search', filters.search);
-    if (filters?.tag) params = params.set('tag', filters.tag);
-    if (sort) params = params.set('sort', sort.field).set('dir', sort.dir);
-    return this.http.get<{ files: FileMeta[]; limit: number; skip: number }>(`/api/brain/spaces/${spaceId}/files`, { params });
-  }
-
-  /** Fetch the single file-metadata record for an exact path (reuses the list route's `?path=` filter — no dedicated route). */
+  /**
+   * The one file-metadata record for an exact path.
+   *
+   * Through `POST /api/brain/filter` since 5.0, with `path` as an ARGUMENT rather than a predicate: the
+   * argument is normalised server-side, so a path with the separators the other way round still finds the
+   * record. A bare `filter: { path }` would be an exact equality and would answer an empty page, which
+   * this method would hand back as `null` — indistinguishable from a file that genuinely has no metadata.
+   *
+   * `listFileMeta` used to sit beside this and is gone: it had no caller. The file manager lists through
+   * the file STORE (`/api/files/:spaceId`), which is a different question — what is on disk, not what the
+   * brain records about it.
+   */
   getFileMeta(spaceId: string, path: string): Observable<FileMeta | null> {
-    const params = new HttpParams().set('path', path).set('limit', 1);
-    return this.http.get<{ files: FileMeta[] }>(`/api/brain/spaces/${spaceId}/files`, { params }).pipe(
-      map(r => r.files[0] ?? null),
-    );
+    return this.http
+      .post<{ results: FileMeta[] }>('/api/brain/filter', {
+        space: spaceId, collection: 'files', path, limit: 1,
+      })
+      .pipe(map(r => r.results?.[0] ?? null));
   }
 
   /**

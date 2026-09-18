@@ -42,9 +42,31 @@ describe('the lookup', () => {
   });
 
   it('distinguishes methods on the same path', () => {
-    // GET and POST on a collection are not the same permission, and a path-only lookup would say they are.
-    assert.equal(rungFor('GET', '/api/brain/spaces/:spaceId/facts').needs, 'read');
-    assert.equal(rungFor('POST', '/api/brain/spaces/:spaceId/facts').needs, 'write');
+    /*
+     * DERIVED, because the pair this used to name stopped existing. It asserted `GET` and `POST` on
+     * `.../facts` were `read` and `write`, and `B-9` step 3b deleted the GET — so the case went red for a
+     * deletion rather than for the rule, and the obvious repair is to pick another pair by hand and wait
+     * for the same thing to happen again.
+     *
+     * The rule has no site in it: wherever ONE path carries two methods at DIFFERENT rungs, the lookup
+     * must tell them apart. A path-only lookup would answer the same for both, and the one it answered
+     * with would decide whether a reader can write.
+     */
+    const byPath = new Map();
+    for (const row of ROUTE_RIGHTS) {
+      if (!row.needs) continue;
+      if (!byPath.has(row.route)) byPath.set(row.route, []);
+      byPath.get(row.route).push(row);
+    }
+    const mixed = [...byPath.values()].filter(rows => new Set(rows.map(r => r.needs)).size > 1);
+    assert.ok(mixed.length > 0,
+      'no path carries two rungs any more, so this case has no subject — check the table before deleting it');
+    for (const rows of mixed) {
+      for (const row of rows) {
+        assert.equal(rungFor(row.method, row.route).needs, row.needs,
+          `${row.method} ${row.route} resolves to the wrong rung — the lookup is answering by path alone`);
+      }
+    }
     /*
      * The bulk wipe left this table entirely at 5.0. Five per-collection DELETEs became one tool call, and
      * a tool is priced in `TOOL_RIGHTS` — so the right answer here is "no row", and asserting it is what

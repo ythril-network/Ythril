@@ -33,24 +33,20 @@ export const CAPABILITIES = [
   ['Brain — facts', 'save_fact', 'POST /api/brain/spaces/:spaceId/facts'],
   ['Brain — facts', 'update_fact', 'PATCH /api/brain/spaces/:spaceId/facts/:id'],
   ['Brain — facts', 'delete_fact', 'DELETE /api/brain/spaces/:spaceId/facts/:id'],
-  ['Brain — facts', 'filter', 'GET /api/brain/spaces/:spaceId/facts'],
 
   ['Brain — entities', 'save_entity', 'POST /api/brain/spaces/:spaceId/entities'],
   ['Brain — entities', 'update_entity', 'PATCH /api/brain/spaces/:spaceId/entities/:id'],
   ['Brain — entities', 'delete_entity', 'DELETE /api/brain/spaces/:spaceId/entities/:id'],
-  ['Brain — entities', 'filter', 'GET /api/brain/spaces/:spaceId/entities'],
   ['Brain — entities', 'delete_entity_preview', 'GET /api/brain/spaces/:spaceId/entities/:id/cascade-preview'],
   ['Brain — entities', 'graph_merge', 'POST /api/brain/spaces/:spaceId/entities/:survivorId/merge/:absorbedId'],
 
   ['Brain — edges', 'save_edge', 'POST /api/brain/spaces/:spaceId/edges'],
   ['Brain — edges', 'update_edge', 'PATCH /api/brain/spaces/:spaceId/edges/:id'],
   ['Brain — edges', 'delete_edge', 'DELETE /api/brain/spaces/:spaceId/edges/:id'],
-  ['Brain — edges', 'filter', 'GET /api/brain/spaces/:spaceId/edges'],
 
   ['Brain — chrono', 'save_chrono', 'POST /api/brain/spaces/:spaceId/chrono'],
   ['Brain — chrono', 'update_chrono', 'PATCH /api/brain/spaces/:spaceId/chrono/:id'],
   ['Brain — chrono', 'delete_chrono', 'DELETE /api/brain/spaces/:spaceId/chrono/:id'],
-  ['Brain — chrono', 'filter', 'GET /api/brain/spaces/:spaceId/chrono'],
 
   ['Brain — links', 'save_link', 'POST /api/brain/spaces/:spaceId/links'],
   ['Brain — links', 'delete_link', 'DELETE /api/brain/spaces/:spaceId/links/:id'],
@@ -90,7 +86,6 @@ export const CAPABILITIES = [
   ['Files', 'delete_file', 'DELETE /api/files/:spaceId'],
   ['Files', 'create_dir', 'POST /api/files/:spaceId/mkdir'],
   ['Files', 'retry_embed_file', 'POST /api/files/:spaceId/retry_embedding'],
-  ['Files', 'list_dir', 'GET /api/brain/spaces/:spaceId/files'],
   ['Files', 'read_file', 'GET /api/brain/spaces/:spaceId/files/extract'],
   ['Files', 'update_file_meta', 'PATCH /api/brain/spaces/:spaceId/files'],
 

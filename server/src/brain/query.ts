@@ -10,8 +10,9 @@ import { col } from '../db/mongo.js';
 import { BUDGET_REQUEST_FIELDS } from './result-budget.js';
 import { BRAIN_COLLECTIONS, type BrainCollection } from '../config/types.js';
 import { normaliseProjection, toMongoProjection } from './projection.js';
-import { sanitizeFilter } from './filter-sanitizer.js';
+import { sanitizeFilter, type CallerCheckedFilter } from './filter-sanitizer.js';
 import { CONVENIENCE_KEYS } from './list-conveniences.js';
+import { UNSUPPORTED_PAGE_PARAMS } from '../util/pagination.js';
 
 /*
  * Re-exported, not re-implemented. Several callers and gates import `sanitizeFilter` from here because this
@@ -148,8 +149,21 @@ export function unknownBodyFields(
 ): { error: string; unrecognized_keys: string[] } | null {
   const unknown = Object.keys(body).filter(k => !allowed.has(k));
   if (unknown.length === 0) return null;
+  /*
+   * A PAGING ALIAS GETS NAMED, because the generic sentence is not enough for the one caller this
+   * actually happened to.
+   *
+   * The fleet integrator paged a list route with `offset`, which was accepted and ignored, and summed
+   * 67 identical pages into a count 67 times the truth. The query-string routes answered that with
+   * `unsupportedPageParam`; those routes are gone (`B-9` step 3b), and a strict body already refuses an
+   * unknown key — but refusing it with "Allowed: space, collection, filter, …" leaves the caller to spot
+   * that `skip` is the one they wanted. Saying it costs one sentence.
+   */
+  const aliases = unknown.filter(k => k in UNSUPPORTED_PAGE_PARAMS)
+    .map(k => `'${k}' is not a parameter of this endpoint — use '${UNSUPPORTED_PAGE_PARAMS[k]}'`);
   return {
-    error: `Unknown field(s): ${unknown.join(', ')}. Allowed: ${[...allowed].join(', ')}`,
+    error: [...aliases, `Unknown field(s): ${unknown.join(', ')}. Allowed: ${[...allowed].join(', ')}`]
+      .join('; '),
     unrecognized_keys: unknown,
   };
 }
@@ -174,6 +188,55 @@ export function unknownBodyFields(
  * report.
  */
 export const DEFAULT_QUERY_LIMIT = 200;
+
+/**
+ * `limit` and `skip` for a `filter` call — one parser, because the two doors had two and they disagreed.
+ *
+ * ## The defect this fixes, found by deleting the routes that hid it
+ *
+ * Measured against a live instance while moving the last list callers onto `filter`:
+ *
+ * | sent | `skip` | `limit` |
+ * |---|---|---|
+ * | `"abc"` | `400` | accepted, silently the default |
+ * | `-5` | `400` | accepted, silently the default |
+ * | `0` | valid — the first page | accepted, silently the default |
+ *
+ * One endpoint, one question — *where does this page start and how big is it* — and two answers to a value
+ * it cannot use. `skip` refused out loud for the reason written beside it: reading a bad value as "start
+ * from the beginning" returns a page that is not the page asked for, with a 200 on it. Every word of that
+ * applies to `limit`, which was quietly answering with 200 rows to a caller who asked for something else.
+ *
+ * The per-collection list routes coerced BOTH, and had to: a query string has no types, so `?limit=abc` is
+ * indistinguishable from a caller who meant something. A JSON body does have types, so there is no guess
+ * left to make and refusing is strictly better information.
+ *
+ * ## Why one function rather than the same six lines on each door
+ *
+ * They already were the same six lines on each door, which is how they came to differ: `skip`'s refusal was
+ * copied to both and `limit`'s default was copied to both, and nobody compared the two parameters to each
+ * other. A caller cannot be told "the body is the tool's arguments" and then find one argument stricter
+ * than its neighbour depending on which one they typo'd.
+ *
+ * `0` is a valid `skip` and NOT a valid `limit`: the first page starts at zero, and a page of zero rows is
+ * a request for nothing that would come back looking like an empty collection.
+ */
+export function parseQueryPaging(
+  raw: { limit?: unknown; skip?: unknown },
+): { limit: number; skip: number } | { error: string } {
+  const { limit, skip } = raw;
+  if (skip !== undefined && (typeof skip !== 'number' || !Number.isInteger(skip) || skip < 0)) {
+    return { error: 'skip must be a non-negative integer' };
+  }
+  if (limit !== undefined && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1)) {
+    return { error: 'limit must be a positive integer' };
+  }
+  return {
+    limit: typeof limit === 'number' ? limit : DEFAULT_QUERY_LIMIT,
+    skip: typeof skip === 'number' ? skip : 0,
+  };
+}
+
 
 /**
  * The ceiling on a PROXY space's merged window.
@@ -231,7 +294,7 @@ export const compareQueryOrder = compareBySort(DEFAULT_QUERY_SORT);
 export async function queryBrain(
   spaceId: string,
   collectionName: BrainCollection,
-  filter: Record<string, unknown>,
+  filter: CallerCheckedFilter,
   projection?: Record<string, unknown>,
   limit = 20,
   maxTimeMS = 5000,
@@ -255,7 +318,9 @@ export async function queryBrain(
   if (!ALLOWED_COLLECTIONS.has(collectionName)) {
     throw new Error(`Unknown collection '${collectionName}'`);
   }
-  const safeFilter = sanitizeFilter(filter) as Record<string, never>;
+  // NOT re-checked here. The caller's filter was checked where it was still identifiable as theirs — see
+  // `CallerCheckedFilter`, which is what makes this parameter impossible to pass a raw object to.
+  const safeFilter = filter as Record<string, never>;
   const safeMaxTime = Math.min(maxTimeMS, 10_000);
   const collName = `${spaceId}_${collectionName}`;
   const cursor = col(collName)
@@ -296,14 +361,14 @@ export async function queryBrain(
 export async function countBrain(
   spaceId: string,
   collectionName: BrainCollection,
-  filter: Record<string, unknown>,
+  filter: CallerCheckedFilter,
   maxTimeMS = 5000,
 ): Promise<number> {
   if (!ALLOWED_COLLECTIONS.has(collectionName)) {
     throw new Error(`Unknown collection '${collectionName}'`);
   }
   return await col(`${spaceId}_${collectionName}`).countDocuments(
-    sanitizeFilter(filter) as Record<string, never>,
+    filter as Record<string, never>,
     { maxTimeMS: Math.min(maxTimeMS, 10_000) },
   );
 }

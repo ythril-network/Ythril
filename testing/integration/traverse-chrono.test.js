@@ -27,7 +27,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, reqJson } from '../sync/helpers.js';
+import { INSTANCES, post, reqJson, readCollection } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -101,9 +101,8 @@ before(async () => {
   const deadline = Date.now() + 20_000;
   let readBack;
   for (;;) {
-    readBack = await reqJson(INSTANCES.a, token(),
-      `/api/brain/spaces/${SPACE}/files?path=${encodeURIComponent(ids.file)}`, { method: 'GET' });
-    const got = readBack.body?.files?.[0]?.description ?? readBack.body?.description;
+    readBack = await readCollection(INSTANCES.a, token(), SPACE, 'files', { path: ids.file, limit: 1 });
+    const got = readBack.results?.[0]?.description;
     if (got === wantDescription) break;
     if (Date.now() > deadline) {
       assert.fail(`the file-meta PATCH never stuck: description reads ${JSON.stringify(got)} rather than `

@@ -23,6 +23,7 @@ import { getEmbedJobCounts } from '../../brain/embed-queue.js';
 import {
   queryBrain, countBrain, QUERY_BODY_FIELDS, TRAVERSE_BODY_FIELDS, FIND_SIMILAR_BODY_FIELDS,
   unknownBodyFields, compareBySort, DEFAULT_QUERY_SORT, DEFAULT_QUERY_LIMIT, PROXY_PAGE_CEILING,
+  parseQueryPaging,
 } from '../../brain/query.js';
 import { findSimilar, type RecallKnowledgeType, type RecallResult } from '../../brain/recall.js';
 import { type FilterExpression } from '../../brain/filter.js';
@@ -340,16 +341,14 @@ searchRouter.post('/filter', globalRateLimit, requireBodyScopedSpace('knowledge'
   // fetch and silently truncated deep pages to nothing.
   // A DEFAULT, not a clamp: see `DEFAULT_QUERY_LIMIT`. What bounds the answer is the byte budget, the
   // `maxTimeMS` ceiling and — on a proxy space — `PROXY_PAGE_CEILING`, which refuses out loud.
-  const safeLimit = typeof limit === 'number' ? limit : DEFAULT_QUERY_LIMIT;
+  // ONE parser for both paging values and both doors — see `parseQueryPaging`. Written out here on each
+  // door until 5.0, which is how `skip` came to refuse a value it cannot use while `limit` quietly
+  // answered with the default instead.
+  const paging = parseQueryPaging({ limit, skip });
+  if ('error' in paging) { res.status(400).json({ error: paging.error }); return; }
+  const safeLimit = paging.limit;
+  const safeSkip = paging.skip;
   const safeMaxTimeMS = typeof maxTimeMS === 'number' ? maxTimeMS : 5000;
-
-  // A non-integer or negative `skip` is refused rather than floored to 0. Silently reading it as "start from the
-  // beginning" is the same failure they reported: a page that is not the page asked for, returned with a 200.
-  if (skip !== undefined && (typeof skip !== 'number' || !Number.isInteger(skip) || skip < 0)) {
-    res.status(400).json({ error: 'skip must be a non-negative integer' });
-    return;
-  }
-  const safeSkip = typeof skip === 'number' ? skip : 0;
 
   // Same `sort`/`dir` the brain LIST endpoints take, with the same allowlist and the same 400 text — a caller who knows
   // one knows the other, and inventing an object form here would have been a second way to say one thing.

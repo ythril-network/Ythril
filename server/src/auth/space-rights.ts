@@ -124,11 +124,9 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   { route: '/api/brain/spaces/:spaceId/stats', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/events', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/events/ticket', method: 'POST', area: 'knowledge', needs: 'read', scope: 'path' },
-  { route: '/api/brain/spaces/:spaceId/facts', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/facts', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/facts/:id', method: 'PATCH', area: 'knowledge', needs: 'write', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/facts/:id', method: 'DELETE', area: 'knowledge', needs: 'write', scope: 'path' },
-  { route: '/api/brain/spaces/:spaceId/entities', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/entities', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/entities/:id', method: 'PATCH', area: 'knowledge', needs: 'write', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/entities/:id', method: 'DELETE', area: 'knowledge', needs: 'write', scope: 'path' },
@@ -138,7 +136,6 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   { route: '/api/brain/spaces/:spaceId/entities/:id/cascade-preview', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
   // A merge DESTROYS one of the two records, so it is admin even though each half looks like an edit.
   { route: '/api/brain/spaces/:spaceId/entities/:survivorId/merge/:absorbedId', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
-  { route: '/api/brain/spaces/:spaceId/edges', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/edges', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/edges/:id', method: 'PATCH', area: 'knowledge', needs: 'write', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/edges/:id', method: 'DELETE', area: 'knowledge', needs: 'write', scope: 'path' },
@@ -149,7 +146,6 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   // A VIEW of one space's data — who wrote its legacy link arrays — so it is area-scoped like the two above
   // and takes the lowest rung. Read before converting; `F-25`.
   { route: '/api/brain/spaces/:spaceId/links/convert-preflight', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
-  { route: '/api/brain/spaces/:spaceId/chrono', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/chrono', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/chrono/:id', method: 'PATCH', area: 'knowledge', needs: 'write', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/chrono/:id', method: 'DELETE', area: 'knowledge', needs: 'write', scope: 'path' },
@@ -164,7 +160,6 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   { route: '/api/files/:spaceId', method: 'GET', area: 'files', needs: 'read', scope: 'path' },
   { route: '/api/files/:spaceId', method: 'POST', area: 'files', needs: 'write', scope: 'path' },
   { route: '/api/files/:spaceId/upload-status', method: 'GET', area: 'files', needs: 'read', scope: 'path' },
-  { route: '/api/brain/spaces/:spaceId/files', method: 'GET', area: 'files', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/files/extract', method: 'GET', area: 'files', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/embedding-queue/media', method: 'GET', area: 'files', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/embedding-queue/media/retry-failed', method: 'POST', area: 'files', needs: 'write', scope: 'path' },

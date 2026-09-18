@@ -22,6 +22,7 @@ import { QUERY_FILTER_OPERATORS } from './shared.js';
 import { resolveBudget, applyBudget, budgetFields, type BudgetRequest, defaultBudgetChars } from '../../brain/result-budget.js';
 import {
   queryBrain, countBrain, compareBySort, DEFAULT_QUERY_SORT, DEFAULT_QUERY_LIMIT, PROXY_PAGE_CEILING,
+  parseQueryPaging,
 } from '../../brain/query.js';
 import { parseSortParam, toMongoSort, SORTABLE_FIELDS } from '../../brain/list-sort.js';
 import { CONVENIENCE_SCHEMA } from '../../brain/list-conveniences.js';
@@ -156,14 +157,10 @@ export const queryTool: ToolHandler = {
     const resolved = resolvePredicate(collName, a, rawFilter, ctx.callSpaces[0] ?? '');
     if ('error' in resolved) throw new Error(resolved.error);
     const filter = resolved.predicate;
-    // A DEFAULT, not a clamp — same value and same reasoning as the route. See `DEFAULT_QUERY_LIMIT`.
-    const limit = typeof a['limit'] === 'number' ? a['limit'] : DEFAULT_QUERY_LIMIT;
-    // Same refusal as the REST route: a non-integer or negative skip is an error, not a silent 0. Reading it as "start
-    // from the beginning" returns a page that is not the page asked for, with no sign that anything went wrong.
-    if (a['skip'] !== undefined && (typeof a['skip'] !== 'number' || !Number.isInteger(a['skip']) || a['skip'] < 0)) {
-      throw new Error('skip must be a non-negative integer');
-    }
-    const skip = typeof a['skip'] === 'number' ? a['skip'] : 0;
+    // The same parser the REST door calls, so the two cannot disagree about a value neither can use.
+    const paging = parseQueryPaging({ limit: a['limit'], skip: a['skip'] });
+    if ('error' in paging) throw new Error(paging.error);
+    const { limit, skip } = paging;
 
     // The same parser, allowlist and error text the REST route and the list endpoints use.
     const sortParse = parseSortParam(a['sort'], a['dir'], SORTABLE_FIELDS[collName as keyof typeof SORTABLE_FIELDS]);

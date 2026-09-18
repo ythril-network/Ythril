@@ -44,18 +44,6 @@ const { BRAIN_COLLECTIONS } = await import('../../server/dist/config/types-knowl
  *   that collection states.
  */
 const NOT_A_SECOND_DOOR = new Map(Object.entries({
-  'GET /api/brain/spaces/:spaceId/facts':
-    'STILL TO GO — B-9 step 3b. A second door onto `filter`, kept one more step because converting its '
-    + 'callers renames a result key at eighty-odd test sites and that belongs in its own diff.',
-  'GET /api/brain/spaces/:spaceId/entities':
-    'STILL TO GO — B-9 step 3b, for the same reason as the facts listing.',
-  'GET /api/brain/spaces/:spaceId/edges':
-    'STILL TO GO — B-9 step 3b, for the same reason as the facts listing.',
-  'GET /api/brain/spaces/:spaceId/chrono':
-    'STILL TO GO — B-9 step 3b, for the same reason as the facts listing.',
-  'GET /api/brain/spaces/:spaceId/files':
-    'STILL TO GO — B-9 step 3b. The file-META listing, and the tenth legacy shape: its client caller did '
-    + 'not move in 2b, so deleting it is a client change rather than a deletion.',
   'GET /api/brain/spaces/:spaceId/files/extract':
     'A DIFFERENT QUESTION. Not a listing at all — it returns the extracted TEXT of one file, the bytes run '
     + 'through the extractor, which no predicate over the metadata collection can produce.',
@@ -120,11 +108,15 @@ describe('a collection is read through one door', () => {
   });
 
   it('the ones on their way out each name the row that closes them', () => {
-    // Without this an exemption can be written as temporary and never be. A row id is what a reader can
-    // check against the tracker; "for now" is not.
+    /*
+     * THERE ARE NONE LEFT, and the case stays for the next one. `B-9` step 3b deleted the five collection
+     * LIST GETs that were exempt with a row behind them, so every exemption here is now a route answering
+     * a different question. The rule is what survives: an exemption written as temporary has to name the
+     * row that ends it, or "for now" becomes permanent by nobody being able to check it.
+     */
     for (const [path, why] of NOT_A_SECOND_DOOR) {
       if (!why.startsWith('STILL TO GO')) continue;
-      assert.match(why, /B-9 step 3b/, `${path} is exempt "for now" with no row behind it`);
+      assert.match(why, /B-9 step 3/, `${path} is exempt "for now" with no row behind it`);
     }
   });
 

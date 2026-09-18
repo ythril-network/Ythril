@@ -18,7 +18,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, patch, get, delWithBody } from '../sync/helpers.js';
+import { INSTANCES, post, patch, get, delWithBody, readCollection } from '../sync/helpers.js';
 import { LINK_ARRAY_FIELDS } from '../../server/dist/brain/array-write-refusal.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -77,9 +77,9 @@ describe('entity references must resolve', () => {
   it('nothing was stored by the refused writes', async () => {
     // The point of a hard error is that the record does not exist afterwards. If a refusal still
     // wrote the row (minus the link), we would have swapped a silent unlinked write for a noisy one.
-    const list = await get(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/facts`);
+    const list = await readCollection(INSTANCES.a, token, SPACE, 'facts');
     assert.equal(list.status, 200);
-    const facts = (list.body.facts ?? []).map(m => m.fact);
+    const facts = (list.results ?? []).map(m => m.fact);
     assert.ok(!facts.includes('links by name'), 'a refused write must not be stored');
     assert.ok(!facts.includes('links to a ghost'), 'a refused write must not be stored');
   });

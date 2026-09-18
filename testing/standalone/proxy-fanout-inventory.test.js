@@ -204,8 +204,14 @@ const TOTAL = 48;
  *   fan-out did not stop happening — the tool does it, on the same spaces, through the same narrowed path,
  *   and is already counted here. Two sites fewer because there is one implementation instead of two, which
  *   is the outcome this inventory exists to make visible rather than to penalise.
+ * - **11, at 5.0: the five collection LIST routes.** `B-9` step 3b deleted
+ *   `GET /api/brain/spaces/:spaceId/{facts,entities,edges,chrono,files}`, and each expanded the proxy
+ *   itself before paging across the members it found. The expansion did not stop happening: `filter`
+ *   does it, on the same spaces, through the shared pager that is already counted here. Five sites
+ *   fewer because there is one implementation instead of six — the same outcome as the recall row above,
+ *   and recorded here rather than by lowering TOTAL, which would erase that they existed.
  */
-const REMOVED = 6;
+const REMOVED = 11;
 
 const GUARDS = {
   'server/src/auth/middleware.ts': 2,

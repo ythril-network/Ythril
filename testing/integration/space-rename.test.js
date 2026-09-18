@@ -20,7 +20,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, patch, delWithBody } from '../sync/helpers.js';
+import { INSTANCES, post, get, patch, delWithBody, readCollection } from '../sync/helpers.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -72,13 +72,13 @@ describe('Space rename', () => {
     createdSpaceIds.push(newId);
 
     // Old ID should 404
-    const oldR = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${oldId}/facts`);
+    const oldR = await readCollection(INSTANCES.a, tokenA, oldId, 'facts');
     assert.ok(oldR.status === 403 || oldR.status === 404, `Old space should be gone, got ${oldR.status}`);
 
     // New ID should have the memory
-    const newR = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${newId}/facts`);
+    const newR = await readCollection(INSTANCES.a, tokenA, newId, 'facts');
     assert.equal(newR.status, 200);
-    const found = newR.body.facts?.some(m => m._id === memId);
+    const found = newR.results?.some(m => m._id === memId);
     assert.ok(found, 'Memory should exist under the renamed space');
   });
 
@@ -106,24 +106,24 @@ describe('Space rename', () => {
     assert.equal(renameR.status, 200, JSON.stringify(renameR.body));
     createdSpaceIds.push(newId);
 
-    const entR = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${newId}/entities`);
+    const entR = await readCollection(INSTANCES.a, tokenA, newId, 'entities');
     assert.equal(entR.status, 200);
     assert.equal(
-      entR.body.entities?.length, 2,
+      entR.results?.length, 2,
       'entities must still be LISTED after a rename (they were present but invisible: the ' +
       'spaceId field inside each document still pointed at the old space id)',
     );
 
-    const edgR = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${newId}/edges`);
+    const edgR = await readCollection(INSTANCES.a, tokenA, newId, 'edges');
     assert.equal(edgR.status, 200);
-    assert.equal(edgR.body.edges?.length, 1, 'edges must still be LISTED after a rename');
+    assert.equal(edgR.results?.length, 1, 'edges must still be LISTED after a rename');
 
     // The stale field also broke entity lookup BY NAME (the same spaceId filter), which is
     // what `saveFact` uses to link to an existing entity rather than creating a duplicate.
-    const byName = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${newId}/entities?name=Ada`);
+    const byName = await readCollection(INSTANCES.a, tokenA, newId, 'entities', { filter: { name: 'Ada' } });
     assert.equal(byName.status, 200);
     assert.equal(
-      byName.body.entities?.length, 1,
+      byName.results?.length, 1,
       'entity lookup by name must still work after a rename — otherwise `saveFact` stops ' +
       'matching existing entities and starts creating duplicates',
     );
@@ -146,10 +146,10 @@ describe('Space rename', () => {
     assert.equal(renameR.status, 200, JSON.stringify(renameR.body));
     createdSpaceIds.push(newId);
 
-    const listR = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${newId}/chrono`);
+    const listR = await readCollection(INSTANCES.a, tokenA, newId, 'chrono');
     assert.equal(listR.status, 200);
     assert.equal(
-      listR.body.chrono?.length, 1,
+      listR.results?.length, 1,
       'chrono entries must still be LISTED after a rename (listChrono filters on the spaceId field)',
     );
   });
@@ -169,8 +169,8 @@ describe('Space rename', () => {
       const w = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${oldId}/facts`, { fact: `seq burn ${i}` });
       assert.equal(w.status, 201, JSON.stringify(w.body));
     }
-    const beforeR = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${oldId}/facts`);
-    const seqBefore = Math.max(...beforeR.body.facts.map(m => m.seq));
+    const beforeR = await readCollection(INSTANCES.a, tokenA, oldId, 'facts');
+    const seqBefore = Math.max(...beforeR.results.map(m => m.seq));
     assert.ok(seqBefore >= 3, `expected a burned-in seq, got ${seqBefore}`);
 
     const renameR = await patch(INSTANCES.a, tokenA, `/api/spaces/${oldId}/rename`, { newId });
@@ -299,7 +299,7 @@ describe('Space rename', () => {
     assert.equal(tokenR.status, 201, JSON.stringify(tokenR.body));
     const scoped = tokenR.body.plaintext;
 
-    const before = await get(INSTANCES.a, scoped, `/api/brain/spaces/${oldId}/entities`);
+    const before = await readCollection(INSTANCES.a, scoped, oldId, 'entities');
     assert.equal(before.status, 200,
       `scoped token should reach its space before the rename: ${JSON.stringify(before.body)}`);
 
@@ -307,7 +307,7 @@ describe('Space rename', () => {
     assert.equal(renameR.status, 200, JSON.stringify(renameR.body));
     createdSpaceIds.push(newId);
 
-    const after = await get(INSTANCES.a, scoped, `/api/brain/spaces/${newId}/entities`);
+    const after = await readCollection(INSTANCES.a, scoped, newId, 'entities');
     assert.equal(after.status, 200,
       `scoped token must still reach the space after it is renamed: ${JSON.stringify(after.body)}`);
   });

@@ -6,31 +6,27 @@
 import { Router } from 'express';
 import { shapeError } from '../../brain/write-shape.js';
 import { assertRefsResolve, edgeEndpointKind } from '../../brain/entity-refs.js';
-import { withEndpointNames } from '../../brain/edge-endpoint-names.js';
 import { REF_KINDS } from '../../config/types-knowledge.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { unknownFieldWarnings } from './unknown-fields.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
-import { listEdges, deleteEdge, upsertEdge, getEdgeById, updateEdgeById, EdgeSchemaViolation } from '../../brain/edges.js';
+import { deleteEdge, upsertEdge, getEdgeById, updateEdgeById, EdgeSchemaViolation } from '../../brain/edges.js';
 import { EdgeIdentityTaken } from '../../brain/edge-rekey.js';
 import { validateDeleteFields, applyDeleteFields as applyDeleteFieldsPaths } from '../../brain/delete-fields.js';
 import { getConfig } from '../../config/loader.js';
 import { col, asFilter } from '../../db/mongo.js';
-import { parseLimit, parseSkip, unsupportedPageParam } from '../../util/pagination.js';
-import { pageAcrossMembers } from '../../spaces/page-across-members.js';
-import { countBrain, compareBySort, PROXY_PAGE_CEILING } from '../../brain/query.js';
-import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
-import { parseSortParam, SORTABLE_FIELDS, toMongoSort } from '../../brain/list-sort.js';
-import { resolveMemberSpaces, resolveWriteTarget, isProxySpace, isStrictLinkage, findFirstAcrossMembers, collectAcrossMembers } from '../../spaces/proxy.js';
+import {
+  resolveMemberSpaces,
+  resolveWriteTarget,
+  isStrictLinkage,
+  findFirstAcrossMembers,
+} from '../../spaces/proxy.js';
 import { validateEdge } from '../../spaces/schema-validation.js';
 import { UUID_V4_RE, webhookToken, getSpaceMeta, ttlDaysFromBody, ttlDaysError, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
 import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
-import { resolveEntityIdsByName } from '../../brain/entities.js';
 import { mergePropertiesOrKeep } from '../../brain/merge-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
-import { withoutListDiagnostics } from '../../brain/read-projection.js';
-import { listDiagnosticsAsked } from './_shared.js';
 
 export const edgesRouter = Router();
 
@@ -177,65 +173,6 @@ edgesRouter.post('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, de
   const warnings = [...(check?.warnings ?? []), ...unknownFieldWarnings(req.body, EDGES_CREATE_BODY_KEYS)];
   if (warnings.length > 0) result['warnings'] = warnings;
   res.status(201).json(result);
-});
-
-
-// GET /api/brain/spaces/:spaceId/edges
-edgesRouter.get('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, async (req, res) => {
-  const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
-  const limit = parseLimit(req.query['limit'], 50, 200);
-  // A pagination name we do not have is a 400 naming the one we do.
-  const badParam = unsupportedPageParam(req.query as Record<string, unknown>);
-  if (badParam) { res.status(400).json(badParam); return; }
-  const skip = parseSkip(req.query['skip']);
-  const sortParse = parseSortParam(req.query['sort'], req.query['dir'], SORTABLE_FIELDS.edges);
-  if ('error' in sortParse) {
-    res.status(400).json({ error: sortParse.error });
-    return;
-  }
-  const filter: { from?: string; to?: string; label?: string; type?: string; tag?: string; search?: string; description?: string; properties?: string; fromIds?: string[]; toIds?: string[] } = {};
-  if (typeof req.query['from'] === 'string') filter.from = req.query['from'];
-  if (typeof req.query['to'] === 'string') filter.to = req.query['to'];
-  if (typeof req.query['label'] === 'string') filter.label = req.query['label'];
-  if (typeof req.query['type'] === 'string') filter.type = req.query['type'];
-  if (typeof req.query['tag'] === 'string') filter.tag = req.query['tag'];
-  if (typeof req.query['search'] === 'string') filter.search = req.query['search'];
-  if (typeof req.query['description'] === 'string') filter.description = req.query['description'];
-  if (typeof req.query['properties'] === 'string') filter.properties = req.query['properties'];
-  // The From/To columns show entity NAMES; edges store ids. Resolve per member — an id belongs to the
-  // member that owns it, so resolving against another's entities would match nothing while looking fine.
-  const fromName = typeof req.query['fromName'] === 'string' ? req.query['fromName'] : undefined;
-  const toName = typeof req.query['toName'] === 'string' ? req.query['toName'] : undefined;
-  const filterFor = async (mid: string) => {
-    const perMember = { ...filter };
-    if (fromName) perMember.fromIds = await resolveEntityIdsByName(mid, fromName);
-    if (toName) perMember.toIds = await resolveEntityIdsByName(mid, toName);
-    return perMember;
-  };
-  const members = memberSpacesForRequest(req, spaceId);
-  const page = await pageAcrossMembers<Record<string, unknown>>({
-    members, limit, skip, ceiling: PROXY_PAGE_CEILING,
-    compare: compareBySort(sortParse.sort ? toMongoSort(sortParse.sort) : { createdAt: -1, _id: -1 }),
-    readMember: async (mid, lim, sk) =>
-      await listEdges(mid, await filterFor(mid), lim, sk, sortParse.sort) as unknown as Record<string, unknown>[],
-  });
-  if (!page.ok) { res.status(400).json({ error: page.error }); return; }
-  // Names are resolved for the PAGE, not for a whole per-member fetch: enriching rows that the window discards is work
-  // whose result is thrown away.
-  const all = page.rows as unknown as Awaited<ReturnType<typeof listEdges>>;
-  // Through `withEndpointNames`, the one place that knows a chrono endpoint's name is its `title` and
-  // that a file needs no lookup at all. It was inline here, so `filter` answered with bare UUIDs.
-  const enriched = await withEndpointNames(spaceId, all,
-    read => collectAcrossMembers(spaceId, read));
-  let total = 0;
-  for (const mid of members) total += await countBrain(mid, 'edges', await filterFor(mid));
-  res.json({ edges: withoutListDiagnostics(enriched, listDiagnosticsAsked(req)),
-    limit, skip, total, truncated: skip + enriched.length < total });
 });
 
 

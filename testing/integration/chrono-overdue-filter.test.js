@@ -21,7 +21,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, readCollection } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -43,9 +43,12 @@ async function mk(title, body) {
 }
 
 const listByStatus = async (status) => {
-  const r = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/chrono?status=${status}&limit=500`);
+  // `deriveStatus: true` because the route this replaced derived unconditionally — and this whole file is
+  // about `overdue`, which only exists once the clock has been read.
+  const r = await readCollection(INSTANCES.a, tokenA, 'general', 'chrono',
+    { limit: 500, deriveStatus: true, filter: { status } });
   assert.equal(r.status, 200);
-  return r.body.chrono;
+  return r.results;
 };
 
 before(async () => {
@@ -115,20 +118,22 @@ describe('the status filter survives being combined', () => {
   });
 
   it('status + search applies BOTH', async () => {
-    const r = await get(INSTANCES.a, tokenA,
-      '/api/brain/spaces/general/chrono?status=overdue&search=needle&limit=500');
+    const r = await readCollection(INSTANCES.a, tokenA, 'general', 'chrono',
+    { search: 'needle', limit: 500, deriveStatus: true, filter: { status: 'overdue' } });
     assert.equal(r.status, 200);
-    const ids = r.body.chrono.map(c => c._id);
+    const ids = r.results.map(c => c._id);
     assert.ok(ids.includes(match), 'the entry matching both must be returned');
     assert.ok(!ids.includes(otherOverdue),
       'an overdue entry that does NOT match the search must be filtered out — if it is here, the search clause was erased');
   });
 
   it('status + tag applies both', async () => {
-    const r = await get(INSTANCES.a, tokenA,
-      '/api/brain/spaces/general/chrono?status=overdue&tags=ch1-combo&limit=500');
+    // `tags` was the route's exact-set filter, which is `$all` as a predicate — not the `tag` substring
+    // convenience, which would match a different set and make this case pass for the wrong reason.
+    const r = await readCollection(INSTANCES.a, tokenA, 'general', 'chrono',
+      { limit: 500, deriveStatus: true, filter: { status: 'overdue', tags: { $all: ['ch1-combo'] } } });
     assert.equal(r.status, 200);
-    const ids = r.body.chrono.map(c => c._id);
+    const ids = r.results.map(c => c._id);
     assert.ok(ids.includes(otherOverdue));
     assert.ok(!ids.includes(match), 'the untagged overdue entry must not be here');
   });
