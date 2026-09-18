@@ -178,10 +178,22 @@ export async function convertSpaceLinks(spaceId: string): Promise<ConversionRepo
 
       for (const doc of docs) {
         report.scanned[suffix] = (report.scanned[suffix] ?? 0) + 1;
-        const before = await col(spaceCollection(spaceId, 'links')).countDocuments(asFilter({ spaceId, from: doc._id }));
         try {
-          await reconcileLinksForDocument(spaceId, doc._id, fromKind, doc);
-          report.added += await col(spaceCollection(spaceId, 'links')).countDocuments(asFilter({ spaceId, from: doc._id })) - before;
+          /*
+           * ADDITIVE, and the COUNT comes from the writer rather than from a measurement around it.
+           *
+           * Both halves were wrong together. The desired set is built from the legacy ARRAYS, so a link
+           * that already existed as a RECORD — which is what `linkEntities` wrote before `Q-28` — was
+           * named by nothing and got deleted, with a tombstone, so the loss replicated to every peer.
+           * A migration announced as *"additive: nothing is removed"* removed data.
+           *
+           * And the count was a countDocuments DELTA reported as *"N link(s) created"*: one creation
+           * and one removal netted to `0`, indistinguishable from nothing to do, and a lone removal
+           * printed `-1`. A live instance printed exactly that. `reconcileLinks` already returns both
+           * numbers; measuring around it was a second implementation of a count it hands back.
+           */
+          const { added } = await reconcileLinksForDocument(spaceId, doc._id, fromKind, doc, { additive: true });
+          report.added += added;
         } catch (err) {
           // One bad document must not stop the walk. It is counted, and the count is what withholds the
           // marker — a conversion that skipped a record and then claimed completeness is the failure this

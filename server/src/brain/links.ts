@@ -97,6 +97,20 @@ export async function reconcileLinks(
   fromKind: RefKind,
   desired: DesiredLinks,
   author: AuthorRef,
+  /**
+   * ADDITIVE: create what the desired set names and delete NOTHING.
+   *
+   * The two callers ask different questions and only one of them may remove. An ordinary write is
+   * authoritative — `linkEntities: []` means "detach", and the removal is the whole point. The link
+   * CONVERSION is not: it is announced to the operator as *"additive: nothing is removed"*, and it
+   * derives its desired set from the legacy ARRAYS.
+   *
+   * Those two together destroyed data. A link written through `linkEntities` before `Q-28` exists as a
+   * record with an empty array beside it, so the conversion's desired set said "no links" and the
+   * reconcile deleted it — with a tombstone, so the loss replicated to every peer and a re-run could not
+   * repair it. Measured: a space with one such link converted to zero and reported `-1 link(s) created`.
+   */
+  opts: { additive?: boolean } = {},
 ): Promise<{ added: number; removed: number }> {
   const classes = Object.keys(desired) as RefKind[];
   if (classes.length === 0) return { added: 0, removed: 0 };
@@ -123,6 +137,9 @@ export async function reconcileLinks(
 
   for (const { _id } of existing) {
     if (wanted.has(_id)) continue;
+    // See `opts.additive`: the conversion reads a desired set out of the arrays, and a link that is
+    // already a record has no array entry to be named by. Deleting on that basis is data loss.
+    if (opts.additive) continue;
     const seq = await nextSeq(spaceId);
     await col<LinkDoc>(spaceCollection(spaceId, 'links')).deleteOne(asFilter<LinkDoc>({ _id, spaceId }));
     // The tombstone is not optional. A link deleted without one comes back on the next pull from any peer
@@ -404,16 +421,25 @@ export async function reconcileLinksForDocument(
   docId: string,
   fromKind: RefKind,
   doc: Record<string, unknown>,
-): Promise<void> {
+  /** Passed straight through — see `reconcileLinks`. The CONVERSION is the additive caller. */
+  opts: { additive?: boolean } = {},
+): Promise<{ added: number; removed: number }> {
   const ids = (k: string) => (Array.isArray(doc[k]) ? doc[k] as string[] : undefined);
   const desired: DesiredLinks = {
     ...(ids('entityIds') !== undefined ? { entity: ids('entityIds')! } : {}),
     ...(ids('memoryIds') !== undefined ? { fact: ids('memoryIds')! } : {}),
     ...(ids('chronoIds') !== undefined ? { chrono: ids('chronoIds')! } : {}),
   };
-  if (Object.keys(desired).length === 0) return;
+  if (Object.keys(desired).length === 0) return { added: 0, removed: 0 };
   const author = doc['author'] as AuthorRef | undefined;
-  await reconcileLinks(spaceId, docId, fromKind, desired, author ?? NO_AUTHOR);
+  /*
+   * RETURNED, not discarded. The conversion used to re-derive this by counting the links collection
+   * before and after each document — a DELTA, which it then reported as *"N link(s) created"*. One
+   * creation and one removal came out as `0`, indistinguishable from nothing to do, and a removal alone
+   * came out as `-1`, which is what a live instance actually printed. The count exists here; the caller
+   * should read it rather than measure around it.
+   */
+  return await reconcileLinks(spaceId, docId, fromKind, desired, author ?? NO_AUTHOR, opts);
 }
 
 /**

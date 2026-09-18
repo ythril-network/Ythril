@@ -107,3 +107,43 @@ describe('a link writer asks the same question its readers ask', () => {
       'the selector must be exported from one place, or agreeing with it means nothing');
   });
 });
+
+/**
+ * ADDITIVE is the conversion's exception, and nobody else's.
+ *
+ * `reconcileLinks` normally deletes a link record the desired set does not name — that is what
+ * `linkEntities: []` MEANS, and an ordinary write is authoritative about its own links. The link
+ * CONVERSION is not: it builds its desired set from the legacy ARRAYS, so a link that already exists as
+ * a record is named by nothing, and deleting on that basis destroyed it — with a tombstone, so the loss
+ * replicated to every peer. Measured on a live instance, which reported `-1 link(s) created`.
+ *
+ * The flag that fixes that is a loaded gun pointed the other way: a SYNC ingest that became additive
+ * would stop honouring a peer's detach, and the link would come back on the next pull for ever. So the
+ * exception is pinned to the one module entitled to it.
+ */
+describe('only the conversion may be additive', () => {
+  it('every `additive: true` call site is in the conversion', () => {
+    const offenders = [];
+    for (const { file, text } of readTrackedSources('server/src', { floor: 100 })) {
+      const src = stripComments(text);
+      if (!/additive:\s*true/.test(src)) continue;
+      if (!file.endsWith('links-conversion.ts')) offenders.push(file);
+    }
+    assert.deepEqual(offenders, [],
+      'these modules ask the link writer NOT to delete:\n  ' + offenders.join('\n  ')
+      + '\n\n      Only the link conversion is entitled to that: it reads its desired set out of the'
+      + '\n      legacy arrays, where a record-only link is named by nothing. Anywhere else — a sync'
+      + '\n      ingest above all — additive means a detach is never honoured and the link returns on'
+      + '\n      the next pull, permanently.');
+  });
+
+  it('and the conversion actually asks for it, so the exception is not just unused', () => {
+    // A rule about who may use a flag says nothing if nobody uses it: the gate above would pass just as
+    // happily on a build where the conversion had quietly gone back to deleting.
+    const conv = readTrackedSources('server/src/brain', { floor: 10 })
+      .find(f => f.file.endsWith('links-conversion.ts'));
+    assert.ok(conv, 'links-conversion.ts is where the exception lives — re-anchor this gate');
+    assert.match(stripComments(conv.text), /additive:\s*true/,
+      'the conversion must ask not to delete, or it destroys record-only links again');
+  });
+});
