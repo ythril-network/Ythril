@@ -591,6 +591,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   collection rather than ignored. The diagnostics default is now the same on both shapes, which the two
   routes never were.
 
+  **A fixture bug fell out of this and it is worth naming, because it is the section rule one level up.**
+  The duplicate-scanner suite waited for its records to be index-visible through a helper that took a flat
+  list of four ids and looked at the first two. So it proved one PAIR was visible and concluded about both
+  — CI then failed with `expected >=2 candidates, got 1`, on exactly the pair nobody had waited for. It
+  takes a list of PAIRS now, so a caller cannot hand it two and have one silently ignored.
+
   Nothing an operator does in the UI changed: the client was already reading everything else through
   `filter` and now reads these the same way.
 
