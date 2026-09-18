@@ -370,25 +370,30 @@ export async function entitiesLinkedFromRecords(
 }
 
 /**
- * The display name for a linked record, by kind.
+ * The display name for a non-entity record, by kind.
  *
  * A chrono has a `title`, a fact a `fact`, a file a `path` — three fields meaning one thing to a reader of
  * a graph, and the mapping was written out at each of the three emit sites.
+ *
+ * **Keyed on `(kind, doc)` rather than on a `LinkedRecord`, and that widening is the point.** A record
+ * reached through an EXPLICIT edge is the same record reached through an implicit link, and it is not a
+ * `LinkedRecord` — it has no `via` and no synthetic label. Taking the wrapper meant the explicit path could
+ * not call this, which is how a second copy of the mapping gets written.
  */
-export function linkedRecordName(rec: LinkedRecord): string {
-  if (rec.kind === 'chrono') return (rec.doc as ChronoEntry).title;
-  if (rec.kind === 'fact') return (rec.doc as FactDoc).fact;
-  return (rec.doc as FileMetaDoc).path;
+export function recordDisplayName(kind: LinkClass['kind'], doc: ChronoEntry | FactDoc | FileMetaDoc): string {
+  if (kind === 'chrono') return (doc as ChronoEntry).title;
+  if (kind === 'fact') return (doc as FactDoc).fact;
+  return (doc as FileMetaDoc).path;
 }
 
 /**
- * The `type` a linked record reports.
+ * The `type` a non-entity record reports.
  *
  * Empty for a file, which has none — borrowing `kind` for it would invent data. Empty for an undeclared
  * fact type for the same reason.
  */
-export function linkedRecordType(rec: LinkedRecord): string {
-  if (rec.kind === 'chrono') return (rec.doc as ChronoEntry).type;
-  if (rec.kind === 'fact') return (rec.doc as FactDoc).type ?? '';
+export function recordDisplayType(kind: LinkClass['kind'], doc: ChronoEntry | FactDoc | FileMetaDoc): string {
+  if (kind === 'chrono') return (doc as ChronoEntry).type;
+  if (kind === 'fact') return (doc as FactDoc).type ?? '';
   return '';
 }

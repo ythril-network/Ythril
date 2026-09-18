@@ -29,6 +29,9 @@ import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
 import type { EdgeDoc } from '../config/types.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { recordDisplayName, recordDisplayType } from './link-frontier.js';
+import { NEVER_RETURNED_PROJECTION } from './read-projection.js';
+import type { ChronoEntry, FactDoc, FileMetaDoc } from '../config/types.js';
 
 /**
  * How much of an endpoint's name reaches the edge's embedding.
@@ -205,4 +208,144 @@ export async function withEndpointNames<T extends EdgeEndpoints>(
   }
 
   return edges.map(e => ({ ...e, fromName: nameMap.get(e.from), toName: nameMap.get(e.to) }));
+}
+
+/** The node shape a graph walk emits. Structural only — `TraverseNode` in `edges.ts` is the public name.
+ *  Declared here rather than imported so this module does not depend on the walk it serves. */
+export interface TraverseNodeShape {
+  _id: string; name: string; type: string; depth: number;
+  kind?: 'fact' | 'chrono' | 'file'; description?: string; tags?: string[];
+}
+
+/** A non-entity endpoint's stored document — whichever of the three collections it lives in. */
+export type EndpointDoc = ChronoEntry | FactDoc | FileMetaDoc;
+
+/** One resolved non-entity endpoint: the record, and the collection it came from. */
+export interface EndpointRecord {
+  doc: EndpointDoc;
+  kind: 'fact' | 'chrono' | 'file';
+}
+
+/**
+ * Resolve an EXPLICIT edge's non-entity endpoints into the records a graph walk emits as nodes.
+ *
+ * ## The defect this exists for
+ *
+ * An edge may declare `fromKind`/`toKind` of `entity`, `fact`, `chrono` or `file`, the writer refuses a kind
+ * that does not match the record, and the edge is then stored, hashed and replicated. **And the walk looked
+ * every neighbour up in `<space>_entities` and dropped whatever was not there** — no flag, no truncation
+ * marker, just a stored edge that no retrieval path reached. That is report `#695`'s *"a link that is
+ * stored, returned, and points at nothing traversable"* arriving by a different route.
+ *
+ * ## TWO walks call this, and that is the point rather than a convenience
+ *
+ * `traverseGraph` and `recall`'s seed expansion each have their own BFS, and each had the same
+ * `entityMap.get(id)` line. The comment in `recall-seed-traversal.ts` records what happened the last time
+ * they diverged: *"One rule, two implementations, and the one reachable from a search had the weaker."*
+ * Fixing only the standalone walk would also have made `graph_traverse`'s own description false, which
+ * tells a caller that *"the difference between the two tools is the default, not the capability."*
+ *
+ * ## What a hand-written copy drops
+ *
+ * **The grouping by KIND** — one lookup in one collection is right only while every endpoint is an entity.
+ * It returns the RECORD rather than a rendered node, because the two callers shape it differently: the
+ * standalone walk wants `name`/`type` (through `recordDisplayName`/`recordDisplayType`) and recall nests
+ * the whole document. Rendering here would have forced one of them to unpick it.
+ *
+ * It lives beside `withEndpointNames` because that is the same question — *what is this endpoint, given its
+ * kind* — and the grouping rule belongs in one file rather than in one file and two loops.
+ *
+ * **A file IS looked up here, unlike in `withEndpointNames` above.** There, only a name was wanted and a
+ * file's `_id` already is its path. A node carries `description` and `tags` as well, so skipping the read
+ * would silently drop them — and the link scan, which reaches the same files the other way, does read them.
+ * Meta only: never chunk text, for the reason `TraverseNode.description` gives.
+ *
+ * @param memberIds   Space IDs to search, so a proxy space resolves across its members.
+ * @param wanted      The endpoints to resolve, each with the kind its edge declared. `entity` is ignored:
+ *                    both walks already batch-fetch those and this must not read them twice.
+ * @returns A record per id that RESOLVED. An id that resolves to nothing is absent rather than invented — an
+ *          edge can outlive the record it points at, and a placeholder node would be a fact the walk made up.
+ */
+export async function endpointRecordsByKind(
+  memberIds: readonly string[],
+  wanted: ReadonlyArray<{ id: string; kind: RefKind }>,
+): Promise<Map<string, EndpointRecord>> {
+  const out = new Map<string, EndpointRecord>();
+  const byKind = new Map<'fact' | 'chrono' | 'file', Set<string>>();
+  for (const { id, kind } of wanted) {
+    const k = edgeEndpointKind(kind);
+    if (k === 'entity') continue;
+    if (!byKind.has(k)) byKind.set(k, new Set());
+    byKind.get(k)!.add(id);
+  }
+
+  for (const [kind, ids] of byKind) {
+    for (const mid of memberIds) {
+      const docs = await col<Record<string, unknown>>(spaceCollection(mid, collectionForRefKind(kind)))
+        .find(asFilter<Record<string, unknown>>({ _id: { $in: [...ids] }, spaceId: mid }),
+          { projection: NEVER_RETURNED_PROJECTION })
+        .toArray();
+      for (const d of docs) out.set(String(d['_id']), { doc: d as unknown as EndpointDoc, kind });
+    }
+  }
+  return out;
+}
+
+/**
+ * Every new neighbour of a hop, resolved to the node a walk emits — whatever collection it lives in.
+ *
+ * ## Why it is here rather than in the walk
+ *
+ * `edges.ts` is frozen at its current size by `no-new-god-files.test.js`, whose message is the reason
+ * rather than the rule: *"the failure mode of a god-file is not its size on any given day — it is that
+ * every change lands in the same place because that is where the code already is."* Following a non-entity
+ * endpoint is new behaviour about endpoints, so it goes beside that file.
+ *
+ * ## What a hand-written copy drops
+ *
+ * **That an entity node carries NO `kind`.** Every node was one until chrono entries became reachable, and
+ * the absence is what keeps an existing response byte-identical. A copy that stamped `kind: 'entity'` for
+ * symmetry would change every answer this product has ever given.
+ *
+ * **And the file extras.** A file node carries `description` and `tags` when set, and never chunk text.
+ *
+ * An id that resolves to nothing is ABSENT from the result rather than given a placeholder: an edge can
+ * outlive the record it points at, and a made-up node is worse than a missing one.
+ */
+export async function neighbourNodes(
+  memberIds: readonly string[],
+  ids: readonly string[],
+  /** The kind each id's edge declared, positionally. An omitted kind means `entity`. */
+  kinds: readonly (RefKind | undefined)[],
+  depth: number,
+): Promise<Map<string, TraverseNodeShape>> {
+  const out = new Map<string, TraverseNodeShape>();
+  if (ids.length === 0) return out;
+
+  for (const mid of memberIds) {
+    const entities = await col<Record<string, unknown>>(spaceCollection(mid, 'entities'))
+      .find(asFilter<Record<string, unknown>>({ _id: { $in: [...ids] }, spaceId: mid }),
+        { projection: NEVER_RETURNED_PROJECTION })
+      .toArray();
+    // No `kind` on an entity — see the docblock. This is the field whose ABSENCE is the contract.
+    for (const e of entities) {
+      out.set(String(e['_id']),
+        { _id: String(e['_id']), name: String(e['name'] ?? ''), type: String(e['type'] ?? ''), depth });
+    }
+  }
+
+  const others = await endpointRecordsByKind(memberIds, ids.map((id, i) => ({ id, kind: edgeEndpointKind(kinds[i]) })));
+  for (const [id, rec] of others) {
+    if (out.has(id)) continue;   // an entity already answered for it; an id is one record
+    const file = rec.kind === 'file' ? rec.doc as FileMetaDoc : undefined;
+    out.set(id, {
+      _id: id, depth, kind: rec.kind,
+      // The same two functions the link scan renders with, so one record reached two ways is described
+      // one way.
+      name: recordDisplayName(rec.kind, rec.doc), type: recordDisplayType(rec.kind, rec.doc),
+      ...(file?.description ? { description: file.description } : {}),
+      ...(file?.tags && file.tags.length > 0 ? { tags: file.tags } : {}),
+    });
+  }
+  return out;
 }

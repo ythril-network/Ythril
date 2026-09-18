@@ -756,6 +756,24 @@ disagreeing about one parameter is worse than either reading of it.
 
 Server-side cycle detection ensures each record is visited at most once, so cyclic graphs are handled safely.
 
+#### An edge to a fact, chrono entry or file is followed, and no flag governs it
+
+An edge declares the KIND at each end — `entity`, `fact`, `chrono` or `file` — and the writer refuses a kind
+that does not match the record. So `supersedes` between two facts is a real, validated, stored, replicated
+edge, and traversal follows it like any other. The node carries the `kind` of the collection it lives in.
+
+**A walk can therefore START from a fact or a chrono entry**, not only an entity.
+
+> *Changed in 5.0:* the walk used to resolve every neighbour against the entities collection alone and drop
+> whatever was not there — no flag, no `truncated`, no error. An edge the write had accepted was stored and
+> reached by nothing, which is the *"stored, returned, and points at nothing traversable"* report arriving by
+> a different route. If you avoided non-entity endpoints because they seemed inert, they were.
+
+**No include flag gates this, and the asymmetry with the flags below is deliberate.** `includeMemories` and
+`includeFiles` are opt-in because they follow IMPLICIT links — a record that happens to name this one — of
+which a busy node has thousands. An edge document exists only because somebody drew it, so there are exactly
+as many as were meant.
+
 #### Chrono entries are nodes
 
 `chrono.entityIds` is the link between a timeline and the graph, and traversal follows it — a chrono entry
@@ -776,8 +794,10 @@ field is. No schema change was needed; the link already existed and simply had n
   > *Changed:* this id used to be the chrono's own `_id`, on the stated rationale that looking it up would
   > resolve to the chrono. It never did — the edge lookup is collection-scoped — and sharing an id between a
   > node and an edge made graph libraries drop the edge, since they keep one id namespace for both.
-- **A chrono is a leaf.** Traversal does not expand outward from one — a chrono links to entities, not to
-  other chrono entries, so expanding would only walk back to entities already visited.
+- **A chrono reached through its LINK is a leaf.** Traversal does not expand outward from one — a chrono's
+  `entityIds` points at entities, not at other chrono entries, so expanding would only walk back to entities
+  already visited. **A chrono reached through an explicit EDGE is not a leaf**: an edge chains, and stopping
+  there would answer one hop of a chain and call it the neighbourhood.
 - Set `includeChrono: false` for the previous entity-only behaviour.
 
 #### Facts are nodes too, on request
@@ -785,7 +805,9 @@ field is. No schema change was needed; the link already existed and simply had n
 `fact.entityIds` is the same kind of link, and `includeMemories: true` follows it. A fact node carries
 `kind: "fact"`, its `name` is the fact's `fact`, and its `type` may be an empty string — a fact's type is
 optional, unlike a chrono's. The synthetic label is `fact.entityIds`, and like the chrono label it is filtered
-by an explicit `edgeLabels`. A fact is a leaf, for the same reason a chrono is.
+by an explicit `edgeLabels`. A fact reached through that link is a leaf, for the same reason a chrono is —
+but a fact reached through an explicit edge is expanded, which is what makes a chain of `supersedes` edges
+walkable in one call.
 
 **Why this one is opt-in when `includeChrono` is not.** Chrono entries are sparse — an incident has ten, not ten
 thousand — and were invisible without traversal. Facts are usually the most numerous record type in a space,

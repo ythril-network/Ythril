@@ -72,6 +72,15 @@ describe('traverse follows chrono.entityIds', () => {
   // Both traversals: the standalone one stayed in `edges.ts`, the recall walk moved to its own module in A-4,
   // and the break condition this pins has to be right in both.
   const code = strip(read('server/src/brain/edges.ts') + read('server/src/brain/recall-seed-traversal.ts'));
+/*
+ * The node RENDERING moved out of the walk in 5.0 and this gate has to follow it.
+ *
+ * Both walks now resolve a neighbour through `neighbourNodes`, because an edge may name a fact, chrono
+ * entry or file at either end and the walks used to look every neighbour up among entities. `edges.ts` is
+ * frozen at its size, so the new behaviour went beside it. A gate that kept pinning the old inline push
+ * would have gone green on a file that no longer contains the rule.
+ */
+const nodes = strip(read('server/src/brain/edge-endpoint-names.ts'));
   const scan = strip(read('server/src/brain/link-frontier.ts'));
 
   it('queries the chrono collection for entries pointing at the frontier', () => {
@@ -95,10 +104,20 @@ describe('traverse follows chrono.entityIds', () => {
 
   it('marks the linked node and leaves entity nodes untouched', () => {
     assert.match(code, /kind: rec\.kind/, 'a caller following `_id` must know which collection to look in');
-    // The entity push must NOT carry a kind — absence is what keeps existing responses identical.
-    const entityPush = /resultNodes\.push\(\{ _id: entity\._id[^)]*\)/.exec(code)?.[0] ?? '';
-    assert.ok(entityPush, 'could not find the entity node push');
-    assert.doesNotMatch(entityPush, /kind:/,
+    /*
+     * The ENTITY node must carry no `kind` — its absence is the contract, and it is what keeps every
+     * response this product has ever given byte-identical.
+     *
+     * Read from `neighbourNodes`, where both walks now build it. The window is the loop that writes an
+     * entity into the map, bounded structurally rather than by a character count — a `+ N` slice spans
+     * different lines on CRLF than on LF.
+     */
+    const at = nodes.indexOf('for (const e of entities)');
+    assert.ok(at > -1, 'the entity loop is not where this gate expects it — re-anchor before trusting it');
+    const entityWrite = blockAfter(nodes, at);
+    assert.ok(entityWrite, 'could not find where an entity becomes a node — this gate is pinned to nothing');
+    assert.match(entityWrite, /_id: String\(e\['_id'\]\)/, 'and it must be the entity write, not some other loop');
+    assert.doesNotMatch(entityWrite, /kind:/,
       'an entity node must stay exactly as it was, so no existing response changes shape');
   });
 

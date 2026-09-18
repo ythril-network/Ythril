@@ -24,11 +24,11 @@ import { enqueueEmbedJob, retireEmbedJob } from './embed-queue.js';
 import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { linkClassFor, LINK_CLASSES } from './link-adjacency.js';
 import { frontierEdgeQuery, type TraverseNarrowing } from './frontier-query.js';
-import { linkedRecordsAtFrontier, entitiesLinkedFromRecords, linkedRecordName, linkedRecordType, type LinkedRecord, type LinkInclusion }
+import { linkedRecordsAtFrontier, entitiesLinkedFromRecords, recordDisplayName, recordDisplayType, type LinkedRecord, type LinkInclusion }
   from './link-frontier.js';
 import { getEntityById } from './entities.js';
-import { resolveEdgeEndpointNames, resolveEdgeEndsForWrite } from './edge-endpoint-names.js';
-import { storedEdgeKind } from './entity-refs.js';
+import { resolveEdgeEndpointNames, resolveEdgeEndsForWrite, neighbourNodes } from './edge-endpoint-names.js';
+import { storedEdgeKind, edgeEndpointKind } from './entity-refs.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { EdgeDoc, EntityDoc, TombstoneDoc, ChronoEntry, FactDoc, FileMetaDoc } from '../config/types.js';
 import type { RefKind } from '../config/types-knowledge.js';
@@ -827,21 +827,35 @@ export async function traverseGraph(
     // Collect new neighbor IDs (not yet visited) and their traversed edges
     const newNeighborIds: string[] = [];
     const edgesForNewNeighbors: EdgeDoc[] = [];
+    /*
+     * The KIND each neighbour was declared as, captured where the end is chosen rather than re-derived.
+     *
+     * An undeclared kind means `entity` — read through `storedEdgeKind` at the write, and the same default
+     * applies here. Deriving it a second time from the id would mean guessing which collection to look in,
+     * which is exactly what the kind exists to stop.
+     */
+    const neighborKinds: (RefKind | undefined)[] = [];
     for (const edge of adjacentEdges) {
       let neighborId: string;
+      let neighborKind: RefKind | undefined;
       if (direction === 'outbound') {
         neighborId = edge.to;
+        neighborKind = edge.toKind;
       } else if (direction === 'inbound') {
         neighborId = edge.from;
+        neighborKind = edge.fromKind;
       } else {
         // For 'both', skip if both ends are in the current frontier (same-level connection)
         if (frontierSet.has(edge.from) && frontierSet.has(edge.to)) continue;
-        neighborId = frontierSet.has(edge.from) ? edge.to : edge.from;
+        const takeTo = frontierSet.has(edge.from);
+        neighborId = takeTo ? edge.to : edge.from;
+        neighborKind = takeTo ? edge.toKind : edge.fromKind;
       }
       if (visited.has(neighborId)) continue;
       visited.add(neighborId);
       newNeighborIds.push(neighborId);
       edgesForNewNeighbors.push(edge);
+      neighborKinds.push(neighborKind);
     }
 
     // Linked records that point AT the current frontier. `entityIds` is an inbound link in everything but
@@ -874,32 +888,51 @@ export async function traverseGraph(
 
     if (newNeighborIds.length === 0 && linkedHere.length === 0) break;
 
-    // Batch-fetch entity docs for all new neighbors
-    const entityMap = new Map<string, EntityDoc>();
-    for (const mid of memberIds) {
-      const entities = await col<EntityDoc>(spaceCollection(mid, 'entities'))
-        .find(asFilter<EntityDoc>({ _id: { $in: newNeighborIds }, spaceId: mid }),
-          { projection: NEVER_RETURNED_PROJECTION })
-        .toArray() as EntityDoc[];
-      for (const e of entities) entityMap.set(e._id, e);
-    }
-
+    /*
+     * EVERY new neighbour, in whatever collection it lives — entities and, since 5.0, the rest.
+     *
+     * An edge may declare a `fact`, `chrono` or `file` endpoint; the writer REFUSES a kind that does not
+     * match the record, so such an edge is validated, stored, hashed and replicated. This used to read
+     * `<space>_entities` alone and `if (!entity) continue` discarded everything else — no flag, no
+     * truncation marker. A stored edge that no retrieval path reached, which is report `#695` arriving by
+     * a different route.
+     *
+     * **No include flag gates this, unlike the link scan below.** `includeMemories` and `includeFiles`
+     * default off because a fact-heavy space would fill the answer with facts nobody traversed for — an
+     * argument about IMPLICIT links, of which a hub entity has thousands. An edge document exists only
+     * because somebody drew it, so there are exactly as many as were meant, and gating them would leave
+     * the capability inert for everyone who does not already know the flag.
+     *
+     * The resolution lives in `edge-endpoint-names.ts` because this file is frozen at its size, and the
+     * gate that freezes it says why: new behaviour goes BESIDE a god-file rather than inside it.
+     */
+    const nodeFor = await neighbourNodes(memberIds, newNeighborIds, neighborKinds, currentDepth + 1);
 
     // Build results for this depth level
     const nextFrontier: string[] = [];
     for (let i = 0; i < newNeighborIds.length; i++) {
       const neighborId = newNeighborIds[i];
-      const entity = entityMap.get(neighborId);
-      if (!entity) continue;
+      const node = nodeFor.get(neighborId);
+      // Still a `continue`, and now it means what it always read as: the record is NOT THERE. An edge can
+      // outlive the record it points at, and inventing a placeholder node would be a fact the walk made up.
+      if (!node) continue;
 
       const edge = edgesForNewNeighbors[i];
       resultEdges.push({ _id: edge._id, from: edge.from, to: edge.to, label: edge.label });
-      resultNodes.push({ _id: entity._id, name: entity.name, type: entity.type, depth: currentDepth + 1 });
+      resultNodes.push(node);
 
       if (resultNodes.length >= limit) {
         return answer(true);
       }
 
+      /*
+       * It joins the next frontier, AND THAT IS THE DIFFERENCE from a linked record.
+       *
+       * The scan below deliberately does not expand its records: a link only ever points back at entities,
+       * so walking on from one returns where you came from. An explicit edge CHAINS — a `supersedes` from
+       * the newest claim to the one before it to the one before that is the shape the knowledge-updates
+       * case is made of — so stopping here would answer one hop of a chain and call it the neighbourhood.
+       */
       nextFrontier.push(neighborId);
     }
 
@@ -912,7 +945,7 @@ export async function traverseGraph(
       });
       const file = rec.kind === 'file' ? rec.doc as FileMetaDoc : undefined;
       resultNodes.push({
-        _id: rec.doc._id, name: linkedRecordName(rec), type: linkedRecordType(rec),
+        _id: rec.doc._id, name: recordDisplayName(rec.kind, rec.doc), type: recordDisplayType(rec.kind, rec.doc),
         depth: currentDepth + 1, kind: rec.kind,
         ...(file?.description ? { description: file.description } : {}),
         ...(file?.tags && file.tags.length > 0 ? { tags: file.tags } : {}),

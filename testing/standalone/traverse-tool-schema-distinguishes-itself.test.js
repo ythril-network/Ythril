@@ -69,8 +69,19 @@ describe('it names the other traversal', () => {
 describe('it describes what comes back', () => {
   it('names the node fields including `kind` and `depth`', () => {
     assert.match(TRAVERSE, /`depth`/, 'a flat list with depths is a different shape from recall\'s nesting');
-    assert.match(TRAVERSE, /"entity" unless it arrived via one of the include flags/,
-      '`kind` is how a caller tells an entity from a chrono/memory/file arrival');
+    /*
+     * This pinned *"entity unless it arrived via one of the include flags"* until 5.0, and the change that
+     * made the sentence FALSE is what re-pointed it: a node also arrives as a fact, chrono entry or file
+     * when an explicit EDGE names one, with no flag involved. A gate pinned to the old wording would have
+     * demanded the description keep saying something untrue.
+     *
+     * The rule it asserts is the one that has not changed: `kind` names the COLLECTION, and the
+     * description has to say so, because that is what a caller reads while constructing arguments.
+     */
+    assert.match(TRAVERSE, /`kind` \("entity", or the collection it lives in/,
+      '`kind` is how a caller tells an entity from a chrono/fact/file arrival, and the description must say so');
+    assert.match(TRAVERSE, /through an explicit edge or through one of the include flags/,
+      'and it must say BOTH ways a non-entity node arrives — an edge needs no flag');
   });
 
   it('warns that a truncated walk is a PARTIAL graph', () => {

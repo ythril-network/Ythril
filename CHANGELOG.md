@@ -696,6 +696,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An edge you drew to a fact, chrono entry or file was stored and reached by nothing.** An edge declares
+  the kind at each end, the writer REFUSES a kind that does not match the record, and the edge is then
+  validated, stored, hashed and replicated — so `supersedes` between two claims is a real edge that
+  everything accepted. The walk resolved every neighbour against the entities collection alone and dropped
+  whatever was not there: no flag, no `truncated`, no error. On the Graph tab such an edge was saved, listed
+  on the Edges table, and never drawn.
+
+  That is the *"stored, returned, and points at nothing traversable"* report arriving by a different route,
+  and it is why the contradiction resolver still refuses to draw one of these — a refusal written a month
+  before endpoint kinds existed, whose stated reason is obsolete and whose EFFECT was right, which is why
+  nothing ever contradicted it.
+
+  **No include flag governs it, and the asymmetry is deliberate.** `includeMemories` and `includeFiles` are
+  opt-in because they follow IMPLICIT links — a record that happens to name this one — of which a busy node
+  has thousands. An edge exists only because somebody drew it, so there are exactly as many as were meant.
+  A record reached through an edge also EXPANDS, unlike one reached through a mention: an edge chains, and a
+  chain of `supersedes` stopped at one hop would answer a fragment and call it the neighbourhood.
+
+  **A walk may now start from a fact or a chrono entry**, not only an entity.
+
 - **`filter` refused a bad `skip` and quietly ignored a bad `limit`.** One endpoint, one question — where
   does this page start and how big is it — and two answers to a value it cannot use. `skip: "abc"` was a
   `400`; `limit: "abc"`, `limit: -5` and `limit: 0` were accepted and silently answered with the default,
