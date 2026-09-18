@@ -23,6 +23,22 @@
  *
  * **A comment cannot hold a universal claim. This file is that claim, enforced.**
  *
+ * ## What it does NOT check, and it read as though it did until 2026-09-18
+ *
+ * This gate's subject is every `structuredContent: { … }` LITERAL. A return that carries no
+ * `structuredContent` at all matches nothing here, so it is outside the sweep entirely — and that is the
+ * strictly worse version of the same defect: metadata-only hands a client a thin page, absent hands it
+ * `null`.
+ *
+ * Thirty-three returns across eleven tool files were in that state while this file was green, including
+ * `graph_traverse` and every write tool that reports the id it just wrote. The title said *"every tool
+ * that returns structuredContent"* and was literally true — it is the reading of it as *"every tool"*
+ * that was wrong, which is this repo's most-repeated gate failure and is why the title now names the
+ * narrowing out loud.
+ *
+ * The other half is `a-tool-answer-reaches-both-halves.test.js`. Neither is complete alone: this one
+ * says *if you carry it, carry the answer*, that one says *carry it*.
+ *
  * Run: node --test testing/standalone/mcp-structured-content-carries-its-payload.test.js
  */
 import { describe, it } from 'node:test';
@@ -64,7 +80,7 @@ function flattenSpreads(literal) {
   return literal.replace(/\.\.\.\([^?]*\?\s*\{/g, '').replace(/\}\s*:\s*\{\}\)/g, ',');
 }
 
-describe('every tool that returns structuredContent puts its answer in it', () => {
+describe('a structuredContent that EXISTS holds the answer, not metadata about it', () => {
   it('sweeps a real set of tool files, so an empty sweep cannot pass', () => {
     assert.ok(toolFiles.length >= 8,
       `expected at least 8 tracked tool files, found ${toolFiles.length} — the scope is wrong and every `

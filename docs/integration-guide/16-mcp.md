@@ -55,29 +55,38 @@ On connect, the server sends global instructions listing all available space IDs
 >> `preExisting` is still in every response, so a client that wants to insist on full compliance can refuse on it
 > itself. `content` carries the same information as a sentence, so a client that reads only text loses nothing.
 >
-> **`query` puts its rows in BOTH places.** `content[0].text` is the JSON array it has always been, and
-> `structuredContent` carries `results` (the same array) plus `count`, `total`, `limit`, `skip` and the
-> `sort`/`dir` in force. Read whichever suits your client — they are the same answer, and `count` always
-> describes `results`.
+> **EVERY tool that succeeds answers in BOTH halves, and that is the rule rather than a list of tools.**
+> `content[0].text` carries the answer as text; `structuredContent` carries the same answer as an object.
+> Read whichever suits your client — they are the same result, never a result and a sidecar. Over plain
+> HTTP the structured half is the `data` field, so this is one change on both doors.
 >
-> Until this release `structuredContent` held the paging facts alone. A client that surfaces
-> `structuredContent` in preference to `content` therefore saw `{"count": 25, "total": 32, ...}` and no
-> rows, which reads as a page that returned nothing rather than as a payload the client dropped. If you
-> built against the old shape nothing changes: `content` was, and remains, complete.
+> **What a tool carries is the record it wrote, or the identity of what it acted on.** A create or update
+> carries the stored record; a delete carries `{"_id": "…", "deleted": true}`; `merge_entities` carries the
+> survivor and the absorbed id; `move_file` carries `{"from": "…", "to": "…"}`; `network_sync` carries its
+> counts and, for a named peer, `notFound` as a field rather than as a sentence to match.
 >
-> **`help` does the same, and it is the one that cost somebody a day.** `structuredContent.guide` carries the
-> rendered guide, byte-identical to `content[0].text`, alongside `sections` (the index as `{id, title}`),
-> `matched` and `restOnly`.
+> Where an answer is naturally an array the structured half NAMES it, because `structuredContent` must be
+> an object: `list_spaces` carries `{"spaces": [...]}` and `network_peers` carries `{"peers": [...]}`. The
+> text half of those two is still the bare array it has always been — if you index it, nothing changes.
 >
-> Until this release `help`'s `structuredContent` was the index and the capability map with **no guide at
-> all** — the same defect `query` had, on the one tool whose entire job is telling you what exists. An
-> integrator reading `structuredContent` received six section titles, concluded the guide was unreachable,
-> and reported it as `help()` returning no section bodies. It never did: `content[0].text` was 76,754
-> characters of them at the time, on the version they were running.
+> **Two things moved earlier, and the rest moved in this release.** `query` held the paging facts alone, so
+> a client that surfaces `structuredContent` in preference to `content` saw `{"count": 25, "total": 32, ...}`
+> and no rows — a page that returned nothing rather than a payload the client dropped. `help` held the index
+> and the capability map with **no guide at all**, on the one tool whose entire job is telling you what
+> exists; an integrator reading it received six section titles, concluded the guide was unreachable, and
+> reported `help()` as returning no section bodies. It never did — `content[0].text` was 76,754 characters
+> of them on the version they were running.
 >
-> **If you are on an older instance, read `content[0].text` — the guide is there, complete, and always was.**
-> A gate now sweeps every tool and refuses a `structuredContent` built from metadata alone, because the
-> comment beside `query`'s fix claimed no other tool had that shape and one did.
+> **Thirty-three returns across eleven tool files then carried no structured half at all**, which is the
+> same defect one step worse: not a thin page, no answer. `graph_traverse` answered
+> `{"ok": true, "text": "{\"nodes\": [...]}", "data": null}`, and every write tool reported the id it had
+> just written in prose only — so learning the id of a record you created meant a regular expression over
+> English. All fixed here.
+>
+> **If you are on an older instance, read `content[0].text` — the answer is there, complete, and always
+> was.** Two gates now hold the rule from both sides: one refuses a `structuredContent` built from metadata
+> alone, the other refuses a successful return that has none. Each was written after the other had been
+> green through the defect it missed.
 >
 > **The consequence to plan for: tightening a schema freezes the records that no longer fit it.** Remove a value from
 > an `enum` and every stored record still carrying it is uneditable until that field is repaired — even an edit to an
