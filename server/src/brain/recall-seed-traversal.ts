@@ -22,8 +22,11 @@
 
 import { col, asFilter } from '../db/mongo.js';
 import { NEVER_RETURNED_PROJECTION } from './read-projection.js';
-import { linkedRecordsAtFrontier, entitiesLinkedFromRecords, linkedRecordName, linkedRecordType, type LinkedRecord } from './link-frontier.js';
+import { linkedRecordsAtFrontier, entitiesLinkedFromRecords, recordDisplayName, recordDisplayType, type LinkedRecord } from './link-frontier.js';
 import { frontierEdgeQuery, type TraverseNarrowing } from './frontier-query.js';
+import { edgeEndpointKind } from './entity-refs.js';
+import { endpointRecordsByKind } from './edge-endpoint-names.js';
+import type { RefKind } from '../config/types-knowledge.js';
 import { syntheticEdgeId } from './edges.js';
 import type { EdgeDoc, EntityDoc, FileMetaDoc } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -238,11 +241,20 @@ export async function traverseFromSeeds(
     }
 
     const newNeighborIds: string[] = [];
+    /*
+     * The KIND each neighbour was declared as, captured where the end is chosen.
+     *
+     * Same as the standalone walk, and it has to be: an edge may name a fact, chrono entry or file at
+     * either end, and resolving the neighbour against entities alone drops it in silence. This file already
+     * carries the scar of the last time the two walks disagreed — see the note on `edgeLabels` above.
+     */
+    const neighborKinds = new Map<string, RefKind>();
     for (const edge of edges) {
       // Same-level edge (both ends already in the frontier) — introduces no new node.
       if (frontierSet.has(edge.from) && frontierSet.has(edge.to)) continue;
       const frontierEnd = frontierSet.has(edge.from) ? edge.from : edge.to;
       const neighborId = frontierEnd === edge.from ? edge.to : edge.from;
+      neighborKinds.set(neighborId, edgeEndpointKind(frontierEnd === edge.from ? edge.toKind : edge.fromKind));
       const routeHere = [...(idPathTo.get(frontierEnd) ?? [frontierEnd]), neighborId];
       if (visited.has(neighborId)) {
         // Already nested somewhere: this is a SECOND route to it, so record the route without re-nesting or
@@ -305,14 +317,31 @@ export async function traverseFromSeeds(
     const entityMap = new Map<string, EntityDoc>();
     for (const e of entities) entityMap.set(e._id, e);
 
+    /*
+     * AND THE NEIGHBOURS THAT ARE NOT ENTITIES — the same resolver the standalone walk uses.
+     *
+     * `if (!entity) continue` below read as "not an entity in this space (e.g. cross-space edge target)",
+     * and that was only half of what it did: it also discarded every endpoint an edge had DECLARED as a
+     * fact, chrono entry or file, which the writer validates and refuses when the kind is wrong. The
+     * comment made the drop look intentional, which is why it survived.
+     */
+    const nonEntityNeighbors = await endpointRecordsByKind(
+      [spaceId], newNeighborIds.map(id => ({ id, kind: neighborKinds.get(id) ?? 'entity' })));
+
     const nextFrontier: string[] = [];
     for (const neighborId of newNeighborIds) {
       const entity = entityMap.get(neighborId);
-      if (!entity) continue; // not an entity in this space (e.g. cross-space edge target) — skip
+      const other = entity ? undefined : nonEntityNeighbors.get(neighborId);
+      // Now it means only what it always read as: the record is not there — a cross-space target, or an
+      // edge that outlived what it pointed at.
+      if (!entity && !other) continue;
       const reached = reachedBy.get(neighborId);
       if (!reached) continue; // unreachable in practice: every new neighbour is recorded above with its edge
       results.push({
-        _id: entity._id, spaceId, hops: depth + 1, path: pathTo.get(neighborId) ?? [], record: entity,
+        _id: neighborId, spaceId, hops: depth + 1, path: pathTo.get(neighborId) ?? [],
+        // `kind` stamped for a non-entity exactly as the linked-record half below stamps it, so one record
+        // reached two ways is described one way.
+        record: entity ?? { ...other!.doc, spaceId, kind: other!.kind },
         parentId: reached.parentId, edge: reached.edge, idPath: idPathTo.get(neighborId) ?? [neighborId],
         altPaths: altPathTo.get(neighborId) ?? [], altPathsTruncated: false,
       });
