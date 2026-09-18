@@ -706,6 +706,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`linkEntities` and its three siblings were accepted with a `201` and the link was reached by
+  nothing** — on any space created since the instance last restarted.
+
+  A link is stored in two shapes during the 4.x transition: a record in the space's `links` collection,
+  and the array on the record itself. `usesLinkRecords` picks which shape a space is READ through, and
+  `link-adjacency.ts` calls it *"the ONLY place that decides"* — which was true of readers and of nothing
+  else. The writer wrote a link record and stopped, so on a space still read through the arrays it wrote
+  a row every reader looks away from: not `traverse`, not a graph-augmented `recall`, not the delete
+  guard.
+
+  **The conversion that flips a space runs at BOOT**, so a space created afterwards keeps the array path
+  until the next restart. The same call therefore worked or silently lost the link depending on when the
+  instance was last rebooted — which is why it went unreported: a reporter could not reproduce it and a
+  responder could.
+
+  **It also meant the two spellings swapped validity across a line a caller cannot see**: `entityIds`
+  worked and `linkEntities` did not on an unconverted space, and a converted space refuses `entityIds`
+  outright. And `linkEntities` is the spelling the MCP schemas publish, so an agent reading the contract
+  was told to use the one that did nothing.
+
+  The writer now resolves the shape through the same selector every reader uses. **Nothing about the
+  request changed**, and a caller who worked around this with `entityIds` is unaffected.
+
+  **Not fixed by making new spaces converted**, which was the first idea and contradicts a recorded
+  decision: the conversion is *"a performance and consistency upgrade rather than a correctness
+  prerequisite"*, so an unconverted space is a supported state and the writer has to work on one.
+
+- **An edge you drew to a fact, chrono entry or file was stored and reached by nothing.** An edge declares
+  the kind at each end, the writer REFUSES a kind that does not match the record, and the edge is then
+  validated, stored, hashed and replicated — so `supersedes` between two claims is a real edge that
+  everything accepted. The walk resolved every neighbour against the entities collection alone and dropped
+  whatever was not there: no flag, no `truncated`, no error. On the Graph tab such an edge was saved, listed
+  on the Edges table, and never drawn.
+
+  That is the *"stored, returned, and points at nothing traversable"* report arriving by a different route,
+  and it is why the contradiction resolver still refuses to draw one of these — a refusal written a month
+  before endpoint kinds existed, whose stated reason is obsolete and whose EFFECT was right, which is why
+  nothing ever contradicted it.
+
+  **No include flag governs it, and the asymmetry is deliberate.** `includeMemories` and `includeFiles` are
+  opt-in because they follow IMPLICIT links — a record that happens to name this one — of which a busy node
+  has thousands. An edge exists only because somebody drew it, so there are exactly as many as were meant.
+  A record reached through an edge also EXPANDS, unlike one reached through a mention: an edge chains, and a
+  chain of `supersedes` stopped at one hop would answer a fragment and call it the neighbourhood.
+
+  **A walk may now start from a fact or a chrono entry**, not only an entity.
+
 - **Almost every tool answered with no structured half, so `data` was `null` over HTTP and
   `structuredContent` was absent over MCP.** Thirty-three successful returns across eleven tool files put
   the whole answer in the text half and nothing beside it. A client that surfaces the structured form —

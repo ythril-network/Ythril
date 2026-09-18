@@ -42,7 +42,7 @@ import { col, asFilter, asDoc } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
 import { nextSeq } from '../util/seq.js';
 import { edgeIdFor } from './edge-id.js';
-import { fieldFor } from './link-adjacency.js';
+import { fieldFor, linkClassFor, linkClassesFrom, usesLinkRecords } from './link-adjacency.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { AuthorRef, LinkDoc, TombstoneDoc } from '../config/types.js';
 // `RefKind` is re-exported by `types.ts` as a type only, so it comes from the leaf that DECLARES it —
@@ -151,7 +151,54 @@ export async function reconcileLinks(
     added++;
   }
 
+  /*
+   * AND THE ARRAY, on a space whose readers are still reading arrays.
+   *
+   * `usesLinkRecords` picks which shape a space is READ through, and `link-adjacency.ts` calls it *"the
+   * ONLY place that decides"*. That was true of readers and of nothing else: this function wrote a link
+   * record and stopped, so on an unconverted space it wrote a row every reader looks away from — a `201`
+   * and a link nobody could see, for as long as the instance had not rebooted since the space was made.
+   *
+   * **Not "instead of": AS WELL AS.** The array path already writes both — `entityIds` on a create lands
+   * in the record and a link record is reconciled from it — so writing only the array here would make the
+   * two spellings of one question differ in the other direction, and would leave the conversion more to
+   * do rather than less.
+   *
+   * The selector is consulted, never re-derived. A writer with its own opinion about which shape a space
+   * uses is how five readers came to follow five different subsets in the first place.
+   */
+  if (!usesLinkRecords(spaceId)) await writeLinkArrays(spaceId, from, fromKind, desired);
+
   return { added, removed };
+}
+
+/**
+ * Mirror the desired links onto the record's own arrays — the 3.x shape, still read by an unconverted space.
+ *
+ * One `$set` per class the caller NAMED, so a write that touches `linkEntities` alone cannot disturb the
+ * fact links. That is the same per-class rule the link-record half above applies, said against the other
+ * storage shape; expressing it twice differently is what this whole module exists to stop.
+ *
+ * A pair that is not a link class is skipped rather than invented: `linkClassFor` returns `undefined`, and
+ * a field named from a kind pair the model does not have would be a key nothing ever reads.
+ */
+async function writeLinkArrays(
+  spaceId: string,
+  from: string,
+  fromKind: RefKind,
+  desired: DesiredLinks,
+): Promise<void> {
+  const cls = linkClassesFrom(fromKind);
+  if (cls.length === 0) return;
+  const set: Record<string, string[]> = {};
+  for (const toKind of Object.keys(desired) as RefKind[]) {
+    const c = linkClassFor(fromKind, toKind);
+    if (!c) continue;
+    set[c.field] = [...new Set(desired[toKind] ?? [])];
+  }
+  if (Object.keys(set).length === 0) return;
+  await col<Record<string, unknown>>(spaceCollection(spaceId, cls[0].collection))
+    .updateOne(asFilter<Record<string, unknown>>({ _id: from, spaceId }), { $set: set } as never);
 }
 
 /**

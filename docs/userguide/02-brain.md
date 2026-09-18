@@ -540,11 +540,17 @@ you land on the neighbourhood rather than on a lone node — then adjust with th
 Edges table the view is centred on the edge's **from** endpoint; the `to` endpoint is one hop away, so the
 edge itself is always on the canvas.
 
-The Facts, Chrono and Files tables have no such button, because a graph always STARTS from an entity.
+The Facts, Chrono and Files tables have no such button, because the search bar here finds entities.
 Those records are reachable *within* a graph — turn on the matching toggle and a walk brings back the facts,
-timeline entries and files that mention what it passes through, and from 4.0 the ones that mention each other
-as well. What they cannot be is the starting point. Use the **Entities** column in those tables to find the
-entity you want, then open the graph from there.
+timeline entries and files that MENTION what it passes through, and from 4.0 the ones that mention each other
+as well. Use the **Entities** column in those tables to find the entity you want, then open the graph from
+there.
+
+**A record you drew an EDGE to appears whether or not its toggle is on, and that is the difference between
+the two.** A toggle governs mentions — a fact that happens to name an entity — and those are numerous enough
+that showing them all by default would bury the entities you came to look at. An edge is something you drew
+on purpose, so there are only as many as you meant, and the graph shows them. Before 5.0 it did not: an edge
+you drew from one fact to another was saved, listed on the Edges table, and never appeared on the canvas.
 
 **Toolbar controls:**
 
