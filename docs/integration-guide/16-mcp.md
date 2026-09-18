@@ -272,6 +272,23 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 > the instance offers *right now*, scoped to what your token may call. If `help()` lists a tool your client
 > does not, the answer is to reconnect.
 
+---
+
+> **A TOKEN THAT REACHES EXACTLY ONE SPACE DOES NOT HAVE TO NAME IT.** Since 5.0, `space` is optional on
+> every writing tool when the calling token's accessible-space list has one member — there is no other
+> space the call could mean, so `save_fact({fact: "…"})` lands. The schema you are shown says so: `space`
+> is absent from `required` for such a token, and present for every other.
+>
+> With **two or more** reachable spaces it stays required, because then the omission really is ambiguous
+> and guessing would write into a space nobody named. The refusal lists the spaces you can choose between.
+>
+> **A READ is a different question.** `recall`, `filter` and `similar` treat an omitted `space` as *every
+> space this token can reach* — an answer, not a default — and that is unchanged however many you have.
+>
+> This exists because a generic MCP client matches a tool by name and fills the parameters it recognises.
+> It has no way to know we want a space, and a refused ingest in a harness that swallows its own errors
+> looks like an empty corpus rather than a failed call.
+
 | Tool | Description |
 |---|---|
 | `help` | Self-documenting system guide — the knowledge model, how to choose between `query` / `recall` / filtered recall, schema authoring, and the tools available to the calling token. Read-only, no `space` needed; scoped to the token so it never lists tools the token can't call. **Pass `query` to get only the matching sections** instead of the whole guide — a tool name returns just that tool's line, not the whole list. Matching is plain keyword (**all** words must appear) and **never semantic**, deliberately: `help` is the tool that must work when the embedder does not. A query matching nothing returns the **section index** rather than an empty answer, and `structuredContent.sections` always lists the ids and titles so a caller can see what there is to ask for |
