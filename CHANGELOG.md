@@ -706,6 +706,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A walk did not return the node it started from, so an isolated record and a bad id looked the same.**
+  `graph_traverse`'s own schema has always described *"`startId` itself at depth 0, so a walk that finds
+  nothing still comes back with one node rather than empty — an empty `nodes` means the id resolved to
+  nothing, which is a different answer from 'it has no neighbours'."* It never sent that node.
+
+  A caller who believed the description read every empty walk as a bad id. That cost four probe
+  iterations here, on an instance where the id was demonstrably good, and a schema description is what a
+  caller reads while constructing arguments.
+
+  **The promise is made true rather than the sentence corrected.** Both were open; emitting the node
+  costs one row and gives callers the distinction, and correcting the sentence would have left them with
+  no way to tell a bad id from a lonely one — which is the reason the sentence exists.
+
+  The start node counts against `limit`, because it is a node: `limit: 1` answers the start alone, which
+  is also the cheapest way to ask whether an id exists. **An id that resolves to nothing is still empty**,
+  which is the other half — the promise is only useful while a bad id is actually empty.
+
+  A walk started from a fact or chrono entry returns that record, with its `kind`, resolved exactly as a
+  neighbour is.
+
 - **`linkEntities` and its three siblings were accepted with a `201` and the link was reached by
   nothing** — on any space created since the instance last restarted.
 

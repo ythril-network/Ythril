@@ -349,3 +349,33 @@ export async function neighbourNodes(
   }
   return out;
 }
+
+/**
+ * The node a walk STARTS from, when nobody has told us which collection it is in.
+ *
+ * ## Why the kind is unknown here and known everywhere else
+ *
+ * A neighbour arrives through an edge, and an edge DECLARES the kind at each end. A `startId` arrives
+ * from the caller as a bare id — `graph_traverse` takes one argument, not two — so the only way to know
+ * what it names is to look.
+ *
+ * ## Entity first, and the order is the contract rather than a guess
+ *
+ * An id is one record, so at most one collection answers. Entity is tried first because it is what a
+ * start node almost always is, and because an entity node carries NO `kind` — resolving one as anything
+ * else would add a field to the commonest answer in the product.
+ *
+ * Returns `undefined` when nothing answers, and that is load-bearing: `graph_traverse` promises that an
+ * empty `nodes` means the id resolved to nothing. Inventing a placeholder would make every walk
+ * non-empty and destroy the one distinction the promise is for.
+ */
+export async function startNode(
+  memberIds: readonly string[],
+  id: string,
+): Promise<TraverseNodeShape | undefined> {
+  // Every kind, for the one id. `neighbourNodes` keys its result by id and lets the entity lookup win,
+  // so this asks all four questions in one call rather than re-implementing the precedence here.
+  const found = await neighbourNodes(
+    memberIds, [id, id, id, id], [undefined, 'fact', 'chrono', 'file'], 0);
+  return found.get(id);
+}
