@@ -10,9 +10,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import {
-  INSTANCES, post, postRetry429, get, del, delWithBody, triggerSync, waitFor, getInstanceId, makeTriggerProbe,
-} from './helpers.js';
+import { INSTANCES, post, postRetry429, get, del, delWithBody, triggerSync, waitFor, getInstanceId, makeTriggerProbe, readRecord } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -137,14 +135,14 @@ describe('Braintree topology (A -> B -> C)', () => {
 
     // A pushes to B
     await waitForSynced(INSTANCES.a, tokenA, networkId, 'A', async () => {
-      const r = await get(INSTANCES.b, tokenB, `/api/brain/spaces/${testSpaceId}/facts/${memId}`);
+      const r = await readRecord(INSTANCES.b, tokenB, testSpaceId, 'facts', memId);
       return r.status === 200;
     });
     console.log(`  Root fact appeared on B ✓`);
 
     // B pushes to C
     await waitForSynced(INSTANCES.b, tokenB, networkId, 'B', async () => {
-      const r = await get(INSTANCES.c, tokenC, `/api/brain/spaces/${testSpaceId}/facts/${memId}`);
+      const r = await readRecord(INSTANCES.c, tokenC, testSpaceId, 'facts', memId);
       return r.status === 200;
     });
     console.log(`  Root fact appeared on C ✓`);
@@ -166,7 +164,7 @@ describe('Braintree topology (A -> B -> C)', () => {
     // Negative assertion — a fixed wait is correct here; do NOT convert to waitFor (Q3), which would
     // return instantly on the absent record and prove nothing.
     await new Promise(r => setTimeout(r, 3000));
-    const r = await get(INSTANCES.b, tokenB, `/api/brain/spaces/${testSpaceId}/facts/${leafMemId}`);
+    const r = await readRecord(INSTANCES.b, tokenB, testSpaceId, 'facts', leafMemId);
     assert.equal(r.status, 404, 'Leaf fact should NOT have propagated to B');
     console.log(`  Leaf fact correctly absent from B ✓`);
   });
@@ -184,7 +182,7 @@ describe('Braintree topology (A -> B -> C)', () => {
 
     // Negative assertion (see above) — fixed wait is correct; do NOT convert to waitFor (Q3).
     await new Promise(r => setTimeout(r, 3000));
-    const r = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${testSpaceId}/facts/${nodeMemId}`);
+    const r = await readRecord(INSTANCES.a, tokenA, testSpaceId, 'facts', nodeMemId);
     assert.equal(r.status, 404, 'Node fact should NOT have propagated to A');
     console.log(`  Node fact correctly absent from A ✓`);
   });

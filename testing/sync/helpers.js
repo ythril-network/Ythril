@@ -409,7 +409,7 @@ export async function syncUntil(baseUrl, token, networkId, condition, what, { ti
  *    the wire or discarded by the receiver.
  */
 export async function whichSideLostIt(senderUrl, senderToken, networkId, spaceId, recordId, type = 'facts') {
-  const rec = await get(senderUrl, senderToken, `/api/brain/spaces/${spaceId}/${type}/${recordId}`);
+  const rec = await readRecord(senderUrl, senderToken, spaceId, type, recordId);
   if (rec.status !== 200) return `the SENDER does not have ${recordId} either (${rec.status}) — the write, not sync`;
   const seq = rec.body?.seq;
   const net = await get(senderUrl, senderToken, `/api/networks/${networkId}`);
@@ -422,6 +422,79 @@ export async function whichSideLostIt(senderUrl, senderToken, networkId, spaceId
       ? 'a watermark is AT OR PAST that seq, so it was marked sent and never will be again'
       : 'no watermark reached that seq, so the sender should still be offering it: lost on the wire or discarded '
         + 'by the receiver');
+}
+
+/**
+ * Read a page of a brain collection - the ONE way a test asks that question.
+ *
+ * ## Why a helper and not a `get` per call site
+ *
+ * `B-9` step 3 deleted the nine `GET /api/brain/spaces/:spaceId/<collection>` routes, so a collection is
+ * read through `filter` and nothing else. Eighty-five call sites were each a hand-written `get` with a
+ * query string; eighty-five hand-written POST bodies would have been eighty-five chances to drop the
+ * guard below, and the next suite written would have made it eighty-six.
+ *
+ * ## The guard, which is the half a copy drops
+ *
+ * **`results` is `undefined` when the call did not answer 200.** The route used to make a failure obvious -
+ * a 403 had no `entities` key to loop over. `filter` answers `{results: [...]}` on success and an error
+ * body on failure, so a copy that read `body.results ?? []` would turn every refusal into an empty page,
+ * and an empty page passes every loop written over it. A test asserting "no rows matched" would then pass
+ * against an instance that refused the read.
+ *
+ * So the caller gets the raw `status` to assert on, and a `results` that is only an array when there was
+ * genuinely an answer.
+ *
+ * @param {string} baseUrl
+ * @param {string} token
+ * @param {string} space
+ * @param {'facts'|'entities'|'edges'|'chrono'|'files'|'links'} collection
+ * @param {Record<string, unknown>} [body] anything else `filter` takes: `limit`, `skip`, `sort`, `dir`,
+ *   `filter`, the five conveniences, `entityName`/`fromName`/`toName`, `deriveStatus`.
+ */
+export async function readCollection(baseUrl, token, space, collection, body = {}) {
+  const r = await post(baseUrl, token, '/api/brain/filter', { space, collection, ...body });
+  return { status: r.status, body: r.body, results: r.status === 200 ? (r.body?.results ?? []) : undefined };
+}
+
+/**
+ * A chrono read derives its status; every other collection has none to derive.
+ *
+ * **This is the guard that makes `readRecord` a module rather than a shorthand.** The by-id route it
+ * replaces derived the status on the way out — an entry past its due moment read `overdue` whatever it was
+ * stored as, unless its type says a passed date means nothing. `filter` returns the STORED value unless
+ * asked, which is right for a predicate and wrong for a read that used to derive.
+ *
+ * A hand-written copy drops this and nothing complains: the happy path is identical for four of the five
+ * collections, and for the fifth it is identical for every entry whose due moment has not passed. The
+ * failure only appears on a past-dated entry, which is exactly the record somebody is looking for.
+ *
+ * Pass `deriveStatus: false` to ask for the stored value on purpose — it is a real question, and the point
+ * is that it has to be asked.
+ */
+const deriveChronoStatus = (collection) => (collection === 'chrono' ? { deriveStatus: true } : {});
+/**
+ * ONE record by id, the way the deleted `GET .../<collection>/:id` was used.
+ *
+ * **A missing record is `status: 404` here, and that is this helper's whole job.** `filter` answers 200
+ * with an empty page - correct for a predicate, and wrong for every caller that was written against a
+ * route which 404d. Translating it here keeps those assertions honest instead of quietly turning each one
+ * into "the read succeeded and I ignored the rows".
+ *
+ * `body` reaches `filter` untouched, which is how a caller asks for `includeDiagnostics: true`. The routes
+ * this replaces returned `matchedText` and `embeddingModel` unconditionally on a by-id read while WITHHOLDING
+ * them on a list — two defaults for one rule, and `filter` has the one default. A test that wants the
+ * embed text has to ask for it now, which is the honest version of what it was relying on.
+ */
+export async function readRecord(baseUrl, token, space, collection, id, body = {}) {
+  const r = await readCollection(baseUrl, token, space, collection, {
+    filter: { _id: id }, limit: 1, ...deriveChronoStatus(collection), ...body,
+  });
+  if (r.status !== 200) return { status: r.status, body: r.body };
+  const doc = r.results[0];
+  return doc
+    ? { status: 200, body: doc }
+    : { status: 404, body: { error: `${collection} '${id}' not found` } };
 }
 
 /** Create a memory on an instance's general space */
@@ -439,11 +512,10 @@ export async function listFacts(baseUrl, token) {
   let skip = 0;
   const pageSize = 500;
   while (true) {
-    const r = await get(baseUrl, token, `/api/brain/spaces/general/facts?limit=${pageSize}&skip=${skip}`);
+    const r = await readCollection(baseUrl, token, 'general', 'facts', { limit: pageSize, skip });
     if (r.status !== 200) return r; // surface errors to callers as-is
-    const page = r.body.facts ?? [];
-    all.push(...page);
-    if (page.length < pageSize) break;
+    all.push(...r.results);
+    if (r.results.length < pageSize) break;
     skip += pageSize;
   }
   return { status: 200, body: { facts: all } };

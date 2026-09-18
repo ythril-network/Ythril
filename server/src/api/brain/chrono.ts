@@ -394,16 +394,6 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
 });
 
 
-// GET /api/brain/spaces/:spaceId/chrono/:id
-chronoRouter.get('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceAuth, async (req, res) => {
-  const spaceId = req.params['spaceId'] as string;
-  const id = req.params['id'] as string;
-  const doc = await findFirstAcrossMembers(spaceId, mid => getChronoById(mid, id));
-  if (doc) { res.json(doc); return; }
-  res.status(404).json({ error: 'Chrono entry not found' });
-});
-
-
 // GET /api/brain/spaces/:spaceId/chrono
 chronoRouter.get('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;

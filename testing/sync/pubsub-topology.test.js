@@ -14,9 +14,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { dockerExec,
-  INSTANCES, post, postRetry429, get, del, delWithBody, triggerSync, syncUntil, whichSideLostIt,
-} from './helpers.js';
+import { dockerExec, INSTANCES, post, postRetry429, get, del, delWithBody, triggerSync, syncUntil, whichSideLostIt, readRecord } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -52,7 +50,7 @@ let instanceIdA;
  */
 const awaitOnB = (memId, expectStatus, what) =>
   syncUntil(INSTANCES.a, tokenA, networkId,
-    async () => (await get(INSTANCES.b, tokenB, `/api/brain/spaces/${testSpaceId}/facts/${memId}`)).status === expectStatus,
+    async () => (await readRecord(INSTANCES.b, tokenB, testSpaceId, 'facts', memId)).status === expectStatus,
     `${what} (expected ${expectStatus} for ${memId} on B)`,
     {
       label: 'A',
@@ -168,7 +166,7 @@ describe('Pub/Sub topology (A -> B subscriber)', () => {
     // Wait and verify the subscriber-local fact is NOT on A.
     // Negative assertion — fixed wait is correct; do NOT convert to waitFor (Q3).
     await new Promise(r => setTimeout(r, 3_000));
-    const r = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${testSpaceId}/facts/${subMemId}`);
+    const r = await readRecord(INSTANCES.a, tokenA, testSpaceId, 'facts', subMemId);
     assert.equal(r.status, 404, 'Subscriber fact should NOT appear on publisher');
     console.log(`  Subscriber fact correctly absent from A ✓`);
   });
@@ -207,7 +205,7 @@ describe('Pub/Sub topology (A -> B subscriber)', () => {
     console.log(`  Publisher's deleted fact removed from B ✓`);
 
     // Verify subscriber's own memory still exists
-    const subCheck = await get(INSTANCES.b, tokenB, `/api/brain/spaces/${testSpaceId}/facts/${subMemId}`);
+    const subCheck = await readRecord(INSTANCES.b, tokenB, testSpaceId, 'facts', subMemId);
     assert.equal(subCheck.status, 200, 'Subscriber local fact must survive publisher tombstone');
     console.log(`  Subscriber local fact survived publisher tombstone ✓`);
   });

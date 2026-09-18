@@ -21,7 +21,7 @@ import { parseLimit, parseSkip, unsupportedPageParam } from '../../util/paginati
 import { pageAcrossMembers } from '../../spaces/page-across-members.js';
 import { countBrain, compareBySort, PROXY_PAGE_CEILING } from '../../brain/query.js';
 import { parseSortParam, SORTABLE_FIELDS, toMongoSort } from '../../brain/list-sort.js';
-import { resolveMemberSpaces, resolveWriteTarget, isProxySpace, isStrictLinkage, findFirstAcrossMembers, collectAcrossMembers } from '../../spaces/proxy.js';
+import { resolveMemberSpaces, resolveWriteTarget, isProxySpace, isStrictLinkage } from '../../spaces/proxy.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
 import { UUID_V4_RE, webhookToken, getSpaceMeta, ttlDaysFromBody, ttlDaysError, dupeCheckOptsFromBody, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
 import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
@@ -225,38 +225,6 @@ entitiesRouter.get('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAut
   for (const mid of members) total += await countBrain(mid, 'entities', filter);
   res.json({ entities: withoutListDiagnostics(page.rows, listDiagnosticsAsked(req)),
     limit, skip, total, truncated: skip + page.rows.length < total });
-});
-
-
-// GET /api/brain/spaces/:spaceId/entities/by-ids?ids=id1,id2,... — batch fetch up to 100 entities by ID
-entitiesRouter.get('/spaces/:spaceId/entities/by-ids', globalRateLimit, requireSpaceAuth, async (req, res) => {
-  const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
-  const raw = req.query['ids'];
-  if (typeof raw !== 'string' || !raw.trim()) {
-    res.status(400).json({ error: '`ids` query parameter required (comma-separated)' });
-    return;
-  }
-  const ids = [...new Set(raw.split(',').map(s => s.trim()).filter(Boolean))].slice(0, 100);
-  if (!ids.length) { res.json({ entities: [] }); return; }
-  const all = await collectAcrossMembers(spaceId, mid => listEntities(mid, { _id: { $in: ids } }, 100));
-  res.json({ entities: all });
-});
-
-
-
-
-// GET /api/brain/spaces/:spaceId/entities/:id
-entitiesRouter.get('/spaces/:spaceId/entities/:id', globalRateLimit, requireSpaceAuth, async (req, res) => {
-  const spaceId = req.params['spaceId'] as string;
-  const id = req.params['id'] as string;
-  const doc = await findFirstAcrossMembers(spaceId, mid => getEntityById(mid, id));
-  if (doc) { res.json(doc); return; }
-  res.status(404).json({ error: 'Entity not found' });
 });
 
 

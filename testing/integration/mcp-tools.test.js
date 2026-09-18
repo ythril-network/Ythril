@@ -38,7 +38,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, patch, delWithBody } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, patch, delWithBody, readRecord } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
 
@@ -806,7 +806,7 @@ describe('MCP brain tools � update_memory / delete_memory / get_stats', () => 
 
     // Effect: re-read via REST and deep-equal the persisted value — the
     // confirmation text alone is satisfied by a handler that persists nothing.
-    const reread = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${storedMemoryId}`);
+    const reread = await readRecord(INSTANCES.a, tokenA, 'general', 'facts', storedMemoryId);
     assert.equal(reread.status, 200, JSON.stringify(reread.body));
     assert.deepEqual(reread.body.tags, ['mcp-updated-tag'], 'updated tags must be persisted');
     assert.equal(reread.body.fact, factText, 'untouched fields must survive the update');
@@ -833,7 +833,7 @@ describe('MCP brain tools � update_memory / delete_memory / get_stats', () => 
       `update_memory still accepts the retired spelling: ${JSON.stringify(result)}`);
 
     // And nothing was written — an accepted-and-dropped field is the outcome this rules out.
-    const reread = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${storedMemoryId}`);
+    const reread = await readRecord(INSTANCES.a, tokenA, 'general', 'facts', storedMemoryId);
     assert.equal(reread.status, 200, JSON.stringify(reread.body));
     assert.equal(reread.body.excludeFromVectorSearch, undefined,
       'a refused argument must not reach the stored record');
@@ -862,7 +862,7 @@ describe('MCP brain tools � update_memory / delete_memory / get_stats', () => 
       space: 'general', id: storedMemoryId, suppressEmbeddings: true,
     });
     assert.ok(!on?.isError, `update_memory rejected suppressEmbeddings: ${JSON.stringify(on)}`);
-    let reread = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${storedMemoryId}`);
+    let reread = await readRecord(INSTANCES.a, tokenA, 'general', 'facts', storedMemoryId);
     assert.equal(reread.body.suppressEmbeddings, true, 'the name must persist');
     assert.equal(reread.body.excludeFromVectorSearch, undefined,
       'the retired key is still being written alongside');
@@ -872,7 +872,7 @@ describe('MCP brain tools � update_memory / delete_memory / get_stats', () => 
       space: 'general', id: storedMemoryId, suppressEmbeddings: false,
     });
     assert.ok(!off?.isError, JSON.stringify(off));
-    reread = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${storedMemoryId}`);
+    reread = await readRecord(INSTANCES.a, tokenA, 'general', 'facts', storedMemoryId);
     assert.equal(reread.body.suppressEmbeddings, false, 'false must be stored, not dropped');
   });
   it('delete_memory with no id returns isError', async () => {
@@ -1895,7 +1895,7 @@ describe('MCP brain tools — per-record TTL (F10)', () => {
     const r = await session.callTool('save_entity', { space: 'general', name: `McpTtlEnt-${RUN}`, type: 'concept', ttlDays: 10 });
     assert.ok(!r?.isError, `upsert_entity error: ${JSON.stringify(r)}`);
     const id = idFrom(r);
-    const g = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/entities/${id}`);
+    const g = await readRecord(INSTANCES.a, tokenA, 'general', 'entities', id);
     assertAboutDaysFromNow((g.body.entity ?? g.body)._expireAt, 10);
     await del(INSTANCES.a, tokenA, `/api/brain/spaces/general/entities/${id}`).catch(() => {});
   });
@@ -1903,7 +1903,7 @@ describe('MCP brain tools — per-record TTL (F10)', () => {
   it('upsert_entity with ttlDays 0 gets no _expireAt', async () => {
     const r = await session.callTool('save_entity', { space: 'general', name: `McpTtlZero-${RUN}`, type: 'concept', ttlDays: 0 });
     const id = idFrom(r);
-    const g = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/entities/${id}`);
+    const g = await readRecord(INSTANCES.a, tokenA, 'general', 'entities', id);
     assert.equal((g.body.entity ?? g.body)._expireAt, undefined);
     await del(INSTANCES.a, tokenA, `/api/brain/spaces/general/entities/${id}`).catch(() => {});
   });
@@ -1914,12 +1914,12 @@ describe('MCP brain tools — per-record TTL (F10)', () => {
 
     const set = await session.callTool('update_entity', { space: 'general', id, ttlDays: 5 });
     assert.ok(!set?.isError, `update_entity ttl-only error: ${JSON.stringify(set)}`);
-    let g = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/entities/${id}`);
+    let g = await readRecord(INSTANCES.a, tokenA, 'general', 'entities', id);
     assertAboutDaysFromNow((g.body.entity ?? g.body)._expireAt, 5);
 
     const clear = await session.callTool('update_entity', { space: 'general', id, ttlDays: 0 });
     assert.ok(!clear?.isError, `update_entity clear error: ${JSON.stringify(clear)}`);
-    g = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/entities/${id}`);
+    g = await readRecord(INSTANCES.a, tokenA, 'general', 'entities', id);
     assert.equal((g.body.entity ?? g.body)._expireAt, undefined);
     await del(INSTANCES.a, tokenA, `/api/brain/spaces/general/entities/${id}`).catch(() => {});
   });

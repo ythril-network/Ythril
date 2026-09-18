@@ -239,16 +239,6 @@ edgesRouter.get('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, asy
 });
 
 
-// GET /api/brain/spaces/:spaceId/edges/:id
-edgesRouter.get('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAuth, async (req, res) => {
-  const spaceId = req.params['spaceId'] as string;
-  const id = req.params['id'] as string;
-  const doc = await findFirstAcrossMembers(spaceId, mid => getEdgeById(mid, id));
-  if (doc) { res.json(doc); return; }
-  res.status(404).json({ error: 'Edge not found' });
-});
-
-
 // DELETE /api/brain/spaces/:spaceId/edges/:id
 edgesRouter.delete('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;

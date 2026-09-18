@@ -21,7 +21,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get } from '../sync/helpers.js';
+import { INSTANCES, post, get, readRecord } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -62,7 +62,10 @@ async function embedTextOf(kind, id, timeoutMs = 30_000) {
   let last = null;
   let polls = 0;
   while (Date.now() < deadline) {
-    const r = await get(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/${COLLECTION_PATH[kind]}/${id}`);
+    // `includeDiagnostics` is what this probe is FOR. `matchedText` is a withheld diagnostic on `filter`,
+    // and the by-id route this replaces returned it unconditionally — so asking for it by name is the
+    // honest version of what the old call was relying on without saying so.
+    const r = await readRecord(INSTANCES.a, token, SPACE, COLLECTION_PATH[kind], id, { includeDiagnostics: true });
     polls++;
     last = r;
     if (r.status === 200 && r.body?.matchedText != null) return r.body;

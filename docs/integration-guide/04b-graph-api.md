@@ -50,41 +50,35 @@ Tags are merged (deduplicated union), properties are shallow-merged (new keys ad
 
 ---
 
-### Find Entities by Name
+### Read one entity, or a set of them, by id
+
+There is no `GET .../entities/:id`, and there has not been since 5.0. One record is a predicate over one
+collection, so it is `filter` — the same call, the same envelope and the same refusals as a page of them:
 
 ```http
-GET /api/brain/spaces/:spaceId/entities/by-name?name=Kubernetes
+POST /api/brain/filter
+Content-Type: application/json
+
+{ "space": "work", "collection": "entities", "filter": { "_id": "8f3c…" }, "limit": 1 }
 ```
 
-**Response** `200`:
+**A record that is not there is `200` with `results: []`, not `404`.** A predicate matching nothing and a
+record not existing are the same event to a filter. Branch on `results.length`, not on the status.
+
+A SET of ids is `{"_id": {"$in": [...]}}`, which is what `entities/by-ids` did — unknown ids are absent
+from `results`, as before. Keep your own cap; the route stopped at 100 and that is still a sensible number.
+Matching a NAME is a predicate too: `{"name": "Kubernetes"}` is exact, and the sibling argument
+`{"search": "kuber"}` is the case-insensitive substring across the searchable fields.
+
+**A CHRONO entry is the exception, and it is the one that costs you if you miss it.** Its `status` is
+DERIVED on read — an entry past its due moment is `overdue` whatever it was stored as, unless its type says
+a passed date means nothing. The deleted route did that for you; `filter` returns the STORED value unless
+asked, because a predicate has to be able to match what is on disk. Send `deriveStatus: true` for what the
+old route gave you — it is refused on any other collection rather than ignored:
 
 ```json
-{
-  "entities": [ ... ]
-}
+{ "space": "work", "collection": "chrono", "filter": { "_id": "8f3c…" }, "limit": 1, "deriveStatus": true }
 ```
-
-Returns entities whose name matches the query as a **case-insensitive substring** (not an exact match), regardless of type, **capped at 20 results**. Multiple entities may share a name (name is not a unique key).
-
----
-
-### Get Entities by IDs
-
-```http
-GET /api/brain/spaces/:spaceId/entities/by-ids?ids=id1,id2,id3
-```
-
-Batch-fetch entities by ID. `ids` is a comma-separated list (required — `400` if missing), deduplicated and capped at **100** IDs per call. Returns `{ "entities": [ ... ] }`; unknown IDs are simply absent from the result.
-
----
-
-### Get an Entity by ID
-
-```http
-GET /api/brain/spaces/:spaceId/entities/:id
-```
-
-Returns the single entity, or `404` if no entity with that ID exists in the space. Edges and chrono entries have the same single-doc shape — `GET /api/brain/spaces/:spaceId/edges/:id` and `GET /api/brain/spaces/:spaceId/chrono/:id`.
 
 ---
 

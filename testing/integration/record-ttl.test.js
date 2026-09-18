@@ -20,7 +20,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, delWithBody, patch } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, delWithBody, patch, readRecord } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -58,7 +58,7 @@ describe('record TTL (F10)', () => {
     assert.equal(w.status, 201, JSON.stringify(w.body));
     assertAboutDaysFromNow(w.body._expireAt, 30);
     // surfaces on read too
-    const g = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${w.body._id}`);
+    const g = await readRecord(INSTANCES.a, tokenA, 'general', 'facts', w.body._id);
     assertAboutDaysFromNow(g.body._expireAt, 30);
     await del(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${w.body._id}`).catch(() => {});
   });
@@ -167,19 +167,19 @@ describe('record TTL (F10)', () => {
     // omitted ttlDays on update must NOT re-slide the existing expiry
     const u1 = await patch(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${id}`, { fact: `ttl-upd-${RUN}-edited` });
     assert.equal(u1.status, 200, JSON.stringify(u1.body));
-    const g1 = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${id}`);
+    const g1 = await readRecord(INSTANCES.a, tokenA, 'general', 'facts', id);
     assert.equal(new Date(g1.body._expireAt).getTime(), new Date(firstExpiry).getTime(), 'expiry must be unchanged');
 
     // ttlDays: 0 clears
     const u2 = await patch(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${id}`, { ttlDays: 0 });
     assert.equal(u2.status, 200, JSON.stringify(u2.body));
-    const g2 = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${id}`);
+    const g2 = await readRecord(INSTANCES.a, tokenA, 'general', 'facts', id);
     assert.equal(g2.body._expireAt, undefined);
 
     // ttlDays > 0 re-sets
     const u3 = await patch(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${id}`, { ttlDays: 5 });
     assert.equal(u3.status, 200, JSON.stringify(u3.body));
-    const g3 = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${id}`);
+    const g3 = await readRecord(INSTANCES.a, tokenA, 'general', 'facts', id);
     assertAboutDaysFromNow(g3.body._expireAt, 5);
 
     await del(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${id}`).catch(() => {});

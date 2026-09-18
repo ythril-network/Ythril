@@ -559,6 +559,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   beside it, which is exactly why this route accepted any authenticated token until 4.4. The name was
   wrong, so the guard was wrong, and no gate could see it.
 
+### Removed
+
+- **The five `GET` routes that read ONE brain record are gone. Read a record through `filter`.** `B-9`
+  step 3a, and a break: `GET /api/brain/spaces/:spaceId/{facts,entities,edges,chrono}/:id` and
+  `GET .../entities/by-ids` all answered what a predicate over one collection answers, with their own
+  response shape, their own refusals and their own 404.
+
+  ```json
+  POST /api/brain/filter
+  { "space": "work", "collection": "entities", "filter": { "_id": "8f3c…" }, "limit": 1 }
+  ```
+
+  A set of ids is the same call with `$in`, which is what `entities/by-ids` did; unknown ids are absent
+  from `results` exactly as they were absent from `entities`.
+
+  **The one behaviour that CHANGED, and it is the reason this is a `Removed` rather than a rename: a
+  record that is not there is `200` with `results: []`, not `404`.** A predicate matching nothing and a
+  record not existing are the same event to a filter, and pretending otherwise would mean `filter`
+  answering 404 for an ordinary empty page. Branch on `results.length`.
+
+  **Two things the routes DID after the query, which a straight swap drops silently.** Both are
+  identical on most records and wrong on exactly the record somebody is looking at:
+
+  | | the route | `filter` |
+  |---|---|---|
+  | a chrono `status` | derived on read | the STORED value unless `deriveStatus: true` |
+  | `matchedText`, `embeddingModel` | returned by a by-id read, withheld by the list beside it | withheld unless `includeDiagnostics: true` |
+
+  Send `deriveStatus: true` on a chrono read to get what the route gave you; it is refused on any other
+  collection rather than ignored. The diagnostics default is now the same on both shapes, which the two
+  routes never were.
+
+  **A fixture bug fell out of this and it is worth naming, because it is the section rule one level up.**
+  The duplicate-scanner suite waited for its records to be index-visible through a helper that took a flat
+  list of four ids and looked at the first two. So it proved one PAIR was visible and concluded about both
+  — CI then failed with `expected >=2 candidates, got 1`, on exactly the pair nobody had waited for. It
+  takes a list of PAIRS now, so a caller cannot hand it two and have one silently ignored.
+
+  Nothing an operator does in the UI changed: the client was already reading everything else through
+  `filter` and now reads these the same way.
+
 ### Fixed
 
 - **`filter` matched a chrono `status` against the STORED value while the list route matched the DERIVED

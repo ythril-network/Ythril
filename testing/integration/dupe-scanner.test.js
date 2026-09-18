@@ -23,7 +23,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, waitForIndexed as waitForRecallable, waitForSimilarityIndex } from '../sync/helpers.js';
+import { INSTANCES, post, get, waitForSimilarityIndex, readRecord } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -78,9 +78,26 @@ async function createEntity(space, name, description) {
  *
  * A pair is the right unit for this file anyway: every case needs BOTH records visible to the index, which
  * is exactly what a similarity search proves.
+ *
+ * ## It takes PAIRS, and that is the fix rather than a detail
+ *
+ * This read `(space, ids)` and looked at `ids[0]` and `ids[1]`. The call site passed FOUR ids - the vault
+ * pair and the telemetry pair - so the wait proved the vault pair was index-visible and said nothing at all
+ * about the telemetry one. CI then failed with `expected >=2 candidates, got 1`: exactly the pair nobody
+ * had waited for, and the merge case below died with it because its candidate was the missing one.
+ *
+ * A flat list is what allowed that. A caller cannot hand this two pairs and have one silently ignored when
+ * the parameter IS a list of pairs, so the shape is the guard - see `a gate concludes about MORE than it
+ * checks` in CLAUDE.md, which is the same failure one level up.
  */
-const waitForIndexed = (space, ids, timeoutMs) =>
-  waitForSimilarityIndex(INSTANCES.a, token(), space, ids[0], 'entity', ids[1], timeoutMs);
+const waitForPairsIndexed = async (space, pairs, timeoutMs) => {
+  // A floor, because an empty list would make this resolve instantly and every case after it race the index.
+  assert.ok(pairs.length > 0, 'waitForPairsIndexed was given no pairs, so it would wait for nothing');
+  for (const [a, b] of pairs) {
+    assert.ok(a && b, `a pair needs both ids: ${JSON.stringify([a, b])}`);
+    await waitForSimilarityIndex(INSTANCES.a, token(), space, a, 'entity', b, timeoutMs);
+  }
+};
 
 async function scan(space) {
   return raw('POST', `/api/duplicates/scan?space=${space}`);
@@ -113,8 +130,8 @@ before(async () => {
   ids.m2 = await createEntity(SPACE_MERGE, `Billing Ledgers ${RUN}`, 'Billing ledger service recording invoices and payment reconciliation for customer accounts daily');
 
   if (embeddingAvailable) {
-    await waitForIndexed(SPACE, [ids.v1, ids.v2, ids.t1, ids.t2]);
-    await waitForIndexed(SPACE_MERGE, [ids.m1, ids.m2]);
+    await waitForPairsIndexed(SPACE, [[ids.v1, ids.v2], [ids.t1, ids.t2]]);
+    await waitForPairsIndexed(SPACE_MERGE, [[ids.m1, ids.m2]]);
   }
 });
 
@@ -225,8 +242,8 @@ describe('Duplicate scanner — flag + review', () => {
     assert.equal(m.status, 200, JSON.stringify(m.body));
     assert.equal(m.body.status, 'merged');
     // One of the two entities is now gone.
-    const e1 = await raw('GET', `/api/brain/spaces/${SPACE}/entities/${ids.t1}`);
-    const e2 = await raw('GET', `/api/brain/spaces/${SPACE}/entities/${ids.t2}`);
+    const e1 = await readRecord(INSTANCES.a, token(), SPACE, 'entities', ids.t1);
+    const e2 = await readRecord(INSTANCES.a, token(), SPACE, 'entities', ids.t2);
     assert.ok((e1.status === 404) !== (e2.status === 404), 'exactly one telemetry entity survives');
     const all = await listDupes(SPACE, 'all');
     const resolved = all.find(c => c.id === tPair.id);
@@ -289,8 +306,8 @@ describe('Duplicate scanner — automerge rule', () => {
     assert.equal(s.status, 200, JSON.stringify(s.body));
 
     // Exactly one billing entity should survive the auto-merge.
-    const e1 = await raw('GET', `/api/brain/spaces/${SPACE_MERGE}/entities/${ids.m1}`);
-    const e2 = await raw('GET', `/api/brain/spaces/${SPACE_MERGE}/entities/${ids.m2}`);
+    const e1 = await readRecord(INSTANCES.a, token(), SPACE_MERGE, 'entities', ids.m1);
+    const e2 = await readRecord(INSTANCES.a, token(), SPACE_MERGE, 'entities', ids.m2);
     assert.ok((e1.status === 404) !== (e2.status === 404), 'exactly one billing entity survives auto-merge');
 
     const all = await listDupes(SPACE_MERGE, 'all');

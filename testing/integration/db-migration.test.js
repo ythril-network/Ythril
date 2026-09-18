@@ -20,7 +20,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, get, post, del, reqJson } from '../sync/helpers.js';
+import { INSTANCES, get, post, del, reqJson, readRecord } from '../sync/helpers.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -401,7 +401,7 @@ describe('Backup + Restore — round-trip', () => {
     assert.equal(delR.status, 204, `delete fact: ${JSON.stringify(delR.body)}`);
 
     // 4. Verify memory is gone
-    const goneR = await reqJson(BASE, adminToken, `/api/brain/spaces/general/facts/${memId}`);
+    const goneR = await readRecord(BASE, adminToken, 'general', 'facts', memId);
     assert.equal(goneR.status, 404, 'memory should be gone after delete');
 
     // 5. Restore from the backup (auto-manages maintenance)
@@ -410,7 +410,7 @@ describe('Backup + Restore — round-trip', () => {
     assert.equal(restoreR.body.ok, true, JSON.stringify(restoreR.body));
 
     // 6. Verify memory is back
-    const backR = await reqJson(BASE, adminToken, `/api/brain/spaces/general/facts/${memId}`);
+    const backR = await readRecord(BASE, adminToken, 'general', 'facts', memId);
     assert.equal(backR.status, 200, `memory should be back after restore: ${JSON.stringify(backR.body)}`);
     const restoredFact = backR.body.fact ?? backR.body.content;
     assert.equal(restoredFact, memName, `memory content mismatch: ${JSON.stringify(backR.body)}`);

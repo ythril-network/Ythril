@@ -156,6 +156,35 @@ describe('BrainApi — list sort, filters and freetext reach `filter` (2b)', () 
     flush(r);
   });
 
+  it('a by-id read goes through `filter` too, and a chrono one DERIVES its status', () => {
+    /*
+     * `B-9` step 3a deleted `GET .../<collection>/:id`. Two things had to survive the move and both are
+     * silent when dropped: a chrono status is derived on read, and a record that is not there has to reach
+     * the caller's error path rather than its success path with `undefined` in it.
+     */
+    api.getEntity('work', 'e-1').subscribe();
+    const e = expectFilter('entities');
+    expect(e.body['filter']).toEqual({ _id: 'e-1' });
+    expect('deriveStatus' in e.body).toBe(false);
+    e.r.flush({ results: [{ _id: 'e-1' }], total: 1, limit: 1, skip: 0, truncated: false });
+
+    api.getChrono('work', 'c-1').subscribe();
+    const c = expectFilter('chrono');
+    expect(c.body['deriveStatus']).toBe(true);
+    c.r.flush({ results: [{ _id: 'c-1' }], total: 1, limit: 1, skip: 0, truncated: false });
+  });
+
+  it('and a record that is not there reaches the ERROR path, not the success path', () => {
+    // The routes answered 404. `filter` answers an empty page, and a caller reading `results[0]` would draw
+    // its panel from `undefined` — which is why the absent case throws inside the service.
+    let err: unknown = null;
+    let value: unknown = 'untouched';
+    api.getEntity('work', 'gone').subscribe({ next: v => { value = v; }, error: e => { err = e; } });
+    const { r } = expectFilter('entities');
+    r.flush({ results: [], total: 0, limit: 1, skip: 0, truncated: false });
+    expect(err).toBeTruthy();
+    expect(value).toBe('untouched');
+  });
   it('the answer is re-keyed for the caller, and the paging fields survive', () => {
     // A pager that lost `total` would page for ever; a tab that got `results` would render nothing.
     let seen: { entities?: unknown[]; total?: number } = {};

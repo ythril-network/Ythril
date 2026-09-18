@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, triggerSync, waitFor } from './helpers.js';
+import { INSTANCES, post, get, del, triggerSync, waitFor, readRecord } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -81,7 +81,7 @@ describe('Conflict detection (concurrent writes)', () => {
       console.log(`  Fork created: forkId=${syncPush.body.forkId} ✓`);
       if (syncPush.body.forkId) injectedMemIds.push(syncPush.body.forkId);
       // Verify the fork exists by direct ID lookup (avoids pagination limits)
-      const forkResp = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${syncPush.body.forkId}`);
+      const forkResp = await readRecord(INSTANCES.a, tokenA, 'general', 'facts', syncPush.body.forkId);
       assert.equal(forkResp.status, 200, `Fork memory not found: ${JSON.stringify(forkResp.body)}`);
       const fork = forkResp.body;
       assert.equal(fork.forkOf, memId);
@@ -124,7 +124,7 @@ describe('Conflict detection (concurrent writes)', () => {
     console.log(`  Higher-seq overwrite: status=${resp.body.status} ✓`);
 
     // Verify the local doc was updated
-    const mem = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${memId}`);
+    const mem = await readRecord(INSTANCES.a, tokenA, 'general', 'facts', memId);
     assert.equal(mem.body.fact, 'Updated fact with higher seq');
     console.log(`  Local doc updated to new version ✓`);
   });
@@ -168,7 +168,7 @@ describe('Conflict detection (concurrent writes)', () => {
     console.log(`  Resurrection correctly blocked by tombstone ✓`);
 
     // Verify the doc is still absent
-    const check = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${memId}`);
+    const check = await readRecord(INSTANCES.a, tokenA, 'general', 'facts', memId);
     assert.equal(check.status, 404);
     console.log(`  Memory correctly absent after resurrection attempt ✓`);
   });

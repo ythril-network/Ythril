@@ -21,7 +21,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, patch } from '../sync/helpers.js';
+import { INSTANCES, post, get, patch, readRecord } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -117,7 +117,7 @@ describe('If-Match on brain records — the write is conditional', () => {
         `${t.name}: the 412 did not hand back a usable seq to retry with`);
 
       // The promise is about what did not happen, so read it back rather than trusting the status.
-      const after = await get(A(), tok, url(t, rec.id));
+      const after = await readRecord(A(), tok, 'general', t.collection, rec.id);
       assert.equal(t.read(after.body), t.read(first.body),
         `${t.name}: the refused write changed the record anyway`);
     }
@@ -176,7 +176,7 @@ describe('If-Match on brain records — the forms of the header', () => {
       const r = await patch(A(), tok, url(t, rec.id), t.edit(1), ifMatch('not-a-seq'));
       assert.equal(r.status, 400, `${t.name}: a malformed If-Match was not refused: ${JSON.stringify(r.body)}`);
 
-      const after = await get(A(), tok, url(t, rec.id));
+      const after = await readRecord(A(), tok, 'general', t.collection, rec.id);
       assert.equal(after.body.seq, rec.seq, `${t.name}: the rejected request wrote anyway`);
     }
   });

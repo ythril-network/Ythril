@@ -199,6 +199,47 @@ export class BrainApi {
   }
 
   /**
+   * ONE record by id, through the same door as a page of them.
+   *
+   * ## Why this exists rather than four `filter` calls written out
+   *
+   * `B-9` step 3 deleted `GET .../<collection>/:id` on all four collections. Each was `findOne({_id})` and
+   * a 404, which is this predicate with a collection — and four hand-written copies would have been four
+   * chances to drop the guard below.
+   *
+   * ## The guard, which is the whole reason this is a module
+   *
+   * **A route answered `404` for a record that is not there; `filter` answers an empty page.** A caller
+   * that merely reads `results[0]` therefore emits `undefined` down its SUCCESS path, and every one of
+   * these callers is a component that draws a panel from what it receives. So the absent case ERRORS here,
+   * which is what the routes did, and the `catchError(() => of(null))` the callers already carry keeps
+   * working untouched.
+   *
+   * That is the forgettable half: the happy path is identical either way, so a copy that omitted it would
+   * pass every test written about a record that exists.
+   *
+   * ## And the SECOND guard, which the integration suite found before a user did
+   *
+   * **A chrono status is derived on read, and `filter` returns the stored one unless asked.** The route
+   * derived it: an entry past its due moment read `overdue` whatever it was stored as, unless its type
+   * says a passed date means nothing. Without `deriveStatus` here, the graph panel and the reference
+   * picker would start showing `active` for an overdue entry — identical for every entry whose moment has
+   * not passed, and wrong for exactly the one somebody is looking at.
+   */
+  private filterOne<T>(spaceId: string, collection: QueryCollection, id: string): Observable<T> {
+    return this.http
+      .post<{ results: T[] }>('/api/brain/filter', {
+        space: spaceId, collection, filter: { _id: id }, limit: 1,
+        ...(collection === 'chrono' ? { deriveStatus: true } : {}),
+      })
+      .pipe(map(r => {
+        const doc = r.results?.[0];
+        if (!doc) throw new Error(`${collection} '${id}' not found`);
+        return doc;
+      }));
+  }
+
+  /**
    * The sort pair, as `filter` takes it. Same field names and the same allowlist the routes used — it
    * is the same parser on the server, which is why nothing here has to translate.
    */
@@ -375,26 +416,37 @@ export class BrainApi {
       .pipe(map(r => ({ entities: r.results ?? [] })));
   }
 
+  /**
+   * Entities for a set of ids, in one request.
+   *
+   * The `$in` is why this is not a loop over `filterOne`: a picker resolving twenty references would
+   * otherwise make twenty round trips, and the route it replaces made one. The 100-id ceiling was the
+   * route's and is kept here — an unbounded `$in` is a page with no limit on it.
+   */
   getEntitiesByIds(spaceId: string, ids: string[]): Observable<{ entities: Entity[] }> {
     if (!ids.length) return new Observable(o => { o.next({ entities: [] }); o.complete(); });
-    const params = new HttpParams().set('ids', ids.join(','));
-    return this.http.get<{ entities: Entity[] }>(`/api/brain/spaces/${spaceId}/entities/by-ids`, { params });
+    const unique = [...new Set(ids)].slice(0, 100);
+    return this.http
+      .post<{ results: Entity[] }>('/api/brain/filter', {
+        space: spaceId, collection: 'entities', filter: { _id: { $in: unique } }, limit: unique.length,
+      })
+      .pipe(map(r => ({ entities: r.results ?? [] })));
   }
 
   getEntity(spaceId: string, id: string): Observable<Entity> {
-    return this.http.get<Entity>(`/api/brain/spaces/${spaceId}/entities/${id}`);
+    return this.filterOne<Entity>(spaceId, 'entities', id);
   }
 
   getEdge(spaceId: string, id: string): Observable<Edge> {
-    return this.http.get<Edge>(`/api/brain/spaces/${spaceId}/edges/${id}`);
+    return this.filterOne<Edge>(spaceId, 'edges', id);
   }
 
   getMemory(spaceId: string, id: string): Observable<Fact> {
-    return this.http.get<Fact>(`/api/brain/spaces/${spaceId}/facts/${id}`);
+    return this.filterOne<Fact>(spaceId, 'facts', id);
   }
 
   getChrono(spaceId: string, id: string): Observable<ChronoEntry> {
-    return this.http.get<ChronoEntry>(`/api/brain/spaces/${spaceId}/chrono/${id}`);
+    return this.filterOne<ChronoEntry>(spaceId, 'chrono', id);
   }
 
   /**

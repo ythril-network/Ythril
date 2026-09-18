@@ -119,9 +119,11 @@ describe('both doors are adapters over one function', () => {
  * client to `POST /api/<tool-name>` first.
  */
 const NOT_YET_ONE_SHAPE = new Map(Object.entries({
-  filter: 'B-9. Nine per-collection GETs take conveniences (`type`, `tag`, `search`, `entity`) as a query '
-    + 'string; `POST /api/brain/filter` takes a predicate as a body. Closing it means the client\'s four '
-    + 'list methods build predicates — the components do not change, the service is the seam.',
+  filter: 'B-9 step 3b. The five BY-ID reads are gone (3a); what is left is the five collection LIST GETs '
+    + 'taking conveniences as a query string, and `POST /api/brain/filter` taking the same body as the '
+    + 'canonical `POST /api/filter` and answering a different ENVELOPE. The client moved onto `filter` in '
+    + '2b, so the lists are a test-conversion away; the envelope is a decision, because changing it moves '
+    + 'every integrator off `{results, total}` and onto `{ok, text, data}`.',
   list_tokens: 'B-9. `GET /api/tokens` lists tokens; `GET .../token-access` answers which tokens reach one '
     + 'space. Possibly two questions rather than one capability — decide that before merging them.',
   network_sync: 'B-9. By network id and by peer id. One route taking either is the likely answer, and it '
