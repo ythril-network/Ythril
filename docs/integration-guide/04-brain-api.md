@@ -111,9 +111,22 @@ POST /api/brain/spaces/:spaceId/facts
 Every create door — `facts`, `chrono`, `entities`, and their MCP twins — takes the relationships the
 record needs alongside the record itself. Two fields, and they behave differently on purpose.
 
-**`linkEntities`, `linkFacts`, `linkChronos`, `linkFiles`** create LINK records. A link is unlabelled and
-which way it runs follows from the kinds at its ends, so a bare id is the whole thing. `linkFiles` takes
+**`linkEntities`, `linkFacts`, `linkChronos`, `linkFiles`** create LINKS. A link is unlabelled and which
+way it runs follows from the kinds at its ends, so a bare id is the whole thing. `linkFiles` takes
 space-relative paths; the other three take UUIDs.
+
+> **Fixed in 5.0: this used to be silently lost on a space that had not been converted.** A link is stored
+> in two shapes during the 4.x transition — as a record in the space's `links` collection, and as the
+> array on the record itself — and which one a space is READ through depends on whether the link
+> conversion has run for it. That conversion runs at boot, so a space created since the last restart is
+> still read through the arrays. These fields wrote only the record, so on such a space the call answered
+> `201` and the link was reached by nothing: not by `traverse`, not by a graph-augmented `recall`, not by
+> the delete guard. **The same call therefore worked or did not depending on whether the instance had
+> rebooted since the space was made**, which is why it went unreported for so long.
+>
+> They now write whichever shape the space is read through, which is exactly what `entityIds` and its
+> siblings always did. Nothing about the request changed — if you worked around this by sending
+> `entityIds` instead, that still works and still means the same thing.
 
 ```json
 {

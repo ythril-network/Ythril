@@ -706,6 +706,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`linkEntities` and its three siblings were accepted with a `201` and the link was reached by
+  nothing** — on any space created since the instance last restarted.
+
+  A link is stored in two shapes during the 4.x transition: a record in the space's `links` collection,
+  and the array on the record itself. `usesLinkRecords` picks which shape a space is READ through, and
+  `link-adjacency.ts` calls it *"the ONLY place that decides"* — which was true of readers and of nothing
+  else. The writer wrote a link record and stopped, so on a space still read through the arrays it wrote
+  a row every reader looks away from: not `traverse`, not a graph-augmented `recall`, not the delete
+  guard.
+
+  **The conversion that flips a space runs at BOOT**, so a space created afterwards keeps the array path
+  until the next restart. The same call therefore worked or silently lost the link depending on when the
+  instance was last rebooted — which is why it went unreported: a reporter could not reproduce it and a
+  responder could.
+
+  **It also meant the two spellings swapped validity across a line a caller cannot see**: `entityIds`
+  worked and `linkEntities` did not on an unconverted space, and a converted space refuses `entityIds`
+  outright. And `linkEntities` is the spelling the MCP schemas publish, so an agent reading the contract
+  was told to use the one that did nothing.
+
+  The writer now resolves the shape through the same selector every reader uses. **Nothing about the
+  request changed**, and a caller who worked around this with `entityIds` is unaffected.
+
+  **Not fixed by making new spaces converted**, which was the first idea and contradicts a recorded
+  decision: the conversion is *"a performance and consistency upgrade rather than a correctness
+  prerequisite"*, so an unconverted space is a supported state and the writer has to work on one.
+
 - **An edge you drew to a fact, chrono entry or file was stored and reached by nothing.** An edge declares
   the kind at each end, the writer REFUSES a kind that does not match the record, and the edge is then
   validated, stored, hashed and replicated — so `supersedes` between two claims is a real edge that
