@@ -47,10 +47,25 @@ async function createEdge(from, to, label, props = {}) {
   return r.body;
 }
 
+/*
+ * `linkEntities`, NOT `entityIds`.
+ *
+ * `SPACE` is `general`, which the boot conversion marks `completeLinkage` — and a converted space
+ * REFUSES the array field outright. This helper asserted 201 and got a 400 naming the link migration.
+ * `linkEntities` works on a converted space and an unconverted one alike.
+ */
 async function createMemory(fact, entityIds, tags = []) {
-  const r = await post(A, token(), `/api/brain/spaces/${SPACE}/facts`, { fact, entityIds, tags });
+  const r = await post(A, token(), `/api/brain/spaces/${SPACE}/facts`, { fact, linkEntities: entityIds, tags });
   assert.equal(r.status, 201, `Memory create failed: ${JSON.stringify(r.body)}`);
   return r.body;
+}
+
+/** Which entities a record is linked to, read through the shape the space actually stores. */
+async function linkedEntityIds(recordId) {
+  const r = await post(A, token(), '/api/filter',
+    { space: SPACE, collection: 'links', filter: { from: recordId } });
+  assert.ok(r.status < 400, `link read failed: ${JSON.stringify(r.body)}`);
+  return (r.body?.data?.results ?? []).filter(l => l.toKind === 'entity').map(l => l.to);
 }
 
 async function merge(survivorId, absorbedId, resolutions = undefined) {
@@ -242,10 +257,21 @@ describe('Entity Merge — integration', () => {
 
     await merge(survivor._id, absorbed._id);
 
-    const m = await readRecord(A, token(), SPACE, 'facts', mem._id);
-    assert.equal(m.status, 200);
-    assert.ok(m.body.entityIds.includes(survivor._id), 'Memory entityIds should contain survivor');
-    assert.ok(!m.body.entityIds.includes(absorbed._id), 'Memory entityIds should NOT contain absorbed');
+    /*
+     * Read through the LINK RECORDS, because that is where this space keeps them.
+     *
+     * The case asserted `entityIds` on the record, which a converted space leaves empty — so it was
+     * asserting which side of the link migration the space happened to be on. Worse, it passed for
+     * years while the thing it names was broken: `merge.ts` rewrites the arrays and has no reference to
+     * the links collection at all, so on a converted space the link stayed pointed at the entity the
+     * merge had just DELETED.
+     */
+    const linked = await linkedEntityIds(mem._id);
+    assert.ok(linked.includes(survivor._id),
+      `the link must now point at the survivor: ${JSON.stringify(linked)}`);
+    assert.ok(!linked.includes(absorbed._id),
+      'the link still points at the absorbed entity, which the merge deleted — a dangling reference '
+      + `that replicates: ${JSON.stringify(linked)}`);
   });
 
   it('self-merge is rejected with 400', async () => {
