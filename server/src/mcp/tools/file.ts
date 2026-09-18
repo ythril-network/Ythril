@@ -41,7 +41,8 @@ export const read_fileTool: ToolHandler = {
       try { content = await readFile(mid, filePath); break; } catch { /* try next */ }
     }
     if (content === null) throw new Error(`File not found: ${filePath}`);
-    return { content: [{ type: 'text' as const, text: content }] };
+    return { content: [{ type: 'text' as const, text: content }],
+      structuredContent: { path: filePath, content } };
   },
 };
 
@@ -124,6 +125,7 @@ export const write_fileTool: ToolHandler = {
       + (wfQuota.softBreached ? `\n⚠️ Storage warning: ${wfQuota.warning}` : '');
     return {
       content: [{ type: 'text' as const, text: wfText }],
+      structuredContent: { path: filePath, sha256, sizeBytes, ...(wfQuota.softBreached ? { warning: wfQuota.warning } : {}) },
     };
   },
 };
@@ -231,7 +233,8 @@ export const delete_fileTool: ToolHandler = {
     // Full cascade (blob + tombstone + meta + job + artifacts + usage + webhook) — shared with the REST
     // DELETE route and the TTL sweep so every delete path cleans up identically.
     await deleteFileCascade(wt.target, filePath, ctx.actor);
-    return { content: [{ type: 'text' as const, text: `Deleted '${filePath}'.` }] };
+    return { content: [{ type: 'text' as const, text: `Deleted '${filePath}'.` }],
+      structuredContent: { path: filePath, deleted: true } };
   },
 };
 
@@ -269,7 +272,8 @@ export const create_dirTool: ToolHandler = {
     const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined);
     if (!wt.ok) throw new Error(wt.error);
     await createDir(wt.target, dirPath);
-    return { content: [{ type: 'text' as const, text: `Directory '${dirPath}' created.` }] };
+    return { content: [{ type: 'text' as const, text: `Directory '${dirPath}' created.` }],
+      structuredContent: { path: dirPath, created: true } };
   },
 };
 
@@ -342,7 +346,8 @@ export const move_fileTool: ToolHandler = {
     });
     await writeFileTombstones(wt.target, oldPaths);
     emitWebhookEvent({ event: 'file.updated', spaceId: wt.target, entry: { path: dst, previousPath: src }, ...(ctx.actor ?? {}) });
-    return { content: [{ type: 'text' as const, text: `Moved '${src}' → '${dst}'.` }] };
+    return { content: [{ type: 'text' as const, text: `Moved '${src}' → '${dst}'.` }],
+      structuredContent: { from: src, to: dst } };
   },
 };
 

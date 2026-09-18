@@ -153,6 +153,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The graph guide's `Links` section is its own page, `04g-links-api.md`.** `04b-graph-api.md` sat on the
+  900-line cap, and the last three changes to it each ended in compressing a paragraph to make room —
+  which is the cap doing its job and being answered the wrong way. Links is a distinct capability with its
+  own conversion story, its own pre-flight and its own lifecycle, so it is the boundary.
+
+  Every line was MOVED by line range, never retyped, and the move asserts a conserved multiset of prose
+  lines — an earlier hand-split of this guide lost a twenty-line block mid-word and shipped the remains
+  for months. Nothing was reworded. The `## Links` heading is kept, so an inbound `#links` anchor still
+  resolves; `#traverse-graph`, which `04a` links to, stays on the graph page.
+
 - **A token that reaches exactly ONE space no longer has to name it.** `space` is optional on every
   writing tool when the calling token's accessible-space list has one member — `save_fact({fact: "…"})`
   lands. With two or more it stays required, and the refusal lists the spaces you can choose between.
@@ -715,6 +725,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   chain of `supersedes` stopped at one hop would answer a fragment and call it the neighbourhood.
 
   **A walk may now start from a fact or a chrono entry**, not only an entity.
+
+- **Almost every tool answered with no structured half, so `data` was `null` over HTTP and
+  `structuredContent` was absent over MCP.** Thirty-three successful returns across eleven tool files put
+  the whole answer in the text half and nothing beside it. A client that surfaces the structured form —
+  several do — got `null` and had to parse prose to recover a result it had just asked for.
+
+  **This is the defect the canary operator reported against `query`, answered on the tool they named.**
+  Nothing swept the siblings, and the sweep is where the cost was.
+
+  It was two classes, and the second is the expensive one. `recall`, `similar`, `graph_traverse`,
+  `save_bulk`, `save_link`, `delete_entity_preview`, `list_spaces`, `space_stats`, `space_meta` and
+  `network_peers` already built an object and dropped it — `graph_traverse` answered
+  `{"ok":true,"text":"{\"nodes\":[…]}","data":null}` throughout. **Every write tool then had the same
+  defect wearing a sentence**: `save_entity` answered `Entity 'Ada' (person) upserted (ID 9f2…).` and
+  nothing else, so getting the id of a record you had just written meant a regular expression over
+  English. Creates, updates, deletes, merges, file writes and `network_sync` were all in that state.
+
+  **What a tool carries now is the record it wrote, or the identity of what it acted on** — one rule, not
+  a decision per tool. A delete answers `{"_id": …, "deleted": true}`; a merge answers the survivor and
+  the absorbed id; `move_file` answers `{"from": …, "to": …}`.
+
+  Where the answer is naturally an array the structured half NAMES it, because `structuredContent` must
+  be an object: `list_spaces` carries `{"spaces": […]}` and `network_peers` carries `{"peers": […]}`.
+  **The text half of both is still the bare array**, so a caller that indexes it is unaffected —
+  `network_peers` has a recorded refusal of an envelope on exactly that ground, and it governs the text
+  half only.
+
+- **A gate had claimed this rule and could not see it.** `mcp-structured-content-carries-its-payload`
+  refuses a `structuredContent` built from metadata alone; its subject is every `structuredContent: { … }`
+  literal, so a return carrying none matched nothing and sat outside the sweep. It was green throughout
+  while refusing the *lesser* form of the same defect — metadata with no answer — and blind to the greater
+  one. Its replacement asserts presence instead, and **the parity test was wrong in the same direction**:
+  it compared `data` across the two doors with `deepEqual`, which passes for two nulls, so it reported
+  agreement about an answer neither door gave.
 
 - **`filter` refused a bad `skip` and quietly ignored a bad `limit`.** One endpoint, one question — where
   does this page start and how big is it — and two answers to a value it cannot use. `skip: "abc"` was a

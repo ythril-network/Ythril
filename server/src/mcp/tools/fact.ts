@@ -190,6 +190,7 @@ export const save_factTool: ToolHandler = {
       + (warnings.length > 0 ? `\n${warnings.join('\n')}` : '');
     return {
       content: [{ type: 'text' as const, text: remText }],
+      structuredContent: { ...mem },
     };
   },
 };
@@ -359,6 +360,7 @@ export const update_factTool: ToolHandler = {
     if (!updated) throw new Error(`Fact '${id}' not found`);
     return {
       content: [{ type: 'text' as const, text: `Fact updated (ID ${updated._id}, seq ${updated.seq}).` }],
+      structuredContent: { ...updated },
     };
   },
 };
@@ -424,6 +426,7 @@ export const delete_factTool: ToolHandler = {
     if (!deleted) throw new Error(`Fact '${id}' not found`);
     return {
       content: [{ type: 'text' as const, text: `Fact deleted (ID ${id}).` }],
+      structuredContent: { _id: id, deleted: true },
     };
   },
 };

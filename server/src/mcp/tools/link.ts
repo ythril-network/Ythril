@@ -101,12 +101,15 @@ export const save_linkTool: ToolHandler = {
     }
 
     const link = await addLink(wt.target, from, fromKind, to, toKind, ctx.actor);
+    // Built once and carried in BOTH halves — see the note on `save_edge`'s return.
+    const written = { ...link, label: linkLabel(link.fromKind, link.toKind) };
     return {
       content: [{
         type: 'text' as const,
         // Not pretty-printed: indentation is billed to the caller's context and read by nothing.
-        text: JSON.stringify({ ...link, label: linkLabel(link.fromKind, link.toKind) }),
+        text: JSON.stringify(written),
       }],
+      structuredContent: written,
     };
   },
 };
@@ -151,7 +154,8 @@ export const delete_linkTool: ToolHandler = {
 
     const removed = await findFirstAcrossMembers(wt.target, mid => removeLink(mid, id, ctx.actor));
     if (!removed) throw new Error(`Link '${id}' not found`);
-    return { content: [{ type: 'text' as const, text: `Link removed (ID ${id}).` }] };
+    return { content: [{ type: 'text' as const, text: `Link removed (ID ${id}).` }],
+      structuredContent: { _id: id, deleted: true } };
   },
 };
 

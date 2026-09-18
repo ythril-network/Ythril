@@ -71,6 +71,26 @@ async function bothDoors(tool, args) {
   assert.equal(rest.ok, !mcpAnswer.isError,
     `${tool} succeeded on one door and failed on the other`);
   assert.deepEqual(rest.data, mcpAnswer.data, `${tool} returns different structured data per door`);
+  /*
+   * AND THE ANSWER IS ACTUALLY IN THERE, which the equality above cannot tell you.
+   *
+   * `deepEqual(null, null)` passes, so this helper reported agreement for two doors that both answered
+   * nothing — `space_stats` and `list_spaces` were doing exactly that from the day they were added here.
+   * Thirty-three returns carried no structured half at all, and this file compared their absence and
+   * called it parity.
+   *
+   * The condition is the rule the source gate holds: a call that SUCCEEDED carries a structured half.
+   * Nothing about the text is consulted, and that width is deliberate — the first version keyed on the
+   * text looking like JSON, which excused every write tool that reports its id in a sentence.
+   *
+   * It lives in the shared helper rather than in each case on purpose: a new case is written by copying
+   * the one above it, and this is the line a copy drops.
+   */
+  if (rest.ok) {
+    assert.notEqual(rest.data, null,
+      `${tool} succeeded and carries nothing in \`data\` / \`structuredContent\`. A client that surfaces `
+      + 'the structured form gets `null` and has to parse prose to recover a result it just asked for.');
+  }
   return { rest, mcp: mcpAnswer };
 }
 
@@ -100,6 +120,37 @@ describe('a read answers identically on both doors', () => {
     const { rest } = await bothDoors('list_spaces', {});
     assert.equal(rest.status, 200);
     assert.match(rest.text, new RegExp(SPACE), 'the space created in setup must be listed');
+    // The text half is a bare ARRAY and the structured half must be an object, so the array is NAMED.
+    // That naming is the one place the two halves are allowed to differ in shape, and it is worth an
+    // assertion rather than an assumption.
+    assert.ok(Array.isArray(rest.data?.spaces), `list_spaces must name its array: ${JSON.stringify(rest.data)}`);
+  });
+
+  it('space_meta', async () => {
+    const { rest } = await bothDoors('space_meta', { space: SPACE });
+    assert.equal(rest.status, 200);
+  });
+
+  it('network_peers, which is global and answers an array even with no peers', async () => {
+    // The empty case on purpose: its text half is the PROSE 'No peers configured.', and the structured
+    // half is `{peers: []}` unconditionally. A client reading the structured form must not have to
+    // recognise a sentence to learn there are none.
+    const { rest } = await bothDoors('network_peers', {});
+    assert.equal(rest.status, 200);
+    assert.ok(Array.isArray(rest.data?.peers), `network_peers must name its array: ${JSON.stringify(rest.data)}`);
+  });
+
+  it('graph_traverse, which answered `data: null` until 5.0', async () => {
+    // Named because it is the one a walk was measured against: `{"ok":true,"text":"{\"nodes\":[…]}",
+    // "data":null}`. The traversal need not FIND anything for the shape to be the subject.
+    const seed = await viaRest('save_entity', { space: SPACE, name: `Seed ${RUN}`, type: 'person' });
+    assert.equal(seed.ok, true, JSON.stringify(seed));
+    const startId = seed.data?._id;
+    assert.ok(startId, `save_entity must report the id it wrote: ${JSON.stringify(seed.data)}`);
+
+    const { rest } = await bothDoors('graph_traverse', { space: SPACE, startId, maxDepth: 2 });
+    assert.equal(rest.status, 200);
+    assert.ok(Array.isArray(rest.data?.nodes), `graph_traverse must carry its nodes: ${JSON.stringify(rest.data)}`);
   });
 });
 

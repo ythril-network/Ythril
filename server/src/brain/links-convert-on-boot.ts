@@ -6,7 +6,7 @@
  * The canary operator, 2026-09-15T0034Z: `npm run links:convert` **cannot run on a deployed instance**. The
  * npm script survives into the published image and resolves `/app/scripts/convert-links.mjs`; `scripts/`
  * is not copied, so it fails as a Node `MODULE_NOT_FOUND` — a stack trace that reads like a broken
- * installation of theirs rather than a missing file of ours. `04b-graph-api.md` documents that script as
+ * installation of theirs rather than a missing file of ours. `04g-links-api.md` documents that script as
  * THE mechanism and there is no second route: the pre-flight only reports, and `POST /links` writes one
  * link at a time, which is not a migration path for a space holding hundreds of array entries.
  *

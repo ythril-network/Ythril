@@ -8,7 +8,7 @@
  * resolves its path correctly; `scripts/` is not copied. So it presents as a Node stack trace rather than
  * `missing script`, and reads like a broken installation of theirs.
  *
- * `04b-graph-api.md` documents that script as THE mechanism and there is no second route — the pre-flight
+ * `04g-links-api.md` documents that script as THE mechanism and there is no second route — the pre-flight
  * only reports, and `POST /links` writes one link at a time. "Spaces converted" was a set a container
  * deployment could not join, and the 5.0 removal of the six link ARRAY fields is gated on exactly it.
  *

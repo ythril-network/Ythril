@@ -392,7 +392,7 @@ export const recallTool: ToolHandler = {
         // for why the fast path says nothing: an agent pays for every byte out of its own context.
         ...(observePath.path() === 'exhaustive' ? { filterPath: 'exhaustive' } : {}),
       };
-      return { content: [{ type: 'text' as const, text: JSON.stringify(output) }] };
+      return { content: [{ type: 'text' as const, text: JSON.stringify(output) }], structuredContent: output };
     }
 
     // Graph-augmented recall: expand seeds along edges, cap the traversed NODES, and nest each one under the
@@ -464,7 +464,7 @@ export const recallTool: ToolHandler = {
       // be told, which is the half of a two-branch response that gets forgotten.
       ...(observePath.path() === 'exhaustive' ? { filterPath: 'exhaustive' } : {}),
     };
-    return { content: [{ type: 'text' as const, text: JSON.stringify(output) }] };
+    return { content: [{ type: 'text' as const, text: JSON.stringify(output) }], structuredContent: output };
   },
 };
 
@@ -635,7 +635,7 @@ export const find_similarTool: ToolHandler = {
         ...plainBudgeted.fields,
         traverseDepth: 0,
       };
-      return { content: [{ type: 'text' as const, text: JSON.stringify(output) }] };
+      return { content: [{ type: 'text' as const, text: JSON.stringify(output) }], structuredContent: output };
     }
 
     // Graph-augmented: expand the similar seeds along edges (mirrors recall's traverse).
@@ -688,7 +688,7 @@ export const find_similarTool: ToolHandler = {
       ...(graphTruncated ? { graphTruncated: true } : {}),
       ...(spill ? { graphComplete: spill } : {}),
     };
-    return { content: [{ type: 'text' as const, text: JSON.stringify(output) }] };
+    return { content: [{ type: 'text' as const, text: JSON.stringify(output) }], structuredContent: output };
   },
 };
 

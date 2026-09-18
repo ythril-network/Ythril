@@ -153,6 +153,7 @@ export const save_edgeTool: ToolHandler = {
     }
     return {
       content: [{ type: 'text' as const, text: edgeMsg }],
+      structuredContent: { ...edge, ...(edgeSchemaViolations.length > 0 ? { violations: edgeSchemaViolations } : {}) },
     };
   },
 };
@@ -298,6 +299,7 @@ export const update_edgeTool: ToolHandler = {
     if (!updatedEdge) throw new Error(`Edge '${id}' not found`);
     return {
       content: [{ type: 'text' as const, text: `Edge '${updatedEdge.label}' updated (ID ${updatedEdge._id}, seq ${updatedEdge.seq}).` }],
+      structuredContent: { ...updatedEdge },
     };
   },
 };
@@ -365,6 +367,7 @@ export const graph_traverseTool: ToolHandler = {
         type: 'text' as const,
         text: JSON.stringify(result),
       }],
+      structuredContent: { ...result },
     };
   },
 };
@@ -427,6 +430,7 @@ export const delete_edgeTool: ToolHandler = {
 
     const deleted = await findFirstAcrossMembers(wt.target, mid => deleteEdge(mid, id, ctx.actor));
     if (!deleted) throw new Error(`Edge '${id}' not found`);
-    return { content: [{ type: 'text' as const, text: `Edge deleted (ID ${id}).` }] };
+    return { content: [{ type: 'text' as const, text: `Edge deleted (ID ${id}).` }],
+      structuredContent: { _id: id, deleted: true } };
   },
 };

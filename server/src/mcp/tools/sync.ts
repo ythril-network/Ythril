@@ -82,6 +82,18 @@ export const network_peersTool: ToolHandler = {
             : JSON.stringify(peers),
         },
       ],
+      /*
+       * NAMED, and the refusal recorded above does not reach this.
+       *
+       * That decision is about the TEXT half: the array is this tool's contract, a caller indexes it,
+       * and wrapping it breaks them. `structuredContent` must be an object and has never existed here,
+       * so there is no caller to break — and answering in one half only is the defect the canary
+       * operator reported against `filter`.
+       *
+       * Unconditional, including when `peers` is empty: the text says 'No peers configured.' in prose,
+       * and a client reading the structured half gets `{ peers: [] }` rather than a sentence to parse.
+       */
+      structuredContent: { peers },
     };
   },
 };
@@ -153,6 +165,10 @@ export const network_syncTool: ToolHandler = {
             ? `Peer '${peerId}' not found in any network.`
             : `Sync complete: ${result.networksSynced} network(s) synced, ${result.errors} error(s).`,
         }],
+        // `notFound` is carried EXPLICITLY rather than inferred from a sentence. It is the one
+        // outcome a caller must branch on — a named peer that does not exist is not a sync that
+        // did nothing — and it was readable only by matching English.
+        structuredContent: { ...result },
         isError: result.errors > 0,
       };
     } else {
@@ -172,6 +188,7 @@ export const network_syncTool: ToolHandler = {
             ? 'No networks configured.'
             : lines.join('\n') + `\n\nTotal: ${totalSynced} synced, ${totalErrors} error(s).`,
         }],
+        structuredContent: { synced: totalSynced, errors: totalErrors, networks: lines },
         isError: totalErrors > 0,
       };
     }

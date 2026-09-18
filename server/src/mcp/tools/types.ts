@@ -89,6 +89,11 @@ export type ToolResult = {
    * into the message text (the create paths appended `JSON.stringify`) or dropped entirely (the update
    * paths threw a plain `Error`, and the router turned it into one string). A caller could read it, but
    * only by parsing English or a JSON blob glued to the end of a message.
+   *
+   * **A spread is why several call sites read `{ ...result }` rather than `result`.** A value typed as a
+   * declared interface has no index signature, so TypeScript refuses it here (`TS2322`); spreading it
+   * into a fresh object literal is the assignment that compiles. It is not a defensive copy and removing
+   * it does not simplify anything — it breaks the build.
    */
   structuredContent?: Record<string, unknown>;
 };
