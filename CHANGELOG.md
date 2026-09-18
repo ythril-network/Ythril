@@ -112,6 +112,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Every Brain tab reads through `filter` now, which is what the nine per-collection list routes were
+  waiting on.** Facts, Entities, Edges and Chrono all issue one `POST /api/brain/filter`; the service
+  re-keys `results` to the key each tab already destructures, so **not one caller changed** and deleting
+  those routes becomes a server-only change.
+
+  It took four preceding fixes to be possible at all, and each was a gap that would have changed what a
+  tab shows: `filter` had none of the five list CONVENIENCES, none of the two DECORATIONS those routes
+  apply after the query, a silent page clamp of 100 where they serve 200 or 500, and a chrono `status`
+  that matched the stored value while the route matched the derived one.
+
+  **What the client sends is arguments, not rules.** The fuzzy things — `tag`, `search`, `description`,
+  `properties` — go as conveniences the server assembles; the exact ones — an entity's `name`, a fact's
+  `entityIds`, a chrono tag set or date range — go as plain predicates. The line matters: a RULE written
+  twice drifts, and a second copy of the substring-and-scan logic in the browser is the thing this whole
+  row exists to avoid.
+
 - **`filter` silently returned 100 rows to a caller who asked for 200.** `limit` was clamped, not
   defaulted — so a page came back short and `total` with `truncated` made it read as a correct short
   page. It matters because `filter` is replacing the nine per-collection list routes, which serve 200

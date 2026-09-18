@@ -1,16 +1,30 @@
 /**
- * BrainApi list methods thread the slice-2b sort into the request as `?sort=&dir=` — and omit both
- * when no sort is active. This is the client half of slice 2a's server sort: the tab passes a
- * `ListSort`, the server orders the full set. If these params silently went missing, the header caret
- * would spin with no effect.
+ * Every list method sends its sort, its filters and its freetext — and omits each when unset.
+ *
+ * ## What changed under these cases, and what did not
+ *
+ * They used to assert query params on five per-collection `GET` routes. `B-9` step 2b moved every tab
+ * onto `POST /api/brain/filter`, so the assertions are against a BODY now. The rules are the same ones:
+ * the sort reaches the request, an absent sort sends nothing rather than a default, filters compose with
+ * it instead of replacing it, and the freetext goes as `search`.
+ *
+ * **Restated rather than deleted.** A caret that spins with no effect is what these exist for, and that
+ * failure is identical on either shape — so the cases had to survive the move, which is also the check
+ * that the move preserved them.
+ *
+ * ## Why the envelope is re-keyed in the service
+ *
+ * `filter` answers `{ results }` and the tabs destructure `{ entities }`, `{ edges }`, `{ facts }`,
+ * `{ chrono }`. The service re-keys, so not one caller changed — which is what makes deleting the nine
+ * routes a server-only change afterwards. The `flush` calls below therefore send `results`.
  */
 import { TestBed } from '@angular/core/testing';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { HttpTestingController, provideHttpClientTesting, type TestRequest } from '@angular/common/http/testing';
 import { BrainApi } from './brain-api.service';
 
-describe('BrainApi — list sort params (2b)', () => {
+describe('BrainApi — list sort, filters and freetext reach `filter` (2b)', () => {
   let api: BrainApi;
   let http: HttpTestingController;
 
@@ -21,121 +35,134 @@ describe('BrainApi — list sort params (2b)', () => {
   });
   afterEach(() => http.verify());
 
-  it('listEntities appends sort + dir when a sort is given', () => {
+  /** The one request every list method now makes, with the collection it asked for. */
+  const expectFilter = (collection: string) => {
+    const r = http.expectOne(req => req.url === '/api/brain/filter');
+    const body = r.request.body as Record<string, unknown>;
+    expect(body['collection']).toBe(collection);
+    return { r, body };
+  };
+  const flush = (r: TestRequest) =>
+    r.flush({ results: [], total: 0, limit: 50, skip: 0, truncated: false });
+
+  it('listEntities sends sort + dir when a sort is given', () => {
     api.listEntities('work', 50, 0, undefined, { field: 'name', dir: 'asc' }).subscribe();
-    const r = http.expectOne(req => req.url === '/api/brain/spaces/work/entities');
-    expect(r.request.params.get('sort')).toBe('name');
-    expect(r.request.params.get('dir')).toBe('asc');
-    r.flush({ entities: [] });
+    const { r, body } = expectFilter('entities');
+    expect(body['space']).toBe('work');
+    expect(body['sort']).toBe('name');
+    expect(body['dir']).toBe('asc');
+    flush(r);
   });
 
-  it('listEntities sends NO sort/dir when none is given — the endpoint keeps its default order', () => {
+  it('and NOTHING when none is given — the endpoint keeps its default order', () => {
+    // Sending a sort nobody chose would silently reorder every tab that does not set one.
     api.listEntities('work', 50, 0).subscribe();
-    const r = http.expectOne(req => req.url === '/api/brain/spaces/work/entities');
-    expect(r.request.params.has('sort')).toBe(false);
-    expect(r.request.params.has('dir')).toBe(false);
-    r.flush({ entities: [] });
+    const { r, body } = expectFilter('entities');
+    expect('sort' in body).toBe(false);
+    expect('dir' in body).toBe(false);
+    flush(r);
   });
 
   it('listEdges / listFacts / listChrono all carry the sort', () => {
     api.listEdges('work', 50, 0, undefined, { field: 'label', dir: 'desc' }).subscribe();
-    const e = http.expectOne(req => req.url === '/api/brain/spaces/work/edges');
-    expect(e.request.params.get('sort')).toBe('label');
-    expect(e.request.params.get('dir')).toBe('desc');
-    e.flush({ edges: [] });
+    const e = expectFilter('edges');
+    expect(e.body['sort']).toBe('label');
+    expect(e.body['dir']).toBe('desc');
+    flush(e.r);
 
     api.listFacts('work', 20, 0, undefined, { field: 'createdAt', dir: 'desc' }).subscribe();
-    const m = http.expectOne(req => req.url === '/api/brain/spaces/work/facts');
-    expect(m.request.params.get('sort')).toBe('createdAt');
-    m.flush({ facts: [], limit: 20, skip: 0 });
+    const m = expectFilter('facts');
+    expect(m.body['sort']).toBe('createdAt');
+    flush(m.r);
 
     api.listChrono('work', 50, 0, undefined, { field: 'startsAt', dir: 'asc' }).subscribe();
-    const c = http.expectOne(req => req.url === '/api/brain/spaces/work/chrono');
-    expect(c.request.params.get('sort')).toBe('startsAt');
-    expect(c.request.params.get('dir')).toBe('asc');
-    c.flush({ chrono: [] });
+    const c = expectFilter('chrono');
+    expect(c.body['sort']).toBe('startsAt');
+    expect(c.body['dir']).toBe('asc');
+    flush(c.r);
   });
 
   it('sort composes with existing filters rather than replacing them', () => {
     api.listEntities('work', 50, 0, { type: 'person', tag: 'vip' }, { field: 'createdAt', dir: 'desc' }).subscribe();
-    const r = http.expectOne(req => req.url === '/api/brain/spaces/work/entities');
-    expect(r.request.params.get('type')).toBe('person');
-    expect(r.request.params.get('tag')).toBe('vip');
-    expect(r.request.params.get('sort')).toBe('createdAt');
-    r.flush({ entities: [] });
+    const { r, body } = expectFilter('entities');
+    expect(body['type']).toBe('person');
+    expect(body['tag']).toBe('vip');
+    expect(body['sort']).toBe('createdAt');
+    flush(r);
   });
 
-  it('the docked freetext filter sends ?search= on entities/edges/facts, omitted when empty', () => {
-    api.listEntities('work', 50, 0, undefined, undefined, 'kuber').subscribe();
-    const e = http.expectOne(req => req.url === '/api/brain/spaces/work/entities');
-    expect(e.request.params.get('search')).toBe('kuber');
-    e.flush({ entities: [] });
-
-    api.listEdges('work', 50, 0, undefined, undefined, 'mentor').subscribe();
-    const g = http.expectOne(req => req.url === '/api/brain/spaces/work/edges');
-    expect(g.request.params.get('search')).toBe('mentor');
-    g.flush({ edges: [] });
-
-    api.listFacts('work', 20, 0, undefined, undefined, 'deadline').subscribe();
-    const m = http.expectOne(req => req.url === '/api/brain/spaces/work/facts');
-    expect(m.request.params.get('search')).toBe('deadline');
-    m.flush({ facts: [], limit: 20, skip: 0 });
+  it('the docked freetext goes as `search` on entities/edges/facts, omitted when empty', () => {
+    for (const [call, collection, term] of [
+      [() => api.listEntities('work', 50, 0, undefined, undefined, 'kuber').subscribe(), 'entities', 'kuber'],
+      [() => api.listEdges('work', 50, 0, undefined, undefined, 'mentor').subscribe(), 'edges', 'mentor'],
+      [() => api.listFacts('work', 20, 0, undefined, undefined, 'deadline').subscribe(), 'facts', 'deadline'],
+    ] as [() => void, string, string][]) {
+      call();
+      const { r, body } = expectFilter(collection);
+      expect(body['search']).toBe(term);
+      flush(r);
+    }
 
     api.listEntities('work', 50, 0).subscribe();
-    const none = http.expectOne(req => req.url === '/api/brain/spaces/work/entities');
-    expect(none.request.params.has('search')).toBe(false);
-    none.flush({ entities: [] });
+    const { r, body } = expectFilter('entities');
+    expect('search' in body).toBe(false);
+    flush(r);
   });
 
-  it('entities keeps the exact `name` lookup (entity-search) distinct from the freetext `search`', () => {
-    api.listEntities('work', 50, 0, { search: 'Alice' }, undefined, 'ali').subscribe();
-    const r = http.expectOne(req => req.url === '/api/brain/spaces/work/entities');
-    expect(r.request.params.get('name')).toBe('Alice'); // exact, from the entity-search bar
-    expect(r.request.params.get('search')).toBe('ali');  // substring, from the column freetext filter
-    r.flush({ entities: [] });
+  it('the entity search bar is an EXACT name, not the substring freetext', () => {
+    // Two different questions that have always shared a spelling in this signature: `filters.search` is
+    // the picker's exact lookup and goes as a predicate, `search` is the column box and goes as the
+    // convenience. Folding them would make the picker match everything containing the name.
+    api.listEntities('work', 50, 0, { search: 'Ada Lovelace' }).subscribe();
+    const { r, body } = expectFilter('entities');
+    expect(body['filter']).toEqual({ name: 'Ada Lovelace' });
+    expect('search' in body).toBe(false);
+    flush(r);
   });
-});
 
-/**
- * Per-column `description` filter reaches the request.
- *
- * The tab specs mock BrainApi, so they prove the tab CALLS it — not that the param survives into the
- * HTTP request. Dropping the `params.set` here would leave every one of those green while the column
- * filter did nothing.
- */
-describe('BrainApi — description column filter', () => {
-  let api: BrainApi;
-  let http: HttpTestingController;
-
-  beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [BrainApi, provideHttpClient(), provideHttpClientTesting()] });
-    api = TestBed.inject(BrainApi);
-    http = TestBed.inject(HttpTestingController);
+  it('a fact filtered by entity id goes as a predicate on its link field', () => {
+    api.listFacts('work', 20, 0, { entity: 'e-1' }).subscribe();
+    const { r, body } = expectFilter('facts');
+    expect(body['filter']).toEqual({ entityIds: 'e-1' });
+    flush(r);
   });
-  afterEach(() => http.verify());
 
-  const CASES: Array<[string, () => void, string, string]> = [
-    ['listEntities', () => api.listEntities('work', 50, 0, { description: 'quarterly' }).subscribe(), '/api/brain/spaces/work/entities', 'entities'],
-    ['listFacts', () => api.listFacts('work', 20, 0, { description: 'quarterly' }).subscribe(), '/api/brain/spaces/work/facts', 'facts'],
-    ['listEdges',    () => api.listEdges('work', 50, 0, { description: 'quarterly' }).subscribe(),    '/api/brain/spaces/work/edges',    'edges'],
-    ['listChrono',   () => api.listChrono('work', 50, 0, { description: 'quarterly' }).subscribe(),   '/api/brain/spaces/work/chrono',   'chrono'],
-  ];
+  it('chrono always asks for the DERIVED status', () => {
+    /*
+     * The reason this tab could not move until `B-8` and `B-19`. A chrono status is derived on read, and
+     * `filter` returns the stored one unless asked — so without this the tab would quietly stop showing
+     * `overdue`, and its status filter would start returning entries the old route excluded.
+     */
+    api.listChrono('work', 50, 0, { status: 'active' }).subscribe();
+    const { r, body } = expectFilter('chrono');
+    expect(body['deriveStatus']).toBe(true);
+    expect(body['filter']).toEqual({ status: 'active' });
+    flush(r);
+  });
 
-  for (const [name, call, url, key] of CASES) {
-    it(`${name} sends ?description=`, () => {
-      call();
-      const r = http.expectOne(req => req.url === url);
-      expect(r.request.params.get('description')).toBe('quarterly');
-      // Not folded into `search` — that spans the name/fact/title column too.
-      expect(r.request.params.get('search')).toBeNull();
-      r.flush({ [key]: [] });
-    });
-  }
+  it('chrono tag sets stay EXACT, and both together intersect', () => {
+    // `tags` is ALL and `tagsAny` is at-least-one. Widening either to the substring convenience would
+    // over-match silently, which is the distinction the server has always drawn.
+    api.listChrono('work', 50, 0, { tags: 'a, b', tagsAny: 'c' }).subscribe();
+    const { r, body } = expectFilter('chrono');
+    expect(body['filter']).toEqual({ $and: [{ tags: { $all: ['a', 'b'] } }, { tags: { $in: ['c'] } }] });
+    flush(r);
+  });
 
-  it('omits the param when no description filter is set', () => {
-    api.listEntities('work', 50, 0, {}).subscribe();
-    const r = http.expectOne(req => req.url === '/api/brain/spaces/work/entities');
-    expect(r.request.params.get('description')).toBeNull();
-    r.flush({ entities: [] });
+  it('and a chrono date range becomes one predicate, not two', () => {
+    api.listChrono('work', 50, 0, { after: '2026-01-01', before: '2026-12-31' }).subscribe();
+    const { r, body } = expectFilter('chrono');
+    expect(body['filter']).toEqual({ createdAt: { $gt: '2026-01-01', $lt: '2026-12-31' } });
+    flush(r);
+  });
+
+  it('the answer is re-keyed for the caller, and the paging fields survive', () => {
+    // A pager that lost `total` would page for ever; a tab that got `results` would render nothing.
+    let seen: { entities?: unknown[]; total?: number } = {};
+    api.listEntities('work', 50, 0).subscribe(v => { seen = v as typeof seen; });
+    const { r } = expectFilter('entities');
+    r.flush({ results: [{ _id: 'e1' }], total: 7, limit: 50, skip: 0, truncated: true });
+    expect(seen.entities).toEqual([{ _id: 'e1' }]);
+    expect(seen.total).toBe(7);
   });
 });
