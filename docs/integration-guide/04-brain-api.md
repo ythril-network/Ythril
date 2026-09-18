@@ -108,8 +108,10 @@ POST /api/brain/spaces/:spaceId/facts
 
 #### A record and its relationships in ONE call
 
-Every create door — `facts`, `chrono`, `entities`, and their MCP twins — takes the relationships the
-record needs alongside the record itself. Two fields, and they behave differently on purpose.
+Every write door — `facts`, `chrono`, `entities`, and their MCP twins — takes the relationships the
+record needs alongside the record itself, **on the update verb as well as the create since 5.0**.
+Two fields, and they behave differently on purpose. What a `PATCH` does with them is in
+[Write & Read Semantics](04f-write-semantics.md#what-a-patch-does-to-tags-and-properties).
 
 **`linkEntities`, `linkFacts`, `linkChronos`, `linkFiles`** create LINKS. A link is unlabelled and which
 way it runs follows from the kinds at its ends, so a bare id is the whole thing. `linkFiles` takes

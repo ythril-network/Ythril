@@ -36,7 +36,7 @@ import { getAllowedChronoTypes, resolveMetaRefs, validateChrono } from '../../sp
 import { mergePropertiesOrKeep } from '../../brain/merge-fields.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
-import { connectionSchemas, applyConnections } from '../../brain/write-connections.js';
+import { connectionSchemas, applyConnections, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
 
 export const save_chronoTool: ToolHandler = {
   name: 'save_chrono',
@@ -393,6 +393,10 @@ export const update_chronoTool: ToolHandler = {
             },
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
             ttlDays: TTL_DAYS_SCHEMA,
+            // `Q-30`: the same connection fields the CREATE tool takes, from the one builder both read —
+            // a field on one verb and not the other is the gap this closes, and two hand-written copies
+            // is how they would drift apart again.
+            ...connectionSchemas(),
           },
           required: ['space', 'id'],
           additionalProperties: false,
@@ -473,8 +477,11 @@ export const update_chronoTool: ToolHandler = {
       ? a['deleteFields'] as string[]
       : undefined;
 
-    if (Object.keys(updates).length === 0 && ttlDaysFromArgs(a) === undefined && !dfPaths) {
-      throw new Error('At least one of title, type, startsAt, endsAt, status, confidence, tags, entityIds, memoryIds, description, properties, recurrence, suppressEmbeddings, deleteFields, or ttlDays must be provided');
+    // A connection field IS a field. Both helpers return `null` for absent, never `undefined` — comparing
+    // against `undefined` would be true for `null` and would DISABLE this refusal rather than widen it.
+    const hasConnections = desiredLinksFrom(a) !== null || edgeInputsFrom(a) !== null;
+    if (Object.keys(updates).length === 0 && ttlDaysFromArgs(a) === undefined && !dfPaths && !hasConnections) {
+      throw new Error('At least one of title, type, startsAt, endsAt, status, confidence, tags, entityIds, memoryIds, description, properties, recurrence, suppressEmbeddings, deleteFields, ttlDays, or a connection field must be provided');
     }
 
     // Validate the entry AS IT WILL BE, against the meta of the member space it actually lives in. The
@@ -489,6 +496,10 @@ export const update_chronoTool: ToolHandler = {
 
     const entry = await updateChrono(wt.target, id, updates as Parameters<typeof updateChrono>[2], dfPaths, ctx.actor, ttlDaysFromArgs(a));
     if (!entry) throw new Error(`Chrono entry '${id}' not found`);
+    // `Q-30`: connections on the UPDATE too. Links REPLACE per class and edges UPSERT; both semantics
+    // live in `applyConnections`, after the record write, exactly as the create tool does it.
+    // `entry.spaceId` rather than `wt.target`: a proxy write lands where the record actually is.
+    await applyConnections(entry.spaceId, entry._id, 'chrono', a, entry.author, ctx.actor);
     return { content: [{ type: 'text' as const, text: `Chrono entry '${entry.title}' updated (seq ${entry.seq}).` }],
       structuredContent: { ...entry } };
   },

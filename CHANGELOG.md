@@ -15,6 +15,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A record's links and edges can be changed after it is created.** `linkEntities`, `linkFacts`,
+  `linkChronos`, `linkFiles` and `edges` are now accepted on the UPDATE verb of every door that accepts
+  them on create — `facts`, `chrono` and `entities`, on both surfaces — with the same meaning they have
+  there: links REPLACE per class (`[]` detaches, a kind you do not name is untouched) and edges UPSERT.
+
+  **Until now they were create-only, and on a converted space that left no way at all.** `entityIds` and
+  its siblings were the workaround, and `array-write-refusal` refuses those outright once a space has
+  been through the link conversion — so a record's relationships were settled the moment it was written,
+  by either door, and the gap grew as spaces converted. The only way round was to delete and re-create
+  the record, which costs its id and its history.
+
+  **`edges` rides in the same body**, so an edge can be drawn or adjusted through the record it hangs
+  off, on an update as well as a create.
+
+  A body carrying only a connection field is a valid patch. It used to answer
+  `400 "At least one field must be provided"` — the field was not in the update allowlist, so it was not
+  rejected, it was not SEEN.
+
 - **`filter` finds one file by `path`, and forgives how you spell it.** *(files only, both doors.)* The
   file-metadata list route always did — it ran the path through the same normalisation the store uses, so
   a Windows-style spelling and a leading slash both find `notes/a.md`. `filter` did not, and

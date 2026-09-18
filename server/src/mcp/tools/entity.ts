@@ -13,7 +13,7 @@ import { isProxySpace, isStrictLinkage, resolveMemberSpaces, resolveWriteTarget,
 import { resolveMetaRefs, validateEntity } from '../../spaces/schema-validation.js';
 import { mergePropertiesOrKeep, mergeTagsOrKeep } from '../../brain/merge-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
-import { connectionSchemas, applyConnections } from '../../brain/write-connections.js';
+import { connectionSchemas, applyConnections, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
 
 export const save_entityTool: ToolHandler = {
   name: 'save_entity',
@@ -233,6 +233,10 @@ export const update_entityTool: ToolHandler = {
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
             deleteFields: { type: 'array', items: { type: 'string' }, description: 'Dot-notation paths to delete from the entity (e.g. ["properties.oldKey", "description"]). System fields (id, name, type, spaceId, createdAt, updatedAt) cannot be deleted. Deletions are permanent.' },
             ttlDays: TTL_DAYS_SCHEMA,
+            // `Q-30`: the same connection fields the CREATE tool takes, from the one builder both read —
+            // a field on one verb and not the other is the gap this closes, and two hand-written copies
+            // is how they would drift apart again.
+            ...connectionSchemas(),
           },
           additionalProperties: false,
           required: ['space', 'id'],
@@ -264,7 +268,11 @@ export const update_entityTool: ToolHandler = {
       updates.properties = a['properties'] as Record<string, string | number | boolean>;
     }
     const ttlDays = ttlDaysFromArgs(a);
-    if (Object.keys(updates).length === 0 && !dfPaths && ttlDays === undefined) throw new Error('At least one of name, type, description, tags, properties, suppressEmbeddings, deleteFields, or ttlDays must be provided');
+    // A connection field IS a field. `desiredLinksFrom` and `edgeInputsFrom` both return `null` for
+    // absent, never `undefined` — comparing against `undefined` would be true for `null` and would
+    // DISABLE this refusal rather than widen it.
+    const hasConnections = desiredLinksFrom(a) !== null || edgeInputsFrom(a) !== null;
+    if (Object.keys(updates).length === 0 && !dfPaths && ttlDays === undefined && !hasConnections) throw new Error('At least one of name, type, description, tags, properties, suppressEmbeddings, deleteFields, ttlDays, or a connection field must be provided');
 
     // Validate the entity AS IT WILL BE, against the meta of the member space it actually lives in. This
     // path had no schema validation at all, so `type` could be moved outside the allowlist that
@@ -278,6 +286,10 @@ export const update_entityTool: ToolHandler = {
 
     const updatedEnt = await findFirstAcrossMembers(wt.target, mid => updateEntityById(mid, id, updates, dfPaths, ctx.actor, ttlDays));
     if (!updatedEnt) throw new Error(`Entity '${id}' not found`);
+    // `Q-30`: connections on the UPDATE too. Links REPLACE per class and edges UPSERT; both
+    // semantics live in `applyConnections`, after the record write, exactly as the create does it.
+    // `updated.spaceId` rather than `wt.target`: a proxy write lands where the record actually is.
+    await applyConnections(updatedEnt.spaceId, updatedEnt._id, 'entity', a, updatedEnt.author, ctx.actor);
     return {
       content: [{ type: 'text' as const, text: `Entity '${updatedEnt.name}' (${updatedEnt.type}) updated (ID ${updatedEnt._id}, seq ${updatedEnt.seq}).` }],
       structuredContent: { ...updatedEnt },

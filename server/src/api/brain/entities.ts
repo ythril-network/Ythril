@@ -22,7 +22,7 @@ import { UUID_V4_RE, webhookToken, getSpaceMeta, ttlDaysFromBody, ttlDaysError, 
 import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
 import { mergePropertiesOrKeep, mergeTagsOrKeep } from '../../brain/merge-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
-import { connectionInputError, applyConnections, CONNECTION_BODY_KEYS } from '../../brain/write-connections.js';
+import { connectionInputError, applyConnections, CONNECTION_BODY_KEYS, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
 
 export const entitiesRouter = Router();
 
@@ -283,7 +283,8 @@ entitiesRouter.get('/spaces/:spaceId/entities/:id/cascade-preview', globalRateLi
  * The shared write options — ttlDays, waitForEmbedding, the duplicate flags and the two suppression
  * spellings — are NOT listed: they are read by helpers, and live in `SHARED_WRITE_BODY_KEYS`.
  */
-const ENTITIES_UPDATE_BODY_KEYS = ['name', 'type', 'description', 'tags', 'properties', 'deleteFields'];
+const ENTITIES_UPDATE_BODY_KEYS = ['name', 'type', 'description', 'tags', 'properties', 'deleteFields',
+  ...CONNECTION_BODY_KEYS];
 entitiesRouter.patch('/spaces/:spaceId/entities/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const id = req.params['id'] as string;
@@ -341,7 +342,10 @@ entitiesRouter.patch('/spaces/:spaceId/entities/:id', globalRateLimit, requireSp
   const sup = parseRecordSuppression(req.body);
   if (!sup.ok) { res.status(400).json({ error: sup.error }); return; }
   if (sup.value !== undefined) updates.suppressEmbeddings = sup.value;
-  if (Object.keys(updates).length === 0 && !dfPaths && !ttlDaysProvided) { res.status(400).json({ error: 'At least one field must be provided' }); return; }
+  // A connection field IS a field. Both helpers return `null` for absent, never `undefined` — comparing
+  // against `undefined` would be true for `null` and would DISABLE this check rather than widen it.
+  const hasConnections = desiredLinksFrom(req.body) !== null || edgeInputsFrom(req.body) !== null;
+  if (Object.keys(updates).length === 0 && !dfPaths && !ttlDaysProvided && !hasConnections) { res.status(400).json({ error: 'At least one field must be provided' }); return; }
   const memberIds = resolveMemberSpaces(wt.target);
   for (const mid of memberIds) {
     // Validate the entity AS IT WILL BE, on every patch — not only when `deleteFields` is present. That
@@ -386,6 +390,21 @@ entitiesRouter.patch('/spaces/:spaceId/entities/:id', globalRateLimit, requireSp
       req.auditSnapshots = { before: existing ?? {}, after: updated };
       // The `warnings` array an update response did not have — see the facts route, where the
       // reasoning is written out. A warn-mode space reported on a create and said nothing on an edit.
+      /*
+       * `Q-30`: the connections, on the UPDATE too.
+       *
+       * Every create door applied these and no update door did, so a record's relationships could be
+       * set once and never changed. `entityIds` was the way round on an unconverted space — and a
+       * `completeLinkage` space refuses that outright, so on a converted space there was no way at
+       * all, by either door.
+       *
+       * AFTER the record write, exactly as the create does: links REPLACE per class and edges UPSERT,
+       * and both semantics live in `applyConnections` so no door has to restate them.
+       *
+       * Keyed on `updated.spaceId` rather than a loop variable: the record says which member space it
+       * lives in, and a proxy write must land where the record is rather than where the search began.
+       */
+      await applyConnections(updated.spaceId, updated._id, 'entity', req.body, updated.author, webhookToken(req));
       const updateWarnings = [...(updateCheck?.warnings ?? []), ...unknownFieldWarnings(req.body, ENTITIES_UPDATE_BODY_KEYS)];
       res.json(updateWarnings.length > 0 ? { ...updated, warnings: updateWarnings } : updated);
       return;

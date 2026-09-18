@@ -65,6 +65,18 @@ let mongo, edgesMod, entitiesMod, erMod;
 
 const coll = (n) => mongo.col(`${SPACE}_${n}`);
 
+/**
+ * The classes a walk REACHED, which is what every baseline below is about.
+ *
+ * The depth-0 node is dropped: since `Q-27` a walk returns `startId` itself, and the start is not a class
+ * the walk followed — counting it would make every default answer include `entity` and say nothing about
+ * which links were followed. Filtering on DEPTH rather than on the start id keeps the helper honest if a
+ * future walk reports more than one root.
+ */
+function reachedKinds(res) {
+  return res.nodes.filter(n => n.depth > 0).map(n => n.kind ?? 'entity').sort();
+}
+
 describe('the 3.x link baseline — what the array walk answered', { skip }, () => {
   before(async () => {
     mongo = await openTestMongo('linkbaseline');
@@ -158,7 +170,7 @@ describe('the 3.x link baseline — what the array walk answered', { skip }, () 
      * the CHANGELOG, not in a quietly different test.
      */
     const res = await edgesMod.traverseGraph([SPACE], ENT, 'both', undefined, 2, 100);
-    const kinds = res.nodes.map(n => n.kind ?? 'entity').sort();
+    const kinds = reachedKinds(res);
     assert.deepEqual(kinds, ['chrono'],
       `default traverse reached ${JSON.stringify(kinds)} — chrono on, memory and file off is the 3.x default`);
     assert.ok(res.nodes.some(n => n._id === CHR), 'the chrono entry naming this entity must be reached');
@@ -169,7 +181,7 @@ describe('the 3.x link baseline — what the array walk answered', { skip }, () 
     // one when they are tested together.
     const kindsWith = async (chrono, mem, file) => {
       const r = await edgesMod.traverseGraph([SPACE], ENT, 'both', undefined, 2, 100, chrono, mem, file);
-      return r.nodes.map(n => n.kind ?? 'entity').sort();
+      return reachedKinds(r);
     };
     // MEASURED, not assumed — and my first draft of this file assumed wrong, which is the argument for
     // writing it against a real database rather than from the signature.
@@ -180,19 +192,30 @@ describe('the 3.x link baseline — what the array walk answered', { skip }, () 
     assert.deepEqual(await kindsWith(true, true, true), ['chrono', 'fact', 'file'], 'all three');
   });
 
-  it('BASELINE: the START NODE is not in `nodes` — `nodes` is what was REACHED', async () => {
+  it('BASELINE: the START NODE is in `nodes` at depth 0, and only at depth 0', async () => {
     /*
      * Pinned on its own because it is the shape most likely to change by accident when the reader is
-     * rewritten, and because it is invisible in the signature: my first draft of this file expected the
-     * entity to be there and was wrong three assertions in a row for one reason.
+     * rewritten, and because it is invisible in the signature.
      *
-     * With every toggle off, a traverse from a lone entity with no edges reaches NOTHING — not itself. A
-     * slice-2 reader that included the origin would make every count in every client one larger, silently.
+     * **This case asserted the OPPOSITE until 5.0** — that the origin never appears — and the reasoning
+     * beside it was that including it *"would make every count in every client one larger, silently"*.
+     * `Q-27` decided the other way, and not silently: `graph_traverse`'s schema had always promised
+     * *"`startId` itself at depth 0"*, and without it an isolated record and an id naming nothing both
+     * answered `nodes: []`, which is the one distinction the promise exists for. The count did change,
+     * by exactly one, and it is in the CHANGELOG as a breaking change.
+     *
+     * What has NOT changed is the origin appearing among what was REACHED. It is at depth 0 and nowhere
+     * else — a walk that emitted it again as a neighbour would be a cycle the `visited` set exists to
+     * prevent.
      */
     const off = await edgesMod.traverseGraph([SPACE], ENT, 'both', undefined, 2, 100, false, false, false);
-    assert.deepEqual(off.nodes, [], 'a walk from a lone entity reaches nothing, and does not report itself');
+    assert.deepEqual(off.nodes.map(n => [n._id, n.depth]), [[ENT, 0]],
+      'a walk from a lone entity reaches nothing and reports ITSELF, so an empty answer means a bad id');
+
     const on = await edgesMod.traverseGraph([SPACE], ENT, 'both', undefined, 2, 100, true, true, true);
-    assert.ok(!on.nodes.some(n => n._id === ENT), 'the origin must not appear among what was reached');
+    const origin = on.nodes.filter(n => n._id === ENT);
+    assert.equal(origin.length, 1, 'the origin appears exactly once, however much the walk reaches');
+    assert.equal(origin[0].depth, 0, 'and only at depth 0 — never again as something it reached');
   });
 
   it('BASELINE: the synthetic edge carries the class as its label', async () => {
