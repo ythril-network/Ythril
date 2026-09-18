@@ -982,16 +982,36 @@ describe('Brain -- chrono CRUD (/api/brain/spaces/:spaceId/chrono)', () => {
       status: 'upcoming',
       confidence: 0.8,
       tags: ['important'],
-      entityIds: [linkedEnt.body._id],
-      memoryIds: [linkedMem.body._id],
+      /*
+       * `linkEntities`/`linkFacts`, NOT the array fields, and that is `Q-26` rather than a preference.
+       *
+       * `general` is converted by the boot conversion — every boot marks every space that is not already
+       * marked — and `array-write-refusal` then answers 400 for `entityIds`/`memoryIds`. This case
+       * asserted 201 and passed only while the stack had not restarted since `general` was created, so it
+       * failed with an error naming a migration it has nothing to do with. The `link*` spelling works on
+       * a converted space and an unconverted one alike (`Q-28`).
+       */
+      linkEntities: [linkedEnt.body._id],
+      linkFacts: [linkedMem.body._id],
       description: 'Submit report',
     });
     assert.equal(r.status, 201, JSON.stringify(r.body));
     assert.equal(r.body.type, 'deadline');
     assert.equal(r.body.confidence, 0.8);
     assert.ok(r.body.endsAt, 'endsAt should be set');
-    assert.deepStrictEqual(r.body.entityIds, [linkedEnt.body._id]);
-    assert.deepStrictEqual(r.body.memoryIds, [linkedMem.body._id]);
+    /*
+     * The link is asserted through a READER, not through the echoed arrays.
+     *
+     * Those two arrays are populated only on a space still read through the array shape; on a converted
+     * one the link lives as a record and they stay empty. Asserting the echo therefore asserts which
+     * side of the migration this space happens to be on, which is not what this case is about. The walk
+     * reads whichever shape the space stores, so it answers the question that was meant.
+     */
+    const reach = await post(INSTANCES.a, token(), '/api/brain/spaces/general/traverse',
+      { startId: linkedEnt.body._id, maxDepth: 1, includeChrono: true });
+    assert.equal(reach.status, 200, JSON.stringify(reach.body));
+    assert.ok((reach.body.nodes ?? []).some(n => n._id === r.body._id),
+      `the chrono entry must be reachable from the entity it named: ${JSON.stringify(reach.body.nodes)}`);
     assert.equal(r.body.description, 'Submit report');
   });
 
