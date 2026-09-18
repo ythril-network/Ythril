@@ -121,9 +121,16 @@ describe('a traverse hop is bounded', { skip }, () => {
 
     const res = await edgesMod.traverseGraph([SPACE], START, 'both', undefined, 2, 50, false, false, false);
     assert.equal(res.truncated, false, 'a graph well inside every budget was reported as truncated');
-    // The START node is NOT in `nodes` — the walk returns what it REACHED, and the caller already has the node
-    // it asked from. Measured rather than assumed: the first draft of this case expected two and got one.
-    assert.deepEqual(res.nodes.map(n => n._id), [HUB]);
+    /*
+     * START FIRST, at depth 0, then what the walk reached.
+     *
+     * This expected `[HUB]` alone until 5.0, with a note saying the caller already has the node it asked
+     * from. `Q-27` reversed that: `graph_traverse`'s schema had always promised the depth-0 node, and
+     * without it an isolated record and a bad id both answered `nodes: []`. The order matters here too —
+     * the start is pushed before the walk begins, so it is `nodes[0]`.
+     */
+    assert.deepEqual(res.nodes.map(n => n._id), [START, HUB]);
+    assert.deepEqual(res.nodes.map(n => n.depth), [0, 1]);
   });
 
   it('the walk still returns what it found when a hop is capped', async () => {

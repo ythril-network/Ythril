@@ -553,7 +553,15 @@ disagreeing about one parameter is worse than either reading of it.
 }
 ```
 
-- `nodes` — records discovered during traversal, excluding the start entity itself; each node includes a `depth` field indicating the hop count from `startId`
+- `nodes` — `startId` itself at **depth 0**, then every record the walk reached, each with the `depth` it
+  was found at. **An empty `nodes` therefore means the id resolved to nothing**, which is a different
+  answer from "it has no neighbours" — an isolated record comes back as one node rather than as nothing.
+  The start node counts against `limit` like any other, so `limit: 1` answers the start alone, which is
+  also the cheapest way to ask whether an id exists.
+
+  > *Changed in 5.0:* the start node was excluded, so an isolated record and a bad id both answered
+  > `nodes: []`. The tool's schema described the depth-0 node throughout — this makes the description
+  > true rather than correcting it, because the distinction it promises is the reason it was written.
 - `edges` — only the edges actually traversed (not all edges of the returned nodes)
 - `truncated: true` if `limit` was reached before exhausting the graph
 

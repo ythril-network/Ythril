@@ -27,7 +27,7 @@ import { frontierEdgeQuery, type TraverseNarrowing } from './frontier-query.js';
 import { linkedRecordsAtFrontier, entitiesLinkedFromRecords, recordDisplayName, recordDisplayType, type LinkedRecord, type LinkInclusion }
   from './link-frontier.js';
 import { getEntityById } from './entities.js';
-import { resolveEdgeEndpointNames, resolveEdgeEndsForWrite, neighbourNodes } from './edge-endpoint-names.js';
+import { resolveEdgeEndpointNames, resolveEdgeEndsForWrite, neighbourNodes, startNode } from './edge-endpoint-names.js';
 import { storedEdgeKind, edgeEndpointKind } from './entity-refs.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { EdgeDoc, EntityDoc, TombstoneDoc, ChronoEntry, FactDoc, FileMetaDoc } from '../config/types.js';
@@ -788,6 +788,26 @@ export async function traverseGraph(
    * same thing and are reported through the same flag.
    */
   let edgeScanCapped = false;
+
+  /*
+   * THE START NODE, at depth 0 — which the tool's own schema has always promised and the walk never sent.
+   *
+   * *"`startId` itself at depth 0, so a walk that finds nothing still comes back with one node rather than
+   * empty — an empty `nodes` means the id resolved to nothing, which is a different answer from 'it has no
+   * neighbours'."* Measured 2026-09-18: an isolated entity answered `nodes: []`, indistinguishable from a
+   * bad id, and that reading cost four probe iterations on an instance where the id was demonstrably good.
+   *
+   * **Absent when nothing resolves, and that is the other half of the promise.** A placeholder here would
+   * make every walk non-empty and destroy the distinction from the other side — "empty means the id
+   * resolved to nothing" is only useful while a bad id is actually empty.
+   *
+   * It counts against `limit` because it IS a node; a node that did not count would be a cap that lies by
+   * one. `limit: 1` therefore answers the start alone, which is also the cheapest "does this id exist".
+   */
+  const started = await startNode(memberIds, startId);
+  // `push` returns the new length, so the cap is checked against the value that just changed — and this
+  // file is frozen at its size, so the short form is the one that fits beside the reasoning above it.
+  if (started && resultNodes.push(started) >= limit) return answer(true);
 
   while (frontier.length > 0 && currentDepth < maxDepth) {
     // Batch-fetch all edges for the current frontier across all member spaces

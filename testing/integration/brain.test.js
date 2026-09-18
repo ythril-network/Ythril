@@ -1632,10 +1632,18 @@ describe('Brain — graph traversal (/api/brain/spaces/:spaceId/traverse)', () =
     const nodeIds = r.body.nodes.map(n => n._id);
     assert.ok(nodeIds.includes(entB), 'B must be in depth-1 neighbours');
     assert.ok(nodeIds.includes(entD), 'D must be in depth-1 neighbours');
-    assert.ok(!nodeIds.includes(entA), 'start node must not appear in results');
     assert.ok(!nodeIds.includes(entC), 'C must not appear at depth 1');
-    // All returned nodes must have depth=1
-    for (const n of r.body.nodes) assert.equal(n.depth, 1, `Node ${n._id} must have depth=1`);
+    /*
+     * The start node IS in the results now, at depth 0 — `Q-27` made `graph_traverse`'s own schema
+     * true. This case asserted its absence and that every node was at depth 1; both are inverted
+     * rather than dropped, because the depth is what tells the start from a neighbour and something
+     * has to hold that.
+     */
+    assert.equal(r.body.nodes.find(n => n._id === entA)?.depth, 0, 'the start node is at depth 0');
+    for (const n of r.body.nodes) {
+      const expected = n._id === entA ? 0 : 1;
+      assert.equal(n.depth, expected, `Node ${n._id} must have depth=${expected}`);
+    }
   });
 
   it('Outbound depth=2 reaches C via B', async () => {
@@ -1708,7 +1716,14 @@ describe('Brain — graph traversal (/api/brain/spaces/:spaceId/traverse)', () =
     assert.equal(r.body.truncated, false);
   });
 
-  it('direction=both returns neighbours in either direction and start node never appears in results', async () => {
+  it('direction=both returns neighbours in either direction, and the start node at depth 0', async () => {
+    /*
+     * This case asserted that the start node NEVER appears, which was the behaviour until 5.0 and was
+     * the opposite of what `graph_traverse`'s own schema had always described: *"`startId` itself at
+     * depth 0, so a walk that finds nothing still comes back with one node rather than empty."*
+     * `Q-27` made the description true, so the assertion is inverted rather than deleted — the start
+     * node is now part of the contract and something has to hold it.
+     */
     // A→B and A→D outbound; C→B is not in graph, but B→C is. Starting from B with both:
     // outbound: C; inbound: A
     const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/traverse', {
@@ -1720,8 +1735,12 @@ describe('Brain — graph traversal (/api/brain/spaces/:spaceId/traverse)', () =
     assert.ok(nodeIds.includes(entA), 'A must appear as inbound neighbour of B in both direction');
     // C is an outbound neighbour of B (B→C depends_on)
     assert.ok(nodeIds.includes(entC), 'C must appear as outbound neighbour of B in both direction');
-    // Start node (B) must never appear in results
-    assert.ok(!nodeIds.includes(entB), 'Start node must not appear in traversal results');
+    // And B itself, at depth 0 — an empty `nodes` now means the id resolved to nothing.
+    const start = r.body.nodes.find(n => n._id === entB);
+    assert.ok(start, 'the start node must be in the results');
+    assert.equal(start.depth, 0, 'and at depth 0, which is what distinguishes it from a neighbour');
+    // The neighbours keep the depth they had: the start is ADDED, never substituted.
+    assert.equal(r.body.nodes.find(n => n._id === entA)?.depth, 1);
   });
 });
 
