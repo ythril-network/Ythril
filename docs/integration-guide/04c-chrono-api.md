@@ -145,7 +145,11 @@ There is no `GET .../chrono`, and there has not been since 5.0 — listing a col
 of them:
 
 ```http
+<<<<<<< HEAD
 POST /api/filter
+=======
+POST /api/brain/filter
+>>>>>>> origin/main
 Content-Type: application/json
 
 { "space": "work", "collection": "chrono", "limit": 50, "deriveStatus": true }

@@ -29,7 +29,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+<<<<<<< HEAD
 import { INSTANCES, post, get, del, readCollection, filterRest } from '../sync/helpers.js';
+=======
+import { INSTANCES, post, get, del, readCollection } from '../sync/helpers.js';
+>>>>>>> origin/main
 import { openMcpSession } from '../sync/mcp-session.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -151,6 +155,7 @@ describe('recall and similar take it too, not just filter', () => {
   });
 
   it('similar accepts a list on both doors', async () => {
+<<<<<<< HEAD
     /*
      * A UUID-shaped id, not simply the newest fact — and the difference is a real failure this case had.
      *
@@ -166,6 +171,11 @@ describe('recall and similar take it too, not just filter', () => {
       .map(r => r._id)
       .find(v => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v));
     if (!id) return;   // no UUID-keyed fact in this run; the parse is what matters and recall covered it
+=======
+    const seed = await readCollection(INSTANCES.a, token, 'general', 'facts', { limit: 1 });
+    const id = seed.results?.[0]?._id;
+    if (!id) return;   // nothing embedded in this run; the parse is what matters and recall covered it
+>>>>>>> origin/main
     const rest = await post(INSTANCES.a, token, '/api/brain/similar', {
       entryId: id, entryType: 'fact', space: ['general'],
     });

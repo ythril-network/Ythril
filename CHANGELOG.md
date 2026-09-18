@@ -580,6 +580,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+<<<<<<< HEAD
 - **`POST /api/brain/filter` is gone, and with it the last second shape of any capability.** `B-9` step
   3c, which closes a row open since 2026-09-16. It was not a thin route over the `filter` tool — it was a
   SECOND IMPLEMENTATION of it: its own body validation, its own paging parse, its own proxy fan-out, its
@@ -603,6 +604,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Governance simplifies with it: `filter` had a `ROUTE_RIGHTS` row beside its `TOOL_RIGHTS` row, which is
   two governance points for one capability. One row governs both doors now.
+=======
+>>>>>>> origin/main
 - **The five collection LIST routes are gone. Reading a collection is `filter`.** `B-9` step 3b, and a
   break: `GET /api/brain/spaces/:spaceId/{facts,entities,edges,chrono,files}` each answered what a
   predicate over one collection answers, with their own query grammar, their own page caps and their own

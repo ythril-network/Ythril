@@ -14,7 +14,15 @@ import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { NotFoundError } from '../../util/errors.js';
 import { countFacts } from '../../brain/fact.js';
 import { getEmbedJobCounts } from '../../brain/embed-queue.js';
+<<<<<<< HEAD
 import { TRAVERSE_BODY_FIELDS, FIND_SIMILAR_BODY_FIELDS, unknownBodyFields } from '../../brain/query.js';
+=======
+import {
+  queryBrain, countBrain, QUERY_BODY_FIELDS, TRAVERSE_BODY_FIELDS, FIND_SIMILAR_BODY_FIELDS,
+  unknownBodyFields, compareBySort, DEFAULT_QUERY_SORT, DEFAULT_QUERY_LIMIT, PROXY_PAGE_CEILING,
+  parseQueryPaging,
+} from '../../brain/query.js';
+>>>>>>> origin/main
 import { findSimilar, type RecallKnowledgeType, type RecallResult } from '../../brain/recall.js';
 import { type FilterExpression } from '../../brain/filter.js';
 import { traverseGraph } from '../../brain/edges.js';
@@ -233,6 +241,224 @@ searchRouter.post('/spaces/:spaceId/traverse', globalRateLimit, requireSpaceAuth
 });
 
 
+<<<<<<< HEAD
+=======
+// POST /api/brain/spaces/:spaceId/query — structured query with filter/projection
+//
+// ## Two defects, one shape
+//
+// The fleet integrator, 2026-08-12T1410Z: `skip` was accepted at 200 and silently ignored, and *"it cost us a fabricated number"* —
+// a paged sweep re-read page one every time and was counted as if it had advanced. Their report names `skip`; the defect
+// is the PERMISSIVE BODY. Honouring one key would have left every other unknown key doing the same thing.
+//
+// So both halves are here: the body is strict, and `skip` is real. MCP's `query` tool already declared
+// `additionalProperties: false` and so already refused unknown keys — REST was the weaker of the two surfaces for the
+// same rule, which is this repo's most repeated defect class.
+/*
+ * POST /api/brain/filter — structured predicate read, across one space or every space you can read.
+ *
+ * The space moved out of the path at 5.0 for the same reason as `recall`: a path segment cannot be omitted,
+ * so the route had no way to express "everything I can reach". The fan-out itself is not new — this already
+ * paged across the members of a proxy space, and an omitted space is the same walk over a different list.
+ */
+searchRouter.post('/filter', globalRateLimit, requireBodyScopedSpace('knowledge', 'read'), statesRetryability, async (req, res) => {
+  const authorised = req.authorisedSpaces ?? [];
+  const namedSpace = req.resolvedSpaceId;
+  const spaceId = namedSpace ?? authorised[0] ?? '';
+  // Resolved before anything is read, so a bad `maxBytes` is a 400 rather than a query that runs first.
+  const budget = resolveBudget(req.body as BudgetRequest);
+  if (!budget.ok) { res.status(400).json({ error: budget.error }); return; }
+
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const bad = unknownBodyFields(body, QUERY_BODY_FIELDS);
+  if (bad) { res.status(400).json(bad); return; }
+
+  const { collection, filter, projection, limit, maxTimeMS, skip } = body;
+
+  /*
+   * The NAME conveniences, same three the per-collection list routes take and the tool declares.
+   *
+   * They are here because a parameter on one door and not the other is the defect this repo pays most
+   * for — a caller reads the tool schema, switches door, and gets a 400 for a documented argument. The
+   * gate that caught it names that outcome exactly: *"a tool argument its route drops is a 200 with the
+   * value silently missing"*, and it is a 400 here only because this route refuses unknown fields.
+   */
+  const nameArg = (k: string): string | undefined =>
+    typeof body[k] === 'string' && (body[k] as string).trim() ? (body[k] as string) : undefined;
+  const entityName = nameArg('entityName');
+  const fromName = nameArg('fromName');
+  const toName = nameArg('toName');
+  const validCollections = BRAIN_COLLECTIONS;
+  if (!validCollections.includes(collection as typeof validCollections[number])) {
+    res.status(400).json({ error: `collection must be one of: ${validCollections.join(', ')}` });
+    return;
+  }
+  /*
+   * Refused on a collection they cannot mean, never ignored — word for word what the tool answers, because
+   * a caller comparing the two doors should not have to work out that two wordings mean the same thing.
+   */
+  /*
+   * Refused on a collection it cannot mean, never ignored — a silently dropped flag is a caller who
+   * believes they asked. Same rule and the same wording as the tool, for the same reason.
+   */
+  if (body['deriveStatus'] !== undefined && collection !== 'chrono') {
+    res.status(400).json({ error: `\`deriveStatus\` applies to chrono only, not '${String(collection)}'. `
+      + 'Only a chrono entry has a due moment for a status to be derived from.' });
+    return;
+  }
+  const ENTITY_LINKED: readonly string[] = ['facts', 'chrono'];
+  if (entityName && !ENTITY_LINKED.includes(collection as string)) {
+    res.status(400).json({ error: `entityName applies to ${ENTITY_LINKED.join(' and ')} only, not `
+      + `'${String(collection)}'. For entities themselves use filter: { name: ... }; for edges use `
+      + 'fromName or toName.' });
+    return;
+  }
+  if ((fromName || toName) && collection !== 'edges') {
+    res.status(400).json({ error: `${fromName ? 'fromName' : 'toName'} applies to edges only, not `
+      + `'${String(collection)}'. For facts and chrono use entityName.` });
+    return;
+  }
+  const rawFilter: Record<string, unknown> =
+    filter != null && typeof filter === 'object' && !Array.isArray(filter)
+      ? (filter as Record<string, unknown>)
+      : {};
+  /*
+   * The predicate this call runs: the five list CONVENIENCES merged under `$and`, then the chrono
+   * status rewritten if `deriveStatus` was asked for. ONE call, so neither door holds the order (the
+   * status rewrite looks for a top-level `status`, and a convenience can put one there) and neither
+   * has two refusals to remember.
+   */
+  const resolved = resolvePredicate(String(collection), body, rawFilter, spaceId);
+  if ('error' in resolved) { res.status(400).json({ error: resolved.error }); return; }
+  const safeFilter = resolved.predicate;
+  const safeProjection: Record<string, unknown> | undefined =
+    projection != null && typeof projection === 'object' && !Array.isArray(projection)
+      ? (projection as Record<string, unknown>)
+      : undefined;
+  // The caller-facing page cap. It used to live inside `queryBrain`, where it also bounded the proxy merge's internal
+  // fetch and silently truncated deep pages to nothing.
+  // A DEFAULT, not a clamp: see `DEFAULT_QUERY_LIMIT`. What bounds the answer is the byte budget, the
+  // `maxTimeMS` ceiling and — on a proxy space — `PROXY_PAGE_CEILING`, which refuses out loud.
+  // ONE parser for both paging values and both doors — see `parseQueryPaging`. Written out here on each
+  // door until 5.0, which is how `skip` came to refuse a value it cannot use while `limit` quietly
+  // answered with the default instead.
+  const paging = parseQueryPaging({ limit, skip });
+  if ('error' in paging) { res.status(400).json({ error: paging.error }); return; }
+  const safeLimit = paging.limit;
+  const safeSkip = paging.skip;
+  const safeMaxTimeMS = typeof maxTimeMS === 'number' ? maxTimeMS : 5000;
+
+  // Same `sort`/`dir` the brain LIST endpoints take, with the same allowlist and the same 400 text — a caller who knows
+  // one knows the other, and inventing an object form here would have been a second way to say one thing.
+  // `toMongoSort` appends `_id`, which is what keeps a caller-chosen order total and therefore pageable.
+  const sortParse = parseSortParam(body['sort'], body['dir'], SORTABLE_FIELDS[collection as keyof typeof SORTABLE_FIELDS]);
+  if ('error' in sortParse) { res.status(400).json({ error: sortParse.error }); return; }
+  const order = sortParse.sort ? toMongoSort(sortParse.sort) : DEFAULT_QUERY_SORT;
+
+  /*
+   * Names resolved PER MEMBER, through the shared predicate.
+   *
+   * An id belongs to the space that owns it, so resolving against one member and querying another matches
+   * nothing while looking correct. `attachedToEntityNamed` also covers BOTH link shapes — the legacy array
+   * and the link records — which a hand-written `entityIds: { $in: ids }` here would not (`B-10`).
+   */
+  const withNameScope = async (mid: string): Promise<Record<string, unknown>> => {
+    if (!entityName && !fromName && !toName) return safeFilter;
+    const per: Record<string, unknown> = { ...safeFilter };
+    if (entityName) {
+      Object.assign(per, await attachedToEntityNamed(mid, collection === 'chrono' ? 'chrono' : 'fact', entityName));
+    }
+    if (fromName) per['from'] = { $in: await resolveEntityIdsByName(mid, fromName) };
+    if (toName) per['to'] = { $in: await resolveEntityIdsByName(mid, toName) };
+    return per;
+  };
+
+  try {
+    // One paging rule, shared with the embed-job listing. It used to be inline here, and being inline is how it shipped
+    // a window capped at 100 that sliced deep pages to nothing — see `spaces/page-across-members.ts`.
+    // A NAMED space may be a proxy and resolves to its members; an omitted one is already the list the
+    // guard authorised — every space where this token actually holds `knowledge: read`, which is a stricter
+    // question than reach.
+    const members = namedSpace ? memberSpacesForRequest(req, namedSpace) : memberSpacesForRequestAcross(req, authorised);
+    const page = await pageAcrossMembers({
+      members,
+      limit: safeLimit,
+      skip: safeSkip,
+      ceiling: PROXY_PAGE_CEILING,
+      compare: compareBySort(order),
+      /** The caller's predicate, plus whatever the names resolve to IN THIS MEMBER. */
+      readMember: async (mid, lim, sk) => decorateMemberRows(String(collection), mid, await queryBrain(
+        mid, collection as typeof validCollections[number],
+        await withNameScope(mid), safeProjection, lim, safeMaxTimeMS, sk, order,
+      ) as Array<Record<string, unknown>>),
+    });
+    if (!page.ok) { res.status(400).json({ error: page.error }); return; }
+    /*
+     * The two DECORATIONS the per-collection list routes apply and this one did not: an edge's endpoint
+     * names, and a file's job step progress (joined per member above, before the page is merged and the
+     * owner is forgotten). A decoration is not a parameter, so nothing compared the doors and nobody
+     * reported the difference — see `brain/list-decorations.ts`.
+     */
+    const decorated = await decoratePage(String(collection), spaceId, page.rows,
+      read => collectAcrossMembers(spaceId, read), { deriveStatus: body['deriveStatus'] === true });
+    // And the same diagnostics projection the four list routes honour. Absent here, `includeDiagnostics`
+    // was accepted by the body allowlist and did nothing, which is the silent no-op it exists to remove.
+    const merged = withoutListDiagnostics(decorated, body['includeDiagnostics'] === true);
+
+    let total = 0;
+    for (const mid of members) {
+      total += await countBrain(mid, collection as typeof validCollections[number], safeFilter, safeMaxTimeMS);
+    }
+
+    /*
+     * THE SIZE CEILING, which this route did not have.
+     *
+     * `limit` caps ROWS and says nothing about how big one is: a hundred file records or a hundred entities
+     * with long descriptions had no bound at all, on the read route a fleet actually pages through.
+     *
+     * The offset is passed so `nextSkip` is ABSOLUTE. `/query` already has a real `skip`, so a continuation
+     * computed from the page alone would send a caller back to the start of page two for ever — a paging loop
+     * that never advances, which is the exact defect this route was reported for in the first place.
+     */
+    const budgeted = applyBudget(merged, { chars: budget.chars, bytes: budget.bytes });
+
+    /*
+     * `count` MEANS DIFFERENT THINGS ON THESE TWO ROUTES, and that collision is worth naming.
+     *
+     * On the recall paths `count` is the TOTAL number of matches, so `budgetFields` reports it as such. On
+     * `/query` it has always been the PAGE — documented that way, with `total` beside it for the whole match.
+     * Spreading the accounting fields wholesale therefore overwrote a documented meaning with a different one:
+     * a caller asking for `limit: 3` got `count: 12`, which is exactly the fabricated-number defect this route
+     * was reported for.
+     *
+     * Stripped by NAME rather than fixed by spread order. Ordering works and is one careless reorder away from
+     * silently coming back.
+     */
+    const { count: _budgetTotal, ...budgetAccounting } = budgetFields(budgeted, total, { chars: budget.chars, bytes: budget.bytes }, safeSkip);
+
+    res.json({
+      results: budgeted.returned, collection,
+      /*
+       * `count` is this page and `total` is the whole match — both, because renaming `count` would break every
+       * caller that already reads it and dropping it would break them silently.
+       *
+       * `count` is the number RETURNED, so it still equals `results.length` when the budget bit. A caller
+       * reading either one is right; a caller who read `count` and then iterated `results` would otherwise be
+       * told a number that did not match what they were holding.
+       */
+      count: budgeted.returned.length, total, limit: safeLimit, skip: safeSkip,
+      ...budgetAccounting,
+      ...(sortParse.sort ? { sort: sortParse.sort.field, dir: sortParse.sort.dir === 1 ? 'asc' : 'desc' } : {}),
+    });
+  } catch (err: unknown) {
+    // A store failure is not a client error. See `brain/store-failure.ts` — this used to answer 400 for every
+    // throw, which told fourteen personas not to retry a condition that cleared in seconds.
+    sendReadFailure(res, err);
+  }
+});
+
+
+>>>>>>> origin/main
 /*
  * POST /api/brain/recall — meaning-ranked search, across one space or across every space you can read.
  *

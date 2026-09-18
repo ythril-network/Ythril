@@ -728,7 +728,11 @@ There is no `GET .../files`, and there has not been since 5.0 — file metadata 
 other, so it is read the same way:
 
 ```http
+<<<<<<< HEAD
 POST /api/filter
+=======
+POST /api/brain/filter
+>>>>>>> origin/main
 Content-Type: application/json
 
 { "space": "work", "collection": "files", "limit": 50, "tag": "design" }

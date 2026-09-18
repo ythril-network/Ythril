@@ -88,7 +88,11 @@ There is no `GET .../entities`, and there has not been since 5.0 — listing a c
 all of them:
 
 ```http
+<<<<<<< HEAD
 POST /api/filter
+=======
+POST /api/brain/filter
+>>>>>>> origin/main
 Content-Type: application/json
 
 { "space": "work", "collection": "entities", "limit": 50, "sort": "name", "dir": "asc" }
@@ -457,7 +461,11 @@ id only has to be agreed on by peers creating an edge from now on.
 Same shape, different collection — and the same since 5.0:
 
 ```http
+<<<<<<< HEAD
 POST /api/filter
+=======
+POST /api/brain/filter
+>>>>>>> origin/main
 Content-Type: application/json
 
 { "space": "work", "collection": "edges", "limit": 50, "fromName": "Ada" }

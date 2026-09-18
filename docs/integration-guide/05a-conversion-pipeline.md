@@ -24,7 +24,11 @@ chunks do not exist yet when the call returns. This is true for the REST upload 
 | `POST /api/files/:spaceId` (document formats) | `202 Accepted` with `embeddingStatus: "pending"` — or `201` with `embeddingStatus: "skipped"` when document extraction is `off` for that space | poll the filemeta record |
 | MCP `write_file` | the write confirmation (sha256) — it reports the **write**, not the conversion | poll the filemeta record |
 
+<<<<<<< HEAD
 Poll the file's metadata record — `POST /api/filter` with
+=======
+Poll the file's metadata record — `POST /api/brain/filter` with
+>>>>>>> origin/main
 `{"collection": "files", "path": "<path>", "limit": 1}` — and watch `embeddingStatus`: `pending` →
 `processing` → `complete` (`partial` means some chunks failed and are retry-eligible; `failed` means
 retries are exhausted). Once complete, the record carries `chunkCount` and (for binary formats)
@@ -162,7 +166,11 @@ Chunk records and `_converted/` records share the same vector space as facts, en
 Chunk records and `_converted/` file records carry a `parentFileId` field. The following surfaces **exclude** them by default, so users only see top-level files:
 
 - **File manager UI** — shows only original, user-uploaded files.
+<<<<<<< HEAD
 - **`POST /api/filter` with `collection: "files"`** — returns chunk records TOO. Exclude them with
+=======
+- **`POST /api/brain/filter` with `collection: "files"`** — returns chunk records TOO. Exclude them with
+>>>>>>> origin/main
   `filter: { parentFileId: { "$exists": false } }`. The list route this replaced excluded them by default;
   `filter` has no default, because a default is a decision about what somebody meant and this door takes
   what they said. A listing without that predicate looks like the same file many times over.

@@ -208,13 +208,14 @@ describe('the vector never leaves the database', () => {
 
   it('the one `filter` handler applies the strip, and reads the flag to decide', () => {
     /*
-     * This case named four list routes until `B-9` step 3b deleted all four. Listing a collection is
-     * `filter` now: ONE place a page of brain records is built, and two doors onto it.
+     * This case named four list routes until `B-9` step 3b deleted all four, and then TWO doors until 3c
+     * deleted the hand-written REST twin. Listing a collection is `filter` now: one place a page of brain
+     * records is built, and one implementation behind both doors.
      *
-     * Counting both doors rather than one is what survives the deletion, and the asymmetry it protects
-     * against is still available: the REST door reads `body['includeDiagnostics']` and the MCP door reads
-     * `a['includeDiagnostics']`. Two spellings of one flag, and a door that dropped it would return the
-     * passage a second time to every caller who happened to pick it.
+     * What it protected against was two spellings of one flag — `body['includeDiagnostics']` on the route
+     * and `a['includeDiagnostics']` on the tool — where a door that dropped its own would return the
+     * passage a second time to whoever picked it. There is one spelling now, which is the rule holding
+     * rather than the case weakening.
      */
     /*
      * ONE door since `B-9` step 3c. The REST half was a hand-written twin with its own copy of this
