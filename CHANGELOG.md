@@ -724,6 +724,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The link conversion DELETED links that existed only as records, and its own log said it removed
+  nothing.** The 5.0 migration walks each record and reconciles its links from the legacy ARRAY fields.
+  A link written through `linkEntities` before that spelling was fixed exists as a link RECORD with an
+  empty array beside it — so the desired set said "this record links to nothing" and the reconcile
+  deleted it. **With a tombstone**, so the loss replicated to every peer and a re-run could not repair
+  it.
+
+  The operator was told the opposite in the same breath: *"It is additive: nothing is removed, the
+  arrays keep being read until a space is marked."*
+
+  **The count is what hid it.** `N link(s) created` was a `countDocuments` delta, not a count of
+  creations — one creation and one removal net to `0`, which is indistinguishable from a space that
+  needed no work. A live instance printed `general converted — -1 link(s) created`, and a creation
+  count cannot be negative.
+
+  The conversion no longer deletes, and it reports the creation count `reconcileLinks` already returns
+  rather than measuring around it. **An ordinary write still deletes** — `linkEntities: []` means
+  detach, and that is the whole point of it — so the exception is pinned by a gate to the one module
+  entitled to it: a sync ingest that became additive would stop honouring a peer's detach and the link
+  would return on every pull.
+
+  **If you converted a space while holding record-only links, those links are gone and the tombstones
+  are with them.** They can be re-created; nothing else was touched.
+
 - **A walk did not return the node it started from, so an isolated record and a bad id looked the same.**
   `graph_traverse`'s own schema has always described *"`startId` itself at depth 0, so a walk that finds
   nothing still comes back with one node rather than empty — an empty `nodes` means the id resolved to

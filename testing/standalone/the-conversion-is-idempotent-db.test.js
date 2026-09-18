@@ -146,6 +146,56 @@ describe('the link conversion is complete, idempotent and non-destructive', { sk
     assert.equal(report.scanned.facts, 2, 'the bare record must still be WALKED, not skipped');
   });
 
+  it('a link that exists ONLY as a record SURVIVES the conversion', async () => {
+    /*
+     * The conversion announces itself to the operator as *"additive: nothing is removed"*, and on a live
+     * instance it printed `general converted — -1 link(s) created`. A negative creation count is a
+     * deletion wearing the wrong name.
+     *
+     * **How a record-only link comes to exist.** Until `Q-28`, `linkEntities` wrote a link RECORD and
+     * left the array alone. So a caller who used the spelling the MCP schemas publish produced exactly
+     * this shape: a real link, stored, with an empty array beside it.
+     *
+     * `reconcileLinksForDocument` then builds its DESIRED set from the arrays — `entityIds: []` means
+     * "this record links to no entities" — and `reconcileLinks` deletes every link record that the
+     * desired set does not name, writing a tombstone so the deletion replicates. The migration therefore
+     * destroys the links it was written to preserve, permanently and on every peer.
+     */
+    /*
+     * Its OWN state: the shared seed carries arrays, which convert into records and would make the
+     * counts below say something about the seed rather than about this case.
+     */
+    for (const c of ['entities', 'facts', 'chrono', 'files', 'links', 'tombstones']) {
+      await coll(c).deleteMany({});
+    }
+    await coll('facts').insertOne({
+      _id: M1, spaceId: SPACE, fact: 'a claim whose link was written the new way', tags: [],
+      entityIds: [], seq: 1, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+      author: AUTHOR,
+    });
+    await coll('entities').insertOne({
+      _id: E1, spaceId: SPACE, name: 'Vault', type: 'service', tags: [], seq: 2,
+      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+    // The link, as `linkEntities` wrote it before Q-28: a record, and nothing in the array.
+    await coll('links').insertOne({
+      _id: `${M1}:fact>entity:${E1}`, spaceId: SPACE, from: M1, fromKind: 'fact', to: E1, toKind: 'entity',
+      author: AUTHOR, createdAt: '2026-01-02T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z', seq: 3,
+    });
+    assert.equal(await coll('links').countDocuments({}), 1, 'precondition: the link is there to lose');
+
+    const report = await convertMod.convertSpaceLinks(SPACE);
+
+    assert.equal(await coll('links').countDocuments({}), 1,
+      'the conversion DELETED a link that existed only as a record — it is announced to the operator as '
+      + '"additive: nothing is removed", and a tombstone makes the loss replicate to every peer');
+    assert.equal(await coll('tombstones').countDocuments({}), 0,
+      'and it wrote a tombstone for it, so the deletion is permanent rather than repairable by a re-run');
+    assert.ok(report.added >= 0,
+      `the report said ${report.added} link(s) created — a creation count cannot be negative, and a `
+      + 'DELTA reported as a total cannot tell "nothing to do" from "one made and one destroyed"');
+  });
+
   it('convertAllLinks sets completeLinkage on a clean run', async () => {
     await convertMod.convertAllLinks();
     const space = loader.getConfig().spaces.find(s => s.id === SPACE);
