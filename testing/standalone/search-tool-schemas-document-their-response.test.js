@@ -30,6 +30,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { MCP_SEARCH_FAMILY, doorSources } from '../_shared/search-doors.mjs';
 
 const { budgetFields } = await import('../../server/dist/brain/result-budget.js');
 
@@ -47,7 +48,12 @@ const BUDGET_FIELDS = Object.keys(budgetFields(
   0,
 ));
 
-const SRC = readFileSync('server/src/mcp/tools/search.ts', 'utf8');
+/*
+ * BOTH MCP sources in the search family, concatenated. Each tool below is sliced out by its own
+ * `name: '<tool>'`, so the slicing is unchanged — what changed is that `filter` lives in its own file
+ * since 2026-09-18, and a gate naming ONE file would have silently stopped having a subject for it.
+ */
+const SRC = doorSources(MCP_SEARCH_FAMILY).join('\n');
 /** The `recall` tool object: from its name to the next tool's, so a later tool cannot satisfy these. */
 const RECALL = (() => {
   const at = SRC.indexOf("name: 'recall'");

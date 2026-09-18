@@ -36,6 +36,7 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { routeBody, delegatesCleanly } from './_delegating-routes.mjs';
 import { readFileSync } from 'node:fs';
+import { MCP_SEARCH_FAMILY, doorSources } from '../_shared/search-doors.mjs';
 
 let normaliseProjection, applyProjection, toMongoProjection, NEVER_PROJECTABLE;
 let mapGraphNodes, graphNodeRecord, RECALL_ENVELOPE_KEYS, mergeEmbeddingExclusion;
@@ -155,7 +156,9 @@ describe('it reaches _graph, at every depth, on nodes AND edges', () => {
 
 describe('both doors take it, and the REST envelope survives', () => {
   const rest = readFileSync('server/src/api/brain/search.ts', 'utf8');
-  const mcp = readFileSync('server/src/mcp/tools/search.ts', 'utf8');
+  // Both MCP sources: `recall` still lives in `search.ts` and `filter` has its own file, and this
+  // case is about every door that parses a projection.
+  const mcp = doorSources(MCP_SEARCH_FAMILY).join('\n');
 
   it('every REST route that still reads a body parses the projection through one parser', () => {
     /*

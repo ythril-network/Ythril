@@ -20,6 +20,7 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { trackedSources } from './_sources.mjs';
 import { readFileSync } from 'node:fs';
+import { FILTER_DOORS } from '../_shared/search-doors.mjs';
 
 let tagContains;
 
@@ -103,7 +104,7 @@ describe('every single-tag call site uses the shared helper', () => {
   it('and both doors reach it, so an agent and the browser match tags the same way', () => {
     // The parity half, which is why the module exists rather than five tidier copies. `filter` gained
     // the conveniences in the same change that collapsed the five assemblies.
-    for (const door of ['server/src/mcp/tools/search.ts', 'server/src/api/brain/search.ts']) {
+    for (const door of FILTER_DOORS) {
       const src = readFileSync(new URL(`../../${door}`, import.meta.url), 'utf8');
       // `resolvePredicate` since `B-19`: the doors stopped calling the convenience assembly directly when
       // the derived-status step joined it, because a door holding the ORDER of the two is a door that can

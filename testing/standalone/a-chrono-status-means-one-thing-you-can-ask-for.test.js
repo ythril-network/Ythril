@@ -34,13 +34,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { trackedSources } from './_sources.mjs';
+import { FILTER_DOORS } from '../_shared/search-doors.mjs';
 
 const { ALL_TOOLS } = await import('../../server/dist/mcp/tools/index.js');
 const { QUERY_BODY_FIELDS } = await import('../../server/dist/brain/query.js');
 const { decoratePage } = await import('../../server/dist/brain/list-decorations.js');
 
 const src = (p) => stripComments(readFileSync(p, 'utf8'));
-const DOORS = ['server/src/mcp/tools/search.ts', 'server/src/api/brain/search.ts'];
+const DOORS = FILTER_DOORS;
 
 function filterSchema() {
   const tool = ALL_TOOLS.find(t => t.name === 'filter');

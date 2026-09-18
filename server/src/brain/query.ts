@@ -76,6 +76,12 @@ export const QUERY_BODY_FIELDS: ReadonlySet<string> = new Set([
    */
   'deriveStatus',
   /*
+   * ONE file, by its stored path — and the reason it is an argument rather than `filter: { path }` is that
+   * the argument is NORMALISED. See `brain/file-path-arg.ts`: a caller holding a Windows-style spelling
+   * finds the record, and through a bare equality finds nothing while getting a 200.
+   */
+  'path',
+  /*
    * The size budget, which this route had none of: `limit` caps ROWS and says nothing about how big one is,
    * so a page of file records had no ceiling on the one read route a fleet actually pages through.
    *
