@@ -118,7 +118,6 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
    * version of the defect the generic door exists to remove.
    */
   { route: '/api/brain/recall', method: 'POST', area: 'knowledge', needs: 'read', scope: 'body' },
-  { route: '/api/brain/filter', method: 'POST', area: 'knowledge', needs: 'read', scope: 'body' },
   { route: '/api/brain/spaces/:spaceId/traverse', method: 'POST', area: 'knowledge', needs: 'read', scope: 'path' },
   { route: '/api/brain/similar', method: 'POST', area: 'knowledge', needs: 'read', scope: 'body' },
   { route: '/api/brain/spaces/:spaceId/stats', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },

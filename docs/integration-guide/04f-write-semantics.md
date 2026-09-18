@@ -181,7 +181,7 @@ thing — a historical import, a backfilled document — and what is being repor
 presence the signal, and this the whole integrity check:
 
 ```http
-POST /api/brain/filter
+POST /api/filter
 { "collection": "facts", "filter": { "stampSkew": { "$exists": true } } }
 ```
 

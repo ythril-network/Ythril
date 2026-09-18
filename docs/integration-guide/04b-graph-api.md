@@ -56,7 +56,7 @@ There is no `GET .../entities/:id`, and there has not been since 5.0. One record
 collection, so it is `filter` — the same call, the same envelope and the same refusals as a page of them:
 
 ```http
-POST /api/brain/filter
+POST /api/filter
 Content-Type: application/json
 
 { "space": "work", "collection": "entities", "filter": { "_id": "8f3c…" }, "limit": 1 }
@@ -88,7 +88,7 @@ There is no `GET .../entities`, and there has not been since 5.0 — listing a c
 all of them:
 
 ```http
-POST /api/brain/filter
+POST /api/filter
 Content-Type: application/json
 
 { "space": "work", "collection": "entities", "limit": 50, "sort": "name", "dir": "asc" }
@@ -457,7 +457,7 @@ id only has to be agreed on by peers creating an edge from now on.
 Same shape, different collection — and the same since 5.0:
 
 ```http
-POST /api/brain/filter
+POST /api/filter
 Content-Type: application/json
 
 { "space": "work", "collection": "edges", "limit": 50, "fromName": "Ada" }
@@ -571,7 +571,7 @@ the marker switches, and they are what the graph reads either way.
 recomputes the same ids, finds them stored, and writes nothing. An interrupted run is fixed by running it
 again rather than by working out where it stopped. It never removes an array.
 
-**There is no `GET`.** Links are a queryable collection like any other — `POST /api/brain/filter`
+**There is no `GET`.** Links are a queryable collection like any other — `POST /api/filter`
 with `collection: "links"` and the full filter grammar. A list endpoint here would be a second, weaker copy
 of it.
 

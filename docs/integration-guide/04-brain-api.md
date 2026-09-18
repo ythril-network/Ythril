@@ -354,7 +354,7 @@ There is no `GET .../facts/:id`, and there has not been since 5.0. One record is
 collection, so it is `filter`:
 
 ```http
-POST /api/brain/filter
+POST /api/filter
 Content-Type: application/json
 
 { "space": "work", "collection": "facts", "filter": { "_id": "8f3c…" }, "limit": 1 }
@@ -399,7 +399,7 @@ There is no `GET .../facts`, and there has not been since 5.0. Listing a collect
 them — a predicate, a page, and the same envelope whichever collection you name:
 
 ```http
-POST /api/brain/filter
+POST /api/filter
 Content-Type: application/json
 
 { "space": "work", "collection": "facts", "limit": 100, "skip": 0 }

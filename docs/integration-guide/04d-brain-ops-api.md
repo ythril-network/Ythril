@@ -511,13 +511,32 @@ Entity items in the `entities` array accept an optional `id` field (UUID v4). If
 
 ---
 
-### Structured Query (Read-Only)
+### Structured query (read-only)
 
 ```http
-POST /api/brain/filter
+POST /api/filter
 ```
 
-Run a constrained Mongo-style read query against one logical collection. Intended for advanced clients and MCP parity with the `query` tool.
+Run a constrained Mongo-style read against one logical collection. This is how you read a collection —
+there is no per-collection `GET` and no second POST beside it.
+
+**IT ANSWERS THE TOOL ENVELOPE, and that is the 5.0 break to port first.** `POST /api/<tool-name>` is one
+shape for every tool, so a caller writes the response handling once:
+
+| | |
+|---|---|
+| `200` | `{ok: true, text, data}` — `data` holds `results`, `count`, `total`, `limit`, `skip`, `truncated` and the budget figures |
+| `4xx`/`5xx` | `{ok: false, error, data}` — `error` is the same sentence the MCP door puts in its `content`, word for word |
+
+The route that used to live at `/api/brain/filter` answered `{results, total, …}` at the top level until
+5.0. It was not a thin
+route over the tool: it was a second implementation of it, with its own body validation, its own paging
+parse and its own proxy fan-out — and three defects were found in the differences between the two while
+it was being removed. What replaced it is the generic tool door, which has no per-tool code at all.
+
+```json
+{ "ok": true, "data": { "results": [ ... ], "count": 20, "total": 4831, "limit": 20, "skip": 0 } }
+```
 
 ```json
 {
@@ -709,7 +728,7 @@ There is no `GET .../files`, and there has not been since 5.0 — file metadata 
 other, so it is read the same way:
 
 ```http
-POST /api/brain/filter
+POST /api/filter
 Content-Type: application/json
 
 { "space": "work", "collection": "files", "limit": 50, "tag": "design" }

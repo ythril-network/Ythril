@@ -43,17 +43,29 @@ let mcp;
 let fileId;
 
 /*
- * `/api/brain/filter`, not `/api/filter`. Both are real doors; the generic `/api/<tool-name>` route
- * dispatches through `callTool`, so the MCP half below already covers it, and it wraps its answer in
- * `{ok, text, data}`. This one returns the envelope directly, which keeps the comparison readable.
+ * The REST door, spelled out rather than through `filterRest`, because these cases compare it to the MCP
+ * door RECORD FOR RECORD and a shared helper would hide which side normalised what.
+ *
+ * `B-9` step 3c deleted the hand-written twin at `/api/brain/filter`, so this is the generic
+ * `/api/<tool-name>` route — the same `callTool` the MCP half reaches, wrapped in `{ok, text, data}`.
+ * The page is unwrapped here so every assertion below reads `body.results` as it always did; what the
+ * cases are about is whether the two doors AGREE, not which envelope carries the answer.
  */
 const viaRest = async (args) => {
-  const res = await fetch(`${INSTANCES.a}/api/brain/filter`, {
+  const res = await fetch(`${INSTANCES.a}/api/filter`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(args),
   });
-  return { status: res.status, body: await res.json() };
+  const envelope = await res.json().catch(() => null);
+  return {
+    status: res.status,
+    // The refusal sentence where every assertion here expects it: `error` on a 4xx, `text` in the prose
+    // half. A caller printing `body.error` must still print one, or a failure reads as `undefined`.
+    body: res.status === 200
+      ? (envelope?.data ?? null)
+      : { ...(envelope ?? {}), error: envelope?.error ?? envelope?.text },
+  };
 };
 
 const viaMcp = async (args) => {
@@ -172,7 +184,7 @@ describe('a file path is normalised the same way on both doors', () => {
 
     const mcpR = await viaMcp(args);
     assert.equal(mcpR.isError, true, 'MCP resolved a conflict REST refuses');
-    assert.equal(mcpR.text.replace(/^Error: /, ''), rest.body.error,
+    assert.equal((mcpR.text ?? '').replace(/^Error: /, ''), (rest.body.error ?? '').replace(/^Error: /, ''),
       `the two doors refuse differently:
   REST: ${rest.body.error}
   MCP:  ${mcpR.text}`);
@@ -189,9 +201,14 @@ describe('a file path is normalised the same way on both doors', () => {
 
     const mcpR = await viaMcp({ space: SPACE, collection: 'facts', path: STORED, limit: 5 });
     assert.equal(mcpR.isError, true, 'MCP accepted a path on facts');
-    // The `Error: ` prefix is how the MCP door wraps EVERY thrown handler error, so it is the envelope
-    // rather than a second wording. What has to match is the sentence inside it.
-    assert.equal(mcpR.text.replace(/^Error: /, ''), rest.body.error,
+    /*
+     * STRIPPED ON BOTH SIDES NOW, and that is the 3c change showing through. The `Error: ` prefix is how
+     * `callTool` wraps a thrown handler error — it used to be the MCP door's alone, because REST had a
+     * hand-written twin that worded its own refusals. Both doors reach the same function, so both carry
+     * the same prefix, which is the outcome this row was about.
+     */
+    const sentence = (t) => (t ?? '').replace(/^Error: /, '');
+    assert.equal(sentence(mcpR.text), sentence(rest.body.error),
       `the two doors refuse differently:\n  REST: ${rest.body.error}\n  MCP:  ${mcpR.text}`);
   });
 });

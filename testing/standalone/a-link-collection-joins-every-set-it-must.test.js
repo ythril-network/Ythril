@@ -135,8 +135,17 @@ describe('the link collection joins every set it belongs to', () => {
      * knowledge one. A dedicated route, when it lands, brings its own row with it.
      */
     const rows = code('server/src/auth/space-rights.ts').split('\n');
-    const query = rows.filter(l => /route: '[^']*\/filter'/.test(l));
-    assert.equal(query.length, 1, 'expected exactly one rights row for /filter');
+    /*
+     * A TOOL_RIGHTS row, not a ROUTE_RIGHTS one, since `B-9` step 3c. `filter` had a hand-written REST
+     * route with its own rights row beside the tool's; the route is gone and the generic `/api/<tool>`
+     * door is governed by `TOOL_RIGHTS` alone — which is the stronger arrangement and the reason the
+     * twin went: ONE row governs both doors instead of two rows that could disagree.
+     */
+    const query = rows.filter(l => /tool: 'filter'/.test(l));
+    assert.equal(query.length, 1, 'expected exactly one rights row for the `filter` tool');
+    assert.equal(rows.filter(l => /route: '[^']*\/filter'/.test(l)).length, 0,
+      'a ROUTE_RIGHTS row for /filter is a second governance point for one capability — that is what '
+      + '3c removed, and adding one back area-scopes the generic tool door by the back gate');
     assert.match(query[0], /area: 'knowledge'/,
       'the door that can now read the links collection must be knowledge-governed');
     // A link route, if one exists, is knowledge too — never files or dataQuality. Matched on the route

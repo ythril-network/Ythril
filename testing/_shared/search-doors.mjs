@@ -27,8 +27,20 @@ export const MCP_RANKING = 'server/src/mcp/tools/search.ts';
 /** Every search route — `recall`, `find_similar` and `filter` all answer from this one file. */
 export const REST_SEARCH = 'server/src/api/brain/search.ts';
 
-/** Both doors of `filter`, MCP first — the pair most of these gates compare. */
-export const FILTER_DOORS = [MCP_FILTER, REST_SEARCH];
+/**
+ * The doors of `filter`. **There is one**, and the list stays a list on purpose.
+ *
+ * It held two until `B-9` step 3c deleted `POST /api/brain/filter` — a hand-written TWIN of the tool,
+ * four hundred lines re-implementing what `callTool` already does. What serves REST now is the generic
+ * `POST /api/<tool-name>` route, which has no per-tool code at all: it forwards the body and returns the
+ * result, so there is no second source for a gate to compare against.
+ *
+ * **Every gate looping over this kept its assertions unchanged**, which is the point of leaving it a
+ * list. They assert that the tool declares a parameter, refuses what it cannot mean and reaches the one
+ * module that implements it — all still true, and now true in one place instead of two. A second entry
+ * appearing here again is a second implementation, which is what `one-capability-is-one-shape` refuses.
+ */
+export const FILTER_DOORS = [MCP_FILTER];
 
 /** Both doors of the RANKING tools. */
 export const RANKING_DOORS = [MCP_RANKING, REST_SEARCH];
@@ -40,7 +52,10 @@ export const MCP_SEARCH_FAMILY = [MCP_RANKING, MCP_FILTER];
 const MUST_DECLARE = {
   [MCP_FILTER]: /export const queryTool/,
   [MCP_RANKING]: /export const recallTool/,
-  [REST_SEARCH]: /searchRouter\.post\('\/filter'/,
+  // `/recall`, not `/filter`: the filter route was deleted at `B-9` step 3c and this file's job is to
+  // fail loudly when a door moves, not to keep naming one that has gone. What makes this file a door is
+  // that it still registers a search route at all.
+  [REST_SEARCH]: /searchRouter\.post\('\/recall'/,
 };
 
 /**

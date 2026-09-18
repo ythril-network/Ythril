@@ -425,6 +425,24 @@ export async function whichSideLostIt(senderUrl, senderToken, networkId, spaceId
 }
 
 /**
+ * A `filter` call over REST, with the tool envelope unwrapped — the ONE place a test does that.
+ *
+ * `POST /api/filter` is the generic tool door and the only one since `B-9` step 3c deleted the
+ * hand-written twin at `/api/brain/filter`. It answers `{ok, text, data}` for every tool, so a caller
+ * writes the response handling once — and `data` is where the page is.
+ *
+ * **The refusal sentence lands where the twin put it.** A failed call comes back as `{error}`, because
+ * a dozen assertions print `body.error` and the generic door spells it `error` on a 4xx and `text` in
+ * the prose half. Normalising it here is the difference between a readable failure and `undefined`.
+ */
+export async function filterRest(baseUrl, token, args) {
+  const r = await post(baseUrl, token, '/api/filter', args);
+  return {
+    status: r.status,
+    body: r.status === 200 ? (r.body?.data ?? null) : { ...(r.body ?? {}), error: r.body?.error ?? r.body?.text },
+  };
+}
+/**
  * Read a page of a brain collection - the ONE way a test asks that question.
  *
  * ## Why a helper and not a `get` per call site
@@ -453,8 +471,8 @@ export async function whichSideLostIt(senderUrl, senderToken, networkId, spaceId
  *   `filter`, the five conveniences, `entityName`/`fromName`/`toName`, `deriveStatus`.
  */
 export async function readCollection(baseUrl, token, space, collection, body = {}) {
-  const r = await post(baseUrl, token, '/api/brain/filter', { space, collection, ...body });
-  return { status: r.status, body: r.body, results: r.status === 200 ? (r.body?.results ?? []) : undefined };
+  const r = await filterRest(baseUrl, token, { space, collection, ...body });
+  return { ...r, results: r.status === 200 ? (r.body?.results ?? []) : undefined };
 }
 
 /**

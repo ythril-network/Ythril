@@ -3,6 +3,7 @@ import { HttpClient, HttpParams, HttpHeaders } from '@angular/common/http';
 import { Observable, Subscription } from 'rxjs';
 import { map } from 'rxjs/operators';
 import type { FileEntry, FileMeta, FileExtract, UploadProgress, ConflictRecord } from './api.types';
+import { filterCall } from './filter-call';
 
 /** File store (listing, upload, download), brain file-metadata, and sync file conflicts. */
 @Injectable({ providedIn: 'root' })
@@ -171,7 +172,7 @@ export class FilesApi {
   /**
    * The one file-metadata record for an exact path.
    *
-   * Through `POST /api/brain/filter` since 5.0, with `path` as an ARGUMENT rather than a predicate: the
+   * Through `filter` since 5.0, with `path` as an ARGUMENT rather than a predicate: the
    * argument is normalised server-side, so a path with the separators the other way round still finds the
    * record. A bare `filter: { path }` would be an exact equality and would answer an empty page, which
    * this method would hand back as `null` — indistinguishable from a file that genuinely has no metadata.
@@ -181,10 +182,9 @@ export class FilesApi {
    * brain records about it.
    */
   getFileMeta(spaceId: string, path: string): Observable<FileMeta | null> {
-    return this.http
-      .post<{ results: FileMeta[] }>('/api/brain/filter', {
-        space: spaceId, collection: 'files', path, limit: 1,
-      })
+    return filterCall<{ results: FileMeta[] }>(this.http, {
+      space: spaceId, collection: 'files', path, limit: 1,
+    })
       .pipe(map(r => r.results?.[0] ?? null));
   }
 

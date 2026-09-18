@@ -115,10 +115,10 @@ describe('Protected routes without auth return 401 not 500', () => {
     ['GET', '/api/spaces'],
     ['GET', '/api/networks'],
     ['GET', '/api/files/general'],
-    // `POST` because reading a collection is `POST /api/brain/filter` since 5.0 — the per-collection
+    // `POST` because reading a collection is `POST /api/filter` since 5.0 — the per-collection
     // GETs are gone. What this row asserts is unchanged: the brain surface refuses an unauthenticated
     // read before it reads anything.
-    ['POST', '/api/brain/filter'],
+    ['POST', '/api/filter'],
   ];
   for (const [method, route] of ROUTES) {
     it(`${method} ${route} without auth → 401`, async () => {

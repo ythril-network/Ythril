@@ -206,7 +206,7 @@ describe('the vector never leaves the database', () => {
       'seq must stay — the canary operator asked for it by name, and it is the conditional-write token');
   });
 
-  it('both doors of `filter` apply the strip, and neither forgot the flag', () => {
+  it('the one `filter` handler applies the strip, and reads the flag to decide', () => {
     /*
      * This case named four list routes until `B-9` step 3b deleted all four. Listing a collection is
      * `filter` now: ONE place a page of brain records is built, and two doors onto it.
@@ -216,7 +216,12 @@ describe('the vector never leaves the database', () => {
      * `a['includeDiagnostics']`. Two spellings of one flag, and a door that dropped it would return the
      * passage a second time to every caller who happened to pick it.
      */
-    for (const [door, file] of [['REST', REST_SEARCH], ['MCP', MCP_FILTER]]) {
+    /*
+     * ONE door since `B-9` step 3c. The REST half was a hand-written twin with its own copy of this
+     * strip; deleting it is what makes the rule unconditional rather than duplicated — the generic tool
+     * door has no per-tool code, so whatever the handler withholds is what both doors withhold.
+     */
+    for (const [door, file] of [['the filter tool', MCP_FILTER]]) {
       const src = stripComments(doorSource(file));
       assert.match(src, /withoutListDiagnostics\(/,
         `the ${door} door returns its rows unfiltered — matchedText is the passage a second time`);

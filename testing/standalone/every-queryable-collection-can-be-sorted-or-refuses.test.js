@@ -38,7 +38,7 @@ const { SORTABLE_FIELDS, parseSortParam } = await import('../../server/dist/brai
 
 /** The collections a caller may name, read from the schema they read. */
 function queryableCollections() {
-  // `filter`, not `query`: the tool was renamed at 5.0 and the route is `POST /api/brain/filter`. The
+  // `filter`, not `query`: the tool was renamed at 5.0 and its one route is `POST /api/filter`. The
   // first draft of this gate said `query` and its own floor caught it, which is what the floor is for.
   const tool = ALL_TOOLS.find(t => t.name === 'filter');
   assert.ok(tool, 'the `filter` tool is gone — re-anchor this gate');

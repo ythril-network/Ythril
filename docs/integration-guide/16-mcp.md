@@ -618,7 +618,7 @@ only shape and the two are identical by construction.
 | | `delete_chrono` | `DELETE /api/brain/spaces/:spaceId/chrono/:id` | write `knowledge` |
 | **Brain — search** | | | |
 | | `recall` | `POST /api/brain/recall` | read `knowledge` |
-| | `query` | `POST /api/brain/filter` | read `knowledge` |
+| | `query` | `POST /api/filter` | read `knowledge` |
 | | `similar` | `POST /api/brain/similar` | read `knowledge` |
 | | `graph_traverse` | `POST /api/brain/spaces/:spaceId/traverse` | read `knowledge` |
 | **Brain — bulk** | | | |

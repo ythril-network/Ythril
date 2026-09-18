@@ -215,9 +215,13 @@ describe('both doors, and all three routes', () => {
      * By ROUTE, not by the guard in front of it. This counted the literal
      * `requireSpaceAuth, statesRetryability`, so when `/recall` moved to `requireBodyScopedSpace` at 5.0
      * the count fell to two and the gate read it as a route DROPPING the wrapper — a false alarm about
-     * the one thing it exists to prevent. The guard is not the subject; the three read routes are.
+     * the one thing it exists to prevent. The guard is not the subject; the read routes are.
+     *
+     * `/filter` left this list at `B-9` step 3c with the route itself — a hand-written twin of the tool,
+     * deleted so there is one implementation. Its early refusals come from `callTool` now, which the
+     * MCP case at the bottom of this file covers: same classification, no status to correct.
      */
-    for (const path of ['/filter', '/recall', '/similar']) {
+    for (const path of ['/recall', '/similar']) {
       const at = routes.indexOf(`searchRouter.post('${path}'`);
       const legacy = at < 0 ? routes.indexOf(`searchRouter.post('/spaces/:spaceId${path}'`) : -1;
       const start = at >= 0 ? at : legacy;
@@ -261,7 +265,10 @@ describe('both doors, and all three routes', () => {
     const src = stripComments(readFileSync('server/src/api/brain/search.ts', 'utf8'));
     const catches = (src.match(/\}\s*catch\s*\(/g) ?? []).length;
     const delegated = (src.match(/sendReadFailure\(res, err\)/g) ?? []).length;
-    assert.ok(catches >= 2, `only ${catches} catch blocks on the search router — the scan is broken, not the code`);
+    // A floor of ONE, down from two at 3c: `/filter`'s hand-written twin caught its own failures and is
+    // gone. The floor exists so an empty scan cannot pass the equality below — it is not a count of the
+    // routes, and lowering it as the surface collapses onto `callTool` is this rule succeeding.
+    assert.ok(catches >= 1, `only ${catches} catch blocks on the search router — the scan is broken, not the code`);
     assert.equal(delegated, catches,
       `${catches} routes catch a failure and only ${delegated} answer through sendReadFailure`);
     assert.doesNotMatch(src, /res\.status\(400\)\.json\(\{ error: msg \}\)/,
