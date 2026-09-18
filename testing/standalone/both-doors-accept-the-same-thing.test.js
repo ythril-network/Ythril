@@ -35,10 +35,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { statementAround } from './_structural-window.mjs';
+import { MCP_FILTER, MCP_RANKING } from '../_shared/search-doors.mjs';
 
 const { BRAIN_COLLECTIONS } = await import('../../server/dist/config/types-knowledge.js');
 
-const MCP_SEARCH = 'server/src/mcp/tools/search.ts';
+// The RANKING tools' file. `filter` moved into its own on 2026-09-18, so a case about the filter tool
+// reads `MCP_FILTER` instead — four of the five cases below are about `recall`, and one is not.
+const MCP_SEARCH = MCP_RANKING;
 const REST_SEARCH = 'server/src/api/brain/search.ts';
 const RECALL = 'server/src/brain/recall.ts';
 const SHAPE = 'server/src/brain/recall-shape.ts';
@@ -214,7 +217,8 @@ describe('the parity gaps, one case each', () => {
   it('the query collection refusal names every collection there is', () => {
     // MCP hardcoded five while the enum admits six, so a mistyped call was handed a list excluding a legal
     // value. REST builds the same sentence from the real list.
-    const src = code(MCP_SEARCH);
+    // `filter`'s file, not the ranking one: this refusal belongs to the filter tool.
+    const src = code(MCP_FILTER);
     for (const c of BRAIN_COLLECTIONS) {
       const at = src.indexOf('collection must be one of');
       assert.ok(at > 0, 'the refusal is gone — re-point this gate');

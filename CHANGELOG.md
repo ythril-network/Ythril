@@ -15,6 +15,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`filter` finds one file by `path`, and forgives how you spell it.** *(files only, both doors.)* The
+  file-metadata list route always did — it ran the path through the same normalisation the store uses, so
+  a Windows-style spelling and a leading slash both find `notes/a.md`. `filter` did not, and
+  `filter: { path }` is a bare equality: a caller holding a path from their own filesystem got an empty
+  page and a `200`, which reads exactly like "no such file".
+
+  It is EXACT after the normalisation — not a prefix, not a substring. For those there is `search`, which
+  also spans the description.
+
+  **Sending both spellings is a `400` rather than one of them quietly winning.** `path` and
+  `filter: { path }` are two ways to ask one question and only the argument is normalised, so together
+  they would disagree — the same call `recall` made about its two filter grammars.
+
+  This is what `B-9` step 3b needs before the file-metadata list route can go: deleting a forgiving read
+  and leaving an exact one is the *route does work around the query* shape that step 3a already paid for
+  once. **`includeChunks` deliberately did NOT move**: that is a default the route applies rather than a
+  transform, a caller can write `filter: { parentFileId: { $exists: false } }`, and adopting it here would
+  change what every existing `filter` caller gets back.
+
 - **A schema type and each of its properties can now say what they are FOR, in prose.** `description` on
   a type schema (4000 characters) and on any property (2000) — stored, returned by `get_space_meta` and
   the space listing, editable in the Schema tab, and **never parsed**. The type already says a value is a
@@ -822,6 +841,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The `filter` tool moved out of `search.ts` into `mcp/tools/filter.ts`.** Not a tidy-up: the size gate
+  refused the two lines the `path` argument added, and the file was at its ceiling. The three tools there
+  were never one responsibility — `recall` and `find_similar` RANK, and `filter` is the one that does not,
+  which is what its own description already calls it.
+
+  **Six gates named `server/src/mcp/tools/search.ts` as "the MCP door for `filter`" and all six went red
+  at once.** Each would have been fixed by editing a literal, and six literals is six chances for the next
+  move to leave one pointing at a file that no longer holds what the gate reads. They derive it now, from
+  `testing/_shared/search-doors.mjs`, which also asserts that each file still declares the handler that
+  makes it a door — a gate handed a file that moved concludes whatever its regex says about the wrong text.
 - **Six gates asserted a SITE rather than a rule, and every one of them went red on a change that improved
   the code.**
 

@@ -1,6 +1,7 @@
 import { withEndpointNames } from './edge-endpoint-names.js';
 import { attachJobProgress } from '../files/file-job-progress.js';
 import { conveniencePredicate, conveniencesFrom } from './list-conveniences.js';
+import { filePathPredicate } from './file-path-arg.js';
 import { withDerivedStatusForPage, chronoStatusPredicate } from './chrono.js';
 import { typesWhereDatePassedMeansNothing } from './chrono-date-policy.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
@@ -110,7 +111,28 @@ export function resolvePredicate(
   rawFilter: Record<string, unknown>,
   spaceId: string,
 ): { predicate: Record<string, unknown> } | { error: string } {
-  const merged = conveniencePredicate(collection, conveniencesFrom(args), rawFilter);
+  /*
+   * The file `path` goes in FIRST, as part of what the caller asked for, so everything after it composes
+   * with it: the conveniences accumulate under `$and` and the status rewrite reads the merged predicate.
+   * Applying it last would mean spreading a key over whatever the conveniences had already built, which
+   * is the silent-widening failure the accumulation exists to prevent.
+   */
+  const byPath = filePathPredicate(collection, args['path']);
+  if (byPath && 'error' in byPath) return byPath;
+  /*
+   * Both spellings at once is REFUSED rather than resolved, which is the same call `recall` made about its
+   * two filter grammars. Spreading the argument over the predicate lets the normalised path win silently;
+   * ANDing them returns nothing whenever the caller's raw spelling was the un-normalised one, which reads
+   * as "no such file" for a file that is right there. Neither is an answer, so neither is given.
+   */
+  if (byPath && 'path' in rawFilter) {
+    return {
+      error: 'Send `path` or a `filter` on `path`, not both — they are two spellings of one question and '
+        + 'only the argument is normalised, so together they would silently disagree.',
+    };
+  }
+  const withPath = byPath ? { ...rawFilter, ...byPath.predicate } : rawFilter;
+  const merged = conveniencePredicate(collection, conveniencesFrom(args), withPath);
   if ('error' in merged) return merged;
   if (args['deriveStatus'] !== true) return merged;
   return derivedStatusPredicate(merged.predicate, new Date(), typesWhereDatePassedMeansNothing(getSpaceMeta(spaceId)));

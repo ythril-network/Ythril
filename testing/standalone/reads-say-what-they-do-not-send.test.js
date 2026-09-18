@@ -38,7 +38,10 @@ let mergeEmbeddingExclusion, toRecallRecord, recallTool, queryTool;
 before(async () => {
   ({ mergeEmbeddingExclusion } = await import('../../server/dist/brain/query.js'));
   ({ toRecallRecord } = await import('../../server/dist/mcp/tools/shared.js'));
-  ({ recallTool, queryTool } = await import('../../server/dist/mcp/tools/search.js'));
+  ({ recallTool } = await import('../../server/dist/mcp/tools/search.js'));
+  // `filter` moved out of `search.ts` when that file hit its size ceiling: the three tools there were
+  // never one responsibility, and only two of them RANK.
+  ({ queryTool } = await import('../../server/dist/mcp/tools/filter.js'));
 });
 
 describe('the vector cannot be asked for, which is why there is no parameter', () => {

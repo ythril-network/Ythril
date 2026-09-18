@@ -581,8 +581,10 @@ metacharacters are escaped, so `a.b` matches the three characters `a.b`, not "a,
 | chrono | `title`, `description` |
 | files | `path`, `description` |
 
-(Files also keep their exact `?path=` filter — distinct from this substring `?search=`; entities keep
-the exact `?name=` filter and the semantic `/entities/by-name` endpoint.)
+(Files also keep their exact `?path=` filter — distinct from this substring `?search=` — and `filter`
+takes the same thing as a `path` ARGUMENT, normalised the same way: see
+[the filter body](04d-brain-ops-api.md). Entities keep the exact `?name=` filter; the predicate for it
+is `filter: { name: ... }`.)
 
 ---
 
