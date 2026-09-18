@@ -19,11 +19,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-<<<<<<< HEAD
 import { INSTANCES, post, get, del, delWithBody, patch, readRecord, readCollection, filterRest } from '../sync/helpers.js';
-=======
-import { INSTANCES, post, get, del, delWithBody, patch, readRecord, readCollection } from '../sync/helpers.js';
->>>>>>> origin/main
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -137,11 +133,7 @@ describe('Brain â€” entities CRUD (/api/brain/spaces/:spaceId/entities)', (
   it('List entities returns 401 without auth', async () => {
     // Through `filter`, because the per-collection route is gone. What has to stay true is that a read
     // with no credentials is refused before anything is read — not that one PATH refuses it.
-<<<<<<< HEAD
     const r = await fetch(`${INSTANCES.a}/api/filter`, {
-=======
-    const r = await fetch(`${INSTANCES.a}/api/brain/filter`, {
->>>>>>> origin/main
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ space: 'general', collection: 'entities' }),
@@ -261,11 +253,7 @@ describe('Brain â€” edges CRUD (/api/brain/spaces/:spaceId/edges)', () => {
   it('List edges returns 401 without auth', async () => {
     // Through `filter`, because the per-collection route is gone. What has to stay true is that a read
     // with no credentials is refused before anything is read — not that one PATH refuses it.
-<<<<<<< HEAD
     const r = await fetch(`${INSTANCES.a}/api/filter`, {
-=======
-    const r = await fetch(`${INSTANCES.a}/api/brain/filter`, {
->>>>>>> origin/main
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ space: 'general', collection: 'edges' }),
@@ -862,11 +850,7 @@ describe('Brain -- chrono CRUD (/api/brain/spaces/:spaceId/chrono)', () => {
   it('List chrono returns 401 without auth', async () => {
     // Through `filter`, because the per-collection route is gone. What has to stay true is that a read
     // with no credentials is refused before anything is read — not that one PATH refuses it.
-<<<<<<< HEAD
     const r = await fetch(`${INSTANCES.a}/api/filter`, {
-=======
-    const r = await fetch(`${INSTANCES.a}/api/brain/filter`, {
->>>>>>> origin/main
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ space: 'general', collection: 'chrono' }),

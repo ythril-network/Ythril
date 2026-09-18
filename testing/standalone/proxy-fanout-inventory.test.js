@@ -210,7 +210,6 @@ const TOTAL = 48;
  *   does it, on the same spaces, through the shared pager that is already counted here. Five sites
  *   fewer because there is one implementation instead of six — the same outcome as the recall row above,
  *   and recorded here rather than by lowering TOTAL, which would erase that they existed.
-<<<<<<< HEAD
  * - **13, at 5.0: `POST /api/brain/filter`.** `B-9` step 3c deleted the hand-written TWIN of the
  *   `filter` tool, and it expanded the proxy itself twice — once for the page and once for the count.
  *   The expansion did not stop happening: the tool does it, on the same spaces, through the same
@@ -218,10 +217,6 @@ const TOTAL = 48;
  *   where there were two, which is the whole point of the row that removed it.
  */
 const REMOVED = 13;
-=======
- */
-const REMOVED = 11;
->>>>>>> origin/main
 
 const GUARDS = {
   'server/src/auth/middleware.ts': 2,

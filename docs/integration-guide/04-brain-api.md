@@ -399,11 +399,7 @@ There is no `GET .../facts`, and there has not been since 5.0. Listing a collect
 them — a predicate, a page, and the same envelope whichever collection you name:
 
 ```http
-<<<<<<< HEAD
 POST /api/filter
-=======
-POST /api/brain/filter
->>>>>>> origin/main
 Content-Type: application/json
 
 { "space": "work", "collection": "facts", "limit": 100, "skip": 0 }

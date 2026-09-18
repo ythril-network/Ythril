@@ -58,11 +58,7 @@ false against every usage figure and enforce nothing while looking configured.
 One read pages a collection, and it takes `limit` and `skip` in its body:
 
 ```http
-<<<<<<< HEAD
 POST /api/filter
-=======
-POST /api/brain/filter
->>>>>>> origin/main
 Content-Type: application/json
 
 { "space": "general", "collection": "facts", "limit": 100, "skip": 200 }

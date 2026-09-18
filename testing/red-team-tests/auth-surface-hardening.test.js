@@ -61,11 +61,7 @@ describe('M2 — ?token= is accepted on no route at all', () => {
    * A request carrying its token in the QUERY STRING, which nothing may accept.
    *
    * It takes a method because one of these routes is a POST: reading a brain collection is
-<<<<<<< HEAD
    * `POST /api/filter` since 5.0. A table that could only GET would have had to drop the brain
-=======
-   * `POST /api/brain/filter` since 5.0. A table that could only GET would have had to drop the brain
->>>>>>> origin/main
    * row, and the brain surface is the one most worth asserting here.
    */
   async function queryTokenRequest(pathAndQuery, method = 'GET') {
@@ -79,11 +75,7 @@ describe('M2 — ?token= is accepted on no route at all', () => {
     '/api/spaces',
     '/api/tokens',
     '/api/networks',
-<<<<<<< HEAD
     ['/api/filter', 'POST'],
-=======
-    ['/api/brain/filter', 'POST'],
->>>>>>> origin/main
     '/api/files/general?path=.',
     '/api/about',
     // The last exception. It authenticated a raw ?token= until 4.0 removed the SSE transport it existed for,
