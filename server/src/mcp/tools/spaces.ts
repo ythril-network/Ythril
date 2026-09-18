@@ -76,6 +76,10 @@ export const list_spacesTool: ToolHandler = {
     }));
     return {
       content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+      // NAMED, because `structuredContent` must be an object and this tool's text half is a bare array.
+      // Naming it here changes nothing about that array: the two halves are the same answer, not the
+      // same bytes.
+      structuredContent: { spaces: result },
     };
   },
 };
@@ -109,11 +113,15 @@ export const space_statsTool: ToolHandler = {
     const edges = counts.reduce((s, c) => s + c.edges, 0);
     const chrono = counts.reduce((s, c) => s + c.chrono, 0);
     const files = counts.reduce((s, c) => s + c.files, 0);
+    // Built ONCE and carried in both halves. Two literals is two places for a field to be added to
+    // one of them, which is this whole file's defect with a smaller blast radius.
+    const stats = { spaceId: callSpace, facts, entities, edges, chrono, files };
     return {
       content: [{
         type: 'text' as const,
-        text: JSON.stringify({ spaceId: callSpace, facts, entities, edges, chrono, files }),
+        text: JSON.stringify(stats),
       }],
+      structuredContent: stats,
     };
   },
 };
@@ -225,6 +233,7 @@ export const space_metaTool: ToolHandler = {
         type: 'text' as const,
         text: JSON.stringify(metaResult),
       }],
+      structuredContent: metaResult,
     };
   },
 };

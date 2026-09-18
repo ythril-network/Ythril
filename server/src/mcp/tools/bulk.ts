@@ -255,6 +255,7 @@ export const save_bulkTool: ToolHandler = {
     const summary = `bulk_write complete — inserted: ${JSON.stringify(result.inserted)}, updated: ${JSON.stringify(result.updated)}, errors: ${result.errors.length}`;
     return {
       content: [{ type: 'text' as const, text: summary + (result.errors.length > 0 ? '\n' + JSON.stringify(result.errors) : '') }],
+      structuredContent: { ...result },
       isError: false,
     };
   },

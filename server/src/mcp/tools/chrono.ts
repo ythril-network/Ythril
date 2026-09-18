@@ -489,7 +489,8 @@ export const update_chronoTool: ToolHandler = {
 
     const entry = await updateChrono(wt.target, id, updates as Parameters<typeof updateChrono>[2], dfPaths, ctx.actor, ttlDaysFromArgs(a));
     if (!entry) throw new Error(`Chrono entry '${id}' not found`);
-    return { content: [{ type: 'text' as const, text: `Chrono entry '${entry.title}' updated (seq ${entry.seq}).` }] };
+    return { content: [{ type: 'text' as const, text: `Chrono entry '${entry.title}' updated (seq ${entry.seq}).` }],
+      structuredContent: { ...entry } };
   },
 };
 
@@ -557,6 +558,7 @@ export const delete_chronoTool: ToolHandler = {
     if (block) throw new Error(block.message);
     const deleted = await findFirstAcrossMembers(wt.target, mid => deleteChrono(mid, id, ctx.actor));
     if (!deleted) throw new Error(`Chrono entry '${id}' not found`);
-    return { content: [{ type: 'text' as const, text: `Chrono entry deleted (ID ${id}).` }] };
+    return { content: [{ type: 'text' as const, text: `Chrono entry deleted (ID ${id}).` }],
+      structuredContent: { _id: id, deleted: true } };
   },
 };

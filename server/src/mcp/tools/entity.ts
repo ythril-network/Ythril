@@ -146,6 +146,7 @@ export const save_entityTool: ToolHandler = {
     }
     return {
       content: [{ type: 'text' as const, text: msg }],
+      structuredContent: { ...entity, ...(warning ? { warning } : {}) },
     };
   },
 };
@@ -279,6 +280,7 @@ export const update_entityTool: ToolHandler = {
     if (!updatedEnt) throw new Error(`Entity '${id}' not found`);
     return {
       content: [{ type: 'text' as const, text: `Entity '${updatedEnt.name}' (${updatedEnt.type}) updated (ID ${updatedEnt._id}, seq ${updatedEnt.seq}).` }],
+      structuredContent: { ...updatedEnt },
     };
   },
 };
@@ -439,6 +441,14 @@ export const graph_mergeTool: ToolHandler = {
     appendEndpointRuleWarnings(lines, plan.endpointRuleWarnings);
     return {
       content: [{ type: 'text' as const, text: lines.join('\n') }],
+      // The survivor and what it absorbed, as ids rather than as a sentence to parse. A caller
+      // that merges then writes needs the survivor's id, and it was only ever in the prose.
+      structuredContent: {
+        survivor: mergedEntity,
+        absorbedId: absorbed._id,
+        deletedDuplicateEdgeIds: mergeResult.deletedDuplicateEdgeIds,
+        endpointRuleWarnings: plan.endpointRuleWarnings,
+      },
     };
   },
 };
@@ -505,7 +515,8 @@ export const delete_entityTool: ToolHandler = {
         const r = await deleteEntityCascade(mid, id, cascadeToken, ctx.actor);
         if (r.ok) {
           return { content: [{ type: 'text' as const,
-            text: `Entity deleted (ID ${id}), with ${r.removed.length} edge(s).` }] };
+            text: `Entity deleted (ID ${id}), with ${r.removed.length} edge(s).` }],
+      structuredContent: { _id: id, deleted: true, removedEdgeIds: r.removed } };
         }
         // Not pretty-printed: indentation is billed to the caller's context and read by nothing —
         // `mcp-recall-payload.test.js` refuses it, and an agent pays for every space.
@@ -518,7 +529,8 @@ What would go now: ${JSON.stringify(r.preview)}`);
       const block = await entityDeleteBlockers(mid, id);
       if (block) throw new Error(block.message);
       if (await deleteEntity(mid, id, ctx.actor)) {
-        return { content: [{ type: 'text' as const, text: `Entity deleted (ID ${id}).` }] };
+        return { content: [{ type: 'text' as const, text: `Entity deleted (ID ${id}).` }],
+      structuredContent: { _id: id, deleted: true } };
       }
     }
     throw new Error(`Entity '${id}' not found`);
