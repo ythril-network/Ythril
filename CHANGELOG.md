@@ -153,6 +153,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The graph guide's `Links` section is its own page, `04g-links-api.md`.** `04b-graph-api.md` sat on the
+  900-line cap, and the last three changes to it each ended in compressing a paragraph to make room —
+  which is the cap doing its job and being answered the wrong way. Links is a distinct capability with its
+  own conversion story, its own pre-flight and its own lifecycle, so it is the boundary.
+
+  Every line was MOVED by line range, never retyped, and the move asserts a conserved multiset of prose
+  lines — an earlier hand-split of this guide lost a twenty-line block mid-word and shipped the remains
+  for months. Nothing was reworded. The `## Links` heading is kept, so an inbound `#links` anchor still
+  resolves; `#traverse-graph`, which `04a` links to, stays on the graph page.
+
 - **A token that reaches exactly ONE space no longer has to name it.** `space` is optional on every
   writing tool when the calling token's accessible-space list has one member — `save_fact({fact: "…"})`
   lands. With two or more it stays required, and the refusal lists the spaces you can choose between.

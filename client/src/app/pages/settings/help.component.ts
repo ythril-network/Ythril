@@ -59,6 +59,10 @@ export const HELP_DOCS = [
       'integration-guide/04c-chrono-api.md', 'integration-guide/04d-brain-ops-api.md',
       'integration-guide/04e-choosing-a-search.md',
       'integration-guide/04f-write-semantics.md',
+      // `04g` came out of `04b` when that page hit the 900-line cap (Q-25). It sits in NUMBERED order
+      // here and in the index, because `the-integration-guide-index` gates on that and a second opinion
+      // about where a part belongs is how the two lists start disagreeing.
+      'integration-guide/04g-links-api.md',
       'integration-guide/05-files-api.md',
       // The three pipelines a file can go through are their own parts. They are read by different people
       // for different reasons — an operator sizing a document converter, an integrator wiring vision/STT

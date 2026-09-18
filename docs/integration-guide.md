@@ -14,7 +14,7 @@ stands on its own.
 3. [Authentication, Errors & Rate Limits](integration-guide/03-auth-and-limits.md)
    Error Format · Rate Limits
 4. [Brain API](integration-guide/04-brain-api.md)
-   [Recall & Similarity](integration-guide/04a-recall-api.md) · [Entities, Edges & Graph](integration-guide/04b-graph-api.md) · [Chrono](integration-guide/04c-chrono-api.md) · [Stats, Maintenance & Bulk](integration-guide/04d-brain-ops-api.md) · [Choosing a Search](integration-guide/04e-choosing-a-search.md) · [Write & Read Semantics](integration-guide/04f-write-semantics.md)
+   [Recall & Similarity](integration-guide/04a-recall-api.md) · [Entities, Edges & Graph](integration-guide/04b-graph-api.md) · [Chrono](integration-guide/04c-chrono-api.md) · [Stats, Maintenance & Bulk](integration-guide/04d-brain-ops-api.md) · [Choosing a Search](integration-guide/04e-choosing-a-search.md) · [Write & Read Semantics](integration-guide/04f-write-semantics.md) · [Links](integration-guide/04g-links-api.md)
 5. [Files API](integration-guide/05-files-api.md)
    [Conversion Pipeline](integration-guide/05a-conversion-pipeline.md) · [Media Embedding](integration-guide/05b-media-embedding.md) · [Face Recognition](integration-guide/05c-face-recognition.md)
 6. [Spaces API](integration-guide/06-spaces-api.md)
