@@ -19,6 +19,7 @@ import { getConfig } from '../config/loader.js';
 import { log } from '../util/log.js';
 import { mergeTags } from './merge-fields.js';
 import { edgeIdFor } from './edge-id.js';
+import { linkIdFor } from './links.js';
 import { rekeyEdge, embedQueueWorkFor } from './edge-rekey.js';
 import { enqueueEmbedJob, retireEmbedJob } from './embed-queue.js';
 import { embeddingSuppressedFor } from './suppress-embeddings.js';
@@ -26,7 +27,7 @@ import { validateEdge } from '../spaces/schema-validation.js';
 import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
 import { validateEntity, getSpaceMeta, applyValidation, type SchemaViolation } from '../spaces/schema-validation.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
-import type { EntityDoc, EdgeDoc, FactDoc, ChronoEntry, FileMetaDoc, TombstoneDoc, SpaceMeta, PropertySchema } from '../config/types.js';
+import type { EntityDoc, EdgeDoc, FactDoc, ChronoEntry, FileMetaDoc, LinkDoc, TombstoneDoc, SpaceMeta, PropertySchema } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
 
 // ── Public types ───────────────────────────────────────────────────────────
@@ -699,6 +700,53 @@ export async function executeMerge(
           asUpdate<FileMetaDoc>({ $set: set }),
           { session },
         );
+      }
+
+      /*
+       * ── 3c. Relink LINK RECORDS ────────────────────────────────────────
+       *
+       * The same phase 3b describes, one collection later. Edges, facts, chrono and files were relinked
+       * and the `links` collection was not — this file had no reference to it at all. So on a space that
+       * has been through the link conversion, which every space becomes at the boot after it is created,
+       * a merge left every link pointing at the entity phase 5 then DELETED. Measured on a live instance:
+       * before the merge the link named the absorbed entity, after it the link still named it, and the
+       * entity was gone.
+       *
+       * **A link is RE-KEYED, not updated.** Its `_id` is derived from both endpoints (`linkIdFor`), so
+       * moving the `to` changes the identity — the same reason `edge-rekey.ts` exists for edges. A `$set`
+       * would leave an id that disagrees with its own contents, and nothing would ever find it again.
+       *
+       * **The old id gets a TOMBSTONE.** Without one the next pull from any peer still holding it
+       * re-creates the link pointing at the deleted entity, so the repair would undo itself.
+       *
+       * An entity is only ever a `to` — nothing hangs off an entity — so there is no `from` half here.
+       */
+      const linkColl = col<LinkDoc>(spaceCollection(spaceId, 'links'));
+      const affectedLinks = await linkColl
+        .find(asFilter<LinkDoc>({ spaceId, to: absorbed._id, toKind: 'entity' }), { session })
+        .toArray() as LinkDoc[];
+      for (const link of affectedLinks) {
+        const newId = linkIdFor(link.from, link.fromKind, survivor._id, 'entity');
+        const linkSeq = await nextSeq(spaceId);
+        // UPSERT: the survivor may already be linked from the same record, and two records describing one
+        // connection is what the derived id exists to prevent. Then the old row goes, with its tombstone.
+        await linkColl.replaceOne(
+          asFilter<LinkDoc>({ _id: newId, spaceId }),
+          asDoc<LinkDoc>({ ...link, _id: newId, to: survivor._id, updatedAt: now, seq: linkSeq }),
+          { upsert: true, session },
+        );
+        if (newId !== link._id) {
+          await linkColl.deleteOne(asFilter<LinkDoc>({ _id: link._id, spaceId }), { session });
+          const linkTombSeq = await nextSeq(spaceId);
+          await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).replaceOne(
+            asFilter<TombstoneDoc>({ _id: link._id }),
+            asDoc<TombstoneDoc>({
+              _id: link._id, type: 'link', spaceId, deletedAt: now,
+              instanceId: getConfig().instanceId, seq: linkTombSeq,
+            }),
+            { upsert: true, session },
+          );
+        }
       }
 
       // ── 4. Update survivor entity ──────────────────────────────────────

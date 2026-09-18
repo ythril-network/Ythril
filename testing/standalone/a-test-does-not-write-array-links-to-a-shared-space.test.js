@@ -48,13 +48,33 @@ import { stripComments } from './_strip-comments.mjs';
 const ARRAY_LINK_FIELDS = ['entityIds', 'memoryIds', 'chronoIds'];
 
 /**
- * A space id is SHARED when it is a literal — no `${…}` in it.
+ * A space id is SHARED when it RESOLVES to a literal, whether it is written inline or through a const.
  *
- * A test that creates its own space builds the id from a nonce (`` `probe-${RUN}` ``), so the template
- * marker is the signal, and it needs no list of shared names to maintain. `general` is the one that
- * exists today; a second built-in would be covered on the day it is added.
+ * A test that creates its own space builds the id from a nonce (`` `probe-${RUN}` ``), so an
+ * interpolation that survives resolution is the signal — and it needs no list of shared names.
+ *
+ * **The first version matched inline literals only, and that was a hole a live failure found.**
+ * `entity-merge.test.js` writes `` `/api/brain/spaces/${SPACE}/facts` `` with `const SPACE = 'general'`
+ * at the top, so the path in the source has no literal segment at all. The gate reported clean while
+ * that exact call was failing in CI with the refusal this file exists to prevent. A title claiming "a
+ * shared space" over a body that checked one way of WRITING one is this repo's most-repeated gate
+ * failure, and it happened inside the gate written against it.
  */
 const SHARED_SPACE_IN_PATH = /spaces\/([a-z0-9][a-z0-9-]*)\//g;
+/** `spaces/${NAME}/` — resolved below against a `const NAME = '…'` in the same file. */
+const SPACE_VAR_IN_PATH = /spaces\/\$\{(\w+)\}\//g;
+
+/**
+ * The string constants a file binds, so `${SPACE}` can be read as what it is.
+ *
+ * Only single-quoted literals: a const built from a template already contains its own interpolation and
+ * is therefore the nonce case this rule means to allow through.
+ */
+function stringConsts(src) {
+  const out = new Map();
+  for (const m of src.matchAll(/const\s+(\w+)\s*=\s*'([^']*)'\s*;/g)) out.set(m[1], m[2]);
+  return out;
+}
 
 /** Every call in the test tree that targets a shared space, with the text of that call. */
 function sharedSpaceCalls() {
@@ -79,7 +99,17 @@ function sharedSpaceCalls() {
       for (let k = 0; k <= n; k++) at = text.indexOf(needle, at + 1);
       return at < 0 ? 0 : text.slice(0, at).split('\n').length;
     };
-    for (const m of src.matchAll(SHARED_SPACE_IN_PATH)) {
+    const consts = stringConsts(src);
+    /*
+     * Both spellings, in one pass: an inline literal, and a `${NAME}` that a const in this file
+     * binds to one. A `${NAME}` the file does not bind is left alone — it is built elsewhere, and
+     * guessing would be the heuristic this gate's own history argues against.
+     */
+    const hits = [...src.matchAll(SHARED_SPACE_IN_PATH)].map(m => ({ m, space: m[1] }))
+      .concat([...src.matchAll(SPACE_VAR_IN_PATH)]
+        .filter(m => consts.has(m[1]))
+        .map(m => ({ m, space: consts.get(m[1]) })));
+    for (const { m, space } of hits) {
       /*
        * The ENCLOSING call, bounded by its own parentheses rather than by a character count — a fixed
        * window spans different lines on CRLF than on LF, and one that can fall short of its subject is
@@ -104,7 +134,7 @@ function sharedSpaceCalls() {
       }
       found.push({
         file: file.replace(/\\/g, '/'),
-        space: m[1],
+        space,
         line: rawLineOf(m[0]),
         call: src.slice(open, j + 1),
       });
@@ -125,7 +155,22 @@ describe('a test does not write array links to a shared space', () => {
 
   it('none of them carries an array link field', () => {
     const offenders = sharedSpaceCalls()
-      .filter(c => ARRAY_LINK_FIELDS.some(f => new RegExp(`\\b${f}\\s*:`).test(c.call)))
+      /*
+       * BOTH SPELLINGS: `entityIds: […]` and the shorthand `{ fact, entityIds, tags }`.
+       *
+       * Requiring the colon was a hole, and a live CI failure found it rather than this gate:
+       * `entity-merge.test.js` passes the field as shorthand, so the gate reported clean while that
+       * exact call was being refused with the message this file exists to prevent. The same lesson is
+       * written into `mcp-structured-content-carries-its-payload`, which had to learn it about object
+       * keys — a pattern that matches one way of writing a thing concludes about both.
+       *
+       * And a KEY, never a VALUE, which widening to `[:,}]` alone got wrong immediately:
+       * `{ fact, linkEntities: entityIds, tags }` passes the parameter NAMED `entityIds` as the
+       * value of the correct field, and the gate reported the very call that had just been fixed.
+       * The delimiter before the name has to be `{` or `,`, which is the same conclusion
+       * `mcp-structured-content-carries-its-payload` reached about its own key scan.
+       */
+      .filter(c => ARRAY_LINK_FIELDS.some(f => new RegExp(`[{,]\\s*${f}\\s*[:,}]`).test(c.call)))
       .map(c => `${c.file}:${c.line}  (space '${c.space}')
         ${c.call.replace(/\s+/g, ' ').slice(0, 160)}`);
     assert.deepEqual(offenders, [],

@@ -724,6 +724,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Merging two entities left every LINK RECORD pointing at the entity it had just deleted.** `merge.ts`
+  relinks edges, facts, chrono entries and file metadata by rewriting their `entityIds` arrays, and had
+  no reference to the `links` collection at all. On a space that has been through the link conversion —
+  which every space becomes at the boot after it is created — the links therefore survived the merge
+  unchanged, pointing at an id phase 5 then removed.
+
+  Measured on a live instance: before the merge the link named the absorbed entity, after it the link
+  still named it, and the entity was gone.
+
+  **A link is RE-KEYED rather than updated.** Its `_id` is derived from both endpoints, so moving the
+  `to` changes its identity — the same reason edges have a re-key path. The old id gets a tombstone, or
+  the next pull from a peer still holding it would re-create the dangling link and undo the repair.
+
+  **Deleting an entity was never exposed to this**: the delete guard reads link records and refuses with
+  a `409`. A merge deletes the absorbed entity directly rather than passing that guard, which is why it
+  was the one path that could do it.
+
+  It is the shape phase 3b of the same function already describes — *"Edges, facts and chrono were
+  relinked and files were not"* — one collection later.
+
 - **The link conversion DELETED links that existed only as records, and its own log said it removed
   nothing.** The 5.0 migration walks each record and reconciles its links from the legacy ARRAY fields.
   A link written through `linkEntities` before that spelling was fixed exists as a link RECORD with an
