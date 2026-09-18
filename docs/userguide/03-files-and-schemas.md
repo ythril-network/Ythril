@@ -199,6 +199,16 @@ so you can untick it: the edge still enforces the name, and until 5.0 there was 
 so the declaration was stuck and invisible. Untick it and it is gone for good — it is not a type this
 space declares, so there is nothing to tick it back on to.
 
+**Every type and every property can carry a note saying what it is for.** The Schema tab has a box at the
+top of a selected type, and one on each property when you open its row. It is plain text: nobody parses
+it, nothing validates against it, and leaving it empty changes nothing.
+
+It is there because an assistant reading the space has to work out what a type is FOR from its name
+alone. The type already says a property is a number; the note is where you say it is the retry BUDGET
+rather than the retry count, or that one record means one deployed instance rather than one repository.
+That is the difference between an assistant guessing and an assistant knowing, and it costs you a
+sentence.
+
 **A type can be renamed without losing what is on it.** Use the pencil beside the name in the detail pane
 and press Enter, or click away; Escape abandons it. Every property, pattern and enum value comes with it,
 and so does every edge that names the type as a permitted end. This is the fix for a spelling mistake

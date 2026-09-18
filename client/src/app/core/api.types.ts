@@ -123,6 +123,8 @@ export type ValidationMode = 'off' | 'warn' | 'strict';
 export type KnowledgeType = typeof KNOWLEDGE_TYPES[number];
 
 export interface PropertySchema {
+  /** What this property MEANS, in the operator's own words. Free text, never parsed (`F-24`). */
+  description?: string;
   type?: 'string' | 'number' | 'boolean' | 'date';
   enum?: (string | number | boolean)[];
   minimum?: number;
@@ -136,6 +138,8 @@ export interface PropertySchema {
 export interface TypeSchema {
   /** Reference to a schema library entry. Format: `"library:<name>"`. */
   $ref?: string;
+  /** What this TYPE is for, in the operator's own words. Free text, never parsed (`F-24`). */
+  description?: string;
   namingPattern?: string;
   propertySchemas?: Record<string, PropertySchema>;
   /** How long records of this type are kept — the schema tier of **record > schema > space**. `days` deletes

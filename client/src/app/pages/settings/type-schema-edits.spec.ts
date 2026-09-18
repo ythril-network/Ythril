@@ -309,3 +309,48 @@ describe('isStaleEndName — an offered name the space no longer declares', () =
     expect(isStaleEndName([], UNTYPED_END)).toBe(false);
   });
 });
+
+/**
+ * F-24 step one — a schema entry can say what it is FOR, in prose.
+ *
+ * Owner, 2026-09-17, approving the split: notes satisfy every need whose consumer is a MODEL and none
+ * whose consumer is the ENGINE, so this is the half that ships and the inverse/transitive/subtype half
+ * waits for a named consumer that changes behaviour because of it.
+ *
+ * The cases below are about SURVIVAL rather than about the text. `typeSchemaFromState` rebuilds the
+ * wire object from scratch, so a field the editor state does not carry is DELETED the next time
+ * anybody saves any type in the UI — which is exactly the note `endpoints` carries, from the last time
+ * it happened.
+ */
+describe('a description survives a round trip through the editor', () => {
+  it('a type description reaches the wire object', () => {
+    const ts = typeSchemaFromState('entity', state({ description: '  A running service we operate.  ' }));
+    expect(ts.description).toBe('A running service we operate.');
+  });
+
+  it('and an empty one is OMITTED rather than stored as an empty string', () => {
+    // An empty string reads as a description somebody wrote and left blank; absent reads as unwritten.
+    expect('description' in typeSchemaFromState('entity', state({ description: '   ' }))).toBe(false);
+  });
+
+  it('a property description reaches it too', () => {
+    const ts = typeSchemaFromState('entity', state({
+      propertySchemas: [prop('retries', { type: 'number', description: 'How many are allowed.' })],
+    }));
+    expect(ts.propertySchemas?.['retries'].description).toBe('How many are allowed.');
+  });
+
+  it('and is omitted when blank, like every other optional here', () => {
+    const ts = typeSchemaFromState('entity', state({
+      propertySchemas: [prop('retries', { type: 'number', description: '  ' })],
+    }));
+    expect('description' in (ts.propertySchemas?.['retries'] ?? {})).toBe(false);
+  });
+
+  it('a type saved to the LIBRARY keeps it', () => {
+    // The library entry is `.strict()` and drops `retention`, so this is the place a new field is most
+    // likely to be left out of one of the two serialisations.
+    const ts = typeSchemaFromState('entity', state({ description: 'kept' }), { withRetention: false });
+    expect(ts.description).toBe('kept');
+  });
+});

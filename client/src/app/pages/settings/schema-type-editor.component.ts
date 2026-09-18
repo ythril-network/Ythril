@@ -109,6 +109,15 @@ import { mergeFnsFor, mergeFnAfterTypeChange } from '../../shared/merge-fns';
     }
   }
 } @else {
+  <!-- WHAT THIS TYPE IS FOR, in the operator's own words. F-24, and it is deliberately prose: the
+       reader is a model, and everything a model needs from a semantic layer is satisfied by a
+       sentence. What is NOT satisfied is anything the engine must act on, which is why this is not
+       an ontology and does not pretend to be one.
+       First in the pane because it is what somebody opening an unfamiliar type wants to read. -->
+  <div class="field" style="margin:0 0 12px;">
+    <label>{{ 'spaces.schema.typeDescription' | transloco }} <span class="sch-hint">{{ 'spaces.schema.typeDescriptionHint' | transloco }}</span></label>
+    <textarea rows="2" [(ngModel)]="d().description" [placeholder]="'spaces.schema.typeDescriptionPlaceholder' | transloco"></textarea>
+  </div>
   <!-- Naming pattern (entity only) -->
   @if (knowledgeType() === 'entity') {
     <div class="field" style="margin:0 0 12px;">
@@ -312,6 +321,14 @@ import { mergeFnsFor, mergeFnAfterTypeChange } from '../../shared/merge-fns';
             <tr class="prop-expand-row" (click)="$event.stopPropagation()">
               <td colspan="5" style="padding:0;">
                 <div class="pdet">
+                  <!-- WHAT THE PROPERTY MEANS (F-24). The type says a value is a number; this says it
+                       is the retry BUDGET rather than the retry count. Full width above the grid
+                       because it is a sentence, not a field. -->
+                  <div class="field" style="margin:0 0 8px;">
+                    <label>{{ 'spaces.schema.propDetail.description' | transloco }}</label>
+                    <input type="text" [(ngModel)]="p.s.description"
+                      [placeholder]="'spaces.schema.propDetail.descriptionPlaceholder' | transloco" />
+                  </div>
                   <div class="pdet-fields">
                     <div class="field" style="margin:0;">
                       <label>{{ 'spaces.schema.propDetail.type' | transloco }}</label>

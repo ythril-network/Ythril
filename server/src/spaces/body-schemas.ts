@@ -41,7 +41,7 @@ import { z } from 'zod';
 import { MERGE_FNS } from '../config/types-knowledge.js';
 import { getSchemaLibrary } from '../config/loader.js';
 import { isSsrfSafeUrl, SSRF_SAFE_MESSAGE } from '../util/ssrf.js';
-import { SPACE_PURPOSE_MAX } from './_shared.js';
+import { SPACE_PURPOSE_MAX, SCHEMA_DESCRIPTION_MAX, PROPERTY_DESCRIPTION_MAX } from './_shared.js';
 import { DOC_EXTRACTION_MODES_IN, IMAGE_LEVELS, AUDIO_LEVELS, VIDEO_LEVELS, TEXT_LEVELS } from '../config/types.js';
 import { KNOWLEDGE_TYPES } from '../config/types-knowledge.js';
 import { hasReDoSRisk, REDOS_REFUSAL } from '../util/redos.js';
@@ -70,6 +70,13 @@ import { DATE_PASSED_VALUES } from '../brain/chrono-date-policy.js';
 const SchemaPatternZ = z.string().max(500).refine(p => !hasReDoSRisk(p), { message: REDOS_REFUSAL });
 
 export const PropertySchemaZ = z.object({
+  /*
+   * `F-24` step one. Free text, never parsed, bounded so a note cannot become a payload: 2000 for a
+   * property and 4000 for a type below, matching the space `purpose` it is the smaller sibling of.
+   * `.strict()` here means an unlisted key is REJECTED, so without this line a caller sending one
+   * would get a 400 for a field the type declares.
+   */
+  description: z.string().max(PROPERTY_DESCRIPTION_MAX).optional(),
   type: z.enum(['string', 'number', 'boolean', 'date']).optional(),
   enum: z.array(z.union([z.string(), z.number(), z.boolean()])).optional(),
   minimum: z.number().optional(),
@@ -123,6 +130,7 @@ export const TypeSchemaZ = z.union([
   }).strict(),
   // Inline schema definition
   z.object({
+    description: z.string().max(SCHEMA_DESCRIPTION_MAX).optional(),
     namingPattern: SchemaPatternZ.optional(),
     propertySchemas: z.record(z.string().min(1).max(200), PropertySchemaZ).optional(),
     // The schema tier of record > schema > space. `.strict()` above means an unlisted key is REJECTED, so

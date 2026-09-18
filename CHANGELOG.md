@@ -15,6 +15,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A schema type and each of its properties can now say what they are FOR, in prose.** `description` on
+  a type schema (4000 characters) and on any property (2000) — stored, returned by `get_space_meta` and
+  the space listing, editable in the Schema tab, and **never parsed**. The type already says a value is a
+  number; the property note is where you say it is the retry BUDGET rather than the retry count, or that
+  one record means one deployed instance rather than one repository.
+
+  **It is deliberately prose rather than an ontology, and that is the whole decision.** Owner,
+  2026-09-17, asking whether `F-24`'s semantic layer could be satisfied this way: the answer splits by
+  who READS it. Everything whose reader is a model — what a type is for, which property carries meaning,
+  whether two types in different spaces are the same thing — is satisfied by a sentence, and better,
+  because it needs no vocabulary and cannot be wrong-but-parseable. Nothing whose reader is the ENGINE is
+  satisfied by it at all: a query cannot widen to subtypes it cannot parse.
+
+  So the engine-facing half — inverse pairs, transitivity, subtyping — is not built, and will not be
+  until a named consumer changes behaviour because of it. **A vocabulary that nothing enforces looks
+  machine-readable and is not**, which is worse than prose rather than a lesser version of it: shipping
+  `transitive: true` while `traverse` ignores it is the documented-but-inert defect at the scale of a
+  feature.
+
+  The pattern is already proven one tier up — a SPACE carries `usageNotes`, and that is where the shared
+  dev board keeps the runbook three parties read at handshake.
+
 - **A chrono entry's `status` meant two different things, and which one you got was decided by the DOOR
   you read through.** The chrono list route returns the DERIVED status — `overdue` where a due moment has
   passed, unless the type's `whenDuePasses` says otherwise — while `filter` and sync return the value the
