@@ -153,6 +153,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A token that reaches exactly ONE space no longer has to name it.** `space` is optional on every
+  writing tool when the calling token's accessible-space list has one member — `save_fact({fact: "…"})`
+  lands. With two or more it stays required, and the refusal lists the spaces you can choose between.
+
+  **`space`'s enum was already narrowed to what the token reaches**, so with one member there is no other
+  space the call could mean. Requiring it there bought no safety and cost every caller who did not read
+  the schema — which is every GENERIC client, because a generic client matches a tool by name and fills
+  the parameters it recognises. `B-6` came from reading one: it sent `save_fact({content})`, was refused
+  for a missing `space` it had no way to know about, and the run then stored nothing, searched an empty
+  space and scored about zero **with no error anybody saw** — the harness swallows its own reset failure
+  and one 400 goes into a log nobody reads.
+
+  **The schema you are SHOWN says so**, per token: `space` is absent from `required` for a single-space
+  token and present for every other. Advertising and enforcement come from one materialisation, so a
+  caller cannot be told to send something they need not, or told they may omit it and then refused.
+
+  **A READ did not move.** `recall`, `filter` and `similar` treat an omitted `space` as *every space this
+  token can reach* — an answer rather than a default — and folding the two would turn a cross-space
+  search into a single-space one the day a token gained a second space.
 - **Every Brain tab reads through `filter` now, which is what the nine per-collection list routes were
   waiting on.** Facts, Entities, Edges and Chrono all issue one `POST /api/brain/filter`; the service
   re-keys `results` to the key each tab already destructures, so **not one caller changed** and deleting

@@ -41,37 +41,13 @@ import type { TokenRights } from '../config/rights-shape.js';
 import { memberSpacesWithin } from '../spaces/proxy-scoped.js';
 import { classifyReadFailure } from '../brain/store-failure.js';
 import { SchemaViolationError } from '../brain/write-validation.js';
-import { TOOLS_BY_NAME, type ToolResult, type ToolSchemas } from './tools/index.js';
+import { TOOLS_BY_NAME, type ToolResult } from './tools/index.js';
 import { makeArgsValidator } from './validate-args.js';
+import { toolSchemasFor } from './tool-schema.js';
 import { consumeHeavyToolCall } from '../rate-limit/heavy-tool.js';
 import { logAuditEntry } from '../audit/audit.js';
 import { mcpAuditOperation, isMcpReadOperation } from './audit-map.js';
 import { toolCallsTotal } from '../metrics/registry.js';
-
-/**
- * The `space` schemas injected into every tool's `inputSchema`.
- *
- * Built from the spaces THIS token reaches, so the enum a caller reads is the set it may actually name.
- * Exported because `tools/list` needs the same object the validator was built from — two builders would be
- * a schema advertised that the validator does not enforce.
- */
-export function toolSchemasFor(accessibleSpaceIds: readonly string[]): ToolSchemas {
-  const spaceEnumBase = accessibleSpaceIds.length > 0 ? { enum: [...accessibleSpaceIds] } : {};
-  return {
-    requiredSpace: { type: 'string' as const, ...spaceEnumBase, description: 'Space ID to operate on. Use list_spaces to discover available spaces.' },
-    optionalSpace: {
-      oneOf: [
-        { type: 'string' as const, ...spaceEnumBase },
-        { type: 'array' as const, items: { type: 'string' as const, ...spaceEnumBase }, minItems: 1 },
-      ],
-      description: 'Optional space. ONE name searches that space; a LIST of names searches exactly those, '
-        + 'and one you cannot reach refuses the whole call rather than quietly returning less — a short '
-        + 'answer and a filtered one are indistinguishable. Omit it to search every space this token can '
-        + 'reach. An empty list is refused rather than read as "all".',
-    },
-  };
-}
-
 /** Who is calling, for the rung checks and the audit trail. Snapshotted by the door at its own edge. */
 export interface ToolCaller {
   rights?: TokenRights;
@@ -184,9 +160,39 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
     const one = typeof spaceArg === 'string' ? spaceArg.trim() : '';
     rawSpaces = one ? [one] : [];
   }
+  /*
+   * ONE REACHABLE SPACE NEEDS NO NAMING — `B-6`.
+   *
+   * `space`'s enum is already narrowed to the spaces this token reaches. When that list has exactly one
+   * member there is no other space the call could mean, so requiring it buys no safety and costs every
+   * caller who did not read the schema. A generic MCP client does not read it: it matches a tool by name,
+   * fills the parameters it recognises and calls. Against us that meant `save_fact({fact})`, refused —
+   * and the run then stored nothing, searched an empty space and scored about zero with no error anybody
+   * saw, because the harness swallows its own reset failure.
+   *
+   * With TWO OR MORE the omission is genuinely ambiguous and guessing would write into a space nobody
+   * named, so it stays required.
+   *
+   * **Here rather than in each handler.** Forty-odd tools filling in a space is forty chances for one to
+   * forget, and the one that forgets writes somewhere the caller did not ask for. `toolSchemasFor` makes
+   * the same decision about what to ADVERTISE, from the same list, so the schema and the dispatcher
+   * cannot disagree about when it may be omitted.
+   */
+  if (tool?.spaceRequired && rawSpaces.length === 0 && accessibleSpaceIds.length === 1) {
+    rawSpaces = [accessibleSpaceIds[0] as string];
+  }
   const rawSpace = rawSpaces[0] ?? '';
   if (tool?.spaceRequired && rawSpaces.length === 0) {
-    return refuse(400, `Error: tool '${name}' requires a 'space' parameter`);
+    /*
+     * The refusal NAMES them, unlike the unreachable-space refusal a few lines down, and the difference
+     * is who is asking. That one withholds the list because naming spaces to a caller who could not reach
+     * the one they tried hands an unauthorised party an inventory. These are this token's OWN spaces —
+     * it can read the same list from `list_spaces` — so withholding them only makes the caller go and
+     * fetch what the error could have told them.
+     */
+    const reachable = accessibleSpaceIds.length ? accessibleSpaceIds.join(', ') : 'none';
+    return refuse(400, `Error: tool '${name}' needs a 'space' — this token reaches more than one, so `
+      + `there is no single space it could mean. Choose one of: ${reachable}`);
   }
 
   /*
@@ -229,7 +235,7 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
     // Enforce the advertised inputSchema before the handler runs — except partial-success tools
     // (save_bulk), which report per-item errors in the result rather than rejecting the whole call.
     if (!tool.skipSchemaValidation) {
-      const argErr = makeArgsValidator(toolSchemasFor(accessibleSpaceIds)).validate(tool, a);
+      const argErr = makeArgsValidator(toolSchemasFor(accessibleSpaceIds), accessibleSpaceIds).validate(tool, a);
       if (argErr) return refuse(400, `Error: ${argErr}`, callSpace);
     }
     /*
@@ -341,3 +347,10 @@ function recordToolCall(caller: ToolCaller, toolName: string, spaceId: string, s
     durationMs,
   });
 }
+
+/**
+ * Re-exported, not re-implemented. Both lived here until the materialisation had to be shared with
+ * `validate-args.ts`, which this file imports — a cycle, and the honest signal that deciding what schema
+ * a token sees is a third thing rather than part of dispatching a call. See `mcp/tool-schema.ts`.
+ */
+export { toolSchemasFor, materialisedSchema } from './tool-schema.js';

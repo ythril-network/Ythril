@@ -11,7 +11,7 @@ import { log } from '../util/log.js';
 import { reachableSpaceIds } from '../auth/space-reach.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { ALL_TOOLS, type ToolSchemas } from './tools/index.js';
-import { callTool, toolSchemasFor } from './call-tool.js';
+import { callTool, toolSchemasFor, materialisedSchema } from './call-tool.js';
 
 /** Create an MCP Server instance with tools operating across all accessible spaces.
  *
@@ -107,7 +107,8 @@ function createGlobalMcpServer(tokenId?: string, tokenLabel?: string,
     tools: visibleTools.map(t => ({
       name: t.name,
       description: t.description,
-      inputSchema: t.inputSchema(schemas),
+      // Through `materialisedSchema`, so what is ADVERTISED is what the validator enforces — see B-6.
+      inputSchema: materialisedSchema(t, schemas, accessibleSpaceIds),
     })),
   }));
 

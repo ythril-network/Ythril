@@ -15,7 +15,18 @@ const schemas = {
   requiredSpace: { type: 'string', enum: ['general'], description: 'Space ID.' },
   optionalSpace: { type: 'string', enum: ['general'], description: 'Optional space ID.' },
 };
-const v = makeArgsValidator(schemas);
+/**
+ * TWO validators, because `space`'s REQUIREMENT depends on how many spaces the token reaches — `B-6`.
+ *
+ * `v` is a token with two, which is the general case and the one every existing case here was written
+ * against: `space` is required, so a call that omits it is refused. `vSolo` is a token with one, where
+ * there is no other space the call could mean and `space` drops out of `required`.
+ *
+ * Built from the same `makeArgsValidator` a real call builds, with the space list passed the same way,
+ * so this is the materialisation the dispatcher enforces rather than a re-implementation of the rule.
+ */
+const v = makeArgsValidator(schemas, ['general', 'other']);
+const vSolo = makeArgsValidator(schemas, ['general']);
 const tool = (name) => ALL_TOOLS.find(t => t.name === name);
 const UUID = '3b241101-e2bb-4255-8caf-4136c566a962';
 
@@ -28,6 +39,24 @@ describe('MCP args enforcement — accept path', () => {
   });
   it('accepts find_similar with the space OMITTED (now optional)', () => {
     assert.equal(v.validate(tool('similar'), { entryId: UUID, entryType: 'entity' }), null);
+  });
+
+  it('a ONE-SPACE token may omit `space` on a WRITING tool too', () => {
+    /*
+     * `B-6`. The enum is already narrowed to what the token reaches, so with one member there is no
+     * other space the call could mean. A generic MCP client fills the parameters it recognises and
+     * calls — it has no way to know we want a space, and a refusal there looks to the harness around
+     * it like an empty corpus rather than a failed write.
+     */
+    assert.equal(vSolo.validate(tool('save_fact'), { fact: 'no space named' }), null);
+  });
+
+  it('and the SAME call is refused for a token that reaches two', () => {
+    // The other half, in the same file, because a rule that only ever relaxes is one nobody has seen
+    // hold. With two reachable spaces the omission is genuinely ambiguous.
+    const err = v.validate(tool('save_fact'), { fact: 'no space named' });
+    assert.ok(err && err.toLowerCase().includes('space'),
+      `a two-space token must still be told to name one, got ${JSON.stringify(err)}`);
   });
 });
 

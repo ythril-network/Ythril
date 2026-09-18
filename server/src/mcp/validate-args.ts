@@ -13,13 +13,18 @@
  */
 import { Ajv, type ValidateFunction } from 'ajv';
 import type { ToolHandler, ToolSchemas } from './tools/types.js';
+import { materialisedSchema } from './tool-schema.js';
 
 export interface ArgsValidator {
   /** Returns a human-readable error message if `args` violate the tool's schema, else `null`. */
   validate(tool: ToolHandler, args: Record<string, unknown>): string | null;
 }
 
-export function makeArgsValidator(schemas: ToolSchemas): ArgsValidator {
+/**
+ * @param accessibleSpaceIds the spaces THIS token reaches. It decides whether `space` is required —
+   see `materialisedSchema` — so it has to reach the compile, not just the enum inside `schemas`.
+ */
+export function makeArgsValidator(schemas: ToolSchemas, accessibleSpaceIds: readonly string[]): ArgsValidator {
   // strict:false — don't throw on benign schema constructs (e.g. `default` with no useDefaults);
   // allowUnionTypes — TTL_DAYS_SCHEMA is `type: ['integer','null']`. Validation itself stays strict.
   const ajv = new Ajv({ allErrors: true, strict: false, allowUnionTypes: true });
@@ -27,9 +32,13 @@ export function makeArgsValidator(schemas: ToolSchemas): ArgsValidator {
 
   return {
     validate(tool, args) {
+      // The cache is keyed by tool NAME and this validator is built per call, so it never serves one
+      // token's schema to another. Hoisting it to module scope would do exactly that, now that the
+      // schema depends on who is asking.
       let validate = cache.get(tool.name);
       if (!validate) {
-        validate = ajv.compile(tool.inputSchema(schemas) as object);
+        // The same materialisation `tools/list` advertises, not a second call to `inputSchema` — see B-6.
+        validate = ajv.compile(materialisedSchema(tool, schemas, accessibleSpaceIds) as object);
         cache.set(tool.name, validate);
       }
       if (validate(args)) return null;
