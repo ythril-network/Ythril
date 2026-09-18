@@ -9,7 +9,7 @@ import { shapeError } from '../../brain/write-shape.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { usesLinkRecords } from '../../brain/link-adjacency.js';
 import { arrayWriteError } from '../../brain/array-write-refusal.js';
-import { connectionInputError, applyConnections, CONNECTION_BODY_KEYS } from '../../brain/write-connections.js';
+import { connectionInputError, applyConnections, CONNECTION_BODY_KEYS, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
 import { WIPE_COLLECTION_TYPES, type WipeCollectionType, wipeSpace } from '../../spaces/lifecycle.js';
 import { assertRefsResolve } from '../../brain/entity-refs.js';
 import { requireSpaceAuth, requireBodyScopedSpace, denyReadOnly } from '../../auth/middleware.js';
@@ -235,7 +235,8 @@ memoriesRouter.delete('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpac
  * The shared write options — ttlDays, waitForEmbedding, the duplicate flags and the two suppression
  * spellings — are NOT listed: they are read by helpers, and live in `SHARED_WRITE_BODY_KEYS`.
  */
-const FACTS_UPDATE_BODY_KEYS = ['fact', 'tags', 'entityIds', 'description', 'properties', 'deleteFields', 'type'];
+const FACTS_UPDATE_BODY_KEYS = ['fact', 'tags', 'entityIds', 'description', 'properties', 'deleteFields', 'type',
+  ...CONNECTION_BODY_KEYS];
 memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const id = req.params['id'] as string;
@@ -325,7 +326,12 @@ memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpace
   const sup = parseRecordSuppression(req.body);
   if (!sup.ok) { res.status(400).json({ error: sup.error }); return; }
   if (sup.value !== undefined) updates.suppressEmbeddings = sup.value;
-  if (Object.keys(updates).length === 0 && !dfPaths && !ttlDaysProvided) { res.status(400).json({ error: 'At least one field must be provided' }); return; }
+  // A connection field IS a field. Without this, `{linkEntities: [...]}` alone answered
+  // "At least one field must be provided" for a body that plainly has one.
+  // Both return `null` for absent, never `undefined` — `!== undefined` would be true for `null` and
+  // would disable the check below entirely rather than widening it.
+  const hasConnections = desiredLinksFrom(req.body) !== null || edgeInputsFrom(req.body) !== null;
+  if (Object.keys(updates).length === 0 && !dfPaths && !ttlDaysProvided && !hasConnections) { res.status(400).json({ error: 'At least one field must be provided' }); return; }
   const memberIds = resolveMemberSpaces(wt.target);
   for (const mid of memberIds) {
     // Validate the record AS IT WILL BE, on every patch — not only when `deleteFields` is present.
@@ -377,6 +383,18 @@ memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpace
        * The unknown-field rows ride in the same array, in the same shape, for the reason the creates give:
        * two warning channels on one response would be worse than the silence they replace.
        */
+      /*
+       * `Q-30`: the connections, on the UPDATE too.
+       *
+       * Every create door applied these and no update door did, so a record's relationships could be
+       * set once and never changed. `entityIds` was the way round on an unconverted space — and a
+       * `completeLinkage` space refuses that outright, so on a converted space there was no way at
+       * all, by either door.
+       *
+       * AFTER the record write, exactly as the create does: links REPLACE per class and edges UPSERT,
+       * and both semantics live in `applyConnections` so no door has to restate them.
+       */
+      await applyConnections(updated.spaceId, updated._id, 'fact', req.body, updated.author, webhookToken(req));
       const warnings = [...(check?.warnings ?? []), ...unknownFieldWarnings(req.body, FACTS_UPDATE_BODY_KEYS)];
       res.json(warnings.length > 0 ? { ...updated, warnings } : updated);
       return;

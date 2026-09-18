@@ -125,16 +125,16 @@ describe('a link written on an unconverted space is a link a reader can see', ()
       + 'about how to undo one another');
   });
 
-  it('the UPDATE verb refuses `linkEntities` OUTRIGHT, which is a gap and not this defect', async () => {
+  it('the UPDATE verb honours it too, and the selector has to hold there as well', async () => {
     /*
-     * Pinned deliberately, because the two are easy to confuse and only one of them misleads.
+     * This case was written the other way round, asserting the `400` — no update route called
+     * `applyConnections`, so the refusal was honest and was filed as `Q-30` rather than fixed here. Its
+     * own note said what to do when that landed: *"the capability landed and this assertion should
+     * become the positive one."* `Q-30` landed, this went red, and here is the positive one.
      *
-     * No update route calls `applyConnections` — the create paths do and the PATCH paths do not — so the
-     * refusal is honest: the verb does not offer the parameter. That is a missing capability, filed as its
-     * own row. The defect THIS file is about is the opposite shape: a `201` and a link nobody can see.
-     *
-     * If this case ever goes red because the PATCH started succeeding, the capability landed and this
-     * assertion should become the positive one.
+     * It belongs in THIS file and not only in `Q-30`'s, because the update path reaches the same writer:
+     * a new caller of `reconcileLinks` on an unconverted space is exactly how the defect this file
+     * guards would come back.
      */
     const id = must('bare fact', await P(`/api/brain/spaces/${SPACE}/facts`, { fact: `bare ${RUN}` }));
     const res = await fetch(`${INSTANCES.a}/api/brain/spaces/${SPACE}/facts/${id}`, {
@@ -142,6 +142,9 @@ describe('a link written on an unconverted space is a link a reader can see', ()
       headers: { Authorization: `Bearer ${tokenA}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ linkEntities: [personId] }),
     });
-    assert.equal(res.status, 400, 'a verb that cannot honour the field must say so rather than accept it');
+    assert.ok(res.status < 400, `PATCH refused \`linkEntities\`: ${res.status} ${await res.text()}`);
+    assert.ok((await reachableFromPerson()).includes(id),
+      'the update was accepted and the link is reached by nothing — the writer took the array path on '
+      + 'the create and not on the update, which is this file\'s defect with a smaller blast radius');
   });
 });
