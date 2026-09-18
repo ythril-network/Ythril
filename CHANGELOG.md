@@ -724,6 +724,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A test wrote the retired link arrays to the built-in `general` space, and failed whenever the stack
+  had restarted.** Every boot converts every space that is not yet marked, so `general` becomes
+  `completeLinkage` and then refuses `entityIds` / `memoryIds` — correctly. A rebuild wipes the config,
+  so the first-run boot converts nothing and CI never saw it; any restart that preserves the config did.
+  The failure named the link migration, which the test had nothing to do with.
+
+  Nothing about the product changed. The case now writes `linkEntities`/`linkFacts`, which work on a
+  converted space and an unconverted one alike, and asserts the link through a WALK rather than through
+  the echoed arrays — those are populated only on the unconverted side, so asserting them asserted which
+  side of the migration the space happened to be on.
+
+  A new gate refuses an array-link field aimed at a space a test did not create.
+
 - **A walk did not return the node it started from, so an isolated record and a bad id looked the same.**
   `graph_traverse`'s own schema has always described *"`startId` itself at depth 0, so a walk that finds
   nothing still comes back with one node rather than empty — an empty `nodes` means the id resolved to
