@@ -57,6 +57,13 @@ export type MergeFn = NumericMergeFn | BooleanMergeFn;
 
 /** Subset of JSON Schema used for property value validation. */
 export interface PropertySchema {
+  /**
+   * What this property MEANS, in the operator's own words — free text, never parsed.
+   *
+   * The type says a value is a number; this says it is the retry budget rather than the retry count.
+   * An agent constructing a write or a filter reads it, and today has to guess from the key.
+   */
+  description?: string;
   /** Declared value type. 'date' is stored as ISO string; UI renders a date picker. */
   type?: 'string' | 'number' | 'boolean' | 'date';
   enum?: (string | number | boolean)[];
@@ -75,6 +82,27 @@ export interface PropertySchema {
 
 /** Schema definition for a single entity type, edge label, fact type, or chrono type. */
 export interface TypeSchema {
+  /**
+   * What this TYPE is for, in the operator's own words — free text, never parsed.
+   *
+   * ## Why prose rather than an ontology
+   *
+   * `F-24` asked for a semantic layer above schemas: that `depends_on` is transitive, that `part_of`
+   * and `contains` are inverses, that two types in different spaces are the same thing. Owner,
+   * 2026-09-17: *"could F-24 be satisfied by some usage-note or similar to each schema entry?"* —
+   * and the answer splits by CONSUMER. Everything whose reader is a MODEL is satisfied by prose, and
+   * better: it needs no vocabulary and cannot be wrong-but-parseable. Nothing whose reader is the
+   * ENGINE is satisfied by it at all — a query cannot widen to subtypes it cannot parse.
+   *
+   * So this is the first half, and the second is only built when a named consumer changes behaviour
+   * because of it. **A formal ontology that nothing acts on is worse than prose**: a vocabulary looks
+   * machine-readable, so a reader trusts it to be enforced, while prose is honest about being
+   * advisory.
+   *
+   * The pattern is already proven one tier up — a SPACE carries `usageNotes`, and it is where the
+   * shared dev board keeps the runbook three parties read at handshake.
+   */
+  description?: string;
   /**
    * Reference to an instance-level schema library entry.
    * Format: `"library:<name>"` (e.g. `"library:service-v1"`).

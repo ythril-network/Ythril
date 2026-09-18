@@ -455,6 +455,28 @@ PATCH /api/spaces/flows
                              "fact": {}, "edge": {}, "chrono": {} } } }
 ```
 
+**A type and a property can each say what they are FOR, in prose.** `description` on a type schema (4000
+characters) and on any `propertySchemas` entry (2000) is free text that is stored, returned by
+`get_space_meta` and by the space listing, and **never parsed**. The type says a value is a number;
+the property description says it is the retry BUDGET rather than the retry count.
+
+```jsonc
+PATCH /api/spaces/ops
+{ "meta": { "typeSchemas": { "entity": { "service": {
+    "description": "A running service we operate. One record per deployed instance, not per repository.",
+    "propertySchemas": {
+      "retries": { "type": "number", "description": "How many are allowed, not how many happened." }
+    } } } } } }
+```
+
+**It is deliberately prose and not an ontology.** The need it answers — an agent working out which type
+to write to, which property carries meaning, whether two types in different spaces are the same thing —
+has a MODEL as its reader, and a model reads sentences. What prose cannot do is anything the ENGINE must
+act on: a query cannot widen to subtypes it cannot parse, and `traverse` cannot follow a hierarchy
+because a sentence says there is one. Those stay unbuilt until something would act on them, because a
+vocabulary that nothing enforces looks machine-readable and is not — which is worse than prose, not a
+lesser version of it.
+
 **A regex that cannot be evaluated is refused here, with a `400` naming the construct.** `namingPattern` and
 `propertySchemas.*.pattern` are both checked when the schema is saved: a quantified group containing a
 quantifier — `^D[0-9]+:[0-9]+(,D[0-9]+:[0-9]+)*$`, the ordinary way to write "a comma-separated list of
