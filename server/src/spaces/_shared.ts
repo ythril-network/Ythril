@@ -272,6 +272,20 @@ export function spaceOpInFlight(): boolean { return _spaceOpDepth > 0; }
  */
 export const SPACE_PURPOSE_MAX = 4000;
 
+/**
+ * How long a SCHEMA ENTRY's prose may be — a type's `description` and a property's (`F-24`).
+ *
+ * Its own constant rather than `SPACE_PURPOSE_MAX`, which it briefly borrowed. Two bounds that happen
+ * to be equal are not one bound: the space directive and a type note answer different questions and
+ * would move for different reasons. Sharing the name also collided with the gate that keeps the retired
+ * space-level `description` alias from returning — it matches on `description: z.string().max(
+ * SPACE_PURPOSE_MAX)`, and a borrowed constant made an unrelated field look like that alias coming back.
+ *
+ * A property gets the smaller half: it describes one value, not a whole record type.
+ */
+export const SCHEMA_DESCRIPTION_MAX = 4000;
+export const PROPERTY_DESCRIPTION_MAX = 2000;
+
 /** Generate a URL-safe space ID from a label */
 export function slugify(label: string): string {
   return label

@@ -259,6 +259,9 @@ interface TypeSchema {
   $ref?: string;                                  // "library:<name>" — use a schema-library entry instead
                                                   //   of the inline fields. When set, inline fields on the
                                                   //   same object are IGNORED, not merged.
+  description?: string;                           // what this TYPE is for, in your own words. Free
+                                                  //   text, never parsed, max 4000. An assistant reads
+                                                  //   it; nothing validates against it. See 06-spaces-api.md.
   namingPattern?: string;                         // entity only — regex for name validation
   retention?: { days?: number; contentDays?: number };  // per-type retention, the middle tier of
                                                   //   record > schema > space. `contentDays` is chrono-only
@@ -280,6 +283,7 @@ interface TypeSchema {
                                                   //   i.e. one `to` per `(from, label)`. Absent = many.
 }
 interface PropertySchema {
+  description?: string;  // what this property MEANS, in your own words. Free text, never parsed, max 2000
   type?: 'string' | 'number' | 'boolean' | 'date';
   enum?: (string | number | boolean)[];
   minimum?: number;

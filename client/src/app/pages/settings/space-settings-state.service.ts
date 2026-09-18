@@ -22,6 +22,14 @@ import {
  * reach the server — see `buildMeta()`.
  */
 export interface TypeSchemaState {
+  /**
+   * What this TYPE is for, in the operator's own words (`F-24`).
+   *
+   * Carried as well as edited. `typeSchemaFromState` rebuilds the wire object from scratch, so a field
+   * this state does not hold is DELETED the next time anybody saves any type in the UI — which is the
+   * note `endpoints` above carries, for the same reason.
+   */
+  description:     string;
   namingPattern:   string;
   /**
    * Edge-only, and carried rather than edited — there is no control for either yet.
@@ -87,7 +95,7 @@ export interface TypeSchemaState {
  */
 export function emptyTypeSchemaState(over: Partial<TypeSchemaState> = {}): TypeSchemaState {
   return {
-    namingPattern: '', retentionDays: null, retentionContentDays: null, suppressEmbeddings: null,
+    description: '', namingPattern: '', retentionDays: null, retentionContentDays: null, suppressEmbeddings: null,
     whenDuePasses: null,
     propertySchemas: [], _newPropInput: '', _newTagInput: '',
     ...over,
@@ -136,6 +144,9 @@ export function typeSchemaFromState(
   { withRetention = true }: { withRetention?: boolean } = {},
 ): TypeSchema {
   const ts: TypeSchema = {};
+  // Trimmed and omitted when empty, like every other optional here: an empty string would store a
+  // description that says nothing and read as one somebody wrote.
+  if (state.description.trim()) ts.description = state.description.trim();
   if (kt === 'entity' && state.namingPattern.trim()) ts.namingPattern = state.namingPattern.trim();
   if (withRetention) {
     // Omitted entirely when neither window is set, so a type that inherits the space default does not carry
@@ -185,6 +196,7 @@ export function typeSchemaFromState(
     const ps: Record<string, PropertySchema> = {};
     for (const { key, s } of state.propertySchemas) {
       const schema: PropertySchema = {};
+      if (s.description?.trim()) schema.description = s.description.trim();
       if (s.type)            schema.type    = s.type;
       if (s.enum?.length)    schema.enum    = [...s.enum];
       if (s.minimum != null) schema.minimum = s.minimum;
@@ -396,6 +408,7 @@ export class SpaceSettingsState {
           map[name] = emptyTypeSchemaState({ _libRef: ts.$ref.slice('library:'.length) });
         } else {
           map[name] = emptyTypeSchemaState({
+            description:     ts.description     ?? '',
             namingPattern:   ts.namingPattern   ?? '',
             // `?? null`, never `?? 0`: an absent window means "inherit the space default", and 0 is a value the
             // API rejects. Reading it as 0 would round-trip a blank field into an invalid save.
