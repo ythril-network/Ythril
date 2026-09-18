@@ -27,7 +27,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get } from '../sync/helpers.js';
+import { INSTANCES, post, get, readRecord } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
 
@@ -93,7 +93,7 @@ describe('a write token deletes one record on both doors', () => {
     try {
       const res = await session.callTool('delete_fact', { space: 'general', id });
       assert.doesNotMatch(JSON.stringify(res ?? {}), /isError/, `MCP delete failed: ${JSON.stringify(res).slice(0, 200)}`);
-      const after = await get(INSTANCES.a, admin, `/api/brain/spaces/general/facts/${id}`);
+      const after = await readRecord(INSTANCES.a, admin, 'general', 'facts', id);
       assert.equal(after.status, 404, 'the record must be gone');
     } finally {
       session?.close();

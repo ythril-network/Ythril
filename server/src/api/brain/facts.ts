@@ -18,16 +18,20 @@ import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { listFacts, deleteFact, saveFact, updateFact } from '../../brain/fact.js';
 import { validateDeleteFields, applyDeleteFields as applyDeleteFieldsPaths } from '../../brain/delete-fields.js';
 import { getConfig } from '../../config/loader.js';
-import { col, asFilter } from '../../db/mongo.js';
 import { parseLimit, parseSkip, unsupportedPageParam } from '../../util/pagination.js';
 import { pageAcrossMembers } from '../../spaces/page-across-members.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
 import { countBrain, compareBySort, PROXY_PAGE_CEILING } from '../../brain/query.js';
 import { parseSortParam, SORTABLE_FIELDS, toMongoSort } from '../../brain/list-sort.js';
 import { checkQuota, QuotaError } from '../../quota/quota.js';
-import { resolveMemberSpaces, resolveWriteTarget, isProxySpace, isStrictLinkage, findFirstAcrossMembers, collectAcrossMembers } from '../../spaces/proxy.js';
+import {
+  resolveMemberSpaces,
+  resolveWriteTarget,
+  isProxySpace,
+  isStrictLinkage,
+  collectAcrossMembers,
+} from '../../spaces/proxy.js';
 import { validateFact } from '../../spaces/schema-validation.js';
-import type { FactDoc } from '../../config/types.js';
 import { UUID_V4_RE, webhookToken, getSpaceMeta, applyValidation, buildFactFilter, ttlDaysFromBody, ttlDaysError, dupeCheckOptsFromBody, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
 import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
 import { resolveEntityIdsByName } from '../../brain/entities.js';
@@ -36,7 +40,6 @@ import { mergePropertiesOrKeep } from '../../brain/merge-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { withoutListDiagnostics } from '../../brain/read-projection.js';
 import { listDiagnosticsAsked } from './_shared.js';
-import { spaceCollection } from '../../db/space-collection.js';
 
 export const memoriesRouter = Router();
 
@@ -192,22 +195,6 @@ memoriesRouter.post('/spaces/:spaceId/facts', globalRateLimit, requireSpaceAuth,
   const warnings = [...validation.warnings, ...unknownFieldWarnings(req.body, FACTS_CREATE_BODY_KEYS)];
   if (warnings.length > 0) body['warnings'] = warnings;
   res.status(201).json(body);
-});
-
-
-// GET /api/brain/spaces/:spaceId/facts/:id — get single fact
-memoriesRouter.get('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpaceAuth, async (req, res) => {
-  const spaceId = req.params['spaceId'] as string;
-  const id = req.params['id'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
-  const doc = await findFirstAcrossMembers(spaceId,
-    mid => col<FactDoc>(spaceCollection(mid, 'facts')).findOne(asFilter<FactDoc>({ _id: id })));
-  if (doc) { res.json(doc); return; }
-  res.status(404).json({ error: 'Fact not found' });
 });
 
 

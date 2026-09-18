@@ -42,7 +42,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, dockerExec } from '../sync/helpers.js';
+import { INSTANCES, post, get, dockerExec, readRecord } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -197,7 +197,7 @@ describe('Contradiction resolve — picking a winner', () => {
 
     // NOTHING is deleted. That is the line between this and a duplicate merge.
     for (const id of [winnerId, loserId]) {
-      const still = await get(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/entities/${id}`);
+      const still = await readRecord(INSTANCES.a, token(), SPACE, 'entities', id);
       assert.equal(still.status, 200, `${id} must survive — a contradiction is not a merge`);
     }
   });

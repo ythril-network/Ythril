@@ -25,7 +25,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, delWithBody, getInstanceId } from './helpers.js';
+import { INSTANCES, post, get, del, delWithBody, getInstanceId, readRecord } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -85,7 +85,7 @@ describe('Forged tombstone cross-instance deletion is refused', () => {
     assert.equal(forged.status, 200, JSON.stringify(forged.body));
 
     // The victim memory must still exist.
-    const check = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${testSpaceId}/facts/${victimId}`);
+    const check = await readRecord(INSTANCES.a, tokenA, testSpaceId, 'facts', victimId);
     assert.equal(check.status, 200, 'VULNERABILITY: forged tombstone deleted A-authored content');
   });
 
@@ -105,7 +105,7 @@ describe('Forged tombstone cross-instance deletion is refused', () => {
     });
     assert.equal(t.status, 200, JSON.stringify(t.body));
 
-    const check = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${testSpaceId}/facts/${id}`);
+    const check = await readRecord(INSTANCES.a, tokenA, testSpaceId, 'facts', id);
     assert.equal(check.status, 404, 'trusted admin tombstone should have deleted the memory');
   });
 });

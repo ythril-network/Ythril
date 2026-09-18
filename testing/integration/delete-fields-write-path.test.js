@@ -38,7 +38,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, patch } from '../sync/helpers.js';
+import { INSTANCES, post, get, patch, readRecord } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -79,8 +79,8 @@ async function newEdge() {
 
 const patchEntity = (id, body) => patch(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/entities/${id}`, body);
 const patchEdge = (id, body) => patch(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/edges/${id}`, body);
-const getEntity = (id) => get(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/entities/${id}`);
-const getEdge = (id) => get(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/edges/${id}`);
+const getEntity = (id) => readRecord(INSTANCES.a, token, SPACE, 'entities', id);
+const getEdge = (id) => readRecord(INSTANCES.a, token, SPACE, 'edges', id);
 
 describe('deleteFields removes a WHOLE field — the reported failure', () => {
   it('an entity loses `tags`, and the write is not refused', async () => {

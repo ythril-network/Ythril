@@ -19,7 +19,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, patch, reqJson } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, patch, reqJson, readRecord } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -72,13 +72,13 @@ describe('Entity Merge — integration', () => {
     assert.ok(r.body.relinked);
 
     // Survivor exists with merged tags
-    const surv = await get(A, token(), `/api/brain/spaces/${SPACE}/entities/${survivor._id}`);
+    const surv = await readRecord(A, token(), SPACE, 'entities', survivor._id);
     assert.equal(surv.status, 200);
     assert.ok(surv.body.tags.includes('tag-a'));
     assert.ok(surv.body.tags.includes('tag-b'));
 
     // Absorbed is gone
-    const abs = await get(A, token(), `/api/brain/spaces/${SPACE}/entities/${absorbed._id}`);
+    const abs = await readRecord(A, token(), SPACE, 'entities', absorbed._id);
     assert.equal(abs.status, 404);
   });
 
@@ -106,12 +106,12 @@ describe('Entity Merge — integration', () => {
     assert.equal(again.from, survivor._id);
     assert.equal(again.to, other._id);
 
-    const e = await get(A, token(), `/api/brain/spaces/${SPACE}/edges/${again._id}`);
+    const e = await readRecord(A, token(), SPACE, 'edges', again._id);
     assert.equal(e.status, 200, 'the relinked edge must be readable at its derived id');
     assert.equal(e.body.from, survivor._id);
     assert.equal(e.body.to, other._id);
 
-    const old = await get(A, token(), `/api/brain/spaces/${SPACE}/edges/${edge._id}`);
+    const old = await readRecord(A, token(), SPACE, 'edges', edge._id);
     assert.equal(old.status, 404, 'the pre-relink id must be gone, not left as a second row for one edge');
     assert.notEqual(again._id, edge._id, 'the identity changed, so the id must have changed with it');
   });
@@ -132,7 +132,7 @@ describe('Entity Merge — integration', () => {
     await merge(survivor._id, absorbed._id);
 
     const again = await createEdge(survivor._id, other._id, 'carries');
-    const e = await get(A, token(), `/api/brain/spaces/${SPACE}/edges/${again._id}`);
+    const e = await readRecord(A, token(), SPACE, 'edges', again._id);
     assert.equal(e.status, 200);
     assert.equal(e.body.description, 'why this link exists');
     assert.deepEqual(e.body.tags, ['provenance']);
@@ -155,11 +155,11 @@ describe('Entity Merge — integration', () => {
     assert.equal(p.body.label, 'new_label');
     assert.notEqual(p.body._id, edge._id, 'a new label is a new identity, so it is a new id');
 
-    const moved = await get(A, token(), `/api/brain/spaces/${SPACE}/edges/${p.body._id}`);
+    const moved = await readRecord(A, token(), SPACE, 'edges', p.body._id);
     assert.equal(moved.status, 200, 'the response must name an id that resolves');
     assert.equal(moved.body.label, 'new_label');
 
-    const gone = await get(A, token(), `/api/brain/spaces/${SPACE}/edges/${edge._id}`);
+    const gone = await readRecord(A, token(), SPACE, 'edges', edge._id);
     assert.equal(gone.status, 404, 'the old id must not survive beside the new one');
 
     // And it converges: creating the same triplet lands on the row the patch produced.
@@ -189,7 +189,7 @@ describe('Entity Merge — integration', () => {
     assert.equal(p.status, 200, JSON.stringify(p.body));
     assert.equal(p.body.description, undefined, 'the response must not carry the removed field');
 
-    const stored = await get(A, token(), `/api/brain/spaces/${SPACE}/edges/${p.body._id}`);
+    const stored = await readRecord(A, token(), SPACE, 'edges', p.body._id);
     assert.equal(stored.status, 200, 'the response named an id that does not resolve');
     assert.equal(stored.body.description, undefined,
       'the removal was reported and not made — the stored edge still carries the field');
@@ -213,7 +213,7 @@ describe('Entity Merge — integration', () => {
     assert.equal(p.body.error, 'edge_identity_taken');
     assert.equal(p.body.existingId, first._id, 'the refusal must name the edge in the way');
 
-    const survivor = await get(A, token(), `/api/brain/spaces/${SPACE}/edges/${second._id}`);
+    const survivor = await readRecord(A, token(), SPACE, 'edges', second._id);
     assert.equal(survivor.status, 200, 'the refused edge was destroyed by the refusal');
     assert.equal(survivor.body.label, 'movable', 'the refused edge was partially updated');
   });
@@ -229,7 +229,7 @@ describe('Entity Merge — integration', () => {
     assert.equal(p.status, 200, JSON.stringify(p.body));
     assert.equal(p.body._id, edge._id, 'an ordinary field patch must not move the edge');
 
-    const still = await get(A, token(), `/api/brain/spaces/${SPACE}/edges/${edge._id}`);
+    const still = await readRecord(A, token(), SPACE, 'edges', edge._id);
     assert.equal(still.status, 200);
     assert.equal(still.body.description, 'edited');
   });
@@ -242,7 +242,7 @@ describe('Entity Merge — integration', () => {
 
     await merge(survivor._id, absorbed._id);
 
-    const m = await get(A, token(), `/api/brain/spaces/${SPACE}/facts/${mem._id}`);
+    const m = await readRecord(A, token(), SPACE, 'facts', mem._id);
     assert.equal(m.status, 200);
     assert.ok(m.body.entityIds.includes(survivor._id), 'Memory entityIds should contain survivor');
     assert.ok(!m.body.entityIds.includes(absorbed._id), 'Memory entityIds should NOT contain absorbed');
@@ -269,11 +269,11 @@ describe('Entity Merge — integration', () => {
     assert.ok(r.body.deletedDuplicateEdgeIds.length > 0, 'One duplicate edge should be auto-deleted');
 
     // Original survivor edge still exists
-    const se = await get(A, token(), `/api/brain/spaces/${SPACE}/edges/${survivorEdge._id}`);
+    const se = await readRecord(A, token(), SPACE, 'edges', survivorEdge._id);
     assert.equal(se.status, 200);
 
     // Absorbed edge should be tombstoned
-    const ae = await get(A, token(), `/api/brain/spaces/${SPACE}/edges/${absorbedEdge._id}`);
+    const ae = await readRecord(A, token(), SPACE, 'edges', absorbedEdge._id);
     assert.equal(ae.status, 404);
   });
 
@@ -290,11 +290,11 @@ describe('Entity Merge — integration', () => {
     // The self-loop edge should now be survivor → survivor, at the id that identity derives — BOTH ends
     // moved, so this is the case where the re-key matters most and the old id is furthest from the truth.
     const again = await createEdge(survivor._id, survivor._id, 'self-ref');
-    const e = await get(A, token(), `/api/brain/spaces/${SPACE}/edges/${again._id}`);
+    const e = await readRecord(A, token(), SPACE, 'edges', again._id);
     assert.equal(e.status, 200);
     assert.equal(e.body.from, survivor._id, 'Self-loop from should be relinked to survivor');
     assert.equal(e.body.to, survivor._id, 'Self-loop to should be relinked to survivor');
-    assert.equal((await get(A, token(), `/api/brain/spaces/${SPACE}/edges/${loop._id}`)).status, 404,
+    assert.equal((await readRecord(A, token(), SPACE, 'edges', loop._id)).status, 404,
       'the pre-relink id must be gone rather than left beside the relinked edge');
   });
 

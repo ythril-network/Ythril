@@ -29,7 +29,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, patch, del, delWithBody } from '../sync/helpers.js';
+import { INSTANCES, post, get, patch, del, delWithBody, readRecord } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -40,7 +40,7 @@ let token;
 
 const create = (body) => post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/facts`, body);
 const edit = (id, body) => patch(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/facts/${id}`, body);
-const read = async (id) => (await get(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/facts/${id}`)).body;
+const read = async (id) => (await readRecord(INSTANCES.a, token, SPACE, 'facts', id)).body;
 
 before(async () => {
   token = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();

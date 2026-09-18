@@ -23,7 +23,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, waitForIndexed as waitForRecallable, waitForSimilarityIndex } from '../sync/helpers.js';
+import { INSTANCES, post, get, waitForIndexed as waitForRecallable, waitForSimilarityIndex, readRecord } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -225,8 +225,8 @@ describe('Duplicate scanner — flag + review', () => {
     assert.equal(m.status, 200, JSON.stringify(m.body));
     assert.equal(m.body.status, 'merged');
     // One of the two entities is now gone.
-    const e1 = await raw('GET', `/api/brain/spaces/${SPACE}/entities/${ids.t1}`);
-    const e2 = await raw('GET', `/api/brain/spaces/${SPACE}/entities/${ids.t2}`);
+    const e1 = await readRecord(INSTANCES.a, token(), SPACE, 'entities', ids.t1);
+    const e2 = await readRecord(INSTANCES.a, token(), SPACE, 'entities', ids.t2);
     assert.ok((e1.status === 404) !== (e2.status === 404), 'exactly one telemetry entity survives');
     const all = await listDupes(SPACE, 'all');
     const resolved = all.find(c => c.id === tPair.id);
@@ -289,8 +289,8 @@ describe('Duplicate scanner — automerge rule', () => {
     assert.equal(s.status, 200, JSON.stringify(s.body));
 
     // Exactly one billing entity should survive the auto-merge.
-    const e1 = await raw('GET', `/api/brain/spaces/${SPACE_MERGE}/entities/${ids.m1}`);
-    const e2 = await raw('GET', `/api/brain/spaces/${SPACE_MERGE}/entities/${ids.m2}`);
+    const e1 = await readRecord(INSTANCES.a, token(), SPACE_MERGE, 'entities', ids.m1);
+    const e2 = await readRecord(INSTANCES.a, token(), SPACE_MERGE, 'entities', ids.m2);
     assert.ok((e1.status === 404) !== (e2.status === 404), 'exactly one billing entity survives auto-merge');
 
     const all = await listDupes(SPACE_MERGE, 'all');

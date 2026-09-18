@@ -19,7 +19,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, delWithBody, patch } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, delWithBody, patch, readRecord } from '../sync/helpers.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -52,7 +52,7 @@ describe('Brain â€” memories', () => {
     });
     const memId = write.body._id ?? write.body.id;
 
-    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/facts/${memId}`);
+    const r = await readRecord(INSTANCES.a, token(), 'general', 'facts', memId);
     assert.equal(r.status, 200, `Written memory should be retrievable by ID: ${JSON.stringify(r.body)}`);
   });
 
@@ -68,7 +68,7 @@ describe('Brain â€” memories', () => {
 
     // Confirm deletion via direct ID lookup — 404 is the authoritative signal;
     // scanning a paginated list would give a false pass once >100 memories exist.
-    const lookup = await get(INSTANCES.a, token(), `/api/brain/spaces/general/facts/${memId}`);
+    const lookup = await readRecord(INSTANCES.a, token(), 'general', 'facts', memId);
     assert.equal(lookup.status, 404, 'Deleted memory must return 404 on direct lookup');
   });
 
@@ -220,7 +220,7 @@ describe('Brain -- entity properties', () => {
 
   it('Properties appear in entity listing', async () => {
     // Look up by the specific id we updated
-    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/entities/${createdId}`);
+    const r = await readRecord(INSTANCES.a, token(), 'general', 'entities', createdId);
     assert.equal(r.status, 200);
     assert.equal(r.body.properties.wheels, 4);
     assert.equal(r.body.properties.color, 'blue');
@@ -866,7 +866,7 @@ describe('Brain -- chrono CRUD (/api/brain/spaces/:spaceId/chrono)', () => {
     assert.equal(r.status, 400, `the retired spelling must be refused: ${JSON.stringify(r.body)}`);
 
     // And nothing was written. A refusal that still mutated is the worst of both.
-    const back = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono/${chronoId}`);
+    const back = await readRecord(INSTANCES.a, token(), 'general', 'chrono', chronoId);
     assert.equal(back.body.excludeFromVectorSearch, undefined,
       'a refused field must not reach the stored record');
   });
@@ -884,7 +884,7 @@ describe('Brain -- chrono CRUD (/api/brain/spaces/:spaceId/chrono)', () => {
       suppressEmbeddings: true,
     });
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    const back = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono/${chronoId}`);
+    const back = await readRecord(INSTANCES.a, token(), 'general', 'chrono', chronoId);
     assert.equal(back.body.suppressEmbeddings, true, 'the STORED record must carry the name');
     assert.equal(back.body.excludeFromVectorSearch, undefined,
       'the retired spelling is still being written alongside');
@@ -897,7 +897,7 @@ describe('Brain -- chrono CRUD (/api/brain/spaces/:spaceId/chrono)', () => {
       suppressEmbeddings: false,
     });
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    const back = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono/${chronoId}`);
+    const back = await readRecord(INSTANCES.a, token(), 'general', 'chrono', chronoId);
     assert.equal(back.body.suppressEmbeddings, false, 'false must be stored, not dropped');
   });
   it('PATCH chrono rejects a non-boolean suppressEmbeddings', async () => {
@@ -928,7 +928,7 @@ describe('Brain -- chrono CRUD (/api/brain/spaces/:spaceId/chrono)', () => {
       suppressEmbeddings: true,
     });
     assert.equal(r.status, 404, JSON.stringify(r.body));
-    const back = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono/${chronoId}`);
+    const back = await readRecord(INSTANCES.a, token(), 'general', 'chrono', chronoId);
     assert.equal(back.body.suppressEmbeddings, false, 'a removed route must not have written');
   });
 
@@ -1145,7 +1145,7 @@ describe('Brain — memory description and properties fields', () => {
     assert.equal(write.status, 201);
     const memId = write.body._id;
 
-    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/facts/${memId}`);
+    const r = await readRecord(INSTANCES.a, token(), 'general', 'facts', memId);
     assert.equal(r.status, 200);
     assert.equal(r.body.description, 'Retrievable description');
     assert.deepStrictEqual(r.body.properties, { key: 'val' });
@@ -1348,7 +1348,7 @@ describe('Brain — chrono properties field', () => {
   });
 
   it('Create chrono with properties stores them in response', async () => {
-    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono/${chronoId}`);
+    const r = await readRecord(INSTANCES.a, token(), 'general', 'chrono', chronoId);
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.deepStrictEqual(r.body.properties, { phase: 'alpha', priority: 1, critical: true });
   });
@@ -1360,7 +1360,7 @@ describe('Brain — chrono properties field', () => {
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.deepStrictEqual(r.body.properties, { phase: 'beta', priority: 2, critical: false });
 
-    const get2 = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono/${chronoId}`);
+    const get2 = await readRecord(INSTANCES.a, token(), 'general', 'chrono', chronoId);
     assert.equal(get2.status, 200);
     assert.deepStrictEqual(get2.body.properties, { phase: 'beta', priority: 2, critical: false },
       'updated properties persisted to DB');
@@ -1900,7 +1900,7 @@ describe('Brain — PATCH memory updates description and properties', () => {
     assert.equal(r.status, 200, `Expected 200, got ${r.status}: ${JSON.stringify(r.body)}`);
     assert.equal(r.body.description, 'Updated description', 'description must be updated');
 
-    const get2 = await get(INSTANCES.a, token(), `/api/brain/spaces/general/facts/${memId}`);
+    const get2 = await readRecord(INSTANCES.a, token(), 'general', 'facts', memId);
     assert.equal(get2.status, 200);
     assert.equal(get2.body.description, 'Updated description', 'description persisted to DB');
   });
@@ -1912,7 +1912,7 @@ describe('Brain — PATCH memory updates description and properties', () => {
     assert.equal(r.status, 200, `Expected 200, got ${r.status}: ${JSON.stringify(r.body)}`);
     assert.equal(r.body.properties?.source, 'patched', 'source property updated');
 
-    const get2 = await get(INSTANCES.a, token(), `/api/brain/spaces/general/facts/${memId}`);
+    const get2 = await readRecord(INSTANCES.a, token(), 'general', 'facts', memId);
     assert.equal(get2.status, 200);
     assert.equal(get2.body.properties?.source, 'patched', 'properties persisted to DB');
     assert.equal(get2.body.properties?.extra, 'yes', 'new property persisted');
@@ -1925,7 +1925,7 @@ describe('Brain — PATCH memory updates description and properties', () => {
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.fact, `PatchMemFact-updated-${RUN}`);
 
-    const get2 = await get(INSTANCES.a, token(), `/api/brain/spaces/general/facts/${memId}`);
+    const get2 = await readRecord(INSTANCES.a, token(), 'general', 'facts', memId);
     assert.equal(get2.status, 200);
     assert.equal(get2.body.fact, `PatchMemFact-updated-${RUN}`, 'fact persisted to DB');
   });
@@ -1972,7 +1972,7 @@ describe('Brain — PATCH memory long-form path persists description and propert
     assert.equal(r.body.description, 'Long-form updated');
     assert.equal(r.body.properties?.v, 2);
 
-    const get2 = await get(INSTANCES.a, token(), `/api/brain/spaces/general/facts/${memId}`);
+    const get2 = await readRecord(INSTANCES.a, token(), 'general', 'facts', memId);
     assert.equal(get2.status, 200);
     assert.equal(get2.body.description, 'Long-form updated', 'description persisted to DB');
     assert.deepEqual(get2.body.properties, { v: 2 }, 'properties persisted to DB');
@@ -2007,7 +2007,7 @@ describe('Brain — PATCH entity by ID', () => {
     assert.equal(r.status, 200, `Expected 200, got ${r.status}: ${JSON.stringify(r.body)}`);
     assert.equal(r.body.description, 'Updated entity description', 'description updated');
 
-    const getR = await get(INSTANCES.a, token(), `/api/brain/spaces/general/entities/${entId}`);
+    const getR = await readRecord(INSTANCES.a, token(), 'general', 'entities', entId);
     assert.equal(getR.body.description, 'Updated entity description', 'persisted to DB');
   });
 
@@ -2076,7 +2076,7 @@ describe('Brain — PATCH edge by ID', () => {
     assert.equal(r.status, 200, `Expected 200, got ${r.status}: ${JSON.stringify(r.body)}`);
     assert.equal(r.body.description, 'Updated edge description', 'description updated');
 
-    const getR = await get(INSTANCES.a, token(), `/api/brain/spaces/general/edges/${edgeId}`);
+    const getR = await readRecord(INSTANCES.a, token(), 'general', 'edges', edgeId);
     assert.equal(getR.body.description, 'Updated edge description', 'persisted to DB');
   });
 
@@ -2133,7 +2133,7 @@ describe('Brain — PATCH chrono by ID', () => {
     assert.equal(r.status, 200, `Expected 200, got ${r.status}: ${JSON.stringify(r.body)}`);
     assert.equal(r.body.description, 'Updated chrono description', 'description updated');
 
-    const get2 = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono/${chronoId}`);
+    const get2 = await readRecord(INSTANCES.a, token(), 'general', 'chrono', chronoId);
     assert.equal(get2.status, 200);
     assert.equal(get2.body.description, 'Updated chrono description', 'description persisted to DB');
   });
@@ -2145,7 +2145,7 @@ describe('Brain — PATCH chrono by ID', () => {
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.properties?.phase, 'beta', 'property updated');
 
-    const get2 = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono/${chronoId}`);
+    const get2 = await readRecord(INSTANCES.a, token(), 'general', 'chrono', chronoId);
     assert.equal(get2.status, 200);
     assert.equal(get2.body.properties?.phase, 'beta', 'updated property persisted to DB');
   });
@@ -2202,7 +2202,7 @@ describe('Brain — a supplied id does not become a new entity id', () => {
 
   it('the ignored id addresses nothing afterwards', async () => {
     // The other half: if the id had been quietly adopted anyway, this would return the record.
-    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/entities/${unusedUuid}`);
+    const r = await readRecord(INSTANCES.a, token(), 'general', 'entities', unusedUuid);
     assert.equal(r.status, 404, `expected the supplied id to name nothing, got ${r.status}`);
   });
 
@@ -2611,7 +2611,7 @@ describe('Brain — legacy route shape removed (A1)', () => {
   it('canonical /spaces/:spaceId/facts create + get-by-id still work', async () => {
     const w = await post(INSTANCES.a, tk, '/api/brain/spaces/general/facts', { fact: 'a1 canonical ok' });
     assert.equal(w.status, 201, `canonical create must work: ${JSON.stringify(w.body)}`);
-    const g = await get(INSTANCES.a, tk, `/api/brain/spaces/general/facts/${w.body._id}`);
+    const g = await readRecord(INSTANCES.a, tk, 'general', 'facts', w.body._id);
     assert.equal(g.status, 200, 'canonical get-by-id must work');
   });
 });

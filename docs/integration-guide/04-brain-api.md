@@ -348,15 +348,25 @@ what a read never sends, retiring a record from semantic search, and partial upd
 `deleteFields` are in **[Write & Read Semantics](04f-write-semantics.md)** — they apply to every
 brain record, not only to facts.
 
-### Get a Fact by ID
+### Read one fact by id
+
+There is no `GET .../facts/:id`, and there has not been since 5.0. One record is a predicate over one
+collection, so it is `filter`:
 
 ```http
-GET /api/brain/spaces/:spaceId/facts/:id
+POST /api/brain/filter
+Content-Type: application/json
+
+{ "space": "work", "collection": "facts", "filter": { "_id": "8f3c…" }, "limit": 1 }
 ```
 
-**Response** `200`: Full `MemoryDoc` (same shape as write response).
+**A record that is not there is `200` with `results: []`, not `404`** — branch on `results.length`. The
+reasoning, and the `$in` form for a set of ids, are in
+[Read one entity, or a set of them, by id](04b-graph-api.md).
 
-> **What a stored record carries beyond the fields you wrote.** A `GET` by id and the list routes below
+**Response** `200`: `results` holds the full `MemoryDoc` (same shape as the write response).
+
+> **What a stored record carries beyond the fields you wrote.** A read by id and the list routes below
 > return the document as stored, minus the embedding vector — which, as everywhere else, is never returned
 > and cannot be requested. Three of the remaining fields are the system's rather than yours:
 >
@@ -369,7 +379,8 @@ GET /api/brain/spaces/:spaceId/facts/:id
 > **`matchedText` and `embeddingModel` are now withheld by DEFAULT here** — the paragraph above used
 > to say all three came back unconditionally, invited anyone it cost to say so, and an integrator did:
 > *"matchedText is the passage a second time, and a list route is the call most likely to be made in bulk."*
-> Send `?includeDiagnostics=true` to get them back, the same parameter name `recall` uses.
+> Send `includeDiagnostics: true` to get them back — the same name `recall` uses, and a body field on
+> `filter` where the list routes take it as `?includeDiagnostics=true`.
 >
 > **`seq` still comes back, always, and that is deliberate rather than an oversight.** It was withheld on
 > `recall` along with the other two, but on a list route it is the `If-Match` value: dropping it would remove

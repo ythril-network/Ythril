@@ -37,7 +37,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, patch, get, delWithBody } from '../sync/helpers.js';
+import { INSTANCES, post, patch, get, delWithBody, readRecord } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
@@ -92,13 +92,13 @@ describe('a passed date means what the chrono type says', () => {
   });
 
   it('a single-entry GET returns the STORED status for an exempt type, and derives for the other', async () => {
-    const exempt = await get(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/chrono/${exemptId}`);
+    const exempt = await readRecord(INSTANCES.a, token, SPACE, 'chrono', exemptId);
     assert.equal(exempt.status, 200, JSON.stringify(exempt.body));
     assert.equal(exempt.body.status, 'active',
       'a type whose schema says a passed date means nothing must come back as it was STORED — this is the '
       + 'whole of the reported defect');
 
-    const deriving = await get(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/chrono/${derivingId}`);
+    const deriving = await readRecord(INSTANCES.a, token, SPACE, 'chrono', derivingId);
     assert.equal(deriving.status, 200, JSON.stringify(deriving.body));
     assert.equal(deriving.body.status, 'overdue',
       'a type that states nothing must be unchanged — absent is the previous behaviour, which is the firm '
@@ -130,7 +130,7 @@ describe('a passed date means what the chrono type says', () => {
       title: `closed ${RUN}`, type: 'deploy', startsAt: LONG_PAST, status: 'completed',
     });
     assert.equal(done.status, 201, JSON.stringify(done.body));
-    const r = await get(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/chrono/${done.body._id}`);
+    const r = await readRecord(INSTANCES.a, token, SPACE, 'chrono', done.body._id);
     assert.equal(r.body.status, 'completed', 'nothing derives over a status that is already terminal');
   });
 });

@@ -20,7 +20,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, delWithBody, reqJson } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, delWithBody, reqJson, readRecord } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
@@ -345,7 +345,7 @@ describe('Space export/import — round-trip (export → wipe → import)', () =
     assert.ok(postImportStats.body.chrono >= 1, 'Chrono should be restored');
 
     // Verify the specific memory is restored with the same ID
-    const memCheck = await reqJson(INSTANCES.a, tok, `/api/brain/spaces/${spaceId}/facts/${memId}`);
+    const memCheck = await readRecord(INSTANCES.a, tok, spaceId, 'facts', memId);
     assert.equal(memCheck.status, 200, `Memory ${memId} should be retrievable after import`);
     assert.equal(memCheck.body.fact, 'Round-trip memory');
     assert.deepEqual(memCheck.body.tags, ['rt-tag']);

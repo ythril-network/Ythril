@@ -30,7 +30,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, delWithBody, reqJson } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, delWithBody, reqJson, readRecord } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -169,7 +169,7 @@ describe('Proxy spaces', () => {
 
     it('Get memory by ID via proxy finds it across members', async () => {
       // memIdA is in alpha, try to get via proxy
-      const r = await get(BASE, tokenA, `/api/brain/spaces/${PROXY}/facts/${memIdA}`);
+      const r = await readRecord(BASE, tokenA, PROXY, 'facts', memIdA);
       assert.equal(r.status, 200);
       assert.equal(r.body.fact, 'Alpha fact from proxy');
     });
@@ -191,7 +191,7 @@ describe('Proxy spaces', () => {
       assert.equal(r.status, 204);
 
       // Confirm it's gone
-      const r2 = await get(BASE, tokenA, `/api/brain/spaces/${PROXY}/facts/${memIdA}`);
+      const r2 = await readRecord(BASE, tokenA, PROXY, 'facts', memIdA);
       assert.equal(r2.status, 404);
     });
 

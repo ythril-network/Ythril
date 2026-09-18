@@ -10,10 +10,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { dockerExec,
-  INSTANCES,
-  post, get, del, delWithBody, triggerSync, waitFor, makeTriggerProbe,
-} from './helpers.js';
+import { dockerExec, INSTANCES, post, get, del, delWithBody, triggerSync, waitFor, makeTriggerProbe, readRecord } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -143,7 +140,7 @@ describe('Closed Network (A <-> B)', () => {
 
     // Wait for B to have the memory (lookup by direct ID to avoid pagination), re-triggering while we wait.
     await waitForSynced(INSTANCES.a, tokenA, networkId, 'A', async () => {
-      const r = await get(INSTANCES.b, tokenB, `/api/brain/spaces/${testSpaceId}/facts/${memId}`);
+      const r = await readRecord(INSTANCES.b, tokenB, testSpaceId, 'facts', memId);
       return r.status === 200;
     });
 
@@ -166,7 +163,7 @@ describe('Closed Network (A <-> B)', () => {
 
     try {
       await waitFor(async () => {
-        const r = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${testSpaceId}/facts/${memId}`);
+        const r = await readRecord(INSTANCES.a, tokenA, testSpaceId, 'facts', memId);
         return r.status === 200;
       }, 20_000, 500, triggerA.diagnose);
     } finally {
@@ -184,7 +181,7 @@ describe('Closed Network (A <-> B)', () => {
 
     // Wait for B to have the memory (direct ID lookup)
     await waitForSynced(INSTANCES.a, tokenA, networkId, 'A', async () => {
-      const r = await get(INSTANCES.b, tokenB, `/api/brain/spaces/${testSpaceId}/facts/${memId}`);
+      const r = await readRecord(INSTANCES.b, tokenB, testSpaceId, 'facts', memId);
       return r.status === 200;
     });
 
@@ -197,7 +194,7 @@ describe('Closed Network (A <-> B)', () => {
     // wait. This is the assertion that timed out in CI on 2026-08-13: a tombstone push queued behind other work, asked
     // for once.
     await waitForSynced(INSTANCES.a, tokenA, networkId, 'A', async () => {
-      const r = await get(INSTANCES.b, tokenB, `/api/brain/spaces/${testSpaceId}/facts/${memId}`);
+      const r = await readRecord(INSTANCES.b, tokenB, testSpaceId, 'facts', memId);
       return r.status === 404;
     });
 
