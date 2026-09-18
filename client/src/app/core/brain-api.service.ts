@@ -164,6 +164,48 @@ export class BrainApi {
   private http = inject(HttpClient);
 
   /** Append `sort`/`dir` to a list request when a sort is active; a no-op otherwise. */
+  /**
+   * Read a page of one collection through `POST /api/brain/filter` — the ONE shape, for every tab.
+   *
+   * ## Why the tabs move off their own routes
+   *
+   * `B-9`: one capability, one shape. Nine per-collection `GET` routes answered what `filter` answers,
+   * and the client was the reason they stayed mounted. Four steps got them here — `filter` gained the
+   * five list CONVENIENCES, then the two DECORATIONS those routes applied after the query, then
+   * `limit` became a default instead of a silent clamp, then a chrono `status` started meaning the same
+   * thing on both doors. Each of those was a gap that would have changed what a tab shows.
+   *
+   * ## The envelope is re-keyed here, deliberately
+   *
+   * `filter` answers `{ results }`; the tabs destructure `{ facts }`, `{ entities }`, `{ edges }`,
+   * `{ chrono }`. Re-keying in the service means not one caller changes, which is what makes the route
+   * deletion a server-only change afterwards — and what keeps THIS change reviewable as one thing.
+   *
+   * `total` and `truncated` are passed through untouched: a pager that lost them would page for ever.
+   *
+   * The collection is typed as `QueryCollection` — the route's OWN set, derived from the one tuple — and
+   * not as the five the tabs happen to use. Four tabs is today's caller list, not this helper's question,
+   * and writing the five out here would be a sixth copy of a list that gains a member for M-2.
+   */
+  private filterPage<T>(
+    spaceId: string,
+    collection: QueryCollection,
+    key: string,
+    body: Record<string, unknown>,
+  ): Observable<Record<string, unknown>> {
+    return this.http.post<{ results: T[]; total: number; limit: number; skip: number; truncated: boolean }>(
+      '/api/brain/filter', { space: spaceId, collection, ...body },
+    ).pipe(map(r => ({ [key]: r.results, total: r.total, limit: r.limit, skip: r.skip, truncated: r.truncated })));
+  }
+
+  /**
+   * The sort pair, as `filter` takes it. Same field names and the same allowlist the routes used — it
+   * is the same parser on the server, which is why nothing here has to translate.
+   */
+  private sortBody(sort?: ListSort): Record<string, unknown> {
+    return sort ? { sort: sort.field, dir: sort.dir } : {};
+  }
+
   private withSort(params: HttpParams, sort?: ListSort): HttpParams {
     return sort ? params.set('sort', sort.field).set('dir', sort.dir) : params;
   }
@@ -221,16 +263,18 @@ export class BrainApi {
   // ── Brain — facts ──────────────────────────────────────────────────────
 
   listFacts(spaceId: string, limit = 20, skip = 0, filters?: { tag?: string; entity?: string; type?: string; description?: string; properties?: string; entityName?: string }, sort?: ListSort, search?: string): Observable<{ facts: Fact[]; limit: number; skip: number }> {
-    let params = new HttpParams().set('limit', limit).set('skip', skip);
-    if (filters?.tag) params = params.set('tag', filters.tag);
-    if (filters?.entity) params = params.set('entity', filters.entity);
-    if (filters?.type) params = params.set('type', filters.type);
-    if (filters?.description) params = params.set('description', filters.description);
-    if (filters?.entityName) params = params.set('entityName', filters.entityName);
-    if (filters?.properties) params = params.set('properties', filters.properties);
-    if (search) params = params.set('search', search);
-    params = this.withSort(params, sort);
-    return this.http.get<any>(`/api/brain/spaces/${spaceId}/facts`, { params });
+    // `entity` is a fact's OWN filter — an id against its link field — so it is a predicate. The other
+    // five are conveniences `filter` takes by name; `entityName` is a per-member JOIN it also takes.
+    return this.filterPage<Fact>(spaceId, 'facts', 'facts', {
+      limit, skip, ...this.sortBody(sort),
+      ...(filters?.entity ? { filter: { entityIds: filters.entity } } : {}),
+      ...(filters?.tag ? { tag: filters.tag } : {}),
+      ...(filters?.type ? { type: filters.type } : {}),
+      ...(filters?.description ? { description: filters.description } : {}),
+      ...(filters?.properties ? { properties: filters.properties } : {}),
+      ...(filters?.entityName ? { entityName: filters.entityName } : {}),
+      ...(search ? { search } : {}),
+    }) as Observable<{ facts: Fact[]; limit: number; skip: number }>;
   }
 
   deleteFact(spaceId: string, id: string): Observable<void> {
@@ -248,17 +292,18 @@ export class BrainApi {
   // ── Brain — entities ──────────────────────────────────────────────────────
 
   listEntities(spaceId: string, limit = 50, skip = 0, filters?: { search?: string; type?: string; tag?: string; description?: string; properties?: string }, sort?: ListSort, search?: string): Observable<{ entities: Entity[] }> {
-    let params = new HttpParams().set('limit', limit).set('skip', skip);
-    // `filters.search` is the entity-search bar's exact `name` lookup; `search` is the docked column
-    // freetext filter → the server's substring `?search=` (2b-iii). They are distinct params.
-    if (filters?.search) params = params.set('name', filters.search);
-    if (filters?.type) params = params.set('type', filters.type);
-    if (filters?.tag) params = params.set('tag', filters.tag);
-    if (filters?.description) params = params.set('description', filters.description);
-    if (filters?.properties) params = params.set('properties', filters.properties);
-    if (search) params = params.set('search', search);
-    params = this.withSort(params, sort);
-    return this.http.get<any>(`/api/brain/spaces/${spaceId}/entities`, { params });
+    // `filters.search` is the entity-search bar's EXACT `name` lookup, so it is a predicate; `search`
+    // is the docked column freetext, which is the substring convenience. Two different questions that
+    // have always shared a spelling here — the distinction is why this one cannot be folded.
+    return this.filterPage<Entity>(spaceId, 'entities', 'entities', {
+      limit, skip, ...this.sortBody(sort),
+      ...(filters?.search ? { filter: { name: filters.search } } : {}),
+      ...(filters?.type ? { type: filters.type } : {}),
+      ...(filters?.tag ? { tag: filters.tag } : {}),
+      ...(filters?.description ? { description: filters.description } : {}),
+      ...(filters?.properties ? { properties: filters.properties } : {}),
+      ...(search ? { search } : {}),
+    }) as Observable<{ entities: Entity[] }>;
   }
 
   deleteEntity(spaceId: string, id: string): Observable<void> {
@@ -284,16 +329,18 @@ export class BrainApi {
   // ── Brain — edges ─────────────────────────────────────────────────────────
 
   listEdges(spaceId: string, limit = 50, skip = 0, filters?: { type?: string; tag?: string; description?: string; properties?: string; fromName?: string; toName?: string }, sort?: ListSort, search?: string): Observable<{ edges: Edge[] }> {
-    let params = new HttpParams().set('limit', limit).set('skip', skip);
-    if (filters?.type) params = params.set('type', filters.type);
-    if (filters?.tag) params = params.set('tag', filters.tag);
-    if (filters?.description) params = params.set('description', filters.description);
-    if (filters?.fromName) params = params.set('fromName', filters.fromName);
-    if (filters?.toName) params = params.set('toName', filters.toName);
-    if (filters?.properties) params = params.set('properties', filters.properties);
-    if (search) params = params.set('search', search);
-    params = this.withSort(params, sort);
-    return this.http.get<any>(`/api/brain/spaces/${spaceId}/edges`, { params });
+    // `fromName`/`toName` are per-member JOINs `filter` resolves server-side — a client holding ids
+    // could not, which is why they are arguments rather than something built here.
+    return this.filterPage<Edge>(spaceId, 'edges', 'edges', {
+      limit, skip, ...this.sortBody(sort),
+      ...(filters?.type ? { type: filters.type } : {}),
+      ...(filters?.tag ? { tag: filters.tag } : {}),
+      ...(filters?.description ? { description: filters.description } : {}),
+      ...(filters?.properties ? { properties: filters.properties } : {}),
+      ...(filters?.fromName ? { fromName: filters.fromName } : {}),
+      ...(filters?.toName ? { toName: filters.toName } : {}),
+      ...(search ? { search } : {}),
+    }) as Observable<{ edges: Edge[] }>;
   }
 
   deleteEdge(spaceId: string, id: string): Observable<void> {
@@ -392,21 +439,41 @@ export class BrainApi {
   // ── Brain — chrono ──────────────────────────────────────────────────────
 
   listChrono(spaceId: string, limit = 50, skip = 0, filters?: { tags?: string; tagsAny?: string; tag?: string; type?: string; status?: string; after?: string; before?: string; search?: string; description?: string; entityName?: string }, sort?: ListSort): Observable<{ chrono: ChronoEntry[] }> {
-    let params = new HttpParams().set('limit', limit).set('skip', skip);
-    if (filters?.tags) params = params.set('tags', filters.tags);
-    if (filters?.tagsAny) params = params.set('tagsAny', filters.tagsAny);
-    if (filters?.tag) params = params.set('tag', filters.tag);
-    if (filters?.description) params = params.set('description', filters.description);
-    if (filters?.entityName) params = params.set('entityName', filters.entityName);
-    // The chrono record "kind" (event/deadline/…) is filtered via the `type` query
-    // param server-side; the old `kind` param was silently ignored.
-    if (filters?.type) params = params.set('type', filters.type);
-    if (filters?.status) params = params.set('status', filters.status);
-    if (filters?.after) params = params.set('after', filters.after);
-    if (filters?.before) params = params.set('before', filters.before);
-    if (filters?.search) params = params.set('search', filters.search);
-    params = this.withSort(params, sort);
-    return this.http.get<any>(`/api/brain/spaces/${spaceId}/chrono`, { params });
+    /*
+     * `deriveStatus: true` IS THE WHOLE REASON THIS TAB COULD NOT MOVE UNTIL NOW.
+     *
+     * A chrono status is derived on read — an entry past its due moment reads `overdue` whatever it
+     * was stored as, unless its type says a passed date means nothing. The list route did that to
+     * both the rows AND its status query; `filter` did neither until `B-8` and `B-19`. Without the
+     * flag this tab would quietly stop showing `overdue`, and its status filter would start
+     * returning entries the old one excluded.
+     */
+    const tagList = (v?: string) => v?.split(',').map(t => t.trim()).filter(Boolean) ?? [];
+    const all = tagList(filters?.tags);
+    const any = tagList(filters?.tagsAny);
+    /*
+     * These four are chrono's OWN filters and are plain predicates — an exact tag set, a tag
+     * intersection, a status and a date range. They are not the substring/scan RULES the
+     * conveniences carry, which is the line: a rule written twice drifts, an equality does not.
+     */
+    const predicate: Record<string, unknown> = {
+      ...(all.length && any.length ? { $and: [{ tags: { $all: all } }, { tags: { $in: any } }] }
+        : all.length ? { tags: { $all: all } }
+          : any.length ? { tags: { $in: any } } : {}),
+      ...(filters?.status ? { status: filters.status } : {}),
+      ...(filters?.after || filters?.before
+        ? { createdAt: { ...(filters.after ? { $gt: filters.after } : {}), ...(filters.before ? { $lt: filters.before } : {}) } }
+        : {}),
+    };
+    return this.filterPage<ChronoEntry>(spaceId, 'chrono', 'chrono', {
+      limit, skip, ...this.sortBody(sort), deriveStatus: true,
+      ...(Object.keys(predicate).length ? { filter: predicate } : {}),
+      ...(filters?.tag ? { tag: filters.tag } : {}),
+      ...(filters?.type ? { type: filters.type } : {}),
+      ...(filters?.description ? { description: filters.description } : {}),
+      ...(filters?.entityName ? { entityName: filters.entityName } : {}),
+      ...(filters?.search ? { search: filters.search } : {}),
+    }) as Observable<{ chrono: ChronoEntry[] }>;
   }
 
   createChrono(spaceId: string, body: { title: string; type: ChronoType; startsAt: string; endsAt?: string; status?: ChronoStatus; confidence?: number; tags?: string[]; entityIds?: string[]; memoryIds?: string[]; description?: string; properties?: Record<string, string | number | boolean> }): Observable<ChronoEntry> {
