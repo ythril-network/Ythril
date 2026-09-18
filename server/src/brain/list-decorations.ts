@@ -2,6 +2,7 @@ import { withEndpointNames } from './edge-endpoint-names.js';
 import { attachJobProgress } from '../files/file-job-progress.js';
 import { conveniencePredicate, conveniencesFrom } from './list-conveniences.js';
 import { filePathPredicate } from './file-path-arg.js';
+import { checkCallerFilter, composedByServer } from './filter-sanitizer.js';
 import { withDerivedStatusForPage, chronoStatusPredicate } from './chrono.js';
 import { typesWhereDatePassedMeansNothing } from './chrono-date-policy.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
@@ -131,11 +132,43 @@ export function resolvePredicate(
         + 'only the argument is normalised, so together they would silently disagree.',
     };
   }
-  const withPath = byPath ? { ...rawFilter, ...byPath.predicate } : rawFilter;
-  const merged = conveniencePredicate(collection, conveniencesFrom(args), withPath);
+  /*
+   * THE CALLER'S FILTER IS CHECKED HERE, which is the only place it is still identifiable as theirs.
+   *
+   * `MAX_FILTER_DEPTH` bounds what a CALLER may ask for, and it used to be enforced at the last moment
+   * before Mongo — by then the caller's filter and the server's composed clauses were one object counted
+   * against one budget. The budget was already spent: a derived chrono `overdue` clause is itself depth
+   * 8, so `deriveStatus` plus any convenience composed to 9 and was refused, naming a depth the caller
+   * had not used. See `CallerCheckedFilter`.
+   */
+  const checked = checkCallerFilter(rawFilter);
+  if ('error' in checked) return checked;
+  const withPath = byPath ? { ...checked.predicate, ...byPath.predicate } : checked.predicate;
+
+  /*
+   * THE STATUS REWRITE READS THE CALLER'S OWN FILTER, BEFORE THE CONVENIENCES — and the order used to be
+   * the other way round, which refused a combination the list route served.
+   *
+   * `derivedStatusPredicate` refuses a `status` nested inside `$or`/`$and`, for a real reason: the derived
+   * clause is itself a disjunction, so folding it into the caller's changes what theirs means. But the
+   * conveniences accumulate UNDER `$and`, so running them first buried a perfectly top-level `status` in
+   * one — and the refusal then fired on the server's own transformation. `?status=overdue&search=needle`
+   * worked on the route and was a 400 here, with an error telling the caller to do what they had done.
+   *
+   * The comment that used to be here said conveniences must come first because a convenience can put a
+   * `status` at the top level. None can: they are `tag`, `type`, `description`, `properties` and `search`,
+   * and the only field any of them writes under its own name is `type`. That was a reason nobody checked.
+   *
+   * So: derive against what the CALLER wrote, then let the conveniences accumulate around the result. The
+   * derived clause is a value in the `$and` like any other, and it keeps its own meaning.
+   */
+  const withStatus = args['deriveStatus'] === true
+    ? derivedStatusPredicate(withPath, new Date(), typesWhereDatePassedMeansNothing(getSpaceMeta(spaceId)))
+    : { predicate: withPath };
+  if ('error' in withStatus) return withStatus;
+  const merged = conveniencePredicate(collection, conveniencesFrom(args), withStatus.predicate);
   if ('error' in merged) return merged;
-  if (args['deriveStatus'] !== true) return merged;
-  return derivedStatusPredicate(merged.predicate, new Date(), typesWhereDatePassedMeansNothing(getSpaceMeta(spaceId)));
+  return { predicate: composedByServer(merged.predicate) };
 }
 /** Rows still inside their member's slice, before a proxy page is merged and the owner forgotten. */
 export async function decorateMemberRows(

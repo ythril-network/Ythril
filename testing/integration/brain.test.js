@@ -19,7 +19,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, delWithBody, patch, readRecord } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, delWithBody, patch, readRecord, readCollection } from '../sync/helpers.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -89,7 +89,7 @@ describe('Brain â€” memories', () => {
   });
 
   it('Access memory in non-existent space returns 404', async () => {
-    const r = await get(INSTANCES.a, token(), '/api/brain/spaces/nonexistent-space/facts');
+    const r = await readCollection(INSTANCES.a, token(), 'nonexistent-space', 'facts');
     assert.equal(r.status, 404, `Got ${r.status}`);
   });
 });
@@ -120,18 +120,24 @@ describe('Brain â€” entities CRUD (/api/brain/spaces/:spaceId/entities)', (
   const RUN = Date.now();
 
   it('List entities returns {entities:[...]}', async () => {
-    const r = await get(INSTANCES.a, token(), '/api/brain/spaces/general/entities');
+    const r = await readCollection(INSTANCES.a, token(), 'general', 'entities');
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.ok(Array.isArray(r.body.entities), 'entities must be an array');
+    assert.ok(Array.isArray(r.results), 'entities must be an array');
   });
 
   it('List entities returns 404 for unknown space', async () => {
-    const r = await get(INSTANCES.a, token(), '/api/brain/spaces/no-such-space/entities');
+    const r = await readCollection(INSTANCES.a, token(), 'no-such-space', 'entities');
     assert.equal(r.status, 404);
   });
 
   it('List entities returns 401 without auth', async () => {
-    const r = await fetch(`${INSTANCES.a}/api/brain/spaces/general/entities`);
+    // Through `filter`, because the per-collection route is gone. What has to stay true is that a read
+    // with no credentials is refused before anything is read — not that one PATH refuses it.
+    const r = await fetch(`${INSTANCES.a}/api/brain/filter`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ space: 'general', collection: 'entities' }),
+    });
     assert.equal(r.status, 401);
   });
 
@@ -234,18 +240,24 @@ describe('Brain â€” edges CRUD (/api/brain/spaces/:spaceId/edges)', () => {
   const RUN = Date.now();
 
   it('List edges returns {edges:[...]}', async () => {
-    const r = await get(INSTANCES.a, token(), '/api/brain/spaces/general/edges');
+    const r = await readCollection(INSTANCES.a, token(), 'general', 'edges');
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.ok(Array.isArray(r.body.edges), 'edges must be an array');
+    assert.ok(Array.isArray(r.results), 'edges must be an array');
   });
 
   it('List edges returns 404 for unknown space', async () => {
-    const r = await get(INSTANCES.a, token(), '/api/brain/spaces/no-such-space/edges');
+    const r = await readCollection(INSTANCES.a, token(), 'no-such-space', 'edges');
     assert.equal(r.status, 404);
   });
 
   it('List edges returns 401 without auth', async () => {
-    const r = await fetch(`${INSTANCES.a}/api/brain/spaces/general/edges`);
+    // Through `filter`, because the per-collection route is gone. What has to stay true is that a read
+    // with no credentials is refused before anything is read — not that one PATH refuses it.
+    const r = await fetch(`${INSTANCES.a}/api/brain/filter`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ space: 'general', collection: 'edges' }),
+    });
     assert.equal(r.status, 401);
   });
 
@@ -317,9 +329,9 @@ describe('Brain — edge type field', () => {
       createdAt: new Date().toISOString(),
     });
 
-    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/edges?from=${entFrom}&to=${entTo}&label=${encodeURIComponent(edgeLabel)}&limit=500`);
+    const r = await readCollection(INSTANCES.a, token(), 'general', 'edges', { limit: 500, filter: { from: entFrom, to: entTo, label: encodeURIComponent(edgeLabel) } });
     assert.equal(r.status, 200);
-    const edge = r.body.edges.find(e => e._id === edgeId);
+    const edge = r.results.find(e => e._id === edgeId);
     assert.ok(edge, 'Typed edge should appear in listing');
     assert.equal(edge.type, 'causal', 'type field should be preserved');
     assert.equal(edge.label, edgeLabel);
@@ -350,9 +362,9 @@ describe('Brain — edge type field', () => {
       createdAt: new Date().toISOString(),
     });
 
-    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/edges?from=${entFrom}&to=${entTo}&label=${encodeURIComponent(edgeLabel)}&limit=500`);
+    const r = await readCollection(INSTANCES.a, token(), 'general', 'edges', { limit: 500, filter: { from: entFrom, to: entTo, label: encodeURIComponent(edgeLabel) } });
     assert.equal(r.status, 200);
-    const edge = r.body.edges.find(e => e._id === edgeId);
+    const edge = r.results.find(e => e._id === edgeId);
     assert.ok(edge, 'Untyped edge should appear in listing');
     assert.equal(edge.type, undefined, 'type should be absent when not set');
     assert.equal(edge.label, edgeLabel);
@@ -389,9 +401,9 @@ describe('Brain — memory list filtering', () => {
   });
 
   it('Filter by tag returns only matching memories', async () => {
-    const r = await get(INSTANCES.a, tokenA, '/api/brain/spaces/general/facts?tag=physics&limit=500');
+    const r = await readCollection(INSTANCES.a, tokenA, 'general', 'facts', { tag: 'physics', limit: 500 });
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    const ids = r.body.facts.map(m => m._id);
+    const ids = r.results.map(m => m._id);
     assert.ok(ids.includes(`filt-${RUN}-1`), 'Alpha (physics) should match');
     assert.ok(ids.includes(`filt-${RUN}-3`), 'Gamma (physics) should match');
     assert.ok(!ids.includes(`filt-${RUN}-2`), 'Beta (biology) should not match');
@@ -399,16 +411,16 @@ describe('Brain — memory list filtering', () => {
   });
 
   it('Tag filter is case-insensitive', async () => {
-    const r = await get(INSTANCES.a, tokenA, '/api/brain/spaces/general/facts?tag=PHYSICS&limit=500');
+    const r = await readCollection(INSTANCES.a, tokenA, 'general', 'facts', { tag: 'PHYSICS', limit: 500 });
     assert.equal(r.status, 200);
-    const ids = r.body.facts.map(m => m._id);
+    const ids = r.results.map(m => m._id);
     assert.ok(ids.includes(`filt-${RUN}-1`), 'Should match physics despite uppercase query');
   });
 
   it('Filter by entity returns only linked memories', async () => {
-    const r = await get(INSTANCES.a, tokenA, '/api/brain/spaces/general/facts?entity=ent-y&limit=500');
+    const r = await readCollection(INSTANCES.a, tokenA, 'general', 'facts', { limit: 500, filter: { entityIds: 'ent-y' } });
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    const ids = r.body.facts.map(m => m._id);
+    const ids = r.results.map(m => m._id);
     assert.ok(ids.includes(`filt-${RUN}-2`), 'Beta (ent-y) should match');
     assert.ok(ids.includes(`filt-${RUN}-3`), 'Gamma (ent-x,ent-y) should match');
     assert.ok(!ids.includes(`filt-${RUN}-1`), 'Alpha (ent-x only) should not match');
@@ -417,27 +429,27 @@ describe('Brain — memory list filtering', () => {
 
   it('Combine tag + entity returns intersection', async () => {
     // tag=physics AND entity=ent-x → items 1 and 3
-    const r = await get(INSTANCES.a, tokenA, '/api/brain/spaces/general/facts?tag=physics&entity=ent-x&limit=500');
+    const r = await readCollection(INSTANCES.a, tokenA, 'general', 'facts', { tag: 'physics', limit: 500, filter: { entityIds: 'ent-x' } });
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    const ids = r.body.facts.map(m => m._id);
+    const ids = r.results.map(m => m._id);
     assert.ok(ids.includes(`filt-${RUN}-1`), 'Alpha (physics + ent-x) should match');
     assert.ok(ids.includes(`filt-${RUN}-3`), 'Gamma (physics + ent-x) should match');
     assert.ok(!ids.includes(`filt-${RUN}-2`), 'Beta (biology + ent-y) should not match');
   });
 
   it('No filter returns all (at least our 5)', async () => {
-    const r = await get(INSTANCES.a, tokenA, '/api/brain/spaces/general/facts?limit=500');
+    const r = await readCollection(INSTANCES.a, tokenA, 'general', 'facts', { limit: 500 });
     assert.equal(r.status, 200);
-    const ids = r.body.facts.map(m => m._id);
+    const ids = r.results.map(m => m._id);
     for (let i = 1; i <= 5; i++) {
       assert.ok(ids.includes(`filt-${RUN}-${i}`), `Item ${i} (filt-${RUN}-${i}) missing from ${ids.length} results`);
     }
   });
 
   it('Filter with no matches returns empty array', async () => {
-    const r = await get(INSTANCES.a, tokenA, '/api/brain/spaces/general/facts?tag=nonexistent-tag-xyz&limit=500');
+    const r = await readCollection(INSTANCES.a, tokenA, 'general', 'facts', { tag: 'nonexistent-tag-xyz', limit: 500 });
     assert.equal(r.status, 200);
-    assert.equal(r.body.facts.length, 0, 'Should return empty array for non-matching filter');
+    assert.equal(r.results.length, 0, 'Should return empty array for non-matching filter');
   });
 });
 
@@ -460,27 +472,39 @@ describe('Brain â€” memory list limit/skip pagination', () => {
   });
 
   it('limit=3 returns at most 3 memories', async () => {
-    const r = await get(INSTANCES.a, token(), '/api/brain/spaces/general/facts?limit=3');
+    const r = await readCollection(INSTANCES.a, token(), 'general', 'facts', { limit: 3 });
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.ok(Array.isArray(r.body.facts), 'memories must be array');
-    assert.ok(r.body.facts.length <= 3, `Expected â‰¤3 items, got ${r.body.facts.length}`);
+    assert.ok(Array.isArray(r.results), 'memories must be array');
+    assert.ok(r.results.length <= 3, `Expected â‰¤3 items, got ${r.results.length}`);
   });
 
   it('skip pagination returns disjoint results', async () => {
-    const page1 = await get(INSTANCES.a, token(), '/api/brain/spaces/general/facts?limit=3&skip=0');
-    const page2 = await get(INSTANCES.a, token(), '/api/brain/spaces/general/facts?limit=3&skip=3');
+    const page1 = await readCollection(INSTANCES.a, token(), 'general', 'facts', { limit: 3, skip: 0 });
+    const page2 = await readCollection(INSTANCES.a, token(), 'general', 'facts', { limit: 3, skip: 3 });
     assert.equal(page1.status, 200);
     assert.equal(page2.status, 200);
-    const p1Ids = new Set(page1.body.facts.map(m => m._id));
-    for (const m of page2.body.facts) {
+    const p1Ids = new Set(page1.results.map(m => m._id));
+    for (const m of page2.results) {
       assert.ok(!p1Ids.has(m._id), `Duplicate id ${m._id} across pages`);
     }
   });
 
-  it('limit cap â€” limit > 500 is capped at 500', async () => {
-    const r = await get(INSTANCES.a, token(), '/api/brain/spaces/general/facts?limit=9999');
+  it('a large limit is ECHOED, not silently capped', async () => {
+    /*
+     * THIS CASE ASSERTED THE OPPOSITE UNTIL 5.0, and the inversion is a decision rather than a fix.
+     *
+     * The list route clamped to 500 and said nothing: a caller asking for 9999 got 500 back with
+     * `truncated` making it read as a correct short page. Owner, 2026-09-17: `cap should be a parameter
+     * and default to 200`. So `limit` is a DEFAULT with no maximum, and what bounds an answer says so —
+     * the byte budget hands back `nextSkip`, `maxTimeMS` bounds the duration, and a proxy space's merge
+     * ceiling is an explicit 400 naming the limit.
+     *
+     * The value coming back UNCHANGED is what a pager needs: a `limit` echoed smaller than the one sent
+     * is the silent clamp under another name.
+     */
+    const r = await readCollection(INSTANCES.a, token(), 'general', 'facts', { limit: 9999 });
     assert.equal(r.status, 200);
-    assert.ok(r.body.limit <= 500, `Expected limit â‰¤500 in response, got ${r.body.limit}`);
+    assert.equal(r.body.limit, 9999, 'the limit must be echoed as sent, not trimmed to a hidden ceiling');
   });
 });
 
@@ -691,9 +715,9 @@ describe('Brain — bulk memory wipe', () => {
     seqBefore = marker.body.seq;
 
     // Verify they exist
-    const list = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${WIPE_SPACE}/facts?limit=500`);
+    const list = await readCollection(INSTANCES.a, tokenA, WIPE_SPACE, 'facts', { limit: 500 });
     for (const id of seededIds) {
-      assert.ok(list.body.facts.some(m => m._id === id), `Seeded ${id} should exist`);
+      assert.ok(list.results.some(m => m._id === id), `Seeded ${id} should exist`);
     }
   });
 
@@ -718,10 +742,10 @@ describe('Brain — bulk memory wipe', () => {
   });
 
   it('Memories are gone after wipe', async () => {
-    const list = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${WIPE_SPACE}/facts?limit=500`);
+    const list = await readCollection(INSTANCES.a, tokenA, WIPE_SPACE, 'facts', { limit: 500 });
     assert.equal(list.status, 200);
     for (const id of seededIds) {
-      const found = list.body.facts.some(m => m._id === id);
+      const found = list.results.some(m => m._id === id);
       assert.ok(!found, `Wiped memory ${id} should be gone`);
     }
   });
@@ -811,20 +835,26 @@ describe('Brain -- chrono CRUD (/api/brain/spaces/:spaceId/chrono)', () => {
   });
 
   it('List chrono returns {chrono:[...]}', async () => {
-    const r = await get(INSTANCES.a, token(), '/api/brain/spaces/general/chrono');
+    const r = await readCollection(INSTANCES.a, token(), 'general', 'chrono');
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.ok(Array.isArray(r.body.chrono), 'chrono must be an array');
-    const found = r.body.chrono.find(c => c._id === chronoId);
+    assert.ok(Array.isArray(r.results), 'chrono must be an array');
+    const found = r.results.find(c => c._id === chronoId);
     assert.ok(found, 'created entry should appear in listing');
   });
 
   it('List chrono returns 404 for unknown space', async () => {
-    const r = await get(INSTANCES.a, token(), '/api/brain/spaces/no-such-space/chrono');
+    const r = await readCollection(INSTANCES.a, token(), 'no-such-space', 'chrono');
     assert.equal(r.status, 404);
   });
 
   it('List chrono returns 401 without auth', async () => {
-    const r = await fetch(`${INSTANCES.a}/api/brain/spaces/general/chrono`);
+    // Through `filter`, because the per-collection route is gone. What has to stay true is that a read
+    // with no credentials is refused before anything is read — not that one PATH refuses it.
+    const r = await fetch(`${INSTANCES.a}/api/brain/filter`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ space: 'general', collection: 'chrono' }),
+    });
     assert.equal(r.status, 401);
   });
 
@@ -1043,30 +1073,30 @@ describe('Brain -- chrono filter queries (/api/brain/spaces/:spaceId/chrono)', (
   });
 
   it('Filter by single tag (AND) returns only matching entries', async () => {
-    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono?tags=${encodeURIComponent(tagA)}`);
+    const r = await readCollection(INSTANCES.a, token(), 'general', 'chrono', { filter: { tags: { $all: [tagA] } } });
     assert.equal(r.status, 200);
-    assert.ok(Array.isArray(r.body.chrono), 'chrono must be an array');
-    const resultIds = r.body.chrono.map(c => c._id);
+    assert.ok(Array.isArray(r.results), 'chrono must be an array');
+    const resultIds = r.results.map(c => c._id);
     assert.ok(resultIds.includes(ids[0]), `Entry with tag ${tagA} should be in results`);
     assert.ok(resultIds.includes(ids[2]), `Entry with both tags should be in results`);
     assert.ok(!resultIds.includes(ids[1]), `Entry with only ${tagB} should NOT be in results`);
   });
 
   it('Filter by multiple tags (AND) returns only entries with all specified tags', async () => {
-    const qs = `tags=${encodeURIComponent(tagA)}&tags=${encodeURIComponent(tagB)}`;
-    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono?${qs}`);
+    const r = await readCollection(INSTANCES.a, token(), 'general', 'chrono',
+      { filter: { tags: { $all: [tagA, tagB] } } });
     assert.equal(r.status, 200);
-    const resultIds = r.body.chrono.map(c => c._id);
+    const resultIds = r.results.map(c => c._id);
     assert.ok(resultIds.includes(ids[2]), `Entry with both tags should be in results`);
     assert.ok(!resultIds.includes(ids[0]), `Entry with only ${tagA} should NOT appear for AND query`);
     assert.ok(!resultIds.includes(ids[1]), `Entry with only ${tagB} should NOT appear for AND query`);
   });
 
   it('tagsAny filter (OR) returns entries matching any of the tags', async () => {
-    const qs = `tagsAny=${encodeURIComponent(tagA)}&tagsAny=${encodeURIComponent(tagB)}`;
-    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono?${qs}`);
+    const r = await readCollection(INSTANCES.a, token(), 'general', 'chrono',
+      { filter: { tags: { $in: [tagA, tagB] } } });
     assert.equal(r.status, 200);
-    const resultIds = r.body.chrono.map(c => c._id);
+    const resultIds = r.results.map(c => c._id);
     assert.ok(resultIds.includes(ids[0]), `Entry with tag ${tagA} should be in results`);
     assert.ok(resultIds.includes(ids[1]), `Entry with tag ${tagB} should be in results`);
     assert.ok(resultIds.includes(ids[2]), `Entry with both tags should be in results`);
@@ -1074,47 +1104,51 @@ describe('Brain -- chrono filter queries (/api/brain/spaces/:spaceId/chrono)', (
   });
 
   it('Filter by non-existent tag returns empty array', async () => {
-    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono?tags=no-such-tag-${RUN}`);
+    const r = await readCollection(INSTANCES.a, token(), 'general', 'chrono',
+      { filter: { tags: { $all: [`no-such-tag-${RUN}`] } } });
     assert.equal(r.status, 200);
-    assert.deepStrictEqual(r.body.chrono, []);
+    assert.deepStrictEqual(r.results, []);
   });
 
   it('after filter returns only entries created after the timestamp', async () => {
-    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono?after=${encodeURIComponent(pastTime)}`);
+    const r = await readCollection(INSTANCES.a, token(), 'general', 'chrono',
+      { filter: { createdAt: { $gt: pastTime } } });
     assert.equal(r.status, 200);
-    assert.ok(Array.isArray(r.body.chrono), 'chrono must be an array');
+    assert.ok(Array.isArray(r.results), 'chrono must be an array');
     // Seeded entries were created after pastTime, so at least our seeded entries should appear
-    const resultIds = r.body.chrono.map(c => c._id);
+    const resultIds = r.results.map(c => c._id);
     assert.ok(resultIds.includes(ids[0]), 'Seeded entry should appear when after < createdAt');
   });
 
   it('before filter returns only entries created before the timestamp', async () => {
-    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono?before=${encodeURIComponent(futureTime)}`);
+    const r = await readCollection(INSTANCES.a, token(), 'general', 'chrono',
+      { filter: { createdAt: { $lt: futureTime } } });
     assert.equal(r.status, 200);
-    assert.ok(Array.isArray(r.body.chrono), 'chrono must be an array');
-    const resultIds = r.body.chrono.map(c => c._id);
+    assert.ok(Array.isArray(r.results), 'chrono must be an array');
+    const resultIds = r.results.map(c => c._id);
     assert.ok(resultIds.includes(ids[0]), 'Seeded entry should appear when before > createdAt');
   });
 
   it('after filter in the far future returns empty array', async () => {
     const farFuture = new Date(Date.now() + 86_400_000 * 365).toISOString();
-    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono?after=${encodeURIComponent(farFuture)}`);
+    const r = await readCollection(INSTANCES.a, token(), 'general', 'chrono',
+      { filter: { createdAt: { $gt: farFuture } } });
     assert.equal(r.status, 200);
-    assert.deepStrictEqual(r.body.chrono, []);
+    assert.deepStrictEqual(r.results, []);
   });
 
   it('search filter matches on title', async () => {
-    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono?search=${encodeURIComponent('TagA-' + RUN)}`);
+    const r = await readCollection(INSTANCES.a, token(), 'general', 'chrono', { search: `TagA-${RUN}` });
     assert.equal(r.status, 200);
-    const resultIds = r.body.chrono.map(c => c._id);
+    const resultIds = r.results.map(c => c._id);
     assert.ok(resultIds.includes(ids[0]), 'Entry with matching title should appear');
     assert.ok(!resultIds.includes(ids[1]), 'Entry with non-matching title should not appear');
   });
 
   it('search filter matches on description (case-insensitive)', async () => {
-    const r = await get(INSTANCES.a, token(), `/api/brain/spaces/general/chrono?search=FIND-THIS-SPECIAL`);
+    const r = await readCollection(INSTANCES.a, token(), 'general', 'chrono', { search: 'FIND-THIS-SPECIAL' });
     assert.equal(r.status, 200);
-    const resultIds = r.body.chrono.map(c => c._id);
+    const resultIds = r.results.map(c => c._id);
     assert.ok(resultIds.includes(ids[4]), 'Entry with matching description should appear');
   });
 });
@@ -1396,8 +1430,8 @@ describe('Brain — POST /api/brain/spaces/:spaceId/bulk', () => {
       entities: [{ name, type: 'concept' }],
     });
     // Retrieve the created entity's id
-    const listR = await get(INSTANCES.a, token(), `/api/brain/spaces/general/entities?name=${encodeURIComponent(name)}`);
-    const createdId = listR.body.entities.find(e => e.name === name)?._id;
+    const listR = await readCollection(INSTANCES.a, token(), 'general', 'entities', { filter: { name: encodeURIComponent(name) } });
+    const createdId = listR.results.find(e => e.name === name)?._id;
     assert.ok(createdId, 'entity must exist after first bulk call');
     const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/bulk', {
       entities: [{ id: createdId, name, type: 'concept', description: 'updated' }],
@@ -1422,10 +1456,12 @@ describe('Brain — POST /api/brain/spaces/:spaceId/bulk', () => {
     assert.equal(r.body.inserted.entities, 2, JSON.stringify(r.body));
 
     // Get the entity IDs
-    const listR = await get(INSTANCES.a, token(), `/api/brain/spaces/general/entities?name=${encodeURIComponent(`${entityName}-A`)}`);
-    const entA = listR.body.entities?.[0];
-    const listRB = await get(INSTANCES.a, token(), `/api/brain/spaces/general/entities?name=${encodeURIComponent(`${entityName}-B`)}`);
-    const entB = listRB.body.entities?.[0];
+    const listR = await readCollection(INSTANCES.a, token(), 'general', 'entities',
+      { filter: { name: `${entityName}-A` } });
+    const entA = listR.results?.[0];
+    const listRB = await readCollection(INSTANCES.a, token(), 'general', 'entities',
+      { filter: { name: `${entityName}-B` } });
+    const entB = listRB.results?.[0];
     assert.ok(entA, 'entity A should be found');
     assert.ok(entB, 'entity B should be found');
 
@@ -2429,7 +2465,7 @@ describe('Brain — read-only token blocked on REST write endpoints', () => {
   });
 
   it('GET /facts allowed with read-only token', async () => {
-    const r = await get(INSTANCES.a, readOnlyToken, '/api/brain/spaces/general/facts?limit=1');
+    const r = await readCollection(INSTANCES.a, readOnlyToken, 'general', 'facts', { limit: 1 });
     assert.equal(r.status, 200, `GET memories should be allowed, got ${r.status}`);
   });
 

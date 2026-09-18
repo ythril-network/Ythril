@@ -24,7 +24,8 @@ chunks do not exist yet when the call returns. This is true for the REST upload 
 | `POST /api/files/:spaceId` (document formats) | `202 Accepted` with `embeddingStatus: "pending"` — or `201` with `embeddingStatus: "skipped"` when document extraction is `off` for that space | poll the filemeta record |
 | MCP `write_file` | the write confirmation (sha256) — it reports the **write**, not the conversion | poll the filemeta record |
 
-Poll `GET /api/brain/spaces/:spaceId/files?path=<path>` and watch `embeddingStatus`: `pending` →
+Poll the file's metadata record — `POST /api/brain/filter` with
+`{"collection": "files", "path": "<path>", "limit": 1}` — and watch `embeddingStatus`: `pending` →
 `processing` → `complete` (`partial` means some chunks failed and are retry-eligible; `failed` means
 retries are exhausted). Once complete, the record carries `chunkCount` and (for binary formats)
 `convertedFileId`, and the chunk records are recall-searchable. To see the chunks themselves, pass
@@ -142,7 +143,8 @@ Or force the bypass (no conversion):
 
 #### Stored artefacts
 
-Three things are stored for each converted file (conversion artefacts are **hidden** from the file manager UI and the `GET /api/brain/spaces/:spaceId/files` listing by default):
+Three things are stored for each converted file. Conversion artefacts are **hidden** from the file manager
+UI; through the API they are ordinary records and you exclude them yourself — see below:
 
 1. **Original file** — bytes on disk, accessible via the usual download URL. Unchanged.
 2. **`_converted/<path>.md`** — full converted Markdown, stored in the space file store (binary formats only). The original file's filemeta record has a `convertedFileId` property pointing to it.
@@ -160,7 +162,10 @@ Chunk records and `_converted/` records share the same vector space as facts, en
 Chunk records and `_converted/` file records carry a `parentFileId` field. The following surfaces **exclude** them by default, so users only see top-level files:
 
 - **File manager UI** — shows only original, user-uploaded files.
-- **`GET /api/brain/spaces/:spaceId/files`** — omits records where `parentFileId` is set. Pass `?includeChunks=true` to include all records.
+- **`POST /api/brain/filter` with `collection: "files"`** — returns chunk records TOO. Exclude them with
+  `filter: { parentFileId: { "$exists": false } }`. The list route this replaced excluded them by default;
+  `filter` has no default, because a default is a decision about what somebody meant and this door takes
+  what they said. A listing without that predicate looks like the same file many times over.
 - **`GET /api/brain/spaces/:spaceId/stats`** — the `files` count reflects only top-level files.
 
 Recall results (`recall`, `similar`) **do** include chunk records by design. When a result has `parentFileId` set, the caller can follow it to retrieve the original file record.

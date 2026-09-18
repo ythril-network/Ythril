@@ -23,12 +23,27 @@ import { execSync } from 'node:child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, req, reqJson, get, del, post } from '../sync/helpers.js';
+import { INSTANCES, req, reqJson, get, del, post, readCollection } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE_A = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
 
 let tokenA;
+
+/**
+ * File metadata records, through `filter` — ONE helper for the whole file.
+ *
+ * There were two, in two `describe` blocks, and the second still called the `GET .../files` route that
+ * `B-9` step 3b deleted. Two copies of one question is how a conversion leaves half a file behind: the
+ * first was converted, the second was out of sight, and a third block calling the first one got a
+ * `ReferenceError` because a `const` inside a `describe` is not in scope for its neighbours.
+ *
+ * `path` stays an ARGUMENT rather than a predicate because the argument is the one that is normalised —
+ * the leading-slash case depends on exactly that, and a bare `filter: { path }` would answer an empty
+ * page for it.
+ */
+const listFileMeta = (args = {}, spaceId = 'general') =>
+  readCollection(INSTANCES.a, tokenA, spaceId, 'files', args);
 
 /** Helper: upload file as JSON body */
 async function uploadFile(token, spaceId, filePath, content) {
@@ -344,14 +359,6 @@ describe('File metadata (MongoDB)', () => {
     tokenA = fs.readFileSync(TOKEN_FILE_A, 'utf8').trim();
   });
 
-  /** Fetch file metadata records from the brain API */
-  async function listFileMeta(token, spaceId, queryParams = '') {
-    const url = `${INSTANCES.a}/api/brain/spaces/${spaceId}/files${queryParams}`;
-    const r = await fetch(url, {
-      headers: { 'Authorization': `Bearer ${token}` },
-    });
-    return { status: r.status, body: await r.json().catch(() => null) };
-  }
 
   /** Fetch brain stats for a space */
   async function getStats(token, spaceId) {
@@ -366,11 +373,11 @@ describe('File metadata (MongoDB)', () => {
     const filePath = `meta-test-${RUN}.txt`;
     await uploadFile(tokenA, 'general', filePath, 'metadata content');
 
-    const q = await listFileMeta(tokenA, 'general', `?path=${encodeURIComponent(filePath)}`);
+    const q = await listFileMeta({ path: filePath });
     assert.equal(q.status, 200, JSON.stringify(q.body));
-    assert.ok(Array.isArray(q.body?.files), 'response should contain files array');
-    assert.ok(q.body.files.length > 0, `Expected metadata record for ${filePath}`);
-    const doc = q.body.files[0];
+    assert.ok(Array.isArray(q.results), 'response should contain files array');
+    assert.ok(q.results.length > 0, `Expected metadata record for ${filePath}`);
+    const doc = q.results[0];
     assert.ok(doc.sizeBytes > 0, 'sizeBytes must be set');
     assert.ok(typeof doc.createdAt === 'string', 'createdAt must be set');
     assert.ok(typeof doc.updatedAt === 'string', 'updatedAt must be set');
@@ -392,10 +399,10 @@ describe('File metadata (MongoDB)', () => {
     });
     assert.ok([201, 202].includes(r.status), await r.text());
 
-    const q = await listFileMeta(tokenA, 'general', `?path=${encodeURIComponent(filePath)}`);
+    const q = await listFileMeta({ path: filePath });
     assert.equal(q.status, 200);
-    assert.ok(q.body.files.length > 0, 'Expected metadata record');
-    const doc = q.body.files[0];
+    assert.ok(q.results.length > 0, 'Expected metadata record');
+    const doc = q.results[0];
     assert.equal(doc.description, 'A tagged file', 'description must be stored');
     assert.ok(Array.isArray(doc.tags) && doc.tags.includes('api-meta-test'), 'tags must be stored');
   });
@@ -403,15 +410,15 @@ describe('File metadata (MongoDB)', () => {
   it('Re-uploading a file updates updatedAt and sizeBytes', async () => {
     const filePath = `meta-overwrite-${RUN}.txt`;
     await uploadFile(tokenA, 'general', filePath, 'v1');
-    const q1 = await listFileMeta(tokenA, 'general', `?path=${encodeURIComponent(filePath)}`);
-    const doc1 = q1.body.files[0];
+    const q1 = await listFileMeta({ path: filePath });
+    const doc1 = q1.results[0];
 
     // Small delay to ensure timestamp differs
     await new Promise(r => setTimeout(r, 50));
     await uploadFile(tokenA, 'general', filePath, 'version 2 content is longer');
 
-    const q2 = await listFileMeta(tokenA, 'general', `?path=${encodeURIComponent(filePath)}`);
-    const doc2 = q2.body.files[0];
+    const q2 = await listFileMeta({ path: filePath });
+    const doc2 = q2.results[0];
     assert.equal(doc2.createdAt, doc1.createdAt, 'createdAt must not change on overwrite');
     assert.ok(doc2.sizeBytes > doc1.sizeBytes || doc2.updatedAt >= doc1.updatedAt,
       'updatedAt or sizeBytes should reflect the overwrite');
@@ -420,8 +427,8 @@ describe('File metadata (MongoDB)', () => {
   it('DELETE removes the metadata record', async () => {
     const filePath = `meta-delete-${RUN}.txt`;
     await uploadFile(tokenA, 'general', filePath, 'going away');
-    const q1 = await listFileMeta(tokenA, 'general', `?path=${encodeURIComponent(filePath)}`);
-    assert.ok(q1.body.files.length > 0, 'Must have metadata before delete');
+    const q1 = await listFileMeta({ path: filePath });
+    assert.ok(q1.results.length > 0, 'Must have metadata before delete');
 
     const delUrl = `${INSTANCES.a}/api/files/general?path=${encodeURIComponent(filePath)}`;
     const dr = await fetch(delUrl, {
@@ -430,8 +437,8 @@ describe('File metadata (MongoDB)', () => {
     });
     assert.equal(dr.status, 204, 'Delete should return 204');
 
-    const q2 = await listFileMeta(tokenA, 'general', `?path=${encodeURIComponent(filePath)}`);
-    assert.equal(q2.body.files.length, 0, 'Metadata must be removed after file delete');
+    const q2 = await listFileMeta({ path: filePath });
+    assert.equal(q2.results.length, 0, 'Metadata must be removed after file delete');
   });
 
   it('PATCH (move) updates the metadata path', async () => {
@@ -447,12 +454,12 @@ describe('File metadata (MongoDB)', () => {
     });
     assert.equal(pr.status, 200, await pr.text());
 
-    const srcQ = await listFileMeta(tokenA, 'general', `?path=${encodeURIComponent(srcPath)}`);
-    assert.equal(srcQ.body.files.length, 0, 'Source metadata must be removed after move');
+    const srcQ = await listFileMeta({ path: srcPath });
+    assert.equal(srcQ.results.length, 0, 'Source metadata must be removed after move');
 
-    const dstQ = await listFileMeta(tokenA, 'general', `?path=${encodeURIComponent(dstPath)}`);
-    assert.ok(dstQ.body.files.length > 0, 'Destination metadata must exist after move');
-    assert.equal(dstQ.body.files[0].path, dstPath, 'path field must reflect new location');
+    const dstQ = await listFileMeta({ path: dstPath });
+    assert.ok(dstQ.results.length > 0, 'Destination metadata must exist after move');
+    assert.equal(dstQ.results[0].path, dstPath, 'path field must reflect new location');
   });
 
   it('GET /api/brain/spaces/:spaceId/files?tag= filters by tag', async () => {
@@ -464,9 +471,9 @@ describe('File metadata (MongoDB)', () => {
       body: JSON.stringify({ content: 'x', tags: [`unique-tag-${RUN}`] }),
     });
 
-    const q = await listFileMeta(tokenA, 'general', `?tag=${encodeURIComponent(`unique-tag-${RUN}`)}`);
+    const q = await listFileMeta({ tag: `unique-tag-${RUN}` });
     assert.equal(q.status, 200);
-    assert.ok(q.body.files.some(f => f.path === filePath), 'Should find file by unique tag');
+    assert.ok(q.results.some(f => f.path === filePath), 'Should find file by unique tag');
   });
 
   it('GET /api/brain/.../files?path= with leading slash normalises correctly', async () => {
@@ -474,10 +481,10 @@ describe('File metadata (MongoDB)', () => {
     await uploadFile(tokenA, 'general', filePath, 'norm');
 
     // Stored path has no leading slash; querying with leading slash must still match
-    const q = await listFileMeta(tokenA, 'general', `?path=${encodeURIComponent('/' + filePath)}`);
+    const q = await listFileMeta({ path: '/' + filePath });
     assert.equal(q.status, 200);
-    assert.ok(q.body.files.length > 0, 'Leading-slash query must find the metadata record');
-    assert.equal(q.body.files[0].path, filePath, 'Returned path must be the normalised (no-slash) form');
+    assert.ok(q.results.length > 0, 'Leading-slash query must find the metadata record');
+    assert.equal(q.results[0].path, filePath, 'Returned path must be the normalised (no-slash) form');
   });
 
   it('the metadata-only delete is GONE, and deleting the file takes both', async () => {
@@ -493,8 +500,8 @@ describe('File metadata (MongoDB)', () => {
     const filePath = `meta-braindelete-${RUN}.txt`;
     await uploadFile(tokenA, 'general', filePath, 'keep me on disk');
 
-    const q1 = await listFileMeta(tokenA, 'general', `?path=${encodeURIComponent(filePath)}`);
-    assert.ok(q1.body.files.length > 0, 'Must have metadata before the delete');
+    const q1 = await listFileMeta({ path: filePath });
+    assert.ok(q1.results.length > 0, 'Must have metadata before the delete');
 
     const delUrl = `${INSTANCES.a}/api/brain/spaces/general/files?path=${encodeURIComponent(filePath)}`;
     const dr = await fetch(delUrl, {
@@ -509,8 +516,8 @@ describe('File metadata (MongoDB)', () => {
     // 200 with a body, or 204 when there is nothing to say. Both mean deleted, and pinning one of them
     // would make this case fail on a change that is not about files at all.
     assert.ok([200, 204].includes(gone.status), `file delete failed: ${gone.status} ${await gone.text()}`);
-    const q2 = await listFileMeta(tokenA, 'general', `?path=${encodeURIComponent(filePath)}`);
-    assert.equal(q2.body.files.length, 0, 'the metadata must go with the file');
+    const q2 = await listFileMeta({ path: filePath });
+    assert.equal(q2.results.length, 0, 'the metadata must go with the file');
   });
 
   it('Brain stats endpoint includes files count', async () => {
@@ -678,12 +685,10 @@ describe('Chunked upload (Content-Range)', () => {
     assert.equal(final.status, 201, `Final chunk: ${JSON.stringify(final.body)}`);
 
     // Verify metadata record was created
-    const url = `${INSTANCES.a}/api/brain/spaces/general/files?path=${encodeURIComponent(filePath)}`;
-    const r = await fetch(url, { headers: { 'Authorization': `Bearer ${tokenA}` } });
-    assert.equal(r.status, 200, 'Metadata endpoint must respond 200');
-    const body = await r.json();
-    assert.ok(body.files.length > 0, `Expected metadata record for ${filePath}`);
-    assert.equal(body.files[0].sizeBytes, TOTAL_SIZE, 'sizeBytes must equal total assembled size');
+    const r = await listFileMeta({ path: filePath });
+    assert.equal(r.status, 200, 'the metadata read must respond 200');
+    assert.ok(r.results.length > 0, `Expected metadata record for ${filePath}`);
+    assert.equal(r.results[0].sizeBytes, TOTAL_SIZE, 'sizeBytes must equal total assembled size');
   });
 });
 
@@ -699,12 +704,6 @@ describe('File metadata (MongoDB) — directory operations', () => {
     return uploadFile(tokenA, 'general', filePath, content);
   }
 
-  /** Fetch file metadata records */
-  async function listFileMeta(queryParams = '') {
-    const url = `${INSTANCES.a}/api/brain/spaces/general/files${queryParams}`;
-    const r = await fetch(url, { headers: { 'Authorization': `Bearer ${tokenA}` } });
-    return { status: r.status, body: await r.json().catch(() => null) };
-  }
 
   it('Deleting a directory removes metadata for all files inside it', async () => {
     const dir = `meta-dir-del-${RUN}`;
@@ -714,7 +713,7 @@ describe('File metadata (MongoDB) — directory operations', () => {
 
     // All three should have metadata
     const before = await listFileMeta();
-    const inDir = before.body.files.filter(f => f.path.startsWith(`${dir}/`));
+    const inDir = before.results.filter(f => f.path.startsWith(`${dir}/`));
     assert.ok(inDir.length >= 3, `Expected ≥3 metadata records under ${dir}, got ${inDir.length}`);
 
     // Delete the directory
@@ -728,7 +727,7 @@ describe('File metadata (MongoDB) — directory operations', () => {
 
     // Metadata for all child files must be gone
     const after = await listFileMeta();
-    const remaining = after.body.files.filter(f => f.path.startsWith(`${dir}/`));
+    const remaining = after.results.filter(f => f.path.startsWith(`${dir}/`));
     assert.equal(remaining.length, 0, `Metadata must be removed for all files under ${dir}`);
   });
 
@@ -743,9 +742,11 @@ describe('File metadata (MongoDB) — directory operations', () => {
     await upload(`${dir}/note.txt`, 'some text body');
 
     // Sanity: records (including hidden chunk/subfile records) exist under the folder.
-    const before = await listFileMeta('?includeChunks=true&limit=200');
+    // `includeChunks=true` was the route's opt-IN; `filter` returns chunk records unless a predicate
+    // excludes them, so asking for every record is asking for no predicate at all.
+    const before = await listFileMeta({ limit: 200 });
     assert.ok(
-      before.body.files.some(f => f.path.startsWith(`${dir}/`)),
+      before.results.some(f => f.path.startsWith(`${dir}/`)),
       `Expected records under ${dir} before delete`,
     );
 
@@ -760,8 +761,8 @@ describe('File metadata (MongoDB) — directory operations', () => {
 
     // No record of ANY kind (file, chunk, or conversion artifact) may remain under the folder —
     // whether its own path or its parent's path is under the deleted directory.
-    const after = await listFileMeta('?includeChunks=true&limit=200');
-    const remaining = after.body.files.filter(f =>
+    const after = await listFileMeta({ limit: 200 });
+    const remaining = after.results.filter(f =>
       f.path.startsWith(`${dir}/`) || (f.parentFileId && f.parentFileId.startsWith(`${dir}/`)),
     );
     assert.equal(
@@ -788,12 +789,12 @@ describe('File metadata (MongoDB) — directory operations', () => {
 
     // Source paths should have no metadata
     const srcMeta = await listFileMeta();
-    const srcRemaining = srcMeta.body.files.filter(f => f.path.startsWith(`${srcDir}/`));
+    const srcRemaining = srcMeta.results.filter(f => f.path.startsWith(`${srcDir}/`));
     assert.equal(srcRemaining.length, 0, `Source metadata must be gone after directory move`);
 
     // Destination paths should have metadata
     const dstMeta = await listFileMeta();
-    const dstRecords = dstMeta.body.files.filter(f => f.path.startsWith(`${dstDir}/`));
+    const dstRecords = dstMeta.results.filter(f => f.path.startsWith(`${dstDir}/`));
     assert.ok(dstRecords.length >= 3, `Expected ≥3 metadata records under ${dstDir}, got ${dstRecords.length}`);
     assert.ok(dstRecords.every(f => f.path.startsWith(`${dstDir}/`)), 'All records must use new dir prefix');
 
@@ -932,11 +933,8 @@ describe('Media embedding — retry_embedding endpoint', () => {
 
     const filePath = `retry-effect-${RUN}.txt`;
     const docStatus = async () => {
-      const r = await fetch(`${INSTANCES.a}/api/brain/spaces/${spaceId}/files?limit=200`, {
-        headers: { 'Authorization': `Bearer ${tokenA}` },
-      });
-      const body = await r.json().catch(() => ({}));
-      const meta = body.files?.find(f => (f.path ?? f._id ?? '').includes(filePath));
+      const r = await readCollection(INSTANCES.a, tokenA, spaceId, 'files', { limit: 200 });
+      const meta = r.results?.find(f => (f.path ?? f._id ?? '').includes(filePath));
       return meta?.embeddingStatus;
     };
     const waitForStatus = async (predicate, timeoutMs) => {

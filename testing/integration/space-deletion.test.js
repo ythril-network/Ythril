@@ -19,7 +19,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, delWithBody, reqJson } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, delWithBody, reqJson, readCollection } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
@@ -74,9 +74,9 @@ describe('Space deletion — full cleanup', () => {
     assert.equal(edgeR.status, 201, `Edge write: ${JSON.stringify(edgeR.body)}`);
 
     // 5. Verify data exists before deletion
-    const preList = await get(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/facts`);
+    const preList = await readCollection(INSTANCES.a, token, spaceId, 'facts');
     assert.equal(preList.status, 200);
-    assert.ok(preList.body.facts?.length > 0, 'Should have at least one memory before deletion');
+    assert.ok(preList.results?.length > 0, 'Should have at least one memory before deletion');
 
     // 6. Delete the space
     const delR = await delWithBody(INSTANCES.a, token, `/api/spaces/${spaceId}`, { confirm: true });
@@ -91,10 +91,10 @@ describe('Space deletion — full cleanup', () => {
     );
 
     // 8. Brain endpoints should return 404 for the deleted space
-    const memCheck = await get(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/facts`);
+    const memCheck = await readCollection(INSTANCES.a, token, spaceId, 'facts');
     assert.equal(memCheck.status, 404, `Brain memories for deleted space should 404, got ${memCheck.status}`);
 
-    const entCheck = await get(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/entities`);
+    const entCheck = await readCollection(INSTANCES.a, token, spaceId, 'entities');
     assert.equal(entCheck.status, 404, `Brain entities for deleted space should 404, got ${entCheck.status}`);
   });
 
@@ -149,20 +149,20 @@ describe('Space deletion — full cleanup', () => {
     assert.equal(createR.status, 201, `Re-create: ${JSON.stringify(createR.body)}`);
 
     // Verify no orphaned data
-    const memR = await get(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/facts`);
+    const memR = await readCollection(INSTANCES.a, token, spaceId, 'facts');
     assert.equal(memR.status, 200);
     assert.equal(
-      memR.body.facts?.length ?? 0,
+      memR.results?.length ?? 0,
       0,
-      `Re-created space should have 0 memories, found ${memR.body.facts?.length}`,
+      `Re-created space should have 0 memories, found ${memR.results?.length}`,
     );
 
-    const entR = await get(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/entities`);
+    const entR = await readCollection(INSTANCES.a, token, spaceId, 'entities');
     assert.equal(entR.status, 200);
     assert.equal(
-      entR.body.entities?.length ?? 0,
+      entR.results?.length ?? 0,
       0,
-      `Re-created space should have 0 entities, found ${entR.body.entities?.length}`,
+      `Re-created space should have 0 entities, found ${entR.results?.length}`,
     );
 
     // Cleanup

@@ -26,7 +26,7 @@ import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, delWithBody } from '../sync/helpers.js';
+import { INSTANCES, post, get, delWithBody, readCollection } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CANDIDATE_CONFIGS = [
@@ -82,9 +82,9 @@ async function setEmbeddingAndReload(embedding) {
 
 /** Read the ORIGINAL document's embeddingStatus (chunk records carry `#chunk` ids). */
 async function docStatus() {
-  const r = await get(INSTANCES.a, token, `/api/brain/spaces/${SPACE_ID}/files?limit=200`);
+  const r = await readCollection(INSTANCES.a, token, SPACE_ID, 'files', { limit: 200 });
   if (r.status !== 200) return undefined;
-  const meta = r.body.files?.find(f => f._id === DOC_PATH || f.path === DOC_PATH);
+  const meta = r.results?.find(f => f._id === DOC_PATH || f.path === DOC_PATH);
   return meta?.embeddingStatus;
 }
 

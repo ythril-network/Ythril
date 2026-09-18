@@ -5,31 +5,23 @@
  */
 import { Router } from 'express';
 import { shapeError } from '../../brain/write-shape.js';
-import { escapeRegex } from '../../util/redos.js';
 import { reportServerFailure } from '../../util/report-failure.js';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { unknownFieldWarnings } from './unknown-fields.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
-import { listEntities, deleteEntity, upsertEntity, getEntityById, updateEntityById } from '../../brain/entities.js';
+import { deleteEntity, upsertEntity, getEntityById, updateEntityById } from '../../brain/entities.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { deleteEntityCascade, previewEntityCascade } from '../../brain/entity-delete-cascade.js';
 import { computeMergePlan, applyResolutions, executeMerge, validateResolution, type PropertyResolution } from '../../brain/merge.js';
 import { validateDeleteFields, applyDeleteFields as applyDeleteFieldsPaths } from '../../brain/delete-fields.js';
 import { primitivePropertyError } from '../../brain/property-values.js';
 import { getConfig } from '../../config/loader.js';
-import { parseLimit, parseSkip, unsupportedPageParam } from '../../util/pagination.js';
-import { pageAcrossMembers } from '../../spaces/page-across-members.js';
-import { countBrain, compareBySort, PROXY_PAGE_CEILING } from '../../brain/query.js';
-import { parseSortParam, SORTABLE_FIELDS, toMongoSort } from '../../brain/list-sort.js';
 import { resolveMemberSpaces, resolveWriteTarget, isProxySpace, isStrictLinkage } from '../../spaces/proxy.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
 import { UUID_V4_RE, webhookToken, getSpaceMeta, ttlDaysFromBody, ttlDaysError, dupeCheckOptsFromBody, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
 import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
-import { conveniencePredicate, conveniencesFrom } from '../../brain/list-conveniences.js';
 import { mergePropertiesOrKeep, mergeTagsOrKeep } from '../../brain/merge-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
-import { withoutListDiagnostics } from '../../brain/read-projection.js';
-import { listDiagnosticsAsked } from './_shared.js';
 import { connectionInputError, applyConnections, CONNECTION_BODY_KEYS } from '../../brain/write-connections.js';
 
 export const entitiesRouter = Router();
@@ -182,49 +174,6 @@ entitiesRouter.post('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAu
     reportServerFailure('brain POST /spaces/:spaceId/entities', err);
     res.status(500).json({ error: 'Internal server error' });
   }
-});
-
-
-// GET /api/brain/spaces/:spaceId/entities
-entitiesRouter.get('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAuth, async (req, res) => {
-  const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
-  const limit = parseLimit(req.query['limit'], 50, 500);
-  // A pagination name we do not have is a 400 naming the one we do — the fleet integrator paged with `offset`, which was accepted
-  // and ignored, and summed 67 identical pages into a count 67x the truth.
-  const badParam = unsupportedPageParam(req.query as Record<string, unknown>);
-  if (badParam) { res.status(400).json(badParam); return; }
-  const skip = parseSkip(req.query['skip']);
-  const sortParse = parseSortParam(req.query['sort'], req.query['dir'], SORTABLE_FIELDS.entities);
-  if ('error' in sortParse) {
-    res.status(400).json({ error: sortParse.error });
-    return;
-  }
-  /*
-   * `name` is the one filter only an entity has — an EXACT match, unlike `search`, which spans name and
-   * description as a substring. Everything else goes through `conveniencePredicate`, the module `filter`
-   * also calls, so the two doors cannot come to mean different things by `tag`.
-   */
-  const base: Record<string, unknown> = {};
-  if (typeof req.query['name'] === 'string') base['name'] = req.query['name'];
-  const merged = conveniencePredicate('entities', conveniencesFrom(req.query as Record<string, unknown>), base);
-  if ('error' in merged) { res.status(400).json({ error: merged.error }); return; }
-  const filter = merged.predicate;
-  const members = memberSpacesForRequest(req, spaceId);
-  const page = await pageAcrossMembers<Record<string, unknown>>({
-    members, limit, skip, ceiling: PROXY_PAGE_CEILING,
-    compare: compareBySort(sortParse.sort ? toMongoSort(sortParse.sort) : { createdAt: -1, _id: -1 }),
-    readMember: async (mid, lim, sk) => await listEntities(mid, filter, lim, sk, sortParse.sort) as unknown as Record<string, unknown>[],
-  });
-  if (!page.ok) { res.status(400).json({ error: page.error }); return; }
-  let total = 0;
-  for (const mid of members) total += await countBrain(mid, 'entities', filter);
-  res.json({ entities: withoutListDiagnostics(page.rows, listDiagnosticsAsked(req)),
-    limit, skip, total, truncated: skip + page.rows.length < total });
 });
 
 

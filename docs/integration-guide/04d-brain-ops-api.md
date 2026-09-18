@@ -703,29 +703,30 @@ being accepted.
 
 ---
 
-### List File Metadata Records
+### List file metadata records
+
+There is no `GET .../files`, and there has not been since 5.0 — file metadata is a collection like any
+other, so it is read the same way:
 
 ```http
-GET /api/brain/spaces/:spaceId/files?limit=50&skip=0&tag=design&path=docs/architecture.md
+POST /api/brain/filter
+Content-Type: application/json
+
+{ "space": "work", "collection": "files", "limit": 50, "tag": "design" }
 ```
 
-Returns metadata rows stored in the brain collection for files (`path`, tags, description, properties, size, author, timestamps).
+Rows carry what the collection stores — `path`, tags, description, properties, size, author, timestamps —
+plus the embedding job's step progress for any file still in flight, joined per member space so a UI can
+draw which stage is running instead of a spinner that never resolves.
 
-| Query param | Description |
-|-------------|-------------|
-| `limit` | Default `50`, max `200` |
-| `skip` | Offset for pagination |
-| `tag` | Tag filter — case-insensitive **substring** match. For an exact set use `tags` (AND) or `tagsAny` (OR), which are unchanged |
-| `path` | Exact path filter |
-| `sort` | Sort field: `createdAt`, `updatedAt`, or `path` (see [Sorting](04-brain-api.md#sorting-all-brain-list-endpoints)). Unknown field → `400` |
-| `dir` | `asc` or `desc` (default `desc`) |
+Two of the route's query parameters are worth naming, because neither is a plain predicate:
 
-**Response** `200`:
+| the route | `filter` |
+|---|---|
+| `?path=` (exact, spelling-tolerant) | `path`, an ARGUMENT — see its row in the body table above. A bare `filter: { path }` is an exact equality and will miss a path spelled with the other separator |
+| `?includeChunks=true` | there is no default here: `filter` returns CHUNK records too unless you exclude them with `filter: { parentFileId: { "$exists": false } }` |
 
-```json
-{
-  "files": [ ... ],
-  "limit": 50,
-  "skip": 0
-}
-```
+**That second row is the one to read before porting a caller.** The route hid chunk records by default and
+`filter` does not, because a default is a decision about what somebody meant and this door takes what they
+said. A file converted to Markdown has one top-level record and one per chunk, so a listing that does not
+exclude them looks like the same file many times over.

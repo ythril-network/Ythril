@@ -18,28 +18,24 @@ import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { listFacts, deleteFact, saveFact, updateFact } from '../../brain/fact.js';
 import { validateDeleteFields, applyDeleteFields as applyDeleteFieldsPaths } from '../../brain/delete-fields.js';
 import { getConfig } from '../../config/loader.js';
-import { parseLimit, parseSkip, unsupportedPageParam } from '../../util/pagination.js';
-import { pageAcrossMembers } from '../../spaces/page-across-members.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
-import { countBrain, compareBySort, PROXY_PAGE_CEILING } from '../../brain/query.js';
-import { parseSortParam, SORTABLE_FIELDS, toMongoSort } from '../../brain/list-sort.js';
 import { checkQuota, QuotaError } from '../../quota/quota.js';
-import {
-  resolveMemberSpaces,
-  resolveWriteTarget,
-  isProxySpace,
-  isStrictLinkage,
-  collectAcrossMembers,
-} from '../../spaces/proxy.js';
+import { resolveMemberSpaces, resolveWriteTarget, isStrictLinkage } from '../../spaces/proxy.js';
 import { validateFact } from '../../spaces/schema-validation.js';
-import { UUID_V4_RE, webhookToken, getSpaceMeta, applyValidation, buildFactFilter, ttlDaysFromBody, ttlDaysError, dupeCheckOptsFromBody, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
+import {
+  UUID_V4_RE,
+  webhookToken,
+  getSpaceMeta,
+  applyValidation,
+  ttlDaysFromBody,
+  ttlDaysError,
+  dupeCheckOptsFromBody,
+  ifMatchFromRequest,
+  preconditionFailedBody,
+} from './_shared.js';
 import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
-import { resolveEntityIdsByName } from '../../brain/entities.js';
-import { attachedToEntityNamed } from '../../brain/entity-name-scope.js';
 import { mergePropertiesOrKeep } from '../../brain/merge-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
-import { withoutListDiagnostics } from '../../brain/read-projection.js';
-import { listDiagnosticsAsked } from './_shared.js';
 
 export const memoriesRouter = Router();
 
@@ -195,66 +191,6 @@ memoriesRouter.post('/spaces/:spaceId/facts', globalRateLimit, requireSpaceAuth,
   const warnings = [...validation.warnings, ...unknownFieldWarnings(req.body, FACTS_CREATE_BODY_KEYS)];
   if (warnings.length > 0) body['warnings'] = warnings;
   res.status(201).json(body);
-});
-
-
-// GET /api/brain/spaces/:spaceId/facts
-memoriesRouter.get('/spaces/:spaceId/facts', globalRateLimit, requireSpaceAuth, async (req, res) => {
-  const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
-  // A pagination name we do not have is a 400 naming the one we do. The fleet integrator paged this endpoint with `offset`, which was
-  // accepted and ignored, and summed 67 identical pages into a count 67x the truth.
-  const badParam = unsupportedPageParam(req.query as Record<string, unknown>);
-  if (badParam) { res.status(400).json(badParam); return; }
-
-  const limit = parseLimit(req.query['limit'], 100, 500);
-  const skip = parseSkip(req.query['skip']);
-  const sortParse = parseSortParam(req.query['sort'], req.query['dir'], SORTABLE_FIELDS.facts);
-  if ('error' in sortParse) {
-    res.status(400).json({ error: sortParse.error });
-    return;
-  }
-  const filter = buildFactFilter(req.query as Record<string, unknown>);
-  // The Entities column shows entity NAMES; records store ids. Resolved per member for the same reason
-  // as edges: an id belongs to the member that owns it. An empty resolution filters to nothing, which is
-  // correct — "no entity by that name" must not fall back to showing everything.
-  const entityName = typeof req.query['entityName'] === 'string' ? req.query['entityName'] : undefined;
-  // Paged through the shared helper, so a proxy space's page is the page of the MERGED set rather than `skip` rows
-  // dropped from each member. Same function `/query` and the embed-job listing use.
-  const members = memberSpacesForRequest(req, spaceId);
-  const filterFor = async (mid: string): Promise<Record<string, unknown>> => {
-    const perMember: Record<string, unknown> = { ...filter };
-    // BOTH shapes, through the shared predicate. Reading the array alone missed every record written
-    // with `linkEntities` — the form the guide leads with — and answered with an empty list, which
-    // reads as "there are none" rather than "this filter cannot see them".
-    if (entityName) Object.assign(perMember, await attachedToEntityNamed(mid, 'fact', entityName));
-    return perMember;
-  };
-  const page = await pageAcrossMembers<Record<string, unknown>>({
-    members, limit, skip, ceiling: PROXY_PAGE_CEILING,
-    // The comparator is built FROM the sort handed to MongoDB, so a proxy merge cannot order by a different rule.
-    compare: compareBySort(sortParse.sort ? toMongoSort(sortParse.sort) : { createdAt: -1, _id: -1 }),
-    readMember: async (mid, lim, sk) =>
-      await listFacts(mid, await filterFor(mid), lim, sk, sortParse.sort) as Record<string, unknown>[],
-  });
-  if (!page.ok) { res.status(400).json({ error: page.error }); return; }
-
-  // `total` is the whole match, and it is the ONE thing the fleet integrator said they would take if we only did one: a caller
-  // compares what it summed against what the server counted and stops. Without it, 67 identical pages summed to a
-  // plausible number with nothing in any response contradicting it.
-  let total = 0;
-  for (const mid of members) total += await countBrain(mid, 'facts', await filterFor(mid));
-
-  res.json({
-    facts: withoutListDiagnostics(page.rows, listDiagnosticsAsked(req)), limit, skip, total,
-    // Explicit rather than left to be derived from `total`: their third ask, and a caller that knows it received a
-    // partial page does not need to work out whether it did.
-    truncated: skip + page.rows.length < total,
-  });
 });
 
 

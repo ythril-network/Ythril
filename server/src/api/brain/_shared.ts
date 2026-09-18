@@ -212,28 +212,3 @@ export function preconditionFailedBody(record: string, currentSeq?: number): Rec
   };
 }
 
-/**
- * Did this list request ask for the withheld record diagnostics?
- *
- * `?includeDiagnostics=true` restores `matchedText` and `embeddingModel`; anything else, including absence,
- * withholds them. `seq` is never withheld — see `LIST_WITHHELD_FIELDS` for why.
- *
- * ## Why the same spelling as the recall parameter, and why it is not the same list
- *
- * A caller who learned `includeDiagnostics` on `recall` must not have to learn a second name for the same
- * intent, so the NAME is shared deliberately. What it restores differs by one field, because `seq` is the
- * `If-Match` value on a list route and withholding it would take away conditional writes. That difference is
- * a decision the canary operator asked for by name, not drift.
- *
- * ## Why absence and a bad value behave the same, unlike the body flags on recall
- *
- * The recall route 400s on a non-boolean `includeDiagnostics`, and that is right for a JSON body where a
- * caller wrote `"true"` and meant `true`. A QUERY STRING has no booleans at all — every value arrives as
- * text — so there is no type error to report, and refusing `?includeDiagnostics=1` would fail a request whose
- * intent is unmistakable while `?includeDiagnostics=yes` is a guess either way. The safe reading of anything
- * that is not the literal `true` is the DEFAULT, which withholds: a caller who wanted the fields and typoed
- * the value gets a smaller response and can see it, rather than a 400 on a read they can already make.
- */
-export function listDiagnosticsAsked(req: express.Request): boolean {
-  return req.query['includeDiagnostics'] === 'true';
-}

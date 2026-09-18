@@ -19,7 +19,7 @@ import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, patch, reqJson } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, patch, reqJson, readCollection } from '../sync/helpers.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -153,11 +153,11 @@ describe('Token lifecycle', () => {
     const scopedToken = create.body.plaintext;
 
     // Should be rejected on general space
-    const wrongSpace = await get(INSTANCES.a, scopedToken, '/api/brain/spaces/general/facts');
+    const wrongSpace = await readCollection(INSTANCES.a, scopedToken, 'general', 'facts');
     assert.equal(wrongSpace.status, 403, 'Scoped token should be rejected on wrong space');
 
     // Should work on the scoped space
-    const rightSpace = await get(INSTANCES.a, scopedToken, `/api/brain/spaces/${spaceId}/facts`);
+    const rightSpace = await readCollection(INSTANCES.a, scopedToken, spaceId, 'facts');
     assert.equal(rightSpace.status, 200, 'Scoped token should work on its own space');
 
     // Clean up

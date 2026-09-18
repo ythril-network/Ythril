@@ -25,16 +25,11 @@ import { fileExists, readFile } from '../../files/files.js';
 import { log } from '../../util/log.js';
 import { getConfig } from '../../config/loader.js';
 import { col, asFilter } from '../../db/mongo.js';
-import { parseLimit, parseSkip, unsupportedPageParam } from '../../util/pagination.js';
-import { pageAcrossMembers } from '../../spaces/page-across-members.js';
-import { countBrain, compareBySort, PROXY_PAGE_CEILING } from '../../brain/query.js';
-import { parseSortParam, toMongoSort, SORTABLE_FIELDS } from '../../brain/list-sort.js';
-import { conveniencePredicate, conveniencesFrom } from '../../brain/list-conveniences.js';
+import { parseLimit, parseSkip } from '../../util/pagination.js';
 import { resolveMemberSpaces, resolveWriteTarget, findFirstAcrossMembers, collectAcrossMembers, isStrictLinkage } from '../../spaces/proxy.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import { getMediaJobCounts, FAILED_SAMPLE_LIMIT, FAILED_REASON_LIMIT, type MediaJobCounts } from '../../files/media/job-queue.js';
-import { attachJobProgress } from '../../files/file-job-progress.js';
 import { reachesSpace } from '../../auth/space-reach.js';
 import { canWriteAnywhere } from '../../auth/write-anywhere.js';
 import type { TokenRights } from '../../config/rights-shape.js';
@@ -55,63 +50,6 @@ const rightsOf = (t: unknown): TokenRights | undefined =>
 export const fileMetaRouter = Router();
 
 
-
-// GET /api/brain/spaces/:spaceId/files — list file metadata records
-fileMetaRouter.get('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth, async (req, res) => {
-  const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
-  const limit = parseLimit(req.query['limit'], 50, 200);
-  const badParam = unsupportedPageParam(req.query as Record<string, unknown>);
-  if (badParam) { res.status(400).json(badParam); return; }
-  const skip = parseSkip(req.query['skip']);
-  const sortParse = parseSortParam(req.query['sort'], req.query['dir'], SORTABLE_FIELDS.files);
-  if ('error' in sortParse) {
-    res.status(400).json({ error: sortParse.error });
-    return;
-  }
-  const mongoSort = sortParse.sort ? toMongoSort(sortParse.sort) : { updatedAt: -1 as const };
-  // By default exclude chunk records (parentFileId set) so the file manager only shows
-  // top-level files. Pass ?includeChunks=true to see all records (e.g. for debugging).
-  const includeChunks = req.query['includeChunks'] === 'true';
-  /*
-   * `parentFileId` and `path` are this collection's own: the chunk filter, and an EXACT path, distinct
-   * from the `search` convenience which spans path and description as a substring. The rest goes through
-   * `conveniencePredicate`, the module the `filter` tool also calls.
-   */
-  const base: Record<string, unknown> = {};
-  if (!includeChunks) base['parentFileId'] = { $exists: false };
-  if (typeof req.query['path'] === 'string') base['path'] = toDocId(req.query['path']);
-  const merged = conveniencePredicate('files', conveniencesFrom(req.query as Record<string, unknown>), base);
-  if ('error' in merged) { res.status(400).json({ error: merged.error }); return; }
-  const filter = merged.predicate;
-  const members = memberSpacesForRequest(req, spaceId);
-  const page = await pageAcrossMembers<Record<string, unknown>>({
-    members, limit, skip, ceiling: PROXY_PAGE_CEILING,
-    compare: compareBySort(sortParse.sort ? toMongoSort(sortParse.sort) : { createdAt: -1, _id: -1 }),
-    readMember: async (mid, lim, sk) => {
-      const rows = await col(spaceCollection(mid, 'files'))
-        .find(asFilter(filter))
-        .sort(mongoSort)
-        .skip(sk)
-        .limit(lim)
-        .toArray();
-      // Attach step progress for files still in flight, so the UI can draw which stage is running
-      // instead of a spinner that never resolves. Joined per MEMBER: on a proxy space the ids belong
-      // to that member's job collection, and looking them up in another's would silently find nothing.
-      return attachJobProgress(mid, rows as Array<Record<string, unknown>>);
-    },
-  });
-  if (!page.ok) { res.status(400).json({ error: page.error }); return; }
-
-  let total = 0;
-  for (const mid of members) total += await countBrain(mid, 'files', filter);
-
-  res.json({ files: page.rows, limit, skip, total, truncated: skip + page.rows.length < total });
-});
 
 /**
  * GET /api/brain/spaces/:spaceId/files/extract?path=… — what retrieval actually sees for one file.

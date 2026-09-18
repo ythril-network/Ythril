@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, delWithBody, patch, put } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, delWithBody, patch, put, readCollection } from '../sync/helpers.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -149,15 +149,15 @@ describe('Space management', () => {
     const memId = writeR.body._id ?? writeR.body.id;
 
     // Should NOT appear in general space
-    const generalR = await get(INSTANCES.a, tokenA, '/api/brain/spaces/general/facts');
+    const generalR = await readCollection(INSTANCES.a, tokenA, 'general', 'facts');
     assert.equal(generalR.status, 200);
-    const found = generalR.body.facts?.some(m => m._id === memId);
+    const found = generalR.results?.some(m => m._id === memId);
     assert.ok(!found, `Memory from ${isolationSpace} must not appear in general space`);
 
     // Should appear in the isolation space
-    const ownSpaceR = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${isolationSpace}/facts`);
+    const ownSpaceR = await readCollection(INSTANCES.a, tokenA, isolationSpace, 'facts');
     assert.equal(ownSpaceR.status, 200);
-    const ownFound = ownSpaceR.body.facts?.some(m => m._id === memId);
+    const ownFound = ownSpaceR.results?.some(m => m._id === memId);
     assert.ok(ownFound, 'Memory should be visible in its own space');
   });
 

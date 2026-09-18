@@ -34,6 +34,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { trackedSources } from './_sources.mjs';
+import { FILTER_DOORS } from '../_shared/search-doors.mjs';
 
 const { ALL_TOOLS } = await import('../../server/dist/mcp/tools/index.js');
 const { CONVENIENCE_KEYS, conveniencePredicate, convenienceFieldsFor } =
@@ -182,9 +183,25 @@ describe('nobody assembles the conveniences a second time', () => {
         'server/src/brain/text-search.ts',
       ],
     });
+    /*
+     * THE FLOOR IS DERIVED, because the number it used to be was a copy of a fact the code already held.
+     *
+     * It read `>= 5` — "the five list assemblies and both doors" — and `B-9` step 3b deleted the five
+     * list assemblies. The gate went red for the deletion SUCCEEDING, which is the same failure its own
+     * comment above describes one paragraph up. A count in a gate is a second copy with its own expiry.
+     *
+     * What cannot rot: both doors of `filter` reach the module, and they reach it through
+     * `resolvePredicate`. Assert the CHAIN and the two doors, and a sixth caller or a fifth deletion
+     * changes nothing here.
+     */
     const callers = sources.filter(f => src(f).includes('conveniencePredicate('));
-    assert.ok(callers.length >= 5,
-      `only ${callers.length} site(s) call the module — the five list assemblies and both doors should`);
+    assert.ok(callers.length > 0, 'nothing calls the module at all — every case here is vacuous');
+    assert.ok(src('server/src/brain/list-decorations.ts').includes('conveniencePredicate('),
+      '`resolvePredicate` must be what reaches the conveniences, or the doors each reach them their own way');
+    for (const door of FILTER_DOORS) {
+      assert.match(src(door), /resolvePredicate\(/,
+        `${door} resolves its predicate itself instead of through the one function both doors share`);
+    }
     const offenders = sources.filter(f => PRIMITIVES.filter(p => src(f).includes(p)).length >= 2);
     assert.deepEqual(offenders, [],
       'these assemble the list conveniences themselves instead of calling the one module, so the browser '

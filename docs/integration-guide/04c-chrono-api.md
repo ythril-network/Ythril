@@ -139,45 +139,48 @@ PATCH /api/brain/spaces/:spaceId/chrono/:id
 
 ---
 
-### List Chrono Entries
+### List chrono entries
+
+There is no `GET .../chrono`, and there has not been since 5.0 — listing a collection is one shape for all
+of them:
 
 ```http
-GET /api/brain/spaces/:spaceId/chrono?limit=50&skip=0
+POST /api/brain/filter
+Content-Type: application/json
+
+{ "space": "work", "collection": "chrono", "limit": 50, "deriveStatus": true }
 ```
 
-#### Query parameters
+The answer is `{ results, count, total, limit, skip, truncated }` — `results` where the route said `chrono`.
+`limit` defaults to 200 and has no maximum; the route's 50/500 are gone.
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `after` | ISO 8601 string | Return entries with `createdAt` > this timestamp |
-| `before` | ISO 8601 string | Return entries with `createdAt` < this timestamp |
-| `tags` | comma-separated strings | Return entries where `tags` contains **ALL** listed values (AND semantics) |
-| `tagsAny` | comma-separated strings | Return entries where `tags` contains **ANY** listed value (OR semantics) |
-| `search` | string | Case-insensitive substring match on `title` and `description` |
-| `status` | string | Filter by status (`upcoming`, `active`, `completed`, `overdue`, `cancelled`). `overdue` is derived on read (past due + not completed/cancelled); filtering by `upcoming`/`active` excludes now-overdue entries |
-| `type` | string | Filter by type (the five built-ins, or the space's own declared chrono types — see above) |
-| `limit` | number | Max entries to return (default 50, max 500) |
-| `skip` | number | Pagination offset (default 0) |
-| `sort` | string | Sort field: `createdAt`, `title`, `startsAt`, or `type` (see [Sorting](04-brain-api.md#sorting-all-brain-list-endpoints)). Unknown field → `400` |
-| `dir` | string | `asc` or `desc` (default `desc`) |
+#### `deriveStatus` is the one you cannot skip
 
-#### Example queries
+**A chrono status means two things and you have to say which.** An entry past its due moment reads `overdue`
+whatever it was stored as, unless its type's `whenDuePasses` says a passed date means nothing. The deleted
+route derived it unconditionally; `filter` returns the STORED value by default, because a predicate has to
+be able to match what is on disk — which is what you want when repairing data, and not what you want when
+showing somebody their open items.
 
-```http
-GET /api/brain/spaces/:id/chrono?after=2026-04-04T00:00:00Z
-GET /api/brain/spaces/:id/chrono?after=2026-01-01T00:00:00Z&before=2026-04-01T00:00:00Z&tags=incident
-GET /api/brain/spaces/:id/chrono?tagsAny=deploy,auth-service
-GET /api/brain/spaces/:id/chrono?search=migration
-```
+`deriveStatus: true` gives you what the route gave you, for the rows AND for a `status` you filter on. It is
+refused on any other collection rather than ignored.
 
-**Response** `200`:
+#### The route's own filters, as predicates
+
+`tag`, `type`, `description`, `properties` and `search` are arguments `filter` takes by name — documented
+once, with what each refuses, in [the filter body](04d-brain-ops-api.md). The four that were chrono's own
+are predicates now, because each is an exact set or range rather than a rule that could drift:
+
+| the route | `filter` |
+|---|---|
+| `?tags=a,b` (ALL) | `filter: { tags: { "$all": ["a", "b"] } }` |
+| `?tagsAny=a,b` (ANY) | `filter: { tags: { "$in": ["a", "b"] } }` |
+| `?after=…&before=…` | `filter: { createdAt: { "$gt": "…", "$lt": "…" } }` |
+| `?status=active` | `filter: { status: "active" }`, with `deriveStatus` deciding which status that means |
 
 ```json
-{
-  "chrono": [ ... ],
-  "limit": 50,
-  "skip": 0
-}
+{ "space": "work", "collection": "chrono", "deriveStatus": true,
+  "filter": { "tags": { "$all": ["incident"] }, "createdAt": { "$gt": "2026-01-01T00:00:00Z" } } }
 ```
 
 ---

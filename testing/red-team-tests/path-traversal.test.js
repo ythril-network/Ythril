@@ -22,7 +22,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES } from '../sync/helpers.js';
+import { INSTANCES, readCollection } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
@@ -224,11 +224,10 @@ describe('File metadata — injection and oversized field rejection', () => {
     return { status: r.status, body: await r.json().catch(() => null) };
   }
 
-  async function queryByTag(tag) {
-    const url = `${INSTANCES.a}/api/brain/spaces/general/files?tag=${encodeURIComponent(tag)}`;
-    const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-    return { status: r.status, body: await r.json().catch(() => null) };
-  }
+  // Through `filter` since the per-collection list route went (`B-9` step 3b). The subject is unchanged
+  // and is the reason the tag goes in as a STRING: an operator-shaped tag must be compared literally,
+  // whichever door carries it.
+  const queryByTag = (tag) => readCollection(INSTANCES.a, token, 'general', 'files', { tag });
 
   it('MongoDB operator in tags array is stored as literal, not evaluated', async () => {
     // An attacker supplies { "$gt": "" } as a tag string — must be stored
@@ -257,12 +256,10 @@ describe('File metadata — injection and oversized field rejection', () => {
 
     if (r.status === 201 || r.status === 202) {
       // Verify description is stored verbatim
-      const url = `${INSTANCES.a}/api/brain/spaces/general/files?path=${encodeURIComponent(filePath)}`;
-      const q = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-      const qb = await q.json().catch(() => null);
-      assert.equal(q.status, 200, `Meta query must succeed: ${JSON.stringify(qb)}`);
-      if (qb?.files?.length) {
-        assert.equal(qb.files[0].description, injectedDesc,
+      const q = await readCollection(INSTANCES.a, token, 'general', 'files', { path: filePath, limit: 1 });
+      assert.equal(q.status, 200, `Meta query must succeed: ${JSON.stringify(q.body)}`);
+      if (q.results.length) {
+        assert.equal(q.results[0].description, injectedDesc,
           'description must be stored as a literal string, not evaluated');
       }
     }
@@ -282,7 +279,7 @@ describe('File metadata — injection and oversized field rejection', () => {
     if (q.status === 200) {
       // The result must NOT contain all files — operator injection must be inert.
       // It should return zero results (no file has that literal string as a tag).
-      const leaked = (q.body?.files ?? []).filter(f => f.path !== filePath);
+      const leaked = (q.results ?? []).filter(f => f.path !== filePath);
       assert.equal(leaked.length, 0,
         `Operator injection in tag query must not leak other records; got ${leaked.length} results`);
     }

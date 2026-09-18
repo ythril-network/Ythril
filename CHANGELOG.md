@@ -580,6 +580,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **The five collection LIST routes are gone. Reading a collection is `filter`.** `B-9` step 3b, and a
+  break: `GET /api/brain/spaces/:spaceId/{facts,entities,edges,chrono,files}` each answered what a
+  predicate over one collection answers, with their own query grammar, their own page caps and their own
+  response key.
+
+  ```json
+  POST /api/brain/filter
+  { "space": "work", "collection": "facts", "limit": 100, "tag": "release" }
+  ```
+
+  | | the routes | `filter` |
+  |---|---|---|
+  | the rows | `{ facts }`, `{ entities }`, `{ edges }`, `{ chrono }`, `{ files }` | `{ results }`, whichever collection |
+  | the page | default 50 or 100, hard max 200 or 500, and the five did not agree | `limit`, default 200, no maximum |
+  | a fact by entity id | `?entity=<id>` | `filter: { entityIds: "<id>" }` |
+  | an entity by exact name | `?name=` | `filter: { name: ... }` |
+  | chrono tag sets and date ranges | `?tags=`, `?tagsAny=`, `?after=`, `?before=` | `$all`, `$in` and a `createdAt` range |
+  | a file by path | `?path=` | `path`, an argument, normalised the same way |
+
+  **THREE THINGS THE ROUTES DID THAT A CALLER NOW HAS TO ASK FOR**, and each is silent if you miss it:
+
+  - **a chrono `status` derived on read** — send `deriveStatus: true`, or `active` means what is stored
+    rather than what is true. The route always derived; `filter` defaults to the stored value because a
+    predicate has to be able to match what is on disk.
+  - **chunk records hidden from a file listing** — the route excluded them by default, `filter` does not.
+    Send `filter: { parentFileId: { "$exists": false } }` or a converted document looks like the same
+    file many times over.
+  - **an unsupported paging name refused by name** — the routes answered `'offset' is not a parameter,
+    use 'skip'`. `filter`'s body is strictly allowlisted so it is still a `400`, and it still names the
+    parameter to use: the alias list moved onto the strict-body refusal rather than going with the routes.
+
+  Nothing an operator does in the UI changed. `listFileMeta` went with them: it had no caller, because the
+  file manager lists through the file STORE, which is a different question.
 - **The five `GET` routes that read ONE brain record are gone. Read a record through `filter`.** `B-9`
   step 3a, and a break: `GET /api/brain/spaces/:spaceId/{facts,entities,edges,chrono}/:id` and
   `GET .../entities/by-ids` all answered what a predicate over one collection answers, with their own
@@ -621,6 +654,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`filter` refused a bad `skip` and quietly ignored a bad `limit`.** One endpoint, one question — where
+  does this page start and how big is it — and two answers to a value it cannot use. `skip: "abc"` was a
+  `400`; `limit: "abc"`, `limit: -5` and `limit: 0` were accepted and silently answered with the default,
+  which is a page nobody asked for with a `200` on it.
+
+  Both refuse now, through one parser. The per-collection list routes had to coerce — a query string has
+  no types, so `?limit=abc` is indistinguishable from a caller who meant something. A JSON body does, so
+  there is no guess left to make, and this only became visible when the last list callers moved across.
+
+- **The filter nesting cap counted the SERVER's clauses against the CALLER's budget.** `MAX_FILTER_DEPTH`
+  bounds what a caller may ask for, and it was enforced at the last moment before the database — by which
+  point the caller's filter had the server's own composition wrapped around it.
+
+  That budget was already spent. A derived chrono `overdue` clause is itself depth 8 — an `$or` over an
+  `$expr` over a `$toDate` over an `$ifNull` — so `deriveStatus: true` plus ANY convenience reached 9 and
+  was refused with `Filter too deeply nested`, about a filter the caller had written one level deep. The
+  combination it refused is `?status=overdue&search=…`, an ordinary query on the list route being removed
+  in the same release: the capability would have gone quietly with it.
+
+  The check runs where the caller's filter is still identifiable as theirs, and a branded type keeps it
+  there — the read path cannot be handed an unchecked predicate without failing to compile. **The cap
+  itself stays at 8** (owner, 2026-09-18): the thing to fix if something composes one level deeper is the
+  composition.
+
+- **A derived chrono status could not be combined with a convenience.** The status rewrite ran AFTER the
+  conveniences, which accumulate under `$and` — so a caller's top-level `status` was buried in one by the
+  server, and the rewrite's refusal (written for a `status` the CALLER nested inside `$or`) fired on the
+  server's own transformation. The error told the caller to put `status` at the top level, which is
+  exactly where they had put it. The rewrite reads the caller's filter first now.
 - **`filter` matched a chrono `status` against the STORED value while the list route matched the DERIVED
   one, so the same question returned different records.** `deriveStatus` made the displayed status
   askable; this is the half that changes which rows come back. `status: "active"` returned a fortnight-old

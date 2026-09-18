@@ -20,7 +20,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, delWithBody, reqJson, readRecord } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, delWithBody, reqJson, readRecord, readCollection } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
@@ -389,21 +389,21 @@ describe('Space export/import — round-trip (export → wipe → import)', () =
     const imp = await post(INSTANCES.a, tok, `/api/admin/spaces/${dstId}/import`, exp.body);
     assert.ok([200, 201].includes(imp.status), JSON.stringify(imp.body));
 
-    const ents = await get(INSTANCES.a, tok, `/api/brain/spaces/${dstId}/entities`);
+    const ents = await readCollection(INSTANCES.a, tok, dstId, 'entities');
     assert.equal(ents.status, 200);
     assert.equal(
-      ents.body.entities?.length, 2,
+      ents.results?.length, 2,
       'imported entities must be LISTED in the TARGET space — they were being written with the ' +
       'source space id, which made them invisible to every list while still being counted',
     );
 
-    const edges = await get(INSTANCES.a, tok, `/api/brain/spaces/${dstId}/edges`);
+    const edges = await readCollection(INSTANCES.a, tok, dstId, 'edges');
     assert.equal(edges.status, 200);
-    assert.equal(edges.body.edges?.length, 1, 'imported edges must be LISTED in the target space');
+    assert.equal(edges.results?.length, 1, 'imported edges must be LISTED in the target space');
 
-    const chrono = await get(INSTANCES.a, tok, `/api/brain/spaces/${dstId}/chrono`);
+    const chrono = await readCollection(INSTANCES.a, tok, dstId, 'chrono');
     assert.equal(chrono.status, 200);
-    assert.equal(chrono.body.chrono?.length, 1, 'imported chrono entries must be LISTED in the target space');
+    assert.equal(chrono.results?.length, 1, 'imported chrono entries must be LISTED in the target space');
   });
 
   it('export streams MANY documents as valid JSON and round-trips them exactly', async () => {

@@ -13,7 +13,7 @@ Base path: `/api/brain`
 Every fact endpoint lives under the `/spaces/:spaceId/` prefix — the same prefix used by all other brain resource types (entities, edges, chrono, stats). For example:
 
 ```http
-GET /api/brain/spaces/general/facts
+POST /api/brain/spaces/general/facts
 ```
 
 > **Breaking change (2.0):** the old two-segment shape `/api/brain/:spaceId/facts` (e.g. `/api/brain/general/facts`) has been **removed**. It previously duplicated these handlers under a second URL; it now returns `404`. Update any client still using it to the `/spaces/:spaceId/` prefix.
@@ -393,56 +393,40 @@ reasoning, and the `$in` form for a set of ids, are in
 
 ---
 
-### List Facts
+### List facts
+
+There is no `GET .../facts`, and there has not been since 5.0. Listing a collection is one shape for all of
+them — a predicate, a page, and the same envelope whichever collection you name:
 
 ```http
-GET /api/brain/spaces/:spaceId/facts?limit=100&skip=0
+POST /api/brain/filter
+Content-Type: application/json
+
+{ "space": "work", "collection": "facts", "limit": 100, "skip": 0 }
 ```
 
-Optional filters:
+Every parameter the old route took, it takes: `tag`, `type`, `description`, `properties`, `search`,
+`entityName`, `sort`, `dir`, `limit`, `skip`. They are documented once, with what each refuses, in
+[the filter body](04d-brain-ops-api.md). Two differences worth knowing before you port a caller:
 
-| Parameter | Description |
-|-----------|-------------|
-| `tag` | Filter by tag — case-insensitive **substring** match, so `arch` finds `architecture` |
-| `description` | Filter by description — case-insensitive **substring**, this field ALONE (unlike `search`, which also spans the name/fact/title field) |
-| `properties` | Filter by property **value** (not key) — case-insensitive substring across every value in the bag. Values are stringified first, so `12` finds a numeric `12`. **Cannot use an index** (the keys are user-defined), so it is a bounded collection scan |
-| `entityName` | *(facts, chrono)* Filter by LINKED ENTITY name — case-insensitive substring. Resolved to ids server-side; a name matching nothing returns nothing |
-| `fromName` / `toName` | *(edges)* Filter the From/To endpoint by entity name, same resolution |
-| `entity` | Filter by linked entity ID |
-| `limit` | Results per page (default 100, max 500) |
-| `skip` | Rows to discard before the page. **The parameter is `skip`** — `offset`, `page`, `per_page`, `pageSize`, `sortBy`, `orderBy`, `order` and `direction` are refused with a `400` naming the one to use, rather than accepted and ignored |
+| | the route | `filter` |
+|---|---|---|
+| a fact linked to an entity ID | `?entity=<id>` | `filter: { entityIds: "<id>" }` — a plain predicate |
+| the page size | default 100, hard max 500 | `limit`, default 200 and no maximum |
 
-Both `tag` and `entity` can be combined (AND logic). Results are sorted newest-first.
+**Compare your running sum against `total` and stop.** That is what `total` is for, and it is the one piece
+of this section that is not about the route. The fleet integrator paged the old endpoint with `offset`,
+which was not a parameter we had: it was accepted and ignored, every page was the same newest-300, and 67
+identical pages summed to 10,184 matching records in a space holding 300 with 152 matches. They were about
+to delete records on that number, and what caught it was a *different* endpoint disagreeing — not anything
+the paging response said.
 
-> **`entityName`, `fromName` and `toName` are on the tool door too, since 5.0.** `filter` (`POST /api/filter`, and the `filter` MCP tool) takes them alongside its predicate, with the same resolution. They had been REST-only, which meant an agent could not ask for “facts about Alice” by name at all — they are a JOIN rather than a predicate, so no Mongo filter a caller writes can express them, and on a proxy space the ids resolve per member. That is also why they cannot move to the client when these list routes are retired.
+Both halves are fixed and both survive the move: `total` is in the envelope, and `filter`'s body is strictly
+allowlisted, so `offset` is a `400` that names `skip` rather than a silently ignored key.
 
-**Response** `200`:
-
-```json
-{
-  "facts": [ ... ],
-  "limit": 100,
-  "skip": 0,
-  "total": 4831,
-  "truncated": true
-}
-```
-
-| Field | Meaning |
-|---|---|
-| `limit` / `skip` | The values actually applied, echoed so a loop can tell what it got from what it asked for |
-| `total` | Every record the filter matches, ignoring `limit` and `skip`. Summed across members on a proxy space |
-| `truncated` | `true` when this page is not the end of the match set — i.e. `skip + returned < total` |
-
-**Compare your running sum against `total` and stop.** That is what `total` is for. The fleet integrator paged this endpoint with
-`offset`, which was not a parameter we had: it was accepted and ignored, every page was the same newest-300, and 67
-identical pages summed to 10,184 matching records in a space holding 300 with 152 matches. They were about to delete
-records on that number, and what caught it was a *different* endpoint disagreeing — not anything the paging response said.
-Both halves of that are fixed here: the total is in the envelope, and an unsupported pagination name is a `400`.
-
-On a **proxy space** the page is computed over the merged set of member spaces, not per member, so `skip` means the same
-thing it does on a plain space. `skip + limit` is bounded there — a deep page needs that many rows from every member — and
-exceeding the bound is a `400` naming the ceiling.
+On a **proxy space** the page is computed over the merged set of member spaces, not per member, so `skip`
+means the same thing it does on a plain space. `skip + limit` is bounded there — a deep page needs that many
+rows from every member — and exceeding the bound is a `400` naming the ceiling.
 
 ---
 

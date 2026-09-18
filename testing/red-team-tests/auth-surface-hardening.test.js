@@ -57,9 +57,17 @@ function readContainerConfig(container = 'ythril-a') {
 
 describe('M2 — ?token= is accepted on no route at all', () => {
   /** Request with the token ONLY in the query string (no Authorization header). */
-  async function queryTokenGet(pathAndQuery) {
+  /**
+   * A request carrying its token in the QUERY STRING, which nothing may accept.
+   *
+   * It takes a method because one of these routes is a POST: reading a brain collection is
+   * `POST /api/brain/filter` since 5.0. A table that could only GET would have had to drop the brain
+   * row, and the brain surface is the one most worth asserting here.
+   */
+  async function queryTokenRequest(pathAndQuery, method = 'GET') {
     const sep = pathAndQuery.includes('?') ? '&' : '?';
-    const r = await fetch(`${INSTANCES.a}${pathAndQuery}${sep}token=${encodeURIComponent(adminToken)}`);
+    const r = await fetch(`${INSTANCES.a}${pathAndQuery}${sep}token=${encodeURIComponent(adminToken)}`,
+      method === 'GET' ? undefined : { method, headers: { 'Content-Type': 'application/json' }, body: '{}' });
     return r.status;
   }
 
@@ -67,7 +75,7 @@ describe('M2 — ?token= is accepted on no route at all', () => {
     '/api/spaces',
     '/api/tokens',
     '/api/networks',
-    '/api/brain/spaces/general/facts',
+    ['/api/brain/filter', 'POST'],
     '/api/files/general?path=.',
     '/api/about',
     // The last exception. It authenticated a raw ?token= until 4.0 removed the SSE transport it existed for,
@@ -75,9 +83,10 @@ describe('M2 — ?token= is accepted on no route at all', () => {
     '/mcp',
   ];
 
-  for (const route of BLOCKED) {
+  for (const entry of BLOCKED) {
+    const [route, method = 'GET'] = Array.isArray(entry) ? entry : [entry];
     it(`rejects a query-param token on ${route}`, async () => {
-      const status = await queryTokenGet(route);
+      const status = await queryTokenRequest(route, method);
       assert.equal(status, 401, `VULNERABILITY: ${route} accepted a token from the query string`);
     });
   }

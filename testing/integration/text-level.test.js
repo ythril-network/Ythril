@@ -22,7 +22,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, patch, get, delWithBody } from '../sync/helpers.js';
+import { INSTANCES, post, patch, get, delWithBody, readCollection } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
@@ -67,8 +67,8 @@ async function settle(space, name) {
   let last;
   for (let i = 0; i < 60; i++) {
     await new Promise(r => setTimeout(r, 500));
-    const r = await get(INSTANCES.a, token, `/api/brain/spaces/${space}/files?path=${encodeURIComponent(name)}`);
-    last = (r.body?.files ?? [])[0];
+    const r = await readCollection(INSTANCES.a, token, space, 'files', { path: name });
+    last = (r.results ?? [])[0];
     const status = last?.embeddingStatus;
     if (status && status !== 'pending' && status !== 'processing') return last;
   }

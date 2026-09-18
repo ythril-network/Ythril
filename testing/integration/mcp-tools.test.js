@@ -38,7 +38,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, patch, delWithBody, readRecord } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, patch, delWithBody, readRecord, readCollection } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
 
@@ -446,8 +446,8 @@ describe('MCP file tools — write_file / read_file / list_dir / create_dir / mo
     let chunks = 0;
     const deadline = Date.now() + 60_000;
     while (Date.now() < deadline) {
-      const r = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${testSpaceId}/files?includeChunks=true&limit=200`);
-      const all = r.body?.files ?? [];
+      const r = await readCollection(INSTANCES.a, tokenA, testSpaceId, 'files', { limit: 200 });
+      const all = r.results ?? [];
       const parent = all.find(f => f.path === docPath && !f.parentFileId);
       chunks = parent ? all.filter(f => f.parentFileId === parent._id).length : 0;
       if (chunks >= 1) break;
@@ -1853,9 +1853,9 @@ describe('MCP schema validation — strict mode must actually block (parity with
 
     // Effect assertion, not a status check: the type must actually be stored — otherwise
     // `type` is accepted and silently dropped, which is the bug in a different costume.
-    const list = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${spaceId}/facts`);
+    const list = await readCollection(INSTANCES.a, tokenA, spaceId, 'facts');
     assert.equal(list.status, 200);
-    const stored = list.body.facts.find(m => m.fact === fact);
+    const stored = list.results.find(m => m.fact === fact);
     assert.ok(stored, 'the memory should have been stored');
     assert.equal(stored.type, 'note', '`type` must be persisted, not silently dropped');
   });
@@ -1944,8 +1944,8 @@ describe('MCP brain tools — per-record TTL (F10)', () => {
     assert.ok(text.includes('errors: ') && !text.includes('errors: 0'), `expected the invalid item reported: ${text}`);
 
     // The valid entity should exist with an expiry.
-    const q = await get(INSTANCES.a, tokenA, `/api/brain/spaces/general/entities?limit=1000`);
-    const found = (q.body.entities ?? q.body ?? []).find(e => e.name === good);
+    const q = await readCollection(INSTANCES.a, tokenA, 'general', 'entities', { limit: 1000 });
+    const found = (q.results ?? q.body ?? []).find(e => e.name === good);
     assert.ok(found, 'the valid bulk entity should have been created');
     assertAboutDaysFromNow(found._expireAt, 7);
     await del(INSTANCES.a, tokenA, `/api/brain/spaces/general/entities/${found._id}`).catch(() => {});
