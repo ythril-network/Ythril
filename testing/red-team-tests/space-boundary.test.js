@@ -83,7 +83,7 @@ describe('Space-scoped token enforcement', () => {
     // Uses OUT_OF_SCOPE_SPACE (created in before()) so a 404 cannot mask enforcement.
     // Through `filter`, the only way to read a collection since 5.0. The space is a BODY field there,
     // which is the interesting half: scope has to be enforced on what the body names, not on a path.
-    const r = await fetch(`${INSTANCES.a}/api/brain/filter`, {
+    const r = await fetch(`${INSTANCES.a}/api/filter`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${generalOnlyToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ space: OUT_OF_SCOPE_SPACE, collection: 'facts' }),

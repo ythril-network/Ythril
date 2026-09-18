@@ -20,7 +20,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, del, delWithBody } from '../sync/helpers.js';
+import { INSTANCES, post, del, delWithBody, filterRest } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
@@ -75,7 +75,7 @@ describe('Space wipe — governed when the space is in a network', () => {
 
     // The point of the whole change: the data is still there. A vote that emptied the space anyway would
     // pass every assertion above and be the exact bug this replaces.
-    const stillR = await post(INSTANCES.a, token, '/api/brain/filter', { space: spaceId, ...({ collection: 'facts', filter: {} }) });
+    const stillR = await filterRest(INSTANCES.a, token, { space: spaceId, ...({ collection: 'facts', filter: {} }) });
     assert.equal(stillR.status, 200, `query after vote opened: ${JSON.stringify(stillR.body)}`);
     assert.ok((stillR.body?.results?.length ?? 0) > 0,
       'the memory must survive: the wipe happens when the round PASSES, not when it opens');

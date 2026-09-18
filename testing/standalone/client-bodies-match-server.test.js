@@ -108,9 +108,33 @@ function clientPosts() {
   for (const file of clientSources()) {
     const src = strip(readFileSync(file, 'utf8'));
     // TWO shapes, because 5.0 moved the search family off the space path: the older
-    // `/api/brain/spaces/${id}/<route>` template, and the body-scoped `'/api/brain/<route>'` plain string
-    // where the space rides in the body. A regex that knew only the first reported “no client POST found”
-    // for a route the client calls on every search — an extractor defect that reads as a missing caller.
+    /*
+     * A THIRD shape, and it is the one that matters most: the client's `filter` bodies are not at a
+     * `.post` any more.
+     *
+     * `B-9` step 3c deleted `POST /api/brain/filter` and moved every call onto the generic tool door,
+     * which answers `{ok, text, data}`. Five call sites across two services would each have unwrapped
+     * that envelope, so one function does — `core/filter-call.ts` — and the BODIES now sit at ITS call
+     * sites rather than at the request.
+     *
+     * An extractor that only knew the `.post` shape would have found one `filter` body (the helper's,
+     * whose argument is a parameter) and reported four real callers as invisible. Following the body to
+     * where it is WRITTEN is what keeps this gate comparing the thing it claims to compare.
+     *
+     * Read procedurally rather than with one regex: the type argument contains `;` and spans lines
+     * (`filterCall<{ results: T[]; total: number; … }>(`), and a pattern tight enough to be safe kept
+     * being tight enough to match nothing — which is this gate's own documented failure mode.
+     */
+    for (let at = src.indexOf('filterCall'); at > -1; at = src.indexOf('filterCall', at + 1)) {
+      const open = src.indexOf('(', at);
+      if (open < 0) break;
+      const rest = src.slice(open + 1);
+      const m = /^\s*this\.http\s*,\s*/.exec(rest);
+      if (!m) continue;                              // the import, or the declaration itself
+      const argAt = open + 1 + m[0].length;
+      if (src[argAt] !== '{') continue;              // a spread built elsewhere; read at its own site
+      found.push({ file, route: 'filter', keys: topLevelKeys(literalAt(src, argAt)), how: 'filterCall' });
+    }
     const call = /\.post\s*<[^(;]*?>\s*\(\s*(?:`\/api\/brain\/spaces\/\$\{[^}]+\}\/([a-z-]+)`|'\/api\/brain\/([a-z-]+)')\s*,\s*/g;
     for (let m = call.exec(src); m; m = call.exec(src)) {
       const route = m[1] ?? m[2];

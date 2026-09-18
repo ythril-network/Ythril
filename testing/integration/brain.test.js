@@ -19,7 +19,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, delWithBody, patch, readRecord, readCollection } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, delWithBody, patch, readRecord, readCollection, filterRest } from '../sync/helpers.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -133,7 +133,7 @@ describe('Brain â€” entities CRUD (/api/brain/spaces/:spaceId/entities)', (
   it('List entities returns 401 without auth', async () => {
     // Through `filter`, because the per-collection route is gone. What has to stay true is that a read
     // with no credentials is refused before anything is read — not that one PATH refuses it.
-    const r = await fetch(`${INSTANCES.a}/api/brain/filter`, {
+    const r = await fetch(`${INSTANCES.a}/api/filter`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ space: 'general', collection: 'entities' }),
@@ -253,7 +253,7 @@ describe('Brain â€” edges CRUD (/api/brain/spaces/:spaceId/edges)', () => {
   it('List edges returns 401 without auth', async () => {
     // Through `filter`, because the per-collection route is gone. What has to stay true is that a read
     // with no credentials is refused before anything is read — not that one PATH refuses it.
-    const r = await fetch(`${INSTANCES.a}/api/brain/filter`, {
+    const r = await fetch(`${INSTANCES.a}/api/filter`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ space: 'general', collection: 'edges' }),
@@ -850,7 +850,7 @@ describe('Brain -- chrono CRUD (/api/brain/spaces/:spaceId/chrono)', () => {
   it('List chrono returns 401 without auth', async () => {
     // Through `filter`, because the per-collection route is gone. What has to stay true is that a read
     // with no credentials is refused before anything is read — not that one PATH refuses it.
-    const r = await fetch(`${INSTANCES.a}/api/brain/filter`, {
+    const r = await fetch(`${INSTANCES.a}/api/filter`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ space: 'general', collection: 'chrono' }),
@@ -1750,7 +1750,7 @@ describe('Brain — POST /spaces/:spaceId/query', () => {
   });
 
   it('Returns 200 with results array and count for basic query', async () => {
-    const r = await post(INSTANCES.a, tokenA, '/api/brain/filter', { space: 'general', ...({
+    const r = await filterRest(INSTANCES.a, tokenA, { space: 'general', ...({
       collection: 'facts',
       filter: {},
       limit: 5,
@@ -1762,7 +1762,7 @@ describe('Brain — POST /spaces/:spaceId/query', () => {
   });
 
   it('Returns seeded memory when filtering by exact tag', async () => {
-    const r = await post(INSTANCES.a, tokenA, '/api/brain/filter', { space: 'general', ...({
+    const r = await filterRest(INSTANCES.a, tokenA, { space: 'general', ...({
       collection: 'facts',
       filter: { tags: { $in: [`qtest-${RUN}`] } },
       limit: 10,
@@ -1773,7 +1773,7 @@ describe('Brain — POST /spaces/:spaceId/query', () => {
   });
 
   it('Supports $regex filter for partial text match on fact', async () => {
-    const r = await post(INSTANCES.a, tokenA, '/api/brain/filter', { space: 'general', ...({
+    const r = await filterRest(INSTANCES.a, tokenA, { space: 'general', ...({
       collection: 'facts',
       filter: { fact: { $regex: `QueryTest-${RUN}`, $options: 'i' } },
       limit: 10,
@@ -1784,7 +1784,7 @@ describe('Brain — POST /spaces/:spaceId/query', () => {
   });
 
   it('$regex with case-insensitive flag matches uppercase version', async () => {
-    const r = await post(INSTANCES.a, tokenA, '/api/brain/filter', { space: 'general', ...({
+    const r = await filterRest(INSTANCES.a, tokenA, { space: 'general', ...({
       collection: 'facts',
       filter: { fact: { $regex: `QUERYTEST-${RUN}`, $options: 'i' } },
       limit: 10,
@@ -1795,7 +1795,7 @@ describe('Brain — POST /spaces/:spaceId/query', () => {
   });
 
   it('Rejects disallowed operator $where with 400', async () => {
-    const r = await post(INSTANCES.a, tokenA, '/api/brain/filter', { space: 'general', ...({
+    const r = await filterRest(INSTANCES.a, tokenA, { space: 'general', ...({
       collection: 'facts',
       filter: { $where: 'function() { return true; }' },
     }) });
@@ -1804,7 +1804,7 @@ describe('Brain — POST /spaces/:spaceId/query', () => {
   });
 
   it('Rejects $options without $regex with 400', async () => {
-    const r = await post(INSTANCES.a, tokenA, '/api/brain/filter', { space: 'general', ...({
+    const r = await filterRest(INSTANCES.a, tokenA, { space: 'general', ...({
       collection: 'facts',
       filter: { fact: { $options: 'i' } },
     }) });
@@ -1813,7 +1813,7 @@ describe('Brain — POST /spaces/:spaceId/query', () => {
   });
 
   it('Rejects $options with invalid flags with 400', async () => {
-    const r = await post(INSTANCES.a, tokenA, '/api/brain/filter', { space: 'general', ...({
+    const r = await filterRest(INSTANCES.a, tokenA, { space: 'general', ...({
       collection: 'facts',
       filter: { fact: { $regex: 'test', $options: 'ig' } },
     }) });
@@ -1822,7 +1822,7 @@ describe('Brain — POST /spaces/:spaceId/query', () => {
   });
 
   it('Rejects unknown collection with 400', async () => {
-    const r = await post(INSTANCES.a, tokenA, '/api/brain/filter', { space: 'general', ...({
+    const r = await filterRest(INSTANCES.a, tokenA, { space: 'general', ...({
       collection: 'unknown_collection',
       filter: {},
     }) });
@@ -1831,7 +1831,7 @@ describe('Brain — POST /spaces/:spaceId/query', () => {
   });
 
   it('Returns 404 for unknown space', async () => {
-    const r = await post(INSTANCES.a, tokenA, '/api/brain/filter', { space: 'no-such-space', ...({
+    const r = await filterRest(INSTANCES.a, tokenA, { space: 'no-such-space', ...({
       collection: 'facts',
       filter: {},
     }) });
@@ -1839,7 +1839,7 @@ describe('Brain — POST /spaces/:spaceId/query', () => {
   });
 
   it('Returns 401 without auth token', async () => {
-    const r = await fetch(`${INSTANCES.a}/api/brain/filter`, {
+    const r = await fetch(`${INSTANCES.a}/api/filter`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ space: 'general', collection: 'facts', filter: {} }),
@@ -1848,7 +1848,7 @@ describe('Brain — POST /spaces/:spaceId/query', () => {
   });
 
   it('Embedding field is excluded from query results', async () => {
-    const r = await post(INSTANCES.a, tokenA, '/api/brain/filter', { space: 'general', ...({
+    const r = await filterRest(INSTANCES.a, tokenA, { space: 'general', ...({
       collection: 'facts',
       filter: { _id: seededId },
       limit: 1,
@@ -1861,7 +1861,7 @@ describe('Brain — POST /spaces/:spaceId/query', () => {
   it('projection include-mode returns only the named fields (+ _id, never embedding)', async () => {
     // S8.2: exercise the real projection path end-to-end (only mergeEmbeddingExclusion
     // was unit-tested before). Include-mode {fact:1} → fact present, tags/createdAt absent.
-    const r = await post(INSTANCES.a, tokenA, '/api/brain/filter', { space: 'general', ...({
+    const r = await filterRest(INSTANCES.a, tokenA, { space: 'general', ...({
       collection: 'facts',
       filter: { _id: seededId },
       projection: { fact: 1 },
@@ -1878,7 +1878,7 @@ describe('Brain — POST /spaces/:spaceId/query', () => {
   });
 
   it('projection exclude-mode drops the named field but keeps the rest (never embedding)', async () => {
-    const r = await post(INSTANCES.a, tokenA, '/api/brain/filter', { space: 'general', ...({
+    const r = await filterRest(INSTANCES.a, tokenA, { space: 'general', ...({
       collection: 'facts',
       filter: { _id: seededId },
       projection: { tags: 0 },
@@ -1892,7 +1892,7 @@ describe('Brain — POST /spaces/:spaceId/query', () => {
   });
 
   it('Respects limit parameter', async () => {
-    const r = await post(INSTANCES.a, tokenA, '/api/brain/filter', { space: 'general', ...({
+    const r = await filterRest(INSTANCES.a, tokenA, { space: 'general', ...({
       collection: 'facts',
       filter: {},
       limit: 2,
@@ -1902,7 +1902,7 @@ describe('Brain — POST /spaces/:spaceId/query', () => {
   });
 
   it('Query across entities collection works', async () => {
-    const r = await post(INSTANCES.a, tokenA, '/api/brain/filter', { space: 'general', ...({
+    const r = await filterRest(INSTANCES.a, tokenA, { space: 'general', ...({
       collection: 'entities',
       filter: {},
       limit: 5,
@@ -2274,7 +2274,7 @@ describe('Brain — a supplied id does not become a new entity id', () => {
 describe('Brain — entities by name, through the filter that replaced the route', () => {
   /*
    * `GET /spaces/:spaceId/entities/by-name` was removed at 5.0 with its `find_entities_by_name` tool. It ran
-   * `find({spaceId, name})` and nothing else, which is `POST /api/brain/filter` with a collection — and a
+   * `find({spaceId, name})` and nothing else, which is `POST /api/filter` with a collection — and a
    * second route for one predicate drifts from the thing it duplicates.
    *
    * The CASES survive the route because they are about the capability: an exact name matches every record
@@ -2287,7 +2287,7 @@ describe('Brain — entities by name, through the filter that replaced the route
   const entityName = `ByNameTest-${RUN}`;
   const createdIds = [];
 
-  const byName = (space, name) => post(INSTANCES.a, token(), '/api/brain/filter', {
+  const byName = (space, name) => filterRest(INSTANCES.a, token(), {
     space, collection: 'entities', filter: { name },
   });
 
@@ -2456,7 +2456,7 @@ describe('Brain — read-only token blocked on REST write endpoints', () => {
   });
 
   it('POST /query allowed with read-only token (read-only operation)', async () => {
-    const r = await post(INSTANCES.a, readOnlyToken, '/api/brain/filter', { space: 'general', ...({
+    const r = await filterRest(INSTANCES.a, readOnlyToken, { space: 'general', ...({
       collection: 'facts',
       filter: {},
       limit: 1,

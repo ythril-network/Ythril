@@ -53,7 +53,6 @@ export const CAPABILITIES = [
   ['Brain — links', 'graph_link_preflight', 'GET /api/brain/spaces/:spaceId/links/convert-preflight'],
 
   ['Brain — search', 'recall', 'POST /api/brain/recall'],
-  ['Brain — search', 'filter', 'POST /api/brain/filter'],
   ['Brain — search', 'similar', 'POST /api/brain/similar'],
   ['Brain — search', 'graph_traverse', 'POST /api/brain/spaces/:spaceId/traverse'],
 

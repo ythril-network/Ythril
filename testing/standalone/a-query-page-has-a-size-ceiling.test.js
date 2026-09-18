@@ -30,20 +30,30 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
+import { MCP_FILTER } from '../_shared/search-doors.mjs';
 
-const ROUTE = 'server/src/api/brain/search.ts';
 const FIELDS = 'server/src/brain/query.ts';
 
 const src = (p) => stripComments(readFileSync(p, 'utf8'));
 
-/** The `/query` handler, bounded by the next route registration. */
+/** The end of an exported const object, at column 0 — a structural bound, never a character count. */
+const CONST_END = `\n};`;
+
+/**
+ * The `filter` handler — THE one, singular since `B-9` step 3c.
+ *
+ * This read `Router.post('/filter'` in `api/brain/search.ts`: a hand-written REST twin of the tool, with
+ * its own budget resolution beside the tool's own. Deleting it made this gate's subject unambiguous —
+ * there is one handler, both doors reach it through `callTool`, and a budget it fails to apply is a page
+ * with no size ceiling on either door rather than on one of two.
+ */
 function queryHandler() {
-  const body = src(ROUTE);
-  const at = body.indexOf("Router.post('/filter'");
-  assert.ok(at > 0, 'could not find the query route — re-point this gate');
-  const rest = body.slice(at + 20);
-  const next = rest.search(/Router\.(post|get|patch|delete|put)\(/);
-  return next === -1 ? rest : rest.slice(0, next);
+  const body = src(MCP_FILTER);
+  const at = body.indexOf('export const queryTool');
+  assert.ok(at > 0, 'could not find the filter tool — re-point this gate');
+  const rest = body.slice(at);
+  const end = rest.indexOf(CONST_END);
+  return end === -1 ? rest : rest.slice(0, end);
 }
 
 let QUERY_BODY_FIELDS;
@@ -89,7 +99,7 @@ describe('the query route takes a budget', () => {
 
   it('the handler resolves a budget and applies it', () => {
     const h = queryHandler();
-    assert.match(h, /resolveBudget\(/, 'the query route computes no budget, so a page has no size ceiling');
+    assert.match(h, /resolveBudget\(/, 'the filter handler computes no budget, so a page has no size ceiling');
     assert.match(h, /applyBudget\(/, 'a budget that is resolved and not applied is a number in a response');
   });
 
@@ -124,7 +134,10 @@ describe('the query route takes a budget', () => {
      * Asserted as a NAMED strip rather than by spread order, because ordering works and is one careless
      * reorder away from bringing it back.
      */
-    assert.match(queryHandler(), /const \{ count: _budgetTotal, \.\.\.budgetAccounting \} = budgetFields\(/,
+    // The SHAPE, not the two local names: the handler moved files at 3c and spells them
+    // `_queryBudgetTotal`/`queryAccounting`. Pinning identifiers would have failed correct code and
+    // invited somebody to delete the case rather than read it — which is how a gate dies.
+    assert.match(queryHandler(), /const \{ count: \w+, \.\.\.\w+ \} = budgetFields\(/,
       'the budget accounting is spread wholesale, so `count` becomes the total and stops meaning the page');
   });
 
@@ -135,7 +148,9 @@ describe('the query route takes a budget', () => {
      * bug it prevents is a paging loop that never advances, which is how `skip` came to be reported in the
      * first place.
      */
-    assert.match(queryHandler(), /budgetFields\([^)]*safeSkip\)/,
+    // Any skip-named value as the last argument, for the same reason as above: the handler spells it
+    // `skip` and the deleted route spelled it `safeSkip`. What matters is that an OFFSET is passed.
+    assert.match(queryHandler(), /budgetFields\([^)]*,\s*\w*[sS]kip\)/,
       'budgetFields is called without the page offset, so nextSkip restarts the page instead of advancing');
   });
 });

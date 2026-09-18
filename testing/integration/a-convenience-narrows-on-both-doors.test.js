@@ -43,18 +43,29 @@ let taggedId;
 let overdueId;
 
 /*
- * `/api/brain/filter`, not `/api/filter`. Both are real doors and both were changed here — the generic
- * `/api/<tool-name>` route dispatches through `callTool`, so the MCP half below already covers it, and
- * it wraps its answer in `{ok, text, data}`. This one returns the envelope directly, which is what makes
- * the record-for-record comparison below readable.
+ * The REST door, spelled out rather than through `filterRest`, because these cases compare it to the MCP
+ * door RECORD FOR RECORD and a shared helper would hide which side normalised what.
+ *
+ * `B-9` step 3c deleted the hand-written twin at `/api/brain/filter`, so this is the generic
+ * `/api/<tool-name>` route — the same `callTool` the MCP half reaches, wrapped in `{ok, text, data}`.
+ * The page is unwrapped here so every assertion below reads `body.results` as it always did; what the
+ * cases are about is whether the two doors AGREE, not which envelope carries the answer.
  */
 const viaRest = async (args) => {
-  const res = await fetch(`${INSTANCES.a}/api/brain/filter`, {
+  const res = await fetch(`${INSTANCES.a}/api/filter`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(args),
   });
-  return { status: res.status, body: await res.json() };
+  const envelope = await res.json().catch(() => null);
+  return {
+    status: res.status,
+    // The refusal sentence where every assertion here expects it: `error` on a 4xx, `text` in the prose
+    // half. A caller printing `body.error` must still print one, or a failure reads as `undefined`.
+    body: res.status === 200
+      ? (envelope?.data ?? null)
+      : { ...(envelope ?? {}), error: envelope?.error ?? envelope?.text },
+  };
 };
 
 const viaMcp = async (args) => {

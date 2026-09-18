@@ -4,7 +4,7 @@
  * ## What changed under these cases, and what did not
  *
  * They used to assert query params on five per-collection `GET` routes. `B-9` step 2b moved every tab
- * onto `POST /api/brain/filter`, so the assertions are against a BODY now. The rules are the same ones:
+ * onto the `filter` tool, so the assertions are against a BODY now. The rules are the same ones:
  * the sort reaches the request, an absent sort sends nothing rather than a default, filters compose with
  * it instead of replacing it, and the freetext goes as `search`.
  *
@@ -37,13 +37,13 @@ describe('BrainApi — list sort, filters and freetext reach `filter` (2b)', () 
 
   /** The one request every list method now makes, with the collection it asked for. */
   const expectFilter = (collection: string) => {
-    const r = http.expectOne(req => req.url === '/api/brain/filter');
+    const r = http.expectOne(req => req.url === '/api/filter');
     const body = r.request.body as Record<string, unknown>;
     expect(body['collection']).toBe(collection);
     return { r, body };
   };
   const flush = (r: TestRequest) =>
-    r.flush({ results: [], total: 0, limit: 50, skip: 0, truncated: false });
+    r.flush({ ok: true, data: { results: [], total: 0, limit: 50, skip: 0, truncated: false } });
 
   it('listEntities sends sort + dir when a sort is given', () => {
     api.listEntities('work', 50, 0, undefined, { field: 'name', dir: 'asc' }).subscribe();
@@ -166,12 +166,12 @@ describe('BrainApi — list sort, filters and freetext reach `filter` (2b)', () 
     const e = expectFilter('entities');
     expect(e.body['filter']).toEqual({ _id: 'e-1' });
     expect('deriveStatus' in e.body).toBe(false);
-    e.r.flush({ results: [{ _id: 'e-1' }], total: 1, limit: 1, skip: 0, truncated: false });
+    e.r.flush({ ok: true, data: { results: [{ _id: 'e-1' }], total: 1, limit: 1, skip: 0, truncated: false } });
 
     api.getChrono('work', 'c-1').subscribe();
     const c = expectFilter('chrono');
     expect(c.body['deriveStatus']).toBe(true);
-    c.r.flush({ results: [{ _id: 'c-1' }], total: 1, limit: 1, skip: 0, truncated: false });
+    c.r.flush({ ok: true, data: { results: [{ _id: 'c-1' }], total: 1, limit: 1, skip: 0, truncated: false } });
   });
 
   it('and a record that is not there reaches the ERROR path, not the success path', () => {
@@ -181,7 +181,7 @@ describe('BrainApi — list sort, filters and freetext reach `filter` (2b)', () 
     let value: unknown = 'untouched';
     api.getEntity('work', 'gone').subscribe({ next: v => { value = v; }, error: e => { err = e; } });
     const { r } = expectFilter('entities');
-    r.flush({ results: [], total: 0, limit: 1, skip: 0, truncated: false });
+    r.flush({ ok: true, data: { results: [], total: 0, limit: 1, skip: 0, truncated: false } });
     expect(err).toBeTruthy();
     expect(value).toBe('untouched');
   });
@@ -190,7 +190,7 @@ describe('BrainApi — list sort, filters and freetext reach `filter` (2b)', () 
     let seen: { entities?: unknown[]; total?: number } = {};
     api.listEntities('work', 50, 0).subscribe(v => { seen = v as typeof seen; });
     const { r } = expectFilter('entities');
-    r.flush({ results: [{ _id: 'e1' }], total: 7, limit: 50, skip: 0, truncated: true });
+    r.flush({ ok: true, data: { results: [{ _id: 'e1' }], total: 7, limit: 50, skip: 0, truncated: true } });
     expect(seen.entities).toEqual([{ _id: 'e1' }]);
     expect(seen.total).toBe(7);
   });

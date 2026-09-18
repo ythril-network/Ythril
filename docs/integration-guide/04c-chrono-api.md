@@ -54,7 +54,7 @@ fact. See [Retry Safety](04-brain-api.md#retry-safety).
   | where | what `status` means |
   |---|---|
   | `GET .../chrono` (the list route) | DERIVED, always |
-  | `filter` / `POST /api/brain/filter` | STORED, unless you send `deriveStatus: true` |
+  | `filter` / `POST /api/filter` | STORED, unless you send `deriveStatus: true` |
   | sync | STORED, always — a peer must replicate what was written, not a reading of it |
 
   **And it governs the PREDICATE, not only the rows.** `filter` with `deriveStatus: true` and
@@ -145,7 +145,7 @@ There is no `GET .../chrono`, and there has not been since 5.0 — listing a col
 of them:
 
 ```http
-POST /api/brain/filter
+POST /api/filter
 Content-Type: application/json
 
 { "space": "work", "collection": "chrono", "limit": 50, "deriveStatus": true }

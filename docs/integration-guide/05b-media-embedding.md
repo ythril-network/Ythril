@@ -57,7 +57,7 @@ and when the previous attempt was anything other than `"complete"` — `"failed"
 re-analysis of a file that succeeded, change the bytes, or delete it and upload it again.
 
 While processing, the filemeta record on the file reflects the current status. Read it with
-`POST /api/brain/filter` — `{"collection": "files", "path": "<path>", "limit": 1}`:
+`POST /api/filter` — `{"collection": "files", "path": "<path>", "limit": 1}`:
 
 | Status | Meaning |
 |---|---|

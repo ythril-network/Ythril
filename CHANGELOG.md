@@ -580,6 +580,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **`POST /api/brain/filter` is gone, and with it the last second shape of any capability.** `B-9` step
+  3c, which closes a row open since 2026-09-16. It was not a thin route over the `filter` tool — it was a
+  SECOND IMPLEMENTATION of it: its own body validation, its own paging parse, its own proxy fan-out, its
+  own budget resolution and its own error handling, four hundred lines beside a tool that already did all
+  of it.
+
+  Read a collection at `POST /api/filter` — the generic tool door, which has no per-tool code at all.
+
+  **THE ENVELOPE CHANGES, and that is the port.** One shape for every tool, so a caller writes the
+  response handling once:
+
+  | | was | is |
+  |---|---|---|
+  | `200` | `{results, count, total, limit, skip, truncated, …}` | `{ok: true, text, data}` — all of that inside `data` |
+  | a refusal | `{error}` | `{ok: false, error, data}`, with the same sentence the MCP door uses |
+
+  **Why this was worth four PRs rather than one.** Every capability gap had to close first, because a
+  deletion that also removes something is indistinguishable, from outside, from a deletion that broke
+  something. Steps 3a and 3b removed nine `GET` routes and found three defects in `filter` on the way;
+  this one removes the tenth shape and nothing else.
+
+  Governance simplifies with it: `filter` had a `ROUTE_RIGHTS` row beside its `TOOL_RIGHTS` row, which is
+  two governance points for one capability. One row governs both doors now.
 - **The five collection LIST routes are gone. Reading a collection is `filter`.** `B-9` step 3b, and a
   break: `GET /api/brain/spaces/:spaceId/{facts,entities,edges,chrono,files}` each answered what a
   predicate over one collection answers, with their own query grammar, their own page caps and their own

@@ -323,6 +323,15 @@ export const queryTool: ToolHandler = {
         },
       ],
       structuredContent: {
+        /*
+         * ECHOED, and it came from the route this tool replaced. `POST /api/brain/filter` sent the
+         * collection back with every answer and this tool did not, which is a field a caller loses when
+         * the twin is deleted — the one thing a deletion must not do quietly.
+         *
+         * It earns its place beyond compatibility: `limit` and `skip` are echoed for a pager, and a
+         * client holding several in-flight reads needs the same thing for WHICH read this is.
+         */
+        collection: coll,
         results: rows,
         // `count` is what you were GIVEN, so it still matches `results.length` when the budget bit; `total`
         // is unchanged and still the whole match.

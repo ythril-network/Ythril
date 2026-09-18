@@ -110,10 +110,22 @@ describe('brain read routes refuse unknown body keys', () => {
     // covering it. `/recall` lost its `/spaces/:spaceId` prefix at 5.0 — the space moved into the body so a
     // caller can omit it and search everything it reads — and this list is the reason that showed up as a
     // failure rather than as silently reduced coverage, which is what it is for.
-    for (const p of ['/filter', '/recall', '/spaces/:spaceId/traverse',
-      '/similar']) {
+    for (const p of ['/recall', '/spaces/:spaceId/traverse', '/similar']) {
       assert.ok(paths.includes(p), `${p} is no longer registered under that path — re-point this gate`);
     }
+    /*
+     * `/filter` WAS in that list and is deliberately not any more. `B-9` step 3c deleted it — a
+     * hand-written REST twin of the `filter` tool — so the only door is the generic `/api/<tool-name>`
+     * route, and a tool's body is validated against its own `inputSchema` with `additionalProperties:
+     * false`. That is the same rule, enforced by the dispatcher rather than by a per-route field set.
+     *
+     * Asserted as an ABSENCE, because the two ways this could rot are opposite: a `/filter` route
+     * appearing here again means the twin is back, and a tool schema losing its strictness is what
+     * `mcp-dispatcher-validates-before-the-handler` covers.
+     */
+    assert.ok(!paths.includes('/filter'),
+      'a `/filter` route is registered on the search router again — the twin `B-9` step 3c deleted has '
+      + 'come back, and with it a second body-validation rule for one capability');
   });
 
   it('every POST route validates its body keys or is exempt with a reason', () => {

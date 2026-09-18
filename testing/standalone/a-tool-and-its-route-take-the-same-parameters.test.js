@@ -137,8 +137,20 @@ describe('a tool and its route take the same parameters', () => {
      * Naming them is the point: they are the ones somebody already decided were worth checking, and the
      * derived count above cannot notice four specific pairs going missing inside it.
      */
+    /*
+     * `filter` came OFF this list at `B-9` step 3c, and that is the fourth answer this case can get.
+     *
+     * It had a hand-written REST route with its own accepted-body set, which is what made it comparable
+     * — and what made it worth comparing. The route is DELETED: `filter` is reachable only through the
+     * generic `/api/<tool-name>` door, which registers no per-tool route at all, so there is no second
+     * parameter list in existence for the tool's schema to drift from.
+     *
+     * That is not lost coverage, it is the coverage becoming unnecessary — the same argument the
+     * `delegatesTo` branch below makes, one step further. `one-capability-is-one-shape` is what holds it
+     * there: it fails if `filter` ever answers a legacy route again.
+     */
     const stillCovered = [];
-    for (const name of ['filter', 'recall', 'graph_traverse', 'similar']) {
+    for (const name of ['recall', 'graph_traverse', 'similar']) {
       const entry = paired.find(p => p.tool.name === name);
       /*
        * `delegatesTo` counts, and counts as the strongest of the three answers rather than as a let-off.

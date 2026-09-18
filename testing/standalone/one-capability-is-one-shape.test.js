@@ -119,11 +119,6 @@ describe('both doors are adapters over one function', () => {
  * client to `POST /api/<tool-name>` first.
  */
 const NOT_YET_ONE_SHAPE = new Map(Object.entries({
-  filter: 'B-9 step 3b. The five BY-ID reads are gone (3a); what is left is the five collection LIST GETs '
-    + 'taking conveniences as a query string, and `POST /api/brain/filter` taking the same body as the '
-    + 'canonical `POST /api/filter` and answering a different ENVELOPE. The client moved onto `filter` in '
-    + '2b, so the lists are a test-conversion away; the envelope is a decision, because changing it moves '
-    + 'every integrator off `{results, total}` and onto `{ok, text, data}`.',
   list_tokens: 'B-9. `GET /api/tokens` lists tokens; `GET .../token-access` answers which tokens reach one '
     + 'space. Possibly two questions rather than one capability — decide that before merging them.',
   network_sync: 'B-9. By network id and by peer id. One route taking either is the likely answer, and it '
@@ -153,7 +148,7 @@ describe('one capability, one shape', () => {
   it('and the exemption list only shrinks', () => {
     // Every entry is a divergence somebody decided to keep for now. A new one is a decision, not a diff.
     const known = [...NOT_YET_ONE_SHAPE.keys()].sort();
-    assert.deepEqual(known, ['filter', 'list_tokens', 'network_sync'],
+    assert.deepEqual(known, ['list_tokens', 'network_sync'],
       'the exemption list changed. Removing an entry is the work; ADDING one needs the owner, because it '
       + 'is a capability whose shape depends on the door. `space_reindex` left on 2026-09-17: its second '
       + 'route was never a second shape, it was a second CAPABILITY, and it has its own tool now.');
@@ -165,6 +160,21 @@ describe('one capability, one shape', () => {
         `${tool}'s exemption has no exit — an exemption with no row behind it is a decision to keep the `
         + 'divergence, and none of these are that');
     }
+  });
+
+  it('`filter` keeps no legacy route either, which is what closes B-9', () => {
+    /*
+     * The longest-running entry on that list, and it came off in four steps: the conveniences and the
+     * decorations `filter` was missing, then the five BY-ID reads, then the five collection LISTS, then
+     * `POST /api/brain/filter` itself — a hand-written TWIN of the tool rather than a thin route.
+     *
+     * The twin is why this one took four PRs instead of one. Deleting it changes the ENVELOPE every
+     * integrator reads, so the other three had to close every capability gap first: a deletion that also
+     * removes something is indistinguishable, from outside, from a deletion that broke something.
+     */
+    assert.deepEqual(routesByTool().get('filter') ?? [], [],
+      '`filter` still has a legacy route. Its only shape is POST /api/filter, served by the generic tool '
+      + 'door — reading a brain collection has exactly one request shape and one envelope.');
   });
 
   it('delete_space_data is the worked example and keeps no legacy route', () => {

@@ -30,7 +30,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { dockerExec, INSTANCES, post, get, triggerSync, waitFor } from './helpers.js';
+import { dockerExec, INSTANCES, post, get, triggerSync, waitFor, filterRest } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -106,7 +106,7 @@ async function storedVersionOfB() {
 
 /** Does a marker record exist on B yet? */
 async function onB(marker) {
-  const r = await post(INSTANCES.b, tokenB, '/api/brain/filter', { space: spaceId, ...({
+  const r = await filterRest(INSTANCES.b, tokenB, { space: spaceId, ...({
     collection: 'facts', filter: { fact: { $regex: marker } },
   }) });
   return (r.body?.results ?? r.body?.rows ?? []).length;

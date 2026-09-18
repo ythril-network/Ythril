@@ -127,7 +127,7 @@ describe('the failing test asks which side lost the record', () => {
 
     // 2. It holds it, and a watermark is already at or past its seq.
     s = await serve({
-      '/api/brain/filter': { results: [{ _id: 'rec', seq: 7 }], total: 1 },
+      '/api/filter': { ok: true, data: { results: [{ _id: 'rec', seq: 7 }], total: 1 } },
       '/api/networks/net': { members: [{ label: 'B', lastSeqPushed: { sp: 7 }, lastSeqReceived: {} }] },
     });
     try {
@@ -139,7 +139,7 @@ describe('the failing test asks which side lost the record', () => {
 
     // 3. It holds it and no watermark reached it — the loss is downstream.
     s = await serve({
-      '/api/brain/filter': { results: [{ _id: 'rec', seq: 9 }], total: 1 },
+      '/api/filter': { ok: true, data: { results: [{ _id: 'rec', seq: 9 }], total: 1 } },
       '/api/networks/net': { members: [{ label: 'B', lastSeqPushed: { sp: 4 }, lastSeqReceived: {} }] },
     });
     try {
@@ -149,7 +149,7 @@ describe('the failing test asks which side lost the record', () => {
     } finally { s.srv.close(); }
 
     // 4. It holds it but the network cannot be read — informative, and it must not throw.
-    s = await serve({ '/api/brain/filter': { results: [{ _id: 'rec', seq: 3 }], total: 1 } });
+    s = await serve({ '/api/filter': { ok: true, data: { results: [{ _id: 'rec', seq: 3 }], total: 1 } } });
     try {
       assert.match(await whichSideLostIt(s.url, 't', 'net', 'sp', 'rec'),
         /sender holds rec at seq 3; could not read the network \(404\)/);

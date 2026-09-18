@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
+import { filterCall } from './filter-call';
 import type {
   Fact, Entity, Edge, ChronoEntry, ChronoType, ChronoStatus,
   QueryCollection, QueryResult, RecallKnowledgeType, RecallResponse, TraverseResult, EmbeddingQueue,
@@ -165,7 +166,7 @@ export class BrainApi {
 
   /** Append `sort`/`dir` to a list request when a sort is active; a no-op otherwise. */
   /**
-   * Read a page of one collection through `POST /api/brain/filter` — the ONE shape, for every tab.
+   * Read a page of one collection through the `filter` tool — the ONE shape, for every tab.
    *
    * ## Why the tabs move off their own routes
    *
@@ -193,8 +194,8 @@ export class BrainApi {
     key: string,
     body: Record<string, unknown>,
   ): Observable<Record<string, unknown>> {
-    return this.http.post<{ results: T[]; total: number; limit: number; skip: number; truncated: boolean }>(
-      '/api/brain/filter', { space: spaceId, collection, ...body },
+    return filterCall<{ results: T[]; total: number; limit: number; skip: number; truncated: boolean }>(
+      this.http, { space: spaceId, collection, ...body },
     ).pipe(map(r => ({ [key]: r.results, total: r.total, limit: r.limit, skip: r.skip, truncated: r.truncated })));
   }
 
@@ -227,11 +228,10 @@ export class BrainApi {
    * not passed, and wrong for exactly the one somebody is looking at.
    */
   private filterOne<T>(spaceId: string, collection: QueryCollection, id: string): Observable<T> {
-    return this.http
-      .post<{ results: T[] }>('/api/brain/filter', {
-        space: spaceId, collection, filter: { _id: id }, limit: 1,
-        ...(collection === 'chrono' ? { deriveStatus: true } : {}),
-      })
+    return filterCall<{ results: T[] }>(this.http, {
+      space: spaceId, collection, filter: { _id: id }, limit: 1,
+      ...(collection === 'chrono' ? { deriveStatus: true } : {}),
+    })
       .pipe(map(r => {
         const doc = r.results?.[0];
         if (!doc) throw new Error(`${collection} '${id}' not found`);
@@ -268,7 +268,7 @@ export class BrainApi {
       maxTimeMS?: number;
     },
   ): Observable<QueryResult> {
-    return this.http.post<QueryResult>('/api/brain/filter', { ...body, space: spaceId });
+    return filterCall<QueryResult>(this.http, { ...body, space: spaceId });
   }
 
   /** Embedding-job backlog for a space (F9 Overview embedding-queue panel). */
@@ -401,7 +401,7 @@ export class BrainApi {
   /**
    * Entities with this exact name.
    *
-   * Through `POST /api/brain/filter` since 5.0. The dedicated `entities/by-name` route was removed with its
+   * Through `filter` since 5.0. The dedicated `entities/by-name` route was removed with its
    * MCP tool: it ran `find({spaceId, name})` and nothing else, which is that filter with a collection — and
    * a second route for one predicate is the kind of duplicate that drifts from the thing it duplicates.
    *
@@ -409,10 +409,9 @@ export class BrainApi {
    * asking this question wants entities, and making every caller learn the generic envelope buys nothing.
    */
   searchEntitiesByName(spaceId: string, name: string): Observable<{ entities: Entity[] }> {
-    return this.http
-      .post<{ results: Entity[] }>('/api/brain/filter', {
-        space: spaceId, collection: 'entities', filter: { name },
-      })
+    return filterCall<{ results: Entity[] }>(this.http, {
+      space: spaceId, collection: 'entities', filter: { name },
+    })
       .pipe(map(r => ({ entities: r.results ?? [] })));
   }
 
@@ -426,10 +425,9 @@ export class BrainApi {
   getEntitiesByIds(spaceId: string, ids: string[]): Observable<{ entities: Entity[] }> {
     if (!ids.length) return new Observable(o => { o.next({ entities: [] }); o.complete(); });
     const unique = [...new Set(ids)].slice(0, 100);
-    return this.http
-      .post<{ results: Entity[] }>('/api/brain/filter', {
-        space: spaceId, collection: 'entities', filter: { _id: { $in: unique } }, limit: unique.length,
-      })
+    return filterCall<{ results: Entity[] }>(this.http, {
+      space: spaceId, collection: 'entities', filter: { _id: { $in: unique } }, limit: unique.length,
+    })
       .pipe(map(r => ({ entities: r.results ?? [] })));
   }
 

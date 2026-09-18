@@ -28,7 +28,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, delWithBody } from '../sync/helpers.js';
+import { INSTANCES, post, delWithBody, filterRest } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -45,7 +45,7 @@ let token;
 let session;
 const created = [];
 
-const query = (body, space = SPACE) => post(INSTANCES.a, token, '/api/brain/filter', { space: space, ...(body) });
+const query = (body, space = SPACE) => filterRest(INSTANCES.a, token, { space: space, ...(body) });
 
 async function makeSpace(id, body = {}) {
   const r = await post(INSTANCES.a, token, '/api/spaces', { id, label: id, ...body });
@@ -167,23 +167,40 @@ describe('REST: the four read routes refuse a key they cannot honour', () => {
       // THREE of the four moved off the space path at 5.0 and take `space` in the body; `traverse` did not,
       // because it walks FROM an entity and an entity lives in exactly one space. Building the URL from a
       // variable is why the bulk rewriter could not see this site — it matched a literal path.
+      /*
+       * THREE PREFIXES NOW, not two, and the third is what `B-9` step 3c added. `/filter` is served by
+       * the generic tool door at `/api/<tool-name>`; `/recall` and `/similar` still have hand-written
+       * routes under `/api/brain`; `/traverse` never left the space path, because it walks FROM an entity
+       * and an entity lives in exactly one space.
+       *
+       * Building the URL from a variable is why the bulk rewriter could not see this site — it matched a
+       * literal path — and why it is worth naming all three here rather than letting the next one be
+       * found by a 404 reported as "the route accepted a bad key".
+       */
+      const url = route === '/filter' ? '/api/filter'
+        : route === '/traverse' ? `/api/brain/spaces/${SPACE}${route}`
+          : `/api/brain${route}`;
       const moved = route !== '/traverse';
-      const url = moved ? `/api/brain${route}` : `/api/brain/spaces/${SPACE}${route}`;
       const r = await post(INSTANCES.a, token, url, moved ? { space: SPACE, ...body } : body);
       assert.equal(r.status, 400, `${route} accepted '${offender}': ${JSON.stringify(r.body)}`);
       assert.ok(JSON.stringify(r.body).includes(offender), `the 400 must name '${offender}': ${JSON.stringify(r.body)}`);
       /*
        * `unrecognized_keys` comes from `unknownBodyFields`, which a route uses when it parses its own body.
-       * `/recall` stopped doing that at 5.0 — it hands its body to `callTool`, whose schema validation
-       * refuses the key and names it in the message. The machine-readable list is not produced there, and
-       * synthesising one by parsing the prose would be worse than not having it.
+       * `/recall` stopped doing that at 5.0 and `/filter` followed it at `B-9` step 3c — both hand their
+       * body to `callTool`, whose schema validation refuses the key and names it in the message. The
+       * machine-readable list is not produced there, and synthesising one by parsing the prose would be
+       * worse than not having it.
+       *
+       * **The set of routes in this branch only grows**, which is the direction the whole row moves in:
+       * every collapse onto the shared dispatcher moves one more route from its own body parse to the
+       * tool's schema. A route LEAVING this branch would mean somebody wrote a second body parse.
        *
        * The claim above survives either way and is the one with the value in it: the refusal NAMES the
        * offending key, which is what shortens the caller's search to zero. The array is asserted only where
        * the route still builds it, so this case cannot pass by the field quietly disappearing everywhere.
        */
-      if (route === '/recall') {
-        assert.match(r.body.error, /unexpected property 'topk'/,
+      if (route === '/recall' || route === '/filter') {
+        assert.match(r.body.error, new RegExp(`unexpected property '${offender}'`),
           'the shared dispatcher must name the key it refused');
       } else {
         assert.deepEqual(r.body.unrecognized_keys, [offender]);
@@ -348,7 +365,7 @@ describe('paging PAST the window — the defect 2.8.0 shipped', () => {
     }
   });
 
-  const q = (body) => post(INSTANCES.a, token, '/api/brain/filter', { space: DEEP, ...(body) });
+  const q = (body) => filterRest(INSTANCES.a, token, { space: DEEP, ...(body) });
 
   it('reports the real total', async () => {
     const r = await q({ collection: 'facts', filter: {}, limit: 5 });

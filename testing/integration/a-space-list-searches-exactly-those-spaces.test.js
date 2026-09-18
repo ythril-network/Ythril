@@ -29,7 +29,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { INSTANCES, post, get, del, readCollection } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, readCollection, filterRest } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -56,7 +56,7 @@ after(async () => {
   await session?.close();
 });
 
-const restFilter = (space) => post(INSTANCES.a, token, '/api/brain/filter', {
+const restFilter = (space) => filterRest(INSTANCES.a, token, {
   collection: 'chrono', filter: { title: `SpaceList-${RUN}` }, ...(space === undefined ? {} : { space }),
 });
 const mcpFilter = (space) => session.callTool('filter', {
@@ -151,9 +151,21 @@ describe('recall and similar take it too, not just filter', () => {
   });
 
   it('similar accepts a list on both doors', async () => {
-    const seed = await readCollection(INSTANCES.a, token, 'general', 'facts', { limit: 1 });
-    const id = seed.results?.[0]?._id;
-    if (!id) return;   // nothing embedded in this run; the parse is what matters and recall covered it
+    /*
+     * A UUID-shaped id, not simply the newest fact — and the difference is a real failure this case had.
+     *
+     * `similar` requires `entryId` to be a UUID v4, and `general` is a shared space where other suites
+     * write facts under ids of their own (`seq-valid-high-…`). Taking `limit: 1` meant taking whatever
+     * ran last, so the case failed with `entryId must be a valid UUID v4` — a refusal about the ID,
+     * reported as `similar refused a list outright`, which is the opposite of what it is testing.
+     *
+     * The subject is the SPACE LIST being parsed, so any valid id will do and having none is a skip.
+     */
+    const seed = await readCollection(INSTANCES.a, token, 'general', 'facts', { limit: 50 });
+    const id = (seed.results ?? [])
+      .map(r => r._id)
+      .find(v => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v));
+    if (!id) return;   // no UUID-keyed fact in this run; the parse is what matters and recall covered it
     const rest = await post(INSTANCES.a, token, '/api/brain/similar', {
       entryId: id, entryType: 'fact', space: ['general'],
     });

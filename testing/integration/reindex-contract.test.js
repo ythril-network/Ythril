@@ -42,7 +42,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, delWithBody, waitFor } from '../sync/helpers.js';
+import { INSTANCES, post, get, delWithBody, waitFor, filterRest } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -99,7 +99,7 @@ async function seedOneOfEach(id) {
 async function embeddedCount(id, collection) {
   // `embedding` is always excluded from a query projection, so presence is asked about with $exists in the FILTER —
   // the one way to observe it from outside without reaching into Mongo.
-  const r = await post(INSTANCES.a, token, '/api/brain/filter', { space: id, ...({ collection, filter: { embedding: { $exists: true } }, limit: 100 }) });
+  const r = await filterRest(INSTANCES.a, token, { space: id, ...({ collection, filter: { embedding: { $exists: true } }, limit: 100 }) });
   assert.equal(r.status, 200, `query failed: ${JSON.stringify(r.body)}`);
   return r.body.count ?? (r.body.results ?? []).length;
 }
@@ -204,7 +204,7 @@ describe('reindex — what the API can actually attribute to it', () => {
     // `updateFact`/`updateEntity` for tidiness would look correct and would bump `seq` on every record in the
     // space — which is a sync-visible change on every peer, for a local re-embed that changed no content. On the
     // reporting operator's instance that is 19 spaces of churn.
-    const before = await post(INSTANCES.a, token, '/api/brain/filter', { space: SPACE, ...({ collection: 'facts', filter: {}, projection: { _id: 1, seq: 1, updatedAt: 1 }, limit: 20 }) });
+    const before = await filterRest(INSTANCES.a, token, { space: SPACE, ...({ collection: 'facts', filter: {}, projection: { _id: 1, seq: 1, updatedAt: 1 }, limit: 20 }) });
     assert.equal(before.status, 200, JSON.stringify(before.body));
     const snapshot = new Map((before.body.results ?? []).map(r => [r._id, `${r.seq}|${r.updatedAt}`]));
     assert.ok(snapshot.size > 0, 'nothing to compare — the space has no memories');
@@ -214,7 +214,7 @@ describe('reindex — what the API can actually attribute to it', () => {
     await waitFor(async () => (await status(SPACE)).status === 200, 10_000, 1_000);
     await new Promise(r => setTimeout(r, 5_000));
 
-    const after = await post(INSTANCES.a, token, '/api/brain/filter', { space: SPACE, ...({ collection: 'facts', filter: {}, projection: { _id: 1, seq: 1, updatedAt: 1 }, limit: 20 }) });
+    const after = await filterRest(INSTANCES.a, token, { space: SPACE, ...({ collection: 'facts', filter: {}, projection: { _id: 1, seq: 1, updatedAt: 1 }, limit: 20 }) });
     for (const r of after.body.results ?? []) {
       const was = snapshot.get(r._id);
       if (!was) continue;

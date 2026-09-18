@@ -168,10 +168,16 @@ describe('both doors take it, and the REST envelope survives', () => {
      *
      * The rule is unchanged and is the point: whoever DOES read a projection reads it through the shared
      * parser. Two doors inlining the same check is how they start disagreeing about what a projection means.
+     *
+     * **`/filter` came off the list at 3c**, and the floor came down with it — from two to one. That is
+     * the direction this whole row moves in: a route that stops building its own response stops being
+     * able to disagree with the tool, so a SHRINKING floor here is the rule succeeding rather than
+     * coverage being lost. What holds the shrink honest is `one-capability-is-one-shape`, which fails if
+     * a second implementation appears again.
      */
-    const readers = ['/recall', '/similar', '/filter']
+    const readers = ['/recall', '/similar']
       .filter(p => { const b = routeBody(rest, p); return b && !delegatesCleanly(b, `POST ${p}`); });
-    assert.ok(readers.length >= 2,
+    assert.ok(readers.length >= 1,
       `only ${readers.length} REST read routes still build their own response — the scan is broken, not the code`);
     assert.ok((rest.match(/projectionFromBody\(/g) ?? []).length >= readers.length,
       `${readers.length} route(s) read a body and fewer parse the projection through the shared parser `
