@@ -156,3 +156,49 @@ describe('seq ingest guard — the sync-poisoning ceiling', () => {
     }
   });
 });
+
+/**
+ * A VALUE the sanitiser does not recognise must survive, or be refused — never be rewritten.
+ *
+ * Found 2026-09-18 by a server-built predicate. `B-19` puts `$gte: [<dueMoment>, now]` into a chrono
+ * filter so `status: "active"` excludes what is derived-overdue. `Object.entries(new Date())` is empty,
+ * so the walk rebuilt `now` key by key and produced `{}` — the comparison then matched every stored
+ * active entry, overdue or not, and answered 200.
+ *
+ * **No caller could have hit it, which is why it survived.** A filter arriving over HTTP is JSON, so its
+ * dates are strings. It bites the moment a predicate is built in-process, and this module is on the path
+ * of every one of those.
+ *
+ * The rule the case stands for is the module's own subject read one level up: everything else here
+ * THROWS on something it will not accept, and this one quietly returned a different value.
+ */
+describe('the sanitiser does not rewrite a value it cannot decompose', () => {
+  let sanitizeFilter;
+  before(async () => {
+    ({ sanitizeFilter } = await import('../../server/dist/brain/filter-sanitizer.js'));
+  });
+
+  it('a Date survives as a Date, not as an empty object', () => {
+    const now = new Date('2026-09-18T00:00:00.000Z');
+    const out = sanitizeFilter({ startsAt: { $gte: now } });
+    const kept = out.startsAt.$gte;
+    assert.ok(kept instanceof Date, `a Date became ${JSON.stringify(kept)} — the comparison is now meaningless`);
+    assert.equal(kept.getTime(), now.getTime());
+  });
+
+  it('including one nested inside an $expr, which is where it was found', () => {
+    // The shape `B-19` builds. A flattened `now` here does not error: it matches the wrong set.
+    const now = new Date('2026-09-18T00:00:00.000Z');
+    const out = sanitizeFilter({ $expr: { $gte: [{ $toDate: '$startsAt' }, now] } });
+    assert.ok(out.$expr.$gte[1] instanceof Date, 'the clock was flattened inside the $expr');
+  });
+
+  it('and the same Date is still refused where the rules refuse it', () => {
+    // Preserving a value must not become a way around the guards: a Date as a `$regex` is still not a
+    // string pattern, and `__proto__` is still a key that names an object's internals.
+    assert.throws(() => sanitizeFilter({ name: { $regex: new Date() } }), /\$regex/);
+    // A COMPUTED key: `{ __proto__: … }` in a literal sets the prototype instead of creating the own
+    // property the guard is about, so the literal form would assert nothing at all.
+    assert.throws(() => sanitizeFilter({ ['__proto__']: { $eq: new Date() } }), /not allowed|internals/);
+  });
+});

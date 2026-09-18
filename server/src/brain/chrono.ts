@@ -482,6 +482,82 @@ export interface ChronoFilter {
 }
 
 /**
+ * The predicate for ONE chrono status, with the clock in it where the status is derived.
+ *
+ * ## Why this is its own function
+ *
+ * `B-19`. It was inline in `buildChronoQuery`, so the chrono LIST route filtered `status` against the
+ * DERIVED value while `filter` — which takes a raw predicate — matched the STORED one. Same question,
+ * two answers: `status: "active"` returns a fortnight-old episode through one door and not the other,
+ * and `status: "overdue"` finds derived ones through the route and only hand-typed ones through
+ * `filter`. Nobody had hit it because the client has always used the route.
+ *
+ * ## What it encodes, and it is not one rule but three
+ *
+ *  - `overdue` matches BOTH the stored value and the derivable ones. `overdue` is legal on every write
+ *    door, so a caller can store it, and matching only the derivable ones hid exactly the entries
+ *    somebody had taken the trouble to mark.
+ *  - `upcoming`/`active` EXCLUDE what is now derived-overdue, so an entry does not surface under a
+ *    stored status the reader would not be shown.
+ *  - `completed`/`cancelled` are terminal: nothing is derived, so the stored value is the answer.
+ *
+ * And all three are conditioned on `whenDuePasses`: a type whose passed date means NOTHING reads as
+ * its stored status everywhere, so the clock must not be applied to it.
+ *
+ * PURE, like `buildChronoQuery`, and for the same reason its docblock gives: what this gets wrong is
+ * never an exception, it is a clause that silently stops matching.
+ *
+ * Returns ONE clause, safe to AND with anything.
+ */
+export function chronoStatusPredicate(
+  status: string,
+  now: Date,
+  datePassedExempt: readonly string[] | null = [],
+): { clause: Record<string, unknown>; comparesAgainstTheClock: boolean } {
+  // The due moment: endsAt, or startsAt when there is no end. `$toDate` so mixed-offset ISO strings
+  // compare chronologically, not lexically.
+  const refDate = { $toDate: { $ifNull: ['$endsAt', '$startsAt'] } };
+  const exempt = datePassedExempt;
+  const derivesForSomeType = exempt !== null;
+  // Restricts the comparison to types that DO derive. Empty when none are exempt, so the shipped query
+  // shape is unchanged on every space that has not set this.
+  const derivingOnly: Record<string, unknown> = exempt && exempt.length > 0
+    ? { type: { $nin: exempt } } : {};
+
+  if (status === 'overdue') {
+    return {
+      clause: {
+        $or: [
+          { status: 'overdue' },
+          ...(derivesForSomeType
+            ? [{ status: { $in: ['upcoming', 'active'] }, $expr: { $lt: [refDate, now] }, ...derivingOnly }]
+            : []),
+        ],
+      },
+      comparesAgainstTheClock: derivesForSomeType,
+    };
+  }
+
+  if (status === 'upcoming' || status === 'active') {
+    if (exempt === null) {
+      // Nothing derives anywhere in this space, so there is no clock comparison to make at all.
+      return { clause: { status }, comparesAgainstTheClock: false };
+    }
+    if (exempt.length === 0) {
+      // The shipped shape, BYTE FOR BYTE, on every space that has not set `whenDuePasses`.
+      return { clause: { status, $expr: { $gte: [refDate, now] } }, comparesAgainstTheClock: true };
+    }
+    return {
+      clause: { status, $or: [{ type: { $in: exempt } }, { $expr: { $gte: [refDate, now] } }] },
+      comparesAgainstTheClock: true,
+    };
+  }
+
+  // completed / cancelled — no derivation.
+  return { clause: { status }, comparesAgainstTheClock: false };
+}
+
+/**
  * The Mongo filter behind `listChrono`, and whether it compares a stored date against the clock.
  *
  * Exported and pure so it can be asserted without a database. That matters here specifically: what this
@@ -523,61 +599,19 @@ export function buildChronoQuery(
    */
   const and: Record<string, unknown>[] = [];
 
-  // Status filter is `overdue`-aware (C5): `overdue` is normally DERIVED from the due moment, not stored.
+  // Status filter is `overdue`-aware (C5): `overdue` is normally DERIVED from the due moment, not
+  // stored. The clause itself is `chronoStatusPredicate`, because `filter` needs the same one — see
+  // its docblock. Merged here rather than pushed whole so the query SHAPE this builder has always
+  // produced is byte-identical: `chrono-list-filter-composes.test.js` pins several of those shapes,
+  // and changing them to tidy the merge would be a behaviour change dressed as a refactor.
   if (filter.status !== undefined) {
-    // The due moment: endsAt, or startsAt when there is no end. `$toDate` so mixed-offset ISO strings
-    // compare chronologically, not lexically.
-    const refDate = { $toDate: { $ifNull: ['$endsAt', '$startsAt'] } };
-    /*
-     * `F-26`: the types whose passed dates mean NOTHING must be excluded from every clock comparison here,
-     * or this door disagrees with every other one about the same record.
-     *
-     * `null` means the SPACE tier says nothing, so no type derives at all and the set is not enumerable —
-     * an empty array would say the opposite while looking identical, which is the absent-versus-empty
-     * conflation this codebase has paid for more than once. `derivesForSomeType` is the branch that reads.
-     */
-    const exempt = datePassedExempt;
-    const derivesForSomeType = exempt !== null;
-    // A clause restricting the comparison to types that DO derive. Empty when none are exempt, so the
-    // shipped query shape is unchanged on every space that has not set this.
-    const derivingOnly: Record<string, unknown> = exempt && exempt.length > 0
-      ? { type: { $nin: exempt } } : {};
-    if (filter.status === 'overdue') {
-      // BOTH kinds, and the second half is the fix. `overdue` is a legal value on every write door — the
-      // enum accepts it on `save_chrono`, `update_chrono`, `save_bulk`, both REST routes and the Brain
-      // UI's own status dropdown — so a caller can store it, and `deriveChronoStatus` passes a stored one
-      // straight through. Matching only the derivable ones therefore hid exactly the entries somebody had
-      // taken the trouble to mark, from the filter that names them.
-      and.push({
-        $or: [
-          { status: 'overdue' },
-          // Only for types that still derive: a `nothing` type reads as its stored status everywhere else,
-          // so matching it here would make `overdue` mean one thing in a filter and another in the answer.
-          ...(derivesForSomeType
-            ? [{ status: { $in: ['upcoming', 'active'] }, $expr: { $lt: [refDate, now] }, ...derivingOnly }]
-            : []),
-        ],
-      });
-      comparesAgainstTheClock = derivesForSomeType;
-    } else if (filter.status === 'upcoming' || filter.status === 'active') {
-      // Exclude entries that are now derived-overdue so they don't surface under their stored status --
-      // but ONLY where the type derives. On a `nothing` type the stored status is the answer, so excluding
-      // it here would hide exactly the records the filter names.
-      query['status'] = filter.status;
-      if (exempt === null) {
-        // Nothing derives anywhere in this space, so there is no clock comparison to make at all.
-      } else if (exempt.length === 0) {
-        // The shipped shape, BYTE FOR BYTE, on every space that has not set `whenDuePasses` -- which is the
-        // ruling's "an instance that changes nothing sees nothing change", carried down to the query. The
-        // accumulator below is only reached when a type is actually exempt.
-        query['$expr'] = { $gte: [refDate, now] };
-      } else {
-        and.push({ $or: [{ type: { $in: exempt } }, { $expr: { $gte: [refDate, now] } }] });
-      }
-      comparesAgainstTheClock = derivesForSomeType;
-    } else {
-      query['status'] = filter.status; // completed / cancelled — no derivation
-    }
+    const st = chronoStatusPredicate(filter.status, now, datePassedExempt);
+    comparesAgainstTheClock = st.comparesAgainstTheClock;
+    const { $or: statusOr, ...scalar } = st.clause as
+      { $or?: Record<string, unknown>[] } & Record<string, unknown>;
+    if (typeof scalar['status'] === 'string') query['status'] = scalar['status'];
+    if (scalar['$expr'] !== undefined) query['$expr'] = scalar['$expr'];
+    if (statusOr) and.push({ $or: statusOr });
   }
   if (filter.type !== undefined) query['type'] = filter.type;
 

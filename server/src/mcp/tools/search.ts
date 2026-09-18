@@ -25,8 +25,8 @@ import {
   queryBrain, countBrain, compareBySort, DEFAULT_QUERY_SORT, DEFAULT_QUERY_LIMIT, PROXY_PAGE_CEILING,
 } from '../../brain/query.js';
 import { parseSortParam, toMongoSort, SORTABLE_FIELDS } from '../../brain/list-sort.js';
-import { conveniencePredicate, conveniencesFrom, CONVENIENCE_SCHEMA } from '../../brain/list-conveniences.js';
-import { decorateMemberRows, decoratePage, PAGE_DECORATION_SCHEMA } from '../../brain/list-decorations.js';
+import { CONVENIENCE_SCHEMA } from '../../brain/list-conveniences.js';
+import { decorateMemberRows, decoratePage, resolvePredicate, PAGE_DECORATION_SCHEMA } from '../../brain/list-decorations.js';
 import { withoutListDiagnostics } from '../../brain/read-projection.js';
 import { type RecallKnowledgeType, type RecallResult, findSimilar, recall, recallGlobal } from '../../brain/recall.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
@@ -813,9 +813,9 @@ export const queryTool: ToolHandler = {
      * predicate — `search` produces an `$or` and so may the caller. See `brain/list-conveniences.ts`;
      * the refusal branch is why it returns a result rather than a predicate.
      */
-    const merged = conveniencePredicate(collName, conveniencesFrom(a), rawFilter);
-    if ('error' in merged) throw new Error(merged.error);
-    const filter = merged.predicate;
+    const resolved = resolvePredicate(collName, a, rawFilter, ctx.callSpaces[0] ?? '');
+    if ('error' in resolved) throw new Error(resolved.error);
+    const filter = resolved.predicate;
     // A DEFAULT, not a clamp — same value and same reasoning as the route. See `DEFAULT_QUERY_LIMIT`.
     const limit = typeof a['limit'] === 'number' ? a['limit'] : DEFAULT_QUERY_LIMIT;
     // Same refusal as the REST route: a non-integer or negative skip is an error, not a silent 0. Reading it as "start

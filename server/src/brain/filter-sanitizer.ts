@@ -118,6 +118,22 @@ export const MAX_FILTER_DEPTH = 8;
 export function sanitizeFilter(filter: unknown, depth = 0): unknown {
   if (depth > MAX_FILTER_DEPTH) throw new Error('Filter too deeply nested');
   if (Array.isArray(filter)) return filter.map(v => sanitizeFilter(v, depth + 1));
+  /*
+   * A `Date` IS A VALUE, not a document to walk, and the walk below DESTROYS one.
+   *
+   * `Object.entries(new Date())` is empty, so a Date rebuilt key by key comes out as `{}` — silently,
+   * and the comparison it was part of then matches the wrong set with a 200. Found 2026-09-18 by a
+   * server-built clause: `B-19` puts `$gte: [<dueMoment>, now]` into a chrono predicate, and the
+   * sanitiser flattened `now` to `{}` so every stored-active entry came back, overdue or not.
+   *
+   * **No caller could have hit it, which is why it survived**: a filter arriving over HTTP is JSON, so
+   * its dates are strings. It bites the moment a predicate is built in-process, and this module is on
+   * the path of every one of those.
+   *
+   * The general rule this stands for: a sanitiser that REWRITES a value it does not recognise is worse
+   * than one that refuses it. Everything else here throws; this used to quietly return something else.
+   */
+  if (filter instanceof Date) return filter;
   if (filter !== null && typeof filter === 'object') {
     const entries = Object.entries(filter as Record<string, unknown>);
     const out: Record<string, unknown> = {};

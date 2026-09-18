@@ -275,7 +275,9 @@ const NOT_A_WINDOW = new Map([
   ['testing/standalone/backups-are-not-world-readable.test.js', 1],
 
   // Nine adjacency claims, documented in that file: `[^.\n]` crosses neither a full stop nor a line.
-  ['testing/standalone/chrono-status-descriptions-match-the-derivation.test.js', 9],
+  // 9 -> 8: `B-19` moved the per-status branches into `chronoStatusPredicate`, and rewriting the scanner
+  // for that retired one capped regex. The list only shrinks, which is what makes it a ratchet.
+  ['testing/standalone/chrono-status-descriptions-match-the-derivation.test.js', 8],
 
   // A COMMENT quoting the `[\s\S]{0,120}?` this file's markup walk replaced. Documentation, not a pattern.
   ['testing/standalone/infra-managed-locks-every-field.test.js', 1],

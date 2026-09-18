@@ -523,6 +523,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`filter` matched a chrono `status` against the STORED value while the list route matched the DERIVED
+  one, so the same question returned different records.** `deriveStatus` made the displayed status
+  askable; this is the half that changes which rows come back. `status: "active"` returned a fortnight-old
+  episode through `filter` and not through the list route, and `status: "overdue"` found derived ones
+  through the route and only hand-typed ones through `filter`.
+
+  `deriveStatus: true` now means the whole call speaks in derived terms, predicate included — through the
+  same clause builder the route uses, extracted rather than copied, because `whenDuePasses` makes "what a
+  passed due moment means" a per-TYPE decision and a second copy would be a second answer to it. A
+  `status` nested inside `$or`/`$and` is REFUSED rather than rewritten: the derived clause is itself a
+  disjunction in two of the three cases, so folding it into a caller's would change what theirs means.
+
+  Nobody had hit this because the client has always used the list route — and it is what blocked moving
+  that client onto `filter`, which is the next step of retiring the per-collection list routes.
+
+- **The filter sanitiser silently turned a `Date` into `{}`.** Found by the above: it walks a filter and
+  rebuilds each object key by key, and `Object.entries(new Date())` is empty — so a date value came out
+  as an empty object, the comparison it was part of stopped meaning anything, and the query answered
+  `200` over the wrong set.
+
+  **No caller could have reached it**, which is why it survived: a filter arriving over HTTP is JSON, so
+  its dates are strings. It bites the moment a predicate is built in-process, and the sanitiser is on the
+  path of every one of those. Dates are preserved now, and the guards that refuse a value still refuse
+  it — the general rule being that a sanitiser which REWRITES what it does not recognise is worse than
+  one that refuses it, and every other branch in that module already threw.
+
 - **The space editor could reach a state where saving was IMPOSSIBLE, and the only way out read as
   discard.** Owner-reported, and it was two defects that made each other worse.
 

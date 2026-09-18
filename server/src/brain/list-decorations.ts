@@ -1,6 +1,9 @@
 import { withEndpointNames } from './edge-endpoint-names.js';
 import { attachJobProgress } from '../files/file-job-progress.js';
-import { withDerivedStatusForPage } from './chrono.js';
+import { conveniencePredicate, conveniencesFrom } from './list-conveniences.js';
+import { withDerivedStatusForPage, chronoStatusPredicate } from './chrono.js';
+import { typesWhereDatePassedMeansNothing } from './chrono-date-policy.js';
+import { getSpaceMeta } from '../spaces/schema-validation.js';
 
 /**
  * What does a page of this collection gain AFTER the query?
@@ -34,6 +37,84 @@ import { withDerivedStatusForPage } from './chrono.js';
  * apply the edge half and forget the file half, because it never sees either.
  */
 
+
+/**
+ * Rewrite a chrono predicate's `status` clause so it means the DERIVED status.
+ *
+ * ## Why `deriveStatus` has to reach the predicate and not just the rows
+ *
+ * `B-19`. `B-8` made the DISPLAYED status askable; this is the half that changes WHICH RECORDS COME
+ * BACK. The chrono list route puts the clock in its status query, so `status: "active"` excludes what is
+ * now derived-overdue. `filter` took the caller's predicate literally, so the same question returned a
+ * fortnight-old episode through one door and not the other — and `status: "overdue"` found derived ones
+ * through the route and only hand-typed ones through `filter`.
+ *
+ * So a caller who says `deriveStatus: true` is saying *this whole call speaks in derived terms*, and a
+ * predicate that still matched stored values would make the flag mean half of itself.
+ *
+ * ## TOP LEVEL ONLY, and the refusal is the point
+ *
+ * A `status` nested inside `$or`/`$and` is REFUSED rather than rewritten. Rewriting arbitrary nesting is
+ * where this would start being subtly wrong — the replacement clause is itself an `$or` in two of the
+ * three cases, so folding it into a caller's disjunction changes what their disjunction means. A refusal
+ * naming the problem costs a caller one edit; a silent half-rewrite costs them the answer.
+ *
+ * Returns the predicate unchanged when there is no `status` to interpret.
+ */
+export function derivedStatusPredicate(
+  base: Record<string, unknown>,
+  now: Date,
+  datePassedExempt: readonly string[] | null,
+): { predicate: Record<string, unknown> } | { error: string } {
+  const nested = JSON.stringify(base['$and'] ?? '') + JSON.stringify(base['$or'] ?? '');
+  if (nested.includes('"status"')) {
+    return {
+      error: '`deriveStatus` cannot interpret a `status` inside `$or` or `$and` — the derived clause is '
+        + 'itself a disjunction, so folding it into yours would change what yours means. Put `status` at '
+        + 'the top level of `filter`, or drop `deriveStatus` and match the stored value.',
+    };
+  }
+  const raw = base['status'];
+  if (typeof raw !== 'string') return { predicate: base };
+
+  const { clause } = chronoStatusPredicate(raw, now, datePassedExempt);
+  const rest = { ...base };
+  delete rest['status'];
+  /*
+   * ANDed rather than spread, for the reason `conveniencePredicate` accumulates: the clause can carry its
+   * own `$or` or `$expr`, and so can the caller's predicate. Assigning either over the other is the
+   * silent-widening failure this codebase produces most.
+   */
+  return { predicate: Object.keys(rest).length ? { $and: [rest, clause] } : clause };
+}
+
+
+/**
+ * The predicate a call should actually run, from the arguments it arrived with.
+ *
+ * ONE call rather than a sequence each door performs for itself. Both were doing the same three
+ * things in the same order — merge the conveniences, resolve which chrono types are exempt from the
+ * clock, apply the derived status — and each step had its own refusal to remember. Two checks is two
+ * chances to handle the first and forget the second, and the forgotten one is a 200 carrying a
+ * predicate nobody validated.
+ *
+ * It also takes the ORDER out of the doors. Conveniences before the derived status is not arbitrary:
+ * the status rewrite looks for a top-level `status`, and a convenience can put one there.
+ *
+ * `spaceId` is the space whose META decides the policy. On a proxy call it is the named space, which
+ * is the same one the list route reads.
+ */
+export function resolvePredicate(
+  collection: string,
+  args: Record<string, unknown>,
+  rawFilter: Record<string, unknown>,
+  spaceId: string,
+): { predicate: Record<string, unknown> } | { error: string } {
+  const merged = conveniencePredicate(collection, conveniencesFrom(args), rawFilter);
+  if ('error' in merged) return merged;
+  if (args['deriveStatus'] !== true) return merged;
+  return derivedStatusPredicate(merged.predicate, new Date(), typesWhereDatePassedMeansNothing(getSpaceMeta(spaceId)));
+}
 /** Rows still inside their member's slice, before a proxy page is merged and the owner forgotten. */
 export async function decorateMemberRows(
   collection: string,

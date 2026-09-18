@@ -13,8 +13,7 @@ import type { TokenRights } from '../../config/rights-shape.js';
 import { summariseActivity } from '../../metrics/space-activity-store.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { parseSortParam, toMongoSort, SORTABLE_FIELDS } from '../../brain/list-sort.js';
-import { conveniencePredicate, conveniencesFrom } from '../../brain/list-conveniences.js';
-import { decorateMemberRows, decoratePage } from '../../brain/list-decorations.js';
+import { decorateMemberRows, decoratePage, resolvePredicate } from '../../brain/list-decorations.js';
 import { withoutListDiagnostics } from '../../brain/read-projection.js';
 import { collectAcrossMembers } from '../../spaces/proxy.js';
 import { pageAcrossMembers } from '../../spaces/page-across-members.js';
@@ -325,16 +324,14 @@ searchRouter.post('/filter', globalRateLimit, requireBodyScopedSpace('knowledge'
       ? (filter as Record<string, unknown>)
       : {};
   /*
-   * The five list CONVENIENCES, through the module both doors call — never assembled here.
-   *
-   * Merged UNDER `$and` rather than assigned, because `search` produces an `$or` and so may the caller's
-   * own predicate; assigning would replace theirs with ours and answer over the wrong set with nothing
-   * said. The module refuses a collection that cannot honour them (`links` has no text of its own), so
-   * this branch cannot be skipped by a caller who forgets it exists.
+   * The predicate this call runs: the five list CONVENIENCES merged under `$and`, then the chrono
+   * status rewritten if `deriveStatus` was asked for. ONE call, so neither door holds the order (the
+   * status rewrite looks for a top-level `status`, and a convenience can put one there) and neither
+   * has two refusals to remember.
    */
-  const merged = conveniencePredicate(String(collection), conveniencesFrom(body), rawFilter);
-  if ('error' in merged) { res.status(400).json({ error: merged.error }); return; }
-  const safeFilter = merged.predicate;
+  const resolved = resolvePredicate(String(collection), body, rawFilter, spaceId);
+  if ('error' in resolved) { res.status(400).json({ error: resolved.error }); return; }
+  const safeFilter = resolved.predicate;
   const safeProjection: Record<string, unknown> | undefined =
     projection != null && typeof projection === 'object' && !Array.isArray(projection)
       ? (projection as Record<string, unknown>)

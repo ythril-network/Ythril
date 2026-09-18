@@ -57,6 +57,12 @@ fact. See [Retry Safety](04-brain-api.md#retry-safety).
   | `filter` / `POST /api/brain/filter` | STORED, unless you send `deriveStatus: true` |
   | sync | STORED, always — a peer must replicate what was written, not a reading of it |
 
+  **And it governs the PREDICATE, not only the rows.** `filter` with `deriveStatus: true` and
+  `status: "active"` excludes what is now derived-overdue, exactly as the list route does — without it
+  the same question returned a fortnight-old episode through one door and not the other. A `status`
+  nested inside `$or`/`$and` is refused rather than rewritten: the derived clause is itself a
+  disjunction, so folding it into yours would change what yours means.
+
   `deriveStatus` defaults **false** on both doors, so nothing an existing caller does changes. Sending it
   on any collection but `chrono` is refused rather than ignored: a silently dropped flag is a caller who
   believes they asked for something.
