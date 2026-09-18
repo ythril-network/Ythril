@@ -105,7 +105,10 @@ describe('every single-tag call site uses the shared helper', () => {
     // the conveniences in the same change that collapsed the five assemblies.
     for (const door of ['server/src/mcp/tools/search.ts', 'server/src/api/brain/search.ts']) {
       const src = readFileSync(new URL(`../../${door}`, import.meta.url), 'utf8');
-      assert.ok(src.includes('conveniencePredicate'),
+      // `resolvePredicate` since `B-19`: the doors stopped calling the convenience assembly directly when
+      // the derived-status step joined it, because a door holding the ORDER of the two is a door that can
+      // get it wrong. It is still the one entry point both of them go through.
+      assert.ok(src.includes('resolvePredicate('),
         `${door} does not reach the shared list-filter assembly, so its \`tag\` can drift`);
     }
   });

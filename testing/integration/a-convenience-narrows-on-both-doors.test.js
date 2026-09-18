@@ -39,6 +39,8 @@ let token;
 let mcp;
 /** The one fact carrying the tag and the searched word; everything else must be excluded. */
 let taggedId;
+/** A deadline 30 days past its start — the entry the derived status is about. */
+let overdueId;
 
 /*
  * `/api/brain/filter`, not `/api/filter`. Both are real doors and both were changed here — the generic
@@ -243,7 +245,6 @@ describe('a chrono status is stored or derived, and the caller chooses which', (
    * Driven live because the derivation resolves `whenDuePasses` from the SPACE META per type — the one
    * thing a unit test would have to stub, which would be asserting against a stub of the rule.
    */
-  let overdueId;
 
   before(async () => {
     const past = new Date(Date.now() - 30 * 86_400_000).toISOString();
@@ -302,5 +303,72 @@ describe('a chrono status is stored or derived, and the caller chooses which', (
     assert.match(rest.body.error, /chrono/, 'the refusal must say what it applies to');
     assert.ok(mcpAnswer.isError, `the tool served a flag the route refused: ${mcpAnswer.text}`);
     assert.match(mcpAnswer.text, /chrono/, 'and the tool refusal must say the same thing');
+  });
+});
+
+describe('B-19 — the two doors return the SAME ROWS for the same status question', () => {
+  /*
+   * `B-8` made the displayed status askable. This is the half that changes which records come back: the
+   * list route puts the clock in its status query, so `status: "active"` excludes what is now
+   * derived-overdue, while `filter` matched the stored value.
+   *
+   * Compared record for record against the LIST ROUTE, because that is the door whose answer the Brain
+   * page has always shown — and the one `B-9` step 3 deletes. If the two ever disagree, deleting it is a
+   * behaviour change nobody planned.
+   */
+  const listRoute = async (query) => {
+    const res = await fetch(`${INSTANCES.a}/api/brain/spaces/${SPACE}/chrono?${query}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return { status: res.status, body: await res.json() };
+  };
+  const ids = (rows) => (rows ?? []).map(r => r._id).sort();
+
+  it('`active` EXCLUDES a passed entry on both doors', async () => {
+    const route = await listRoute('status=active&limit=200');
+    const viaFilter = await viaRest({
+      space: SPACE, collection: 'chrono', filter: { status: 'active' }, deriveStatus: true, limit: 200,
+    });
+    assert.equal(viaFilter.status, 200, JSON.stringify(viaFilter.body));
+    assert.deepEqual(ids(viaFilter.body.results), ids(route.body.chrono),
+      'the overdue entry is stored `active`, so a filter without the clock returns it and the route does not');
+    // And it really is excluded, rather than both doors returning everything.
+    assert.ok(!ids(route.body.chrono).includes(overdueId),
+      'precondition: the route excludes the passed entry from `active`');
+  });
+
+  it('`overdue` FINDS the derived one on both doors', async () => {
+    const route = await listRoute('status=overdue&limit=200');
+    const viaFilter = await viaRest({
+      space: SPACE, collection: 'chrono', filter: { status: 'overdue' }, deriveStatus: true, limit: 200,
+    });
+    assert.equal(viaFilter.status, 200, JSON.stringify(viaFilter.body));
+    assert.ok(ids(route.body.chrono).includes(overdueId),
+      'precondition: the route finds the derived-overdue entry');
+    assert.deepEqual(ids(viaFilter.body.results), ids(route.body.chrono),
+      'the entry is stored `active`, so a filter without the clock finds nothing here');
+  });
+
+  it('and WITHOUT the flag `filter` still matches the stored value, unchanged', async () => {
+    // The default has to stay what it was: a predicate read must be able to see what is stored, or it
+    // cannot be used to repair anything.
+    const viaFilter = await viaRest({
+      space: SPACE, collection: 'chrono', filter: { status: 'active' }, limit: 200,
+    });
+    assert.equal(viaFilter.status, 200, JSON.stringify(viaFilter.body));
+    assert.ok(ids(viaFilter.body.results).includes(overdueId),
+      'the stored-active entry must still come back when the clock was not asked for');
+  });
+
+  it('a nested `status` is refused on both doors', async () => {
+    const args = {
+      space: SPACE, collection: 'chrono', deriveStatus: true,
+      filter: { $or: [{ status: 'active' }, { type: 'deadline' }] },
+    };
+    const rest = await viaRest(args);
+    const mcpAnswer = await viaMcp(args);
+    assert.equal(rest.status, 400, JSON.stringify(rest.body));
+    assert.match(rest.body.error, /\$or/);
+    assert.ok(mcpAnswer.isError, `the tool served what the route refused: ${mcpAnswer.text}`);
   });
 });

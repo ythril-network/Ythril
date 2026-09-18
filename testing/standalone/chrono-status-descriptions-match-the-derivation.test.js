@@ -32,7 +32,7 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
-import { statementAround, bodyOf } from './_structural-window.mjs';
+import { statementAround, bodyOf, between } from './_structural-window.mjs';
 import { blockAfter } from './_structural-window.mjs';
 
 let deriveChronoStatus, ALL_TOOLS;
@@ -78,6 +78,13 @@ describe('what the code actually does', () => {
 
 describe('every chrono read path applies it, which is what makes the sentences true', () => {
   const src = () => stripComments(readFileSync('server/src/brain/chrono.ts', 'utf8'));
+  /** Just `chronoStatusPredicate`, which is where `B-19` moved the per-status branches. */
+  const pred = () => {
+    const all = src();
+    const at = all.indexOf('export function chronoStatusPredicate(');
+    assert.ok(at > 0, 'chronoStatusPredicate is gone or renamed -- re-anchor this scanner');
+    return all.slice(at, all.indexOf('export function buildChronoQuery(', at));
+  };
 
   it('a single-entry get derives', () => {
     // A WINDOW, converted: the subject is the function, and 300 characters was a guess at how much of it fits.
@@ -86,34 +93,35 @@ describe('every chrono read path applies it, which is what makes the sentences t
   });
 
   it('a list derives its OUTPUT as well as translating its filter', () => {
-    // The filter's own construction is exercised in `chrono-list-filter-composes.test.js` against
-    // `buildChronoQuery`, which is why the source reads here are only about the parts that function does not
-    // return: that the OUTPUT is derived too, and that the translation lives in `listChrono` at all.
-    //
-    // The `{0,200}` bounds below were written as character counts before that lesson landed. They are
-    // POSITIVE assertions, so a window that spans fewer lines fails loudly rather than passing quietly —
-    // but the statement bound is right either way and costs nothing.
+    /*
+     * The filter's own construction is exercised in `chrono-list-filter-composes.test.js`, which is why
+     * the reads here are only about the parts that are not the query: that the OUTPUT is derived too,
+     * and that the translation exists at all.
+     *
+     * THE BRANCHES MOVED, and where they moved to is the point. `B-19` extracted them into
+     * `chronoStatusPredicate` because `filter` needed the same clause — the list route was putting the
+     * clock in its status query while `filter` matched the stored value, so the same question returned
+     * different records through the two doors. A copy would have been a second answer to what a passed
+     * due moment means, which `whenDuePasses` makes a per-TYPE decision.
+     */
     const s = src();
     assert.match(s, /entries\.map\(e => withDerivedStatus\(e, now\)\)/,
       'translating the filter alone would return rows whose status contradicts the filter that found them');
+    assert.match(s, /chronoStatusPredicate\(filter\.status, now, datePassedExempt\)/,
+      'the list route must build its status clause with the shared predicate, not its own copy');
 
-    const at = s.indexOf("filter.status === 'overdue'");
+    const p = pred();
+    const at = p.indexOf("status === 'overdue'");
     assert.ok(at > 0, 'the overdue branch was not found — the scanner is wrong, not the code');
-    const branch = s.slice(at, s.indexOf('} else if', at));
+    const branch = p.slice(at, p.indexOf("if (status === 'upcoming'", at));
     assert.match(branch, /\$in: \['upcoming', 'active'\]/,
       '`status: "overdue"` must be TRANSLATED — the derivable entries are found by comparing the clock');
     assert.match(branch, /status: 'overdue'/,
       'and it must ALSO match a stored `overdue` (CH-1) — the tools now promise both kinds');
 
-    const upAt = s.indexOf("filter.status === 'upcoming' || filter.status === 'active'");
+    const upAt = p.indexOf("status === 'upcoming' || status === 'active'");
     assert.ok(upAt > 0, 'the upcoming/active branch was not found');
-    /*
-     * `blockAfter`, not "up to the next `} else`". That literal was the bound, and `F-26` nested an `if`
-     * inside this branch — so the window closed on the INNER `} else` and stopped containing the `$gte` it
-     * exists to find, failing on code that does exactly what it asks. A window bounded by a token that can
-     * appear inside its own subject is a character count wearing structure's clothes.
-     */
-    assert.match(blockAfter(s, upAt, 'the upcoming/active branch'), /\$gte/,
+    assert.match(p.slice(upAt), /\$gte/,
       '`upcoming`/`active` must EXCLUDE the now-overdue ones — the tools promise both directions');
   });
 
@@ -122,11 +130,26 @@ describe('every chrono read path applies it, which is what makes the sentences t
       'recall presents a chrono hit\'s status, and `update_chrono` names it as one of the deriving paths');
   });
 
-  it('but `query` does NOT — which the tools now state as a difference', () => {
-    // If query ever starts deriving, "the same records, two answers" becomes false and the sentence
-    // pointing a caller at `list_chrono` for status stops being advice.
+  it('but `filter` derives ONLY when asked, and never by default', () => {
+    /*
+     * THIS CASE WAS INVERTED AT 5.0 and the old wording is the reason to say so. It read *"but `query`
+     * does NOT derive"*, which was true and became a claim about more than it checked: `B-8` gave
+     * `filter` a `deriveStatus` flag and `B-19` extended it to the predicate, so the door DOES derive —
+     * when a caller asks.
+     *
+     * What has to stay true is the DEFAULT. A predicate read that derived on its own could not be used
+     * to repair anything, because a caller could no longer see what the collection holds. So: the
+     * reader itself never derives, and the flag that does is off unless set.
+     */
     assert.doesNotMatch(stripComments(readFileSync('server/src/brain/query.ts', 'utf8')), /deriveChronoStatus/,
-      'query reads documents as stored; that contrast is now written into three tool descriptions');
+      'the predicate reader must present documents as STORED; deriving there would remove the only '
+      + 'door that can see them');
+    // And the flag defaults OFF on the tool a caller reads.
+    const deco = stripComments(readFileSync('server/src/brain/list-decorations.ts', 'utf8'));
+    // `between`, not a character count: the property's own closing brace IS the bound, and a count
+    // that falls short of it is a gate passing while it checks less than it means to.
+    assert.match(between(deco, 'deriveStatus: {', '},', 'the deriveStatus schema'), /default: false/,
+      'defaulting it true would change what every existing caller of this door sees');
   });
 });
 
