@@ -25,7 +25,7 @@ import { type UpdateValidation } from '../../brain/write-validation.js';
 import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, ttlDaysFromArgs, unitScoreSchema, uuidSchema } from './shared.js';
 import { mergePropertiesOrKeep } from '../../brain/merge-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
-import { connectionSchemas, applyConnections } from '../../brain/write-connections.js';
+import { connectionSchemas, applyConnections, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
 
 export const save_factTool: ToolHandler = {
   name: 'save_fact',
@@ -281,6 +281,10 @@ export const update_factTool: ToolHandler = {
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
             deleteFields: { type: 'array', items: { type: 'string' }, description: 'Dot-notation paths to delete from the fact (e.g. ["properties.oldKey", "description"]). System fields (id, name, type, spaceId, createdAt, updatedAt) cannot be deleted. Deletions are permanent.' },
             ttlDays: TTL_DAYS_SCHEMA,
+            // `Q-30`: the same connection fields the CREATE tool takes, from the one builder both read —
+            // a field on one verb and not the other is the gap this closes, and two hand-written copies
+            // is how they would drift apart again.
+            ...connectionSchemas(),
           },
           required: ['space', 'id'],
           additionalProperties: false,
@@ -343,7 +347,10 @@ export const update_factTool: ToolHandler = {
     }
 
     const ttlDays = ttlDaysFromArgs(a);
-    if (Object.keys(updates).length === 0 && !dfPaths && ttlDays === undefined) throw new Error('At least one of fact, tags, entityIds, description, properties, suppressEmbeddings, deleteFields, or ttlDays must be provided');
+    // A connection field IS a field. Both helpers return `null` for absent, never `undefined` — comparing
+    // against `undefined` would be true for `null` and would DISABLE this refusal rather than widen it.
+    const hasConnections = desiredLinksFrom(a) !== null || edgeInputsFrom(a) !== null;
+    if (Object.keys(updates).length === 0 && !dfPaths && ttlDays === undefined && !hasConnections) throw new Error('At least one of fact, tags, entityIds, description, properties, suppressEmbeddings, deleteFields, ttlDays, or a connection field must be provided');
 
     // Validate the fact AS IT WILL BE, against the meta of the member space it actually lives in.
     // This path had no schema validation at all, so an agent could write through MCP a value the same
@@ -358,6 +365,10 @@ export const update_factTool: ToolHandler = {
     // Search member spaces sequentially — consistent with REST endpoint behaviour.
     const updated = await findFirstAcrossMembers(wt.target, mid => updateFact(mid, id, updates, dfPaths, ctx.actor, ttlDays));
     if (!updated) throw new Error(`Fact '${id}' not found`);
+    // `Q-30`: connections on the UPDATE too. Links REPLACE per class and edges UPSERT; both semantics
+    // live in `applyConnections`, after the record write, exactly as the create tool does it.
+    // `updated.spaceId` rather than `wt.target`: a proxy write lands where the record actually is.
+    await applyConnections(updated.spaceId, updated._id, 'fact', a, updated.author, ctx.actor);
     return {
       content: [{ type: 'text' as const, text: `Fact updated (ID ${updated._id}, seq ${updated.seq}).` }],
       structuredContent: { ...updated },

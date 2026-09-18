@@ -223,7 +223,8 @@ chronoRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, 
  * The shared write options — ttlDays, waitForEmbedding, the duplicate flags and the two suppression
  * spellings — are NOT listed: they are read by helpers, and live in `SHARED_WRITE_BODY_KEYS`.
  */
-const CHRONO_UPDATE_BODY_KEYS = ['title', 'type', 'startsAt', 'endsAt', 'status', 'confidence', 'tags', 'entityIds', 'memoryIds', 'description', 'properties', 'recurrence', 'deleteFields'];
+const CHRONO_UPDATE_BODY_KEYS = ['title', 'type', 'startsAt', 'endsAt', 'status', 'confidence', 'tags', 'entityIds', 'memoryIds', 'description', 'properties', 'recurrence', 'deleteFields',
+  ...CONNECTION_BODY_KEYS];
 chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const id = req.params['id'] as string;
@@ -311,6 +312,9 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
     'title', 'type', 'startsAt', 'endsAt', 'status', 'confidence', 'tags', 'entityIds', 'memoryIds',
     'description', 'properties', 'recurrence', 'ttlDays', 'deleteFields',
     RECORD_SUPPRESS_FIELD,
+    // A connection field IS a field. Without these, `{linkEntities: [...]}` alone answered
+    // "At least one field must be provided" for a body that plainly has one.
+    ...CONNECTION_BODY_KEYS,
   ];
   const body = req.body != null && typeof req.body === 'object' ? req.body as Record<string, unknown> : {};
   if (!PATCHABLE_FIELDS.some(f => f in body)) {
@@ -369,6 +373,21 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
     req.auditSnapshots = { before: prior ?? {}, after: updated };
     // The `warnings` array an update response did not have — see the facts route, where the
     // reasoning is written out. A warn-mode space reported on a create and said nothing on an edit.
+    /*
+     * `Q-30`: the connections, on the UPDATE too.
+     *
+     * Every create door applied these and no update door did, so a record's relationships could be
+     * set once and never changed. `entityIds` was the way round on an unconverted space — and a
+     * `completeLinkage` space refuses that outright, so on a converted space there was no way at
+     * all, by either door.
+     *
+     * AFTER the record write, exactly as the create does: links REPLACE per class and edges UPSERT,
+     * and both semantics live in `applyConnections` so no door has to restate them.
+     *
+     * Keyed on `updated.spaceId` rather than a loop variable: the record says which member space it
+     * lives in, and a proxy write must land where the record is rather than where the search began.
+     */
+    await applyConnections(updated.spaceId, updated._id, 'chrono', req.body, updated.author, webhookToken(req));
     const updateWarnings = [...(updateCheck?.warnings ?? []), ...unknownFieldWarnings(req.body, CHRONO_UPDATE_BODY_KEYS)];
     res.json(updateWarnings.length > 0 ? { ...updated, warnings: updateWarnings } : updated);
     return;

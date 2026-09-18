@@ -221,6 +221,25 @@ follows, so there is one thing to know across facts, entities, edges and chrono 
 | `PATCH .../facts/:id`, `update_fact` | merge | **replaces** the stored tags |
 | `PATCH .../chrono/:id`, `update_chrono` | merge | **replaces** the stored tags |
 
+**A `PATCH` can change a record's CONNECTIONS too, since 5.0.** `linkEntities`, `linkFacts`, `linkChronos`,
+`linkFiles` and `edges` are accepted on the update verb of every door that accepts them on create —
+`facts`, `chrono` and `entities`, on both surfaces — and they mean exactly what they mean on a create:
+
+| field | on a `PATCH` |
+|---|---|
+| `linkEntities` and its siblings | **REPLACES** the links of that kind. `[]` detaches them all; a kind you do not name is untouched |
+| `edges` | **UPSERTS** each one. An edge you do not name is left alone; there is no list here that removes one |
+
+A body carrying only a connection field is a valid patch — it used to answer
+`400 "At least one field must be provided"`, because the field was not in the update allowlist and so was
+not seen at all rather than rejected.
+
+> **Before 5.0 a record's relationships were settled when it was created.** `entityIds` and its siblings were
+> the only way to change them afterwards, and a space that has been through the link conversion refuses
+> those outright — so on a converted space there was no way to change a record's links at all, by either
+> door. If you worked around this by deleting and re-creating a record, you no longer need to, and that
+> workaround cost you the record's id and its history.
+
 **Removing a key is `deleteFields`' job, never an absence.** Omitting a property does not delete it, and sending
 an empty `properties: {}` is a no-op rather than a wipe. If you need a key gone, name it:
 `deleteFields: ["properties.oldKey"]`.
