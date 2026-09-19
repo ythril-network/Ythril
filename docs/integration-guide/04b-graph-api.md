@@ -511,9 +511,23 @@ POST /api/brain/spaces/:spaceId/traverse
 | `maxDepth` | — | `3` | Maximum hops from `startId`; hard-capped at `10` |
 | `limit` | — | `100` | Maximum total nodes returned, **clamped to 1–1000 on both doors** — `limit: 5000` silently becomes 1000. The neighbouring `maxDepth` row states its ceiling and this one did not |
 | `includeChrono` | — | `true` | Also reach chrono entries whose `entityIds` reference a traversed node. Set `false` for entity-only results. A non-boolean is a `400`, never coerced |
-| `includeMemories` | — | `false` | Also reach facts whose `entityIds` reference a traversed node, marked `kind: "fact"`. **Opt-in, unlike `includeChrono`** — see the note below. A non-boolean is a `400` |
+| `includeMemories` | — | `false` | Also reach facts whose `entityIds` reference a traversed node, marked `kind: "fact"`. **Opt-in, unlike `includeChrono`** — see the note below. A non-boolean is a `400`. **This door's `false` is a real default**, so an unsaid flag brings no facts: recall's expansion differs and brings ATTRIBUTED claims when the flag is unsaid, because its caller asked a question rather than asked to explore — see [the recall page](04a-recall-api.md) |
 | `includeFiles` | — | `false` | Also reach files whose `entityIds` reference a traversed node, marked `kind: "file"` and carrying **file meta only**. Opt-in. A non-boolean is a `400` |
 | `includeEdges` | — | `true` | Whether the response carries the `edges` list. **This does not change the walk** — edges are how the graph is traversed. A non-boolean is a `400` |
+
+> **`includeMemories` means three things on a RECALL, and this table is the one to read for it.** An
+> *attributed* claim is one an AI assistant originated rather than a person. It is stored with no vector, so
+> nothing can rank it — which keeps a model's contributions out of the ranked slots somebody asked a question
+> to fill, and would hide them completely if the expansion did not reach them.
+>
+> | `includeMemories` on `recall`'s `traverse` | what arrives |
+> |---|---|
+> | unsaid | the attributed claims of what the walk reached, and no other fact |
+> | `true` | every linked fact |
+> | `false` | none, attributed included — an explicit refusal is still a refusal |
+>
+> **On THIS door it is a plain `false`** and an unsaid flag brings no facts at all: a caller here is
+> exploring a graph and says what it wants, where a recall asked a question and is owed the context.
 
 **`truncated: true` has three causes, and one of them is new in 3.7.** The node cap filled; a link scan spent
 its budget; or **a hop's EDGE read spent its budget**. The third used to be impossible to report because the

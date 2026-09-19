@@ -306,11 +306,20 @@ export async function docsFromCollection<T extends { _id: string }>(
    * membership. Measured, that alone was most of the gap between the link path and the arrays on that scan.
    */
   projection?: Record<string, 1>,
+  /**
+   * A further narrowing, merged into the query rather than applied to what comes back.
+   *
+   * Post-filtering would read every candidate and discard most of them, which spends the caller's scan
+   * budget on records nobody asked for — the exact cost the narrowing exists to avoid. The one caller today
+   * is the expansion admitting only ATTRIBUTED claims, and `attributed` is a declared property, so this is
+   * an index pre-filter rather than a collection scan.
+   */
+  extra?: Record<string, unknown>,
 ): Promise<T[]> {
   if (ids.length === 0) return [];
   const scope = LINK_CLASSES.find(c => c.collection === collection)?.scope ?? {};
   return await col<T>(`${spaceId}_${collection}`)
-    .find(asFilter<T>({ _id: { $in: [...ids] }, ...scope }),
+    .find(asFilter<T>({ _id: { $in: [...ids] }, ...scope, ...(extra ?? {}) }),
           { projection: projection ?? projectionForCollection(collection) })
     .toArray() as T[];
 }
