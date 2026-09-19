@@ -15,6 +15,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A claim an AI assistant originated is marked, so the graph records that it was SAID rather than that it
+  is SO.** Ingesting a chat log is not ingesting a conversation between people: an assistant's turn may
+  state a fact about the world, hand back one the user just gave it, or invent one — and until now nothing
+  told the extractor which, so a model's guess would land beside the user's own words and rank the same.
+
+  Three rules, and the middle one carries most of the weight. An assistant turn is CONTEXT first, read to
+  resolve the user's (*"Yes."* means nothing alone). A fact is attributed to whoever ORIGINATED it, not to
+  the turn it was read in — most of what an assistant appears to state is the user's own fact echoed back.
+  What is left, where the assistant really is the origin, is written with `attributed: true`.
+
+  **Measured rather than assumed**, over the 246,929 turns of `longmemeval_s`: 842 of its 896
+  evidence-bearing turns are the user's (94%), 54 are the assistant's, and 32 of those 54 repeat over half
+  of the preceding user turn's own words. The assistant is the sole origin of about 1% of the evidence —
+  and reading those turns is what showed the two shapes worth keeping: world knowledge it supplied, and an
+  artefact it produced on request.
+
+  The mark is a declared boolean on the claim type, so a filter on it is a native index pre-filter on both
+  doors rather than an exhaustive scan, and the validator refuses a file in BOTH directions — an unmarked
+  assistant claim, and a person's claim wearing the mark. The second is the quiet one: it retires a real
+  fact from every reader that filters, and nothing contradicts it.
+
 - **An AI assistant can save a picture, a PDF or anything else that is not text.** `write_file` takes
   `encoding: "base64"` alongside its existing UTF-8 default, which the REST upload had accepted throughout.
   Reported by the canary operator after one of their coding sessions was asked to put a photograph of a

@@ -28,7 +28,10 @@ depends on a write having happened.
     { "text": "Caroline: I went to a LGBTQ support group yesterday and it was so powerful.",
       "speaker": "Caroline", "statedOn": "2023-05-08",
       "entities": ["caroline"], "chrono": ["support-group-visit"],
-      "sourceTurns": ["D1:3"] }
+      "sourceTurns": ["D1:3"] },
+    { "text": "The assistant recommended Stayokay Amsterdam Vondelpark and ClinkNOORD as budget hostels in Amsterdam.",
+      "speaker": "assistant", "attributed": true, "statedOn": "2023-05-08",
+      "entities": ["caroline"], "sourceTurns": ["D1:4"] }
   ]
 }
 ```
@@ -55,6 +58,18 @@ of the product has one.
 
 **A claim is one thing said.** Do not merge turns into a summary claim; do not split a turn into several
 claims unless it genuinely states several separable things.
+
+**`attributed: true` marks a claim the graph does not assert.** It is for a claim whose origin is an AI
+assistant — world knowledge it supplied, or something it produced at the user's request — and it means the
+graph records that this was SAID, not that it is SO. Written to the record as an ordinary property, so both
+doors can filter on it with no new parameter.
+
+Absence is the default and is the overwhelming case: a claim with no mark is one a person asserted. **A
+claim whose `speaker` is the assistant MUST carry it, and no other claim may** — the writer refuses the
+file otherwise, because a mark that is optional in practice is a mark nobody can filter on.
+
+The assistant echoing a user's own fact is NOT this case: that claim belongs to the user, with the user as
+`speaker` and no mark. See the assistant-turn section of `../prompt/extraction.md`.
 
 ## What the writer does with it
 
