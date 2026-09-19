@@ -547,6 +547,63 @@ describe('MCP file tools — write_file / read_file / list_dir / create_dir / mo
     assert.ok(!dstCheck?.isError, 'Destination file must exist after move');
   });
 
+  it('a move carries the file\'s metadata, and a rewrite does not reset it', async () => {
+    /*
+     * The guarantee an integrator had to measure from outside before believing it.
+     *
+     * A file is the one record type with no id of its own — its `_id` IS its path — so a rename changes
+     * its identity, and anything mapped onto that file has to survive the change. Both halves held and
+     * neither was written down, so the integrator building an external alias re-asserted their key after
+     * every single write, paying a round trip per write to insure against a promise we were keeping.
+     * Documented in `05-files-api.md` now, and asserted here so it is a guarantee rather than a habit.
+     *
+     * Read back through REST rather than through a tool, because the tool that wrote it is the one whose
+     * behaviour is in question.
+     */
+    const src = `${dir}/handle/original.txt`;
+    const dst = `${dir}/handle/renamed/deep/moved.txt`;
+    const externalId = `ext-${Date.now()}`;
+
+    await session.callTool('write_file', {
+      space: testSpaceId, path: src, content: 'the bytes are not the point',
+      description: 'a described file', tags: ['alpha', 'beta'],
+      properties: { externalId },
+    });
+
+    const metaAt = async (path) => {
+      const r = await readCollection(INSTANCES.a, tokenA, testSpaceId, 'files', { limit: 200 });
+      return (r.results ?? []).find(f => f.path === path);
+    };
+
+    const before = await metaAt(src);
+    assert.ok(before, 'the file meta record was not written at all');
+    assert.equal(before.properties?.externalId, externalId, 'the authored property did not reach the record');
+
+    const moved = await session.callTool('move_file', { space: testSpaceId, src, dst });
+    assert.ok(!moved?.isError, `move_file error: ${JSON.stringify(moved)}`);
+
+    const after = await metaAt(dst);
+    assert.ok(after, 'the record did not arrive at the new path');
+    assert.equal(after.properties?.externalId, externalId, 'a move must carry `properties` across');
+    assert.deepEqual(after.tags, ['alpha', 'beta'], 'a move must carry `tags` across');
+    assert.equal(after.description, 'a described file', 'a move must carry `description` across');
+
+    // The shape of a sync write: new bytes, and not one word about the metadata.
+    const rewritten = await session.callTool('write_file', {
+      space: testSpaceId, path: dst, content: 'different bytes, same handle, nothing else sent',
+    });
+    assert.ok(!rewritten?.isError, `rewrite error: ${JSON.stringify(rewritten)}`);
+
+    const afterRewrite = await metaAt(dst);
+    assert.notEqual(afterRewrite.sizeBytes, after.sizeBytes, 'the rewrite did not actually change the file');
+    assert.equal(afterRewrite.properties?.externalId, externalId,
+      'a content rewrite that sends no properties must not clear the stored ones');
+    assert.deepEqual(afterRewrite.tags, ['alpha', 'beta'], 'nor the stored tags');
+    assert.equal(afterRewrite.description, 'a described file', 'nor the stored description');
+
+    await session.callTool('delete_file', { space: testSpaceId, path: dst });
+  });
+
   it('move_file with empty src returns isError', async () => {
     const result = await session.callTool('move_file', { space: testSpaceId, src: '', dst: `${dir}/x.txt` });
     assert.ok(result?.isError, 'Empty src must return isError');

@@ -740,6 +740,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A file keeps its description, tags and properties across a move, and across a rewrite that does not
+  mention them.** Both already held; neither was written down, and the cost of that landed on somebody
+  else. A file is the one record type with no id of its own — its `_id` IS its path — so an integrator
+  mapping an external reference onto a file measured the two behaviours from outside, found them correct,
+  and then re-asserted their key after every single write **because they were undocumented**, paying a
+  round trip per write to insure against a promise we were keeping.
+
+  `05-files-api.md` now states both as guarantees, says why a file is path-keyed rather than UUID-keyed
+  (a delete writes a tombstone per path and a file's link records hang off the same id, so a second
+  identity is a second thing to reconcile), and shows the stable-handle pattern. Two tests hold it: a
+  source gate on the two shapes that make it structural, and a live round trip through move and rewrite.
+
 - **Twenty-four sentences still sent a caller to a tool 5.0 had removed.** A rename is the one change that
   passes the compiler while leaving the writing wrong, and these were in the writing a caller reads while
   constructing a call: `save_entity` told them to look an entity up with a tool that is gone, `space_meta`
