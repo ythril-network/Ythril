@@ -155,17 +155,38 @@ export function loadHistories(path) {
     }
     return {
       id,
-      sessions: sessions.map((turns, i) => {
-        const index = i + 1;
-        const where = `${id} session ${index}`;
-        if (!Array.isArray(turns)) refuse(`${where}: it is ${typeof turns}, not an array of turns`);
-        return {
-          index,
-          id: String(ids[i]),
-          startsAt: readSessionDate(dates[i], where),
-          turns: turns.map((t, position) => readTurn(t, index, position, where, repairs)).filter(Boolean),
-        };
-      }),
+      /*
+       * IN TIME ORDER, which the release is not. Measured: 211 of the 500 pinned histories list their
+       * sessions out of chronological order, 3,382 backward steps, the largest a full day. LoCoMo: 0 of 10.
+       *
+       * It matters because everything downstream reads position as time. The extraction prompt's
+       * supersession rule is *"when a LATER session makes an earlier fact wrong"* and the parts protocol
+       * splits on *"a contiguous run of sessions"* — so a model reading the array order would retire the
+       * WRONG claim in nearly half the corpus, asserting the stale fact and marking the current one dead.
+       * Nothing counts that.
+       *
+       * Sorted here rather than by each consumer, because "remember to sort" is a line four callers each
+       * have to write and one will not. Ties break on the published position, so two sessions recorded in
+       * the same minute keep a stable order between runs instead of whatever the sort happens to do.
+       *
+       * `index` does NOT follow the sort. It is the published position and the turn ids are minted from
+       * it, so renumbering would make `D13:9` name a different remark than the release does and repoint
+       * every `sourceTurns` in a committed extraction. `sessions[0]` is the earliest and
+       * `sessions[0].index` says where it came from; the two disagreeing is the honest shape.
+       */
+      sessions: sessions
+        .map((turns, i) => {
+          const index = i + 1;
+          const where = `${id} session ${index}`;
+          if (!Array.isArray(turns)) refuse(`${where}: it is ${typeof turns}, not an array of turns`);
+          return {
+            index,
+            id: String(ids[i]),
+            startsAt: readSessionDate(dates[i], where),
+            turns: turns.map((t, position) => readTurn(t, index, position, where, repairs)).filter(Boolean),
+          };
+        })
+        .sort((a, b) => (a.startsAt < b.startsAt ? -1 : a.startsAt > b.startsAt ? 1 : a.index - b.index)),
     };
   });
   return withReport(histories, repairs);

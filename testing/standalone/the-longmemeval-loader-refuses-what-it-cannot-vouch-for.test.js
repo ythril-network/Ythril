@@ -55,6 +55,77 @@ const instance = (over = {}) => ({
   ...over,
 });
 
+describe('sessions come back in TIME order, whatever order the release lists them in', () => {
+  /*
+   * ## Measured, and it is not a rare edge
+   *
+   * 211 of the 500 pinned histories list their sessions out of chronological order — 3,382 backward steps,
+   * the largest a full day. LoCoMo: 0 of 10. So the array order is not time order here, and nothing in the
+   * release says so.
+   *
+   * ## Why that is worse than untidy
+   *
+   * The extraction prompt's supersession rule is *"when a LATER session makes an earlier fact wrong"*, and
+   * the parts protocol splits on *"a contiguous run of sessions"*. Both read position as time. Told to
+   * retire the earlier claim, a model reading the array order would retire the wrong one in nearly half the
+   * corpus — and the result is a graph that asserts the stale fact and marks the current one dead, which is
+   * the exact inverse of what supersession is for and is invisible in every count.
+   *
+   * ## The sort is here rather than in each consumer
+   *
+   * Every reader of a history wants time order, so "remember to sort" would be a line four callers each
+   * have to write and one will not. The tie-break is the published position, so two sessions on the same
+   * minute keep a stable, reproducible order rather than whatever the sort happened to do.
+   *
+   * ## `index` still means the PUBLISHED position
+   *
+   * It is what the turn ids are minted from, so it cannot follow the sort: renumbering would make `D13:9`
+   * name a different remark than the release does, and a committed extraction's `sourceTurns` would point
+   * at the wrong line. So `sessions[0]` is the earliest and `sessions[0].index` says where it came from —
+   * and the two disagreeing is the honest shape rather than a bug.
+   */
+  const jumbled = () => [instance({
+    haystack_sessions: [[turn('user', 'second in the file')], [turn('user', 'first in time')]],
+    haystack_dates: ['2023/05/20 (Sat) 18:00', '2023/05/20 (Sat) 09:00'],
+    haystack_session_ids: ['s-late', 's-early'],
+  })];
+
+  test('the earliest session comes first', () => {
+    const [h] = load(jumbled());
+    assert.deepEqual(h.sessions.map(s => s.startsAt),
+      ['2023-05-20T09:00:00Z', '2023-05-20T18:00:00Z']);
+    assert.deepEqual(h.sessions.map(s => s.id), ['s-early', 's-late']);
+  });
+
+  test('but `index` and the turn ids keep the PUBLISHED position', () => {
+    // The trap. A sort that renumbered would silently repoint every `sourceTurns` in a committed file.
+    const [h] = load(jumbled());
+    assert.deepEqual(h.sessions.map(s => s.index), [2, 1], 'index is where the release put it, not where the sort did');
+    assert.equal(h.sessions[0].turns[0].id, 'D2:1', 'the earliest session is the release\'s session 2');
+    assert.equal(h.sessions[0].turns[0].text, 'first in time');
+  });
+
+  test('two sessions at the same instant keep their published order', () => {
+    // Deterministic rather than whatever the sort does with equal keys: a benchmark that reorders between
+    // runs produces a diff nobody can attribute.
+    const [h] = load([instance({
+      haystack_sessions: [[turn('user', 'a')], [turn('user', 'b')]],
+      haystack_dates: ['2023/05/20 (Sat) 09:00', '2023/05/20 (Sat) 09:00'],
+      haystack_session_ids: ['s1', 's2'],
+    })]);
+    assert.deepEqual(h.sessions.map(s => s.id), ['s1', 's2']);
+  });
+
+  test('an already-ordered release is untouched', () => {
+    const [h] = load([instance({
+      haystack_sessions: [[turn('user', 'a')], [turn('user', 'b')]],
+      haystack_dates: ['2023/05/20 (Sat) 09:00', '2023/05/21 (Sun) 09:00'],
+      haystack_session_ids: ['s1', 's2'],
+    })]);
+    assert.deepEqual(h.sessions.map(s => s.index), [1, 2]);
+  });
+});
+
 describe('a well-formed release', () => {
   test('comes back as histories with ids, dates, speakers and text', () => {
     const [h] = load([instance()]);
