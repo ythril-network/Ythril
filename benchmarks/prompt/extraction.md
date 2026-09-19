@@ -29,9 +29,15 @@ copy that goes stale.
 
 ## The task
 
-You are reading a long conversation between people, recorded over many sessions spread across months. Turn it
-into a knowledge graph, so that a question asked later can be answered from it — including a question whose
-answer needs one thing said in an early session and another said months afterwards.
+You are reading a long conversation recorded over many sessions. Turn it into a knowledge graph, so that a
+question asked later can be answered from it — including one whose answer needs something said in an early
+session and something said long afterwards.
+
+**Do not assume the shape of it.** It may be two people or a person and an assistant; it may run over years
+or over a fortnight with six sessions in a day; the sessions may not be handed to you in time order, and one
+turn may be an entire document somebody pasted in. Each of those has a section below, because each of them
+changes what the right answer is — and reading this paragraph as a description of the conversation in front
+of you is how a rule written for a different shape gets applied to this one.
 
 Read `benchmarks/space/schema.json` first. It is the complete list of what you may create: the entity types,
 the edge labels with the types allowed at each end, the chrono types, and the one claim type. **Do not invent
@@ -181,9 +187,9 @@ seam inside a session leaves a fact half-written on each side of it.
 
 ## When a later session makes an earlier fact WRONG
 
-A conversation recorded over months does not only add facts — it replaces them. Somebody changes job, moves
-city, gives up a hobby, finishes a course they were halfway through. The earlier statement was true when it
-was made and is not true now, and **both belong in the graph.**
+A conversation recorded over any length of time does not only add facts — it replaces them. Somebody changes
+job, moves city, gives up a hobby, finishes a course they were halfway through. The earlier statement was
+true when it was made and is not true now, and **both belong in the graph.**
 
 Writing only the newer one loses the history, and a question about what used to be the case has nothing to
 match. Writing both with nothing to separate them is worse: a search for *"where does she work"* hands back
