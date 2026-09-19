@@ -24,7 +24,8 @@
  * into the pin file by hand. There is no mode in which this module updates a pin for you.
  */
 import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, createWriteStream, renameSync, rmSync } from 'node:fs';
+import { once } from 'node:events';
 import { dirname, join } from 'node:path';
 
 /** Every field a pin entry must carry before it can be fetched at all. */
@@ -78,6 +79,18 @@ export function readPinnedDataset(repoRoot, pinPath, name) {
  * error to somebody reading the condition.
  */
 export function assertPinned(entry, bytes, name) {
+  return assertPinnedDigest(entry, sha256(bytes), bytes.length, name);
+}
+
+/**
+ * The same refusal, against a digest computed WITHOUT holding the file.
+ *
+ * `assertPinned` above delegates here, so there is one implementation of the rule and the buffer form is
+ * a convenience over it rather than a second copy. A streaming fetch cannot produce a `Buffer` — the
+ * corpus this module exists to pin is 278 MB, and buffering it killed the process with a heap overflow —
+ * so the rule had to be expressible against a hash and a length.
+ */
+export function assertPinnedDigest(entry, actual, byteLength, name) {
   if (typeof entry.sha256 !== 'string' || entry.sha256.length !== 64) {
     throw new Error(
       `${name} is recorded but NOT PINNED: its sha256 is ${JSON.stringify(entry.sha256)}. `
@@ -85,14 +98,13 @@ export function assertPinned(entry, bytes, name) {
       + 'An unpinned dataset is refused rather than used, because a run against an unverified corpus '
       + 'produces a number nobody can reproduce.');
   }
-  const actual = sha256(bytes);
   if (actual !== entry.sha256) {
     throw new Error(
       `${name} does not match its pin.\n  expected ${entry.sha256}\n  actual   ${actual}\n`
       + 'The file at the pinned URL is not the file this repository measured. Do not overwrite the pin to '
       + 'make this pass — find out what changed upstream and record it.');
   }
-  if (typeof entry.bytes === 'number' && entry.bytes !== bytes.length) {
+  if (typeof entry.bytes === 'number' && entry.bytes !== byteLength) {
     throw new Error(`${name} matched its hash but not its byte count — the pin file is internally wrong.`);
   }
   return true;
@@ -108,15 +120,76 @@ export async function fetchPinned(repoRoot, pinPath, name, { recordHash = false 
   const entry = readPin(pinPath, name);
   const res = await fetch(entry.url);
   if (!res.ok) throw new Error(`${entry.url} answered ${res.status}`);
-  const bytes = Buffer.from(await res.arrayBuffer());
 
+  /*
+   * STREAMED, and the corpus is why.
+   *
+   * This read `await res.arrayBuffer()` and hashed the result. `longmemeval_s` is 278 MB, so that held
+   * the body twice — once as the ArrayBuffer and once as the Buffer copied from it — and the process
+   * died with `JavaScript heap out of memory` before it could print a hash. A fetcher that cannot fetch
+   * the corpus it was written to pin is a pin nobody can record.
+   *
+   * The hash is computed over the stream as it arrives, so memory is one chunk at a time whatever the
+   * file weighs.
+   */
+  const digest = createHash('sha256');
+  let byteLength = 0;
+
+  /*
+   * A TEMPORARY path, renamed only after the bytes are verified.
+   *
+   * Streaming means the file exists before its hash is known, and the one thing this module must never
+   * do is leave an unverified corpus where a reader expects a pinned one — `readPinnedDataset` checks on
+   * read, but a half-written or wrong file sitting at the cache path is exactly the "run against the
+   * wrong bytes" this exists to prevent. So the download lands beside the target and is moved into place
+   * as the last act, or deleted.
+   */
+  /*
+   * `recordHash` WRITES NOTHING, and that is forced by the pin's own shape rather than by taste.
+   *
+   * An unpinned entry's `cachePath` carries the placeholder the human fills in — LoCoMo's reads
+   * `locomo-79fa87e90f04.json`, so an unfetched one reads `longmemeval-s-<sha12>.json`. There is no file
+   * to write yet because the NAME is part of what recording the pin decides, and `<` is not even a legal
+   * character in a Windows filename. Streaming through the hash and discarding is the only honest
+   * reading of "look at what came back".
+   */
   if (recordHash) {
-    return { bytes, sha256: sha256(bytes), byteLength: bytes.length, written: false };
+    for await (const chunk of res.body) {
+      const buf = Buffer.from(chunk);
+      digest.update(buf);
+      byteLength += buf.length;
+    }
+    return { sha256: digest.digest('hex'), byteLength, written: false };
   }
 
-  assertPinned(entry, bytes, name);
+  /*
+   * A TEMPORARY path, renamed only after the bytes are verified.
+   *
+   * Streaming means the file exists before its hash is known, and the one thing this module must never
+   * do is leave an unverified corpus where a reader expects a pinned one — `readPinnedDataset` checks on
+   * read, but a half-written or wrong file sitting at the cache path is exactly the "run against the
+   * wrong bytes" this exists to prevent. So the download lands beside the target and is moved into place
+   * as the last act, or deleted.
+   */
   const path = join(repoRoot, entry.cachePath);
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, bytes);
-  return { bytes, sha256: entry.sha256, byteLength: bytes.length, written: true, path };
+  const partial = `${path}.partial`;
+  const sink = createWriteStream(partial);
+  try {
+    for await (const chunk of res.body) {
+      const buf = Buffer.from(chunk);
+      digest.update(buf);
+      byteLength += buf.length;
+      if (!sink.write(buf)) await once(sink, 'drain');
+    }
+    await new Promise((resolve, reject) => sink.end(err => (err ? reject(err) : resolve())));
+
+    assertPinnedDigest(entry, digest.digest('hex'), byteLength, name);
+    renameSync(partial, path);
+    return { sha256: entry.sha256, byteLength, written: true, path };
+  } catch (err) {
+    sink.destroy();
+    rmSync(partial, { force: true });
+    throw err;
+  }
 }
