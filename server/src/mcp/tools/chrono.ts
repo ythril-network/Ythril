@@ -25,7 +25,7 @@ const WHAT_A_PASSED_DATE_MEANS =
   + '`filter`, `recall` and a single-entry get — so you never need to set `overdue` yourself. A space '
   + 'or a chrono type that sets `whenDuePasses: "nothing"` turns that off for its records, and the STORED '
   + 'status is then what you get back: for entries recording something that HAPPENED — a deploy, a backup '
-  + 'run, an alert episode — a past date is the normal condition and does not mean late. `query` and sync '
+  + 'run, an alert episode — a past date is the normal condition and does not mean late. `filter` and sync '
   + 'always see the stored value, whatever the setting.';
 import { getConfig } from '../../config/loader.js';
 import { checkQuota } from '../../quota/quota.js';
@@ -42,7 +42,7 @@ export const save_chronoTool: ToolHandler = {
   name: 'save_chrono',
   description: 'Create a chronological entry — something that happened, or is meant to. Default types are event, deadline, plan, prediction and milestone; a space with its own `typeSchemas.chrono` accepts ITS names INSTEAD, not in addition, so a custom schema that omits `event` refuses `event`.\n\n'
     + 'THIS IS THE RECORD FOR ANYTHING DATED, and the reason the distinction matters: a fact saying "the migration is planned for March" is a fact whose truth expires, while a chrono entry carries `startsAt`/`endsAt` and a `status`, so it can be listed by date, found by `filter` in a window, and closed rather than contradicted. If it has a date, it belongs here.\n\n'
-    + 'Link it with `entityIds` — that is what lets `traverse` reach it from the entity it is about (with `includeChrono`, on by default). Those references are NOT edges, so a chrono entry left unlinked is reachable only by search or by date, never from the thing it concerns.\n\n'
+    + 'Link it with `entityIds` — that is what lets `graph_traverse` reach it from the entity it is about (with `includeChrono`, on by default). Those references are NOT edges, so a chrono entry left unlinked is reachable only by search or by date, never from the thing it concerns.\n\n'
     + 'Always an INSERT; use `update_chrono` to change one, including to move its `status`. IF THE SPACE VALIDATES: `introduced` are violations this write caused and are what refuses it; `preExisting` were already stored, are reported, and do NOT block. Branch on `introduced`.',
   mutating: true,
   spaceRequired: true,
@@ -85,7 +85,7 @@ export const save_chronoTool: ToolHandler = {
             },
             confidence: unitScoreSchema('How sure you are, 0 to 1, for entries that are predictions rather '
               + 'than records. Nothing derives it, nothing ranks on it and nothing requires it — it is stored '
-              + 'and returned, and `query` can sort and filter on it.'),
+              + 'and returned, and `filter` can sort and narrow on it.'),
             tags: {
               type: 'array', items: { type: 'string' },
               description: 'Categorisation tags. EMBEDDED along with the title, so a tag affects meaning '
@@ -94,7 +94,7 @@ export const save_chronoTool: ToolHandler = {
             entityIds: {
               type: 'array', items: { type: 'string' },
               description: 'Entity IDs this entry is about. THIS IS WHAT MAKES IT REACHABLE from the graph: '
-                + '`traverse` follows these (with `includeChrono`, on by default), and they are NOT edges, so '
+                + '`graph_traverse` follows these (with `includeChrono`, on by default), and they are NOT edges, so '
                 + 'an entry left unlinked is findable only by search or by date. Pass ids, not names.',
             },
             memoryIds: {
@@ -361,7 +361,7 @@ export const update_chronoTool: ToolHandler = {
             entityIds: {
               type: 'array', items: { type: 'string' },
               description: 'REPLACES the stored entity links — send the FULL list, because sending one id '
-                + 'drops the rest. These are what let `traverse` reach the entry from the entity it concerns; '
+                + 'drops the rest. These are what let `graph_traverse` reach the entry from the entity it concerns; '
                 + 'they are NOT edges, so an entry left with an empty list is reachable only by search or by '
                 + 'date.',
             },

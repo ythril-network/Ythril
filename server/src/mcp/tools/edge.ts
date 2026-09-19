@@ -45,7 +45,7 @@ export const save_edgeTool: ToolHandler = {
             label: { type: 'string', minLength: 1, description: 'Relationship label (e.g. "works_at", "knows").' },
             type: { type: 'string', description: 'Optional edge type (e.g. "causal", "attribution").' },
             weight: unitScoreSchema('Optional strength for this relationship, 0 to 1. Nothing derives it '
-              + 'and nothing ranks on it — it is stored, returned, and sortable by `query`, so it means '
+              + 'and nothing ranks on it — it is stored, returned, and sortable by `filter`, so it means '
               + 'whatever you decide it means. The 0–1 bound is enforced HERE and not on `save_bulk`, whose '
               + 'per-item schemas are for discovery only.'),
             tags: {
@@ -178,7 +178,7 @@ export const update_edgeTool: ToolHandler = {
     + 'recall `topK`. Excluding a busy structural edge is how you stop it crowding out the records it '
     + 'connects.\n\n'
     + 'PARAMETERS:\n'
-    + '- `id` — the edge\'s `_id`, as `traverse`, `query` and `recall`\'s `_graph` report it. Required.\n'
+    + '- `id` — the edge\'s `_id`, as `graph_traverse`, `filter` and `recall`\'s `_graph` report it. Required.\n'
     + '- `label` — the relationship\'s name, replaced when sent. Re-embeds, AND CHANGES THE `_id`: since 3.6 an edge id is derived from `(from, to, label)` so two peers creating one relationship agree on its id without talking, and a label is part of that identity. The result carries the NEW `_id` and the old one 404s — read it back rather than reusing the id you sent. Every other field patches in place. The same happens to an edge whose endpoint moves in an entity merge.\n'
     + '- `type` — replaced when sent, and re-validated against the space\'s edge-type allowlist.\n'
     + '- `weight` — 0 to 1. Ranking uses it; traversal does not filter on it.\n'
@@ -188,7 +188,7 @@ export const update_edgeTool: ToolHandler = {
     + '- `deleteFields` — dot-notation paths to remove, permanently and with no undo. System fields are '
     + 'refused. This is the ONLY way to unset anything, and it runs AFTER the merge above.\n'
     + '- `suppressEmbeddings` — see its own description. It removes the vector, so `recall` can no longer '
-    + 'RANK this edge by meaning. It does NOT remove the edge from the graph: `traverse` still walks it, and a '
+    + 'RANK this edge by meaning. It does NOT remove the edge from the graph: `graph_traverse` still walks it, and a '
     + 'recall on either endpoint still expands through it into `_graph`. Excluding an edge hides it from '
     + 'ranking, never from traversal.\n'
     + '- `ttlDays` — this edge\'s own expiry, the MOST specific of three tiers: it beats the type\'s retention '
@@ -205,7 +205,7 @@ export const update_edgeTool: ToolHandler = {
             space: s.requiredSpace,
             id: {
               type: 'string', minLength: 1,
-              description: 'The edge\'s `_id`, as `traverse`, `recall` and `query` report it. Required, '
+              description: 'The edge\'s `_id`, as `graph_traverse`, `recall` and `filter` report it. Required, '
                 + 'and an id that names nothing is an ERROR rather than a silent no-op. Note this addresses '
                 + 'the edge by id, while `save_edge` addresses it by the from/to/label TRIPLET.',
             },
@@ -309,7 +309,7 @@ export const graph_traverseTool: ToolHandler = {
   description: 'Follow edges from a starting entity and return reachable nodes up to `maxDepth` hops. For dependency analysis, impact assessment and lineage.\n\n'
     + 'NOT THE SAME AS `recall(traverse: n)`, and the difference decides which one you want:\n'
     + '• This starts from a node you ALREADY KNOW, by id. `recall`\'s expansion starts from whatever a search matched, so it answers "what is near the things about X" rather than "what is near THIS".\n'
-    + '• This can follow `entityIds` references — chrono entries, facts and files that point AT a node — which are not edges. `includeChrono`, `includeMemories` and `includeFiles` turn each kind on, and `includeChrono` is ON by default here because you came to explore a graph rather than to search. `recall` takes the SAME three flags inside its `traverse` object, all three defaulting OFF there because its answer is budgeted — so the difference between the two tools is the default, not the capability.\n'
+    + '• This can follow `entityIds` references — chrono entries, facts and files that point AT a node — which are not edges. `includeChrono`, `includeMemories` and `includeFiles` turn each kind on, and `includeChrono` is ON by default here because you came to explore a graph rather than to search. `recall` takes the SAME three flags inside `recall`\'s `traverse` object, all three defaulting OFF there because its answer is budgeted — so the difference between the two tools is the default, not the capability.\n'
     + '• This returns a flat node list with a depth on each; `recall` nests its walk under the match that reached it.\n\n'
     + 'It is also blind to meaning, which is the point: a node reached in three hops is reached whether or not it resembles anything, and nothing here is embedded or ranked. A record retired from semantic ranking is reached exactly as any other.\n\n'
     + 'AN EDGE TO A FACT, CHRONO ENTRY OR FILE IS FOLLOWED, and no flag governs it. An edge declares the KIND at each end, so `supersedes` between two facts is a real stored edge — before 5.0 the walk looked every neighbour up among entities and dropped the rest in silence, so such an edge was stored and reached by nothing. The include flags below are about IMPLICIT links (a record naming this one), of which a busy node has thousands; an edge exists only because somebody drew it, so there are exactly as many as were meant. This also means a walk can START from a fact or a chrono entry, not only an entity.\n\n'
@@ -390,7 +390,7 @@ export const delete_edgeTool: ToolHandler = {
     + 'one.\n\n'
     + 'IF YOU WANT IT OUT OF SEARCH RATHER THAN GONE, set `suppressEmbeddings` with `update_edge` '
     + 'instead. Edges are searchable records and compete with knowledge for a recall `topK`; excluding one '
-    + 'stops it being ranked while `traverse` still walks it and recall still expands through it. Deleting it '
+    + 'stops it being ranked while `graph_traverse` still walks it and recall still expands through it. Deleting it '
     + 'removes it from the graph as well, which is a much larger change than "it was crowding my results".\n\n'
     + 'IT IS NEVER REFUSED FOR BEING REFERENCED, and unlike facts and chrono entries that did not change '
     + 'in 4.0: nothing can point AT an edge. Links run from a fact, chrono entry or file to what it is '
@@ -399,7 +399,7 @@ export const delete_edgeTool: ToolHandler = {
     + 'not quietly resurrected from a peer that still has it. That is also why re-creating it with the same '
     + 'id does not undo this — the tombstone outranks it. Use a new id.\n\n'
     + 'PARAMETERS:\n'
-    + '- `id` — the edge\'s `_id`, as `traverse`, `query` and recall\'s `_graph` report it. Required. An id '
+    + '- `id` — the edge\'s `_id`, as `graph_traverse`, `filter` and recall\'s `_graph` report it. Required. An id '
     + 'that does not exist is an ERROR, not a silent success.\n'
     + '- `targetSpace` — required when `space` is a proxy: the member space holding the edge.\n\n'
     + 'RESPONSE: one line confirming the id that was deleted.',

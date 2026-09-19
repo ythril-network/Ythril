@@ -753,6 +753,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the paths it cannot read statically instead of silently passing them, so the skip cannot grow into the
   gate.
 
+- **Another seventeen schema descriptions told a caller to use `query`, a tool 5.0 renamed `filter`** —
+  *"sortable by `query`"*, *"filterable by `query` on the `files` collection"*, *"as `recall` and `query`
+  report it"* — plus a dozen more naming `traverse` where they meant `graph_traverse`. All of them sit in
+  the text a caller reads while constructing a call.
+
+  **They were measured by the pre-5.0 audit and deliberately not fixed by it.** The gate it shipped skips
+  a retired name that is still live as a parameter, because reporting recall's `traverse` FIELD as a dead
+  tool is how a gate gets deleted — and that same skip hid these. In a schema description the question has
+  an answer the gate can derive: it is the parameter of the tool being described (`help`'s own `query`), or
+  it says whose parameter it is (`recall`'s `traverse`), or it is the dead tool. So the exclusion now
+  applies to guide prose only, and descriptions are held to naming live tools.
+
+  Two test gates had pinned themselves to the old names and kept passing on the rot; both now name the
+  live tool, so they fail if the pointer rots again.
 - **A file keeps its description, tags and properties across a move, and across a rewrite that does not
   mention them.** Both already held; neither was written down, and the cost of that landed on somebody
   else. A file is the one record type with no id of its own — its `_id` IS its path — so an integrator

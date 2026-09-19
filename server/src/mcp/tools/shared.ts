@@ -52,7 +52,7 @@ export const SUPPRESS_EMBEDDINGS_SCHEMA = {
   description:
     'Retire this record from semantic RANKING. Implemented as the ABSENCE of a vector, NOT a query-time '
     + 'filter: a suppressed record cannot be RANKED by recall even deliberately, because there is no vector '
-    + 'to rank. Everything that does not rank still reaches it in full — query, list, get, the `traverse` '
+    + 'to rank. Everything that does not rank still reaches it in full — filter, list, get, the `graph_traverse` '
     + 'tool, AND recall\'s own `traverse` expansion, which walks edges out of a match and never consults a '
     + 'vector. So a record suppressed here is still findable through its relationships; it just stops '
     + 'competing on meaning. May be the only field you send — retiring a record is a complete edit.\n\n'

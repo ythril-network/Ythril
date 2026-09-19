@@ -124,7 +124,7 @@ export const delete_linkTool: ToolHandler = {
     + 'A TOMBSTONE IS WRITTEN, so the deletion reaches peer instances on the next sync instead of being '
     + 'quietly restored by one that still holds the link.\n\n'
     + 'PARAMETERS:\n'
-    + '- `id` — the link\'s `_id`, as `save_link` and `query` report it. An id that is not a link is an '
+    + '- `id` — the link\'s `_id`, as `save_link` and `filter` report it. An id that is not a link is an '
     + 'ERROR, not a silent success.\n'
     + '- `targetSpace` — required when `space` is a proxy: the member space holding the link.\n\n'
     + 'RESPONSE: one line confirming the id that was removed.',
