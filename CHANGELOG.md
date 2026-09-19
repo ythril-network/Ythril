@@ -15,6 +15,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A pasted document is treated as material rather than assertion** (`B-5`). Measured on the pinned
+  corpora: LoCoMo's longest turn ever is **454 characters**; LongMemEval has **351 user turns over 5,000**,
+  across **253 of 500 histories**, the largest **76,560** — a user pasting the whole Wikipedia article on
+  the GDPR and asking what it said about AI regulation. Assistant turns over 5,000: three, in the entire
+  corpus. So a long turn is almost always somebody pasting something in, and half the corpus has one.
+
+  The prompt had a rule for the ASSISTANT supplying world knowledge and none for a person pasting it — and
+  `attributed` is the wrong tool twice over, since the writer refuses it on a person's claim. So a pasted
+  article would have become either a hundred unmarked claims the graph ASSERTS, or a refusal. It is now a
+  third thing: the person did not say what is in it, they brought it, and the fact is that they brought it
+  and what they wanted from it. What the exchange then establishes about the people — what they were doing,
+  what they said about it, a detail the conversation turns on — is still a claim.
+
+  **With a validator rule, because the prompt half depends on the model having read it.** Mining a document
+  produces dozens of claims sharing one `sourceTurns` entry, about a subject nobody in the conversation is,
+  and nothing else downstream can see it — every claim is well formed. No single turn may account for more
+  than a share of a file's claims, expressed as a share rather than a count for the same reason as the rule
+  it inverts: a threshold in records is wrong for a short conversation and meaningless for a long one.
+
 - **A superseded record is badged wherever a record is listed** (`Q-36`). The mark reached the API, an
   export, a sync and every assistant answer, and no view in the app. An operator resolving a contradiction
   saw the pair leave the review queue and then found both claims sitting in the Facts tab looking identical

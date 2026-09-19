@@ -60,6 +60,41 @@ graph that models reality and a pile of chat lines.
 The verbatim words are not lost — they live in the session transcript, which is kept as a file so anything
 can be quoted exactly. The graph is for finding; the transcript is for quoting.
 
+## When somebody PASTES something
+
+People paste. An article, a contract, a log, an error page, a draft somebody else wrote, a recipe — dropped
+into a turn and followed by *"what does this say about X?"* or *"can you fix this?"*. The turn is enormous
+and almost none of it is the speaker talking.
+
+**A pasted document is MATERIAL, not assertion.** The person did not say the things in it; they brought it.
+So the fact the conversation establishes is that they brought it, and what they wanted from it:
+
+> *"On 12 July 2023 Dana pasted the Wikipedia article on the GDPR and asked what it said about AI
+> regulation."*
+
+That is one claim, and the pasted turn is its `sourceTurns`. **Do not mine the document for claims.** An
+article yields a hundred statements about its subject, none of them about anybody in the conversation, and
+a graph that swallows them is a graph where a question about the person returns paragraphs about data
+protection law.
+
+**`attributed` is not the tool here, and reaching for it makes a second mistake.** That mark is for a claim
+an AI assistant originated, and the writer refuses it on a person's claim — correctly. A pasted document is
+a third thing: not the speaker's assertion, not the assistant's output, just material they put on the table.
+
+**What to take from it, if anything.** Only what the exchange establishes about the people in it:
+
+- **what they were doing** — reviewing a contract, debugging a stack trace, researching a regulation. That
+  is a fact about them, and it is usually the point.
+- **what they said ABOUT it** — *"this clause is the one my lawyer flagged"* is theirs, and it is a claim.
+- **a detail the conversation then turns on** — if they and the assistant go on to discuss one figure from
+  the document for three turns, that figure has become part of the conversation and can be a claim.
+
+Everything else stays in the transcript, which is where the verbatim text lives and where anything can be
+quoted from exactly.
+
+**The same goes for something the assistant pastes back** — a rewritten draft, a corrected file. That it
+produced the thing is true and is one attributed claim; the contents are not a hundred more.
+
 ## When one of the speakers is an ASSISTANT
 
 Some conversations are between people. Others are between a person and an AI assistant, and then the turns

@@ -42,6 +42,25 @@ function startsWithSpeakerName(text, speaker) {
  */
 const MAX_SYNTHESISED_PROVENANCE_SHARE = 0.12;
 
+/**
+ * The share of a conversation's claims that may come from ONE turn.
+ *
+ * The inverse of the rule above, and it catches the opposite mistake. That one stops a record claiming most
+ * of the transcript as its provenance; this one stops most of the claims coming out of a single turn.
+ *
+ * **It exists because people paste.** An article, a contract, a log — dropped into one turn and followed by
+ * a question. Mining it yields dozens of claims about a subject nobody in the conversation is, all sharing
+ * one `sourceTurns` entry, and the graph stops being about the people in it. The prompt says a pasted
+ * document is material rather than assertion; this is the part that does not depend on the model having
+ * read that.
+ *
+ * A legitimate turn is named by a handful of claims — the fact it states, plus the arc claims it takes
+ * part in. A mined document is named by a quarter of the file. The gap between those is wide enough that
+ * the exact share does not have to be argued about, which is why it is a share rather than a count: a
+ * threshold in records would be wrong for a short conversation and meaningless for a long one.
+ */
+const MAX_CLAIMS_FROM_ONE_TURN_SHARE = 0.15;
+
 /** `YYYY-MM-DD`, and nothing looser. A partial date cannot be compared and a relative one cannot be resolved. */
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -289,6 +308,28 @@ export function validateExtraction(extraction, schemaEntries) {
     }
     for (const k of c.chrono ?? []) {
       if (!chronoKeys.has(k)) say(`${at} links to the chrono key '${k}', which nothing defines`);
+    }
+  }
+
+  /*
+   * ONE TURN, TOO MANY CLAIMS — a pasted document being mined. See `MAX_CLAIMS_FROM_ONE_TURN_SHARE`.
+   *
+   * The floor keeps a short file out of it: with six claims, four from one turn is a conversation about one
+   * thing rather than a document being taken apart.
+   */
+  if (claims.length >= 20) {
+    const ceiling = Math.ceil(claims.length * MAX_CLAIMS_FROM_ONE_TURN_SHARE);
+    const from = new Map();
+    for (const c of claims) {
+      for (const t of new Set(c.sourceTurns ?? [])) from.set(t, (from.get(t) ?? 0) + 1);
+    }
+    for (const [turn, n] of from) {
+      if (n > ceiling) {
+        say(`${n} of ${claims.length} claims name turn '${turn}' as a source, over the ${ceiling} a single `
+          + 'turn may account for. That is the shape of a pasted document being mined: an article or a log '
+          + 'yields dozens of statements about a subject nobody in the conversation is. Record that it was '
+          + 'brought and what was wanted from it, and leave the contents in the transcript.');
+      }
     }
   }
 
