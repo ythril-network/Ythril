@@ -61,7 +61,7 @@ export const save_factTool: ToolHandler = {
               type: 'array',
               items: { type: 'string' },
               description: 'Categorisation tags. They are part of what gets EMBEDDED, so a tag influences '
-                + 'meaning-ranking as well as being a filter — and they are filterable exactly, by `query` on '
+                + 'meaning-ranking as well as being a filter — and they are filterable exactly, by `filter` on '
                 + '`tags` and by `recall`\'s own `filter`. On the idempotent path (an `id` naming an entry '
                 + 'that already exists) they are MERGED over the stored list rather than replacing it.',
             },
@@ -215,7 +215,7 @@ export const update_factTool: ToolHandler = {
     + 'that is already stored, it would only stop you maintaining the record. Violations your change introduces '
     + 'are refused as before, in a `strict` space.\n\n'
     + 'PARAMETERS:\n'
-    + '- `id` — the fact\'s `_id`, as `recall` and `query` report it. Required.\n'
+    + '- `id` — the fact\'s `_id`, as `recall` and `filter` report it. Required.\n'
     + '- `fact` — the fact\'s text, replaced when sent. Re-embeds. Must not be empty.\n'
     + '- `tags` — REPLACES the stored list. See above.\n'
     + '- `entityIds` — REPLACES the stored links. UUID v4 each, and in a space with strict linkage every one '
@@ -226,7 +226,7 @@ export const update_factTool: ToolHandler = {
     + '- `deleteFields` — dot-notation paths to remove, permanently and with no undo. System fields are '
     + 'refused. This is the ONLY way to unset a property; applied AFTER the merge above.\n'
     + '- `suppressEmbeddings` — see its own description. In short: it removes the vector, so `recall` can '
-    + 'no longer RANK this fact by meaning, but `query`, `list`, `get` and recall\'s `traverse` expansion all '
+    + 'no longer RANK this fact by meaning, but `filter`, `list`, `get` and recall\'s `traverse` expansion all '
     + 'still reach it. Excluding a record does not hide it from the graph.\n'
     + '- `ttlDays` — this record\'s own expiry, the MOST specific of three tiers: it beats the type\'s '
     + 'retention window, which beats the space-wide one.\n'
@@ -242,7 +242,7 @@ export const update_factTool: ToolHandler = {
             space: s.requiredSpace,
             id: {
               type: 'string',
-              description: 'The fact\'s `_id`, as `recall`, `query` and the list endpoints report it. '
+              description: 'The fact\'s `_id`, as `recall`, `filter` and the list endpoints report it. '
                 + 'Required. An id that names nothing is an ERROR, not a silent no-op — so a failed update '
                 + 'is something you find out about rather than something you assume worked.',
             },
@@ -406,7 +406,7 @@ export const delete_factTool: ToolHandler = {
             space: s.requiredSpace,
             id: {
               type: 'string', minLength: 1,
-              description: 'The fact\'s `_id`, as `recall` and `query` report it. An id that does not exist '
+              description: 'The fact\'s `_id`, as `recall` and `filter` report it. An id that does not exist '
                 + 'is an ERROR, not a silent success, so a successful reply means a record really was '
                 + 'deleted. A tombstone is written under this id, which is why re-creating the record with '
                 + 'it does not undo the delete.',

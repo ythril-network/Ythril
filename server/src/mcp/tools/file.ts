@@ -91,7 +91,7 @@ export const write_fileTool: ToolHandler = {
               type: 'array', items: { type: 'string' },
               description: 'Tags stored on the file\'s metadata record. REPLACES the stored list on a '
                 + 'rewrite; `update_file_meta` replaces too, unlike the brain update tools, which merge. '
-                + 'Filterable by `query` on the `files` collection and by `recall`\'s own filter.',
+                + 'Filterable by `filter` on the `files` collection and by `recall`\'s own filter.',
             },
             properties: {
               type: 'object',
@@ -531,7 +531,7 @@ export const update_file_metaTool: ToolHandler = {
       },
       entityIds: {
         type: 'array', items: { type: 'string' },
-        description: 'REPLACES the stored entity links. These are what let `traverse` reach the file from '
+        description: 'REPLACES the stored entity links. These are what let `graph_traverse` reach the file from '
           + 'an entity; they are not edges, so a file with an empty list is reachable only by path or by '
           + 'search.',
       },
