@@ -740,6 +740,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The gate that checks every mutating route is guarded could not see the five most destructive ones.**
+  Wiping a space, importing one, exporting one, reloading the config and rotating the signing key are
+  declared straight on the express app rather than on a router, and both halves of the analysis missed
+  them: the pattern matched only names containing "router", and the file scan never read `app.ts` at all.
+  They were not reported as unguarded — they were **absent**.
+
+  **All five turned out to be correctly guarded and correctly audited**, so nothing was exposed; what was
+  missing was the check. Proven by mutation: stripping the admin guard off `POST /api/admin/reload-config`
+  left the suite green before this change and names the route after it.
+
+  **The route list was already a shared module, and the guard analysis had kept its own copy of it** — so
+  teaching the module to see `app` moved nine routes into every other gate's view and left the one that
+  matters exactly as blind. It reads the shared list now.
+
+- **Every path the client calls is now checked against a route the server mounts.** There is no type
+  between a template string and a router, so a renamed route is a runtime 404 rather than a build error —
+  and what an operator sees is an empty panel, not an error naming the call. Nothing was broken when the
+  check was added; 5.0 renames almost every public name, which is why it exists now.
+
+- **One refusal, written out by hand in three places, is built from the vocabulary instead.**
+  `Invalid knowledgeType … Must be one of: entity, fact, edge, chrono` sat beside a check that reads the
+  same list from the code. They agree today; the rename from `memory` to `fact` had to find all three, and
+  nothing would have failed had it missed one.
+
+  These three close the pre-5.0 audit (`Q-22`).
+
 - **Twenty-four sentences still sent a caller to a tool 5.0 had removed.** A rename is the one change that
   passes the compiler while leaving the writing wrong, and these were in the writing a caller reads while
   constructing a call: `save_entity` told them to look an entity up with a tool that is gone, `space_meta`
