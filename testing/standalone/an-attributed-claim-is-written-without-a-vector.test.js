@@ -25,28 +25,13 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { writeSpace } from '../../benchmarks/writer/write-space.mjs';
+import { recordingYthril } from '../_shared/recording-ythril-client.mjs';
 
 /** The smallest schema the writer will accept: it reads the claim type's name out of this. */
 const SCHEMA = [
   { knowledgeType: 'entity', typeName: 'person', schema: { propertySchemas: {} } },
   { knowledgeType: 'fact', typeName: 'utterance', schema: { propertySchemas: {} } },
 ];
-
-/** A client that records what it was asked to write and invents ids, so the writer runs for real. */
-function recordingClient() {
-  let n = 0;
-  const wrote = { memories: [], entities: [], chrono: [], edges: [], files: [] };
-  const id = () => `id-${++n}`;
-  return {
-    wrote,
-    createSpace: async () => ({}),
-    writeEntity: async (_s, r) => { wrote.entities.push(r); return { id: id() }; },
-    writeChrono: async (_s, r) => { wrote.chrono.push(r); return { id: id() }; },
-    writeMemory: async (_s, r) => { wrote.memories.push(r); return { id: id() }; },
-    writeEdge: async (_s, r) => { wrote.edges.push(r); return { id: id() }; },
-    writeFile: async (_s, r) => { wrote.files.push(r); return { id: id() }; },
-  };
-}
 
 const extractionWith = claims => ({
   conversationId: 'conv-x',
@@ -59,7 +44,7 @@ const extractionWith = claims => ({
 });
 
 async function write(claims) {
-  const ythril = recordingClient();
+  const ythril = recordingYthril();
   await writeSpace({ extraction: extractionWith(claims), ythril, space: 'test-space', schemaEntries: SCHEMA });
   return ythril.wrote.memories;
 }

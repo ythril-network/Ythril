@@ -26,7 +26,8 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { validateExtraction } from '../../benchmarks/writer/validate-extraction.mjs';
+import { readFileSync } from 'node:fs';
+import { validateExtraction, SUPERSEDES } from '../../benchmarks/writer/validate-extraction.mjs';
 
 /** A minimal schema in the shape `space/schema.json` holds, so the validator is exercised, not mocked. */
 const SCHEMA = [
@@ -116,7 +117,11 @@ describe('what the instance would NOT catch, which is the point', () => {
   });
 
   test('two records claiming the same key', () => {
-    assert.match(problemsFor(e => { e.entities[1].key = 'ada'; }).join(' '), /redefines the key 'ada'/);
+    // The wording changed when the three key spaces became one: "redefines" described an entity clashing
+    // with an entity, and the rule now covers a claim clashing with either. The message names BOTH records
+    // because "this key is taken" without saying by what is a hunt through the file.
+    assert.match(problemsFor(e => { e.entities[1].key = 'ada'; }).join(' '),
+      /entities\[1\] uses the key 'ada', which entities\[0\] already defines/);
   });
 });
 
@@ -232,6 +237,100 @@ describe('the claim layer is complete', () => {
     // The writer has no transcript to compare against, and inventing a failure there would block a caller
     // who is not running a benchmark at all.
     assert.deepEqual(validateExtraction(good(), SCHEMA), []);
+  });
+});
+
+describe('supersession — a claim that retired another', () => {
+  /*
+   * ## Why a claim needs a `key` at all, when nothing needed one before
+   *
+   * Entities and chrono entries carry a local `key` because something points at them. Claims never did,
+   * because nothing did. Supersession is the first thing that points at a claim: *"the August answer
+   * replaced the May one"* is an edge between two claims, and an edge names its ends by key.
+   *
+   * So a claim's `key` is OPTIONAL — the overwhelming majority of claims are still pointed at by nothing —
+   * and one namespace covers all three kinds, because an edge end is a key and says nothing about which
+   * collection it is in.
+   *
+   * ## The rule that matters, and it is not "every retirement has a successor"
+   *
+   * A retirement often has no successor: *"she left Acme"* with no new employer is a real thing to record.
+   * So `superseded: true` stands alone and is never required to have an edge.
+   *
+   * The implication runs the other way and it is the one worth gating: if X supersedes Y, then Y is not
+   * true any more. An edge drawn without the mark leaves both claims ranking as current, which is the whole
+   * defect supersession exists to fix — and it would be invisible, because the edge looks like the fix.
+   */
+  const superseding = e => {
+    e.claims[0].key = 'worked-at-acme';
+    e.claims[0].superseded = true;
+    e.claims.push({
+      key: 'works-at-beta', text: 'Ada left Acme and started at Beta in June 2023.',
+      speaker: 'Ada', statedOn: '2023-05-08', entities: ['ada'], sourceTurns: ['D1:2'],
+    });
+    e.edges.push({ label: 'supersedes', from: 'works-at-beta', to: 'worked-at-acme' });
+  };
+
+  test('a claim-to-claim supersedes edge is accepted', () => {
+    assert.deepEqual(problemsFor(superseding), []);
+  });
+
+  test('a retirement with NO successor is accepted', () => {
+    // "She left and has not started anywhere new" is a retirement with nothing replacing it. Requiring an
+    // edge would make that unsayable, and the model would invent a successor to satisfy the validator.
+    assert.deepEqual(problemsFor(e => { e.claims[0].superseded = true; }), []);
+  });
+
+  test('a supersedes edge whose target is NOT marked is refused', () => {
+    const p = problemsFor(e => { superseding(e); delete e.claims[0].superseded; });
+    assert.equal(p.length, 1, `expected one problem, got: ${p.join(' | ')}`);
+    assert.match(p[0], /supersedes.*worked-at-acme.*superseded/);
+  });
+
+  test('a supersedes edge between two ENTITIES is refused', () => {
+    // Two entities that turn out to be one thing is a MERGE, and merging is what `aliases` is for. Drawing
+    // this instead would leave two nodes where the whole point of the graph is that there is one.
+    const p = problemsFor(e => { e.edges.push({ label: 'supersedes', from: 'ada', to: 'acme' }); });
+    assert.match(p.join(' '), /supersedes.*claims/);
+  });
+
+  test('an edge end naming a claim key is resolved, not reported as dangling', () => {
+    // The pre-existing dangling-key check knew only about entities. A claim key would have read as a
+    // reference to nothing — and the message would have been confidently wrong.
+    const p = problemsFor(superseding);
+    assert.ok(!p.join(' ').includes('defines no'), `no key may read as dangling: ${p.join(' | ')}`);
+  });
+
+  test('one key used by two records is refused, whatever kinds they are', () => {
+    // One namespace is what lets an edge end be a bare key. Two records sharing one means an edge points at
+    // whichever the writer happened to resolve last, silently.
+    const p = problemsFor(e => { superseding(e); e.claims[1].key = 'ada'; });
+    assert.match(p.join(' '), /'ada'.*(twice|more than once|already)/);
+  });
+
+  test('superseded must be a boolean, not a string', () => {
+    // "false" is truthy. A mark whose whole job is to be believed must not be coerced.
+    assert.match(problemsFor(e => { e.claims[0].superseded = 'true'; }).join(' '), /superseded.*boolean/);
+  });
+});
+
+describe('the second copy of the supersedes label is compared, not trusted', () => {
+  test('the harness and the server spell it the same', () => {
+    /*
+     * The validator cannot import the server's constant: it runs in the benchmark harness, which must work
+     * without a TypeScript build having happened. So the name exists twice — and a second copy of a fact is
+     * only survivable while something compares the two. A coverage check that the label is MENTIONED
+     * somewhere would pass with them spelled differently, which is exactly the state that produces an edge
+     * the server refuses, on whichever request reaches it.
+     */
+    const src = readFileSync('server/src/spaces/schema-validation.ts', 'utf8');
+    const block = /SERVER_WRITTEN_EDGE_LABELS[^=]*=\s*new Set\(\[([\s\S]*?)\]\)/.exec(src);
+    assert.ok(block, 'SERVER_WRITTEN_EDGE_LABELS is gone from the server, so this gate compares nothing');
+    const labels = [...block[1].matchAll(/'([^']+)'/g)].map(m => m[1]);
+    assert.ok(labels.length >= 1, 'the server declares no server-written edge labels — read the file, not this gate');
+    assert.ok(labels.includes(SUPERSEDES),
+      `the harness writes '${SUPERSEDES}' and the server's server-written labels are [${labels.join(', ')}]. `
+      + 'A space carrying an edge allowlist would refuse the harness edge.');
   });
 });
 

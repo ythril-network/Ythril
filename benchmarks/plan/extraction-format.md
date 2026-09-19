@@ -71,6 +71,49 @@ file otherwise, because a mark that is optional in practice is a mark nobody can
 The assistant echoing a user's own fact is NOT this case: that claim belongs to the user, with the user as
 `speaker` and no mark. See the assistant-turn section of `../prompt/extraction.md`.
 
+**`superseded: true` marks a claim that is no longer true**, and it is written as a record FIELD rather than
+a property — unlike `attributed`. The difference is whose vocabulary it is: `attributed` belongs to this
+corpus and is declared on the claim type, `superseded` belongs to the product and exists on every record in
+every space. A second spelling of a real field, in the one space anybody reads to judge the product, is
+worse than no mark at all.
+
+It does not hide the claim. A superseded claim still embeds, still ranks and comes back labelled — hiding it
+would make *"where DID she work?"* unanswerable in order to fix *"where does she work?"*.
+
+**A claim MAY carry a `key`, and almost none do.** Nothing pointed at a claim until supersession; entities
+and chrono entries have always needed one because something referred to them. Give a claim a key only when
+an edge names it.
+
+**One key names one record, across all three kinds.** An edge end is a bare key and says nothing about which
+collection it is in, so two records sharing one make the edge point at whichever was resolved first.
+
+**Which claim replaced which is a `supersedes` edge, claim to claim:**
+
+```json
+{ "claims": [
+    { "key": "worked-at-acme", "text": "Ada worked at Acme as a platform engineer from March 2021.",
+      "speaker": "Ada", "statedOn": "2023-05-08", "superseded": true,
+      "entities": ["ada", "acme"], "sourceTurns": ["D1:1"] },
+    { "key": "works-at-beta", "text": "Ada left Acme and started at Beta in June 2023.",
+      "speaker": "Ada", "statedOn": "2023-06-14",
+      "entities": ["ada"], "sourceTurns": ["D4:2"] }
+  ],
+  "edges": [ { "label": "supersedes", "from": "works-at-beta", "to": "worked-at-acme" } ] }
+```
+
+`supersedes` is the one label that is **not** declared in `../space/schema.json`, and must not be: the
+instance writes it itself when a reviewer resolves a contradiction, so it is server-written vocabulary
+rather than this corpus's.
+
+**A retirement needs no successor.** *"She left Acme"* with nobody named after it is a real thing to record:
+`superseded: true` stands alone and no edge is required. The implication runs the other way and the writer
+enforces it — **if an edge says X replaced Y, then Y must carry the mark**, or both come back from a search
+looking equally current, which is the thing the edge was drawn to prevent.
+
+**Between two ENTITIES, `supersedes` is refused.** Two entities that turn out to be one thing are a merge,
+and merging is what `aliases` is for; drawing an edge instead leaves two nodes where the whole value of the
+graph is that there is one.
+
 ## What the writer does with it
 
 1. Creates the space with `../space/schema.json`, its purpose and its usage notes.

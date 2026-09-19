@@ -78,6 +78,7 @@ export async function writeSpace({ extraction, ythril, space }) {
 
   const entityId = new Map();
   const chronoId = new Map();
+  const claimId = new Map();
   const claimIdsBySession = new Map();
   const entityKeysBySession = new Map();
   const sourceTurns = new Map();
@@ -158,9 +159,24 @@ export async function writeSpace({ extraction, ythril, space }) {
        * is back to competing for slots, silently.
        */
       ...(c.attributed === true ? { suppressEmbeddings: true } : {}),
+      /*
+       * THE RETIREMENT MARK IS A RECORD FIELD, not a property, and that is the opposite of `attributed`
+       * one line above — worth stating because the two look like the same kind of thing.
+       *
+       * `attributed` is this corpus's vocabulary: a declared property on the claim type, meaningful in
+       * this space and nowhere else. `superseded` is the product's, on every fact, entity, edge and
+       * chrono entry in every space — so writing it as a property here would put a second spelling of a
+       * real field into the one space anybody reads to judge the product.
+       *
+       * It does NOT suppress. A superseded claim keeps its vector and keeps ranking, because hiding it
+       * would make *"where DID she work?"* unanswerable in order to fix *"where does she work?"*.
+       */
+      ...(c.superseded === true ? { superseded: true } : {}),
       ...(linked.length > 0 ? { entityIds: linked } : {}),
     });
     const id = created.id ?? created._id;
+    // Only a claim something points at carries a key, and almost none do — see the edge resolver below.
+    if (c.key !== undefined) claimId.set(c.key, id);
     records++;
 
     // The side map, and the only place these ever live.
@@ -176,11 +192,36 @@ export async function writeSpace({ extraction, ythril, space }) {
   }
 
   /* ── 4. edges ──────────────────────────────────────────────────────────────────────────────────────── */
+  /*
+   * AN EDGE END IS A BARE KEY, so the key alone has to say which collection it is in — and which the
+   * INSTANCE is told, because an edge declares the kind at each end and a wrong one is refused at the write.
+   *
+   * Every end was an entity until supersession: nothing had ever pointed at a claim. Rather than adding a
+   * second lookup for the one new case, all three maps are consulted, which is also what makes the
+   * validator's one-namespace rule the thing that keeps this honest — two records sharing a key would
+   * resolve to whichever map is asked first, silently and differently from run to run.
+   *
+   * `entity` passes NO kind: omitting them means both ends are entities, which is what every edge in the
+   * corpus except a supersedes one means, and sending it explicitly would change nothing but the bytes.
+   */
+  const resolveEnd = (key) => {
+    if (entityId.has(key)) return { id: entityId.get(key), kind: undefined };
+    if (claimId.has(key)) return { id: claimId.get(key), kind: 'fact' };
+    if (chronoId.has(key)) return { id: chronoId.get(key), kind: 'chrono' };
+    // Unreachable through the harness — `validateExtraction` refuses a dangling end before anything is
+    // written. Thrown rather than passed on as `undefined`, which the instance would read as a missing
+    // field and answer with a 400 naming the wrong problem.
+    throw new Error(`edge end '${key}' names no record; the extraction should have been refused`);
+  };
   for (const e of extraction.edges ?? []) {
+    const from = resolveEnd(e.from);
+    const to = resolveEnd(e.to);
     await ythril.writeEdge(space, {
-      from: entityId.get(e.from),
-      to: entityId.get(e.to),
+      from: from.id,
+      to: to.id,
       label: e.label,
+      ...(from.kind ? { fromKind: from.kind } : {}),
+      ...(to.kind ? { toKind: to.kind } : {}),
       ...(e.properties && Object.keys(e.properties).length > 0 ? { properties: e.properties } : {}),
     });
     records++;

@@ -95,6 +95,52 @@ graph records that this was SAID, not that it is SO** — the same distinction a
 Leave `attributed` off everywhere else. A claim with no mark is one a person asserted, and in any real
 conversation that is almost all of them.
 
+## When a later session makes an earlier fact WRONG
+
+A conversation recorded over months does not only add facts — it replaces them. Somebody changes job, moves
+city, gives up a hobby, finishes a course they were halfway through. The earlier statement was true when it
+was made and is not true now, and **both belong in the graph.**
+
+Writing only the newer one loses the history, and a question about what used to be the case has nothing to
+match. Writing both with nothing to separate them is worse: a search for *"where does she work"* hands back
+two employers and no way to tell which is current, so the graph answers confidently and wrongly.
+
+So the later claim gets written, the earlier one **stays exactly where it is and gains a mark**:
+
+```json
+{ "key": "worked-at-acme", "text": "Ada worked at Acme as a platform engineer from March 2021.",
+  "speaker": "Ada", "statedOn": "2023-05-08", "superseded": true, "entities": ["ada", "acme"],
+  "sourceTurns": ["D1:1"] }
+```
+
+and an edge says which claim replaced it:
+
+```json
+{ "label": "supersedes", "from": "works-at-beta", "to": "worked-at-acme" }
+```
+
+A claim needs a `key` only for this — give one to the two claims an edge names, and to no others.
+
+**Three things to get right, and the second is the one that goes wrong.**
+
+**1. Mark the OLD one, not the new one.** `superseded` means *this is no longer true*. The claim that
+replaced it is current and carries nothing.
+
+**2. Not every change is a supersession.** Ask whether the earlier statement is still true of the time it
+described. *"I was nervous before the interview"* is not retired by *"I got the job"* — both remain true,
+and they are two facts about a sequence. Retire a claim only when the world it described has been replaced:
+a job that ended, an address that changed, a plan that was abandoned, a number that was corrected. **A habit
+that stopped, a project that finished and a pet that died are all still TRUE of their period** — write the
+ending as its own claim rather than retiring the beginning.
+
+**3. A retirement often has no successor, and that is a complete record.** *"She left Acme"* with nothing
+said about what came next is `superseded: true` on the old claim and no edge at all. Do not invent a
+replacement to have something to point at.
+
+**Never retire something the conversation did not retire.** Two claims that merely disagree are not a
+supersession — people misremember, and a later session repeating a fact differently is usually one fact said
+twice, not two facts of which one is dead. Mark it only when the text says the situation changed.
+
 ## How to do it well
 
 **Identity is the whole job.** The graph is worth having because a mention in session 3 and a mention in
@@ -187,6 +233,8 @@ Check these yourself; the writer will refuse the file otherwise.
 - Every referenced `key` is defined.
 - Every claim has `speaker`, `statedOn` and at least one `sourceTurns` entry.
 - **Every claim whose `speaker` is the assistant carries `attributed: true`**, and no other claim does.
+- **Every `supersedes` edge runs claim to claim, and the claim at its `to` end carries `superseded: true`.**
+  A mark with no edge is fine — a retirement need not have a successor.
 - **Every turn of every session appears in some claim's `sourceTurns`.** Count them.
 - **Every entity has a `description`.** A bare name loses every search it takes part in.
 - **Every claim reads on its own** — subjects named, dates resolved, no pronoun pointing outside it.

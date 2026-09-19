@@ -60,6 +60,17 @@ const ASSISTANT_SPEAKER = /^\s*(assistant|ai|bot|chatbot|agent|model|system)\s*$
  * @param {Array<object>} schemaEntries  the parsed `space/schema.json`
  * @returns {string[]} every problem found, empty when the file is writable
  */
+/**
+ * The edge label that says one claim replaced another.
+ *
+ * A second copy of `SERVER_WRITTEN_EDGE_LABELS` in `server/src/spaces/schema-validation.ts`, and it is a
+ * copy on purpose: this module runs in the benchmark harness, which must not depend on a server build
+ * having happened. `an-extraction-is-checked-before-anything-is-written.test.js` reads both and compares
+ * them, so the copy cannot drift without a gate failing — which is the only thing that makes a second copy
+ * survivable.
+ */
+export const SUPERSEDES = 'supersedes';
+
 export function validateExtraction(extraction, schemaEntries) {
   const problems = [];
   const say = m => problems.push(m);
@@ -90,11 +101,33 @@ export function validateExtraction(extraction, schemaEntries) {
 
   /* ── keys, and what type each one names ────────────────────────────────────────────────────────────── */
 
+  /*
+   * ONE NAMESPACE FOR EVERY LOCAL KEY, and one place that says so.
+   *
+   * An edge names its ends by bare key and says nothing about which collection the key is in — so the key
+   * has to decide that by itself. Entities and chrono entries each policed their own keys, which meant an
+   * entity and a chrono entry could share one: harmless while nothing crossed the two, and an edge end
+   * resolving to whichever the writer looked up first as soon as something did.
+   *
+   * Claims joined the namespace when supersession arrived. Nothing had ever pointed at a claim before.
+   */
+  const keyKind = new Map();
+  const defineKey = (key, kind, at) => {
+    const prior = keyKind.get(key);
+    if (prior) {
+      say(`${at} uses the key '${key}', which ${prior.at} already defines. One key names one record: an `
+        + 'edge end is a bare key, so two records sharing one make the edge point at whichever was '
+        + 'resolved last.');
+      return;
+    }
+    keyKind.set(key, { kind, at });
+  };
+
   const entityType = new Map();
   for (const [i, e] of entities.entries()) {
     const at = `entities[${i}]`;
     if (!e.key) { say(`${at} has no key`); continue; }
-    if (entityType.has(e.key)) say(`${at} redefines the key '${e.key}'`);
+    defineKey(e.key, 'entity', at);
     if (!e.name) say(`${at} ('${e.key}') has no name`);
     if (!entityTypes.has(e.type)) say(`${at} ('${e.key}') has type '${e.type}', which the schema does not declare`);
     // An entity is where facts about a subject accumulate, and it is the natural hub for a question about
@@ -111,7 +144,7 @@ export function validateExtraction(extraction, schemaEntries) {
   for (const [i, c] of chrono.entries()) {
     const at = `chrono[${i}]`;
     if (!c.key) { say(`${at} has no key`); continue; }
-    if (chronoKeys.has(c.key)) say(`${at} redefines the key '${c.key}'`);
+    defineKey(c.key, 'chrono', at);
     chronoKeys.add(c.key);
     if (!chronoTypes.has(c.type)) say(`${at} ('${c.key}') has type '${c.type}', which the schema does not declare`);
     if (!c.title) say(`${at} ('${c.key}') has no title`);
@@ -121,10 +154,61 @@ export function validateExtraction(extraction, schemaEntries) {
     }
   }
 
+  /*
+   * Claim keys, registered before the edges are read rather than in the claims block below.
+   *
+   * A claim's `key` is OPTIONAL and almost always absent — nothing points at a claim except a supersedes
+   * edge, and most claims retire nothing. The registration is hoisted here only because the edge loop
+   * resolves ends by key, and a claim key that arrived after it would read as a reference to nothing: a
+   * confidently wrong message about the one construct this was added for.
+   */
+  const supersededClaims = new Set();
+  for (const [i, c] of claims.entries()) {
+    if (c.key === undefined) continue;
+    defineKey(c.key, 'claim', `claims[${i}]`);
+    if (c.superseded === true) supersededClaims.add(c.key);
+  }
+
+  /*
+   * What a `supersedes` edge must look like, and the ONE implication worth gating.
+   *
+   * It runs claim → claim. Between two ENTITIES it would be a merge written as a link, leaving two nodes
+   * where the whole value of the graph is that a mention in session 3 and one in session 18 are one node;
+   * `aliases` is where that belongs.
+   *
+   * The rule is NOT "every retirement has a successor". "She left Acme" with no new employer is a real
+   * retirement, so `superseded: true` stands alone — required an edge, the model would invent a successor
+   * to satisfy the validator. The implication runs the other way: if X supersedes Y then Y is no longer
+   * true, and an edge drawn without the mark leaves both claims ranking as current. That is the whole
+   * defect supersession exists to fix, and it would be invisible, because the edge looks like the fix.
+   */
+  const checkSupersedes = (e, at) => {
+    for (const [end, key] of [['from', e.from], ['to', e.to]]) {
+      const kind = keyKind.get(key)?.kind;
+      if (kind !== 'claim') {
+        say(`${at} ('${SUPERSEDES}') ${end} is '${key}', which is ${kind ? `a ${kind}` : 'nothing'}. `
+          + 'A supersedes edge runs between two claims: one fact replacing another. Two entities that turn '
+          + 'out to be the same thing are a merge — put the variants in aliases instead.');
+      }
+    }
+    if (keyKind.get(e.to)?.kind === 'claim' && !supersededClaims.has(e.to)) {
+      say(`${at} ('${SUPERSEDES}') says '${e.to}' was replaced, but that claim is not marked `
+        + '`superseded: true`. Both then come back from a search looking equally current, which is the '
+        + 'thing this edge was drawn to prevent.');
+    }
+  };
+
   /* ── edges: the ends must be the kinds the label allows ────────────────────────────────────────────── */
 
   for (const [i, e] of edges.entries()) {
     const at = `edges[${i}]`;
+    /*
+     * `supersedes` is not declared in the space schema and must not be: the INSTANCE writes it too — it is
+     * in `SERVER_WRITTEN_EDGE_LABELS`, drawn whenever a reviewer resolves a contradiction — so a space that
+     * declared an edge allowlist without it would forbid an edge its own server creates. Checked as the
+     * shape it is rather than as a schema entry.
+     */
+    if (e.label === SUPERSEDES) { checkSupersedes(e, at); continue; }
     const def = edgeDefs.get(e.label);
     if (!def) { say(`${at} has label '${e.label}', which the schema does not declare`); continue; }
     for (const [end, key] of [['from', e.from], ['to', e.to]]) {
@@ -192,6 +276,11 @@ export function validateExtraction(extraction, schemaEntries) {
       say(`${at} is marked \`attributed: true\` but its speaker is '${c.speaker}', who is a person. The mark `
         + 'is for a claim an AI assistant originated; on a person\'s claim it hides a real fact from every '
         + 'reader that filters on it.');
+    }
+    // Refused rather than coerced: "false" is truthy, and a mark whose entire job is to be believed must
+    // never be read as the opposite of what was written.
+    if (c.superseded !== undefined && typeof c.superseded !== 'boolean') {
+      say(`${at} has superseded '${c.superseded}', which must be a boolean`);
     }
     if (!ISO_DATE.test(String(c.statedOn ?? ''))) say(`${at} has statedOn '${c.statedOn}', which is not YYYY-MM-DD`);
     if ((c.sourceTurns ?? []).length === 0) say(`${at} names no sourceTurns, so nothing can trace it to the transcript`);
