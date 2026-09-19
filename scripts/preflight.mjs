@@ -27,6 +27,7 @@ import { readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 
 import { join } from 'node:path';
 import { Socket } from 'node:net';
+import { splitStandalone, batched } from '../testing/_shared/standalone-split.mjs';
 
 /** Gates that read SOURCE only — no build required, so they run first and fail fastest. */
 const SOURCE_GATES = [
@@ -80,67 +81,38 @@ for (const [file, why] of BUILT_GATES) gate(file, why, file);
 
 // Every standalone test that does NOT need a running instance, rather than the curated handful above.
 //
-// `npm run test:standalone` assumes the Docker stack — a third of those files drive a live server on
+// `npm run test:standalone` assumes the Docker stack — a handful of those files drive a live server on
 // :3200. The rest are pure: they import from `server/dist` and assert on logic. Those had no reason to
 // wait for CI, and waiting for CI is exactly how a PR that changed `toRecallRecord`'s output shipped
 // with the test contradicting it still asserting the old shape.
 //
-// The split is DECLARED, not inferred. A test that drives a live server says `@needs-instance` in its
-// header; everything else runs here.
-//
-// It used to be inferred, by content match on `fetch(|127.0.0.1|localhost:|INSTANCES|BASE_URL`. That
-// guarded the loud direction — a test that really hits the network without a marker fails here with
-// ECONNREFUSED — and completely missed the quiet one: a PURE test that merely MENTIONS one of those
-// strings was silently excluded and never ran locally at all.
-//
-// Measured before replacing it, by running every standalone file alone with nothing listening:
-// **22 of 158 were pure and being skipped**, among them `ssrf-hardening`, `ssrf-ip-pinning`,
-// `peer-ssrf-policy`, `oidc-issuer-ssrf`, `log-redaction`, `secrets-permissions` and
-// `config-permissions`. "Preflight PASSED" was not running the SSRF suites. It cost two red CI runs
-// (#559 and #562), each on an assertion inside a file the heuristic had excluded for containing the
-// word `fetch(` in its own failure messages.
-//
-// Zero files were wrong in the other direction, which is why a declared marker is safe: the failure
-// mode it introduces (a new server-driving test that forgets the marker) is the loud one that was
-// already handled.
-// Anchored to a header line (` * @needs-instance …`), not a bare substring. A bare match self-excluded
-// the very gate that polices this split, because that file necessarily mentions the marker in its
-// assertions — the same "matched test data, not behaviour" mistake the heuristic made, one level up.
-const NEEDS_INSTANCE = /^\s*\*\s*@needs-instance/m;
-// TRACKED files, not whatever is on disk. `readdirSync` picks up untracked ones too, so a scratch
-// `*.test.js` left in this folder would run here and NOT in CI — preflight and CI disagreeing about which
-// gates exist is the one divergence that makes a green preflight worthless. The counts match today (331 = 331);
-// this keeps them matching on the day somebody leaves a probe behind.
-const allStandalone = execFileSync('git', ['ls-files', 'testing/standalone'], { encoding: 'utf8' })
-  .split('\n').map(f => f.split('/').pop()).filter(f => f && f.endsWith('.test.js')).sort();
-const pure = allStandalone.filter(f => !NEEDS_INSTANCE.test(readFileSync(`testing/standalone/${f}`, 'utf8')));
-console.log(`\n── standalone tests that need no running instance (${pure.length} of ${allStandalone.length}; ` +
-  `${allStandalone.length - pure.length} declare @needs-instance and run in CI) ──`);
-// Run in batches, because Windows caps a command line at 32 767 characters and this list crossed it.
-//
-// The failure that taught this: `The command line is too long.` — printed by cmd, not by node, so the gate
-// went RED with no test output and nothing named. One more test file was all it took, and the next person to
-// add one would have hit the same wall with the same unhelpful message.
-//
-// Batching by measured length rather than a file count: the paths differ in length, so a fixed count would
-// drift back over the limit as names grow. 8 000 characters is a quarter of the ceiling, which leaves room
-// for the interpreter prefix and any future flag.
-const CMD_BUDGET = 8_000;
+// THE SPLIT AND THE BATCHING MOVED TO `testing/_shared/standalone-split.mjs`, whole, with the
+// measurements that produced them. `test:standalone` asks the same question, and two copies of it is two
+// places for preflight and the suite to disagree about which gates exist — which is the one divergence
+// that makes a green preflight worthless.
+const { all: allStandalone, offline: pure } = splitStandalone();
+console.log(`
+── standalone tests that need no running instance (${pure.length} of ${allStandalone.length}; `
+  + `${allStandalone.length - pure.length} declare @needs-instance and run in CI) ──`);
 /** How many standalone suites stood down for want of the test database. Reported in the verdict. */
 let skippedForDb = 0;
 
-const batches = [[]];
-let batchLen = 0;
-for (const f of pure) {
-  const arg = ` testing/standalone/${f}`;
-  if (batchLen + arg.length > CMD_BUDGET && batches.at(-1).length > 0) { batches.push([]); batchLen = 0; }
-  batches.at(-1).push(f);
-  batchLen += arg.length;
-}
+/*
+ * DEFAULT CONCURRENCY — one worker per core — and the flag that was here is gone.
+ *
+ * `--test-concurrency=1` is right for a suite sharing ONE live instance: `testing/integration` run
+ * concurrently latches maintenance mode and reports 314 false failures. These files have no instance to
+ * share; that is what `@needs-instance` declares, and the ones that do are not in this list.
+ *
+ * Measured over the 591 offline files on this machine: 191.0s serialised, 46.6s parallel, both green.
+ * Preflight ran them serially too, so the offline set cost about three and a half minutes twice per
+ * cycle — once here and once in `test:all:core`.
+ */
+const batches = batched(pure.map(f => `testing/standalone/${f}`));
 let standaloneFailed = false;
 for (const [i, batch] of batches.entries()) {
   if (batches.length > 1) console.log(`  batch ${i + 1}/${batches.length} — ${batch.length} file(s)`);
-  try { run(`node --test --test-concurrency=1 ${batch.map(f => `testing/standalone/${f}`).join(' ')}`); } catch {
+  try { run(`node --test ${batch.join(' ')}`); } catch {
     // Keep going: one batch failing must not hide a second failure in a later batch, which is exactly the
     // information a single all-or-nothing invocation used to give.
     standaloneFailed = true;

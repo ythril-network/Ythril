@@ -1131,6 +1131,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The offline standalone tests run in parallel, and the split is one module instead of two copies.**
+  Measured on 591 offline files: **191.0s serialised, 46.6s at default concurrency**, both green.
+  `npm run test:standalone` goes 257s → 160s, and preflight's own offline pass — which was serialised
+  too — drops by the same three and a half minutes, so the set is no longer paid for twice per cycle.
+
+  **`--test-concurrency=1` is right where it came from and wrong here.** `testing/integration` shares
+  ONE live instance: run concurrently it latches maintenance mode and reports 314 false failures. The
+  offline files have no instance to share, which is what `@needs-instance` declares — and the 16 files
+  that do declare it still run one at a time.
+
+  Explicit sleeps across the whole test tree total 5.3 seconds in four call sites, so the time was
+  queueing, not waiting.
+
+  **And the runner REFUSES a stale `server/dist`.** These files import from it; preflight builds it
+  first and `test:all:core` never has, so running the suite straight after a branch switch tested
+  whatever was compiled last. That cost two confused diagnoses in one evening — a fix that was already
+  merged looked broken, and a build from two branches ago looked like a regression in the change under
+  test. A check rather than a build, deliberately: building would hide the mistake and add a minute to
+  every run, while refusing costs milliseconds and says what to do. `--allow-stale` is the escape hatch.
+
+  **The guard the change owes:** `openTestMongo('x')` drops `ythril_harness_x` on entry and exit, so two
+  files sharing a name were harmless while everything ran one at a time and delete each other's
+  documents in parallel — intermittently, blaming whichever file was unlucky.
+  `a-db-harness-name-is-unique` keeps all 48 names distinct.
+
 - **The `filter` tool moved out of `search.ts` into `mcp/tools/filter.ts`.** Not a tidy-up: the size gate
   refused the two lines the `path` argument added, and the file was at its ceiling. The three tools there
   were never one responsibility — `recall` and `find_similar` RANK, and `filter` is the one that does not,
