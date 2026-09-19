@@ -722,6 +722,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A history's sessions are handed to extraction in TIME order, which the release is not** (`B-5`).
+  Measured across the pinned corpus: **211 of 500 histories list their sessions out of chronological
+  order**, 3,382 backward steps, the largest a full day. LoCoMo: **0 of 10** — so nothing in the harness had
+  ever needed to think about it, and the array order was being read as time everywhere.
+
+  That is worse than untidy. The extraction prompt's supersession rule is *"when a LATER session makes an
+  earlier fact wrong"* and the parts protocol splits on *"a contiguous run of sessions"*; told to retire the
+  earlier claim, a model reading position would retire the wrong one in nearly half the corpus — asserting
+  the stale fact and marking the current one dead, which is the exact inverse of what supersession is for
+  and appears in no count.
+
+  Sorted in the loader rather than by each consumer, because *remember to sort* is a line four callers each
+  have to write and one will not. Ties break on the published position, so two sessions recorded in the
+  same minute keep a stable order between runs. **`index` does not follow the sort** — it is the published
+  position, the turn ids are minted from it, and renumbering would repoint every `sourceTurns` in a
+  committed extraction at a different remark. The prompt now says the same thing in its own words: *later*
+  means a later date, never a later position in the file.
+
 - **A day with more than one session no longer loses all but the last of them** (`B-5`). The writer named
   each transcript `transcripts/<date>.md` and filed each claim by `statedOn`. That is correct for a
   conversation with one session a day and silently destructive for one without — measured across both

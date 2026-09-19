@@ -186,6 +186,12 @@ ending as its own claim rather than retiring the beginning.
 said about what came next is `superseded: true` on the old claim and no edge at all. Do not invent a
 replacement to have something to point at.
 
+**"Later" means a later DATE, never a later position in the file.** Sessions are not always handed to you
+in time order, and the one that comes second on the page may have happened first. Every session carries its
+date; read that, and if two sessions share a day, read the time on them. Retiring by position in nearly
+half a corpus gets it exactly backwards — the stale claim asserted and the current one marked dead, which
+is the inverse of what this section is for and shows up in no count.
+
 **Never retire something the conversation did not retire.** Two claims that merely disagree are not a
 supersession — people misremember, and a later session repeating a fact differently is usually one fact said
 twice, not two facts of which one is dead. Mark it only when the text says the situation changed.
