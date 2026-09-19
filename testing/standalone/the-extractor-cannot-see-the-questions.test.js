@@ -1,5 +1,5 @@
 /**
- * What the extraction step is handed carries no questions, no answers and no categories.
+ * What the extraction step is handed carries no questions, no answers and no categories — for EVERY corpus.
  *
  * ## Why this is enforced rather than promised
  *
@@ -12,19 +12,39 @@
  * URL and came back byte-identical, so the corpus is unchanged; what this gate adds is that the rule cannot
  * be broken by accident from here.
  *
- * `loadConversations` is the only door the extractor uses, and its own docblock says it returns objects
- * carrying no question data. This checks the objects rather than the sentence — the sentence has been true
- * and the shape is what a caller actually receives.
+ * ## Its title said "the extraction step" and its body read ONE corpus
+ *
+ * That is the shape this repository keeps producing: a title claiming a set, a body naming a member, and
+ * nothing ever contradicting it because a gate that passes is evidence of nothing in particular. LongMemEval
+ * arrived and was covered by none of this — and it is the corpus that needed covering most.
+ *
+ * **LoCoMo keeps its questions in a block BESIDE the conversation. LongMemEval puts them in the same object**
+ * — and, measured across the release, **896 individual turns inside the haystack carry `has_answer: true`.**
+ * The top-level fields are ones a reader notices; that one is a third key on a turn otherwise holding `role`
+ * and `content`, on exactly the turns a score is computed from. A loader passing sessions through verbatim
+ * would hand the extraction model a flag reading *this turn is the evidence*, and nothing downstream could
+ * see that it had.
+ *
+ * So `CORPORA` is a list of doors, and a third corpus is a row rather than an edit to the assertions.
  *
  * ## Why it looks at the whole tree
  *
- * A question could arrive nested inside a session or a turn, not only at the top of a conversation. Checking
- * the top-level keys would pass a loader that stopped stripping one level down, which is exactly the kind of
+ * A question could arrive nested inside a session or a turn, not only at the top of a record. Checking the
+ * top-level keys would pass a loader that stopped stripping one level down, which is exactly the kind of
  * change nobody notices: the extra field is simply present, nothing errors, and the extraction quietly gets
  * better at this corpus.
  *
- * Skipped when the pinned dataset is absent. It is fetched by URL and not vendored, so a clean checkout has
- * no copy — and a gate that FAILS on a missing optional input teaches people to ignore it.
+ * ## THIS GATE DOES NOT RUN IN CI, and that is worth stating rather than leaving to be discovered
+ *
+ * Skipped per corpus when its pinned dataset is absent: they are fetched by URL and not vendored, so a
+ * clean checkout has no copy, and a gate that FAILS on a missing optional input teaches people to ignore
+ * it. **Neither corpus is fetched in CI** — they are 278 MB and 2.8 MB pulled on demand — so every block
+ * below skips there, and always has.
+ *
+ * A draft of this file asserted the opposite, that CI must have one, and CI answered by failing. The
+ * enforcement is real on a machine that has fetched a corpus, which is the machine about to extract from
+ * one; that is the machine this protects, and extraction happens where the data is. Written down because
+ * *"the gate is green"* and *"the gate ran"* are different claims and a CI summary reports only the first.
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -33,14 +53,25 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 import { loadConversations } from '../../benchmarks/locomo/loader.mjs';
+import { loadHistories } from '../../benchmarks/longmemeval/loader.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const pinPath = join(repoRoot, 'benchmarks', 'locomo', 'pin.json');
-const pin = JSON.parse(readFileSync(pinPath, 'utf8'));
-const dataPath = join(repoRoot, pin.datasets.locomo.cachePath);
 
-/** Everything the answer key is spelled with, in the release and in anything derived from it. */
-const QUESTION_KEYS = ['qa', 'question', 'questions', 'answer', 'adversarial_answer', 'adversarialAnswer', 'evidence', 'category'];
+/** Every corpus the extraction step can be pointed at, with the one door it is read through. */
+const CORPORA = [
+  { name: 'locomo', pin: join(repoRoot, 'benchmarks', 'locomo', 'pin.json'), dataset: 'locomo', load: loadConversations },
+  { name: 'longmemeval', pin: join(repoRoot, 'benchmarks', 'longmemeval', 'pin.json'), dataset: 'longmemeval_s', load: loadHistories },
+];
+
+/**
+ * Everything an answer key is spelled with, in either release or in anything derived from one.
+ *
+ * `has_answer` is the important addition and it is not like the others — see the header for why a key on a
+ * turn is the dangerous kind.
+ */
+const QUESTION_KEYS = ['qa', 'question', 'questions', 'question_type', 'questionType', 'answer',
+  'adversarial_answer', 'adversarialAnswer', 'evidence', 'category',
+  'has_answer', 'hasAnswer', 'answer_session_ids', 'answerSessionIds'];
 
 /** Every key appearing anywhere in a value, however deeply nested. */
 function keysAnywhere(value, found = new Set()) {
@@ -51,46 +82,62 @@ function keysAnywhere(value, found = new Set()) {
   return found;
 }
 
-const conversations = existsSync(dataPath) ? await loadConversations(dataPath) : [];
+for (const corpus of CORPORA) {
+  const pin = JSON.parse(readFileSync(corpus.pin, 'utf8'));
+  const dataPath = join(repoRoot, pin.datasets[corpus.dataset].cachePath);
+  const fetched = existsSync(dataPath);
+  const skip = fetched ? false : `${corpus.name} is not fetched`;
+  const histories = fetched ? await corpus.load(dataPath) : [];
 
-describe('the conversations handed to extraction', { skip: existsSync(dataPath) ? false : 'pinned dataset not fetched' }, () => {
+  describe(`${corpus.name}: what extraction is handed`, { skip }, () => {
+    test('there is something to check', () => {
+      // The floor. Every assertion below is a loop, and a loop over nothing proves nothing.
+      assert.ok(histories.length > 0, 'the loader returned nothing');
+      const turns = histories.flatMap(c => (c.sessions ?? []).flatMap(s => s.turns ?? []));
+      assert.ok(turns.length > 0, 'there are no turns at all — the loader shape changed');
+    });
 
-  test('there are conversations to check', () => {
-    // The floor. Every assertion below is a loop, and a loop over nothing proves nothing.
-    assert.ok(conversations.length > 0, 'the loader returned no conversations');
-    const turns = conversations.flatMap(c => (c.sessions ?? []).flatMap(s => s.turns ?? []));
-    assert.ok(turns.length > 0, 'the conversations contain no turns — the loader shape changed');
+    test('no question, answer, evidence or category reaches the extractor, at any depth', () => {
+      const present = [...keysAnywhere(histories)].filter(k => QUESTION_KEYS.includes(k));
+      assert.deepEqual(present, [],
+        `the ${corpus.name} loader is handing the extraction step ${present.join(', ')} — a graph built `
+        + 'while looking at the answer key describes this corpus and nothing else');
+    });
+
+    test('a turn carries what extraction needs and nothing more', () => {
+      // Stated positively as well, because "none of these keys" also passes on an empty object.
+      const turn = histories[0].sessions[0].turns[0];
+      assert.ok(typeof turn.speaker === 'string' && turn.speaker.length > 0, 'a turn has no speaker');
+      assert.ok(typeof turn.text === 'string' && turn.text.length > 0, 'a turn has no text');
+      assert.ok(typeof turn.id === 'string' && turn.id.length > 0,
+        'a turn has no id, so no claim could ever name it in sourceTurns');
+    });
+
+    test('a session carries its date, because every relative expression is resolved against it', () => {
+      const session = histories[0].sessions[0];
+      assert.match(String(session.startsAt ?? ''), /^\d{4}-\d{2}-\d{2}/, 'a session has no usable date');
+    });
+
+    test('the bytes on disk match the recorded sha256', async () => {
+      // The pin is what makes "may not be touched" checkable rather than a promise: an edited local copy
+      // stops matching, and a result produced from it is not a result about the published corpus.
+      //
+      // Through the shared refusal rather than a comparison written here. A hand-rolled `assert.equal`
+      // against the pin field is the second copy of a rule whose whole difficulty is the case it does not
+      // cover — a pin with no hash at all. See `benchmarks/dataset-pin.mjs`.
+      const { assertPinned } = await import('../../benchmarks/dataset-pin.mjs');
+      assert.equal(assertPinned(pin.datasets[corpus.dataset], readFileSync(dataPath), corpus.name), true);
+    });
   });
+}
 
-  test('no question, answer, evidence or category reaches the extractor, at any depth', () => {
-    const present = [...keysAnywhere(conversations)].filter(k => QUESTION_KEYS.includes(k));
-    assert.deepEqual(present, [],
-      `the loader is handing the extraction step ${present.join(', ')} — a graph built while looking at the `
-      + 'answer key describes this corpus and nothing else');
-  });
+describe('the gate itself', () => {
 
-  test('a turn carries what extraction needs and nothing more', () => {
-    // Stated positively as well, because "none of these keys" also passes on an empty object.
-    const turn = conversations[0].sessions[0].turns[0];
-    assert.ok(typeof turn.speaker === 'string' && turn.speaker.length > 0, 'a turn has no speaker');
-    assert.ok(typeof turn.text === 'string' && turn.text.length > 0, 'a turn has no text');
-  });
-
-  test('a session carries its date, because every relative expression is resolved against it', () => {
-    const session = conversations[0].sessions[0];
-    assert.match(String(session.startsAt ?? ''), /^\d{4}-\d{2}-\d{2}/, 'a session has no usable date');
-  });
-});
-
-describe('the dataset is the one that was pinned', { skip: existsSync(dataPath) ? false : 'pinned dataset not fetched' }, () => {
-  test('the bytes on disk match the recorded sha256', async () => {
-    // The pin is what makes "may not be touched" checkable rather than a promise: an edited local copy stops
-    // matching, and a result produced from it is not a result about the published corpus.
-    //
-    // Through the shared refusal rather than a comparison written here. A hand-rolled `assert.equal` against
-    // the pin field is the second copy of a rule whose whole difficulty is the case it does not cover — a pin
-    // with no hash at all. See `benchmarks/dataset-pin.mjs`.
-    const { assertPinned } = await import('../../benchmarks/dataset-pin.mjs');
-    assert.equal(assertPinned(pin.datasets.locomo, readFileSync(dataPath), 'locomo'), true);
+  test('the detector sees the key it exists for', () => {
+    // `has_answer` is the one that hides. Checked against the detector rather than trusted: a typo in the
+    // list fails OPEN, and this gate's whole value is that it cannot.
+    assert.ok(QUESTION_KEYS.includes('has_answer'));
+    const leaky = [{ sessions: [{ turns: [{ role: 'user', content: 'x', has_answer: true }] }] }];
+    assert.deepEqual([...keysAnywhere(leaky)].filter(k => QUESTION_KEYS.includes(k)), ['has_answer']);
   });
 });

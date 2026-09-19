@@ -15,6 +15,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **LongMemEval has a loader, and it exists because the answer key is inside the histories** (`B-5`).
+  LoCoMo keeps its questions in a block beside the conversation, so returning the conversation returns
+  nothing about them. A LongMemEval instance is one object holding the history AND `question`, `answer`,
+  `question_type` and `answer_session_ids` — and, measured across the release, **896 turns inside the
+  haystack carry `has_answer: true`**. That last one is the dangerous one: a third key on a turn otherwise
+  holding `role` and `content`, on exactly the turns a score is computed from. Anything reading the release
+  directly would have handed the extraction model a flag saying *this turn is the evidence*, and nothing
+  downstream could have seen it. The pin had said the rule since the fetch — extraction *"must never read
+  the questions, the answers or the abilities. That is enforced by the loader rather than promised"* — and
+  the loader it named did not exist.
+
+  A turn is BUILT from named fields rather than copied, so a field the authors add later cannot ride along,
+  and an unknown key stops the run instead of being dropped. Twelve turns of 246,930 carry no content, in
+  seven histories, none of them evidence: they are dropped and REPORTED, the shape LoCoMo's loader already
+  uses for its nine malformed evidence references. Ids are minted from the PUBLISHED position, so a dropped
+  turn leaves a gap — renumbering the survivors would make a committed extraction's `sourceTurns` point at
+  the wrong remark with nothing anywhere to reveal it.
+
 - **An extraction may arrive in parts, and an incomplete run is refused** (`B-5`). A long history reads in
   one pass; the graph of one does not always write back in one, because the extraction is itself a large
   document. A part declares `part: {index, of}` and covers a contiguous run of sessions, and
@@ -85,6 +103,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   carrying a vector is back to competing for ranked slots, silently.
 
 ### Changed
+
+- **The gate that keeps the extractor blind now derives its corpora.** Its title has claimed something
+  about *"the extraction step"* since it was written, while its body read LoCoMo alone — so LongMemEval
+  would have been covered by nothing, and it is the corpus that needed covering most. Adding a third is now
+  a row rather than an edit to the assertions. Seen red before being believed: putting `has_answer` back
+  into the loader's output fails it.
 
 - **BREAKING — a recall's expansion now brings the ATTRIBUTED claims of what it reached, unasked.** A claim
   an AI assistant originated is stored with no vector, so nothing can rank it. That is half a decision: it
