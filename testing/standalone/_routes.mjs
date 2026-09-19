@@ -70,7 +70,7 @@ export function mountedRoutes({ roots = ['server/src'], floor = 150 } = {}) {
       const [, router, method, routePath] = m;
       // The app serves at the root, so its declared path IS the served path. Nothing mounts it, so the
       // mount graph has no answer for it and every route it carries would otherwise be skipped below.
-      const prefix = router === 'app' ? '' : mounts.prefixOf(router);
+      const prefix = router === 'app' ? '' : mounts.prefixOf(router, file);
       // `undefined` means nothing mounts it — dead code or a helper. An empty string is a real answer (a
       // router mounted at the app root), so this cannot be a truthiness test.
       if (prefix === undefined) continue;

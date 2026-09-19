@@ -25,6 +25,8 @@
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
+import { mountedRoutes } from '../testing/standalone/_routes.mjs';
+import { CAPABILITIES, THE_TOOL_DOOR } from '../testing/standalone/_capability-map.mjs';
 
 const ROOT = process.cwd();
 const read = p => readFileSync(join(ROOT, p), 'utf8');
@@ -104,17 +106,28 @@ for (let pass = 0; pass < 8; pass++) {
   if (!changed) break;
 }
 
-const staticRoutes = new Set();
+/*
+ * THE STATIC HALF IS `mountedRoutes()` NOW, and the copy it replaces is why this audit was wrong.
+ *
+ * This walked the tree with its own `(\w*[Rr]outer)\.(get|post|…)` scan and its own mount graph — the fifth
+ * copy of one derivation. It could not resolve a router passed as a function PARAMETER, so
+ * `POST /api/files/:spaceId` was reported as "served by express, missing from the matrix" for as long as
+ * nobody ran this.
+ *
+ * **And pointing it at the shared module is what makes the comparison worth running**, which is the
+ * opposite of what I wrote when the other copies were converted. This audit does not check that module
+ * against itself: it checks it against the LIVE express router objects, which is the one source in the
+ * repository that cannot be wrong about what is served. That is a real cross-check, and it is the check
+ * that would have caught the module's `app.ts` blindness on its own.
+ *
+ * Routes declared straight on the app are excluded from the comparison rather than silently dropped: the
+ * runtime half walks the routers `app.ts` IMPORTS, so it never sees them, and counting them on one side
+ * only would report nine permanent disagreements. They are accounted for below.
+ */
+const ALL_STATIC = mountedRoutes();
+const appDeclared = ALL_STATIC.filter(r => r.router === 'app');
+const staticRoutes = new Set(ALL_STATIC.filter(r => r.router !== 'app').map(r => `${r.method} ${r.path}`));
 const unattributed = [];
-for (const f of API_ALL) {
-  let code;
-  try { code = strip(read(f)); } catch { continue; }
-  for (const m of code.matchAll(/\b(\w*[Rr]outer)\.(get|post|patch|put|delete)\(\s*'(\/[^']*)'/g)) {
-    const mount = mountFor.get(m[1]);
-    if (!mount) { unattributed.push(`${f}: ${m[1]}.${m[2]}('${m[3]}')`); continue; }
-    staticRoutes.add(`${m[2].toUpperCase()} ${mount}${m[3] === '/' ? '' : m[3]}`);
-  }
-}
 
 // ── 2 · what EXPRESS actually serves ────────────────────────────────────────
 /**
@@ -129,8 +142,19 @@ for (const f of API_ALL) {
  * come from the objects the app dispatches on. The MOUNT prefixes still come from `app.use('/api/x', router)`
  * in source — they are literal strings, and the audit says so rather than implying otherwise.
  */
+/*
+ * ANY relative import, not `api/` only — six routes hung on that one word.
+ *
+ * `mcpRouter` lives in `./mcp/router.js` and `setupRouter` in `./setup/routes.js`, so neither matched, and
+ * the runtime half never saw `GET /mcp`, `POST /mcp`, `POST /mcp/messages`, both setup routes, or the MCP
+ * OAuth consent screen. Six routes the static half correctly lists, reported as "claimed by the matrix and
+ * served by nothing" — the direction that reads as the matrix inventing routes, which is the worse way to
+ * be wrong here.
+ *
+ * The directory was never the question. Whether `app.use()` mounts it is, and the loop below asks that.
+ */
 const routerExport = new Map();
-for (const m of APP.matchAll(/import \{ (\w+) \} from '\.\/(api\/[^']+)\.js'/g)) {
+for (const m of APP.matchAll(/import \{ (\w+) \} from '\.\/([^']+)\.js'/g)) {
   routerExport.set(m[1], `server/dist/${m[2]}.js`);
 }
 
@@ -192,8 +216,33 @@ if (runtimeRoutes.size === 0) {
 }
 
 if (runtimeOk) {
+  /*
+   * What only ONE side can see, accounted for rather than reported.
+   *
+   * The runtime half walks the routers `app.ts` imports and mounts with a literal prefix. Two shapes fall
+   * outside that by construction, and both are real routes:
+   *
+   *  - routes declared straight on `app`, which belong to no router at all;
+   *  - `POST /mcp-oauth/consent`, whose router is BUILT by a function that returns `null` unless a public
+   *    URL is configured, and is mounted through the returned value with no prefix.
+   *
+   * Listing them is not an exemption list in the bad sense: each is asserted to still be exactly what it
+   * claims — an app-declared route, or the one conditional build — so a NEW route cannot hide among them.
+   */
+  const appPaths = new Set(appDeclared.map(r => `${r.method} ${r.path}`));
+  const CONDITIONAL_BUILD = 'POST /mcp-oauth/consent';
+  const conditional = staticRoutes.has(CONDITIONAL_BUILD) ? [CONDITIONAL_BUILD] : [];
+  if (!conditional.length) {
+    note(`${CONDITIONAL_BUILD} is no longer in the static extraction — if the route is gone, delete this `
+      + 'accounting with it rather than leaving a name nothing matches');
+  }
+  const invisibleToRuntime = new Set([...appPaths, ...conditional]);
+  console.log(`accounted for: ${appPaths.size} app-declared route(s) and ${conditional.length} built `
+    + 'conditionally — neither is reachable by the runtime walk');
+
   const onlyRuntime = [...runtimeRoutes].filter(r => !staticRoutes.has(r)).sort();
-  const onlyStatic = [...staticRoutes].filter(r => !runtimeRoutes.has(r)).sort();
+  const onlyStatic = [...staticRoutes]
+    .filter(r => !runtimeRoutes.has(r) && !invisibleToRuntime.has(r)).sort();
   if (onlyRuntime.length) note(`routes the router SERVES that the matrix misses (${onlyRuntime.length}):\n    ${onlyRuntime.join('\n    ')}`);
   if (onlyStatic.length) note(`routes the matrix claims that no router serves (${onlyStatic.length}):\n    ${onlyStatic.join('\n    ')}`);
   console.log(`routes — live routers ${runtimeRoutes.size}, static extraction ${staticRoutes.size}, `
@@ -202,9 +251,36 @@ if (runtimeOk) {
 
 // ── 3 · tool completeness, from the registry ────────────────────────────────
 const { ALL_TOOLS } = await import(`file://${join(ROOT, 'server/dist/mcp/tools/index.js')}`);
-const matrixSrc = read('scripts/surface-matrix.mjs');
-const mapped = new Set([...matrixSrc.matchAll(/\['[^']*', '([a-z_0-9]+)',/g)].map(m => m[1]));
-const unmapped = ALL_TOOLS.map(t => t.name).filter(n => !mapped.has(n));
+/*
+ * THE MAP IS IMPORTED, and grepping for it is what made this audit report all 46 tools unmapped.
+ *
+ * It read `scripts/surface-matrix.mjs` with a regex for the row shape. The map MOVED into
+ * `testing/standalone/_capability-map.mjs` — the renderer imports it now — so the regex matched nothing,
+ * `mapped` was empty, and every tool in the registry came back as absent from the map. Forty-six findings,
+ * all false, from a file that no longer holds the thing being looked for.
+ *
+ * A regex over another file's source is a second reading of a value that can simply be imported, and this
+ * is what that costs: the map was correct throughout, and the audit said the opposite about all of it.
+ */
+const mapped = new Set(CAPABILITIES.map(([, tool]) => tool));
+
+/*
+ * A TOOL WITHOUT A ROW IS NOT UNMAPPED — it is reached through the generic door, and three are.
+ *
+ * `filter`, `list_dir` and `delete_space_data` have no dedicated REST route: they are served by
+ * `POST /api/:tool`, which is the door every tool can be called through. The map says so in its own
+ * comments and the parity gate honours it; this audit did not, so it reported three real capabilities as
+ * missing from a table that had correctly left them out.
+ *
+ * The check is not vacuous for accepting them, because the door itself is asserted to exist. Remove
+ * `POST /api/:tool` and those three become unreachable over REST, which is what fails here.
+ */
+const doorServed = staticRoutes.has(THE_TOOL_DOOR);
+if (!doorServed) {
+  note(`the generic tool door ${THE_TOOL_DOOR} is not served, so every tool without its own row is `
+    + 'unreachable over REST');
+}
+const unmapped = ALL_TOOLS.map(t => t.name).filter(n => !mapped.has(n) && !doorServed);
 if (unmapped.length) note(`tools absent from the map: ${unmapped.join(', ')}`);
 console.log(`tools — registry ${ALL_TOOLS.length}, mapped ${mapped.size}`);
 
@@ -236,21 +312,22 @@ const apiImports = new Map();
 for (const f of API_FILES) apiImports.set(f, domainImports(read(f)));
 
 /** Which api file registers a given route path? */
+/*
+ * THE ROUTE ALREADY KNOWS ITS FILE, so stop re-deriving it from the mount prefix and a substring search.
+ *
+ * The old walk matched the route's tail against each candidate file's source, which cannot find a route
+ * registered by a function living in another file — `POST /api/spaces/:id/reembed` is declared in
+ * `spaces-reembed.ts` and the search only looked under the `/api/spaces` mount's own file. It came back
+ * "route file not found", which reads as a broken mapping and is a broken lookup.
+ */
+const FILE_OF = new Map(ALL_STATIC.map(r => [`${r.method} ${r.path}`, r.file]));
 function apiFileFor(route) {
-  const [, path] = route.split(' ');
-  for (const { mount, file } of mounts) {
-    if (!path.startsWith(mount)) continue;
-    const sub = path.slice(mount.length) || '/';
-    for (const f of filesFor(file)) {
-      const code = strip(read(f));
-      if (code.includes(`'${sub}'`)) return f;
-    }
-  }
-  return null;
+  return FILE_OF.get(route) ?? null;
 }
 
-const pairs = [...matrixSrc.matchAll(/\['[^']*', '([a-z_0-9]+)', (?:'([A-Z]+ [^']+)'|null)/g)]
-  .map(m => ({ tool: m[1], route: m[2] ?? null }));
+// From the imported map, for the same reason the count above is: a regex over another file's source
+// is a second reading of a value that can be imported, and it is the reading that goes stale.
+const pairs = CAPABILITIES.map(([, tool, route]) => ({ tool, route: route ?? null }));
 const noShared = [];
 for (const { tool, route } of pairs) {
   if (!route) continue;
