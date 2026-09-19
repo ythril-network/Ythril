@@ -1363,6 +1363,10 @@
   "brain.query.filterPlaceholder": "{\"tags\": {\"$in\": [\"my-tag\"]}} or {\"name\": {\"$regex\": \"auth\", \"$options\": \"i\"}}",
   "brain.query.projectionPlaceholder": "{\"fact\": 1, \"tags\": 1}",
   "brain.query.resultsFrom": "result(s) from {{ collection }}",
+  "brain.superseded.badge": "superseded",
+
+  "brain.superseded.hint": "This record is no longer true. It is kept and still searchable — something later replaced or retired it.",
+
   "brain.query.passages": "{{count}} passages",
   "brain.query.groupedPassages": "from {{count}} matching passages",
   "graph.stats.nodesEdges": "{{ nodes }} nodes · {{ edges }} edges",

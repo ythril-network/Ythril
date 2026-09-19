@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject, output, signal } from '@angular/core';
+import { SupersededBadgeComponent } from '../../shared/superseded-badge.component';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TranslocoPipe } from '@jsverse/transloco';
@@ -35,7 +36,7 @@ import { TimestampComponent } from '../../shared/timestamp.component';
   selector: 'app-edges-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, PropertiesViewComponent, PropertiesEditorComponent, EntitySearchComponent, PhIconComponent, ErrorStateComponent, RecordSearchBarComponent, SortableHeaderComponent, HscrollTopDirective, TimestampComponent],
+  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, PropertiesViewComponent, PropertiesEditorComponent, EntitySearchComponent, PhIconComponent, ErrorStateComponent, RecordSearchBarComponent, SortableHeaderComponent, HscrollTopDirective, TimestampComponent, SupersededBadgeComponent],
   styles: [BRAIN_CHIP_STYLES, BRAIN_RECORD_TABLE_STYLES],
   template: `
 
@@ -209,7 +210,7 @@ import { TimestampComponent } from '../../shared/timestamp.component';
                   } @else {
                     <tr style="vertical-align:top;">
                       <td style="font-size:12px; white-space:nowrap;">{{ edge.fromName || edge.from }}</td>
-                      <td><span class="badge badge-blue">{{ edge.label }}</span></td>
+                      <td><span class="badge badge-blue">{{ edge.label }}</span> <app-superseded-badge [superseded]="edge.superseded" /></td>
                       <td style="font-size:12px; white-space:nowrap;">{{ edge.toName || edge.to }}</td>
                       <td style="color:var(--text-muted);">{{ edge.weight ?? '—' }}</td>
                       <td style="font-size:11px; white-space:nowrap;">{{ edge.type || '—' }}</td>

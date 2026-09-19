@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject, output, signal } from '@angular/core';
+import { SupersededBadgeComponent } from '../../shared/superseded-badge.component';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -37,7 +38,7 @@ import { TimestampComponent } from '../../shared/timestamp.component';
   selector: 'app-entities-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, PropertiesViewComponent, PropertiesEditorComponent, EntitySearchComponent, PhIconComponent, ErrorStateComponent, SortableHeaderComponent, HscrollTopDirective, TimestampComponent],
+  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, PropertiesViewComponent, PropertiesEditorComponent, EntitySearchComponent, PhIconComponent, ErrorStateComponent, SortableHeaderComponent, HscrollTopDirective, TimestampComponent, SupersededBadgeComponent],
   styles: [BRAIN_CHIP_STYLES, BRAIN_RECORD_TABLE_STYLES],
   template: `
 
@@ -195,7 +196,7 @@ import { TimestampComponent } from '../../shared/timestamp.component';
                     </tr>
                   } @else {
                     <tr>
-                      <td>{{ ent.name }}</td>
+                      <td>{{ ent.name }} <app-superseded-badge [superseded]="ent.superseded" /></td>
                       <td>
                         @if (ent.type) { <span class="badge badge-purple">{{ ent.type }}</span> }
                       </td>

@@ -316,6 +316,14 @@ export interface Fact {
   entityIds?: string[];
   description?: string;
   properties?: Record<string, string | number | boolean>;
+  /**
+   * The record is no longer true.
+   *
+   * Only ever `true`; absent and `false` both mean current. It does NOT mean hidden — a superseded
+   * record keeps its vector, still ranks and still comes back, so hiding it in a view would restate a
+   * decision the server deliberately did not make. Show it marked.
+   */
+  superseded?: boolean;
   createdAt: string;
   /**
    * Set on every write, by the server, always — and it was missing from this interface.
@@ -336,6 +344,14 @@ export interface Entity {
   tags?: string[];
   description?: string;
   properties?: Record<string, string | number | boolean>;
+  /**
+   * The record is no longer true.
+   *
+   * Only ever `true`; absent and `false` both mean current. It does NOT mean hidden — a superseded
+   * record keeps its vector, still ranks and still comes back, so hiding it in a view would restate a
+   * decision the server deliberately did not make. Show it marked.
+   */
+  superseded?: boolean;
   createdAt: string;
   /**
    * Set on every write, by the server, always — and it was missing from this interface.
@@ -359,6 +375,14 @@ export interface Edge {
   tags?: string[];
   description?: string;
   properties?: Record<string, string | number | boolean>;
+  /**
+   * The record is no longer true.
+   *
+   * Only ever `true`; absent and `false` both mean current. It does NOT mean hidden — a superseded
+   * record keeps its vector, still ranks and still comes back, so hiding it in a view would restate a
+   * decision the server deliberately did not make. Show it marked.
+   */
+  superseded?: boolean;
   createdAt: string;
   /**
    * Set on every write, by the server, always — and it was missing from this interface.
@@ -389,6 +413,14 @@ export interface ChronoEntry {
   properties?: Record<string, string | number | boolean>;
   recurrence?: { freq: string; interval?: number; until?: string };
   author: { instanceId: string; instanceLabel: string };
+  /**
+   * The record is no longer true.
+   *
+   * Only ever `true`; absent and `false` both mean current. It does NOT mean hidden — a superseded
+   * record keeps its vector, still ranks and still comes back, so hiding it in a view would restate a
+   * decision the server deliberately did not make. Show it marked.
+   */
+  superseded?: boolean;
   createdAt: string;
   updatedAt: string;
   seq: number;

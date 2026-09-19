@@ -610,7 +610,14 @@ const FROZEN = {
   // else, which is the shape a mirror should have; splitting it by domain would put the halves of a
   // request/response pair in different files. If it is ever split, the axis is the API section it
   // mirrors, and that is a move rather than a decomposition.
-  'client/src/app/core/api.types.ts': 662,
+  //
+  // RAISED 662 -> 666 for `Q-36`: `superseded` on `Fact`, `Entity`, `Edge` and `ChronoEntry`. The server
+  // declares it on all four record documents and returns it on all four, so the mirror grows by exactly
+  // what the API grew by — a mirror that carries the field on three of four is the shape that makes one
+  // list silently stop badging. There is nowhere beside this file a field of a response type can live.
+  //
+  // NO DECOMPOSITION: same reason as the raise above it, and the same axis if it is ever split.
+  'client/src/app/core/api.types.ts': 666,
 };
 
 describe('no file grows past what we already carry', () => {

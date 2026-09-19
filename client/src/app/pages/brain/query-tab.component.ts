@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, ViewChild, computed, inject, input, output, signal } from '@angular/core';
+import { SupersededBadgeComponent } from '../../shared/superseded-badge.component';
 import { groupRecallResults, chunkLabel, passageText, relatedOf, orderingOf } from './recall-grouping';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -25,7 +26,7 @@ import { BrainStore } from './brain-store.service';
   selector: 'app-query-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, TranslocoPipe, PhIconComponent, RecallFormComponent, JsonTreeComponent],
+  imports: [CommonModule, FormsModule, TranslocoPipe, PhIconComponent, RecallFormComponent, JsonTreeComponent, SupersededBadgeComponent],
   styles: [`
     .query-panel {
       display: flex;
@@ -359,6 +360,7 @@ import { BrainStore } from './brain-store.service';
                     } @else {
                       <div style="display:flex; gap:8px; margin-bottom:4px; align-items:center;">
                         <span class="badge badge-purple">{{ g.hits[0].type }}</span>
+                        <app-superseded-badge [superseded]="supersededOf(g.hits[0])" />
                         <!--
                           THE SCORE THAT DECIDED THE PLACE, named. It read "Score" and showed plain vector
                           similarity — which on an instance with a cross-encoder configured is not the number
@@ -663,6 +665,24 @@ export class QueryTabComponent {
   /** A match's neighbourhood, grouped by kind — rendered under the match, never beside it in the ranking. */
   relatedOf(hit: RecallResult) { return relatedOf(hit); }
   orderingOf(hit: RecallResult) { return orderingOf(hit as Record<string, unknown>); }
+
+  /**
+   * Whether this match is a record that is no longer true.
+   *
+   * A method rather than `hit.record?.superseded` in the template, because `RecallResult` is an index
+   * signature: everything read off it through the template is `unknown` and reaching into it there gives
+   * a build error or, worse, a cast that hides the next shape change. The nesting — the record sits under
+   * `record`, and the ranking fields sit beside it — is knowledge about the wire shape, and it belongs in
+   * one method rather than in the markup.
+   *
+   * Strictly `true`. Absent and `false` both mean current, and a badge on a current record retires a real
+   * fact in the reader's mind with nothing to contradict it.
+   */
+  supersededOf(hit: RecallResult): boolean | undefined {
+    const record = (hit as Record<string, unknown>)['record'];
+    if (record === null || typeof record !== 'object') return undefined;
+    return (record as Record<string, unknown>)['superseded'] === true ? true : undefined;
+  }
 
   /** The heading a passage sits under, when the chunker recorded one. */
   chunkHeading(r: RecallResult): string | undefined {
