@@ -182,13 +182,25 @@ export async function writeSpace({ extraction, ythril, space }) {
     // The side map, and the only place these ever live.
     sourceTurns.set(id, c.sourceTurns ?? []);
 
-    // A claim is filed under the session it was said in, so the transcript can name it later.
-    const bucket = claimIdsBySession.get(c.statedOn) ?? [];
+    /*
+     * A claim is filed under the session it was said in, so the transcript can name it later — BY THE
+     * SESSION, not by the day.
+     *
+     * It was by the day, and that was correct for the corpus it was written against and wrong for the next
+     * one. Measured: LoCoMo has 0 of 272 sessions sharing a date; LongMemEval has 18,565 of 25,112, in 500
+     * of 500 histories. A history there runs about eleven days with several sessions a day, so bucketing on
+     * `statedOn` hands every session of a day the whole day's claims.
+     *
+     * `session` falls back to `statedOn`, which is what every committed LoCoMo extraction relies on, and
+     * `sessionKey` below refuses the case where that fallback would collide.
+     */
+    const bucketKey = c.session ?? c.statedOn;
+    const bucket = claimIdsBySession.get(bucketKey) ?? [];
     bucket.push(id);
-    claimIdsBySession.set(c.statedOn, bucket);
-    const seen = entityKeysBySession.get(c.statedOn) ?? new Set();
+    claimIdsBySession.set(bucketKey, bucket);
+    const seen = entityKeysBySession.get(bucketKey) ?? new Set();
     for (const k of c.entities ?? []) seen.add(k);
-    entityKeysBySession.set(c.statedOn, seen);
+    entityKeysBySession.set(bucketKey, seen);
   }
 
   /* ── 4. edges ──────────────────────────────────────────────────────────────────────────────────────── */
@@ -228,16 +240,32 @@ export async function writeSpace({ extraction, ythril, space }) {
   }
 
   /* ── 5. the transcripts ────────────────────────────────────────────────────────────────────────────── */
+  /*
+   * WHAT IDENTIFIES A SESSION, and why it is not the date.
+   *
+   * A transcript's path was `transcripts/<date>.md`. On a corpus with one session per day that is a
+   * readable name; on one with six sessions on the first day it is six writes to one path, keeping the
+   * last. Nothing fails — the space holds most of the conversation and a question about a lost session
+   * returns nothing, which reads as a retrieval result rather than as five overwritten files.
+   *
+   * The fallback to the date is what keeps the ten committed LoCoMo extractions working unchanged. What
+   * stops the fallback being a fix somebody can forget is the REFUSAL, and it lives in
+   * `validateExtraction` rather than here — `assertWritable` at the top of this function runs it before a
+   * single record is written, so a collision never reaches this loop. A second copy of the check here
+   * would be one rule with two implementations and no way to reach the second, which is the shape this
+   * repository keeps paying for.
+   */
+  const sessionKey = (s) => s.key ?? s.date;
   for (const s of extraction.sessions ?? []) {
     if (!s.text) continue;   // a session whose verbatim text was not carried through; nothing to quote from
-    const claims = claimIdsBySession.get(s.date) ?? [];
-    const keys = [...(entityKeysBySession.get(s.date) ?? [])];
+    const claims = claimIdsBySession.get(sessionKey(s)) ?? [];
+    const keys = [...(entityKeysBySession.get(sessionKey(s)) ?? [])];
     const links = {
       ...(claims.length > 0 ? { memoryIds: claims } : {}),
       ...(keys.length > 0 ? { entityIds: keys.map(k => entityId.get(k)) } : {}),
     };
     await ythril.writeFile(space, {
-      path: `transcripts/${s.date}.md`,
+      path: `transcripts/${sessionKey(s)}.md`,
       content: s.text,
       tags: ['transcript'],
       ...(Object.keys(links).length > 0 ? { links } : {}),

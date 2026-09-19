@@ -114,6 +114,33 @@ looking equally current, which is the thing the edge was drawn to prevent.
 and merging is what `aliases` is for; drawing an edge instead leaves two nodes where the whole value of the
 graph is that there is one.
 
+## A day may hold more than one session
+
+**The date does not identify a session.** A conversation recorded over months has one session a day and the
+date reads as a name; a history recorded over a fortnight has several a day, and then two sessions share it.
+
+That matters because the writer names each transcript after its session and files each claim under one. So
+a session carries an optional `key`, and a claim carries an optional `session` naming it:
+
+```json
+{ "sessions": [
+    { "key": "s1", "date": "2023-05-20", "turns": ["D1:1", "D1:2"] },
+    { "key": "s2", "date": "2023-05-20", "turns": ["D2:1"] }
+  ],
+  "claims": [
+    { "session": "s1", "text": "Ada planned a road trip.", "speaker": "Ada", "statedOn": "2023-05-20",
+      "entities": ["ada"], "sourceTurns": ["D1:1"] }
+  ] }
+```
+
+Both fall back to the date, so a file with one session per day needs neither and none of the committed
+LoCoMo extractions changes. **Two sessions that resolve to the same identity are refused** — without that,
+one transcript silently overwrites the other and both sessions' claims are filed under whichever survived,
+which nothing downstream can see.
+
+`statedOn` stays a date and still means the day the claim was made. It is what a reader sees in the record;
+`session` is only how the file refers to one of its own sessions.
+
 ## An extraction delivered in parts
 
 A big conversation reads in one pass and does not always WRITE back in one — the graph of a long history is

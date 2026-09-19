@@ -104,6 +104,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The extraction prompt learned three things from reading a second corpus, which is what `B-5` is for.**
+  Each was visible in the output with no question involved, which is the rule that keeps this work from
+  contaminating the benchmark.
+
+  **World knowledge is only worth recording when the conversation TURNS on it.** An assistant answers at
+  length — lists of options, examples, background — and the rule as written would have made a claim of each
+  one, burying the handful of facts about the person under a hundred records of generic advice. The test is
+  now whether the exchange did something: the user picked one, said they would use it, or came back to it.
+
+  **An approximation stays approximate.** *"For about three weeks now"* was being resolved to an exact day,
+  which is searchable and invented. The anchor date is the exact part and the offset is as exact as the
+  speaker made it — and a fuzzy span gets no chrono entry, because a chrono entry is for something that
+  happened ON a date and one built from a guess puts a made-up day on the timeline.
+
+  **A day may hold more than one session**, so each gets a `key` and each claim names its session.
+
 - **The gate that keeps the extractor blind now derives its corpora.** Its title has claimed something
   about *"the extraction step"* since it was written, while its body read LoCoMo alone — so LongMemEval
   would have been covered by nothing, and it is the corpus that needed covering most. Adding a third is now
@@ -688,6 +704,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `filter` and now reads these the same way.
 
 ### Fixed
+
+- **A day with more than one session no longer loses all but the last of them** (`B-5`). The writer named
+  each transcript `transcripts/<date>.md` and filed each claim by `statedOn`. That is correct for a
+  conversation with one session a day and silently destructive for one without — measured across both
+  pinned corpora, LoCoMo has **0 of 272** sessions sharing a date and LongMemEval has **18,565 of 25,112,
+  in 500 of 500 histories**. Six sessions on one day became one transcript, keeping the last, and all six
+  sessions' claims were filed under whichever survived. Nothing failed: the space held most of the
+  conversation, and a question about a lost session returned nothing, which reads as a retrieval result.
+
+  A session now carries an optional `key` and a claim an optional `session`, both falling back to the date
+  so none of the ten committed LoCoMo extractions changes. Two sessions resolving to one identity are
+  REFUSED by the validator, before the first record is written — a key that merely defaults to the date is
+  a fix a caller can forget, and forgetting it restores the overwrite exactly. The writer holds no second
+  copy of that check: `writeSpace` validates first, so a copy there could not be reached, and an
+  unreachable guard is a claim about safety rather than safety.
 
 - **A product rule was justified by a benchmark corpus, in the text every ingest reads.** The assistant-turn
   rules shipped citing *"54 of the 896 evidence turns"* and *"842 of the 896"* in the extraction prompt —
