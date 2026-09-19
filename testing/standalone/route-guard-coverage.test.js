@@ -26,6 +26,7 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { argumentsOf } from './_structural-window.mjs';
 import { routerMounts } from './_router-mounts.mjs';
+import { mountedRoutes } from './_routes.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import fs from 'node:fs';
 import { readFileSync } from 'node:fs';
@@ -315,6 +316,9 @@ describe('Route guards — every mutating route must be protected', () => {
       }
 
       /*
+       * HISTORICAL — the scan this block used to do now lives in `_routes.mjs`, and the note stays because
+       * it is what the window in that module is paying for.
+       *
        * The middleware chain is the ARGUMENTS between the path and the handler — split at the call's own commas.
        *
        * A WINDOW, converted, and this is what the cap was costing. To find the chain the pattern matched from the
@@ -332,16 +336,25 @@ describe('Route guards — every mutating route must be protected', () => {
       // `registerUploadRoute(router: Router)` spells it `router`. `POST /api/files/:spaceId` was never in
       // the analysis until this matched it — not reported as unguarded, absent. The mount graph resolves
       // the parameter to the router its call site passes, so `isMounted` still answers correctly.
-      const re = /(\w*[Rr]outer)\s*\.\s*(get|post|put|patch|delete)\s*\(\s*'([^']+)'/g;
-      let m;
-      while ((m = re.exec(src)) !== null) {
-        const [, router, method, routePath] = m;
-        if (!mounts.isMounted(router)) continue;
-        const args = argumentsOf(src, src.indexOf('(', m.index), `${routePath}: the route registration`);
-        // Argument 0 is the path and the last is the handler; everything between them is the chain.
-        const chain = args.slice(1, -1).join(',');
-        routes.push({ router, method, routePath, chain, file });
-      }
+    }
+
+    /*
+     * THE ROUTES COME FROM `mountedRoutes()` NOW, and the copy they replace is why.
+     *
+     * This gate carried its own `(\w*[Rr]outer)\.(get|post|…)` scan over `server/src/api`, which is the
+     * shape `_routes.mjs` was extracted to stop. It cost exactly what a second implementation costs: when
+     * the module learned to see a route declared straight on the express app, every gate built on it saw
+     * nine more routes and this one — the guard analysis, the one that matters most — stayed blind.
+     *
+     * Two blind spots at once, and either alone was enough: the pattern could not match `app.post`, and
+     * `apiFiles()` never read `app.ts` in the first place. `POST /api/admin/reload-config`,
+     * `POST /api/admin/spaces/:spaceId/wipe` and `…/import` were not reported as unguarded — they were
+     * absent, which is the failure this file's own header describes.
+     *
+     * The method is lower-cased because everything below compares against lower-case verbs.
+     */
+    for (const r of mountedRoutes()) {
+      routes.push({ ...r, method: r.method.toLowerCase(), file: r.file.replace(/^server\/src\//, '') });
     }
   });
 

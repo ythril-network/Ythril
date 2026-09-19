@@ -147,6 +147,16 @@ export const NOT_A_CAPABILITY = new Map(Object.entries({
   '/api/notify': 'outbound notification plumbing configured by an operator.',
   '/api/about': 'build and version metadata. `help` already carries what an agent needs.',
   '/metrics': 'the Prometheus scrape endpoint.',
+  /*
+   * The four the app declares on ITSELF rather than on a router, and they arrived here together because
+   * `mountedRoutes` could not see `app.get(…)` until 2026-09-19. None is a capability, and each is the
+   * kind of thing a tool would be absurd for: two liveness probes an orchestrator polls, the redirect a
+   * browser lands on, and the SPA catch-all that serves index.html for every client-side path.
+   */
+  'GET /health': 'the liveness probe. An orchestrator polls it; an agent has `help` and `space_stats`.',
+  'GET /ready': 'the readiness probe, same reader and same reason.',
+  'GET /': 'the browser entry point, which redirects to setup or to the app.',
+  'GET /{*path}': 'the single-page-app catch-all: every client-side route is served the same index.html.',
   '/mcp': 'the MCP transport itself.',
   '/api/files/mcp-oauth/consent': 'the browser consent screen for an MCP OAuth client.',
   '/api/files/:spaceId/upload-status': 'progress of an upload in flight, polled by the uploader that '

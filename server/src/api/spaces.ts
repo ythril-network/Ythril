@@ -531,6 +531,17 @@ spacesRouter.get('/:id/completeness', globalRateLimit, requireSpaceAuthScoped('i
 // ── Granular type schema CRUD ─────────────────────────────────────────────────
 
 const VALID_KNOWLEDGE_TYPES = new Set<string>(KNOWLEDGE_TYPES);
+
+/**
+ * The refusal, built from the vocabulary rather than spelling it out.
+ *
+ * Three routes below wrote `Must be one of: entity, fact, edge, chrono` by hand, and the check beside each
+ * of them reads `KNOWLEDGE_TYPES`. They agree today and they are two copies of one fact: the release that
+ * renamed `memory` to `fact` had to find all three, and the next change to the vocabulary will have to find
+ * them again — with nothing failing if it misses one, because a 400 nobody asserts on is just a 400.
+ */
+const knowledgeTypeRefusal = (got: string) =>
+  `Invalid knowledgeType '${got}'. Must be one of: ${KNOWLEDGE_TYPES.join(', ')}`;
 const MAX_TYPES_PER_KIND = 200;
 
 // GET /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName
@@ -538,7 +549,7 @@ spacesRouter.get('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
   const { id, knowledgeType, typeName } = req.params as { id: string; knowledgeType: string; typeName: string };
 
   if (!VALID_KNOWLEDGE_TYPES.has(knowledgeType)) {
-    res.status(400).json({ error: `Invalid knowledgeType '${knowledgeType}'. Must be one of: entity, fact, edge, chrono` });
+    res.status(400).json({ error: knowledgeTypeRefusal(knowledgeType) });
     return;
   }
 
@@ -564,7 +575,7 @@ spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
   const { id, knowledgeType, typeName } = req.params as { id: string; knowledgeType: string; typeName: string };
 
   if (!VALID_KNOWLEDGE_TYPES.has(knowledgeType)) {
-    res.status(400).json({ error: `Invalid knowledgeType '${knowledgeType}'. Must be one of: entity, fact, edge, chrono` });
+    res.status(400).json({ error: knowledgeTypeRefusal(knowledgeType) });
     return;
   }
 
@@ -643,7 +654,7 @@ spacesRouter.delete('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRate
   const { id, knowledgeType, typeName } = req.params as { id: string; knowledgeType: string; typeName: string };
 
   if (!VALID_KNOWLEDGE_TYPES.has(knowledgeType)) {
-    res.status(400).json({ error: `Invalid knowledgeType '${knowledgeType}'. Must be one of: entity, fact, edge, chrono` });
+    res.status(400).json({ error: knowledgeTypeRefusal(knowledgeType) });
     return;
   }
 
