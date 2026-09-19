@@ -15,6 +15,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **An extraction may arrive in parts, and an incomplete run is refused** (`B-5`). A long history reads in
+  one pass; the graph of one does not always write back in one, because the extraction is itself a large
+  document. A part declares `part: {index, of}` and covers a contiguous run of sessions, and
+  `mergeExtractionParts` joins them. **The refusal is the point:** three parts of four concatenate into a
+  file that is valid in every other way and describes three-quarters of a conversation — every type
+  declared, every key resolving, every date parsing — so the hole only ever surfaces as a question that
+  returns nothing, which reads as a retrieval failure. Nothing else in the pipeline can see it. Identity
+  crosses the seam by every part repeating every entity, reconciled by key with the later description
+  winning; a key whose TYPE changed between parts is refused rather than resolved, because whichever side
+  won, the edges the other part drew now run to the wrong kind of thing.
+
+- **`longmemeval_s` is measured rather than quoted, and the number this repository had been repeating was
+  wrong twice over.** The tracker called the corpus structurally different because *"a history runs to 500
+  sessions rather than 20"*. 500 is the number of INSTANCES, and the 500-sessions figure belongs to
+  `longmemeval_m`, which is neither pinned nor fetched. Measured from the file: 39–66 sessions per history
+  (p50 50), 396–616 turns (p50 492), 462–514 KB. The pin now carries an `observed` block beside the
+  authors' `stated` one, which its own `$method` note had been asking for since the first fetch.
+
 - **The extraction harness can say that a later session made an earlier fact wrong** (`B-5`). The prompt
   had no sentence about supersession, so a chat log saying *"I left Acme"* produced two equally live
   claims and a search for *"where does she work"* answered with both. A claim may now carry `superseded:

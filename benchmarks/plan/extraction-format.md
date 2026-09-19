@@ -114,6 +114,31 @@ looking equally current, which is the thing the edge was drawn to prevent.
 and merging is what `aliases` is for; drawing an edge instead leaves two nodes where the whole value of the
 graph is that there is one.
 
+## An extraction delivered in parts
+
+A big conversation reads in one pass and does not always WRITE back in one — the graph of a long history is
+a large document even where the history itself fitted comfortably in front of the model. So a file may
+arrive as several parts, each covering a contiguous run of sessions and each carrying its place:
+
+```json
+{ "conversationId": "conv-x", "part": { "index": 2, "of": 4 }, "sessions": [ ... ] }
+```
+
+`mergeExtractionParts` in `../writer/merge-extraction.mjs` joins them, and **refuses an incomplete run**.
+That refusal is the only thing in the pipeline that can see a part went missing: three parts of four
+concatenate into a file that is valid in every other way and describes three-quarters of a conversation, so
+the hole surfaces as a question returning nothing — which reads as a retrieval failure.
+
+| | |
+|---|---|
+| entities | repeated in every part, reconciled by key. Later wins on the description; `sourceTurns` and `aliases` are unioned. A key whose **type** changed between parts is refused rather than resolved |
+| claims, chrono, edges | belong to the part whose sessions they came from, and are never repeated |
+| sessions | concatenated in part order, whatever order the parts arrive in |
+| a key used twice | refused, naming both parts — the seam is where a model forgets what it minted |
+
+A single file with no `part` block is a whole extraction and passes through untouched. Every LoCoMo file is
+one, and none of them needs changing.
+
 ## What the writer does with it
 
 1. Creates the space with `../space/schema.json`, its purpose and its usage notes.

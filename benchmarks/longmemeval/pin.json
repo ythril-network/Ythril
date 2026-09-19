@@ -24,10 +24,21 @@
       "cachePath": "benchmarks/.cache/datasets/longmemeval-s-08d8dad4be43.json",
       "licence": "TO CONFIRM before publishing any result. The repository README does not state one; read the Hugging Face dataset card and the ICLR 2025 paper, and record the answer here rather than assuming a permissive default.",
       "stated": {
-        "$method": "taken from the authors, NOT measured — replace with an `observed` block on first fetch",
+        "$method": "taken from the authors, NOT measured — see `observed` below, which is",
         "instances": 500,
         "approxTokensPerHistory": 115000,
         "approxSessionsPerHistory": 40
+      },
+      "observed": {
+        "$method": "measured from the fetched file 2026-09-19, by reading every instance's haystack_sessions",
+        "$why": [
+          "A tracker row called this corpus structurally different from LoCoMo because 'a history runs to 500 sessions rather than 20'. Both halves were wrong against this file: 500 is the number of INSTANCES, and the 500-sessions figure belongs to longmemeval_m, which is not pinned and not fetched.",
+          "The real difference is smaller and points somewhere else. A history is about 2.5x LoCoMo's session count and about 1.2x its turn count, so it READS in one pass; what it does not always do is write back in one, because the extraction of a long history is itself a large document. That is why the format has parts."
+        ],
+        "instances": 500,
+        "sessionsPerHistory": { "min": 39, "p50": 50, "p90": 55, "max": 66 },
+        "turnsPerHistory": { "min": 396, "p50": 492, "p90": 532, "max": 616 },
+        "charsPerHistory": { "min": 461807, "p50": 490326, "p90": 500046, "max": 513954 }
       }
     },
     "longmemeval_m": {
