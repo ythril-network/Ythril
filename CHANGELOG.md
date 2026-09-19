@@ -15,6 +15,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The extraction harness can say that a later session made an earlier fact wrong** (`B-5`). The prompt
+  had no sentence about supersession, so a chat log saying *"I left Acme"* produced two equally live
+  claims and a search for *"where does she work"* answered with both. A claim may now carry `superseded:
+  true`, written as a record field rather than a property — `attributed` is this corpus's vocabulary and
+  `superseded` is the product's, and a second spelling of a real field in the space people read to judge
+  the product is worse than no mark. It does not suppress: the retired claim keeps its vector and keeps
+  ranking, so *"where DID she work?"* still has an answer.
+
+  A claim may also carry a local `key` — the first thing that ever pointed at a claim — and the three key
+  spaces became one, because an edge end is a bare key and says nothing about which collection it is in.
+  The writer resolves an end across all three and declares the endpoint kind. `supersedes` is exempt from
+  the schema's label allowlist for the reason the server exempts it: the instance writes that label itself
+  when a reviewer resolves a contradiction, and a gate compares the harness's spelling against the
+  server's rather than trusting the copy.
+
+  The validator's rule is the implication and not the pair. A retirement need not have a successor —
+  *"she left and has not started anywhere new"* is a complete record, and demanding an edge would make the
+  model invent one. An edge saying X replaced Y with Y unmarked is refused, because both then come back
+  looking equally current, which is the thing the edge was drawn to prevent. Between two entities it is
+  refused outright: that is a merge, and `aliases` is where a merge belongs.
+
 - **A record can be marked as no longer true, and it keeps ranking.** `superseded` is a boolean on facts,
   entities, edges and chrono entries, accepted on the create and the update, on both doors. Owner's
   decision, answering a proposal that a retired record be stored unembedded the way an attributed claim is:
