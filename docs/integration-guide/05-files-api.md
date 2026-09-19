@@ -197,6 +197,46 @@ Content-Type: application/json
 { "from": "reports/draft.docx", "to": "reports/final.docx" }
 ```
 
+#### A file is identified by its PATH, and that is the one record type where it is
+
+Entities, facts, edges and chrono entries all carry a UUID. **A file's metadata record does not**: its
+`_id` IS its path, chunks extend the same key as `path#chunkN`, and every file operation addresses by
+path. `sha256` changes on every save and `seq` is a sync counter, so neither is a handle either.
+
+**It is deliberate, and the reason is deletion.** A delete writes a sync tombstone per removed path so
+peers remove their copies; the link records a file takes part in hang off that same id, and a rename
+re-keys them. A second identity would be a second thing each of those has to reconcile, and the one that
+disagreed would be found by an operator rather than by a test.
+
+**So a rename changes a file's identity, and two guarantees make that survivable.** Both are asserted by
+`a-file-keeps-its-metadata-across-a-move.test.js`; neither was written down before an integrator measured
+them from outside and built a workaround they did not need.
+
+| | |
+|---|---|
+| **A move carries the whole record** | `description`, `tags`, `properties`, `sha256`, the embedding state and the link arrays all arrive at the new path. The record is re-inserted under the new key with every field intact. |
+| **A content rewrite touches only what you send** | `POST` with a body carrying no `description`, `tags` or `properties` changes the bytes, the size and the hash, and leaves those three exactly as they were. Sending one replaces that one. |
+
+**To hold a stable handle onto a file, mint your own id into `properties` and resolve it with a query**
+on that key:
+
+```http
+PATCH /api/brain/spaces/:spaceId/files?path=reports/final.docx
+Content-Type: application/json
+
+{ "properties": { "externalId": "6f1c…" } }
+```
+
+```http
+POST /api/filter
+Content-Type: application/json
+
+{ "space": "…", "collection": "files", "filter": { "properties.externalId": "6f1c…" } }
+```
+
+`update_file_meta` merges `properties`, so re-asserting the key is safe and idempotent — but with the
+guarantee above you do not have to re-assert it after every write.
+
 ---
 
 ### Delete a File
