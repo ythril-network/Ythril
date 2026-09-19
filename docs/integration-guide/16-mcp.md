@@ -61,7 +61,7 @@ On connect, the server sends global instructions listing all available space IDs
 > HTTP the structured half is the `data` field, so this is one change on both doors.
 >
 > **What a tool carries is the record it wrote, or the identity of what it acted on.** A create or update
-> carries the stored record; a delete carries `{"_id": "…", "deleted": true}`; `merge_entities` carries the
+> carries the stored record; a delete carries `{"_id": "…", "deleted": true}`; `graph_merge` carries the
 > survivor and the absorbed id; `move_file` carries `{"from": "…", "to": "…"}`; `network_sync` carries its
 > counts and, for a named peer, `notFound` as a field rather than as a sentence to match.
 >

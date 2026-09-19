@@ -4,7 +4,7 @@ Practical scenarios showing how Ythril spaces and networks solve real knowledge 
 
 > **How entity linking works in these examples:**
 >
-> - **The parameter is `entityIds`, and it takes IDs — not `entities`, and not names.** `save_fact`'s schema declares `entityIds` with `additionalProperties: false`, so a call passing `entities` is refused outright rather than ignored. Look the entity up first (`find_entities_by_name`) and pass its id.
+> - **The parameter is `entityIds`, and it takes IDs — not `entities`, and not names.** `save_fact`'s schema declares `entityIds` with `additionalProperties: false`, so a call passing `entities` is refused outright rather than ignored. Look the entity up first (`filter` on the `entities` collection, by `name`) and pass its id.
 > - **An unresolved reference is a HARD ERROR, not a skipped one.** It is refused before the write, so the fact is not stored at all. This note described a warning on a write that had already happened, and quoted a message (*"Unresolved entity names — create them first"*) that appears nowhere in the product.
 > - **`strictLinkage` is ON by default** — an absent setting means strict. So passing entity NAMES where an id is wanted fails on an ordinary space: chrono `entityIds` answers *"must contain valid UUID v4 values (entity IDs), not names"*, and an unresolvable edge endpoint is refused too. This note said strict was off by default, which made every example below it look like it would work as written.
 

@@ -253,7 +253,8 @@ deep, so there is no level below it for a structure to live in.
 graph in the wrong place, and the reason is not the API's — it is that a property bag cannot be improved a
 piece at a time. Storing the phases of a plan as one nested value means rewriting the whole value to change
 one phase; storing each phase as a record with scalar properties, linked to what it belongs to, means editing
-the phase. The second shape is also the one `traverse`, `er_model` and the backlink scans can see at all.
+the phase. The second shape is also the one `graph_traverse`, `space_meta`'s `actualSchema` and the
+backlink scans can see at all.
 
 > **Fixed in 4.0.** `PATCH .../entities/:id` checked that `properties` was an object and never looked inside it, so
 > a nested value was refused on create and **stored** on update — same field, same record, same space, two

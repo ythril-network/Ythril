@@ -457,7 +457,7 @@ PATCH /api/spaces/flows
 
 **A type and a property can each say what they are FOR, in prose.** `description` on a type schema (4000
 characters) and on any `propertySchemas` entry (2000) is free text that is stored, returned by
-`get_space_meta` and by the space listing, and **never parsed**. The type says a value is a number;
+`space_meta` and by the space listing, and **never parsed**. The type says a value is a number;
 the property description says it is the retry BUDGET rather than the retry count.
 
 ```jsonc
