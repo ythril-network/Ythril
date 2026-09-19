@@ -56,7 +56,7 @@
 import { readFileSync } from 'node:fs';
 import { trackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
-import { routerMounts } from './_router-mounts.mjs';
+import { mountedRoutesWithSource } from './_routes.mjs';
 import { argumentsOf } from './_structural-window.mjs';
 
 /** From the `{` at `open`, the matching `}`. Depth-counted, so a nested object does not end it early. */
@@ -217,32 +217,45 @@ export function bodyKeysFrom(body, exportedSets, fileSrc = '') {
  * `exportedSets` maps a symbol name to an iterable of keys, for schemas the caller can import and this
  * cannot see. A symbol that is not supplied comes back unresolved.
  */
-export function routeAcceptKeys({ apiRoot = 'server/src/api', exportedSets = {} } = {}) {
-  const mounts = routerMounts();
+/*
+ * `apiRoot` DEFAULTS TO EVERY ROUTE, and it used to default to `server/src/api`.
+ *
+ * That default was a caller's narrowing baked into the module, and it hid fifteen routes from every
+ * question asked here — the five admin ones on the app, the three MCP transport routes, the two setup
+ * routes, and the health probes. A module answering *what does this route accept* should answer for
+ * every route; a caller that wants a subset says so.
+ */
+export function routeAcceptKeys({ apiRoot = null, exportedSets = {} } = {}) {
   const readers = requestReadingHelpers(
     trackedSources(['server/src'], { floor: 50 }).map(f => stripComments(readFileSync(f, 'utf8'))));
   const out = [];
-  for (const f of trackedSources([apiRoot], { floor: 10 })) {
-    const src = stripComments(readFileSync(f, 'utf8'));
-    for (const m of src.matchAll(/(\w*[Rr]outer)\.(get|post|patch|put|delete)\(\s*'([^']*)'/g)) {
-      const prefix = mounts.prefixOf(m[1]);
-      if (prefix === undefined) continue;              // a router nobody mounts serves nothing
-      const from = m.index;
-      const next = [...src.slice(from + 10).matchAll(/\n\w*[Rr]outer\.(get|post|patch|put|delete)\(/g)][0];
-      const body = src.slice(from, next ? from + 10 + next.index : src.length);
-      const row = {
-        file: f,
-        method: m[2].toUpperCase(),
-        route: (prefix + m[3]).replace(/\/$/, '') || '/',
-      };
-      const hop = handsOffTheRequest(body, readers);
-      if (hop) {
-        out.push({ ...row, unresolved: `the handler hands \`req\` to ${hop}(), which reads parameters from it` });
-        continue;
-      }
-      const read = bodyKeysFrom(body, exportedSets, src);
-      out.push(read.unresolved ? { ...row, ...read } : { ...row, ...read, queryKeys: queryKeysFrom(body) });
+  const sources = new Map();
+  /*
+   * THE SUBJECT COMES FROM `mountedRoutes` NOW, and the scan it replaces was the fourth copy of one pattern.
+   *
+   * This walked `server/src/api` with its own `(\w*[Rr]outer).(get|post|…)` regex and its own
+   * next-registration window. Both halves were wrong in the same way as the other copies: a route declared
+   * straight on the express app matches neither the pattern nor the directory, so the five heaviest admin
+   * routes — wipe, import, export, reload-config, rotate-signing-key — were never asked which keys they
+   * accept. Not reported as accepting an undocumented one. Absent from the question.
+   *
+   * `apiRoot` still narrows which FILES are asked about, which is what its callers want; it no longer
+   * decides what counts as a route.
+   */
+  for (const r of mountedRoutesWithSource()) {
+    if (apiRoot && !r.file.startsWith(apiRoot)) continue;
+    const f = r.file;
+    if (!sources.has(f)) sources.set(f, stripComments(readFileSync(f, 'utf8')));
+    const src = sources.get(f);
+    const body = r.source;
+    const row = { file: f, method: r.method, route: r.path };
+    const hop = handsOffTheRequest(body, readers);
+    if (hop) {
+      out.push({ ...row, unresolved: `the handler hands \`req\` to ${hop}(), which reads parameters from it` });
+      continue;
     }
+    const read = bodyKeysFrom(body, exportedSets, src);
+    out.push(read.unresolved ? { ...row, ...read } : { ...row, ...read, queryKeys: queryKeysFrom(body) });
   }
   if (out.length < 150) {
     throw new Error(`only ${out.length} registrations found — the sweep is wrong, not the code`);
