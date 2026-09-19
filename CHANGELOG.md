@@ -724,6 +724,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Upgrading stopped quietly rewriting file records that every peer also holds.** Giving a file uploaded
+  before 4.0 its position in a space's history is a one-time change to a record that replicates, and it rode
+  inside the link conversion — which was an operator-run script until 5.0 taught the instance to run it at
+  every startup. From then on every instance in a network stamped the same records with its own counter at
+  whatever moment it happened to restart, and each overwrote the others in turn. The stamp is back on
+  `npm run links:convert`, which now prints how many records it stamped per space; the boot conversion does
+  links only.
+
+  **A container deployment cannot run that script, so its pre-4.0 file descriptions stay local** until the
+  record is next written — which is what they did before 5.0, and is the smaller of the two problems.
+
+- **The gate that refuses boot migrations over synced data can follow a call.** It read one function's own
+  body, so a migration that did its writing three calls away was invisible to it — which is how the case
+  above went unnoticed for eleven days. It now resolves each call through the importing module's own import
+  list, keyed `path:name` rather than by bare name, and walks the real startup graph to exhaustion. Its list
+  of which collections replicate is read out of `sync/replicated-families.ts` rather than kept by hand,
+  which is how `links` came to be missing from it.
+
 - **A backfill could report records as suppressed when nothing was suppressed.** `space_reembed`'s
   `skippedSuppressed` is the number that tells an operator *"the setting is still on"*, and it was
   computed as `count(vectorless) - count(vectorless AND allowed)` — two separate reads of a collection
