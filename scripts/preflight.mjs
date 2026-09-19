@@ -227,6 +227,23 @@ console.log('\n── every test file parses (incl. the Docker-only suites CI ru
   }
 }
 
+/*
+ * ── the route list, checked against what express actually serves ──
+ *
+ * Every gate that says "every route" reads one module, and that module reads SOURCE. This is the only check
+ * in the repository that compares it against the live express router objects — the one thing that cannot be
+ * wrong about what is served — so it is the check that catches the module being wrong.
+ *
+ * It is here because nothing ran it. Left as a manual script it rotted into reporting all 46 tools as
+ * unmapped (it grepped a file the map had moved out of) and one route as unserved (its own scan could not
+ * resolve a router passed as a parameter). Forty-seven false findings is worse than no audit: the next
+ * person to run it stops trusting the tooling. A check nobody runs is a claim.
+ */
+console.log('\n── the route list agrees with what express serves ──');
+try { run('node scripts/surface-matrix-audit.mjs'); } catch {
+  failures.push({ name: 'surface-matrix-audit', why: 'the static route list and the live express routers disagree' });
+}
+
 console.log('\n── docs lint ──');
 try { run('npm run lint:docs'); } catch { failures.push({ name: 'lint:docs', why: 'markdown that will fail CI' }); }
 

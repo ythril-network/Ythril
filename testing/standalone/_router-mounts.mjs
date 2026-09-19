@@ -63,22 +63,41 @@ export function routerMounts({ roots = ['server/src'], floor = 25 } = {}) {
 
   const edges = [];
   const aliases = new Map();
+  /** Names a `use()` mounts DIRECTLY — authoritative in every file, unlike a parameter alias. */
+  const directlyMounted = new Set();
 
   for (const src of texts.values()) {
     // 1. `parent.use('/prefix', child)`
     for (const m of src.matchAll(/\b(\w+)\.use\(\s*'([^']*)'\s*,\s*(\w+)/g)) {
       edges.push({ parent: m[1], prefix: m[2], child: m[3] });
+      directlyMounted.add(m[3]);
     }
     // 2. `parent.use(child)` — no prefix of its own.
     for (const m of src.matchAll(/\b(\w+)\.use\(\s*(\w+Router)\s*\)/g)) {
       edges.push({ parent: m[1], prefix: '', child: m[2] });
+      directlyMounted.add(m[2]);
     }
   }
 
   // 3. A function that registers routes onto the router it is handed. Bind its PARAMETER to whatever the
   //    call sites pass — and only when they all pass the same one, because two callers would make one
   //    parameter mean two prefixes, and a guess there is worse than the gap it fills.
-  for (const src of texts.values()) {
+  /*
+   * A parameter alias binds the NAME tree-wide, so a file with its own local router of the same name
+   * inherits somebody else's mount. `boundIn` is what stops it.
+   *
+   * `registerUploadRoute(router: Router)` is called with `fileStoreRouter`, so the identifier `router`
+   * resolved to `/api/files` — everywhere. `mcp/oauth.ts` builds its own `const router = Router()` and
+   * mounts it at the ROOT, so its one route was reported at `/api/files/mcp-oauth/consent`: a path nothing
+   * serves, in every gate built on this module. Found by the surface audit, which is the only check that
+   * compares this graph against the live express router objects.
+   *
+   * The fix is scope, not ambiguity-skipping. Refusing to bind `router` at all would also lose
+   * `POST /api/files/:spaceId`, which this module's own header records as having sat outside the guard
+   * analysis for a release.
+   */
+  const boundIn = new Map();
+  for (const [file, src] of texts) {
     for (const m of src.matchAll(/(?:export )?function (\w+)\(\s*(\w+)\s*:\s*Router/g)) {
       const [, fn, param] = m;
       const callers = [];
@@ -87,8 +106,54 @@ export function routerMounts({ roots = ['server/src'], floor = 25 } = {}) {
       }
       if (callers.length && callers.every(c => c === callers[0])) {
         aliases.set(param, callers[0]);
+        boundIn.set(param, file);
         edges.push({ parent: callers[0], prefix: '', child: param });
       }
+    }
+  }
+
+  /*
+   * FORM 4: a function that BUILDS a router and hands it back, mounted through the returned value.
+   *
+   * ```
+   * export function buildMcpOAuthRouter(): Router | null { const router = Router(); … return router; }
+   * const oauthRouter = buildMcpOAuthRouter();
+   * if (oauthRouter) app.use(oauthRouter);
+   * ```
+   *
+   * The three forms above all name the router at the mount. This one does not, so `POST /mcp-oauth/consent`
+   * resolved through whatever else happened to be called `router` — `/api/files`, a path nothing serves —
+   * and then, once that was scoped, resolved to nothing at all. Neither is the route.
+   *
+   * The binding is FILE-SCOPED, because the name being bound is a local: `router` inside this file means
+   * this router, and inside another file it means that file's.
+   */
+  const fileBinding = new Map();
+  for (const [file, src] of texts) {
+    for (const m of src.matchAll(/(?:export )?function (\w+)\([^)]*\)\s*:\s*Router\b[^{]*\{/g)) {
+      const fn = m[1];
+      const built = new RegExp(`\\b(?:const|let)\\s+(\\w+)\\s*(?::[^=]*)?=\\s*(?:express\\.)?Router\\(`)
+        .exec(src.slice(m.index));
+      if (!built) continue;
+      const local = built[1];
+      // Where the RESULT is mounted: `const v = fn();` and something `use()`s `v`.
+      for (const other of texts.values()) {
+        const assign = new RegExp(`\\b(?:const|let)\\s+(\\w+)\\s*=\\s*${fn}\\(`).exec(other);
+        if (!assign) continue;
+        const value = assign[1];
+        if (!directlyMounted.has(value)) continue;
+        if (!fileBinding.has(file)) fileBinding.set(file, new Map());
+        fileBinding.get(file).set(local, value);
+      }
+    }
+  }
+
+  /** Files that declare a router of their own under a given name — they must not inherit an alias. */
+  const declaresLocally = new Map();
+  for (const [file, src] of texts) {
+    for (const m of src.matchAll(/\b(?:const|let)\s+(\w+)\s*(?::\s*Router\s*)?=\s*(?:express\.)?Router\(/g)) {
+      if (!declaresLocally.has(m[1])) declaresLocally.set(m[1], new Set());
+      declaresLocally.get(m[1]).add(file);
     }
   }
 
@@ -111,7 +176,31 @@ export function routerMounts({ roots = ['server/src'], floor = 25 } = {}) {
   }
 
   return {
-    prefixOf: name => at.get(name),
+    /**
+     * The mount a router's routes hang under.
+     *
+     * `file` is optional and narrows the answer: a file declaring its OWN router of this name does not
+     * inherit a parameter alias bound in another file. Without it the caller gets the tree-wide answer,
+     * which is right for every name that is not also somebody else's local.
+     */
+    prefixOf: (name, file) => {
+      /*
+       * Only a PARAMETER-ONLY binding is file-scoped, and the first version of this got that wrong.
+       *
+       * `spacesRouter` is both: mounted by name in `app.use('/api/spaces', spacesRouter)` AND passed as a
+       * parameter to two registrars. Scoping it dropped the five routes `spaces.ts` declares itself —
+       * every space read and write — because the file that owns the router is not the file that bound the
+       * alias. A direct mount is authoritative wherever the name appears; an alias is not.
+       */
+      // A router this file BUILT and handed back wins: it is the most specific answer there is.
+      const built = file && fileBinding.get(file)?.get(name);
+      if (built !== undefined && at.has(built)) return at.get(built);
+
+      const paramOnly = boundIn.has(name) && !directlyMounted.has(name);
+      if (file && paramOnly && boundIn.get(name) !== file
+        && declaresLocally.get(name)?.has(file)) return undefined;
+      return at.get(name);
+    },
     isMounted: name => at.has(name),
     aliasOf: name => aliases.get(name),
     /** Every mounted router, for a caller that wants to assert over the set. */

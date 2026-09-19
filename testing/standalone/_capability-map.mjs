@@ -158,7 +158,10 @@ export const NOT_A_CAPABILITY = new Map(Object.entries({
   'GET /': 'the browser entry point, which redirects to setup or to the app.',
   'GET /{*path}': 'the single-page-app catch-all: every client-side route is served the same index.html.',
   '/mcp': 'the MCP transport itself.',
-  '/api/files/mcp-oauth/consent': 'the browser consent screen for an MCP OAuth client.',
+  // Served at the ROOT, not under `/api/files`. It read `/api/files/mcp-oauth/consent` because the mount
+  // graph resolved its router by bare name and `router` meant the upload registrar's parameter; the
+  // surface audit, comparing against the live express objects, is what caught it.
+  '/mcp-oauth/consent': 'the browser consent screen for an MCP OAuth client.',
   '/api/files/:spaceId/upload-status': 'progress of an upload in flight, polled by the uploader that '
     + 'started it. An MCP `write_file` is one call that returns when it is done.',
   '/api/brain/spaces/:spaceId/events': 'the server-sent event stream the UI subscribes to for live '

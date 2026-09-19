@@ -740,6 +740,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A route was attributed to a path nothing serves, in every gate that reads the route list.** The MCP
+  OAuth consent screen is served at `/mcp-oauth/consent`; the mount graph resolved its router by bare name,
+  another file's function parameter is also called `router`, and that one is mounted under `/api/files` —
+  so the route was reported at `/api/files/mcp-oauth/consent`. A guard gate checking a path that does not
+  exist is checking nothing, and the real path went unchecked.
+
+  The graph now scopes a parameter alias to the file that binds it, keeps a direct mount authoritative
+  everywhere (a first attempt at this dropped all five space routes), and learned the fourth mount form —
+  a router BUILT by a function and mounted through the value it returns.
+
+  **It was found by the one audit that compares the route list against the live express router objects,
+  and that audit had rotted because nothing ran it.** It grepped for the capability map in a file the map
+  had moved out of, so it reported all 46 tools as unmapped; its own route scan could not resolve a router
+  passed as a parameter, so it reported a real route as unserved. Forty-seven findings, every one false —
+  which is worse than no audit, because the next person to run it stops trusting the tooling.
+
+  It reads the shared list and the imported map now, accounts explicitly for the routes only one side can
+  see, and **runs in preflight**. A check nobody runs is a claim.
+
 - **Two more gates were asking their question of two thirds of the API.** The rights-row gate and the
   route-parameter reader each kept their own copy of the route scan — the same pattern, with the same two
   blind spots: it cannot match a route declared straight on the express app, and it walks `server/src/api`,
