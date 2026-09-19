@@ -15,6 +15,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **An AI assistant can save a picture, a PDF or anything else that is not text.** `write_file` takes
+  `encoding: "base64"` alongside its existing UTF-8 default, which the REST upload had accepted throughout.
+  Reported by the canary operator after one of their coding sessions was asked to put a photograph of a
+  whiteboard on a record and could not: `write_file` is the only file-writing tool a write-capable token is
+  offered, so a session reached through MCP could create a text file and could never create a byte file.
+
+  **The ceiling is the request rather than the file store, and the schema says so.** A tool call arrives as
+  one JSON body capped at 10 MB and base64 costs a third more than the bytes it carries, so about 7 MB of
+  file fits; anything larger goes through `POST /api/files/{path}`, which takes a raw body and supports
+  chunked upload.
+
+  **Base64 that is not base64 is now refused on BOTH doors.** `Buffer.from` skips characters outside the
+  alphabet rather than failing, so a `data:image/png;base64,…` URL used to be stored as a short, corrupt
+  file under a `201` — with a plausible sha256 and a plausible size, and nothing downstream able to tell.
+  The decode, the encoding vocabulary and that refusal are one module behind both doors.
+
 - **A record's links and edges can be changed after it is created.** `linkEntities`, `linkFacts`,
   `linkChronos`, `linkFiles` and `edges` are now accepted on the UPDATE verb of every door that accepts
   them on create — `facts`, `chrono` and `entities`, on both surfaces — with the same meaning they have

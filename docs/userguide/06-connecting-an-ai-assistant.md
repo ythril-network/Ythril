@@ -137,7 +137,9 @@ Once connected, your AI assistant can:
 - **Recall** — semantically search everything you have stored.
 - **Manage entities** — create, update, merge, and traverse the knowledge graph.
 - **Track time** — create and update events, deadlines, plans, and milestones in the chrono log.
-- **Work with files** — read, write, list, and move files in any accessible space.
+- **Work with files** — read, write, list, and move files in any accessible space, including pictures
+  and PDFs. Roughly 7 MB is the most an assistant can save in one go; anything larger has to be uploaded
+  through the Files page or the upload API instead.
 - **Query directly** — run structured MongoDB-style queries against any collection.
 
 Use a **read-only token** to give an assistant search access without the ability to write or delete anything.

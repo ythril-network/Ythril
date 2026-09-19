@@ -22,6 +22,7 @@ import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { getConfig } from '../config/loader.js';
 import { resolveSafePath, assertNoSymlinkEscape } from '../files/sandbox.js';
 import { writeFileBytes } from '../files/files.js';
+import { decodeContent } from '../files/content-encoding.js';
 import { upsertFileMeta } from '../files/file-meta.js';
 import { parseContentRange, storeChunk, assembleChunks } from '../files/chunks.js';
 import { checkQuota, QuotaError } from '../quota/quota.js';
@@ -155,16 +156,25 @@ export function registerUploadRoute(router: Router): void {
       try {
         let sha256: string;
         let incomingBytes = 0;
+        let decoded: Buffer | undefined;
 
         if (Buffer.isBuffer(req.body)) {
           incomingBytes = req.body.length;
         } else if (req.body && typeof req.body === 'object' && typeof req.body.content === 'string') {
-          const encoding: string = req.body.encoding ?? 'utf8';
-          if (encoding !== 'utf8' && encoding !== 'base64') {
-            res.status(400).json({ error: "encoding must be 'utf8' or 'base64'" });
+          // DECODED ONCE, up here, and the buffer is what gets written below.
+          //
+          // This measured the size with `Buffer.byteLength(content, encoding)` and decoded again after the
+          // quota check, which is two readings of one string and only the second of them produced bytes. The
+          // `write_file` tool then needed the same rule and there was nothing to call — so the decode, the
+          // encoding vocabulary and the base64 validation moved into `files/content-encoding.ts` and both
+          // doors read it from there.
+          try {
+            decoded = decodeContent(req.body.content as string, req.body.encoding);
+          } catch (err) {
+            res.status(400).json({ error: (err as Error).message });
             return;
           }
-          incomingBytes = Buffer.byteLength(req.body.content as string, encoding as BufferEncoding);
+          incomingBytes = decoded.length;
         } else {
           res
             .status(400)
@@ -187,13 +197,7 @@ export function registerUploadRoute(router: Router): void {
           throw err;
         }
 
-        if (Buffer.isBuffer(req.body)) {
-          ({ sha256 } = await writeFileBytes(targetSpace, filePath, req.body));
-        } else {
-          const encoding = (req.body.encoding ?? 'utf8') as BufferEncoding;
-          const buf = Buffer.from(req.body.content as string, encoding);
-          ({ sha256 } = await writeFileBytes(targetSpace, filePath, buf));
-        }
+        ({ sha256 } = await writeFileBytes(targetSpace, filePath, Buffer.isBuffer(req.body) ? req.body : decoded!));
 
         // Persist file metadata to MongoDB
         const metaOpts: { description?: string; tags?: string[]; properties?: Record<string, string | number | boolean>; ttlDays?: number; sha256?: string } = {};

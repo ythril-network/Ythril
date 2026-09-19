@@ -425,6 +425,45 @@ describe('MCP file tools — write_file / read_file / list_dir / create_dir / mo
     assert.ok(text.includes('sha256'), `Expected sha256 in: ${text}`);
   });
 
+  it('write_file stores BYTES when encoding is base64, byte for byte (B-14)', async () => {
+    /*
+     * The report this closes: a session reached through MCP could create a text file and could never
+     * create a byte file, while the REST door had taken `{ content, encoding: 'base64' }` throughout.
+     *
+     * Asserted by fetching the bytes back through REST rather than through `read_file`, which decodes as
+     * UTF-8 — a comparison that goes through the same assumption the write did would pass on a file that
+     * had been mangled and re-mangled identically.
+     */
+    const png = Buffer.from(
+      '89504E470D0A1A0A0000000D49484452000000010000000108060000001F15C489', 'hex');
+    const bytePath = `${dir}/whiteboard.png`;
+    const result = await session.callTool('write_file', {
+      space: testSpaceId, path: bytePath, content: png.toString('base64'), encoding: 'base64',
+    });
+    assert.ok(!result?.isError, `write_file(base64) error: ${JSON.stringify(result)}`);
+    assert.equal(result?.structuredContent?.sizeBytes, png.length,
+      'the reported size must be the DECODED length, not the length of the base64 string');
+
+    const res = await fetch(`${INSTANCES.a}/api/files/${testSpaceId}?path=${encodeURIComponent(bytePath)}`,
+      { headers: { Authorization: `Bearer ${tokenA}` } });
+    assert.equal(res.status, 200, `fetching the stored bytes: ${res.status}`);
+    const stored = Buffer.from(await res.arrayBuffer());
+    assert.deepEqual(stored, png, 'the stored bytes are not the bytes that were sent');
+  });
+
+  it('write_file REFUSES base64 that is not base64, rather than storing a short file', async () => {
+    // `Buffer.from(s, 'base64')` skips characters outside the alphabet, so a data URL would be stored as
+    // a file three bytes shorter than it should be, under a success, with a plausible sha256.
+    const result = await session.callTool('write_file', {
+      space: testSpaceId,
+      path: `${dir}/data-url.png`,
+      content: 'data:image/png;base64,iVBORw0KGgo=',
+      encoding: 'base64',
+    });
+    assert.ok(result?.isError, `a data URL must be refused, got: ${JSON.stringify(result)}`);
+    assert.match(JSON.stringify(result), /not base64/, 'the refusal must say what is wrong with it');
+  });
+
   it('write_file with empty path returns isError', async () => {
     const result = await session.callTool('write_file', { space: testSpaceId, path: '', content: 'oops' });
     assert.ok(result?.isError, 'Empty path must return isError');

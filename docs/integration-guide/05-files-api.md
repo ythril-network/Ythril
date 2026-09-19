@@ -57,6 +57,16 @@ Content-Type: application/json
 }
 ```
 
+`encoding` is `utf8` or `base64`, and **`write_file` over MCP takes the same two and means the same thing
+by them** — the decode, the vocabulary and the refusal are one module behind both doors. Base64 that is not
+base64 is a `400` rather than a short file: `Buffer.from` skips characters outside the alphabet, so the
+usual mistake — sending a whole `data:image/png;base64,…` URL instead of only the part after the comma —
+would otherwise store something corrupt under a `201`.
+
+The two doors differ in what they can CARRY, not in what they accept. A tool call arrives as one JSON body
+capped at 10 MB, so roughly 7 MB of file fits once base64 inflation is counted; this route takes a raw body
+up to `maxUploadBodyBytes` and supports the chunked upload below.
+
 ---
 
 ### Chunked Upload (Content-Range)
