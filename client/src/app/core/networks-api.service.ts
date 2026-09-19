@@ -64,10 +64,6 @@ export class NetworksApi {
     return this.http.patch<any>(`/api/networks/${networkId}`, { syncSchedule });
   }
 
-  updateSyncSchedule(networkId: string, memberId: string, schedule: string): Observable<void> {
-    return this.http.patch<void>(`/api/networks/${networkId}/members/${memberId}`, { syncSchedule: schedule });
-  }
-
   triggerSync(networkId: string): Observable<{ ok: boolean }> {
     return this.http.post<{ ok: boolean }>(`/api/networks/${networkId}/sync`, {});
   }
