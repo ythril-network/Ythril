@@ -173,16 +173,25 @@ POST /api/contradictions/:id/resolve
   resolution. Guessing which record a reviewer meant to keep is the one mistake this endpoint must not make.
 - **Repeating the call is safe.** An edge's identity is `(from, to, label)`, so resolving the same pair twice
   lands on the same edge rather than accumulating duplicates.
-- **A non-entity pair gets the decision but no edge**, and the response says so:
+- **Facts, entities, chrono entries and files all get the edge now.** It used to be drawn for entity pairs
+  only, on the ground that an edge between two facts would be stored and never walked; the walk follows an
+  edge to a fact, chrono entry or file since 5.0. **A pair of EDGES is the one exception**, because an edge
+  cannot be the endpoint of an edge — `note` says so, and it appears in no other case. Branch on `edge` in
+  the response if your automation depends on the link.
+
+- **The LOSING RECORD is marked, which is the part that reaches retrieval.** Before 5.0 `supersededId` was
+  written onto the review finding and nowhere else, so resolving a contradiction changed nothing about what
+  the next `recall` returned: both claims came back ranked together with nothing to choose between them. The
+  loser now carries `superseded: true` on the record itself, and `markedRecord` in the response says the
+  mark landed:
 
   ```json
-  { "status": "resolved", "resolution": "superseded", "supersededId": "…",
-    "note": "no edge drawn: edges connect entities, and this pair is of type 'fact'" }
+  { "status": "resolved", "resolution": "superseded", "supersededId": "…", "markedRecord": true,
+    "edge": { "id": "…", "from": "<winner>", "to": "<loser>", "label": "supersedes" } }
   ```
 
-  Edges in Ythril connect entities. Drawing one between two facts would be a link that is stored, returned,
-  and points at nothing traversable — so the judgement is kept and the absence of the edge is reported rather
-  than left for you to discover. Check for `edge` in the response if your automation depends on the link.
+  It keeps its vector and keeps ranking — see
+  [Marking a record as no longer true](04f-write-semantics.md#marking-a-record-as-no-longer-true).
 
 `supersededId` and `resolvedBy` are also returned on the candidate by `GET /api/contradictions`, so a later
 reviewer can see who settled it and which side they judged stale without reading the audit log.

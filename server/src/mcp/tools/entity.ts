@@ -1,6 +1,6 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { shapeError } from '../../brain/write-shape.js';
-import { UUID_V4_RE, TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, ttlDaysFromArgs, uuidSchema, unitScoreSchema } from './shared.js';
+import { UUID_V4_RE, TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, uuidSchema, unitScoreSchema } from './shared.js';
 import { validateDeleteFields, applyDeleteFields as applyDeleteFieldsPaths } from '../../brain/delete-fields.js';
 import { deleteEntity, findEntitiesByName, getEntityById, updateEntityById, upsertEntity } from '../../brain/entities.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
@@ -13,6 +13,7 @@ import { isProxySpace, isStrictLinkage, resolveMemberSpaces, resolveWriteTarget,
 import { resolveMetaRefs, validateEntity } from '../../spaces/schema-validation.js';
 import { mergePropertiesOrKeep, mergeTagsOrKeep } from '../../brain/merge-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
+import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { connectionSchemas, applyConnections, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
 
 export const save_entityTool: ToolHandler = {
@@ -57,6 +58,7 @@ export const save_entityTool: ToolHandler = {
             checkDuplicates: { type: 'boolean', default: true, description: 'On a NEW entity insert (no id / unknown id), run a semantic near-duplicate check first (default true). Flags highly similar existing entities (id + summary + score) so you can merge or update instead of creating a duplicate. Does not fire on updates. Set false to skip.' },
             dupeThreshold: unitScoreSchema('Cosine-similarity threshold for the duplicate check (0-1, default ~0.92). Lower to flag looser matches.'),
             suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
+            superseded: SUPERSEDED_SCHEMA,
             ttlDays: TTL_DAYS_SCHEMA,
           },
           required: ['space', 'name', 'type'],
@@ -105,10 +107,13 @@ export const save_entityTool: ToolHandler = {
       // grammar, so a change to it reaches every create door at once rather than one at a time.
       const supCreate = parseRecordSuppression(a);
       if (!supCreate.ok) throw new Error(supCreate.error);
+      const susCreate = parseRecordSuperseded(a);
+      if (!susCreate.ok) throw new Error(susCreate.error);
       upserted = await upsertEntity(wt.target, eName, eType, tags, props, description, rawId,
         {
           checkDuplicates: entDupeCheck, checkContradictions: entContraCheck, dupeThreshold: entDupeThreshold,
           ...(supCreate.value !== undefined ? { suppressEmbeddings: supCreate.value } : {}),
+          ...(susCreate.value !== undefined ? { superseded: susCreate.value } : {}),
         },
         ctx.actor, entTtlDays, c => { entCheck = c; });
     } catch (err) {
@@ -231,6 +236,7 @@ export const update_entityTool: ToolHandler = {
               additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
             },
             suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
+            superseded: SUPERSEDED_SCHEMA,
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
             deleteFields: { type: 'array', items: { type: 'string' }, description: 'Dot-notation paths to delete from the entity (e.g. ["properties.oldKey", "description"]). System fields (id, name, type, spaceId, createdAt, updatedAt) cannot be deleted. Deletions are permanent.' },
             ttlDays: TTL_DAYS_SCHEMA,
@@ -257,10 +263,13 @@ export const update_entityTool: ToolHandler = {
     const dfResult = validateDeleteFields(a['deleteFields']);
     if (!dfResult.ok) throw new Error(dfResult.error);
     const dfPaths: string[] | undefined = Array.isArray(a['deleteFields']) && (a['deleteFields'] as string[]).length > 0 ? a['deleteFields'] as string[] : undefined;
-    const updates: { name?: string; type?: string; description?: string; tags?: string[]; properties?: Record<string, string | number | boolean>; suppressEmbeddings?: boolean } = {};
+    const updates: { name?: string; type?: string; description?: string; tags?: string[]; properties?: Record<string, string | number | boolean>; suppressEmbeddings?: boolean; superseded?: boolean } = {};
     const sup = parseRecordSuppression(a);
     if (!sup.ok) throw new Error(sup.error);
     if (sup.value !== undefined) updates.suppressEmbeddings = sup.value;
+    const sus = parseRecordSuperseded(a);
+    if (!sus.ok) throw new Error(sus.error);
+    if (sus.value !== undefined) updates.superseded = sus.value;
     if (typeof a['name'] === 'string') updates.name = a['name'].trim();
     if (typeof a['type'] === 'string') updates.type = (a['type'] as string).trim();
     if (typeof a['description'] === 'string') updates.description = a['description'] as string;

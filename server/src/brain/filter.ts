@@ -64,7 +64,7 @@ export type FilterExpression = Record<string, FilterOperator>;
  * one copy is a performance cliff wearing a feature's clothes.
  */
 export const ALLOWED_FILTER_KEY_PREFIXES =
-  ['properties.', 'tags', 'type', 'name', 'status', 'label'] as const;
+  ['properties.', 'tags', 'type', 'name', 'status', 'label', 'superseded'] as const;
 
 /**
  * Does this key reach an allowed path? The three clauses are the rule, and they are not obvious:

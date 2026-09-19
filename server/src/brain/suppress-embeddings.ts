@@ -1,6 +1,7 @@
 import { TYPE_FIELD } from './ttl.js';
 import type { KnowledgeType, BrainEmbedRecordType } from '../config/types.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
+import { RECORD_SUPPRESS_FIELD, parseRecordFlag, recordFlagTypeError } from './record-flag.js';
 
 /**
  * Should this record be embedded at all?
@@ -74,7 +75,7 @@ export function embeddingSuppressed(i: SuppressInputs): boolean {
  * No stored-value migration is needed: every write since 3.1.0 has set this key, and a record that
  * carries only the legacy one predates 3.1.0 — which the floor now excludes from the network anyway.
  */
-export const RECORD_SUPPRESS_FIELD = 'suppressEmbeddings';
+export { RECORD_SUPPRESS_FIELD } from './record-flag.js';
 
 /**
  * The record tier's value for a stored document.
@@ -96,7 +97,7 @@ export function recordNotSuppressedFilter(): Record<string, unknown> {
 }
 
 /** The one refusal text for a bad record-tier value, so both doors say the same thing. */
-export const RECORD_SUPPRESS_TYPE_ERROR = `\`${RECORD_SUPPRESS_FIELD}\` must be a boolean`;
+export const RECORD_SUPPRESS_TYPE_ERROR = recordFlagTypeError(RECORD_SUPPRESS_FIELD);
 
 /**
  * Read the record tier out of a request body or a set of MCP tool args.
@@ -113,12 +114,7 @@ export const RECORD_SUPPRESS_TYPE_ERROR = `\`${RECORD_SUPPRESS_FIELD}\` must be 
 export function parseRecordSuppression(
   body: unknown,
 ): { ok: true; value: boolean | undefined } | { ok: false; error: string } {
-  if (typeof body !== 'object' || body === null) return { ok: true, value: undefined };
-  const b = body as Record<string, unknown>;
-  const raw = b[RECORD_SUPPRESS_FIELD];
-  if (raw === undefined) return { ok: true, value: undefined };
-  if (typeof raw !== 'boolean') return { ok: false, error: RECORD_SUPPRESS_TYPE_ERROR };
-  return { ok: true, value: raw };
+  return parseRecordFlag(body, RECORD_SUPPRESS_FIELD);
 }
 
 /**

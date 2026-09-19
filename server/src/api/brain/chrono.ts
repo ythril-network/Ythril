@@ -26,6 +26,7 @@ import { mergePropertiesOrKeep } from '../../brain/merge-fields.js';
 import {
   parseRecordSuppression, RECORD_SUPPRESS_FIELD,
 } from '../../brain/suppress-embeddings.js';
+import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { connectionInputError, applyConnections, CONNECTION_BODY_KEYS } from '../../brain/write-connections.js';
 
 export const chronoRouter = Router();
@@ -297,6 +298,9 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
   const sup = parseRecordSuppression(req.body);
   if (!sup.ok) { res.status(400).json({ error: sup.error }); return; }
   const suppressEmbeddings = sup.value;
+  const sus = parseRecordSuperseded(req.body);
+  if (!sus.ok) { res.status(400).json({ error: sus.error }); return; }
+  const superseded = sus.value;
 
   // Nothing this handler recognises is an ERROR, not a 200 with an unchanged record. The three sibling
   // PATCH handlers have always answered `At least one field must be provided`; chrono answered success,
@@ -357,7 +361,7 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
     updated = await findFirstAcrossMembers(wt.target, mid => updateChrono(mid, id, {
       title, type, startsAt, endsAt, status, confidence,
       tags, entityIds, memoryIds, description, properties: safeProps, recurrence: safeRecurrence,
-      suppressEmbeddings,
+      suppressEmbeddings, superseded,
     }, dfPaths, webhookToken(req), ttlDaysFromBody(req.body), ifMatch.seq, c => { updateCheck = c; }));
   } catch (err) {
     if (err instanceof SchemaViolationError) {

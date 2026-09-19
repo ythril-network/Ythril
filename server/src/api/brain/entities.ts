@@ -22,6 +22,7 @@ import { UUID_V4_RE, webhookToken, getSpaceMeta, ttlDaysFromBody, ttlDaysError, 
 import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
 import { mergePropertiesOrKeep, mergeTagsOrKeep } from '../../brain/merge-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
+import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { connectionInputError, applyConnections, CONNECTION_BODY_KEYS, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
 
 export const entitiesRouter = Router();
@@ -311,7 +312,7 @@ entitiesRouter.patch('/spaces/:spaceId/entities/:id', globalRateLimit, requireSp
   if (shapeErr) { res.status(400).json({ error: shapeErr }); return; }
   const ttlDaysProvided = !!req.body && typeof req.body === 'object' && 'ttlDays' in req.body;
   const dfPaths: string[] | undefined = Array.isArray(deleteFields) && deleteFields.length > 0 ? deleteFields : undefined;
-  const updates: { name?: string; type?: string; description?: string; tags?: string[]; properties?: Record<string, string | number | boolean>; suppressEmbeddings?: boolean } = {};
+  const updates: { name?: string; type?: string; description?: string; tags?: string[]; properties?: Record<string, string | number | boolean>; suppressEmbeddings?: boolean; superseded?: boolean } = {};
   if (name !== undefined) {
     if (typeof name !== 'string' || !name.trim()) { res.status(400).json({ error: '`name` must be a non-empty string' }); return; }
     updates.name = name.trim();
@@ -342,6 +343,9 @@ entitiesRouter.patch('/spaces/:spaceId/entities/:id', globalRateLimit, requireSp
   const sup = parseRecordSuppression(req.body);
   if (!sup.ok) { res.status(400).json({ error: sup.error }); return; }
   if (sup.value !== undefined) updates.suppressEmbeddings = sup.value;
+  const sus = parseRecordSuperseded(req.body);
+  if (!sus.ok) { res.status(400).json({ error: sus.error }); return; }
+  if (sus.value !== undefined) updates.superseded = sus.value;
   // A connection field IS a field. Both helpers return `null` for absent, never `undefined` — comparing
   // against `undefined` would be true for `null` and would DISABLE this check rather than widen it.
   const hasConnections = desiredLinksFrom(req.body) !== null || edgeInputsFrom(req.body) !== null;

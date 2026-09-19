@@ -299,6 +299,7 @@ export const IncomingFactDoc = z.object({
    * fact came to be dropped from its batch in silence.
    */
   suppressEmbeddings: z.boolean().optional(),
+  superseded: z.boolean().optional(),
   spaceId: z.string().min(1),
   fact: z.string(),
   tags: z.array(z.string()).max(100),
@@ -439,6 +440,7 @@ export const IncomingEntityDoc = z.object({
   _id: z.string().min(1),
   /** See `IncomingFactDoc`: the record tier of suppression, which the receiver needs in order to honour it. */
   suppressEmbeddings: z.boolean().optional(),
+  superseded: z.boolean().optional(),
   spaceId: z.string().min(1),
   name: z.string().min(1),
   type: z.string().min(1),
@@ -463,6 +465,7 @@ export const IncomingEdgeDoc = z.object({
   _id: z.string().min(1),
   /** See `IncomingFactDoc`: the record tier of suppression, which the receiver needs in order to honour it. */
   suppressEmbeddings: z.boolean().optional(),
+  superseded: z.boolean().optional(),
   spaceId: z.string().min(1),
   from: z.string().min(1),
   to: z.string().min(1),
@@ -540,6 +543,7 @@ export const IncomingChronoDoc = z.object({
   contentRedactedAt: z.string().optional(),
   /** See `IncomingFactDoc`: the record tier of suppression, which the receiver needs in order to honour it. */
   suppressEmbeddings: z.boolean().optional(),
+  superseded: z.boolean().optional(),
   spaceId: z.string().min(1),
   title: z.string().min(1),
   description: z.string().optional(),

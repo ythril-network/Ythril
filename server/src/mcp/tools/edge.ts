@@ -1,6 +1,6 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { shapeError } from '../../brain/write-shape.js';
-import { UUID_V4_RE, TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, ttlDaysFromArgs, unitScoreSchema } from './shared.js';
+import { UUID_V4_RE, TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema } from './shared.js';
 import { validateDeleteFields, applyDeleteFields as applyDeleteFieldsPaths } from '../../brain/delete-fields.js';
 import { deleteEdge, getEdgeById, traverseGraph, updateEdgeById, upsertEdge, EdgeSchemaViolation } from '../../brain/edges.js';
 // The shared write gate, imported rather than reimplemented — see the note in memory.ts.
@@ -13,6 +13,7 @@ import type { RefKind } from '../../config/types-knowledge.js';
 import { resolveMetaRefs, validateEdge } from '../../spaces/schema-validation.js';
 import { mergePropertiesOrKeep } from '../../brain/merge-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
+import { parseRecordSuperseded } from '../../brain/record-flag.js';
 
 export const save_edgeTool: ToolHandler = {
   name: 'save_edge',
@@ -62,6 +63,7 @@ export const save_edgeTool: ToolHandler = {
             },
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
             suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
+            superseded: SUPERSEDED_SCHEMA,
             ttlDays: TTL_DAYS_SCHEMA,
           },
           required: ['space', 'from', 'to', 'label'],
@@ -127,9 +129,12 @@ export const save_edgeTool: ToolHandler = {
       // grammar, so a change to it reaches every create door at once rather than one at a time.
       const supCreate = parseRecordSuppression(a);
       if (!supCreate.ok) throw new Error(supCreate.error);
+      const susCreate = parseRecordSuperseded(a);
+      if (!susCreate.ok) throw new Error(susCreate.error);
       edge = await upsertEdge(wt.target, from, to, label, weight, edgeType, description, edgeProps, edgeTags, ctx.actor, edgeTtlDays,
         {
           ...(supCreate.value !== undefined ? { suppressEmbeddings: supCreate.value } : {}),
+          ...(susCreate.value !== undefined ? { superseded: susCreate.value } : {}),
           ...(a['fromKind'] !== undefined ? { fromKind } : {}),
           ...(a['toKind'] !== undefined ? { toKind } : {}),
           onValidation: c => { edgeCheck = c; },
@@ -243,6 +248,7 @@ export const update_edgeTool: ToolHandler = {
             fromKind: edgeEndpointKindSchema('from'),
             toKind: edgeEndpointKindSchema('to'),
             suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
+            superseded: SUPERSEDED_SCHEMA,
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
             deleteFields: { type: 'array', items: { type: 'string' }, description: 'Dot-notation paths to delete from the edge (e.g. ["properties.oldKey", "description"]). System fields (id, name, type, spaceId, createdAt, updatedAt) cannot be deleted. Deletions are permanent.' },
             ttlDays: TTL_DAYS_SCHEMA,
@@ -265,10 +271,13 @@ export const update_edgeTool: ToolHandler = {
     const dfResult = validateDeleteFields(a['deleteFields']);
     if (!dfResult.ok) throw new Error(dfResult.error);
     const dfPaths: string[] | undefined = Array.isArray(a['deleteFields']) && (a['deleteFields'] as string[]).length > 0 ? a['deleteFields'] as string[] : undefined;
-    const updates: { label?: string; description?: string; tags?: string[]; properties?: Record<string, string | number | boolean>; weight?: number; type?: string; suppressEmbeddings?: boolean; fromKind?: RefKind; toKind?: RefKind } = {};
+    const updates: { label?: string; description?: string; tags?: string[]; properties?: Record<string, string | number | boolean>; weight?: number; type?: string; suppressEmbeddings?: boolean; superseded?: boolean; fromKind?: RefKind; toKind?: RefKind } = {};
     const sup = parseRecordSuppression(a);
     if (!sup.ok) throw new Error(sup.error);
     if (sup.value !== undefined) updates.suppressEmbeddings = sup.value;
+    const sus = parseRecordSuperseded(a);
+    if (!sus.ok) throw new Error(sus.error);
+    if (sus.value !== undefined) updates.superseded = sus.value;
     if (typeof a['label'] === 'string') updates.label = (a['label'] as string).trim();
     if (typeof a['description'] === 'string') updates.description = a['description'] as string;
     if (Array.isArray(a['tags'])) updates.tags = a['tags'] as string[];

@@ -5,6 +5,7 @@
  * surface in query.ts (A17.4). `saveFact` reaches into recall.ts for the optional insert-time
  * duplicate check; nothing here is imported back by those modules.
  */
+import { applyRecordFlags } from './record-flag.js';
 import { v4 as uuidv4 } from 'uuid';
 import { reconcileLinks, removeLinksFrom } from './links.js';
 import { authorRef } from '../config/author.js';
@@ -250,7 +251,7 @@ export async function saveFact(
    * `false` is stored too, and means the same as it does anywhere else: this record does not suppress, which
    * still does not override a type or a space that does. Only `undefined` — not stated — is left off.
    */
-  if (opts?.suppressEmbeddings !== undefined) doc.suppressEmbeddings = opts.suppressEmbeddings;
+  applyRecordFlags(doc, opts);
   if (type !== undefined) doc.type = type;
   if (description !== undefined) doc.description = description;
   if (properties !== undefined) doc.properties = properties;
@@ -278,7 +279,7 @@ export async function saveFact(
 export async function updateFact(
   spaceId: string,
   memoryId: string,
-  updates: { fact?: string; tags?: string[]; entityIds?: string[]; description?: string; properties?: Record<string, string | number | boolean>; type?: string; suppressEmbeddings?: boolean },
+  updates: { fact?: string; tags?: string[]; entityIds?: string[]; description?: string; properties?: Record<string, string | number | boolean>; type?: string; suppressEmbeddings?: boolean; superseded?: boolean },
   deleteFieldsPaths?: string[],
   actor?: WebhookActor,
   ttlDays?: number | null,
@@ -316,6 +317,7 @@ export async function updateFact(
   // vector when the flag is on and computes one when it is off. So this path never needs to know which
   // way the toggle went.
   if (updates.suppressEmbeddings !== undefined) $set['suppressEmbeddings'] = updates.suppressEmbeddings;
+  if (updates.superseded !== undefined) $set['superseded'] = updates.superseded;
 
   // Apply deleteFields after merge
   if (deleteFieldsPaths && deleteFieldsPaths.length > 0) {

@@ -484,6 +484,57 @@ record flag or the space setting.
 > then run [`POST /api/spaces/:id/reembed`](06-spaces-api.md#re-embed-backfill), because nothing backfills on
 > its own.
 
+### Marking a record as no longer true
+
+A fact you stored is now wrong, and the history matters. `superseded` says so on the record itself:
+
+```json
+{ "superseded": true }
+```
+
+It is a boolean on **all four** record types (`facts`, `entities`, `edges`, `chrono`), accepted on the
+create and on the `PATCH`, and on both doors — `POST /api/brain/spaces/:id/facts`, `save_fact`,
+`update_fact` and their siblings all take it. Send it on the create when you already know: an agent that
+learns a correction and the claim it replaces in one turn would otherwise write the record, patch it, and
+leave a window in which a recall hands back a claim it knows is stale.
+
+**It does not touch the vector.** A superseded record still embeds, still ranks, and comes back from
+`recall`, `query`, `list`, `get` and `traverse` carrying `superseded: true`. That is the point: hiding it
+would answer *"where does she work?"* by making *"where DID she work?"* unanswerable. Retrieval marks; you
+decide what the mark means.
+
+| you want | send |
+|---|---|
+| this is no longer true, keep it readable | `superseded: true` |
+| this should never be RANKED again | `suppressEmbeddings: true` — removes the vector, see above |
+| this should be deleted on a schedule | `ttlDays` — a different statement, see Record Expiry |
+
+Only ever read as `true`. `superseded: false` on a create means the same as leaving it out; on a `PATCH`
+it clears the mark.
+
+**Say what replaced it with an edge, not with a second field.** Draw a `supersedes` edge from the new
+record to the retired one:
+
+```json
+POST /api/brain/spaces/work/edges
+{ "from": "<new fact id>", "fromKind": "fact", "to": "<old fact id>", "toKind": "fact", "label": "supersedes" }
+```
+
+That edge is walked, so `POST /api/brain/spaces/:id/traverse` from either record reaches the other. Leave it
+out when nothing replaced the claim — *"she left and has no new job"* is a retirement with no successor, and
+that is why the mark and the edge are two things rather than one field holding an id.
+
+**Filtering on it is index-served**, so *"only what is still believed"* costs nothing extra:
+
+```json
+POST /api/filter
+{ "space": "work", "collection": "facts", "filter": { "superseded": { "$ne": true } } }
+```
+
+> **A reviewer resolving a contradiction writes this for you.** `POST /api/contradictions/:id/resolve` with
+> `resolution: "superseded"` marks the losing record and draws the `supersedes` edge, for every pair kind.
+> The response carries `markedRecord` so you can tell the mark landed.
+
 ### Partial Update with deleteFields
 
 **All five** `PATCH` update endpoints — entities, edges, facts, chrono entries and file metadata — accept an optional `deleteFields` array of dot-notation paths. This allows callers to remove specific fields from a document in the same atomic operation as normal property/tag updates.

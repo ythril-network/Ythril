@@ -1,3 +1,4 @@
+import { applyRecordFlags, type RecordFlags } from './record-flag.js';
 import { edgeIdFor } from './edge-id.js';
 import { rekeyEdge, embedQueueWorkFor, type EdgeRekey } from './edge-rekey.js';
 import { brainWriteSeqTotal } from '../metrics/registry.js';
@@ -176,10 +177,11 @@ export async function upsertEdge(
    * the worse failure. Omitting them means both endpoints are entities, which is what every existing caller
    * means.
    */
-  opts?: {
+  // `RecordFlags` rather than the two booleans spelled out: they are declared once in `record-flag.ts`,
+  // `applyRecordFlags` writes exactly that set, and a third flag would otherwise have to be added here and
+  // in three sibling writers that all mean the same thing by it.
+  opts?: RecordFlags & {
     waitForEmbedding?: boolean;
-    /** Retire this edge from meaning-ranked search at creation — see `DupeCheckOpts.suppressEmbeddings`. */
-    suppressEmbeddings?: boolean;
     onValidation?: (check: UpdateValidation) => void;
     fromKind?: RefKind;
     toKind?: RefKind;
@@ -333,7 +335,7 @@ export async function upsertEdge(
     ...embeddingFields,
   };
   // Stored, not merely consulted — see the note in `saveFact`.
-  if (opts?.suppressEmbeddings !== undefined) doc.suppressEmbeddings = opts.suppressEmbeddings;
+  applyRecordFlags(doc, opts);
   // `doc.label`, NOT `doc.type` — an edge has both, and the schema is keyed by label (see validateEdgeWrite).
   // Passing `type` here would look right and read a schema that is never there.
   stampExpiryOnCreate(spaceId, doc, ttlDays, { collection: 'edge', type: doc.label });
@@ -428,7 +430,7 @@ export async function getEdgeById(spaceId: string, id: string): Promise<EdgeDoc 
 export async function updateEdgeById(
   spaceId: string,
   id: string,
-  updates: { label?: string; description?: string; tags?: string[]; properties?: Record<string, string | number | boolean>; weight?: number; type?: string; suppressEmbeddings?: boolean; fromKind?: RefKind; toKind?: RefKind },
+  updates: { label?: string; description?: string; tags?: string[]; properties?: Record<string, string | number | boolean>; weight?: number; type?: string; suppressEmbeddings?: boolean; superseded?: boolean; fromKind?: RefKind; toKind?: RefKind },
   deleteFieldsPaths?: string[],
   actor?: WebhookActor,
   ttlDays?: number | null,
@@ -447,6 +449,7 @@ export async function updateEdgeById(
   const $unset: Record<string, unknown> = {};
 
   if (updates.suppressEmbeddings !== undefined) $set['suppressEmbeddings'] = updates.suppressEmbeddings;
+  if (updates.superseded !== undefined) $set['superseded'] = updates.superseded;
   /*
    * Correcting an endpoint's KIND is a patch, and it has to be, because there is no other way to fix one.
    * An edge's identity is its `(from, to, label)` triplet, so an endpoint cannot be moved by a patch — and

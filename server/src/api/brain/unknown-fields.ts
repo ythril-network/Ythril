@@ -29,7 +29,7 @@
  * its caller and REST's body shape is not, so the strict door can afford to refuse and the open one has to
  * explain. It is documented rather than left to be discovered.
  */
-import { RECORD_SUPPRESS_FIELD } from '../../brain/suppress-embeddings.js';
+import { RECORD_SUPPRESS_FIELD, RECORD_SUPERSEDED_FIELD } from '../../brain/record-flag.js';
 import type { SchemaViolation } from '../../spaces/schema-validation.js';
 
 /**
@@ -50,6 +50,7 @@ export const SHARED_WRITE_BODY_KEYS: readonly string[] = [
   'checkContradictions',
   'dupeThreshold',
   RECORD_SUPPRESS_FIELD,
+  RECORD_SUPERSEDED_FIELD,
 ];
 
 /**

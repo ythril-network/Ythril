@@ -212,20 +212,51 @@ describe('Contradiction resolve — picking a winner', () => {
     assert.ok(c.resolvedBy, 'resolvedBy must survive onto the stored finding');
   });
 
-  it('a NON-entity pair records the decision and says no edge was drawn', async (t) => {
+  it('a FACT pair gets the edge too, and the walk follows it', async (t) => {
     if (!ready) return t.skip('records could not be created');
-    // Edges connect entities. A `supersedes` between two memories would be stored, returned, and point at
-    // nothing traversable — the accepted-dead-edge shape. The decision is still the reviewer's and is kept;
-    // what must not happen is the caller believing the graph changed.
+    /*
+     * REWRITTEN BY HAND, not inverted. This case used to assert the opposite — that a fact pair records the
+     * decision and explicitly says no edge was drawn — on the ground that *"edges connect entities"* and a
+     * `supersedes` between two facts would be stored, returned and point at nothing traversable.
+     *
+     * That was true when it was written. 5.0 made the walk follow an edge to a fact, chrono entry or file,
+     * so the ground the refusal stood on is gone, and re-measured before this was changed: a walk from the
+     * winner reached 1 node with no edge stored and 2 with it.
+     *
+     * A title carrying `no`, `refuses` or a status code is the kind a mechanical inversion silently turns
+     * into a test of nothing, which is why this one was replaced rather than edited.
+     */
     const r = await raw('POST', `/api/contradictions/${ids.memoryPair}/resolve`, { resolution: 'superseded', winner: 'b' });
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.equal(r.body.edge, undefined, `no edge for a memory pair: ${JSON.stringify(r.body)}`);
-    assert.match(r.body.note ?? '', /no edge drawn/, `the response must explain: ${JSON.stringify(r.body)}`);
     assert.equal(r.body.supersededId, ids.m1, 'the decision is still recorded');
+    assert.ok(r.body.edge, `a fact pair must now get its edge: ${JSON.stringify(r.body)}`);
+    assert.equal(r.body.note, undefined, 'there is nothing left to apologise for');
 
-    const edges = await readCollection(INSTANCES.a, token(), SPACE, 'edges', { filter: { label: 'supersedes' } });
-    const strays = (edges.results ?? []).filter(e => [e.from, e.to].some(x => x === ids.m1 || x === ids.m2));
-    assert.deepEqual(strays, [], 'no edge may reference a memory');
+    const walk = await raw('POST', `/api/brain/spaces/${SPACE}/traverse`, { startId: ids.m2, maxDepth: 2, direction: 'both' });
+    const reached = (walk.body?.nodes ?? []).map(n => n._id);
+    assert.ok(reached.includes(ids.m1),
+      `the edge exists so that a reader starting at the winner finds what it replaced — got ${JSON.stringify(reached)}`);
+  });
+
+  it('the LOSING RECORD itself is marked, not just the review queue', async (t) => {
+    if (!ready) return t.skip('records could not be created');
+    /*
+     * THE DEFECT THIS CLOSES (`Q-35`). `supersededId` lands on the contradiction CANDIDATE, which is the
+     * queue's own bookkeeping — no retrieval path reads it. So a reviewer could settle a contradiction and
+     * change nothing about what the next recall answered: both claims came back ranked together with
+     * nothing to choose between them.
+     *
+     * The loser keeps its vector on purpose. Marking is not hiding — hiding it would answer "where does she
+     * work?" by making "where DID she work?" unanswerable.
+     */
+    const facts = await readCollection(INSTANCES.a, token(), SPACE, 'facts', { filter: { _id: ids.m1 } });
+    const loser = (facts.results ?? [])[0];
+    assert.ok(loser, `the losing fact must still exist — nothing is deleted: ${JSON.stringify(facts)}`);
+    assert.equal(loser.superseded, true,
+      'the reviewer\'s judgement has to reach the record, or it changes nothing a caller can see');
+
+    const winner = (await readCollection(INSTANCES.a, token(), SPACE, 'facts', { filter: { _id: ids.m2 } })).results?.[0];
+    assert.ok(winner.superseded === undefined || winner.superseded === false, 'the winner must NOT be marked');
   });
 
   it('resolving twice lands on the SAME edge rather than accumulating duplicates', async (t) => {

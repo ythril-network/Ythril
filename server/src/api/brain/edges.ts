@@ -27,6 +27,7 @@ import { UUID_V4_RE, webhookToken, getSpaceMeta, ttlDaysFromBody, ttlDaysError, 
 import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
 import { mergePropertiesOrKeep } from '../../brain/merge-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
+import { parseRecordSuperseded } from '../../brain/record-flag.js';
 
 export const edgesRouter = Router();
 
@@ -145,6 +146,9 @@ edgesRouter.post('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, de
     const supCreate = parseRecordSuppression(req.body);
     if (!supCreate.ok) { res.status(400).json({ error: supCreate.error }); return; }
     const createSuppress = supCreate.value;
+    const susCreate = parseRecordSuperseded(req.body);
+    if (!susCreate.ok) { res.status(400).json({ error: susCreate.error }); return; }
+    const createSuperseded = susCreate.value;
     edge = await upsertEdge(
       wt.target, from.trim(), to.trim(), label.trim(), weight, type?.trim(),
       typeof description === 'string' ? description : undefined, safeProps, safeTags,
@@ -154,6 +158,7 @@ edgesRouter.post('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, de
         // The record tier, which no create path stated until 2026-09-02 — see `dupeCheckOptsFromBody`, which
         // is where the other three routes get it. This one builds its options inline.
         ...(createSuppress !== undefined ? { suppressEmbeddings: createSuppress } : {}),
+        ...(createSuperseded !== undefined ? { superseded: createSuperseded } : {}),
         ...(fromKind !== undefined ? { fromKind: fromKind as RefKind } : {}),
         ...(toKind !== undefined ? { toKind: toKind as RefKind } : {}),
         onValidation: c => { check = c; },
@@ -225,7 +230,7 @@ edgesRouter.patch('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAut
   if (shapeErr) { res.status(400).json({ error: shapeErr }); return; }
   const ttlDaysProvided = !!req.body && typeof req.body === 'object' && 'ttlDays' in req.body;
   const dfPaths: string[] | undefined = Array.isArray(deleteFields) && deleteFields.length > 0 ? deleteFields : undefined;
-  const updates: { label?: string; description?: string; tags?: string[]; properties?: Record<string, string | number | boolean>; weight?: number; type?: string; suppressEmbeddings?: boolean; fromKind?: RefKind; toKind?: RefKind } = {};
+  const updates: { label?: string; description?: string; tags?: string[]; properties?: Record<string, string | number | boolean>; weight?: number; type?: string; suppressEmbeddings?: boolean; superseded?: boolean; fromKind?: RefKind; toKind?: RefKind } = {};
   if (label !== undefined) {
     if (typeof label !== 'string' || !label.trim()) { res.status(400).json({ error: '`label` must be a non-empty string' }); return; }
     updates.label = label.trim();
@@ -298,6 +303,9 @@ edgesRouter.patch('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAut
   const sup = parseRecordSuppression(req.body);
   if (!sup.ok) { res.status(400).json({ error: sup.error }); return; }
   if (sup.value !== undefined) updates.suppressEmbeddings = sup.value;
+  const sus = parseRecordSuperseded(req.body);
+  if (!sus.ok) { res.status(400).json({ error: sus.error }); return; }
+  if (sus.value !== undefined) updates.superseded = sus.value;
   if (Object.keys(updates).length === 0 && !dfPaths && !ttlDaysProvided) { res.status(400).json({ error: 'At least one field must be provided' }); return; }
   const memberIds = resolveMemberSpaces(wt.target);
   for (const mid of memberIds) {

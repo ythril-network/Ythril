@@ -128,7 +128,75 @@ describe('waitForEmbedding is reachable on every brain create route', () => {
   });
 });
 
-describe('suppressEmbeddings is reachable on every surface that can set it', () => {
+/**
+ * Every per-record flag, derived from the module that declares them — never listed here.
+ *
+ * A gate whose TITLE claims a set and whose BODY names one member passes for ever on the member it knows,
+ * and this file's title has said *"a per-record write flag"* since it was written while its body read
+ * `suppressEmbeddings` alone. When `superseded` arrived it would have been covered by nothing.
+ *
+ * The FLOOR matters as much as the derivation: an empty set passes every loop written over it, so a regex
+ * that stops matching would turn this whole file green rather than red.
+ */
+function recordFlags() {
+  const src = code('server/src/brain/record-flag.ts');
+  const m = /export const RECORD_FLAGS = \[([^\]]+)\]/.exec(src);
+  assert.ok(m, 'RECORD_FLAGS is gone from brain/record-flag.ts, so this gate is deriving nothing');
+  const names = m[1].split(',').map(t => t.trim()).filter(Boolean).map((constName) => {
+    const d = new RegExp(`export const ${constName} = '([^']+)'`).exec(src);
+    assert.ok(d, `${constName} is in RECORD_FLAGS but declares no string value`);
+    return d[1];
+  });
+  assert.ok(names.length >= 2,
+    `only ${names.length} per-record flag(s) derived. This gate exists because the set has more than one `
+    + 'member; a set of one is how it passed on a flag nobody had wired.');
+  return names;
+}
+
+/**
+ * What it means for a handler to FORWARD a flag, as opposed to naming it.
+ *
+ * Presence anywhere in the file is not evidence — a file that validates the flag and puts it in an error
+ * message contains the string with or without the forward, which is how the predecessor gate passed on the
+ * exact defect it was written for. Each shape below is an assignment or a spread that reaches the writer.
+ *
+ * Three shapes rather than one because the handlers genuinely differ: three build an allowlisted `updates`
+ * object, chrono passes an inline literal to its writer, and the create paths spread a conditional. A
+ * single loose regex covering all three would match the mention it is supposed to reject.
+ */
+function forwards(flag) {
+  const f = flag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return [
+    // `updates.superseded = sus.value` / `updates['suppressEmbeddings'] = sup.value`
+    new RegExp(`updates(?:\\.${f}|\\['${f}'\\]) = \\w+\\.value;`),
+    // chrono's inline literal — `dfPaths` stays pinned rather than wildcarded, so a change to the writer
+    // call is reviewed instead of silently absorbed.
+    new RegExp(`${f},[\\s\\w,]*\\}, dfPaths, webhookToken\\(req\\)`),
+    // a create spreading the parsed value into the options object
+    new RegExp(`\\{ ${f}: \\w+(?:\\.value)? \\}`),
+  ];
+}
+const forwarded = (src, flag) => forwards(flag).some(re => re.test(src));
+
+/**
+ * The UPDATE handler alone, because a create and an update live in one file and either one's forward
+ * satisfies a whole-file search.
+ *
+ * Measured, not supposed: removing the forward from `update_chrono` left this gate green, because
+ * `create_chrono` sits above it in the same file and spreads the same flag. A gate that cannot tell the
+ * two handlers apart concludes about both from whichever one happens to be wired.
+ *
+ * Returns '' when the marker is absent, so the caller sees "not forwarded" rather than a whole-file match —
+ * and the scope assertions above are what catch a marker that has moved.
+ */
+function updateHalf(src, marker) {
+  const at = src.indexOf(marker);
+  return at < 0 ? '' : src.slice(at);
+}
+const REST_UPDATE = '.patch(';
+const MCP_UPDATE = "name: 'update_";
+
+describe('every per-record flag is reachable on every surface that can set it', () => {
   it('the PATCH detector keys on the handler, not on a message the fix introduces', () => {
     // Build the regex fresh per use — a shared /g literal advances lastIndex between calls and fakes a miss.
     const patch = () => /\.patch\(/;
@@ -143,25 +211,23 @@ describe('suppressEmbeddings is reachable on every surface that can set it', () 
   it('the forward detectors distinguish forwarding from merely mentioning', () => {
     // The second way the predecessor passed on a real defect: a file that validates the flag and names it in
     // an error message contains the string with or without the forward. Every detector must reject the
-    // mention-only shape, and must still match its own route — a detector that matches nothing measures
-    // nothing, and this is the check that would have failed loudly instead of silently.
-    //
-    // Rewritten for 3.1.0's rename. The mention-only sample is the CURRENT shape with the forward taken out,
-    // not the pre-rename one: a sample no detector could match either way would prove nothing about them.
+    // mention-only shape, and must still match a real handler — a detector that matches nothing measures
+    // nothing, and this is the check that fails loudly instead of silently.
     const mentionOnly = `
       const sup = parseRecordSuppression(req.body);
       if (!sup.ok) { res.status(400).json({ error: sup.error }); return; }
-      const PATCHABLE_FIELDS = ['description', 'suppressEmbeddings', 'ttlDays'];
+      const PATCHABLE_FIELDS = ['description', 'suppressEmbeddings', 'superseded', 'ttlDays'];
       const updated = await updateChrono(mid, id, {
         title, description,
       }, dfPaths, webhookToken(req), ttlDaysFromBody(req.body));
     `;
-    for (const [type, { forward }] of Object.entries(ROUTES)) {
-      assert.equal(forward().test(mentionOnly), false,
-        `the ${type} forward detector matches a handler that only parses the flag and never passes it`);
-      assert.ok(forward().test(routeCode(type)),
-        `the ${type} forward detector does not match its own route — the handler changed shape, so this `
-        + 'detector is measuring nothing. Update it deliberately.');
+    for (const flag of recordFlags()) {
+      assert.equal(forwarded(mentionOnly, flag), false,
+        `the ${flag} detectors match a handler that only parses the flag and never passes it`);
+      const real = Object.keys(ROUTES).filter(t => forwarded(updateHalf(routeCode(t), REST_UPDATE), flag));
+      assert.ok(real.length > 0,
+        `no route matches any ${flag} forward detector, so this gate is measuring nothing for it. The `
+        + 'handlers changed shape — update the detectors deliberately.');
     }
   });
 
@@ -174,71 +240,78 @@ describe('suppressEmbeddings is reachable on every surface that can set it', () 
       + 'Either it lost its update route, or the file moved — decide which, do not let the gate skip it.');
   });
 
-  it('all four REST PATCH handlers forward it, or none do', () => {
-    const has = {};
-    for (const [type, { forward }] of Object.entries(ROUTES)) {
-      const src = routeCode(type);
-      if (!/\.patch\(/.test(src)) continue;
-      has[type] = forward().test(src);
+  it('all four REST handlers forward each flag, or none do', () => {
+    for (const flag of recordFlags()) {
+      const yes = [], no = [];
+      for (const type of Object.keys(ROUTES)) {
+        (forwarded(updateHalf(routeCode(type), REST_UPDATE), flag) ? yes : no).push(type);
+      }
+      assert.ok(yes.length === 0 || no.length === 0,
+        `${flag} is forwarded to the writer over REST for [${yes.join(', ')}] but not [${no.join(', ')}]. `
+        + 'A flag wired into the update function and not into the handler ships UNREACHABLE on the surface '
+        + 'most integrators use, and these handlers DESTRUCTURE rather than allowlist, so sending it is a '
+        + '200 that changes nothing.');
+      assert.equal(yes.length + no.length, 4, 'all four types must be in scope — see the test above');
     }
-    const yes = Object.entries(has).filter(([, v]) => v).map(([k]) => k);
-    const no = Object.entries(has).filter(([, v]) => !v).map(([k]) => k);
-    assert.ok(yes.length === 0 || no.length === 0,
-      `suppressEmbeddings is forwarded to the writer over REST for [${yes.join(', ')}] but not `
-      + `[${no.join(', ')}]. A flag wired into the update function and not into the handler ships `
-      + 'UNREACHABLE on the surface most integrators use, and these handlers DESTRUCTURE rather than '
-      + 'allowlist, so sending it is a 200 that changes nothing.');
-    assert.equal(Object.keys(has).length, 4, 'all four types must be in scope — see the test above');
   });
 
-  it('every handler on BOTH doors reads it through the one shared parser', () => {
+  it('every handler on BOTH doors reads the flag through a shared parser', () => {
     // This replaced a per-file check for the literal refusal text, which stopped being evidence once the
-    // refusal moved into `parseRecordSuppression`. The stronger question is the one this repo keeps getting
-    // wrong: one rule, two implementations, the weaker winning silently. MCP's own copy WAS the weaker one —
+    // refusal moved into the parser. The stronger question is the one this repo keeps getting wrong: one
+    // rule, two implementations, the weaker winning silently. MCP's own copy WAS the weaker one —
     // `typeof a[...] === 'boolean'` accepted a non-boolean by dropping it, while REST answered 400 for the
-    // same value. Eight handlers, one parser, or the two doors can disagree again.
+    // same value. So no handler may test the flag's type itself.
     const offenders = [];
-    for (const [type, { file }] of Object.entries(ROUTES)) {
-      if (!/parseRecordSuppression\(req\.body\)/.test(code(file))) offenders.push(`REST ${type}`);
-    }
-    for (const [type, file] of Object.entries(MCP_TOOLS)) {
-      if (!/parseRecordSuppression\(a\)/.test(code(file))) offenders.push(`MCP ${type}`);
+    for (const flag of recordFlags()) {
+      const own = new RegExp(`typeof (?:a|b|req\\.body)\\['${flag}'\\] ===`);
+      for (const [type, { file }] of Object.entries(ROUTES)) {
+        if (own.test(code(file))) offenders.push(`REST ${type}/${flag}`);
+      }
+      for (const [type, file] of Object.entries(MCP_TOOLS)) {
+        if (own.test(code(file))) offenders.push(`MCP ${type}/${flag}`);
+      }
     }
     assert.deepEqual(offenders, [],
-      'these handlers do not go through parseRecordSuppression, so they carry their own copy of the '
-      + 'record-tier rule — including which spellings are accepted and what a non-boolean does.');
+      'these handlers carry their own copy of the record-flag rule — including which values are accepted '
+      + 'and what a non-boolean does. One parser, or the two doors can disagree again.');
+
+    // And the parsers are actually reached, on both doors, for the flag that has the longest history here.
+    for (const [type, { file }] of Object.entries(ROUTES)) {
+      assert.match(code(file), /parseRecordSuppression\(req\.body\)/, `REST ${type} bypasses the parser`);
+    }
+    for (const [type, file] of Object.entries(MCP_TOOLS)) {
+      assert.match(code(file), /parseRecordSuppression\(a\)/, `MCP ${type} bypasses the parser`);
+    }
   });
 
-  it('all four MCP update tools accept it, or none do', () => {
-    // REST and MCP are two doors onto one writer, and they have already diverged on this exact field: it
-    // reached three REST handlers and zero MCP tools, so the capability was documented, implemented, and
-    // unusable from the surface an agent holds. MCP schemas are `additionalProperties: false`, so a missing
-    // field is at least a hard rejection rather than a silent drop — but rejected is still unreachable.
-    const has = {};
-    for (const [type, file] of Object.entries(MCP_TOOLS)) {
-      const src = code(file);
-      assert.match(src, /name: 'update_/, `${file} no longer defines an update tool — fix this gate's map`);
-      // Both halves: the input schema must ADVERTISE it (or additionalProperties:false rejects the call)
-      // and the handler must READ it out of the args.
-      has[type] = /suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA/.test(src)
-        && /parseRecordSuppression\(a\)/.test(src);
+  it('all four MCP tools ADVERTISE each flag and READ it, or none do', () => {
+    // Both halves: the input schema must advertise it (or `additionalProperties: false` rejects the call)
+    // and the handler must forward it out of the args. A tool that advertises and drops, or reads and never
+    // declares, counts as not settable.
+    for (const flag of recordFlags()) {
+      const declares = new RegExp(`\\n\\s+${flag}: \\w+,`);
+      const yes = [], no = [];
+      for (const [type, file] of Object.entries(MCP_TOOLS)) {
+        const src = code(file);
+        assert.match(src, /name: 'update_/, `${file} no longer defines an update tool — fix this gate's map`);
+        const half = updateHalf(src, MCP_UPDATE);
+        (declares.test(half) && forwarded(half, flag) ? yes : no).push(type);
+      }
+      assert.ok(yes.length === 0 || no.length === 0,
+        `${flag} is settable over MCP for [${yes.join(', ')}] but not [${no.join(', ')}].`);
     }
-    const yes = Object.entries(has).filter(([, v]) => v).map(([k]) => k);
-    const no = Object.entries(has).filter(([, v]) => !v).map(([k]) => k);
-    assert.ok(yes.length === 0 || no.length === 0,
-      `suppressEmbeddings is settable over MCP for [${yes.join(', ')}] but not [${no.join(', ')}]. `
-      + 'A tool whose schema advertises the field but whose handler drops it, or the reverse, counts as not '
-      + 'settable — both halves are checked.');
   });
 
   it('REST and MCP agree with each other, not merely each with itself', () => {
     // Two internally-consistent halves that disagree is the shape this whole gate keeps catching. Compare
     // ACROSS the surfaces, or a future sweep of one door passes twice and fixes half the problem.
-    const rest = Object.entries(ROUTES).some(([type, { forward }]) => forward().test(routeCode(type)));
-    const mcp = Object.values(MCP_TOOLS).some(f => /parseRecordSuppression\(a\)/.test(code(f)));
-    assert.equal(rest, mcp,
-      `suppressEmbeddings is reachable over ${rest ? 'REST but not MCP' : 'MCP but not REST'}. `
-      + 'One rule, two surfaces: gate on consistency, not on presence.');
+    for (const flag of recordFlags()) {
+      const rest = Object.keys(ROUTES).some(t => forwarded(updateHalf(routeCode(t), REST_UPDATE), flag));
+      const mcp = Object.values(MCP_TOOLS).some(f => forwarded(updateHalf(code(f), MCP_UPDATE), flag));
+      assert.equal(rest, mcp,
+        `${flag} is reachable over ${rest ? 'REST but not MCP' : 'MCP but not REST'}. `
+        + 'One rule, two surfaces: gate on consistency, not on presence.');
+    }
   });
 
   /*
@@ -258,9 +331,7 @@ describe('suppressEmbeddings is reachable on every surface that can set it', () 
    * an inversion: it originally demanded the old name appear NOWHERE in a tool file, on the sound-looking
    * ground that a schema description is what an agent constructs arguments from. CI proved the conclusion
    * wrong — removing the property does not hide the alias, it makes the tool REFUSE it, which is a
-   * capability difference between the doors rather than a documentation one. That is now exactly what
-   * makes the removal work, and it is why `D-6` is a deletion in the schemas rather than a change in any
-   * handler.
+   * capability difference between the doors rather than a documentation one.
    */
   it('the legacy chrono POST-as-update form is GONE, so there is no deprecated door to drop it on', () => {
     // This assertion is inverted from what it was. While the route existed it had to REFUSE the flag —
