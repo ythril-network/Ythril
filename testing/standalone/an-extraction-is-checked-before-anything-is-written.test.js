@@ -134,6 +134,54 @@ describe('what a claim must carry', () => {
   });
 });
 
+/**
+ * A model's output must not enter the graph as a plain fact, and a person's must not leave it.
+ *
+ * `attributed: true` means the graph records that a claim was SAID, not that it is SO — the distinction a
+ * citation makes between *"Vasari wrote that Leonardo painted the Mona Lisa"* and the painting fact itself.
+ * It exists because a corpus can be a conversation with an AI: measured on `longmemeval_s`, 54 of the 896
+ * evidence-bearing turns are the assistant's, and reading them shows world knowledge that may be right,
+ * stale or invented — a restaurant's signature dishes, the processes at three named refineries.
+ *
+ * BOTH DIRECTIONS, because only one of them is loud. A missing mark puts a guess in the graph beside the
+ * user's own words; a mark on a PERSON's claim retires a real fact from every reader that filters on it,
+ * and nothing ever contradicts that.
+ */
+describe('a claim an assistant originated says so', () => {
+  test('an assistant claim with no mark is refused', () => {
+    const problems = problemsFor(e => { e.claims[0].speaker = 'assistant'; });
+    assert.match(problems.join(' '), /not marked/);
+  });
+
+  test('and the refusal says what to do when it was really the user\'s fact', () => {
+    // The commonest case by far — 32 of those 54 turns repeat over half of the user's own words back at
+    // them. A refusal that only says "add the mark" would get the mark added to the user's fact.
+    const problems = problemsFor(e => { e.claims[0].speaker = 'assistant'; });
+    assert.match(problems.join(' '), /set `speaker` to them/);
+  });
+
+  test('a person\'s claim carrying the mark is refused too', () => {
+    const problems = problemsFor(e => { e.claims[0].attributed = true; });
+    assert.match(problems.join(' '), /speaker is 'Ada', who is a person/);
+  });
+
+  test('a correctly marked assistant claim passes', () => {
+    assert.deepEqual(problemsFor(e => {
+      e.claims[0].speaker = 'assistant';
+      e.claims[0].attributed = true;
+    }), []);
+  });
+
+  test('the speaker match is whole-value, so a person named Ai is not a model', () => {
+    // A substring test would mark every claim by anybody whose name contains those letters, in a corpus
+    // whose participants are named — which is every corpus but this one.
+    assert.deepEqual(problemsFor(e => {
+      e.entities[0].name = 'Ai';
+      e.claims[0].speaker = 'Aisha';
+    }), []);
+  });
+});
+
 describe('a record must be worth retrieving', () => {
   test('a claim that is a transcript line is refused', () => {
     /*

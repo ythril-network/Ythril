@@ -617,6 +617,10 @@
         "statedOn": {
           "type": "date",
           "required": true
+        },
+        "attributed": {
+          "type": "boolean",
+          "description": "True when an AI assistant ORIGINATED this claim rather than a person — world knowledge it supplied, or something it produced on request. It means the graph records that this was said, not that it is so. Absent on a person's claim, which is the overwhelming majority, and absent on an assistant turn that merely hands back the user's own fact (that claim is the user's). DECLARED rather than left undeclared so a filter on it is a native index pre-filter instead of an exhaustive scan."
         }
       }
     }

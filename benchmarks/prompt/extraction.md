@@ -60,6 +60,41 @@ graph that models reality and a pile of chat lines.
 The verbatim words are not lost — they live in the session transcript, which is kept as a file so anything
 can be quoted exactly. The graph is for finding; the transcript is for quoting.
 
+## When one of the speakers is an ASSISTANT
+
+Some conversations are between people. Others are between a person and an AI assistant, and then the turns
+are not equal: a person's turn is somebody asserting something, and an assistant's turn is a model producing
+text. **Having been said by a model does not make a thing so**, and a graph that cannot tell the two apart
+hands back the model's guesses beside the user's own words, ranked the same.
+
+Three rules, in this order.
+
+**1. An assistant's turn is CONTEXT first.** Read it to understand the person's turns — *"Yes."* means
+nothing without the question above it, and a date, a name or a subject is often only recoverable from the
+reply. Do not mine it for claims by default.
+
+**2. Attribute a fact to whoever ORIGINATED it, not to the turn you read it in.** Most of what an assistant
+appears to state is the user's own fact handed back: *"Congratulations on raising $250 for the charity
+ride!"* establishes nothing the user did not already say. The claim is the user's, `speaker` is the user,
+and the assistant's turn was how you resolved it. Measured on `longmemeval_s`: of the 54 evidence-bearing
+assistant turns, 32 repeat over half of the preceding user turn's own words.
+
+**3. When the assistant is genuinely the origin, write the claim and mark it `attributed`.** Two cases, and
+both are real:
+
+- **it supplied world knowledge** — a restaurant's signature dishes, the refining processes at three
+  refineries, hostels in Amsterdam. This may be right, stale or invented, and nothing in the conversation
+  settles which;
+- **it produced something the user asked for** — a shift rotation for seven named staff, a draft chapter.
+  That the assistant produced it is simply true, whatever the thing is worth.
+
+Both are written as claims with `speaker: "assistant"` and `attributed: true`. **`attributed` means the
+graph records that this was SAID, not that it is SO** — the same distinction a citation makes between
+*"Vasari wrote that Leonardo painted the Mona Lisa"* and *"Leonardo painted the Mona Lisa"*.
+
+Leave `attributed` off everywhere else. A claim with no mark is one a person asserted, which is the
+overwhelming majority: 842 of the 896 evidence turns in `longmemeval_s` are the user's own.
+
 ## How to do it well
 
 **Identity is the whole job.** The graph is worth having because a mention in session 3 and a mention in
@@ -151,6 +186,7 @@ Check these yourself; the writer will refuse the file otherwise.
 - Every date matches `YYYY-MM-DD`.
 - Every referenced `key` is defined.
 - Every claim has `speaker`, `statedOn` and at least one `sourceTurns` entry.
+- **Every claim whose `speaker` is the assistant carries `attributed: true`**, and no other claim does.
 - **Every turn of every session appears in some claim's `sourceTurns`.** Count them.
 - **Every entity has a `description`.** A bare name loses every search it takes part in.
 - **Every claim reads on its own** — subjects named, dates resolved, no pronoun pointing outside it.

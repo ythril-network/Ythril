@@ -128,7 +128,20 @@ export async function writeSpace({ extraction, ythril, space }) {
     const created = await ythril.writeMemory(space, {
       fact: c.text,
       type: claimTypeName(entries),
-      properties: { speaker: c.speaker, statedOn: c.statedOn },
+      /*
+       * `attributed` rides in `properties` because that is already where `speaker` lives, and because a
+       * declared property is filterable on BOTH doors with no new parameter — `recall`'s filter takes a
+       * real predicate over properties, and so does `filter`.
+       *
+       * Written only when true. A property present-and-false and a property absent are different rows to
+       * every predicate anybody writes, and the overwhelming majority of claims are a person's: absence
+       * is the default, so the default costs nothing to store and nothing to query around.
+       */
+      properties: {
+        speaker: c.speaker,
+        statedOn: c.statedOn,
+        ...(c.attributed === true ? { attributed: true } : {}),
+      },
       ...(linked.length > 0 ? { entityIds: linked } : {}),
     });
     const id = created.id ?? created._id;

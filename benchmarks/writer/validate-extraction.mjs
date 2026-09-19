@@ -46,6 +46,16 @@ const MAX_SYNTHESISED_PROVENANCE_SHARE = 0.12;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
+ * A speaker who is an AI assistant rather than a person.
+ *
+ * Matched on the whole value rather than as a substring, because a person may be called Ai, and a corpus
+ * whose participants are named is exactly where a loose pattern would start marking their claims as a
+ * model's. LongMemEval writes the role as `assistant`; the others are what a transcript of a product
+ * conversation tends to use for the same participant.
+ */
+const ASSISTANT_SPEAKER = /^\s*(assistant|ai|bot|chatbot|agent|model|system)\s*$/i;
+
+/**
  * @param {object} extraction  the parsed extraction file
  * @param {Array<object>} schemaEntries  the parsed `space/schema.json`
  * @returns {string[]} every problem found, empty when the file is writable
@@ -159,6 +169,30 @@ export function validateExtraction(extraction, schemaEntries) {
         + 'The verbatim words belong in the session transcript; a claim says what is true.');
     }
     if (!c.speaker) say(`${at} has no speaker — a claim nobody can attribute is not auditable`);
+
+    /*
+     * A CLAIM THE ASSISTANT ORIGINATED SAYS SO, AND NOTHING ELSE DOES.
+     *
+     * `attributed: true` means the graph records that this was said, not that it is so — an assistant's
+     * world knowledge may be right, stale or invented, and nothing in a conversation settles which. The
+     * mark is what lets a caller ask for only what a person asserted.
+     *
+     * Checked BOTH WAYS on purpose. A missing mark puts a model's output in the graph as fact, which is
+     * the failure; a mark on a person's claim is the quieter one, because it retires a real fact from
+     * whatever the reader filters on and nothing ever contradicts it. A mark that is optional in practice
+     * cannot be filtered on at all, so neither direction is a warning.
+     */
+    const bySpeaker = ASSISTANT_SPEAKER.test(String(c.speaker ?? ''));
+    if (bySpeaker && c.attributed !== true) {
+      say(`${at} is spoken by the assistant and is not marked \`attributed: true\`. A model's output stored `
+        + 'as a plain fact is indistinguishable at retrieval from something the user said. If the assistant '
+        + 'was handing back the USER\'s own fact, the claim is the user\'s — set `speaker` to them instead.');
+    }
+    if (!bySpeaker && c.attributed === true) {
+      say(`${at} is marked \`attributed: true\` but its speaker is '${c.speaker}', who is a person. The mark `
+        + 'is for a claim an AI assistant originated; on a person\'s claim it hides a real fact from every '
+        + 'reader that filters on it.');
+    }
     if (!ISO_DATE.test(String(c.statedOn ?? ''))) say(`${at} has statedOn '${c.statedOn}', which is not YYYY-MM-DD`);
     if ((c.sourceTurns ?? []).length === 0) say(`${at} names no sourceTurns, so nothing can trace it to the transcript`);
     for (const k of c.entities ?? []) {
