@@ -580,6 +580,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A product rule was justified by a benchmark corpus, in the text every ingest reads.** The assistant-turn
+  rules shipped citing *"54 of the 896 evidence turns"* and *"842 of the 896"* in the extraction prompt —
+  and there is one ingester, so those sentences are read when somebody ingests a support history, a
+  transcript or an agent's own conversation. The rules were right on product grounds and said so nowhere.
+
+  **Tuning does not arrive as a decision, it arrives as a justification.** A rule that cites a corpus
+  teaches the next reader it exists for the benchmark, and the day the corpus changes somebody deletes it.
+  The rules now stand on what is true of any conversation; the measurements stay in the changelog and the
+  tracker, where a number about a corpus belongs.
+
+  A gate holds it: no product-facing instruction may name a pinned corpus, with the names derived from the
+  pin files rather than listed, because a corpus is added by dropping a `pin.json` in — which is exactly
+  the moment nobody edits a gate.
+
 - **A suppressed record being REACHABLE had never been tested, only its being stored.** Three schema descriptions promise that
   a suppressed record cannot be ranked but is still reached — the behaviour the field was renamed for in
   August, after *"i want entries to be findable via traversal even if they are not embedded themselves"*.

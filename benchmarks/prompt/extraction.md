@@ -76,8 +76,8 @@ reply. Do not mine it for claims by default.
 **2. Attribute a fact to whoever ORIGINATED it, not to the turn you read it in.** Most of what an assistant
 appears to state is the user's own fact handed back: *"Congratulations on raising $250 for the charity
 ride!"* establishes nothing the user did not already say. The claim is the user's, `speaker` is the user,
-and the assistant's turn was how you resolved it. Measured on `longmemeval_s`: of the 54 evidence-bearing
-assistant turns, 32 repeat over half of the preceding user turn's own words.
+and the assistant's turn was how you resolved it. **This is the commonest case by a wide margin** — an
+assistant confirms, congratulates and summarises constantly, and almost none of it is new.
 
 **3. When the assistant is genuinely the origin, write the claim and mark it `attributed`.** Two cases, and
 both are real:
@@ -92,8 +92,8 @@ Both are written as claims with `speaker: "assistant"` and `attributed: true`. *
 graph records that this was SAID, not that it is SO** — the same distinction a citation makes between
 *"Vasari wrote that Leonardo painted the Mona Lisa"* and *"Leonardo painted the Mona Lisa"*.
 
-Leave `attributed` off everywhere else. A claim with no mark is one a person asserted, which is the
-overwhelming majority: 842 of the 896 evidence turns in `longmemeval_s` are the user's own.
+Leave `attributed` off everywhere else. A claim with no mark is one a person asserted, and in any real
+conversation that is almost all of them.
 
 ## How to do it well
 
