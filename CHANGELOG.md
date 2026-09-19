@@ -15,196 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **A claim an AI assistant originated is marked, so the graph records that it was SAID rather than that it
-  is SO.** Ingesting a chat log is not ingesting a conversation between people: an assistant's turn may
-  state a fact about the world, hand back one the user just gave it, or invent one — and until now nothing
-  told the extractor which, so a model's guess would land beside the user's own words and rank the same.
+- **An attributed claim is stored without a vector, so nothing can rank it — and everything can still reach
+  it.** Owner's decision: a model's contribution must not compete for space in an answer somebody asked a
+  question to get, and must not be hidden either. Suppression is the one mechanism that is neither. A record
+  with no vector cannot be ranked by `recall` even deliberately, while `filter`, `graph_traverse` and
+  recall's own expansion still reach it in full, because the walk follows links and never consults a vector.
 
-  Three rules, and the middle one carries most of the weight. An assistant turn is CONTEXT first, read to
-  resolve the user's (*"Yes."* means nothing alone). A fact is attributed to whoever ORIGINATED it, not to
-  the turn it was read in — most of what an assistant appears to state is the user's own fact echoed back.
-  What is left, where the assistant really is the origin, is written with `attributed: true`.
-
-  **Measured rather than assumed**, over the 246,929 turns of `longmemeval_s`: 842 of its 896
-  evidence-bearing turns are the user's (94%), 54 are the assistant's, and 32 of those 54 repeat over half
-  of the preceding user turn's own words. The assistant is the sole origin of about 1% of the evidence —
-  and reading those turns is what showed the two shapes worth keeping: world knowledge it supplied, and an
-  artefact it produced on request.
-
-  The mark is a declared boolean on the claim type, so a filter on it is a native index pre-filter on both
-  doors rather than an exhaustive scan, and the validator refuses a file in BOTH directions — an unmarked
-  assistant claim, and a person's claim wearing the mark. The second is the quiet one: it retires a real
-  fact from every reader that filters, and nothing contradicts it.
-
-- **An AI assistant can save a picture, a PDF or anything else that is not text.** `write_file` takes
-  `encoding: "base64"` alongside its existing UTF-8 default, which the REST upload had accepted throughout.
-  Reported by the canary operator after one of their coding sessions was asked to put a photograph of a
-  whiteboard on a record and could not: `write_file` is the only file-writing tool a write-capable token is
-  offered, so a session reached through MCP could create a text file and could never create a byte file.
-
-  **The ceiling is the request rather than the file store, and the schema says so.** A tool call arrives as
-  one JSON body capped at 10 MB and base64 costs a third more than the bytes it carries, so about 7 MB of
-  file fits; anything larger goes through `POST /api/files/{path}`, which takes a raw body and supports
-  chunked upload.
-
-  **Base64 that is not base64 is now refused on BOTH doors.** `Buffer.from` skips characters outside the
-  alphabet rather than failing, so a `data:image/png;base64,…` URL used to be stored as a short, corrupt
-  file under a `201` — with a plausible sha256 and a plausible size, and nothing downstream able to tell.
-  The decode, the encoding vocabulary and that refusal are one module behind both doors.
-
-- **A record's links and edges can be changed after it is created.** `linkEntities`, `linkFacts`,
-  `linkChronos`, `linkFiles` and `edges` are now accepted on the UPDATE verb of every door that accepts
-  them on create — `facts`, `chrono` and `entities`, on both surfaces — with the same meaning they have
-  there: links REPLACE per class (`[]` detaches, a kind you do not name is untouched) and edges UPSERT.
-
-  **Until now they were create-only, and on a converted space that left no way at all.** `entityIds` and
-  its siblings were the workaround, and `array-write-refusal` refuses those outright once a space has
-  been through the link conversion — so a record's relationships were settled the moment it was written,
-  by either door, and the gap grew as spaces converted. The only way round was to delete and re-create
-  the record, which costs its id and its history.
-
-  **`edges` rides in the same body**, so an edge can be drawn or adjusted through the record it hangs
-  off, on an update as well as a create.
-
-  A body carrying only a connection field is a valid patch. It used to answer
-  `400 "At least one field must be provided"` — the field was not in the update allowlist, so it was not
-  rejected, it was not SEEN.
-
-- **`filter` finds one file by `path`, and forgives how you spell it.** *(files only, both doors.)* The
-  file-metadata list route always did — it ran the path through the same normalisation the store uses, so
-  a Windows-style spelling and a leading slash both find `notes/a.md`. `filter` did not, and
-  `filter: { path }` is a bare equality: a caller holding a path from their own filesystem got an empty
-  page and a `200`, which reads exactly like "no such file".
-
-  It is EXACT after the normalisation — not a prefix, not a substring. For those there is `search`, which
-  also spans the description.
-
-  **Sending both spellings is a `400` rather than one of them quietly winning.** `path` and
-  `filter: { path }` are two ways to ask one question and only the argument is normalised, so together
-  they would disagree — the same call `recall` made about its two filter grammars.
-
-  This is what `B-9` step 3b needs before the file-metadata list route can go: deleting a forgiving read
-  and leaving an exact one is the *route does work around the query* shape that step 3a already paid for
-  once. **`includeChunks` deliberately did NOT move**: that is a default the route applies rather than a
-  transform, a caller can write `filter: { parentFileId: { $exists: false } }`, and adopting it here would
-  change what every existing `filter` caller gets back.
-
-- **A schema type and each of its properties can now say what they are FOR, in prose.** `description` on
-  a type schema (4000 characters) and on any property (2000) — stored, returned by `get_space_meta` and
-  the space listing, editable in the Schema tab, and **never parsed**. The type already says a value is a
-  number; the property note is where you say it is the retry BUDGET rather than the retry count, or that
-  one record means one deployed instance rather than one repository.
-
-  **It is deliberately prose rather than an ontology, and that is the whole decision.** Owner,
-  2026-09-17, asking whether `F-24`'s semantic layer could be satisfied this way: the answer splits by
-  who READS it. Everything whose reader is a model — what a type is for, which property carries meaning,
-  whether two types in different spaces are the same thing — is satisfied by a sentence, and better,
-  because it needs no vocabulary and cannot be wrong-but-parseable. Nothing whose reader is the ENGINE is
-  satisfied by it at all: a query cannot widen to subtypes it cannot parse.
-
-  So the engine-facing half — inverse pairs, transitivity, subtyping — is not built, and will not be
-  until a named consumer changes behaviour because of it. **A vocabulary that nothing enforces looks
-  machine-readable and is not**, which is worse than prose rather than a lesser version of it: shipping
-  `transitive: true` while `traverse` ignores it is the documented-but-inert defect at the scale of a
-  feature.
-
-  The pattern is already proven one tier up — a SPACE carries `usageNotes`, and that is where the shared
-  dev board keeps the runbook three parties read at handshake.
-
-- **A chrono entry's `status` meant two different things, and which one you got was decided by the DOOR
-  you read through.** The chrono list route returns the DERIVED status — `overdue` where a due moment has
-  passed, unless the type's `whenDuePasses` says otherwise — while `filter` and sync return the value the
-  collection holds. Both are correct, and a predicate read must see the stored one or it cannot be used
-  to repair anything. What was wrong is that the two were indistinguishable from outside.
-
-  Reported in substance by the canary operator, 2026-09-15, after a fortnight-old episode read `active`
-  through one door and `overdue` through the other: *"'I checked the status' is not a claim anyone can
-  evaluate without the door being named"*. Every attempt they made to confirm the suspicion queried the
-  collection, got `active`, and read as a clean bill of health. It degrades rather than breaking, too —
-  a record read shortly after it is written still says `active`, so code built against the stored literal
-  works the day it ships and starts failing only as records outlive their due moment.
-
-  `filter` takes `deriveStatus` now, on both doors, **defaulting false** — so every existing caller sees
-  exactly what it saw before, and the client asks for `true`, so the Brain page is unchanged too. Nothing
-  moves for anybody who does not ask. Sending it on any collection but `chrono` is refused rather than
-  ignored: a silently dropped flag is a caller who believes they asked for something.
-
-  It is the same derivation the list route uses, not a second one — `whenDuePasses` makes "what a passed
-  due moment means" a per-TYPE decision, and a copy of that rule would be a second answer to it. Proved
-  against a live instance on both doors, including that `deriveStatus: true` and the list route agree
-  about the same entry, which is the condition for ever retiring that route.
-
-  **And the operator page now says the status it shows is worked out rather than stored**, because that
-  is the half an operator meets: a backup or an export reads what was stored, so an entry the page calls
-  overdue reads as active there.
-
-- **`filter` returned an edge as two bare UUIDs, and a file with no job progress.** Two of the nine
-  per-collection list routes do work on their rows AFTER the query, and the one call meant to replace all
-  nine did neither: `GET .../edges` resolves both endpoints' display names — batched by endpoint KIND,
-  because an entity's name is `name`, a chrono entry's is `title` and a fact's is `fact` — and
-  `GET .../files` joins the embedding job's step progress for rows still in flight. `filter` now does
-  both, on the tool and on `POST /api/brain/filter`, through one module.
-
-  **A decoration is not a parameter, which is why nothing had reported this.** It appears in no body
-  allowlist, no `inputSchema` and no capability map, so the two doors were never compared. The retirement
-  of those routes would have taken both with them silently — an agent reading edges would have started
-  getting ids where a browser gets names, and the Files tab would have shown a stage indicator that never
-  resolves.
-
-  **`includeDiagnostics` was the third, and it was refused rather than ignored.** Four list routes honour
-  it; `filter` accepted it nowhere — a `400` on the route, an `additionalProperties` refusal on the tool.
-  It is accepted and APPLIED on both doors now, defaulting false on each. Admitting it without wiring the
-  projection would have been the worse half: a `200` with the flag doing nothing.
-
-  **The file join moved out of a route file to make this possible at all.** `attachJobProgress` lived in
-  `api/brain/file-meta.ts`, and a `brain/` module may not import from `api/` — so no amount of care in
-  `filter` could have reached it where it was. It is `files/file-job-progress.ts` now, with its own gate
-  asserting exactly one declaration.
-
-- **An agent could not ask for "facts tagged release", and a browser could.** `filter` took a MongoDB
-  predicate and knew nothing else, while the nine per-collection list routes it is meant to replace have
-  always accepted five conveniences: `tag` (a case-insensitive SUBSTRING over the tag array, so `rel`
-  finds `release`), `type`, `description` (that column only), `properties` (a value scan) and `search`
-  (freetext over the collection's own text fields). Both doors were present and one accepted less, which
-  is the half of the parity rule that hides — and it hid here for as long as the capability map paired
-  the tool with the routes and called the pair answered.
-
-  All five are arguments of `filter` now, on the tool and on `POST /api/brain/filter`, in the same
-  change. `filter` itself is no longer REQUIRED: narrowing by tag alone used to mean sending
-  `filter: {}` to say "and no predicate", which is a shape you have to be told about.
-
-  **They are assembled by one module, and that is the point rather than tidiness.** The same four-line
-  sequence existed five times — `buildFactFilter`, the entities route, `listEdges`, `buildChronoQuery`
-  and the file-meta route — each reading the same names into the same three primitives. `filter` would
-  have been the sixth, which is how the browser and an agent come to disagree about what `tag` means.
-
-  **The guard the module carries could not have survived a hand-written copy.** The old assemblies
-  merged the freetext `$or` by assignment, which is safe only because none of them has a caller-supplied
-  predicate to collide with. `filter` does: a caller passing `{$or: [...]}` beside `search` would have
-  had their disjunction silently REPLACED by ours — no error, no log, a plausible answer over the wrong
-  set. Everything accumulates under `$and` now, asserted against a live instance on both doors.
-
-  **`links` refuses rather than ignoring.** It is a pair of ids, with no tags, type, description or text
-  of its own, so `search` there would have matched every link in the space — and a filter that matched
-  everything is indistinguishable from a filter that was ignored. Both doors answer with the same
-  refusal naming the collection. Same shape as the `links` sort crash fixed earlier this release: the
-  answer lives in the function that RECEIVES the collection, not at a call site.
-
-- **`filter` takes `entityName`, `fromName` and `toName`.** They were REST-only, so an agent could not ask
-  for “facts about Alice” by name — it had to filter entities, take the ids, then filter facts, and on a
-  proxy space the ids differ per member. They are a JOIN rather than a predicate, which is why no Mongo
-  filter a caller writes can express them. Refused on a collection they cannot mean rather than ignored.
-
-- **`space_reembed` — the embedding backfill now has a tool.** `POST /api/spaces/:id/reembed` has queued
-  embeddings for records with no vector since 4.4, and had no MCP counterpart. It is also
-  `POST /api/space_reembed`, takes `kinds` and `limit`, and returns the same counts the route does.
-
-  **It was invisible rather than forgotten, which is the part worth reading.** The capability map paired
-  that route with `space_reindex` and the parity gate reads the map, so a REST-only capability was recorded
-  as covered — inside the file built to end exactly that. The two do opposite things: `space_reindex`
-  re-embeds EVERY record with the configured model and returns as soon as the job starts; `space_reembed`
-  touches only records with no vector, is awaited, and the counts are the answer. A map keyed on which
-  DATA a door touches cannot tell those apart; the question is what makes a pairing true.
+  The suppression is DERIVED from the mark in one expression rather than set beside it. Two fields meaning
+  one thing drift, and this drift is the invisible kind: a claim that says it is attributed while still
+  carrying a vector is back to competing for ranked slots, silently.
 
 ### Changed
 
@@ -760,6 +579,207 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `filter` and now reads these the same way.
 
 ### Fixed
+
+- **A suppressed record being REACHABLE had never been tested, only its being stored.** Three schema descriptions promise that
+  a suppressed record cannot be ranked but is still reached — the behaviour the field was renamed for in
+  August, after *"i want entries to be findable via traversal even if they are not embedded themselves"*.
+  The suite proved suppression is STORED, that `false` is stored rather than dropped, and that a re-embed
+  sweep skips it. That it is still REACHED was asserted nowhere: a promise living in three descriptions and
+  no gate, which is the shape nobody reports, because nobody reports a capability they were told they had.
+
+  Now an integration test, run against a live instance, with an unsuppressed control on every assertion —
+  without one, *"recall did not return it"* is equally good evidence that recall returned nothing at all.
+
+- **A claim an AI assistant originated is marked, so the graph records that it was SAID rather than that it
+  is SO.** Ingesting a chat log is not ingesting a conversation between people: an assistant's turn may
+  state a fact about the world, hand back one the user just gave it, or invent one — and until now nothing
+  told the extractor which, so a model's guess would land beside the user's own words and rank the same.
+
+  Three rules, and the middle one carries most of the weight. An assistant turn is CONTEXT first, read to
+  resolve the user's (*"Yes."* means nothing alone). A fact is attributed to whoever ORIGINATED it, not to
+  the turn it was read in — most of what an assistant appears to state is the user's own fact echoed back.
+  What is left, where the assistant really is the origin, is written with `attributed: true`.
+
+  **Measured rather than assumed**, over the 246,929 turns of `longmemeval_s`: 842 of its 896
+  evidence-bearing turns are the user's (94%), 54 are the assistant's, and 32 of those 54 repeat over half
+  of the preceding user turn's own words. The assistant is the sole origin of about 1% of the evidence —
+  and reading those turns is what showed the two shapes worth keeping: world knowledge it supplied, and an
+  artefact it produced on request.
+
+  The mark is a declared boolean on the claim type, so a filter on it is a native index pre-filter on both
+  doors rather than an exhaustive scan, and the validator refuses a file in BOTH directions — an unmarked
+  assistant claim, and a person's claim wearing the mark. The second is the quiet one: it retires a real
+  fact from every reader that filters, and nothing contradicts it.
+
+- **An AI assistant can save a picture, a PDF or anything else that is not text.** `write_file` takes
+  `encoding: "base64"` alongside its existing UTF-8 default, which the REST upload had accepted throughout.
+  Reported by the canary operator after one of their coding sessions was asked to put a photograph of a
+  whiteboard on a record and could not: `write_file` is the only file-writing tool a write-capable token is
+  offered, so a session reached through MCP could create a text file and could never create a byte file.
+
+  **The ceiling is the request rather than the file store, and the schema says so.** A tool call arrives as
+  one JSON body capped at 10 MB and base64 costs a third more than the bytes it carries, so about 7 MB of
+  file fits; anything larger goes through `POST /api/files/{path}`, which takes a raw body and supports
+  chunked upload.
+
+  **Base64 that is not base64 is now refused on BOTH doors.** `Buffer.from` skips characters outside the
+  alphabet rather than failing, so a `data:image/png;base64,…` URL used to be stored as a short, corrupt
+  file under a `201` — with a plausible sha256 and a plausible size, and nothing downstream able to tell.
+  The decode, the encoding vocabulary and that refusal are one module behind both doors.
+
+- **A record's links and edges can be changed after it is created.** `linkEntities`, `linkFacts`,
+  `linkChronos`, `linkFiles` and `edges` are now accepted on the UPDATE verb of every door that accepts
+  them on create — `facts`, `chrono` and `entities`, on both surfaces — with the same meaning they have
+  there: links REPLACE per class (`[]` detaches, a kind you do not name is untouched) and edges UPSERT.
+
+  **Until now they were create-only, and on a converted space that left no way at all.** `entityIds` and
+  its siblings were the workaround, and `array-write-refusal` refuses those outright once a space has
+  been through the link conversion — so a record's relationships were settled the moment it was written,
+  by either door, and the gap grew as spaces converted. The only way round was to delete and re-create
+  the record, which costs its id and its history.
+
+  **`edges` rides in the same body**, so an edge can be drawn or adjusted through the record it hangs
+  off, on an update as well as a create.
+
+  A body carrying only a connection field is a valid patch. It used to answer
+  `400 "At least one field must be provided"` — the field was not in the update allowlist, so it was not
+  rejected, it was not SEEN.
+
+- **`filter` finds one file by `path`, and forgives how you spell it.** *(files only, both doors.)* The
+  file-metadata list route always did — it ran the path through the same normalisation the store uses, so
+  a Windows-style spelling and a leading slash both find `notes/a.md`. `filter` did not, and
+  `filter: { path }` is a bare equality: a caller holding a path from their own filesystem got an empty
+  page and a `200`, which reads exactly like "no such file".
+
+  It is EXACT after the normalisation — not a prefix, not a substring. For those there is `search`, which
+  also spans the description.
+
+  **Sending both spellings is a `400` rather than one of them quietly winning.** `path` and
+  `filter: { path }` are two ways to ask one question and only the argument is normalised, so together
+  they would disagree — the same call `recall` made about its two filter grammars.
+
+  This is what `B-9` step 3b needs before the file-metadata list route can go: deleting a forgiving read
+  and leaving an exact one is the *route does work around the query* shape that step 3a already paid for
+  once. **`includeChunks` deliberately did NOT move**: that is a default the route applies rather than a
+  transform, a caller can write `filter: { parentFileId: { $exists: false } }`, and adopting it here would
+  change what every existing `filter` caller gets back.
+
+- **A schema type and each of its properties can now say what they are FOR, in prose.** `description` on
+  a type schema (4000 characters) and on any property (2000) — stored, returned by `get_space_meta` and
+  the space listing, editable in the Schema tab, and **never parsed**. The type already says a value is a
+  number; the property note is where you say it is the retry BUDGET rather than the retry count, or that
+  one record means one deployed instance rather than one repository.
+
+  **It is deliberately prose rather than an ontology, and that is the whole decision.** Owner,
+  2026-09-17, asking whether `F-24`'s semantic layer could be satisfied this way: the answer splits by
+  who READS it. Everything whose reader is a model — what a type is for, which property carries meaning,
+  whether two types in different spaces are the same thing — is satisfied by a sentence, and better,
+  because it needs no vocabulary and cannot be wrong-but-parseable. Nothing whose reader is the ENGINE is
+  satisfied by it at all: a query cannot widen to subtypes it cannot parse.
+
+  So the engine-facing half — inverse pairs, transitivity, subtyping — is not built, and will not be
+  until a named consumer changes behaviour because of it. **A vocabulary that nothing enforces looks
+  machine-readable and is not**, which is worse than prose rather than a lesser version of it: shipping
+  `transitive: true` while `traverse` ignores it is the documented-but-inert defect at the scale of a
+  feature.
+
+  The pattern is already proven one tier up — a SPACE carries `usageNotes`, and that is where the shared
+  dev board keeps the runbook three parties read at handshake.
+
+- **A chrono entry's `status` meant two different things, and which one you got was decided by the DOOR
+  you read through.** The chrono list route returns the DERIVED status — `overdue` where a due moment has
+  passed, unless the type's `whenDuePasses` says otherwise — while `filter` and sync return the value the
+  collection holds. Both are correct, and a predicate read must see the stored one or it cannot be used
+  to repair anything. What was wrong is that the two were indistinguishable from outside.
+
+  Reported in substance by the canary operator, 2026-09-15, after a fortnight-old episode read `active`
+  through one door and `overdue` through the other: *"'I checked the status' is not a claim anyone can
+  evaluate without the door being named"*. Every attempt they made to confirm the suspicion queried the
+  collection, got `active`, and read as a clean bill of health. It degrades rather than breaking, too —
+  a record read shortly after it is written still says `active`, so code built against the stored literal
+  works the day it ships and starts failing only as records outlive their due moment.
+
+  `filter` takes `deriveStatus` now, on both doors, **defaulting false** — so every existing caller sees
+  exactly what it saw before, and the client asks for `true`, so the Brain page is unchanged too. Nothing
+  moves for anybody who does not ask. Sending it on any collection but `chrono` is refused rather than
+  ignored: a silently dropped flag is a caller who believes they asked for something.
+
+  It is the same derivation the list route uses, not a second one — `whenDuePasses` makes "what a passed
+  due moment means" a per-TYPE decision, and a copy of that rule would be a second answer to it. Proved
+  against a live instance on both doors, including that `deriveStatus: true` and the list route agree
+  about the same entry, which is the condition for ever retiring that route.
+
+  **And the operator page now says the status it shows is worked out rather than stored**, because that
+  is the half an operator meets: a backup or an export reads what was stored, so an entry the page calls
+  overdue reads as active there.
+
+- **`filter` returned an edge as two bare UUIDs, and a file with no job progress.** Two of the nine
+  per-collection list routes do work on their rows AFTER the query, and the one call meant to replace all
+  nine did neither: `GET .../edges` resolves both endpoints' display names — batched by endpoint KIND,
+  because an entity's name is `name`, a chrono entry's is `title` and a fact's is `fact` — and
+  `GET .../files` joins the embedding job's step progress for rows still in flight. `filter` now does
+  both, on the tool and on `POST /api/brain/filter`, through one module.
+
+  **A decoration is not a parameter, which is why nothing had reported this.** It appears in no body
+  allowlist, no `inputSchema` and no capability map, so the two doors were never compared. The retirement
+  of those routes would have taken both with them silently — an agent reading edges would have started
+  getting ids where a browser gets names, and the Files tab would have shown a stage indicator that never
+  resolves.
+
+  **`includeDiagnostics` was the third, and it was refused rather than ignored.** Four list routes honour
+  it; `filter` accepted it nowhere — a `400` on the route, an `additionalProperties` refusal on the tool.
+  It is accepted and APPLIED on both doors now, defaulting false on each. Admitting it without wiring the
+  projection would have been the worse half: a `200` with the flag doing nothing.
+
+  **The file join moved out of a route file to make this possible at all.** `attachJobProgress` lived in
+  `api/brain/file-meta.ts`, and a `brain/` module may not import from `api/` — so no amount of care in
+  `filter` could have reached it where it was. It is `files/file-job-progress.ts` now, with its own gate
+  asserting exactly one declaration.
+
+- **An agent could not ask for "facts tagged release", and a browser could.** `filter` took a MongoDB
+  predicate and knew nothing else, while the nine per-collection list routes it is meant to replace have
+  always accepted five conveniences: `tag` (a case-insensitive SUBSTRING over the tag array, so `rel`
+  finds `release`), `type`, `description` (that column only), `properties` (a value scan) and `search`
+  (freetext over the collection's own text fields). Both doors were present and one accepted less, which
+  is the half of the parity rule that hides — and it hid here for as long as the capability map paired
+  the tool with the routes and called the pair answered.
+
+  All five are arguments of `filter` now, on the tool and on `POST /api/brain/filter`, in the same
+  change. `filter` itself is no longer REQUIRED: narrowing by tag alone used to mean sending
+  `filter: {}` to say "and no predicate", which is a shape you have to be told about.
+
+  **They are assembled by one module, and that is the point rather than tidiness.** The same four-line
+  sequence existed five times — `buildFactFilter`, the entities route, `listEdges`, `buildChronoQuery`
+  and the file-meta route — each reading the same names into the same three primitives. `filter` would
+  have been the sixth, which is how the browser and an agent come to disagree about what `tag` means.
+
+  **The guard the module carries could not have survived a hand-written copy.** The old assemblies
+  merged the freetext `$or` by assignment, which is safe only because none of them has a caller-supplied
+  predicate to collide with. `filter` does: a caller passing `{$or: [...]}` beside `search` would have
+  had their disjunction silently REPLACED by ours — no error, no log, a plausible answer over the wrong
+  set. Everything accumulates under `$and` now, asserted against a live instance on both doors.
+
+  **`links` refuses rather than ignoring.** It is a pair of ids, with no tags, type, description or text
+  of its own, so `search` there would have matched every link in the space — and a filter that matched
+  everything is indistinguishable from a filter that was ignored. Both doors answer with the same
+  refusal naming the collection. Same shape as the `links` sort crash fixed earlier this release: the
+  answer lives in the function that RECEIVES the collection, not at a call site.
+
+- **`filter` takes `entityName`, `fromName` and `toName`.** They were REST-only, so an agent could not ask
+  for “facts about Alice” by name — it had to filter entities, take the ids, then filter facts, and on a
+  proxy space the ids differ per member. They are a JOIN rather than a predicate, which is why no Mongo
+  filter a caller writes can express them. Refused on a collection they cannot mean rather than ignored.
+
+- **`space_reembed` — the embedding backfill now has a tool.** `POST /api/spaces/:id/reembed` has queued
+  embeddings for records with no vector since 4.4, and had no MCP counterpart. It is also
+  `POST /api/space_reembed`, takes `kinds` and `limit`, and returns the same counts the route does.
+
+  **It was invisible rather than forgotten, which is the part worth reading.** The capability map paired
+  that route with `space_reindex` and the parity gate reads the map, so a REST-only capability was recorded
+  as covered — inside the file built to end exactly that. The two do opposite things: `space_reindex`
+  re-embeds EVERY record with the configured model and returns as soon as the job starts; `space_reembed`
+  touches only records with no vector, is awaited, and the counts are the answer. A map keyed on which
+  DATA a door touches cannot tell those apart; the question is what makes a pairing true.
 
 - **A route was attributed to a path nothing serves, in every gate that reads the route list.** The MCP
   OAuth consent screen is served at `/mcp-oauth/consent`; the mount graph resolved its router by bare name,

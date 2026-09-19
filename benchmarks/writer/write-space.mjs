@@ -142,6 +142,22 @@ export async function writeSpace({ extraction, ythril, space }) {
         statedOn: c.statedOn,
         ...(c.attributed === true ? { attributed: true } : {}),
       },
+      /*
+       * AN ATTRIBUTED CLAIM IS STORED WITHOUT A VECTOR, so it can never win a ranked slot.
+       *
+       * Owner's decision, 2026-09-19: a model's contribution must not compete for space in an answer
+       * somebody asked a question to get — *"(2) fills context very often with stuff thats not
+       * interesting"* — and must not be hidden either. Suppression is the one mechanism that is both:
+       * `recall` cannot rank a record with no vector even deliberately, while `filter`, `graph_traverse`
+       * and recall's own expansion still reach it in full, because the walk follows links and never
+       * consults a vector. Verified against a live instance in
+       * `a-suppressed-record-is-unranked-but-still-reached.test.js`, which is the gate that was missing.
+       *
+       * DERIVED from the mark rather than set beside it. Two fields meaning one thing drift, and the one
+       * that drifts here is the one nobody can see: a claim marked attributed but still carrying a vector
+       * is back to competing for slots, silently.
+       */
+      ...(c.attributed === true ? { suppressEmbeddings: true } : {}),
       ...(linked.length > 0 ? { entityIds: linked } : {}),
     });
     const id = created.id ?? created._id;
