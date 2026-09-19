@@ -49,31 +49,56 @@ import { mountedRoutes } from './_routes.mjs';
 /** A parameter, on either side, is a hole that matches exactly one segment. */
 const HOLE = '\u0001';
 const shape = p => p
+  // The QUERY STRING is not part of the route. `GET /api/spaces/${id}/meta?resolve=1` is the meta route
+  // with an argument on it, and six such calls read as unmatched until this line existed.
+  .split('?')[0]
   .replace(/\$\{[^}]*\}/g, HOLE)
   .replace(/:[A-Za-z0-9_]+/g, HOLE)
   .replace(/\/+$/, '');
 
-const ROUTE_SHAPES = mountedRoutes().map(r => shape(r.path).split('/'));
+const ROUTES = mountedRoutes().map(r => ({ method: r.method, segs: shape(r.path).split('/') }));
+const ROUTE_SHAPES = ROUTES.map(r => r.segs);
 
-function resolves(path) {
+/** `method` narrows it when the call site gave one; without it, any verb will do. */
+function resolves(path, method) {
   const segs = shape(path).split('/');
-  return ROUTE_SHAPES.some(r => r.length === segs.length
-    && r.every((s, i) => s === HOLE || segs[i] === HOLE || s === segs[i]));
+  return ROUTES.some(r => (method === undefined || r.method === method)
+    && r.segs.length === segs.length
+    && r.segs.every((s, i) => s === HOLE || segs[i] === HOLE || s === segs[i]));
 }
 
-/** Every `/api/…` literal the shipped client contains, with the line it is on. */
+/**
+ * Every `/api/…` call the shipped client makes, with its VERB where the verb is on the same expression.
+ *
+ * **The verb is what turns this from a shape check into a real one.** `POST /api/:tool` is a live route, so
+ * path alone resolves every two-segment `/api/x` and the gate cannot tell a real tool from a typo. Matched
+ * with the method, the question is exact — and on its first run with the verb it found a dead one:
+ * `updateSyncSchedule` PATCHed `/api/networks/:id/members/:memberId`, which the server has never served
+ * (members takes POST, PUT on the signing key, and DELETE). Nothing called it, so nothing had 404d yet.
+ *
+ * A path the client builds from a nested template is UNREADABLE here rather than wrong — `` `/api/x${a ?
+ * `?b=${c}` : ''}` `` ends the outer literal early — so those are counted and skipped, and the count is
+ * asserted below so the skip cannot quietly grow to cover everything.
+ */
 function clientCalls() {
   const out = [];
+  const VERB = /\bhttp\s*\.\s*(get|post|put|patch|delete)\s*(?:<[^>]*>)?\s*\(\s*['"`](\/api\/[^'"`]*)['"`]/g;
+  const BARE = /['"`](\/api\/[A-Za-z0-9_\-/.:${}?=&]*)['"`]/g;
   for (const file of trackedSources('client/src', { floor: 100, specs: false })) {
     const text = blankComments(readFileSync(join(REPO_ROOT, file), 'utf8'));
     text.split(/\r?\n/).forEach((line, i) => {
-      for (const m of line.matchAll(/['"`](\/api\/[A-Za-z0-9_\-/.:${}]*)['"`]/g)) {
-        out.push({ file, line: i + 1, path: m[1] });
+      const withVerb = new Map();
+      for (const m of line.matchAll(VERB)) withVerb.set(m[2], m[1].toUpperCase());
+      for (const m of line.matchAll(BARE)) {
+        out.push({ file, line: i + 1, path: m[1], method: withVerb.get(m[1]) });
       }
     });
   }
   return out;
 }
+
+/** A path whose template is not closed on this line cannot be read statically. */
+const unreadable = p => (p.match(/\$\{/g) ?? []).length !== (p.match(/\}/g) ?? []).length;
 
 describe('the sweep reads both sides before concluding', () => {
   it('finds the server\'s routes', () => {
@@ -111,11 +136,24 @@ describe('the sweep reads both sides before concluding', () => {
 
 describe('every path the client calls resolves', () => {
   it('no call names a route this server does not mount', () => {
-    const offenders = clientCalls().filter(c => !resolves(c.path))
-      .map(c => `${c.file}:${c.line} calls ${c.path}`);
+    const offenders = clientCalls().filter(c => !unreadable(c.path) && !resolves(c.path, c.method))
+      .map(c => `${c.file}:${c.line} calls ${c.method ?? '(any verb)'} ${c.path}`);
     assert.deepEqual(offenders, [],
       'the client calls a path no route serves:\n  ' + offenders.join('\n  ')
       + '\n\nThere is no type between a template string and a router, so this is a runtime 404 — and what '
       + 'the operator sees is an empty panel rather than an error naming the call.');
+  });
+
+  it('and the paths it cannot read stay a handful', () => {
+    /*
+     * The skip has to be visible or it becomes the gate. A path built from a NESTED template ends its own
+     * literal early, so it cannot be read here and is passed over — one call does that today
+     * (`/api/duplicates/scan` with an optional query string). If that number climbs, the reason to look is
+     * that the sweep is quietly covering less, not that the client got cleverer.
+     */
+    const skipped = clientCalls().filter(c => unreadable(c.path));
+    assert.ok(skipped.length <= 3,
+      `${skipped.length} client paths cannot be read statically; it was 1 when measured:\n  `
+      + skipped.map(c => `${c.file}:${c.line} ${c.path}`).join('\n  '));
   });
 });

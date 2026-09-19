@@ -740,6 +740,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A client method called a route the server has never served.** `updateSyncSchedule` PATCHed
+  `/api/networks/{id}/members/{memberId}`; that collection takes a `POST`, a `PUT` on the signing key and a
+  `DELETE`, and nothing else. Nothing in the client called the method, so nobody had seen the 404 yet — it
+  is deleted rather than pointed somewhere, because a method with no caller and no route is not a feature
+  waiting to be wired up.
+
+  **It was found by teaching the client-path gate to read the VERB**, which is the part that makes the
+  check exact. `POST /api/{tool}` is a live route, so a path on its own resolves every two-segment
+  `/api/x` whatever `x` is; matched with its method, the question has one answer. The gate also stops
+  reporting a query string as part of the path — six calls read as unmatched for that reason — and counts
+  the paths it cannot read statically instead of silently passing them, so the skip cannot grow into the
+  gate.
+
 - **Another seventeen schema descriptions told a caller to use `query`, a tool 5.0 renamed `filter`** —
   *"sortable by `query`"*, *"filterable by `query` on the `files` collection"*, *"as `recall` and `query`
   report it"* — plus a dozen more naming `traverse` where they meant `graph_traverse`. All of them sit in
