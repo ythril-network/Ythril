@@ -724,6 +724,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A backfill could report records as suppressed when nothing was suppressed.** `space_reembed`'s
+  `skippedSuppressed` is the number that tells an operator *"the setting is still on"*, and it was
+  computed as `count(vectorless) - count(vectorless AND allowed)` — two separate reads of a collection
+  the embed worker is actively DRAINING. Every record the worker finishes gains a vector and leaves the
+  first population, so a worker landing between the two reads shrinks the second count for a reason that
+  has nothing to do with suppression, and the difference goes positive.
+
+  Both counts now come from one `$facet` pass, so they describe the same instant and their difference is
+  what the exclusion removed rather than what the worker happened to finish in between. `remaining` came
+  from a third live read and now shares the same snapshot.
+
+  Caught as an intermittent `skippedSuppressed: 1` in a loaded full-suite run, against a space whose
+  suppression had just been turned off — and passing when that file ran alone, which is the signature the
+  same file already documents twelve lines above the assertion that failed.
+
 - **Merging two entities left every LINK RECORD pointing at the entity it had just deleted.** `merge.ts`
   relinks edges, facts, chrono entries and file metadata by rewriting their `entityIds` arrays, and had
   no reference to the `links` collection at all. On a space that has been through the link conversion —
