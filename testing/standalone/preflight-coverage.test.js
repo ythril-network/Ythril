@@ -33,6 +33,14 @@ import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
 const PREFLIGHT = readFileSync('scripts/preflight.mjs', 'utf8');
+/*
+ * The MARKER moved out of preflight into the module preflight and `test:standalone` now share.
+ *
+ * Two runners ask which files need an instance, and a second copy of the answer is two places for them
+ * to disagree about which gates exist. This gate follows the DECLARATION rather than the file it used to
+ * sit in — staying pinned to the old location would have left it green about a rule that had moved.
+ */
+const SPLIT = readFileSync('testing/_shared/standalone-split.mjs', 'utf8');
 
 const NUL = String.fromCharCode(0);
 const files = execFileSync('git', ['ls-files', '-z', 'testing/standalone'], { encoding: 'utf8' })
@@ -51,7 +59,7 @@ const files = execFileSync('git', ['ls-files', '-z', 'testing/standalone'], { en
  * ever stops being parseable, that is a hard failure below rather than a silent fallback to a looser rule.
  */
 const NEEDS_INSTANCE = (() => {
-  const m = PREFLIGHT.match(/const NEEDS_INSTANCE = \/(.+?)\/([gimsuy]*);/);
+  const m = SPLIT.match(/export const NEEDS_INSTANCE = \/(.+?)\/([gimsuy]*);/);
   return m ? new RegExp(m[1], m[2]) : null;
 })();
 
@@ -61,7 +69,7 @@ describe('the exclusion is declared, not guessed', () => {
   it('this gate reads preflight\'s own marker pattern, not a second copy of it', () => {
     // Everything below counts "marked" files with it. If the declaration stops being parseable, that has
     // to fail here rather than quietly leave `marked` empty and pass every assertion vacuously.
-    assert.ok(NEEDS_INSTANCE, 'could not lift NEEDS_INSTANCE out of scripts/preflight.mjs');
+    assert.ok(NEEDS_INSTANCE, 'could not lift NEEDS_INSTANCE out of testing/_shared/standalone-split.mjs — re-anchor this gate');
     assert.ok(NEEDS_INSTANCE.test(' * @needs-instance drives a live server\n'), 'the lifted pattern must match a real header');
     assert.ok(!NEEDS_INSTANCE.test(' * see the integration suite (`@needs-instance`) for those\n'),
       'a doc comment MENTIONING the marker is not a file declaring it');
@@ -70,19 +78,19 @@ describe('the exclusion is declared, not guessed', () => {
   it('preflight selects on the marker', () => {
     // Asserts the SELECTOR, not its exact spelling — the pattern is anchored to a header line
     // (` * @needs-instance …`) and that detail is free to change.
-    assert.match(PREFLIGHT, /const NEEDS_INSTANCE = \/[^\n]*@needs-instance/);
+    assert.match(SPLIT, /export const NEEDS_INSTANCE = \/[^\n]*@needs-instance/);
   });
 
   it('the marker match is anchored, so a file that merely mentions it is not excluded', () => {
     // An unanchored match excluded THIS file, which necessarily names the marker in its assertions —
     // the same "matched test data, not behaviour" mistake the old heuristic made, one level up.
-    assert.match(PREFLIGHT, /const NEEDS_INSTANCE = \/\^/, 'the pattern must be line-anchored');
+    assert.match(SPLIT, /export const NEEDS_INSTANCE = \/\^/, 'the pattern must be line-anchored');
   });
 
   it('and NOT on a content heuristic', () => {
     // The exact shape that skipped 22 pure files. Matching test data is not evidence about behaviour.
     assert.doesNotMatch(
-      PREFLIGHT,
+      SPLIT,
       /NEEDS_INSTANCE = \/[^/]*(fetch\\\(|127\\\.0\\\.0\\\.1|localhost:|BASE_URL)/,
       'inferring from file contents excludes pure tests that merely mention a URL or the word fetch',
     );
@@ -139,9 +147,15 @@ describe('preflight invokes the offline subset within the platform limit', () =>
   const WINDOWS_LIMIT = 32_767;
 
   it('batches, and by measured length rather than a file count', () => {
-    assert.match(script, /CMD_BUDGET/, 'the batch budget is gone — the full list will not fit on Windows');
-    assert.match(script, /batchLen \+ arg\.length > CMD_BUDGET/,
+    /*
+     * The batching moved into the shared split with the marker, for the same reason: `test:standalone`
+     * builds the same command lines and a second copy is a second place to drift back over the Windows
+     * cap. This gate asserts the RULE where it now lives, and that preflight still uses it.
+     */
+    assert.match(SPLIT, /budget = 8_000/, 'the batch budget is gone — the full list will not fit on Windows');
+    assert.match(SPLIT, /len \+ p\.length \+ 1 > budget/,
       'batching by a fixed file count drifts back over the limit as names grow');
+    assert.match(script, /batched\(/, 'preflight must batch through the shared helper, not its own copy');
   });
 
   it('keeps running after a batch fails, so a later failure is not hidden', () => {
