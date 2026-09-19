@@ -95,6 +95,41 @@ graph records that this was SAID, not that it is SO** — the same distinction a
 Leave `attributed` off everywhere else. A claim with no mark is one a person asserted, and in any real
 conversation that is almost all of them.
 
+## When the answer is too long for one reply
+
+A history recorded over years — a support account, an assistant's whole relationship with one person, a
+project channel — runs to hundreds of turns. **Reading it is rarely the problem; answering is.** The graph
+of a long conversation is a large document in its own right, and it will often be longer than one reply can
+carry even where the conversation itself fitted comfortably in front of you.
+
+When that happens, return the file in **parts**, each covering a contiguous run of sessions, each a complete
+file of the normal shape with one extra block:
+
+```json
+{ "conversationId": "conv-x", "part": { "index": 2, "of": 4 }, "sessions": [ ... ], "claims": [ ... ] }
+```
+
+**Say `of` correctly in the FIRST part and never change it.** The parts are joined by a step that refuses an
+incomplete run, and that refusal is the only thing anywhere that can notice a part went missing: three parts
+of four concatenate into a file that is perfectly valid and describes three-quarters of a conversation.
+
+**Carry the entities forward.** Identity is the whole job, and it does not restart at a seam. Each part after
+the first repeats **every entity minted so far**, with its key, its type and its description brought up to
+date with what the new sessions added. A part that mints a fresh key for somebody already in the graph
+produces two nodes for one person, which is the failure that makes the whole thing useless.
+
+Three rules for what you repeat, and the third is the one that gets missed:
+
+1. **Entities: all of them, every time.** They are cheap, and they are what the next part resolves against.
+2. **A key keeps its type.** If session 40 makes you think you misread the subject, fix it in the part where
+   you first wrote it, do not change it later — a type that differs between parts is refused, because the
+   edges drawn against the old one now run to the wrong kind of thing.
+3. **Claims, chrono entries and edges are NOT repeated.** Each belongs to the part whose sessions it came
+   from. Repeating a claim writes it twice.
+
+**Split on a session boundary, never inside one.** A claim may draw on several turns of one session, so a
+seam inside a session leaves a fact half-written on each side of it.
+
 ## When a later session makes an earlier fact WRONG
 
 A conversation recorded over months does not only add facts — it replaces them. Somebody changes job, moves
