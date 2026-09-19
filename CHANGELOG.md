@@ -741,6 +741,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The extraction prompt opened by describing one corpus, and five sections now contradicted it**
+  (`B-5`). Its first paragraph said *"a long conversation between people, recorded over many sessions
+  spread across months"* — written against LoCoMo and true of it. By the time the second corpus had
+  been read, the sections below covered a person and an assistant, a fortnight with six sessions in a
+  day, sessions handed over out of time order, and a turn that is an entire pasted document. The
+  opening paragraph is the first thing a model reads and it was telling it none of that applied.
+
+  It now says the shape is not to be assumed and names the four that have their own section, because a
+  rule written for one shape applied to another is the failure every one of those sections exists for.
+
 - **A history's sessions are handed to extraction in TIME order, which the release is not** (`B-5`).
   Measured across the pinned corpus: **211 of 500 histories list their sessions out of chronological
   order**, 3,382 backward steps, the largest a full day. LoCoMo: **0 of 10** — so nothing in the harness had
