@@ -5,7 +5,8 @@ import { recall } from '../../brain/recall.js';
 import { TTL_DAYS_SCHEMA, filePathSchema, ttlDaysFromArgs } from './shared.js';
 import { type InputFormat } from '../../files/converters/pipeline.js';
 import { renameFileMeta, renameFileMetaByPrefix, upsertFileMeta } from '../../files/file-meta.js';
-import { createDir, listDir, listFilesRecursive, moveFile, readFile, writeFile } from '../../files/files.js';
+import { createDir, listDir, listFilesRecursive, moveFile, readFile, writeFileBytes } from '../../files/files.js';
+import { CONTENT_ENCODINGS, decodeContent } from '../../files/content-encoding.js';
 import { dispatchFileProcessing } from '../../files/dispatch.js';
 import { writeFileTombstones } from '../../files/tombstones.js';
 import { deleteFileCascade } from '../../files/delete-cascade.js';
@@ -48,7 +49,11 @@ export const read_fileTool: ToolHandler = {
 
 export const write_fileTool: ToolHandler = {
   name: 'write_file',
-  description: 'Write text content to a file in the space file store.\n\n'
+  description: 'Write a file in the space file store, as text or as bytes.\n\n'
+    + 'BYTES GO THROUGH `encoding: "base64"`. Without it `content` is read as UTF-8 text, which is the '
+    + 'default and is what you want for notes, markdown and code; an image, a PDF or anything else that is '
+    + 'not text has to say `base64` or it is stored as mojibake. The two doors take the same two encodings '
+    + 'and mean the same thing by them.\n\n'
     + 'IT REPLACES THE WHOLE FILE. There is no append and no patch: whatever you send becomes the entire content, so read first if you meant to add to it. Writing a path that already exists overwrites it without asking.\n\n'
     + 'The file is CHUNKED and each chunk is embedded separately, which is why `recall` returns a passage rather than a document and why `includeFileContent: false` is worth using — one long chunk can crowd out several one-line records. Structure the text with headings: a chunk that begins under a heading carries it, and that is what makes a recall hit locatable.\n\n'
     + 'Embedding is ASYNCHRONOUS, as with `saveFact`: the write returns once the bytes are stored and a queued job computes the vectors afterwards. `recall` always scans the newest records straight from the collection, so a chunk the vector index has not ingested yet is still found — but a chunk whose embedding job has not RUN yet has no vector to compare and stays invisible until it does; `list_embed_jobs` says whether the queue is behind. Rewriting a file resets its embedding: new content is new content, and a previous failure to embed it is not carried forward.',
@@ -65,7 +70,21 @@ export const write_fileTool: ToolHandler = {
               description: 'The ENTIRE new contents. There is no append and no patch — whatever you send '
                 + 'replaces the whole file, so read it first if you meant to add to it. It is chunked and '
                 + 'each chunk embedded separately, which is why structure matters: a chunk beginning under a '
-                + 'heading carries that heading, and that is what makes a recall hit locatable.',
+                + 'heading carries that heading, and that is what makes a recall hit locatable. For a file '
+                + 'that is not text, send base64 here and set `encoding`.',
+            },
+            encoding: {
+              type: 'string',
+              enum: [...CONTENT_ENCODINGS],
+              default: 'utf8',
+              description: 'How to read `content`. "utf8" (the default) stores it as text. "base64" decodes '
+                + 'it first, which is the only way to write an image, a PDF or anything else that is not text '
+                + 'through this tool. Base64 that is not base64 is REFUSED rather than decoded as far as it '
+                + 'goes — the usual mistake is sending a whole `data:image/png;base64,…` URL instead of only '
+                + 'the part after the comma. THE CEILING IS THE REQUEST, not the file store: a tool call '
+                + 'arrives as one JSON body capped at 10 MB, and base64 costs a third more than the bytes it '
+                + 'carries, so roughly 7 MB of file is the most that fits. Anything larger goes through '
+                + '`POST /api/files/{path}`, which takes a raw body and supports chunked upload.',
             },
             description: { type: 'string', description: 'Optional human-readable summary stored as file metadata.' },
             tags: {
@@ -98,11 +117,24 @@ export const write_fileTool: ToolHandler = {
     if (!filePath.trim()) throw new Error('path must not be empty');
     const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined);
     if (!wt.ok) throw new Error(wt.error);
+    /*
+     * DECODED FIRST, and through the same module the REST upload uses.
+     *
+     * This tool had no `encoding` at all, so a session reached through MCP could create a text file and
+     * could never create a byte file — reported by the canary operator on 2026-09-08 after one of their
+     * coding sessions was asked to put a photograph of a whiteboard on a record. Everything past this line
+     * was already shared with the REST door; only the door was narrower.
+     *
+     * Decoding through the module rather than a second `Buffer.from` is what keeps them honest: the base64
+     * validation is the part a second copy drops, and `Buffer.from` answers a bad string with a SHORT
+     * buffer rather than an error.
+     */
+    const bytes = decodeContent(content, a['encoding']);
     // Quota check — project the incoming size so a write that would exceed the hard limit is
     // rejected up-front (parity with the REST upload), throwing QuotaError (caught below).
-    const sizeBytes = Buffer.byteLength(content, 'utf8');
+    const sizeBytes = bytes.length;
     const wfQuota = await checkQuota('files', sizeBytes);
-    const { sha256 } = await writeFile(wt.target, filePath, content);
+    const { sha256 } = await writeFileBytes(wt.target, filePath, bytes);
     const metaOpts: { description?: string; tags?: string[]; properties?: Record<string, string | number | boolean>; ttlDays?: number | null; sha256?: string } = {};
     if (typeof a['description'] === 'string') metaOpts.description = a['description'];
     if (Array.isArray(a['tags'])) metaOpts.tags = a['tags'] as string[];
