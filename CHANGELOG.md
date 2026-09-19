@@ -27,6 +27,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING — a recall's expansion now brings the ATTRIBUTED claims of what it reached, unasked.** A claim
+  an AI assistant originated is stored with no vector, so nothing can rank it. That is half a decision: it
+  has to ARRIVE, or it is merely hidden by a different mechanism. So with `includeMemories` unsaid, a walk
+  brings those claims — and no other fact.
+
+  **A narrowing, not the whole class.** Admitting linked facts wholesale is what the flag's `false` default
+  existed to prevent: *"a match is counted with its whole `_graph` subtree, so every record admitted by
+  default is paid for in matches that no longer fit."* Measured on a live instance against a control space
+  holding ten ordinary linked facts and one attributed claim:
+
+  | call | bytes | graph nodes | attributed | ordinary |
+  |---|---|---|---|---|
+  | default | 2 894 | 1 | yes | 0 |
+  | `includeMemories: false` | 2 332 | 0 | no | 0 |
+  | `includeMemories: true` | 6 485 | 7 | yes | 6 |
+
+  The default costs one record. It is bounded because `attributed` is a DECLARED property, which makes the
+  scan a native index pre-filter rather than a read of every linked fact.
+
+  **`false` still means false.** An explicit refusal brings nothing, attributed included — a default that
+  overrode it would make the flag stop meaning what its own description says. Absent and `false` were
+  already kept apart by the parser, which is what made this expressible.
+
+  **The standalone `graph_traverse` is unchanged**: its `includeMemories` is a real `false`, because its
+  caller is explicitly exploring a graph and says what it wants.
+
 - **The graph guide's `Links` section is its own page, `04g-links-api.md`.** `04b-graph-api.md` sat on the
   900-line cap, and the last three changes to it each ended in compressing a paragraph to make room —
   which is the cap doing its job and being answered the wrong way. Links is a distinct capability with its

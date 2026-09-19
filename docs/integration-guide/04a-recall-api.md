@@ -521,11 +521,11 @@ counting rows never double-counts a record, and no relationship is invisible.
   { "traverse": { "depth": 2, "includeChrono": true, "includeMemories": true, "includeFiles": true } }
   ```
 
-  All three default to **false**, which is deliberate and is why this changed nothing for existing callers. You
-  asked for semantic matches; expansion is decoration on them, and the answer is budgeted — a match is counted
-  together with its whole `_graph` subtree, so every extra record admitted by default would be paid for in
-  matches that no longer fit. The standalone `graph_traverse` tool defaults `includeChrono` to **true** because its
-  caller is explicitly exploring a graph rather than searching.
+  Chrono and files default to **false** because the answer is budgeted: a match is counted with its whole
+  `_graph` subtree, so every record admitted by default is paid for in matches that no longer fit. **Facts
+  are the exception** — with `includeMemories` unsaid a walk brings the ATTRIBUTED claims of what it reached
+  and no other fact, which is the only way a claim an AI assistant originated reaches you at all. All three
+  values are tabulated on the [graph page](04b-graph-api.md#traverse-graph), with the standalone walk beside.
 
   A linked node arrives carrying `kind` (`chrono`, `fact` or `file`) and the fields that say what it is — a
   chrono's `title` and `type`, a fact's `fact`, a file's `path`, `description` and `tags`. **Never file chunk

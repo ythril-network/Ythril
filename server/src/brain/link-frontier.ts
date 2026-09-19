@@ -61,12 +61,48 @@ export interface LinkInclusion {
   includeFiles?: boolean | undefined;
 }
 
-/** Whether this class is switched on for this walk. */
+/**
+ * Whether this class is switched on for this walk, and — for facts — whether ALL of them or only the
+ * attributed ones.
+ *
+ * ## Why facts have three answers and the other two have two
+ *
+ * A claim an AI assistant originated is stored with no vector, so nothing can rank it. That is half a
+ * decision: it must also ARRIVE, or it is merely hidden by a different mechanism. Owner's ruling,
+ * 2026-09-19 — *"(2) fills context very often with stuff thats not interesting"* and excluding it hides
+ * real content, so: never ranked, but reached as context.
+ *
+ * Reaching it means following `fact.entityIds`, and that class is off by default for a reason written into
+ * the schema: *"a match is counted with its whole `_graph` subtree, so every record admitted by default is
+ * paid for in matches that no longer fit."* Turning it on wholesale would drag every linked fact into
+ * every answer, which is the cost the ruling was about.
+ *
+ * So the default admits the class NARROWED to attributed records. It is bounded rather than exhaustive
+ * because `attributed` is a DECLARED property, which makes it a native index pre-filter instead of a scan.
+ *
+ * ## `false` still means false, and that is why absent and false are kept apart
+ *
+ * `undefined` is *"you did not say"* and gets the attributed context. An explicit `includeMemories: false`
+ * is *"I said no"* and gets nothing — otherwise the flag would stop meaning what its own description says,
+ * which is worse than the gap it closes. `parseTraverseOption` preserves the difference already.
+ */
+export type FactInclusion = 'all' | 'attributedOnly' | 'none';
+
 function included(cls: LinkClass, inc: LinkInclusion): boolean {
   if (cls.kind === 'chrono') return inc.includeChrono === true;
-  if (cls.kind === 'fact') return inc.includeMemories === true;
+  if (cls.kind === 'fact') return factInclusion(inc) !== 'none';
   return inc.includeFiles === true;
 }
+
+/** How much of the fact class this walk follows. Exported so a caller can explain what it will get. */
+export function factInclusion(inc: LinkInclusion): FactInclusion {
+  if (inc.includeMemories === true) return 'all';
+  if (inc.includeMemories === false) return 'none';
+  return 'attributedOnly';
+}
+
+/** The narrowing a fact scan carries when only attributed claims are wanted. */
+const ATTRIBUTED_ONLY = { 'properties.attributed': true } as const;
 
 /**
  * Whether an explicit `edgeLabels` filter admits this class's synthetic label.
@@ -98,6 +134,7 @@ interface FoundRecords {
  */
 async function linkedRecordsFromRows(
   mid: string, rows: readonly LinkEnd[], wanted: readonly LinkClass[], remaining: number | undefined,
+  attributedOnly: ReadonlySet<LinkClass>,
 ): Promise<FoundRecords> {
   // A cursor that came back FULL is the case that hides: the database stopped reading, so there may be
   // more behind it — and that is true however many of these survive the class filter and the visited set.
@@ -123,7 +160,15 @@ async function linkedRecordsFromRows(
   for (const [collection, ids] of idsPerCollection) {
     // The chunk exclusion rides here — a link row has no `parentFileId`, so a file link and a chunk link
     // are indistinguishable in the links collection and the narrowing has to happen against the record.
-    for (const doc of await docsFromCollection<LinkRow>(mid, collection, [...ids])) {
+    // The narrowing is per COLLECTION here because the hydration is: a collection whose every claiming
+    // class is attributed-only is read with the filter, and one with a class that wants everything is not.
+    // No collection is claimed by both today — only fact classes read `facts` — and the `every` says so
+    // rather than assuming it, because a class added later that shares a collection would otherwise have
+    // its records silently withheld.
+    const claiming = wanted.filter(c => c.collection === collection);
+    const narrowed = claiming.length > 0 && claiming.every(c => attributedOnly.has(c));
+    for (const doc of await docsFromCollection<LinkRow>(mid, collection, [...ids], undefined,
+      narrowed ? { ...ATTRIBUTED_ONLY } : undefined)) {
       for (const cls of classOfId.get(doc._id) ?? []) found.push({ cls, doc });
     }
   }
@@ -138,6 +183,7 @@ async function linkedRecordsFromRows(
  */
 async function linkedRecordsFromArrays(
   mid: string, frontier: readonly string[], wanted: readonly LinkClass[], remaining: number | undefined,
+  attributedOnly: ReadonlySet<LinkClass>,
 ): Promise<FoundRecords> {
   const found: FoundRecords['found'] = [];
   let capped = false;
@@ -147,8 +193,12 @@ async function linkedRecordsFromArrays(
     // A budget spent before every class was read leaves whole kinds of record unlooked-at, not merely
     // trimmed — so this is a truncation even though nothing was thrown away here.
     if (left === 0) return { found, capped: true };
+    // The narrowing rides INSIDE the query rather than filtering what came back. Reading every linked fact
+    // and discarding the unattributed ones would spend the scan budget on records nobody asked for, which
+    // is the exact cost `includeMemories: false` exists to avoid.
+    const narrowing = attributedOnly.has(cls) ? ATTRIBUTED_ONLY : {};
     const docs = await col<LinkRow>(`${mid}_${cls.collection}`)
-      .find(asFilter<LinkRow>(linksToAny(mid, cls, frontier)), { projection: cls.projection })
+      .find(asFilter<LinkRow>({ ...linksToAny(mid, cls, frontier), ...narrowing }), { projection: cls.projection })
       .limit(left ?? 0)
       .toArray() as LinkRow[];
     if (left !== undefined && docs.length === left) capped = true;
@@ -199,6 +249,10 @@ export async function linkedRecordsAtFrontier(
   if (frontier.length === 0) return { records: out, scanCapped };
 
   const wanted = LINK_CLASSES.filter(cls => included(cls, inclusion) && labelWanted(cls, edgeLabels));
+  // Which of those are admitted only for their ATTRIBUTED records. Carried beside `wanted` rather than
+  // folded into it, so every existing use of a class stays a class and only the scan reads the mode.
+  const attributedOnly = new Set(
+    factInclusion(inclusion) === 'attributedOnly' ? wanted.filter(c => c.kind === 'fact') : []);
   if (wanted.length === 0) return { records: out, scanCapped };
 
   for (const mid of memberIds) {
@@ -217,8 +271,8 @@ export async function linkedRecordsAtFrontier(
      * Which shape a space answers from is `usesLinkRecords`, never a decision taken here.
      */
     const rows = usesLinkRecords(mid)
-      ? await linkedRecordsFromRows(mid, await linksPointingAt(mid, frontier, remaining), wanted, remaining)
-      : await linkedRecordsFromArrays(mid, frontier, wanted, remaining);
+      ? await linkedRecordsFromRows(mid, await linksPointingAt(mid, frontier, remaining), wanted, remaining, attributedOnly)
+      : await linkedRecordsFromArrays(mid, frontier, wanted, remaining, attributedOnly);
     if (rows.capped) scanCapped = true;
 
     for (const { cls, doc } of rows.found) {
