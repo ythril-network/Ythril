@@ -3,7 +3,7 @@ import { shapeError } from '../../brain/write-shape.js';
 import { CHRONO_STATUSES } from '../../config/types.js';
 import { usesLinkRecords } from '../../brain/link-adjacency.js';
 import { arrayWriteError } from '../../brain/array-write-refusal.js';
-import { UUID_V4_RE, TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, ttlDaysFromArgs, recurrenceSchema, unitScoreSchema, uuidSchema } from './shared.js';
+import { UUID_V4_RE, TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, recurrenceSchema, unitScoreSchema, uuidSchema } from './shared.js';
 import { ChronoFilter, createChrono, deleteChrono, getChronoById, listChrono, updateChrono, parseRecurrence } from '../../brain/chrono.js';
 // The API layer's write gate, imported rather than reimplemented — see the note in memory.ts.
 import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
@@ -36,6 +36,7 @@ import { getAllowedChronoTypes, resolveMetaRefs, validateChrono } from '../../sp
 import { mergePropertiesOrKeep } from '../../brain/merge-fields.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
+import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { connectionSchemas, applyConnections, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
 
 export const save_chronoTool: ToolHandler = {
@@ -118,6 +119,7 @@ export const save_chronoTool: ToolHandler = {
             checkContradictions: { type: 'boolean', default: false, description: 'Also flag existing entries that CONTRADICT this one — a near-neighbour claiming a different status, or setting the same single-valued property to a different value. Deterministic only (no model call). The entry is still stored regardless.' },
             dupeThreshold: unitScoreSchema('Cosine-similarity threshold for the duplicate check (0-1, default ~0.92). Lower to flag looser matches.'),
             suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
+            superseded: SUPERSEDED_SCHEMA,
             ttlDays: TTL_DAYS_SCHEMA,
           },
           required: ['space', 'title', 'type', 'startsAt'],
@@ -186,6 +188,8 @@ export const save_chronoTool: ToolHandler = {
     try {
       const chronoSuppress = parseRecordSuppression(a);
       if (!chronoSuppress.ok) throw new Error(chronoSuppress.error);
+      const susCreate = parseRecordSuperseded(a);
+      if (!susCreate.ok) throw new Error(susCreate.error);
       entry = await createChrono(wt.target, {
       id: chronoSuppliedId,
       title,
@@ -204,6 +208,7 @@ export const save_chronoTool: ToolHandler = {
       // The record tier, which no create door stated until 2026-09-02. `parseRecordSuppression` owns the
       // grammar, so a change to it reaches every create door at once rather than one at a time.
       ...(chronoSuppress.value !== undefined ? { suppressEmbeddings: chronoSuppress.value } : {}),
+      ...(susCreate.value !== undefined ? { superseded: susCreate.value } : {}),
       // Duplicate check defaults ON for the interactive create tool, as it does for remember/upsert_entity.
       checkDuplicates: a['checkDuplicates'] !== false,
       checkContradictions: a['checkContradictions'] === true,
@@ -382,6 +387,7 @@ export const update_chronoTool: ToolHandler = {
             },
             recurrence: recurrenceSchema('The repeat rule, replaced wholesale when sent,'),
             suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
+            superseded: SUPERSEDED_SCHEMA,
             deleteFields: {
               type: 'array', items: { type: 'string' },
               description: 'Dot-notation paths to REMOVE from the entry, applied after the merge above — the '
@@ -422,6 +428,9 @@ export const update_chronoTool: ToolHandler = {
     const sup = parseRecordSuppression(a);
     if (!sup.ok) throw new Error(sup.error);
     if (sup.value !== undefined) updates['suppressEmbeddings'] = sup.value;
+    const sus = parseRecordSuperseded(a);
+    if (!sus.ok) throw new Error(sus.error);
+    if (sus.value !== undefined) updates['superseded'] = sus.value;
     if (typeof a['title'] === 'string') updates['title'] = a['title'];
     if (typeof a['type'] === 'string') {
       // Same allowlist check `save_chrono` runs, and the same one the REST PATCH already runs.

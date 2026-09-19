@@ -1939,7 +1939,7 @@
   "review.contradictions.kept": "kept",
   "review.contradictions.superseded": "superseded",
   "review.contradictions.decidedBy": "Decided by {{who}}. Nothing was deleted — the superseded record is kept and marked.",
-  "review.contradictions.noEdge": "Decision recorded. No edge was drawn: edges connect entities, and this pair is not one.",
+  "review.contradictions.notMarked": "Decision recorded, but the superseded record could not be marked — searches will still show both as current.",
   "review.contradictions.fullError": "This record could not be loaded — do not decide from the summary alone.",
   "review.contradictions.loadError": "Could not load contradictions.",
   "review.typeFilter.label": "Record type",

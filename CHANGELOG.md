@@ -15,6 +15,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A record can be marked as no longer true, and it keeps ranking.** `superseded` is a boolean on facts,
+  entities, edges and chrono entries, accepted on the create and the update, on both doors. Owner's
+  decision, answering a proposal that a retired record be stored unembedded the way an attributed claim is:
+  *"what if you ask 'where did ada work?' or 'list all workplaces' — A kills that."* It does, so the mark
+  does not touch the vector. A superseded record still embeds, still ranks and comes back carrying
+  `superseded: true`; retrieval marks rather than decides. Which record replaced it, if any did, is a
+  `supersedes` edge — kept separate because *"she left and has no new job"* is a retirement with no
+  successor. Filtering on it is index-served, so *"only what is still believed"* costs nothing extra.
+
+- **Resolving a contradiction now reaches retrieval, and draws the edge for every pair kind** (`Q-35`).
+  `supersededId` was written onto the review finding and nowhere else, so a reviewer could settle a
+  contradiction and change nothing at all about the next `recall`: both claims came back ranked together
+  with nothing to choose between them. The losing RECORD is now marked, through its own writer so the change
+  replicates and is audited, and the response carries `markedRecord`. The edge was drawn for entity pairs
+  only, on the ground that a fact→fact edge would be stored and never walked — true when it was written, and
+  no longer, since 5.0 made the walk follow an edge to a fact, chrono entry or file. Re-measured against a
+  control before the refusal was removed. The one pair that still gets no edge is a pair of EDGES, because
+  an edge is not a thing an edge can point at, and which kinds can is read out of `REF_KINDS` rather than
+  restated — the `note` field says so in that case and in no other.
+
 - **An attributed claim is stored without a vector, so nothing can rank it — and everything can still reach
   it.** Owner's decision: a model's contribution must not compete for space in an answer somebody asked a
   question to get, and must not be hidden either. Suppression is the one mechanism that is neither. A record

@@ -143,6 +143,8 @@ interface RecallBase {
   properties?: Record<string, string | number | boolean>;
   /** Pre-embedding source text — the exact string fed to the embedding model for this document. */
   matchedText?: string;
+  /** The record is no longer true — see `RECORD_SUPERSEDED_FIELD`. Only ever `true`. */
+  superseded?: boolean;
 }
 
 export interface RecallMemory extends RecallBase {
@@ -787,7 +789,11 @@ function recallProjection(knowledgeType: RecallKnowledgeType): {
   commonProject: Record<string, number>;
   typeProject: Record<string, number>;
 } {
-  const commonProject = { _id: 1, spaceId: 1, _knowledgeType: 1, score: 1, createdAt: 1, updatedAt: 1, seq: 1, embeddingModel: 1, matchedText: 1 };
+  // An INCLUSION list, so a field absent from it never leaves Mongo — which is why `superseded` is here and
+  // not only in `toRecallRecord`'s allowlist further down. Both are field-by-field rebuilds of one record,
+  // and a new field has to be named in each: it was named in the second alone, and came back missing with
+  // every gate green, because the record handed to the second had already lost it.
+  const commonProject = { _id: 1, spaceId: 1, _knowledgeType: 1, score: 1, createdAt: 1, updatedAt: 1, seq: 1, embeddingModel: 1, matchedText: 1, superseded: 1 };
   let typeProject: Record<string, number> = {};
   if (knowledgeType === 'fact') {
     typeProject = { fact: 1, tags: 1, entityIds: 1, description: 1, properties: 1 };
@@ -1040,6 +1046,7 @@ function mapToRecallResult(doc: Record<string, unknown>, knowledgeType: RecallKn
     description: doc['description'] as string | undefined,
     properties: doc['properties'] as Record<string, string | number | boolean> | undefined,
     matchedText: doc['matchedText'] as string | undefined,
+    superseded: doc['superseded'] as boolean | undefined,
   };
   switch (knowledgeType) {
     case 'fact':

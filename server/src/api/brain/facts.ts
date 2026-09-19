@@ -36,6 +36,7 @@ import {
 import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
 import { mergePropertiesOrKeep } from '../../brain/merge-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
+import { parseRecordSuperseded } from '../../brain/record-flag.js';
 
 export const memoriesRouter = Router();
 
@@ -274,7 +275,7 @@ memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpace
   if (connErr) { res.status(400).json({ error: connErr }); return; }
   const ttlDaysProvided = !!req.body && typeof req.body === 'object' && 'ttlDays' in req.body;
   const dfPaths: string[] | undefined = Array.isArray(deleteFields) && deleteFields.length > 0 ? deleteFields : undefined;
-  const updates: { fact?: string; type?: string; tags?: string[]; entityIds?: string[]; description?: string; properties?: Record<string, string | number | boolean>; suppressEmbeddings?: boolean } = {};
+  const updates: { fact?: string; type?: string; tags?: string[]; entityIds?: string[]; description?: string; properties?: Record<string, string | number | boolean>; suppressEmbeddings?: boolean; superseded?: boolean } = {};
   // `type` was accepted on CREATE and silently DROPPED here: this handler never destructured it, so a caller PATCHing
   // a fact's type got 200 and no change. `updateFact` has always accepted it and writes `$set.type`, so the field
   // was plumbed the whole way down and lost at the door. An empty string CLEARS it, which is how the UI unsets a type —
@@ -326,6 +327,9 @@ memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpace
   const sup = parseRecordSuppression(req.body);
   if (!sup.ok) { res.status(400).json({ error: sup.error }); return; }
   if (sup.value !== undefined) updates.suppressEmbeddings = sup.value;
+  const sus = parseRecordSuperseded(req.body);
+  if (!sus.ok) { res.status(400).json({ error: sus.error }); return; }
+  if (sus.value !== undefined) updates.superseded = sus.value;
   // A connection field IS a field. Without this, `{linkEntities: [...]}` alone answered
   // "At least one field must be provided" for a body that plainly has one.
   // Both return `null` for absent, never `undefined` — `!== undefined` would be true for `null` and

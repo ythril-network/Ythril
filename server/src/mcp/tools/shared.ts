@@ -47,6 +47,28 @@ export const TTL_DAYS_SCHEMA = {
  * ACCEPTED as an input alias — see `parseRecordSuppression` — and is deliberately not named here, because a
  * schema description is what a caller constructs arguments from and naming both would re-create the defect.
  */
+/**
+ * The retirement mark, described by the GUARANTEE it gives rather than by what it does to storage.
+ *
+ * A description that states a MECHANISM has to be revisited every time the mechanism gains a case, and
+ * nobody does — which is how a caller came to read *"filter applied after vector search"* on `recall` and
+ * build around a limitation that had never existed. So this says what a caller can rely on: the record
+ * still ranks, and it comes back marked.
+ */
+export const SUPERSEDED_SCHEMA = {
+  type: 'boolean',
+  description:
+    'Mark this record as NO LONGER TRUE. It keeps its vector and keeps ranking — a superseded record is '
+    + 'still returned by recall, query, list, get and traverse, carrying `superseded: true` so you can see '
+    + 'that it has been overtaken. Hiding it would make "where DID she work?" unanswerable in order to fix '
+    + '"where DOES she work?", so retrieval marks rather than decides.\n\n'
+    + 'It does NOT say what replaced it, and it does NOT schedule a deletion. Draw a `supersedes` edge from '
+    + 'the new record to this one to say which replaced it — that edge is walked, so `graph_traverse` from '
+    + 'either reaches the other. Leave the edge out when nothing replaced it: "she left and has no new job" '
+    + 'is a retirement with no successor, and both are sayable.\n\n'
+    + 'Not the same as `suppressEmbeddings`, which removes the vector and makes a record unrankable.',
+} as const;
+
 export const SUPPRESS_EMBEDDINGS_SCHEMA = {
   type: 'boolean',
   description:
@@ -251,6 +273,17 @@ export function toRecallRecord(
   if (r.tags !== undefined) common['tags'] = r.tags;
   if (r.description !== undefined) common['description'] = r.description;
   if (r.properties !== undefined) common['properties'] = r.properties;
+  /*
+   * THE RETIREMENT MARK IS NEVER TRIMMED, and it is the one field here that costs nothing to keep.
+   *
+   * Everything above is weighed against `topK` because it is paid for on every row. This is written only
+   * onto a record somebody retired, so the common row does not carry it at all — and on the rare row that
+   * does, dropping it is what leaves a caller holding two contradictory claims with nothing to choose
+   * between them. That is the defect `Q-35` is about, so the saving would BE the bug.
+   *
+   * Only ever present when true: `superseded: false` says the same thing as its absence.
+   */
+  if (r.superseded === true) common['superseded'] = true;
   switch (r.type) {
     case 'fact':
       return { ...common, fact: r.fact, ...(r.entityIds !== undefined ? { entityIds: r.entityIds } : {}) };

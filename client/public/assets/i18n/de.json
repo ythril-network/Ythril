@@ -1939,7 +1939,7 @@
   "review.contradictions.kept": "behalten",
   "review.contradictions.superseded": "überholt",
   "review.contradictions.decidedBy": "Entschieden von {{who}}. Nichts wurde gelöscht — der überholte Datensatz bleibt erhalten und ist markiert.",
-  "review.contradictions.noEdge": "Entscheidung gespeichert. Es wurde keine Kante gezogen: Kanten verbinden Entitäten, dieses Paar ist keines.",
+  "review.contradictions.notMarked": "Entscheidung gespeichert, aber der überholte Eintrag konnte nicht markiert werden — in der Suche erscheinen weiterhin beide als aktuell.",
   "review.contradictions.fullError": "Dieser Datensatz konnte nicht geladen werden — entscheiden Sie nicht allein anhand der Zusammenfassung.",
   "review.contradictions.loadError": "Widersprüche konnten nicht geladen werden.",
   "review.typeFilter.label": "Datensatztyp",

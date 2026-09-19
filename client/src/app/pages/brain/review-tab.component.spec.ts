@@ -628,17 +628,21 @@ describe('ReviewTabComponent', () => {
       expect(calls).toEqual([['c1', 'b']]);
     });
 
-    it('says so when the decision was recorded but NO edge was drawn', () => {
-      // Edges connect entities, so a memory pair gets the judgement and no link. A reviewer who believes
-      // the graph changed when it did not will never go and fix it.
-      const { c, toastInfos } = setup({}, true, {
+    it('says so when the LOSING RECORD could not be marked', () => {
+      // Rewritten, not inverted. This case asserted that a fact pair was told no edge had been drawn —
+      // true until 5.0 drew the edge for every pair kind, after which the message could only mislead.
+      //
+      // What a reviewer must not be left to assume is the other half: the decision stored and the record
+      // unmarked means the next search still shows both claims as current, which is the state resolving a
+      // contradiction is supposed to end.
+      const { c, toastErrors } = setup({}, true, {
         listContradictions: () => of({ contradictions: [con({ type: 'fact' })], nliConfigured: true }),
-        keepSide: () => of({ status: 'resolved', resolution: 'superseded', note: 'no edge drawn: ...' }),
+        keepSide: () => of({ status: 'resolved', resolution: 'superseded', markedRecord: false }),
       });
       c.sub.set('contradictions');
       c.loadContradictions();
       c.keepSide(c.conRows()[0], 'a');
-      expect(toastInfos.join(' ')).toContain('review.contradictions.noEdge');
+      expect(toastErrors.join(' ')).toContain('review.contradictions.notMarked');
     });
 
     it('stays quiet when an edge WAS drawn', () => {

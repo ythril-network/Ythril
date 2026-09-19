@@ -1939,7 +1939,7 @@
   "review.contradictions.kept": "zachowany",
   "review.contradictions.superseded": "zastąpiony",
   "review.contradictions.decidedBy": "Zdecydował(a) {{who}}. Nic nie zostało usunięte — zastąpiony rekord pozostaje i jest oznaczony.",
-  "review.contradictions.noEdge": "Decyzja zapisana. Nie utworzono krawędzi: krawędzie łączą encje, a ta para nią nie jest.",
+  "review.contradictions.notMarked": "Decyzja zapisana, ale nie udało się oznaczyć zastąpionego rekordu — w wyszukiwaniu oba nadal będą widoczne jako aktualne.",
   "review.contradictions.fullError": "Nie udało się wczytać tego rekordu — nie decyduj wyłącznie na podstawie streszczenia.",
   "review.contradictions.loadError": "Nie udało się wczytać sprzeczności.",
   "review.typeFilter.label": "Typ rekordu",

@@ -479,6 +479,38 @@ these three levels before treating it as a fault.
 > `excludeFromVectorSearch` before version 3.1.0, and 4.0 removed that old name: a script still
 > sending it is now refused rather than quietly accepted, so nothing is left half-working.
 
+**A record can also be marked as no longer TRUE, which is a different thing entirely.** A fact you stored
+last year may simply have stopped being the case — somebody changed job, a service moved host, a policy was
+replaced. Marking it **superseded** says so on the record, and the mark travels with the record itself — into an
+export, across a sync to another instance, and into every answer an AI assistant reads out of this space.
+
+**It does not remove the record from search, and that is deliberate.** A superseded fact still appears in
+results, still ranks, and simply arrives labelled. Hiding it would answer *"where does she work now?"* by
+making *"where did she work before?"* impossible to answer at all — and the older answer is often the reason
+the record was kept instead of edited.
+
+| the record is | use | what happens in search |
+|---|---|---|
+| no longer true | **superseded** | still found, arrives labelled |
+| not worth searching by meaning | **suppressEmbeddings**, above | stops competing on meaning |
+| no longer wanted at all | retention, or delete it | gone when the window passes |
+
+**Which record replaced it is a separate link**, drawn as a **supersedes** connection from the new record to
+the old one. Follow it with **Graph hops** from either end. It is separate because not every retirement has a
+replacement: *"she left and has not started anywhere new"* is a real thing to record, and forcing a
+replacement would make it unsayable.
+
+**The Review tab writes both for you.** When you settle a contradiction by picking a winner
+(**Review → Contradictions → Resolve**), the losing record is marked superseded and the supersedes link is
+drawn — for facts, entities, chrono entries and edges alike. Before version 5.0 the decision was stored only
+against the review item, so resolving a contradiction changed nothing about what the next search returned.
+
+> **What the app shows today, exactly.** Resolving a contradiction is how you set the mark from the app,
+> and it is the only way: there is no checkbox for it on a record's form, as with the per-record suppression
+> above. Records already marked are not badged in the lists either — the mark is visible to the API, to an
+> export, and to an assistant, and a record's own tab shows it among its fields. A badge in the Query and
+> Facts lists is not built yet.
+
 **In a network, each instance searches with its own model, and from 3.7 that is explicit.** A record that
 arrives from another instance is prepared for search **here**, using this instance's own model — the sending
 instance's version is never used, because two instances configured with different models produce numbers that
@@ -631,11 +663,13 @@ either **dismiss** it (sticky, like a duplicate dismissal), mark it **resolved b
 record, **link** the two as a contradiction, or pick a winner with **Keep A** / **Keep B**.
 
 **Keep A / Keep B** is usually what you actually mean: *this one is right, that one is stale*. It records who
-decided, marks the other record as superseded, and — for two entities — draws the `supersedes` edge for you.
-**Nothing is deleted.** The superseded record stays exactly where it was, now labelled, because it was true
-once and that history is often the reason you were looking. For a fact or chrono pair the decision is still
-recorded, but no edge is drawn (edges connect entities) and the app tells you so rather than letting you
-assume the graph changed.
+decided, marks the losing record itself as superseded, and draws the `supersedes` link from the winner to it.
+**Nothing is deleted.** The superseded record stays exactly where it was and still turns up in search, now
+labelled, because it was true once and that history is often the reason you were looking.
+
+Both halves changed in version 5.0. The link used to be drawn for two entities only, and the decision used to
+be stored against the review item rather than on the record — so settling a contradiction changed nothing
+about what the next search returned.
 
 Before deciding, use **Show both in full** on the card: the two lines you see are summaries, which is enough
 to triage a pair and rarely enough to judge one.

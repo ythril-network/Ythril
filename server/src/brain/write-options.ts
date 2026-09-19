@@ -60,4 +60,15 @@ export interface DupeCheckOpts {
    * parameter: `saveFact` carries a note saying its twelfth was one too many.
    */
   waitForEmbedding?: boolean;
+  /**
+   * Store this record already marked as no longer true.
+   *
+   * The create half of the mark, for the same reason `suppressEmbeddings` has one: an agent that learns a
+   * correction and the history it replaces in the same turn would otherwise need two writes and a window
+   * between them where the retired claim reads as current.
+   *
+   * It does NOT affect embedding — see `RECORD_SUPERSEDED_FIELD` in `brain/record-flag.ts` for why a
+   * retired record keeps its vector and keeps ranking.
+   */
+  superseded?: boolean;
 }

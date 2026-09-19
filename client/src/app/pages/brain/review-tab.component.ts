@@ -613,10 +613,17 @@ export class ReviewTabComponent implements OnInit, OnChanges {
     this.contradictionsApi.keepSide(c.id, winner).subscribe({
       next: (r) => {
         this.conBusy.set(null);
-        // The server reports when it recorded the decision WITHOUT drawing an edge — edges connect
-        // entities, so a memory or chrono pair gets the judgement and no link. Surfaced rather than
-        // swallowed: a reviewer who believes the graph changed when it did not will not go and fix it.
-        if (r.note) this.toast.info(this.transloco.translate('review.contradictions.noEdge'));
+        /*
+         * This branch used to announce that no edge had been drawn, for a pair that was not two entities.
+         * 5.0 draws the edge for every pair kind, so that message could only ever have been a lie, and it
+         * is replaced rather than deleted: the same place now surfaces the one outcome a reviewer must not
+         * be left to assume.
+         *
+         * `markedRecord: false` means the decision was stored and the LOSING RECORD was not marked — so
+         * the next search still returns both claims looking equally current, which is the state the whole
+         * feature exists to end. Success stays silent; only this is worth a reviewer's attention.
+         */
+        if (r.note) this.toast.info(r.note); else if (r.resolution === 'superseded' && r.markedRecord === false) this.toast.error(this.transloco.translate('review.contradictions.notMarked'));
         this.loadContradictions();
       },
       error: () => { this.conBusy.set(null); this.toast.error(this.transloco.translate('duplicates.dismissError')); },

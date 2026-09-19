@@ -27,6 +27,8 @@ import { pairContentHash } from '../brain/dupe-scanner.js';
 import { scanSpace } from '../brain/contradiction-scanner.js';
 import { nliConfigured } from '../brain/nli-client.js';
 import { upsertEdge } from '../brain/edges.js';
+import { retireRecord, canBeRetired } from '../brain/retire-record.js';
+import { REF_KINDS, type RefKind } from '../config/types-knowledge.js';
 import { webhookToken } from './brain/_shared.js';
 import type { ContradictionCandidateDoc } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -223,6 +225,10 @@ contradictionsRouter.post('/:id/resolve', globalRateLimit, requireAuth, denyRead
       if (req.authToken?.name) set.resolvedBy = req.authToken.name;
 
       let edge: { id: string; from: string; to: string; label: string } | null = null;
+      // Whether the LOSER itself was marked. Reported rather than assumed: a reviewer whose decision was
+      // recorded on the queue and nowhere else is the defect this endpoint just stopped having, and a
+      // response that claimed the mark unconditionally would hide its return.
+      let markedRecord = false;
       let edgeSkipped: string | undefined;
 
       if (resolution === 'superseded') {
@@ -230,21 +236,58 @@ contradictionsRouter.post('/:id/resolve', globalRateLimit, requireAuth, denyRead
         const loserId = body.winner === 'a' ? doc.bId : doc.aId;
         set.supersededId = loserId;
 
-        if (doc.type === 'entity') {
-          // from → to reads "winner supersedes loser". `upsertEdge` is keyed on (from, to, label), so
-          // resolving the same pair twice lands on the same edge instead of accumulating duplicates.
+        /*
+         * THE MARK GOES ON THE RECORD, and until `Q-35` it did not go anywhere a reader could see.
+         *
+         * `supersededId` above names the loser on the CANDIDATE document, which is the review queue's own
+         * bookkeeping — no retrieval path reads it. So a reviewer could settle a contradiction and change
+         * nothing at all about what the next recall answered: both claims came back, ranked together, with
+         * nothing to choose between them. Measured on a live instance 2026-09-19.
+         *
+         * The loser keeps its vector and keeps ranking — see `RECORD_SUPERSEDED_FIELD`. Hiding it would
+         * answer *"where does Ada work?"* by making *"where did Ada work?"* unanswerable.
+         */
+        if (canBeRetired(doc.type)) {
+          markedRecord = await retireRecord(spaceId, doc.type, loserId, webhookToken(req));
+        }
+
+        /*
+         * from → to reads "winner supersedes loser". `upsertEdge` is keyed on (from, to, label), so
+         * resolving the same pair twice lands on the same edge instead of accumulating duplicates.
+         *
+         * DRAWN FOR EVERY PAIR KIND SINCE 5.0, and this branch used to refuse for anything but an entity
+         * pair, on the ground that *"an edge in Ythril connects ENTITIES"* and a fact→fact edge would be
+         * the accepted-dead-edge an integrator reported. That was true when it was written and stopped
+         * being true when the walk started following an edge to a fact, chrono entry or file — which is
+         * the whole of what makes the edge half of this worth drawing.
+         *
+         * Re-measured before the refusal was removed, with a control: the same probe with the edge write
+         * failing reached 1 node from the newer fact, and with the edge stored reached 2. The earlier
+         * measurement that said otherwise started its walk at the ENTITY both facts hang off, where each
+         * is reached by a LINK — and a linked record is a leaf that does not expand, so no edge between
+         * them could ever have appeared. One mechanism checked, both concluded about.
+         */
+        /*
+         * WHICH kinds can be an endpoint is `REF_KINDS`, read rather than restated. It holds `entity`,
+         * `fact`, `chrono` and `file` — an EDGE is not among them, and cannot be: an edge between two edges
+         * has no meaning the traversal could follow. The scanner's defaults are facts, entities and chrono
+         * entries, but `contradictions.types` is configurable, so an edge pair reaches here and a
+         * hard-coded `doc.type as RefKind` would hand `upsertEdge` a kind it refuses — a 500 for a request
+         * that is perfectly legitimate.
+         *
+         * Omitting the kinds means both ends are entities, which is what every pre-5.0 caller meant.
+         */
+        if ((REF_KINDS as readonly string[]).includes(doc.type)) {
+          const kind = doc.type === 'entity' ? undefined : (doc.type as RefKind);
           const e = await upsertEdge(spaceId, winnerId, loserId, SUPERSEDES_LABEL,
-            undefined, undefined, undefined, undefined, undefined, webhookToken(req));
+            undefined, undefined, undefined, undefined, undefined, webhookToken(req),
+            undefined, { fromKind: kind, toKind: kind });
           edge = { id: e._id, from: e.from, to: e.to, label: e.label };
         } else {
-          // An edge in Ythril connects ENTITIES. Drawing one between two facts or two chrono entries
-          // would produce exactly the accepted-dead-edge an integrator reported (#695): a link that is
-          // stored, returned, and points at nothing traversable.
-          //
-          // So the decision is still recorded — it is the reviewer's judgement and it is worth keeping —
-          // and the response SAYS no edge was drawn. Silently recording a resolution the caller believes
-          // drew an edge is the failure this endpoint is meant to avoid.
-          edgeSkipped = `no edge drawn: edges connect entities, and this pair is of type '${doc.type}'`;
+          // The judgement is kept — it is the reviewer's and it is worth having — and the response SAYS the
+          // link was not drawn. Silently recording a resolution the caller believes changed the graph is
+          // the failure this endpoint has always been written to avoid.
+          edgeSkipped = `no edge drawn: an edge cannot be the endpoint of an edge, and this pair is of type '${doc.type}'`;
         }
       }
 
@@ -255,6 +298,7 @@ contradictionsRouter.post('/:id/resolve', globalRateLimit, requireAuth, denyRead
         ...(set.resolvedBy ? { resolvedBy: set.resolvedBy } : {}),
         ...(set.supersededId ? { supersededId: set.supersededId } : {}),
         ...(edge ? { edge } : {}),
+        ...(resolution === 'superseded' ? { markedRecord } : {}),
         ...(edgeSkipped ? { note: edgeSkipped } : {}),
       });
       return;

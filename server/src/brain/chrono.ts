@@ -1,3 +1,4 @@
+import { applyRecordFlags } from './record-flag.js';
 import { v4 as uuidv4 } from 'uuid';
 import { reconcileLinks, removeLinksFrom } from './links.js';
 import { LINK_CLASSES } from './link-adjacency.js';
@@ -268,7 +269,7 @@ export async function createChrono(
     ...embeddingFields,
   };
   // Stored, not merely consulted — see the note in `saveFact`.
-  if (opts?.suppressEmbeddings !== undefined) doc.suppressEmbeddings = opts.suppressEmbeddings;
+  applyRecordFlags(doc, opts);
   if (fields.description !== undefined) doc.description = fields.description;
   if (fields.endsAt !== undefined) doc.endsAt = fields.endsAt;
   if (fields.confidence !== undefined) doc.confidence = fields.confidence;
@@ -296,7 +297,7 @@ export async function createChrono(
 export async function updateChrono(
   spaceId: string,
   id: string,
-  updates: Partial<Pick<ChronoEntry, 'title' | 'description' | 'type' | 'startsAt' | 'endsAt' | 'status' | 'confidence' | 'tags' | 'entityIds' | 'memoryIds' | 'properties' | 'recurrence' | 'suppressEmbeddings'>>,
+  updates: Partial<Pick<ChronoEntry, 'title' | 'description' | 'type' | 'startsAt' | 'endsAt' | 'status' | 'confidence' | 'tags' | 'entityIds' | 'memoryIds' | 'properties' | 'recurrence' | 'suppressEmbeddings' | 'superseded'>>,
   deleteFieldsPaths?: string[],
   actor?: WebhookActor,
   ttlDays?: number | null,
@@ -352,6 +353,12 @@ export async function updateChrono(
       suppressEmbeddings: updates.suppressEmbeddings !== undefined
         ? updates.suppressEmbeddings
         : existing.suppressEmbeddings,
+      // Same shape, same reason: chrono REPLACES the document, so a field omitted here is a field the
+      // update silently deletes. `false` is a real stored value — a caller un-retiring a record must not
+      // have it read as "not stated" and fall back to the existing `true`.
+      superseded: updates.superseded !== undefined
+        ? updates.superseded
+        : existing.superseded,
     };
     applyDeleteFields(merged, deleteFieldsPaths);
 

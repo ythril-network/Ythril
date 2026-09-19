@@ -22,9 +22,10 @@ import { resolveWriteTarget, findFirstAcrossMembers, isStrictLinkage } from '../
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { resolveMetaRefs } from '../../spaces/schema-validation.js';
 import { type UpdateValidation } from '../../brain/write-validation.js';
-import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, ttlDaysFromArgs, unitScoreSchema, uuidSchema } from './shared.js';
+import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, uuidSchema } from './shared.js';
 import { mergePropertiesOrKeep } from '../../brain/merge-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
+import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { connectionSchemas, applyConnections, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
 
 export const save_factTool: ToolHandler = {
@@ -78,6 +79,7 @@ export const save_factTool: ToolHandler = {
             checkContradictions: { type: 'boolean', default: false, description: 'Also flag existing facts that CONTRADICT this one — a near-neighbour that sets the same single-valued property to a different value (e.g. status="active" vs status="retired"). Different question from checkDuplicates: "is this redundant?" vs "does this conflict with what we already believe?". Deterministic only (no model call, no added latency). The fact is still stored regardless — if you are correcting an outdated fact, that is expected; consider updating or superseding the record named in the warning.' },
             dupeThreshold: unitScoreSchema('Cosine-similarity threshold for the duplicate check (0-1, default ~0.92). Lower to flag looser matches.'),
             suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
+            superseded: SUPERSEDED_SCHEMA,
             ttlDays: TTL_DAYS_SCHEMA,
           },
           required: ['space', 'fact'],
@@ -150,11 +152,14 @@ export const save_factTool: ToolHandler = {
     // grammar, so a change to it reaches every create door at once rather than one at a time.
     const supCreate = parseRecordSuppression(a);
     if (!supCreate.ok) throw new Error(supCreate.error);
+    const susCreate = parseRecordSuperseded(a);
+    if (!susCreate.ok) throw new Error(susCreate.error);
     const mem = await saveFact(ts, fact, entityIds, tags, description, props, memType,
       {
         checkDuplicates: remDupeCheck, checkContradictions: remContraCheck, dupeThreshold: remDupeThreshold,
         ...(a['waitForEmbedding'] === true ? { waitForEmbedding: true } : {}),
         ...(supCreate.value !== undefined ? { suppressEmbeddings: supCreate.value } : {}),
+        ...(susCreate.value !== undefined ? { superseded: susCreate.value } : {}),
         onValidation: c => { remCheck = c; },
       }, ctx.actor, remTtlDays,
       typeof a['id'] === 'string' ? a['id'] : undefined);
@@ -278,6 +283,7 @@ export const update_factTool: ToolHandler = {
               additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
             },
             suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
+            superseded: SUPERSEDED_SCHEMA,
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
             deleteFields: { type: 'array', items: { type: 'string' }, description: 'Dot-notation paths to delete from the fact (e.g. ["properties.oldKey", "description"]). System fields (id, name, type, spaceId, createdAt, updatedAt) cannot be deleted. Deletions are permanent.' },
             ttlDays: TTL_DAYS_SCHEMA,
@@ -312,10 +318,13 @@ export const update_factTool: ToolHandler = {
     if (!dfResult.ok) throw new Error(dfResult.error);
     const dfPaths: string[] | undefined = Array.isArray(a['deleteFields']) && (a['deleteFields'] as string[]).length > 0 ? a['deleteFields'] as string[] : undefined;
 
-    const updates: { type?: string; fact?: string; tags?: string[]; entityIds?: string[]; description?: string; properties?: Record<string, string | number | boolean>; suppressEmbeddings?: boolean } = {};
+    const updates: { type?: string; fact?: string; tags?: string[]; entityIds?: string[]; description?: string; properties?: Record<string, string | number | boolean>; suppressEmbeddings?: boolean; superseded?: boolean } = {};
     const sup = parseRecordSuppression(a);
     if (!sup.ok) throw new Error(sup.error);
     if (sup.value !== undefined) updates.suppressEmbeddings = sup.value;
+    const sus = parseRecordSuperseded(a);
+    if (!sus.ok) throw new Error(sus.error);
+    if (sus.value !== undefined) updates.superseded = sus.value;
     if (typeof a['fact'] === 'string') {
       if (!a['fact'].trim()) throw new Error('fact must not be empty');
       updates.fact = a['fact'] as string;

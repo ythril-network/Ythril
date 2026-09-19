@@ -1,3 +1,4 @@
+import { applyRecordFlags } from './record-flag.js';
 import { v4 as uuidv4 } from 'uuid';
 import { brainWriteSeqTotal } from '../metrics/registry.js';
 import { authorRef } from '../config/author.js';
@@ -254,7 +255,7 @@ export async function upsertEntity(
   };
   // Stored, not merely consulted — see the note in `saveFact`: everything that revisits a record later reads
   // the tiers off the document.
-  if (opts?.suppressEmbeddings !== undefined) doc.suppressEmbeddings = opts.suppressEmbeddings;
+  applyRecordFlags(doc, opts);
   if (description !== undefined) doc.description = description;
   // `typed` is what makes the SCHEMA tier reachable. Omit it and the resolver silently falls through to the
   // space default, so a window set on `typeSchemas.entity.<type>.retention` does nothing at all.
@@ -334,7 +335,7 @@ export async function getEntityById(spaceId: string, id: string): Promise<Entity
 export async function updateEntityById(
   spaceId: string,
   id: string,
-  updates: { name?: string; type?: string; description?: string; tags?: string[]; properties?: Record<string, string | number | boolean>; suppressEmbeddings?: boolean },
+  updates: { name?: string; type?: string; description?: string; tags?: string[]; properties?: Record<string, string | number | boolean>; suppressEmbeddings?: boolean; superseded?: boolean },
   deleteFieldsPaths?: string[],
   actor?: WebhookActor,
   ttlDays?: number | null,
@@ -400,6 +401,7 @@ export async function updateEntityById(
   onValidation?.(check);
 
   if (updates.suppressEmbeddings !== undefined) $set['suppressEmbeddings'] = updates.suppressEmbeddings;
+  if (updates.superseded !== undefined) $set['superseded'] = updates.superseded;
   if (updates.name !== undefined) $set['name'] = newName;
   if (updates.type !== undefined) $set['type'] = newType;
   // `setUnlessDeleted` rather than a guard on `$unset['x']`: that value is the empty string, so the old test was

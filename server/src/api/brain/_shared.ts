@@ -9,6 +9,7 @@ import { conveniencePredicate, conveniencesFrom } from '../../brain/list-conveni
 import type express from 'express';
 import { getConfig } from '../../config/loader.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
+import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { resolveMetaRefs, type SchemaViolation } from '../../spaces/schema-validation.js';
 import type { SpaceMeta } from '../../config/types.js';
 import type { DupeCheckOpts } from '../../brain/write-options.js';
@@ -161,6 +162,15 @@ export function dupeCheckOptsFromBody(body: unknown): { opts: DupeCheckOpts } | 
   const sup = parseRecordSuppression(body);
   if (!sup.ok) return { error: sup.error };
   if (sup.value !== undefined) opts.suppressEmbeddings = sup.value;
+
+  /*
+   * The retirement mark, read here for the same reason as the tier above it: a create that could not state
+   * it would force an agent correcting a fact to write the old one, then patch it, with a window in between
+   * where a recall hands back a claim the caller already knows is stale.
+   */
+  const sus = parseRecordSuperseded(body);
+  if (!sus.ok) return { error: sus.error };
+  if (sus.value !== undefined) opts.superseded = sus.value;
 
   return { opts };
 }

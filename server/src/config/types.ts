@@ -1372,6 +1372,17 @@ export interface FactDoc extends StampSkewable {
    */
   suppressEmbeddings?: boolean;
   /**
+   * This record is no longer true.
+   *
+   * It does NOT affect embedding: a superseded record keeps its vector, keeps ranking, and comes back
+   * marked — because hiding it would make *"where did Ada work?"* unanswerable to fix *"where does Ada
+   * work?"*. Which record replaced it, if any did, is a `supersedes` edge; see
+   * `RECORD_SUPERSEDED_FIELD` in `brain/record-flag.ts` for why those are two facts and not one.
+   *
+   * Hashed and replicated like any other authored field.
+   */
+  superseded?: boolean;
+  /**
    * The pre-3.1.0 spelling of {@link suppressEmbeddings}, still read and still written beside it.
    *
    * Never offered on either API door. It stays on the document because these collections replicate by
@@ -1427,6 +1438,17 @@ export interface EntityDoc extends StampSkewable {
    */
   suppressEmbeddings?: boolean;
   /**
+   * This record is no longer true.
+   *
+   * It does NOT affect embedding: a superseded record keeps its vector, keeps ranking, and comes back
+   * marked — because hiding it would make *"where did Ada work?"* unanswerable to fix *"where does Ada
+   * work?"*. Which record replaced it, if any did, is a `supersedes` edge; see
+   * `RECORD_SUPERSEDED_FIELD` in `brain/record-flag.ts` for why those are two facts and not one.
+   *
+   * Hashed and replicated like any other authored field.
+   */
+  superseded?: boolean;
+  /**
    * The pre-3.1.0 spelling of {@link suppressEmbeddings}, still read and still written beside it.
    *
    * Never offered on either API door. It stays on the document because these collections replicate by
@@ -1471,6 +1493,17 @@ export interface EdgeDoc extends StampSkewable {
    * is "not stated" and falls through to the tiers below rather than overriding them.
    */
   suppressEmbeddings?: boolean;
+  /**
+   * This record is no longer true.
+   *
+   * It does NOT affect embedding: a superseded record keeps its vector, keeps ranking, and comes back
+   * marked — because hiding it would make *"where did Ada work?"* unanswerable to fix *"where does Ada
+   * work?"*. Which record replaced it, if any did, is a `supersedes` edge; see
+   * `RECORD_SUPERSEDED_FIELD` in `brain/record-flag.ts` for why those are two facts and not one.
+   *
+   * Hashed and replicated like any other authored field.
+   */
+  superseded?: boolean;
   /**
    * The pre-3.1.0 spelling of {@link suppressEmbeddings}, still read and still written beside it.
    *
@@ -1612,6 +1645,17 @@ export interface ChronoEntry extends StampSkewable {
    * is "not stated" and falls through to the tiers below rather than overriding them.
    */
   suppressEmbeddings?: boolean;
+  /**
+   * This record is no longer true.
+   *
+   * It does NOT affect embedding: a superseded record keeps its vector, keeps ranking, and comes back
+   * marked — because hiding it would make *"where did Ada work?"* unanswerable to fix *"where does Ada
+   * work?"*. Which record replaced it, if any did, is a `supersedes` edge; see
+   * `RECORD_SUPERSEDED_FIELD` in `brain/record-flag.ts` for why those are two facts and not one.
+   *
+   * Hashed and replicated like any other authored field.
+   */
+  superseded?: boolean;
   /**
    * The pre-3.1.0 spelling of {@link suppressEmbeddings}, still read and still written beside it.
    *
