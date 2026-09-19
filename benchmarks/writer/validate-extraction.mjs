@@ -294,7 +294,28 @@ export function validateExtraction(extraction, schemaEntries) {
 
   /* ── sessions ──────────────────────────────────────────────────────────────────────────────────────── */
 
+  /*
+   * WHAT IDENTIFIES A SESSION, and why the date is not enough.
+   *
+   * The writer files claims by session and names each transcript after one. It keyed both on the date,
+   * which is correct for a corpus with one session a day and silently destructive for one without:
+   * measured, LoCoMo has 0 of 272 sessions sharing a date and LongMemEval has 18,565 of 25,112, across
+   * every one of its 500 histories. Six sessions on one day become one transcript, keeping the last, and
+   * all six sessions' claims are filed under it.
+   *
+   * Reported here so a caller sees it with everything else rather than on the write. The writer refuses it
+   * too — the same rule twice, deliberately, because that one is the guard that cannot be skipped by a
+   * caller assembling an extraction by hand.
+   */
+  const sessionAt = new Map();
   for (const [i, s] of sessions.entries()) {
+    const key = s.key ?? s.date;
+    const prior = sessionAt.get(key);
+    if (prior !== undefined) {
+      say(`sessions[${i}] and sessions[${prior}] both identify as '${key}', so one transcript would `
+        + 'overwrite the other and both would claim the same records. Give each session its own `key`; the '
+        + 'date alone is not an identity when a day holds more than one session.');
+    } else sessionAt.set(key, i);
     if (!ISO_DATE.test(String(s.date ?? ''))) say(`sessions[${i}] has date '${s.date}', which is not YYYY-MM-DD`);
   }
 

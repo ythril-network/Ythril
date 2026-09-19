@@ -88,6 +88,20 @@ both are real:
 - **it produced something the user asked for** — a shift rotation for seven named staff, a draft chapter.
   That the assistant produced it is simply true, whatever the thing is worth.
 
+**But world knowledge is only worth recording when the conversation TURNS on it**, and this is where an
+assistant conversation will mislead you. An assistant answers at length: lists of suggestions, options,
+examples, background. Most of it is reference material that could have come from anywhere, that nobody
+returns to, and that no later question is about — and writing a claim for each one buries the handful of
+facts about the person under a hundred records of generic advice.
+
+The test is whether the exchange DID something. The user picked one of the options, said they would use it,
+came back to it later, or the reply is the only place a fact about their world appears. *"The assistant
+suggested ten ways to organise a playlist"* is not a fact about anybody; *"the assistant recommended two
+particular hostels, and she booked one"* is one claim, and it belongs to her.
+
+When in doubt, leave it out. An assistant's turn that established nothing still appears in the
+`sourceTurns` of the claim it helped resolve, so nothing is lost by not making it a record of its own.
+
 Both are written as claims with `speaker: "assistant"` and `attributed: true`. **`attributed` means the
 graph records that this was SAID, not that it is SO** — the same distinction a citation makes between
 *"Vasari wrote that Leonardo painted the Mona Lisa"* and *"Leonardo painted the Mona Lisa"*.
@@ -218,10 +232,21 @@ being a transcript: facts cover the turns they came from, including the ones tha
 extraction that dropped the quiet turns covered 34.6% of a conversation and scored worse than storing raw
 turns, because a question about a dropped turn cannot be answered by anything.
 
+**When a day holds more than one session, give each one a `key`.** Some conversations are one session a
+day over months; others are several a day over a fortnight, and then the date is not a name — it is shared.
+Give each session a key, and put it on every claim from that session as `session`. Without it two sessions
+are one, and everything either of them said is filed under whichever the writer reached last.
+
 **Resolve every date, everywhere.** *"Yesterday"*, *"last Friday"*, *"three years ago"* — against the date of
 the session the remark was made in. The resolved date goes in the sentence itself, not only in a chrono
 entry, because the sentence is what gets searched. A question asking *when* has nothing to match against the
 word "yesterday".
+
+**Keep an approximation approximate.** *"For about three weeks now"* and *"a few months back"* are not
+precise and must not become precise: write *"for about three weeks as of 24 May 2023"*, which is searchable
+and true, rather than *"since 3 May 2023"*, which is searchable and invented. The anchor date is the exact
+part; the offset is as exact as the speaker made it. And give a fuzzy span no chrono entry — a chrono entry
+is for something that happened ON a date, so one built from a guess puts a made-up day on the timeline.
 
 **Link every claim to what it is about.** This is what makes it reachable from another session, and it is how
 two facts stated months apart become one answer: both hang off the subject they share.
