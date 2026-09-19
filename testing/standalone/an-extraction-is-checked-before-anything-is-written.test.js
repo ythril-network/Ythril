@@ -362,3 +362,59 @@ describe('the floors', () => {
     assert.deepEqual(validateExtraction(null, SCHEMA), ['the extraction is not an object']);
   });
 });
+
+/**
+ * A pasted document is material, not assertion — and mining it has a shape a file can be checked for.
+ *
+ * ## Measured on the pinned corpora
+ *
+ * | | longest turn | user turns over 5,000 chars |
+ * |---|---|---|
+ * | LoCoMo | 454 chars | none — the class does not exist there |
+ * | LongMemEval `_s` | 76,560 chars | **351, across 253 of 500 histories** |
+ *
+ * Assistant turns over 5,000 chars: three, in the whole corpus. So a long turn is almost always somebody
+ * pasting something in, and half the corpus has one.
+ *
+ * ## Why a validator rule and not only a prompt sentence
+ *
+ * The prompt says to record that the document was brought and what was wanted from it. This is the half
+ * that does not depend on the model having read that: mining an article produces dozens of claims sharing
+ * one `sourceTurns` entry, about a subject nobody in the conversation is, and the graph stops being about
+ * the people in it. Nothing else downstream can see that — every claim is well formed.
+ *
+ * A SHARE rather than a count, matching the rule it inverts. A threshold in records would be wrong for a
+ * short conversation and meaningless for a long one.
+ */
+describe('a pasted document is not mined for claims', () => {
+  const spread = (n, turn) => Array.from({ length: n }, (_, i) => ({
+    text: `Something the article says, number ${i}.`, speaker: 'Ada', statedOn: '2023-05-08',
+    entities: ['ada'], sourceTurns: [turn ?? `D1:${i + 1}`],
+  }));
+
+  test('dozens of claims from one turn are refused', () => {
+    const p = problemsFor(e => { e.claims = spread(40, 'D1:1'); });
+    assert.match(p.join(' '), /claims name turn 'D1:1' as a source/);
+  });
+
+  test('the same claims spread across their own turns are fine', () => {
+    // The control, and it is the whole test. Without it, "40 claims were refused" is equally good evidence
+    // that the rule refuses any large extraction — which would make every real conversation fail.
+    const p = problemsFor(e => { e.claims = spread(40); });
+    assert.deepEqual(p.filter(x => /name turn/.test(x)), []);
+  });
+
+  test('a handful of claims naming one turn is legitimate', () => {
+    // A turn states a fact and also takes part in the arc claims over it. That is normal and must pass.
+    const claims = spread(40);
+    for (let i = 0; i < 5; i++) claims[i].sourceTurns = ['D1:1'];
+    assert.deepEqual(problemsFor(e => { e.claims = claims; }).filter(x => /name turn/.test(x)), []);
+  });
+
+  test('a short conversation is out of scope', () => {
+    // With six claims, four from one turn is a conversation about one thing rather than a document being
+    // taken apart. A rule that fired there would refuse the commonest small file there is.
+    const p = problemsFor(e => { e.claims = spread(6, 'D1:1'); });
+    assert.deepEqual(p.filter(x => /name turn/.test(x)), []);
+  });
+});
