@@ -740,6 +740,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Two more gates were asking their question of two thirds of the API.** The rights-row gate and the
+  route-parameter reader each kept their own copy of the route scan — the same pattern, with the same two
+  blind spots: it cannot match a route declared straight on the express app, and it walks `server/src/api`,
+  which does not contain `app.ts`. Between them that hid fifteen routes, including every one of the five
+  heaviest admin operations and all three MCP transport routes.
+
+  Nothing was wrong behind them; what was wrong is that neither gate had looked. Both read the shared route
+  list now, which gained the ability to hand back the source that registers each route — that window was
+  the reason the second copy existed.
+
+  **The manual surface-matrix audit keeps its own scan on purpose.** It exists to cross-check the static
+  extraction against what express actually serves at runtime, and pointing it at the module it is meant to
+  check would make the comparison assert that a thing equals itself.
 - **A client method called a route the server has never served.** `updateSyncSchedule` PATCHed
   `/api/networks/{id}/members/{memberId}`; that collection takes a `POST`, a `PUT` on the signing key and a
   `DELETE`, and nothing else. Nothing in the client called the method, so nobody had seen the 404 yet — it

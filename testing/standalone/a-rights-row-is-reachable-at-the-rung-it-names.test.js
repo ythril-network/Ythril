@@ -37,10 +37,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { stripComments } from './_strip-comments.mjs';
-import { trackedSources } from './_sources.mjs';
-import { routerMounts } from './_router-mounts.mjs';
+import { mountedRoutes } from './_routes.mjs';
 
 const { ROUTE_RIGHTS } = await import('../../server/dist/auth/space-rights.js');
 
@@ -60,31 +57,24 @@ const ADMIN_FIRST = [
  */
 const KNOWN_MISMATCH = {};
 
-const src = f => stripComments(readFileSync(f, 'utf8'));
-
-/** Every `router.verb('path', …guards)` registration in the API tree, with the guards named on it. */
-function registrations(mounts) {
-  const out = [];
-  for (const f of trackedSources(['server/src/api'], { floor: 10 })) {
-    const s = src(f);
-    for (const m of s.matchAll(/(\w*[Rr]outer)\.(get|post|patch|put|delete)\(\s*'([^']*)'/g)) {
-      const prefix = mounts.prefixOf(m[1]);
-      if (prefix === undefined) continue;   // a router nobody mounts serves nothing
-      // From the path to the handler: the guards are the arguments between them.
-      const from = m.index + m[0].length;
-      const to = s.indexOf('=>', from);
-      out.push({
-        method: m[2].toUpperCase(),
-        route: (prefix + m[3]).replace(/\/$/, '') || '/',
-        guards: to > from ? s.slice(from, to) : '',
-      });
-    }
-  }
-  return out;
+/**
+ * Every route registration, with the guards named on it — FROM THE SHARED MODULE.
+ *
+ * This kept its own `(\w*[Rr]outer)\.(get|post|…)` scan over `server/src/api`, which is the fourth copy of
+ * one derivation and the third to be wrong in the same way. Two blind spots, either sufficient: the
+ * pattern cannot match a route declared straight on the express app, and `server/src/api` does not contain
+ * `app.ts`. So the five heaviest admin routes — wiping a space, importing one, exporting one, reloading
+ * the config, rotating the signing key — were not reported as unreachable by a rights row; they were
+ * absent from the question.
+ *
+ * `mountedRoutes()` carries each route's middleware chain for exactly this, so the guards come with it.
+ */
+function registrations() {
+  return mountedRoutes().map(r => ({ method: r.method, route: r.path, guards: r.chain }));
 }
 
 describe('a rights row is reachable at the rung it names', () => {
-  const regs = registrations(routerMounts());
+  const regs = registrations();
 
   it('found the registrations', () => {
     // A floor: an empty scan passes the loop below while checking nothing.

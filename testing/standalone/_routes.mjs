@@ -87,7 +87,7 @@ export function mountedRoutes({ roots = ['server/src'], floor = 150 } = {}) {
        */
       const args = argumentsOf(src, src.indexOf('(', m.index), `${routePath}: the route registration`);
       const chain = args.slice(1, -1).join(',');
-      out.push({ method: method.toUpperCase(), path, routePath, router, chain, file });
+      out.push({ method: method.toUpperCase(), path, routePath, router, chain, file, at: m.index });
     }
   }
 
@@ -98,4 +98,44 @@ export function mountedRoutes({ roots = ['server/src'], floor = 150 } = {}) {
     );
   }
   return out;
+}
+
+/**
+ * The same routes, each with the SOURCE that registers it — from this registration to the next one in the
+ * file.
+ *
+ * ## Why the window lives here
+ *
+ * A caller that wants the handler's text (which body keys it reads, which guards it carries) needs the
+ * registration's position, and the only way to get one used to be a second scan. That second scan was the
+ * fourth copy of this module's pattern, and like the other three it could not see a route declared straight
+ * on the express app. Returning the window closes the reason the copy existed.
+ *
+ * **The offsets are into `stripComments(source)`, which is what this module reads** — so the text handed
+ * back is comment-free, and a caller must not compare it against positions taken from the raw file. That is
+ * stated rather than implied because the two differ by however many comment lines precede the route, which
+ * in this codebase is a lot.
+ *
+ * The last route in a file runs to the end of it, which over-reads by whatever follows the final handler.
+ * That is the safe direction: a window that is too long reports a key the route does not accept, which
+ * somebody investigates; one that is too short silently misses one.
+ */
+export function mountedRoutesWithSource(opts = {}) {
+  const routes = mountedRoutes(opts);
+  const byFile = new Map();
+  for (const r of routes) {
+    if (!byFile.has(r.file)) byFile.set(r.file, stripComments(readFileSync(r.file, 'utf8')));
+  }
+  const starts = new Map();
+  for (const r of routes) {
+    if (!starts.has(r.file)) starts.set(r.file, []);
+    starts.get(r.file).push(r.at);
+  }
+  for (const list of starts.values()) list.sort((a, b) => a - b);
+
+  return routes.map(r => {
+    const src = byFile.get(r.file);
+    const after = starts.get(r.file).find(at => at > r.at);
+    return { ...r, source: src.slice(r.at, after ?? src.length) };
+  });
 }
