@@ -37,7 +37,7 @@ const dist = (p) => pathToFileURL(path.join(process.cwd(), 'server', 'dist', p))
 
 const { loadConfig } = await import(dist('config/loader.js'));
 const { connectMongo, closeMongo } = await import(dist('db/mongo.js'));
-const { convertSpaceLinks, convertAllLinks, previewSpaceLinks } = await import(dist('brain/links-conversion.js'));
+const { convertSpaceLinks, convertAllLinks, previewSpaceLinks, stampFileMetaSeqs } = await import(dist('brain/links-conversion.js'));
 
 loadConfig();
 await connectMongo();
@@ -79,6 +79,21 @@ try {
   } else {
     reports = await convertAllLinks();
   }
+
+  /*
+   * THE SEQ STAMP RIDES HERE, and it used to ride inside `convertSpaceLinks`.
+   *
+   * Giving a pre-4.0 file record the `seq` it never had is a one-time migration over a collection that
+   * REPLICATES, and the rule for those is that they migrate lazily — every instance would otherwise stamp
+   * the same records with its own counter at whatever moment it restarted, and each would win the
+   * last-writer-wins comparison against the others in turn. That was fine while `convertSpaceLinks` was
+   * only ever reached from this script; `convertLinksOnBoot` then started calling it at every startup and
+   * quietly turned it into exactly the boot migration its own docblock forbids.
+   *
+   * So it lives on the operator path, which is this file, and it covers BOTH branches from one place —
+   * a second call inside the `if` above is the shape that lets one branch drift away from the other.
+   */
+  for (const r of reports) r.fileSeqsStamped = await stampFileMetaSeqs(r.spaceId);
 } finally {
   await closeMongo();
 }
@@ -86,7 +101,8 @@ try {
 let failed = 0;
 for (const r of reports) {
   const scanned = Object.entries(r.scanned).map(([c, n]) => `${c}=${n}`).join(' ');
-  console.log(`${r.spaceId}: ${scanned} | links added ${r.added} | failed ${r.failed}`);
+  console.log(`${r.spaceId}: ${scanned} | links added ${r.added} | failed ${r.failed}`
+    + ` | file seqs stamped ${r.fileSeqsStamped ?? 0}`);
   failed += r.failed;
 }
 if (only) console.log('single space: completeLinkage was NOT set — run without an argument to mark the instance.');

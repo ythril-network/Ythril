@@ -41,7 +41,12 @@ import { spaceCollection } from '../db/space-collection.js';
 
 /** What one space's conversion did, per collection and in total. */
 export interface ConversionReport {
-  /** Parent file records stamped with a `seq` they did not have — see `stampFileMetaSeqs`. */
+  /**
+   * Parent file records stamped with a `seq` they did not have — see `stampFileMetaSeqs`.
+   *
+   * OPTIONAL because the conversion itself no longer stamps: only the operator-run script does, and only
+   * it fills this in. A boot conversion leaves it absent, which is the honest report of what it did.
+   */
   fileSeqsStamped?: number;
   spaceId: string;
   /** Documents walked, by collection suffix. */
@@ -76,6 +81,23 @@ const PAGE = 200;
  *
  * So it rides in the script an operator already runs once after upgrading, and it is idempotent the same
  * way: a record that has a seq is left alone.
+ *
+ * ## And it stopped being true the moment conversion learned to run at boot
+ *
+ * This was called from `convertSpaceLinks`, which was only ever the script's function — until
+ * `convertLinksOnBoot` started calling the same function at every startup on 2026-09-17. The paragraph
+ * above then described a rule the code no longer kept, and nothing said so: the gate that refuses boot
+ * migrations over synced data reads a function's own body and cannot follow three calls.
+ *
+ * **The version floor does not rescue it, which is why this is not simply sanctioned.** A 5.0 instance
+ * refuses every 4.x peer, so no older peer can revert a link record — that is the argument that makes the
+ * link conversion safe at boot. It says nothing here: every 5.0 peer in the network stamps the same records
+ * with ITS OWN `seq` counter at whatever moment it happened to restart, so the same file record arrives at
+ * each peer with a different number and the whole document is replaced each time one wins.
+ *
+ * So the call moved OUT of `convertSpaceLinks` and into `scripts/convert-links.mjs`, where the operator
+ * path already was. A caller now has to reach for this by name, which is the only place the boot walk in
+ * `no-boot-migration-on-synced-data` can see it.
  *
  * **Chunks are skipped**, because a chunk never replicates — it is derived from the blob and the receiver
  * makes its own.
@@ -160,7 +182,6 @@ export async function previewSpaceLinks(spaceId: string): Promise<ConversionPrev
 
 export async function convertSpaceLinks(spaceId: string): Promise<ConversionReport> {
   const report: ConversionReport = { spaceId, scanned: {}, added: 0, failed: 0 };
-  report.fileSeqsStamped = await stampFileMetaSeqs(spaceId);
 
   for (const [suffix, fromKind] of Object.entries(LINK_BEARING_COLLECTIONS)) {
     if (!fromKind) continue;

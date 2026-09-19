@@ -287,11 +287,18 @@ it. The two views disagreed, and which one you believed depended on where you lo
 the checksum, the extracted text and the search vector. Those are never overwritten by another instance,
 because each one computed them from its own copy of the bytes.
 
-> **Files uploaded before 4.0 need one conversion before their descriptions travel — and from 5.0 the
-> instance runs it for you.** It is the same one-off that converts the connection lists. Every restart
-> checks each space and converts anything still holding the old lists, so an ordinary upgrade is enough
-> and there is nothing to run. A space that has already been converted is skipped, and a space that could
-> not be converted is named in an `ERROR` line in the server log rather than passed over quietly.
+> **Connection lists convert themselves from 5.0, and there is nothing to run.** Every restart checks each
+> space and converts anything still holding the old lists. A space that has already been converted is
+> skipped, and a space that could not be converted is named in an `ERROR` line in the server log rather
+> than passed over quietly.
+>
+> **Files uploaded before 4.0 are the one part startup does NOT do for you.** Their descriptions reach a
+> peer only once each record has been given a position in the space's history, and giving it one is a
+> change to a record that other instances also hold — so if every instance did it at its own restart,
+> each would pick a different position and they would take turns overwriting one another. It is the
+> administrator's one-off instead: `npm run links:convert`, from source, which prints how many records it
+> stamped per space. Nothing is lost by leaving it — those files work normally, and only their
+> descriptions stay local until somebody edits them.
 >
 > **There is still a command, and it is for looking rather than doing.** An administrator running from
 > source can use `npm run links:convert`; on a container deployment that command is not present, which is

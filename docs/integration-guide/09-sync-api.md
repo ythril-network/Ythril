@@ -279,8 +279,14 @@ under an id ending in `#0`, carrying another instance's passage text.
 tombstone rather than a brain one, so the metadata page carries no tombstones of its own.
 
 > **Metadata written before 4.0 has no `seq`, and the page cursor is `seq > n`.** So it does not reach a
-> peer until the record is next written. `npm run links:convert` stamps the ones already stored, and it is
-> the same one-off an operator runs for the link records — idempotent, and safe to run twice.
+> peer until the record is next written. `npm run links:convert` stamps the ones already stored —
+> idempotent, and safe to run twice.
+>
+> **The 5.0 boot conversion does NOT stamp them, and that is deliberate.** Startup converts link arrays
+> to link records on every instance, but a `seq` is drawn from the instance's own counter: were every
+> peer to stamp the same record at its own restart, each would write a different number and each would
+> win the last-writer-wins comparison in turn. So the stamp stays on the operator-run script, and a
+> container deployment that cannot run it keeps pre-4.0 metadata local until the record is next written.
 
 ### Common Query Parameters
 
