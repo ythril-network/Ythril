@@ -1367,6 +1367,10 @@
   "brain.query.filterPlaceholder": "{\"tags\": {\"$in\": [\"mein-tag\"]}} oder {\"name\": {\"$regex\": \"auth\", \"$options\": \"i\"}}",
   "brain.query.projectionPlaceholder": "{\"fact\": 1, \"tags\": 1}",
   "brain.query.resultsFrom": "Ergebnis(se) aus {{ collection }}",
+  "brain.superseded.badge": "überholt",
+
+  "brain.superseded.hint": "Dieser Eintrag ist nicht mehr aktuell. Er bleibt erhalten und bleibt durchsuchbar — etwas Späteres hat ihn ersetzt oder zurückgezogen.",
+
   "brain.query.passages": "{{count}} Passagen",
   "brain.query.groupedPassages": "aus {{count}} passenden Passagen",
   "graph.stats.nodesEdges": "{{ nodes }} Knoten · {{ edges }} Kanten",

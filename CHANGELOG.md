@@ -15,6 +15,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A superseded record is badged wherever a record is listed** (`Q-36`). The mark reached the API, an
+  export, a sync and every assistant answer, and no view in the app. An operator resolving a contradiction
+  saw the pair leave the review queue and then found both claims sitting in the Facts tab looking identical
+  — which reads as the resolve having done nothing, the impression `Q-35` existed to end. It is the same
+  defect one surface down: `Q-35` was *the judgement reaches the record and not retrieval*, this was *it
+  reaches retrieval and not the operator*.
+
+  One shared component across the query results and the Facts, Entities, Edges and Chrono tabs, because
+  five copies of `@if (r.superseded)` is five chances to write the condition differently and the one that
+  reads `!== false` badges every record in the list while looking like the others. The condition is inside
+  it and is strict: absent and `false` both mean current, and a badge on a current record retires a real
+  fact in the reader's mind with nothing to contradict it.
+
+  Verified by reading the screenshots on a running instance rather than by counting elements — a count of
+  zero cannot tell a badge that does not render from a query that had not returned, and the first probe
+  hit exactly that.
+
 - **LongMemEval has a loader, and it exists because the answer key is inside the histories** (`B-5`).
   LoCoMo keeps its questions in a block beside the conversation, so returning the conversation returns
   nothing about them. A LongMemEval instance is one object holding the history AND `question`, `answer`,

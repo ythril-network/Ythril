@@ -505,11 +505,13 @@ replacement would make it unsayable.
 drawn — for facts, entities, chrono entries and edges alike. Before version 5.0 the decision was stored only
 against the review item, so resolving a contradiction changed nothing about what the next search returned.
 
-> **What the app shows today, exactly.** Resolving a contradiction is how you set the mark from the app,
-> and it is the only way: there is no checkbox for it on a record's form, as with the per-record suppression
-> above. Records already marked are not badged in the lists either — the mark is visible to the API, to an
-> export, and to an assistant, and a record's own tab shows it among its fields. A badge in the Query and
-> Facts lists is not built yet.
+**A marked record is labelled everywhere it is listed** — an amber **superseded** pill beside it in search
+results and in the Facts, Entities, Edges and Chrono tabs. Hover it for the one-line reminder that the
+record is kept and still searchable.
+
+> **Setting the mark is a different matter.** Resolving a contradiction is how you set it from the app, and
+> it is the only way: there is no checkbox for it on a record's form, as with the per-record suppression
+> above. Whoever writes to the API can set it directly.
 
 **In a network, each instance searches with its own model, and from 3.7 that is explicit.** A record that
 arrives from another instance is prepared for search **here**, using this instance's own model — the sending

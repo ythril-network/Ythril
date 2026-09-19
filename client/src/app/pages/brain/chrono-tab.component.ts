@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { SupersededBadgeComponent } from '../../shared/superseded-badge.component';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TranslocoPipe } from '@jsverse/transloco';
@@ -38,7 +39,7 @@ import { TimestampComponent } from '../../shared/timestamp.component';
   selector: 'app-chrono-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, EntityRefFieldComponent, FactRefFieldComponent, PropertiesEditorComponent, PhIconComponent, ErrorStateComponent, RecordSearchBarComponent, SortableHeaderComponent, HscrollTopDirective, TimestampComponent],
+  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, EntityRefFieldComponent, FactRefFieldComponent, PropertiesEditorComponent, PhIconComponent, ErrorStateComponent, RecordSearchBarComponent, SortableHeaderComponent, HscrollTopDirective, TimestampComponent, SupersededBadgeComponent],
   styles: [BRAIN_CHIP_STYLES, BRAIN_RECORD_TABLE_STYLES],
   template: `
 
@@ -210,7 +211,7 @@ import { TimestampComponent } from '../../shared/timestamp.component';
                     </tr>
                   } @else {
                     <tr>
-                      <td>{{ entry.title }}</td>
+                      <td>{{ entry.title }} <app-superseded-badge [superseded]="entry.superseded" /></td>
                       <td class="desc-cell" style="max-width:160px;" [title]="entry.description ?? ''">
                         <div class="desc-clamp">{{ entry.description || '—' }}</div>
                       </td>

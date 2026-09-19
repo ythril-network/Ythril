@@ -1363,6 +1363,10 @@
   "brain.query.filterPlaceholder": "{\"tags\": {\"$in\": [\"moj-tag\"]}} lub {\"name\": {\"$regex\": \"auth\", \"$options\": \"i\"}}",
   "brain.query.projectionPlaceholder": "{\"fact\": 1, \"tags\": 1}",
   "brain.query.resultsFrom": "wynik(i) z {{ collection }}",
+  "brain.superseded.badge": "nieaktualne",
+
+  "brain.superseded.hint": "Ten rekord nie jest już aktualny. Pozostaje zapisany i nadal jest wyszukiwalny — coś późniejszego go zastąpiło lub wycofało.",
+
   "brain.query.passages": "{{count}} fragmentów",
   "brain.query.groupedPassages": "z {{count}} pasujących fragmentów",
   "graph.stats.nodesEdges": "{{ nodes }} węzłów · {{ edges }} krawędzi",
