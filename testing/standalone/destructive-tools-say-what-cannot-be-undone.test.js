@@ -49,7 +49,7 @@ describe('both say they cannot be undone', () => {
   }
 });
 
-describe('merge_entities: the 409 is the question, not a failure', () => {
+describe('graph_merge: the 409 is the question, not a failure', () => {
   it('says the first call is expected to 409 with a plan', () => {
     // A generic retry-on-4xx client hammers it; a generic fail-on-4xx client reports a working merge as
     // broken. Both are avoidable by saying which status the happy path returns.

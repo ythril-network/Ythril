@@ -17,7 +17,7 @@ import { connectionSchemas, applyConnections, desiredLinksFrom, edgeInputsFrom }
 
 export const save_entityTool: ToolHandler = {
   name: 'save_entity',
-  description: 'Create or update a named entity in the knowledge graph. Identity is by `id` — supply one and the matching record is updated, omit it and a NEW record is always inserted regardless of name. Two entities may share a name; nothing deduplicates for you. Use `find_entities_by_name` first if you meant to update.\n\n'
+  description: 'Create or update a named entity in the knowledge graph. Identity is by `id` — supply one and the matching record is updated, omit it and a NEW record is always inserted regardless of name. Two entities may share a name; nothing deduplicates for you. Search by name with `filter` on the `entities` collection first if you meant to update.\n\n'
     + 'An upsert onto an existing record MERGES: properties and tags are merged over what is stored, so you can set one field without restating the rest, and the record is validated in its MERGED form rather than as the fragment you sent. That is why a partial upsert of a conformant record is accepted even when the fragment alone would fail a required-property rule.\n\n'
     + 'IF THE SPACE VALIDATES, a refusal names WHOSE FAULT it is. `introduced` are violations your write caused — fix those. `preExisting` were already stored and your write neither caused nor fixed them; in `strict` mode they are REPORTED and do NOT refuse the write, so an unrelated edit is never blocked by a field somebody else broke. Branch on `introduced` and treat `preExisting` as a repair opportunity rather than an error.',
   mutating: true,
@@ -34,7 +34,8 @@ export const save_entityTool: ToolHandler = {
               type: 'string', minLength: 1,
               description: 'Entity name. NOTHING DEDUPLICATES BY IT — omit `id` and a NEW record is always '
                 + 'inserted, even when an entity of the same name already exists, so two entities may share '
-                + 'a name. Call `find_entities_by_name` first if you meant to update one. The name is '
+                + 'a name. Search by name with `filter` on the `entities` collection first if you meant to update '
+                + 'one. The name is '
                 + 'embedded, so it also affects how `recall` ranks this entity.',
             },
             type: { type: 'string', minLength: 1, description: 'Entity type (person, place, concept, …).' },
@@ -168,7 +169,7 @@ export const update_entityTool: ToolHandler = {
     + 'longer fitted a tightened schema. Violations your change introduces are refused as before, in a '
     + '`strict` space.\n\n'
     + 'PARAMETERS:\n'
-    + '- `id` — the entity\'s `_id`, as `query`, `recall` and `find_entities_by_name` report it. Required.\n'
+    + '- `id` — the entity\'s `_id`, as `filter` and `recall` report it. Required.\n'
     + '- `name` / `type` / `description` — replaced when sent. Changing `type` is re-validated against the '
     + 'space\'s type allowlist, so it cannot be moved somewhere `save_entity` would have refused.\n'
     + '- `tags` — MERGED into the existing tags, never replacing them.\n'
@@ -196,7 +197,7 @@ export const update_entityTool: ToolHandler = {
             space: s.requiredSpace,
             id: {
               type: 'string', minLength: 1,
-              description: 'The entity\'s `_id`, as `find_entities_by_name`, `recall` and `query` report '
+              description: 'The entity\'s `_id`, as `filter` and `recall` report '
                 + 'it. Required, and an id that names nothing is an ERROR rather than a silent no-op.',
             },
             name: {

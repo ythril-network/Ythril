@@ -70,7 +70,11 @@ describe('each says what its write does to what is already there', () => {
   it('upsert_entity: omitting id always INSERTS, and names deduplicate nothing', () => {
     assert.match(UPSERT_ENTITY, /Two entities may share a name/,
       'the obvious wrong assumption is that a name is an identity');
-    assert.match(UPSERT_ENTITY, /find_entities_by_name/, 'point at the tool that answers it');
+    // The tool it used to point at was removed at 5.0, and this assertion kept passing because the
+    // description still named it. Pinned to the LIVE answer now — searching `entities` by name with
+    // `filter` — so the case fails if the pointer rots again rather than preserving the rot.
+    assert.match(UPSERT_ENTITY, /`filter`/, 'point at the tool that answers it');
+    assert.match(UPSERT_ENTITY, /`entities` collection/, 'and at the collection to search');
   });
 
   it('remember: an insert WITHOUT an id, convergence with one, and duplicates compete', () => {

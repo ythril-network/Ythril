@@ -414,7 +414,7 @@ describe('Schema validation — GET /api/spaces/:id/meta', () => {
       'two answers to one question must not disagree');
   });
 
-  it('MCP get_space_meta reports the same field', async (t) => {
+  it('MCP space_meta reports the same field', async (t) => {
     // The whole point: the door that was told to poll can now poll.
     let session;
     try {
@@ -427,7 +427,7 @@ describe('Schema validation — GET /api/spaces/:id/meta', () => {
       const text = res?.content?.[0]?.text ?? '';
       const meta = JSON.parse(text);
       assert.equal(typeof meta.needsReindex, 'boolean',
-        `get_space_meta must carry needsReindex: ${text.slice(0, 200)}`);
+        `space_meta must carry needsReindex: ${text.slice(0, 200)}`);
       const status = await get(INSTANCES.a, token(), `/api/brain/spaces/${TEST_SPACE}/reindex-status`);
       assert.equal(meta.needsReindex, status.body.needsReindex, 'both doors, one answer');
     } finally {

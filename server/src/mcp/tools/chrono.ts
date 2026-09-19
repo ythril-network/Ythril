@@ -22,7 +22,7 @@ import { SchemaViolationError, type UpdateValidation } from '../../brain/write-v
 const WHAT_A_PASSED_DATE_MEANS =
   'WHAT A PASSED DUE MOMENT MEANS IS THE TYPE\'S TO DECIDE, and by default it means late. With no setting, '
   + 'an entry stored `upcoming` or `active` whose due moment has passed reads back as `overdue` from '
-  + '`list_chrono`, `recall` and a single-entry get — so you never need to set `overdue` yourself. A space '
+  + '`filter`, `recall` and a single-entry get — so you never need to set `overdue` yourself. A space '
   + 'or a chrono type that sets `whenDuePasses: "nothing"` turns that off for its records, and the STORED '
   + 'status is then what you get back: for entries recording something that HAPPENED — a deploy, a backup '
   + 'run, an alert episode — a past date is the normal condition and does not mean late. `query` and sync '
@@ -41,7 +41,7 @@ import { connectionSchemas, applyConnections, desiredLinksFrom, edgeInputsFrom }
 export const save_chronoTool: ToolHandler = {
   name: 'save_chrono',
   description: 'Create a chronological entry — something that happened, or is meant to. Default types are event, deadline, plan, prediction and milestone; a space with its own `typeSchemas.chrono` accepts ITS names INSTEAD, not in addition, so a custom schema that omits `event` refuses `event`.\n\n'
-    + 'THIS IS THE RECORD FOR ANYTHING DATED, and the reason the distinction matters: a fact saying "the migration is planned for March" is a fact whose truth expires, while a chrono entry carries `startsAt`/`endsAt` and a `status`, so it can be listed by date, found by `list_chrono` in a window, and closed rather than contradicted. If it has a date, it belongs here.\n\n'
+    + 'THIS IS THE RECORD FOR ANYTHING DATED, and the reason the distinction matters: a fact saying "the migration is planned for March" is a fact whose truth expires, while a chrono entry carries `startsAt`/`endsAt` and a `status`, so it can be listed by date, found by `filter` in a window, and closed rather than contradicted. If it has a date, it belongs here.\n\n'
     + 'Link it with `entityIds` — that is what lets `traverse` reach it from the entity it is about (with `includeChrono`, on by default). Those references are NOT edges, so a chrono entry left unlinked is reachable only by search or by date, never from the thing it concerns.\n\n'
     + 'Always an INSERT; use `update_chrono` to change one, including to move its `status`. IF THE SPACE VALIDATES: `introduced` are violations this write caused and are what refuses it; `preExisting` were already stored, are reported, and do NOT block. Branch on `introduced`.',
   mutating: true,
@@ -65,7 +65,7 @@ export const save_chronoTool: ToolHandler = {
             startsAt: {
               type: 'string', minLength: 1,
               description: 'ISO 8601 date/time the entry is ABOUT — not when you recorded it, which is '
-                + '`createdAt` and is what `list_chrono`\'s `after`/`before` filter on. Required. With no '
+                + '`createdAt` and is what `filter`\'s `after`/`before` narrow on. Required. With no '
                 + '`endsAt` this is also the DUE MOMENT, so on a type that derives, a past `startsAt` on an '
                 + '`upcoming` entry makes it read back as `overdue` straight away.',
             },
@@ -89,7 +89,7 @@ export const save_chronoTool: ToolHandler = {
             tags: {
               type: 'array', items: { type: 'string' },
               description: 'Categorisation tags. EMBEDDED along with the title, so a tag affects meaning '
-                + 'ranking as well as being an exact filter for `list_chrono` and `query`.',
+                + 'ranking as well as being an exact filter for `filter`.',
             },
             entityIds: {
               type: 'array', items: { type: 'string' },
@@ -279,7 +279,7 @@ export const update_chronoTool: ToolHandler = {
     + 'The worker reads the record as STORED, so it cannot embed a stale version — deciding here would mean '
     + 'deciding from this function\'s own read, which is what made the older inline embedding wrong.\n\n'
     + 'PARAMETERS:\n'
-    + '- `id` — the entry\'s `_id`, as `list_chrono` and `query` report it. Required.\n'
+    + '- `id` — the entry\'s `_id`, as `filter` reports it. Required.\n'
     + '- `title` — replaced when sent.\n'
     + '- `type` — `event`, `deadline`, `plan`, `prediction`, `milestone`, or any custom type the space schema '
     + 'defines. Re-validated against the allowlist.\n'
@@ -298,7 +298,7 @@ export const update_chronoTool: ToolHandler = {
     + '- `recurrence` — the repeat rule, replaced wholesale when sent. It describes the entry; it does not '
     + 'generate further entries.\n'
     + '- `suppressEmbeddings` — removes the vector, so `recall` can no longer RANK this entry by meaning. '
-    + '`list_chrono`, `query`, `get` and recall\'s `traverse` expansion all still reach it — excluding an entry '
+    + '`filter`, `get` and recall\'s `traverse` expansion all still reach it — excluding an entry '
     + 'never hides it from the graph or from a time-ordered listing.\n'
     + '- `ttlDays` — this entry\'s own expiry, the MOST specific of three tiers: it beats the type\'s retention '
     + 'window, which beats the space-wide one.\n'
@@ -314,7 +314,7 @@ export const update_chronoTool: ToolHandler = {
             space: s.requiredSpace,
             id: {
               type: 'string', minLength: 1,
-              description: 'The entry\'s `_id`, as `list_chrono`, `recall` and `query` report it. '
+              description: 'The entry\'s `_id`, as `filter` and `recall` report it. '
                 + 'Required, and an id that names nothing is an ERROR rather than a silent no-op.',
             },
             title: {
@@ -333,7 +333,7 @@ export const update_chronoTool: ToolHandler = {
                 + 'entries somebody STORED as overdue. `overdue` is a legal value to write, so the two are '
                 + 'mixed in any result. A caller who read only "derived from the clock" would not expect the '
                 + 'second kind, and would treat a marked entry as a clock artefact it could fix by moving the '
-                + 'date. This note lived on `list_chrono` until 5.0 folded that tool into `filter`, which is '
+                + 'date. The note belongs with `filter`, which is '
                 + 'generic and has no business describing chrono semantics.',
             },
             endsAt: {
@@ -514,7 +514,7 @@ export const delete_chronoTool: ToolHandler = {
     + 'rubbish. Set `status: "completed"` or `"cancelled"` with `update_chrono` and the entry stops being '
     + 'derived-overdue while staying as the record that it happened. Deleting is for '
     + 'entries that should never have existed. If you only want it out of meaning-ranking, set '
-    + '`suppressEmbeddings` — it stays listable by `list_chrono` and reachable by traversal.\n\n'
+    + '`suppressEmbeddings` — it stays listable by `filter` and reachable by traversal.\n\n'
     + 'THE ENTITIES AND MEMORIES IT LINKS ARE NOT TOUCHED. `entityIds` and `memoryIds` are references; '
     + 'deleting the entry drops the references and leaves every referenced record in place.\n\n'
     + 'IT IS REFUSED IF SOMETHING STILL POINTS AT IT, in a space with strict linkage on — a file listing '
@@ -528,7 +528,7 @@ export const delete_chronoTool: ToolHandler = {
     + 'not quietly resurrected from a peer that still has it. That is also why re-creating it with the same '
     + 'id does not undo this — the tombstone outranks it.\n\n'
     + 'PARAMETERS:\n'
-    + '- `id` — the entry\'s `_id`, as `list_chrono` and `query` report it. Required. An id that does not '
+    + '- `id` — the entry\'s `_id`, as `filter` reports it. Required. An id that does not '
     + 'exist is an ERROR, not a silent success.\n'
     + '- `targetSpace` — required when `space` is a proxy: the member space holding the entry.\n\n'
     + 'RESPONSE: one line confirming the id that was deleted.',

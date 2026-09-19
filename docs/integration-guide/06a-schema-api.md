@@ -374,7 +374,8 @@ types on `to`, and a rule that has to enumerate seven of nine is a list somebody
 probably had in mind. That is the semantics, not an omission: if you need exactly one pair, declare a label per
 pair — which you can already do. There is deliberately no pairs form.
 
-**Members are entity type names**, in the same vocabulary [`er_model`](04b-graph-api.md) prints, plus the literal
+**Members are entity type names**, in the same vocabulary [`space_meta`'s `actualSchema`](04b-graph-api.md)
+reports, plus the literal
 `UNTYPED` for entities that have no type. Untyped entities are ordinary, so they are admissible by SAYING so
 rather than by being refused in silence — and an untyped entity at an end that names a type IS a violation. A
 member may also be written `entity:<type>`; a bare name means the same thing. Any other knowledge-type prefix

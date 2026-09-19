@@ -740,6 +740,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Twenty-four sentences still sent a caller to a tool 5.0 had removed.** A rename is the one change that
+  passes the compiler while leaving the writing wrong, and these were in the writing a caller reads while
+  constructing a call: `save_entity` told them to look an entity up with a tool that is gone, `space_meta`
+  told them to read the shape with `er_model` — which it had absorbed — ten chrono sentences named
+  `list_chrono` after `filter` replaced it, and the integrator's MCP page described what `merge_entities`
+  carries over the webhook. Each now names the live tool.
+
+  **Nobody would have reported any of them.** A caller sent to a tool that is not there does not file a bug
+  about the sentence; they conclude the capability is missing. So the fix comes with a gate that derives the
+  retired set from the previous major's last release tag rather than a list, and holds every tool
+  description, every guide page and every use-case example to naming only tools that exist — unless the
+  sentence is saying the old one is gone, which is the most useful sentence a migration note has.
+
+  Part of the pre-5.0 audit (`Q-22`); it is the first of that audit's six sweeps, and the two it covers are
+  the guide pages and the schema descriptions.
+
 - **Upgrading stopped quietly rewriting file records that every peer also holds.** Giving a file uploaded
   before 4.0 its position in a space's history is a one-time change to a record that replicates, and it rode
   inside the link conversion — which was an operator-run script until 5.0 taught the instance to run it at
