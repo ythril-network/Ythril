@@ -1,6 +1,6 @@
 {
   "$comment": [
-    "NOT YET PINNED. The URLs below are recorded; the hashes are not, because nothing has been fetched.",
+    "PARTLY PINNED: `longmemeval_s` is fetched and pinned; `_m` and `_oracle` are recorded and NOT PINNED, so the fetcher refuses them exactly as it refuses a mismatch. The URLs carried a `.json` the publisher does not use and every one of them 404d — they were recorded from the dataset page rather than from a fetch, so nothing ever proved they resolved.",
     "A null sha256 is refused by the fetcher exactly like a mismatch — this file cannot be used to pull an",
     "unverified dataset. The first fetch records the hash and the byte count, and every fetch after that",
     "is checked against them.",
@@ -18,10 +18,10 @@
   "pinnedAt": null,
   "datasets": {
     "longmemeval_s": {
-      "url": "https://huggingface.co/datasets/xiaowu0162/longmemeval/resolve/main/longmemeval_s.json",
-      "sha256": null,
-      "bytes": null,
-      "cachePath": "benchmarks/.cache/datasets/longmemeval-s-<sha12>.json",
+      "url": "https://huggingface.co/datasets/xiaowu0162/longmemeval/resolve/main/longmemeval_s",
+      "sha256": "08d8dad4be43ee2049a22ff5674eb86725d0ce5ff434cde2627e5e8e7e117894",
+      "bytes": 278025796,
+      "cachePath": "benchmarks/.cache/datasets/longmemeval-s-08d8dad4be43.json",
       "licence": "TO CONFIRM before publishing any result. The repository README does not state one; read the Hugging Face dataset card and the ICLR 2025 paper, and record the answer here rather than assuming a permissive default.",
       "stated": {
         "$method": "taken from the authors, NOT measured — replace with an `observed` block on first fetch",
@@ -31,7 +31,7 @@
       }
     },
     "longmemeval_m": {
-      "url": "https://huggingface.co/datasets/xiaowu0162/longmemeval/resolve/main/longmemeval_m.json",
+      "url": "https://huggingface.co/datasets/xiaowu0162/longmemeval/resolve/main/longmemeval_m",
       "sha256": null,
       "bytes": null,
       "cachePath": "benchmarks/.cache/datasets/longmemeval-m-<sha12>.json",
@@ -43,7 +43,7 @@
       }
     },
     "longmemeval_oracle": {
-      "url": "https://huggingface.co/datasets/xiaowu0162/longmemeval/resolve/main/longmemeval_oracle.json",
+      "url": "https://huggingface.co/datasets/xiaowu0162/longmemeval/resolve/main/longmemeval_oracle",
       "sha256": null,
       "bytes": null,
       "cachePath": "benchmarks/.cache/datasets/longmemeval-oracle-<sha12>.json",

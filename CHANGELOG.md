@@ -1146,6 +1146,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The benchmark fetcher could not fetch the corpus it was written to pin, and every LongMemEval URL
+  404d.** Two independent failures on the same step.
+
+  The pinned URLs append `.json`; the publisher's files have no extension. They were recorded from the
+  dataset page rather than from a fetch, so nothing ever proved they resolved — which is the one thing
+  pinning by URL is supposed to make impossible. Corrected against the HuggingFace file listing.
+
+  And `fetchPinned` read `await res.arrayBuffer()`, holding the body twice. `longmemeval_s` is 278 MB
+  against LoCoMo's 2.8 MB, so the process died with `JavaScript heap out of memory` before it could
+  print a hash. It now hashes the response as it streams, writes to a `.partial`, and renames into the
+  cache only after the digest verifies — so an unverified corpus never appears where a reader expects a
+  pinned one.
+
+  The refusal is expressed once, against a digest: `assertPinnedDigest` holds the rule and the buffer
+  form delegates to it, rather than a streaming path growing its own copy of the comparison.
+
+  `longmemeval_s` is now pinned at `08d8dad4be43…`, 278,025,796 bytes. `_m` and `_oracle` remain
+  recorded and unpinned, which the fetcher refuses exactly as it refuses a mismatch.
+
 - **The offline standalone tests run in parallel, and the split is one module instead of two copies.**
   Measured on 591 offline files: **191.0s serialised, 46.6s at default concurrency**, both green.
   `npm run test:standalone` goes 257s → 160s, and preflight's own offline pass — which was serialised
