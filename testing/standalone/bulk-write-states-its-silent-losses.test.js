@@ -108,7 +108,9 @@ describe('the reference-checking asymmetry is stated', () => {
      * left is the honest half: the caller has to know a dangling link can land here, and how to find one.
      */
     assert.match(DESC, /dangling link/i, 'a caller cannot act on an asymmetry whose consequence is unstated');
-    assert.match(DESC, /`traverse`/, 'and needs to be told how to find one after a large import');
+    // The tool it names was `traverse` until 5.0 renamed it. Pinned to the LIVE name, so this case
+    // fails if the pointer rots again rather than preserving the rot.
+    assert.match(DESC, /`graph_traverse`/, 'and needs to be told how to find one after a large import');
   });
 
   it('and does NOT offer a forward reference as the reason', () => {

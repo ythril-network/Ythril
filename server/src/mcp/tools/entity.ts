@@ -179,7 +179,7 @@ export const update_entityTool: ToolHandler = {
     + '`name`, `type`, `spaceId`, `createdAt`, `updatedAt`) are refused. This is the ONLY way to unset '
     + 'anything.\n'
     + '- `suppressEmbeddings` — see its own description. In short: it removes the vector, so `recall` can '
-    + 'no longer RANK this record by meaning, but `query`, `list`, `get` and recall\'s own `traverse` expansion '
+    + 'no longer RANK this record by meaning, but `filter`, `list`, `get` and recall\'s own `traverse` expansion '
     + 'all still reach it. An excluded entity linked to an embedded one still appears in that neighbour\'s '
     + '`_graph`.\n'
     + '- `ttlDays` — this record\'s own expiry, and the MOST specific of three tiers: it beats the type\'s '

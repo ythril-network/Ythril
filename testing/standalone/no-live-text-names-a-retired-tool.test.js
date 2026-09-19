@@ -107,8 +107,60 @@ const WAS = toolNamesAt(TAG);
 const AMBIGUOUS = ambiguous();
 const RETIRED = [...WAS].filter(n => !live.has(n) && !AMBIGUOUS.has(n)).sort();
 
+/**
+ * The names the docs cannot be held to, and a SCHEMA DESCRIPTION can.
+ *
+ * In prose `query` is a word and `reindex` is a route segment, so a gate holding a guide page to them
+ * reports the sentence rather than the defect. Inside a tool's own description the question is answerable:
+ * either it is that tool's parameter, or it says whose parameter it is, or it means the dead tool.
+ */
+const RETIRED_AMBIGUOUS = [...WAS].filter(n => !live.has(n) && AMBIGUOUS.has(n)).sort();
+
 /** A sentence that says the thing is gone is allowed to name it. */
 const OBITUARY = /\b(gone|removed|renamed|replaced|absorbed|folded|retired|no longer|used to|until 5\.0)\b/i;
+
+/**
+ * Which MCP source file declares which tool, and what parameters that tool takes.
+ *
+ * This is what lets the ambiguous names be checked in a SCHEMA DESCRIPTION rather than skipped there.
+ * `query` and `traverse` are both retired tool names AND live parameters, and skipping them wholesale
+ * cost seventeen sentences telling a caller to sort with `query` — a tool 5.0 renamed `filter`. In a
+ * description the question has a precise answer: is this the parameter of the tool being described, or
+ * is it the dead tool?
+ */
+function paramsByFile() {
+  const byFile = new Map();
+  for (const file of trackedSources('server/src/mcp/tools', { floor: 5 })) {
+    const src = readFileSync(join(REPO_ROOT, file), 'utf8');
+    const declared = new Set([...src.matchAll(/^\s*name:\s*'([a-z][a-z0-9_]*)',/gm)].map(m => m[1]));
+    const params = new Set();
+    for (const tool of ALL_TOOLS) {
+      if (!declared.has(tool.name)) continue;
+      const schema = tool.inputSchema?.({ requiredSpace: {}, optionalSpace: {} }) ?? {};
+      for (const key of Object.keys(schema.properties ?? {})) params.add(key);
+    }
+    byFile.set(file, params);
+  }
+  return byFile;
+}
+
+const PARAMS_BY_FILE = paramsByFile();
+
+/**
+ * Is this mention of an ambiguous name legitimate?
+ *
+ * Two allowances, both derived. **The parameter of the tool being described** — `help`'s own `query`,
+ * `recall`'s own `traverse`. And **a possessive naming the tool that owns it** — `` `recall`'s `traverse`
+ * expansion `` is said from four other files and is right every time, because it names whose parameter it
+ * is. A mention with neither is a sentence pointing at a tool that does not exist.
+ */
+function excusedInDescription(file, name, line) {
+  if (PARAMS_BY_FILE.get(file)?.has(name)) return true;
+  for (const owner of live) {
+    if (new RegExp('`?' + owner + '`?(?:\\\\)?\'s\\s+(?:own\\s+)?`' + name + '`').test(line)) return true;
+  }
+  return false;
+}
 
 /** The text a caller is shown: the MCP surface's own strings, and every published page. */
 function liveText() {
@@ -149,6 +201,41 @@ describe('the sweep works before anything is concluded from it', () => {
   it('the subject is text, and there is some of it', () => {
     const files = liveText();
     assert.ok(files.length > 50, `only ${files.length} file(s) of caller-facing text found`);
+  });
+});
+
+describe('a schema description names a live tool, even when the name is also a parameter', () => {
+  it('the ambiguous set is real and the parameter map resolved', () => {
+    assert.ok(RETIRED_AMBIGUOUS.length > 0,
+      'nothing is both retired and still live as a parameter, which would make the cases below vacuous');
+    assert.ok([...PARAMS_BY_FILE.values()].some(s => s.size > 0),
+      'no file resolved to any tool parameter — the declaration scan broke, and every mention would be '
+      + 'reported as a dead tool');
+  });
+
+  it('no description sends a caller to one', () => {
+    /*
+     * Seventeen did. `sortable by `query``, `filterable by `query` on the `files` collection`, `as
+     * `recall` and `query` report it` — all naming the tool 5.0 renamed `filter`, in the text a caller
+     * reads while constructing the call. The audit that found them could not gate them, because the
+     * exclusion that keeps recall's `traverse` FIELD from being reported also hid these.
+     */
+    const offenders = [];
+    for (const file of trackedSources('server/src/mcp', { floor: 10 })) {
+      const lines = blankComments(readFileSync(join(REPO_ROOT, file), 'utf8')).split(/\r?\n/);
+      for (const name of RETIRED_AMBIGUOUS) {
+        const hit = new RegExp('`' + name + '`');
+        lines.forEach((line, i) => {
+          if (!hit.test(line) || OBITUARY.test(line) || excusedInDescription(file, name, line)) return;
+          offenders.push(`${file}:${i + 1} names \`${name}\`, retired since ${TAG}`);
+        });
+      }
+    }
+    assert.deepEqual(offenders, [],
+      'a tool description names something that is not a live tool:\n  ' + offenders.join('\n  ')
+      + '\n\nIf it is the parameter of the tool being described, it is fine as it is. If it is another '
+      + "tool's parameter, say whose — `recall`'s `traverse` — and this accepts it. Otherwise it is a "
+      + 'dead tool name, and a caller sent to one concludes the capability is missing.');
   });
 });
 

@@ -35,7 +35,7 @@ export const save_bulkTool: ToolHandler = {
     + 'resolved `$ref` always exists, so the correlation key never pays for this. '
     + 'On an UNCONVERTED space this door can therefore still write a dangling link the single-record path '
     + 'would have refused — that is the deliberate trade for an import whose records arrive in an order '
-    + 'nobody controls. Verify with `traverse` after a large import if linkage matters.\n\n'
+    + 'nobody controls. Verify with `graph_traverse` after a large import if linkage matters.\n\n'
     + 'ORDER IS facts → entities → chrono → edges, EDGES LAST so that a `$ref` can name a record of any '
     + 'kind. It also matters for records this call UPDATES: an entity '
     + 'addressed by an id that already exists is written before an edge in the same batch reads it. Facts go '
@@ -219,7 +219,7 @@ export const save_bulkTool: ToolHandler = {
                   confidence:  { type: 'number', description: 'Confidence 0 to 1, for entries that are predictions. A non-number is dropped silently and does not appear in `errors`; unlike `save_chrono`, the 0–1 bound is not enforced on this door.' },
                   description: { type: 'string', description: 'Optional longer description of the entry.' },
                   tags:        { type: 'array', items: { type: 'string' }, description: 'Categorisation tags. Every chrono item is an INSERT, so there is nothing to merge with.' },
-                  entityIds:   { type: 'array', items: { type: 'string' }, description: 'Entity IDs this entry concerns — what lets `traverse` reach it from that entity. NEVER checked for existence on this door, and checked for UUID shape only when the space uses strict linkage, so a well-formed id pointing at nothing is stored as a dangling link.' },
+                  entityIds:   { type: 'array', items: { type: 'string' }, description: 'Entity IDs this entry concerns — what lets `graph_traverse` reach it from that entity. NEVER checked for existence on this door, and checked for UUID shape only when the space uses strict linkage, so a well-formed id pointing at nothing is stored as a dangling link.' },
                   memoryIds:   { type: 'array', items: { type: 'string' }, description: 'Fact IDs this entry relates to. Shape-checked under strict linkage only, and never for existence — like `entityIds`.' },
                   properties:  {
                     type: 'object',
