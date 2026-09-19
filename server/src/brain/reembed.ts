@@ -214,14 +214,34 @@ export async function reembedSpace(
     }
 
     const filter = asFilter({ ...vectorless, ...exclusion.query });
+    /*
+     * BOTH COUNTS FROM ONE SNAPSHOT, and the subtraction is why that matters.
+     *
+     * This read the collection TWICE and subtracted: `count(vectorless) - count(vectorless AND allowed)`.
+     * Both are live counts over a population the embed worker is actively draining — every record it
+     * finishes gains a vector and leaves `vectorless`. Shrink the second count after taking the first and
+     * the difference goes POSITIVE with nothing suppressed at all, which tells an operator the setting is
+     * still on when it is not.
+     *
+     * Measured as an intermittent `skippedSuppressed: 1` in a loaded full-suite run of
+     * `reembed-both-doors`, against a space whose suppression had just been turned off — passing when the
+     * file ran alone, which is the signature this same file documents twelve lines from that assertion.
+     *
+     * `$facet` evaluates every branch over ONE pass of the same input, so `all` and `allowed` describe the
+     * same instant and their difference is the number the exclusion removed rather than the number the
+     * worker happened to finish in between. `a-parity-assertion-over-a-moving-quantity` is the general
+     * form: two reads of a live value assert nothing about each other.
+     */
+    const [counts] = await col(collName).aggregate([
+      { $match: asFilter(vectorless) },
+      { $facet: { all: [{ $count: 'n' }], allowed: [{ $match: asFilter(exclusion.query) }, { $count: 'n' }] } },
+    ]).toArray() as Array<{ all: Array<{ n: number }>; allowed: Array<{ n: number }> }>;
+    const allVectorless = counts?.all?.[0]?.n ?? 0;
+    const total = counts?.allowed?.[0]?.n ?? 0;
+
     // Candidates the filter removed — reported so "nothing happened" is never silent, which is what tells an
     // operator the setting is still on.
-    result.skippedSuppressed += await col(collName).countDocuments(asFilter(vectorless)) -
-      await col(collName).countDocuments(filter);
-
-    // Counted before the cap is applied, so `remaining` is the truth about the space rather than about this
-    // page. Without this a truncated sweep could not tell an operator that more work is left.
-    const total = await col(collName).countDocuments(filter);
+    result.skippedSuppressed += allVectorless - total;
 
     const budget = cap - result.enqueued;
     if (budget <= 0) { result.remaining += total; continue; }
