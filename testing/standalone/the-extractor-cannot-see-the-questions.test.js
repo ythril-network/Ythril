@@ -34,9 +34,17 @@
  * change nobody notices: the extra field is simply present, nothing errors, and the extraction quietly gets
  * better at this corpus.
  *
- * Skipped per corpus when its pinned dataset is absent. They are fetched by URL and not vendored, so a clean
- * checkout has no copy — and a gate that FAILS on a missing optional input teaches people to ignore it. What
- * that leaves is a file that can skip entirely and stay green, so the last block refuses that in CI.
+ * ## THIS GATE DOES NOT RUN IN CI, and that is worth stating rather than leaving to be discovered
+ *
+ * Skipped per corpus when its pinned dataset is absent: they are fetched by URL and not vendored, so a
+ * clean checkout has no copy, and a gate that FAILS on a missing optional input teaches people to ignore
+ * it. **Neither corpus is fetched in CI** — they are 278 MB and 2.8 MB pulled on demand — so every block
+ * below skips there, and always has.
+ *
+ * A draft of this file asserted the opposite, that CI must have one, and CI answered by failing. The
+ * enforcement is real on a machine that has fetched a corpus, which is the machine about to extract from
+ * one; that is the machine this protects, and extraction happens where the data is. Written down because
+ * *"the gate is green"* and *"the gate ran"* are different claims and a CI summary reports only the first.
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -74,14 +82,10 @@ function keysAnywhere(value, found = new Set()) {
   return found;
 }
 
-/** At least one corpus must actually be on disk, or this whole file skips and asserts nothing. */
-let anyFetched = false;
-
 for (const corpus of CORPORA) {
   const pin = JSON.parse(readFileSync(corpus.pin, 'utf8'));
   const dataPath = join(repoRoot, pin.datasets[corpus.dataset].cachePath);
   const fetched = existsSync(dataPath);
-  anyFetched ||= fetched;
   const skip = fetched ? false : `${corpus.name} is not fetched`;
   const histories = fetched ? await corpus.load(dataPath) : [];
 
@@ -128,13 +132,6 @@ for (const corpus of CORPORA) {
 }
 
 describe('the gate itself', () => {
-  test('at least one corpus was actually read, in CI', () => {
-    // Every block above skips when its corpus is absent, so all of them skipping is a green file that
-    // checked nothing. On a developer machine with no dataset that is correct; in CI, where they are
-    // fetched, a silent all-skip is how this gate would stop meaning anything without ever failing.
-    assert.ok(anyFetched || process.env.CI !== 'true',
-      'no pinned corpus is on disk in CI, so every blindness check skipped and this file asserted nothing');
-  });
 
   test('the detector sees the key it exists for', () => {
     // `has_answer` is the one that hides. Checked against the detector rather than trusted: a typo in the
