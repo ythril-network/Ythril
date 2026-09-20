@@ -26,6 +26,7 @@
  *   node benchmarks/bench.mjs status
  *   node benchmarks/bench.mjs dump conv-49 [> somewhere.md]
  *   node benchmarks/bench.mjs check path/to/extraction.json
+ *   node benchmarks/bench.mjs stats
  *   node benchmarks/bench.mjs merge part1.json part2.json [> conv-49.json]
  *   node benchmarks/bench.mjs write benchmarks/locomo/extractions/conv-49.json <space-id>
  *
@@ -36,6 +37,7 @@ import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { loadConversations } from './locomo/loader.mjs';
 import { validateExtraction } from './writer/validate-extraction.mjs';
 import { mergeExtractionParts } from './writer/merge-extraction.mjs';
+import { corpusSpread } from './writer/corpus-spread.mjs';
 import { extractionMatchesConversation } from './writer/extraction-matches-conversation.mjs';
 import { writeSpace, loadSpaceDefinition } from './writer/write-space.mjs';
 import { makeYthril } from './writer/ythril-client.mjs';
@@ -145,6 +147,36 @@ function againstTheCorpus(extraction) {
   return extractionMatchesConversation(extraction, conversation);
 }
 
+/**
+ * What the committed corpus holds, and how unevenly one prompt treated it.
+ *
+ * **The headline is the SPREAD, not any total.** `B-4` extracted ten conversations with one prompt and one
+ * model and got a 6.6x range in chrono entries per 1,000 turns. The prompt's own standard is that two models
+ * disagreeing a lot is a finding about the prompt; that met the test before a second model was ever run, and
+ * most of `B-14` was about what caused it. `B-16` is judged by whether the range narrows — so the figure is
+ * recomputed here rather than remembered from the round that first produced it.
+ */
+function stats() {
+  const files = existsSync(EXTRACTIONS)
+    ? readdirSync(EXTRACTIONS).filter(f => f.endsWith('.json')).sort()
+    : [];
+  if (files.length === 0) die(`no extractions in ${EXTRACTIONS}`);
+  const r = corpusSpread(files.map(f => JSON.parse(readFileSync(`${EXTRACTIONS}/${f}`, 'utf8'))));
+
+  const row = (id, x) => `  ${String(id).padEnd(9)}${String(x.turns).padStart(6)}${String(x.claims).padStart(8)}`
+    + `${String(x.chrono).padStart(8)}${String(x.spansUsed).padStart(7)}${String(x.entities).padStart(6)}`
+    + `${String(x.edges).padStart(7)}${String(x.superseded).padStart(9)}${x.chronoPer1000.toFixed(1).padStart(10)}`;
+
+  console.log('  id        turns  claims  chrono  spans   ent  edges  retired  per 1000');
+  for (const x of r.rows) console.log(row(x.id, x));
+  console.log(row('TOTAL', r.totals));
+
+  console.log(r.chronoSpread === null
+    ? `\nno spread: ${r.why}`
+    : `\nchrono spread ${r.chronoSpread}x — ${r.sparsest.id} at ${r.sparsest.chronoPer1000} up to `
+      + `${r.densest.id} at ${r.densest.chronoPer1000} entries per 1,000 turns.`);
+}
+
 /** Join parts into one file, on stdout. Refuses an incomplete run — see merge-extraction.mjs. */
 function merge(paths) {
   if (paths.length === 0) die('merge needs at least one part');
@@ -167,13 +199,15 @@ switch (verb) {
   case 'status': status(); break;
   case 'dump': dump(rest[0]); break;
   case 'check': check(rest[0] ?? die('check needs a path')); break;
+  case 'stats': stats(); break;
   case 'merge': merge(rest); break;
   case 'write': await write(rest[0] ?? die('write needs a path'), rest[1]); break;
   default:
-    die(`usage: node benchmarks/bench.mjs <status|dump|check|merge|write>\n`
+    die(`usage: node benchmarks/bench.mjs <status|dump|check|stats|merge|write>\n`
       + `  status                       which conversations still need extracting\n`
       + `  dump <id>                    one conversation as readable text, through the loader\n`
       + `  check <extraction.json>      every problem at once, or silence\n`
+      + `  stats                        what the corpus holds, and how unevenly one prompt treated it\n`
       + `  merge <part.json>...         join parts; refuses an incomplete run\n`
       + `  write <extraction.json> <space>   replay into an instance (YTHRIL_URL, YTHRIL_TOKEN)`);
 }
