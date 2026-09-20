@@ -15,6 +15,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The conversation-writer ships, and `B-3` closes on work that was already done** (`B-3`). The row's
+  remaining scope read *"what is left to build is the writer: mint entities, link them, resolve dates
+  against the session they were said in, and store each remark as a claim"*. All of it is in
+  `benchmarks/writer/` and has been for some time — what had never happened is the CHANGELOG line the
+  row watches for, so a reader of the tracker would have concluded the writer did not exist.
+
+  It is closed now rather than quietly, because the proof arrived with `conv-30`: a committed extraction
+  carrying no Ythril ids, replayed deterministically into a live space as 133 records — entities minted
+  and linked, dates resolved against their session, every remark a claim. That is the row's own
+  reproducibility claim demonstrated rather than asserted: anybody can rebuild the exact graph from the
+  repository, and only re-deriving the extraction needs a model.
+
+  **Three rows in a row have now turned out to be stale in their central premise** — `B-2` said a graded
+  harness exists when it was deleted, this one said the writer was unbuilt when it was built and
+  working. Both were read as ready-to-act and were describing a different repository. A verify clause
+  catches the second kind and not the first: it can tell you a row has not closed, and cannot tell you
+  the reason it gives is no longer true.
+
 - **`conv-30` is extracted, and it is the first conversation the shipped pipeline has produced end to
   end** (`B-4`, 1 of 10). 19 sessions, 369 turns, two speakers who both lose their jobs in January 2023 and
   spend the year building businesses. 84 claims, 12 entities, 25 chrono entries, 12 edges — and **all 369
