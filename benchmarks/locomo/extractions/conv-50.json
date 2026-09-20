@@ -728,18 +728,18 @@
       "properties": {
         "aliases": "Cal"
       },
-      "description": "A rapper and musician who talks with Dave through 2023. He bought a red Ferrari in March 2023, moved into a mansion in Japan that spring, toured with Frank Ocean, released an album on 11 September 2023 and kept planning trips to Boston. Dave calls him Cal.",
+      "description": "A rap musician and one of the two speakers. He moved into a mansion in Japan in spring 2023 and converted part of it into a recording studio, toured and recorded with Frank Ocean, released an album on 11 September 2023 and owns a red Ferrari. He planned a trip to Boston from March 2023 onwards and was meeting artists, sightseeing and attending a gala there by late 2023. Dave calls him Cal.",
       "sourceTurns": [
-        "D1:1",
         "D1:3",
-        "D12:11"
+        "D2:1",
+        "D18:1"
       ]
     },
     {
       "key": "dave",
       "type": "person",
       "name": "Dave",
-      "description": "An automotive engineer and mechanic in Boston, and Calvin's friend. He opened his own car maintenance shop in spring 2023, teamed up with a local garage, restores classic cars, joined a rock band in June 2023, took up photography in autumn 2023 and started a blog about car modifications.",
+      "description": "An automotive engineer and one of the two speakers, based in Boston. He has worked on cars since he was ten, opened his own car maintenance shop in May 2023, restored a vintage Ford Mustang he found in a junkyard, joined a rock band in June 2023, attended a car modification workshop in San Francisco in August 2023 and took up photography in autumn 2023.",
       "sourceTurns": [
         "D1:2",
         "D4:1",
@@ -753,10 +753,10 @@
       "properties": {
         "aliases": "Frank"
       },
-      "description": "The well-known artist Calvin tours and records with. Calvin says they met at a music festival — in Tokyo in 2023 by one telling, in August 2022 by another — and in August 2023 he secured a deal to keep collaborating with him.",
+      "description": "The well-known musician Calvin tours and records with. Calvin gives two accounts of how they met: at a music festival in Tokyo, told on 22 August 2023, and at a festival in August 2022, told on 19 October 2023. Calvin secured a deal in August 2023 to continue the collaboration.",
       "sourceTurns": [
         "D3:9",
-        "D7:1",
+        "D15:4",
         "D24:5"
       ]
     },
@@ -767,7 +767,7 @@
       "properties": {
         "aliases": "my dad"
       },
-      "description": "Dave's father, who worked on cars with him throughout his childhood. They spent one summer restoring an old car together, Dave spent hours in his garage tinkering with engines, and he took Dave to his first car show when Dave was ten. Never named — referred to only as 'my dad'.",
+      "description": "Dave's father, referred to only as 'my dad'. He took Dave to his first car show when Dave was ten, let him spend hours tinkering with engines in his garage, and spent one summer of Dave's childhood restoring an old car with him.",
       "sourceTurns": [
         "D12:2",
         "D22:5",
@@ -775,17 +775,30 @@
       ]
     },
     {
+      "key": "calvins-dad",
+      "type": "person",
+      "name": "Calvin's father",
+      "properties": {
+        "aliases": "my dad"
+      },
+      "description": "Calvin's father, referred to only as 'my dad'. Calvin remembers a childhood road trip with him on which they sang along to 'California Love' by Tupac and Dr. Dre.",
+      "sourceTurns": [
+        "D20:6",
+        "D20:8"
+      ]
+    },
+    {
       "key": "calvins-high-school-friend",
       "type": "person",
-      "name": "Calvin's high school friend",
+      "name": "Calvin's old high-school friend",
       "properties": {
-        "aliases": "a high school friend; my old high school buddy"
+        "aliases": "a high school friend, my old high school buddy"
       },
-      "description": "Calvin's old friend from his school days, with whom he used to freestyle as a teenager and talk about getting famous. He showed Calvin around Boston sights on 24 October 2023, and Calvin invited him to a Boston performance in November 2023, calling his positivity a big difference in his journey. Never named; the two mentions are treated as one person because they agree in period, place and role.",
+      "description": "Calvin's old friend from high school, with whom he used to freestyle and talk about getting famous as a teenager. They visited sights in Boston together on 24 October 2023, and Calvin invited him to a Boston performance in November 2023, saying his support and positivity have made a big difference.",
       "sourceTurns": [
         "D26:1",
         "D29:1",
-        "D29:3"
+        "D29:5"
       ]
     },
     {
@@ -796,11 +809,11 @@
         "kind": "country",
         "country": "Japan"
       },
-      "description": "The country Calvin moved to in spring 2023, where his mansion and home studio are. He was fascinated by its traditions before ever going, collaborated with Japanese artists, and a Japanese artist friend made his custom guitar. Dave has never been but is keen to go.",
+      "description": "The country Calvin moved to in spring 2023, having never been there before March 2023. He lives in a mansion there, collaborates with Japanese artists and had a custom guitar made by a Japanese artist friend. Dave has never been but wants to go, saying he is hooked on Japanese music.",
       "sourceTurns": [
         "D1:5",
         "D1:7",
-        "D10:10"
+        "D10:6"
       ]
     },
     {
@@ -811,11 +824,11 @@
         "kind": "city",
         "country": "Japan"
       },
-      "description": "Japan's capital. Calvin attended a music festival there in April 2023, photographed the skyline at night on 15 May 2023, performed there on the Frank Ocean tour and planned to return in November 2023 for Shibuya, Shinjuku and the food. Dave hopes to visit one day.",
+      "description": "The Japanese city where Calvin attended a music festival in April 2023, photographed the skyline on the night of 15 May 2023, performed to a large crowd, and planned to return in November 2023 to see Shibuya Crossing and Shinjuku. Dave has never been and wants to visit.",
       "sourceTurns": [
         "D3:1",
         "D6:15",
-        "D24:11"
+        "D24:17"
       ]
     },
     {
@@ -826,7 +839,7 @@
         "kind": "city",
         "country": "United States"
       },
-      "description": "Dave's home city, and the one Calvin repeatedly plans and takes trips to. Its music scene, parks, architecture and history recur throughout. Calvin says both that he has never been there (9 June 2023) and that he was there a few years back (29 October 2023).",
+      "description": "Dave's home city, whose music scene he describes as including Paradise Rock, House of Blues and Fenway Park. Calvin planned to visit from March 2023 onwards, gave inconsistent accounts of whether he had been there before, and by October and November 2023 was meeting artists, sightseeing with an old school friend and attending a gala there.",
       "sourceTurns": [
         "D1:15",
         "D3:10",
@@ -841,7 +854,7 @@
         "kind": "city",
         "country": "United States"
       },
-      "description": "The city where Calvin shot the music video for his album, on a beach, from the weekend of 26 August 2023; he likes its vibe and thought it perfect for the video.",
+      "description": "The city where Calvin shot the video for his new album, on a beach, from late August 2023; he said the Miami vibe was perfect for the video.",
       "sourceTurns": [
         "D16:8",
         "D16:10"
@@ -855,7 +868,7 @@
         "kind": "city",
         "country": "United States"
       },
-      "description": "The city where Dave went to a car restoration and modification workshop in August 2023, and from which he returned on 1 September 2023 with new knowledge of car modification.",
+      "description": "The city where Dave attended a car restoration and modification workshop in August 2023, returning to Boston on 1 September 2023 with new knowledge about car modification.",
       "sourceTurns": [
         "D14:1",
         "D17:1"
@@ -869,66 +882,43 @@
         "kind": "city",
         "country": "United States"
       },
-      "description": "The city where Dave attended a conference shortly before 25 October 2023 and said he learned a lot.",
+      "description": "The city where Dave attended a conference shortly before 25 October 2023, which he said he learned a lot from.",
       "sourceTurns": [
-        "D26:2",
-        "D26:3"
+        "D26:2"
       ]
     },
     {
-      "key": "shibuya-crossing",
+      "key": "calvins-japanese-mansion",
       "type": "place",
-      "name": "Shibuya Crossing",
+      "name": "Calvin's Japanese mansion",
       "properties": {
         "kind": "venue",
-        "country": "Japan"
+        "country": "Japan",
+        "aliases": "my new mansion, my Japanese house, my Japanese mansion"
       },
-      "description": "The Tokyo crossing Calvin compared to Times Square and named on 19 October 2023 as a spot he was excited to see on his return to Tokyo.",
-      "sourceTurns": [
-        "D24:19"
-      ]
-    },
-    {
-      "key": "shinjuku",
-      "type": "place",
-      "name": "Shinjuku",
-      "properties": {
-        "kind": "region",
-        "country": "Japan"
-      },
-      "description": "The Tokyo district Calvin named on 19 October 2023 as one he was excited to explore on his return to Tokyo.",
-      "sourceTurns": [
-        "D24:19"
-      ]
-    },
-    {
-      "key": "calvins-mansion",
-      "type": "place",
-      "name": "Calvin's mansion in Japan",
-      "properties": {
-        "kind": "venue",
-        "country": "Japan"
-      },
-      "description": "Calvin's mansion in Japan, announced as a big life change on 23 March 2023 and found for him by his agent. He calls it 'my new mansion', 'my Japanese mansion' and 'my Japanese house'. It looks out over a city skyline, has a backyard and a living room with a television, and from July 2023 he was converting part of it into a recording studio; he held the party for his album there in late October 2023.",
+      "description": "The mansion in Japan that Calvin's agent found for him and that he showed Dave on 23 March 2023 as his new mansion. He was living in it by July 2023 and admired the city skyline from its windows, converted part of it into a recording studio, recorded a song there with Frank Ocean in August 2023 and held an album party there in late October 2023.",
       "sourceTurns": [
         "D1:3",
+        "D1:11",
         "D10:6",
         "D28:1"
       ]
     },
     {
-      "key": "daves-favourite-park",
+      "key": "daves-park",
       "type": "place",
-      "name": "Dave's favourite park",
+      "name": "The park near Dave in Boston",
       "properties": {
-        "kind": "natural",
-        "country": "United States"
+        "kind": "venue",
+        "country": "United States",
+        "aliases": "that beautiful park, my favourite spot, a nearby park"
       },
-      "description": "The park near Dave that he finds calming, referred to as 'this beautiful park', 'that spot' and 'one of my favorites' in Boston. It has a lake with boats. He walks there, arranged regular walks with friends there from July 2023, recommended it to Calvin in March 2023, and Calvin went on his October 2023 Boston trip. The nearby park where Dave photographed a waterfall in November 2023 may be the same place.",
+      "description": "The park in Boston that Dave visits to relax; he recommended it to Calvin on 23 March 2023, strolled there on 2 June 2023, arranged regular walks there with friends in July 2023 and photographed a waterfall at a serene spot in it in November 2023. Dave also speaks of Boston's parks in the plural, and those mentions are joined here as one place he keeps returning to.",
       "sourceTurns": [
         "D1:16",
-        "D10:5",
-        "D26:2"
+        "D8:6",
+        "D10:3",
+        "D30:15"
       ]
     },
     {
@@ -937,9 +927,9 @@
       "name": "Dave's car maintenance shop",
       "properties": {
         "kind": "business",
-        "aliases": "the shop; my garage"
+        "aliases": "my garage, my car shop"
       },
-      "description": "The car maintenance shop Dave owns. He announced opening it on 1 May 2023 and said again on 16 May 2023 that he had opened it 'last week', inviting friends to celebrate. He does everything there from routine servicing to full classic restorations. In October 2023 a competing shop took a contract he had been chasing for months.",
+      "description": "The car maintenance shop Dave opened in May 2023 in Boston after years of dreaming about it, celebrating with friends. It handles everything from routine maintenance to full restorations of classic cars, and in October 2023 a competing shop won a deal it had chased for months. Dave also calls it his garage and has invited Calvin to visit it.",
       "sourceTurns": [
         "D4:1",
         "D6:8",
@@ -947,42 +937,13 @@
       ]
     },
     {
-      "key": "local-garage",
-      "type": "organization",
-      "name": "the local garage Dave teamed up with",
-      "properties": {
-        "kind": "business",
-        "aliases": "a local garage"
-      },
-      "description": "The local garage Dave joined forces with on 3 May 2023, working alongside other mechanics, sharing his car knowledge and assisting customers. Never named.",
-      "sourceTurns": [
-        "D5:1",
-        "D5:3"
-      ]
-    },
-    {
-      "key": "car-mod-workshop",
-      "type": "organization",
-      "name": "the car modification workshop",
-      "properties": {
-        "kind": "course",
-        "aliases": "a car mod workshop; the car workshop in San Francisco"
-      },
-      "description": "The car modification and restoration workshop Dave was selected for on 11 August 2023 and attended in San Francisco, returning on 1 September 2023 with new insights. He treats it as a step towards learning auto engineering and building a custom car.",
-      "sourceTurns": [
-        "D13:1",
-        "D14:1",
-        "D17:1"
-      ]
-    },
-    {
       "key": "daves-rock-band",
       "type": "organization",
       "name": "Dave's rock band",
       "properties": {
-        "aliases": "the guys; our rock band"
+        "kind": "club"
       },
-      "description": "The rock band Dave joined around June 2023, playing guitar; he says he had been a fan of them for ages before getting the chance to join. They rehearsed on 14 September 2023 and did not record it, and in November 2023 he showed the guitar logo they had made.",
+      "description": "The rock band Dave joined shortly before 21 June 2023, playing guitar; he says he had been a fan of them for ages before getting the chance to join. They rehearse together, had a jam session on 14 September 2023 that they were too absorbed in to record, and created a band logo.",
       "sourceTurns": [
         "D9:18",
         "D19:1",
@@ -994,12 +955,11 @@
       "type": "organization",
       "name": "Aerosmith",
       "properties": {
-        "kind": "team"
+        "kind": "club"
       },
-      "description": "The band Dave named as his favourite act at the Boston music festival of 18-19 March 2023, where he saw them live for the first time. Calvin says he likes them too.",
+      "description": "The band Dave named as his favourite act at the music festival he attended in Boston in March 2023. It was the first time he had seen them live, and he did not get to meet them after the show.",
       "sourceTurns": [
         "D2:10",
-        "D2:11",
         "D2:12"
       ]
     },
@@ -1008,12 +968,26 @@
       "type": "organization",
       "name": "The Fireworks",
       "properties": {
-        "kind": "team"
+        "kind": "club"
       },
-      "description": "The band that headlined the music festival Dave went to shortly before 15 October 2023; he called the headliner and the vibe unreal.",
+      "description": "The band that headlined the music festival Dave returned from shortly before 15 October 2023, which he described as unreal.",
       "sourceTurns": [
-        "D23:9",
-        "D23:10"
+        "D23:9"
+      ]
+    },
+    {
+      "key": "car-mod-workshop",
+      "type": "organization",
+      "name": "The car modification workshop in San Francisco",
+      "properties": {
+        "kind": "course",
+        "aliases": "car mod workshop, a car workshop in San Francisco"
+      },
+      "description": "The car modification workshop Dave was picked for in August 2023 and attended in San Francisco, returning on 1 September 2023. He called it a dream come true because he had always wanted to learn auto engineering and build a custom car. His mentions of 'a car mod workshop', 'a car workshop in San Francisco' and his San Francisco trip are joined here because they agree in date and subject.",
+      "sourceTurns": [
+        "D13:1",
+        "D14:1",
+        "D17:1"
       ]
     },
     {
@@ -1021,14 +995,26 @@
       "type": "work",
       "name": "Calvin's album",
       "properties": {
-        "medium": "album",
-        "aliases": "my new album"
+        "medium": "album"
       },
-      "description": "Calvin's album. He met its creative team for a long session on 8 June 2023, worked on it with a team in the studio, shot a video for it in Miami from the weekend of 26 August 2023, released it on 11 September 2023 to a strong response, and threw a party for it at his Japanese mansion in the week before 2 November 2023 — though on 29 October 2023 he described the album as almost finished.",
+      "description": "Calvin's album. He met its creative team for a long session on 8 June 2023, started shooting a video for it on a Miami beach over the weekend of 26-27 August 2023, said on 13 September 2023 that it had been released on 11 September to a warm reception, and threw a launch party at his Japanese mansion in the week before 2 November 2023. On 29 October 2023 he described the album as almost finished, which contradicts the release he had reported in September.",
       "sourceTurns": [
         "D8:1",
         "D18:1",
         "D28:1"
+      ]
+    },
+    {
+      "key": "california-love",
+      "type": "work",
+      "name": "California Love",
+      "properties": {
+        "medium": "song"
+      },
+      "description": "The song by Tupac and Dr. Dre that played on a childhood road trip Calvin took with his father, and which they sang along to. Calvin said on 22 September 2023 that it still makes him smile.",
+      "sourceTurns": [
+        "D20:6",
+        "D20:8"
       ]
     },
     {
@@ -1038,7 +1024,7 @@
       "properties": {
         "medium": "film"
       },
-      "description": "The Disney film whose poster Calvin shared on 15 September 2023. Calvin names it one of his favourites for its message about going after what you love whatever anyone says, and Dave says the poster reminds him of one of his favourite Disney films and its lesson about following your dreams.",
+      "description": "The Disney film on a poster Calvin showed Dave on 15 September 2023. Calvin called it one of his favourites because it is about going after what you love, and Dave said it is one of his favourite Disney films for its lesson about following your dreams no matter what others say.",
       "sourceTurns": [
         "D19:4",
         "D19:5",
@@ -1046,73 +1032,45 @@
       ]
     },
     {
-      "key": "california-love",
-      "type": "work",
-      "name": "California Love",
-      "properties": {
-        "medium": "song",
-        "aliases": "\"California Love\" by Tupac and Dr. Dre"
-      },
-      "description": "The Tupac and Dr. Dre song Calvin and his father sang along to on a childhood road trip. On 22 September 2023 he named it as the song from his childhood that always makes him smile, and Dave called it a classic.",
-      "sourceTurns": [
-        "D20:6",
-        "D20:8",
-        "D20:9"
-      ]
-    },
-    {
-      "key": "daves-car-blog",
-      "type": "work",
-      "name": "Dave's car modification blog",
-      "properties": {
-        "medium": "blog"
-      },
-      "description": "The blog about car modifications Dave started shortly before 2 November 2023 to share his passion. Readers write to him for advice, and a post about how he made one car look like a beast inspired others to start their own DIY projects.",
-      "sourceTurns": [
-        "D28:8",
-        "D28:10"
-      ]
-    },
-    {
       "key": "calvins-ferrari",
       "type": "object",
-      "name": "Calvin's Ferrari",
+      "name": "Calvin's red Ferrari",
       "properties": {
         "kind": "car",
         "brand": "Ferrari"
       },
-      "description": "Calvin's red sports car, a Ferrari and the first luxury car he owned, bought in March 2023 and treated as proof that his hard work paid off. He takes long drives in it to clear his head, crashed it on 16 June 2023 with nobody hurt and had it repaired within a week, and took it for a stressful service in early August 2023. On 15 October 2023 he said he had got a new Ferrari the week before, which the conversation never reconciles with the car he already had.",
+      "description": "The red luxury sports car Calvin bought shortly before 26 March 2023, his first, which he took for a ride on 25 March 2023 and later calls his Ferrari. He had a minor accident in it on 16 June 2023, had the insurance and repairs settled within a week, and took it for a service in early August 2023. He describes long drives in it as relaxing and the car itself as a symbol of his hard work.",
       "sourceTurns": [
         "D2:1",
-        "D2:5",
+        "D9:1",
         "D12:1"
+      ]
+    },
+    {
+      "key": "calvins-second-ferrari",
+      "type": "object",
+      "name": "Calvin's new Ferrari",
+      "properties": {
+        "kind": "car",
+        "brand": "Ferrari"
+      },
+      "description": "A further Ferrari that Calvin said on 15 October 2023 he had got in the week before, calling it a masterpiece on wheels. It is kept apart from the red sports car he bought in March 2023 because he described it as new rather than as the car he already had.",
+      "sourceTurns": [
+        "D23:16"
       ]
     },
     {
       "key": "calvins-guitar",
       "type": "object",
-      "name": "Calvin's custom guitar",
+      "name": "Calvin's custom octopus guitar",
       "properties": {
         "kind": "guitar"
       },
-      "description": "Calvin's custom-made guitar, made for him by a Japanese artist friend. It carries an octopus design standing for his love of art and the sea, and he had it finished with a shiny purple look to match his style. One of his favourites, and a reminder of his passion for music and the friendships he has made.",
+      "description": "Calvin's custom guitar, made for him by a Japanese artist friend, carrying an octopus design that stands for his love of art and the sea and customised with a shiny purple finish to match his style. He calls it one of his favourites and a reminder of his passion for music and of the friendships he has made.",
       "sourceTurns": [
-        "D16:13",
         "D16:14",
+        "D16:18",
         "D16:20"
-      ]
-    },
-    {
-      "key": "calvins-necklace",
-      "type": "object",
-      "name": "Calvin's diamond pendant necklace",
-      "properties": {
-        "kind": "necklace"
-      },
-      "description": "A gold necklace with a diamond pendant, given to Calvin by another artist as a gift. He keeps it as a reminder of why he goes on hustling as a musician.",
-      "sourceTurns": [
-        "D4:24",
-        "D4:26"
       ]
     },
     {
@@ -1123,11 +1081,12 @@
         "kind": "car",
         "brand": "Ford"
       },
-      "description": "The vintage Ford Mustang Dave found in a junkyard in bad shape and restored through 2023. He showed a finished result on 15 September 2023, then hit unexplained engine noise on 22 September 2023 after thinking the engine fixed, and said on 29 October 2023 that he had just finished restoring it.",
+      "description": "The vintage Ford Mustang Dave found in a junkyard in bad shape and restored between August and October 2023, doing engine swaps, suspension work and body modifications and giving it a silver finish. He hoped to finish by the end of September 2023, heard a strange engine noise on 22 September, showed the finished car in October and said on 29 October 2023 that the restoration was done. His mentions of 'the car I'm restoring', 'the vintage Mustang' and 'that Ford Mustang I found in a junkyard' are joined here as one car.",
       "sourceTurns": [
+        "D13:7",
+        "D14:11",
         "D20:1",
-        "D21:4",
-        "D21:6"
+        "D21:4"
       ]
     },
     {
@@ -1137,7 +1096,7 @@
       "properties": {
         "kind": "camera"
       },
-      "description": "The vintage camera Dave bought in November 2023, which he says captures special moments very clearly and uses for his landscape photography.",
+      "description": "The vintage camera Dave bought in November 2023 and uses for his photography, saying it captures special moments very clearly.",
       "sourceTurns": [
         "D30:5",
         "D30:7"
@@ -1146,39 +1105,53 @@
     {
       "key": "car-restoration",
       "type": "activity",
-      "name": "restoring and modifying cars",
+      "name": "Restoring and modifying cars",
       "properties": {
         "kind": "craft"
       },
-      "description": "Restoring, repairing and modifying cars: Dave's craft since he fixed a neighbour's old car at the age of ten, now his trade and, he says, his therapy and his sanctuary. He does engine swaps, suspension and body modifications and full classic restorations. Calvin says working on cars calms him too, like meditating.",
+      "description": "Restoring, repairing and modifying cars. It has been Dave's passion since he was ten, became his living when he opened his shop in May 2023, and is the subject of the blog he started in late 2023; he calls it therapeutic and says it gives him a sense of purpose. Calvin also says that working on cars calms him down.",
       "sourceTurns": [
-        "D4:5",
-        "D13:7",
+        "D1:2",
+        "D7:6",
         "D25:15"
+      ]
+    },
+    {
+      "key": "making-music",
+      "type": "activity",
+      "name": "Making music",
+      "properties": {
+        "kind": "music"
+      },
+      "description": "Writing, recording, collaborating and performing. It is Calvin's career - he experiments with genres, adds electronic elements, collaborates with artists in Japan and Boston and mentors young musicians - and a hobby for Dave, who plays guitar in a rock band and writes lyrics in a notebook.",
+      "sourceTurns": [
+        "D1:13",
+        "D11:6",
+        "D28:34"
       ]
     },
     {
       "key": "photography",
       "type": "activity",
-      "name": "photography",
+      "name": "Photography",
       "properties": {
         "kind": "hobby"
       },
-      "description": "Photography, which Dave took up in autumn 2023 as a creative outlet. He shoots Boston cityscapes and the clock tower at sunset, and nature — sunsets, beaches, waves and a waterfall — and bought a vintage camera for it in November 2023.",
+      "description": "Photography, which Dave took up in autumn 2023. He photographs the Boston skyline and its clock tower at sunset and the beauty of nature - sunsets, beaches, waves and waterfalls - and bought a vintage camera for it in November 2023.",
       "sourceTurns": [
         "D27:2",
-        "D27:8",
-        "D30:1"
+        "D30:1",
+        "D30:9"
       ]
     },
     {
-      "key": "park-walks",
+      "key": "walking",
       "type": "activity",
-      "name": "walking in parks",
+      "name": "Walking in parks",
       "properties": {
-        "kind": "outdoors"
+        "kind": "exercise"
       },
-      "description": "Walking in parks, how Dave unwinds and recharges: weekend strolls in Boston's parks, and from July 2023 regular walks he arranged with friends at their favourite spot.",
+      "description": "Walks in parks, which Dave uses to destress and recharge. He walks at weekends, explored parks through spring and summer 2023 and arranged regular walks with friends in July 2023.",
       "sourceTurns": [
         "D5:9",
         "D8:6",
@@ -1189,68 +1162,34 @@
       "key": "frank-ocean-tour",
       "type": "project",
       "name": "Calvin's tour with Frank Ocean",
-      "description": "Calvin's tour as part of Frank Ocean's touring act. The conversation describes it as already under way in the week before 31 May 2023, as ending in August 2023 with a show in Japan, and then as only starting on 19 October 2023; a Boston trip and a return to Tokyo were to follow it.",
+      "description": "Calvin's tour with Frank Ocean. The conversation's account of it is inconsistent: he speaks of it as still to be finished in April 2023, as having taken him to Tokyo in late May 2023, as ending soon on 22 August 2023, as over by 31 August 2023, and as newly started on 19 October 2023 with an end expected before a November 2023 trip to Tokyo.",
       "sourceTurns": [
         "D3:9",
         "D7:1",
+        "D16:1",
         "D24:1"
       ]
     },
     {
-      "key": "mansion-studio-conversion",
+      "key": "mansion-recording-studio",
       "type": "project",
-      "name": "converting the Japanese mansion into a recording studio",
-      "description": "Calvin's project, under way by 21 July 2023, to turn part of his Japanese mansion into a recording studio where he can create with other artists. He calls it a lifelong dream and his sanctuary, and recorded a song with Frank Ocean in the studio there.",
+      "name": "Calvin's recording studio in his Japanese mansion",
+      "description": "The recording studio in Calvin's Japanese mansion. He showed it as his creative haven in May 2023, described it in July 2023 as a project to transform the mansion into a recording studio and as his sanctuary for creating music with other artists, recorded a song there with Frank Ocean in August 2023, and makes beats there for young artists he mentors.",
       "sourceTurns": [
+        "D6:5",
         "D11:4",
-        "D15:4"
-      ]
-    },
-    {
-      "key": "album-music-video",
-      "type": "project",
-      "name": "the music video for Calvin's album",
-      "description": "The music video for Calvin's album, which he started shooting on the weekend of 26 August 2023 on a beach in Miami, planned around epic visuals. Dave offered to help with props.",
-      "sourceTurns": [
-        "D16:6",
-        "D16:8",
-        "D16:11"
+        "D15:4",
+        "D28:27"
       ]
     }
   ],
   "chrono": [
     {
-      "key": "calvin-buys-ferrari",
-      "type": "event",
-      "title": "Calvin bought his first luxury car, a red Ferrari",
-      "date": "2023-03-26",
-      "entities": [
-        "calvin",
-        "calvins-ferrari"
-      ],
-      "sourceTurns": [
-        "D2:1"
-      ]
-    },
-    {
-      "key": "calvin-first-drive-ferrari",
-      "type": "event",
-      "title": "Calvin took his new Ferrari out for a drive and photographed it",
-      "date": "2023-03-25",
-      "entities": [
-        "calvin",
-        "calvins-ferrari"
-      ],
-      "sourceTurns": [
-        "D2:5"
-      ]
-    },
-    {
-      "key": "dave-boston-music-festival",
+      "key": "boston-music-festival-march",
       "type": "event",
       "title": "Dave went to a music festival in Boston where Aerosmith played",
-      "date": "2023-03-18",
-      "endsAt": "2023-03-19",
+      "date": "2023-03-25",
+      "endsAt": "2023-03-26",
       "entities": [
         "dave",
         "boston",
@@ -1262,47 +1201,20 @@
       ]
     },
     {
-      "key": "dave-april-car-show",
+      "key": "calvin-first-ride",
       "type": "event",
-      "title": "Dave went to a classic car show",
-      "date": "2023-04-15",
-      "endsAt": "2023-04-16",
+      "title": "Calvin took his new red sports car out for a ride",
+      "date": "2023-03-25",
       "entities": [
-        "dave",
-        "car-restoration"
+        "calvin",
+        "calvins-ferrari"
       ],
       "sourceTurns": [
-        "D3:12"
+        "D2:5"
       ]
     },
     {
-      "key": "dave-opens-car-shop",
-      "type": "milestone",
-      "title": "Dave opened his own car maintenance shop",
-      "date": "2023-05-01",
-      "entities": [
-        "dave",
-        "daves-car-shop"
-      ],
-      "sourceTurns": [
-        "D4:1"
-      ]
-    },
-    {
-      "key": "dave-joins-local-garage",
-      "type": "event",
-      "title": "Dave teamed up with a local garage",
-      "date": "2023-05-03",
-      "entities": [
-        "dave",
-        "local-garage"
-      ],
-      "sourceTurns": [
-        "D5:1"
-      ]
-    },
-    {
-      "key": "calvin-tokyo-skyline-photo",
+      "key": "tokyo-skyline-photo",
       "type": "event",
       "title": "Calvin photographed the Tokyo skyline at night",
       "date": "2023-05-15",
@@ -1316,9 +1228,9 @@
       ]
     },
     {
-      "key": "calvin-album-team-meeting",
+      "key": "album-team-session",
       "type": "milestone",
-      "title": "Calvin met the creative team for his album for a long session",
+      "title": "Calvin met the creative team for his album for a long studio session",
       "date": "2023-06-08",
       "entities": [
         "calvin",
@@ -1329,14 +1241,15 @@
       ]
     },
     {
-      "key": "dave-boston-park-stroll",
+      "key": "daves-park-stroll",
       "type": "event",
-      "title": "Dave took a spring stroll in a Boston park",
+      "title": "Dave went for a stroll in a Boston park",
       "date": "2023-06-02",
       "entities": [
         "dave",
         "boston",
-        "park-walks"
+        "daves-park",
+        "walking"
       ],
       "sourceTurns": [
         "D8:6"
@@ -1345,7 +1258,7 @@
     {
       "key": "calvin-car-accident",
       "type": "event",
-      "title": "Calvin had a car accident in which nobody was hurt",
+      "title": "Calvin had a minor car accident in which nobody was hurt",
       "date": "2023-06-16",
       "entities": [
         "calvin",
@@ -1356,73 +1269,33 @@
       ]
     },
     {
-      "key": "dave-park-outing-with-friends",
-      "type": "event",
-      "title": "Dave and his friends went to their favourite park spot",
-      "date": "2023-07-07",
-      "entities": [
-        "dave",
-        "daves-favourite-park",
-        "park-walks"
-      ],
-      "sourceTurns": [
-        "D10:5"
-      ]
-    },
-    {
-      "key": "calvin-performs-with-band",
+      "key": "calvin-performed-with-band",
       "type": "event",
       "title": "Calvin performed on stage with a band",
       "date": "2023-08-02",
       "entities": [
-        "calvin"
+        "calvin",
+        "making-music"
       ],
       "sourceTurns": [
         "D12:11"
       ]
     },
     {
-      "key": "calvin-ferrari-service",
-      "type": "event",
-      "title": "Calvin took his Ferrari in for a service",
-      "date": "2023-08-03",
-      "entities": [
-        "calvin",
-        "calvins-ferrari"
-      ],
-      "sourceTurns": [
-        "D12:1"
-      ]
-    },
-    {
-      "key": "dave-picked-for-workshop",
-      "type": "milestone",
-      "title": "Dave was picked for a car modification workshop",
-      "date": "2023-08-11",
-      "entities": [
-        "dave",
-        "car-mod-workshop"
-      ],
-      "sourceTurns": [
-        "D13:1"
-      ]
-    },
-    {
-      "key": "daves-restoration-target",
+      "key": "mustang-deadline",
       "type": "deadline",
-      "title": "Dave hoped to have the car he was restoring finished",
+      "title": "Dave hoped to have the vintage Ford Mustang fully restored",
       "date": "2023-09-30",
       "entities": [
         "dave",
-        "daves-mustang",
-        "car-restoration"
+        "daves-mustang"
       ],
       "sourceTurns": [
         "D14:13"
       ]
     },
     {
-      "key": "dave-card-night",
+      "key": "daves-card-night",
       "type": "event",
       "title": "Dave had a card night with his friends",
       "date": "2023-08-18",
@@ -1446,39 +1319,9 @@
       ]
     },
     {
-      "key": "calvin-frank-ocean-deal",
-      "type": "milestone",
-      "title": "Calvin secured a deal to continue collaborating with Frank Ocean",
-      "date": "2023-08-22",
-      "entities": [
-        "calvin",
-        "frank-ocean"
-      ],
-      "sourceTurns": [
-        "D15:2"
-      ]
-    },
-    {
-      "key": "calvin-video-shoot",
+      "key": "dave-back-from-san-francisco",
       "type": "event",
-      "title": "Calvin started shooting the music video for his album on a beach in Miami",
-      "date": "2023-08-26",
-      "endsAt": "2023-08-27",
-      "entities": [
-        "calvin",
-        "miami",
-        "album-music-video",
-        "calvins-album"
-      ],
-      "sourceTurns": [
-        "D16:6",
-        "D16:8"
-      ]
-    },
-    {
-      "key": "dave-returns-from-san-francisco",
-      "type": "event",
-      "title": "Dave came back from San Francisco with new knowledge of car modification",
+      "title": "Dave came back from San Francisco with new knowledge about car modification",
       "date": "2023-09-01",
       "entities": [
         "dave",
@@ -1503,47 +1346,35 @@
       ]
     },
     {
-      "key": "dave-rock-concert-boston",
+      "key": "dave-band-jam",
       "type": "event",
-      "title": "Dave went to a rock concert in Boston",
-      "date": "2023-09-09",
-      "endsAt": "2023-09-10",
-      "entities": [
-        "dave",
-        "boston"
-      ],
-      "sourceTurns": [
-        "D19:1"
-      ]
-    },
-    {
-      "key": "daves-band-rehearsal",
-      "type": "event",
-      "title": "Dave and his rock band had a jam session",
+      "title": "Dave and his rock band had a jam session they were too absorbed in to record",
       "date": "2023-09-14",
       "entities": [
         "dave",
         "daves-rock-band"
       ],
       "sourceTurns": [
-        "D19:1"
+        "D19:1",
+        "D19:3"
       ]
     },
     {
-      "key": "calvin-meets-boston-artists",
+      "key": "calvin-boston-artists",
       "type": "event",
       "title": "Calvin met artists in Boston to talk about working together",
       "date": "2023-10-03",
       "entities": [
         "calvin",
-        "boston"
+        "boston",
+        "making-music"
       ],
       "sourceTurns": [
         "D21:1"
       ]
     },
     {
-      "key": "dave-october-car-show",
+      "key": "dave-car-show-october",
       "type": "event",
       "title": "Dave went to a car show and tried out car modifications",
       "date": "2023-10-06",
@@ -1558,7 +1389,7 @@
     {
       "key": "calvin-boston-sightseeing",
       "type": "event",
-      "title": "Calvin saw the sights of Boston with his old high school friend",
+      "title": "Calvin visited sights in Boston with his old high-school friend",
       "date": "2023-10-24",
       "entities": [
         "calvin",
@@ -1570,23 +1401,9 @@
       ]
     },
     {
-      "key": "dave-finishes-restoration",
-      "type": "milestone",
-      "title": "Dave finished restoring the car he had been working on",
-      "date": "2023-10-29",
-      "entities": [
-        "dave",
-        "daves-mustang",
-        "car-restoration"
-      ],
-      "sourceTurns": [
-        "D27:10"
-      ]
-    },
-    {
       "key": "calvin-boston-gala",
       "type": "event",
-      "title": "Calvin went to a gala in Boston and met an artist he connected with",
+      "title": "Calvin attended a gala in Boston and met an artist he clicked with",
       "date": "2023-11-16",
       "entities": [
         "calvin",
@@ -1608,19 +1425,17 @@
       }
     },
     {
+      "label": "knows",
+      "from": "calvin",
+      "to": "frank-ocean",
+      "properties": {
+        "kind": "colleague"
+      }
+    },
+    {
       "label": "lives_in",
       "from": "dave",
       "to": "boston"
-    },
-    {
-      "label": "lives_in",
-      "from": "calvin",
-      "to": "calvins-mansion"
-    },
-    {
-      "label": "located_in",
-      "from": "calvins-mansion",
-      "to": "japan"
     },
     {
       "label": "located_in",
@@ -1629,8 +1444,66 @@
     },
     {
       "label": "located_in",
-      "from": "daves-car-shop",
+      "from": "daves-park",
       "to": "boston"
+    },
+    {
+      "label": "owns",
+      "from": "calvin",
+      "to": "calvins-ferrari"
+    },
+    {
+      "label": "works_at",
+      "from": "dave",
+      "to": "daves-car-shop",
+      "properties": {
+        "role": "owner"
+      }
+    },
+    {
+      "label": "practices",
+      "from": "dave",
+      "to": "car-restoration"
+    },
+    {
+      "label": "practices",
+      "from": "dave",
+      "to": "walking"
+    },
+    {
+      "label": "practices",
+      "from": "calvin",
+      "to": "making-music"
+    },
+    {
+      "label": "works_on",
+      "from": "calvin",
+      "to": "frank-ocean-tour"
+    },
+    {
+      "label": "works_on",
+      "from": "frank-ocean",
+      "to": "frank-ocean-tour"
+    },
+    {
+      "label": "created_by",
+      "from": "calvins-album",
+      "to": "calvin"
+    },
+    {
+      "label": "likes",
+      "from": "dave",
+      "to": "aerosmith"
+    },
+    {
+      "label": "likes",
+      "from": "dave",
+      "to": "car-restoration"
+    },
+    {
+      "label": "likes",
+      "from": "calvin",
+      "to": "car-restoration"
     },
     {
       "label": "likes",
@@ -1643,99 +1516,42 @@
       "to": "calvins-ferrari"
     },
     {
-      "label": "likes",
-      "from": "calvin",
-      "to": "aerosmith"
-    },
-    {
-      "label": "likes",
-      "from": "dave",
-      "to": "aerosmith"
-    },
-    {
-      "label": "owns",
-      "from": "calvin",
-      "to": "calvins-ferrari",
-      "properties": {
-        "since": "2023-03-26"
-      }
-    },
-    {
-      "label": "owns",
-      "from": "calvin",
-      "to": "calvins-necklace"
-    },
-    {
-      "label": "practices",
-      "from": "dave",
-      "to": "car-restoration"
-    },
-    {
-      "label": "practices",
-      "from": "dave",
-      "to": "park-walks"
-    },
-    {
-      "label": "works_at",
-      "from": "dave",
-      "to": "daves-car-shop",
-      "properties": {
-        "role": "owner",
-        "since": "2023-05-01"
-      }
-    },
-    {
-      "label": "works_at",
-      "from": "dave",
-      "to": "local-garage",
-      "properties": {
-        "since": "2023-05-03"
-      }
-    },
-    {
-      "label": "works_on",
-      "from": "calvin",
-      "to": "frank-ocean-tour",
-      "properties": {
-        "role": "performer"
-      }
-    },
-    {
-      "label": "works_on",
-      "from": "frank-ocean",
-      "to": "frank-ocean-tour",
-      "properties": {
-        "role": "headliner"
-      }
-    },
-    {
-      "label": "knows",
-      "from": "calvin",
-      "to": "frank-ocean",
-      "properties": {
-        "kind": "colleague"
-      }
-    },
-    {
-      "label": "supersedes",
-      "from": "calvin-went-to-japan",
-      "to": "calvin-never-been-to-japan"
-    },
-    {
-      "label": "created_by",
-      "from": "calvins-album",
-      "to": "calvin",
-      "properties": {
-        "role": "artist"
-      }
-    },
-    {
       "label": "member_of",
       "from": "dave",
       "to": "daves-rock-band",
       "properties": {
         "role": "guitarist"
       }
+    },
+    {
+      "label": "member_of",
+      "from": "dave",
+      "to": "car-mod-workshop"
+    },
+    {
+      "label": "located_in",
+      "from": "car-mod-workshop",
+      "to": "san-francisco"
+    },
+    {
+      "label": "practices",
+      "from": "dave",
+      "to": "making-music"
+    },
+    {
+      "label": "lives_in",
+      "from": "calvin",
+      "to": "japan"
+    },
+    {
+      "label": "located_in",
+      "from": "calvins-japanese-mansion",
+      "to": "japan"
+    },
+    {
+      "label": "works_on",
+      "from": "calvin",
+      "to": "mansion-recording-studio"
     },
     {
       "label": "family_of",
@@ -1746,32 +1562,9 @@
       }
     },
     {
-      "label": "member_of",
+      "label": "owns",
       "from": "dave",
-      "to": "car-mod-workshop",
-      "properties": {
-        "since": "2023-08-11"
-      }
-    },
-    {
-      "label": "works_on",
-      "from": "calvin",
-      "to": "mansion-studio-conversion"
-    },
-    {
-      "label": "located_in",
-      "from": "car-mod-workshop",
-      "to": "san-francisco"
-    },
-    {
-      "label": "works_on",
-      "from": "calvin",
-      "to": "album-music-video"
-    },
-    {
-      "label": "part_of",
-      "from": "album-music-video",
-      "to": "calvins-album"
+      "to": "daves-mustang"
     },
     {
       "label": "owns",
@@ -1779,9 +1572,17 @@
       "to": "calvins-guitar"
     },
     {
-      "label": "owns",
-      "from": "dave",
-      "to": "daves-mustang"
+      "label": "located_in",
+      "from": "daves-car-shop",
+      "to": "boston"
+    },
+    {
+      "label": "family_of",
+      "from": "calvin",
+      "to": "calvins-dad",
+      "properties": {
+        "relation": "father"
+      }
     },
     {
       "label": "likes",
@@ -1800,23 +1601,13 @@
     },
     {
       "label": "likes",
+      "from": "dave",
+      "to": "tokyo"
+    },
+    {
+      "label": "owns",
       "from": "calvin",
-      "to": "miami"
-    },
-    {
-      "label": "located_in",
-      "from": "daves-favourite-park",
-      "to": "boston"
-    },
-    {
-      "label": "located_in",
-      "from": "shibuya-crossing",
-      "to": "tokyo"
-    },
-    {
-      "label": "located_in",
-      "from": "shinjuku",
-      "to": "tokyo"
+      "to": "calvins-second-ferrari"
     },
     {
       "label": "knows",
@@ -1827,27 +1618,9 @@
       }
     },
     {
-      "label": "likes",
-      "from": "dave",
-      "to": "daves-favourite-park"
-    },
-    {
-      "label": "supersedes",
-      "from": "calvin-visited-daves-park",
-      "to": "calvin-never-visited-daves-park"
-    },
-    {
       "label": "practices",
       "from": "dave",
       "to": "photography"
-    },
-    {
-      "label": "created_by",
-      "from": "daves-car-blog",
-      "to": "dave",
-      "properties": {
-        "role": "author"
-      }
     },
     {
       "label": "owns",
@@ -1857,7 +1630,7 @@
   ],
   "claims": [
     {
-      "text": "Dave told Calvin on 23 March 2023 that he had recently been to a classic car show, where he saw many classic cars and heard their owners' stories, and found it inspiring.",
+      "text": "Dave attended a classic car show shortly before 23 March 2023, where he saw many classic cars and spoke with their owners about them, and found it inspiring.",
       "speaker": "Dave",
       "statedOn": "2023-03-23",
       "entities": [
@@ -1870,12 +1643,12 @@
       ]
     },
     {
-      "text": "Calvin told Dave on 23 March 2023 that he had had a big life change and showed him his new mansion.",
+      "text": "Calvin told Dave on 23 March 2023 that he had just had a big life change, and showed him a photograph of his new mansion.",
       "speaker": "Calvin",
       "statedOn": "2023-03-23",
       "entities": [
         "calvin",
-        "calvins-mansion"
+        "calvins-japanese-mansion"
       ],
       "sourceTurns": [
         "D1:3",
@@ -1883,7 +1656,7 @@
       ]
     },
     {
-      "text": "Calvin said on 23 March 2023 that the move was driven by his excitement to learn about Japanese culture and to expand.",
+      "text": "Calvin said on 23 March 2023 that he was excited to learn about Japanese culture and to expand.",
       "speaker": "Calvin",
       "statedOn": "2023-03-23",
       "entities": [
@@ -1896,11 +1669,9 @@
       ]
     },
     {
-      "key": "calvin-never-been-to-japan",
-      "text": "As of 23 March 2023 Calvin had never been to Japan, and said he was fascinated by its traditions and could not wait to experience the culture.",
+      "text": "As of 23 March 2023 Calvin had never been to Japan, and said he was fascinated by its traditions and could not wait to get a taste of the culture.",
       "speaker": "Calvin",
       "statedOn": "2023-03-23",
-      "superseded": true,
       "entities": [
         "calvin",
         "japan"
@@ -1910,48 +1681,49 @@
       ]
     },
     {
-      "text": "Calvin said on 23 March 2023 that he was leaving for Japan the following month, April 2023, and showed the living room of the place he would be staying in.",
+      "text": "Calvin was leaving for Japan in April 2023 and showed Dave the living room of the place he would be staying in.",
       "speaker": "Calvin",
       "statedOn": "2023-03-23",
       "entities": [
         "calvin",
         "japan",
-        "calvins-mansion"
+        "calvins-japanese-mansion"
       ],
       "sourceTurns": [
         "D1:8",
-        "D1:9"
+        "D1:9",
+        "D1:10"
       ]
     },
     {
-      "text": "Calvin said on 23 March 2023 that his agent had found him the place he would stay in in Japan, and that he was thankful for it.",
+      "text": "Calvin's agent found him the place he was to stay in in Japan, and he said he was thankful for it.",
+      "speaker": "Calvin",
+      "statedOn": "2023-03-23",
+      "entities": [
+        "calvin",
+        "calvins-japanese-mansion"
+      ],
+      "sourceTurns": [
+        "D1:11",
+        "D1:12"
+      ]
+    },
+    {
+      "text": "Calvin planned to explore the city while in Japan, try different local cuisines and perhaps collaborate with local musicians.",
       "speaker": "Calvin",
       "statedOn": "2023-03-23",
       "entities": [
         "calvin",
         "japan",
-        "calvins-mansion"
+        "making-music"
       ],
       "sourceTurns": [
-        "D1:10",
-        "D1:11"
+        "D1:13",
+        "D1:14"
       ]
     },
     {
-      "text": "Calvin's plans for his April 2023 trip to Japan were to explore the city, try local cuisines and possibly collaborate with local musicians.",
-      "speaker": "Calvin",
-      "statedOn": "2023-03-23",
-      "entities": [
-        "calvin",
-        "japan"
-      ],
-      "sourceTurns": [
-        "D1:12",
-        "D1:13"
-      ]
-    },
-    {
-      "text": "Calvin said on 23 March 2023 that he would be in Japan for a few months and would then go on to Boston.",
+      "text": "Calvin planned to stay in Japan for a few months and then travel on to Boston.",
       "speaker": "Calvin",
       "statedOn": "2023-03-23",
       "entities": [
@@ -1960,82 +1732,64 @@
         "boston"
       ],
       "sourceTurns": [
-        "D1:14",
         "D1:15"
       ]
     },
     {
-      "text": "Dave said on 23 March 2023 that he had been spending a lot of time at a beautiful park with a lake and boats that he finds calming, and recommended it to Calvin.",
+      "text": "Dave had been spending a lot of time at a park he finds calming, and recommended it to Calvin on 23 March 2023.",
       "speaker": "Dave",
       "statedOn": "2023-03-23",
       "entities": [
         "dave",
-        "daves-favourite-park",
-        "park-walks"
+        "daves-park",
+        "walking"
       ],
       "sourceTurns": [
         "D1:16"
       ]
     },
     {
-      "key": "calvin-never-visited-daves-park",
-      "text": "As of 23 March 2023 Calvin had never been to the park Dave recommended, and he said he would check it out when he was back in Boston.",
+      "text": "As of 23 March 2023 Calvin had never been to the park Dave recommended, and said he would check it out when he was back.",
       "speaker": "Calvin",
       "statedOn": "2023-03-23",
-      "superseded": true,
       "entities": [
         "calvin",
-        "daves-favourite-park",
-        "boston"
+        "daves-park"
       ],
       "sourceTurns": [
-        "D1:17"
-      ]
-    },
-    {
-      "text": "Dave offered Calvin further recommendations for his trip on 23 March 2023, and Calvin said he would ask if he needed help.",
-      "speaker": "Dave",
-      "statedOn": "2023-03-23",
-      "entities": [
-        "dave",
-        "calvin"
-      ],
-      "sourceTurns": [
+        "D1:17",
         "D1:18",
         "D1:19"
       ]
     },
     {
-      "text": "Calvin told Dave on 26 March 2023 that he had just bought a new car, and that finally owning a luxury car was a dream come true.",
+      "text": "Calvin bought a luxury red sports car shortly before 26 March 2023, the first he had owned, and called finally owning one a dream come true.",
       "speaker": "Calvin",
       "statedOn": "2023-03-26",
       "entities": [
         "calvin",
         "calvins-ferrari"
-      ],
-      "chrono": [
-        "calvin-buys-ferrari"
       ],
       "sourceTurns": [
         "D2:1",
-        "D2:2"
-      ]
-    },
-    {
-      "text": "Calvin described his new car on 26 March 2023 as a smooth and powerful ride that made him feel like a rockstar behind the wheel.",
-      "speaker": "Calvin",
-      "statedOn": "2023-03-26",
-      "entities": [
-        "calvin",
-        "calvins-ferrari"
-      ],
-      "sourceTurns": [
-        "D2:3",
+        "D2:2",
         "D2:4"
       ]
     },
     {
-      "text": "Calvin took his new red sports car out for a drive on 25 March 2023 and photographed it, saying it was what he deserved after all his hard work and felt like an adrenaline rush every time he got in.",
+      "text": "Calvin described his new red sports car as a smooth and powerful ride that made him feel like a rockstar behind the wheel.",
+      "speaker": "Calvin",
+      "statedOn": "2023-03-26",
+      "entities": [
+        "calvin",
+        "calvins-ferrari"
+      ],
+      "sourceTurns": [
+        "D2:3"
+      ]
+    },
+    {
+      "text": "Calvin took his new red sports car out for a ride on 25 March 2023 and said stepping into it is an adrenaline rush and what he deserved after his hard work.",
       "speaker": "Calvin",
       "statedOn": "2023-03-26",
       "entities": [
@@ -2043,7 +1797,7 @@
         "calvins-ferrari"
       ],
       "chrono": [
-        "calvin-first-drive-ferrari"
+        "calvin-first-ride"
       ],
       "sourceTurns": [
         "D2:5",
@@ -2052,7 +1806,7 @@
       ]
     },
     {
-      "text": "Dave went to a music festival in Boston over the weekend of 18-19 March 2023, with many bands playing and an electric atmosphere, and said it reminded him why he loves music.",
+      "text": "Dave went to a music festival in Boston over the weekend of 25-26 March 2023 and said the bands and the atmosphere reminded him why he loves music.",
       "speaker": "Dave",
       "statedOn": "2023-03-26",
       "entities": [
@@ -2060,7 +1814,7 @@
         "boston"
       ],
       "chrono": [
-        "dave-boston-music-festival"
+        "boston-music-festival-march"
       ],
       "sourceTurns": [
         "D2:8",
@@ -2068,91 +1822,56 @@
       ]
     },
     {
-      "text": "Dave said his favourite act at the Boston music festival of 18-19 March 2023 was Aerosmith, whose performance he called incredible.",
+      "text": "Dave named Aerosmith as his favourite act at the Boston music festival in March 2023, said their performance was incredible, and saw them live for the first time there.",
+      "speaker": "Dave",
+      "statedOn": "2023-03-26",
+      "entities": [
+        "dave",
+        "aerosmith",
+        "boston"
+      ],
+      "chrono": [
+        "boston-music-festival-march"
+      ],
+      "sourceTurns": [
+        "D2:10",
+        "D2:11",
+        "D2:12"
+      ]
+    },
+    {
+      "text": "Dave did not get to meet Aerosmith after their performance at the Boston festival, but said seeing them live was enough.",
       "speaker": "Dave",
       "statedOn": "2023-03-26",
       "entities": [
         "dave",
         "aerosmith"
       ],
-      "chrono": [
-        "dave-boston-music-festival"
-      ],
       "sourceTurns": [
-        "D2:10"
-      ]
-    },
-    {
-      "text": "Calvin said on 26 March 2023 that he likes Aerosmith.",
-      "speaker": "Calvin",
-      "statedOn": "2023-03-26",
-      "entities": [
-        "calvin",
-        "aerosmith"
-      ],
-      "sourceTurns": [
-        "D2:11"
-      ]
-    },
-    {
-      "text": "Dave saw Aerosmith live for the first time at the Boston festival of 18-19 March 2023 and did not get to meet them after the show, but said seeing them live was enough.",
-      "speaker": "Dave",
-      "statedOn": "2023-03-26",
-      "entities": [
-        "dave",
-        "aerosmith"
-      ],
-      "chrono": [
-        "dave-boston-music-festival"
-      ],
-      "sourceTurns": [
-        "D2:12",
         "D2:13",
-        "D2:14"
-      ]
-    },
-    {
-      "text": "Calvin said on 26 March 2023 that it is always a dream to see your favourite performers live and that he was glad Dave had had the experience.",
-      "speaker": "Calvin",
-      "statedOn": "2023-03-26",
-      "entities": [
-        "calvin",
-        "dave"
-      ],
-      "sourceTurns": [
+        "D2:14",
         "D2:15",
         "D2:16"
       ]
     },
     {
-      "text": "Calvin had a few studio sessions in the week before 26 March 2023, wrote new songs and was looking forward to collaborating on them.",
-      "speaker": "Calvin",
-      "statedOn": "2023-03-26",
-      "entities": [
-        "calvin"
-      ],
-      "sourceTurns": [
-        "D2:17",
-        "D2:18"
-      ]
-    },
-    {
-      "text": "Calvin promised Dave on 26 March 2023 that he would keep him posted on how his musical collaborations went.",
+      "text": "Calvin had several studio sessions in the week before 26 March 2023, wrote new songs and was looking forward to collaborating on them.",
       "speaker": "Calvin",
       "statedOn": "2023-03-26",
       "entities": [
         "calvin",
-        "dave"
+        "making-music"
       ],
       "sourceTurns": [
+        "D2:17",
+        "D2:18",
         "D2:19",
         "D2:20",
         "D2:21"
       ]
     },
     {
-      "key": "calvin-went-to-japan",
-      "text": "Calvin travelled to Japan and went to a music festival in Tokyo shortly before 20 April 2023; he saw no bands there but met many talented artists and music industry people and found it enriching.",
+      "text": "Calvin attended a music festival in Tokyo shortly before 20 April 2023; he saw no bands but met many talented artists and music industry people and found it enriching.",
       "speaker": "Calvin",
       "statedOn": "2023-04-20",
       "entities": [
@@ -2163,54 +1882,44 @@
       "sourceTurns": [
         "D3:1",
         "D3:2",
-        "D3:3"
+        "D3:3",
+        "D3:4"
       ]
     },
     {
-      "text": "Calvin said on 20 April 2023 that he had learned a lot and been given great advice by music industry professionals at the Tokyo festival, and found it inspiring.",
+      "text": "Calvin said he learned a lot and was given good advice by music industry professionals at the Tokyo festival in April 2023.",
       "speaker": "Calvin",
       "statedOn": "2023-04-20",
       "entities": [
         "calvin",
-        "tokyo"
+        "making-music"
       ],
       "sourceTurns": [
-        "D3:4",
-        "D3:5"
+        "D3:5",
+        "D3:6"
       ]
     },
     {
-      "text": "A producer at the Tokyo music festival advised Calvin to stay true to himself and keep his sound unique, which made Calvin think about where he wanted his music to go.",
+      "text": "A producer Calvin met at the Tokyo music festival advised him to stay true to himself and keep a unique sound, which made him think about where he wanted his music to go.",
       "speaker": "Calvin",
       "statedOn": "2023-04-20",
       "entities": [
         "calvin",
-        "tokyo"
+        "making-music"
       ],
       "sourceTurns": [
-        "D3:6",
-        "D3:7"
+        "D3:7",
+        "D3:8"
       ]
     },
     {
-      "text": "Calvin said on 20 April 2023 that he dreams of touring the world, performing for different people and reaching a global audience with his music.",
-      "speaker": "Calvin",
-      "statedOn": "2023-04-20",
-      "entities": [
-        "calvin"
-      ],
-      "sourceTurns": [
-        "D3:8",
-        "D3:9"
-      ]
-    },
-    {
-      "text": "Calvin said on 20 April 2023 that he was looking forward to a trip to Boston after finishing the Frank Ocean tour, because he had heard the music scene there was good.",
+      "text": "Calvin said on 20 April 2023 that he dreamed of touring the world and reaching a global audience, and that he would travel to Boston after finishing the Frank Ocean tour.",
       "speaker": "Calvin",
       "statedOn": "2023-04-20",
       "entities": [
         "calvin",
         "boston",
+        "frank-ocean",
         "frank-ocean-tour"
       ],
       "sourceTurns": [
@@ -2218,13 +1927,13 @@
       ]
     },
     {
-      "text": "Dave offered on 20 April 2023 to show Calvin around Boston, naming Paradise Rock, House of Blues and Fenway Park as places in the city's music scene, and said he would be in the front row.",
+      "text": "Dave offered to show Calvin around Boston and named Paradise Rock, House of Blues and Fenway Park as part of the city's music scene.",
       "speaker": "Dave",
       "statedOn": "2023-04-20",
       "entities": [
         "dave",
-        "calvin",
-        "boston"
+        "boston",
+        "calvin"
       ],
       "sourceTurns": [
         "D3:10",
@@ -2232,22 +1941,19 @@
       ]
     },
     {
-      "text": "Dave went to a car show over the weekend of 15-16 April 2023, and said the charm of classic cars and the dedication of the people restoring them is why he is into auto engineering.",
+      "text": "Dave went to a car show over the weekend of 15-16 April 2023 and said the dedication people put into restoring classic cars is why he is so into auto engineering.",
       "speaker": "Dave",
       "statedOn": "2023-04-20",
       "entities": [
         "dave",
         "car-restoration"
       ],
-      "chrono": [
-        "dave-april-car-show"
-      ],
       "sourceTurns": [
         "D3:12"
       ]
     },
     {
-      "text": "Calvin said on 20 April 2023 that he had put a lot of work into his own car and looked forward to seeing more of Dave's cars in Boston.",
+      "text": "Calvin said he had put a lot of work into his own car and looked forward to seeing more of Dave's cars when he was in Boston.",
       "speaker": "Calvin",
       "statedOn": "2023-04-20",
       "entities": [
@@ -2256,11 +1962,12 @@
         "boston"
       ],
       "sourceTurns": [
-        "D3:13"
+        "D3:13",
+        "D3:14"
       ]
     },
     {
-      "text": "Asked on 20 April 2023 whether he had seen anything of Boston apart from his gigs, Calvin said he had been too busy with rehearsals and travelling, but wanted to explore the city, try the food and see the attractions, and suggested eating with Dave.",
+      "text": "As of 20 April 2023 Calvin had not explored Boston beyond his gigs because he was busy with rehearsals and travelling, and he suggested that he and Dave eat together when he was there.",
       "speaker": "Calvin",
       "statedOn": "2023-04-20",
       "entities": [
@@ -2269,44 +1976,14 @@
         "dave"
       ],
       "sourceTurns": [
-        "D3:14",
-        "D3:15"
-      ]
-    },
-    {
-      "text": "Calvin and Dave agreed on 20 April 2023 to eat out together and for Dave to show Calvin his favourite spots in Boston when Calvin came.",
-      "speaker": "Dave",
-      "statedOn": "2023-04-20",
-      "entities": [
-        "dave",
-        "calvin",
-        "boston"
-      ],
-      "sourceTurns": [
+        "D3:15",
         "D3:16",
         "D3:17",
         "D3:18"
       ]
     },
     {
-      "text": "Dave told Calvin on 1 May 2023 that he had finally opened his own car maintenance shop, a dream come true and the result of a lot of hard work.",
-      "speaker": "Dave",
-      "statedOn": "2023-05-01",
-      "entities": [
-        "dave",
-        "daves-car-shop"
-      ],
-      "chrono": [
-        "dave-opens-car-shop"
-      ],
-      "sourceTurns": [
-        "D4:1",
-        "D4:2",
-        "D4:3"
-      ]
-    },
-    {
-      "text": "Dave said on 1 May 2023 that opening the shop was a step towards his other dream of working on classic cars, whose design and engineering he loves.",
+      "text": "Dave opened his own car maintenance shop, which he announced to Calvin on 1 May 2023 as a dream come true after a lot of hard work.",
       "speaker": "Dave",
       "statedOn": "2023-05-01",
       "entities": [
@@ -2315,12 +1992,28 @@
         "car-restoration"
       ],
       "sourceTurns": [
-        "D4:4",
-        "D4:5"
+        "D4:1",
+        "D4:2",
+        "D4:3",
+        "D4:4"
       ]
     },
     {
-      "text": "Dave restored a classic car in 2022 and said on 1 May 2023 that he had been thrilled to bring it back to life; he showed Calvin its engine.",
+      "text": "Dave said opening his shop was a step towards his other dream of working on classic cars, whose design and engineering he loves.",
+      "speaker": "Dave",
+      "statedOn": "2023-05-01",
+      "entities": [
+        "dave",
+        "daves-car-shop",
+        "car-restoration"
+      ],
+      "sourceTurns": [
+        "D4:5",
+        "D4:6"
+      ]
+    },
+    {
+      "text": "Dave restored a classic car in 2022 and described it as a challenging labour of love that was worth it.",
       "speaker": "Dave",
       "statedOn": "2023-05-01",
       "entities": [
@@ -2328,28 +2021,13 @@
         "car-restoration"
       ],
       "sourceTurns": [
-        "D4:6",
         "D4:7",
-        "D4:8"
+        "D4:8",
+        "D4:9"
       ]
     },
     {
-      "text": "Dave called the classic car restoration he finished in 2022 a labour of love, challenging but worth it, and Calvin agreed that it is rewarding to see something you worked on come to life.",
-      "speaker": "Dave",
-      "statedOn": "2023-05-01",
-      "entities": [
-        "dave",
-        "calvin",
-        "car-restoration"
-      ],
-      "sourceTurns": [
-        "D4:9",
-        "D4:10",
-        "D4:11"
-      ]
-    },
-    {
-      "text": "Calvin and Dave agreed on 1 May 2023 that finishing something you made from scratch and seeing it resonate with people is deeply satisfying, and that dedication and passion together are what keep them motivated.",
+      "text": "Calvin and Dave agreed that seeing something you made or restored come to life, and knowing your own skill and work made it happen, is deeply satisfying.",
       "speaker": "Calvin",
       "statedOn": "2023-05-01",
       "entities": [
@@ -2357,6 +2035,8 @@
         "dave"
       ],
       "sourceTurns": [
+        "D4:10",
+        "D4:11",
         "D4:12",
         "D4:13",
         "D4:14",
@@ -2365,13 +2045,13 @@
       ]
     },
     {
-      "text": "Dave invited Calvin on 1 May 2023 to come by his new car shop, and Calvin said he would love to.",
+      "text": "Dave invited Calvin to come by his car maintenance shop sometime.",
       "speaker": "Dave",
       "statedOn": "2023-05-01",
       "entities": [
         "dave",
-        "calvin",
-        "daves-car-shop"
+        "daves-car-shop",
+        "calvin"
       ],
       "sourceTurns": [
         "D4:17",
@@ -2379,7 +2059,7 @@
       ]
     },
     {
-      "text": "Dave works on all kinds of cars at his shop, from regular maintenance to full restorations of classic cars, and says it keeps him busy and happy and that he is helping people keep their cars in good condition.",
+      "text": "Dave's shop works on all kinds of cars, from regular maintenance to full restorations of classic cars.",
       "speaker": "Dave",
       "statedOn": "2023-05-01",
       "entities": [
@@ -2389,96 +2069,69 @@
       ],
       "sourceTurns": [
         "D4:19",
-        "D4:20",
-        "D4:21"
+        "D4:20"
       ]
     },
     {
-      "text": "Dave said on 1 May 2023 that it means a lot to him that his work is valued and brings joy to others, after Calvin told him that doing what he loves while helping others is rewarding.",
+      "text": "Dave said working on cars is what he is passionate about and that helping people keep their cars in good condition is rewarding.",
       "speaker": "Dave",
       "statedOn": "2023-05-01",
       "entities": [
         "dave",
-        "calvin"
+        "car-restoration"
       ],
       "sourceTurns": [
+        "D4:21",
         "D4:22",
         "D4:23"
       ]
     },
     {
-      "text": "Calvin was given a gold necklace with a diamond pendant by another artist, and said on 1 May 2023 that it is a reminder of why he keeps hustling as a musician.",
+      "text": "Calvin was given a gold necklace with a diamond pendant by another artist, and said it is a reminder of why he keeps hustling as a musician.",
       "speaker": "Calvin",
       "statedOn": "2023-05-01",
       "entities": [
         "calvin",
-        "calvins-necklace"
+        "making-music"
       ],
       "sourceTurns": [
         "D4:24",
         "D4:25",
-        "D4:26"
-      ]
-    },
-    {
-      "text": "Calvin and Dave agreed on 1 May 2023 to keep each other motivated when the road gets hard.",
-      "speaker": "Calvin",
-      "statedOn": "2023-05-01",
-      "entities": [
-        "calvin",
-        "dave"
-      ],
-      "sourceTurns": [
+        "D4:26",
         "D4:27",
         "D4:28"
       ]
     },
     {
-      "text": "Dave told Calvin on 3 May 2023 that he was teaming up with a local garage, and Calvin congratulated him on the new venture.",
+      "text": "Dave teamed up with a local garage and by 3 May 2023 was working there with other mechanics and sharing his knowledge of cars.",
       "speaker": "Dave",
       "statedOn": "2023-05-03",
       "entities": [
         "dave",
-        "local-garage"
-      ],
-      "chrono": [
-        "dave-joins-local-garage"
-      ],
-      "sourceTurns": [
-        "D5:1",
-        "D5:2"
-      ]
-    },
-    {
-      "text": "Dave said on 3 May 2023 that he was loving the work at the local garage, where he works with other mechanics and shares his knowledge about cars, and that his current car was a cool if challenging project.",
-      "speaker": "Dave",
-      "statedOn": "2023-05-03",
-      "entities": [
-        "dave",
-        "local-garage",
         "car-restoration"
       ],
       "sourceTurns": [
-        "D5:3",
-        "D5:4"
+        "D5:1",
+        "D5:2",
+        "D5:3"
       ]
     },
     {
-      "text": "Dave said on 3 May 2023 that he intended to keep learning about auto engineering, that building a custom car from scratch was his dream, and that for now he would keep working on his current project and assisting customers.",
+      "text": "Dave planned to keep learning about auto engineering and said his dream was to build a custom car from scratch one day.",
       "speaker": "Dave",
       "statedOn": "2023-05-03",
       "entities": [
         "dave",
-        "car-restoration",
-        "local-garage"
+        "car-restoration"
       ],
       "sourceTurns": [
+        "D5:4",
         "D5:5",
         "D5:6"
       ]
     },
     {
-      "text": "Calvin said on 3 May 2023 that long drives in his car are how he relaxes, because the wind and the open road clear his head.",
+      "text": "Calvin said long drives in his red sports car help him relax and clear his head, and that the wind and the open road feel freeing.",
       "speaker": "Calvin",
       "statedOn": "2023-05-03",
       "entities": [
@@ -2491,58 +2144,60 @@
       ]
     },
     {
-      "text": "Dave said on 3 May 2023 that taking a walk and exploring the sights and sounds is a peaceful way for him to destress.",
+      "text": "Dave said driving and taking walks to explore and take in the sights are how he destresses.",
       "speaker": "Dave",
       "statedOn": "2023-05-03",
       "entities": [
         "dave",
-        "park-walks"
+        "walking"
       ],
       "sourceTurns": [
         "D5:9"
       ]
     },
     {
-      "text": "Calvin said on 3 May 2023 that he had been enjoying getting to know Japanese culture, but that he was stuck with his music and felt as if his creativity had frozen.",
+      "text": "Calvin said on 3 May 2023 that he was enjoying getting to know Japanese culture but was creatively stuck with his music, and he asked Dave for advice.",
       "speaker": "Calvin",
       "statedOn": "2023-05-03",
       "entities": [
         "calvin",
-        "japan"
+        "japan",
+        "making-music"
       ],
       "sourceTurns": [
         "D5:10"
       ]
     },
     {
-      "text": "Dave advised Calvin on 3 May 2023 to take a break from music and immerse himself in concerts and favourite albums to jumpstart his inspiration, and Calvin said he would take the advice.",
+      "text": "Dave advised Calvin to break his creative block by taking a break from music and immersing himself in things he loves, such as concerts and favourite albums.",
       "speaker": "Dave",
       "statedOn": "2023-05-03",
       "entities": [
         "dave",
-        "calvin"
+        "calvin",
+        "making-music"
       ],
       "sourceTurns": [
-        "D5:11",
-        "D5:12"
+        "D5:11"
       ]
     },
     {
-      "text": "Dave told Calvin on 3 May 2023 to keep pursuing his music and never give up, and Calvin said he would not and that they should stay in touch.",
-      "speaker": "Dave",
+      "text": "Calvin said he would take Dave's advice to take a break and explore, and promised not to give up on his music.",
+      "speaker": "Calvin",
       "statedOn": "2023-05-03",
       "entities": [
-        "dave",
-        "calvin"
+        "calvin",
+        "making-music"
       ],
       "sourceTurns": [
+        "D5:12",
         "D5:13",
         "D5:14",
         "D5:15"
       ]
     },
     {
-      "text": "Calvin's home was flooded in the week before 16 May 2023, but he managed to save his music gear and his favourite microphone and said he was staying positive about getting everything fixed up.",
+      "text": "Calvin's place was flooded in the week before 16 May 2023, but he managed to save his music gear and his favourite microphone.",
       "speaker": "Calvin",
       "statedOn": "2023-05-16",
       "entities": [
@@ -2551,36 +2206,26 @@
       "sourceTurns": [
         "D6:1",
         "D6:2",
-        "D6:3"
+        "D6:3",
+        "D6:4"
       ]
     },
     {
-      "text": "Calvin said on 16 May 2023 that he was waiting for his insurance to come through before he could start repairs after the flood, and showed Dave the home studio where he makes his music.",
+      "text": "Calvin was waiting for his insurance to pay out before starting repairs after the flood, and showed Dave the studio he calls his creative haven.",
       "speaker": "Calvin",
       "statedOn": "2023-05-16",
       "entities": [
-        "calvin"
+        "calvin",
+        "mansion-recording-studio"
       ],
       "sourceTurns": [
-        "D6:4",
-        "D6:5"
-      ]
-    },
-    {
-      "text": "Dave hoped on 16 May 2023 that Calvin's studio would be fixed soon, and Calvin said he could not wait to get back to making music.",
-      "speaker": "Dave",
-      "statedOn": "2023-05-16",
-      "entities": [
-        "dave",
-        "calvin"
-      ],
-      "sourceTurns": [
+        "D6:5",
         "D6:6",
         "D6:7"
       ]
     },
     {
-      "text": "On 16 May 2023 Dave said he had opened his car shop the previous week and had invited friends over to celebrate, calling it an incredible journey so far.",
+      "text": "Dave opened his car shop in the week before 16 May 2023 and invited friends over to celebrate.",
       "speaker": "Dave",
       "statedOn": "2023-05-16",
       "entities": [
@@ -2594,7 +2239,7 @@
       ]
     },
     {
-      "text": "Calvin said on 16 May 2023 that he had a performance coming up in Tokyo later that month and hoped it would expand his following.",
+      "text": "Calvin had a performance coming up in Tokyo later in May 2023 and hoped it would win him a new audience and expand his following.",
       "speaker": "Calvin",
       "statedOn": "2023-05-16",
       "entities": [
@@ -2607,7 +2252,7 @@
       ]
     },
     {
-      "text": "Calvin was in Tokyo on 15 May 2023 and photographed the city skyline at night, calling it stunning.",
+      "text": "Calvin photographed the Tokyo skyline on the night of 15 May 2023 and said the city lights were stunning.",
       "speaker": "Calvin",
       "statedOn": "2023-05-16",
       "entities": [
@@ -2615,7 +2260,7 @@
         "tokyo"
       ],
       "chrono": [
-        "calvin-tokyo-skyline-photo"
+        "tokyo-skyline-photo"
       ],
       "sourceTurns": [
         "D6:13",
@@ -2624,7 +2269,7 @@
       ]
     },
     {
-      "text": "Dave said on 16 May 2023 that he was adding Tokyo to his list of places to visit after seeing Calvin's photograph of the city lights.",
+      "text": "Dave said after seeing Calvin's photograph of the Tokyo skyline that he had to take a trip there soon and was adding it to his list.",
       "speaker": "Dave",
       "statedOn": "2023-05-16",
       "entities": [
@@ -2638,7 +2283,7 @@
       ]
     },
     {
-      "text": "Calvin toured with Frank Ocean in the week before 31 May 2023 and performed in Tokyo, where he said the crowd was insane and he felt more alive than he could express.",
+      "text": "Calvin toured with Frank Ocean in the week before 31 May 2023 and said performing to the Tokyo crowd made him feel alive.",
       "speaker": "Calvin",
       "statedOn": "2023-05-31",
       "entities": [
@@ -2648,11 +2293,12 @@
         "tokyo"
       ],
       "sourceTurns": [
-        "D7:1"
+        "D7:1",
+        "D7:2"
       ]
     },
     {
-      "text": "Dave repaired the engine of his neighbour's car himself, and showed Calvin a photograph of the work on 31 May 2023.",
+      "text": "Dave repaired the engine of his neighbour's car himself, and said helping neighbours with their cars is not difficult for him and is therapeutic.",
       "speaker": "Dave",
       "statedOn": "2023-05-31",
       "entities": [
@@ -2661,23 +2307,12 @@
       ],
       "sourceTurns": [
         "D7:2",
-        "D7:3"
-      ]
-    },
-    {
-      "text": "Dave said on 31 May 2023 that helping his neighbours with their cars is no trouble for him and that working on cars is therapeutic.",
-      "speaker": "Dave",
-      "statedOn": "2023-05-31",
-      "entities": [
-        "dave",
-        "car-restoration"
-      ],
-      "sourceTurns": [
+        "D7:3",
         "D7:4"
       ]
     },
     {
-      "text": "Calvin said on 31 May 2023 that fixing cars calms him down and gives him a sense of achievement, like meditating.",
+      "text": "Calvin said working on cars helps him chill out, calms him down and gives him a sense of achievement like meditating.",
       "speaker": "Calvin",
       "statedOn": "2023-05-31",
       "entities": [
@@ -2690,63 +2325,51 @@
       ]
     },
     {
-      "text": "Dave said on 31 May 2023 that fixing things up is more than a hobby for him: turning something broken into something that runs gives him a sense of achievement and purpose, and Calvin compared it to making something new out of nothing in music.",
+      "text": "Dave said fixing things up is more than a hobby for him: turning something broken into something that runs gives him a sense of achievement, purpose and power.",
       "speaker": "Dave",
       "statedOn": "2023-05-31",
       "entities": [
         "dave",
-        "calvin",
         "car-restoration"
       ],
       "sourceTurns": [
         "D7:6",
         "D7:7",
         "D7:8",
-        "D7:9"
+        "D7:9",
+        "D7:10"
       ]
     },
     {
-      "text": "Calvin said on 31 May 2023 that performing live always fuels his soul, and that the rush and the connection with the crowd are an absolute high.",
+      "text": "Calvin said performing live always fuels his soul and that the rush and the connection with the crowd are an absolute high.",
       "speaker": "Calvin",
       "statedOn": "2023-05-31",
       "entities": [
-        "calvin"
+        "calvin",
+        "making-music"
       ],
       "sourceTurns": [
-        "D7:10",
-        "D7:11"
-      ]
-    },
-    {
-      "text": "Calvin and Dave agreed on 31 May 2023, sharing photographs of concert crowds, that the connection between an artist and an audience is powerful and that music brings people together like therapy.",
-      "speaker": "Dave",
-      "statedOn": "2023-05-31",
-      "entities": [
-        "dave",
-        "calvin"
-      ],
-      "sourceTurns": [
+        "D7:11",
         "D7:12",
         "D7:13",
         "D7:14"
       ]
     },
     {
-      "text": "Calvin said on 31 May 2023 that he was looking forward to the rest of the tour with Frank Ocean and to performing in Boston, which he described as playing for folks from home.",
+      "text": "Calvin looked forward to performing in Boston with the Frank Ocean tour and said it would be playing for folks from home.",
       "speaker": "Calvin",
       "statedOn": "2023-05-31",
       "entities": [
         "calvin",
-        "frank-ocean",
-        "frank-ocean-tour",
-        "boston"
+        "boston",
+        "frank-ocean-tour"
       ],
       "sourceTurns": [
         "D7:15"
       ]
     },
     {
-      "text": "Dave said on 31 May 2023 that Boston's music scene has plenty of talented musicians and good places to play, and that he would be there to cheer Calvin on.",
+      "text": "Dave said Boston's music scene has many talented musicians and good places to play, and promised to be there to cheer Calvin on.",
       "speaker": "Dave",
       "statedOn": "2023-05-31",
       "entities": [
@@ -2755,26 +2378,14 @@
         "calvin"
       ],
       "sourceTurns": [
-        "D7:16"
-      ]
-    },
-    {
-      "text": "Calvin thanked Dave for his support on 31 May 2023 and promised to tell him everything about Boston when he got back.",
-      "speaker": "Calvin",
-      "statedOn": "2023-05-31",
-      "entities": [
-        "calvin",
-        "dave",
-        "boston"
-      ],
-      "sourceTurns": [
+        "D7:16",
         "D7:17",
         "D7:18",
         "D7:19"
       ]
     },
     {
-      "text": "Calvin met the creative team for his album on 8 June 2023 for a long session, and said it was good to see everything coming together.",
+      "text": "Calvin met the creative team for his album on 8 June 2023 for a long session and said it was good to see everything coming together.",
       "speaker": "Calvin",
       "statedOn": "2023-06-09",
       "entities": [
@@ -2782,39 +2393,29 @@
         "calvins-album"
       ],
       "chrono": [
-        "calvin-album-team-meeting"
+        "album-team-session"
       ],
       "sourceTurns": [
         "D8:1",
-        "D8:2"
-      ]
-    },
-    {
-      "text": "Calvin said on 9 June 2023 that he was excited about the album he was making with a team in the studio, and showed Dave the studio they were working in.",
-      "speaker": "Calvin",
-      "statedOn": "2023-06-09",
-      "entities": [
-        "calvin",
-        "calvins-album"
-      ],
-      "sourceTurns": [
+        "D8:2",
         "D8:3"
       ]
     },
     {
-      "text": "Dave said on 9 June 2023 that he had been exploring parks at the weekends to relax and find peace in nature.",
+      "text": "Dave had been exploring parks at the weekends to relax as of 9 June 2023 and said being surrounded by nature is peaceful.",
       "speaker": "Dave",
       "statedOn": "2023-06-09",
       "entities": [
         "dave",
-        "park-walks"
+        "walking",
+        "daves-park"
       ],
       "sourceTurns": [
         "D8:4"
       ]
     },
     {
-      "text": "As of 9 June 2023 Calvin said he had never been to Boston, though he had heard its parks were amazing, and that he could not wait to visit the following month.",
+      "text": "Calvin said on 9 June 2023 that he had never been to Boston, that he had heard its parks are amazing and that he expected to visit in July 2023.",
       "speaker": "Calvin",
       "statedOn": "2023-06-09",
       "entities": [
@@ -2826,35 +2427,25 @@
       ]
     },
     {
-      "text": "Dave went for a stroll in a Boston park on Friday 2 June 2023 and found it serene; he said the Boston parks are best in spring and that weekend walks recharge him for the week.",
+      "text": "Dave went for a stroll in a Boston park on 2 June 2023, said the parks there are especially serene in spring, and takes walks at weekends to recharge for the week.",
       "speaker": "Dave",
       "statedOn": "2023-06-09",
       "entities": [
         "dave",
         "boston",
-        "park-walks"
+        "daves-park",
+        "walking"
       ],
       "chrono": [
-        "dave-boston-park-stroll"
+        "daves-park-stroll"
       ],
       "sourceTurns": [
-        "D8:6"
-      ]
-    },
-    {
-      "text": "Calvin said on 9 June 2023 that he was looking forward to walking in Boston's parks to recharge, and asked Dave whether he had been hiking lately.",
-      "speaker": "Calvin",
-      "statedOn": "2023-06-09",
-      "entities": [
-        "calvin",
-        "boston"
-      ],
-      "sourceTurns": [
+        "D8:6",
         "D8:7"
       ]
     },
     {
-      "text": "Dave said on 9 June 2023 that he had not been hiking recently, but that being in nature and pushing yourself clears the mind.",
+      "text": "As of 9 June 2023 Dave had not been hiking recently, but said being in nature and pushing yourself clears the mind.",
       "speaker": "Dave",
       "statedOn": "2023-06-09",
       "entities": [
@@ -2865,36 +2456,26 @@
       ]
     },
     {
-      "text": "As of 9 June 2023 Calvin had never been to the mountains, and said he was keen to go on a hike there to escape and de-stress.",
+      "text": "As of 9 June 2023 Calvin had never been to the mountains but wanted to go on a hike to escape and de-stress.",
       "speaker": "Calvin",
       "statedOn": "2023-06-09",
       "entities": [
         "calvin"
       ],
       "sourceTurns": [
+        "D8:7",
         "D8:9"
       ]
     },
     {
-      "text": "Dave booked a trip to a mountainous region for July 2023 and said on 9 June 2023 that he was finally going to see the peaks.",
+      "text": "Dave booked a trip to a mountainous region for July 2023 and promised to take lots of pictures to show Calvin afterwards.",
       "speaker": "Dave",
       "statedOn": "2023-06-09",
       "entities": [
         "dave"
       ],
       "sourceTurns": [
-        "D8:10"
-      ]
-    },
-    {
-      "text": "Dave promised on 9 June 2023 to take plenty of photographs on his mountain trip and show them to Calvin when he got back.",
-      "speaker": "Dave",
-      "statedOn": "2023-06-09",
-      "entities": [
-        "dave",
-        "calvin"
-      ],
-      "sourceTurns": [
+        "D8:10",
         "D8:11",
         "D8:12",
         "D8:13",
@@ -2902,7 +2483,7 @@
       ]
     },
     {
-      "text": "Calvin had a small car accident on Friday 16 June 2023 in which nobody was hurt, and said on 21 June 2023 that dealing with the insurance and the repairs had taken a lot of time and energy.",
+      "text": "Calvin had a minor car accident on 16 June 2023 in which nobody was hurt, and it left him dealing with insurance and repairs.",
       "speaker": "Calvin",
       "statedOn": "2023-06-21",
       "entities": [
@@ -2918,7 +2499,7 @@
       ]
     },
     {
-      "text": "Calvin said on 21 June 2023 that the insurance process after his 16 June 2023 accident had been a hassle with a lot of paperwork, but was now sorted and the car was being repaired.",
+      "text": "Calvin said the insurance claim after his June 2023 accident took a long time and a lot of paperwork but was settled, and his car was being fixed.",
       "speaker": "Calvin",
       "statedOn": "2023-06-21",
       "entities": [
@@ -2931,7 +2512,7 @@
       ]
     },
     {
-      "text": "Calvin said it took a week to settle everything after his car accident and that the cost was not as bad as he had feared; he showed a photograph from the auto repair shop.",
+      "text": "Calvin said the insurance and repairs after his June 2023 car accident took only a week to sort out and cost less than he had feared.",
       "speaker": "Calvin",
       "statedOn": "2023-06-21",
       "entities": [
@@ -2939,12 +2520,11 @@
         "calvins-ferrari"
       ],
       "sourceTurns": [
-        "D9:5",
-        "D9:6"
+        "D9:5"
       ]
     },
     {
-      "text": "The man Calvin photographed at the auto repair shop was the mechanic repairing his car, whom Calvin described as knowledgeable and doing his best to get the car running again.",
+      "text": "Calvin said the mechanic repairing his car knew his stuff, and that trusting the garage's expertise left him confident and excited to show the car off again.",
       "speaker": "Calvin",
       "statedOn": "2023-06-21",
       "entities": [
@@ -2952,51 +2532,15 @@
         "calvins-ferrari"
       ],
       "sourceTurns": [
+        "D9:6",
         "D9:7",
-        "D9:8"
-      ]
-    },
-    {
-      "text": "Calvin said on 21 June 2023 that he trusted the expertise of the people repairing his car and felt confident and excited to show it off again.",
-      "speaker": "Calvin",
-      "statedOn": "2023-06-21",
-      "entities": [
-        "calvin",
-        "calvins-ferrari"
-      ],
-      "sourceTurns": [
+        "D9:8",
         "D9:9",
         "D9:10"
       ]
     },
     {
-      "text": "Calvin showed Dave a photograph on 21 June 2023 that he described as the view from his living room, of a small town with mountains behind it.",
-      "speaker": "Calvin",
-      "statedOn": "2023-06-21",
-      "entities": [
-        "calvin",
-        "calvins-mansion"
-      ],
-      "sourceTurns": [
-        "D9:11",
-        "D9:12"
-      ]
-    },
-    {
-      "text": "Calvin said the town in the photograph he shared on 21 June 2023 was a small town in Japan, and called the view of the mountains stunning.",
-      "speaker": "Calvin",
-      "statedOn": "2023-06-21",
-      "entities": [
-        "calvin",
-        "japan"
-      ],
-      "sourceTurns": [
-        "D9:13",
-        "D9:14"
-      ]
-    },
-    {
-      "text": "Calvin said on 21 June 2023 that he had not yet been to the small Japanese town in the photograph and that it was on his list for after his tour with Frank Ocean ended.",
+      "text": "Calvin showed Dave a photograph of mountains above a small town in Japan and said on 21 June 2023 that he had not been there yet but had it on his list for after his tour with Frank Ocean ended.",
       "speaker": "Calvin",
       "statedOn": "2023-06-21",
       "entities": [
@@ -3005,11 +2549,15 @@
         "frank-ocean-tour"
       ],
       "sourceTurns": [
+        "D9:11",
+        "D9:12",
+        "D9:13",
+        "D9:14",
         "D9:15"
       ]
     },
     {
-      "text": "As of 21 June 2023 Calvin had never tried skiing, and said it looked like fun and that he might give it a go.",
+      "text": "As of 21 June 2023 Calvin had never tried skiing, but said it looked like a lot of fun and that he might give it a try.",
       "speaker": "Calvin",
       "statedOn": "2023-06-21",
       "entities": [
@@ -3021,34 +2569,23 @@
       ]
     },
     {
-      "text": "Dave joined a rock band shortly before 21 June 2023 and had been practising guitar with them; he showed Calvin a photograph of the group playing.",
+      "text": "Dave joined a rock band shortly before 21 June 2023 and had been practising guitar with them.",
       "speaker": "Dave",
       "statedOn": "2023-06-21",
       "entities": [
         "dave",
-        "daves-rock-band"
+        "daves-rock-band",
+        "making-music"
       ],
       "sourceTurns": [
         "D9:18",
-        "D9:19"
-      ]
-    },
-    {
-      "text": "Dave said on 21 June 2023 that good company and music lift the mood, and he and Calvin agreed to keep in touch.",
-      "speaker": "Dave",
-      "statedOn": "2023-06-21",
-      "entities": [
-        "dave",
-        "calvin",
-        "daves-rock-band"
-      ],
-      "sourceTurns": [
+        "D9:19",
         "D9:20",
         "D9:21"
       ]
     },
     {
-      "text": "Calvin's car was repaired and running well again by 7 July 2023, and he said cruising around in it was the best thing there is.",
+      "text": "Calvin's car was repaired and back on the road by 7 July 2023 after his June accident, and he said cruising around in it is the best.",
       "speaker": "Calvin",
       "statedOn": "2023-07-07",
       "entities": [
@@ -3061,63 +2598,53 @@
       ]
     },
     {
-      "text": "Dave arranged with friends to take regular walks together in the park, and said on 7 July 2023 that he had been spending time with them there.",
-      "speaker": "Dave",
+      "text": "Calvin's red sports car was bought shortly before 26 March 2023, damaged in an accident on 16 June 2023, repaired within a week of the claim being settled, and back on the road by 7 July 2023.",
+      "speaker": "Calvin",
       "statedOn": "2023-07-07",
       "entities": [
-        "dave",
-        "daves-favourite-park",
-        "park-walks"
+        "calvin",
+        "calvins-ferrari"
       ],
       "sourceTurns": [
-        "D10:3",
-        "D10:4"
+        "D2:1",
+        "D9:1",
+        "D9:5",
+        "D10:2"
       ]
     },
     {
-      "text": "Dave and his friends were going to their favourite spot by the river on 7 July 2023, and he shared a photograph of the city skyline there.",
+      "text": "Dave had been spending time with friends at parks and had arranged regular walks in the park with them as of 7 July 2023.",
       "speaker": "Dave",
       "statedOn": "2023-07-07",
       "entities": [
         "dave",
-        "daves-favourite-park"
-      ],
-      "chrono": [
-        "dave-park-outing-with-friends"
+        "walking",
+        "daves-park"
       ],
       "sourceTurns": [
+        "D10:3",
+        "D10:4",
         "D10:5"
       ]
     },
     {
-      "text": "Calvin said on 7 July 2023 that Dave's river view reminded him of living in his Japanese mansion with its cityscape, and he shared a photograph taken from the mansion's backyard.",
+      "text": "By 7 July 2023 Calvin was living in his Japanese mansion and described the city lights and skyline seen from its windows as awe-inspiring luxury.",
       "speaker": "Calvin",
       "statedOn": "2023-07-07",
       "entities": [
         "calvin",
-        "calvins-mansion",
+        "calvins-japanese-mansion",
         "japan"
       ],
       "sourceTurns": [
         "D10:6",
-        "D10:7"
-      ]
-    },
-    {
-      "text": "Calvin said on 7 July 2023 that seeing the city lights from the windows of his Japanese mansion is awe-inspiring, and showed Dave the front of the house.",
-      "speaker": "Calvin",
-      "statedOn": "2023-07-07",
-      "entities": [
-        "calvin",
-        "calvins-mansion"
-      ],
-      "sourceTurns": [
+        "D10:7",
         "D10:8",
         "D10:9"
       ]
     },
     {
-      "text": "Calvin said on 7 July 2023 that he could not wait to try more of the food and explore the culture in Japan.",
+      "text": "Calvin said on 7 July 2023 that he could not wait to try the food and check out the culture in Japan.",
       "speaker": "Calvin",
       "statedOn": "2023-07-07",
       "entities": [
@@ -3129,7 +2656,7 @@
       ]
     },
     {
-      "text": "As of 7 July 2023 Dave had never been to Japan, but said he was keen to go one day for the food, the technology and the culture, and that he is hooked on Japanese music.",
+      "text": "As of 7 July 2023 Dave had never been to Japan but was keen to go one day, having heard about its food and technology and being hooked on its music.",
       "speaker": "Dave",
       "statedOn": "2023-07-07",
       "entities": [
@@ -3141,46 +2668,25 @@
       ]
     },
     {
-      "text": "Calvin had been working on music collaborations with Japanese artists by 7 July 2023 and was excited to hear how they would turn out.",
+      "text": "Calvin was working on music collaborations with Japanese artists as of 7 July 2023 and promised to share clips when they were ready.",
       "speaker": "Calvin",
       "statedOn": "2023-07-07",
       "entities": [
         "calvin",
-        "japan"
+        "japan",
+        "making-music"
       ],
       "sourceTurns": [
         "D10:12",
-        "D10:13"
-      ]
-    },
-    {
-      "text": "Calvin promised on 7 July 2023 to share clips of his Japanese collaborations when they were ready, and said collaborating with different artists is a chance to create something unique.",
-      "speaker": "Calvin",
-      "statedOn": "2023-07-07",
-      "entities": [
-        "calvin",
-        "japan"
-      ],
-      "sourceTurns": [
+        "D10:13",
         "D10:14",
-        "D10:15"
-      ]
-    },
-    {
-      "text": "Calvin ended the conversation of 7 July 2023 saying he had to get back to work, and Dave told him not to overwork himself.",
-      "speaker": "Calvin",
-      "statedOn": "2023-07-07",
-      "entities": [
-        "calvin",
-        "dave"
-      ],
-      "sourceTurns": [
+        "D10:15",
         "D10:16",
         "D10:17"
       ]
     },
     {
-      "text": "Dave got back from a road trip through the countryside with friends shortly before 21 July 2023, and said the winding roads and the company were a welcome break from work that recharged him.",
+      "text": "Dave got back from a road trip through the countryside with friends shortly before 21 July 2023 and said the winding roads and the company recharged him and reminded him why he loves cars.",
       "speaker": "Dave",
       "statedOn": "2023-07-21",
       "entities": [
@@ -3188,29 +2694,18 @@
       ],
       "sourceTurns": [
         "D11:1",
-        "D11:2"
-      ]
-    },
-    {
-      "text": "Dave said on 21 July 2023 that the road trip reminded him why he is passionate about cars and made the long hours worth it, and he shared a photograph of a place they found.",
-      "speaker": "Dave",
-      "statedOn": "2023-07-21",
-      "entities": [
-        "dave",
-        "car-restoration"
-      ],
-      "sourceTurns": [
+        "D11:2",
         "D11:3"
       ]
     },
     {
-      "text": "By 21 July 2023 Calvin was working on a project to transform his Japanese mansion into a recording studio, which he called a long-held dream and his sanctuary, and he showed Dave a photograph of the progress.",
+      "text": "Calvin was converting his Japanese mansion into a recording studio as of 21 July 2023, calling it his dream space for creating music with other artists and his sanctuary.",
       "speaker": "Calvin",
       "statedOn": "2023-07-21",
       "entities": [
         "calvin",
-        "mansion-studio-conversion",
-        "calvins-mansion"
+        "calvins-japanese-mansion",
+        "mansion-recording-studio"
       ],
       "sourceTurns": [
         "D11:4",
@@ -3218,12 +2713,29 @@
       ]
     },
     {
-      "text": "Calvin said on 21 July 2023 that in his new studio space he had been experimenting with different genres and adding electronic elements to his songs for a fresh sound.",
+      "text": "Calvin went from never having been to Japan in March 2023 to living in a Japanese mansion by July 2023 and converting it into his own recording studio.",
       "speaker": "Calvin",
       "statedOn": "2023-07-21",
       "entities": [
         "calvin",
-        "mansion-studio-conversion"
+        "japan",
+        "calvins-japanese-mansion",
+        "mansion-recording-studio"
+      ],
+      "sourceTurns": [
+        "D1:7",
+        "D1:9",
+        "D10:6",
+        "D11:4"
+      ]
+    },
+    {
+      "text": "Calvin had been experimenting with different genres and adding electronic elements to his songs as of 21 July 2023, calling it a process of self-discovery and growth.",
+      "speaker": "Calvin",
+      "statedOn": "2023-07-21",
+      "entities": [
+        "calvin",
+        "making-music"
       ],
       "sourceTurns": [
         "D11:6",
@@ -3231,11 +2743,12 @@
       ]
     },
     {
-      "text": "Calvin said on 21 July 2023 that moving between musical styles is tough and intimidating, and that the challenge is balancing his own sound against trying new things.",
+      "text": "Calvin said moving between musical styles is tough and is a matter of balancing his own sound against trying new things.",
       "speaker": "Calvin",
       "statedOn": "2023-07-21",
       "entities": [
-        "calvin"
+        "calvin",
+        "making-music"
       ],
       "sourceTurns": [
         "D11:8",
@@ -3243,48 +2756,35 @@
       ]
     },
     {
-      "text": "Calvin said on 21 July 2023 that he started making music to follow his dreams, and that collaborating with others and surrounding himself with positive energy is how he stays motivated under pressure.",
-      "speaker": "Calvin",
-      "statedOn": "2023-07-21",
-      "entities": [
-        "calvin"
-      ],
-      "sourceTurns": [
-        "D11:10",
-        "D11:11"
-      ]
-    },
-    {
-      "text": "Calvin thanked Dave for his support on 21 July 2023 and said he would keep pushing towards his goals; Dave called himself Calvin's biggest fan.",
+      "text": "Calvin said he started making music to follow his dreams and that collaborating with others and surrounding himself with positive energy is what keeps him motivated.",
       "speaker": "Calvin",
       "statedOn": "2023-07-21",
       "entities": [
         "calvin",
-        "dave"
+        "making-music"
       ],
       "sourceTurns": [
+        "D11:10",
+        "D11:11",
         "D11:12",
         "D11:13",
         "D11:14"
       ]
     },
     {
-      "text": "Calvin took his Ferrari in for a service in early August 2023 and said on 3 August 2023 that it had been stressful because he is attached to the car.",
+      "text": "Calvin took his Ferrari for a service shortly before 3 August 2023 and found it stressful because he is attached to the car.",
       "speaker": "Calvin",
       "statedOn": "2023-08-03",
       "entities": [
         "calvin",
         "calvins-ferrari"
       ],
-      "chrono": [
-        "calvin-ferrari-service"
-      ],
       "sourceTurns": [
         "D12:1"
       ]
     },
     {
-      "text": "Dave said on 3 August 2023 that fixing cars is like therapy for him, and that he grew up working on cars with his father, which is why refurbishing them gives him a sense of fulfilment.",
+      "text": "Dave grew up working on cars with his father and says refurbishing them is like therapy and gives him a sense of fulfilment.",
       "speaker": "Dave",
       "statedOn": "2023-08-03",
       "entities": [
@@ -3293,11 +2793,12 @@
         "car-restoration"
       ],
       "sourceTurns": [
-        "D12:2"
+        "D12:2",
+        "D12:3"
       ]
     },
     {
-      "text": "Dave and his father spent one summer of his childhood restoring an old car together, which Dave remembers as hard work made satisfying by having done it together.",
+      "text": "Dave and his father spent one summer of Dave's childhood restoring an old car together, which Dave remembers as hard work and very satisfying.",
       "speaker": "Dave",
       "statedOn": "2023-08-03",
       "entities": [
@@ -3306,25 +2807,13 @@
         "car-restoration"
       ],
       "sourceTurns": [
-        "D12:3",
-        "D12:4"
-      ]
-    },
-    {
-      "text": "Dave kept a photograph of himself as a child with his father from the summer they restored a car, and shared it with Calvin on 3 August 2023.",
-      "speaker": "Dave",
-      "statedOn": "2023-08-03",
-      "entities": [
-        "dave",
-        "daves-dad"
-      ],
-      "sourceTurns": [
+        "D12:4",
         "D12:5",
         "D12:6"
       ]
     },
     {
-      "text": "Calvin visited a Ferrari dealership and saw many cars there, but said on 3 August 2023 that his own car is the best of them and, though only material, reminds him of his hard work.",
+      "text": "Calvin visited a Ferrari dealership, and said that although his own car is just material it reminds him of his hard work and dedication and keeps him motivated.",
       "speaker": "Calvin",
       "statedOn": "2023-08-03",
       "entities": [
@@ -3333,28 +2822,33 @@
       ],
       "sourceTurns": [
         "D12:7",
-        "D12:8"
+        "D12:8",
+        "D12:9"
       ]
     },
     {
-      "text": "Calvin said on 3 August 2023 that seeing his car every day keeps him motivated and reminds him to keep pushing.",
+      "text": "Calvin's goals as of 3 August 2023 were to expand his brand worldwide, grow his fanbase and work with artists from around the globe.",
       "speaker": "Calvin",
       "statedOn": "2023-08-03",
       "entities": [
         "calvin",
-        "calvins-ferrari"
+        "making-music"
       ],
       "sourceTurns": [
-        "D12:9",
-        "D12:10"
+        "D12:10",
+        "D12:11"
       ]
     },
     {
-      "text": "Calvin's stated goals on 3 August 2023 were to expand his brand worldwide, grow his fanbase, work with artists from around the globe and make music that has an impact.",
+      "text": "Calvin performed on stage with a band on the night of 2 August 2023 and praised their musicianship.",
       "speaker": "Calvin",
       "statedOn": "2023-08-03",
       "entities": [
-        "calvin"
+        "calvin",
+        "making-music"
+      ],
+      "chrono": [
+        "calvin-performed-with-band"
       ],
       "sourceTurns": [
         "D12:11",
@@ -3362,21 +2856,7 @@
       ]
     },
     {
-      "text": "Calvin performed on stage with a band on 2 August 2023 and praised their musicianship.",
-      "speaker": "Calvin",
-      "statedOn": "2023-08-03",
-      "entities": [
-        "calvin"
-      ],
-      "chrono": [
-        "calvin-performs-with-band"
-      ],
-      "sourceTurns": [
-        "D12:11"
-      ]
-    },
-    {
-      "text": "Calvin told Dave on 3 August 2023 that his support and encouragement mean a lot and that he was determined to make his dreams come true.",
+      "text": "Calvin said he was determined to make his dreams come true and that Dave's support and encouragement meant a lot to him.",
       "speaker": "Calvin",
       "statedOn": "2023-08-03",
       "entities": [
@@ -3392,15 +2872,12 @@
       ]
     },
     {
-      "text": "Dave was picked for a car modification workshop and told Calvin about it on 11 August 2023, saying it was a chance to take his skills up a notch.",
+      "text": "Dave was picked for a car modification workshop shortly before 11 August 2023 and saw it as a chance to take his skills up a notch.",
       "speaker": "Dave",
       "statedOn": "2023-08-11",
       "entities": [
         "dave",
         "car-mod-workshop"
-      ],
-      "chrono": [
-        "dave-picked-for-workshop"
       ],
       "sourceTurns": [
         "D13:1",
@@ -3408,7 +2885,7 @@
       ]
     },
     {
-      "text": "Dave called the car modification workshop a dream come true on 11 August 2023, because he had always wanted to learn auto engineering and build a custom car.",
+      "text": "Dave called the car modification workshop a dream come true because he had always wanted to learn auto engineering and build a custom car, and said seeing a car's potential come to life is satisfying.",
       "speaker": "Dave",
       "statedOn": "2023-08-11",
       "entities": [
@@ -3418,83 +2895,64 @@
       ],
       "sourceTurns": [
         "D13:3",
-        "D13:4"
+        "D13:4",
+        "D13:5"
       ]
     },
     {
-      "text": "Dave said on 11 August 2023 that the most thrilling part of the car modification workshop is seeing a car's potential come to life.",
+      "text": "By 11 August 2023 Dave had done engine swaps and suspension modifications on the classic muscle car he was restoring and was learning body modifications.",
       "speaker": "Dave",
       "statedOn": "2023-08-11",
       "entities": [
         "dave",
-        "car-mod-workshop"
-      ],
-      "sourceTurns": [
-        "D13:5",
-        "D13:6"
-      ]
-    },
-    {
-      "text": "By 11 August 2023 Dave had done engine swaps and suspension modifications on a classic muscle car and was learning body modifications, aiming to give it a modern twist.",
-      "speaker": "Dave",
-      "statedOn": "2023-08-11",
-      "entities": [
-        "dave",
+        "daves-mustang",
         "car-restoration"
       ],
       "sourceTurns": [
+        "D13:6",
         "D13:7"
       ]
     },
     {
-      "text": "Dave gave the classic muscle car he was modifying a silver finish, wanting a modern vibe while keeping the classic muscle car style, and said on 11 August 2023 that he was really happy with it.",
+      "text": "Dave gave the classic muscle car he was modifying a silver finish for a modern look while keeping its classic muscle-car style, and said the small details are what make it personal.",
       "speaker": "Dave",
       "statedOn": "2023-08-11",
       "entities": [
         "dave",
+        "daves-mustang",
         "car-restoration"
       ],
       "sourceTurns": [
         "D13:8",
-        "D13:9"
-      ]
-    },
-    {
-      "text": "Dave and Calvin agreed on 11 August 2023 that the small details are what make a customised car unique and personal, and Dave called it customising a work of art on wheels.",
-      "speaker": "Dave",
-      "statedOn": "2023-08-11",
-      "entities": [
-        "dave",
-        "calvin",
-        "car-restoration"
-      ],
-      "sourceTurns": [
+        "D13:9",
         "D13:10",
         "D13:11",
         "D13:12",
-        "D13:13"
+        "D13:13",
+        "D13:14"
       ]
     },
     {
-      "text": "Dave offered on 11 August 2023 to help Calvin with his music if he needed it, and showed him his own music studio setup with its high-quality sound system.",
+      "text": "Dave has a music studio setup with a high-quality sound system and offered to help Calvin with his music.",
       "speaker": "Dave",
       "statedOn": "2023-08-11",
       "entities": [
         "dave",
+        "making-music",
         "calvin"
       ],
       "sourceTurns": [
-        "D13:14",
         "D13:15"
       ]
     },
     {
-      "text": "Calvin declined Dave's offer of help on 11 August 2023, saying he was too busy with his own music at the moment but would keep it in mind.",
+      "text": "Calvin put off Dave's offer of help on 11 August 2023 because he was very busy with his own music, but said he would keep it in mind.",
       "speaker": "Calvin",
       "statedOn": "2023-08-11",
       "entities": [
         "calvin",
-        "dave"
+        "dave",
+        "making-music"
       ],
       "sourceTurns": [
         "D13:16",
@@ -3504,7 +2962,7 @@
       ]
     },
     {
-      "text": "Dave went to a car workshop in San Francisco between 11 and 14 August 2023, where he saw car restoration techniques and found the people there passionate and inspiring.",
+      "text": "Dave attended a car workshop in San Francisco shortly before 14 August 2023 and found the restoration techniques and the participants' dedication inspiring.",
       "speaker": "Dave",
       "statedOn": "2023-08-14",
       "entities": [
@@ -3515,26 +2973,27 @@
       ],
       "sourceTurns": [
         "D14:1",
-        "D14:2"
+        "D14:2",
+        "D14:3"
       ]
     },
     {
-      "text": "Calvin said on 14 August 2023 that his tour with a well-known artist had ended with a show in Japan, after which he had been able to explore his new place there.",
+      "text": "Calvin's tour with a well-known artist ended with a show in Japan, after which he explored his new place there.",
       "speaker": "Calvin",
       "statedOn": "2023-08-14",
       "entities": [
         "calvin",
-        "frank-ocean-tour",
         "japan",
-        "calvins-mansion"
+        "frank-ocean-tour",
+        "calvins-japanese-mansion"
       ],
       "sourceTurns": [
-        "D14:3",
-        "D14:4"
+        "D14:4",
+        "D14:5"
       ]
     },
     {
-      "text": "Calvin said on 14 August 2023 that his Tokyo show had been a magical moment, with the audience singing along to one of his songs.",
+      "text": "Calvin said the crowd at his Tokyo show sang along to one of his songs and called it a magical moment that is why he loves his job.",
       "speaker": "Calvin",
       "statedOn": "2023-08-14",
       "entities": [
@@ -3542,52 +3001,15 @@
         "tokyo"
       ],
       "sourceTurns": [
-        "D14:5",
-        "D14:6"
-      ]
-    },
-    {
-      "text": "Calvin shared a photograph of the crowd at his Tokyo show on 14 August 2023 and said moments like that are why he loves his job.",
-      "speaker": "Calvin",
-      "statedOn": "2023-08-14",
-      "entities": [
-        "calvin",
-        "tokyo"
-      ],
-      "sourceTurns": [
+        "D14:6",
         "D14:7",
-        "D14:8"
-      ]
-    },
-    {
-      "text": "Calvin said on 14 August 2023 that the energy of the Tokyo crowd made him proud and motivated, and that he is all about spreading joy with his art.",
-      "speaker": "Calvin",
-      "statedOn": "2023-08-14",
-      "entities": [
-        "calvin",
-        "tokyo"
-      ],
-      "sourceTurns": [
+        "D14:8",
         "D14:9",
         "D14:10"
       ]
     },
     {
-      "text": "Dave said on 14 August 2023 that the car he was restoring was going well and showed a photograph of it, calling it a change from a beat-up mess to a real beauty.",
-      "speaker": "Dave",
-      "statedOn": "2023-08-14",
-      "entities": [
-        "dave",
-        "daves-mustang",
-        "car-restoration"
-      ],
-      "sourceTurns": [
-        "D14:11",
-        "D14:12"
-      ]
-    },
-    {
-      "text": "Dave hoped on 14 August 2023 to have the car he was restoring finished by the end of September 2023.",
+      "text": "Dave was restoring a beaten-up car and hoped on 14 August 2023 to have it finished by the end of September 2023.",
       "speaker": "Dave",
       "statedOn": "2023-08-14",
       "entities": [
@@ -3596,51 +3018,38 @@
         "car-restoration"
       ],
       "chrono": [
-        "daves-restoration-target"
+        "mustang-deadline"
       ],
       "sourceTurns": [
-        "D14:13"
-      ]
-    },
-    {
-      "text": "Calvin told Dave on 14 August 2023 that he was excited to see the finished restoration and that Dave had serious talent.",
-      "speaker": "Calvin",
-      "statedOn": "2023-08-14",
-      "entities": [
-        "calvin",
-        "dave",
-        "daves-mustang"
-      ],
-      "sourceTurns": [
+        "D14:11",
+        "D14:12",
+        "D14:13",
         "D14:14",
         "D14:15",
         "D14:16"
       ]
     },
     {
-      "text": "Dave had a card night with his friends on Friday 18 August 2023, which he described as great fun, and shared a photograph of it.",
+      "text": "Dave had a card night with friends on 18 August 2023 and said they laughed and had a great time.",
       "speaker": "Dave",
       "statedOn": "2023-08-22",
       "entities": [
         "dave"
       ],
       "chrono": [
-        "dave-card-night"
+        "daves-card-night"
       ],
       "sourceTurns": [
         "D15:1"
       ]
     },
     {
-      "text": "Calvin secured a deal to continue collaborating with Frank Ocean, which he told Dave about on 22 August 2023 and called a dream come true after a lot of hard work.",
+      "text": "Calvin secured a deal to continue his collaboration with Frank Ocean, which he described on 22 August 2023 as a dream come true and the payoff for his hard work.",
       "speaker": "Calvin",
       "statedOn": "2023-08-22",
       "entities": [
         "calvin",
         "frank-ocean"
-      ],
-      "chrono": [
-        "calvin-frank-ocean-deal"
       ],
       "sourceTurns": [
         "D15:2",
@@ -3648,15 +3057,15 @@
       ]
     },
     {
-      "text": "Calvin said on 22 August 2023 that he had met Frank Ocean at a music festival in Tokyo, that they clicked and shared ideas, and that they had arranged a meeting and recorded a song in the studio at his mansion.",
+      "text": "Calvin said on 22 August 2023 that he met Frank Ocean at a music festival in Tokyo, that they clicked and shared ideas, and that they had since arranged a meeting and recorded a song in the studio at his mansion.",
       "speaker": "Calvin",
       "statedOn": "2023-08-22",
       "entities": [
         "calvin",
         "frank-ocean",
         "tokyo",
-        "calvins-mansion",
-        "mansion-studio-conversion"
+        "mansion-recording-studio",
+        "calvins-japanese-mansion"
       ],
       "sourceTurns": [
         "D15:4",
@@ -3664,7 +3073,7 @@
       ]
     },
     {
-      "text": "Calvin described the Tokyo music festival as a city buzzing with energy and a lively crowd that was fuel for his soul.",
+      "text": "Calvin described the Tokyo festival as buzzing with energy with a lively crowd, and playing it as a dream come true.",
       "speaker": "Calvin",
       "statedOn": "2023-08-22",
       "entities": [
@@ -3673,51 +3082,28 @@
       ],
       "sourceTurns": [
         "D15:6",
-        "D15:7"
-      ]
-    },
-    {
-      "text": "Calvin said playing at the Tokyo festival was a dream come true, with an upbeat crowd and a feeling that everyone was connected.",
-      "speaker": "Calvin",
-      "statedOn": "2023-08-22",
-      "entities": [
-        "calvin",
-        "tokyo"
-      ],
-      "sourceTurns": [
+        "D15:7",
         "D15:8"
       ]
     },
     {
-      "text": "Someone who noticed Calvin's performance at the Tokyo festival was working with him by 22 August 2023, which he called wild.",
+      "text": "Someone who noticed Calvin's festival performance began working with him, and on 22 August 2023 he said his tour would end soon and he was heading to Boston, where he hoped to meet Dave.",
       "speaker": "Calvin",
       "statedOn": "2023-08-22",
       "entities": [
         "calvin",
-        "tokyo"
+        "boston",
+        "frank-ocean-tour",
+        "dave"
       ],
       "sourceTurns": [
         "D15:9",
-        "D15:10"
-      ]
-    },
-    {
-      "text": "Calvin said on 22 August 2023 that his tour was ending soon and that he was heading to Boston, and he and Dave agreed to meet up there.",
-      "speaker": "Calvin",
-      "statedOn": "2023-08-22",
-      "entities": [
-        "calvin",
-        "dave",
-        "boston",
-        "frank-ocean-tour"
-      ],
-      "sourceTurns": [
         "D15:10",
         "D15:11"
       ]
     },
     {
-      "text": "Calvin and his friends recorded a podcast on 21 August 2023 discussing the rapidly evolving rap industry.",
+      "text": "Calvin and his friends recorded a podcast discussing the rapidly evolving rap industry on 21 August 2023, and he promised to tell Dave when it was uploaded.",
       "speaker": "Calvin",
       "statedOn": "2023-08-22",
       "entities": [
@@ -3728,24 +3114,13 @@
       ],
       "sourceTurns": [
         "D15:12",
-        "D15:13"
-      ]
-    },
-    {
-      "text": "Calvin promised on 22 August 2023 to tell Dave when his rap industry podcast was uploaded.",
-      "speaker": "Calvin",
-      "statedOn": "2023-08-22",
-      "entities": [
-        "calvin",
-        "dave"
-      ],
-      "sourceTurns": [
+        "D15:13",
         "D15:14",
         "D15:15"
       ]
     },
     {
-      "text": "Calvin said on 31 August 2023 that his tour had ended and had been amazing, and that the energy of the audiences had left him pumped.",
+      "text": "Calvin's tour had ended by 31 August 2023 and he said the energy from the audience made it amazing.",
       "speaker": "Calvin",
       "statedOn": "2023-08-31",
       "entities": [
@@ -3758,7 +3133,7 @@
       ]
     },
     {
-      "text": "Calvin described performing on a big stage on the tour as a dream come true that felt surreal and made him feel on top of the world.",
+      "text": "Calvin said performing on a big stage during the tour was a dream come true that felt surreal and made him feel on top of the world.",
       "speaker": "Calvin",
       "statedOn": "2023-08-31",
       "entities": [
@@ -3777,11 +3152,7 @@
       "statedOn": "2023-08-31",
       "entities": [
         "calvin",
-        "calvins-album",
-        "album-music-video"
-      ],
-      "chrono": [
-        "calvin-video-shoot"
+        "calvins-album"
       ],
       "sourceTurns": [
         "D16:6",
@@ -3789,51 +3160,24 @@
       ]
     },
     {
-      "text": "Calvin's album video was being shot in Miami on a beach they had picked, and he said on 31 August 2023 that it would have epic visuals.",
+      "text": "Calvin's album video was being shot on a beach in Miami, a location he picked for its epic visuals and the Miami vibe.",
       "speaker": "Calvin",
       "statedOn": "2023-08-31",
       "entities": [
         "calvin",
-        "miami",
-        "album-music-video"
-      ],
-      "chrono": [
-        "calvin-video-shoot"
+        "calvins-album",
+        "miami"
       ],
       "sourceTurns": [
         "D16:8",
-        "D16:9"
-      ]
-    },
-    {
-      "text": "Calvin said on 31 August 2023 that he loves the Miami vibe and that it was perfect for his album video.",
-      "speaker": "Calvin",
-      "statedOn": "2023-08-31",
-      "entities": [
-        "calvin",
-        "miami",
-        "album-music-video"
-      ],
-      "sourceTurns": [
-        "D16:10"
-      ]
-    },
-    {
-      "text": "Dave offered on 31 August 2023 to help with props or anything else for Calvin's album video, and Calvin said he would ask if he needed assistance.",
-      "speaker": "Dave",
-      "statedOn": "2023-08-31",
-      "entities": [
-        "dave",
-        "calvin",
-        "album-music-video"
-      ],
-      "sourceTurns": [
+        "D16:9",
+        "D16:10",
         "D16:11",
         "D16:12"
       ]
     },
     {
-      "text": "Calvin's guitar was custom made for him by a Japanese artist friend and carries an octopus design standing for his love of art and the sea; he called it one of his favourites on 31 August 2023.",
+      "text": "Calvin's custom guitar was made by a Japanese artist friend and carries an octopus design representing his love of art and the sea; he calls it one of his favourites.",
       "speaker": "Calvin",
       "statedOn": "2023-08-31",
       "entities": [
@@ -3843,11 +3187,12 @@
       ],
       "sourceTurns": [
         "D16:13",
-        "D16:14"
+        "D16:14",
+        "D16:15"
       ]
     },
     {
-      "text": "Calvin said on 31 August 2023 that his custom guitar means a great deal to him as a reminder of his passion for music and of the friendships he has made.",
+      "text": "Calvin said his custom guitar is a reminder of his passion for music and of the friendships he has made, and that every mark on it holds a story.",
       "speaker": "Calvin",
       "statedOn": "2023-08-31",
       "entities": [
@@ -3855,13 +3200,13 @@
         "calvins-guitar"
       ],
       "sourceTurns": [
-        "D16:15",
         "D16:16",
-        "D16:17"
+        "D16:17",
+        "D16:18"
       ]
     },
     {
-      "text": "Calvin had his custom guitar finished with a shiny purple look because it gives it a unique appearance and goes with his style.",
+      "text": "Calvin had his guitar customised with a shiny purple finish because it gives it a unique look that goes with his style.",
       "speaker": "Calvin",
       "statedOn": "2023-08-31",
       "entities": [
@@ -3869,34 +3214,22 @@
         "calvins-guitar"
       ],
       "sourceTurns": [
-        "D16:18",
         "D16:19",
-        "D16:20"
-      ]
-    },
-    {
-      "text": "Dave said on 31 August 2023 that the customised purple finish on Calvin's guitar stands out and suits him, and that Calvin's unique style comes through in his music and playing.",
-      "speaker": "Dave",
-      "statedOn": "2023-08-31",
-      "entities": [
-        "dave",
-        "calvin",
-        "calvins-guitar"
-      ],
-      "sourceTurns": [
+        "D16:20",
         "D16:21",
-        "D16:22",
-        "D16:23"
+        "D16:22"
       ]
     },
     {
-      "text": "Calvin said on 31 August 2023 that staying true to himself and being unique in his music is something he values.",
+      "text": "Calvin said staying true to himself and being unique in his music is something he values, and thanked Dave for appreciating it.",
       "speaker": "Calvin",
       "statedOn": "2023-08-31",
       "entities": [
-        "calvin"
+        "calvin",
+        "making-music"
       ],
       "sourceTurns": [
+        "D16:23",
         "D16:24",
         "D16:25"
       ]
@@ -3908,11 +3241,10 @@
       "entities": [
         "dave",
         "san-francisco",
-        "car-mod-workshop",
-        "car-restoration"
+        "car-mod-workshop"
       ],
       "chrono": [
-        "dave-returns-from-san-francisco"
+        "dave-back-from-san-francisco"
       ],
       "sourceTurns": [
         "D17:1",
@@ -3920,7 +3252,7 @@
       ]
     },
     {
-      "text": "Dave said on 2 September 2023 that fixing cars gives him a sense of purpose and that he feels he is making a difference when he sees a customer's relief at getting their car back.",
+      "text": "Dave said fixing people's cars gives him a sense of purpose and that he feels he is making a difference when he sees a customer's relief.",
       "speaker": "Dave",
       "statedOn": "2023-09-02",
       "entities": [
@@ -3934,35 +3266,24 @@
       ]
     },
     {
-      "text": "Calvin booked a flight to Boston in the week before 2 September 2023 and said he was excited about the trip.",
+      "text": "Calvin booked a flight to Boston in the week before 2 September 2023 and agreed to tell Dave when he was free to meet there.",
       "speaker": "Calvin",
       "statedOn": "2023-09-02",
       "entities": [
         "calvin",
-        "boston"
+        "boston",
+        "dave"
       ],
       "sourceTurns": [
         "D17:6",
-        "D17:7"
-      ]
-    },
-    {
-      "text": "Calvin promised on 2 September 2023 to contact Dave when he arrived in Boston so they could catch up.",
-      "speaker": "Calvin",
-      "statedOn": "2023-09-02",
-      "entities": [
-        "calvin",
-        "dave",
-        "boston"
-      ],
-      "sourceTurns": [
+        "D17:7",
         "D17:8",
         "D17:9",
         "D17:10"
       ]
     },
     {
-      "text": "Calvin's album was released on 11 September 2023, which he described on 13 September 2023 as a wild feeling with everyone loving it.",
+      "text": "Calvin's album was released on 11 September 2023 and he said the response was overwhelming and that everyone had been loving it.",
       "speaker": "Calvin",
       "statedOn": "2023-09-13",
       "entities": [
@@ -3978,79 +3299,49 @@
       ]
     },
     {
-      "text": "Calvin said on 13 September 2023 that the response to his album had been a lot to take in and slightly overwhelming, but that seeing it connect with people motivated him to make better music.",
+      "text": "Calvin said the reception of his album was motivating and reminded him why he got into music: making a difference and sharing his own story.",
       "speaker": "Calvin",
       "statedOn": "2023-09-13",
       "entities": [
         "calvin",
-        "calvins-album"
+        "calvins-album",
+        "making-music"
       ],
       "sourceTurns": [
         "D18:3",
-        "D18:4"
-      ]
-    },
-    {
-      "text": "Calvin said on 13 September 2023 that the album's reception reminded him why he got into music: making a difference and sharing his own story.",
-      "speaker": "Calvin",
-      "statedOn": "2023-09-13",
-      "entities": [
-        "calvin",
-        "calvins-album"
-      ],
-      "sourceTurns": [
+        "D18:4",
         "D18:5",
         "D18:6"
       ]
     },
     {
-      "text": "Calvin said on 13 September 2023 that a tour was next for him, after which he would explore and grow his brand.",
+      "text": "Calvin's plans after his album release were a tour and then growing his brand, though on 13 September 2023 he named no cities or venues.",
       "speaker": "Calvin",
       "statedOn": "2023-09-13",
       "entities": [
-        "calvin"
+        "calvin",
+        "making-music"
       ],
       "sourceTurns": [
         "D18:7",
-        "D18:8"
-      ]
-    },
-    {
-      "text": "Asked on 13 September 2023 which cities or venues his tour would take in, Calvin named none, saying only that they were hitting some awesome spots.",
-      "speaker": "Calvin",
-      "statedOn": "2023-09-13",
-      "entities": [
-        "calvin"
-      ],
-      "sourceTurns": [
+        "D18:8",
         "D18:9"
       ]
     },
     {
-      "text": "Dave invited Calvin on 13 September 2023 to come and see his garage and the cars in it, and Calvin accepted, saying he might get ideas for future projects and would tell Dave when he was in Boston.",
+      "text": "Dave invited Calvin to visit his garage and see the cars when Calvin was next in Boston, and Calvin said he would take him up on it.",
       "speaker": "Dave",
       "statedOn": "2023-09-13",
       "entities": [
         "dave",
-        "calvin",
         "daves-car-shop",
+        "calvin",
         "boston"
       ],
       "sourceTurns": [
         "D18:10",
         "D18:11",
-        "D18:12"
-      ]
-    },
-    {
-      "text": "Calvin and Dave wished each other well at the end of their conversation on 13 September 2023, Calvin telling Dave to keep enjoying his hobbies.",
-      "speaker": "Calvin",
-      "statedOn": "2023-09-13",
-      "entities": [
-        "calvin",
-        "dave"
-      ],
-      "sourceTurns": [
+        "D18:12",
         "D18:13",
         "D18:14",
         "D18:15",
@@ -4058,7 +3349,7 @@
       ]
     },
     {
-      "text": "Dave and his rock band had a jam session on 14 September 2023 in which the music kept flowing and they had a lot of fun rehearsing.",
+      "text": "Dave and his rock band had a jam session on the night of 14 September 2023 that flowed so well they were too absorbed in it to record it.",
       "speaker": "Dave",
       "statedOn": "2023-09-15",
       "entities": [
@@ -4066,43 +3357,28 @@
         "daves-rock-band"
       ],
       "chrono": [
-        "daves-band-rehearsal"
+        "dave-band-jam"
       ],
       "sourceTurns": [
-        "D19:1"
+        "D19:1",
+        "D19:2",
+        "D19:3"
       ]
     },
     {
-      "text": "Dave went to a rock concert in Boston over the weekend of 9-10 September 2023 and called the atmosphere amazing.",
+      "text": "Dave attended a rock concert in Boston over the weekend of 9-10 September 2023 and called the atmosphere amazing.",
       "speaker": "Dave",
       "statedOn": "2023-09-15",
       "entities": [
         "dave",
         "boston"
       ],
-      "chrono": [
-        "dave-rock-concert-boston"
-      ],
       "sourceTurns": [
         "D19:1"
       ]
     },
     {
-      "text": "Dave and his band did not record their jam session of 14 September 2023 because they were too caught up in playing, which Calvin said was a shame.",
-      "speaker": "Dave",
-      "statedOn": "2023-09-15",
-      "entities": [
-        "dave",
-        "daves-rock-band"
-      ],
-      "sourceTurns": [
-        "D19:2",
-        "D19:3",
-        "D19:4"
-      ]
-    },
-    {
-      "text": "Dave said on 15 September 2023 that the Disney poster Calvin shared reminded him of one of his favourite Disney films, for its lesson about following your dreams no matter what others say.",
+      "text": "Dave said the Disney film on the poster Calvin showed him on 15 September 2023 is one of his favourites for its lesson about following your dreams no matter what others say.",
       "speaker": "Dave",
       "statedOn": "2023-09-15",
       "entities": [
@@ -4110,11 +3386,12 @@
         "ratatouille"
       ],
       "sourceTurns": [
+        "D19:4",
         "D19:5"
       ]
     },
     {
-      "text": "Calvin said on 15 September 2023 that Ratatouille is one of his favourite films, because it is about going after what you love whatever anyone says.",
+      "text": "Calvin said Ratatouille is one of his favourite films because it is about going after what you love no matter what anyone says.",
       "speaker": "Calvin",
       "statedOn": "2023-09-15",
       "entities": [
@@ -4126,7 +3403,7 @@
       ]
     },
     {
-      "text": "Dave said on 15 September 2023 that he had been restoring a vintage car, and showed Calvin a photograph of the finished result with himself standing beside it.",
+      "text": "Dave finished restoring a vintage car and showed Calvin the result on 15 September 2023, saying people's reactions to the finished product make the work worth it.",
       "speaker": "Dave",
       "statedOn": "2023-09-15",
       "entities": [
@@ -4136,38 +3413,15 @@
       ],
       "sourceTurns": [
         "D19:7",
-        "D19:8"
-      ]
-    },
-    {
-      "text": "Dave said on 15 September 2023 that what makes the work worth it is seeing a car brought back to life and watching people react to the finished product.",
-      "speaker": "Dave",
-      "statedOn": "2023-09-15",
-      "entities": [
-        "dave",
-        "car-restoration"
-      ],
-      "sourceTurns": [
+        "D19:8",
         "D19:9",
-        "D19:10"
-      ]
-    },
-    {
-      "text": "Calvin told Dave on 15 September 2023 that he is talented and inspiring and should keep making people happy with his car work.",
-      "speaker": "Calvin",
-      "statedOn": "2023-09-15",
-      "entities": [
-        "calvin",
-        "dave",
-        "car-restoration"
-      ],
-      "sourceTurns": [
+        "D19:10",
         "D19:11",
         "D19:12"
       ]
     },
     {
-      "text": "Dave worked on the engine of his vintage Mustang and thought he had fixed it, but heard a strange noise when he started it up, which he told Calvin about on 22 September 2023 and found disappointing after so much work.",
+      "text": "Dave worked on the engine of his vintage Mustang and heard a strange noise when he started it up, which disappointed him after all the work he had put in.",
       "speaker": "Dave",
       "statedOn": "2023-09-22",
       "entities": [
@@ -4176,11 +3430,12 @@
         "car-restoration"
       ],
       "sourceTurns": [
-        "D20:1"
+        "D20:1",
+        "D20:2"
       ]
     },
     {
-      "text": "Calvin shared a photograph of his red sports car on 22 September 2023, calling it a sign of his hard work and dedication and a reminder of how far he has come.",
+      "text": "Calvin said his car is a sign of his hard work and dedication and reminds him how far he has come.",
       "speaker": "Calvin",
       "statedOn": "2023-09-22",
       "entities": [
@@ -4193,11 +3448,12 @@
       ]
     },
     {
-      "text": "Calvin recalled on 22 September 2023 an unforgettable drive on a summer day, with the wind in his hair and a rush of freedom, and said he had reflected on the path he had chosen.",
+      "text": "Calvin remembered an unforgettable summer drive in his car, and said his trip to Japan was incredible and that he already longed to go back.",
       "speaker": "Calvin",
       "statedOn": "2023-09-22",
       "entities": [
         "calvin",
+        "japan",
         "calvins-ferrari"
       ],
       "sourceTurns": [
@@ -4206,52 +3462,31 @@
       ]
     },
     {
-      "text": "Calvin said on 22 September 2023 that his trip to Japan had been incredible for its culture and people and that he was already longing to go back.",
+      "text": "A song from Calvin's childhood, 'California Love' by Tupac and Dr. Dre, played on a road trip with his father and they sang along to it; he says it still makes him smile.",
       "speaker": "Calvin",
       "statedOn": "2023-09-22",
       "entities": [
         "calvin",
-        "japan"
-      ],
-      "sourceTurns": [
-        "D20:4"
-      ]
-    },
-    {
-      "text": "Calvin said on 22 September 2023 that a song from his childhood always makes him smile because it played during a road trip with his father, on which they sang along to it.",
-      "speaker": "Calvin",
-      "statedOn": "2023-09-22",
-      "entities": [
-        "calvin",
+        "calvins-dad",
         "california-love"
       ],
       "sourceTurns": [
         "D20:6",
-        "D20:7"
+        "D20:7",
+        "D20:8"
       ]
     },
     {
-      "text": "The childhood song Calvin and his father sang on their road trip was \"California Love\" by Tupac and Dr. Dre, which Dave called a classic.",
-      "speaker": "Calvin",
-      "statedOn": "2023-09-22",
-      "entities": [
-        "calvin",
-        "california-love"
-      ],
-      "sourceTurns": [
-        "D20:8",
-        "D20:9"
-      ]
-    },
-    {
-      "text": "Calvin and Dave agreed on 22 September 2023 to have a jam session together and make some music when they next met.",
+      "text": "Calvin and Dave agreed on 22 September 2023 to have a jam session together.",
       "speaker": "Dave",
       "statedOn": "2023-09-22",
       "entities": [
         "dave",
-        "calvin"
+        "calvin",
+        "making-music"
       ],
       "sourceTurns": [
+        "D20:9",
         "D20:10",
         "D20:11",
         "D20:12",
@@ -4263,15 +3498,16 @@
       ]
     },
     {
-      "text": "Calvin met several artists in Boston on 3 October 2023 and talked with them about working together, calling their individual styles inspiring.",
+      "text": "Calvin met several artists in Boston on 3 October 2023 to talk about working together, and found their individual styles inspiring.",
       "speaker": "Calvin",
       "statedOn": "2023-10-04",
       "entities": [
         "calvin",
-        "boston"
+        "boston",
+        "making-music"
       ],
       "chrono": [
-        "calvin-meets-boston-artists"
+        "calvin-boston-artists"
       ],
       "sourceTurns": [
         "D21:1",
@@ -4279,7 +3515,7 @@
       ]
     },
     {
-      "text": "Calvin said on 4 October 2023 that a mutual friend had brought him together with the Boston artists because they would be a good fit, and he showed Dave a car project he enjoys working on to unwind.",
+      "text": "The meeting between Calvin and the Boston artists was arranged by a mutual friend who thought they would be a great fit.",
       "speaker": "Calvin",
       "statedOn": "2023-10-04",
       "entities": [
@@ -4291,7 +3527,7 @@
       ]
     },
     {
-      "text": "Dave said on 4 October 2023 that working on cars relaxes him, and that he had been working on a Ford Mustang he found in a junkyard in bad shape but saw potential in.",
+      "text": "Dave was restoring a Ford Mustang he had found in a junkyard in bad shape, and said working on cars is therapeutic and how he relaxes.",
       "speaker": "Dave",
       "statedOn": "2023-10-04",
       "entities": [
@@ -4300,11 +3536,12 @@
         "car-restoration"
       ],
       "sourceTurns": [
+        "D21:3",
         "D21:4"
       ]
     },
     {
-      "text": "Dave showed Calvin a photograph of the Ford Mustang he had restored on 4 October 2023 and said it was satisfying to bring an old car back to life.",
+      "text": "Dave showed Calvin the restored Ford Mustang on 4 October 2023 and said bringing an old car back to life is deeply satisfying.",
       "speaker": "Dave",
       "statedOn": "2023-10-04",
       "entities": [
@@ -4319,47 +3556,22 @@
       ]
     },
     {
-      "text": "Dave said on 4 October 2023 that his hands are permanently stained with grease after a day in the garage, but that it is worth it for the end result.",
+      "text": "Dave said his hands are permanently stained with grease after a day in the garage, and that it is worth it for the end result.",
       "speaker": "Dave",
       "statedOn": "2023-10-04",
       "entities": [
         "dave",
+        "daves-car-shop",
         "car-restoration"
       ],
       "sourceTurns": [
         "D21:8",
-        "D21:9"
+        "D21:9",
+        "D21:10"
       ]
     },
     {
-      "text": "Dave said on 4 October 2023 that he loves transforming something old and beaten-up into something beautiful, and that the small successes are what make him feel proud and fulfilled.",
-      "speaker": "Dave",
-      "statedOn": "2023-10-04",
-      "entities": [
-        "dave",
-        "car-restoration"
-      ],
-      "sourceTurns": [
-        "D21:10",
-        "D21:11"
-      ]
-    },
-    {
-      "text": "Calvin and Dave agreed on 4 October 2023 that seeing progress in their projects and in themselves is what keeps them motivated and that hard work pays off.",
-      "speaker": "Dave",
-      "statedOn": "2023-10-04",
-      "entities": [
-        "dave",
-        "calvin"
-      ],
-      "sourceTurns": [
-        "D21:12",
-        "D21:13",
-        "D21:14"
-      ]
-    },
-    {
-      "text": "Calvin and Dave promised each other on 4 October 2023 to stay focused on their goals and keep working towards them until they next spoke.",
+      "text": "Calvin and Dave agreed on 4 October 2023 that small wins and visible progress in their projects and in themselves are what keep them motivated.",
       "speaker": "Calvin",
       "statedOn": "2023-10-04",
       "entities": [
@@ -4367,6 +3579,10 @@
         "dave"
       ],
       "sourceTurns": [
+        "D21:11",
+        "D21:12",
+        "D21:13",
+        "D21:14",
         "D21:15",
         "D21:16",
         "D21:17",
@@ -4374,7 +3590,7 @@
       ]
     },
     {
-      "text": "Dave went to a car show on Friday 6 October 2023, saw some impressive cars and got to try out car modifications.",
+      "text": "Dave went to a car show on 6 October 2023 where he saw many cars and got to work with car modifications.",
       "speaker": "Dave",
       "statedOn": "2023-10-08",
       "entities": [
@@ -4382,7 +3598,7 @@
         "car-restoration"
       ],
       "chrono": [
-        "dave-october-car-show"
+        "dave-car-show-october"
       ],
       "sourceTurns": [
         "D22:1",
@@ -4390,7 +3606,7 @@
       ]
     },
     {
-      "text": "Dave restored and modified one of the cars himself, adding a custom exhaust and performance upgrades, and said on 8 October 2023 that he was proud of its sound and how it turned out.",
+      "text": "Dave restored and modified a car himself, adding a custom exhaust and performance upgrades, and was proud of its sound.",
       "speaker": "Dave",
       "statedOn": "2023-10-08",
       "entities": [
@@ -4403,20 +3619,22 @@
       ]
     },
     {
-      "text": "Dave said on 8 October 2023 that working on cars is a passion and a therapy that gets him away from everyday stress, that as a boy he spent hours tinkering with engines in his father's garage as his own sanctuary, and that he is now lucky enough to do it as a job.",
+      "text": "Dave spent hours as a child in his father's garage tinkering with engines, which he called his own sanctuary, and now does the same work for a living.",
       "speaker": "Dave",
       "statedOn": "2023-10-08",
       "entities": [
         "dave",
         "daves-dad",
-        "car-restoration"
+        "car-restoration",
+        "daves-car-shop"
       ],
       "sourceTurns": [
-        "D22:5"
+        "D22:5",
+        "D22:6"
       ]
     },
     {
-      "text": "Dave said on 8 October 2023 that doing something he loves for a living had been his goal since he was a kid, and that the feeling of accomplishment from restoring cars makes the difficulty worthwhile.",
+      "text": "Dave said doing what he loves has been his goal since he was a kid and that the feeling of accomplishment makes the difficulty of restoration worth it.",
       "speaker": "Dave",
       "statedOn": "2023-10-08",
       "entities": [
@@ -4424,33 +3642,10 @@
         "car-restoration"
       ],
       "sourceTurns": [
-        "D22:6",
-        "D22:7"
-      ]
-    },
-    {
-      "text": "Calvin told Dave on 8 October 2023 that chasing his dreams is what life is about and that it was inspiring to see how far he had come; Dave said conversations like it remind him why he loves what he does.",
-      "speaker": "Calvin",
-      "statedOn": "2023-10-08",
-      "entities": [
-        "calvin",
-        "dave"
-      ],
-      "sourceTurns": [
+        "D22:7",
         "D22:8",
         "D22:9",
-        "D22:10"
-      ]
-    },
-    {
-      "text": "Calvin promised Dave on 8 October 2023 that he would always be there to support him and give him a boost.",
-      "speaker": "Calvin",
-      "statedOn": "2023-10-08",
-      "entities": [
-        "calvin",
-        "dave"
-      ],
-      "sourceTurns": [
+        "D22:10",
         "D22:11",
         "D22:12",
         "D22:13",
@@ -4458,7 +3653,7 @@
       ]
     },
     {
-      "text": "A competing car maintenance shop won a deal Dave's shop had been trying to secure for months, which he told Calvin about on 15 October 2023, saying it left him bummed out and wondering whether he was wasting his time.",
+      "text": "A competing car maintenance shop won a deal that Dave's shop had spent months trying to secure, which left Dave discouraged and wondering on 15 October 2023 whether he was wasting his time.",
       "speaker": "Dave",
       "statedOn": "2023-10-15",
       "entities": [
@@ -4467,24 +3662,24 @@
       ],
       "sourceTurns": [
         "D23:1",
-        "D23:2"
+        "D23:2",
+        "D23:3"
       ]
     },
     {
-      "text": "Calvin said on 15 October 2023 that when he faces setbacks he reminds himself why he is passionate about his goals, leans on the people around him and takes a break with his favourite activities.",
+      "text": "Calvin said he handles setbacks by reminding himself why he is passionate about his goals, relying on the people around him and taking a break with his favourite activities.",
       "speaker": "Calvin",
       "statedOn": "2023-10-15",
       "entities": [
-        "calvin",
-        "dave"
+        "calvin"
       ],
       "sourceTurns": [
-        "D23:3",
-        "D23:4"
+        "D23:4",
+        "D23:5"
       ]
     },
     {
-      "text": "Dave had just got back from a music festival when he spoke to Calvin on 15 October 2023, and said the energy, the music and the crowd had made him feel alive.",
+      "text": "Dave got back from a music festival shortly before 15 October 2023 and said the energy, the music and the crowd made him feel alive.",
       "speaker": "Dave",
       "statedOn": "2023-10-15",
       "entities": [
@@ -4492,23 +3687,13 @@
       ],
       "sourceTurns": [
         "D23:5",
-        "D23:6"
-      ]
-    },
-    {
-      "text": "Dave shared a photograph of the main stage of the music festival he had just been to and called the stage and the vibe unreal.",
-      "speaker": "Dave",
-      "statedOn": "2023-10-15",
-      "entities": [
-        "dave"
-      ],
-      "sourceTurns": [
+        "D23:6",
         "D23:7",
         "D23:8"
       ]
     },
     {
-      "text": "The Fireworks headlined the music festival Dave went to shortly before 15 October 2023.",
+      "text": "The Fireworks headlined the music festival Dave attended shortly before 15 October 2023.",
       "speaker": "Dave",
       "statedOn": "2023-10-15",
       "entities": [
@@ -4520,52 +3705,30 @@
       ]
     },
     {
-      "text": "Calvin said on 15 October 2023 that performing with Frank Ocean recently had been really cool, and that connecting with the crowd is why he loves his job.",
+      "text": "Calvin said on 15 October 2023 that performing with Frank Ocean recently had been really cool and that connecting with the crowd is why he loves his job.",
       "speaker": "Calvin",
       "statedOn": "2023-10-15",
       "entities": [
         "calvin",
         "frank-ocean",
-        "the-fireworks"
+        "frank-ocean-tour"
       ],
       "sourceTurns": [
-        "D23:10"
-      ]
-    },
-    {
-      "text": "Dave compared music to his own work on 15 October 2023, saying that taking something broken and making it whole again is why he keeps doing what he does.",
-      "speaker": "Dave",
-      "statedOn": "2023-10-15",
-      "entities": [
-        "dave",
-        "car-restoration"
-      ],
-      "sourceTurns": [
+        "D23:10",
         "D23:11",
-        "D23:12"
-      ]
-    },
-    {
-      "text": "Calvin told Dave on 15 October 2023 that he believed in him and that having a friend who believes in you helps; Dave said he would keep pushing.",
-      "speaker": "Calvin",
-      "statedOn": "2023-10-15",
-      "entities": [
-        "calvin",
-        "dave"
-      ],
-      "sourceTurns": [
+        "D23:12",
         "D23:13",
         "D23:14",
         "D23:15"
       ]
     },
     {
-      "text": "On 15 October 2023 Calvin said he had got a new Ferrari the week before, calling it a masterpiece on wheels and promising to share a photograph of it soon.",
+      "text": "Calvin got a new Ferrari in the week before 15 October 2023, calling it a masterpiece on wheels.",
       "speaker": "Calvin",
       "statedOn": "2023-10-15",
       "entities": [
         "calvin",
-        "calvins-ferrari"
+        "calvins-second-ferrari"
       ],
       "sourceTurns": [
         "D23:16",
@@ -4574,7 +3737,7 @@
       ]
     },
     {
-      "text": "On 19 October 2023 Calvin said he had started touring with Frank Ocean, and described the crowd's energy and the connection he feels on stage as unreal.",
+      "text": "Calvin started touring with Frank Ocean shortly before 19 October 2023 and described the crowd's energy and the connection on stage as unreal.",
       "speaker": "Calvin",
       "statedOn": "2023-10-19",
       "entities": [
@@ -4584,11 +3747,12 @@
       ],
       "sourceTurns": [
         "D24:1",
-        "D24:2"
+        "D24:2",
+        "D24:3"
       ]
     },
     {
-      "text": "Calvin said on 19 October 2023 that the tour was going great and that jamming with Frank Ocean was a dream come true.",
+      "text": "Calvin's tour with Frank Ocean is described inconsistently across the conversation: as still to be finished in April 2023, as having played Tokyo in late May 2023, as ending soon on 22 August 2023, as over by 31 August 2023, and as newly started on 19 October 2023.",
       "speaker": "Calvin",
       "statedOn": "2023-10-19",
       "entities": [
@@ -4597,12 +3761,15 @@
         "frank-ocean-tour"
       ],
       "sourceTurns": [
-        "D24:3",
-        "D24:4"
+        "D3:9",
+        "D7:1",
+        "D15:10",
+        "D16:1",
+        "D24:1"
       ]
     },
     {
-      "text": "On 19 October 2023 Calvin said his work with Frank Ocean had started in August 2022, when they met at a festival, Frank Ocean said he wanted to collaborate, and they clicked immediately.",
+      "text": "Calvin said on 19 October 2023 that his collaboration with Frank Ocean began in August 2022, when they met at a festival and Frank Ocean said he wanted to collaborate.",
       "speaker": "Calvin",
       "statedOn": "2023-10-19",
       "entities": [
@@ -4610,26 +3777,15 @@
         "frank-ocean"
       ],
       "sourceTurns": [
+        "D24:4",
         "D24:5",
-        "D24:6"
-      ]
-    },
-    {
-      "text": "Calvin shared photographs of the crowds on the Frank Ocean tour on 19 October 2023 and said the crowd's energy always pumps him up.",
-      "speaker": "Calvin",
-      "statedOn": "2023-10-19",
-      "entities": [
-        "calvin",
-        "frank-ocean-tour"
-      ],
-      "sourceTurns": [
+        "D24:6",
         "D24:7",
-        "D24:8",
-        "D24:9"
+        "D24:8"
       ]
     },
     {
-      "text": "The crowd photograph Calvin shared on 19 October 2023 was taken at a concert in Tokyo, where he said the energy felt as if the whole city had come out.",
+      "text": "Calvin showed Dave a photograph of a huge crowd at a concert he played in Tokyo and said the energy felt as though the whole city had come out.",
       "speaker": "Calvin",
       "statedOn": "2023-10-19",
       "entities": [
@@ -4637,40 +3793,29 @@
         "tokyo"
       ],
       "sourceTurns": [
+        "D24:9",
         "D24:10",
         "D24:11"
       ]
     },
     {
-      "text": "Dave shared a photograph of a busy Tokyo street he had found online on 19 October 2023 and said it made him dream of visiting; Calvin said he had walked streets like it.",
+      "text": "Dave said he dreams of visiting Tokyo and wants to experience its people, culture, food and street life in person.",
       "speaker": "Dave",
       "statedOn": "2023-10-19",
       "entities": [
         "dave",
-        "calvin",
         "tokyo"
       ],
       "sourceTurns": [
         "D24:12",
-        "D24:13"
-      ]
-    },
-    {
-      "text": "Dave said on 19 October 2023 that he wants to know everything about Tokyo - its people, culture, food and street life - and hopes to see it in person one day.",
-      "speaker": "Dave",
-      "statedOn": "2023-10-19",
-      "entities": [
-        "dave",
-        "tokyo"
-      ],
-      "sourceTurns": [
+        "D24:13",
         "D24:14",
         "D24:15",
         "D24:16"
       ]
     },
     {
-      "text": "Calvin said on 19 October 2023 that he was going to Tokyo the following month, November 2023, once the tour ended.",
+      "text": "Calvin planned to go to Tokyo in November 2023, after his tour ended.",
       "speaker": "Calvin",
       "statedOn": "2023-10-19",
       "entities": [
@@ -4684,21 +3829,19 @@
       ]
     },
     {
-      "text": "Calvin named Shibuya Crossing, which he compared to Times Square, and Shinjuku as the Tokyo spots he was most excited to see on his return, along with the food.",
+      "text": "Calvin named Shibuya Crossing, which he compared to Times Square, and Shinjuku as the Tokyo places he was most excited to explore, along with the food.",
       "speaker": "Calvin",
       "statedOn": "2023-10-19",
       "entities": [
         "calvin",
-        "tokyo",
-        "shibuya-crossing",
-        "shinjuku"
+        "tokyo"
       ],
       "sourceTurns": [
         "D24:19"
       ]
     },
     {
-      "text": "Dave had eaten ramen in Boston and said on 19 October 2023 that it was delicious but that he expected Tokyo's to be better.",
+      "text": "Dave ate a bowl of ramen in Boston that he found delicious and expected Tokyo ramen to be better still.",
       "speaker": "Dave",
       "statedOn": "2023-10-19",
       "entities": [
@@ -4711,7 +3854,7 @@
       ]
     },
     {
-      "text": "As of 19 October 2023 Calvin had never tried ramen, and said he would give it a go while he was in Tokyo.",
+      "text": "As of 19 October 2023 Calvin had never tried ramen and said he would give it a shot while in Tokyo.",
       "speaker": "Calvin",
       "statedOn": "2023-10-19",
       "entities": [
@@ -4725,13 +3868,13 @@
       ]
     },
     {
-      "text": "Calvin said on 23 October 2023 that the tour with Frank Ocean had been incredible and energising, but that fame brings its own challenges and balancing everything had been tough.",
+      "text": "Calvin said on 23 October 2023 that the tour with Frank Ocean had been incredible and energising, but that fame brought its own struggles and made balancing work and personal life tough.",
       "speaker": "Calvin",
       "statedOn": "2023-10-23",
       "entities": [
         "calvin",
-        "frank-ocean",
-        "frank-ocean-tour"
+        "frank-ocean-tour",
+        "frank-ocean"
       ],
       "sourceTurns": [
         "D25:1",
@@ -4739,7 +3882,7 @@
       ]
     },
     {
-      "text": "Calvin said on 23 October 2023 that he takes the demands of his career one day at a time, that it can get overwhelming, and that he pushes on because he enjoys what he does.",
+      "text": "Calvin said he takes the demands of his career one day at a time, can get overwhelmed by them, and pushes on because he enjoys what he does.",
       "speaker": "Calvin",
       "statedOn": "2023-10-23",
       "entities": [
@@ -4751,7 +3894,7 @@
       ]
     },
     {
-      "text": "Calvin said on 23 October 2023 that a strong support system of his friends and his team is what keeps him on track.",
+      "text": "Calvin said his friends and his team are the strong support system that keeps him on track.",
       "speaker": "Calvin",
       "statedOn": "2023-10-23",
       "entities": [
@@ -4763,7 +3906,7 @@
       ]
     },
     {
-      "text": "Dave had a conversation with some neighbours about current events and politics shortly before 23 October 2023, and said hearing different perspectives cheers him up and keeps him informed.",
+      "text": "Dave had a good conversation with some neighbours about current events and politics shortly before 23 October 2023 and said hearing different perspectives cheers him up and keeps him informed.",
       "speaker": "Dave",
       "statedOn": "2023-10-23",
       "entities": [
@@ -4774,42 +3917,34 @@
       ]
     },
     {
-      "text": "Calvin said on 23 October 2023 that staying up to date on world events matters to him because it gives his music unique perspectives and connects him better with his fans.",
+      "text": "Calvin said keeping up with world events matters to him because it helps his music stand out and connects him better with his fans.",
       "speaker": "Calvin",
       "statedOn": "2023-10-23",
       "entities": [
-        "calvin"
+        "calvin",
+        "making-music"
       ],
       "sourceTurns": [
-        "D25:8"
+        "D25:8",
+        "D25:9"
       ]
     },
     {
-      "text": "Calvin said on 23 October 2023 that he had lately been inspired by the struggles people go through and was digging deeper into his music to capture those feelings.",
+      "text": "Calvin said he had been inspired by the struggles people go through and was digging deeper into his music to capture those feelings, calling music his own form of therapy.",
       "speaker": "Calvin",
       "statedOn": "2023-10-23",
       "entities": [
-        "calvin"
+        "calvin",
+        "making-music"
       ],
       "sourceTurns": [
-        "D25:9",
-        "D25:10"
-      ]
-    },
-    {
-      "text": "Calvin said on 23 October 2023 that making music is how he expresses himself and works through his emotions, and called it his own form of therapy.",
-      "speaker": "Calvin",
-      "statedOn": "2023-10-23",
-      "entities": [
-        "calvin"
-      ],
-      "sourceTurns": [
+        "D25:10",
         "D25:11",
         "D25:12"
       ]
     },
     {
-      "text": "Dave said on 23 October 2023 that cars are his outlet and an oasis of calm where he reconnects with himself, and showed Calvin his garage with its tools on the wall.",
+      "text": "Dave said cars are his outlet for expressing himself and an oasis of calm, and showed Calvin his garage with its tools on the wall.",
       "speaker": "Dave",
       "statedOn": "2023-10-23",
       "entities": [
@@ -4823,7 +3958,7 @@
       ]
     },
     {
-      "text": "Dave has been fascinated by how machines work since he was ten, when he found an old car in a neighbour's garage and asked to fix it; transforming it from broken down to running hooked him on car engineering.",
+      "text": "Dave has been fascinated by how machines work since he was ten, when he asked to fix an old car in a neighbour's garage; the sense of accomplishment hooked him and he has worked on cars ever since.",
       "speaker": "Dave",
       "statedOn": "2023-10-23",
       "entities": [
@@ -4836,7 +3971,7 @@
       ]
     },
     {
-      "text": "Dave restored a car in 2022 and sold it to a collector, and said on 23 October 2023 that he was now working on a new and challenging car.",
+      "text": "Dave restored a car in 2022 and sold it to a collector, and by 23 October 2023 was working on a new and challenging project.",
       "speaker": "Dave",
       "statedOn": "2023-10-23",
       "entities": [
@@ -4844,11 +3979,12 @@
         "car-restoration"
       ],
       "sourceTurns": [
-        "D25:17"
+        "D25:17",
+        "D25:18"
       ]
     },
     {
-      "text": "Dave said on 23 October 2023 that the hardest part of car restoration is the patience and the attention to detail it takes, but that the payoff is worth it.",
+      "text": "Dave said the hardest part of car restoration is the patience and the attention to detail it takes, and that the details are what make the difference.",
       "speaker": "Dave",
       "statedOn": "2023-10-23",
       "entities": [
@@ -4856,39 +3992,16 @@
         "car-restoration"
       ],
       "sourceTurns": [
-        "D25:18",
-        "D25:19"
-      ]
-    },
-    {
-      "text": "Calvin and Dave agreed on 23 October 2023 that small details are what separate something extraordinary from something average, whether in a rap song or a car.",
-      "speaker": "Calvin",
-      "statedOn": "2023-10-23",
-      "entities": [
-        "calvin",
-        "dave"
-      ],
-      "sourceTurns": [
+        "D25:19",
         "D25:20",
         "D25:21",
-        "D25:22"
-      ]
-    },
-    {
-      "text": "Dave praised the attention to detail in Calvin's work on 23 October 2023 and told him to keep creating.",
-      "speaker": "Dave",
-      "statedOn": "2023-10-23",
-      "entities": [
-        "dave",
-        "calvin"
-      ],
-      "sourceTurns": [
+        "D25:22",
         "D25:23",
         "D25:24"
       ]
     },
     {
-      "text": "Dave went to concerts in September 2023 and shared photographs of the crowds on 23 October 2023, saying music makes memories and connects people.",
+      "text": "Dave went to concerts in September 2023 and said music connects people and creates memories.",
       "speaker": "Dave",
       "statedOn": "2023-10-23",
       "entities": [
@@ -4901,11 +4014,12 @@
       ]
     },
     {
-      "text": "Calvin said on 23 October 2023 that concerts are what he lives for, because the connection between the artist and the crowd is indescribable.",
+      "text": "Calvin said concerts are what he lives for and that the connection between the artist and the crowd is indescribable.",
       "speaker": "Calvin",
       "statedOn": "2023-10-23",
       "entities": [
-        "calvin"
+        "calvin",
+        "making-music"
       ],
       "sourceTurns": [
         "D25:28",
@@ -4915,7 +4029,7 @@
       ]
     },
     {
-      "text": "Calvin saw the sights of Boston with an old high school friend on 24 October 2023 and called it fun and eye-opening.",
+      "text": "Calvin visited sights in Boston with an old high-school friend on 24 October 2023 and called it fun and eye-opening.",
       "speaker": "Calvin",
       "statedOn": "2023-10-25",
       "entities": [
@@ -4927,7 +4041,8 @@
         "calvin-boston-sightseeing"
       ],
       "sourceTurns": [
-        "D26:1"
+        "D26:1",
+        "D26:2"
       ]
     },
     {
@@ -4939,39 +4054,26 @@
         "detroit"
       ],
       "sourceTurns": [
-        "D26:2"
+        "D26:2",
+        "D26:3"
       ]
     },
     {
-      "key": "calvin-visited-daves-park",
-      "text": "Calvin took Dave's advice on his October 2023 Boston trip and went to the park Dave had recommended, finding it peaceful; he also praised the city's architecture and history.",
+      "text": "Calvin praised Boston's architecture and history and said he had followed Dave's advice and visited the peaceful spot Dave recommended.",
       "speaker": "Calvin",
       "statedOn": "2023-10-25",
       "entities": [
         "calvin",
         "boston",
-        "daves-favourite-park"
+        "daves-park"
       ],
       "sourceTurns": [
-        "D26:3"
+        "D26:3",
+        "D26:4"
       ]
     },
     {
-      "text": "Dave said on 25 October 2023 that working on his latest car project takes him out of his head and calms him down, and Calvin said he too is into cars and loves making new and powerful models.",
-      "speaker": "Dave",
-      "statedOn": "2023-10-25",
-      "entities": [
-        "dave",
-        "calvin",
-        "car-restoration"
-      ],
-      "sourceTurns": [
-        "D26:4",
-        "D26:5"
-      ]
-    },
-    {
-      "text": "Dave's father took him to his first car show when he was ten and he was hooked; he is now an automotive engineer and still finds it remarkable that something so powerful can be made from small parts.",
+      "text": "Dave's father took him to his first car show when Dave was ten, which hooked him on cars, and by 25 October 2023 Dave described himself as an automotive engineer.",
       "speaker": "Dave",
       "statedOn": "2023-10-25",
       "entities": [
@@ -4980,42 +4082,50 @@
         "car-restoration"
       ],
       "sourceTurns": [
+        "D26:5",
         "D26:6"
       ]
     },
     {
-      "text": "Calvin shared a photograph on 25 October 2023 of himself performing with an artist he admires.",
-      "speaker": "Calvin",
+      "text": "Dave went from talking about his love of classic cars in March 2023 to opening his own car maintenance shop in May 2023, teaming up with a local garage, and describing himself as an automotive engineer by October 2023.",
+      "speaker": "Dave",
       "statedOn": "2023-10-25",
       "entities": [
-        "calvin"
+        "dave",
+        "daves-car-shop",
+        "car-restoration"
       ],
       "sourceTurns": [
-        "D26:7",
-        "D26:8"
+        "D1:2",
+        "D4:1",
+        "D5:1",
+        "D26:6"
       ]
     },
     {
-      "text": "Calvin said performing alongside an artist he admires was a dream come true that made him realise music is his passion and his purpose.",
-      "speaker": "Calvin",
-      "statedOn": "2023-10-25",
-      "entities": [
-        "calvin"
-      ],
-      "sourceTurns": [
-        "D26:9",
-        "D26:10"
-      ]
-    },
-    {
-      "text": "Calvin and Dave agreed on 25 October 2023 that they had each found something fulfilling and would keep inspiring each other.",
+      "text": "Calvin performed alongside a musician he admires and said it was a dream come true that made him realise music is his passion and his purpose.",
       "speaker": "Calvin",
       "statedOn": "2023-10-25",
       "entities": [
         "calvin",
-        "dave"
+        "making-music"
       ],
       "sourceTurns": [
+        "D26:7",
+        "D26:8",
+        "D26:9"
+      ]
+    },
+    {
+      "text": "Calvin and Dave agreed on 25 October 2023 that they were fortunate to have each found something that fulfils them, and said they would keep inspiring each other.",
+      "speaker": "Dave",
+      "statedOn": "2023-10-25",
+      "entities": [
+        "dave",
+        "calvin"
+      ],
+      "sourceTurns": [
+        "D26:10",
         "D26:11",
         "D26:12",
         "D26:13",
@@ -5024,18 +4134,19 @@
       ]
     },
     {
-      "text": "Calvin went to a networking event to meet more artists shortly before 29 October 2023, and said the people he met would help him build up his fan base.",
+      "text": "Calvin went to a networking event to meet other artists shortly before 29 October 2023 and said the people he met would help him build up his fan base.",
       "speaker": "Calvin",
       "statedOn": "2023-10-29",
       "entities": [
-        "calvin"
+        "calvin",
+        "making-music"
       ],
       "sourceTurns": [
         "D27:1"
       ]
     },
     {
-      "text": "Dave took up photography in the autumn of 2023 and said on 29 October 2023 that he had seen some amazing places and taken some great shots.",
+      "text": "Dave took up photography shortly before 29 October 2023 and had been photographing the places he visited.",
       "speaker": "Dave",
       "statedOn": "2023-10-29",
       "entities": [
@@ -5048,33 +4159,23 @@
       ]
     },
     {
-      "text": "Dave photographed a sunset over a city skyline and said on 29 October 2023 that the sky looked as if it were on fire.",
+      "text": "Dave photographed a sunset over the Boston skyline, and in September 2023 photographed the city's clock tower at sunset.",
       "speaker": "Dave",
       "statedOn": "2023-10-29",
       "entities": [
         "dave",
-        "photography"
+        "photography",
+        "boston"
       ],
       "sourceTurns": [
         "D27:4",
-        "D27:5"
+        "D27:5",
+        "D27:6",
+        "D27:8"
       ]
     },
     {
-      "text": "The sunset skyline Dave photographed was Boston, and he took a picture of the city's clock tower in September 2023.",
-      "speaker": "Dave",
-      "statedOn": "2023-10-29",
-      "entities": [
-        "dave",
-        "boston",
-        "photography"
-      ],
-      "sourceTurns": [
-        "D27:6"
-      ]
-    },
-    {
-      "text": "On 29 October 2023 Calvin said he had been to Boston a few years back and that it is a beautiful city.",
+      "text": "Calvin said on 29 October 2023 that he had been to Boston a few years earlier and thought it a beautiful city.",
       "speaker": "Calvin",
       "statedOn": "2023-10-29",
       "entities": [
@@ -5086,44 +4187,57 @@
       ]
     },
     {
-      "text": "Dave said on 29 October 2023 that he had photographed the Boston clock tower at sunset, and that photography has been a creative outlet that helps him capture and appreciate the beauty of nature.",
+      "text": "Dave said photography has become a creative outlet that helps him capture and appreciate the beauty of nature.",
       "speaker": "Dave",
       "statedOn": "2023-10-29",
       "entities": [
         "dave",
-        "boston",
         "photography"
       ],
       "sourceTurns": [
-        "D27:8"
+        "D27:8",
+        "D27:9"
       ]
     },
     {
-      "text": "Dave said on 29 October 2023 that he had just finished restoring his car, that it looked amazing, and invited Calvin to come and see it.",
+      "text": "Dave finished restoring his car project by 29 October 2023 and invited Calvin to come by and see it.",
       "speaker": "Dave",
       "statedOn": "2023-10-29",
       "entities": [
         "dave",
         "daves-mustang",
-        "calvin",
-        "car-restoration"
-      ],
-      "chrono": [
-        "dave-finishes-restoration"
+        "car-restoration",
+        "calvin"
       ],
       "sourceTurns": [
-        "D27:9",
         "D27:10"
       ]
     },
     {
-      "text": "On 29 October 2023 Calvin said he had had some great collaborations recently and that his album was almost finished, promising to send Dave previews.",
+      "text": "Dave's restoration of the vintage Ford Mustang he found in a junkyard ran from engine and suspension work in August 2023, through an engine fault heard on 22 September, to the finished car he showed in October 2023.",
+      "speaker": "Dave",
+      "statedOn": "2023-10-29",
+      "entities": [
+        "dave",
+        "daves-mustang",
+        "car-restoration"
+      ],
+      "sourceTurns": [
+        "D13:7",
+        "D14:11",
+        "D19:7",
+        "D20:1",
+        "D21:4",
+        "D27:10"
+      ]
+    },
+    {
+      "text": "Calvin said on 29 October 2023 that he had had some great collaborations recently and that his album was almost finished, and promised to send Dave previews.",
       "speaker": "Calvin",
       "statedOn": "2023-10-29",
       "entities": [
         "calvin",
-        "calvins-album",
-        "dave"
+        "calvins-album"
       ],
       "sourceTurns": [
         "D27:11",
@@ -5132,53 +4246,59 @@
       ]
     },
     {
-      "text": "Calvin threw a small party for his new album at his Japanese house in the week before 2 November 2023, with family and friends showing their support.",
+      "text": "Calvin threw a small party for his new album at his Japanese house in the week before 2 November 2023, with family and friends there to celebrate.",
       "speaker": "Calvin",
       "statedOn": "2023-11-02",
       "entities": [
         "calvin",
         "calvins-album",
-        "calvins-mansion"
+        "calvins-japanese-mansion"
       ],
       "sourceTurns": [
         "D28:1",
-        "D28:2"
+        "D28:2",
+        "D28:3"
       ]
     },
     {
-      "text": "Calvin said the album party at his mansion was rewarding, with everyone coming together to celebrate and the room buzzing with energy and love.",
+      "text": "Calvin's album went from a creative-team session on 8 June 2023 and a Miami video shoot in late August, to its release on 11 September 2023, to a launch party at his Japanese mansion in late October 2023.",
       "speaker": "Calvin",
       "statedOn": "2023-11-02",
       "entities": [
         "calvin",
         "calvins-album",
-        "calvins-mansion"
+        "miami",
+        "calvins-japanese-mansion"
       ],
       "sourceTurns": [
-        "D28:3",
-        "D28:4",
-        "D28:5"
+        "D8:1",
+        "D16:6",
+        "D18:1",
+        "D28:1"
       ]
     },
     {
-      "text": "Calvin said on 2 November 2023 that creating something people connect with and that brings them joy is what motivates him to keep growing.",
+      "text": "Calvin said his album party was buzzing with energy and love and was a powerful reminder of why he makes music.",
       "speaker": "Calvin",
       "statedOn": "2023-11-02",
       "entities": [
-        "calvin"
+        "calvin",
+        "calvins-album",
+        "making-music"
       ],
       "sourceTurns": [
+        "D28:4",
+        "D28:5",
         "D28:6",
         "D28:7"
       ]
     },
     {
-      "text": "Dave started a blog about car modifications shortly before 2 November 2023 as a way to share his passion, and asked Calvin for blogging tips.",
+      "text": "Dave started a blog about car modifications shortly before 2 November 2023 to share his passion, and asked Calvin for blogging tips.",
       "speaker": "Dave",
       "statedOn": "2023-11-02",
       "entities": [
         "dave",
-        "daves-car-blog",
         "car-restoration"
       ],
       "sourceTurns": [
@@ -5187,47 +4307,23 @@
       ]
     },
     {
-      "text": "Dave said on 2 November 2023 that people were reading his car blog and asking him for advice, and that a post about how he made one car look like a beast had inspired others to start their own DIY projects.",
+      "text": "Dave's blog post about how he made one car look like a beast drew readers asking him for advice and inspired others to start their own DIY projects.",
       "speaker": "Dave",
       "statedOn": "2023-11-02",
       "entities": [
         "dave",
-        "daves-car-blog"
+        "car-restoration"
       ],
       "sourceTurns": [
         "D28:10",
-        "D28:11"
-      ]
-    },
-    {
-      "text": "Dave said on 2 November 2023 that sharing his knowledge through the blog and helping others unleash their creativity is fulfilling.",
-      "speaker": "Dave",
-      "statedOn": "2023-11-02",
-      "entities": [
-        "dave",
-        "daves-car-blog"
-      ],
-      "sourceTurns": [
+        "D28:11",
         "D28:12",
-        "D28:13"
+        "D28:13",
+        "D28:14"
       ]
     },
     {
-      "text": "Dave said the car modification he had blogged about took a lot of work but was worth it, and Calvin asked how he had made its headlights look so good.",
-      "speaker": "Dave",
-      "statedOn": "2023-11-02",
-      "entities": [
-        "dave",
-        "daves-car-blog",
-        "car-restoration"
-      ],
-      "sourceTurns": [
-        "D28:14",
-        "D28:15"
-      ]
-    },
-    {
-      "text": "Dave restored the headlights of the car he had modified by spending a long time cleaning, polishing and protecting them.",
+      "text": "Dave cleaned, polished and protected the headlights of the car he had modified, and was pleased with how they turned out.",
       "speaker": "Dave",
       "statedOn": "2023-11-02",
       "entities": [
@@ -5235,6 +4331,7 @@
         "car-restoration"
       ],
       "sourceTurns": [
+        "D28:15",
         "D28:16",
         "D28:17",
         "D28:18"
@@ -5255,7 +4352,7 @@
       ]
     },
     {
-      "text": "Dave's rock band had a guitar logo made, which he showed Calvin on 2 November 2023, saying he had been a fan of the band for ages before getting the chance to join them.",
+      "text": "Dave's rock band created a logo, and Dave said he had been a fan of the band for ages before getting the opportunity to join them.",
       "speaker": "Dave",
       "statedOn": "2023-11-02",
       "entities": [
@@ -5265,55 +4362,34 @@
       "sourceTurns": [
         "D28:22",
         "D28:23",
-        "D28:24"
-      ]
-    },
-    {
-      "text": "Calvin and Dave agreed on 2 November 2023 that music moves people and is almost a language for the soul.",
-      "speaker": "Calvin",
-      "statedOn": "2023-11-02",
-      "entities": [
-        "calvin",
-        "dave"
-      ],
-      "sourceTurns": [
+        "D28:24",
         "D28:25",
         "D28:26"
       ]
     },
     {
-      "text": "Calvin showed Dave the setup of his recording studio on 2 November 2023, saying the connection music makes is what he aims for.",
+      "text": "Calvin only works in his studio and keeps a separate cosy room with a television for relaxing and getting inspired.",
       "speaker": "Calvin",
       "statedOn": "2023-11-02",
       "entities": [
         "calvin",
-        "mansion-studio-conversion",
-        "calvins-mansion"
+        "mansion-recording-studio",
+        "calvins-japanese-mansion"
       ],
       "sourceTurns": [
         "D28:27",
-        "D28:28"
-      ]
-    },
-    {
-      "text": "Calvin only works in his studio and keeps a separate, cosy room with a television for relaxing, which he showed Dave on 2 November 2023.",
-      "speaker": "Calvin",
-      "statedOn": "2023-11-02",
-      "entities": [
-        "calvin",
-        "calvins-mansion"
-      ],
-      "sourceTurns": [
+        "D28:28",
         "D28:29",
         "D28:30"
       ]
     },
     {
-      "text": "Calvin said on 2 November 2023 that he watches music videos, concerts and documentaries about artists and their creative process, both to learn about the industry and for inspiration.",
+      "text": "Calvin watches music videos, concerts and documentaries about artists and their creative process, both to learn about the industry and for inspiration.",
       "speaker": "Calvin",
       "statedOn": "2023-11-02",
       "entities": [
-        "calvin"
+        "calvin",
+        "making-music"
       ],
       "sourceTurns": [
         "D28:31",
@@ -5321,20 +4397,21 @@
       ]
     },
     {
-      "text": "Dave keeps a notebook for writing lyrics and notes, and said on 2 November 2023 that writing lyrics boosts his motivation to grow.",
+      "text": "Dave writes lyrics and notes in a notebook and says it boosts his motivation to grow.",
       "speaker": "Dave",
       "statedOn": "2023-11-02",
       "entities": [
         "dave",
-        "daves-rock-band"
+        "making-music"
       ],
       "sourceTurns": [
         "D28:33",
-        "D28:34"
+        "D28:34",
+        "D28:35"
       ]
     },
     {
-      "text": "Dave said on 2 November 2023 that music helps him focus and be productive, and that he listens to vinyl to relax and stay on track while doing his car work.",
+      "text": "Dave listens to vinyl on an old record player while working on cars, saying the music keeps him focused and productive.",
       "speaker": "Dave",
       "statedOn": "2023-11-02",
       "entities": [
@@ -5342,24 +4419,13 @@
         "car-restoration"
       ],
       "sourceTurns": [
-        "D28:35",
-        "D28:36"
-      ]
-    },
-    {
-      "text": "Dave's record player is old but still works, and he showed it to Calvin on 2 November 2023.",
-      "speaker": "Dave",
-      "statedOn": "2023-11-02",
-      "entities": [
-        "dave"
-      ],
-      "sourceTurns": [
+        "D28:36",
         "D28:37",
         "D28:38"
       ]
     },
     {
-      "text": "Dave said on 2 November 2023 that he had lately been getting into classic rock and finds the music of that era timeless.",
+      "text": "Dave had been getting into classic rock as of 2 November 2023 and called the music of that era timeless.",
       "speaker": "Dave",
       "statedOn": "2023-11-02",
       "entities": [
@@ -5367,31 +4433,21 @@
       ],
       "sourceTurns": [
         "D28:39",
-        "D28:40"
-      ]
-    },
-    {
-      "text": "Calvin and Dave agreed on 2 November 2023 that classic rock had a huge effect on music and that exploring different styles and eras broadens your musical knowledge.",
-      "speaker": "Calvin",
-      "statedOn": "2023-11-02",
-      "entities": [
-        "calvin",
-        "dave"
-      ],
-      "sourceTurns": [
+        "D28:40",
         "D28:41",
         "D28:42",
         "D28:43"
       ]
     },
     {
-      "text": "Calvin invited his old high school friend to see him perform in Boston shortly before 13 November 2023, and said it made him think about how far he had come and how important relationships are in the music business.",
+      "text": "Calvin invited his old high-school friend to see him perform in Boston in November 2023, and said it made him reflect on how far he had come and how important relationships are in the music business.",
       "speaker": "Calvin",
       "statedOn": "2023-11-13",
       "entities": [
         "calvin",
+        "boston",
         "calvins-high-school-friend",
-        "boston"
+        "making-music"
       ],
       "sourceTurns": [
         "D29:1",
@@ -5399,7 +4455,7 @@
       ]
     },
     {
-      "text": "Calvin and his high school friend used to freestyle together as teenagers and talk about getting famous, which Calvin remembered with nostalgia on 13 November 2023 while sharing a photograph of the two of them.",
+      "text": "Calvin and his high-school friend used to freestyle together as teenagers and talk about getting famous.",
       "speaker": "Calvin",
       "statedOn": "2023-11-13",
       "entities": [
@@ -5412,7 +4468,7 @@
       ]
     },
     {
-      "text": "Calvin said on 13 November 2023 that his high school friend has always been there to support and encourage him and that his positivity has made a big difference to his journey.",
+      "text": "Calvin said his old high-school friend has always supported and encouraged him and that his positivity has made a big difference to Calvin's journey.",
       "speaker": "Calvin",
       "statedOn": "2023-11-13",
       "entities": [
@@ -5425,92 +4481,66 @@
       ]
     },
     {
-      "text": "Calvin said on 13 November 2023 that having supportive people around him is key to growing as an artist and staying true to himself in a tough industry.",
+      "text": "Calvin said supportive people are key to his growth as an artist and matter especially in a tough music industry.",
       "speaker": "Calvin",
       "statedOn": "2023-11-13",
       "entities": [
-        "calvin"
+        "calvin",
+        "making-music"
       ],
       "sourceTurns": [
-        "D29:7"
+        "D29:7",
+        "D29:8"
       ]
     },
     {
-      "text": "Calvin had been supporting young musicians from a music programme by 13 November 2023 and said their enthusiasm was inspiring.",
+      "text": "Calvin had been supporting young musicians from a music programme by late 2023 and said he expected to keep supporting them for a long time.",
       "speaker": "Calvin",
       "statedOn": "2023-11-13",
       "entities": [
-        "calvin"
+        "calvin",
+        "making-music"
       ],
       "sourceTurns": [
-        "D29:8",
-        "D29:9"
-      ]
-    },
-    {
-      "text": "Calvin said on 13 November 2023 that the young musicians he supports are very ambitious and that he expected to support them for a long time, like a torch being passed on.",
-      "speaker": "Calvin",
-      "statedOn": "2023-11-13",
-      "entities": [
-        "calvin"
-      ],
-      "sourceTurns": [
+        "D29:9",
         "D29:10",
         "D29:11",
         "D29:12"
       ]
     },
     {
-      "text": "Calvin was making a beat for a young artist he considers to have great potential, and showed Dave a photograph of himself doing it on 13 November 2023.",
-      "speaker": "Calvin",
-      "statedOn": "2023-11-13",
-      "entities": [
-        "calvin"
-      ],
-      "sourceTurns": [
-        "D29:13",
-        "D29:14"
-      ]
-    },
-    {
-      "text": "Calvin said on 13 November 2023 that he had been trying out new sounds and pushing the boundaries of his music to stay ahead.",
-      "speaker": "Calvin",
-      "statedOn": "2023-11-13",
-      "entities": [
-        "calvin"
-      ],
-      "sourceTurns": [
-        "D29:15",
-        "D29:16"
-      ]
-    },
-    {
-      "text": "Calvin and Dave agreed on 13 November 2023 that growing and evolving is key for any artist before ending the conversation.",
+      "text": "Calvin was making a beat for a young artist he thinks has great potential, and said trying new sounds and pushing boundaries keeps him ahead.",
       "speaker": "Calvin",
       "statedOn": "2023-11-13",
       "entities": [
         "calvin",
-        "dave"
+        "mansion-recording-studio",
+        "making-music"
       ],
       "sourceTurns": [
+        "D29:13",
+        "D29:14",
+        "D29:15",
+        "D29:16",
         "D29:17",
         "D29:18"
       ]
     },
     {
-      "text": "Dave said on 17 November 2023 that he had taken up photography and had been photographing the scenery around him.",
+      "text": "Dave had taken up photography and by 17 November 2023 was photographing the scenery around Boston.",
       "speaker": "Dave",
       "statedOn": "2023-11-17",
       "entities": [
         "dave",
-        "photography"
+        "photography",
+        "boston"
       ],
       "sourceTurns": [
         "D30:1"
       ]
     },
     {
-      "text": "Calvin went to a fancy gala in Boston on 16 November 2023, met interesting people there and shared a photograph of himself with the group.",
+      "text": "Calvin attended a fancy gala in Boston on 16 November 2023 and met interesting people there.",
       "speaker": "Calvin",
       "statedOn": "2023-11-17",
       "entities": [
@@ -5541,7 +4571,23 @@
       ]
     },
     {
-      "text": "Dave bought a vintage camera in November 2023 and said it takes excellent photographs and helps him capture special moments clearly.",
+      "text": "Calvin's planned trip to Boston, first mentioned on 23 March 2023, became a booked flight in late August 2023 and then meetings with artists, sightseeing with an old school friend and a gala there in October and November 2023.",
+      "speaker": "Calvin",
+      "statedOn": "2023-11-17",
+      "entities": [
+        "calvin",
+        "boston"
+      ],
+      "sourceTurns": [
+        "D1:15",
+        "D17:6",
+        "D21:1",
+        "D26:1",
+        "D30:2"
+      ]
+    },
+    {
+      "text": "Dave bought a vintage camera in November 2023 and said it helps him capture special moments very clearly.",
       "speaker": "Dave",
       "statedOn": "2023-11-17",
       "entities": [
@@ -5556,7 +4602,7 @@
       ]
     },
     {
-      "text": "Dave said on 17 November 2023 that what he loves photographing is the beauty of nature - sunsets, beaches and waves - and shared a recent shot.",
+      "text": "Dave likes photographing the beauty of nature, especially sunsets, beaches and waves.",
       "speaker": "Dave",
       "statedOn": "2023-11-17",
       "entities": [
@@ -5565,32 +4611,20 @@
       ],
       "sourceTurns": [
         "D30:8",
-        "D30:9"
-      ]
-    },
-    {
-      "text": "Calvin and Dave agreed on 17 November 2023 that a photograph can convey the emotion and beauty of nature and that nature helps you appreciate life when things are hard.",
-      "speaker": "Dave",
-      "statedOn": "2023-11-17",
-      "entities": [
-        "dave",
-        "calvin",
-        "photography"
-      ],
-      "sourceTurns": [
+        "D30:9",
         "D30:10",
         "D30:11",
         "D30:12"
       ]
     },
     {
-      "text": "Dave photographed a waterfall running over rocks at a serene spot in a nearby park in the week before 17 November 2023.",
+      "text": "Dave photographed a waterfall at a serene spot he found in a nearby park in the week before 17 November 2023.",
       "speaker": "Dave",
       "statedOn": "2023-11-17",
       "entities": [
         "dave",
         "photography",
-        "daves-favourite-park"
+        "daves-park"
       ],
       "sourceTurns": [
         "D30:13",
@@ -5599,23 +4633,33 @@
       ]
     },
     {
-      "text": "Calvin shared a photograph he had taken in a Japanese garden of a bench under a tree with pink flowers on 17 November 2023, and he and Dave agreed to visit a peaceful spot like it together.",
+      "text": "Calvin photographed a bench under a tree with pink flowers in a Japanese garden.",
       "speaker": "Calvin",
       "statedOn": "2023-11-17",
       "entities": [
         "calvin",
-        "japan",
-        "dave"
+        "japan"
       ],
       "sourceTurns": [
-        "D30:16",
+        "D30:16"
+      ]
+    },
+    {
+      "text": "Dave said he had found an even better spot, with a bench under a tree with pink flowers, and promised to take Calvin there.",
+      "speaker": "Dave",
+      "statedOn": "2023-11-17",
+      "entities": [
+        "dave",
+        "calvin"
+      ],
+      "sourceTurns": [
         "D30:17",
         "D30:18",
         "D30:19"
       ]
     },
     {
-      "text": "Calvin accepted an invitation to perform at an upcoming show in Boston, which he told Dave about on 17 November 2023 along with his gala news.",
+      "text": "Calvin accepted an invitation to perform at an upcoming show in Boston, which he told Dave about on 17 November 2023.",
       "speaker": "Calvin",
       "statedOn": "2023-11-17",
       "entities": [
@@ -5624,23 +4668,15 @@
       ],
       "sourceTurns": [
         "D30:20",
-        "D30:21"
-      ]
-    },
-    {
-      "text": "Calvin said on 17 November 2023 that he would catch up with Dave when he was next in Boston.",
-      "speaker": "Calvin",
-      "statedOn": "2023-11-17",
-      "entities": [
-        "calvin",
-        "dave",
-        "boston"
-      ],
-      "sourceTurns": [
+        "D30:21",
         "D30:22",
         "D30:23",
         "D30:24"
       ]
     }
-  ]
+  ],
+  "producedBy": {
+    "promptSha256": "b1c042ac4a2071d1dc3d7b938667d5a1cf6406d8848a8acb84387e0e9b8a0cf7",
+    "unattended": true
+  }
 }
