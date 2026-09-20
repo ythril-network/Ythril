@@ -784,6 +784,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Two feature ids were reused for different work, so grepping either one misled in both directions.**
+  `#1262` shipped as `F-25` — *"find out who still writes the arrays before converting a space"* — and
+  `#1265` as `F-26`, *"a passed date means what the schema says"*. Seven source files cite `F-25` and
+  three cite `F-26` meaning exactly those. The tracker then reused both ids in September for new
+  owner-directed asks: a skill endpoint and aggregation pipelines.
+
+  So a reader of the skill-endpoint row who greps the code finds writer-attribution plumbing and
+  concludes it is half built; a reader of `request-actor.ts` who looks up `F-25` finds a skill endpoint
+  that has nothing to do with it. I made the first mistake myself while checking the queue.
+
+  The UNSTARTED rows move — to `F-27` and `F-28` — because the shipped side is quoted in source
+  comments and in merged PR titles that cannot be corrected. Both rows record why.
+
+  **`F-24` is the opposite case and is worth telling apart:** its citations really are its own, and its
+  step one — free-text descriptions on a type and a property — has shipped without the row saying so. A
+  reader who greps it, finds six files and concludes the row is underway is half right, which is the
+  more dangerous half.
+
 - **The recorder-start stamp could be skipped by an unrelated failure five statements earlier.** The
   conversion pre-flight clamps its `since` to when this instance began recording, so an unstamped
   instance reports the full retention window over a recorder it cannot vouch for — the defect `B-13`
