@@ -113,6 +113,11 @@ export async function writeSpace({ extraction, ythril, space }) {
       // it `startsAt`. Mapping here rather than making the model-facing contract speak the store's field
       // names is the whole reason this layer exists.
       startsAt: c.date,
+      /*
+       * The second end, and it is spread rather than assigned so a one-day event carries NO `endsAt` key —
+       * `endsAt: undefined` is not the same absence, and the sync schemas read presence with `in`.
+       */
+      ...(c.endsAt ? { endsAt: c.endsAt } : {}),
       ...(c.description ? { description: c.description } : {}),
       ...(linked.length > 0 ? { entityIds: linked } : {}),
     });

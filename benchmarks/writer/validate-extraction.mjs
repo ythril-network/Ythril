@@ -168,6 +168,27 @@ export function validateExtraction(extraction, schemaEntries) {
     if (!chronoTypes.has(c.type)) say(`${at} ('${c.key}') has type '${c.type}', which the schema does not declare`);
     if (!c.title) say(`${at} ('${c.key}') has no title`);
     if (!ISO_DATE.test(String(c.date ?? ''))) say(`${at} ('${c.key}') has date '${c.date}', which is not YYYY-MM-DD`);
+    /*
+     * The second end, and the two refusals a pass-through would skip.
+     *
+     * `endsAt` exists because a weekend is neither one date nor a vague span, and before it did, five
+     * separate extractions each dropped their weekend events off the timeline rather than invent a day.
+     * What it opens is a range, and a range has two ways to be wrong that the store accepts happily: written
+     * as something that is not a date, and running backwards. An event that ended before it began is a valid
+     * record everywhere downstream, which is why it is refused here.
+     *
+     * A same-day range is NOT refused. An extractor writing both ends for a one-day event is being explicit,
+     * and rejecting that pushes it back toward the ambiguity this field removes.
+     */
+    if (c.endsAt !== undefined) {
+      if (!ISO_DATE.test(String(c.endsAt))) {
+        say(`${at} ('${c.key}') has endsAt '${c.endsAt}', which is not YYYY-MM-DD`);
+      } else if (!ISO_DATE.test(String(c.date ?? ''))) {
+        say(`${at} ('${c.key}') has an endsAt and no usable date, so it is an end with no beginning`);
+      } else if (c.endsAt < c.date) {
+        say(`${at} ('${c.key}') ends ${c.endsAt} and starts ${c.date}, so it ends before it starts`);
+      }
+    }
     for (const k of c.entities ?? []) {
       if (!entityType.has(k)) say(`${at} ('${c.key}') links to the entity key '${k}', which nothing defines`);
     }

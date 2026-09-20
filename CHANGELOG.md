@@ -15,6 +15,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The extraction prompt's nine gaps are closed, and a two-day event can now reach the timeline** (`B-14`).
+  Every one of them was reported independently by extractions that could not see each other's work — one
+  model finding an ambiguity is a model having an opinion; five finding the same one is the prompt not saying
+  something.
+
+  **The one that was a bug rather than a judgement call.** A Ythril chrono record carries `startsAt` **and**
+  `endsAt`, and the REST route validates both. The extraction format offered only a single `date`, the writer
+  mapped it onto `startsAt`, and all five chrono types were worded as single-dated — so a weekend was
+  inexpressible, and five separate runs each invented the same fallback: write the span into the sentence and
+  emit no chrono entry. A marriage, a gastritis diagnosis, a pride parade and a career-high game are
+  therefore absent from their timelines while a photograph taken on a named Friday is present. **What reached
+  the timeline was being decided by the grammar the speaker happened to use.** `endsAt` is now in the format,
+  in the prompt, in the writer and in `conversation.event`; a backwards range is refused before anything is
+  written, a same-day range is accepted as simply explicit, and a one-day event carries no `endsAt` key at
+  all rather than an undefined one.
+
+  **Six new prompt sections, each answering a question ten runs had to answer for themselves:**
+
+  - **A conversation that contradicts ITSELF** — the same speaker saying incompatible things about one
+    unchanged world. Nothing was superseded, so the supersession section did not apply and writing both as
+    current facts produced two answers with no way to tell them apart. Three extractors independently
+    invented the same fix and it is now the rule: date the claim to its telling.
+  - **A turn carrying an IMAGE** — a machine-written caption is neither speech nor a pasted document, and
+    roughly a third of some conversations is one. Captions are context, never a fact of their own, because
+    they are frequently wrong: shoes captioned pink that their owner calls purple, a *"soccer team"* caption
+    on a basketball turn.
+  - **A recurring subject with no NAME** — *"my mom's old house"* across ten sessions, somebody's turtles
+    across half a conversation. The schema's *"a named location"* meant *"not a passing mention"*, and read
+    literally it dropped the strongest hubs in several graphs.
+  - **Order within a session** — *"later means a later DATE, never a later position in the file"* was written
+    against sessions handed over out of order, and read literally it forbade retiring a plan renegotiated
+    three times in one afternoon. Position orders claims inside a session, the date orders them between.
+  - **"Last Tuesday"** has two ordinary readings seven days apart, and unlike a weekend it *looks* exactly
+    resolvable, so it gets resolved silently. One rule, stated: the most recent past occurrence.
+  - **A thin supersession count is the expected result** — 24 across ten conversations and 5,882 turns — so
+    nobody tunes toward retiring what the text did not retire.
+
+  Also: `aliases` now exists on `place`, `organization` and `work`, because *"the Wolves"*, *"GoT"* and
+  *"NYC"* had nowhere to go; and the format finally documents that an entity or a chrono entry may carry
+  `sourceTurns` — **the validator has always had a rule capping it at 12% of a transcript, and a run
+  following the format exactly never wrote the field, so that rule had never once fired.**
+
 - **All ten LoCoMo conversations are extracted unattended, and conv-26 was re-extracted unattended too**
   (`B-4`). 5,882 turns across 272 sessions, producing 2,294 claims, 470 entities, 212 chrono entries and 527
   edges. Every file passes `bench.mjs check`: valid against the schema, every key resolving, every turn id
