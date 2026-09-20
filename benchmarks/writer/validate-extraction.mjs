@@ -61,6 +61,14 @@ const MAX_SYNTHESISED_PROVENANCE_SHARE = 0.12;
  */
 const MAX_CLAIMS_FROM_ONE_TURN_SHARE = 0.15;
 
+/**
+ * The statuses an extraction may WRITE.
+ *
+ * The store also knows `overdue`, which it derives on read from the dates and the type's date policy — so it
+ * is deliberately absent here rather than forgotten.
+ */
+const CHRONO_STATUSES = ['upcoming', 'active', 'completed', 'cancelled'];
+
 /** `YYYY-MM-DD`, and nothing looser. A partial date cannot be compared and a relative one cannot be resolved. */
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -167,6 +175,20 @@ export function validateExtraction(extraction, schemaEntries) {
     chronoKeys.add(c.key);
     if (!chronoTypes.has(c.type)) say(`${at} ('${c.key}') has type '${c.type}', which the schema does not declare`);
     if (!c.title) say(`${at} ('${c.key}') has no title`);
+    /*
+     * `status` is REQUIRED, and `overdue` is refused.
+     *
+     * Required, because a default would make every silent omission read as a deliberate claim — the same
+     * asymmetry as `producedBy.unattended`. Refused for `overdue`, because the read path DERIVES that from
+     * the dates and the type's date policy and never stores it: a written one is a value in the collection
+     * that disagrees with the value an operator is shown.
+     */
+    if (!CHRONO_STATUSES.includes(c.status)) {
+      say(c.status === 'overdue'
+        ? `${at} ('${c.key}') has status 'overdue', which the read path derives and never stored. Write the `
+          + 'status it actually has and let the reader decide whether a passed date means late.'
+        : `${at} ('${c.key}') has status '${c.status}', which is not one of: ${CHRONO_STATUSES.join(', ')}`);
+    }
     if (!ISO_DATE.test(String(c.date ?? ''))) say(`${at} ('${c.key}') has date '${c.date}', which is not YYYY-MM-DD`);
     /*
      * The second end, and the two refusals a pass-through would skip.

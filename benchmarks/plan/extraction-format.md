@@ -22,9 +22,11 @@ depends on a write having happened.
   ],
   "chrono": [
     { "key": "support-group-visit", "type": "event", "title": "Caroline attended an LGBTQ support group",
-      "date": "2023-05-07", "entities": ["caroline"] },
+      "date": "2023-05-07", "status": "completed", "entities": ["caroline"] },
     { "key": "pride-parade", "type": "event", "title": "Caroline went to the city pride parade",
-      "date": "2023-07-15", "endsAt": "2023-07-16", "entities": ["caroline"] }
+      "date": "2023-07-15", "endsAt": "2023-07-16", "status": "completed", "entities": ["caroline"] },
+    { "key": "art-show", "type": "event", "title": "Caroline's art show, which she means to hold",
+      "date": "2023-09-16", "status": "upcoming", "entities": ["caroline"] }
   ],
   "claims": [
     { "text": "Caroline: I went to a LGBTQ support group yesterday and it was so powerful.",
@@ -38,6 +40,34 @@ depends on a write having happened.
 }
 ```
 
+## `producedBy` — how the file was made
+
+Every extraction carries one, and `check` refuses a file without it:
+
+```json
+{ "producedBy": { "promptSha256": "b1c042ac…", "unattended": true } }
+```
+
+**You supply `unattended` and nothing else.** Put it in the first part; the merge carries it through.
+`promptSha256` is stamped by the merge from the prompt file on disk, because which prompt produced a file
+is a fact about the working tree rather than something worth asking anyone to copy correctly.
+
+**`unattended: true` means no retrieval score, benchmark result or accuracy figure was visible to whoever
+or whatever wrote this extraction, at any point.** If one was, say `false` — that is legitimate
+development and the flag simply records which it was. Leaving it out is refused rather than read as
+`true`: the run that would misreport is exactly the run that omits it.
+
+**Why the fingerprint is a hash and not a version.** A version somebody types is a claim about the
+prompt; a hash of its bytes is the prompt, and it cannot survive an edit. Its newlines are normalised
+first, so a CRLF checkout and an LF one agree — otherwise one prompt would produce two digests and the
+corpus would report itself as made by two prompts, permanently and on nothing.
+
+**What it is for.** Two things have gone wrong that nothing else could see. One extraction was written by
+hand while its author watched the retrieval scores, and sat in the directory indistinguishable from nine
+that were not. And twice in one day a corpus ended up made by two prompts — once when a rate limit killed
+a round halfway, once when a rule was clarified between conversations. Every per-conversation difference
+afterwards is unattributable, and the files are individually perfect either way.
+
 ## Rules
 
 **`key` is local to the file.** It is how one record refers to another before anything has an id. The writer
@@ -49,6 +79,18 @@ fails halfway leaves a space nobody can interpret.
 
 **Every edge's endpoints must match the label's declared ends.** `works_at` from anything but a person is an
 error in the file, not something to discover from a 400.
+
+**A chrono entry is always type `event`, and `status` says whether it has happened.** One of `completed`,
+`upcoming`, `active` or `cancelled`, and it is required — there is no default, because a default would
+make every omission read as a deliberate claim.
+
+The vocabulary used to carry this as four types. `plan` and `deadline` said only *"not yet"*, which is
+`status: upcoming`; `milestone` was an opinion about importance that nothing reads; `prediction` was never
+used once in 5,882 turns of conversation. **A thing somebody means to do is an event that has not happened
+yet, not a different kind of thing.**
+
+**Never write `overdue`.** The store derives it on read from the dates and the type policy, so a written
+one is a value in the collection that disagrees with the value an operator is shown.
 
 **A chrono entry may carry `endsAt`, and that is how a two-day event gets onto the timeline.** `date` is
 the day it started and `endsAt` the day it ended; omit `endsAt` for anything that happened on one day. It

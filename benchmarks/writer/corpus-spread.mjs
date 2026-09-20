@@ -100,3 +100,50 @@ export function corpusSpread(extractions) {
     chronoSpread: round1(densest.chronoPer1000 / sparsest.chronoPer1000),
   };
 }
+
+/**
+ * Which of this extraction's spans look like a date WINDOW rather than a duration?
+ *
+ * ## The artefact, and why the detector is a shape rather than a length
+ *
+ * `endsAt` means how long something lasted; it does not mean how unsure you are about when it happened. Once
+ * written the two are indistinguishable — `2023-07-03 → 2023-07-09` is a valid record whether it is a
+ * week-long festival or a wedding somebody could only date to that week.
+ *
+ * One extraction came back with 24 spans and every one of them was a calendar week or a whole month over an
+ * event that took a single day. It read as the prompt fix working spectacularly, it moved the corpus-wide
+ * figure by a third, and the only thing that caught it was somebody reading a prose report.
+ *
+ * **A long span is not the signal. Snapping to a calendar is.** Nobody's holiday reliably begins on a Monday
+ * and ends on the following Sunday; that is what you write when the conversation said *"last week"* and you
+ * wanted a timeline entry anyway. A nine-day trip starting on a Tuesday is simply a nine-day trip, and a
+ * length test would refuse it while letting the guess through.
+ *
+ * @returns {{key: string, title: string, why: string}[]} the suspect spans, named
+ */
+export function calendarWindowSpans(extraction) {
+  const out = [];
+  for (const c of extraction?.chrono ?? []) {
+    if (c.endsAt === undefined) continue;
+    const from = new Date(`${c.date}T00:00:00Z`);
+    const to = new Date(`${c.endsAt}T00:00:00Z`);
+    if (Number.isNaN(+from) || Number.isNaN(+to)) continue;   // the validator refuses these; not this module's question
+    const days = (to - from) / 86400000 + 1;
+    const say = (why) => out.push({ key: c.key, title: c.title ?? '', why });
+
+    /* Monday through the following Sunday: seven days that begin exactly where a calendar week begins. */
+    if (days === 7 && from.getUTCDay() === 1 && to.getUTCDay() === 0) {
+      say('a calendar week, Monday to Sunday — the shape of a date guessed from "last week" rather than a '
+        + 'week something lasted');
+      continue;
+    }
+    /* The 1st to the last day of a month, whatever its length. */
+    const lastOfMonth = new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth() + 1, 0)).getUTCDate();
+    if (from.getUTCDate() === 1 && to.getUTCDate() === lastOfMonth
+      && from.getUTCMonth() === to.getUTCMonth() && from.getUTCFullYear() === to.getUTCFullYear()) {
+      say('a whole calendar month — the shape of a date guessed from "last month" rather than a month '
+        + 'something lasted');
+    }
+  }
+  return out;
+}
