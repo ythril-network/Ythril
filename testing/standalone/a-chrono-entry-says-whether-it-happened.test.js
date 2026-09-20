@@ -4,7 +4,10 @@
  * ## The duplication this removes
  *
  * A Ythril chrono entry carries `status` — `upcoming`, `active`, `completed`, `cancelled`, with `overdue`
- * derived per type by `datePassedPolicy` and never stored. The benchmark space instead declared five chrono
+ * derived per type by `datePassedPolicy` and never stored. **An extraction may write three of those**, and
+ * `the-status-and-relation-vocabularies-fit-what-people-say.test.js` is where `active` was taken back out:
+ * the store's vocabulary is wider than what a transcript can honestly produce. The benchmark space instead
+ * declared five chrono
  * TYPES, of which `plan` and `deadline` say only that the thing has not happened yet, and
  * `writer/write-space.mjs` set title, type, dates, description and entities — **never `status`**.
  *

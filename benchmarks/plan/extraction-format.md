@@ -81,16 +81,25 @@ fails halfway leaves a space nobody can interpret.
 error in the file, not something to discover from a 400.
 
 **A chrono entry is always type `event`, and `status` says whether it has happened.** One of `completed`,
-`upcoming`, `active` or `cancelled`, and it is required — there is no default, because a default would
-make every omission read as a deliberate claim.
+`upcoming` or `cancelled`, and it is required — there is no default, because a default would make every
+omission read as a deliberate claim.
 
 The vocabulary used to carry this as four types. `plan` and `deadline` said only *"not yet"*, which is
 `status: upcoming`; `milestone` was an opinion about importance that nothing reads; `prediction` was never
 used once in 5,882 turns of conversation. **A thing somebody means to do is an event that has not happened
 yet, not a different kind of thing.**
 
-**Never write `overdue`.** The store derives it on read from the dates and the type policy, so a written
-one is a value in the collection that disagrees with the value an operator is shown.
+**Never write `overdue` or `active`, both of which the STORE accepts.** The store derives `overdue` on read
+from the dates and the type policy, so a written one is a value in the collection that disagrees with the
+value an operator is shown. `active` was offered and retired: `date` is the day a thing started and
+something merely under way has no stated start, so the slot was being filled with the day it happened to be
+mentioned. A subject that persists is an entity — the course, the studio, the routine — and what gets a
+chrono entry is the moment it started, finished or was given up.
+
+**`upcoming` is rare, and that is a limit of the format.** A plan is usually dated to a month or a season,
+a chrono entry needs a resolved day, so most plans stay claims and a conversation can legitimately produce
+none. Recorded here rather than worked around: `F-29` is where a coarsely dated event would get somewhere
+to live.
 
 **A chrono entry may carry `endsAt`, and that is how a two-day event gets onto the timeline.** `date` is
 the day it started and `endsAt` the day it ended; omit `endsAt` for anything that happened on one day. It

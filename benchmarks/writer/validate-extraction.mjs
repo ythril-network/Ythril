@@ -64,10 +64,27 @@ const MAX_CLAIMS_FROM_ONE_TURN_SHARE = 0.15;
 /**
  * The statuses an extraction may WRITE.
  *
- * The store also knows `overdue`, which it derives on read from the dates and the type's date policy — so it
- * is deliberately absent here rather than forgotten.
+ * **Narrower than the store's own vocabulary, and on purpose.** A Ythril chrono record may hold `active`, and
+ * the read path may return `overdue`; neither is something an extraction can honestly produce from a
+ * transcript. See `RETIRED_CHRONO_STATUSES` for what each one goes back to.
  */
-const CHRONO_STATUSES = ['upcoming', 'active', 'completed', 'cancelled'];
+const CHRONO_STATUSES = ['upcoming', 'completed', 'cancelled'];
+
+/**
+ * The statuses this refuses, each with the sentence that says where the record goes instead.
+ *
+ * **A refusal that only lists what is allowed is a wall.** Three separate extractions reached for `active`
+ * because the thing they were describing genuinely was under way, and being told the word is invalid does
+ * not tell anybody that the thing belongs in a different collection. The reason is the part that stops the
+ * next run making the same choice, so it lives beside the value rather than in a comment.
+ */
+const RETIRED_CHRONO_STATUSES = {
+  overdue: 'the read path derives and never stored. Write the status it actually has and let the reader '
+    + 'decide whether a passed date means late.',
+  active: '`date` is the day a thing STARTED, and something merely under way has no stated start — so the '
+    + 'slot gets filled with the day it was mentioned, which is a fabrication with a date on it. A subject '
+    + 'that persists is an entity; founding it, launching it and closing it are the events.',
+};
 
 /** `YYYY-MM-DD`, and nothing looser. A partial date cannot be compared and a relative one cannot be resolved. */
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -176,17 +193,16 @@ export function validateExtraction(extraction, schemaEntries) {
     if (!chronoTypes.has(c.type)) say(`${at} ('${c.key}') has type '${c.type}', which the schema does not declare`);
     if (!c.title) say(`${at} ('${c.key}') has no title`);
     /*
-     * `status` is REQUIRED, and `overdue` is refused.
+     * `status` is REQUIRED, and two statuses the STORE accepts are refused here.
      *
      * Required, because a default would make every silent omission read as a deliberate claim — the same
-     * asymmetry as `producedBy.unattended`. Refused for `overdue`, because the read path DERIVES that from
-     * the dates and the type's date policy and never stores it: a written one is a value in the collection
-     * that disagrees with the value an operator is shown.
+     * asymmetry as `producedBy.unattended`. The two refusals carry their own reasons, because a caller told
+     * only that a word is invalid picks the next-nearest word rather than the right collection.
      */
     if (!CHRONO_STATUSES.includes(c.status)) {
-      say(c.status === 'overdue'
-        ? `${at} ('${c.key}') has status 'overdue', which the read path derives and never stored. Write the `
-          + 'status it actually has and let the reader decide whether a passed date means late.'
+      const retired = RETIRED_CHRONO_STATUSES[c.status];
+      say(retired
+        ? `${at} ('${c.key}') has status '${c.status}', which ${retired}`
         : `${at} ('${c.key}') has status '${c.status}', which is not one of: ${CHRONO_STATUSES.join(', ')}`);
     }
     if (!ISO_DATE.test(String(c.date ?? ''))) say(`${at} ('${c.key}') has date '${c.date}', which is not YYYY-MM-DD`);
