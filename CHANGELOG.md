@@ -766,6 +766,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A tracker row said the graded benchmark harness exists. It was deleted eight weeks ago** (`B-2`).
+  The row opened *"it is a DECISION rather than a build: the harness exists (`benchmarks/harness/` —
+  dataset, ingest, retrieve, grade, report, pins)"*, and there is no such directory: `#1282` removed 56
+  files on the owner's instruction, because everything in them rested on one premise — that a
+  conversation is a pile of transcript chunks — under which **multi-hop scored 0.0% across all twelve**
+  strategies built on it, since those answers need two remarks from sessions weeks apart.
+
+  So every cost line in that row — three seeds, two model families, roughly 1,200 calls — is an estimate
+  for a runner that has to be written first. The decision it records still stands; what is missing is
+  the thing that would carry it out. Filed as `B-6`, buildable now against `conv-30` and quotable only
+  after all ten conversations are re-ingested.
+
+  A stale row is worth an entry here when it was load-bearing, and this one read as a single decision
+  away from a graded number anybody could quote.
+
 - **The extraction prompt opened by describing one corpus, and five sections now contradicted it**
   (`B-5`). Its first paragraph said *"a long conversation between people, recorded over many sessions
   spread across months"* — written against LoCoMo and true of it. By the time the second corpus had
