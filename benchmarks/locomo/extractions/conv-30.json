@@ -471,14 +471,15 @@
       "key": "jon",
       "type": "person",
       "name": "Jon",
-      "description": "One of the two speakers. A banker who lost his job on 19 January 2023 and spent the rest of 2023 trying to found his own dance studio, hunting for premises, writing a business plan and looking for investors. He has danced since childhood and calls it his escape and stress-buster; contemporary is his favourite style; his dance crew won a local competition in 2022. He visited Paris on 28 January 2023 and Rome in June 2023, and is a close friend of Gina, who encourages him in every session.",
+      "properties": {
+        "aliases": "Jon"
+      },
+      "description": "One of the two speakers. A former banker who lost his banking job on 19 January 2023 and spent the rest of the year building his own dance studio. He has danced since childhood and calls it his escape and stress-buster, favours contemporary, rehearsed with a dance crew that won a local competition in 2022, held his studio's official opening night on 20 June 2023, and by 21 July 2023 had taken a temporary job to cover expenses while looking for investors. A close friend of Gina.",
       "sourceTurns": [
         "D1:2",
         "D1:6",
-        "D2:4",
         "D5:10",
-        "D11:3",
-        "D15:1",
+        "D15:5",
         "D18:2"
       ]
     },
@@ -486,14 +487,16 @@
       "key": "gina",
       "type": "person",
       "name": "Gina",
-      "description": "One of the two speakers. She lost her job at Door Dash in January 2023 and started her own clothing business, designing a store space and opening an online clothing store she announced on 16 March 2023. She dances for stress relief, competed as a teenager and won a regional competition at fifteen with a contemporary piece called \"Finding Freedom\", and has a tattoo standing for freedom. She interviewed for a design internship on 10 May 2023 and was accepted for a part-time fashion internship reported on 27 May 2023. She is Jon's close friend and his constant encourager.",
+      "properties": {
+        "aliases": "Gina"
+      },
+      "description": "The other speaker. She lost her job at Door Dash in January 2023 and became an entrepreneur, designing a clothing store and opening it online on 16 March 2023. She dances for stress relief, favours contemporary, competed as a teenager and won a regional competition at fifteen, has a tattoo standing for freedom, and took a part-time fashion internship at an international company in May 2023. Jon's close friend and his most constant supporter.",
       "sourceTurns": [
         "D1:3",
         "D1:17",
-        "D5:15",
         "D6:6",
-        "D11:14",
-        "D12:1"
+        "D12:1",
+        "D14:8"
       ]
     },
     {
@@ -503,7 +506,7 @@
       "properties": {
         "aliases": "Shia Labeouf"
       },
-      "description": "The actor whose \"Just do it\" motivational speech Gina quoted to Jon on 23 July 2023 to spur him on. The only person named in the conversation apart from the two speakers.",
+      "description": "The actor whom Gina identified on 23 July 2023 as the source of the \"Just do it\" motivational speech she quoted at Jon. Not a participant in the conversation.",
       "sourceTurns": [
         "D19:2",
         "D19:4"
@@ -515,15 +518,13 @@
       "name": "Jon's dance studio",
       "properties": {
         "kind": "business",
-        "aliases": "the dance studio; my studio; the studio; my biz"
+        "aliases": "the dance studio; my studio; the studio; my biz; the dance studio business"
       },
-      "description": "The dance studio Jon set out to found after losing his banking job in January 2023, and the conversation's main subject. He pictured a space by the water with an ocean view, looked at a downtown place with good natural light and wanted Marley flooring; he was still searching for premises through at least May 2023, worked on a business plan, investors, social media and networking, and set an official opening night for 20 June 2023. By 21 July 2023 he described it as on tenuous ground and had taken a temporary job to cover expenses. From February 2023 onwards he also spoke of it as already running, with students, classes and workshops, which the rest of the conversation does not bear out.",
+      "description": "The dance studio Jon set out to open after losing his banking job in January 2023, and the central subject of the conversation. He wanted a space by the water with Marley flooring, searched for premises through the spring, worked on a business plan and hunted investors, and held the official opening night on 20 June 2023. He teaches classes and workshops there, offers one-on-one mentoring, and by 21 July 2023 described the studio as on tenuous ground.",
       "sourceTurns": [
         "D1:4",
         "D2:6",
-        "D2:8",
-        "D5:4",
-        "D12:12",
+        "D8:13",
         "D15:5",
         "D18:2"
       ]
@@ -534,15 +535,13 @@
       "name": "Gina's clothing store",
       "properties": {
         "kind": "business",
-        "aliases": "my store; my clothing store; my online clothing store; my online store; the online clothes store"
+        "aliases": "my clothing store; my online clothing store; my online store; the store; my shop"
       },
-      "description": "The clothing business Gina started after losing her job at Door Dash. It is referred to as \"my clothing store\", \"my store\" and \"my online clothing store\" and treated throughout as one business, although the conversation describes both a physical space she designed in a shopping mall in early 2023 and an online store she announced as open on 16 March 2023; those mentions are joined here as one subject. She ran an advertising campaign in January 2023, secured a wholesaler on 1 February 2023, partnered with a local artist on designs, ran offers and promotions, made a limited edition line in June 2023, was noticed by fashion editors in July 2023 and built an ordering website shortly before 21 July 2023.",
+      "description": "Gina's clothing business, treated here as one venture: the store space she designed in early 2023 and the online clothes store she opened on 16 March 2023. She promoted it with an ad campaign, secured a wholesaler on 1 February 2023, collaborated with a local artist, added dance-inspired pieces, made a limited-edition line in June 2023 and built an ordering website in July 2023. Merged as one entity because Gina uses \"my store\", \"my online store\" and \"my business\" interchangeably for it.",
       "sourceTurns": [
         "D2:1",
         "D3:2",
-        "D3:4",
         "D6:6",
-        "D8:4",
         "D16:3",
         "D18:1"
       ]
@@ -553,28 +552,12 @@
       "name": "Door Dash",
       "properties": {
         "kind": "employer",
-        "aliases": "DoorDash"
+        "aliases": "Door Dash; DoorDash"
       },
-      "description": "The company Gina worked for until she lost her job there in January 2023. That loss is what pushed her into becoming an entrepreneur and starting her own clothing business.",
+      "description": "The delivery company Gina worked for until she lost her job there in January 2023, which is what pushed her into starting her own clothing business.",
       "sourceTurns": [
         "D1:3",
-        "D6:4",
-        "D14:8"
-      ]
-    },
-    {
-      "key": "international-fashion-company",
-      "type": "organization",
-      "name": "the international company where Gina interns",
-      "properties": {
-        "kind": "employer",
-        "aliases": "an international company; the fashion department"
-      },
-      "description": "The unnamed international company whose fashion department accepted Gina for a part-time internship, which she reported on 27 May 2023. She had interviewed for a design internship on 10 May 2023 and said it went great; the two mentions are joined here as one position.",
-      "sourceTurns": [
-        "D11:14",
-        "D12:1",
-        "D12:3"
+        "D6:4"
       ]
     },
     {
@@ -583,24 +566,38 @@
       "name": "Jon's dance crew",
       "properties": {
         "kind": "team",
-        "aliases": "my dance crew; the small group of dancers I rehearsed with"
+        "aliases": "my dance crew; a small group of dancers; my dancers"
       },
-      "description": "The small group of dancers Jon rehearsed with after work, covering everything from contemporary to hip-hop. They took first place at a local competition in 2022, and in January 2023 were finishing choreography for a nearby festival the following month, which Jon performed at and described as awesome on 8 February 2023.",
+      "description": "The small group of dancers Jon rehearsed with after work, covering styles from contemporary to hip-hop. They took first place at a local competition in 2022 and performed at a nearby festival in February 2023 after finishing the choreography in January.",
       "sourceTurns": [
         "D1:16",
         "D1:24",
-        "D1:26",
-        "D5:2"
+        "D1:26"
       ]
     },
     {
-      "key": "dance",
-      "type": "activity",
-      "name": "dance",
+      "key": "ginas-internship-company",
+      "type": "organization",
+      "name": "the international company where Gina took a fashion internship",
       "properties": {
-        "kind": "performing art"
+        "kind": "employer",
+        "aliases": "an international company; the fashion department"
       },
-      "description": "The shared passion at the centre of the conversation and the thing that connects the two speakers. Jon has danced since childhood and calls it his escape, his stress-buster and where he feels most alive; Gina calls it her stress relief and says she cannot picture life without it, that it is like air. Both competed when younger, both name contemporary as their favourite style, and Jon's entire business plan is built on teaching it.",
+      "description": "The unnamed international company whose fashion department gave Gina a part-time internship. She interviewed for it on 10 May 2023, calling it a design internship, and announced on 27 May 2023 that she had been accepted for a fashion internship; joined as one because the dates and the description match.",
+      "sourceTurns": [
+        "D11:14",
+        "D12:1",
+        "D12:3"
+      ]
+    },
+    {
+      "key": "dancing",
+      "type": "activity",
+      "name": "dancing",
+      "properties": {
+        "kind": "dance"
+      },
+      "description": "Dance, the shared passion that connects Jon and Gina and runs through every session. Jon has danced since childhood and calls it his escape, his stress-buster and where he feels most alive; Gina calls it her stress relief and says she cannot picture life without it. Both competed when younger, and both built their businesses around it.",
       "sourceTurns": [
         "D1:6",
         "D1:7",
@@ -615,11 +612,25 @@
       "properties": {
         "kind": "dance style"
       },
-      "description": "The dance style both speakers name as their favourite — Jon because it is expressive and powerful, Gina because it is expressive and graceful. \"Finding Freedom\", the piece Gina's team won a regional competition with, was a contemporary work.",
+      "description": "The dance style both Jon and Gina named on 20 January 2023 as their favourite — Jon calls it expressive and powerful, Gina expressive and graceful. It is also the style of \"Finding Freedom\", the piece Gina's team won a regional competition with.",
       "sourceTurns": [
         "D1:8",
         "D1:9",
         "D1:19"
+      ]
+    },
+    {
+      "key": "fashion",
+      "type": "activity",
+      "name": "fashion",
+      "properties": {
+        "kind": "interest"
+      },
+      "description": "Fashion, Gina's second passion alongside dance. It drives her clothing store, her hunt for trends and unique pieces, her collaboration with a local artist, her limited-edition line, and the part-time internship in an international company's fashion department she took in May 2023. She describes fashion as what fuels her creativity while dance is what relieves her stress.",
+      "sourceTurns": [
+        "D6:8",
+        "D8:6",
+        "D12:1"
       ]
     },
     {
@@ -631,7 +642,7 @@
         "country": "France",
         "aliases": "Paris"
       },
-      "description": "The city Jon visited on 28 January 2023 and described as very cool. Gina said she had never had the chance to visit it.",
+      "description": "The city Jon visited on 28 January 2023 and described as very cool. Gina said the same day that she had never had the chance to visit it.",
       "sourceTurns": [
         "D2:4",
         "D2:5"
@@ -646,10 +657,23 @@
         "country": "Italy",
         "aliases": "Rome"
       },
-      "description": "The only city abroad Gina says she has visited, once, as of January 2023. Jon took a short trip there in the week before 19 June 2023 to clear his mind while working on his business.",
+      "description": "The city Gina said on 29 January 2023 she had visited once, and where Jon took a short trip in the week before 19 June 2023 to clear his mind.",
       "sourceTurns": [
         "D2:5",
         "D15:1"
+      ]
+    },
+    {
+      "key": "finding-freedom",
+      "type": "work",
+      "name": "Finding Freedom",
+      "properties": {
+        "medium": "contemporary dance piece",
+        "aliases": "\"Finding Freedom\""
+      },
+      "description": "The contemporary dance piece Gina's team performed to take first place at a regional competition when she was fifteen. She described it as really emotional and powerful, and it is her favourite competition memory.",
+      "sourceTurns": [
+        "D1:19"
       ]
     },
     {
@@ -658,53 +682,25 @@
       "name": "The Lean Startup",
       "properties": {
         "medium": "book",
-        "aliases": "the book"
+        "aliases": "The Lean Startup"
       },
-      "description": "The business book Jon was reading in May 2023, hoping it would give him tips for his dance studio. It got him thinking about building a focused and efficient business and about adapting from customer feedback, which he said he would try.",
+      "description": "The business book Jon was reading in May 2023 hoping for tips for his dance studio. He said it got him thinking about building a focused, efficient business and about adapting from customer feedback, which he intended to try.",
       "sourceTurns": [
         "D12:6",
         "D12:8"
       ]
     },
     {
-      "key": "finding-freedom",
-      "type": "work",
-      "name": "Finding Freedom",
-      "properties": {
-        "medium": "dance piece",
-        "aliases": "a contemporary piece called Finding Freedom"
-      },
-      "description": "The contemporary dance piece Gina's team performed when they won first place at a regional competition when she was fifteen. She describes it as really emotional and powerful, and that win is her favourite dance memory.",
-      "sourceTurns": [
-        "D1:17",
-        "D1:19"
-      ]
-    },
-    {
-      "key": "ginas-tattoo",
-      "type": "object",
-      "name": "Gina's freedom tattoo",
-      "properties": {
-        "kind": "tattoo"
-      },
-      "description": "A tattoo Gina got a few years before February 2023. It stands for freedom — dancing without worrying what people think — and she keeps it as a reminder to follow her passions and express herself.",
-      "sourceTurns": [
-        "D5:13",
-        "D5:14",
-        "D5:15"
-      ]
-    },
-    {
       "key": "jons-whiteboard",
       "type": "object",
-      "name": "Jon's planning whiteboard",
+      "name": "Jon's whiteboard",
       "properties": {
         "kind": "whiteboard"
       },
-      "description": "The whiteboard Jon keeps of ideas, dates and milestones for his dance studio business. He uses it to visualise his progress and stay organised, and colour-codes achievements on it so he can track them and stay motivated.",
+      "description": "The whiteboard on which Jon tracks ideas, milestones and dates for his dance studio business, giving him a visual of his progress. He colour-codes achievements on it so he can see how far he has come and stay motivated.",
       "sourceTurns": [
         "D12:8",
-        "D12:10",
+        "D12:9",
         "D13:13",
         "D13:15"
       ]
@@ -712,7 +708,7 @@
   ],
   "chrono": [
     {
-      "key": "jon-lost-banker-job",
+      "key": "jon-lost-banking-job",
       "type": "event",
       "title": "Jon lost his job as a banker",
       "date": "2023-01-19",
@@ -721,6 +717,21 @@
       ],
       "sourceTurns": [
         "D1:2"
+      ]
+    },
+    {
+      "key": "dance-class-plan",
+      "type": "plan",
+      "title": "Jon and Gina arranged to go to a dance class together",
+      "date": "2023-01-27",
+      "entities": [
+        "jon",
+        "gina",
+        "dancing"
+      ],
+      "sourceTurns": [
+        "D1:12",
+        "D1:13"
       ]
     },
     {
@@ -737,21 +748,6 @@
       ]
     },
     {
-      "key": "dance-session-plan",
-      "type": "plan",
-      "title": "Jon and Gina planned to go to a dance class together",
-      "date": "2023-01-27",
-      "entities": [
-        "jon",
-        "gina",
-        "dance"
-      ],
-      "sourceTurns": [
-        "D1:12",
-        "D1:13"
-      ]
-    },
-    {
       "key": "gina-ad-campaign",
       "type": "event",
       "title": "Gina launched an advertising campaign for her clothing store",
@@ -765,9 +761,9 @@
       ]
     },
     {
-      "key": "wholesaler-agreed",
-      "type": "event",
-      "title": "A wholesaler Gina had emailed agreed to supply her clothing store",
+      "key": "wholesaler-agreement",
+      "type": "milestone",
+      "title": "A wholesaler agreed to supply Gina's clothing store, letting her expand it",
       "date": "2023-02-01",
       "entities": [
         "gina",
@@ -778,7 +774,7 @@
       ]
     },
     {
-      "key": "gina-online-store-open",
+      "key": "gina-online-store-opening",
       "type": "milestone",
       "title": "Gina's online clothing store opened",
       "date": "2023-03-16",
@@ -791,9 +787,9 @@
       ]
     },
     {
-      "key": "jon-fair",
+      "key": "business-fair",
       "type": "event",
-      "title": "Jon went to a fair to show off his dance studio",
+      "title": "Jon showed off his dance studio at a fair and came away with possible leads",
       "date": "2023-04-24",
       "entities": [
         "jon",
@@ -810,7 +806,7 @@
       "date": "2023-05-10",
       "entities": [
         "gina",
-        "international-fashion-company"
+        "ginas-internship-company"
       ],
       "sourceTurns": [
         "D11:14"
@@ -819,11 +815,12 @@
     {
       "key": "gina-internship-accepted",
       "type": "milestone",
-      "title": "Gina was accepted for a part-time fashion internship at an international company",
+      "title": "Gina announced she had been accepted for a part-time fashion internship at an international company",
       "date": "2023-05-27",
       "entities": [
         "gina",
-        "international-fashion-company"
+        "ginas-internship-company",
+        "fashion"
       ],
       "sourceTurns": [
         "D12:1",
@@ -831,9 +828,9 @@
       ]
     },
     {
-      "key": "jon-mentored",
+      "key": "jon-business-mentoring",
       "type": "event",
-      "title": "Jon was mentored by a business mentor",
+      "title": "Jon was mentored by a business mentor, which left him more determined to chase his dreams",
       "date": "2023-06-15",
       "entities": [
         "jon",
@@ -846,7 +843,7 @@
     {
       "key": "studio-grand-opening",
       "type": "plan",
-      "title": "The official opening night of Jon's dance studio",
+      "title": "The official opening night of Jon's dance studio, which Gina planned to attend",
       "date": "2023-06-20",
       "entities": [
         "jon",
@@ -861,7 +858,7 @@
     {
       "key": "jon-networking-decision",
       "type": "event",
-      "title": "Jon decided to start going to networking events for his business",
+      "title": "Jon decided to start going to networking events to make things happen for his business",
       "date": "2023-06-20",
       "entities": [
         "jon",
@@ -872,9 +869,9 @@
       ]
     },
     {
-      "key": "jon-learning-marketing-tools",
+      "key": "jon-learns-marketing-tools",
       "type": "event",
-      "title": "Jon started learning marketing and analytics tools for his business",
+      "title": "Jon started learning marketing and analytics tools to push his dance studio business forward",
       "date": "2023-07-09",
       "entities": [
         "jon",
@@ -891,7 +888,7 @@
       "date": "2023-07-21",
       "entities": [
         "gina",
-        "dance"
+        "dancing"
       ],
       "sourceTurns": [
         "D19:6"
@@ -910,12 +907,17 @@
     {
       "label": "practices",
       "from": "jon",
-      "to": "dance"
+      "to": "dancing"
     },
     {
       "label": "practices",
       "from": "gina",
-      "to": "dance"
+      "to": "dancing"
+    },
+    {
+      "label": "practices",
+      "from": "gina",
+      "to": "fashion"
     },
     {
       "label": "likes",
@@ -929,20 +931,20 @@
     },
     {
       "label": "likes",
-      "from": "gina",
-      "to": "finding-freedom"
+      "from": "jon",
+      "to": "dancing"
     },
     {
       "label": "likes",
-      "from": "jon",
-      "to": "paris"
+      "from": "gina",
+      "to": "dancing"
     },
     {
       "label": "works_at",
       "from": "jon",
       "to": "jons-dance-studio",
       "properties": {
-        "role": "founder and owner"
+        "role": "owner and dance teacher"
       }
     },
     {
@@ -950,7 +952,7 @@
       "from": "gina",
       "to": "ginas-clothing-store",
       "properties": {
-        "role": "founder and owner"
+        "role": "owner"
       }
     },
     {
@@ -959,14 +961,18 @@
       "to": "door-dash"
     },
     {
+      "label": "works_at",
+      "from": "gina",
+      "to": "ginas-internship-company",
+      "properties": {
+        "role": "part-time intern in the fashion department",
+        "since": "2023-05-27"
+      }
+    },
+    {
       "label": "member_of",
       "from": "jon",
       "to": "jons-dance-crew"
-    },
-    {
-      "label": "owns",
-      "from": "gina",
-      "to": "ginas-tattoo"
     },
     {
       "label": "owns",
@@ -974,17 +980,9 @@
       "to": "jons-whiteboard"
     },
     {
-      "label": "likes",
-      "from": "jon",
-      "to": "the-lean-startup"
-    },
-    {
-      "label": "works_at",
-      "from": "gina",
-      "to": "international-fashion-company",
-      "properties": {
-        "role": "part-time intern in the fashion department"
-      }
+      "label": "supersedes",
+      "from": "jon-still-searching-feb",
+      "to": "jon-found-downtown-space"
     },
     {
       "label": "supersedes",
@@ -1001,7 +999,7 @@
         "jon"
       ],
       "chrono": [
-        "jon-lost-banker-job"
+        "jon-lost-banking-job"
       ],
       "sourceTurns": [
         "D1:1",
@@ -1021,13 +1019,13 @@
       ]
     },
     {
-      "text": "The business Jon decided to start is a dance studio, because he is passionate about dancing and wants to share it with others.",
+      "text": "The business Jon decided to start is a dance studio, because he is passionate about dancing and wanted to share it with others.",
       "speaker": "Jon",
       "statedOn": "2023-01-20",
       "entities": [
         "jon",
         "jons-dance-studio",
-        "dance"
+        "dancing"
       ],
       "sourceTurns": [
         "D1:4",
@@ -1035,12 +1033,12 @@
       ]
     },
     {
-      "text": "Jon has been into dancing since he was a child, and calls it his passion and his escape; he wants a dance studio so he can teach others the joy dancing brings him.",
+      "text": "Jon has been into dancing since he was a child and describes it as his passion and his escape; he wants a dance studio so he can teach others the joy dancing brings him.",
       "speaker": "Jon",
       "statedOn": "2023-01-20",
       "entities": [
         "jon",
-        "dance",
+        "dancing",
         "jons-dance-studio"
       ],
       "sourceTurns": [
@@ -1048,19 +1046,19 @@
       ]
     },
     {
-      "text": "Gina said on 20 January 2023 that dance is her go-to for stress relief.",
+      "text": "Gina uses dance as her main way of relieving stress.",
       "speaker": "Gina",
       "statedOn": "2023-01-20",
       "entities": [
         "gina",
-        "dance"
+        "dancing"
       ],
       "sourceTurns": [
         "D1:7"
       ]
     },
     {
-      "text": "Jon loves all dances but contemporary is his favourite style, because he finds it expressive and powerful.",
+      "text": "Jon's favourite dance style is contemporary, which he finds expressive and powerful, although he loves all dances.",
       "speaker": "Jon",
       "statedOn": "2023-01-20",
       "entities": [
@@ -1072,7 +1070,7 @@
       ]
     },
     {
-      "text": "Gina's favourite dance style is also contemporary, which she describes as expressive and graceful and says really speaks to her.",
+      "text": "Gina's favourite dance style is also contemporary, which she finds expressive and graceful.",
       "speaker": "Gina",
       "statedOn": "2023-01-20",
       "entities": [
@@ -1084,16 +1082,16 @@
       ]
     },
     {
-      "text": "Jon and Gina arranged on 20 January 2023 to go to a dance class together, settling on Friday 27 January 2023.",
+      "text": "On 20 January 2023 Jon and Gina agreed to go to a dance class together and settled on Friday 27 January 2023.",
       "speaker": "Jon",
       "statedOn": "2023-01-20",
       "entities": [
         "jon",
         "gina",
-        "dance"
+        "dancing"
       ],
       "chrono": [
-        "dance-session-plan"
+        "dance-class-plan"
       ],
       "sourceTurns": [
         "D1:10",
@@ -1103,13 +1101,12 @@
       ]
     },
     {
-      "text": "Jon's dance crew took first place at a local dance competition in 2022, and he shared a photograph of himself performing on that stage.",
+      "text": "Jon's dance crew took first place at a local dance competition in 2022, and Jon described being up on that stage as amazing.",
       "speaker": "Jon",
       "statedOn": "2023-01-20",
       "entities": [
         "jon",
-        "jons-dance-crew",
-        "dance"
+        "jons-dance-crew"
       ],
       "sourceTurns": [
         "D1:14",
@@ -1122,16 +1119,14 @@
       "speaker": "Gina",
       "statedOn": "2023-01-20",
       "entities": [
-        "gina",
-        "dance"
+        "gina"
       ],
       "sourceTurns": [
-        "D1:17",
-        "D1:18"
+        "D1:17"
       ]
     },
     {
-      "text": "The piece Gina's team performed when they won that regional competition was a contemporary work called \"Finding Freedom\", which she describes as emotional and powerful.",
+      "text": "The piece Gina's team won that regional competition with was a contemporary work called \"Finding Freedom\", which she described as really emotional and powerful.",
       "speaker": "Gina",
       "statedOn": "2023-01-20",
       "entities": [
@@ -1140,11 +1135,12 @@
         "contemporary-dance"
       ],
       "sourceTurns": [
+        "D1:18",
         "D1:19"
       ]
     },
     {
-      "text": "Jon's ideal dance studio is a space by the water with an ocean view, and he hoped on 20 January 2023 to find a place like it that would inspire his dancers.",
+      "text": "Jon's ideal dance studio would be by the water, and on 20 January 2023 he hoped he would find a place like that to inspire his dancers.",
       "speaker": "Jon",
       "statedOn": "2023-01-20",
       "entities": [
@@ -1164,7 +1160,7 @@
       "entities": [
         "jon",
         "jons-dance-crew",
-        "dance"
+        "dancing"
       ],
       "sourceTurns": [
         "D1:23",
@@ -1172,19 +1168,7 @@
       ]
     },
     {
-      "text": "As of 20 January 2023 Jon's group of dancers was finishing choreography to perform at a nearby festival in February 2023.",
-      "speaker": "Jon",
-      "statedOn": "2023-01-20",
-      "entities": [
-        "jon",
-        "jons-dance-crew"
-      ],
-      "sourceTurns": [
-        "D1:24"
-      ]
-    },
-    {
-      "text": "Jon confirmed that the dancers in the photograph he shared on 20 January 2023 are the ones performing at the February 2023 festival, and said they had been practising hard.",
+      "text": "In January 2023 Jon's dance group was finishing choreography to perform at a nearby festival the following month, and Jon said they had been practising hard.",
       "speaker": "Jon",
       "statedOn": "2023-01-20",
       "entities": [
@@ -1199,7 +1183,7 @@
       ]
     },
     {
-      "text": "Gina launched an advertising campaign for her clothing store shortly before 29 January 2023, hoping to grow the business, and said starting her own store and taking risks was both scary and rewarding.",
+      "text": "Gina launched an advertising campaign for her clothing store on 29 January 2023 to grow the business, and said starting her own store and taking risks was both scary and rewarding.",
       "speaker": "Gina",
       "statedOn": "2023-01-29",
       "entities": [
@@ -1211,11 +1195,12 @@
       ],
       "sourceTurns": [
         "D2:1",
-        "D2:2"
+        "D2:2",
+        "D2:3"
       ]
     },
     {
-      "text": "As of 29 January 2023 Jon was still hunting for the ideal premises for his dance studio, viewing different places and picturing how each would look, and had found one with great natural light.",
+      "text": "As of 29 January 2023 Jon was hunting for the ideal location for his dance studio, looking at different places and picturing how each space would look.",
       "speaker": "Jon",
       "statedOn": "2023-01-29",
       "entities": [
@@ -1223,12 +1208,11 @@
         "jons-dance-studio"
       ],
       "sourceTurns": [
-        "D2:3",
         "D2:4"
       ]
     },
     {
-      "text": "Jon went to Paris on 28 January 2023 and said it was very cool.",
+      "text": "Jon visited Paris on 28 January 2023 and said it was really cool.",
       "speaker": "Jon",
       "statedOn": "2023-01-29",
       "entities": [
@@ -1239,12 +1223,11 @@
         "jon-paris-trip"
       ],
       "sourceTurns": [
-        "D2:4",
-        "D2:5"
+        "D2:4"
       ]
     },
     {
-      "text": "Gina said on 29 January 2023 that she had never had the chance to visit Paris and had been only to Rome, once.",
+      "text": "As of 29 January 2023 Gina had never had the chance to visit Paris and had been to Rome once.",
       "speaker": "Gina",
       "statedOn": "2023-01-29",
       "entities": [
@@ -1257,7 +1240,9 @@
       ]
     },
     {
-      "text": "The dance studio premises Jon was considering are downtown, which he likes because it is easy to get to, and he still had to check the size and the floor quality so his students could dance safely.",
+      "key": "jon-found-downtown-space",
+      "superseded": true,
+      "text": "On 29 January 2023 Jon had found a candidate space for his dance studio downtown, which he liked for being easy to get to and for its great natural light.",
       "speaker": "Jon",
       "statedOn": "2023-01-29",
       "entities": [
@@ -1269,7 +1254,7 @@
       ]
     },
     {
-      "text": "Jon wants Marley flooring in his dance studio, the flooring dance studios usually use, because it is grippy while still letting dancers move, and is tough and easy to keep clean; Gina agreed it was the right choice.",
+      "text": "Jon wanted Marley flooring for his dance studio, the flooring dance studios usually use, because it is grippy while still letting dancers move and is tough and easy to keep clean; he also wanted enough bounce for his students to dance safely.",
       "speaker": "Jon",
       "statedOn": "2023-01-29",
       "entities": [
@@ -1283,7 +1268,7 @@
       ]
     },
     {
-      "text": "Jon described finding the right place and getting everything ready for the dance studio as a mix of exciting and nerve-wracking, and said on 29 January 2023 that he was determined to make it work.",
+      "text": "On 29 January 2023 Jon described finding the right place and getting everything ready for his dance studio as a mix of exciting and nerve-wracking, but said he was determined to make it work.",
       "speaker": "Jon",
       "statedOn": "2023-01-29",
       "entities": [
@@ -1295,13 +1280,13 @@
       ]
     },
     {
-      "text": "Gina told Jon on 29 January 2023 to take breaks and dance it out when he needed to de-stress, and Jon said he was glad to have her in his corner.",
+      "text": "Gina told Jon on 29 January 2023 to believe in himself, take breaks and dance it out when he needed to destress, and Jon said he was glad to have her in his corner.",
       "speaker": "Gina",
       "statedOn": "2023-01-29",
       "entities": [
         "jon",
         "gina",
-        "dance"
+        "dancing"
       ],
       "sourceTurns": [
         "D2:11",
@@ -1310,7 +1295,7 @@
       ]
     },
     {
-      "text": "Jon and Gina told each other on 29 January 2023 to keep chasing their dreams, agreeing that there was nothing but good stuff coming.",
+      "text": "On 29 January 2023 Jon and Gina agreed to keep chasing their business dreams together and said they believed success was close.",
       "speaker": "Jon",
       "statedOn": "2023-01-29",
       "entities": [
@@ -1324,7 +1309,8 @@
       ]
     },
     {
-      "text": "As of 1 February 2023 Jon was still searching for a place to open his dance studio, and said the journey had been bumpy but he was determined to make it work.",
+      "key": "jon-still-searching-feb",
+      "text": "As of 1 February 2023 Jon had still not found a place to open his dance studio; he said the road had been bumpy but that he was determined to make it work.",
       "speaker": "Jon",
       "statedOn": "2023-02-01",
       "entities": [
@@ -1336,7 +1322,7 @@
       ]
     },
     {
-      "text": "Gina emailed a number of wholesalers and one agreed on 1 February 2023, which she said would let her expand her clothing store and get closer to her customers.",
+      "text": "Gina emailed several wholesalers and one agreed on 1 February 2023, which she said would let her expand her clothing store and get closer to her customers.",
       "speaker": "Gina",
       "statedOn": "2023-02-01",
       "entities": [
@@ -1344,7 +1330,7 @@
         "ginas-clothing-store"
       ],
       "chrono": [
-        "wholesaler-agreed"
+        "wholesaler-agreement"
       ],
       "sourceTurns": [
         "D3:2",
@@ -1352,7 +1338,7 @@
       ]
     },
     {
-      "text": "Gina designed the space for her clothing store herself, aiming for somewhere cosy and inviting where customers could look through the trendy pieces.",
+      "text": "Gina designed the interior of her clothing store herself in her own style, choosing furniture that looked good and was comfortable and a chandelier for a touch of glamour, so customers would find the space cosy and inviting.",
       "speaker": "Gina",
       "statedOn": "2023-02-01",
       "entities": [
@@ -1361,24 +1347,13 @@
       ],
       "sourceTurns": [
         "D3:4",
-        "D3:5"
-      ]
-    },
-    {
-      "text": "Gina chose furniture for her store that looks good and is comfortable so the place would reflect her own style, and picked a chandelier for a touch of glamour that matched the store.",
-      "speaker": "Gina",
-      "statedOn": "2023-02-01",
-      "entities": [
-        "gina",
-        "ginas-clothing-store"
-      ],
-      "sourceTurns": [
+        "D3:5",
         "D3:6",
         "D3:7"
       ]
     },
     {
-      "text": "Gina's goal for her store is to create an experience that feels like a cool oasis and makes customers want to come back.",
+      "text": "Gina's aim for her clothing store was to create an experience — a \"cool oasis\" — that would make customers want to come back.",
       "speaker": "Gina",
       "statedOn": "2023-02-01",
       "entities": [
@@ -1392,7 +1367,7 @@
       ]
     },
     {
-      "text": "Jon and Gina each told the other on 1 February 2023 that they believed they would succeed, Jon with the dance studio and Gina with the store, and that hard work pays off eventually.",
+      "text": "On 1 February 2023 Jon and Gina told each other to keep going with the dance studio and the clothing store, saying they had put their hearts into their dreams.",
       "speaker": "Jon",
       "statedOn": "2023-02-01",
       "entities": [
@@ -1407,7 +1382,7 @@
       ]
     },
     {
-      "text": "Gina said on 4 February 2023 that her clothing store was doing great and that running it was a wild ride.",
+      "text": "As of 4 February 2023 Gina said her clothing store was doing great and described running it as a wild ride.",
       "speaker": "Gina",
       "statedOn": "2023-02-04",
       "entities": [
@@ -1420,7 +1395,7 @@
       ]
     },
     {
-      "text": "Jon said on 4 February 2023 that he was putting a lot of work into his business despite obstacles, and that it was hard when things did not go his way but he was sure he would reach his dreams.",
+      "text": "As of 4 February 2023 Jon was putting a lot of work into his dance studio business despite the obstacles, and said it was hard when things did not go his way.",
       "speaker": "Jon",
       "statedOn": "2023-02-04",
       "entities": [
@@ -1434,7 +1409,7 @@
       ]
     },
     {
-      "text": "Gina told Jon on 4 February 2023 that setbacks are just opportunities for comebacks and that he had the skills, passion and drive plus her full support.",
+      "text": "Gina told Jon on 4 February 2023 that setbacks are just opportunities for comebacks and that he had her full support.",
       "speaker": "Gina",
       "statedOn": "2023-02-04",
       "entities": [
@@ -1448,7 +1423,7 @@
       ]
     },
     {
-      "text": "Jon said on 4 February 2023 that searching for a dance studio location had been tricky, but that once he found the right spot the rest would follow.",
+      "text": "As of 4 February 2023 Jon was still finding it tricky to find the right location for his dance studio, and believed the rest would follow once he did.",
       "speaker": "Jon",
       "statedOn": "2023-02-04",
       "entities": [
@@ -1457,17 +1432,16 @@
       ],
       "sourceTurns": [
         "D4:9",
-        "D4:10",
-        "D4:11"
+        "D4:10"
       ]
     },
     {
-      "text": "As of 4 February 2023 Jon was working on new dance routines and rehearsing hard for an upcoming show, and said dancing brings him joy and fulfilment.",
+      "text": "In early February 2023 Jon was working on his business and rehearsing new dance routines for an upcoming show, saying dancing brought him joy and fulfilment.",
       "speaker": "Jon",
       "statedOn": "2023-02-04",
       "entities": [
         "jon",
-        "dance"
+        "dancing"
       ],
       "sourceTurns": [
         "D4:11",
@@ -1475,28 +1449,28 @@
       ]
     },
     {
-      "text": "Jon was preparing for a dance competition near him in March 2023, which he saw as a chance to show his skills and win recognition from the dance community.",
+      "text": "Jon was getting ready for a dance competition near him in March 2023, which he saw as a chance to show his skills and win recognition from the dance community.",
       "speaker": "Jon",
       "statedOn": "2023-02-04",
       "entities": [
         "jon",
-        "dance"
+        "dancing"
       ],
       "sourceTurns": [
         "D4:13",
-        "D4:14"
+        "D4:14",
+        "D4:15"
       ]
     },
     {
-      "text": "Jon and Gina spent the end of their 4 February 2023 conversation encouraging each other to go after their dreams and not give up.",
-      "speaker": "Jon",
+      "text": "On 4 February 2023 Gina told Jon his passion and commitment were awesome and that she would always be there to cheer him on.",
+      "speaker": "Gina",
       "statedOn": "2023-02-04",
       "entities": [
         "jon",
         "gina"
       ],
       "sourceTurns": [
-        "D4:15",
         "D4:16",
         "D4:17",
         "D4:18",
@@ -1504,24 +1478,25 @@
       ]
     },
     {
-      "text": "Gina found a new fashion piece for her store and shared it with Jon on 8 February 2023.",
+      "text": "Gina found a new fashion piece for her store in early February 2023 and was looking forward to sharing it with her customers.",
       "speaker": "Gina",
       "statedOn": "2023-02-08",
       "entities": [
         "gina",
-        "ginas-clothing-store"
+        "ginas-clothing-store",
+        "fashion"
       ],
       "sourceTurns": [
         "D5:1"
       ]
     },
     {
-      "text": "Jon performed at the nearby festival he had told Gina about in January 2023; he said it was awesome, with many people complimenting his dance moves, and that it reminded him why he is passionate about dancing.",
+      "text": "Jon performed at the nearby festival he had told Gina about in January, and by 8 February 2023 he described it as awesome, with many people complimenting his dance moves and reminding him why he is passionate about dancing.",
       "speaker": "Jon",
       "statedOn": "2023-02-08",
       "entities": [
         "jon",
-        "dance",
+        "dancing",
         "jons-dance-crew"
       ],
       "sourceTurns": [
@@ -1530,7 +1505,7 @@
       ]
     },
     {
-      "text": "On 8 February 2023 Jon said he loved running his own studio, valuing the freedom to create a space where dancers of all ages and levels can express themselves and the fulfilment of seeing his students progress — although he had not yet found premises for it.",
+      "text": "As of 8 February 2023 Jon said he loved running his own dance studio for the freedom to create a space where dancers of all ages and levels could express themselves, and that seeing his students progress was fulfilling — said more than four months before he gave the studio an opening night.",
       "speaker": "Jon",
       "statedOn": "2023-02-08",
       "entities": [
@@ -1542,50 +1517,41 @@
       ]
     },
     {
-      "text": "Gina teamed up with a local artist on designs for her online store, which she showed Jon on 8 February 2023.",
+      "text": "Gina teamed up with a local artist on new designs for her online store, an idea she took from a fashion magazine after seeing there was not much like it around, wanting to give her customers something different.",
       "speaker": "Gina",
       "statedOn": "2023-02-08",
       "entities": [
         "gina",
-        "ginas-clothing-store"
+        "ginas-clothing-store",
+        "fashion"
       ],
       "sourceTurns": [
         "D5:5",
-        "D5:6"
+        "D5:6",
+        "D5:7"
       ]
     },
     {
-      "text": "Gina got the idea for the artist collaboration from a fashion magazine, having noticed there was not much like it around, and said it was about staying ahead of the game and giving her customers something different.",
+      "text": "Gina said on 8 February 2023 that taking risks is scary but the only way to grow, and Jon said her willingness to take them was inspiring.",
       "speaker": "Gina",
       "statedOn": "2023-02-08",
       "entities": [
         "gina",
-        "ginas-clothing-store"
+        "jon"
       ],
       "sourceTurns": [
-        "D5:7",
-        "D5:8"
-      ]
-    },
-    {
-      "text": "Gina said on 8 February 2023 that taking risks is scary but is the only way to grow and part of the journey to success.",
-      "speaker": "Gina",
-      "statedOn": "2023-02-08",
-      "entities": [
-        "gina"
-      ],
-      "sourceTurns": [
+        "D5:8",
         "D5:9"
       ]
     },
     {
-      "text": "Jon said taking risks got him out of his secure nine-to-five job as a banker, and that he is now aiming to turn his passion for dancing into a business while not underestimating how hard it has been.",
+      "text": "Jon said taking risks got him out of his secure nine-to-five job as a banker and that he was now aiming to turn his passion for dancing into a business, which he said had not been a walk in the park.",
       "speaker": "Jon",
       "statedOn": "2023-02-08",
       "entities": [
         "jon",
         "jons-dance-studio",
-        "dance"
+        "dancing"
       ],
       "sourceTurns": [
         "D5:10",
@@ -1594,25 +1560,12 @@
       ]
     },
     {
-      "text": "Gina shared with Jon on 8 February 2023 a quote about fear that had kept her positive through tough times.",
-      "speaker": "Gina",
-      "statedOn": "2023-02-08",
-      "entities": [
-        "gina"
-      ],
-      "sourceTurns": [
-        "D5:12",
-        "D5:13"
-      ]
-    },
-    {
-      "text": "Gina got a tattoo a few years before February 2023 that stands for freedom — dancing without worrying what people think — as a reminder to follow her passions and express herself.",
+      "text": "Gina got a tattoo a few years before February 2023 that stands for freedom — dancing without worrying what people think — as a reminder to follow her passions and express herself; she also shared a quote that kept her positive through tough times.",
       "speaker": "Gina",
       "statedOn": "2023-02-08",
       "entities": [
         "gina",
-        "ginas-tattoo",
-        "dance"
+        "dancing"
       ],
       "sourceTurns": [
         "D5:13",
@@ -1621,36 +1574,36 @@
       ]
     },
     {
-      "text": "Jon said on 8 February 2023 that dance gives him an escape in which he can be himself, agreeing with Gina about the importance of expressing yourself without worry.",
+      "text": "Jon said on 8 February 2023 that dance gives him an escape in which he can be himself, and that freedom and self-expression matter.",
       "speaker": "Jon",
       "statedOn": "2023-02-08",
       "entities": [
         "jon",
-        "dance"
+        "dancing"
       ],
       "sourceTurns": [
         "D5:16",
-        "D5:17"
+        "D5:17",
+        "D5:18"
       ]
     },
     {
-      "text": "Jon said on 8 February 2023 that juggling dancing and running his business is tricky but rewarding, because his dancing energises him for his business goals and business successes drive him back to the dance floor.",
+      "text": "Jon said on 8 February 2023 that juggling dancing and running his business was tricky but rewarding, because dancing got him pumped to tackle his business goals and business successes boosted his drive on the dance floor.",
       "speaker": "Jon",
       "statedOn": "2023-02-08",
       "entities": [
         "jon",
-        "dance",
+        "dancing",
         "jons-dance-studio"
       ],
       "sourceTurns": [
-        "D5:18",
         "D5:19",
         "D5:20",
         "D5:21"
       ]
     },
     {
-      "text": "Jon thanked Gina on 8 February 2023 for her pep talk and said he would not give up on the dance studio or his other business ventures.",
+      "text": "On 8 February 2023 Jon thanked Gina for her pep talk and the two agreed to keep helping each other chase their dreams.",
       "speaker": "Jon",
       "statedOn": "2023-02-08",
       "entities": [
@@ -1663,7 +1616,7 @@
       ]
     },
     {
-      "text": "Jon started going to the gym in the week before 16 March 2023, to stay on track with his business venture, and said he still had to work out how to balance it all.",
+      "text": "Jon started going to the gym in the week beginning 6 March 2023 to stay on track with his business venture, and said he was still working out how to balance everything.",
       "speaker": "Jon",
       "statedOn": "2023-03-16",
       "entities": [
@@ -1674,7 +1627,7 @@
       ]
     },
     {
-      "text": "Gina said on 16 March 2023 that she had been having a tough time since losing her job at Door Dash.",
+      "text": "Gina said on 16 March 2023 that things had been tough since she lost her job at Door Dash, but that she had good news to share.",
       "speaker": "Gina",
       "statedOn": "2023-03-16",
       "entities": [
@@ -1689,7 +1642,7 @@
       ]
     },
     {
-      "text": "Gina's online clothing store opened, which she announced to Jon on 16 March 2023 after dreaming of it for a while.",
+      "text": "Gina's online clothing store opened on 16 March 2023, something she said she had been dreaming of for a while.",
       "speaker": "Gina",
       "statedOn": "2023-03-16",
       "entities": [
@@ -1697,7 +1650,7 @@
         "ginas-clothing-store"
       ],
       "chrono": [
-        "gina-online-store-open"
+        "gina-online-store-opening"
       ],
       "sourceTurns": [
         "D6:6",
@@ -1705,13 +1658,14 @@
       ]
     },
     {
-      "text": "Gina started the online clothing store because she is passionate about fashion trends and finding unique pieces, and wanted to blend her love of dance with her love of fashion.",
+      "text": "Gina started her online clothing store because she is passionate about fashion trends and finding unique pieces and wanted to blend her love of dance with her love of fashion.",
       "speaker": "Gina",
       "statedOn": "2023-03-16",
       "entities": [
         "gina",
         "ginas-clothing-store",
-        "dance"
+        "fashion",
+        "dancing"
       ],
       "sourceTurns": [
         "D6:8",
@@ -1719,7 +1673,7 @@
       ]
     },
     {
-      "text": "On 16 March 2023 Jon said that losing his job had been hard but that starting his business meant he was living his dream, and that he kept facing new challenges he was sure would be worth it.",
+      "text": "As of 16 March 2023 Jon said losing his job had been hard but that starting his business meant living his dream, and that he kept facing new challenges he was sure would be worth it.",
       "speaker": "Jon",
       "statedOn": "2023-03-16",
       "entities": [
@@ -1732,21 +1686,7 @@
       ]
     },
     {
-      "text": "Gina described running her own business on 16 March 2023 as having had its ups and downs but being an amazing ride, and Jon said her determination inspired him to keep pushing.",
-      "speaker": "Gina",
-      "statedOn": "2023-03-16",
-      "entities": [
-        "gina",
-        "ginas-clothing-store"
-      ],
-      "sourceTurns": [
-        "D6:12",
-        "D6:13",
-        "D6:14"
-      ]
-    },
-    {
-      "text": "Jon and Gina agreed on 16 March 2023 that facing the same challenges in parallel motivated them both, and toasted to taking on new heights together.",
+      "text": "On 16 March 2023 Jon and Gina agreed that running their own businesses had been a rollercoaster, and each said the other's determination was motivating, like having a partner to dance with.",
       "speaker": "Jon",
       "statedOn": "2023-03-16",
       "entities": [
@@ -1754,6 +1694,9 @@
         "gina"
       ],
       "sourceTurns": [
+        "D6:12",
+        "D6:13",
+        "D6:14",
         "D6:15",
         "D6:16",
         "D6:17",
@@ -1762,7 +1705,7 @@
       ]
     },
     {
-      "text": "Gina described running her online clothing store on 23 March 2023 as a roller coaster but rewarding, and said starting a business takes courage.",
+      "text": "As of 23 March 2023 Gina described running her online clothing store as a rollercoaster but rewarding, and said starting a business takes courage.",
       "speaker": "Gina",
       "statedOn": "2023-03-23",
       "entities": [
@@ -1776,19 +1719,20 @@
       ]
     },
     {
-      "text": "As of 23 March 2023 Gina's store was going well and she was keeping up with fashion trends so she could offer her customers the best pieces.",
+      "text": "Gina kept up with fashion trends so she could offer the best pieces to her customers, and said on 23 March 2023 that it was a lot of work but she was really enjoying it.",
       "speaker": "Gina",
       "statedOn": "2023-03-23",
       "entities": [
         "gina",
-        "ginas-clothing-store"
+        "ginas-clothing-store",
+        "fashion"
       ],
       "sourceTurns": [
         "D7:4"
       ]
     },
     {
-      "text": "Jon's business advice to Gina on 23 March 2023 was that brand identity is key and hers should stand out, to build relationships with customers so they know she cares, and to stay positive and motivate others because that energy is contagious.",
+      "text": "Jon's advice to Gina on 23 March 2023 for running a successful business was to make her brand identity stand out, build relationships with customers so they know she cares, and stay positive because her energy would be contagious.",
       "speaker": "Jon",
       "statedOn": "2023-03-23",
       "entities": [
@@ -1802,13 +1746,13 @@
       ]
     },
     {
-      "text": "On 23 March 2023 Jon said that seeing his students succeed is what keeps him motivated in the dance studio business, and shared a photograph taken after one of the dance classes.",
+      "text": "Jon said what keeps him motivated with the dance studio is seeing his students succeed and helping them learn and reach their goals, and he shared a photo taken after one of his dance classes.",
       "speaker": "Jon",
       "statedOn": "2023-03-23",
       "entities": [
         "jon",
         "jons-dance-studio",
-        "dance"
+        "dancing"
       ],
       "sourceTurns": [
         "D7:7",
@@ -1816,7 +1760,7 @@
       ]
     },
     {
-      "text": "Jon told Gina on 23 March 2023 that her support had made a huge difference to him and kept him motivated, and Gina said she was glad to be part of his journey and would keep cheering him on.",
+      "text": "On 23 March 2023 Jon told Gina that her being there for him had made a huge difference, and Gina said she was rooting for him all the way.",
       "speaker": "Jon",
       "statedOn": "2023-03-23",
       "entities": [
@@ -1836,7 +1780,7 @@
       ]
     },
     {
-      "text": "Jon shut down his bank account, telling Gina on 3 April 2023 that it was a tough call but that he thought it would help his business grow, and that handling the change had been hard.",
+      "text": "Jon shut down his bank account by 3 April 2023, a tough call he made because he thought it would help his business grow, and said handling the changes had been hard.",
       "speaker": "Jon",
       "statedOn": "2023-04-03",
       "entities": [
@@ -1850,7 +1794,7 @@
       ]
     },
     {
-      "text": "As of 3 April 2023 Gina was running new offers and promotions on her online store to bring in new customers.",
+      "text": "Gina was running new offers and promotions on her online store in early April 2023 to bring in new customers, and said she was not giving up.",
       "speaker": "Gina",
       "statedOn": "2023-04-03",
       "entities": [
@@ -1863,12 +1807,13 @@
       ]
     },
     {
-      "text": "Gina said on 3 April 2023 that dance is her stress relief and fashion fuels her creativity, and that finding new trends for her store keeps her motivated to keep growing.",
+      "text": "Gina said on 3 April 2023 that dance is her stress relief and fashion fuels her creativity, and that finding new trends for her store keeps her motivated to grow.",
       "speaker": "Gina",
       "statedOn": "2023-04-03",
       "entities": [
         "gina",
-        "dance",
+        "dancing",
+        "fashion",
         "ginas-clothing-store"
       ],
       "sourceTurns": [
@@ -1877,13 +1822,14 @@
       ]
     },
     {
-      "text": "Gina combined her passions for dance and fashion in her business so she could express her creativity and add dance-inspired items to her store.",
+      "text": "Gina combined her passions for dance and fashion by adding dance-inspired items to her clothing store, which let her show her creativity and share what she loves.",
       "speaker": "Gina",
       "statedOn": "2023-04-03",
       "entities": [
         "gina",
         "ginas-clothing-store",
-        "dance"
+        "dancing",
+        "fashion"
       ],
       "sourceTurns": [
         "D8:8",
@@ -1891,7 +1837,7 @@
       ]
     },
     {
-      "text": "By 3 April 2023 Gina's offers and promotions were bringing in more sales, customers liked her designs, and growing her customer base was her main focus.",
+      "text": "By 3 April 2023 the offers and promotions on Gina's online store were bringing in more sales, and growing her customer base had become her main focus.",
       "speaker": "Gina",
       "statedOn": "2023-04-03",
       "entities": [
@@ -1904,19 +1850,20 @@
       ]
     },
     {
-      "text": "Gina planned, as of 3 April 2023, to work with fashion bloggers and influencers over the following few months and to run more advertising, to grow her customer base and make her store a top destination for fashion fans.",
+      "text": "Gina planned to work with fashion bloggers and influencers over the months following April 2023 and to run more advertising, aiming to make her store a top destination for fashion fans.",
       "speaker": "Gina",
       "statedOn": "2023-04-03",
       "entities": [
         "gina",
-        "ginas-clothing-store"
+        "ginas-clothing-store",
+        "fashion"
       ],
       "sourceTurns": [
         "D8:12"
       ]
     },
     {
-      "text": "On 3 April 2023 Jon said he was expanding his dance studio's social media presence and offering workshops and classes to local schools and centres.",
+      "text": "In April 2023 Jon was expanding his dance studio's social media presence and offering workshops and classes to local schools and community centres.",
       "speaker": "Jon",
       "statedOn": "2023-04-03",
       "entities": [
@@ -1924,42 +1871,31 @@
         "jons-dance-studio"
       ],
       "sourceTurns": [
-        "D8:13"
+        "D8:13",
+        "D8:14"
       ]
     },
     {
-      "text": "Jon was hosting a dance competition in May 2023 to showcase local talent and draw attention to his studio, with his own studio and other schools performing and being judged over an evening.",
+      "text": "Jon planned to host a dance competition in May 2023 at which his dance studio and other local schools would perform and be judged, to showcase local talent and draw attention to his studio; he invited Gina and she said she would be there.",
       "speaker": "Jon",
       "statedOn": "2023-04-03",
       "entities": [
         "jon",
+        "gina",
         "jons-dance-studio",
-        "dance"
+        "dancing"
       ],
       "sourceTurns": [
-        "D8:13",
-        "D8:14",
         "D8:15",
         "D8:16",
-        "D8:17"
-      ]
-    },
-    {
-      "text": "Gina told Jon on 3 April 2023 that she would come to his dance event the following month to support him.",
-      "speaker": "Gina",
-      "statedOn": "2023-04-03",
-      "entities": [
-        "jon",
-        "gina"
-      ],
-      "sourceTurns": [
+        "D8:17",
         "D8:18",
         "D8:19",
         "D8:20"
       ]
     },
     {
-      "text": "Jon and Gina wished each other luck with their businesses at the end of their 3 April 2023 conversation and promised to keep pursuing their goals.",
+      "text": "On 3 April 2023 Jon wished Gina luck with her store and both said they would keep pursuing their goals.",
       "speaker": "Jon",
       "statedOn": "2023-04-03",
       "entities": [
@@ -1976,13 +1912,13 @@
       ]
     },
     {
-      "text": "On 9 April 2023 Jon said he had sunk a lot of time into the dance studio recently, that his students were already doing very well, and that he was learning alongside them.",
+      "text": "As of 9 April 2023 Jon said he had sunk a great deal of time into his dance studio, that his students were already doing well, and that he was learning alongside them.",
       "speaker": "Jon",
       "statedOn": "2023-04-09",
       "entities": [
         "jon",
         "jons-dance-studio",
-        "dance"
+        "dancing"
       ],
       "sourceTurns": [
         "D9:1",
@@ -1990,7 +1926,7 @@
       ]
     },
     {
-      "text": "Jon said on 9 April 2023 that losing his job was tough but gave him the push he needed to do what he loves, and that he was determined to make the studio work.",
+      "text": "Jon said on 9 April 2023 that losing his job was tough but gave him the push he needed to go after what he loves.",
       "speaker": "Jon",
       "statedOn": "2023-04-09",
       "entities": [
@@ -2003,12 +1939,12 @@
       ]
     },
     {
-      "text": "Jon said on 9 April 2023 that dancing makes him happy, that he is living as his true self, and that seeing his students get better brings him joy.",
+      "text": "Jon said dancing makes him happy, that he is now living as his true self, and that seeing his students get better brings him joy.",
       "speaker": "Jon",
       "statedOn": "2023-04-09",
       "entities": [
         "jon",
-        "dance",
+        "dancing",
         "jons-dance-studio"
       ],
       "sourceTurns": [
@@ -2017,70 +1953,71 @@
       ]
     },
     {
-      "text": "Jon used to be terrified of what people would think of him dancing, and learned that his own happiness is the most important thing.",
+      "text": "Jon used to be scared to death of what people would think of him, and learned that his own happiness is the most important thing.",
       "speaker": "Jon",
       "statedOn": "2023-04-09",
       "entities": [
-        "jon",
-        "dance"
+        "jon"
       ],
       "sourceTurns": [
         "D9:7"
       ]
     },
     {
-      "text": "Gina used to take dance classes and loved spending time in the studio, and says dance still has a special meaning for her.",
+      "text": "Gina used to take dance classes and loved spending time in the studio, and said on 9 April 2023 that dance is still a happy place for both of them.",
       "speaker": "Gina",
       "statedOn": "2023-04-09",
       "entities": [
         "gina",
-        "dance"
+        "jon",
+        "dancing"
       ],
       "sourceTurns": [
         "D9:8"
       ]
     },
     {
-      "text": "Jon loved taking dance lessons with his friends when he was younger and calls those memories precious.",
+      "text": "Jon loved taking dance lessons with his friends when he was younger and treasures those memories, which is part of why having his own studio means so much to him.",
       "speaker": "Jon",
       "statedOn": "2023-04-09",
       "entities": [
         "jon",
-        "dance"
+        "dancing",
+        "jons-dance-studio"
       ],
       "sourceTurns": [
         "D9:9"
       ]
     },
     {
-      "text": "Gina keeps a trophy from a dance contest as a reminder of the hard work, dedication and joy dancing brings, and showed it to Jon on 9 April 2023.",
+      "text": "Gina shared one of her trophies from a dance contest on 9 April 2023, calling it a reminder of the hard work, dedication and joy dance brings.",
       "speaker": "Gina",
       "statedOn": "2023-04-09",
       "entities": [
         "gina",
-        "dance"
+        "dancing"
       ],
       "sourceTurns": [
         "D9:10",
-        "D9:11"
+        "D9:11",
+        "D9:12"
       ]
     },
     {
-      "text": "Gina told Jon on 9 April 2023 that he had earned every bit of praise for his hard work, and Jon said he would keep pushing and let nothing hold him back.",
-      "speaker": "Gina",
+      "text": "On 9 April 2023 Jon said he would keep pushing and working hard and would not let anything hold him back.",
+      "speaker": "Jon",
       "statedOn": "2023-04-09",
       "entities": [
         "jon",
         "gina"
       ],
       "sourceTurns": [
-        "D9:12",
         "D9:13",
         "D9:14"
       ]
     },
     {
-      "text": "Jon went to a fair on 24 April 2023 to show off his dance studio; he found it both stressful and great, and came away with some possible leads.",
+      "text": "Jon went to a fair on 24 April 2023 to show off his dance studio, found it both stressful and great, and came away with some possible leads; he said the experience taught him that the business is no cakewalk and that self-confidence matters.",
       "speaker": "Jon",
       "statedOn": "2023-04-25",
       "entities": [
@@ -2088,46 +2025,33 @@
         "jons-dance-studio"
       ],
       "chrono": [
-        "jon-fair"
+        "business-fair"
       ],
       "sourceTurns": [
         "D10:1",
-        "D10:2"
+        "D10:2",
+        "D10:3"
       ]
     },
     {
-      "text": "Jon said on 25 April 2023 that he had learned running this business is no cakewalk and that having confidence in yourself is important for making it successful.",
-      "speaker": "Jon",
-      "statedOn": "2023-04-25",
-      "entities": [
-        "jon",
-        "jons-dance-studio"
-      ],
-      "sourceTurns": [
-        "D10:1"
-      ]
-    },
-    {
-      "text": "Gina started her own online clothing store after losing her job because she wanted to take control of her own destiny, and describes the journey as tough but very rewarding.",
+      "text": "Gina said on 25 April 2023 that she started her online clothing store after losing her job because she wanted to take control of her own destiny, and called the journey tough but very rewarding.",
       "speaker": "Gina",
       "statedOn": "2023-04-25",
       "entities": [
         "gina",
-        "ginas-clothing-store",
-        "door-dash"
+        "ginas-clothing-store"
       ],
       "sourceTurns": [
-        "D10:2",
-        "D10:3",
         "D10:4"
       ]
     },
     {
-      "text": "Jon said on 25 April 2023 that he was having trouble with his business project and asked Gina how to stay motivated when times are tough.",
+      "text": "On 25 April 2023 Jon said he was having trouble with his business project and asked Gina how she stays motivated when times are tough.",
       "speaker": "Jon",
       "statedOn": "2023-04-25",
       "entities": [
         "jon",
+        "gina",
         "jons-dance-studio"
       ],
       "sourceTurns": [
@@ -2135,19 +2059,19 @@
       ]
     },
     {
-      "text": "Gina stays motivated by thinking of her big goal and why she is doing it, getting help from the people who support her, and dancing it out.",
+      "text": "Gina stays motivated by thinking of the big goal and why she is doing it, getting help from the people who support her, and dancing it out.",
       "speaker": "Gina",
       "statedOn": "2023-04-25",
       "entities": [
         "gina",
-        "dance"
+        "dancing"
       ],
       "sourceTurns": [
         "D10:6"
       ]
     },
     {
-      "text": "Jon said on 25 April 2023 that he had been feeling low on confidence lately and that it is hard to run a business without faith in yourself.",
+      "text": "On 25 April 2023 Jon said he had been feeling low on confidence lately and was finding it hard to run a business without faith in himself.",
       "speaker": "Jon",
       "statedOn": "2023-04-25",
       "entities": [
@@ -2159,12 +2083,12 @@
       ]
     },
     {
-      "text": "Gina's advice to Jon on confidence, on 25 April 2023, was to remind himself of his successes and progress, keep a good support system, and focus on why he started — because he loves it.",
+      "text": "Gina's advice to Jon on staying confident in business was to remind himself of his successes and progress, keep a good support system, and focus on the fact that he started because he loves it.",
       "speaker": "Gina",
       "statedOn": "2023-04-25",
       "entities": [
-        "gina",
-        "jon"
+        "jon",
+        "gina"
       ],
       "sourceTurns": [
         "D10:8",
@@ -2173,7 +2097,7 @@
       ]
     },
     {
-      "text": "Jon and Gina agreed on 25 April 2023 to keep pushing each other along their business paths.",
+      "text": "On 25 April 2023 Jon and Gina agreed to keep pushing each other along their paths.",
       "speaker": "Jon",
       "statedOn": "2023-04-25",
       "entities": [
@@ -2188,7 +2112,7 @@
       ]
     },
     {
-      "text": "As of 11 May 2023 Jon was still working on the dance studio and said things were looking up.",
+      "text": "As of 11 May 2023 Jon was still working on his dance studio and said things were looking up.",
       "speaker": "Jon",
       "statedOn": "2023-05-11",
       "entities": [
@@ -2201,7 +2125,7 @@
       ]
     },
     {
-      "text": "Jon said on 11 May 2023 that losing his job gave him the push to finally start his dream business, his own dance studio, and that he was stepping into the unknown and hoping for the best.",
+      "text": "Jon said losing his job gave him the push to finally start his dream business, his own dance studio, and that he was stepping into the unknown and hoping for the best.",
       "speaker": "Jon",
       "statedOn": "2023-05-11",
       "entities": [
@@ -2214,55 +2138,43 @@
       ]
     },
     {
-      "text": "Jon said dance has been his stress-buster since childhood and that thinking about how it makes him feel is what gets him through the fear of the unknown.",
+      "text": "Jon said dance has been his stress-buster since childhood, that it helps him de-stress and is where he feels most alive, and that it is a must-have in his life.",
       "speaker": "Jon",
       "statedOn": "2023-05-11",
       "entities": [
         "jon",
-        "dance"
+        "dancing"
       ],
       "sourceTurns": [
-        "D11:5"
+        "D11:5",
+        "D11:7"
       ]
     },
     {
-      "text": "Gina said on 11 May 2023 that dance is her stress fix too, that all her worries vanish as soon as she starts, and that she cannot picture life without it — it is like air to her.",
+      "text": "Gina said dance is her stress fix too, that her worries vanish as soon as she starts, and that she cannot picture life without it — it is like air to her.",
       "speaker": "Gina",
       "statedOn": "2023-05-11",
       "entities": [
         "gina",
-        "dance"
+        "dancing"
       ],
       "sourceTurns": [
         "D11:6",
-        "D11:7",
         "D11:8"
       ]
     },
     {
-      "text": "Jon said on 11 May 2023 that dancing is second nature to him and that owning a dance studio and teaching others is him living his dream.",
-      "speaker": "Jon",
-      "statedOn": "2023-05-11",
-      "entities": [
-        "jon",
-        "dance",
-        "jons-dance-studio"
-      ],
-      "sourceTurns": [
-        "D11:9",
-        "D11:10"
-      ]
-    },
-    {
-      "text": "Jon's long-held dream for the studio is to create a place where people can dance and express themselves, and he promised on 11 May 2023 to keep Gina posted on its progress.",
+      "text": "Jon's dream was to create a place where people could dance and express themselves, and on 11 May 2023 he said having his own studio and teaching others was living that dream; Gina said the studio would change things for a lot of people.",
       "speaker": "Jon",
       "statedOn": "2023-05-11",
       "entities": [
         "jon",
         "jons-dance-studio",
-        "dance"
+        "dancing"
       ],
       "sourceTurns": [
+        "D11:9",
+        "D11:10",
         "D11:11",
         "D11:12",
         "D11:13"
@@ -2274,7 +2186,8 @@
       "statedOn": "2023-05-11",
       "entities": [
         "gina",
-        "international-fashion-company"
+        "ginas-internship-company",
+        "fashion"
       ],
       "chrono": [
         "gina-internship-interview"
@@ -2286,28 +2199,17 @@
       ]
     },
     {
-      "text": "As of 11 May 2023 Jon had been practising dance routines, which he said keeps his mind focused and motivated.",
-      "speaker": "Jon",
-      "statedOn": "2023-05-11",
-      "entities": [
-        "jon",
-        "dance"
-      ],
-      "sourceTurns": [
-        "D11:17",
-        "D11:18"
-      ]
-    },
-    {
-      "text": "Jon promised on 11 May 2023 to send Gina a video of one of his dance routines.",
+      "text": "In May 2023 Jon had been practising dance routines to keep his mind focused and motivated, and agreed to send Gina a video of one of them.",
       "speaker": "Jon",
       "statedOn": "2023-05-11",
       "entities": [
         "jon",
         "gina",
-        "dance"
+        "dancing"
       ],
       "sourceTurns": [
+        "D11:17",
+        "D11:18",
         "D11:19",
         "D11:20",
         "D11:21",
@@ -2315,37 +2217,38 @@
       ]
     },
     {
-      "text": "Gina was accepted for a fashion internship, which she told Jon about on 27 May 2023, saying she was excited and a little nervous because it would be a big change.",
+      "text": "Gina announced on 27 May 2023 that she had been accepted for a fashion internship: a part-time position in the fashion department of an international company.",
       "speaker": "Gina",
       "statedOn": "2023-05-27",
       "entities": [
         "gina",
-        "international-fashion-company"
+        "ginas-internship-company",
+        "fashion"
       ],
       "chrono": [
         "gina-internship-accepted"
       ],
       "sourceTurns": [
         "D12:1",
-        "D12:2"
+        "D12:2",
+        "D12:3"
       ]
     },
     {
-      "text": "Gina's internship is a part-time position in the fashion department of an international company, and she said she was a mix of excited and scared about getting into fashion but was staying upbeat and planning to learn as much as she could.",
+      "text": "Gina said on 27 May 2023 that she was excited and kind of nervous about the big change of moving into fashion, and was trying to stay upbeat and learn as much as she could.",
       "speaker": "Gina",
       "statedOn": "2023-05-27",
       "entities": [
         "gina",
-        "international-fashion-company"
+        "fashion"
       ],
       "sourceTurns": [
-        "D12:3",
         "D12:4",
         "D12:5"
       ]
     },
     {
-      "text": "Jon was reading \"The Lean Startup\" in May 2023 and hoped it would give him tips for his business.",
+      "text": "In May 2023 Jon was reading \"The Lean Startup\", hoping it would give him tips for his dance studio business.",
       "speaker": "Jon",
       "statedOn": "2023-05-27",
       "entities": [
@@ -2359,7 +2262,7 @@
       ]
     },
     {
-      "text": "\"The Lean Startup\" got Jon thinking about building a focused and efficient business and about adapting and tweaking from customer feedback, which he said on 27 May 2023 he was going to try for the dance studio.",
+      "text": "\"The Lean Startup\" got Jon thinking about building a focused and efficient business and about adapting and tweaking from customer feedback, which he said he was going to try out.",
       "speaker": "Jon",
       "statedOn": "2023-05-27",
       "entities": [
@@ -2372,7 +2275,7 @@
       ]
     },
     {
-      "text": "Jon keeps a whiteboard of ideas, dates and milestones for his business, which gives him a visual of his progress and keeps him organised.",
+      "text": "Jon keeps a whiteboard of ideas, milestones and dates for his business, which he says gives him a visual of his progress and keeps him organised.",
       "speaker": "Jon",
       "statedOn": "2023-05-27",
       "entities": [
@@ -2381,14 +2284,13 @@
         "jons-dance-studio"
       ],
       "sourceTurns": [
-        "D12:8",
         "D12:9",
         "D12:10",
         "D12:11"
       ]
     },
     {
-      "text": "As of 27 May 2023 Jon was wrapping up his business plan and looking for investors, driven by his passion for the project and his belief that it would succeed.",
+      "text": "As of 27 May 2023 Jon was wrapping up his business plan and looking for investors, driven by his passion for the project; he said the search for investors had been tough but he was staying hopeful and learning a lot.",
       "speaker": "Jon",
       "statedOn": "2023-05-27",
       "entities": [
@@ -2397,31 +2299,20 @@
       ],
       "sourceTurns": [
         "D12:12",
-        "D12:13"
+        "D12:13",
+        "D12:14"
       ]
     },
     {
-      "text": "Jon said on 27 May 2023 that the hunt for investors had been tough but that he was staying hopeful and learning a lot from the process.",
-      "speaker": "Jon",
-      "statedOn": "2023-05-27",
-      "entities": [
-        "jon",
-        "jons-dance-studio"
-      ],
-      "sourceTurns": [
-        "D12:14",
-        "D12:15"
-      ]
-    },
-    {
-      "text": "Jon and Gina encouraged each other on 27 May 2023 to keep going through the inevitable obstacles.",
-      "speaker": "Jon",
+      "text": "On 27 May 2023 Gina told Jon to keep learning and growing through the process, and Jon said he would never quit.",
+      "speaker": "Gina",
       "statedOn": "2023-05-27",
       "entities": [
         "jon",
         "gina"
       ],
       "sourceTurns": [
+        "D12:15",
         "D12:16",
         "D12:17",
         "D12:18",
@@ -2429,7 +2320,7 @@
       ]
     },
     {
-      "text": "Jon thanked Gina on 13 June 2023 for being there and believing in him, and said he was preparing for his dance studio more than ever.",
+      "text": "On 13 June 2023 Jon thanked Gina for believing in him and said he was preparing for his dance studio more than ever.",
       "speaker": "Jon",
       "statedOn": "2023-06-13",
       "entities": [
@@ -2444,12 +2335,13 @@
       ]
     },
     {
-      "text": "Gina developed a video presentation teaching customers how to style her fashion pieces, which she mentioned on 13 June 2023 and promised to send Jon.",
+      "text": "Gina developed a video presentation teaching customers how to style her fashion pieces, which she told Jon about on 13 June 2023 and promised to send him.",
       "speaker": "Gina",
       "statedOn": "2023-06-13",
       "entities": [
         "gina",
-        "ginas-clothing-store"
+        "ginas-clothing-store",
+        "fashion"
       ],
       "sourceTurns": [
         "D13:4",
@@ -2457,17 +2349,16 @@
       ]
     },
     {
-      "text": "Jon said on 13 June 2023 that working with young dancers had been inspiring and that he wants the dance studio to be a place of support and encouragement where dancers can grow, not just a business.",
+      "text": "Jon said working with young dancers had been inspiring and that he wanted his dance studio to be a place of support and encouragement where all his dancers could grow.",
       "speaker": "Jon",
       "statedOn": "2023-06-13",
       "entities": [
         "jon",
         "jons-dance-studio",
-        "dance"
+        "dancing"
       ],
       "sourceTurns": [
-        "D13:5",
-        "D13:6"
+        "D13:5"
       ]
     },
     {
@@ -2476,28 +2367,28 @@
       "statedOn": "2023-06-13",
       "entities": [
         "jon",
-        "jons-dance-studio",
-        "dance"
+        "jons-dance-studio"
       ],
       "sourceTurns": [
-        "D13:7",
-        "D13:9"
+        "D13:7"
       ]
     },
     {
-      "text": "Gina had a mentor of her own when she was learning to dance.",
+      "text": "Gina had a mentor herself when she was learning to dance, and both she and Jon said a mentor's guidance and support can make a dancer really shine.",
       "speaker": "Gina",
       "statedOn": "2023-06-13",
       "entities": [
         "gina",
-        "dance"
+        "jon",
+        "dancing"
       ],
       "sourceTurns": [
-        "D13:8"
+        "D13:8",
+        "D13:9"
       ]
     },
     {
-      "text": "Jon uses a written planning system to set goals, track his achievements and find areas to improve, which keeps him organised and motivated.",
+      "text": "Jon uses a written planning system to stay organised and motivated: it sets goals, tracks his achievements and helps him find areas to improve.",
       "speaker": "Jon",
       "statedOn": "2023-06-13",
       "entities": [
@@ -2527,7 +2418,7 @@
       ]
     },
     {
-      "text": "Gina reminded Jon on 13 June 2023 that staying positive matters, and Jon said he would keep pushing and working to make his dreams happen.",
+      "text": "On 13 June 2023 Gina reminded Jon that staying positive is very important, and Jon said he would keep pushing to make his dreams happen.",
       "speaker": "Gina",
       "statedOn": "2023-06-13",
       "entities": [
@@ -2544,24 +2435,7 @@
       ]
     },
     {
-      "text": "Gina's working life went from losing her job at Door Dash in January 2023, through founding her own clothing business, to interviewing for a design internship on 10 May 2023 and being accepted for a part-time fashion internship at an international company by 27 May 2023.",
-      "speaker": "Gina",
-      "statedOn": "2023-05-27",
-      "entities": [
-        "gina",
-        "door-dash",
-        "international-fashion-company",
-        "ginas-clothing-store"
-      ],
-      "sourceTurns": [
-        "D1:3",
-        "D11:14",
-        "D12:1",
-        "D12:3"
-      ]
-    },
-    {
-      "text": "Jon was mentored by a business mentor on 15 June 2023 and found it really inspiring, saying it made him even more pumped to chase his dreams.",
+      "text": "Jon was mentored by a business mentor on 15 June 2023, an experience he found really inspiring and which left him even more pumped to chase his dreams.",
       "speaker": "Jon",
       "statedOn": "2023-06-16",
       "entities": [
@@ -2569,15 +2443,14 @@
         "jons-dance-studio"
       ],
       "chrono": [
-        "jon-mentored"
+        "jon-business-mentoring"
       ],
       "sourceTurns": [
-        "D14:1",
-        "D14:2"
+        "D14:1"
       ]
     },
     {
-      "text": "As of 16 June 2023 Gina was working on growing her online store's customer base and found it tough but was determined.",
+      "text": "As of 16 June 2023 Gina was working on growing her online store's customer base, which she said was tough but which she was determined to do.",
       "speaker": "Gina",
       "statedOn": "2023-06-16",
       "entities": [
@@ -2589,38 +2462,27 @@
       ]
     },
     {
-      "text": "Jon had been promoting his business as of 16 June 2023, called it a crazy ride, and asked Gina for marketing tips.",
-      "speaker": "Jon",
-      "statedOn": "2023-06-16",
-      "entities": [
-        "jon",
-        "jons-dance-studio"
-      ],
-      "sourceTurns": [
-        "D14:3"
-      ]
-    },
-    {
-      "text": "Gina's marketing advice to Jon on 16 June 2023 was to use social media channels and work with influencers for bigger reach.",
+      "text": "In June 2023 Jon was promoting his business and asked Gina for marketing tips; she advised using social media channels and working with influencers for bigger reach.",
       "speaker": "Gina",
       "statedOn": "2023-06-16",
       "entities": [
-        "gina",
         "jon",
+        "gina",
         "jons-dance-studio"
       ],
       "sourceTurns": [
+        "D14:3",
         "D14:4"
       ]
     },
     {
-      "text": "Jon took Gina's social media advice and posted some of his dance videos, which he said on 16 June 2023 was creating a bit of a stir.",
+      "text": "Following Gina's advice Jon posted some of his dance videos on social media, and by 16 June 2023 said they were creating a bit of a stir.",
       "speaker": "Jon",
       "statedOn": "2023-06-16",
       "entities": [
         "jon",
         "jons-dance-studio",
-        "dance"
+        "dancing"
       ],
       "sourceTurns": [
         "D14:5",
@@ -2629,13 +2491,12 @@
       ]
     },
     {
-      "text": "Gina became an entrepreneur because she lost her job, opening an online clothing store, and says being her own boss doing something she loves is great and was a huge jump that was totally worth it.",
+      "text": "Gina said she became an entrepreneur because she lost her job, opening an online clothing store, and that being her own boss doing something she loves has been great.",
       "speaker": "Gina",
       "statedOn": "2023-06-16",
       "entities": [
         "gina",
-        "ginas-clothing-store",
-        "door-dash"
+        "ginas-clothing-store"
       ],
       "sourceTurns": [
         "D14:8",
@@ -2643,7 +2504,7 @@
       ]
     },
     {
-      "text": "Gina's advice to someone starting a business is to stay passionate, focused and resilient, to believe in yourself when challenges come, and to stay open to learning and improving.",
+      "text": "Gina's advice to someone starting out in business was to stay passionate, focused and resilient, to believe in themselves and keep going when challenges come, and to stay open to learning and improving.",
       "speaker": "Gina",
       "statedOn": "2023-06-16",
       "entities": [
@@ -2658,13 +2519,13 @@
       ]
     },
     {
-      "text": "Gina shared a photograph from her own dancing days with Jon on 16 June 2023, saying it had been a tough road but worth it, and Jon said it reminded him how much he loves performing.",
+      "text": "Gina shared a photograph from her own dancing days on 16 June 2023, saying the road had been tough but worth it, and Jon said it reminded him how much he loves performing.",
       "speaker": "Gina",
       "statedOn": "2023-06-16",
       "entities": [
         "gina",
         "jon",
-        "dance"
+        "dancing"
       ],
       "sourceTurns": [
         "D14:14",
@@ -2673,7 +2534,7 @@
       ]
     },
     {
-      "text": "Jon told Gina on 16 June 2023 that knowing she had his back is what keeps him going, and that he would not let her down.",
+      "text": "On 16 June 2023 Jon said knowing Gina had his back kept him going and that he would not let her down.",
       "speaker": "Jon",
       "statedOn": "2023-06-16",
       "entities": [
@@ -2702,7 +2563,7 @@
       ]
     },
     {
-      "text": "The official opening night of Jon's dance studio was set for 20 June 2023, and he said on 19 June 2023 that he was working hard to make everything just right.",
+      "text": "The official opening night of Jon's dance studio was set for 20 June 2023, and the day before he was working hard to get everything just right.",
       "speaker": "Jon",
       "statedOn": "2023-06-19",
       "entities": [
@@ -2719,7 +2580,7 @@
       ]
     },
     {
-      "text": "Gina congratulated Jon on 19 June 2023 on how far he had come, said the studio looked amazing and that all the long nights had been worth it, and Jon said it had been a wild ride but he felt ready.",
+      "text": "On 19 June 2023 Gina congratulated Jon, said the studio looked amazing and that all his long nights had been worth it, and told him to savour the launch.",
       "speaker": "Gina",
       "statedOn": "2023-06-19",
       "entities": [
@@ -2753,7 +2614,7 @@
       ]
     },
     {
-      "text": "Jon and Gina looked forward on 19 June 2023 to making memories together at the studio's grand opening and afterwards.",
+      "text": "On 19 June 2023 Jon and Gina looked forward to making memories together at the dance studio the following day and afterwards.",
       "speaker": "Jon",
       "statedOn": "2023-06-19",
       "entities": [
@@ -2775,12 +2636,13 @@
       ]
     },
     {
-      "text": "Gina acquired some new unique pieces for her clothing store, which she told Jon about on 21 June 2023.",
+      "text": "Gina acquired some new unique pieces for her clothing store shortly before 21 June 2023.",
       "speaker": "Gina",
       "statedOn": "2023-06-21",
       "entities": [
         "gina",
-        "ginas-clothing-store"
+        "ginas-clothing-store",
+        "fashion"
       ],
       "sourceTurns": [
         "D16:1",
@@ -2788,12 +2650,13 @@
       ]
     },
     {
-      "text": "Gina made a limited edition clothing line in the week before 21 June 2023 to show off her style and creativity, including a camouflage-print hoodie from her own collection that is not for sale.",
+      "text": "Gina made a limited-edition clothing line in the week beginning 12 June 2023 to show off her own style and creativity, including a camouflage-print hoodie from her personal collection that is not for sale.",
       "speaker": "Gina",
       "statedOn": "2023-06-21",
       "entities": [
         "gina",
-        "ginas-clothing-store"
+        "ginas-clothing-store",
+        "fashion"
       ],
       "sourceTurns": [
         "D16:3",
@@ -2805,15 +2668,14 @@
       "speaker": "Gina",
       "statedOn": "2023-06-21",
       "entities": [
-        "gina",
-        "ginas-clothing-store"
+        "gina"
       ],
       "sourceTurns": [
         "D16:5"
       ]
     },
     {
-      "text": "Jon decided on 20 June 2023 to start going to networking events to make things happen for his business, and said it had been tough but he was staying determined and focused.",
+      "text": "On 20 June 2023 Jon decided to start going to networking events to make things happen for his business, which he said was tough but which he was staying determined and focused about.",
       "speaker": "Jon",
       "statedOn": "2023-06-21",
       "entities": [
@@ -2829,7 +2691,7 @@
       ]
     },
     {
-      "text": "On 21 June 2023 Jon said things had been tough going since he lost his job but that he was sure investing his time in the business would pay off eventually.",
+      "text": "On 21 June 2023 Jon said things had been tough since he lost his job but that he was sure investing his time in his business would pay off eventually.",
       "speaker": "Jon",
       "statedOn": "2023-06-21",
       "entities": [
@@ -2842,7 +2704,7 @@
       ]
     },
     {
-      "text": "Jon writes all his business plans and goals down on paper, and says seeing them written keeps him motivated and focused on what he has to do.",
+      "text": "Jon writes all his plans and goals down on paper, and says seeing them written down keeps him motivated and focused on what he has to do.",
       "speaker": "Jon",
       "statedOn": "2023-06-21",
       "entities": [
@@ -2856,7 +2718,7 @@
       ]
     },
     {
-      "text": "Gina told Jon on 21 June 2023 to persevere when things get rough and never give up, and Jon said the reminder left him feeling confident.",
+      "text": "On 21 June 2023 Gina told Jon to persevere and never give up, and Jon said the reminder left him feeling confident.",
       "speaker": "Gina",
       "statedOn": "2023-06-21",
       "entities": [
@@ -2876,7 +2738,8 @@
       "statedOn": "2023-07-09",
       "entities": [
         "gina",
-        "ginas-clothing-store"
+        "ginas-clothing-store",
+        "fashion"
       ],
       "sourceTurns": [
         "D17:1"
@@ -2884,14 +2747,14 @@
     },
     {
       "key": "jon-going-full-time",
-      "text": "On 9 July 2023 Jon said dance practice had been fun and exhausting and that he was going to make his own path by going full-time with his business idea.",
+      "superseded": true,
+      "text": "On 9 July 2023 Jon said he was going to make his own path by going full-time with his business idea, and that dance practice had been fun and exhausting.",
       "speaker": "Jon",
       "statedOn": "2023-07-09",
-      "superseded": true,
       "entities": [
         "jon",
         "jons-dance-studio",
-        "dance"
+        "dancing"
       ],
       "sourceTurns": [
         "D17:2",
@@ -2899,7 +2762,7 @@
       ]
     },
     {
-      "text": "Jon started learning marketing and analytics tools on 9 July 2023 to push his business forward, and said that although it was tricky he was up for the challenge.",
+      "text": "Jon started learning marketing and analytics tools on 9 July 2023 to push his business forward, and said that although losing his job was a bummer it had pushed him to take the plunge and go for his business dreams.",
       "speaker": "Jon",
       "statedOn": "2023-07-09",
       "entities": [
@@ -2907,7 +2770,7 @@
         "jons-dance-studio"
       ],
       "chrono": [
-        "jon-learning-marketing-tools"
+        "jon-learns-marketing-tools"
       ],
       "sourceTurns": [
         "D17:4",
@@ -2915,14 +2778,14 @@
       ]
     },
     {
-      "text": "Jon said on 9 July 2023 that he was excited to guide and mentor aspiring dancers towards their dreams, and Gina told him he would be the perfect mentor and guide.",
+      "text": "On 9 July 2023 Jon said he was excited to guide and mentor aspiring dancers towards their dreams, and Gina told him he would be the perfect mentor.",
       "speaker": "Jon",
       "statedOn": "2023-07-09",
       "entities": [
         "jon",
         "gina",
         "jons-dance-studio",
-        "dance"
+        "dancing"
       ],
       "sourceTurns": [
         "D17:6",
@@ -2930,19 +2793,20 @@
       ]
     },
     {
-      "text": "Jon said on 9 July 2023 that dance has the power to bring people together and create sweet moments, and that those moments remind him why he is chasing his dream.",
+      "text": "Jon said dance has the power to bring people together and create sweet moments, and that those moments remind him why he is chasing his dream.",
       "speaker": "Jon",
       "statedOn": "2023-07-09",
       "entities": [
         "jon",
-        "dance"
+        "dancing"
       ],
       "sourceTurns": [
-        "D17:8"
+        "D17:8",
+        "D17:9"
       ]
     },
     {
-      "text": "Gina told Jon on 9 July 2023 that he had a solid community cheering him on, herself included.",
+      "text": "On 9 July 2023 Gina told Jon he had a solid community cheering him on, herself included, and Jon said their faith in him was priceless and kept him going.",
       "speaker": "Gina",
       "statedOn": "2023-07-09",
       "entities": [
@@ -2950,20 +2814,8 @@
         "gina"
       ],
       "sourceTurns": [
-        "D17:9",
         "D17:10",
-        "D17:11"
-      ]
-    },
-    {
-      "text": "Jon thanked Gina on 9 July 2023 for being a great friend and said her belief in him meant the world and that he would not let anything stop him.",
-      "speaker": "Jon",
-      "statedOn": "2023-07-09",
-      "entities": [
-        "jon",
-        "gina"
-      ],
-      "sourceTurns": [
+        "D17:11",
         "D17:12",
         "D17:13",
         "D17:14",
@@ -2977,7 +2829,7 @@
       ]
     },
     {
-      "text": "Gina built a new website for customers to place orders in the week before 21 July 2023 and said it had been a wild ride she was loving.",
+      "text": "Gina built a new website for her clothing store in the week before 21 July 2023 so customers could place orders.",
       "speaker": "Gina",
       "statedOn": "2023-07-21",
       "entities": [
@@ -2990,7 +2842,7 @@
     },
     {
       "key": "jon-temp-job",
-      "text": "On 21 July 2023 Jon said the dance studio was on tenuous ground and that he had taken a temporary job to help cover expenses while he looked for investors.",
+      "text": "As of 21 July 2023 Jon's dance studio was on tenuous ground and he had taken a temporary job to help cover expenses while he looked for investors.",
       "speaker": "Jon",
       "statedOn": "2023-07-21",
       "entities": [
@@ -3003,19 +2855,7 @@
       ]
     },
     {
-      "text": "Jon said on 21 July 2023 that running a business is not easy but that he was determined to make it work.",
-      "speaker": "Jon",
-      "statedOn": "2023-07-21",
-      "entities": [
-        "jon",
-        "jons-dance-studio"
-      ],
-      "sourceTurns": [
-        "D18:4"
-      ]
-    },
-    {
-      "text": "Gina's biggest business hurdle was sourcing trendy pieces for her store, which took a lot of research and networking; her advice to Jon was not to be scared to reach out to people in his field for help and contacts.",
+      "text": "Gina's biggest business hurdle was sourcing trendy pieces for her store, which took a lot of research and networking; her advice to Jon on 21 July 2023 was not to be scared to reach out to people in his field for help and contacts.",
       "speaker": "Gina",
       "statedOn": "2023-07-21",
       "entities": [
@@ -3024,11 +2864,12 @@
         "jon"
       ],
       "sourceTurns": [
+        "D18:4",
         "D18:5"
       ]
     },
     {
-      "text": "Jon had been networking through mid-2023 and said on 21 July 2023 that it had got him some good results, sharing a picture from his most recent networking event.",
+      "text": "At a networking event shortly before 21 July 2023 Jon met some investors and got good advice, and said the energy of the event was motivating.",
       "speaker": "Jon",
       "statedOn": "2023-07-21",
       "entities": [
@@ -3037,24 +2878,13 @@
       ],
       "sourceTurns": [
         "D18:6",
-        "D18:7"
-      ]
-    },
-    {
-      "text": "At his most recent networking event Jon met some investors and got good advice, and said the energy there gave him a boost to go after his goals.",
-      "speaker": "Jon",
-      "statedOn": "2023-07-21",
-      "entities": [
-        "jon",
-        "jons-dance-studio"
-      ],
-      "sourceTurns": [
+        "D18:7",
         "D18:8",
         "D18:9"
       ]
     },
     {
-      "text": "Acting on the advice from that networking event, Jon was sprucing up his business plan, tweaking his pitch to investors and working on an online platform to show off the dance studio.",
+      "text": "After that networking event Jon was sprucing up his business plan, tweaking his pitch to investors, and working on an online platform to show off his dance studio.",
       "speaker": "Jon",
       "statedOn": "2023-07-21",
       "entities": [
@@ -3067,33 +2897,22 @@
       ]
     },
     {
-      "text": "Jon asked Gina on 21 July 2023 for help with marketing strategies to reach his target audience and raise awareness for the dance studio.",
-      "speaker": "Jon",
-      "statedOn": "2023-07-21",
-      "entities": [
-        "jon",
-        "gina",
-        "jons-dance-studio"
-      ],
-      "sourceTurns": [
-        "D18:12"
-      ]
-    },
-    {
-      "text": "Gina advised Jon to use Instagram and TikTok to reach a younger crowd, post dance clips and dance-related content, and collaborate with local influencers or dance communities, and offered to make content or manage his accounts.",
+      "text": "Gina advised Jon on 21 July 2023 to market his dance studio on Instagram and TikTok to reach a younger crowd, posting dance clips and collaborating with local influencers and dance communities.",
       "speaker": "Gina",
       "statedOn": "2023-07-21",
       "entities": [
-        "gina",
         "jon",
-        "jons-dance-studio"
+        "gina",
+        "jons-dance-studio",
+        "dancing"
       ],
       "sourceTurns": [
+        "D18:12",
         "D18:13"
       ]
     },
     {
-      "text": "Jon and Gina agreed on 21 July 2023 that Gina would help create content and manage the dance studio's social media accounts.",
+      "text": "On 21 July 2023 Jon and Gina agreed that Gina would help create content for and manage the dance studio's social media accounts.",
       "speaker": "Jon",
       "statedOn": "2023-07-21",
       "entities": [
@@ -3109,13 +2928,13 @@
       ]
     },
     {
-      "text": "Jon and Gina said on 21 July 2023 that they were excited to collaborate and to make an impact together by teaching others through dance to chase their dreams.",
+      "text": "On 21 July 2023 Jon and Gina said they were excited about collaborating and wanted to make an impact by teaching others to chase their dreams through dance.",
       "speaker": "Jon",
       "statedOn": "2023-07-21",
       "entities": [
         "jon",
         "gina",
-        "dance"
+        "dancing"
       ],
       "sourceTurns": [
         "D18:18",
@@ -3126,12 +2945,12 @@
       ]
     },
     {
-      "text": "On 23 July 2023 Jon said he had been rehearsing hard and working on business plans, that it had been stressful, and that dancing had kept him going.",
+      "text": "As of 23 July 2023 Jon had been rehearsing hard and working on business plans, which he found stressful, and said dancing was what kept him going.",
       "speaker": "Jon",
       "statedOn": "2023-07-23",
       "entities": [
         "jon",
-        "dance",
+        "dancing",
         "jons-dance-studio"
       ],
       "sourceTurns": [
@@ -3139,7 +2958,7 @@
       ]
     },
     {
-      "text": "Gina spurred Jon on during their 23 July 2023 conversation with the \"Just do it\" motivational speech, which she identified as Shia LaBeouf's and repeated at the end of the conversation.",
+      "text": "Gina quoted the \"Just do it\" motivational speech at Jon on 23 July 2023 and, when he asked whose words they were, identified the actor Shia LaBeouf as its source.",
       "speaker": "Gina",
       "statedOn": "2023-07-23",
       "entities": [
@@ -3151,18 +2970,16 @@
         "D19:2",
         "D19:3",
         "D19:4",
-        "D19:5",
-        "D19:12",
-        "D19:13"
+        "D19:5"
       ]
     },
     {
-      "text": "Gina went to a dance class with a group of friends on Friday 21 July 2023.",
+      "text": "Gina went to a dance class with a group of friends on Friday 21 July 2023 and said it showed her how important a creative space for dancers is.",
       "speaker": "Gina",
       "statedOn": "2023-07-23",
       "entities": [
         "gina",
-        "dance"
+        "dancing"
       ],
       "chrono": [
         "gina-dance-class-friday"
@@ -3172,34 +2989,21 @@
       ]
     },
     {
-      "text": "Gina said on 23 July 2023 that having a creative space for dancers is important and that Jon's studio would become a go-to spot for self-expression.",
-      "speaker": "Gina",
-      "statedOn": "2023-07-23",
-      "entities": [
-        "gina",
-        "jon",
-        "jons-dance-studio",
-        "dance"
-      ],
-      "sourceTurns": [
-        "D19:6",
-        "D19:7"
-      ]
-    },
-    {
-      "text": "Jon said on 23 July 2023 that he could not wait until his studio starts welcoming dancers of all ages and backgrounds.",
+      "text": "On 23 July 2023 Jon said he could not wait until his studio started welcoming dancers of all ages and backgrounds.",
       "speaker": "Jon",
       "statedOn": "2023-07-23",
       "entities": [
         "jon",
-        "jons-dance-studio"
+        "jons-dance-studio",
+        "dancing"
       ],
       "sourceTurns": [
-        "D19:7"
+        "D19:7",
+        "D19:8"
       ]
     },
     {
-      "text": "Gina told Jon on 23 July 2023 that every step was getting him closer to his dream, and Jon said he would keep going whatever came his way.",
+      "text": "On 23 July 2023 Gina told Jon that every step was getting him closer to his dream and Jon said he would keep going whatever came his way.",
       "speaker": "Gina",
       "statedOn": "2023-07-23",
       "entities": [
@@ -3207,15 +3011,16 @@
         "gina"
       ],
       "sourceTurns": [
-        "D19:8",
         "D19:9",
         "D19:10",
         "D19:11",
+        "D19:12",
+        "D19:13",
         "D19:14"
       ]
     },
     {
-      "text": "Jon's dance studio went from a plan he formed after losing his banking job on 19 January 2023, through months of searching for premises and then a business plan and investor hunt, to an official opening night set for 20 June 2023 — and by 21 July 2023 to tenuous ground with a temporary job covering his expenses.",
+      "text": "Jon's dance studio went from a decision taken the day after he lost his banking job on 19 January 2023, through five months of hunting for premises and looking for investors, to an official opening night on 20 June 2023 — and by 21 July 2023 it was on tenuous ground, with Jon taking a temporary job to cover expenses.",
       "speaker": "Jon",
       "statedOn": "2023-07-21",
       "entities": [
@@ -3231,38 +3036,39 @@
       ]
     },
     {
-      "text": "Gina's clothing business went from an advertising campaign and a store space she designed in early 2023, through the online store she announced as open on 16 March 2023 and a limited edition line in June 2023, to being noticed by fashion editors and building an ordering website in July 2023.",
+      "text": "Gina's clothing business went from losing her job at Door Dash in January 2023, through designing a store space and securing a wholesaler on 1 February 2023, to opening her online clothing store on 16 March 2023 and being noticed by fashion editors in early July 2023.",
       "speaker": "Gina",
-      "statedOn": "2023-07-21",
+      "statedOn": "2023-07-09",
       "entities": [
         "gina",
-        "ginas-clothing-store"
+        "ginas-clothing-store",
+        "door-dash"
       ],
       "sourceTurns": [
-        "D2:1",
-        "D3:4",
+        "D1:3",
+        "D3:2",
         "D6:6",
-        "D16:3",
-        "D17:1",
-        "D18:1"
+        "D17:1"
       ]
     },
     {
-      "text": "Jon and Gina both lost their jobs in January 2023 and each answered it by starting their own business — Jon a dance studio, Gina a clothing store — and they encouraged each other through it in every conversation across 2023.",
+      "text": "Gina moved from running her clothing store alone to also holding a part-time fashion internship at an international company, interviewing on 10 May 2023 and announcing on 27 May 2023 that she had been accepted.",
       "speaker": "Gina",
-      "statedOn": "2023-06-16",
+      "statedOn": "2023-05-27",
       "entities": [
-        "jon",
         "gina",
-        "jons-dance-studio",
-        "ginas-clothing-store"
+        "ginas-internship-company",
+        "fashion"
       ],
       "sourceTurns": [
-        "D1:2",
-        "D1:3",
-        "D6:11",
-        "D14:8"
+        "D11:14",
+        "D12:1",
+        "D12:3"
       ]
     }
-  ]
+  ],
+  "producedBy": {
+    "promptSha256": "b1c042ac4a2071d1dc3d7b938667d5a1cf6406d8848a8acb84387e0e9b8a0cf7",
+    "unattended": true
+  }
 }

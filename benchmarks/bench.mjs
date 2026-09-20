@@ -38,11 +38,13 @@ import { loadConversations } from './locomo/loader.mjs';
 import { validateExtraction } from './writer/validate-extraction.mjs';
 import { mergeExtractionParts } from './writer/merge-extraction.mjs';
 import { corpusSpread } from './writer/corpus-spread.mjs';
+import { promptFingerprint, provenanceProblems, corpusProvenance } from './writer/extraction-provenance.mjs';
 import { extractionMatchesConversation } from './writer/extraction-matches-conversation.mjs';
 import { writeSpace, loadSpaceDefinition } from './writer/write-space.mjs';
 import { makeYthril } from './writer/ythril-client.mjs';
 
 const EXTRACTIONS = 'benchmarks/locomo/extractions';
+const PROMPT = 'benchmarks/prompt/extraction.md';
 
 const die = (msg) => { console.error(msg); process.exit(1); };
 
@@ -104,6 +106,7 @@ function check(path) {
    * that turned out to be shared between runs.
    */
   problems.push(...againstTheCorpus(extraction));
+  problems.push(...provenanceProblems(extraction));
   if (problems.length === 0) {
     const turns = new Set((extraction.sessions ?? []).flatMap(s => s.turns ?? []));
     const covered = new Set((extraction.claims ?? []).flatMap(c => c.sourceTurns ?? []));
@@ -171,16 +174,49 @@ function stats() {
   for (const x of r.rows) console.log(row(x.id, x));
   console.log(row('TOTAL', r.totals));
 
+  /*
+   * WHO MADE IT, before what it says. A spread computed across files produced by two different prompts
+   * measures the prompts, and that has happened twice — once to a rate limit halfway through a round,
+   * once to a rule clarified between conversations. Nothing could see either at the time.
+   */
+  const prov = corpusProvenance(files.map(f => JSON.parse(readFileSync(`${EXTRACTIONS}/${f}`, 'utf8'))));
+  if (!prov.onePrompt) {
+    console.log(`
+WARNING: this corpus was produced by ${prov.prompts.length} different prompts, so a`
+      + ' figure taken across it is partly a figure about the prompts:');
+    for (const q of prov.prompts) console.log(`  ${q.sha.slice(0, 12)}  ${q.conversations.join(', ')}`);
+  }
+  if (prov.attended.length > 0) {
+    console.log(`
+WARNING: not produced unattended: ${prov.attended.join(', ')}. A retrieval score was`
+      + ' visible while these were written, which is development rather than evidence.');
+  }
+
   console.log(r.chronoSpread === null
     ? `\nno spread: ${r.why}`
     : `\nchrono spread ${r.chronoSpread}x — ${r.sparsest.id} at ${r.sparsest.chronoPer1000} up to `
       + `${r.densest.id} at ${r.densest.chronoPer1000} entries per 1,000 turns.`);
 }
 
-/** Join parts into one file, on stdout. Refuses an incomplete run — see merge-extraction.mjs. */
+/**
+ * Join parts into one file, on stdout. Refuses an incomplete run — see merge-extraction.mjs.
+ *
+ * **It also stamps the prompt's fingerprint, and that half cannot be forgotten by design.** Provenance has
+ * two parts and only one of them is knowable from outside: which prompt produced the file is a fact about
+ * the working tree and is taken from it here, while whether a retrieval score was visible is an attestation
+ * only the extractor can make, so it travels in the part and is merely carried through. A file that arrives
+ * without it fails `check` rather than being stamped with a guess.
+ */
 function merge(paths) {
   if (paths.length === 0) die('merge needs at least one part');
-  console.log(JSON.stringify(mergeExtractionParts(paths.map(p => JSON.parse(readFileSync(p, 'utf8')))), null, 2));
+  const parts = paths.map(p => JSON.parse(readFileSync(p, 'utf8')));
+  const merged = mergeExtractionParts(parts);
+  const attested = parts.find(p => p.producedBy?.unattended !== undefined)?.producedBy?.unattended;
+  merged.producedBy = {
+    promptSha256: promptFingerprint(PROMPT),
+    ...(attested !== undefined ? { unattended: attested } : {}),
+  };
+  console.log(JSON.stringify(merged, null, 2));
 }
 
 /** Replay an extraction into a space. The only verb that talks to an instance. */

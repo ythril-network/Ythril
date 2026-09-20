@@ -38,6 +38,34 @@ depends on a write having happened.
 }
 ```
 
+## `producedBy` — how the file was made
+
+Every extraction carries one, and `check` refuses a file without it:
+
+```json
+{ "producedBy": { "promptSha256": "b1c042ac…", "unattended": true } }
+```
+
+**You supply `unattended` and nothing else.** Put it in the first part; the merge carries it through.
+`promptSha256` is stamped by the merge from the prompt file on disk, because which prompt produced a file
+is a fact about the working tree rather than something worth asking anyone to copy correctly.
+
+**`unattended: true` means no retrieval score, benchmark result or accuracy figure was visible to whoever
+or whatever wrote this extraction, at any point.** If one was, say `false` — that is legitimate
+development and the flag simply records which it was. Leaving it out is refused rather than read as
+`true`: the run that would misreport is exactly the run that omits it.
+
+**Why the fingerprint is a hash and not a version.** A version somebody types is a claim about the
+prompt; a hash of its bytes is the prompt, and it cannot survive an edit. Its newlines are normalised
+first, so a CRLF checkout and an LF one agree — otherwise one prompt would produce two digests and the
+corpus would report itself as made by two prompts, permanently and on nothing.
+
+**What it is for.** Two things have gone wrong that nothing else could see. One extraction was written by
+hand while its author watched the retrieval scores, and sat in the directory indistinguishable from nine
+that were not. And twice in one day a corpus ended up made by two prompts — once when a rate limit killed
+a round halfway, once when a rule was clarified between conversations. Every per-conversation difference
+afterwards is unattributable, and the files are individually perfect either way.
+
 ## Rules
 
 **`key` is local to the file.** It is how one record refers to another before anything has an id. The writer

@@ -830,13 +830,11 @@
       "key": "john",
       "type": "person",
       "name": "John",
-      "description": "One of the two speakers. A married father of at least three children, including a son Kyle who was one year old in March 2023 and a daughter Sara. He grew up in West County and lives in the same community as Maria. He worked at a mechanical engineering company, was promoted to assistant manager shortly before 16 June 2023 and lost the job in early August 2023 when the company went under. He has wanted to get into local politics since at least December 2022, focusing on education and infrastructure, graduated with a university degree in late March 2023, failed a military aptitude test in late 2022 and retook it with good results in early March 2023, and joined a volunteer fire-fighting brigade in July 2023.",
-      "properties": {},
+      "description": "John, one of the two people in this conversation: a married father whose children include his son Kyle, one year old in March 2023, and his daughter Sara. He worked at a mechanical engineering company, was promoted to assistant manager in June 2023 and lost the job in early August 2023 when the company failed, then pursued a hardware role at a tech company. He wants to get into local politics and campaigns on education and infrastructure, ran for office more than once, said in January 2023 that he had failed the military aptitude test and in March 2023 that he had retaken it with good results, graduated with a university degree in late March 2023, lost his dog Max shortly before June 2023, and joined a volunteer fire-fighting brigade in late July 2023 which he later called his true calling.",
       "sourceTurns": [
         "D1:2",
-        "D1:6",
         "D8:4",
-        "D19:6",
+        "D19:8",
         "D28:1"
       ]
     },
@@ -844,11 +842,10 @@
       "key": "maria",
       "type": "person",
       "name": "Maria",
-      "description": "One of the two speakers and John's close friend. She has volunteered at a homeless shelter since about August 2022, when she saw a family struggling on the streets, and from June 2023 also at a local dog shelter once a month. Her family is small: a mother, an aunt whose example started her volunteering, a cousin she helped rehouse, and a grandmother who died in early March 2023. She practises aerial yoga, joined a gym in June 2023 and a church in May 2023, took creative writing and poetry classes, travelled alone to Spain in 2022, and acquired two dogs, Coco and Shadow, in the summer of 2023.",
-      "properties": {},
+      "description": "Maria, the other person in this conversation: a volunteer at a homeless shelter she approached about a year before August 2023, who also began volunteering monthly at a dog shelter in June 2023. She practises aerial yoga, joined a gym in June 2023 and a nearby church on 5 May 2023, has a small family, took a solo trip to Spain in 2022, and acquired two dogs in the summer of 2023: Coco around late July and Shadow in August.",
       "sourceTurns": [
+        "D1:1",
         "D1:3",
-        "D13:12",
         "D27:4"
       ]
     },
@@ -856,66 +853,84 @@
       "key": "kyle",
       "type": "person",
       "name": "Kyle",
-      "description": "John's son, one year old when John named him on 6 March 2023.",
-      "properties": {},
+      "description": "John's son, one year old as of 6 March 2023.",
       "sourceTurns": [
-        "D8:3",
         "D8:4"
       ]
     },
     {
-      "key": "johns-wife",
+      "key": "sara",
       "type": "person",
-      "name": "John's wife",
-      "description": "John's wife, never named and referred to as the wife and the missus. She is part of the family John describes as his rock and his motivation.",
-      "properties": {
-        "aliases": "the wife; the missus"
-      },
+      "name": "Sara",
+      "description": "John's daughter; the family took a trip in 2022 for her birthday, and the photograph from it is one John keeps as motivation.",
       "sourceTurns": [
-        "D8:2",
-        "D31:17"
+        "D22:7"
       ]
     },
     {
       "key": "rob",
       "type": "person",
       "name": "Rob",
-      "description": "A colleague of John's who invited him to a beginner's yoga class in February 2023; John started a weekend yoga class with a colleague in April 2023.",
-      "properties": {},
+      "description": "A colleague of John's who invited him to a beginner's yoga class in February 2023; John started a weekend yoga class with a colleague in early April 2023.",
       "sourceTurns": [
         "D7:16",
         "D10:1"
       ]
     },
     {
-      "key": "jean",
-      "type": "person",
-      "name": "Jean",
-      "description": "A woman Maria met while volunteering at the homeless shelter on 24 February 2023. She had been through a divorce, lost her job and become homeless, and Maria found her optimism and gratitude striking.",
-      "properties": {},
-      "sourceTurns": [
-        "D7:5",
-        "D7:7"
-      ]
-    },
-    {
       "key": "david",
       "type": "person",
       "name": "David",
-      "description": "A man Maria met at the charity event on 3 February 2023. She heard his story of hardship and afterwards connected him with a nearby organisation offering housing and support for homeless people.",
-      "properties": {},
+      "description": "A man Maria met at a charity event on 3 February 2023 whose story of hardship humbled her; she afterwards linked him with a nearby organization offering housing and support for homeless people.",
       "sourceTurns": [
         "D6:5",
         "D6:7"
       ]
     },
     {
+      "key": "jean",
+      "type": "person",
+      "name": "Jean",
+      "description": "A woman Maria met while volunteering at the homeless shelter on 24 February 2023, who had been through a divorce, lost her job and become homeless yet stayed optimistic and grateful.",
+      "sourceTurns": [
+        "D7:5",
+        "D7:7"
+      ]
+    },
+    {
+      "key": "laura",
+      "type": "person",
+      "name": "Laura",
+      "description": "A resident of the homeless shelter who wrote the volunteers a letter of gratitude, which Maria shared on 3 July 2023.",
+      "sourceTurns": [
+        "D21:19"
+      ]
+    },
+    {
+      "key": "cindy",
+      "type": "person",
+      "name": "Cindy",
+      "description": "A resident of the homeless shelter who wrote a heartfelt note of gratitude, which Maria shared on 3 August 2023.",
+      "sourceTurns": [
+        "D27:8"
+      ]
+    },
+    {
+      "key": "samuel",
+      "type": "person",
+      "name": "Samuel",
+      "description": "An elderly veteran John met at a veterans' hospital in the week before 17 July 2023, whose stories he found inspiring and heartbreaking.",
+      "sourceTurns": [
+        "D24:3"
+      ]
+    },
+    {
       "key": "marias-aunt",
       "type": "person",
       "name": "Maria's aunt",
-      "description": "Maria's aunt, referred to as my aunt and as our auntie. She believed in volunteering and helped Maria's family through their money problems when Maria was younger, which is the reason Maria started volunteering.",
+      "description": "Maria's aunt, never named and referred to as 'my aunt' and 'our auntie'. She believed in volunteering and helped Maria's family when they had money problems during Maria's childhood, and she is why Maria started volunteering.",
       "properties": {
-        "aliases": "my aunt; our auntie"
+        "aliases": "auntie, my aunt"
       },
       "sourceTurns": [
         "D5:8",
@@ -923,25 +938,68 @@
       ]
     },
     {
-      "key": "marias-grandmother",
-      "type": "person",
-      "name": "Maria's grandmother",
-      "description": "Maria's grandmother, who died in the week before 6 March 2023; Maria was finding the loss hard.",
-      "properties": {},
+      "key": "max",
+      "type": "animal",
+      "name": "Max",
+      "description": "John's dog, part of the family for ten years until he died shortly before 3 June 2023. John's best memory of him is a camping trip in the summer of 2022 where they hiked and swam, and John was still sharing photographs of him in August 2023.",
+      "properties": {
+        "species": "dog"
+      },
       "sourceTurns": [
-        "D8:1"
+        "D17:1",
+        "D30:4"
+      ]
+    },
+    {
+      "key": "coco",
+      "type": "animal",
+      "name": "Coco",
+      "description": "Maria's first dog, a white puppy she got about two weeks before 11 August 2023. She greets Maria when she comes home, and from August 2023 shares the household with Shadow.",
+      "properties": {
+        "species": "dog"
+      },
+      "sourceTurns": [
+        "D30:1"
+      ]
+    },
+    {
+      "key": "shadow",
+      "type": "animal",
+      "name": "Shadow",
+      "description": "Maria's second dog, a black puppy she adopted from a shelter in the week before 13 August 2023. She was learning commands and house training, and gets along with Coco.",
+      "properties": {
+        "species": "dog"
+      },
+      "sourceTurns": [
+        "D31:2",
+        "D31:4"
+      ]
+    },
+    {
+      "key": "west-county",
+      "type": "place",
+      "name": "West County",
+      "description": "The area John used to live in, which he calls 'my old area' and wants to help improve. It was hit by a bad flood in the week before 7 July 2023 that ruined many homes because the infrastructure was poor.",
+      "properties": {
+        "kind": "region",
+        "aliases": "my old area"
+      },
+      "sourceTurns": [
+        "D14:21",
+        "D23:1"
       ]
     },
     {
       "key": "london",
       "type": "place",
       "name": "London",
-      "description": "The city in England Maria visited a few years before March 2023. Its architecture and castles inspired the castle shadow box and the castle painting she made for her home.",
+      "description": "The city in England Maria visited a few years before 2023; its architecture captivated her and inspired the castle shadow box and castle painting she made for her home.",
       "properties": {
         "kind": "city",
         "country": "England"
       },
       "sourceTurns": [
+        "D8:15",
         "D8:17"
       ]
     },
@@ -949,177 +1007,43 @@
       "key": "england",
       "type": "place",
       "name": "England",
-      "description": "The country Maria travelled to a few years before March 2023; the trip was to London and she came back mesmerised by the castles.",
+      "description": "The country Maria travelled to a few years before 2023, on the trip to London whose castles she was mesmerised by.",
       "properties": {
         "kind": "country"
       },
       "sourceTurns": [
-        "D8:15",
-        "D8:16"
-      ]
-    },
-    {
-      "key": "homeless-shelter",
-      "type": "organization",
-      "name": "the homeless shelter",
-      "description": "The homeless shelter Maria has volunteered at since about August 2022, referred to throughout simply as the shelter. She donated her old car to it in December 2022, helped at an event for children, gave talks there, organised a meal for residents, ran a 5K charity run and a chili cook-off fundraiser for it, received letters of thanks from residents Laura and Cindy, and was given a medal by it in August 2023. John's online service group also gave out food and supplies at a homeless shelter.",
-      "properties": {
-        "kind": "nonprofit",
-        "aliases": "the shelter"
-      },
-      "sourceTurns": [
-        "D1:3",
-        "D2:1",
-        "D27:4"
-      ]
-    },
-    {
-      "key": "service-online-group",
-      "type": "organization",
-      "name": "the service-focused online group",
-      "description": "The online group John joined in the last week of December 2022, made up of people who share a passion for serving. Its members met in person, gave out food and supplies at a homeless shelter and ran a toy drive, and were brainstorming projects on education, mentorship, job training and resume building. By August 2023 John was asking family and friends to join it and advocate for the military. Referred to as the service-focused online group and as the virtual support group.",
-      "properties": {
-        "kind": "club",
-        "aliases": "the virtual support group"
-      },
-      "sourceTurns": [
-        "D3:1",
-        "D3:5",
-        "D27:1"
-      ]
-    },
-    {
-      "key": "creative-writing-class",
-      "type": "organization",
-      "name": "the creative writing class",
-      "description": "A creative writing class Maria took shortly before 25 February 2023 and described as super enlightening.",
-      "properties": {
-        "kind": "course"
-      },
-      "sourceTurns": [
-        "D7:1"
-      ]
-    },
-    {
-      "key": "aerial-yoga",
-      "type": "activity",
-      "name": "aerial yoga",
-      "description": "Maria's aerial yoga practice, started shortly before 17 December 2022. She uses it to switch off and focus on her body, and her favourites are the upside-down poses.",
-      "properties": {
-        "kind": "exercise"
-      },
-      "sourceTurns": [
-        "D1:3",
-        "D18:15"
-      ]
-    },
-    {
-      "key": "yoga",
-      "type": "activity",
-      "name": "yoga",
-      "description": "John's yoga practice. His colleague Rob invited him to a beginner's class in February 2023 and he started a weekend beginner class in April 2023, focused on poses and breathing; by 7 April 2023 it was part of his daily routine, and he continued at his yoga studio.",
-      "properties": {
-        "kind": "exercise"
-      },
-      "sourceTurns": [
-        "D7:16",
-        "D10:1",
-        "D10:5"
-      ]
-    },
-    {
-      "key": "kickboxing",
-      "type": "activity",
-      "name": "kickboxing",
-      "description": "The kickboxing John was doing as of 17 December 2022, which he said was giving him energy. It is also one of the classes his yoga studio offers.",
-      "properties": {
-        "kind": "exercise"
-      },
-      "sourceTurns": [
-        "D1:4",
-        "D25:13"
-      ]
-    },
-    {
-      "key": "political-campaign",
-      "type": "project",
-      "name": "John's run for local office",
-      "description": "John's political ambition and campaigning. Joins the mentions of getting into local politics from December 2022, the campaign Maria asks after, networking with community leaders and organisations, the community meetings, the policy blog, going into policymaking after his degree, and the decision in early May 2023 to run for office again despite earlier unsuccessful runs. Its subjects throughout are education and infrastructure.",
-      "properties": {},
-      "sourceTurns": [
-        "D1:6",
-        "D7:2",
-        "D14:1"
-      ]
-    },
-    {
-      "key": "food-drive",
-      "type": "project",
-      "name": "the community food drive",
-      "description": "The community food drive John was helping with by 5 February 2023 for people who had lost their jobs, which he started because of unemployment in the community. The response and the number of volunteers overwhelmed him, and Maria offered to help with networking and at future events.",
-      "properties": {},
-      "sourceTurns": [
-        "D6:10",
-        "D6:12",
-        "D6:14"
-      ]
-    },
-    {
-      "key": "johns-car",
-      "type": "object",
-      "name": "John's car",
-      "description": "John's car. Its windshield was broken in an unexpected incident on his way home in the week before 9 January 2023, and it broke down on his way to work on Friday 7 April 2023, with the repairs straining his finances.",
-      "properties": {
-        "kind": "car"
-      },
-      "sourceTurns": [
-        "D4:2",
-        "D11:1"
-      ]
-    },
-    {
-      "key": "marias-mother",
-      "type": "person",
-      "name": "Maria's mother",
-      "description": "Maria's mother, part of the small family Maria relies on for strength. They cooked dinner together on 3 May 2023.",
-      "properties": {},
-      "sourceTurns": [
-        "D13:16"
-      ]
-    },
-    {
-      "key": "west-county",
-      "type": "place",
-      "name": "West County",
-      "description": "The area John grew up in, referred to as West County, as his old area and as back home. He renovated a rundown community centre there in 2022, said on 6 May 2023 that he wanted to work on improving it, and it was hit by a bad flood in the week before 7 July 2023 that ruined many homes because the infrastructure was poor.",
-      "properties": {
-        "kind": "region",
-        "aliases": "John's old area; back home"
-      },
-      "sourceTurns": [
-        "D14:21",
-        "D23:1",
-        "D28:11"
+        "D8:15"
       ]
     },
     {
       "key": "spain",
       "type": "place",
       "name": "Spain",
-      "description": "Where Maria took a solo trip in 2022 during a hard period of her life. She photographed a beach and a small island there, surfed for the first time, and came back valuing solitude, inner strength and different perspectives.",
+      "description": "Where Maria took a solo trip in 2022, photographing a beach, trying surfing for the first time and learning the value of solitude.",
       "properties": {
         "kind": "country"
       },
       "sourceTurns": [
-        "D13:24",
-        "D13:30"
+        "D13:24"
+      ]
+    },
+    {
+      "key": "oregon",
+      "type": "place",
+      "name": "Oregon",
+      "description": "Where Maria's family went on a road trip when she was younger, and where she hiked to a waterfall with a bridge over it.",
+      "properties": {
+        "kind": "region"
+      },
+      "sourceTurns": [
+        "D18:3"
       ]
     },
     {
       "key": "pacific-northwest",
       "type": "place",
       "name": "the Pacific Northwest",
-      "description": "The stretch of coast and the national parks John's family explored on a road trip in 2022, which he remembers for the beauty of the nature.",
+      "description": "The coast John and his family explored on a road trip in 2022, taking in several national parks.",
       "properties": {
         "kind": "region"
       },
@@ -1128,168 +1052,10 @@
       ]
     },
     {
-      "key": "marias-church",
-      "type": "organization",
-      "name": "Maria's church",
-      "description": "The nearby church Maria joined on 5 May 2023 to feel closer to a community and to her faith. Through mid-2023 she went camping, picnicking and hiking with friends from it and took up community work with them.",
-      "properties": {
-        "kind": "nonprofit",
-        "aliases": "the church"
-      },
-      "sourceTurns": [
-        "D14:10",
-        "D18:1",
-        "D24:6"
-      ]
-    },
-    {
-      "key": "local-school",
-      "type": "organization",
-      "name": "the local school",
-      "description": "A local school John is involved with. This joins two mentions of a local school that are consistent in every detail given: the career fair he volunteered at over the weekend of 1-2 April 2023, where he saw how a lack of resources affects children's dreams, and the school where he was volunteering as a mentor by 13 August 2023, whose students had improved in confidence and skills.",
-      "properties": {
-        "kind": "school"
-      },
-      "sourceTurns": [
-        "D10:13",
-        "D31:1",
-        "D31:9"
-      ]
-    },
-    {
-      "key": "poetry-class",
-      "type": "organization",
-      "name": "the poetry class",
-      "description": "A poetry class Maria was taking as of 2 April 2023 to help her put her feelings into words; she described it as a rough ride but good.",
-      "properties": {
-        "kind": "course"
-      },
-      "sourceTurns": [
-        "D9:1"
-      ]
-    },
-    {
-      "key": "boot-camp",
-      "type": "activity",
-      "name": "family boot camp",
-      "description": "The boot camp workouts John started doing with his family in April 2023, three times a week, for bonding and fitness. They gained energy, strength and endurance, and his children became excited about staying active.",
-      "properties": {
-        "kind": "exercise"
-      },
-      "sourceTurns": [
-        "D13:3",
-        "D13:7"
-      ]
-    },
-    {
-      "key": "veterans-support-project",
-      "type": "project",
-      "name": "John's project to support military veterans",
-      "description": "The project John was busy with by 20 May 2023 to support military veterans and their rights, run partly through a petition. It takes in the party for veterans on 19 May 2023, the marching event for veterans rights in mid-2023, the visit to a veterans hospital in July 2023, the advocacy he asked his online group to join, and the 5K charity run for veterans and their families over 5-6 August 2023.",
-      "properties": {},
-      "sourceTurns": [
-        "D15:1",
-        "D16:1",
-        "D21:22",
-        "D29:4"
-      ]
-    },
-    {
-      "key": "infrastructure-community-project",
-      "type": "project",
-      "name": "John's community infrastructure project",
-      "description": "The community project on infrastructure John said on 6 May 2023 he was thinking of starting, after a power cut and over the state of the potholed roads, and which Maria agreed to help him get the neighbourhood behind. Joined with the meeting he was gathering people for on 7 July 2023 to discuss solutions after the flood, which Maria also agreed to join.",
-      "properties": {},
-      "sourceTurns": [
-        "D14:17",
-        "D23:3"
-      ]
-    },
-    {
-      "key": "shelter-fundraiser",
-      "type": "project",
-      "name": "the homeless shelter fundraiser",
-      "description": "The homeless shelter's fundraiser at the end of May 2023, intended to raise enough to cover basic needs for homeless people. Maria planned a ring-toss tournament and a chili cook-off for it and asked John to spread the word and find volunteers.",
-      "properties": {},
-      "sourceTurns": [
-        "D15:18",
-        "D16:2",
-        "D16:4"
-      ]
-    },
-    {
-      "key": "sara",
-      "type": "person",
-      "name": "Sara",
-      "description": "John's daughter. The family took a trip in 2022 for her birthday, and the photograph from it is one John says reminds him why he keeps going.",
-      "properties": {},
-      "sourceTurns": [
-        "D22:7"
-      ]
-    },
-    {
-      "key": "laura",
-      "type": "person",
-      "name": "Laura",
-      "description": "A resident of the homeless shelter who wrote Maria and the other volunteers a letter expressing her gratitude, which Maria described on 3 July 2023.",
-      "properties": {},
-      "sourceTurns": [
-        "D21:19"
-      ]
-    },
-    {
-      "key": "samuel",
-      "type": "person",
-      "name": "Samuel",
-      "description": "An elderly veteran John met at the veterans hospital he visited in the week before 17 July 2023. His stories were inspiring and heartbreaking, and hearing them reminded John why he had wanted to join the military.",
-      "properties": {},
-      "sourceTurns": [
-        "D24:3"
-      ]
-    },
-    {
-      "key": "marias-cousin",
-      "type": "person",
-      "name": "Maria's cousin",
-      "description": "Maria's cousin, who had to leave her home in a hurry and find a new place in mid-2023. Maria was helping her look, and John offered to find organisations and resources that could help.",
-      "properties": {},
-      "sourceTurns": [
-        "D21:5",
-        "D21:7"
-      ]
-    },
-    {
-      "key": "max",
-      "type": "animal",
-      "name": "Max",
-      "description": "John's family dog for ten years, who died shortly before 3 June 2023. John says Max taught the family unconditional love and loyalty, remembers a camping trip with him in summer 2022 as his best memory, and was still thinking about him in August 2023.",
-      "properties": {
-        "species": "dog"
-      },
-      "sourceTurns": [
-        "D17:1",
-        "D17:7",
-        "D30:4"
-      ]
-    },
-    {
-      "key": "oregon",
-      "type": "place",
-      "name": "Oregon",
-      "description": "Where Maria's family took a road trip when she was younger; she remembers hiking to the top and a waterfall with a bridge over it as the prettiest spot.",
-      "properties": {
-        "kind": "region"
-      },
-      "sourceTurns": [
-        "D18:3",
-        "D18:5"
-      ]
-    },
-    {
       "key": "california",
       "type": "place",
       "name": "California",
-      "description": "Where John's family had a vacation he remembers for a gorgeous sunset and an evening walk along the shore.",
+      "description": "Where John's family took a vacation he remembers for a gorgeous sunset and an evening walk along the shore.",
       "properties": {
         "kind": "region"
       },
@@ -1301,7 +1067,7 @@
       "key": "florida",
       "type": "place",
       "name": "Florida",
-      "description": "Where Maria had a family vacation she remembers for the colours of the sunset and a feeling of gratitude sitting there with her family.",
+      "description": "Where Maria had a family vacation she remembers for the colours of a sunset over the water.",
       "properties": {
         "kind": "region"
       },
@@ -1310,23 +1076,51 @@
       ]
     },
     {
-      "key": "dog-shelter",
+      "key": "homeless-shelter",
       "type": "organization",
-      "name": "the local dog shelter",
-      "description": "The local dog shelter Maria started volunteering at once a month as of 3 June 2023, and the kind of place she adopted Shadow from in August 2023. She offered to help John's family when they were considering adopting a rescue dog.",
+      "name": "the homeless shelter",
+      "description": "The homeless shelter Maria has volunteered at since about August 2022, which she calls 'the shelter'. She donated her old car to it in December 2022, gave talks there in April 2023, helped organise meals and a fundraiser with a chili cook-off, was given a medal for her work in August 2023, and worked its front desk on 11 August 2023. John's online service group also handed out food and supplies at a homeless shelter at the end of 2022.",
       "properties": {
-        "kind": "nonprofit"
+        "kind": "nonprofit",
+        "aliases": "the shelter"
       },
       "sourceTurns": [
-        "D17:12",
-        "D31:2"
+        "D1:3",
+        "D27:4"
+      ]
+    },
+    {
+      "key": "fire-brigade",
+      "type": "organization",
+      "name": "the fire-fighting brigade",
+      "description": "The volunteer fire-fighting brigade John joined shortly before 31 July 2023. Its training was intense, its first call-out with him was on 30 July 2023 when the team saved a family from a burning building, and a two-hour donation drive it ran collected canned food, toiletries and clothes and helped pay for a new fire truck.",
+      "properties": {
+        "kind": "nonprofit",
+        "aliases": "the fire brigade, fire-fighting brigade"
+      },
+      "sourceTurns": [
+        "D26:2",
+        "D32:1"
+      ]
+    },
+    {
+      "key": "marias-church",
+      "type": "organization",
+      "name": "Maria's church",
+      "description": "The nearby church Maria joined on 5 May 2023 to feel closer to a community and to her faith. Her friends from it went camping with her over the weekend of 10-11 June 2023, had a picnic with her in mid-July 2023, hiked with her, and did community work with her on 4 August 2023.",
+      "properties": {
+        "kind": "nonprofit",
+        "aliases": "the church, my church"
+      },
+      "sourceTurns": [
+        "D14:10"
       ]
     },
     {
       "key": "marias-gym",
       "type": "organization",
       "name": "Maria's gym",
-      "description": "The gym Maria joined in the week before 16 June 2023. She found the people and the atmosphere welcoming, works on strength and endurance there, was trying kundalini yoga, and has friends from it she goes to dinner with.",
+      "description": "The gym Maria joined in the week before 16 June 2023, where she works on strength and endurance in a welcoming atmosphere and has made friends she went to dinner with on 7 July 2023.",
       "properties": {
         "kind": "business"
       },
@@ -1336,75 +1130,10 @@
       ]
     },
     {
-      "key": "mechanical-engineering-company",
-      "type": "organization",
-      "name": "the mechanical engineering company",
-      "description": "John's employer, a mechanical engineering company. He was promoted to assistant manager there shortly before 16 June 2023, said on 22 July 2023 that he was enjoying the new job and his team, and lost the job in early August 2023 when the company went under.",
-      "properties": {
-        "kind": "employer"
-      },
-      "sourceTurns": [
-        "D19:6",
-        "D25:1",
-        "D28:1"
-      ]
-    },
-    {
-      "key": "camping",
-      "type": "activity",
-      "name": "camping",
-      "description": "Camping. John has been plenty of times and likes how uncomplicated it is, including a trip with his dog Max in summer 2022; Maria has been a few times, including with friends from her church over the weekend of 10-11 June 2023, and has never tried mountain climbing.",
-      "properties": {
-        "kind": "outdoors"
-      },
-      "sourceTurns": [
-        "D18:11",
-        "D18:12",
-        "D30:6"
-      ]
-    },
-    {
-      "key": "cindy",
-      "type": "person",
-      "name": "Cindy",
-      "description": "A resident of the homeless shelter who wrote Maria a heartfelt note of gratitude, which Maria described on 3 August 2023.",
-      "properties": {},
-      "sourceTurns": [
-        "D27:8"
-      ]
-    },
-    {
-      "key": "coco",
-      "type": "animal",
-      "name": "Coco",
-      "description": "Maria's puppy, acquired about two weeks before 11 August 2023. Maria's first pet, she greets Maria when she comes home and has been an adjustment to care for; she gets along with Shadow.",
-      "properties": {
-        "species": "dog"
-      },
-      "sourceTurns": [
-        "D30:1",
-        "D30:3"
-      ]
-    },
-    {
-      "key": "shadow",
-      "type": "animal",
-      "name": "Shadow",
-      "description": "Maria's second puppy, adopted from a shelter in the week before 13 August 2023. She is full of energy, was learning commands and house training, and gets along with Coco.",
-      "properties": {
-        "species": "dog"
-      },
-      "sourceTurns": [
-        "D31:2",
-        "D31:4",
-        "D31:10"
-      ]
-    },
-    {
       "key": "yoga-studio",
       "type": "organization",
       "name": "John's yoga studio",
-      "description": "The yoga studio John goes to often, described on 22 July 2023 as having a chill vibe and great instructors. It offers yoga, kickboxing and circuit training, and John has also done weight training there.",
+      "description": "The yoga studio John goes to often, which he describes as having a chill vibe and good instructors. It offers a range of classes including yoga, kickboxing and circuit training, and he had also done weight training there by July 2023.",
       "properties": {
         "kind": "business"
       },
@@ -1414,26 +1143,192 @@
       ]
     },
     {
-      "key": "fire-brigade",
+      "key": "mechanical-engineering-company",
       "type": "organization",
-      "name": "the fire-fighting brigade",
-      "description": "The volunteer fire-fighting brigade John joined in July 2023, after Maria's shelter work made him think about how he could give back. The training was intense, the first call-out on Sunday 30 July 2023 saved a family from a burning building, and a two-hour donation drive in August 2023 collected canned food, toiletries and clothes and helped pay for a new fire truck. John calls the team a family and the work his true calling.",
+      "name": "John's mechanical engineering company",
+      "description": "The mechanical engineering company John worked at. He was promoted to assistant manager there in June 2023 and lost the job shortly before 5 August 2023 when the company failed.",
       "properties": {
-        "kind": "nonprofit",
-        "aliases": "the fire brigade; the local fire station"
+        "kind": "employer"
       },
       "sourceTurns": [
-        "D26:2",
-        "D26:4",
-        "D32:1"
+        "D19:8",
+        "D28:1"
+      ]
+    },
+    {
+      "key": "tech-company",
+      "type": "organization",
+      "name": "the tech company",
+      "description": "A tech company John said on 5 August 2023 he might have found a job at, which needed his mechanical skills for its hardware team after his engineering job ended.",
+      "properties": {
+        "kind": "employer"
+      },
+      "sourceTurns": [
+        "D28:5"
+      ]
+    },
+    {
+      "key": "service-online-group",
+      "type": "organization",
+      "name": "John's service-focused online group",
+      "description": "The service-focused online group John joined in the week before 1 January 2023, which he later called his virtual support group. Its members met in person, handed out food and supplies at a homeless shelter, ran a toy drive for children, and brainstormed projects for education, mentorship, job training and resume building; in August 2023 John asked his family and friends to join it and advocate for the military.",
+      "properties": {
+        "kind": "club",
+        "aliases": "the virtual support group, service-focused online group"
+      },
+      "sourceTurns": [
+        "D3:1",
+        "D27:1"
+      ]
+    },
+    {
+      "key": "dog-shelter",
+      "type": "organization",
+      "name": "the local dog shelter",
+      "description": "A local dog shelter Maria began volunteering at once a month from June 2023; she adopted the puppy Shadow from a shelter in August 2023.",
+      "properties": {
+        "kind": "nonprofit"
+      },
+      "sourceTurns": [
+        "D17:12",
+        "D31:2"
+      ]
+    },
+    {
+      "key": "johns-political-campaign",
+      "type": "project",
+      "name": "John's run for local office",
+      "description": "John's pursuit of local political office, running from wanting to get into local politics in December 2022 through networking, community meetings and policy blogging to running for office again in February 2023 and deciding to run once more in the week before 6 May 2023. Its themes throughout are improving education and infrastructure.",
+      "sourceTurns": [
+        "D1:6",
+        "D7:2",
+        "D14:1"
+      ]
+    },
+    {
+      "key": "veterans-support-project",
+      "type": "project",
+      "name": "John's project to support military veterans",
+      "description": "John's project supporting military veterans, under way by 20 May 2023 and built around a petition. It included a party on 19 May 2023 where veterans shared their stories, a marching event for veterans' rights at the start of July 2023, a veterans' hospital visit in mid-July 2023 and a 5K charity run in early August 2023.",
+      "sourceTurns": [
+        "D15:1",
+        "D16:1"
+      ]
+    },
+    {
+      "key": "shelter-fundraiser",
+      "type": "project",
+      "name": "the homeless shelter's fundraiser",
+      "description": "The homeless shelter fundraiser held at the end of May 2023, for which Maria planned a ring-toss tournament and a chili cook-off and asked John to spread the word and find volunteers; she hoped it would raise enough to cover basic needs for homeless people.",
+      "sourceTurns": [
+        "D15:18",
+        "D16:2",
+        "D16:4"
+      ]
+    },
+    {
+      "key": "community-food-drive",
+      "type": "project",
+      "name": "John's community food drive",
+      "description": "The community food drive John started in early February 2023 for people who had lost their jobs, prompted by the effect unemployment was having on his neighbours. It drew an overwhelming response and many volunteers, and Maria offered to help with networking and future events.",
+      "sourceTurns": [
+        "D6:10",
+        "D6:12"
+      ]
+    },
+    {
+      "key": "veterans-5k-run",
+      "type": "project",
+      "name": "John's 5K charity run for veterans",
+      "description": "The 5K charity run John set up in his neighbourhood and held on the weekend of 5-6 August 2023, raising funds for veterans and their families. Organizing it meant getting sponsors, coordinating with the city and spreading the word, and getting sponsors was the hardest part.",
+      "sourceTurns": [
+        "D29:4",
+        "D29:6"
+      ]
+    },
+    {
+      "key": "local-school-mentoring",
+      "type": "project",
+      "name": "John's school mentoring",
+      "description": "The mentoring John took up at a local school by 13 August 2023. His students improved in confidence and skills, and one proudly showed him an essay in the week before 13 August 2023.",
+      "sourceTurns": [
+        "D31:1",
+        "D31:9"
+      ]
+    },
+    {
+      "key": "aerial-yoga",
+      "type": "activity",
+      "name": "aerial yoga",
+      "description": "The aerial yoga Maria took up in December 2022 and still practised in June 2023. She uses it to switch off and focus on her body, and her favourite poses are the upside-down ones.",
+      "properties": {
+        "kind": "exercise"
+      },
+      "sourceTurns": [
+        "D1:3",
+        "D18:15"
+      ]
+    },
+    {
+      "key": "kickboxing",
+      "type": "activity",
+      "name": "kickboxing",
+      "description": "The kickboxing John was doing by December 2022, which he said gave him energy; it is also one of the classes his yoga studio offers.",
+      "properties": {
+        "kind": "martial art"
+      },
+      "sourceTurns": [
+        "D1:4",
+        "D25:13"
+      ]
+    },
+    {
+      "key": "yoga",
+      "type": "activity",
+      "name": "yoga",
+      "description": "The beginner yoga John started as a weekend class in early April 2023, after his colleague Rob invited him in February 2023. It focuses on poses and breathing, helps him relax and improves his flexibility, and had become part of his daily routine by 7 April 2023.",
+      "properties": {
+        "kind": "exercise"
+      },
+      "sourceTurns": [
+        "D7:16",
+        "D10:1",
+        "D10:5"
+      ]
+    },
+    {
+      "key": "camping",
+      "type": "activity",
+      "name": "camping",
+      "description": "Camping, which John has done plenty of times and values for being uncomplicated, including the summer 2022 trip with his dog Max that is his best memory of him. Maria has camped a few times and went with friends from her church over the weekend of 10-11 June 2023.",
+      "properties": {
+        "kind": "outdoor"
+      },
+      "sourceTurns": [
+        "D18:12",
+        "D30:6"
+      ]
+    },
+    {
+      "key": "hiking",
+      "type": "activity",
+      "name": "hiking",
+      "description": "Hiking, which recurs for both of them: Maria hikes with friends, hiked to a waterfall in Oregon as a child and hiked with her church group in July 2023, while John hiked with workmates before 25 May 2023 and hikes with his family.",
+      "properties": {
+        "kind": "outdoor"
+      },
+      "sourceTurns": [
+        "D2:17",
+        "D16:1",
+        "D25:2"
       ]
     }
   ],
   "chrono": [
     {
-      "key": "road-trip-return",
+      "key": "johns-road-trip-return",
       "type": "event",
-      "title": "John got back from a family road trip",
+      "title": "John returned from a family road trip",
       "date": "2022-12-16",
       "entities": [
         "john"
@@ -1461,19 +1356,16 @@
       "title": "Maria served meals at a charity event",
       "date": "2023-02-03",
       "entities": [
-        "maria",
-        "david"
+        "maria"
       ],
       "sourceTurns": [
-        "D6:1",
-        "D6:3",
-        "D6:5"
+        "D6:1"
       ]
     },
     {
-      "key": "met-jean",
+      "key": "maria-meets-jean",
       "type": "event",
-      "title": "Maria met Jean while volunteering at the homeless shelter",
+      "title": "Maria met Jean, a woman staying at the homeless shelter",
       "date": "2023-02-24",
       "entities": [
         "maria",
@@ -1485,79 +1377,33 @@
       ]
     },
     {
-      "key": "park-weekend-march",
-      "type": "event",
-      "title": "John and his family spent the weekend at the park playground",
-      "date": "2023-03-04",
-      "endsAt": "2023-03-05",
-      "entities": [
-        "john"
-      ],
-      "sourceTurns": [
-        "D8:8",
-        "D8:9",
-        "D8:10"
-      ]
-    },
-    {
-      "key": "5k-charity-run-maria",
-      "type": "event",
-      "title": "Maria took part in a 5K charity run for a homeless shelter",
-      "date": "2023-04-01",
-      "endsAt": "2023-04-02",
-      "entities": [
-        "maria",
-        "homeless-shelter"
-      ],
-      "sourceTurns": [
-        "D10:10",
-        "D10:12"
-      ]
-    },
-    {
-      "key": "career-fair",
-      "type": "event",
-      "title": "John volunteered at a career fair at a local school",
-      "date": "2023-04-01",
-      "endsAt": "2023-04-02",
-      "entities": [
-        "john",
-        "local-school"
-      ],
-      "sourceTurns": [
-        "D10:13"
-      ]
-    },
-    {
       "key": "car-breakdown",
       "type": "event",
       "title": "John's car broke down on his way to work",
       "date": "2023-04-07",
       "entities": [
-        "john",
-        "johns-car"
+        "john"
       ],
       "sourceTurns": [
         "D11:1"
       ]
     },
     {
-      "key": "dinner-with-mom",
+      "key": "maria-mother-dinner",
       "type": "event",
-      "title": "Maria and her mother cooked dinner together",
+      "title": "Maria and her mother made dinner together",
       "date": "2023-05-03",
       "entities": [
-        "maria",
-        "marias-mother"
+        "maria"
       ],
       "sourceTurns": [
         "D13:16"
       ]
     },
     {
-      "key": "apple-pie",
+      "key": "johns-apple-pie",
       "type": "event",
-      "title": "John baked an apple pie for his children",
+      "title": "John made an apple pie for his children",
       "date": "2023-05-03",
       "entities": [
         "john"
@@ -1567,8 +1413,8 @@
       ]
     },
     {
-      "key": "joined-church",
-      "type": "milestone",
+      "key": "maria-joins-church",
+      "type": "event",
       "title": "Maria joined a nearby church",
       "date": "2023-05-05",
       "entities": [
@@ -1582,19 +1428,18 @@
     {
       "key": "veterans-party",
       "type": "event",
-      "title": "John threw a small party for veterans to share their stories",
+      "title": "John's group threw a party where veterans shared their stories",
       "date": "2023-05-19",
       "entities": [
         "john",
         "veterans-support-project"
       ],
       "sourceTurns": [
-        "D15:11",
-        "D15:13"
+        "D15:11"
       ]
     },
     {
-      "key": "church-camping",
+      "key": "maria-camping-weekend",
       "type": "event",
       "title": "Maria went camping with friends from her church",
       "date": "2023-06-10",
@@ -1609,52 +1454,34 @@
       ]
     },
     {
-      "key": "car-accident",
+      "key": "maria-car-accident",
       "type": "event",
-      "title": "A car ran a red light and hit the car Maria was travelling in",
+      "title": "A car ran a red light and hit the car Maria was travelling in; nobody was hurt",
       "date": "2023-07-02",
       "entities": [
         "maria"
       ],
       "sourceTurns": [
-        "D21:3",
         "D21:5"
       ]
     },
     {
-      "key": "church-picnic",
+      "key": "maria-gym-dinner",
       "type": "event",
-      "title": "Maria had a picnic with friends from her church",
-      "date": "2023-07-15",
-      "endsAt": "2023-07-16",
+      "title": "Maria had dinner with friends from her gym",
+      "date": "2023-07-07",
       "entities": [
         "maria",
-        "marias-church"
+        "marias-gym"
       ],
       "sourceTurns": [
-        "D24:6",
-        "D24:8"
+        "D23:14"
       ]
     },
     {
-      "key": "church-hike",
+      "key": "brigade-first-callout",
       "type": "event",
-      "title": "Maria hiked with friends from her church",
-      "date": "2023-07-15",
-      "endsAt": "2023-07-16",
-      "entities": [
-        "maria",
-        "marias-church"
-      ],
-      "sourceTurns": [
-        "D25:2",
-        "D25:6"
-      ]
-    },
-    {
-      "key": "first-callout",
-      "type": "event",
-      "title": "John's fire brigade answered its first call-out and saved a family from a burning building",
+      "title": "John's fire-fighting brigade had its first call-out with him and saved a family from a burning building",
       "date": "2023-07-30",
       "entities": [
         "john",
@@ -1666,9 +1493,9 @@
       ]
     },
     {
-      "key": "community-work-church",
+      "key": "maria-church-community-work",
       "type": "event",
-      "title": "Maria took up community work with friends from her church",
+      "title": "Maria did community work with her friends from church",
       "date": "2023-08-04",
       "entities": [
         "maria",
@@ -1679,22 +1506,7 @@
       ]
     },
     {
-      "key": "5k-run-veterans",
-      "type": "event",
-      "title": "John ran a 5K charity event in his neighbourhood to raise money for veterans and their families",
-      "date": "2023-08-05",
-      "endsAt": "2023-08-06",
-      "entities": [
-        "john",
-        "veterans-support-project"
-      ],
-      "sourceTurns": [
-        "D29:2",
-        "D29:4"
-      ]
-    },
-    {
-      "key": "shelter-front-desk",
+      "key": "maria-front-desk",
       "type": "event",
       "title": "Maria volunteered at the homeless shelter's front desk",
       "date": "2023-08-11",
@@ -1717,12 +1529,25 @@
       }
     },
     {
-      "label": "member_of",
-      "from": "maria",
-      "to": "homeless-shelter",
+      "label": "family_of",
+      "from": "john",
+      "to": "kyle",
       "properties": {
-        "role": "volunteer"
+        "relation": "father of"
       }
+    },
+    {
+      "label": "family_of",
+      "from": "marias-aunt",
+      "to": "maria",
+      "properties": {
+        "relation": "aunt of"
+      }
+    },
+    {
+      "label": "practices",
+      "from": "john",
+      "to": "kickboxing"
     },
     {
       "label": "practices",
@@ -1736,21 +1561,16 @@
     },
     {
       "label": "practices",
-      "from": "john",
-      "to": "kickboxing"
+      "from": "maria",
+      "to": "hiking"
     },
     {
-      "label": "works_on",
-      "from": "john",
-      "to": "political-campaign",
+      "label": "member_of",
+      "from": "maria",
+      "to": "homeless-shelter",
       "properties": {
-        "role": "candidate"
+        "role": "volunteer"
       }
-    },
-    {
-      "label": "works_on",
-      "from": "john",
-      "to": "food-drive"
     },
     {
       "label": "member_of",
@@ -1758,41 +1578,14 @@
       "to": "service-online-group"
     },
     {
-      "label": "member_of",
-      "from": "maria",
-      "to": "creative-writing-class"
-    },
-    {
-      "label": "family_of",
-      "from": "maria",
-      "to": "marias-aunt",
-      "properties": {
-        "relation": "aunt"
-      }
-    },
-    {
-      "label": "family_of",
-      "from": "maria",
-      "to": "marias-grandmother",
-      "properties": {
-        "relation": "grandmother"
-      }
-    },
-    {
-      "label": "family_of",
+      "label": "works_on",
       "from": "john",
-      "to": "kyle",
-      "properties": {
-        "relation": "son"
-      }
+      "to": "johns-political-campaign"
     },
     {
-      "label": "family_of",
+      "label": "works_on",
       "from": "john",
-      "to": "johns-wife",
-      "properties": {
-        "relation": "wife"
-      }
+      "to": "community-food-drive"
     },
     {
       "label": "knows",
@@ -1819,19 +1612,9 @@
       }
     },
     {
-      "label": "owns",
-      "from": "john",
-      "to": "johns-car"
-    },
-    {
       "label": "located_in",
       "from": "london",
       "to": "england"
-    },
-    {
-      "label": "member_of",
-      "from": "maria",
-      "to": "poetry-class"
     },
     {
       "label": "practices",
@@ -1844,27 +1627,6 @@
       "to": "yoga"
     },
     {
-      "label": "practices",
-      "from": "john",
-      "to": "boot-camp"
-    },
-    {
-      "label": "member_of",
-      "from": "john",
-      "to": "local-school",
-      "properties": {
-        "role": "volunteer"
-      }
-    },
-    {
-      "label": "family_of",
-      "from": "maria",
-      "to": "marias-mother",
-      "properties": {
-        "relation": "mother"
-      }
-    },
-    {
       "label": "member_of",
       "from": "maria",
       "to": "marias-church",
@@ -1874,18 +1636,34 @@
     },
     {
       "label": "works_on",
+      "from": "maria",
+      "to": "shelter-fundraiser",
+      "properties": {
+        "role": "organiser"
+      }
+    },
+    {
+      "label": "works_on",
+      "from": "john",
+      "to": "shelter-fundraiser",
+      "properties": {
+        "role": "supporter"
+      }
+    },
+    {
+      "label": "part_of",
+      "from": "shelter-fundraiser",
+      "to": "homeless-shelter"
+    },
+    {
+      "label": "works_on",
       "from": "john",
       "to": "veterans-support-project"
     },
     {
-      "label": "works_on",
+      "label": "practices",
       "from": "john",
-      "to": "infrastructure-community-project"
-    },
-    {
-      "label": "works_on",
-      "from": "maria",
-      "to": "shelter-fundraiser"
+      "to": "hiking"
     },
     {
       "label": "owns",
@@ -1901,6 +1679,11 @@
       }
     },
     {
+      "label": "member_of",
+      "from": "maria",
+      "to": "marias-gym"
+    },
+    {
       "label": "practices",
       "from": "maria",
       "to": "camping"
@@ -1916,40 +1699,11 @@
       "to": "camping"
     },
     {
-      "label": "member_of",
-      "from": "maria",
-      "to": "marias-gym"
-    },
-    {
       "label": "works_at",
       "from": "john",
       "to": "mechanical-engineering-company",
       "properties": {
         "role": "assistant manager"
-      }
-    },
-    {
-      "label": "family_of",
-      "from": "maria",
-      "to": "marias-cousin",
-      "properties": {
-        "relation": "cousin"
-      }
-    },
-    {
-      "label": "family_of",
-      "from": "john",
-      "to": "sara",
-      "properties": {
-        "relation": "daughter"
-      }
-    },
-    {
-      "label": "knows",
-      "from": "maria",
-      "to": "laura",
-      "properties": {
-        "kind": "acquaintance"
       }
     },
     {
@@ -1961,14 +1715,48 @@
       }
     },
     {
-      "label": "member_of",
+      "label": "knows",
+      "from": "maria",
+      "to": "laura",
+      "properties": {
+        "kind": "acquaintance"
+      }
+    },
+    {
+      "label": "family_of",
       "from": "john",
-      "to": "fire-brigade"
+      "to": "sara",
+      "properties": {
+        "relation": "father of"
+      }
     },
     {
       "label": "member_of",
       "from": "john",
       "to": "yoga-studio"
+    },
+    {
+      "label": "member_of",
+      "from": "john",
+      "to": "fire-brigade"
+    },
+    {
+      "label": "knows",
+      "from": "maria",
+      "to": "cindy",
+      "properties": {
+        "kind": "acquaintance"
+      }
+    },
+    {
+      "label": "works_on",
+      "from": "john",
+      "to": "veterans-5k-run"
+    },
+    {
+      "label": "part_of",
+      "from": "veterans-5k-run",
+      "to": "veterans-support-project"
     },
     {
       "label": "owns",
@@ -1981,29 +1769,29 @@
       "to": "shadow"
     },
     {
-      "label": "knows",
-      "from": "maria",
-      "to": "cindy",
+      "label": "works_on",
+      "from": "john",
+      "to": "local-school-mentoring",
       "properties": {
-        "kind": "acquaintance"
+        "role": "mentor"
       }
     },
     {
       "label": "supersedes",
-      "from": "lost-job-mechanical-engineering",
-      "to": "promoted-assistant-manager"
+      "from": "john-lost-job",
+      "to": "john-works-mech-eng"
     }
   ],
   "claims": [
     {
-      "text": "John got back from a family road trip on 16 December 2022 and told Maria the next day that it had been fun.",
+      "text": "John got back from a family road trip with his family on 16 December 2022 and said it was fun.",
       "speaker": "John",
       "statedOn": "2022-12-17",
       "entities": [
         "john"
       ],
       "chrono": [
-        "road-trip-return"
+        "johns-road-trip-return"
       ],
       "sourceTurns": [
         "D1:1",
@@ -2011,23 +1799,12 @@
       ]
     },
     {
-      "text": "As of 17 December 2022 Maria had been busy volunteering at the homeless shelter and keeping fit.",
+      "text": "Maria had been busy volunteering at the homeless shelter and keeping fit, and had just started aerial yoga, as of 17 December 2022.",
       "speaker": "Maria",
       "statedOn": "2022-12-17",
       "entities": [
         "maria",
-        "homeless-shelter"
-      ],
-      "sourceTurns": [
-        "D1:3"
-      ]
-    },
-    {
-      "text": "Maria had just started doing aerial yoga as of 17 December 2022 and said it was great.",
-      "speaker": "Maria",
-      "statedOn": "2022-12-17",
-      "entities": [
-        "maria",
+        "homeless-shelter",
         "aerial-yoga"
       ],
       "sourceTurns": [
@@ -2035,7 +1812,7 @@
       ]
     },
     {
-      "text": "John was doing kickboxing as of 17 December 2022 and said it was giving him a lot of energy.",
+      "text": "John was doing kickboxing in December 2022 and said it was giving him a lot of energy.",
       "speaker": "John",
       "statedOn": "2022-12-17",
       "entities": [
@@ -2048,12 +1825,12 @@
       ]
     },
     {
-      "text": "John told Maria on 17 December 2022 that he was hoping to get into local politics because he loved helping the community and making it a better place.",
+      "text": "John said on 17 December 2022 that he was hoping to get into local politics because he loves helping the community and making it a better place.",
       "speaker": "John",
       "statedOn": "2022-12-17",
       "entities": [
         "john",
-        "political-campaign"
+        "johns-political-campaign"
       ],
       "sourceTurns": [
         "D1:6",
@@ -2061,12 +1838,12 @@
       ]
     },
     {
-      "text": "John's main political focuses, stated on 17 December 2022, were improving education and infrastructure in his community.",
+      "text": "John's main political focuses are improving education and infrastructure in his community.",
       "speaker": "John",
       "statedOn": "2022-12-17",
       "entities": [
         "john",
-        "political-campaign"
+        "johns-political-campaign"
       ],
       "sourceTurns": [
         "D1:8",
@@ -2074,19 +1851,18 @@
       ]
     },
     {
-      "text": "John's interest in education and infrastructure came from growing up seeing how a lack of education and crumbling infrastructure affected his neighbourhood, and he said on 17 December 2022 that he did not want future generations to go through that.",
+      "text": "John became interested in education and infrastructure because he saw growing up how the lack of both affected his neighbourhood, and he believes schools and infrastructure should be funded properly so future generations do not go through the same thing.",
       "speaker": "John",
       "statedOn": "2022-12-17",
       "entities": [
         "john"
       ],
       "sourceTurns": [
-        "D1:9",
         "D1:10"
       ]
     },
     {
-      "text": "John shared a photograph of a school taken in 2021 after it received funding, and said on 17 December 2022 that the extra money paid for repairs and renovations that made the learning environment safer and more modern for the students.",
+      "text": "John shared a photograph of a local school taken in 2021 after it received funding, which paid for repairs and renovations that made the learning environment safer and more modern for its students.",
       "speaker": "John",
       "statedOn": "2022-12-17",
       "entities": [
@@ -2095,20 +1871,20 @@
       "sourceTurns": [
         "D1:10",
         "D1:11",
-        "D1:12"
+        "D1:12",
+        "D1:13"
       ]
     },
     {
-      "text": "John's next move in politics, as he described it on 17 December 2022, was to talk with local leaders and organisations to gain support and gather ideas, and Maria asked him to keep her posted on the campaign.",
+      "text": "John planned to talk with local leaders and organizations to gather support and ideas for his next move in politics, and Maria asked him to keep her posted on his campaign.",
       "speaker": "John",
       "statedOn": "2022-12-17",
       "entities": [
         "john",
         "maria",
-        "political-campaign"
+        "johns-political-campaign"
       ],
       "sourceTurns": [
-        "D1:13",
         "D1:14",
         "D1:15",
         "D1:16"
@@ -2130,21 +1906,20 @@
       ]
     },
     {
-      "text": "By 22 December 2022 John described his campaign as an interesting ride so far, and said he had been networking with people to get their input.",
+      "text": "John had been networking with people to get their input on his political campaign, as of 22 December 2022.",
       "speaker": "John",
       "statedOn": "2022-12-22",
       "entities": [
         "john",
-        "political-campaign"
+        "johns-political-campaign"
       ],
       "sourceTurns": [
-        "D2:1",
         "D2:2",
         "D2:3"
       ]
     },
     {
-      "text": "John said on 22 December 2022 that he had just talked to someone whose stories fired up his passion to make education better in his area, and that investing in future generations is the foundation of progress and opportunity.",
+      "text": "John talked with someone shortly before 22 December 2022 whose stories fired up his passion to make education better in his area.",
       "speaker": "John",
       "statedOn": "2022-12-22",
       "entities": [
@@ -2152,26 +1927,25 @@
       ],
       "sourceTurns": [
         "D2:4",
-        "D2:5",
-        "D2:6",
-        "D2:7"
+        "D2:5"
       ]
     },
     {
-      "text": "John told Maria on 22 December 2022 that her encouragement meant a lot to him and made him more determined.",
+      "text": "John said investing in future generations and giving them the right tools for success is the foundation of progress and opportunity.",
       "speaker": "John",
       "statedOn": "2022-12-22",
       "entities": [
-        "john",
-        "maria"
+        "john"
       ],
       "sourceTurns": [
+        "D2:6",
+        "D2:7",
         "D2:8",
         "D2:9"
       ]
     },
     {
-      "text": "John shared a photograph of his family on 22 December 2022 and said they are the reason he never gives up, that their love gives him strength and that they keep him centred.",
+      "text": "John said his family are the reason he never gives up, that their love gives him strength and that they keep him centred.",
       "speaker": "John",
       "statedOn": "2022-12-22",
       "entities": [
@@ -2181,28 +1955,29 @@
         "D2:10",
         "D2:11",
         "D2:12",
-        "D2:13"
+        "D2:13",
+        "D2:14"
       ]
     },
     {
-      "text": "John said on 22 December 2022 that his family are his rock in tough times, and that at the playground they like climbing, sliding and playing games together.",
+      "text": "John and his family enjoy climbing, sliding and playing games together at the playground.",
       "speaker": "John",
       "statedOn": "2022-12-22",
       "entities": [
         "john"
       ],
       "sourceTurns": [
-        "D2:14",
         "D2:15",
         "D2:16"
       ]
     },
     {
-      "text": "Maria said on 22 December 2022 that her family is small, and that she spends time with her friends watching movies, hiking and having game nights at her place.",
+      "text": "Maria's family is small, so she spends her time with friends watching movies, hiking and holding game nights at her place, and she values quality connections most.",
       "speaker": "Maria",
       "statedOn": "2022-12-22",
       "entities": [
-        "maria"
+        "maria",
+        "hiking"
       ],
       "sourceTurns": [
         "D2:17",
@@ -2211,7 +1986,7 @@
       ]
     },
     {
-      "text": "John shared a photograph of his family at dinner on 22 December 2022 and said that shared meals, with good food, laughs and chats, are what keep them close.",
+      "text": "John's family made pizza together at a dinner shortly before 22 December 2022, picking out their own toppings.",
       "speaker": "John",
       "statedOn": "2022-12-22",
       "entities": [
@@ -2221,24 +1996,14 @@
         "D2:20",
         "D2:21",
         "D2:22",
-        "D2:23"
-      ]
-    },
-    {
-      "text": "John's family made pizza together, picking out their own toppings, as he described on 22 December 2022.",
-      "speaker": "John",
-      "statedOn": "2022-12-22",
-      "entities": [
-        "john"
-      ],
-      "sourceTurns": [
+        "D2:23",
         "D2:24",
         "D2:26",
         "D2:27"
       ]
     },
     {
-      "text": "Maria had made peach cobbler shortly before 22 December 2022 and said it was great.",
+      "text": "Maria made peach cobbler shortly before 22 December 2022 and said it was great.",
       "speaker": "Maria",
       "statedOn": "2022-12-22",
       "entities": [
@@ -2249,7 +2014,7 @@
       ]
     },
     {
-      "text": "John ended the conversation of 22 December 2022 saying he was off to do some taekwondo.",
+      "text": "John said on 22 December 2022 that he was off to do taekwondo.",
       "speaker": "John",
       "statedOn": "2022-12-22",
       "entities": [
@@ -2260,7 +2025,7 @@
       ]
     },
     {
-      "text": "John joined a service-focused online group in the last week of December 2022 and said on 1 January 2023 that it had been an emotional ride, that everyone there had inspiring stories, and that it gave him a sense of connection and purpose.",
+      "text": "John joined a service-focused online group in the week before 1 January 2023 and found it an emotional ride, with members whose stories opened his eyes and gave him a sense of connection and purpose.",
       "speaker": "John",
       "statedOn": "2023-01-01",
       "entities": [
@@ -2274,7 +2039,7 @@
       ]
     },
     {
-      "text": "The service-focused online group John joined held events where members met in person: they went to a homeless shelter to give out food and supplies and organised a toy drive for children in need, as John described on 1 January 2023.",
+      "text": "The members of John's online service group held events and met in person, going to a homeless shelter to hand out food and supplies and organizing a toy drive for children in need.",
       "speaker": "John",
       "statedOn": "2023-01-01",
       "entities": [
@@ -2283,11 +2048,12 @@
       ],
       "sourceTurns": [
         "D3:4",
-        "D3:5"
+        "D3:5",
+        "D3:6"
       ]
     },
     {
-      "text": "John said on 1 January 2023 that his online service group was brainstorming future projects to help underserved communities get access to education, mentorship, job training and resume building, with the goal of empowering people to reach their aspirations.",
+      "text": "John's online service group was brainstorming future projects to give underserved communities access to education, mentorship, job training and resume building, with the goal of helping people achieve their aspirations.",
       "speaker": "John",
       "statedOn": "2023-01-01",
       "entities": [
@@ -2295,7 +2061,6 @@
         "service-online-group"
       ],
       "sourceTurns": [
-        "D3:6",
         "D3:7",
         "D3:8",
         "D3:9",
@@ -2303,54 +2068,44 @@
       ]
     },
     {
-      "text": "As of 1 January 2023 John said he had recently failed the military aptitude test and had been feeling stressed about it.",
+      "text": "John said on 1 January 2023 that he had recently failed the military aptitude test and had been feeling stressed about it.",
       "speaker": "John",
       "statedOn": "2023-01-01",
       "entities": [
         "john"
       ],
       "sourceTurns": [
-        "D3:11"
+        "D3:11",
+        "D3:12"
       ]
     },
     {
-      "text": "Maria took a photograph of a sunset at the beach in December 2022 and said on 1 January 2023 that watching it was peaceful and made her feel connected to nature and grateful for life's small moments.",
+      "text": "Maria took a photograph of a sunset at the beach in December 2022, and said watching it was peaceful and made her feel connected to nature.",
       "speaker": "Maria",
       "statedOn": "2023-01-01",
       "entities": [
         "maria"
       ],
       "sourceTurns": [
-        "D3:12",
         "D3:13",
         "D3:14",
         "D3:16"
       ]
     },
     {
-      "text": "John had a film camera as a child and took plenty of beach pictures with it, as he recalled on 1 January 2023.",
+      "text": "John had a film camera as a child and took plenty of beach pictures with it.",
       "speaker": "John",
       "statedOn": "2023-01-01",
       "entities": [
         "john"
       ],
       "sourceTurns": [
-        "D3:15"
-      ]
-    },
-    {
-      "text": "John said on 1 January 2023 that the beauty of nature helps people remember the small joys, especially when life gets busy.",
-      "speaker": "John",
-      "statedOn": "2023-01-01",
-      "entities": [
-        "john"
-      ],
-      "sourceTurns": [
+        "D3:15",
         "D3:17"
       ]
     },
     {
-      "text": "Maria became friends with one of her fellow volunteers, who also loves helping others, as she told John on 9 January 2023.",
+      "text": "Maria became friends with one of her fellow volunteers, who also loves helping others, as of 9 January 2023.",
       "speaker": "Maria",
       "statedOn": "2023-01-09",
       "entities": [
@@ -2362,12 +2117,11 @@
       ]
     },
     {
-      "text": "In the week before 9 January 2023 John had an unexpected incident on his way home in which his car's windshield was broken, and he said it reminded him how life can throw unexpected troubles.",
+      "text": "John had an unexpected incident on his way home in the week before 9 January 2023 that left his car windscreen broken, and it reminded him how life can throw unexpected troubles.",
       "speaker": "John",
       "statedOn": "2023-01-09",
       "entities": [
-        "john",
-        "johns-car"
+        "john"
       ],
       "sourceTurns": [
         "D4:2",
@@ -2375,7 +2129,7 @@
       ]
     },
     {
-      "text": "John said on 9 January 2023 that the incident on his way home was a reminder to stay strong during tough times and to tap into inner strength.",
+      "text": "John said the incident on his way home was a reminder to stay strong during tough times and to tap into inner strength.",
       "speaker": "John",
       "statedOn": "2023-01-09",
       "entities": [
@@ -2387,46 +2141,55 @@
       ]
     },
     {
-      "text": "John handled the incident on his way home by staying calm and asking for assistance, made it back safely, and said on 9 January 2023 that he felt relieved and grateful.",
-      "speaker": "John",
-      "statedOn": "2023-01-09",
-      "entities": [
-        "john",
-        "johns-car"
-      ],
-      "sourceTurns": [
-        "D4:6",
-        "D4:7",
-        "D4:8"
-      ]
-    },
-    {
-      "text": "John said on 9 January 2023 that to calm down in tough times he likes to look at the sunset, because it reminds him to enjoy the small things in life.",
+      "text": "John handled the incident on his way home by staying calm and asking for assistance, which got him back safely.",
       "speaker": "John",
       "statedOn": "2023-01-09",
       "entities": [
         "john"
       ],
       "sourceTurns": [
-        "D4:9",
+        "D4:6",
+        "D4:7"
+      ]
+    },
+    {
+      "text": "John felt relieved and grateful to have come through the incident on his way home without harm.",
+      "speaker": "John",
+      "statedOn": "2023-01-09",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D4:8",
+        "D4:9"
+      ]
+    },
+    {
+      "text": "John calms down after a difficult time by looking at the sunset, which reminds him to enjoy the small things in life.",
+      "speaker": "John",
+      "statedOn": "2023-01-09",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
         "D4:10",
         "D4:11"
       ]
     },
     {
-      "text": "By 9 January 2023 John had been looking into local politics, talking to community leaders and getting to know the needs and hopes of his neighbourhood, and said he felt optimistic about it.",
+      "text": "John had been looking into local politics and talking to community leaders to learn the needs and hopes of his neighbourhood, and said on 9 January 2023 that it had been informative and he felt optimistic.",
       "speaker": "John",
       "statedOn": "2023-01-09",
       "entities": [
         "john",
-        "political-campaign"
+        "johns-political-campaign"
       ],
       "sourceTurns": [
         "D4:12"
       ]
     },
     {
-      "text": "Maria had been taking notes about local politics in her notebook, as she told John on 9 January 2023, and he said it gave him new ideas and plans for the community.",
+      "text": "Maria had been taking notes about local politics in her notebook, and John said they gave him new ideas and plans for the community.",
       "speaker": "Maria",
       "statedOn": "2023-01-09",
       "entities": [
@@ -2440,22 +2203,21 @@
       ]
     },
     {
-      "text": "John had a community meeting in the week after 9 January 2023 at which education and infrastructure upgrades were to be discussed, and he said he would stick up for his community there.",
+      "text": "John had a community meeting in the week after 9 January 2023 at which education and infrastructure upgrades were to be discussed.",
       "speaker": "John",
       "statedOn": "2023-01-09",
       "entities": [
         "john",
-        "political-campaign"
+        "johns-political-campaign"
       ],
       "sourceTurns": [
         "D4:16",
         "D4:17",
-        "D4:18",
-        "D4:19"
+        "D4:18"
       ]
     },
     {
-      "text": "John and Maria agreed on 9 January 2023 to join forces to bring positive change to their neighbourhood, and John thanked Maria for being an awesome friend.",
+      "text": "John and Maria agreed on 9 January 2023 to work together as a team to bring positive changes to their neighbourhood.",
       "speaker": "John",
       "statedOn": "2023-01-09",
       "entities": [
@@ -2463,43 +2225,55 @@
         "maria"
       ],
       "sourceTurns": [
+        "D4:19",
         "D4:20",
         "D4:21",
         "D4:22",
-        "D4:23",
+        "D4:23"
+      ]
+    },
+    {
+      "text": "John thanked Maria on 9 January 2023 for being an awesome friend and said they make a great team.",
+      "speaker": "John",
+      "statedOn": "2023-01-09",
+      "entities": [
+        "john",
+        "maria"
+      ],
+      "sourceTurns": [
         "D4:24",
         "D4:25",
         "D4:26"
       ]
     },
     {
-      "text": "John attended the community meeting between 9 and 28 January 2023, found it interesting to hear everyone's worries, and said it made him realise how crucial the upgrades are, especially for children.",
+      "text": "John attended the community meeting between 9 and 28 January 2023, found hearing everyone’s worries eye-opening, and came away upset about the state of local education and convinced the upgrades matter, especially for children.",
       "speaker": "John",
       "statedOn": "2023-01-28",
       "entities": [
         "john",
-        "political-campaign"
+        "johns-political-campaign"
       ],
       "sourceTurns": [
-        "D5:1"
+        "D5:1",
+        "D5:2"
       ]
     },
     {
-      "text": "John and Maria agreed on 28 January 2023 that they should fight for more money and resources for schools and raise awareness of the importance of education.",
-      "speaker": "Maria",
+      "text": "John and Maria agreed on 28 January 2023 that they should fight for more money and resources for local schools and raise awareness of the importance of education.",
+      "speaker": "John",
       "statedOn": "2023-01-28",
       "entities": [
         "john",
         "maria"
       ],
       "sourceTurns": [
-        "D5:2",
         "D5:3",
         "D5:4"
       ]
     },
     {
-      "text": "John said on 28 January 2023 that his own children have a great deal while other children have nothing, and that something needs to be done about it.",
+      "text": "John said his own children have a great deal while other children go without, and that something needs to be done about it.",
       "speaker": "John",
       "statedOn": "2023-01-28",
       "entities": [
@@ -2510,7 +2284,7 @@
       ]
     },
     {
-      "text": "In the week before 28 January 2023 Maria volunteered at the homeless shelter during an event for children and called it a great experience.",
+      "text": "Maria volunteered at the homeless shelter during an event for children in the week before 28 January 2023 and called it a great experience.",
       "speaker": "Maria",
       "statedOn": "2023-01-28",
       "entities": [
@@ -2523,20 +2297,19 @@
       ]
     },
     {
-      "text": "Maria started volunteering because her aunt believed in volunteering and used to help Maria's family when they were struggling, and because it makes her happy to brighten somebody's day.",
+      "text": "Maria started volunteering to make a difference, inspired by her aunt, who believed in volunteering and used to help Maria's family when they were struggling.",
       "speaker": "Maria",
       "statedOn": "2023-01-28",
       "entities": [
         "maria",
-        "marias-aunt",
-        "homeless-shelter"
+        "marias-aunt"
       ],
       "sourceTurns": [
         "D5:8"
       ]
     },
     {
-      "text": "Maria's most impactful volunteering moment, as she described it on 28 January 2023, was sitting with a girl of about eight at the shelter who had no other family; they talked and ended up laughing together.",
+      "text": "The moment Maria found most impactful while volunteering was sitting with a girl of about eight at the homeless shelter who was alone and had no other family; Maria comforted her and they ended up laughing together.",
       "speaker": "Maria",
       "statedOn": "2023-01-28",
       "entities": [
@@ -2550,23 +2323,33 @@
       ]
     },
     {
-      "text": "John had a little doll as a child that always made him feel better, and he said on 28 January 2023 that it reminds him to look out for others when they are feeling down.",
+      "text": "John had a little doll as a child that always made him feel better, and it reminds him to look out for others when they are feeling down.",
       "speaker": "John",
       "statedOn": "2023-01-28",
       "entities": [
         "john"
       ],
       "sourceTurns": [
-        "D5:11",
         "D5:12",
         "D5:13",
-        "D5:14",
+        "D5:14"
+      ]
+    },
+    {
+      "text": "John said it is important to support each other when people are down, because nobody knows the difference a kind gesture can make.",
+      "speaker": "John",
+      "statedOn": "2023-01-28",
+      "entities": [
+        "john",
+        "maria"
+      ],
+      "sourceTurns": [
         "D5:15",
         "D5:16"
       ]
     },
     {
-      "text": "Maria took part in a charity event on Friday 3 February 2023, serving meals, and said the gratitude on people's faces was heartwarming and reminded her how powerful compassion can be.",
+      "text": "Maria took part in a charity event on Friday 3 February 2023, serving meals, and found the collective effort and the gratitude she saw heartwarming.",
       "speaker": "Maria",
       "statedOn": "2023-02-05",
       "entities": [
@@ -2582,20 +2365,19 @@
       ]
     },
     {
-      "text": "John said on 5 February 2023 that he got into politics from a strong urge to serve his country and community, and that running for office was his chance to make an impact.",
+      "text": "John said he went into politics out of a strong urge to serve his country and community, and that running for office was his chance to make an impact.",
       "speaker": "John",
       "statedOn": "2023-02-05",
       "entities": [
         "john",
-        "political-campaign"
+        "johns-political-campaign"
       ],
       "sourceTurns": [
-        "D6:3",
         "D6:4"
       ]
     },
     {
-      "text": "At the charity event on 3 February 2023 Maria talked with a man named David, whose story of hardship and how he ended up in difficult circumstances she found humbling.",
+      "text": "At the charity event on 3 February 2023 Maria talked with a man named David, whose story of hardship and how he ended up in difficult circumstances humbled her.",
       "speaker": "Maria",
       "statedOn": "2023-02-05",
       "entities": [
@@ -2611,7 +2393,7 @@
       ]
     },
     {
-      "text": "Maria linked David up with a nearby organisation that offers housing and support for homeless individuals, as she told John on 5 February 2023.",
+      "text": "After the charity event on 3 February 2023 Maria linked David up with a nearby organization that offers housing and support for homeless individuals.",
       "speaker": "Maria",
       "statedOn": "2023-02-05",
       "entities": [
@@ -2624,7 +2406,7 @@
       ]
     },
     {
-      "text": "When Maria was younger her family had money problems and had to rely on outside help from her auntie, which she said taught her the importance of helping others who struggle.",
+      "text": "When Maria was younger her family had money problems and had to rely on help from her aunt, which taught her the importance of helping others who struggle.",
       "speaker": "Maria",
       "statedOn": "2023-02-05",
       "entities": [
@@ -2636,28 +2418,39 @@
       ]
     },
     {
-      "text": "John had just started helping with a community food drive for people who had lost their jobs as of 5 February 2023, and said unemployment in the community was the reason he started it.",
+      "text": "John had just started helping out with a community food drive for people who had lost their jobs, as of 5 February 2023.",
       "speaker": "John",
       "statedOn": "2023-02-05",
       "entities": [
         "john",
-        "food-drive"
+        "community-food-drive"
       ],
       "sourceTurns": [
         "D6:10",
-        "D6:11",
+        "D6:11"
+      ]
+    },
+    {
+      "text": "John started the community food drive because he saw the effect unemployment was having on his neighbours and wanted to help in tough times.",
+      "speaker": "John",
+      "statedOn": "2023-02-05",
+      "entities": [
+        "john",
+        "community-food-drive"
+      ],
+      "sourceTurns": [
         "D6:12",
         "D6:13",
         "D6:14"
       ]
     },
     {
-      "text": "John said on 5 February 2023 that the response to the food drive and the number of volunteers had been overwhelming.",
+      "text": "The community food drive had an overwhelming response and drew many volunteers.",
       "speaker": "John",
       "statedOn": "2023-02-05",
       "entities": [
         "john",
-        "food-drive"
+        "community-food-drive"
       ],
       "sourceTurns": [
         "D6:15",
@@ -2665,30 +2458,30 @@
       ]
     },
     {
-      "text": "Maria offered on 5 February 2023 to help John's food drive with networking or at future events, and John accepted.",
+      "text": "Maria offered on 5 February 2023 to help John's food drive with networking and at future events.",
       "speaker": "Maria",
       "statedOn": "2023-02-05",
       "entities": [
         "maria",
         "john",
-        "food-drive"
+        "community-food-drive"
       ],
       "sourceTurns": [
         "D6:17",
         "D6:18",
-        "D6:19",
-        "D6:20"
+        "D6:19"
       ]
     },
     {
-      "text": "John and Maria affirmed their friendship on 5 February 2023, saying they have each other's backs and are working towards a shared goal.",
-      "speaker": "Maria",
+      "text": "John thanked Maria for always being there for him and said their friendship and shared goal mean a lot to him.",
+      "speaker": "John",
       "statedOn": "2023-02-05",
       "entities": [
         "john",
         "maria"
       ],
       "sourceTurns": [
+        "D6:20",
         "D6:21",
         "D6:22"
       ]
@@ -2698,41 +2491,40 @@
       "speaker": "Maria",
       "statedOn": "2023-02-25",
       "entities": [
-        "maria",
-        "creative-writing-class"
+        "maria"
       ],
       "sourceTurns": [
         "D7:1"
       ]
     },
     {
-      "text": "On 25 February 2023 John told Maria he was running for office again, and said that after his last run he had seen the impact he could make in the community through politics.",
+      "text": "John told Maria on 25 February 2023 that he was running for office again and was more excited than ever.",
       "speaker": "John",
       "statedOn": "2023-02-25",
       "entities": [
         "john",
-        "political-campaign"
+        "johns-political-campaign"
       ],
       "sourceTurns": [
         "D7:2",
-        "D7:3",
-        "D7:4"
-      ]
-    },
-    {
-      "text": "As of 25 February 2023 Maria was volunteering at a homeless shelter and finding it really rewarding.",
-      "speaker": "Maria",
-      "statedOn": "2023-02-25",
-      "entities": [
-        "maria",
-        "homeless-shelter"
-      ],
-      "sourceTurns": [
         "D7:3"
       ]
     },
     {
-      "text": "While volunteering on 24 February 2023 Maria met a woman named Jean who had been through a divorce, lost her job and ended up homeless, yet stayed optimistic and resilient and still valued the little things.",
+      "text": "John decided to run for office again because his last run showed him the impact he could make in the community through politics.",
+      "speaker": "John",
+      "statedOn": "2023-02-25",
+      "entities": [
+        "john",
+        "johns-political-campaign"
+      ],
+      "sourceTurns": [
+        "D7:4",
+        "D7:5"
+      ]
+    },
+    {
+      "text": "While volunteering on 24 February 2023 Maria met a woman named Jean who had been through a lot yet stayed optimistic and resilient, and who showed Maria the importance of gratitude and connection.",
       "speaker": "Maria",
       "statedOn": "2023-02-25",
       "entities": [
@@ -2741,24 +2533,35 @@
         "homeless-shelter"
       ],
       "chrono": [
-        "met-jean"
+        "maria-meets-jean"
       ],
       "sourceTurns": [
         "D7:5",
-        "D7:6",
-        "D7:7"
+        "D7:6"
       ]
     },
     {
-      "text": "John and Maria agreed on 25 February 2023 that a little kindness and optimism can go a long way, and John called Maria's volunteer work influential.",
+      "text": "Jean had gone through a divorce, lost her job and ended up homeless, yet still values the little things and believes in the good of kindness.",
+      "speaker": "Maria",
+      "statedOn": "2023-02-25",
+      "entities": [
+        "maria",
+        "jean"
+      ],
+      "sourceTurns": [
+        "D7:7",
+        "D7:8"
+      ]
+    },
+    {
+      "text": "John said Jean's staying optimistic through hard times was inspiring and that a little kindness and optimism can go a long way.",
       "speaker": "John",
       "statedOn": "2023-02-25",
       "entities": [
         "john",
-        "maria"
+        "jean"
       ],
       "sourceTurns": [
-        "D7:8",
         "D7:9",
         "D7:10",
         "D7:11",
@@ -2768,7 +2571,7 @@
       ]
     },
     {
-      "text": "John's colleague Rob invited him to a beginner's yoga class, as John mentioned on 25 February 2023.",
+      "text": "John's colleague Rob invited him to a beginner's yoga class, as of 25 February 2023.",
       "speaker": "John",
       "statedOn": "2023-02-25",
       "entities": [
@@ -2783,12 +2586,11 @@
       ]
     },
     {
-      "text": "Maria's grandmother died in the week before 6 March 2023 and Maria said it had been really hard and she was trying to stay positive.",
+      "text": "Maria's grandmother died in the week before 6 March 2023, and Maria said it had been really hard and she was trying to stay positive.",
       "speaker": "Maria",
       "statedOn": "2023-03-06",
       "entities": [
-        "maria",
-        "marias-grandmother"
+        "maria"
       ],
       "sourceTurns": [
         "D8:1"
@@ -2799,15 +2601,15 @@
       "speaker": "John",
       "statedOn": "2023-03-06",
       "entities": [
-        "john",
-        "johns-wife"
+        "john"
       ],
       "sourceTurns": [
-        "D8:2"
+        "D8:2",
+        "D8:3"
       ]
     },
     {
-      "text": "John's youngest child is a one-year-old son named Kyle, as John told Maria on 6 March 2023.",
+      "text": "John's son Kyle was one year old as of 6 March 2023.",
       "speaker": "John",
       "statedOn": "2023-03-06",
       "entities": [
@@ -2815,41 +2617,37 @@
         "kyle"
       ],
       "sourceTurns": [
-        "D8:3",
-        "D8:4"
+        "D8:4",
+        "D8:5"
       ]
     },
     {
-      "text": "John described parenting on 6 March 2023 as a wild ride full of ups and downs, with the love and happiness outweighing it all.",
+      "text": "John described parenting as a wild ride full of ups and downs in which the love and happiness outweigh it all.",
       "speaker": "John",
       "statedOn": "2023-03-06",
       "entities": [
         "john"
       ],
       "sourceTurns": [
-        "D8:5",
-        "D8:6"
+        "D8:6",
+        "D8:7"
       ]
     },
     {
-      "text": "John takes his children to the park a few times a week for family bonding, and over the weekend of 4-5 March 2023 they all had a turn on the swings and enjoyed themselves.",
+      "text": "John takes his children to the park a few times a week for family bonding, and they had a great time there over the weekend of 4-5 March 2023.",
       "speaker": "John",
       "statedOn": "2023-03-06",
       "entities": [
         "john"
       ],
-      "chrono": [
-        "park-weekend-march"
-      ],
       "sourceTurns": [
-        "D8:7",
         "D8:8",
         "D8:9",
         "D8:10"
       ]
     },
     {
-      "text": "John finds activities for his family such as walks, picnics in the park and events in and beyond their town, and in the week before 6 March 2023 he found a violin concert they all enjoyed.",
+      "text": "John finds family activities by looking for things they will all enjoy, such as a walk or a picnic in the park or events in their town and beyond.",
       "speaker": "John",
       "statedOn": "2023-03-06",
       "entities": [
@@ -2861,7 +2659,29 @@
       ]
     },
     {
-      "text": "Maria made a castle shadow box and a castle painting for her home, inspired by a trip to England a few years before March 2023 on which she was mesmerised by the castles.",
+      "text": "John found a violin concert in the week before 6 March 2023 that the whole family enjoyed.",
+      "speaker": "John",
+      "statedOn": "2023-03-06",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D8:12"
+      ]
+    },
+    {
+      "text": "Maria did similar simple things with her siblings when she was young and they made lasting memories.",
+      "speaker": "Maria",
+      "statedOn": "2023-03-06",
+      "entities": [
+        "maria"
+      ],
+      "sourceTurns": [
+        "D8:13"
+      ]
+    },
+    {
+      "text": "Maria made a castle shadow box and a castle painting for her home, inspired by a trip to England a few years before 2023 where she was mesmerised by the castles.",
       "speaker": "Maria",
       "statedOn": "2023-03-06",
       "entities": [
@@ -2869,13 +2689,12 @@
         "england"
       ],
       "sourceTurns": [
-        "D8:13",
         "D8:14",
         "D8:15"
       ]
     },
     {
-      "text": "Maria's trip to England was to London, whose architecture she found so captivating that she wanted to recreate some of its charm in her own space.",
+      "text": "Maria's trip in England was to London, whose architecture she found so captivating that she wanted to recreate some of its charm in her own space as a reminder of London's history and grace.",
       "speaker": "Maria",
       "statedOn": "2023-03-06",
       "entities": [
@@ -2889,7 +2708,7 @@
       ]
     },
     {
-      "text": "John retook the military aptitude test in the week before 6 March 2023 with great results, said he felt drawn to serving his country, and said his family and friends were supportive when he discussed it with them.",
+      "text": "John retook the military aptitude test in the week before 6 March 2023 and got great results, and said he felt drawn to serving his country that way.",
       "speaker": "John",
       "statedOn": "2023-03-06",
       "entities": [
@@ -2897,12 +2716,22 @@
       ],
       "sourceTurns": [
         "D8:18",
-        "D8:19",
+        "D8:19"
+      ]
+    },
+    {
+      "text": "John discussed serving his country with his family and friends, who were supportive and understood why he wanted to volunteer, and he said he was proud to have the opportunity.",
+      "speaker": "John",
+      "statedOn": "2023-03-06",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
         "D8:20"
       ]
     },
     {
-      "text": "Maria built her connections at the homeless shelter slowly, by listening and showing compassion, and said on 6 March 2023 that building trust and real relationships is what makes the biggest impact.",
+      "text": "Maria said the people behind her had made a big difference while she volunteered at the homeless shelter.",
       "speaker": "Maria",
       "statedOn": "2023-03-06",
       "entities": [
@@ -2911,7 +2740,18 @@
       ],
       "sourceTurns": [
         "D8:21",
-        "D8:22",
+        "D8:22"
+      ]
+    },
+    {
+      "text": "Maria built her connections at the homeless shelter slowly, by listening and showing compassion and by building trust and real relationships.",
+      "speaker": "Maria",
+      "statedOn": "2023-03-06",
+      "entities": [
+        "maria",
+        "homeless-shelter"
+      ],
+      "sourceTurns": [
         "D8:23",
         "D8:24",
         "D8:25",
@@ -2919,67 +2759,77 @@
       ]
     },
     {
-      "text": "Maria had been taking a poetry class as of 2 April 2023 to help her put her feelings into words, and called it a rough ride but good.",
+      "text": "Maria had been taking a poetry class to help her put her feelings into words, as of 2 April 2023, and said it had been a rough but good ride.",
       "speaker": "Maria",
       "statedOn": "2023-04-02",
       "entities": [
-        "maria",
-        "poetry-class"
+        "maria"
       ],
       "sourceTurns": [
-        "D9:1"
+        "D9:1",
+        "D9:2"
       ]
     },
     {
-      "text": "John graduated with a university degree in the week before 2 April 2023, and called it quite a journey but worth it.",
+      "text": "John graduated with a university degree in the week before 2 April 2023, after what he called quite a journey.",
       "speaker": "John",
       "statedOn": "2023-04-02",
       "entities": [
         "john"
       ],
       "sourceTurns": [
-        "D9:2",
         "D9:3",
         "D9:4"
       ]
     },
     {
-      "text": "John said on 2 April 2023 that he was considering going into policymaking, because of his degree and his passion for making a positive impact.",
+      "text": "John was considering going into policymaking because of his new degree and his passion for making a positive impact.",
       "speaker": "John",
       "statedOn": "2023-04-02",
       "entities": [
         "john",
-        "political-campaign"
+        "johns-political-campaign"
       ],
       "sourceTurns": [
         "D9:5",
-        "D9:6"
+        "D9:6",
+        "D9:7"
       ]
     },
     {
-      "text": "John said on 2 April 2023 that improving education and infrastructure were the areas that particularly interested him, as they had been since December 2022.",
+      "text": "John said on 2 April 2023 that improving education and infrastructure remained the areas that interest him most.",
+      "speaker": "John",
+      "statedOn": "2023-04-02",
+      "entities": [
+        "john",
+        "johns-political-campaign"
+      ],
+      "sourceTurns": [
+        "D9:8",
+        "D9:9"
+      ]
+    },
+    {
+      "text": "John said going to community meetings and getting involved locally had given him a better understanding of the challenges facing education and infrastructure and the impact those issues have on his neighbours.",
+      "speaker": "John",
+      "statedOn": "2023-04-02",
+      "entities": [
+        "john",
+        "johns-political-campaign"
+      ],
+      "sourceTurns": [
+        "D9:10",
+        "D9:11"
+      ]
+    },
+    {
+      "text": "John said it matters to him to put his words into action and find solutions, and that it is rewarding to know he is making a difference even when it is hard.",
       "speaker": "John",
       "statedOn": "2023-04-02",
       "entities": [
         "john"
       ],
       "sourceTurns": [
-        "D9:7",
-        "D9:8",
-        "D9:9"
-      ]
-    },
-    {
-      "text": "John said on 2 April 2023 that going to community meetings and getting involved had given him a better understanding of the challenges facing education and infrastructure and of their impact on his neighbours.",
-      "speaker": "John",
-      "statedOn": "2023-04-02",
-      "entities": [
-        "john",
-        "political-campaign"
-      ],
-      "sourceTurns": [
-        "D9:10",
-        "D9:11",
         "D9:12",
         "D9:13",
         "D9:14",
@@ -2988,12 +2838,12 @@
       ]
     },
     {
-      "text": "John and Maria volunteered together at some point in 2022, and both remembered it on 2 April 2023 as a fulfilling experience that showed how their actions can make an impact.",
+      "text": "Maria recalled on 2 April 2023 that she and John volunteered together in 2022 and that it was a fulfilling experience.",
       "speaker": "Maria",
       "statedOn": "2023-04-02",
       "entities": [
-        "john",
-        "maria"
+        "maria",
+        "john"
       ],
       "sourceTurns": [
         "D9:17",
@@ -3001,12 +2851,13 @@
       ]
     },
     {
-      "text": "John started a weekend yoga class with a colleague shortly before 7 April 2023, after wanting to try yoga for a while, and said the stretching and breathing left him feeling great mentally and physically.",
+      "text": "John started a weekend beginner yoga class with a colleague in the week before 7 April 2023, having wanted to try yoga for a while, and said the stretching and breathing were having a positive effect on his wellbeing.",
       "speaker": "John",
       "statedOn": "2023-04-07",
       "entities": [
         "john",
-        "yoga"
+        "yoga",
+        "rob"
       ],
       "sourceTurns": [
         "D10:1",
@@ -3014,7 +2865,7 @@
       ]
     },
     {
-      "text": "John praised his yoga instructor on 7 April 2023 for making sure the class did the poses properly, encouraging them to listen to their bodies, and creating a relaxed environment where everyone felt welcome.",
+      "text": "John said his yoga instructor makes sure the class do the poses properly, encourages them to listen to their bodies, and creates a relaxed environment that makes everyone feel welcome.",
       "speaker": "John",
       "statedOn": "2023-04-07",
       "entities": [
@@ -3022,12 +2873,12 @@
         "yoga"
       ],
       "sourceTurns": [
-        "D10:2",
-        "D10:3"
+        "D10:3",
+        "D10:4"
       ]
     },
     {
-      "text": "John's class is a beginner yoga class focusing on fundamentals such as poses and breathing, and he said on 7 April 2023 that it helps him relax, feel connected and increase his flexibility.",
+      "text": "John's class is a beginner yoga class focused on fundamentals such as poses and breathing, and he finds it helps him relax, feel more connected and increase his flexibility.",
       "speaker": "John",
       "statedOn": "2023-04-07",
       "entities": [
@@ -3035,7 +2886,6 @@
         "yoga"
       ],
       "sourceTurns": [
-        "D10:4",
         "D10:5",
         "D10:6",
         "D10:7",
@@ -3043,7 +2893,7 @@
       ]
     },
     {
-      "text": "By 7 April 2023 yoga was part of John's daily routine, which he said he kept up for the peace of mind and mindfulness as much as the physical benefits.",
+      "text": "Yoga had become part of John’s daily routine by 7 April 2023, for the peace of mind and mindfulness as much as the physical benefit.",
       "speaker": "John",
       "statedOn": "2023-04-07",
       "entities": [
@@ -3055,15 +2905,12 @@
       ]
     },
     {
-      "text": "Maria took part in a 5K charity run for a homeless shelter over the weekend of 1-2 April 2023 and said the energy and sense of unity reminded her why she is passionate about charity work.",
+      "text": "Maria took part in a 5K charity run for a homeless shelter on the weekend of 1-2 April 2023 and found the shared energy and sense of unity rewarding.",
       "speaker": "Maria",
       "statedOn": "2023-04-07",
       "entities": [
         "maria",
         "homeless-shelter"
-      ],
-      "chrono": [
-        "5k-charity-run-maria"
       ],
       "sourceTurns": [
         "D10:10",
@@ -3072,44 +2919,47 @@
       ]
     },
     {
-      "text": "John volunteered at a career fair at a local school over the weekend of 1-2 April 2023 and said it showed him how a lack of resources affects the children's dreams.",
+      "text": "John volunteered at a career fair at a local school on the weekend of 1-2 April 2023 and saw how a lack of resources affects the pupils' dreams.",
       "speaker": "John",
       "statedOn": "2023-04-07",
       "entities": [
-        "john",
-        "local-school"
-      ],
-      "chrono": [
-        "career-fair"
+        "john"
       ],
       "sourceTurns": [
         "D10:13",
-        "D10:16",
+        "D10:14"
+      ]
+    },
+    {
+      "text": "The sign in the photograph John shared on 7 April 2023 read 'Always look on the bright side of life', which he took as a reminder that children can reach their dreams with the right help.",
+      "speaker": "John",
+      "statedOn": "2023-04-07",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D10:15",
+        "D10:16"
+      ]
+    },
+    {
+      "text": "John said he would keep pushing for the children at the local school and that the community needs people doing good for those who need it.",
+      "speaker": "John",
+      "statedOn": "2023-04-07",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
         "D10:17",
         "D10:18"
       ]
     },
     {
-      "text": "John shared a sign reading Always look on the bright side of life on 7 April 2023 and said it reminds him that children can reach their dreams with the right help.",
-      "speaker": "John",
-      "statedOn": "2023-04-07",
-      "entities": [
-        "john",
-        "local-school"
-      ],
-      "sourceTurns": [
-        "D10:13",
-        "D10:14",
-        "D10:15"
-      ]
-    },
-    {
-      "text": "John's car broke down on Friday 7 April 2023 on his way to work, and he said on 10 April 2023 that getting it fixed was hard and putting a strain on his wallet.",
+      "text": "John's car broke down on Friday 7 April 2023 on his way to work, and getting it fixed was proving hard and putting a strain on his finances.",
       "speaker": "John",
       "statedOn": "2023-04-10",
       "entities": [
-        "john",
-        "johns-car"
+        "john"
       ],
       "chrono": [
         "car-breakdown"
@@ -3120,7 +2970,18 @@
       ]
     },
     {
-      "text": "John's family took a road trip in 2022 exploring the coast of the Pacific Northwest and visiting national parks, which he remembered on 10 April 2023 for the breathtaking nature.",
+      "text": "John said on 10 April 2023 that he was staying positive and looking for a solution despite the car trouble and money problems.",
+      "speaker": "John",
+      "statedOn": "2023-04-10",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D11:3"
+      ]
+    },
+    {
+      "text": "John and his family took a road trip in 2022 exploring the coast up in the Pacific Northwest and some national parks, and he found the beauty of nature breathtaking.",
       "speaker": "John",
       "statedOn": "2023-04-10",
       "entities": [
@@ -3128,7 +2989,6 @@
         "pacific-northwest"
       ],
       "sourceTurns": [
-        "D11:3",
         "D11:4",
         "D11:5",
         "D11:6",
@@ -3138,7 +2998,7 @@
       ]
     },
     {
-      "text": "Maria gave a few talks at the homeless shelter she volunteers at shortly before 10 April 2023 and received lots of compliments from the other volunteers.",
+      "text": "Maria gave a few talks at the homeless shelter shortly before 10 April 2023 and received lots of compliments from the other volunteers.",
       "speaker": "Maria",
       "statedOn": "2023-04-10",
       "entities": [
@@ -3146,11 +3006,12 @@
         "homeless-shelter"
       ],
       "sourceTurns": [
-        "D11:10"
+        "D11:10",
+        "D11:11"
       ]
     },
     {
-      "text": "Maria bought a cross necklace shortly before 10 April 2023 to feel closer to her faith, and said it had made her happy.",
+      "text": "Maria bought a cross necklace shortly before 10 April 2023 to feel closer to her faith, and it made her happy.",
       "speaker": "Maria",
       "statedOn": "2023-04-10",
       "entities": [
@@ -3161,7 +3022,7 @@
       ]
     },
     {
-      "text": "Maria said on 10 April 2023 that the people at the homeless shelter had become like family to her and that she felt blessed to know them.",
+      "text": "Maria said the people at the homeless shelter had become like family to her and that she felt blessed to know them.",
       "speaker": "Maria",
       "statedOn": "2023-04-10",
       "entities": [
@@ -3169,13 +3030,12 @@
         "homeless-shelter"
       ],
       "sourceTurns": [
-        "D11:11",
         "D11:12",
         "D11:13"
       ]
     },
     {
-      "text": "In the week before 10 April 2023 Maria helped organise and prepare a meal for the residents of the homeless shelter, and said it was good to see everyone together and supporting each other.",
+      "text": "Maria helped organise a meal for the homeless shelter's residents in the week before 10 April 2023, getting everything ready.",
       "speaker": "Maria",
       "statedOn": "2023-04-10",
       "entities": [
@@ -3186,7 +3046,18 @@
         "D11:14",
         "D11:15",
         "D11:16",
-        "D11:17",
+        "D11:17"
+      ]
+    },
+    {
+      "text": "Maria said it was special to bring people together at the homeless shelter and create a sense of comfort and community.",
+      "speaker": "Maria",
+      "statedOn": "2023-04-10",
+      "entities": [
+        "maria",
+        "homeless-shelter"
+      ],
+      "sourceTurns": [
         "D11:18",
         "D11:19",
         "D11:20",
@@ -3194,60 +3065,71 @@
       ]
     },
     {
-      "text": "By 18 April 2023 John had been blogging about politics and government, researching policies and writing up his thoughts to raise awareness and start conversations.",
+      "text": "John had been blogging about politics and the government as of 18 April 2023 and found it a satisfying way to push for better education and infrastructure.",
       "speaker": "John",
       "statedOn": "2023-04-18",
       "entities": [
         "john",
-        "political-campaign"
+        "johns-political-campaign"
       ],
       "sourceTurns": [
         "D12:1",
-        "D12:2",
-        "D12:3"
+        "D12:2"
       ]
     },
     {
-      "text": "The policies John was writing about on his blog as of 18 April 2023 were education reform and infrastructure development.",
+      "text": "John had been researching policies and writing up his thoughts and ideas, hoping to raise awareness and start conversations that create positive change.",
       "speaker": "John",
       "statedOn": "2023-04-18",
       "entities": [
         "john",
-        "political-campaign"
+        "johns-political-campaign"
       ],
       "sourceTurns": [
-        "D12:4",
+        "D12:3",
+        "D12:4"
+      ]
+    },
+    {
+      "text": "John’s blog had lately focused on education reform and infrastructure development, with the goal of getting people involved and taking action.",
+      "speaker": "John",
+      "statedOn": "2023-04-18",
+      "entities": [
+        "john",
+        "johns-political-campaign"
+      ],
+      "sourceTurns": [
         "D12:5",
         "D12:6"
       ]
     },
     {
-      "text": "John had received some good feedback on his blog posts by 18 April 2023 and called it a small step.",
+      "text": "John had received good feedback on his blog posts by 18 April 2023 and called it a small step that counts.",
       "speaker": "John",
       "statedOn": "2023-04-18",
       "entities": [
         "john",
-        "political-campaign"
+        "johns-political-campaign"
       ],
       "sourceTurns": [
-        "D12:7"
+        "D12:7",
+        "D12:8"
       ]
     },
     {
-      "text": "John and his colleagues went to a convention together in March 2023, where they connected with people who share their passion for using technology for good in the community.",
+      "text": "John and his colleagues went to a convention in March 2023 about using technology for good in their community, where he connected with like-minded people and swapped ideas.",
       "speaker": "John",
       "statedOn": "2023-04-18",
       "entities": [
         "john"
       ],
       "sourceTurns": [
-        "D12:8",
         "D12:9",
         "D12:10"
       ]
     },
     {
-      "text": "John said on 18 April 2023 that the energy in the room at the March 2023 technology convention, and brainstorming with motivated people there, gave him renewed energy and purpose and inspired him to make a bigger difference.",
+      "text": "John said the energy in the room at the March 2023 technology convention was infectious and that the motivated people there gave him renewed energy and a sense of purpose.",
       "speaker": "John",
       "statedOn": "2023-04-18",
       "entities": [
@@ -3263,7 +3145,7 @@
       ]
     },
     {
-      "text": "John was planning a trip to the East Coast as of 18 April 2023.",
+      "text": "John was planning a trip to the East Coast, as of 18 April 2023.",
       "speaker": "John",
       "statedOn": "2023-04-18",
       "entities": [
@@ -3274,7 +3156,7 @@
       ]
     },
     {
-      "text": "As of 18 April 2023 Maria was still volunteering at the homeless shelter, and said it was rewarding and fulfilling but that the growing need for help could be overwhelming.",
+      "text": "Maria was still volunteering at the homeless shelter as of 18 April 2023 and said it was fulfilling but that the growing need for help could be overwhelming.",
       "speaker": "Maria",
       "statedOn": "2023-04-18",
       "entities": [
@@ -3284,18 +3166,7 @@
       "sourceTurns": [
         "D12:18",
         "D12:19",
-        "D12:20"
-      ]
-    },
-    {
-      "text": "John and Maria agreed on 18 April 2023 that every small act of kindness has a big effect.",
-      "speaker": "John",
-      "statedOn": "2023-04-18",
-      "entities": [
-        "john",
-        "maria"
-      ],
-      "sourceTurns": [
+        "D12:20",
         "D12:21",
         "D12:22",
         "D12:23"
@@ -3306,38 +3177,35 @@
       "speaker": "John",
       "statedOn": "2023-05-04",
       "entities": [
-        "john",
-        "boot-camp"
+        "john"
       ],
       "sourceTurns": [
         "D13:1",
         "D13:2",
-        "D13:3"
+        "D13:3",
+        "D13:4"
       ]
     },
     {
-      "text": "John said on 4 May 2023 that the family boot camps had given them more energy and gains in strength and endurance, and that his children were getting excited about staying active.",
+      "text": "John said his family had much more energy and had gained strength and endurance since starting boot camps, and that his children were getting excited about staying active.",
       "speaker": "John",
       "statedOn": "2023-05-04",
       "entities": [
-        "john",
-        "boot-camp"
+        "john"
       ],
       "sourceTurns": [
-        "D13:4",
-        "D13:5"
+        "D13:5",
+        "D13:6"
       ]
     },
     {
-      "text": "John and his family work out together three times a week, as he told Maria on 4 May 2023.",
+      "text": "John and his family work out together three times a week, which keeps them on track.",
       "speaker": "John",
       "statedOn": "2023-05-04",
       "entities": [
-        "john",
-        "boot-camp"
+        "john"
       ],
       "sourceTurns": [
-        "D13:6",
         "D13:7",
         "D13:8",
         "D13:9",
@@ -3346,97 +3214,85 @@
       ]
     },
     {
-      "text": "Maria said on 4 May 2023 that even though her family is small she relies on them for strength during tough times.",
+      "text": "Maria said her family is small but she relies on them for strength during tough times.",
       "speaker": "Maria",
       "statedOn": "2023-05-04",
       "entities": [
         "maria"
       ],
       "sourceTurns": [
-        "D13:12"
-      ]
-    },
-    {
-      "text": "John said on 4 May 2023 that his family is the most important thing to him and his biggest support, through good times and bad.",
-      "speaker": "John",
-      "statedOn": "2023-05-04",
-      "entities": [
-        "john"
-      ],
-      "sourceTurns": [
+        "D13:12",
         "D13:13",
         "D13:14"
       ]
     },
     {
-      "text": "John said on 4 May 2023 that his family had been supporting each other through boot camp, cheering each other on during workouts and giving emotional support outside them.",
+      "text": "John said his family cheer each other on during their boot camp workouts and support each other emotionally outside them.",
       "speaker": "John",
       "statedOn": "2023-05-04",
       "entities": [
-        "john",
-        "boot-camp"
+        "john"
       ],
       "sourceTurns": [
         "D13:15"
       ]
     },
     {
-      "text": "Maria and her mother made dinner together on 3 May 2023.",
+      "text": "Maria and her mother made dinner together on 3 May 2023, a spread that included salads, sandwiches and homemade desserts.",
       "speaker": "Maria",
       "statedOn": "2023-05-04",
       "entities": [
-        "maria",
-        "marias-mother"
+        "maria"
       ],
       "chrono": [
-        "dinner-with-mom"
+        "maria-mother-dinner"
       ],
       "sourceTurns": [
-        "D13:16"
+        "D13:16",
+        "D13:18"
       ]
     },
     {
-      "text": "John baked an apple pie for his children on 3 May 2023.",
+      "text": "John made an apple pie for his children on 3 May 2023.",
       "speaker": "John",
       "statedOn": "2023-05-04",
       "entities": [
         "john"
       ],
       "chrono": [
-        "apple-pie"
+        "johns-apple-pie"
       ],
       "sourceTurns": [
         "D13:17"
       ]
     },
     {
-      "text": "The dinner Maria and her mother made included salads, sandwiches and homemade desserts, and Maria said on 4 May 2023 that her favourite is a banana split sundae, which she enjoys after a day of volunteering.",
-      "speaker": "Maria",
-      "statedOn": "2023-05-04",
-      "entities": [
-        "maria",
-        "marias-mother"
-      ],
-      "sourceTurns": [
-        "D13:17",
-        "D13:18"
-      ]
-    },
-    {
-      "text": "Maria said on 4 May 2023 that she finds balance by taking care of herself physically, emotionally and mentally, through exercise, music and spending time with loved ones.",
+      "text": "Maria's favourite dessert is a banana split sundae, which she enjoys after a day of volunteering as a little moment of joy.",
       "speaker": "Maria",
       "statedOn": "2023-05-04",
       "entities": [
         "maria"
       ],
       "sourceTurns": [
-        "D13:19",
+        "D13:18",
+        "D13:19"
+      ]
+    },
+    {
+      "text": "Maria finds balance by taking care of herself physically, emotionally and mentally, through exercise, music and spending time with loved ones.",
+      "speaker": "Maria",
+      "statedOn": "2023-05-04",
+      "entities": [
+        "maria"
+      ],
+      "sourceTurns": [
         "D13:20",
-        "D13:21"
+        "D13:21",
+        "D13:22"
       ]
     },
     {
-      "text": "Maria took a solo trip to Spain in 2022, during a year she found hard, and said the beach there reminded her that life is difficult but there is still hope and beauty, and taught her to rely on her inner strength.",
+      "text": "Maria took a solo trip to Spain in 2022 and photographed a beach there; the trip reminded her that life is hard but there is still hope and beauty, and taught her to rely on her inner strength.",
       "speaker": "Maria",
       "statedOn": "2023-05-04",
       "entities": [
@@ -3444,13 +3300,14 @@
         "spain"
       ],
       "sourceTurns": [
-        "D13:22",
         "D13:23",
-        "D13:24"
+        "D13:24",
+        "D13:25",
+        "D13:26"
       ]
     },
     {
-      "text": "Maria said on 4 May 2023 that her 2022 solo trip to Spain was transformative and taught her to value different perspectives, the power of solitude, and the importance of letting go and trusting life.",
+      "text": "On her 2022 solo trip to Spain Maria realised the value of different perspectives and the power of solitude, and the importance of letting go and trusting life.",
       "speaker": "Maria",
       "statedOn": "2023-05-04",
       "entities": [
@@ -3458,14 +3315,12 @@
         "spain"
       ],
       "sourceTurns": [
-        "D13:25",
-        "D13:26",
         "D13:27",
         "D13:28"
       ]
     },
     {
-      "text": "Maria tried surfing for the first time on her 2022 trip to Spain and kept falling off, which she said taught her the power of not giving up and of trying new things.",
+      "text": "Maria tried surfing for the first time on her 2022 trip to Spain and kept falling off, which taught her the power of not giving up and trying new things.",
       "speaker": "Maria",
       "statedOn": "2023-05-04",
       "entities": [
@@ -3496,29 +3351,29 @@
       ]
     },
     {
-      "text": "In the week before 6 May 2023 John decided to run for office again, even though he had not been successful before, saying he could not let go of his dream of making a difference in his community.",
+      "text": "John decided in the week before 6 May 2023 to run for office again, despite not having been successful before, saying he could not let go of his dream of making a difference in his community.",
       "speaker": "John",
       "statedOn": "2023-05-06",
       "entities": [
         "john",
-        "political-campaign"
+        "johns-political-campaign"
       ],
       "sourceTurns": [
         "D14:1",
-        "D14:2",
-        "D14:3"
+        "D14:2"
       ]
     },
     {
-      "text": "John said on 6 May 2023 that the campaign sometimes felt like too much, and that Maria's encouragement gave him the strength to keep going.",
+      "text": "John said running for office is tough and that he still has a lot to learn, but that Maria's encouragement gives him the motivation and strength to keep going.",
       "speaker": "John",
       "statedOn": "2023-05-06",
       "entities": [
         "john",
         "maria",
-        "political-campaign"
+        "johns-political-campaign"
       ],
       "sourceTurns": [
+        "D14:3",
         "D14:4",
         "D14:5",
         "D14:6",
@@ -3526,7 +3381,7 @@
       ]
     },
     {
-      "text": "As of 6 May 2023 Maria had been involved in charity work that she found connecting and really fulfilling.",
+      "text": "Maria had been involved in charity work as of 6 May 2023 and found it connecting and really fulfilling.",
       "speaker": "Maria",
       "statedOn": "2023-05-06",
       "entities": [
@@ -3538,7 +3393,7 @@
       ]
     },
     {
-      "text": "Maria joined a nearby church on 5 May 2023, because she wanted to feel closer to a community and to her faith.",
+      "text": "Maria joined a nearby church on 5 May 2023 because she wanted to feel closer to a community and to her faith.",
       "speaker": "Maria",
       "statedOn": "2023-05-06",
       "entities": [
@@ -3546,7 +3401,7 @@
         "marias-church"
       ],
       "chrono": [
-        "joined-church"
+        "maria-joins-church"
       ],
       "sourceTurns": [
         "D14:10",
@@ -3554,7 +3409,7 @@
       ]
     },
     {
-      "text": "Maria said on 6 May 2023 that life had been a bit rough lately and that she was taking time to reflect and find some balance.",
+      "text": "Maria said on 6 May 2023 that life had been a bit rough lately but she was doing alright and taking time to reflect and find some balance.",
       "speaker": "Maria",
       "statedOn": "2023-05-06",
       "entities": [
@@ -3565,7 +3420,7 @@
       ]
     },
     {
-      "text": "A power cut hit John's area in the week before 6 May 2023, which he said made him realise the importance of upgrading infrastructure so services stay stable for everyone.",
+      "text": "A power cut in John's area in the week before 6 May 2023 made him realise the importance of upgrading infrastructure so services stay stable for everyone.",
       "speaker": "John",
       "statedOn": "2023-05-06",
       "entities": [
@@ -3577,7 +3432,7 @@
       ]
     },
     {
-      "text": "John said on 6 May 2023 that the roadways in his area are the main thing needing fixing, being full of potholes, dangerous for drivers and damaging to cars.",
+      "text": "John said the roadways in his area are full of potholes, dangerous for drivers and damaging to cars, and need improvement.",
       "speaker": "John",
       "statedOn": "2023-05-06",
       "entities": [
@@ -3589,13 +3444,12 @@
       ]
     },
     {
-      "text": "John said on 6 May 2023 that he was thinking about starting a community project about infrastructure, and asked Maria to work with him to get the neighbourhood's backing; she agreed.",
+      "text": "John was thinking about starting a community project on infrastructure as of 6 May 2023, and asked Maria to work with him to get the neighbourhood's backing.",
       "speaker": "John",
       "statedOn": "2023-05-06",
       "entities": [
         "john",
-        "maria",
-        "infrastructure-community-project"
+        "maria"
       ],
       "sourceTurns": [
         "D14:17",
@@ -3603,13 +3457,12 @@
       ]
     },
     {
-      "text": "John and Maria agreed on 6 May 2023 to fight for better housing, affordable housing and better living conditions in their neighbourhood.",
+      "text": "John and Maria agreed on 6 May 2023 that everyone should have access to affordable housing and that they would fight for better living conditions in their neighbourhood.",
       "speaker": "John",
       "statedOn": "2023-05-06",
       "entities": [
         "john",
-        "maria",
-        "infrastructure-community-project"
+        "maria"
       ],
       "sourceTurns": [
         "D14:19",
@@ -3617,7 +3470,7 @@
       ]
     },
     {
-      "text": "John said on 6 May 2023 that he also wanted to work on improving West County, the area he used to live in.",
+      "text": "John said he also wants to work on improving West County, the area he used to live in.",
       "speaker": "John",
       "statedOn": "2023-05-06",
       "entities": [
@@ -3631,7 +3484,7 @@
       ]
     },
     {
-      "text": "By 20 May 2023 John had been busy with a project to support military veterans and was trying to get a petition going, which he described as rewarding but stressful.",
+      "text": "John had been busy with a project to support military veterans and was trying to get a petition going, as of 20 May 2023, which he found rewarding but stressful.",
       "speaker": "John",
       "statedOn": "2023-05-20",
       "entities": [
@@ -3644,7 +3497,7 @@
       ]
     },
     {
-      "text": "John said on 20 May 2023 that he had always been passionate about veterans and their rights, and that in the week before he had again realised how much they had done, which is why he took on the project as his way of giving back.",
+      "text": "John said he has always been passionate about veterans and their rights, and that in the week before 20 May 2023 he was reminded again how much they had done, which is why he took the project on as his way of giving back.",
       "speaker": "John",
       "statedOn": "2023-05-20",
       "entities": [
@@ -3653,12 +3506,27 @@
       ],
       "sourceTurns": [
         "D15:3",
-        "D15:4",
-        "D15:5"
+        "D15:4"
       ]
     },
     {
-      "text": "Maria offered on 20 May 2023 to help with John's project to support veterans, and John accepted.",
+      "text": "John said the veterans project had taken a lot of work but was worth it, because he wants veterans to know their hard work is appreciated and to be valued in the community.",
+      "speaker": "John",
+      "statedOn": "2023-05-20",
+      "entities": [
+        "john",
+        "veterans-support-project"
+      ],
+      "sourceTurns": [
+        "D15:5",
+        "D15:6",
+        "D15:7",
+        "D15:8",
+        "D15:9"
+      ]
+    },
+    {
+      "text": "Maria offered on 20 May 2023 to help John with his project supporting veterans.",
       "speaker": "Maria",
       "statedOn": "2023-05-20",
       "entities": [
@@ -3667,15 +3535,12 @@
         "veterans-support-project"
       ],
       "sourceTurns": [
-        "D15:6",
-        "D15:7",
-        "D15:8",
-        "D15:9",
-        "D15:10"
+        "D15:10",
+        "D15:11"
       ]
     },
     {
-      "text": "On Friday 19 May 2023 John threw a small party and invited veterans to share their stories, and said the connections, camaraderie and new friendships made it heartwarming and reminded him how important it is to help veterans.",
+      "text": "On Friday 19 May 2023 John and his group threw a small party and invited veterans to share their stories, where they made connections and found camaraderie.",
       "speaker": "John",
       "statedOn": "2023-05-20",
       "entities": [
@@ -3688,7 +3553,18 @@
       "sourceTurns": [
         "D15:11",
         "D15:12",
-        "D15:13",
+        "D15:13"
+      ]
+    },
+    {
+      "text": "John said the veterans' party reminded him of the sense of community and togetherness and made him realise how important it is to help veterans.",
+      "speaker": "John",
+      "statedOn": "2023-05-20",
+      "entities": [
+        "john",
+        "veterans-support-project"
+      ],
+      "sourceTurns": [
         "D15:14",
         "D15:15",
         "D15:16",
@@ -3696,13 +3572,13 @@
       ]
     },
     {
-      "text": "Maria was planning a ring-toss tournament for the homeless shelter's fundraiser later in May 2023, as she told John on 20 May 2023.",
+      "text": "Maria was planning a ring-toss tournament for the homeless shelter's fundraiser later in May 2023.",
       "speaker": "Maria",
       "statedOn": "2023-05-20",
       "entities": [
         "maria",
-        "homeless-shelter",
-        "shelter-fundraiser"
+        "shelter-fundraiser",
+        "homeless-shelter"
       ],
       "sourceTurns": [
         "D15:18",
@@ -3710,7 +3586,7 @@
       ]
     },
     {
-      "text": "By 25 May 2023 John's veterans petition was proving tricky, but he said it had been good for getting back in touch with his buddies and gaining support, and he shared a photograph of workmates from a hiking trip.",
+      "text": "John had been working on the veterans petition as of 25 May 2023, finding it tricky but a good way to get back in touch with his buddies and gain support.",
       "speaker": "John",
       "statedOn": "2023-05-25",
       "entities": [
@@ -3722,20 +3598,34 @@
       ]
     },
     {
-      "text": "Maria was getting ready at the homeless shelter for a fundraiser in the week after 25 May 2023, hoping to raise enough to cover basic needs for homeless people.",
-      "speaker": "Maria",
+      "text": "John went on a hiking trip with his workmates before 25 May 2023 and said they really keep him going.",
+      "speaker": "John",
       "statedOn": "2023-05-25",
       "entities": [
-        "maria",
-        "homeless-shelter",
-        "shelter-fundraiser"
+        "john",
+        "hiking"
       ],
       "sourceTurns": [
+        "D16:1",
         "D16:2"
       ]
     },
     {
-      "text": "The homeless shelter's fundraiser included a chili cook-off, and on 25 May 2023 Maria asked John to help get the word out about it using the poster; he agreed.",
+      "text": "Maria was busy at the homeless shelter preparing a fundraiser for the week after 25 May 2023, hoping to raise enough to cover basic needs for homeless people.",
+      "speaker": "Maria",
+      "statedOn": "2023-05-25",
+      "entities": [
+        "maria",
+        "shelter-fundraiser",
+        "homeless-shelter"
+      ],
+      "sourceTurns": [
+        "D16:2",
+        "D16:3"
+      ]
+    },
+    {
+      "text": "The shelter fundraiser included a chili cook-off, and Maria asked John to help get the word out about it.",
       "speaker": "Maria",
       "statedOn": "2023-05-25",
       "entities": [
@@ -3744,13 +3634,12 @@
         "shelter-fundraiser"
       ],
       "sourceTurns": [
-        "D16:3",
         "D16:4",
         "D16:5"
       ]
     },
     {
-      "text": "Maria asked John on 25 May 2023 to let her know of anyone who might want to volunteer at the fundraiser, and he agreed to ask around.",
+      "text": "Maria asked John to find anyone who might want to volunteer at the shelter fundraiser, and he agreed to ask around.",
       "speaker": "Maria",
       "statedOn": "2023-05-25",
       "entities": [
@@ -3767,7 +3656,7 @@
       ]
     },
     {
-      "text": "John shared a photograph of his family at the beach on 25 May 2023, and he and Maria agreed that such moments give them hope and are worth cherishing.",
+      "text": "John shared a photograph of his family at the beach on 25 May 2023, and he and Maria agreed that such small moments give them hope and make them appreciate life.",
       "speaker": "John",
       "statedOn": "2023-05-25",
       "entities": [
@@ -3787,7 +3676,35 @@
       ]
     },
     {
-      "text": "John's family dog Max, who had been part of the family for ten years, died shortly before 3 June 2023, and John said the family were still sad but comforted by the good times and the memories.",
+      "text": "John’s political ambition developed across the conversation from hoping to get into local politics in December 2022, through talking to community leaders in January 2023 and blogging about policy in April 2023, to deciding in the week before 6 May 2023 to run for office again.",
+      "speaker": "John",
+      "statedOn": "2023-05-06",
+      "entities": [
+        "john",
+        "johns-political-campaign"
+      ],
+      "sourceTurns": [
+        "D1:6",
+        "D4:12",
+        "D12:1",
+        "D14:1"
+      ]
+    },
+    {
+      "text": "Maria's faith became a larger part of her life over the spring of 2023: she bought a cross necklace shortly before 10 April 2023 to feel closer to it, and joined a nearby church on 5 May 2023 to feel closer to a community and her faith.",
+      "speaker": "Maria",
+      "statedOn": "2023-05-06",
+      "entities": [
+        "maria",
+        "marias-church"
+      ],
+      "sourceTurns": [
+        "D11:10",
+        "D14:10"
+      ]
+    },
+    {
+      "text": "John's dog Max, who had been an important part of the family for ten years, died shortly before 3 June 2023, and John said saying goodbye to him was the toughest thing he was dealing with.",
       "speaker": "John",
       "statedOn": "2023-06-03",
       "entities": [
@@ -3796,12 +3713,11 @@
       ],
       "sourceTurns": [
         "D17:1",
-        "D17:2",
-        "D17:3"
+        "D17:2"
       ]
     },
     {
-      "text": "John shared a cherished photograph of Max in the backyard on 3 June 2023 and said Max had taught the family unconditional love and loyalty, a lesson he wanted his children to learn.",
+      "text": "John said his family were all still sad about losing Max but had been comforted by the good times and the memories they had with him.",
       "speaker": "John",
       "statedOn": "2023-06-03",
       "entities": [
@@ -3809,16 +3725,39 @@
         "max"
       ],
       "sourceTurns": [
-        "D17:4",
+        "D17:3",
+        "D17:4"
+      ]
+    },
+    {
+      "text": "John shared a cherished photograph of Max in the backyard, and Maria said remembering him peaceful like that was a good way to honour him.",
+      "speaker": "John",
+      "statedOn": "2023-06-03",
+      "entities": [
+        "john",
+        "max"
+      ],
+      "sourceTurns": [
         "D17:5",
-        "D17:6",
+        "D17:6"
+      ]
+    },
+    {
+      "text": "John said Max taught his family about unconditional love and loyalty and that he wants his children to learn that too.",
+      "speaker": "John",
+      "statedOn": "2023-06-03",
+      "entities": [
+        "john",
+        "max"
+      ],
+      "sourceTurns": [
         "D17:7",
         "D17:8",
         "D17:9"
       ]
     },
     {
-      "text": "John said on 3 June 2023 that his family were considering adopting a rescue dog, both for the love and to teach his children responsibility and compassion.",
+      "text": "John's family were considering adopting a rescue dog, as of 3 June 2023, both for the love and to teach the children responsibility and compassion.",
       "speaker": "John",
       "statedOn": "2023-06-03",
       "entities": [
@@ -3830,7 +3769,7 @@
       ]
     },
     {
-      "text": "Maria had just started volunteering at a local dog shelter once a month as of 3 June 2023, and offered to help John's family if they adopted a dog.",
+      "text": "Maria had just started volunteering at a local dog shelter once a month, as of 3 June 2023, and offered to help if John's family adopt a dog.",
       "speaker": "Maria",
       "statedOn": "2023-06-03",
       "entities": [
@@ -3840,14 +3779,25 @@
       ],
       "sourceTurns": [
         "D17:12",
-        "D17:13",
+        "D17:13"
+      ]
+    },
+    {
+      "text": "John thanked Maria for offering to help with a rescue dog and said her support means a lot to him.",
+      "speaker": "John",
+      "statedOn": "2023-06-03",
+      "entities": [
+        "john",
+        "maria"
+      ],
+      "sourceTurns": [
         "D17:14",
         "D17:15",
         "D17:16"
       ]
     },
     {
-      "text": "Maria went camping with friends from her church over the weekend of 10-11 June 2023 and said it was a blast and took her mind off things.",
+      "text": "Maria went camping with some friends from her church over the weekend of 10-11 June 2023 and said it was a blast that took her mind off things.",
       "speaker": "Maria",
       "statedOn": "2023-06-12",
       "entities": [
@@ -3856,14 +3806,14 @@
         "camping"
       ],
       "chrono": [
-        "church-camping"
+        "maria-camping-weekend"
       ],
       "sourceTurns": [
         "D18:1"
       ]
     },
     {
-      "text": "John went on a mountaineering trip with some workmates in the week before 12 June 2023, reached the summit, and said the view was stunning and that it helped clear his head.",
+      "text": "John went on a mountaineering trip with some workmates in the week before 12 June 2023, which was great and helped clear his head.",
       "speaker": "John",
       "statedOn": "2023-06-12",
       "entities": [
@@ -3871,17 +3821,28 @@
       ],
       "sourceTurns": [
         "D18:2",
-        "D18:3",
+        "D18:3"
+      ]
+    },
+    {
+      "text": "John and his workmates made it to the top on their mountaineering trip and found the view stunning, though the climb was tough.",
+      "speaker": "John",
+      "statedOn": "2023-06-12",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
         "D18:4"
       ]
     },
     {
-      "text": "Maria's family went on a road trip to Oregon when she was younger, and she remembered hiking to the top and a waterfall with a bridge over it as the prettiest spot, which felt to her like a fairy tale.",
+      "text": "Maria's family went on a road trip to Oregon when she was younger, where she hiked to the top and saw a waterfall with a bridge over it that made her feel she was in a fairy tale.",
       "speaker": "Maria",
       "statedOn": "2023-06-12",
       "entities": [
         "maria",
-        "oregon"
+        "oregon",
+        "hiking"
       ],
       "sourceTurns": [
         "D18:3",
@@ -3891,12 +3852,12 @@
       ]
     },
     {
-      "text": "John and Maria agreed on 12 June 2023 that nature calms them down and works like a reset button when things get tough.",
-      "speaker": "John",
+      "text": "Maria and John agreed on 12 June 2023 that nature calms them down and helps them recognise what truly matters.",
+      "speaker": "Maria",
       "statedOn": "2023-06-12",
       "entities": [
-        "john",
-        "maria"
+        "maria",
+        "john"
       ],
       "sourceTurns": [
         "D18:8",
@@ -3905,7 +3866,7 @@
       ]
     },
     {
-      "text": "Maria has been camping a few times but has never tried mountain climbing, as she said on 12 June 2023.",
+      "text": "Maria has been camping a few times but has never tried mountain climbing.",
       "speaker": "Maria",
       "statedOn": "2023-06-12",
       "entities": [
@@ -3917,7 +3878,7 @@
       ]
     },
     {
-      "text": "John has been camping plenty of times and said on 12 June 2023 that he loves how uncomplicated it is and how it lets him get away from everything and be at one with nature.",
+      "text": "John has been camping plenty of times and loves how uncomplicated it is and how it lets him get away from it all and be at one with nature.",
       "speaker": "John",
       "statedOn": "2023-06-12",
       "entities": [
@@ -3931,7 +3892,7 @@
       ]
     },
     {
-      "text": "Maria said on 12 June 2023 that she finds her Zen through a moment to herself with her favourite music, and through aerial yoga, whose upside-down poses are her favourites because they make her feel free and light.",
+      "text": "Maria finds her peace through a moment to herself with her favourite music, and through aerial yoga, which lets her switch off and focus on her body.",
       "speaker": "Maria",
       "statedOn": "2023-06-12",
       "entities": [
@@ -3940,14 +3901,25 @@
       ],
       "sourceTurns": [
         "D18:15",
-        "D18:16",
+        "D18:16"
+      ]
+    },
+    {
+      "text": "Maria's favourite aerial yoga poses are the upside-down ones, which make her feel free and light.",
+      "speaker": "Maria",
+      "statedOn": "2023-06-12",
+      "entities": [
+        "maria",
+        "aerial-yoga"
+      ],
+      "sourceTurns": [
         "D18:17",
         "D18:18",
         "D18:19"
       ]
     },
     {
-      "text": "John spent a day at the park with his family shortly before 12 June 2023, where his children had a lot of fun on the playground.",
+      "text": "John had an awesome day at the park with his family shortly before 12 June 2023, where the children had a lot of fun on the playground.",
       "speaker": "John",
       "statedOn": "2023-06-12",
       "entities": [
@@ -3961,7 +3933,7 @@
       ]
     },
     {
-      "text": "Maria joined a gym in the week before 16 June 2023, and said she was sticking to her workout routine and found the people and the atmosphere welcoming.",
+      "text": "Maria joined a gym in the week before 16 June 2023, has been sticking to her workout routine, and finds the people awesome and the atmosphere welcoming.",
       "speaker": "Maria",
       "statedOn": "2023-06-16",
       "entities": [
@@ -3974,7 +3946,7 @@
       ]
     },
     {
-      "text": "Maria's fitness goals as of 16 June 2023 were to get stronger and improve her endurance, and she was trying kundalini yoga.",
+      "text": "Maria’s fitness goals as of 16 June 2023 were to get stronger and improve her endurance, and she was trying kundalini yoga.",
       "speaker": "Maria",
       "statedOn": "2023-06-16",
       "entities": [
@@ -3986,7 +3958,7 @@
       ]
     },
     {
-      "text": "John was trying out different workout regimes as of 16 June 2023 and wanted to try rock climbing to push his limits; Maria had never tried it.",
+      "text": "John was trying out different workout regimes as of 16 June 2023 and thought rock climbing sounded like a fun way to push his limits; Maria had never tried it.",
       "speaker": "John",
       "statedOn": "2023-06-16",
       "entities": [
@@ -3999,9 +3971,9 @@
       ]
     },
     {
-      "key": "promoted-assistant-manager",
+      "key": "john-works-mech-eng",
       "superseded": true,
-      "text": "John was promoted at work to assistant manager shortly before 16 June 2023, after what he called a long time coming, and described it as a stepping stone to bigger things.",
+      "text": "John worked at a mechanical engineering company and had just been promoted to assistant manager as of 16 June 2023, a promotion he said had been a long time coming and felt like a stepping stone to bigger things.",
       "speaker": "John",
       "statedOn": "2023-06-16",
       "entities": [
@@ -4015,7 +3987,7 @@
       ]
     },
     {
-      "text": "John keeps a golden trophy that commemorates his journey to his promotion and symbolises the obstacles he had to overcome, as he explained on 16 June 2023.",
+      "text": "John's trophy commemorates his journey and is a symbol of all the obstacles he had to overcome to reach his promotion.",
       "speaker": "John",
       "statedOn": "2023-06-16",
       "entities": [
@@ -4028,36 +4000,34 @@
       ]
     },
     {
-      "text": "John said on 16 June 2023 that the hurdles on the way to his promotion included technical and workplace problems, but that the worst was self-doubt, and that support at home and his own grit got him through.",
+      "text": "John faced technical and workplace hurdles and above all self-doubt on the way to his promotion, and got through with support at home and his own grit.",
       "speaker": "John",
       "statedOn": "2023-06-16",
       "entities": [
-        "john",
-        "mechanical-engineering-company"
+        "john"
       ],
       "sourceTurns": [
         "D19:12",
         "D19:13",
         "D19:14",
-        "D19:15"
+        "D19:15",
+        "D19:16"
       ]
     },
     {
-      "text": "John usually works regular working hours but sometimes brings work home, as he said on 16 June 2023 while showing his desk.",
+      "text": "John usually works regular work hours and sometimes brings work home.",
       "speaker": "John",
       "statedOn": "2023-06-16",
       "entities": [
-        "john",
-        "mechanical-engineering-company"
+        "john"
       ],
       "sourceTurns": [
-        "D19:16",
         "D19:17",
         "D19:18"
       ]
     },
     {
-      "text": "John said on 16 June 2023 that he balances work and family by organising his time and making sure he is there for the important things.",
+      "text": "John balances work and family by organizing his time and making sure he is there for the important things.",
       "speaker": "John",
       "statedOn": "2023-06-16",
       "entities": [
@@ -4070,7 +4040,7 @@
       ]
     },
     {
-      "text": "John's family had a vacation in California that he remembered on 16 June 2023 for a gorgeous sunset and an evening stroll along the shore.",
+      "text": "John's family had a special vacation in California that he remembers for a gorgeous sunset and an evening strolling along the shore.",
       "speaker": "John",
       "statedOn": "2023-06-16",
       "entities": [
@@ -4082,7 +4052,7 @@
       ]
     },
     {
-      "text": "Maria had a family vacation in Florida that she remembered on 16 June 2023 for the amazing colours and a feeling of gratitude sitting there with her family.",
+      "text": "Maria had a family vacation in Florida where the colours of the sunset over the water left her feeling grateful to be sitting there with her family.",
       "speaker": "Maria",
       "statedOn": "2023-06-16",
       "entities": [
@@ -4090,24 +4060,14 @@
         "florida"
       ],
       "sourceTurns": [
-        "D19:23"
-      ]
-    },
-    {
-      "text": "John shared a photograph of two of his children playing in the ocean waves on a family vacation, and said on 16 June 2023 that these family times are why life is great.",
-      "speaker": "John",
-      "statedOn": "2023-06-16",
-      "entities": [
-        "john"
-      ],
-      "sourceTurns": [
+        "D19:23",
         "D19:24",
         "D19:25",
         "D19:26"
       ]
     },
     {
-      "text": "As of 27 June 2023 Maria had been struggling, and said she was focusing on the positive and relying on her family and friends, who had been her rock and reminded her she was not alone.",
+      "text": "Maria said on 27 June 2023 that she had been struggling but was focusing on the positive and relying on her friends and family for support.",
       "speaker": "Maria",
       "statedOn": "2023-06-27",
       "entities": [
@@ -4115,12 +4075,22 @@
       ],
       "sourceTurns": [
         "D20:1",
-        "D20:2",
+        "D20:2"
+      ]
+    },
+    {
+      "text": "Maria said her family had been her rock, giving her words of encouragement and reminding her she is not alone.",
+      "speaker": "Maria",
+      "statedOn": "2023-06-27",
+      "entities": [
+        "maria"
+      ],
+      "sourceTurns": [
         "D20:3"
       ]
     },
     {
-      "text": "John and his family went to a live music event in the week before 27 June 2023, and he said watching them dancing and the energy in the air was amazing.",
+      "text": "John and his family went to a live music event in the week before 27 June 2023 and had a blast, and he loved seeing them dancing and having fun.",
       "speaker": "John",
       "statedOn": "2023-06-27",
       "entities": [
@@ -4128,12 +4098,22 @@
       ],
       "sourceTurns": [
         "D20:4",
-        "D20:5",
+        "D20:5"
+      ]
+    },
+    {
+      "text": "John said moments like the live music event remind him to appreciate the people he loves, and that finding silver linings keeps him going when life is tough.",
+      "speaker": "John",
+      "statedOn": "2023-06-27",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
         "D20:6"
       ]
     },
     {
-      "text": "Maria said on 27 June 2023 that volunteering at the shelter was how she found silver linings during a hard time.",
+      "text": "Maria said volunteering at the homeless shelter is how she finds silver linings in tough times.",
       "speaker": "Maria",
       "statedOn": "2023-06-27",
       "entities": [
@@ -4146,7 +4126,7 @@
       ]
     },
     {
-      "text": "Maria's standout memory from the shelter, told on 27 June 2023, was someone who had been sad for months suddenly laughing while she was playing with the children.",
+      "text": "The memory that stands out most for Maria from the homeless shelter is someone who had been sad for months suddenly laughing while she was playing with the children.",
       "speaker": "Maria",
       "statedOn": "2023-06-27",
       "entities": [
@@ -4156,12 +4136,11 @@
       "sourceTurns": [
         "D20:9",
         "D20:10",
-        "D20:11",
-        "D20:12"
+        "D20:11"
       ]
     },
     {
-      "text": "Maria said on 27 June 2023 that she would keep volunteering, as her way of spreading kindness and positivity.",
+      "text": "Maria said she would carry on volunteering as her way of spreading kindness and positivity.",
       "speaker": "Maria",
       "statedOn": "2023-06-27",
       "entities": [
@@ -4169,6 +4148,7 @@
         "homeless-shelter"
       ],
       "sourceTurns": [
+        "D20:12",
         "D20:13",
         "D20:14",
         "D20:15",
@@ -4178,7 +4158,7 @@
       ]
     },
     {
-      "text": "Maria met three children at the homeless shelter shortly before 3 July 2023 and said their smiles warmed her heart.",
+      "text": "Maria met three children at the homeless shelter shortly before 3 July 2023 whose smiles warmed her heart.",
       "speaker": "Maria",
       "statedOn": "2023-07-03",
       "entities": [
@@ -4187,18 +4167,19 @@
       ],
       "sourceTurns": [
         "D21:1",
-        "D21:2"
+        "D21:2",
+        "D21:3"
       ]
     },
     {
-      "text": "On 2 July 2023 a car ran a red light and hit the car Maria was travelling in; the car was badly damaged but everyone was unhurt.",
+      "text": "On 2 July 2023 a car ran a red light and hit the car Maria was travelling in, and thankfully everyone was unhurt.",
       "speaker": "Maria",
       "statedOn": "2023-07-03",
       "entities": [
         "maria"
       ],
       "chrono": [
-        "car-accident"
+        "maria-car-accident"
       ],
       "sourceTurns": [
         "D21:3",
@@ -4207,12 +4188,11 @@
       ]
     },
     {
-      "text": "Maria's cousin had to leave her home and find a new place in a hurry shortly before July 2023, which was stressful for her, and Maria was helping her look.",
+      "text": "Maria was helping her cousin find a new place to live as of 3 July 2023, after her cousin had to leave in a hurry; it had been really stressful for her but she was making progress.",
       "speaker": "Maria",
       "statedOn": "2023-07-03",
       "entities": [
-        "maria",
-        "marias-cousin"
+        "maria"
       ],
       "sourceTurns": [
         "D21:5",
@@ -4221,13 +4201,12 @@
       ]
     },
     {
-      "text": "John offered on 3 July 2023 to look for resources and organisations that could help Maria's cousin find somewhere to live, and Maria accepted.",
+      "text": "John offered on 3 July 2023 to look for resources and organizations that could help Maria's cousin find somewhere to live.",
       "speaker": "John",
       "statedOn": "2023-07-03",
       "entities": [
         "john",
-        "maria",
-        "marias-cousin"
+        "maria"
       ],
       "sourceTurns": [
         "D21:8",
@@ -4236,24 +4215,13 @@
         "D21:11",
         "D21:12",
         "D21:13",
-        "D21:14"
-      ]
-    },
-    {
-      "text": "Maria said on 3 July 2023 that kindness and compassion matter and that small acts of kindness can make a big difference in a challenging life.",
-      "speaker": "Maria",
-      "statedOn": "2023-07-03",
-      "entities": [
-        "maria"
-      ],
-      "sourceTurns": [
+        "D21:14",
         "D21:15",
-        "D21:16",
-        "D21:17"
+        "D21:16"
       ]
     },
     {
-      "text": "Laura, one of the residents at the homeless shelter, wrote Maria and the volunteers a letter expressing her gratitude, which Maria described on 3 July 2023 as showing the impact they had made on her life.",
+      "text": "Laura, one of the residents at the homeless shelter, wrote the volunteers a letter expressing her gratitude, which Maria shared on 3 July 2023.",
       "speaker": "Maria",
       "statedOn": "2023-07-03",
       "entities": [
@@ -4264,13 +4232,25 @@
       "sourceTurns": [
         "D21:17",
         "D21:18",
-        "D21:19",
+        "D21:19"
+      ]
+    },
+    {
+      "text": "Maria said Laura's letter showed the impact the volunteers had made on her life, and that making a difference is why she loves volunteering.",
+      "speaker": "Maria",
+      "statedOn": "2023-07-03",
+      "entities": [
+        "maria",
+        "laura",
+        "homeless-shelter"
+      ],
+      "sourceTurns": [
         "D21:20",
         "D21:21"
       ]
     },
     {
-      "text": "John took part in a marching event for veterans' rights shortly before 3 July 2023, out of his long-standing respect for the military and a wish to stand up for what he believes in.",
+      "text": "John took part in a marching event for veterans' rights shortly before 3 July 2023, which reminded him how much veterans sacrifice.",
       "speaker": "John",
       "statedOn": "2023-07-03",
       "entities": [
@@ -4279,12 +4259,11 @@
       ],
       "sourceTurns": [
         "D21:22",
-        "D21:23",
-        "D21:24"
+        "D21:23"
       ]
     },
     {
-      "text": "John said on 3 July 2023 that being at the veterans' rights march among people who shared his values reminded him how important activism is and motivated him.",
+      "text": "John said he has always had great respect for the military and joined the march to show his support and stand up for what he believes in, and that being around others who shared his values motivated him.",
       "speaker": "John",
       "statedOn": "2023-07-03",
       "entities": [
@@ -4292,6 +4271,7 @@
         "veterans-support-project"
       ],
       "sourceTurns": [
+        "D21:24",
         "D21:25",
         "D21:26",
         "D21:27",
@@ -4300,11 +4280,12 @@
       ]
     },
     {
-      "text": "John said on 5 July 2023 that education and infrastructure shape communities and can stunt a neighbourhood's growth when they are lacking, and that although it felt like an uphill battle it drove him to make things better.",
+      "text": "John said on 5 July 2023 that he had been thinking about how education and infrastructure shape communities and how badly their lack stunts growth in neighbourhoods.",
       "speaker": "John",
       "statedOn": "2023-07-05",
       "entities": [
-        "john"
+        "john",
+        "johns-political-campaign"
       ],
       "sourceTurns": [
         "D22:1",
@@ -4314,7 +4295,19 @@
       ]
     },
     {
-      "text": "John shared a family photograph taken on a trip in 2022 for his daughter Sara's birthday, and said on 5 July 2023 that his family motivate him to keep striving for change.",
+      "text": "John said he sometimes doubts whether he is making a difference, and that knowing there are people who understand his work helps keep him going.",
+      "speaker": "John",
+      "statedOn": "2023-07-05",
+      "entities": [
+        "john",
+        "maria"
+      ],
+      "sourceTurns": [
+        "D22:5"
+      ]
+    },
+    {
+      "text": "The family photograph John shared on 5 July 2023 was taken on a trip in 2022 for his daughter Sara's birthday.",
       "speaker": "John",
       "statedOn": "2023-07-05",
       "entities": [
@@ -4322,13 +4315,12 @@
         "sara"
       ],
       "sourceTurns": [
-        "D22:5",
         "D22:6",
         "D22:7"
       ]
     },
     {
-      "text": "John said on 5 July 2023 that when times get hard he looks at the family photograph and remembers why he is doing what he is doing, and that he sometimes doubts whether he is making a difference.",
+      "text": "John said his family motivate him and remind him why he is working for change when times get hard.",
       "speaker": "John",
       "statedOn": "2023-07-05",
       "entities": [
@@ -4340,7 +4332,7 @@
       ]
     },
     {
-      "text": "Maria said on 5 July 2023 that she is inspired by chatting to people, volunteering and listening to music.",
+      "text": "Maria is inspired by chatting to people, volunteering and listening to music.",
       "speaker": "Maria",
       "statedOn": "2023-07-05",
       "entities": [
@@ -4351,7 +4343,7 @@
       ]
     },
     {
-      "text": "John said on 5 July 2023 that his family, exercise and spending time with friends are what keep him inspired.",
+      "text": "John is inspired by his family, exercise and spending time with friends.",
       "speaker": "John",
       "statedOn": "2023-07-05",
       "entities": [
@@ -4365,7 +4357,7 @@
       ]
     },
     {
-      "text": "John took a photograph of a sunset over the ocean on a walk in the week before 5 July 2023, and said he sees sunsets like that at least once a week on his walks and uses them to disconnect and find peace.",
+      "text": "John photographed a sunset on a walk in the week before 5 July 2023 and said he sees sunsets like that at least once a week, using the walks to disconnect, think and find peace.",
       "speaker": "John",
       "statedOn": "2023-07-05",
       "entities": [
@@ -4378,7 +4370,7 @@
       ]
     },
     {
-      "text": "Maria had been taking regular me-time walks at a park near her home as of 5 July 2023, and said it had made a big impact.",
+      "text": "Maria had been taking regular 'me-time' walks at a park near her as of 5 July 2023, and said they had made a big impact.",
       "speaker": "Maria",
       "statedOn": "2023-07-05",
       "entities": [
@@ -4392,7 +4384,7 @@
       ]
     },
     {
-      "text": "A nasty flood hit West County, John's old area, in the week before 7 July 2023, ruining lots of homes because the infrastructure was poor, which John said reminded him things need fixing in his community.",
+      "text": "A nasty flood hit West County, John's old area, in the week before 7 July 2023, ruining lots of homes because the infrastructure was not good.",
       "speaker": "John",
       "statedOn": "2023-07-07",
       "entities": [
@@ -4405,13 +4397,13 @@
       ]
     },
     {
-      "text": "John was getting people together after the flood for a meeting to discuss potential solutions, and Maria agreed on 7 July 2023 to join it and contribute.",
+      "text": "John was getting people together after the flood to discuss potential solutions and asked for Maria’s thoughts, and she agreed to join the meeting.",
       "speaker": "John",
       "statedOn": "2023-07-07",
       "entities": [
         "john",
         "maria",
-        "infrastructure-community-project"
+        "west-county"
       ],
       "sourceTurns": [
         "D23:3",
@@ -4420,8 +4412,8 @@
       ]
     },
     {
-      "text": "John and Maria agreed on 7 July 2023 to keep working together on their community, saying that small actions add up and that they value each other's friendship and shared passion.",
-      "speaker": "Maria",
+      "text": "John and Maria said on 7 July 2023 that their community work together matters however small the steps, and agreed to keep going.",
+      "speaker": "John",
       "statedOn": "2023-07-07",
       "entities": [
         "john",
@@ -4439,19 +4431,22 @@
       ]
     },
     {
-      "text": "Maria went to have dinner with some friends from her gym on the evening of 7 July 2023.",
+      "text": "Maria was going for dinner with some friends from her gym on 7 July 2023.",
       "speaker": "Maria",
       "statedOn": "2023-07-07",
       "entities": [
         "maria",
         "marias-gym"
       ],
+      "chrono": [
+        "maria-gym-dinner"
+      ],
       "sourceTurns": [
         "D23:14"
       ]
     },
     {
-      "text": "John visited a veterans' hospital in the week before 17 July 2023, met people there, and said it made him appreciate what he has and the need to give back.",
+      "text": "John visited a veterans' hospital in the week before 17 July 2023 and met people there who made him appreciate what he has and the need to give back.",
       "speaker": "John",
       "statedOn": "2023-07-17",
       "entities": [
@@ -4464,7 +4459,7 @@
       ]
     },
     {
-      "text": "At the veterans' hospital John heard stories from an elderly veteran named Samuel, which he found inspiring and heartbreaking, and said the veterans' resilience reminded him why he had wanted to join the military.",
+      "text": "At the veterans' hospital John heard stories from an elderly veteran named Samuel, which he found inspiring and heartbreaking and which reminded him why he had wanted to join the military.",
       "speaker": "John",
       "statedOn": "2023-07-17",
       "entities": [
@@ -4477,7 +4472,7 @@
       ]
     },
     {
-      "text": "John said on 17 July 2023 that he was glad to be part of the organisation he does veterans' work with, and that its passionate people are like a family who always support each other.",
+      "text": "John said the organization he works with on veterans' causes is full of passionate people and is like a family, always supporting each other.",
       "speaker": "John",
       "statedOn": "2023-07-17",
       "entities": [
@@ -4489,38 +4484,46 @@
       ]
     },
     {
-      "text": "Maria had a picnic with friends from her church over the weekend of 15-16 July 2023, where they sat under the trees, ate and played games including charades and a scavenger hunt.",
+      "text": "Maria had a picnic with some friends from her church over the weekend of 15-16 July 2023, sitting under the trees, playing games and eating.",
       "speaker": "Maria",
       "statedOn": "2023-07-17",
       "entities": [
         "maria",
         "marias-church"
       ],
-      "chrono": [
-        "church-picnic"
-      ],
       "sourceTurns": [
         "D24:6",
-        "D24:7",
-        "D24:8"
+        "D24:7"
       ]
     },
     {
-      "text": "John saw arts and crafts, activities and games for families at a community event in June 2023, and planned to set up something similar for his children, family and friends.",
+      "text": "At the church picnic Maria and her friends played charades and a scavenger hunt and had a good laugh.",
+      "speaker": "Maria",
+      "statedOn": "2023-07-17",
+      "entities": [
+        "maria",
+        "marias-church"
+      ],
+      "sourceTurns": [
+        "D24:8",
+        "D24:9"
+      ]
+    },
+    {
+      "text": "John saw arts and crafts activities at a community event in June 2023 and planned to set up something similar for his children, family and friends.",
       "speaker": "John",
       "statedOn": "2023-07-17",
       "entities": [
         "john"
       ],
       "sourceTurns": [
-        "D24:9",
         "D24:10",
         "D24:11",
         "D24:12"
       ]
     },
     {
-      "text": "John and Maria agreed on 17 July 2023 that making connections and enjoying life's simpler moments matter, and that little acts of kindness have a big effect.",
+      "text": "John and Maria agreed on 17 July 2023 that making connections, enjoying life's simpler moments and small acts of kindness are what matter.",
       "speaker": "John",
       "statedOn": "2023-07-17",
       "entities": [
@@ -4536,38 +4539,89 @@
       ]
     },
     {
-      "text": "As of 22 July 2023 John said he was really enjoying his new job and that his team had been super encouraging and inspiring.",
+      "text": "John's involvement with the military ran from failing the aptitude test at the end of 2022, through retaking it with good results in the week before 6 March 2023, to a veterans support project and petition by May 2023, a march for veterans' rights at the start of July 2023 and a veterans' hospital visit in mid-July 2023.",
+      "speaker": "John",
+      "statedOn": "2023-07-17",
+      "entities": [
+        "john",
+        "veterans-support-project"
+      ],
+      "sourceTurns": [
+        "D3:11",
+        "D8:18",
+        "D15:1",
+        "D21:22",
+        "D24:1"
+      ]
+    },
+    {
+      "text": "Maria's church became a centre of her social life after she joined it on 5 May 2023: she went camping with friends from it over the weekend of 10-11 June 2023 and had a picnic with them over the weekend of 15-16 July 2023.",
+      "speaker": "Maria",
+      "statedOn": "2023-07-17",
+      "entities": [
+        "maria",
+        "marias-church"
+      ],
+      "sourceTurns": [
+        "D14:10",
+        "D18:1",
+        "D24:6"
+      ]
+    },
+    {
+      "text": "John said on 22 July 2023 that he was really enjoying his new job and that his team had been super encouraging and inspiring.",
       "speaker": "John",
       "statedOn": "2023-07-22",
       "entities": [
-        "john",
-        "mechanical-engineering-company"
+        "john"
       ],
       "sourceTurns": [
         "D25:1"
       ]
     },
     {
-      "text": "Maria went hiking with friends from her church over the weekend of 15-16 July 2023, and said reaching the top and seeing the view gave her a sense of peace and of being part of something bigger.",
+      "text": "Maria went hiking with friends from her church over the weekend of 15-16 July 2023 and found being surrounded by supportive people and enjoying nature refreshing.",
       "speaker": "Maria",
       "statedOn": "2023-07-22",
       "entities": [
         "maria",
-        "marias-church"
-      ],
-      "chrono": [
-        "church-hike"
+        "marias-church",
+        "hiking"
       ],
       "sourceTurns": [
         "D25:2",
-        "D25:3",
-        "D25:4",
-        "D25:5",
-        "D25:6"
+        "D25:3"
       ]
     },
     {
-      "text": "Maria planned to explore more and to volunteer at shelters in August 2023, as she told John on 22 July 2023.",
+      "text": "Maria went on the church hike wanting to make connections, laugh together and take in nature's beauty.",
+      "speaker": "Maria",
+      "statedOn": "2023-07-22",
+      "entities": [
+        "maria",
+        "marias-church",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D25:4",
+        "D25:5"
+      ]
+    },
+    {
+      "text": "Maria said the best part of the church hike was reaching the top, where the view was breathtaking and made her feel part of something special and at peace.",
+      "speaker": "Maria",
+      "statedOn": "2023-07-22",
+      "entities": [
+        "maria",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D25:6",
+        "D25:7"
+      ]
+    },
+    {
+      "text": "Maria planned to explore more and to volunteer at shelters in August 2023.",
       "speaker": "Maria",
       "statedOn": "2023-07-22",
       "entities": [
@@ -4575,12 +4629,12 @@
         "homeless-shelter"
       ],
       "sourceTurns": [
-        "D25:7",
-        "D25:8"
+        "D25:8",
+        "D25:9"
       ]
     },
     {
-      "text": "John goes often to a yoga studio he described on 22 July 2023 as having a really chill vibe and awesome instructors.",
+      "text": "John goes often to a yoga studio he describes as having a really chill vibe and awesome instructors.",
       "speaker": "John",
       "statedOn": "2023-07-22",
       "entities": [
@@ -4589,28 +4643,30 @@
         "yoga"
       ],
       "sourceTurns": [
-        "D25:9",
         "D25:10",
-        "D25:11"
+        "D25:11",
+        "D25:12"
       ]
     },
     {
-      "text": "John's yoga studio offers a range of classes including yoga, kickboxing and circuit training, as he told Maria on 22 July 2023.",
+      "text": "John's yoga studio offers a range of classes including yoga, kickboxing and circuit training, which keeps things interesting for him.",
       "speaker": "John",
       "statedOn": "2023-07-22",
       "entities": [
         "john",
         "yoga-studio",
+        "yoga",
         "kickboxing"
       ],
       "sourceTurns": [
-        "D25:12",
         "D25:13",
-        "D25:14"
+        "D25:14",
+        "D25:15",
+        "D25:16"
       ]
     },
     {
-      "text": "John had also done weight training at the yoga studio and said on 22 July 2023 that he found it challenging but peaceful, rather like yoga.",
+      "text": "John had also done weight training by 22 July 2023 and found it challenging but peaceful, a bit like yoga.",
       "speaker": "John",
       "statedOn": "2023-07-22",
       "entities": [
@@ -4618,15 +4674,13 @@
         "yoga-studio"
       ],
       "sourceTurns": [
-        "D25:15",
-        "D25:16",
         "D25:17",
         "D25:18",
         "D25:19"
       ]
     },
     {
-      "text": "Maria went off to bake some cakes at the end of the conversation of 22 July 2023.",
+      "text": "Maria was going off to bake some cakes on 22 July 2023.",
       "speaker": "Maria",
       "statedOn": "2023-07-22",
       "entities": [
@@ -4637,7 +4691,7 @@
       ]
     },
     {
-      "text": "In the week before 31 July 2023 Maria dropped off the things she had baked at the homeless shelter, and said it left her more motivated than ever to help people.",
+      "text": "Maria dropped off some baking she had done at the homeless shelter in the week before 31 July 2023 and said it left her more motivated than ever to help people.",
       "speaker": "Maria",
       "statedOn": "2023-07-31",
       "entities": [
@@ -4649,7 +4703,7 @@
       ]
     },
     {
-      "text": "John joined a fire-fighting brigade shortly before 31 July 2023, and said Maria's work at the homeless shelter had made him think about how he could give back to his community too.",
+      "text": "John joined a fire-fighting brigade shortly before 31 July 2023, prompted by Maria's work at the homeless shelter, and said it felt great to do something to give back to his community.",
       "speaker": "John",
       "statedOn": "2023-07-31",
       "entities": [
@@ -4663,7 +4717,7 @@
       ]
     },
     {
-      "text": "John found the fire brigade training intense and taxing but said it changed his view on helping others, and his crew had their first call-out on Sunday 30 July 2023.",
+      "text": "John found the fire brigade's training intense and taxing but said it changed his view on helping others, and the brigade had its first call-out with him on Sunday 30 July 2023.",
       "speaker": "John",
       "statedOn": "2023-07-31",
       "entities": [
@@ -4671,7 +4725,7 @@
         "fire-brigade"
       ],
       "chrono": [
-        "first-callout"
+        "brigade-first-callout"
       ],
       "sourceTurns": [
         "D26:4",
@@ -4679,7 +4733,7 @@
       ]
     },
     {
-      "text": "On the call-out of 30 July 2023 John's fire crew arrived to chaos, pulled together and saved a family from a burning building.",
+      "text": "At the call-out on 30 July 2023 John's fire brigade team arrived to chaos, pulled together and saved a family from a burning building.",
       "speaker": "John",
       "statedOn": "2023-07-31",
       "entities": [
@@ -4687,7 +4741,7 @@
         "fire-brigade"
       ],
       "chrono": [
-        "first-callout"
+        "brigade-first-callout"
       ],
       "sourceTurns": [
         "D26:6",
@@ -4695,7 +4749,7 @@
       ]
     },
     {
-      "text": "As of 31 July 2023 John said his fire brigade team trust and rely on one another and have become like family to him, a bond he said he had not felt since his time in the military.",
+      "text": "John said he and his fire brigade team trust and rely on one another, have different skills that all contribute, and have become like family to him.",
       "speaker": "John",
       "statedOn": "2023-07-31",
       "entities": [
@@ -4704,7 +4758,18 @@
       ],
       "sourceTurns": [
         "D26:8",
-        "D26:9",
+        "D26:9"
+      ]
+    },
+    {
+      "text": "John said on 31 July 2023 that the bond he felt in the fire brigade was one he had not felt since his time in the military.",
+      "speaker": "John",
+      "statedOn": "2023-07-31",
+      "entities": [
+        "john",
+        "fire-brigade"
+      ],
+      "sourceTurns": [
         "D26:10",
         "D26:11",
         "D26:12"
@@ -4727,20 +4792,20 @@
       ]
     },
     {
-      "text": "By 3 August 2023 John had asked his family and friends to join the virtual support group he belongs to and to be advocates for the military, and said it was great to see so many people backing those serving the nation.",
+      "text": "John asked his family and friends, on or before 3 August 2023, to join the virtual support group he belongs to and to be advocates for the military.",
       "speaker": "John",
       "statedOn": "2023-08-03",
       "entities": [
         "john",
-        "service-online-group",
-        "veterans-support-project"
+        "service-online-group"
       ],
       "sourceTurns": [
-        "D27:1"
+        "D27:1",
+        "D27:2"
       ]
     },
     {
-      "text": "As of 3 August 2023 Maria was still volunteering at a homeless shelter and finding it rewarding.",
+      "text": "Maria started volunteering at the homeless shelter about a year before August 2023, after witnessing a family struggling on the streets and reaching out to ask the shelter whether they needed volunteers.",
       "speaker": "Maria",
       "statedOn": "2023-08-03",
       "entities": [
@@ -4748,26 +4813,14 @@
         "homeless-shelter"
       ],
       "sourceTurns": [
-        "D27:2",
-        "D27:3"
-      ]
-    },
-    {
-      "text": "Maria started volunteering at the homeless shelter about a year before August 2023, after witnessing a family struggling on the streets; she reached out to the shelter to ask whether they needed volunteers and they said yes.",
-      "speaker": "Maria",
-      "statedOn": "2023-08-03",
-      "entities": [
-        "maria",
-        "homeless-shelter"
-      ],
-      "sourceTurns": [
+        "D27:3",
         "D27:4",
         "D27:5",
         "D27:6"
       ]
     },
     {
-      "text": "Cindy, one of the residents at the homeless shelter, wrote a heartfelt note of gratitude that Maria described on 3 August 2023 as showing the impact of the support the residents receive.",
+      "text": "Cindy, one of the residents at the homeless shelter, wrote a heartfelt note of gratitude showing the impact of the support the residents receive, which Maria shared on 3 August 2023.",
       "speaker": "Maria",
       "statedOn": "2023-08-03",
       "entities": [
@@ -4776,13 +4829,12 @@
         "homeless-shelter"
       ],
       "sourceTurns": [
-        "D27:6",
         "D27:7",
         "D27:8"
       ]
     },
     {
-      "text": "John took his children to a military memorial in the week before 3 August 2023; they were awestruck and humbled, and he said it was a moving experience for all of them.",
+      "text": "John and his family had a meaningful visit to a military memorial in the week before 3 August 2023, and his children were awestruck and humbled by it.",
       "speaker": "John",
       "statedOn": "2023-08-03",
       "entities": [
@@ -4793,26 +4845,15 @@
         "D27:10",
         "D27:11",
         "D27:12",
-        "D27:13"
-      ]
-    },
-    {
-      "text": "John and Maria agreed on 3 August 2023 that it is important to teach younger generations to remember and appreciate those who served.",
-      "speaker": "Maria",
-      "statedOn": "2023-08-03",
-      "entities": [
-        "john",
-        "maria"
-      ],
-      "sourceTurns": [
+        "D27:13",
         "D27:14",
         "D27:15",
         "D27:16"
       ]
     },
     {
-      "key": "lost-job-mechanical-engineering",
-      "text": "John lost his job at the mechanical engineering company shortly before 5 August 2023, when the company went under; he said it had been really rough and that he never saw it coming.",
+      "key": "john-lost-job",
+      "text": "John lost his job at the mechanical engineering company shortly before 5 August 2023 when the company failed, which he said he never saw coming and which had been really rough.",
       "speaker": "John",
       "statedOn": "2023-08-05",
       "entities": [
@@ -4825,11 +4866,12 @@
       ]
     },
     {
-      "text": "John said on 5 August 2023 that he had been looking into opportunities in the tech industry for a while and that losing his job might be the change he needed.",
+      "text": "John had been looking into opportunities in the tech industry for a while before losing his job, and said on 5 August 2023 that the change might be what he needed.",
       "speaker": "John",
       "statedOn": "2023-08-05",
       "entities": [
-        "john"
+        "john",
+        "tech-company"
       ],
       "sourceTurns": [
         "D28:3",
@@ -4837,11 +4879,12 @@
       ]
     },
     {
-      "text": "John said on 5 August 2023 that he might have found a job at a tech company he likes, which needs his mechanical skills for its hardware team, and called it a great opportunity to learn and contribute.",
+      "text": "John said on 5 August 2023 that he might have found a job at a tech company he likes, which needed his mechanical skills for its hardware team.",
       "speaker": "John",
       "statedOn": "2023-08-05",
       "entities": [
-        "john"
+        "john",
+        "tech-company"
       ],
       "sourceTurns": [
         "D28:5",
@@ -4858,7 +4901,7 @@
         "marias-church"
       ],
       "chrono": [
-        "community-work-church"
+        "maria-church-community-work"
       ],
       "sourceTurns": [
         "D28:8",
@@ -4867,12 +4910,11 @@
       ]
     },
     {
-      "text": "John helped renovate a rundown community centre in his hometown in 2022; he said on 5 August 2023 that it took a lot of work but that seeing the impact on the community and how busy the centre had become was worth it.",
+      "text": "John had not been able to volunteer much lately as of 5 August 2023, but in 2022 he helped renovate a rundown community centre back in his hometown, which is now busy.",
       "speaker": "John",
       "statedOn": "2023-08-05",
       "entities": [
-        "john",
-        "west-county"
+        "john"
       ],
       "sourceTurns": [
         "D28:11",
@@ -4881,7 +4923,7 @@
       ]
     },
     {
-      "text": "Maria offered John her support after he lost his job on 5 August 2023, and he said he would reach out if he needed anything.",
+      "text": "Maria encouraged John after his job loss on 5 August 2023 and told him she was there to support him however she could.",
       "speaker": "Maria",
       "statedOn": "2023-08-05",
       "entities": [
@@ -4898,7 +4940,7 @@
       ]
     },
     {
-      "text": "The homeless shelter gave Maria a medal for her volunteering in the week before 9 August 2023, which she found humbling.",
+      "text": "The homeless shelter gave Maria a medal in the week before 9 August 2023 for her volunteering, which she found humbling.",
       "speaker": "Maria",
       "statedOn": "2023-08-09",
       "entities": [
@@ -4910,60 +4952,69 @@
       ]
     },
     {
-      "text": "John set up a 5K charity run in his neighbourhood over the weekend of 5-6 August 2023 to raise money for veterans and their families; it had a great turnout and raised funds.",
+      "text": "John took part in a community event to raise money for a good cause over the weekend of 5-6 August 2023, which had a great turnout and many supportive people.",
       "speaker": "John",
       "statedOn": "2023-08-09",
       "entities": [
         "john",
-        "veterans-support-project"
-      ],
-      "chrono": [
-        "5k-run-veterans"
+        "veterans-5k-run"
       ],
       "sourceTurns": [
         "D29:2",
-        "D29:3",
-        "D29:4"
+        "D29:3"
       ]
     },
     {
-      "text": "Organising the 5K charity run for veterans meant getting sponsors, coordinating with the city and spreading the word, and John said on 9 August 2023 that getting sponsors was the hardest part but that reaching out to several businesses paid off.",
+      "text": "The event John ran over the weekend of 5-6 August 2023 was a 5K charity run he set up in his neighbourhood to raise funds for veterans and their families.",
       "speaker": "John",
       "statedOn": "2023-08-09",
       "entities": [
         "john",
+        "veterans-5k-run",
         "veterans-support-project"
       ],
       "sourceTurns": [
-        "D29:5",
-        "D29:6",
-        "D29:7",
-        "D29:8"
+        "D29:4",
+        "D29:5"
       ]
     },
     {
-      "text": "John's group also worked with a local organisation that helps victims of domestic abuse, raising awareness and funds for that cause at the event, as he described on 9 August 2023.",
+      "text": "Organizing the 5K charity run meant getting sponsors, coordinating with the city and spreading the word, which John called hard work worth doing.",
+      "speaker": "John",
+      "statedOn": "2023-08-09",
+      "entities": [
+        "john",
+        "veterans-5k-run"
+      ],
+      "sourceTurns": [
+        "D29:6",
+        "D29:7"
+      ]
+    },
+    {
+      "text": "Getting sponsors was the hardest part of the 5K charity run for John; he reached out to several businesses through different means and ended up with sponsors that made the event a hit.",
+      "speaker": "John",
+      "statedOn": "2023-08-09",
+      "entities": [
+        "john",
+        "veterans-5k-run"
+      ],
+      "sourceTurns": [
+        "D29:8",
+        "D29:9"
+      ]
+    },
+    {
+      "text": "John also worked with a local organization that helps victims of domestic abuse, raising awareness and funds for the cause at an event.",
       "speaker": "John",
       "statedOn": "2023-08-09",
       "entities": [
         "john"
       ],
       "sourceTurns": [
-        "D29:9",
         "D29:10",
         "D29:11",
-        "D29:12"
-      ]
-    },
-    {
-      "text": "John and Maria agreed on 9 August 2023 to keep spreading awareness and supporting causes in their community together.",
-      "speaker": "John",
-      "statedOn": "2023-08-09",
-      "entities": [
-        "john",
-        "maria"
-      ],
-      "sourceTurns": [
+        "D29:12",
         "D29:13",
         "D29:14",
         "D29:15",
@@ -4973,7 +5024,7 @@
       ]
     },
     {
-      "text": "Maria got a puppy called Coco about two weeks before 11 August 2023; Coco greets her when she comes home, and Maria said caring for her has been an adjustment but is totally worth it.",
+      "text": "Maria got a puppy called Coco about two weeks before 11 August 2023.",
       "speaker": "Maria",
       "statedOn": "2023-08-11",
       "entities": [
@@ -4982,12 +5033,23 @@
       ],
       "sourceTurns": [
         "D30:1",
-        "D30:2",
+        "D30:2"
+      ]
+    },
+    {
+      "text": "Maria said Coco brings joy to her life and is always there to greet her when she comes home, and that taking care of her has been an adjustment but is totally worth it.",
+      "speaker": "Maria",
+      "statedOn": "2023-08-11",
+      "entities": [
+        "maria",
+        "coco"
+      ],
+      "sourceTurns": [
         "D30:3"
       ]
     },
     {
-      "text": "John said on 11 August 2023 that he is always still thinking about Max, and shared a photograph of him.",
+      "text": "John said on 11 August 2023 that he was still always thinking about Max, and shared a photograph of him.",
       "speaker": "John",
       "statedOn": "2023-08-11",
       "entities": [
@@ -5000,7 +5062,7 @@
       ]
     },
     {
-      "text": "John's best memory of Max is a camping trip they took in the summer of 2022, where they hiked and swam; he described it on 11 August 2023 as peaceful and like a restart for his mind and spirit.",
+      "text": "John's best memory of Max is a camping trip in the summer of 2022 where they hiked and swam; he found it peaceful and a nice break from the everyday hustle.",
       "speaker": "John",
       "statedOn": "2023-08-11",
       "entities": [
@@ -5018,7 +5080,7 @@
       ]
     },
     {
-      "text": "John said on 11 August 2023 that times had been tough for him lately, that he did not feel he was making much of an impact, and that it had him questioning his decisions and goals.",
+      "text": "John said on 11 August 2023 that there had been some tough times for him lately.",
       "speaker": "John",
       "statedOn": "2023-08-11",
       "entities": [
@@ -5026,30 +5088,29 @@
       ],
       "sourceTurns": [
         "D30:12",
-        "D30:13",
-        "D30:14",
-        "D30:15"
+        "D30:13"
       ]
     },
     {
-      "text": "John said on 11 August 2023 that he wants to positively affect people and the world but feels stuck, and needs to find a better way to focus his passion and enthusiasm.",
+      "text": "John said on 11 August 2023 that he did not feel he was making much of an impact, which had him questioning his decisions and goals, and that he needed a better way to focus his passion.",
       "speaker": "John",
       "statedOn": "2023-08-11",
       "entities": [
         "john"
       ],
       "sourceTurns": [
+        "D30:14",
+        "D30:15",
         "D30:16",
         "D30:17"
       ]
     },
     {
-      "text": "John's idea on 11 August 2023 for channelling his energy was to join local organisations or volunteering programmes; at Maria's suggestion he said he would make a list of the ones that suit what he believes in and reach out for more information.",
+      "text": "John was exploring joining local organizations or volunteering programmes as of 11 August 2023, and said he would make a list of the ones that suit what he believes in and reach out for more information.",
       "speaker": "John",
       "statedOn": "2023-08-11",
       "entities": [
-        "john",
-        "maria"
+        "john"
       ],
       "sourceTurns": [
         "D30:18",
@@ -5061,25 +5122,25 @@
       ]
     },
     {
-      "text": "By 13 August 2023 John was volunteering as a mentor for a local school and said it was rewarding to see how much he could help the students.",
+      "text": "John was volunteering as a mentor for a local school as of 13 August 2023 and found it really rewarding to see how much he could help the students.",
       "speaker": "John",
       "statedOn": "2023-08-13",
       "entities": [
         "john",
-        "local-school"
+        "local-school-mentoring"
       ],
       "sourceTurns": [
-        "D31:1"
+        "D31:1",
+        "D31:2"
       ]
     },
     {
-      "text": "Maria adopted a second puppy, Shadow, from a shelter in the week before 13 August 2023; Shadow is full of energy and gets along well with Maria's other dog.",
+      "text": "Maria adopted a black puppy called Shadow from a shelter in the week before 13 August 2023 and said she felt blessed to be able to give her a home.",
       "speaker": "Maria",
       "statedOn": "2023-08-13",
       "entities": [
         "maria",
         "shadow",
-        "coco",
         "dog-shelter"
       ],
       "sourceTurns": [
@@ -5089,44 +5150,47 @@
       ]
     },
     {
-      "text": "Maria had no pets growing up, as she told John on 13 August 2023, but said having a furry companion brightens her days.",
+      "text": "Shadow is full of energy, always puts a smile on Maria’s face, and gets along great with her other dog Coco.",
+      "speaker": "Maria",
+      "statedOn": "2023-08-13",
+      "entities": [
+        "maria",
+        "shadow",
+        "coco"
+      ],
+      "sourceTurns": [
+        "D31:4",
+        "D31:5"
+      ]
+    },
+    {
+      "text": "Maria did not have any pets growing up, and said having a furry pal brightens her days.",
       "speaker": "Maria",
       "statedOn": "2023-08-13",
       "entities": [
         "maria"
       ],
       "sourceTurns": [
-        "D31:5",
-        "D31:6"
-      ]
-    },
-    {
-      "text": "John said on 13 August 2023 that he would look into shelters near him soon, because it would be great to have a new dog in the house.",
-      "speaker": "John",
-      "statedOn": "2023-08-13",
-      "entities": [
-        "john",
-        "dog-shelter"
-      ],
-      "sourceTurns": [
+        "D31:6",
         "D31:7",
         "D31:8"
       ]
     },
     {
-      "text": "The students John mentors had made a real improvement in confidence and skills by 13 August 2023, and in the week before that one of them excitedly showed him an essay, which John called a proud moment.",
+      "text": "The students John mentors had made a real improvement in confidence and skills, and one of them proudly showed him an essay in the week before 13 August 2023.",
       "speaker": "John",
       "statedOn": "2023-08-13",
       "entities": [
         "john",
-        "local-school"
+        "local-school-mentoring"
       ],
       "sourceTurns": [
-        "D31:9"
+        "D31:9",
+        "D31:10"
       ]
     },
     {
-      "text": "Maria said on 13 August 2023 that Shadow was doing great, learning commands and house training, and was an amazing learner.",
+      "text": "Shadow was learning commands and house training as of 13 August 2023, and Maria called her an amazing learner who is fun to work with.",
       "speaker": "Maria",
       "statedOn": "2023-08-13",
       "entities": [
@@ -5140,8 +5204,8 @@
       ]
     },
     {
-      "text": "John and Maria agreed on 13 August 2023 that animals are incredible companions who comfort people and make them feel understood.",
-      "speaker": "Maria",
+      "text": "John and Maria agreed on 13 August 2023 that animals are incredible companions who comfort people and can always be counted on.",
+      "speaker": "John",
       "statedOn": "2023-08-13",
       "entities": [
         "john",
@@ -5155,16 +5219,26 @@
       ]
     },
     {
-      "text": "John's household is himself, his wife and their children, and he said on 13 August 2023 that they love hikes, the park, picnics, board games and movie nights at home, and that his family always have his back.",
+      "text": "John's household is himself, his wife and their children, and he said they always have his back even when times are hard.",
+      "speaker": "John",
+      "statedOn": "2023-08-13",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D31:17",
+        "D31:18"
+      ]
+    },
+    {
+      "text": "John and his family love being outdoors together — hikes, the park and picnics — as well as board games and movie nights at home.",
       "speaker": "John",
       "statedOn": "2023-08-13",
       "entities": [
         "john",
-        "johns-wife"
+        "hiking"
       ],
       "sourceTurns": [
-        "D31:17",
-        "D31:18",
         "D31:19",
         "D31:20",
         "D31:21",
@@ -5173,7 +5247,7 @@
       ]
     },
     {
-      "text": "On 16 August 2023 John told Maria he was now part of the fire-fighting brigade, and said he was impressed by the members' dedication and how well they worked together.",
+      "text": "John said on 16 August 2023 that he was now part of the fire-fighting brigade and was excited to be involved and help out his community.",
       "speaker": "John",
       "statedOn": "2023-08-16",
       "entities": [
@@ -5182,12 +5256,11 @@
       ],
       "sourceTurns": [
         "D32:1",
-        "D32:2",
-        "D32:3"
+        "D32:2"
       ]
     },
     {
-      "text": "John's fire brigade ran a donation drive that took two hours and collected canned food, toiletries and clothes, as he described on 16 August 2023.",
+      "text": "John was impressed by the fire brigade members' dedication and how well they worked together, and found being around them inspiring.",
       "speaker": "John",
       "statedOn": "2023-08-16",
       "entities": [
@@ -5195,14 +5268,25 @@
         "fire-brigade"
       ],
       "sourceTurns": [
-        "D32:4",
+        "D32:3",
+        "D32:4"
+      ]
+    },
+    {
+      "text": "The fire brigade's donation drive took only two hours, and John found it hard work but really satisfying.",
+      "speaker": "John",
+      "statedOn": "2023-08-16",
+      "entities": [
+        "john",
+        "fire-brigade"
+      ],
+      "sourceTurns": [
         "D32:5",
-        "D32:6",
-        "D32:7"
+        "D32:6"
       ]
     },
     {
-      "text": "John said on 16 August 2023 that helping the community through the fire brigade gives him a sense of purpose and passion and feels like his true calling.",
+      "text": "The fire brigade's donation drive collected a great deal, including canned food, toiletries and clothes.",
       "speaker": "John",
       "statedOn": "2023-08-16",
       "entities": [
@@ -5210,13 +5294,25 @@
         "fire-brigade"
       ],
       "sourceTurns": [
-        "D32:8",
+        "D32:7",
+        "D32:8"
+      ]
+    },
+    {
+      "text": "John said on 16 August 2023 that helping with the fire brigade gives him a sense of purpose and passion and that it feels like his true calling.",
+      "speaker": "John",
+      "statedOn": "2023-08-16",
+      "entities": [
+        "john",
+        "fire-brigade"
+      ],
+      "sourceTurns": [
         "D32:9",
         "D32:10"
       ]
     },
     {
-      "text": "The donations the fire brigade collected helped get the station a brand new fire truck, as John told Maria on 16 August 2023.",
+      "text": "The donations collected by the fire brigade helped pay for a brand new fire truck.",
       "speaker": "John",
       "statedOn": "2023-08-16",
       "entities": [
@@ -5230,7 +5326,7 @@
       ]
     },
     {
-      "text": "On Friday 11 August 2023 Maria volunteered at the homeless shelter's front desk, and said seeing the smiles on people's faces when they got food or a bed made her feel good.",
+      "text": "Maria spent Friday 11 August 2023 volunteering at the homeless shelter's front desk, and said seeing residents' smiles when they got food or a bed made her feel good.",
       "speaker": "Maria",
       "statedOn": "2023-08-16",
       "entities": [
@@ -5238,83 +5334,23 @@
         "homeless-shelter"
       ],
       "chrono": [
-        "shelter-front-desk"
+        "maria-front-desk"
       ],
       "sourceTurns": [
-        "D32:14"
-      ]
-    },
-    {
-      "text": "John and Maria agreed on 16 August 2023 to keep spreading kindness and making a difference in their community.",
-      "speaker": "John",
-      "statedOn": "2023-08-16",
-      "entities": [
-        "john",
-        "maria"
-      ],
-      "sourceTurns": [
+        "D32:14",
         "D32:15",
         "D32:16",
         "D32:17"
       ]
     },
     {
-      "text": "John's political ambition ran from hoping to get into local politics in December 2022, through community meetings and a policy blog on education and infrastructure, to deciding in early May 2023 to run for office again; by August 2023 he said he was questioning whether he was making an impact, and by 16 August 2023 he described the volunteer fire brigade rather than politics as his true calling.",
-      "speaker": "John",
-      "statedOn": "2023-08-16",
-      "entities": [
-        "john",
-        "political-campaign",
-        "fire-brigade"
-      ],
-      "sourceTurns": [
-        "D1:6",
-        "D5:1",
-        "D12:1",
-        "D14:1",
-        "D30:14",
-        "D32:9"
-      ]
-    },
-    {
-      "text": "Maria's volunteering at the homeless shelter went from starting there around August 2022 after seeing a family struggling on the streets, through giving talks to other volunteers in April 2023, to being given a medal by the shelter in early August 2023.",
-      "speaker": "Maria",
-      "statedOn": "2023-08-09",
-      "entities": [
-        "maria",
-        "homeless-shelter"
-      ],
-      "sourceTurns": [
-        "D1:3",
-        "D11:10",
-        "D27:4",
-        "D29:1"
-      ]
-    },
-    {
-      "text": "John's involvement with the military went from failing the military aptitude test in late 2022, through retaking it with great results in early March 2023, to a project supporting veterans from May 2023, a veterans' rights march, a visit to a veterans' hospital in July 2023, and speaking on 31 July 2023 of a bond he had not felt since his time in the military.",
-      "speaker": "John",
-      "statedOn": "2023-07-31",
-      "entities": [
-        "john",
-        "veterans-support-project"
-      ],
-      "sourceTurns": [
-        "D3:11",
-        "D8:18",
-        "D15:1",
-        "D21:22",
-        "D24:1",
-        "D26:10"
-      ]
-    },
-    {
-      "text": "John's working life went from a promotion to assistant manager at the mechanical engineering company shortly before 16 June 2023, through enjoying the new job on 22 July 2023, to losing it in early August 2023 when the company went under and pursuing a hardware role at a tech company instead.",
+      "text": "John's working life changed twice in two months: he was promoted to assistant manager at a mechanical engineering company in June 2023, said on 22 July 2023 that he was enjoying the new job, then lost it shortly before 5 August 2023 when the company failed, after which he pursued a hardware role at a tech company.",
       "speaker": "John",
       "statedOn": "2023-08-05",
       "entities": [
         "john",
-        "mechanical-engineering-company"
+        "mechanical-engineering-company",
+        "tech-company"
       ],
       "sourceTurns": [
         "D19:6",
@@ -5324,7 +5360,7 @@
       ]
     },
     {
-      "text": "Maria went from having had no pets growing up to owning two dogs in the summer of 2023: Coco, acquired about two weeks before 11 August 2023, and Shadow, adopted from a shelter in the week before 13 August 2023.",
+      "text": "Maria's household went from no pets at all — she had none growing up — to two dogs within about a month: Coco, acquired around late July 2023, and Shadow, adopted from a shelter in the week before 13 August 2023.",
       "speaker": "Maria",
       "statedOn": "2023-08-13",
       "entities": [
@@ -5339,53 +5375,22 @@
       ]
     },
     {
-      "text": "After his dog Max died shortly before 3 June 2023, John's family considered adopting a rescue dog, and by 13 August 2023 John said he would look into shelters near him soon.",
+      "text": "John's search for a way to serve settled on the fire brigade: he joined shortly before 31 July 2023, said on 11 August 2023 that he still did not feel he was making an impact and was exploring local organizations, and by 16 August 2023 called the brigade his true calling.",
       "speaker": "John",
-      "statedOn": "2023-08-13",
+      "statedOn": "2023-08-16",
       "entities": [
         "john",
-        "max",
-        "dog-shelter"
+        "fire-brigade"
       ],
       "sourceTurns": [
-        "D17:1",
-        "D17:11",
-        "D31:7"
-      ]
-    },
-    {
-      "text": "John's exercise went from kickboxing in December 2022, through a beginner's yoga class his colleague Rob invited him to in February 2023 and a weekend yoga class started in April 2023, to family boot camps three times a week from April 2023 and weight training at his yoga studio by July 2023.",
-      "speaker": "John",
-      "statedOn": "2023-07-22",
-      "entities": [
-        "john",
-        "kickboxing",
-        "yoga",
-        "boot-camp",
-        "yoga-studio"
-      ],
-      "sourceTurns": [
-        "D1:4",
-        "D7:16",
-        "D10:1",
-        "D13:3",
-        "D25:17"
-      ]
-    },
-    {
-      "text": "Maria's turn towards faith and community went from buying a cross necklace shortly before 10 April 2023, through joining a nearby church on 5 May 2023, to camping, picnics, hikes and community work with friends from that church through June, July and August 2023.",
-      "speaker": "Maria",
-      "statedOn": "2023-07-17",
-      "entities": [
-        "maria",
-        "marias-church"
-      ],
-      "sourceTurns": [
-        "D11:10",
-        "D14:10",
-        "D18:1",
-        "D24:6"
+        "D26:2",
+        "D30:14",
+        "D32:9"
       ]
     }
-  ]
+  ],
+  "producedBy": {
+    "promptSha256": "b1c042ac4a2071d1dc3d7b938667d5a1cf6406d8848a8acb84387e0e9b8a0cf7",
+    "unattended": true
+  }
 }
