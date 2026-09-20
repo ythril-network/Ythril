@@ -198,7 +198,9 @@ describe('recall parameters reach the UI', () => {
     const src = stripComments(readFileSync('server/src/brain/edges.ts', 'utf8'));
     const uses = [...src.matchAll(/includeEdges/g)].length;
     assert.ok(uses >= 2, 'includeEdges is not used in edges.ts');
-    assert.match(src, /edges: includeEdges \? resultEdges : \[\]/,
+    // The SHAPE of the list is not what this pins — it gained the subgraph's edges in `Q-24` — only that
+    // the flag decides between a list and an empty one, in the expression that builds the answer.
+    assert.match(src, /edges: includeEdges \? \[[^\]]*\] : \[\]/,
       'the edge list must be chosen where the answer is built');
     // The traversal guards read `includeChrono`/`includeMemories`; `includeEdges` must not join them.
     assert.ok(!/if \([^)]*includeEdges[^)]*\)\s*\{/.test(src),

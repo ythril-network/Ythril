@@ -174,7 +174,7 @@ export function passageText(r: RecallResult): string | undefined {
  * Turn a graph-augmented recall into the flat, ordered list this tab renders.
  *
  * `traverse > 0` no longer returns traversed records beside the matches. Each match carries a `_graph` array
- * of `{edge, node, paths}`, and a nested node carries its own `_graph`, so the answer is a tree per match —
+ * of `{edges, node, paths}`, and a nested node carries its own `_graph`, so the answer is a tree per match —
  * which is the right API shape (`count` means matches again, and a structurally-reached node is not competing
  * in a ranked list) and the wrong shape for a list of rows.
  *

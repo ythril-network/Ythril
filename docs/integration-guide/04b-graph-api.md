@@ -576,7 +576,15 @@ disagreeing about one parameter is worse than either reading of it.
   > *Changed in 5.0:* the start node was excluded, so an isolated record and a bad id both answered
   > `nodes: []`. The tool's schema described the depth-0 node throughout — this makes the description
   > true rather than correcting it, because the distinction it promises is the reason it was written.
-- `edges` — only the edges actually traversed (not all edges of the returned nodes)
+- `edges` — **every** edge among the records in `nodes`, including a **self-loop** and including a second
+  edge between a pair already joined once. An edge to a record that is not in `nodes` is not listed: a
+  relationship to something the answer does not contain says nothing a caller can use.
+
+  > *Changed in 5.0:* this listed one edge per node reached — the one that got there first. So a
+  > self-loop was never returned (its far end is always already visited) and the second of two
+  > differently-labelled edges between one pair silently disappeared, with `truncated: false`, which
+  > means *nothing was cut for size*. If you read `edges` as the relationships in a neighbourhood, it
+  > now is.
 - `truncated: true` if `limit` was reached before exhausting the graph
 
 Server-side cycle detection ensures each record is visited at most once, so cyclic graphs are handled safely.

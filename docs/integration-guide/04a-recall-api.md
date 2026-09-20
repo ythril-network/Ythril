@@ -302,7 +302,7 @@ off the match that reached it:
 |---|---|
 | `count` | the number of **matches** — what `topK` bounds |
 | `graphNodes` | how many traversed nodes the trees hold in total |
-| `edge` | the **whole** edge document for the hop that reached this node, including its `description` and `tags` |
+| `edges` | **every** edge joining this node to the one it is nested under, as whole documents including `description` and `tags` — but **without `from`/`to`**, which the entry already states. Each carries `direction`: `outbound`, `inbound` or `self`. One for an ordinary hop; more when two records are joined by more than one relationship, and on a node that loops back to itself |
 | `node` | the reached record |
 | `paths` | **every** route from a match to this node, record ids, match first. `paths[0]` is the route it is nested under, so `paths[0].length - 1` is the hop count |
 | `pathsTruncated` | present and `true` only when a node had more routes than were recorded |
@@ -312,10 +312,11 @@ A traversed node carries **no score**. It was reached structurally, not matched:
 query, and it is not in the ranked list at all — so there is no `null` competing with a real score, and
 nothing for `minScore` or `topK` to act on that nobody measured.
 
-An ordered array of ids **is** the direction — match first, this node last — so there is no orientation to
-work out. The hop labels along the nesting route are not lost either: each node on it carries its own `edge`,
-so walking the tree yields the chain in order. Only the last hop of an *alternate* route has no label, and
-both of its endpoint ids are right there.
+An ordered array of ids **is** the direction — match first, this node last — and each node carries its own `edges`, so walking the tree
+yields the chain of labels in order. **`edges` is plural because one pair of records can be joined more than once and `paths` cannot say
+so** (two edges produce the identical chain of ids), and a **self-loop** reaches no new node, so it sits on that record's own entry and the
+record is its own neighbour. Every edge in an entry therefore joins the same pair, which is why none repeats `from`/`to`: each says only
+`direction` — `outbound` (parent to this node), `inbound`, or `self`, with the far end at `paths[0][paths[0].length - 2]`.
 
 The MCP `recall` tool takes the same parameters, plus `space` — one name, a list of them, or omitted to search every accessible space:
 
@@ -457,7 +458,7 @@ actually reached was the weaker.
 |-------|---------|
 | `count` | The number of **matches**, which is what `topK` bounds. It does **not** include traversed nodes |
 | `graphNodes` | How many traversed nodes came back in total, across every match |
-| `edge` | The **whole** edge document for the hop that reached this node — `description` and `tags` included |
+| `edges` | **Every** edge joining this node to the one it is nested under, whole documents, `description` and `tags` included, `from`/`to` replaced by `direction` (`outbound`/`inbound`/`self`). Usually one; more for a pair joined twice, and on a node with a self-loop |
 | `node` | The reached **entity** document |
 | `paths` | Every route from a match to this node, record ids, match first. `paths[0]` is the nesting route; `paths[0].length - 1` is the hop count |
 | `pathsTruncated` | Present and `true` only when a node had more routes than were recorded (cap: 8) |
@@ -532,11 +533,10 @@ counting rows never double-counts a record, and no relationship is invisible.
   text:** a file's body is its passages, they are the largest thing stored, and a structural walk must not pay
   for them. Read the content with the file API if you want it.
 
-  The reaching `edge` is **synthetic** — there is no stored edge record for a link. It carries `_id` in the form
-  `<label>:<from>:<to>`, its two ends, and a label of `chrono.entityIds`, `fact.entityIds` or
-  `file.entityIds`. It has no `author`, `createdAt` or `seq`, because a derived edge has none; do not look one
-  up by that id, and do use the label to tell a modelled relationship from a derived one. `edgeLabels` filters
-  these exactly like any other label, so `{"edgeLabels": ["owns"]}` excludes them and
+  The reaching edge is **synthetic** and the only entry in that node's `edges`: `_id` in the form `<label>:<from>:<to>` — which is where its
+  two ends still are — a label of `chrono.entityIds`, `fact.entityIds` or `file.entityIds`, and no `author`, `createdAt` or `seq`, because a
+  derived edge has none. Do not look one up by that id; do use the label to tell a modelled relationship from a derived one. `edgeLabels`
+  filters these exactly like any other label, so `{"edgeLabels": ["owns"]}` excludes them and
   `{"edgeLabels": ["owns", "fact.entityIds"]}` keeps the facts.
 - **A non-entity seed reaches its own links.** An edge's endpoints are entity ids, so a fact, chrono entry or
   file that matched semantically has no edges of its own. With the matching flag on, the walk instead starts
@@ -863,7 +863,7 @@ Given an existing entry's `_id`, find other entries with high vector similarity.
 - `spaceId` included on each result when `crossSpace: true`
 
 **With `traverse > 0`** the response carries the same graph-augmented shape `recall` uses: each match gains a `_graph`
-array of `{edge, node, paths}`, nested nodes carry their own `_graph`, and the envelope adds `traverseDepth` and
+array of `{edges, node, paths}`, nested nodes carry their own `_graph`, and the envelope adds `traverseDepth` and
 `graphNodes`. `count` stays the number of matches. The traversed nodes are capped at
 `min(topK × (traverse + 1) × 4, 5000)` minus the matches — the formula shapes a normal answer, and the
 absolute figure is what keeps an uncapped `topK` from turning a walk into an unbounded query. It is the same builder behind both endpoints and both doors — see

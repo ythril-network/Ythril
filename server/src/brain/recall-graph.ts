@@ -87,15 +87,52 @@ export function graphNodeRecord(e: TraverseHopRecord): Record<string, unknown> {
   return rec;
 }
 
+/**
+ * Which way an edge in a `_graph` entry runs, in place of repeating its two endpoint ids.
+ *
+ * **Every edge in one entry joins the SAME pair** — this node and the one it is nested under — so `from`
+ * and `to` were two UUIDs per edge restating what `node._id` and `paths[0]` already say. All that is left
+ * to know is the orientation, and `outbound`/`inbound` is the vocabulary `traverse` already uses for
+ * exactly this question. `self` is a record joined to itself, where there is no second end to point at.
+ *
+ * A caller who wants the ids has them: the far end is `paths[0][paths[0].length - 2]`.
+ */
+export type GraphEdgeDirection = 'outbound' | 'inbound' | 'self';
+
+/** An edge as a `_graph` entry carries it: the whole document, minus the two ids the entry already states. */
+export type GraphHopEdge = Omit<TraverseHopEdge, 'from' | 'to'> & { direction: GraphEdgeDirection };
+
+/**
+ * Drop the endpoint ids and say which way it runs instead.
+ *
+ * Oriented against the NODE rather than against the parent, because the node is the thing the entry is
+ * about: `outbound` means the edge leaves the node it is nested under and arrives here, which is the same
+ * reading `direction: outbound` has on a walk.
+ */
+function orient(edge: Record<string, unknown>, nodeId: string | undefined): Record<string, unknown> {
+  const { from, to, ...rest } = edge as { from?: string; to?: string };
+  const direction: GraphEdgeDirection = from === to ? 'self' : (to === nodeId ? 'outbound' : 'inbound');
+  return { ...rest, direction };
+}
+
 /** One traversed node, nested under whatever reached it. */
 export interface GraphNode {
   /**
-   * The edge for the hop that reached this node — `paths[0]`'s last hop.
+   * EVERY edge joining this node to the walk — whole documents.
    *
-   * The whole document when a stored edge reached it. A record reached through a LINK has no stored edge and
-   * carries a synthetic one instead, which holds only what is derived: see `SyntheticLinkEdge`.
+   * Usually one: the hop that reached it, `paths[0]`'s last hop. Two or more when the same pair of records
+   * is joined by more than one relationship, and one or more on a node that loops back to itself, which is
+   * a node reached from nowhere but its own edge.
+   *
+   * **Plural since `Q-24`.** The singular field reported the first edge read into a node and silently
+   * dropped the rest, because the walk deduplicates NODES and the answer was derived from that. A record
+   * reached through a LINK has no stored edge and carries a single synthetic one: see `SyntheticLinkEdge`.
+   *
+   * Held here with both endpoint ids, as the walk read them. They are dropped for `direction` on the way
+   * out — see `orient` — because every edge in one entry joins the same pair and the entry already names
+   * both ends of it.
    */
-  edge: TraverseHopEdge;
+  edges: TraverseHopEdge[];
   /** The reached record itself, embedding stripped. Non-entity kinds carry `kind`. */
   node: TraverseHopRecord;
   /**
@@ -131,13 +168,13 @@ export function mapGraphNodes<T>(
    * Carry the system-facing fields into the tree, or drop them (default: drop).
    *
    * Owner, 2026-08-16: *"on traverse stuff make sure the subentries in _graph also respect this"* — and it
-   * is the branch where it matters most. `edge` is the WHOLE edge document, once per hop, and an edge is a
-   * searchable record with a `matchedText` of its own; a depth-2 traversal off ten seeds can carry more
-   * diagnostic text than the matches it was expanding. Honouring the flag on the results and not on their
-   * neighbourhood would have left the largest half of the saving unmade.
+   * is the branch where it matters most. `edges` are WHOLE edge documents, and an edge is a searchable
+   * record with a `matchedText` of its own; a depth-2 traversal off ten seeds can carry more diagnostic text
+   * than the matches it was expanding. Honouring the flag on the results and not on their neighbourhood
+   * would have left the largest half of the saving unmade.
    *
    * It is applied HERE rather than in each door's `shapeNode` for the reason this function exists at all:
-   * one nesting implementation, so neither surface can forget. It also reaches the `edge`, which no
+   * one nesting implementation, so neither surface can forget. It also reaches the `edges`, which no
    * `shapeNode` ever sees.
    */
   includeDiagnostics = false,
@@ -146,17 +183,22 @@ export function mapGraphNodes<T>(
    *
    * It has to reach here for the same reason `includeDiagnostics` did: a projection that trimmed the top-level
    * results while a traverse answer kept returning whole documents would be a lever that silently stops
-   * working exactly where the response is largest. `edge` is the WHOLE edge document once per hop, so on a
-   * traversing call it is usually the bulk of what a projection is being asked to remove.
+   * working exactly where the response is largest. `edges` are WHOLE edge documents, so on a traversing call
+   * they are usually the bulk of what a projection is being asked to remove.
    */
   projection?: NormalisedProjection,
-): { edge: TraverseHopEdge; node: T; paths: string[][]; pathsTruncated?: boolean; _graph?: unknown[] }[] | undefined {
+): { edges: GraphHopEdge[]; node: T; paths: string[][]; pathsTruncated?: boolean; _graph?: unknown[] }[] | undefined {
   if (!nodes) return undefined;
   return nodes.map(n => {
     const children = mapGraphNodes(n._graph, shapeNode, includeDiagnostics, projection);
-    const edge = stripDiag(n.edge, includeDiagnostics) as TraverseHopEdge;
+    const nodeId = (n.node as { _id?: string })._id;
     return {
-      edge: (projection ? applyProjection(edge, projection) : edge) as TraverseHopEdge,
+      // Oriented BEFORE the projection, so `direction` is an ordinary field a caller can include or exclude
+      // like any other rather than an envelope key that survives everything.
+      edges: n.edges.map(e => {
+        const stripped = orient(stripDiag(e, includeDiagnostics) as unknown as Record<string, unknown>, nodeId);
+        return (projection ? applyProjection(stripped, projection) : stripped) as unknown as GraphHopEdge;
+      }),
       // The node goes through the caller's shaping FIRST and is stripped after, so this holds whether the
       // door passes the document through (REST) or maps it to its own record shape (MCP). Stripping an
       // allowlisted record is a no-op, which is the correct outcome rather than a wasted branch.
@@ -201,7 +243,7 @@ export function nestNeighbours(flat: SeedTraverseNeighbor[], seedIds: string[]):
 
   for (const n of ordered) {
     const gn: GraphNode = {
-      edge: n.edge,
+      edges: n.edges,
       node: n.record,
       paths: [n.idPath, ...n.altPaths],
       ...(n.altPathsTruncated ? { pathsTruncated: true } : {}),

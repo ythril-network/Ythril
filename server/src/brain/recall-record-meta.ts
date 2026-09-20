@@ -74,7 +74,7 @@ export function stripRecordMeta<T extends object>(
   return out;
 }
 
-/** One `{ edge, node, paths, _graph }` wrapper, with the same rule applied to the node and its children. */
+/** One `{ edges, node, paths, _graph }` wrapper, with the same rule applied to the node and its children. */
 function stripGraphEntry(
   entry: Record<string, unknown>,
   opts: { includeRecordMeta?: boolean | undefined },

@@ -55,9 +55,21 @@ const DENSE_LEAVES = Array.from({ length: 30 }, (_, i) => `dense-leaf-${i}-${RUN
 
 function token() { return tokenA; }
 
-/** True if `edge` connects x and y in either orientation (edge iteration order is not deterministic). */
-function edgeConnects(edge, x, y) {
-  return (edge.from === x && edge.to === y) || (edge.from === y && edge.to === x);
+/**
+ * True if a `_graph` entry's edges join x and y — asserted against the entry rather than against an edge.
+ *
+ * Two things changed in `Q-24` and both land here. `edges` is PLURAL, because a pair of records can be
+ * joined by more than one relationship and `paths` cannot express that: two edges between one pair produce
+ * the identical chain of ids. And an edge no longer repeats its two endpoint ids, because every edge in one
+ * entry joins the same pair — the node and the one it is nested under — so the pair is read off `paths[0]`
+ * and each edge says only which way it runs. Orientation is still not asserted; a fixture that pins it
+ * would be testing which way somebody happened to write the edge.
+ */
+function edgeConnects(entry, x, y) {
+  if (!entry?.edges?.length) return false;
+  const route = entry.paths?.[0] ?? [];
+  const ends = [route[route.length - 1], route[route.length - 2]];
+  return ends.includes(x) && ends.includes(y);
 }
 
 /** Every nested node in the results' `_graph`, at any depth, flattened for lookup. */
@@ -289,8 +301,8 @@ describe('Recall traverse — graph expansion', () => {
     for (const [n, id] of [[b, entB], [d, entD]]) {
       assert.deepEqual(n.paths[0], [seedAId, id], 'the route is ids, seed first');
       assert.equal(n.paths[0].length - 1, 1, 'hop count is derived from the path');
-      assert.ok(edgeConnects(n.edge, seedAId, id), `the reaching edge connects seed and ${id}`);
-      assert.ok('label' in n.edge, 'the WHOLE edge document, not {from,label,to}');
+      assert.ok(edgeConnects(n, seedAId, id), `the reaching edge connects seed and ${id}`);
+      assert.ok(n.edges.every(e => 'label' in e), 'WHOLE edge documents, not {from,label,to}');
       assert.ok(!('score' in n), 'a traversed node has no score to compete with a match');
     }
     assert.ok(!nested(r.body.results, entC), 'two-hop neighbour C must NOT appear at depth 1');
@@ -310,8 +322,8 @@ describe('Recall traverse — graph expansion', () => {
     assert.equal(c.paths[0].length - 1, 2, 'two hops, derived');
     // The labels are not lost with an id-only path: B's own edge is hop 1 and C's is hop 2, so walking the
     // tree yields the chain in order.
-    assert.ok(edgeConnects(b.edge, seedAId, entB), 'hop 1 edge is on B');
-    assert.ok(edgeConnects(c.edge, entB, entC), 'hop 2 edge is on C');
+    assert.ok(edgeConnects(b, seedAId, entB), 'hop 1 edge is on B');
+    assert.ok(edgeConnects(c, entB, entC), 'hop 2 edge is on C');
   });
 
   it('a cycle does not loop or duplicate records', async (t) => {
@@ -359,10 +371,14 @@ describe('Recall traverse — links, which are not edges', () => {
     assert.equal(mem.node.kind, 'fact');
     assert.equal(mem.node.fact, `Rotation runbook note ${RUN}`);
     // Synthetic: there is no stored edge record, so it carries what is derived and nothing invented.
-    assert.equal(mem.edge.label, 'fact.entityIds');
-    assert.equal(mem.edge._id, `fact.entityIds:${seedAId}:${memLinked}`);
-    assert.equal(mem.edge.author, undefined, 'a derived edge must not carry a fabricated author');
-    assert.equal(mem.edge.createdAt, undefined, 'a derived edge must not carry a fabricated timestamp');
+    assert.equal(mem.edges.length, 1, 'a link hop has exactly one edge, and it is the derived one');
+    assert.equal(mem.edges[0].label, 'fact.entityIds');
+    assert.equal(mem.edges[0]._id, `fact.entityIds:${seedAId}:${memLinked}`);
+    // The id still carries both ends, so a derived edge remains identifiable without the two fields that
+    // were dropped; `direction` is what says which way it runs.
+    assert.equal(mem.edges[0].direction, 'outbound');
+    assert.equal(mem.edges[0].author, undefined, 'a derived edge must not carry a fabricated author');
+    assert.equal(mem.edges[0].createdAt, undefined, 'a derived edge must not carry a fabricated timestamp');
   });
 
   it('edgeLabels excludes a link like any other label', async (t) => {
@@ -397,7 +413,7 @@ describe('Recall traverse — links, which are not edges', () => {
     const a = nested(on.body.results, seedAId);
     assert.ok(a, `the entity the memory names must be hop 1: ${JSON.stringify(allNested(on.body.results).map(n => n.node?._id))}`);
     assert.equal(a.paths[0].length - 1, 1, 'the named entity is one hop from the match');
-    assert.equal(a.edge.label, 'fact.entityIds');
+    assert.equal(a.edges[0].label, 'fact.entityIds');
   });
 
   it('and the walk carries on from there — hop 2 is an ordinary edge', async (t) => {
@@ -517,7 +533,7 @@ describe('Recall traverse — the complete graph is downloadable when it does no
     assert.equal(body.nodes, 30);
     const nested = body.graph.flatMap(g => g.graph ?? []);
     assert.equal(nested.length, 30, 'the file holds the whole neighbourhood, not the inline slice');
-    assert.ok(nested[0].edge && nested[0].node && nested[0].paths, 'and holds it in the same shape');
+    assert.ok(nested[0].edges?.length && nested[0].node && nested[0].paths, 'and holds it in the same shape');
   });
 
   it('a graph that FITS gets no link and no flag', async (t) => {
@@ -577,7 +593,7 @@ describe('Recall traverse — MCP tool', () => {
       const neighbour = (seed._graph ?? []).find(n => n.node?._id === entB);
       assert.ok(neighbour, `neighbour B nested under the seed: ${JSON.stringify((seed._graph ?? []).map(n => n.node?._id))}`);
       assert.deepEqual(neighbour.paths[0], [seedAId, entB]);
-      assert.ok(edgeConnects(neighbour.edge, seedAId, entB), 'MCP carries the whole reaching edge too');
+      assert.ok(edgeConnects(neighbour, seedAId, entB), 'MCP carries the whole reaching edge too');
       assert.equal(output.count, output.results.length, 'MCP count is the matches as well');
     } finally {
       session.close();
