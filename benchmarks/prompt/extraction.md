@@ -237,16 +237,54 @@ by whether the event mattered.**
 Omit `endsAt` entirely for a one-day event. A range that runs backwards is refused before anything is
 written; a range of one day is accepted and simply means you are being explicit.
 
-**This does not rescue a genuinely vague span.** *"Sometime in the spring"* and *"for about three weeks"*
-still get no chrono entry, because you would be inventing both ends rather than recording two you were
-given. The test is whether the speaker could name the days if asked.
+**`endsAt` is how long the thing LASTED. It is never how unsure you are about when it happened.** This is
+the distinction the whole section turns on, and it is easy to slide off:
+
+| said | how long it lasted | does the conversation hand you both ends | entry |
+|---|---|---|---|
+| *"last weekend"* | two days | yes — the Saturday and Sunday before this session | a span |
+| *"Friday to Sunday"* | three days | yes | a span |
+| *"a short trip last week"* | more than a day, unknown | no | no chrono entry |
+| *"last week I got married"* | one day | irrelevant — it is not a span at all | no chrono entry |
+| *"the concert last weekend"* (one evening) | one evening | irrelevant — the two days are the doubt, not the event | no chrono entry |
+| *"sometime in the spring"* | one day, or unknown | no | no chrono entry |
+
+**A one-day event with an uncertain date is not a span, however tightly the uncertainty is bounded.**
+Giving a wedding the Monday and Sunday of its calendar week says the wedding took a week. Nothing
+downstream can tell that apart from a genuine week-long event, so a question about the Wednesday matches
+something that did not happen on the Wednesday — and it is wrong in both directions at once, silently.
+Write the week into the claim's own sentence, where it is true, and leave it off the timeline.
+
+So the test is not what the speaker could tell you if you asked. **The test is whether the conversation
+hands you both ends of something that genuinely took more than a day.** If it hands you neither, or if the
+thing took a day, there is no span to record.
+
+**And that holds at two days as much as at seven.** *"We were away last weekend"* is a two-day event and
+gets a span; *"the concert last weekend"* is one evening, and the Saturday-to-Sunday range would be the
+doubt about which night rather than the length of the concert. The rule has no size threshold, because a
+threshold would only say how large a lie is tolerable.
+
+**Yes, this leaves real events off the timeline** — a death, a graduation, a career-high game, all dated
+only to a week. That is a known and accepted cost: a timeline that is exact is worth more than one that is
+complete, because the incomplete one is honest about what it does not know. The facts stay findable; they
+are claims carrying their own dates in prose.
 
 ### "Last Tuesday" means the most recent Tuesday
 
 It has two ordinary readings — the most recent past occurrence, and the same weekday of the previous week —
 and they differ by seven days. Said on a Wednesday, *"last Tuesday"* is either yesterday or eight days ago.
 
-**Take the most recent past occurrence, always.** Not because it is more correct, but because a weekday
+**Take the nearest occurrence in the direction the sentence points: the most recent one for *"last
+Friday"*, the next one for *"see you Friday"*.** A forward reference carries the identical ambiguity
+mirrored — *"Saturday"*, proposed on a Saturday, is either today or in seven days — so it takes the
+matching rule rather than a second judgement call.
+
+**The same applies to a weekend**, which is where it bites hardest because a weekend also decides whether
+a span is written at all: *"last weekend"* is the most recent one, *"this weekend"* and *"next weekend"*
+are the coming one. Said ON a Sunday, *"this weekend"* is the one starting six days later, not the day
+before — one rule, applied everywhere, rather than the right answer case by case.
+
+Not because either is more correct, but because a weekday
 reference LOOKS exactly resolvable, so it gets resolved silently and the choice is invisible in the file —
 unlike a weekend, where the ambiguity is on the surface and you know you are deciding. A confidently wrong
 date on a timeline has nothing anywhere to contradict it. One rule, applied everywhere, is worth more here

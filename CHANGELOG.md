@@ -15,6 +15,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **All ten conversations re-extracted under the revised prompt, and the uneven-treatment figure halves**
+  (`B-16`, `B-17`). 5,882 turns → 2,445 claims, 457 entities, 251 chrono entries, 477 edges. Every file
+  valid, every turn id cross-checked against the corpus, all 5,882 turns named by a claim.
+
+  **The headline: a 6.6x spread in chrono entries per 1,000 turns becomes 3.5x.** Roughly half the
+  unevenness was the prompt and roughly half was the conversations. 42 chrono entries now carry a real
+  span, a shape the old format could not express at all.
+
+  **Two extractions had to be redone a second time, and finding out why was worth more than the number.**
+  `conv-43` came back at 34 chrono entries where the old prompt gave 7 — which on its own would have
+  closed most of the gap. All 24 of its spans were week-windows or whole months over events that took one
+  day: a wedding, a 40-point game, an endorsement signing. `conv-49` did the same to a lesser degree and
+  said outright that it was following a convention rather than a rule. **So the spread appeared to narrow
+  because two extractors applied a different rule, which is exactly the artefact that would have been
+  invisible in the headline.** Redone under the clarified text, `conv-43` reports 12 entries and no spans
+  at all, and `conv-49` one span instead of eleven.
+
+  **`B-17`, the clarification that decided it.** `endsAt` is **how long something lasted** and never **how
+  unsure you are about when it happened**. Bracketing a wedding to the Monday and Sunday of its week says
+  the wedding took a week, and nothing downstream can tell that apart from a genuine week-long event — so
+  a question about the Wednesday matches something that did not happen then, wrong in both directions and
+  silently. The rule is stated with **no size threshold**, because a threshold would only say how large a
+  lie is tolerable: *"we were away last weekend"* is a two-day event and gets a span, *"the concert last
+  weekend"* is one evening and does not. Three extractions found that boundary independently at three
+  scales — a month, a week and two days.
+
+  The closing test was also asking the wrong question. It read *"whether the speaker could name the days
+  if asked"*; it now reads **whether the conversation hands you both ends of something that genuinely took
+  more than a day**. And the weekday rule, which spoke only about the past, now points both ways for
+  weekdays and weekends alike — two extractions had already mirrored it unprompted and said so.
+
+  **The cost is documented rather than hidden.** Events dated only to a week stay off the timeline. In
+  `conv-43` that is eight of about twenty datable happenings, lost to phrasing rather than to
+  insignificance, and it is why that conversation remains the sparsest in the corpus at 17.6 entries per
+  1,000 turns against `conv-26`'s 62.1. **Its sparsity is a real property of two speakers who date
+  everything to a week, not a defect in the extraction** — which turns `F-29`, a chrono record that can
+  say how precisely it is dated, from a preference into a measured argument.
+
 - **`bench.mjs stats` — the corpus states how unevenly one prompt treated it** (`B-16`).
   `benchmarks/writer/corpus-spread.mjs`, printed by a new CLI verb.
 
