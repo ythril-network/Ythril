@@ -15,6 +15,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`bench.mjs stats` — the corpus states how unevenly one prompt treated it** (`B-16`).
+  `benchmarks/writer/corpus-spread.mjs`, printed by a new CLI verb.
+
+  The figure that decided the last three rows was a 6.6x range in chrono entries per 1,000 turns across
+  ten conversations extracted by one prompt and one model — 10.3 to 67.8 — with supersessions running 0
+  to 8 across conversations of comparable length. It was arrived at by a command typed once, and the next
+  round is judged by whether it narrows. **A number nobody can recompute is a number everybody quotes**,
+  which is this repo's rule about a count in prose one level up, so the derivation is code now.
+
+  Two headlines it refuses to print rather than render. A conversation with no chrono entries makes the
+  ratio infinite, and `Infinity` beside nine honest numbers reads as a catastrophe rather than as one
+  empty file; a corpus of one has no spread at all, and `1.0` for it looks like perfect consistency. Both
+  return the reason instead. Totals are summed rather than averaged from the per-conversation rates,
+  because an average weights a 369-turn conversation like a 689-turn one.
+
+  It also reports `spans` — chrono entries carrying `endsAt` — which reads 0 across the current corpus
+  and is the direct measure of what the field just added was for.
+
 - **The extraction prompt's nine gaps are closed, and a two-day event can now reach the timeline** (`B-14`).
   Every one of them was reported independently by extractions that could not see each other's work — one
   model finding an ambiguity is a model having an opinion; five finding the same one is the prompt not saying
