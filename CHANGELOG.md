@@ -15,6 +15,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`benchmarks/bench.mjs` — the four things an extraction takes, so the next nine do not rewrite them**
+  (`B-4`). `conv-30` was extracted with four throwaway scripts: dump the conversation, merge the parts,
+  validate, write it to a space. Each was written at the keyboard and deleted. Nine conversations
+  remain and `B-4` extracts each in a fresh context, so without this every one of them starts by
+  rewriting those four slightly differently.
+
+  `status` reads which are done off the directory rather than a list, and says plainly that `conv-26`
+  having a file does not make it admissible. `check` reports every problem at once and also counts the
+  turns no claim names — the number a person checks by eye before committing, since an extraction that
+  dropped the quiet turns once covered 34.6% of a conversation.
+
+  **The part a rewritten copy would drop is the reason it is committed:** `dump` goes through
+  `loadConversations`. The pinned release is one object per instance — history, question, answer and
+  evidence together — so parsing it directly is one line shorter and puts the answer key in front of
+  the model doing the extraction. The blindness gate enforces that on the LOADER and cannot enforce it
+  on whoever opens the file next, so a second gate checks this CLI's imports. Mutation-checked by
+  making it read the raw file.
+
 - **The no-memory baseline, built so the two arms cannot differ in anything but the memory** (`B-6`).
   `B-2` says the number to publish is not the accuracy but *"the accuracy minus what the same answerer
   scores with the whole history in its context"* — same questions, same judge, same seeds, memory off.
