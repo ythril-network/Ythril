@@ -47,21 +47,35 @@ export async function startConfiguredInstanceServices(): Promise<void> {
     const { ensureActivityIndexes } = await import('./metrics/space-activity-store.js');
     await ensureActivityIndexes();
 
-    /*
-     * When this instance began recording legacy array writes — HERE rather than in `index.ts`, because a
-     * first-run instance never reaches the boot path at all.
-     *
-     * The conversion pre-flight clamps its `since` to this stamp, and an unstamped instance reports the
-     * full retention window whatever it was really watching. Put beside the boot-only migrations it was
-     * silently skipped for the entire first run of a freshly set-up instance — which is the install this
-     * was written for. Found by the integration suite against a rebuilt stack, not by reading.
-     *
-     * This is the function BOTH paths go through, so a third entry point gets it without being told.
-     */
+  } catch (err) {
+    log.error(`Instance DB initialisation failed (background services will still start): ${err}`);
+  }
+
+  /*
+   * WHEN THIS INSTANCE BEGAN RECORDING legacy array writes — OUTSIDE the block above, and that is the whole
+   * point of where it sits.
+   *
+   * It is in this function rather than in `index.ts` because a first-run instance never reaches the boot
+   * path at all; the setup route calls this one once the config is written. That much was already right.
+   *
+   * **What was wrong is that it was the LAST of six statements inside one `try` whose `catch` only logs.**
+   * Any earlier step failing — an index creation racing a Mongo that is still coming up, which is the
+   * flake this repository already knows — skipped the stamp and said so in a line nobody reads. The
+   * pre-flight then reports the full retention window over a recorder it cannot vouch for, which is the
+   * exact defect `B-13` was filed for, arriving through a different door. Caught by CI on 2026-09-20,
+   * intermittently, on a change that touched no code.
+   *
+   * It needs no guard of its own: `stampRecorderStart` never throws, by construction and by its own
+   * docblock — failing to record an observation about the observer must not take down a boot. So the
+   * honest shape is a statement that cannot be skipped rather than one wrapped in a second net.
+   */
+  try {
     const { stampRecorderStart } = await import('./brain/legacy-array-writers.js');
     await stampRecorderStart();
   } catch (err) {
-    log.error(`Instance DB initialisation failed (background services will still start): ${err}`);
+    // The import itself, not the stamp. Kept so a module-resolution failure cannot take down a boot the
+    // way its first line once did — see the note on `convertLinksOnBoot` in `index.ts`.
+    log.error(`Could not stamp the array-write recorder start: ${err}`);
   }
 
   // ── Phase 2: start background services (always) ───────────────────────────

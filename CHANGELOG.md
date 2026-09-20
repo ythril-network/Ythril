@@ -766,6 +766,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The recorder-start stamp could be skipped by an unrelated failure five statements earlier.** The
+  conversion pre-flight clamps its `since` to when this instance began recording, so an unstamped
+  instance reports the full retention window over a recorder it cannot vouch for — the defect `B-13`
+  was filed for, where a space of 270 chronos answered `count: 1`.
+
+  That was fixed once by moving the stamp out of `index.ts` into `startConfiguredInstanceServices`,
+  because a first-run instance never reaches the boot path. Correct, and not enough: it landed as the
+  **last of six statements inside one `try` whose `catch` only logs**. An index creation racing a Mongo
+  that is still coming up skips every statement after it — including the stamp — and says so in a line
+  nobody reads.
+
+  Caught by CI, intermittently, on a change that touched no server code at all. The stamp now sits
+  outside that block; it needs no net of its own, because it already never throws, and what it needed
+  was not to be downstream of five unrelated things inside somebody else's. A gate asserts the
+  POSITION rather than the behaviour, and also that nothing else was hoisted out with it — the other
+  five failures MUST stay tolerated, or a slow database takes the boot down.
+
+- **A tracker row said the graded benchmark harness exists. It was deleted eight weeks ago** (`B-2`).
+  The row opened *"it is a DECISION rather than a build: the harness exists (`benchmarks/harness/` —
+  dataset, ingest, retrieve, grade, report, pins)"*, and there is no such directory: `#1282` removed 56
+  files on the owner's instruction, because everything in them rested on one premise — that a
+  conversation is a pile of transcript chunks — under which **multi-hop scored 0.0% across all twelve**
+  strategies built on it, since those answers need two remarks from sessions weeks apart.
+
+  So every cost line in that row — three seeds, two model families, roughly 1,200 calls — is an estimate
+  for a runner that has to be written first. The decision it records still stands; what is missing is
+  the thing that would carry it out. Filed as `B-6`, buildable now against `conv-30` and quotable only
+  after all ten conversations are re-ingested.
+
+  A stale row is worth an entry here when it was load-bearing, and this one read as a single decision
+  away from a graded number anybody could quote.
+
 - **The extraction prompt opened by describing one corpus, and five sections now contradicted it**
   (`B-5`). Its first paragraph said *"a long conversation between people, recorded over many sessions
   spread across months"* — written against LoCoMo and true of it. By the time the second corpus had
