@@ -15,6 +15,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **An extraction records how it was produced, and the whole corpus is regenerated under one prompt**
+  (`B-15`, `B-18`, and the chrono vocabulary). 5,882 turns → 2,275 claims, 474 entities, 199 chrono
+  entries, 489 edges. Every file valid, every turn cross-checked against the corpus, all 5,882 turns named
+  by a claim, and every one stamped by the run that made it.
+
+  **`producedBy`, and the split is what makes it un-forgettable.** Which prompt produced a file is a fact
+  about the working tree, so `bench.mjs merge` stamps its sha256 and nobody can omit it. Whether a
+  retrieval score was visible is an attestation only the extractor can make, so it travels in the first
+  part. **A missing flag is refused rather than read as `true`** — the run that would misreport is exactly
+  the run that leaves it out — and an honest `false` records something real. `stats` now warns when a
+  corpus came from more than one prompt, naming which files came from which.
+
+  Two guards live inside rather than in a caller. A missing prompt file throws instead of hashing the
+  empty string, which would hand every run an identical fingerprint while looking like it worked. And
+  newlines are normalised before digesting, because this repo checks out CRLF on Windows and LF in CI:
+  without it one prompt yields two digests and the corpus reports itself as made by two prompts,
+  permanently and on nothing.
+
+  **It found a real defect on its first use.** The 3.5x figure published earlier the same day was measured
+  across eight files from one prompt and two from another. That number was never comparable and is
+  withdrawn.
+
+  **The chrono vocabulary is now one type.** The five conversation chrono types become `event` alone, with
+  `status` required and plumbed through the format, the prompt, the validator and the writer. `deadline`
+  had collected ONE record across 5,882 turns — an aspiration, not a due date — and `prediction` none;
+  `milestone` was an opinion about importance that nothing filters on, recalled at 57% by a classifier and
+  disputed by ten separate extractions. And `plan` duplicated a field the store already had: a thing
+  somebody means to do is an event with `status: upcoming`, not a different kind of thing, while
+  `write-space.mjs` never sent `status` at all. One rule, two implementations, and the weaker one won
+  because nothing plumbed the stronger one through. `overdue` is refused — the read path derives it, so a
+  stored one disagrees with what an operator is shown. **No product default changes:**
+  `getAllowedChronoTypes` still returns the same five to a space that declares none.
+
+  Plus `B-18`: nine prompt clauses, each reported by extractions that could not see each other. The
+  largest was that **an end worked out from a later session is a bound, not an end** — one reading of it
+  was worth a whole conversation's timeline.
+
+  **THE HEADLINE NUMBER MOVED THE WRONG WAY AND THAT IS THE RESULT.** Chrono entries per 1,000 turns now
+  spread **4.6x** across the ten, against **6.6x** for the first single-prompt round. A third narrower, not
+  the halving the withdrawn 3.5x suggested. Spans fell from 42 to **6** and chrono entries from 251 to 199,
+  because the tightened duration rule refuses far more than it admits — and `B-19` already records four
+  independent reports that it now refuses too much, including one conversation whose shop opening, tour,
+  video shoot and flood are all off its timeline for want of a stated day.
+
 - **All ten conversations re-extracted under the revised prompt, and the uneven-treatment figure halves**
   (`B-16`, `B-17`). 5,882 turns → 2,445 claims, 457 entities, 251 chrono entries, 477 edges. Every file
   valid, every turn id cross-checked against the corpus, all 5,882 turns named by a claim.

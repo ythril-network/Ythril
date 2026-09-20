@@ -189,7 +189,7 @@ WARNING: this corpus was produced by ${prov.prompts.length} different prompts, s
   if (prov.attended.length > 0) {
     console.log(`
 WARNING: not produced unattended: ${prov.attended.join(', ')}. A retrieval score was`
-      + ' visible while these were written, which is development rather than evidence.');
+      + ' visible while these were written, which is development rather than a clean measurement.');
   }
 
   console.log(r.chronoSpread === null
