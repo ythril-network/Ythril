@@ -15,6 +15,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The no-memory baseline, built so the two arms cannot differ in anything but the memory** (`B-6`).
+  `B-2` says the number to publish is not the accuracy but *"the accuracy minus what the same answerer
+  scores with the whole history in its context"* — same questions, same judge, same seeds, memory off.
+  Without it a figure in the eighties says nothing about whether the memory did anything, and it is the
+  column every self-reported figure omits.
+
+  **One configuration produces both arms, and there is no way to ask for one.** A subtraction is only a
+  measurement of the memory if the arms differ in exactly one thing, and two arms configured separately
+  drift in a way nothing reports: a different seed, a judge swapped in one and not the other, and the
+  difference stops being the memory while still looking like a result. Every shared field is spread
+  from one object, `MEMORY_ONLY` is the whole list of what may differ, and `armsDisagreeOn` catches a
+  pair somebody else assembled — because the report calls it rather than trusting where they came from.
+
+  Two refusals worth naming, both in the flattering direction nobody checks: a baseline handed a
+  conversation with no sessions answers nothing and makes the memory look better by exactly that much;
+  and absent hits are not empty hits, since one is a question retrieval FAILED on and the other is one
+  it found nothing for. A negative delta is a real result and is reported as one.
+
+  Still no model call: the answerer and the judge remain parked on two provider keys.
+
 - **`benchmarks/harness/` exists again, with the half of a graded run that needs no model** (`B-6`,
   first increment). `#1282` deleted the previous one — 56 files, on the owner's instruction — because
   everything in it rested on the premise that a conversation is a pile of transcript chunks, under
