@@ -118,6 +118,12 @@ export async function writeSpace({ extraction, ythril, space }) {
        * `endsAt: undefined` is not the same absence, and the sync schemas read presence with `in`.
        */
       ...(c.endsAt ? { endsAt: c.endsAt } : {}),
+      /*
+       * Whether it has happened. The store has carried this since long before the benchmark did, and the
+       * extraction used to say it with a TYPE instead — `plan` and `deadline` meant only "not yet". One
+       * rule, two implementations, and the weaker one won because nothing sent the stronger one.
+       */
+      status: c.status,
       ...(c.description ? { description: c.description } : {}),
       ...(linked.length > 0 ? { entityIds: linked } : {}),
     });

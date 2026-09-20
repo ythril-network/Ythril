@@ -22,9 +22,11 @@ depends on a write having happened.
   ],
   "chrono": [
     { "key": "support-group-visit", "type": "event", "title": "Caroline attended an LGBTQ support group",
-      "date": "2023-05-07", "entities": ["caroline"] },
+      "date": "2023-05-07", "status": "completed", "entities": ["caroline"] },
     { "key": "pride-parade", "type": "event", "title": "Caroline went to the city pride parade",
-      "date": "2023-07-15", "endsAt": "2023-07-16", "entities": ["caroline"] }
+      "date": "2023-07-15", "endsAt": "2023-07-16", "status": "completed", "entities": ["caroline"] },
+    { "key": "art-show", "type": "event", "title": "Caroline's art show, which she means to hold",
+      "date": "2023-09-16", "status": "upcoming", "entities": ["caroline"] }
   ],
   "claims": [
     { "text": "Caroline: I went to a LGBTQ support group yesterday and it was so powerful.",
@@ -77,6 +79,18 @@ fails halfway leaves a space nobody can interpret.
 
 **Every edge's endpoints must match the label's declared ends.** `works_at` from anything but a person is an
 error in the file, not something to discover from a 400.
+
+**A chrono entry is always type `event`, and `status` says whether it has happened.** One of `completed`,
+`upcoming`, `active` or `cancelled`, and it is required — there is no default, because a default would
+make every omission read as a deliberate claim.
+
+The vocabulary used to carry this as four types. `plan` and `deadline` said only *"not yet"*, which is
+`status: upcoming`; `milestone` was an opinion about importance that nothing reads; `prediction` was never
+used once in 5,882 turns of conversation. **A thing somebody means to do is an event that has not happened
+yet, not a different kind of thing.**
+
+**Never write `overdue`.** The store derives it on read from the dates and the type policy, so a written
+one is a value in the collection that disagrees with the value an operator is shown.
 
 **A chrono entry may carry `endsAt`, and that is how a two-day event gets onto the timeline.** `date` is
 the day it started and `endsAt` the day it ended; omit `endsAt` for anything that happened on one day. It

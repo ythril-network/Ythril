@@ -48,7 +48,10 @@ const good = () => ({
     { key: 'acme', type: 'organization', name: 'Acme', description: "Ada's employer since March 2021." },
   ],
   edges: [{ label: 'works_at', from: 'ada', to: 'acme', properties: { since: '2021-03-01' } }],
-  chrono: [{ key: 'joined', type: 'event', title: 'Ada joined Acme', date: '2021-03-01', entities: ['ada'] }],
+  // `status` became required when the four chrono types collapsed into one — see
+  // `a-chrono-entry-says-whether-it-happened.test.js`. Fixture furniture here, not the subject.
+  chrono: [{ key: 'joined', type: 'event', title: 'Ada joined Acme', date: '2021-03-01',
+    status: 'completed', entities: ['ada'] }],
   claims: [{
     text: 'Ada started working at Acme in March 2021.', speaker: 'Ada', statedOn: '2023-05-08',
     entities: ['ada', 'acme'], chrono: ['joined'], sourceTurns: ['D1:1'],

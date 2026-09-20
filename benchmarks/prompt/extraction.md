@@ -214,6 +214,29 @@ Three rules for what you repeat, and the third is the one that gets missed:
 **Split on a session boundary, never inside one.** A claim may draw on several turns of one session, so a
 seam inside a session leaves a fact half-written on each side of it.
 
+## Every dated thing is an `event`, and `status` says whether it happened
+
+There is one chrono type. What varies is `status`, and it is required:
+
+| | |
+|---|---|
+| `completed` | it happened. Most of them. |
+| `upcoming` | they mean to do it and the date has not come, or the conversation never says it did |
+| `active` | it is under way across the conversation — a course being taken, a build in progress |
+| `cancelled` | it was called off, and the conversation says so |
+
+**A thing somebody plans is an event that has not happened yet, not a different kind of thing.**
+*"Joanna planned to visit Nate on the 4th"* is `{"type": "event", "status": "upcoming"}`. Writing a
+separate type for it would say the same fact twice and let the two disagree.
+
+**When the conversation sets something up and never mentions it again, it stays `upcoming`.** *"The
+opening night is tomorrow"*, and then nothing — no later session says it happened, and a month afterwards
+the speaker is still looking forward to opening. Do not promote it to `completed` because it probably
+happened; the graph would be asserting something nobody said.
+
+**Never write `overdue`.** It is derived on read from the dates, and a stored one disagrees with what the
+reader is shown.
+
 ## When something took MORE THAN A DAY
 
 *"Last weekend"*, *"over the bank holiday"*, *"we were there Friday to Sunday"*. This is a third case and
@@ -247,7 +270,16 @@ the distinction the whole section turns on, and it is easy to slide off:
 | *"a short trip last week"* | more than a day, unknown | no | no chrono entry |
 | *"last week I got married"* | one day | irrelevant — it is not a span at all | no chrono entry |
 | *"the concert last weekend"* (one evening) | one evening | irrelevant — the two days are the doubt, not the event | no chrono entry |
+| *"we painted last weekend"* | **not stated** | yes | **no chrono entry** |
 | *"sometime in the spring"* | one day, or unknown | no | no chrono entry |
+
+**The fourth row is the commonest of all and the easiest to get wrong.** *"We painted last weekend"*,
+*"I had a quiet weekend"*, *"hiking with some buddies this weekend"* — both ends are handed to you and
+the length is never stated. **Not stated is not the same as two days.** You have to KNOW it took more
+than a day, and a weekend that merely contains something tells you when, not how long. One extraction
+counted four such turns in a single conversation and read them one way; read the other way its span count
+changes by a factor of two or three, on no evidence either way. So: no chrono entry, and the weekend goes
+in the claim.
 
 **A one-day event with an uncertain date is not a span, however tightly the uncertainty is bounded.**
 Giving a wedding the Monday and Sunday of its calendar week says the wedding took a week. Nothing
@@ -258,6 +290,16 @@ Write the week into the claim's own sentence, where it is true, and leave it off
 So the test is not what the speaker could tell you if you asked. **The test is whether the conversation
 hands you both ends of something that genuinely took more than a day.** If it hands you neither, or if the
 thing took a day, there is no span to record.
+
+**An end you worked out from a LATER SESSION is not an end.** *"My wife and I just left"* on 6 November,
+and a session on the 11th that speaks of the trip in the past tense — that gives you a start and a bound,
+not two ends. *"He was back by the 11th"* does not say when he came back, so writing 6-11 November records
+your uncertainty as the length of his holiday. The same goes for an end bounded by the next thing that
+happened: *"I met back up with my teammates on the 15th"* closes a window, it does not date a return.
+
+This one is worth saying because it decides a whole conversation at a time. One extraction read those as
+bounds and produced **zero** spans; reading them as ends would have produced several, and nothing in the
+file would have shown which rule had been applied.
 
 **And that holds at two days as much as at seven.** *"We were away last weekend"* is a two-day event and
 gets a span; *"the concert last weekend"* is one evening, and the Saturday-to-Sunday range would be the
@@ -279,10 +321,26 @@ Friday"*, the next one for *"see you Friday"*.** A forward reference carries the
 mirrored — *"Saturday"*, proposed on a Saturday, is either today or in seven days — so it takes the
 matching rule rather than a second judgement call.
 
+**The day of speaking does not count as the occurrence, unless the exchange says it does.** *"Last
+Friday"* said on a Friday is seven days back, not today. *"See you Friday"* said on a Friday is seven days
+forward — **unless the same exchange places it today**: *"gonna head out soon"*, *"see you in an hour"*,
+*"I am on my way"*. Somebody who meant today usually says so, and when they do, believe them over the
+default.
+
+**A weekend containing today is not "last weekend".** Said on a Sunday, *"last weekend"* is the previous
+completed one, not yesterday-and-today — the same rule, since the day of speaking is inside the weekend it
+would otherwise name.
+
 **The same applies to a weekend**, which is where it bites hardest because a weekend also decides whether
 a span is written at all: *"last weekend"* is the most recent one, *"this weekend"* and *"next weekend"*
 are the coming one. Said ON a Sunday, *"this weekend"* is the one starting six days later, not the day
 before — one rule, applied everywhere, rather than the right answer case by case.
+
+**Two sessions can legitimately land on the same weekend, and that is not a mistake to fix.** A session on
+the Monday and a session on the Saturday both say *"last weekend"* and both mean the same two days, so a
+picnic described in one and a hike described in the other sit together on the timeline. That is what the
+speakers said. Moving one of them to a different weekend to make the graph look tidier invents a date the
+conversation does not contain.
 
 Not because either is more correct, but because a weekday
 reference LOOKS exactly resolvable, so it gets resolved silently and the choice is invisible in the file —
@@ -375,6 +433,16 @@ that the conversation disagrees with itself rather than the graph being broken.
 correct themselves without saying so, and deciding which telling was right is inventing a fact the
 conversation does not contain.
 
+**When the contradicted thing is a STATE rather than an event, write it once.** The examples above are
+discrete — four dogs, one Boston trip, a tour that ended. A background state is different: somebody talks
+about *running his own studio* and *his students* from February onward while, in other sessions, he is
+still looking for premises and the opening night is in June. Dating every mention gives you twenty claims
+that all read as hedging and bury the one fact underneath.
+
+Write the state **once**, dated to its first telling, and let the later mentions be `sourceTurns` on that
+one claim. Where the conversation genuinely contradicts it — the premises hunt, the opening night — those
+are their own claims, dated to theirs. The reader then sees two facts that disagree instead of twenty.
+
 **A count that GROWS is this, not a supersession — usually.** Two dogs become three; three countries
 visited become five. Ask what changed: a household that gained a pet genuinely replaced its old
 composition, so retire the old count. A tally of places someone has been only ever goes up, and the
@@ -392,6 +460,11 @@ say why in the entity's `aliases`.
 places, every one of them referred to two ways in the same conversation. `aliases` is declared on
 `person`, `animal`, `place`, `organization` and `work`; for a type that does not have it, put the variants
 in the `description` so a reader can still find the join.
+
+**An entity or a chrono entry may carry `sourceTurns` too, and should.** A claim always does; on these two
+it is the turns that established the SUBJECT — where the person was introduced, where the event was
+described. Keep it to the few turns that actually did: a record naming most of a transcript as its
+provenance is refused, because a few sentences about one subject cannot have come from all of it.
 
 **Every entity carries a `description` saying what is known about it**, written from the whole conversation
 and updated as it goes. `Luna, animal, cat` is a label and deserves to lose to a sentence in any search.
@@ -415,6 +488,12 @@ Give it a descriptive key and a descriptive name — `nates-turtles`, "Nate's tu
 *"a named location"* or *"a named animal"*, read it as **"not a passing mention"**: it says *named* because
 in a one-line example those are the same thing, and here they are not.
 
+**A group is one entity, not several and not none.** *"The kids"*, *"my parents"*, *"the turtles"* —
+returned to constantly, named individually never. Mint one entity for the group, type it as whatever its
+members are, and say in the description that it is a group and who is in it as far as the conversation
+says. Three thin entities nobody mentions separately is worse, and no entity at all leaves forty claims
+with nothing to join them.
+
 **The merging rule applies to those too, and it is harder there.** *"My project I've been working on for
 weeks"*, *"a big project I had been working on for months"* and *"the game I've wanted to make since I was
 a kid"* may be one thing or three, and unlike `Deb`/`Deborah` there is no spelling to go on. Prefer merging
@@ -422,6 +501,12 @@ when the dates and the details are consistent, keep them apart when something ru
 *"first game"* released six months after a different game was finished cannot be the same project — and
 say in the `description` which mentions you joined. A reader can then see the judgement; they cannot see a
 silent one.
+
+**Merging is for entities. Two claims that might describe one event stay two claims.** A road trip
+returned from in December and a road trip described in April; a promotion in June and *"my new job"* in
+July. An entity exists to be one node, so a wrong split there breaks every link that runs to it — but two
+claims are just two sentences, and asserting they are one invents a fact while merely leaving them apart
+costs a reader nothing. When it matters, say the relation in the later claim's text.
 
 **A claim is one RESOLVED FACT, and it may draw on several turns.** Write what the exchange establishes, in
 a sentence that stands alone: subjects named, dates resolved, pronouns replaced. One exchange about one thing

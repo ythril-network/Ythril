@@ -44,7 +44,10 @@ const withChrono = (chrono) => ({
   sessions: [{ date: '2023-07-17', turns: ['D1:1'] }],
   entities: [{ key: 'ada', type: 'person', name: 'Ada',
     description: 'Ada, one of the two speakers in this conversation.' }],
-  chrono: [{ key: 'k', type: 'event', title: 'Ada went to the parade', entities: ['ada'], ...chrono }],
+  // `status` became required when the four chrono types collapsed into one — see
+  // `a-chrono-entry-says-whether-it-happened.test.js`. It is fixture furniture here, not the subject.
+  chrono: [{ key: 'k', type: 'event', title: 'Ada went to the parade', status: 'completed',
+    entities: ['ada'], ...chrono }],
   claims: [{ text: 'Ada went to the parade.', speaker: 'Ada', statedOn: '2023-07-17',
     entities: ['ada'], chrono: ['k'], sourceTurns: ['D1:1'] }],
 });
