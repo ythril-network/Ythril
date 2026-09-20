@@ -66,11 +66,13 @@ function status() {
     const mark = done.has(c.id) ? 'done   ' : 'TO DO  ';
     console.log(`  ${mark} ${c.id.padEnd(9)} ${String(c.sessions.length).padStart(2)} sessions, ${String(turns).padStart(4)} turns`);
   }
-  if (done.has('conv-26')) {
-    console.log('\n  NOTE: conv-26\'s committed extraction was written by hand with the retrieval scores');
-    console.log('  visible. B-4 replaces it from scratch like the other nine — "done" above means a file');
-    console.log('  exists, not that it is admissible.');
-  }
+  /*
+   * A paragraph naming conv-26 stood here until 2026-09-20, because its extraction had been written by hand
+   * with the retrieval scores visible and nothing on disk said so. B-4 replaced it, so the paragraph expired
+   * — and the gap it was covering did not. Nothing in a file, this directory or any gate distinguishes an
+   * extraction produced unattended from one tuned against a scoreboard; what caught conv-26 was somebody
+   * remembering. That is B-15, and it is a field the writer cannot omit rather than a note here.
+   */
 }
 
 /** One conversation as readable text, for the model that is about to extract it. */

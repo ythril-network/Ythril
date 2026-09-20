@@ -15,6 +15,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **All ten LoCoMo conversations are extracted unattended, and conv-26 was re-extracted unattended too**
+  (`B-4`). 5,882 turns across 272 sessions, producing 2,294 claims, 470 entities, 212 chrono entries and 527
+  edges. Every file passes `bench.mjs check`: valid against the schema, every key resolving, every turn id
+  real, and every one of the 5,882 turns named by a claim.
+
+  **Each conversation was extracted in a context that had seen none of the others, and no retrieval score was
+  measured until all ten were committed.** That is the whole point of the row rather than a procedural detail:
+  a prompt that only works while its author watches the scoreboard is not a product capability, and the only
+  way to find out is to not look. `conv-26`'s previous extraction was written by hand with the scores visible
+  — legitimate development, illegitimate evidence — and is replaced rather than kept beside the rest. The
+  unattended version of it finds 198 claims where the hand-tuned one found 129.
+
+  **What the run measured about the prompt, which is the part worth keeping.** One prompt and one model
+  produce a **6.6x spread in how much of a conversation reaches the timeline** — chrono entries per 1,000
+  turns range from 10.3 to 67.8 — and supersessions range from 0 to 8 across conversations of comparable
+  length. The prompt states that two models disagreeing a lot is a finding about the prompt; one model
+  disagreeing with itself by 6.6x meets that test without a second model.
+
+  Nine gaps are filed as `B-14`, every one of them reported independently by extractions that could not see
+  each other's work. The largest has a concrete cause rather than a judgement call: a Ythril chrono record
+  carries `startsAt` **and** `endsAt`, the extraction format exposes only a single `date`, and five separate
+  runs therefore dropped two-day events — a marriage, a gastritis diagnosis, a pride parade, a career-high
+  game — off the timeline entirely while keeping a photograph taken on a named Friday.
+
+  **The prompt is deliberately unchanged.** Editing it between conversation six and conversation seven would
+  produce a corpus extracted by two prompts, and every per-conversation difference afterwards would be
+  unattributable — the same defect on the authoring side that watching the scoreboard is on the scoring side.
+
 - **An extraction is now checked against the conversation it NAMES, not only against itself** (`B-4`).
   `benchmarks/writer/extraction-matches-conversation.mjs`, called by `bench.mjs check` and swept over every
   committed extraction by its own gate.

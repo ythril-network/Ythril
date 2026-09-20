@@ -1,0 +1,6317 @@
+{
+  "conversationId": "conv-47",
+  "sessions": [
+    {
+      "date": "2022-03-17",
+      "turns": [
+        "D1:1",
+        "D1:2",
+        "D1:3",
+        "D1:4",
+        "D1:5",
+        "D1:6",
+        "D1:7",
+        "D1:8",
+        "D1:9",
+        "D1:10",
+        "D1:11",
+        "D1:12",
+        "D1:13",
+        "D1:14",
+        "D1:15",
+        "D1:16",
+        "D1:17",
+        "D1:18",
+        "D1:19",
+        "D1:20",
+        "D1:21",
+        "D1:22",
+        "D1:23",
+        "D1:24",
+        "D1:25",
+        "D1:26",
+        "D1:27",
+        "D1:28",
+        "D1:29",
+        "D1:30",
+        "D1:31",
+        "D1:32",
+        "D1:33",
+        "D1:34",
+        "D1:35",
+        "D1:36",
+        "D1:37"
+      ]
+    },
+    {
+      "date": "2022-03-20",
+      "turns": [
+        "D2:1",
+        "D2:2",
+        "D2:3",
+        "D2:4",
+        "D2:5",
+        "D2:6",
+        "D2:7",
+        "D2:8",
+        "D2:9",
+        "D2:10",
+        "D2:11",
+        "D2:12",
+        "D2:13",
+        "D2:14",
+        "D2:15",
+        "D2:16",
+        "D2:17",
+        "D2:18",
+        "D2:19",
+        "D2:20",
+        "D2:21"
+      ]
+    },
+    {
+      "date": "2022-03-27",
+      "turns": [
+        "D3:1",
+        "D3:2",
+        "D3:3",
+        "D3:4",
+        "D3:5",
+        "D3:6",
+        "D3:7",
+        "D3:8",
+        "D3:9",
+        "D3:10",
+        "D3:11",
+        "D3:12",
+        "D3:13",
+        "D3:14",
+        "D3:15",
+        "D3:16",
+        "D3:17",
+        "D3:18",
+        "D3:19",
+        "D3:20",
+        "D3:21",
+        "D3:22",
+        "D3:23"
+      ]
+    },
+    {
+      "date": "2022-04-04",
+      "turns": [
+        "D4:1",
+        "D4:2",
+        "D4:3",
+        "D4:4",
+        "D4:5",
+        "D4:6",
+        "D4:7",
+        "D4:8",
+        "D4:9",
+        "D4:10",
+        "D4:11",
+        "D4:12",
+        "D4:13",
+        "D4:14",
+        "D4:15",
+        "D4:16",
+        "D4:17",
+        "D4:18",
+        "D4:19",
+        "D4:20",
+        "D4:21",
+        "D4:22",
+        "D4:23",
+        "D4:24",
+        "D4:25"
+      ]
+    },
+    {
+      "date": "2022-04-12",
+      "turns": [
+        "D5:1",
+        "D5:2",
+        "D5:3",
+        "D5:4",
+        "D5:5",
+        "D5:6",
+        "D5:7",
+        "D5:8",
+        "D5:9",
+        "D5:10",
+        "D5:11",
+        "D5:12",
+        "D5:13",
+        "D5:14",
+        "D5:15",
+        "D5:16"
+      ]
+    },
+    {
+      "date": "2022-04-20",
+      "turns": [
+        "D6:1",
+        "D6:2",
+        "D6:3",
+        "D6:4",
+        "D6:5",
+        "D6:6",
+        "D6:7",
+        "D6:8",
+        "D6:9",
+        "D6:10",
+        "D6:11",
+        "D6:12",
+        "D6:13",
+        "D6:14",
+        "D6:15",
+        "D6:16",
+        "D6:17",
+        "D6:18",
+        "D6:19"
+      ]
+    },
+    {
+      "date": "2022-04-23",
+      "turns": [
+        "D7:1",
+        "D7:2",
+        "D7:3",
+        "D7:4",
+        "D7:5",
+        "D7:6",
+        "D7:7",
+        "D7:8",
+        "D7:9",
+        "D7:10",
+        "D7:11",
+        "D7:12",
+        "D7:13",
+        "D7:14",
+        "D7:15",
+        "D7:16",
+        "D7:17",
+        "D7:18",
+        "D7:19",
+        "D7:20",
+        "D7:21"
+      ]
+    },
+    {
+      "date": "2022-04-29",
+      "turns": [
+        "D8:1",
+        "D8:2",
+        "D8:3",
+        "D8:4",
+        "D8:5",
+        "D8:6",
+        "D8:7",
+        "D8:8",
+        "D8:9",
+        "D8:10",
+        "D8:11",
+        "D8:12",
+        "D8:13",
+        "D8:14",
+        "D8:15",
+        "D8:16",
+        "D8:17",
+        "D8:18",
+        "D8:19",
+        "D8:20",
+        "D8:21",
+        "D8:22",
+        "D8:23",
+        "D8:24",
+        "D8:25",
+        "D8:26",
+        "D8:27",
+        "D8:28",
+        "D8:29",
+        "D8:30",
+        "D8:31",
+        "D8:32",
+        "D8:33",
+        "D8:34",
+        "D8:35",
+        "D8:36",
+        "D8:37",
+        "D8:38",
+        "D8:39",
+        "D8:40"
+      ]
+    },
+    {
+      "date": "2022-05-04",
+      "turns": [
+        "D9:1",
+        "D9:2",
+        "D9:3",
+        "D9:4",
+        "D9:5",
+        "D9:6",
+        "D9:7",
+        "D9:8",
+        "D9:9",
+        "D9:10",
+        "D9:11",
+        "D9:12",
+        "D9:13",
+        "D9:14",
+        "D9:15",
+        "D9:16",
+        "D9:17",
+        "D9:18",
+        "D9:19",
+        "D9:20",
+        "D9:21",
+        "D9:22",
+        "D9:23",
+        "D9:24",
+        "D9:25"
+      ]
+    },
+    {
+      "date": "2022-05-08",
+      "turns": [
+        "D10:1",
+        "D10:2",
+        "D10:3",
+        "D10:4",
+        "D10:5",
+        "D10:6",
+        "D10:7",
+        "D10:8",
+        "D10:9",
+        "D10:10",
+        "D10:11",
+        "D10:12",
+        "D10:13",
+        "D10:14",
+        "D10:15"
+      ]
+    },
+    {
+      "date": "2022-05-11",
+      "turns": [
+        "D11:1",
+        "D11:2",
+        "D11:3",
+        "D11:4",
+        "D11:5",
+        "D11:6",
+        "D11:7",
+        "D11:8",
+        "D11:9",
+        "D11:10",
+        "D11:11",
+        "D11:12",
+        "D11:13",
+        "D11:14",
+        "D11:15",
+        "D11:16",
+        "D11:17",
+        "D11:18",
+        "D11:19"
+      ]
+    },
+    {
+      "date": "2022-05-23",
+      "turns": [
+        "D12:1",
+        "D12:2",
+        "D12:3",
+        "D12:4",
+        "D12:5",
+        "D12:6",
+        "D12:7",
+        "D12:8",
+        "D12:9",
+        "D12:10",
+        "D12:11",
+        "D12:12",
+        "D12:13",
+        "D12:14"
+      ]
+    },
+    {
+      "date": "2022-06-13",
+      "turns": [
+        "D13:1",
+        "D13:2",
+        "D13:3",
+        "D13:4",
+        "D13:5",
+        "D13:6",
+        "D13:7",
+        "D13:8",
+        "D13:9",
+        "D13:10",
+        "D13:11",
+        "D13:12",
+        "D13:13",
+        "D13:14",
+        "D13:15",
+        "D13:16",
+        "D13:17",
+        "D13:18",
+        "D13:19",
+        "D13:20"
+      ]
+    },
+    {
+      "date": "2022-06-16",
+      "turns": [
+        "D14:1",
+        "D14:2",
+        "D14:3",
+        "D14:4",
+        "D14:5",
+        "D14:6",
+        "D14:7",
+        "D14:8",
+        "D14:9",
+        "D14:10",
+        "D14:11",
+        "D14:12",
+        "D14:13",
+        "D14:14",
+        "D14:15",
+        "D14:16",
+        "D14:17",
+        "D14:18",
+        "D14:19",
+        "D14:20",
+        "D14:21",
+        "D14:22",
+        "D14:23",
+        "D14:24",
+        "D14:25",
+        "D14:26",
+        "D14:27",
+        "D14:28",
+        "D14:29",
+        "D14:30",
+        "D14:31",
+        "D14:32",
+        "D14:33",
+        "D14:34"
+      ]
+    },
+    {
+      "date": "2022-06-19",
+      "turns": [
+        "D15:1",
+        "D15:2",
+        "D15:3",
+        "D15:4",
+        "D15:5",
+        "D15:6",
+        "D15:7",
+        "D15:8",
+        "D15:9",
+        "D15:10",
+        "D15:11",
+        "D15:12",
+        "D15:13",
+        "D15:14",
+        "D15:15",
+        "D15:16",
+        "D15:17",
+        "D15:18",
+        "D15:19"
+      ]
+    },
+    {
+      "date": "2022-07-09",
+      "turns": [
+        "D16:1",
+        "D16:2",
+        "D16:3",
+        "D16:4",
+        "D16:5",
+        "D16:6",
+        "D16:7",
+        "D16:8",
+        "D16:9",
+        "D16:10",
+        "D16:11",
+        "D16:12",
+        "D16:13",
+        "D16:14",
+        "D16:15",
+        "D16:16"
+      ]
+    },
+    {
+      "date": "2022-07-22",
+      "turns": [
+        "D17:1",
+        "D17:2",
+        "D17:3",
+        "D17:4",
+        "D17:5",
+        "D17:6",
+        "D17:7",
+        "D17:8",
+        "D17:9",
+        "D17:10",
+        "D17:11",
+        "D17:12",
+        "D17:13",
+        "D17:14",
+        "D17:15",
+        "D17:16",
+        "D17:17",
+        "D17:18",
+        "D17:19",
+        "D17:20",
+        "D17:21",
+        "D17:22",
+        "D17:23",
+        "D17:24",
+        "D17:25",
+        "D17:26",
+        "D17:27",
+        "D17:28",
+        "D17:29",
+        "D17:30",
+        "D17:31",
+        "D17:32",
+        "D17:33",
+        "D17:34",
+        "D17:35",
+        "D17:36",
+        "D17:37"
+      ]
+    },
+    {
+      "date": "2022-08-06",
+      "turns": [
+        "D18:1",
+        "D18:2",
+        "D18:3",
+        "D18:4",
+        "D18:5",
+        "D18:6",
+        "D18:7",
+        "D18:8",
+        "D18:9",
+        "D18:10",
+        "D18:11",
+        "D18:12",
+        "D18:13",
+        "D18:14",
+        "D18:15",
+        "D18:16",
+        "D18:17",
+        "D18:18",
+        "D18:19",
+        "D18:20"
+      ]
+    },
+    {
+      "date": "2022-08-10",
+      "turns": [
+        "D19:1",
+        "D19:2",
+        "D19:3",
+        "D19:4",
+        "D19:5",
+        "D19:6",
+        "D19:7",
+        "D19:8",
+        "D19:9",
+        "D19:10",
+        "D19:11",
+        "D19:12",
+        "D19:13",
+        "D19:14",
+        "D19:15",
+        "D19:16",
+        "D19:17"
+      ]
+    },
+    {
+      "date": "2022-08-21",
+      "turns": [
+        "D20:1",
+        "D20:2",
+        "D20:3",
+        "D20:4",
+        "D20:5",
+        "D20:6",
+        "D20:7",
+        "D20:8",
+        "D20:9",
+        "D20:10",
+        "D20:11",
+        "D20:12",
+        "D20:13",
+        "D20:14",
+        "D20:15",
+        "D20:16",
+        "D20:17",
+        "D20:18",
+        "D20:19",
+        "D20:20",
+        "D20:21",
+        "D20:22"
+      ]
+    },
+    {
+      "date": "2022-08-26",
+      "turns": [
+        "D21:1",
+        "D21:2",
+        "D21:3",
+        "D21:4",
+        "D21:5",
+        "D21:6",
+        "D21:7",
+        "D21:8",
+        "D21:9",
+        "D21:10",
+        "D21:11",
+        "D21:12",
+        "D21:13",
+        "D21:14",
+        "D21:15",
+        "D21:16",
+        "D21:17",
+        "D21:18",
+        "D21:19"
+      ]
+    },
+    {
+      "date": "2022-09-01",
+      "turns": [
+        "D22:1",
+        "D22:2",
+        "D22:3",
+        "D22:4",
+        "D22:5",
+        "D22:6",
+        "D22:7",
+        "D22:8",
+        "D22:9",
+        "D22:10",
+        "D22:11",
+        "D22:12",
+        "D22:13",
+        "D22:14",
+        "D22:15",
+        "D22:16",
+        "D22:17",
+        "D22:18",
+        "D22:19"
+      ]
+    },
+    {
+      "date": "2022-09-04",
+      "turns": [
+        "D23:1",
+        "D23:2",
+        "D23:3",
+        "D23:4",
+        "D23:5",
+        "D23:6",
+        "D23:7",
+        "D23:8",
+        "D23:9",
+        "D23:10",
+        "D23:11",
+        "D23:12",
+        "D23:13",
+        "D23:14",
+        "D23:15",
+        "D23:16",
+        "D23:17",
+        "D23:18",
+        "D23:19",
+        "D23:20",
+        "D23:21"
+      ]
+    },
+    {
+      "date": "2022-09-18",
+      "turns": [
+        "D24:1",
+        "D24:2",
+        "D24:3",
+        "D24:4",
+        "D24:5",
+        "D24:6",
+        "D24:7",
+        "D24:8",
+        "D24:9",
+        "D24:10",
+        "D24:11",
+        "D24:12",
+        "D24:13",
+        "D24:14",
+        "D24:15",
+        "D24:16",
+        "D24:17",
+        "D24:18",
+        "D24:19",
+        "D24:20",
+        "D24:21"
+      ]
+    },
+    {
+      "date": "2022-09-20",
+      "turns": [
+        "D25:1",
+        "D25:2",
+        "D25:3",
+        "D25:4",
+        "D25:5",
+        "D25:6",
+        "D25:7",
+        "D25:8",
+        "D25:9",
+        "D25:10",
+        "D25:11",
+        "D25:12",
+        "D25:13",
+        "D25:14",
+        "D25:15",
+        "D25:16",
+        "D25:17",
+        "D25:18",
+        "D25:19",
+        "D25:20",
+        "D25:21",
+        "D25:22",
+        "D25:23",
+        "D25:24",
+        "D25:25"
+      ]
+    },
+    {
+      "date": "2022-10-03",
+      "turns": [
+        "D26:1",
+        "D26:2",
+        "D26:3",
+        "D26:4",
+        "D26:5",
+        "D26:6",
+        "D26:7",
+        "D26:8",
+        "D26:9",
+        "D26:10",
+        "D26:11",
+        "D26:12",
+        "D26:13",
+        "D26:14",
+        "D26:15"
+      ]
+    },
+    {
+      "date": "2022-10-13",
+      "turns": [
+        "D27:1",
+        "D27:2",
+        "D27:3",
+        "D27:4",
+        "D27:5",
+        "D27:6",
+        "D27:7",
+        "D27:8",
+        "D27:9",
+        "D27:10",
+        "D27:11",
+        "D27:12",
+        "D27:13",
+        "D27:14"
+      ]
+    },
+    {
+      "date": "2022-10-21",
+      "turns": [
+        "D28:1",
+        "D28:2",
+        "D28:3",
+        "D28:4",
+        "D28:5",
+        "D28:6",
+        "D28:7",
+        "D28:8",
+        "D28:9",
+        "D28:10",
+        "D28:11",
+        "D28:12",
+        "D28:13",
+        "D28:14",
+        "D28:15",
+        "D28:16",
+        "D28:17",
+        "D28:18",
+        "D28:19",
+        "D28:20",
+        "D28:21",
+        "D28:22",
+        "D28:23",
+        "D28:24",
+        "D28:25",
+        "D28:26",
+        "D28:27",
+        "D28:28",
+        "D28:29",
+        "D28:30",
+        "D28:31",
+        "D28:32",
+        "D28:33",
+        "D28:34",
+        "D28:35"
+      ]
+    },
+    {
+      "date": "2022-10-31",
+      "turns": [
+        "D29:1",
+        "D29:2",
+        "D29:3",
+        "D29:4",
+        "D29:5",
+        "D29:6",
+        "D29:7",
+        "D29:8",
+        "D29:9",
+        "D29:10",
+        "D29:11",
+        "D29:12",
+        "D29:13",
+        "D29:14",
+        "D29:15",
+        "D29:16"
+      ]
+    },
+    {
+      "date": "2022-11-05",
+      "turns": [
+        "D30:1",
+        "D30:2",
+        "D30:3",
+        "D30:4",
+        "D30:5",
+        "D30:6",
+        "D30:7",
+        "D30:8",
+        "D30:9",
+        "D30:10",
+        "D30:11",
+        "D30:12",
+        "D30:13",
+        "D30:14",
+        "D30:15",
+        "D30:16",
+        "D30:17",
+        "D30:18",
+        "D30:19"
+      ]
+    },
+    {
+      "date": "2022-11-07",
+      "turns": [
+        "D31:1",
+        "D31:2",
+        "D31:3",
+        "D31:4",
+        "D31:5",
+        "D31:6",
+        "D31:7",
+        "D31:8",
+        "D31:9",
+        "D31:10",
+        "D31:11",
+        "D31:12",
+        "D31:13",
+        "D31:14",
+        "D31:15",
+        "D31:16",
+        "D31:17",
+        "D31:18",
+        "D31:19",
+        "D31:20",
+        "D31:21",
+        "D31:22",
+        "D31:23",
+        "D31:24",
+        "D31:25"
+      ]
+    }
+  ],
+  "entities": [
+    {
+      "key": "james",
+      "type": "person",
+      "name": "James",
+      "description": "One of the two friends in this conversation. A programmer who works in Python and C++ and took up coding in college, a lifelong gamer and game maker, owner of the dogs Max, Daisy and Ned, and a Liverpool supporter. He and John were friends as ten-year-old skateboarders. Over 2022 he finished a game project he had wanted to make since childhood, built a virtual world, took a game-development course, built and released a Unity strategy game, took up extreme sports, cooking and streaming, travelled to Canada and Greenland, and began a relationship with Samantha and moved in with her."
+    },
+    {
+      "key": "john",
+      "type": "person",
+      "name": "John",
+      "description": "The other friend in this conversation. He learned HTML and CSS years before and signed up for a programming course in March 2022, plays CS:GO, chess, drums and board games, reads science fiction and epic fantasy, and detects metal on beaches. Over 2022 he left a three-year IT job for a new one, turned toward organising esports tournaments as a career, volunteered his coding for charities, taught his younger siblings and then his parents to code, released his first mobile game, and won the regional chess tournament on 1 November 2022. He has siblings, parents and someone called Jill, and wants a dog but has never had one."
+    },
+    {
+      "key": "samantha",
+      "type": "person",
+      "name": "Samantha",
+      "description": "The woman James met at a dog owners' beach outing on 9 August 2022, who left him her phone number. He asked her to be his girlfriend at the theatre on 3 September 2022 and she agreed; by 31 October 2022 they had decided to move in together and rented an apartment near McGee's bar. She loves the theatre and a good lager."
+    },
+    {
+      "key": "jill",
+      "type": "person",
+      "name": "Jill",
+      "description": "Someone close to John, named by James as 'your Jill' on 22 July 2022 when he brought souvenirs back from his Canada trip for both of them; John said she would be delighted."
+    },
+    {
+      "key": "james-sister",
+      "type": "person",
+      "name": "James's sister",
+      "description": "James's sister, with whom he says he is blessed to have a close bond. She visited him and his dogs on 21 July 2022, and the two of them were by the ocean the same day and watched a sunset together."
+    },
+    {
+      "key": "james-mother",
+      "type": "person",
+      "name": "James's mother",
+      "description": "James's mother, who served in the army. She visited James on 19 October 2022 with an army friend, and the two of them used to tell him stories about their time in the military and about their dog; their old Nintendo console was James's first gaming system."
+    },
+    {
+      "key": "josh",
+      "type": "person",
+      "name": "Josh",
+      "description": "A friend of James, visited together with Mark during the road trip James took with his family in early November 2022."
+    },
+    {
+      "key": "mark",
+      "type": "person",
+      "name": "Mark",
+      "description": "A friend of James, visited together with Josh during the road trip James took with his family in early November 2022."
+    },
+    {
+      "key": "max",
+      "type": "animal",
+      "name": "Max",
+      "properties": {
+        "species": "dog",
+        "breed": "shepherd"
+      },
+      "description": "One of James's three dogs, lovable and playful and a source of joy to James especially in tough times. He is a strong swimmer who loves the beach and the lake, never misses a frisbee in mid-air, and walks with James on a trail a mile from the house."
+    },
+    {
+      "key": "daisy",
+      "type": "animal",
+      "name": "Daisy",
+      "properties": {
+        "species": "dog",
+        "breed": "Labrador"
+      },
+      "description": "One of James's three dogs, a Labrador who loves playing with her toys and, most of all, eating. She can sit, stay, give a paw and roll over, and often lies down beside James while he games."
+    },
+    {
+      "key": "ned",
+      "type": "animal",
+      "name": "Ned",
+      "properties": {
+        "species": "dog",
+        "breed": "shepherd"
+      },
+      "description": "The puppy James adopted from an animal shelter in Stamford in the week before 12 April 2022, making three dogs in the household. James introduced him to Max and Daisy on 17 June 2022 and took him to the clinic on 5 August 2022 for a routine examination and a vaccination against a seasonal canine disease."
+    },
+    {
+      "key": "luna",
+      "type": "animal",
+      "name": "Luna",
+      "properties": {
+        "species": "dog"
+      },
+      "description": "The dog belonging to John's cousin, whose photograph John showed James on 7 November 2022; James said Luna was a great name."
+    },
+    {
+      "key": "stamford",
+      "type": "place",
+      "name": "Stamford",
+      "properties": {
+        "kind": "city"
+      },
+      "description": "The town whose animal shelter James adopted his puppy Ned from in the week before 12 April 2022."
+    },
+    {
+      "key": "italy",
+      "type": "place",
+      "name": "Italy",
+      "properties": {
+        "kind": "country"
+      },
+      "description": "A country James visited in 2021 and found very beautiful with delicious food; John said he had always dreamed of going there."
+    },
+    {
+      "key": "turkey",
+      "type": "place",
+      "name": "Turkey",
+      "properties": {
+        "kind": "country"
+      },
+      "description": "One of the three countries James had visited as of 20 April 2022, along with Italy and Mexico."
+    },
+    {
+      "key": "mexico",
+      "type": "place",
+      "name": "Mexico",
+      "properties": {
+        "kind": "country"
+      },
+      "description": "One of the three countries James had visited as of 20 April 2022, along with Italy and Turkey."
+    },
+    {
+      "key": "japan",
+      "type": "place",
+      "name": "Japan",
+      "properties": {
+        "kind": "country"
+      },
+      "description": "The last country John had visited as of April 2022. He was impressed by its technologically advanced megacities, the huge screens on the buildings and the street food."
+    },
+    {
+      "key": "canada",
+      "type": "place",
+      "name": "Canada",
+      "properties": {
+        "kind": "country"
+      },
+      "description": "The fourth country James visited. He bought air tickets and flew out on the evening of 11 July 2022 to Toronto, planned to visit Vancouver as well, and planned to return on 20 July 2022 with souvenirs for John and Jill."
+    },
+    {
+      "key": "toronto",
+      "type": "place",
+      "name": "Toronto",
+      "properties": {
+        "kind": "city",
+        "country": "Canada"
+      },
+      "description": "The Canadian city James flew to on the evening of 11 July 2022 on the trip that made Canada his fourth country."
+    },
+    {
+      "key": "vancouver",
+      "type": "place",
+      "name": "Vancouver",
+      "properties": {
+        "kind": "city",
+        "country": "Canada"
+      },
+      "description": "The second Canadian city James planned to visit on his July 2022 trip, besides Toronto."
+    },
+    {
+      "key": "greenland",
+      "type": "place",
+      "name": "Greenland",
+      "properties": {
+        "kind": "country"
+      },
+      "description": "The country James added to his list during his July 2022 trip by stopping briefly in Nuuk, making it another country on his bucket list."
+    },
+    {
+      "key": "nuuk",
+      "type": "place",
+      "name": "Nuuk",
+      "properties": {
+        "kind": "city",
+        "country": "Greenland"
+      },
+      "description": "The city in Greenland James got out to during his July 2022 trip, staying only a short time but adding one more country to his list."
+    },
+    {
+      "key": "mcgees-pub",
+      "type": "place",
+      "name": "McGee's Pub",
+      "properties": {
+        "kind": "venue"
+      },
+      "description": "The pub James proposed to John on 26 August 2022 for its stout, where the two met the next day for a beer instead of coffee. James and Samantha drink there too — she loves its lager — and its being nearby was one of their criteria when they rented an apartment together in October 2022."
+    },
+    {
+      "key": "john-programming-course",
+      "type": "organization",
+      "name": "John's programming course",
+      "properties": {
+        "kind": "course"
+      },
+      "description": "The programming class John signed up for around 17 March 2022 to refresh the HTML and CSS he had learned a few years earlier. He met three new friends on it on 19 April 2022, and his younger siblings joined the same course later, after which he began helping them with their coding."
+    },
+    {
+      "key": "james-gamedev-course",
+      "type": "organization",
+      "name": "James's game-development course",
+      "properties": {
+        "kind": "course"
+      },
+      "description": "A course combining gaming and programming that James started shortly before 13 June 2022, which he found fun and challenging. On it he worked on a new instalment of a football simulator, his own job being to collect the player databases."
+    },
+    {
+      "key": "chess-club",
+      "type": "organization",
+      "name": "John's chess club",
+      "properties": {
+        "kind": "club"
+      },
+      "description": "The chess club John joined in July 2022 to practise with other players, alongside playing mostly online."
+    },
+    {
+      "key": "cooking-class",
+      "type": "organization",
+      "name": "James's cooking class",
+      "properties": {
+        "kind": "course"
+      },
+      "description": "A cooking class James signed up for on 2 September 2022 at $10 a lesson although he had never liked cooking. In the first lesson he made a good omelette first time and a meringue, and was taught how to make dough."
+    },
+    {
+      "key": "online-programming-group",
+      "type": "organization",
+      "name": "John's online programming group",
+      "properties": {
+        "kind": "club"
+      },
+      "description": "An online programming community John joined on 19 August 2022, full of skilled coders passionate about using technology for good. He shared ideas, exchanged contacts with several members and worked with one of them on a project that week, but called it a one-time experience rather than a return to programming work."
+    },
+    {
+      "key": "james-gaming-group",
+      "type": "organization",
+      "name": "James's gaming group",
+      "properties": {
+        "kind": "team"
+      },
+      "description": "The group of gamers James plays with regularly, communicating by voice chat during matches. They stream their sessions, had a get-together in August 2022, and James hosted an all-night gaming marathon with them that he said strengthened their bond."
+    },
+    {
+      "key": "charity-foundation",
+      "type": "organization",
+      "name": "the charitable foundation John built software for",
+      "properties": {
+        "kind": "nonprofit"
+      },
+      "description": "A foundation devoted to helping children whose inventory had all been kept on paper and recorded by hand until John volunteered his programming skills in May 2022 and built it a smartphone application for tracking inventory, resources and donations and generating reports."
+    },
+    {
+      "key": "gift-charity",
+      "type": "organization",
+      "name": "the charity James volunteers with",
+      "properties": {
+        "kind": "nonprofit"
+      },
+      "description": "An organisation that provides necessary items to people who are less fortunate. James volunteered with it in May 2022 and offered on 19 June 2022 to take John there the following weekend and introduce him to staff he still knows, telling him no interview is needed."
+    },
+    {
+      "key": "gamedev-nonprofit",
+      "type": "organization",
+      "name": "the game-development non-profit",
+      "properties": {
+        "kind": "nonprofit"
+      },
+      "description": "The non-profit that emailed John in late September 2022 offering him a volunteer position as a programming mentor for game developers, teaching coding and assisting with their projects — the start, he hoped, of a career combining gaming and helping people."
+    },
+    {
+      "key": "liverpool-fc",
+      "type": "organization",
+      "name": "Liverpool",
+      "properties": {
+        "kind": "team"
+      },
+      "description": "The football club James supports. He says there is no sport better than football and no club better than Liverpool, does not miss a single one of their matches, and hoped on 13 June 2022 that they would be champions the following season."
+    },
+    {
+      "key": "manchester-city",
+      "type": "organization",
+      "name": "Manchester City",
+      "properties": {
+        "kind": "team"
+      },
+      "description": "The football club John supports. On 13 June 2022 he predicted his club and James's would fight for the championship and that City would win, while James called their form bad and their transfer policy terrible; the two bet on which would finish higher."
+    },
+    {
+      "key": "the-witcher-3",
+      "type": "work",
+      "name": "The Witcher 3",
+      "properties": {
+        "medium": "video game"
+      },
+      "description": "The role-playing game James was most into in March 2022 for its story and atmosphere, and that John — who had not played it then — was hooked on by August 2022 for its monster-hunter protagonist and its world-shaping choices. It inspired the virtual world James built in April 2022 and, he said in October 2022, his own released game."
+    },
+    {
+      "key": "csgo",
+      "type": "work",
+      "name": "CS:GO",
+      "properties": {
+        "medium": "video game"
+      },
+      "description": "John's favourite game. He played it in an intense tournament at a gaming convention in March 2022, organised a charity tournament for it on 7 May 2022, and named it first when he decided in August 2022 to become an organiser of computer-game competitions in his state."
+    },
+    {
+      "key": "apex-legends",
+      "type": "work",
+      "name": "Apex Legends",
+      "properties": {
+        "medium": "video game"
+      },
+      "description": "James's favourite game to play with his gaming team, which he praised for awesome graphics and very fast-paced gameplay. It was also one of the games played at John's charity tournament on 30 October 2022."
+    },
+    {
+      "key": "civilization",
+      "type": "work",
+      "name": "Civilization",
+      "properties": {
+        "medium": "video game"
+      },
+      "description": "The turn-based strategy series James was playing in April 2022 — John guessed Civilization VI from a screenshot — and had been playing for a month by 29 April. Loving its depth is why he decided in August 2022 to build a strategy game of his own."
+    },
+    {
+      "key": "total-war",
+      "type": "work",
+      "name": "Total War",
+      "properties": {
+        "medium": "video game"
+      },
+      "description": "A strategy series James says he has always loved playing, named alongside Civilization as what made him want to build a strategy game himself."
+    },
+    {
+      "key": "ac-valhalla",
+      "type": "work",
+      "name": "Assassin's Creed Valhalla",
+      "properties": {
+        "medium": "video game"
+      },
+      "description": "The game John was playing at the end of April 2022 and thought was cool."
+    },
+    {
+      "key": "cyberpunk-2077",
+      "type": "work",
+      "name": "Cyberpunk 2077",
+      "properties": {
+        "medium": "video game"
+      },
+      "description": "The game John recommended to James on 3 October 2022 for his new video card, praising its immersive world and story. James tried it on 20 October 2022 and found it great and addictive; John warned him the hardest part is choosing right, because even a line of dialogue can change everything."
+    },
+    {
+      "key": "fifa-23",
+      "type": "work",
+      "name": "FIFA 23",
+      "properties": {
+        "medium": "video game"
+      },
+      "description": "The football game John was hooked on in November 2022, playable online against players all over the world, which he recommended to James as a way into the sports genre."
+    },
+    {
+      "key": "fortnite",
+      "type": "work",
+      "name": "Fortnite",
+      "properties": {
+        "medium": "video game"
+      },
+      "description": "A game John said in August 2022 he could host competitions for, and one of the games played at the tournament he held on 30 October 2022 for a children's hospital."
+    },
+    {
+      "key": "overwatch",
+      "type": "work",
+      "name": "Overwatch",
+      "properties": {
+        "medium": "video game"
+      },
+      "description": "One of the games John and his gaming friends played at the charity tournament for a children's hospital on 30 October 2022."
+    },
+    {
+      "key": "super-mario",
+      "type": "work",
+      "name": "Super Mario",
+      "properties": {
+        "medium": "video game"
+      },
+      "description": "One of the two games James played for hours as a child on the Nintendo console that was his first gaming system, and part of what sparked his passion for gaming."
+    },
+    {
+      "key": "legend-of-zelda",
+      "type": "work",
+      "name": "The Legend of Zelda",
+      "properties": {
+        "medium": "video game"
+      },
+      "description": "A game James played for hours as a child on his first Nintendo console, and the comparison he reached for on 20 September 2022 when John described his own 2D adventure game with puzzles."
+    },
+    {
+      "key": "name-of-the-wind",
+      "type": "work",
+      "name": "The Name of the Wind",
+      "properties": {
+        "medium": "book"
+      },
+      "description": "The fantasy novel John recommended to James on 29 April 2022, calling it a great novel with awesome writing and part of a trilogy James would love."
+    },
+    {
+      "key": "stormlight-archive",
+      "type": "work",
+      "name": "The Stormlight Archive",
+      "properties": {
+        "medium": "book"
+      },
+      "description": "One of John's two favourite epic fantasy series, recommended to James on 16 June 2022 for its magical world and believable characters."
+    },
+    {
+      "key": "kingkiller-chronicle",
+      "type": "work",
+      "name": "Kingkiller Chronicle",
+      "properties": {
+        "medium": "book"
+      },
+      "description": "One of John's two favourite epic fantasy series, recommended to James on 16 June 2022 for its magical world and believable characters."
+    },
+    {
+      "key": "the-expanse",
+      "type": "work",
+      "name": "The Expanse",
+      "properties": {
+        "medium": "book"
+      },
+      "description": "The science-fiction series John recommended to James on 16 June 2022, calling it epic."
+    },
+    {
+      "key": "dungeons-of-the-dragon",
+      "type": "work",
+      "name": "Dungeons of the Dragon",
+      "properties": {
+        "medium": "board game"
+      },
+      "description": "The board game John tried in the week before 18 September 2022 and found very exciting; it is what got him into board games properly."
+    },
+    {
+      "key": "nintendo-console",
+      "type": "object",
+      "name": "the old Nintendo console",
+      "properties": {
+        "kind": "games console",
+        "brand": "Nintendo"
+      },
+      "description": "The old Nintendo console belonging to James's mother and her army friend, which was James's first gaming system as a child. He played Super Mario and The Legend of Zelda on it for hours, and it is what sparked his passion for gaming; he showed John a photograph of himself playing on it on 21 October 2022."
+    },
+    {
+      "key": "gaming",
+      "type": "activity",
+      "name": "playing video games",
+      "properties": {
+        "kind": "hobby"
+      },
+      "description": "The shared passion the friendship runs on. James says games give him joy and excitement, are a shared language with other gamers, a refuge in tough times and like therapy when he is overwhelmed; John plays to relax after a long day, to escape stress, and says gaming keeps him focused and motivated in other areas of life."
+    },
+    {
+      "key": "programming",
+      "type": "activity",
+      "name": "programming",
+      "properties": {
+        "kind": "skill"
+      },
+      "description": "Writing code. James tried it in college and says it is now all his life, working in Python and C++. John learned HTML and CSS years earlier, took a class from March 2022, freelanced on a small-business website, blogged about it, built software for a charity, joined an online programming group, taught his siblings and then his parents, ran a seminar and became a mentor."
+    },
+    {
+      "key": "game-development",
+      "type": "activity",
+      "name": "making video games",
+      "properties": {
+        "kind": "craft"
+      },
+      "description": "Making games rather than only playing them. James made game mods, built a virtual world, took a game-development course, finished the game he had wanted to make since childhood and built and released a Unity strategy game; John made his first mobile game, collaborated on an online board game and took a mentoring role at a game-development non-profit."
+    },
+    {
+      "key": "chess",
+      "type": "activity",
+      "name": "chess",
+      "properties": {
+        "kind": "game"
+      },
+      "description": "The game John took up in July 2022 to get better at strategy, playing mostly online and at a club. James advised him to study openings and analyse his own games, and John won the regional chess tournament on 1 November 2022."
+    },
+    {
+      "key": "drumming",
+      "type": "activity",
+      "name": "playing the drums",
+      "properties": {
+        "kind": "music"
+      },
+      "description": "John owns a drum kit and had been playing for a month as of 27 March 2022, having also played when he was younger; James started learning a few days before the same date and was practising daily."
+    },
+    {
+      "key": "bowling",
+      "type": "activity",
+      "name": "bowling",
+      "properties": {
+        "kind": "sport"
+      },
+      "description": "James loves bowling and rolled two strikes on 16 March 2022, and wished he and John could play together. John does not like it and says his fingers are too big for it."
+    },
+    {
+      "key": "skateboarding",
+      "type": "activity",
+      "name": "skateboarding",
+      "properties": {
+        "kind": "sport"
+      },
+      "description": "What James and John were both into as ten-year-olds, going to the skate park with a group of friends, helping each other learn tricks and sometimes leaving class early for it. James still rides occasionally and has taught his dogs to balance on a board."
+    },
+    {
+      "key": "reading",
+      "type": "activity",
+      "name": "reading",
+      "properties": {
+        "kind": "hobby"
+      },
+      "description": "John is a big reader of science fiction and epic fantasy, bought a lot of books in June 2022 and nearly filled his bookcase, and relaxes by entering authors' imaginative worlds. James likes reading too, bought an illustrated fantasy adventure book on 26 April 2022, and takes a book to the park."
+    },
+    {
+      "key": "metal-detecting",
+      "type": "activity",
+      "name": "metal detecting",
+      "properties": {
+        "kind": "hobby"
+      },
+      "description": "The hobby John took up in March 2022, walking along beaches with a metal detector looking for something worthwhile. Mostly bottle caps, but also coins a couple of times and once a gold ring."
+    },
+    {
+      "key": "cooking",
+      "type": "activity",
+      "name": "cooking",
+      "properties": {
+        "kind": "hobby"
+      },
+      "description": "Something James had never liked but took up as a new hobby with a class from 2 September 2022, wanting to learn something new and hoping to cook for John once he has learned a little more."
+    },
+    {
+      "key": "extreme-sports",
+      "type": "activity",
+      "name": "extreme sports",
+      "properties": {
+        "kind": "sport"
+      },
+      "description": "What James became interested in during the summer of 2022 as a way of taking breaks from his other hobbies: rope jumping on 8 July 2022 from a height of 150 metres, and surfing on 6 July 2022, which he found strangely relaxing."
+    },
+    {
+      "key": "game-streaming",
+      "type": "activity",
+      "name": "streaming games",
+      "properties": {
+        "kind": "hobby"
+      },
+      "description": "Broadcasting gameplay. James's gaming group stream their sessions together, and James started streaming himself in September 2022; a stream on the night of 19 September 2022 drew comments from the gaming community that left him stoked and inspired to keep going."
+    },
+    {
+      "key": "travel",
+      "type": "activity",
+      "name": "travelling",
+      "properties": {
+        "kind": "hobby"
+      },
+      "description": "Both men enjoy travelling. James had been to Italy, Turkey and Mexico by April 2022 and added Canada and Greenland in July; John's last trip was to Japan and he says chilling with friends and travelling are what motivate him to work. On 20 April 2022 they agreed to go somewhere together the following year, and in November 2022 James took a road trip with his family and dogs."
+    },
+    {
+      "key": "volunteering",
+      "type": "activity",
+      "name": "volunteering",
+      "properties": {
+        "kind": "service"
+      },
+      "description": "Using skills and time for causes. John built software for a children's charitable foundation, ran charity gaming tournaments for a dog shelter and a children's hospital, fed homeless people with the surplus, and took a mentoring position at a game-development non-profit; James volunteered with a charity that gives necessities to people in need and offered to take John along."
+    },
+    {
+      "key": "board-games",
+      "type": "activity",
+      "name": "playing board games",
+      "properties": {
+        "kind": "game"
+      },
+      "description": "John played a strategy board game with friends on 27 April 2022, got into board games properly in September 2022 with Dungeons of the Dragon, and in November 2022 helped create an online board game with a game developer."
+    },
+    {
+      "key": "football",
+      "type": "activity",
+      "name": "football",
+      "properties": {
+        "kind": "sport"
+      },
+      "description": "James says there is no sport better than football, supports Liverpool and does not miss a match; John supports Manchester City, and on 13 June 2022 they bet on which club would finish higher. James's game-development course worked on a football simulator, and John was hooked on FIFA 23 in November 2022."
+    },
+    {
+      "key": "esports-organizing",
+      "type": "activity",
+      "name": "organising gaming tournaments",
+      "properties": {
+        "kind": "work"
+      },
+      "description": "What John turned from a hobby into a career ambition in August 2022: a charity CS:GO tournament on 7 May 2022, an online competition with programmer friends in October, a programming seminar, and a Fortnite, Overwatch and Apex Legends tournament on 30 October 2022 for a children's hospital. He wants to organise state-level competitions and had already made connections to help."
+    },
+    {
+      "key": "james-dream-game",
+      "type": "project",
+      "name": "James's game from his childhood comics",
+      "description": "The computer game James had wanted to make since he was a child, grown out of the comics and main-character sketches he drew back then and combining his two passions, gaming and storytelling. He worked on it for months; a bug broke its game mechanics on 29 April 2022 and a group of friends helped him fix it, and he finished it in April 2022, a personal milestone that had required him to learn a new programming language."
+    },
+    {
+      "key": "james-dog-app",
+      "type": "project",
+      "name": "the dog-walking and pet-care app",
+      "description": "An application James and John talked about building together on 17 March 2022, after John suggested they might develop mobile apps. It would connect pet owners with reliable dog walkers and provide pet-care information, and its personal touch — owners entering each dog's preferences and needs — was what James said would set it apart."
+    },
+    {
+      "key": "james-virtual-world",
+      "type": "project",
+      "name": "the Witcher-3-inspired virtual world",
+      "description": "A virtual world James built with one of his gaming friends on 14 April 2022, combining programming and gaming. Its main character's appearance came from a stranger he passed while walking his dogs around the neighbourhood about two weeks earlier, whom he felt he had fallen in love with at first sight and never approached."
+    },
+    {
+      "key": "james-strategy-game",
+      "type": "project",
+      "name": "James's Unity strategy game",
+      "description": "The strategy game James built in Unity after deciding on 26 August 2022 that he was dying to make one like Civilization. He finished it on about 1 September 2022, found balancing the mechanics and keeping it fair the hard part, and had released it to the gaming community by 13 October 2022 — his first released game, which he said The Witcher 3 had inspired."
+    },
+    {
+      "key": "john-website-project",
+      "type": "project",
+      "name": "the small-business website",
+      "description": "John's first professional project outside his class: a website for a local small business, taken on as freelance work by late April 2022 to sharpen his coding. Progress was slow with hiccups, and getting payments working on it was the hardest part."
+    },
+    {
+      "key": "john-charity-software",
+      "type": "project",
+      "name": "the charity inventory application",
+      "description": "The smartphone application John built for a children's charitable foundation in May 2022, replacing paper records and manual inventory with one app that tracks inventory, resources and donations and generates reports for analysis."
+    },
+    {
+      "key": "john-coding-blog",
+      "type": "project",
+      "name": "John's coding blog",
+      "description": "The blog about coding John started in the week before 16 June 2022, which he found exciting and a little frightening. He shares and tracks his coding journey on it and uses it to connect with other coders."
+    },
+    {
+      "key": "john-siblings-project",
+      "type": "project",
+      "name": "the coding project with John’s siblings",
+      "description": "A project John built with his younger siblings after they joined his programming course: a simple text-based adventure game they play while working on their coding skills. By September 2022 they were writing their own small programs, basic games and stories."
+    },
+    {
+      "key": "john-mobile-game",
+      "type": "project",
+      "name": "John's first mobile game",
+      "description": "A 2D adventure game with puzzles and exploration that John worked on secretly for months and announced on 20 September 2022 as launching the following month. He used a game-design book for the puzzles, watches tutorials and follows developer forums, and offered James a chance to test it."
+    },
+    {
+      "key": "portable-smoker-startup",
+      "type": "project",
+      "name": "John's portable smoker startup",
+      "description": "A startup making portable smokers that John began on 19 September 2022, having already welded the first one himself out of metal."
+    },
+    {
+      "key": "john-online-board-game",
+      "type": "project",
+      "name": "the online board game",
+      "description": "A board game John created with a game developer over the weekend of 5–6 November 2022, seeing his own ideas come to life. A demo was about to be released so others could try it and give feedback."
+    }
+  ],
+  "chrono": [
+    {
+      "key": "ch-bowling-strikes",
+      "type": "event",
+      "date": "2022-03-16",
+      "title": "James went bowling and rolled two strikes",
+      "entities": [
+        "james",
+        "bowling"
+      ]
+    },
+    {
+      "key": "ch-online-tournament-apr",
+      "type": "event",
+      "date": "2022-04-03",
+      "title": "James competed in an online gaming tournament, reaching the semi-finals before losing in the final rounds",
+      "entities": [
+        "james",
+        "gaming"
+      ]
+    },
+    {
+      "key": "ch-virtual-world-built",
+      "type": "milestone",
+      "date": "2022-04-14",
+      "title": "James and one of his gaming friends built a virtual world inspired by The Witcher 3",
+      "entities": [
+        "james",
+        "james-virtual-world",
+        "the-witcher-3"
+      ]
+    },
+    {
+      "key": "ch-canyon-visit",
+      "type": "event",
+      "date": "2022-04-18",
+      "title": "John went out alone into nature and found a canyon in the area around him",
+      "entities": [
+        "john"
+      ]
+    },
+    {
+      "key": "ch-new-course-friends",
+      "type": "event",
+      "date": "2022-04-19",
+      "title": "John met three new friends in his programming course",
+      "entities": [
+        "john",
+        "john-programming-course"
+      ]
+    },
+    {
+      "key": "ch-dog-hike",
+      "type": "event",
+      "date": "2022-04-21",
+      "title": "James took his dogs on a hike along woodland trails",
+      "entities": [
+        "james",
+        "max",
+        "daisy",
+        "ned"
+      ]
+    },
+    {
+      "key": "ch-adventure-book",
+      "type": "event",
+      "date": "2022-04-26",
+      "title": "James bought an adventure book of fantasy novels with artwork in it",
+      "entities": [
+        "james",
+        "reading"
+      ]
+    },
+    {
+      "key": "ch-board-game-friends",
+      "type": "event",
+      "date": "2022-04-27",
+      "title": "John played a strategy board game with friends",
+      "entities": [
+        "john",
+        "board-games"
+      ]
+    },
+    {
+      "key": "ch-project-bug",
+      "type": "event",
+      "date": "2022-04-29",
+      "title": "A bug in the code broke the game mechanics of the project James had worked on for months",
+      "entities": [
+        "james",
+        "james-dream-game"
+      ]
+    },
+    {
+      "key": "ch-movie-night",
+      "type": "event",
+      "date": "2022-05-04",
+      "title": "John spent his day off watching films with a few new friends",
+      "entities": [
+        "john"
+      ]
+    },
+    {
+      "key": "ch-charity-csgo-tournament",
+      "type": "event",
+      "date": "2022-05-07",
+      "title": "John and his friends ran a CS:GO tournament that raised money for a dog shelter and food for homeless people",
+      "entities": [
+        "john",
+        "csgo",
+        "esports-organizing",
+        "volunteering"
+      ]
+    },
+    {
+      "key": "ch-local-tournament-2nd",
+      "type": "event",
+      "date": "2022-05-20",
+      "title": "John took second place in a local tournament, winning prize money and a trophy",
+      "entities": [
+        "john",
+        "gaming"
+      ]
+    },
+    {
+      "key": "ch-dogs-introduced",
+      "type": "event",
+      "date": "2022-06-17",
+      "title": "James began introducing his new puppy Ned to Max and Daisy",
+      "entities": [
+        "james",
+        "max",
+        "daisy",
+        "ned"
+      ]
+    },
+    {
+      "key": "ch-surfing",
+      "type": "event",
+      "date": "2022-07-06",
+      "title": "James went surfing and found catching a wave relaxing",
+      "entities": [
+        "james",
+        "extreme-sports"
+      ]
+    },
+    {
+      "key": "ch-rope-jump",
+      "type": "event",
+      "date": "2022-07-08",
+      "title": "James went rope jumping, his highest jump from 150 metres",
+      "entities": [
+        "james",
+        "extreme-sports"
+      ]
+    },
+    {
+      "key": "ch-canada-departure",
+      "type": "plan",
+      "date": "2022-07-11",
+      "title": "James was to fly out to Toronto in the evening, his fourth country",
+      "entities": [
+        "james",
+        "canada",
+        "toronto"
+      ]
+    },
+    {
+      "key": "ch-canada-return",
+      "type": "plan",
+      "date": "2022-07-20",
+      "title": "James planned to return from his Canada trip with a souvenir for John",
+      "entities": [
+        "james",
+        "john",
+        "canada"
+      ]
+    },
+    {
+      "key": "ch-sister-visit",
+      "type": "event",
+      "date": "2022-07-21",
+      "title": "James's sister came to see him and spent the day with him and his dogs",
+      "entities": [
+        "james",
+        "james-sister",
+        "max",
+        "daisy",
+        "ned"
+      ]
+    },
+    {
+      "key": "ch-ocean-sunset",
+      "type": "event",
+      "date": "2022-07-21",
+      "title": "James and his sister were by the ocean and watched a sunset together",
+      "entities": [
+        "james",
+        "james-sister"
+      ]
+    },
+    {
+      "key": "ch-puppy-clinic",
+      "type": "event",
+      "date": "2022-08-05",
+      "title": "James took his puppy Ned to the clinic for a routine examination and a vaccination against a seasonal canine disease",
+      "entities": [
+        "james",
+        "ned"
+      ]
+    },
+    {
+      "key": "ch-beach-outing",
+      "type": "event",
+      "date": "2022-08-09",
+      "title": "James took his three dogs to a beach outing with other dog keepers and met Samantha there",
+      "entities": [
+        "james",
+        "samantha",
+        "max",
+        "daisy",
+        "ned"
+      ]
+    },
+    {
+      "key": "ch-call-samantha",
+      "type": "plan",
+      "date": "2022-08-11",
+      "title": "James intended to telephone Samantha for the first time and ask her out",
+      "entities": [
+        "james",
+        "samantha"
+      ]
+    },
+    {
+      "key": "ch-joined-programming-group",
+      "type": "event",
+      "date": "2022-08-19",
+      "title": "John joined an online programming group",
+      "entities": [
+        "john",
+        "online-programming-group"
+      ]
+    },
+    {
+      "key": "ch-pub-meeting",
+      "type": "plan",
+      "date": "2022-08-27",
+      "title": "James and John arranged to meet for a beer at McGee's Pub",
+      "entities": [
+        "james",
+        "john",
+        "mcgees-pub"
+      ]
+    },
+    {
+      "key": "ch-strategy-game-finished",
+      "type": "milestone",
+      "date": "2022-09-01",
+      "title": "James finished his Unity strategy game",
+      "entities": [
+        "james",
+        "james-strategy-game"
+      ]
+    },
+    {
+      "key": "ch-cooking-class-signup",
+      "type": "event",
+      "date": "2022-09-02",
+      "title": "James signed up for a cooking class",
+      "entities": [
+        "james",
+        "cooking-class",
+        "cooking"
+      ]
+    },
+    {
+      "key": "ch-asked-samantha-out",
+      "type": "event",
+      "date": "2022-09-03",
+      "title": "James asked Samantha at the theatre to become his girlfriend and she agreed",
+      "entities": [
+        "james",
+        "samantha"
+      ]
+    },
+    {
+      "key": "ch-baseball-plan",
+      "type": "plan",
+      "date": "2022-09-11",
+      "title": "James, Samantha and John were to go to a baseball game together",
+      "entities": [
+        "james",
+        "samantha",
+        "john"
+      ]
+    },
+    {
+      "key": "ch-startup-started",
+      "type": "event",
+      "date": "2022-09-19",
+      "title": "John started a portable-smoker startup and welded the first smoker from metal",
+      "entities": [
+        "john",
+        "portable-smoker-startup"
+      ]
+    },
+    {
+      "key": "ch-stream-night",
+      "type": "event",
+      "date": "2022-09-19",
+      "title": "James streamed a game and was overwhelmed by the gaming community’s comments",
+      "entities": [
+        "james",
+        "game-streaming"
+      ]
+    },
+    {
+      "key": "ch-power-cut",
+      "type": "event",
+      "date": "2022-10-18",
+      "title": "A power cut in James’s apartment interrupted his game and cost him unsaved progress",
+      "entities": [
+        "james",
+        "gaming"
+      ]
+    },
+    {
+      "key": "ch-mother-visit",
+      "type": "event",
+      "date": "2022-10-19",
+      "title": "James’s mother came to see him with her army friend",
+      "entities": [
+        "james",
+        "james-mother"
+      ]
+    },
+    {
+      "key": "ch-cyberpunk-try",
+      "type": "event",
+      "date": "2022-10-20",
+      "title": "James played Cyberpunk 2077 for the first time",
+      "entities": [
+        "james",
+        "cyberpunk-2077"
+      ]
+    },
+    {
+      "key": "ch-fortnite-charity",
+      "type": "event",
+      "date": "2022-10-30",
+      "title": "John and his gaming friends held a tournament that raised money for a children’s hospital",
+      "entities": [
+        "john",
+        "fortnite",
+        "overwatch",
+        "apex-legends",
+        "esports-organizing",
+        "volunteering"
+      ]
+    },
+    {
+      "key": "ch-chess-win",
+      "type": "milestone",
+      "date": "2022-11-01",
+      "title": "John won the regional chess tournament",
+      "entities": [
+        "john",
+        "chess"
+      ]
+    },
+    {
+      "key": "ch-road-trip-start",
+      "type": "event",
+      "date": "2022-11-04",
+      "title": "James set off on a road trip with his family and his dogs",
+      "entities": [
+        "james",
+        "max",
+        "daisy",
+        "ned",
+        "travel"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "label": "knows",
+      "from": "james",
+      "to": "john",
+      "properties": {
+        "kind": "friend"
+      }
+    },
+    {
+      "label": "practices",
+      "from": "james",
+      "to": "gaming"
+    },
+    {
+      "label": "practices",
+      "from": "james",
+      "to": "programming"
+    },
+    {
+      "label": "practices",
+      "from": "james",
+      "to": "game-development"
+    },
+    {
+      "label": "practices",
+      "from": "james",
+      "to": "bowling"
+    },
+    {
+      "label": "practices",
+      "from": "james",
+      "to": "drumming"
+    },
+    {
+      "label": "practices",
+      "from": "james",
+      "to": "reading"
+    },
+    {
+      "label": "practices",
+      "from": "james",
+      "to": "travel"
+    },
+    {
+      "label": "practices",
+      "from": "john",
+      "to": "gaming"
+    },
+    {
+      "label": "practices",
+      "from": "john",
+      "to": "programming"
+    },
+    {
+      "label": "practices",
+      "from": "john",
+      "to": "drumming"
+    },
+    {
+      "label": "practices",
+      "from": "john",
+      "to": "metal-detecting"
+    },
+    {
+      "label": "practices",
+      "from": "john",
+      "to": "board-games"
+    },
+    {
+      "label": "practices",
+      "from": "john",
+      "to": "travel"
+    },
+    {
+      "label": "member_of",
+      "from": "john",
+      "to": "john-programming-course",
+      "properties": {
+        "since": "2022-03-17"
+      }
+    },
+    {
+      "label": "member_of",
+      "from": "james",
+      "to": "james-gaming-group"
+    },
+    {
+      "label": "owns",
+      "from": "james",
+      "to": "max"
+    },
+    {
+      "label": "owns",
+      "from": "james",
+      "to": "daisy"
+    },
+    {
+      "label": "owns",
+      "from": "james",
+      "to": "ned"
+    },
+    {
+      "label": "works_on",
+      "from": "james",
+      "to": "james-dream-game"
+    },
+    {
+      "label": "works_on",
+      "from": "james",
+      "to": "james-dog-app"
+    },
+    {
+      "label": "works_on",
+      "from": "james",
+      "to": "james-virtual-world"
+    },
+    {
+      "label": "works_on",
+      "from": "john",
+      "to": "john-website-project"
+    },
+    {
+      "label": "likes",
+      "from": "james",
+      "to": "the-witcher-3"
+    },
+    {
+      "label": "likes",
+      "from": "james",
+      "to": "bowling"
+    },
+    {
+      "label": "likes",
+      "from": "james",
+      "to": "apex-legends"
+    },
+    {
+      "label": "likes",
+      "from": "james",
+      "to": "civilization"
+    },
+    {
+      "label": "likes",
+      "from": "james",
+      "to": "italy"
+    },
+    {
+      "label": "likes",
+      "from": "john",
+      "to": "csgo"
+    },
+    {
+      "label": "likes",
+      "from": "john",
+      "to": "ac-valhalla"
+    },
+    {
+      "label": "likes",
+      "from": "john",
+      "to": "name-of-the-wind"
+    },
+    {
+      "label": "likes",
+      "from": "john",
+      "to": "japan"
+    },
+    {
+      "label": "dislikes",
+      "from": "john",
+      "to": "bowling"
+    },
+    {
+      "label": "supersedes",
+      "from": "james-adopted-ned",
+      "to": "james-has-two-dogs"
+    },
+    {
+      "label": "practices",
+      "from": "john",
+      "to": "volunteering"
+    },
+    {
+      "label": "practices",
+      "from": "john",
+      "to": "esports-organizing"
+    },
+    {
+      "label": "practices",
+      "from": "john",
+      "to": "reading"
+    },
+    {
+      "label": "practices",
+      "from": "john",
+      "to": "chess"
+    },
+    {
+      "label": "practices",
+      "from": "john",
+      "to": "skateboarding"
+    },
+    {
+      "label": "practices",
+      "from": "james",
+      "to": "volunteering"
+    },
+    {
+      "label": "practices",
+      "from": "james",
+      "to": "football"
+    },
+    {
+      "label": "practices",
+      "from": "james",
+      "to": "extreme-sports"
+    },
+    {
+      "label": "practices",
+      "from": "james",
+      "to": "skateboarding"
+    },
+    {
+      "label": "works_on",
+      "from": "john",
+      "to": "john-charity-software"
+    },
+    {
+      "label": "works_on",
+      "from": "john",
+      "to": "john-coding-blog"
+    },
+    {
+      "label": "member_of",
+      "from": "james",
+      "to": "james-gamedev-course"
+    },
+    {
+      "label": "member_of",
+      "from": "james",
+      "to": "gift-charity",
+      "properties": {
+        "role": "volunteer"
+      }
+    },
+    {
+      "label": "member_of",
+      "from": "john",
+      "to": "chess-club"
+    },
+    {
+      "label": "family_of",
+      "from": "james",
+      "to": "james-sister",
+      "properties": {
+        "relation": "sister"
+      }
+    },
+    {
+      "label": "likes",
+      "from": "james",
+      "to": "liverpool-fc"
+    },
+    {
+      "label": "likes",
+      "from": "james",
+      "to": "football"
+    },
+    {
+      "label": "likes",
+      "from": "john",
+      "to": "manchester-city"
+    },
+    {
+      "label": "likes",
+      "from": "john",
+      "to": "stormlight-archive"
+    },
+    {
+      "label": "likes",
+      "from": "john",
+      "to": "kingkiller-chronicle"
+    },
+    {
+      "label": "likes",
+      "from": "john",
+      "to": "the-expanse"
+    },
+    {
+      "label": "located_in",
+      "from": "toronto",
+      "to": "canada"
+    },
+    {
+      "label": "located_in",
+      "from": "vancouver",
+      "to": "canada"
+    },
+    {
+      "label": "located_in",
+      "from": "nuuk",
+      "to": "greenland"
+    },
+    {
+      "label": "supersedes",
+      "from": "james-finished-big-project",
+      "to": "james-only-two-languages"
+    },
+    {
+      "label": "knows",
+      "from": "james",
+      "to": "samantha"
+    },
+    {
+      "label": "likes",
+      "from": "james",
+      "to": "samantha"
+    },
+    {
+      "label": "likes",
+      "from": "james",
+      "to": "total-war"
+    },
+    {
+      "label": "likes",
+      "from": "john",
+      "to": "the-witcher-3"
+    },
+    {
+      "label": "practices",
+      "from": "james",
+      "to": "cooking"
+    },
+    {
+      "label": "practices",
+      "from": "james",
+      "to": "game-streaming"
+    },
+    {
+      "label": "member_of",
+      "from": "john",
+      "to": "online-programming-group",
+      "properties": {
+        "since": "2022-08-19"
+      }
+    },
+    {
+      "label": "member_of",
+      "from": "james",
+      "to": "cooking-class",
+      "properties": {
+        "since": "2022-09-02"
+      }
+    },
+    {
+      "label": "works_on",
+      "from": "james",
+      "to": "james-strategy-game",
+      "properties": {
+        "since": "2022-08-26"
+      }
+    },
+    {
+      "label": "works_on",
+      "from": "john",
+      "to": "john-siblings-project"
+    },
+    {
+      "label": "works_on",
+      "from": "john",
+      "to": "john-mobile-game"
+    },
+    {
+      "label": "works_on",
+      "from": "john",
+      "to": "portable-smoker-startup",
+      "properties": {
+        "since": "2022-09-19"
+      }
+    },
+    {
+      "label": "supersedes",
+      "from": "john-new-job",
+      "to": "john-it-job"
+    },
+    {
+      "label": "member_of",
+      "from": "john",
+      "to": "gamedev-nonprofit",
+      "properties": {
+        "role": "programming mentor"
+      }
+    },
+    {
+      "label": "practices",
+      "from": "john",
+      "to": "game-development"
+    },
+    {
+      "label": "practices",
+      "from": "john",
+      "to": "football"
+    },
+    {
+      "label": "owns",
+      "from": "james",
+      "to": "nintendo-console"
+    },
+    {
+      "label": "family_of",
+      "from": "james",
+      "to": "james-mother",
+      "properties": {
+        "relation": "mother"
+      }
+    },
+    {
+      "label": "knows",
+      "from": "james",
+      "to": "josh",
+      "properties": {
+        "kind": "friend"
+      }
+    },
+    {
+      "label": "knows",
+      "from": "james",
+      "to": "mark",
+      "properties": {
+        "kind": "friend"
+      }
+    },
+    {
+      "label": "likes",
+      "from": "james",
+      "to": "cyberpunk-2077"
+    },
+    {
+      "label": "likes",
+      "from": "james",
+      "to": "mcgees-pub"
+    },
+    {
+      "label": "likes",
+      "from": "samantha",
+      "to": "mcgees-pub"
+    },
+    {
+      "label": "likes",
+      "from": "john",
+      "to": "fifa-23"
+    },
+    {
+      "label": "works_on",
+      "from": "john",
+      "to": "john-online-board-game"
+    }
+  ],
+  "claims": [
+    {
+      "text": "James is motivated by video games, which he says give him tons of joy and excitement.",
+      "speaker": "James",
+      "statedOn": "2022-03-17",
+      "entities": [
+        "james",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D1:1",
+        "D1:2"
+      ]
+    },
+    {
+      "text": "John is a big video-game fan too and plays to relax after a long day.",
+      "speaker": "John",
+      "statedOn": "2022-03-17",
+      "entities": [
+        "john",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D1:3"
+      ]
+    },
+    {
+      "text": "In March 2022 James was most into The Witcher 3, whose story and atmosphere he found amazing.",
+      "speaker": "James",
+      "statedOn": "2022-03-17",
+      "entities": [
+        "james",
+        "the-witcher-3"
+      ],
+      "sourceTurns": [
+        "D1:4"
+      ]
+    },
+    {
+      "text": "John had not played The Witcher 3 as of 17 March 2022 but had heard it was awesome and meant to give it a go.",
+      "speaker": "John",
+      "statedOn": "2022-03-17",
+      "entities": [
+        "john",
+        "the-witcher-3"
+      ],
+      "sourceTurns": [
+        "D1:5"
+      ]
+    },
+    {
+      "text": "John signed up for a programming class shortly before 17 March 2022.",
+      "speaker": "John",
+      "statedOn": "2022-03-17",
+      "entities": [
+        "john",
+        "john-programming-course",
+        "programming"
+      ],
+      "sourceTurns": [
+        "D1:5"
+      ]
+    },
+    {
+      "text": "James first tried programming in college and says it is now all his life.",
+      "speaker": "James",
+      "statedOn": "2022-03-17",
+      "entities": [
+        "james",
+        "programming"
+      ],
+      "sourceTurns": [
+        "D1:6"
+      ]
+    },
+    {
+      "text": "John did a bit of HTML and CSS coding a few years before March 2022 and took the programming course to refresh those skills.",
+      "speaker": "John",
+      "statedOn": "2022-03-17",
+      "entities": [
+        "john",
+        "programming",
+        "john-programming-course"
+      ],
+      "sourceTurns": [
+        "D1:7"
+      ]
+    },
+    {
+      "text": "James has worked with Python and C++, has built a website and has created game mods, one of which he showed John on 17 March 2022.",
+      "speaker": "James",
+      "statedOn": "2022-03-17",
+      "entities": [
+        "james",
+        "programming",
+        "game-development"
+      ],
+      "sourceTurns": [
+        "D1:8",
+        "D1:9"
+      ]
+    },
+    {
+      "text": "As of 17 March 2022 James had worked with no programming languages other than Python and C++, although he hoped to in future.",
+      "speaker": "James",
+      "statedOn": "2022-03-17",
+      "entities": [
+        "james",
+        "programming"
+      ],
+      "sourceTurns": [
+        "D1:10"
+      ],
+      "key": "james-only-two-languages",
+      "superseded": true
+    },
+    {
+      "text": "John suggested on 17 March 2022 that he and James might develop mobile applications together one day, and James liked the idea.",
+      "speaker": "John",
+      "statedOn": "2022-03-17",
+      "entities": [
+        "john",
+        "james"
+      ],
+      "sourceTurns": [
+        "D1:11",
+        "D1:12"
+      ]
+    },
+    {
+      "text": "James had two dogs, Max and Daisy, as of March 2022.",
+      "speaker": "James",
+      "statedOn": "2022-03-17",
+      "entities": [
+        "james",
+        "max",
+        "daisy"
+      ],
+      "sourceTurns": [
+        "D1:12",
+        "D1:13",
+        "D1:14"
+      ],
+      "key": "james-has-two-dogs",
+      "superseded": true
+    },
+    {
+      "text": "The app James and John discussed building together would be for dog walking and pet care, connecting pet owners with reliable dog walkers and providing helpful information on looking after pets.",
+      "speaker": "James",
+      "statedOn": "2022-03-17",
+      "entities": [
+        "james",
+        "john",
+        "james-dog-app"
+      ],
+      "sourceTurns": [
+        "D1:14",
+        "D1:15"
+      ]
+    },
+    {
+      "text": "What would set the pet-care app apart, James said, is a personal touch: owners could add their dog's preferences and needs so the app is customised to each owner and each pup.",
+      "speaker": "James",
+      "statedOn": "2022-03-17",
+      "entities": [
+        "james",
+        "james-dog-app"
+      ],
+      "sourceTurns": [
+        "D1:16",
+        "D1:17"
+      ]
+    },
+    {
+      "text": "James is motivated by creating something and seeing it come to life, and he writes all his goals in a notebook so that he can check each one off when it is done.",
+      "speaker": "James",
+      "statedOn": "2022-03-17",
+      "entities": [
+        "james"
+      ],
+      "sourceTurns": [
+        "D1:18",
+        "D1:19"
+      ]
+    },
+    {
+      "text": "James is building a computer game out of a story he has wanted to tell since he was a child, when he drew comics and sketched its main character.",
+      "speaker": "James",
+      "statedOn": "2022-03-17",
+      "entities": [
+        "james",
+        "james-dream-game",
+        "game-development"
+      ],
+      "sourceTurns": [
+        "D1:20",
+        "D1:21"
+      ]
+    },
+    {
+      "text": "James took on his childhood game project to combine his two passions, gaming and storytelling, and says he enjoys the challenge of bringing his own ideas to life.",
+      "speaker": "James",
+      "statedOn": "2022-03-17",
+      "entities": [
+        "james",
+        "james-dream-game"
+      ],
+      "sourceTurns": [
+        "D1:22",
+        "D1:23"
+      ]
+    },
+    {
+      "text": "James offered on 17 March 2022 to invite John to help with parts of his game because of John's HTML knowledge, and John said it would be great to work with him.",
+      "speaker": "James",
+      "statedOn": "2022-03-17",
+      "entities": [
+        "james",
+        "john",
+        "james-dream-game"
+      ],
+      "sourceTurns": [
+        "D1:24",
+        "D1:25"
+      ]
+    },
+    {
+      "text": "James went bowling on 16 March 2022 and got two strikes; he loves bowling.",
+      "speaker": "James",
+      "statedOn": "2022-03-17",
+      "entities": [
+        "james",
+        "bowling"
+      ],
+      "sourceTurns": [
+        "D1:26"
+      ],
+      "chrono": [
+        "ch-bowling-strikes"
+      ]
+    },
+    {
+      "text": "John does not like bowling and says his fingers are too big for it, and thought he should take up exercise and start going for a morning run instead.",
+      "speaker": "John",
+      "statedOn": "2022-03-17",
+      "entities": [
+        "john",
+        "bowling"
+      ],
+      "sourceTurns": [
+        "D1:27",
+        "D1:28"
+      ]
+    },
+    {
+      "text": "John suggested slot machines and arcades as something he and James could do together instead of bowling.",
+      "speaker": "John",
+      "statedOn": "2022-03-17",
+      "entities": [
+        "john",
+        "james"
+      ],
+      "sourceTurns": [
+        "D1:29"
+      ]
+    },
+    {
+      "text": "The last time James played the slot machines he was so engrossed in the game that his wallet was taken out of his pocket without him noticing, and John joked that he would look after his pockets next time.",
+      "speaker": "James",
+      "statedOn": "2022-03-17",
+      "entities": [
+        "james",
+        "john"
+      ],
+      "sourceTurns": [
+        "D1:30",
+        "D1:31",
+        "D1:32"
+      ]
+    },
+    {
+      "text": "John suggested VR gaming as something he and James could try together, having tried it a few times himself and found the experience insanely immersive.",
+      "speaker": "John",
+      "statedOn": "2022-03-17",
+      "entities": [
+        "john",
+        "james",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D1:33",
+        "D1:35"
+      ]
+    },
+    {
+      "text": "James has tried VR gaming and found it crazy how real it feels, and he and John agreed on 17 March 2022 to try it together on the coming Saturday.",
+      "speaker": "James",
+      "statedOn": "2022-03-17",
+      "entities": [
+        "james",
+        "john",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D1:34",
+        "D1:36",
+        "D1:37"
+      ]
+    },
+    {
+      "text": "Between 17 and 20 March 2022 James made a game avatar and joined a new online gaming platform, where he enjoys exploring and chatting with other gamers and feels part of a cool online community.",
+      "speaker": "James",
+      "statedOn": "2022-03-20",
+      "entities": [
+        "james",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D2:1",
+        "D2:2"
+      ]
+    },
+    {
+      "text": "James has shared tips, strategies and gaming stories with the other gamers on the platform, and says gaming brings people together regardless of their backgrounds.",
+      "speaker": "James",
+      "statedOn": "2022-03-20",
+      "entities": [
+        "james",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D2:3",
+        "D2:4"
+      ]
+    },
+    {
+      "text": "James calls gaming a shared language and a refuge in tough times, and says it is like therapy when he feels overwhelmed — a way to relax, forget his troubles and get lost in another world.",
+      "speaker": "James",
+      "statedOn": "2022-03-20",
+      "entities": [
+        "james",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D2:5",
+        "D2:7"
+      ]
+    },
+    {
+      "text": "John says gaming helps him escape stress and calms him down during tough times.",
+      "speaker": "John",
+      "statedOn": "2022-03-20",
+      "entities": [
+        "john",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D2:6",
+        "D2:8"
+      ]
+    },
+    {
+      "text": "By March 2022 James had been checking out different styles of gaming, finding it fun to try something fresh and test himself in other ways.",
+      "speaker": "James",
+      "statedOn": "2022-03-20",
+      "entities": [
+        "james",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D2:9"
+      ]
+    },
+    {
+      "text": "John took up metal detecting in March 2022, having bought a metal detector and taken to walking along the beaches looking for something worthwhile.",
+      "speaker": "John",
+      "statedOn": "2022-03-20",
+      "entities": [
+        "john",
+        "metal-detecting"
+      ],
+      "sourceTurns": [
+        "D2:10",
+        "D2:11"
+      ]
+    },
+    {
+      "text": "With his metal detector John has mostly found bottle caps, but also coins a couple of times and once a gold ring.",
+      "speaker": "John",
+      "statedOn": "2022-03-20",
+      "entities": [
+        "john",
+        "metal-detecting"
+      ],
+      "sourceTurns": [
+        "D2:12",
+        "D2:13"
+      ]
+    },
+    {
+      "text": "James says his dogs are the best pals ever and have brought a great deal of joy to his life; he showed John a photograph of them in the park on 20 March 2022.",
+      "speaker": "James",
+      "statedOn": "2022-03-20",
+      "entities": [
+        "james",
+        "max",
+        "daisy"
+      ],
+      "sourceTurns": [
+        "D2:14",
+        "D2:15"
+      ]
+    },
+    {
+      "text": "James's dogs can sit, stay, give a paw and roll over, having picked the tricks up fast after a lot of training from him, and he calls them family.",
+      "speaker": "James",
+      "statedOn": "2022-03-20",
+      "entities": [
+        "james",
+        "max",
+        "daisy"
+      ],
+      "sourceTurns": [
+        "D2:16",
+        "D2:17"
+      ]
+    },
+    {
+      "text": "John badly wanted a pet as of 20 March 2022 but said he was not in a position to get one yet.",
+      "speaker": "John",
+      "statedOn": "2022-03-20",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D2:18"
+      ]
+    },
+    {
+      "text": "James offered on 20 March 2022 to help John find the perfect pet when he is ready, saying John would make a great pet parent, and John said he would keep it in mind.",
+      "speaker": "James",
+      "statedOn": "2022-03-20",
+      "entities": [
+        "james",
+        "john"
+      ],
+      "sourceTurns": [
+        "D2:19",
+        "D2:20",
+        "D2:21"
+      ]
+    },
+    {
+      "text": "John had a big win in his game in the week before 27 March 2022, finally advancing to the next level, which he found a huge confidence boost.",
+      "speaker": "John",
+      "statedOn": "2022-03-27",
+      "entities": [
+        "john",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D3:1"
+      ]
+    },
+    {
+      "text": "James started learning the drums a few days before 27 March 2022 and had been at it daily, finding it tough but rewarding and seeing improvements.",
+      "speaker": "James",
+      "statedOn": "2022-03-27",
+      "entities": [
+        "james",
+        "drumming"
+      ],
+      "sourceTurns": [
+        "D3:2",
+        "D3:6"
+      ]
+    },
+    {
+      "text": "John plays the drums too, owns a drum kit and had been playing for a month as of 27 March 2022, finding it tough but fun.",
+      "speaker": "John",
+      "statedOn": "2022-03-27",
+      "entities": [
+        "john",
+        "drumming"
+      ],
+      "sourceTurns": [
+        "D3:3",
+        "D3:4",
+        "D3:5"
+      ]
+    },
+    {
+      "text": "James got a new cutting-edge gaming system in March 2022 with incredible graphics, and has been playing all kinds of new games on it to relax after work and to connect with friends who share his passion.",
+      "speaker": "James",
+      "statedOn": "2022-03-27",
+      "entities": [
+        "james",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D3:7",
+        "D3:8"
+      ]
+    },
+    {
+      "text": "John went to a gaming convention in the week before 27 March 2022, tried out many games, met developers and took part in a tournament.",
+      "speaker": "John",
+      "statedOn": "2022-03-27",
+      "entities": [
+        "john",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D3:9",
+        "D3:10"
+      ]
+    },
+    {
+      "text": "The tournament John played in at the gaming convention was for CS:GO, his favourite game, and watching the skilled players compete inspired him to improve his own gaming skills.",
+      "speaker": "John",
+      "statedOn": "2022-03-27",
+      "entities": [
+        "john",
+        "csgo",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D3:11",
+        "D3:12",
+        "D3:13",
+        "D3:14"
+      ]
+    },
+    {
+      "text": "John says he is always looking to up his game and hit new goals, and that the same commitment holds for his hobbies and everything else.",
+      "speaker": "John",
+      "statedOn": "2022-03-27",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D3:15"
+      ]
+    },
+    {
+      "text": "James stays motivated and focused by setting small goals and tracking his progress.",
+      "speaker": "James",
+      "statedOn": "2022-03-27",
+      "entities": [
+        "james"
+      ],
+      "sourceTurns": [
+        "D3:16",
+        "D3:17"
+      ]
+    },
+    {
+      "text": "By 27 March 2022 James was getting into different types of games such as role-playing and strategy games, and promised to keep John updated on how he got on with the new genres.",
+      "speaker": "James",
+      "statedOn": "2022-03-27",
+      "entities": [
+        "james",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D3:18",
+        "D3:19",
+        "D3:20",
+        "D3:21",
+        "D3:22",
+        "D3:23"
+      ]
+    },
+    {
+      "text": "James joined an online gaming tournament on 3 April 2022, which he found intense and fun.",
+      "speaker": "James",
+      "statedOn": "2022-04-04",
+      "entities": [
+        "james",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D4:1",
+        "D4:2",
+        "D4:3"
+      ],
+      "chrono": [
+        "ch-online-tournament-apr"
+      ]
+    },
+    {
+      "text": "In the online tournament on 3 April 2022 James won some rounds and made it to the semi-finals, but lost in close final rounds; he enjoyed competing with talented players and was looking forward to the next tournament.",
+      "speaker": "James",
+      "statedOn": "2022-04-04",
+      "entities": [
+        "james",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D4:4",
+        "D4:5",
+        "D4:6"
+      ],
+      "chrono": [
+        "ch-online-tournament-apr"
+      ]
+    },
+    {
+      "text": "At the tournament on 3 April 2022 James met a whole professional team; he got no photograph with them, but one of them gave him a couple of gaming tips and the whole team gave him autographs, which made him very happy.",
+      "speaker": "James",
+      "statedOn": "2022-04-04",
+      "entities": [
+        "james",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D4:7",
+        "D4:8",
+        "D4:9",
+        "D4:10",
+        "D4:11"
+      ],
+      "chrono": [
+        "ch-online-tournament-apr"
+      ]
+    },
+    {
+      "text": "The advice James remembered best from the professional player was that you must always communicate properly with your team and never put your ego above the team’s success.",
+      "speaker": "James",
+      "statedOn": "2022-04-04",
+      "entities": [
+        "james",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D4:12",
+        "D4:13"
+      ]
+    },
+    {
+      "text": "James communicates with his gaming team by voice chat, which he finds fast and effective.",
+      "speaker": "James",
+      "statedOn": "2022-04-04",
+      "entities": [
+        "james",
+        "james-gaming-group"
+      ],
+      "sourceTurns": [
+        "D4:14",
+        "D4:15"
+      ]
+    },
+    {
+      "text": "Apex Legends is the favourite game James plays with his team; he praises its awesome graphics and super fast-paced gameplay as making it stand out among other games.",
+      "speaker": "James",
+      "statedOn": "2022-04-04",
+      "entities": [
+        "james",
+        "apex-legends",
+        "james-gaming-group"
+      ],
+      "sourceTurns": [
+        "D4:16",
+        "D4:17",
+        "D4:18",
+        "D4:19"
+      ]
+    },
+    {
+      "text": "In April 2022 James was thinking of trying role-playing games and MOBAs next, and promised to tell John what he thought of them once he had.",
+      "speaker": "James",
+      "statedOn": "2022-04-04",
+      "entities": [
+        "james",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D4:20",
+        "D4:21",
+        "D4:22",
+        "D4:23",
+        "D4:24",
+        "D4:25"
+      ]
+    },
+    {
+      "text": "James adopted a puppy from a shelter in Stamford in the week before 12 April 2022 and named him Ned, giving him three dogs; he said his days had been much happier since.",
+      "speaker": "James",
+      "statedOn": "2022-04-12",
+      "entities": [
+        "james",
+        "ned",
+        "stamford",
+        "max",
+        "daisy"
+      ],
+      "sourceTurns": [
+        "D5:1"
+      ],
+      "key": "james-adopted-ned"
+    },
+    {
+      "text": "John had made little progress on his gaming goals by April 2022 because work and life were busy, but said it was nice to remember how happy gaming makes him and how well it helps him forget life’s stresses.",
+      "speaker": "John",
+      "statedOn": "2022-04-12",
+      "entities": [
+        "john",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D5:2",
+        "D5:3"
+      ]
+    },
+    {
+      "text": "In April 2022 John was playing a new role-playing game with a cool story and world, like being transported to a futuristic dystopia, and told James he would love it.",
+      "speaker": "John",
+      "statedOn": "2022-04-12",
+      "entities": [
+        "john",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D5:4",
+        "D5:5"
+      ]
+    },
+    {
+      "text": "John's new role-playing game was a little laggy and sometimes produced errors — he hit one on 11 April 2022 — but he argued the graphics and immersive gameplay made it worth playing anyway.",
+      "speaker": "John",
+      "statedOn": "2022-04-12",
+      "entities": [
+        "john",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D5:6",
+        "D5:8"
+      ]
+    },
+    {
+      "text": "James said he would rather wait until the bugs in John’s new role-playing game were fixed, then let himself be persuaded and agreed to try it once John sent him a link.",
+      "speaker": "James",
+      "statedOn": "2022-04-12",
+      "entities": [
+        "james",
+        "john",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D5:7",
+        "D5:9",
+        "D5:10",
+        "D5:11",
+        "D5:12",
+        "D5:13",
+        "D5:14",
+        "D5:15",
+        "D5:16"
+      ]
+    },
+    {
+      "text": "John met three new friends in his programming course on 19 April 2022, all sharing his passion, and was glad to be growing his social circle.",
+      "speaker": "John",
+      "statedOn": "2022-04-20",
+      "entities": [
+        "john",
+        "john-programming-course"
+      ],
+      "sourceTurns": [
+        "D6:1"
+      ],
+      "chrono": [
+        "ch-new-course-friends"
+      ]
+    },
+    {
+      "text": "On 14 April 2022 James worked with one of his gaming friends on a programming project, combining programming and gaming to create a virtual world inspired by The Witcher 3.",
+      "speaker": "James",
+      "statedOn": "2022-04-20",
+      "entities": [
+        "james",
+        "james-virtual-world",
+        "the-witcher-3",
+        "game-development"
+      ],
+      "sourceTurns": [
+        "D6:2",
+        "D6:3"
+      ],
+      "chrono": [
+        "ch-virtual-world-built"
+      ]
+    },
+    {
+      "text": "James had no screenshot of the whole virtual world he built, but did have one of the game character he created for it, which he said was a lot of work and hugely satisfying when it came together.",
+      "speaker": "James",
+      "statedOn": "2022-04-20",
+      "entities": [
+        "james",
+        "james-virtual-world"
+      ],
+      "sourceTurns": [
+        "D6:4",
+        "D6:5"
+      ]
+    },
+    {
+      "text": "James based the character in his virtual world on a stranger he passed while walking his dogs around his neighbourhood about two weeks before 20 April 2022; her eyes and appearance amazed him, he felt he had fallen in love at first sight, and he regretted not approaching her but put her appearance into the game.",
+      "speaker": "James",
+      "statedOn": "2022-04-20",
+      "entities": [
+        "james",
+        "james-virtual-world",
+        "max",
+        "daisy",
+        "ned"
+      ],
+      "sourceTurns": [
+        "D6:6"
+      ]
+    },
+    {
+      "text": "On 18 April 2022 John went off to be alone with nature and found a canyon in the area around him, a very calming view that he said sparked his creativity and motivation.",
+      "speaker": "John",
+      "statedOn": "2022-04-20",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D6:7",
+        "D6:8",
+        "D6:9"
+      ],
+      "chrono": [
+        "ch-canyon-visit"
+      ]
+    },
+    {
+      "text": "John holds to the principle that only those who rest well work well, so chilling with friends and travelling are what give him the motivation to keep working.",
+      "speaker": "John",
+      "statedOn": "2022-04-20",
+      "entities": [
+        "john",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D6:10",
+        "D6:11"
+      ]
+    },
+    {
+      "text": "James loves to travel and had visited Italy in 2021, calling it a very beautiful country with delicious food; besides Italy he had also been to Turkey and Mexico, and said he had not visited many countries.",
+      "speaker": "James",
+      "statedOn": "2022-04-20",
+      "entities": [
+        "james",
+        "travel",
+        "italy",
+        "turkey",
+        "mexico"
+      ],
+      "sourceTurns": [
+        "D6:12",
+        "D6:13",
+        "D6:14"
+      ]
+    },
+    {
+      "text": "The last country John had visited as of April 2022 was Japan, whose technologically advanced megacities, mesmerising huge screens on the buildings and tasty street food impressed him.",
+      "speaker": "John",
+      "statedOn": "2022-04-20",
+      "entities": [
+        "john",
+        "japan",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D6:15"
+      ]
+    },
+    {
+      "text": "On 20 April 2022 James and John agreed they would like to travel somewhere together the following year, and James said he would start looking for a country for them to go to.",
+      "speaker": "James",
+      "statedOn": "2022-04-20",
+      "entities": [
+        "james",
+        "john",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D6:16",
+        "D6:17",
+        "D6:18",
+        "D6:19"
+      ]
+    },
+    {
+      "text": "James took his dogs out for a hike on 21 April 2022, exploring trails and enjoying the fresh air; he called it quite an adventure and said the dogs loved it.",
+      "speaker": "James",
+      "statedOn": "2022-04-23",
+      "entities": [
+        "james",
+        "max",
+        "daisy",
+        "ned"
+      ],
+      "sourceTurns": [
+        "D7:1",
+        "D7:2",
+        "D7:3",
+        "D7:4"
+      ],
+      "chrono": [
+        "ch-dog-hike"
+      ]
+    },
+    {
+      "text": "James picked that hiking spot for its great views and its many trails, so the dogs could explore nature, and for the lush greenery and clean air.",
+      "speaker": "James",
+      "statedOn": "2022-04-23",
+      "entities": [
+        "james",
+        "max",
+        "daisy",
+        "ned"
+      ],
+      "sourceTurns": [
+        "D7:5",
+        "D7:6",
+        "D7:7"
+      ]
+    },
+    {
+      "text": "James says he loves the crunch of leaves under his feet and the peacefulness of walking, which helps him clear his head and relax.",
+      "speaker": "James",
+      "statedOn": "2022-04-23",
+      "entities": [
+        "james"
+      ],
+      "sourceTurns": [
+        "D7:8"
+      ]
+    },
+    {
+      "text": "John was extremely busy at work in April 2022, with deadlines all over the place, and described the period as hectic and crazy.",
+      "speaker": "John",
+      "statedOn": "2022-04-23",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D7:9",
+        "D7:10",
+        "D7:11"
+      ]
+    },
+    {
+      "text": "What was making John’s work so hard in April 2022 was a difficult coding assignment he was stuck on — an algorithm he was trying to make work better — and he found being stuck without progress frustrating.",
+      "speaker": "John",
+      "statedOn": "2022-04-23",
+      "entities": [
+        "john",
+        "programming"
+      ],
+      "sourceTurns": [
+        "D7:12",
+        "D7:13",
+        "D7:14",
+        "D7:15",
+        "D7:16",
+        "D7:17"
+      ]
+    },
+    {
+      "text": "James advised John to break the algorithm problem into smaller steps, research similar algorithms and ask other programmers for help, and John said the words really helped and that he would not quit.",
+      "speaker": "James",
+      "statedOn": "2022-04-23",
+      "entities": [
+        "james",
+        "john",
+        "programming"
+      ],
+      "sourceTurns": [
+        "D7:18",
+        "D7:19",
+        "D7:20",
+        "D7:21"
+      ]
+    },
+    {
+      "text": "By late April 2022 John was taking on freelance programming work to hone his coding skills, which he found challenging.",
+      "speaker": "John",
+      "statedOn": "2022-04-29",
+      "entities": [
+        "john",
+        "programming",
+        "john-website-project"
+      ],
+      "sourceTurns": [
+        "D8:1",
+        "D8:2",
+        "D8:3"
+      ]
+    },
+    {
+      "text": "John’s freelance work was a website for a local small business, his first professional project outside his class.",
+      "speaker": "John",
+      "statedOn": "2022-04-29",
+      "entities": [
+        "john",
+        "john-website-project"
+      ],
+      "sourceTurns": [
+        "D8:4",
+        "D8:5"
+      ]
+    },
+    {
+      "text": "Progress on John’s small-business website was slow with hiccups along the way, but he said he had learned a lot and was determined to push through.",
+      "speaker": "John",
+      "statedOn": "2022-04-29",
+      "entities": [
+        "john",
+        "john-website-project"
+      ],
+      "sourceTurns": [
+        "D8:6",
+        "D8:7",
+        "D8:8",
+        "D8:9"
+      ]
+    },
+    {
+      "text": "The hardest part of John’s small-business website was working out how to take payments; he used outside resources to understand the process and was getting closer to a solution.",
+      "speaker": "John",
+      "statedOn": "2022-04-29",
+      "entities": [
+        "john",
+        "john-website-project"
+      ],
+      "sourceTurns": [
+        "D8:10"
+      ]
+    },
+    {
+      "text": "James bought himself an adventure book of fantasy novels with cool artwork on 26 April 2022, and says fantasy is a genre he loves.",
+      "speaker": "James",
+      "statedOn": "2022-04-29",
+      "entities": [
+        "james",
+        "reading"
+      ],
+      "sourceTurns": [
+        "D8:11",
+        "D8:12",
+        "D8:13"
+      ],
+      "chrono": [
+        "ch-adventure-book"
+      ]
+    },
+    {
+      "text": "John recommended the novel The Name of the Wind to James on 29 April 2022, calling it a great novel with awesome writing and part of a trilogy James would love; James had never heard of it and said he would check it out.",
+      "speaker": "John",
+      "statedOn": "2022-04-29",
+      "entities": [
+        "john",
+        "james",
+        "name-of-the-wind",
+        "reading"
+      ],
+      "sourceTurns": [
+        "D8:14",
+        "D8:15",
+        "D8:16"
+      ]
+    },
+    {
+      "text": "James’s dogs love to watch him gaming and often come and lie down or hug him while he plays, which he calls good cuddle buddies; Daisy did so on 29 April 2022.",
+      "speaker": "James",
+      "statedOn": "2022-04-29",
+      "entities": [
+        "james",
+        "daisy",
+        "max",
+        "ned",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D8:17",
+        "D8:18",
+        "D8:19"
+      ]
+    },
+    {
+      "text": "John was playing Assassin’s Creed Valhalla at the end of April 2022 and thought it was cool.",
+      "speaker": "John",
+      "statedOn": "2022-04-29",
+      "entities": [
+        "john",
+        "ac-valhalla"
+      ],
+      "sourceTurns": [
+        "D8:20"
+      ]
+    },
+    {
+      "text": "James was trying out strategy games in April 2022, describing a high-quality turn-based strategy game — which John took to be Civilization VI — in which you manage resources, lead armies and conquer territories.",
+      "speaker": "James",
+      "statedOn": "2022-04-29",
+      "entities": [
+        "james",
+        "civilization"
+      ],
+      "sourceTurns": [
+        "D8:21",
+        "D8:22",
+        "D8:23"
+      ]
+    },
+    {
+      "text": "James says the strategy game he was playing demands a lot of strategy: planning, managing resources and making good decisions to beat rivals, with every move mattering.",
+      "speaker": "James",
+      "statedOn": "2022-04-29",
+      "entities": [
+        "james",
+        "civilization"
+      ],
+      "sourceTurns": [
+        "D8:24",
+        "D8:25",
+        "D8:26"
+      ]
+    },
+    {
+      "text": "James says strategy games are a great way to work on problem-solving and thinking, and that it is satisfying to see a plan go the way you wanted and win.",
+      "speaker": "James",
+      "statedOn": "2022-04-29",
+      "entities": [
+        "james",
+        "civilization"
+      ],
+      "sourceTurns": [
+        "D8:27",
+        "D8:28"
+      ]
+    },
+    {
+      "text": "James had been playing the turn-based strategy game for a month as of 29 April 2022 and said it had really challenged his strategy skills.",
+      "speaker": "James",
+      "statedOn": "2022-04-29",
+      "entities": [
+        "james",
+        "civilization"
+      ],
+      "sourceTurns": [
+        "D8:29"
+      ]
+    },
+    {
+      "text": "John played a strategy board game with friends on 27 April 2022 and found it very exciting; he and James agreed board games are a blast when you hang out with friends.",
+      "speaker": "John",
+      "statedOn": "2022-04-29",
+      "entities": [
+        "john",
+        "james",
+        "board-games"
+      ],
+      "sourceTurns": [
+        "D8:30",
+        "D8:31",
+        "D8:32",
+        "D8:33"
+      ],
+      "chrono": [
+        "ch-board-game-friends"
+      ]
+    },
+    {
+      "text": "John described a card game he had played with friends but whose name he had forgotten — multi-coloured numbered cards played onto a matching colour or number, with card swaps, extra draws and skipped turns — and James could not identify it either.",
+      "speaker": "John",
+      "statedOn": "2022-04-29",
+      "entities": [
+        "john",
+        "james",
+        "board-games"
+      ],
+      "sourceTurns": [
+        "D8:34",
+        "D8:35"
+      ]
+    },
+    {
+      "text": "John had also been playing a game about working out who the impostors are with his friends, and advised James, who had been meaning to try it, to gather a large group for it.",
+      "speaker": "John",
+      "statedOn": "2022-04-29",
+      "entities": [
+        "john",
+        "james",
+        "board-games"
+      ],
+      "sourceTurns": [
+        "D8:36",
+        "D8:37",
+        "D8:38",
+        "D8:39",
+        "D8:40"
+      ]
+    },
+    {
+      "text": "Over March and April 2022 James went from playing games to competing in them and branching out: he joined a new gaming platform in late March, moved beyond The Witcher 3 into role-playing and strategy genres, entered an online tournament on 3 April where he reached the semi-finals, and had been playing a turn-based strategy game for a month by the end of April.",
+      "speaker": "James",
+      "statedOn": "2022-04-29",
+      "entities": [
+        "james",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D2:1",
+        "D3:18",
+        "D4:4",
+        "D8:29"
+      ]
+    },
+    {
+      "text": "On 29 April 2022 a bug in the code broke the game mechanics of the project James had been working on for weeks, and hours of debugging did not solve it, which he found super disappointing.",
+      "speaker": "James",
+      "statedOn": "2022-05-04",
+      "entities": [
+        "james",
+        "james-dream-game",
+        "programming"
+      ],
+      "sourceTurns": [
+        "D9:1",
+        "D9:2",
+        "D9:3",
+        "D9:4"
+      ],
+      "chrono": [
+        "ch-project-bug"
+      ]
+    },
+    {
+      "text": "James could not fix the bug in his game project alone, so he and a group of friends teamed up and got it fixed; he said a group who share your passion bring their own ideas and let you achieve far more together.",
+      "speaker": "James",
+      "statedOn": "2022-05-04",
+      "entities": [
+        "james",
+        "james-dream-game"
+      ],
+      "sourceTurns": [
+        "D9:5",
+        "D9:6",
+        "D9:7",
+        "D9:8"
+      ]
+    },
+    {
+      "text": "John spent his day off on 4 May 2022 watching films with a few new friends, part of an effort to socialise more and balance work with enjoyment, and invited James to join them next time.",
+      "speaker": "John",
+      "statedOn": "2022-05-04",
+      "entities": [
+        "john",
+        "james"
+      ],
+      "sourceTurns": [
+        "D9:9",
+        "D9:10"
+      ],
+      "chrono": [
+        "ch-movie-night"
+      ]
+    },
+    {
+      "text": "Daisy, one of James’s dogs, is a Labrador who loves playing with her toys but most of all loves to eat.",
+      "speaker": "James",
+      "statedOn": "2022-05-04",
+      "entities": [
+        "james",
+        "daisy"
+      ],
+      "sourceTurns": [
+        "D9:11",
+        "D9:12"
+      ]
+    },
+    {
+      "text": "James’s other two dogs, Max and Ned, are shepherds, and he says their loyalty is their main feature and they bring him great joy.",
+      "speaker": "James",
+      "statedOn": "2022-05-04",
+      "entities": [
+        "james",
+        "max",
+        "ned"
+      ],
+      "sourceTurns": [
+        "D9:13",
+        "D9:14",
+        "D9:15"
+      ]
+    },
+    {
+      "text": "James says his pets, computer games, travel and pizza are what bring him happiness in life.",
+      "speaker": "James",
+      "statedOn": "2022-05-04",
+      "entities": [
+        "james",
+        "gaming",
+        "travel",
+        "max",
+        "daisy",
+        "ned"
+      ],
+      "sourceTurns": [
+        "D9:16"
+      ]
+    },
+    {
+      "text": "James’s favourite pizza is pepperoni, for the combination of spicy salami and cheese, and he also likes cheese pizza and prosciutto.",
+      "speaker": "James",
+      "statedOn": "2022-05-04",
+      "entities": [
+        "james"
+      ],
+      "sourceTurns": [
+        "D9:17",
+        "D9:18",
+        "D9:20"
+      ]
+    },
+    {
+      "text": "John’s favourite pizza is Hawaiian, for its combination of sweet and salty; he had not tried prosciutto pizza as of 4 May 2022 but said he would on James’s recommendation.",
+      "speaker": "John",
+      "statedOn": "2022-05-04",
+      "entities": [
+        "john",
+        "james"
+      ],
+      "sourceTurns": [
+        "D9:19",
+        "D9:21",
+        "D9:22",
+        "D9:23",
+        "D9:24",
+        "D9:25"
+      ]
+    },
+    {
+      "text": "John and his friends put together a tournament for CS:GO on 7 May 2022; a lot of people turned up and it raised a good deal of money for charity.",
+      "speaker": "John",
+      "statedOn": "2022-05-08",
+      "entities": [
+        "john",
+        "csgo",
+        "esports-organizing"
+      ],
+      "sourceTurns": [
+        "D10:1",
+        "D10:2",
+        "D10:3",
+        "D10:4",
+        "D10:5"
+      ],
+      "chrono": [
+        "ch-charity-csgo-tournament"
+      ]
+    },
+    {
+      "text": "John said the charity CS:GO tournament took planning and coordination but was rewarding, and that he wants to organise more events like it because they combine his interests, help the community and bring people together for friendly competition.",
+      "speaker": "John",
+      "statedOn": "2022-05-08",
+      "entities": [
+        "john",
+        "esports-organizing"
+      ],
+      "sourceTurns": [
+        "D10:6",
+        "D10:7",
+        "D10:8",
+        "D10:9"
+      ]
+    },
+    {
+      "text": "The money John’s May 2022 tournament raised went to a dog shelter not far from the street where he lives, and the surplus was spent on groceries and cooked food for homeless people.",
+      "speaker": "John",
+      "statedOn": "2022-05-08",
+      "entities": [
+        "john",
+        "volunteering"
+      ],
+      "sourceTurns": [
+        "D10:10",
+        "D10:11",
+        "D10:12"
+      ]
+    },
+    {
+      "text": "John said he would not stop at the May 2022 charity tournament and would go on doing more good things, and James told him he was really proud of him.",
+      "speaker": "John",
+      "statedOn": "2022-05-08",
+      "entities": [
+        "john",
+        "james",
+        "volunteering"
+      ],
+      "sourceTurns": [
+        "D10:13",
+        "D10:14",
+        "D10:15"
+      ]
+    },
+    {
+      "text": "In May 2022 John volunteered his programming skills for a social cause, making a software tool for a charitable foundation that streamlined its operations, and found it rewarding to see his skills make a real difference.",
+      "speaker": "John",
+      "statedOn": "2022-05-11",
+      "entities": [
+        "john",
+        "charity-foundation",
+        "john-charity-software",
+        "volunteering",
+        "programming"
+      ],
+      "sourceTurns": [
+        "D11:1",
+        "D11:2"
+      ]
+    },
+    {
+      "text": "The foundation John helped had used paper records and recorded all inventory manually; the application he built put everything they need for inventory into one app on their smartphone and generates reports for analysis, tracking inventory, resources and donations.",
+      "speaker": "John",
+      "statedOn": "2022-05-11",
+      "entities": [
+        "john",
+        "charity-foundation",
+        "john-charity-software"
+      ],
+      "sourceTurns": [
+        "D11:3",
+        "D11:4",
+        "D11:5"
+      ]
+    },
+    {
+      "text": "John built the foundation’s application because he was inspired by their passion for helping children, and because coding lets him challenge himself and expand his skills.",
+      "speaker": "John",
+      "statedOn": "2022-05-11",
+      "entities": [
+        "john",
+        "charity-foundation",
+        "john-charity-software"
+      ],
+      "sourceTurns": [
+        "D11:6",
+        "D11:7",
+        "D11:8"
+      ]
+    },
+    {
+      "text": "Building the charity’s software showed John the power of technology to make positive change beyond his own enjoyment and gave him a real sense of purpose.",
+      "speaker": "John",
+      "statedOn": "2022-05-11",
+      "entities": [
+        "john",
+        "volunteering"
+      ],
+      "sourceTurns": [
+        "D11:9",
+        "D11:10"
+      ]
+    },
+    {
+      "text": "After the charity project John was considering volunteer roles and potentially a career in the non-profit sector, motivated to use his programming skills to make a positive impact.",
+      "speaker": "John",
+      "statedOn": "2022-05-11",
+      "entities": [
+        "john",
+        "volunteering",
+        "programming"
+      ],
+      "sourceTurns": [
+        "D11:11",
+        "D11:12"
+      ]
+    },
+    {
+      "text": "As of 11 May 2022 John had not yet found a non-profit organisation matching his values, admitting he had not looked, but expected it would not be difficult and hoped to find a place where his skills and passions are a perfect match.",
+      "speaker": "John",
+      "statedOn": "2022-05-11",
+      "entities": [
+        "john",
+        "volunteering"
+      ],
+      "sourceTurns": [
+        "D11:13",
+        "D11:14",
+        "D11:15",
+        "D11:16",
+        "D11:17",
+        "D11:18",
+        "D11:19"
+      ]
+    },
+    {
+      "text": "James spent the weekend of 21–22 May 2022 at an amusement park with friends, riding roller coasters that reminded him of being a child as well as the Ferris wheel, electric cars and buggies, and called it a great break from the virtual world.",
+      "speaker": "James",
+      "statedOn": "2022-05-23",
+      "entities": [
+        "james"
+      ],
+      "sourceTurns": [
+        "D12:1",
+        "D12:2",
+        "D12:3"
+      ]
+    },
+    {
+      "text": "John entered a local tournament on 20 May 2022 and took second place, receiving prize money and a trophy; he found the competitive energy insane and was stoked that his effort paid off.",
+      "speaker": "John",
+      "statedOn": "2022-05-23",
+      "entities": [
+        "john",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D12:4",
+        "D12:5",
+        "D12:6",
+        "D12:7",
+        "D12:8"
+      ],
+      "chrono": [
+        "ch-local-tournament-2nd"
+      ]
+    },
+    {
+      "text": "In April 2022 James finished the big project he had been working on for months, a personal milestone; it was challenging because he had to learn a new programming language and handle many details, and it taught him a lot about problem-solving, patience and perseverance.",
+      "speaker": "James",
+      "statedOn": "2022-05-23",
+      "entities": [
+        "james",
+        "james-dream-game",
+        "programming"
+      ],
+      "sourceTurns": [
+        "D12:9",
+        "D12:10",
+        "D12:11"
+      ],
+      "key": "james-finished-big-project"
+    },
+    {
+      "text": "Finishing the big project left James feeling more confident about taking on even bigger ones, and John told him that determination and confidence make any project a success.",
+      "speaker": "James",
+      "statedOn": "2022-05-23",
+      "entities": [
+        "james",
+        "john",
+        "james-dream-game"
+      ],
+      "sourceTurns": [
+        "D12:12",
+        "D12:13",
+        "D12:14"
+      ]
+    },
+    {
+      "text": "John got what he called his dream job in June 2022 after a lot of interviews and late nights, was ecstatic at the offer, and was due to start the following month.",
+      "speaker": "John",
+      "statedOn": "2022-06-13",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D13:1",
+        "D13:2",
+        "D13:3",
+        "D13:4",
+        "D13:5"
+      ]
+    },
+    {
+      "text": "James started a course combining his passion for gaming with programming shortly before 13 June 2022, which he found fun and challenging and which increased his excitement for both.",
+      "speaker": "James",
+      "statedOn": "2022-06-13",
+      "entities": [
+        "james",
+        "james-gamedev-course",
+        "programming",
+        "game-development"
+      ],
+      "sourceTurns": [
+        "D13:6",
+        "D13:7"
+      ]
+    },
+    {
+      "text": "On his game-development course James was working on a new part of a football simulator, his own job being to collect the player databases, which was not easy but which he managed.",
+      "speaker": "James",
+      "statedOn": "2022-06-13",
+      "entities": [
+        "james",
+        "james-gamedev-course",
+        "football",
+        "game-development"
+      ],
+      "sourceTurns": [
+        "D13:8"
+      ]
+    },
+    {
+      "text": "James chose the game-development course mainly to improve himself rather than because he loves football, though he was glad it connected with something he enjoys.",
+      "speaker": "James",
+      "statedOn": "2022-06-13",
+      "entities": [
+        "james",
+        "james-gamedev-course",
+        "football"
+      ],
+      "sourceTurns": [
+        "D13:9",
+        "D13:10",
+        "D13:11"
+      ]
+    },
+    {
+      "text": "James supports Liverpool, says there is no sport better than football and no club better than Liverpool, does not miss a single one of their matches, and hoped they would become champions the following season.",
+      "speaker": "James",
+      "statedOn": "2022-06-13",
+      "entities": [
+        "james",
+        "liverpool-fc",
+        "football"
+      ],
+      "sourceTurns": [
+        "D13:12",
+        "D13:13",
+        "D13:14"
+      ]
+    },
+    {
+      "text": "John is a Manchester City fan and predicted on 13 June 2022 that his club and James’s would fight for the championship and that City would win.",
+      "speaker": "John",
+      "statedOn": "2022-06-13",
+      "entities": [
+        "john",
+        "manchester-city",
+        "football"
+      ],
+      "sourceTurns": [
+        "D13:15"
+      ]
+    },
+    {
+      "text": "James said Manchester City were in bad form and their transfer policy terrible, and John countered that the City manager could handle it.",
+      "speaker": "James",
+      "statedOn": "2022-06-13",
+      "entities": [
+        "james",
+        "john",
+        "manchester-city",
+        "football"
+      ],
+      "sourceTurns": [
+        "D13:16",
+        "D13:17"
+      ]
+    },
+    {
+      "text": "On 13 June 2022 James and John made a bet over which of their clubs, Liverpool or Manchester City, would finish higher in the final standings.",
+      "speaker": "James",
+      "statedOn": "2022-06-13",
+      "entities": [
+        "james",
+        "john",
+        "liverpool-fc",
+        "manchester-city",
+        "football"
+      ],
+      "sourceTurns": [
+        "D13:18",
+        "D13:19",
+        "D13:20"
+      ]
+    },
+    {
+      "text": "James said on 16 June 2022 that a lot had been happening to him, some good and some not, and that he is lucky to have at least two people who always help him out when he is struggling.",
+      "speaker": "James",
+      "statedOn": "2022-06-16",
+      "entities": [
+        "james"
+      ],
+      "sourceTurns": [
+        "D14:1"
+      ]
+    },
+    {
+      "text": "John started a blog about coding in the week before 16 June 2022, which he found exciting and a little frightening, and uploaded his first picture to it.",
+      "speaker": "John",
+      "statedOn": "2022-06-16",
+      "entities": [
+        "john",
+        "john-coding-blog",
+        "programming"
+      ],
+      "sourceTurns": [
+        "D14:2",
+        "D14:3"
+      ]
+    },
+    {
+      "text": "John enjoys sharing and tracking his coding journey on his blog and finds it a great way to connect with other coders.",
+      "speaker": "John",
+      "statedOn": "2022-06-16",
+      "entities": [
+        "john",
+        "john-coding-blog"
+      ],
+      "sourceTurns": [
+        "D14:4",
+        "D14:5"
+      ]
+    },
+    {
+      "text": "John bought a lot of new books in June 2022 and almost completely filled his bookcase.",
+      "speaker": "John",
+      "statedOn": "2022-06-16",
+      "entities": [
+        "john",
+        "reading"
+      ],
+      "sourceTurns": [
+        "D14:6",
+        "D14:7"
+      ]
+    },
+    {
+      "text": "John is a big fan of science-fiction and fantasy books, enjoying epic fantasy series with immersive world-building and intricate storylines as a wonderful escape from reality.",
+      "speaker": "John",
+      "statedOn": "2022-06-16",
+      "entities": [
+        "john",
+        "reading"
+      ],
+      "sourceTurns": [
+        "D14:8",
+        "D14:9"
+      ]
+    },
+    {
+      "text": "John’s two favourite series are The Stormlight Archive and the Kingkiller Chronicle, and he also recommended The Expanse to James for science fiction, praising the magical worlds they create and how real their characters feel.",
+      "speaker": "John",
+      "statedOn": "2022-06-16",
+      "entities": [
+        "john",
+        "stormlight-archive",
+        "kingkiller-chronicle",
+        "the-expanse",
+        "reading"
+      ],
+      "sourceTurns": [
+        "D14:10",
+        "D14:11",
+        "D14:12"
+      ]
+    },
+    {
+      "text": "Max, the dog John spotted in a photograph on James’s Facebook, is lovable and playful and brings James a great deal of joy, cheering him up especially in tough times.",
+      "speaker": "James",
+      "statedOn": "2022-06-16",
+      "entities": [
+        "james",
+        "max"
+      ],
+      "sourceTurns": [
+        "D14:12",
+        "D14:13",
+        "D14:14",
+        "D14:15"
+      ]
+    },
+    {
+      "text": "Max loves swimming and is a pro in the water; James usually takes him to the beach or a lake to play, and enjoys seeing him happy and carefree in his favourite activity.",
+      "speaker": "James",
+      "statedOn": "2022-06-16",
+      "entities": [
+        "james",
+        "max"
+      ],
+      "sourceTurns": [
+        "D14:16",
+        "D14:17",
+        "D14:18",
+        "D14:19",
+        "D14:20",
+        "D14:21"
+      ]
+    },
+    {
+      "text": "Max is a real go-getter who is awesome at catching frisbees in mid-air and never misses.",
+      "speaker": "James",
+      "statedOn": "2022-06-16",
+      "entities": [
+        "james",
+        "max"
+      ],
+      "sourceTurns": [
+        "D14:22",
+        "D14:23",
+        "D14:24"
+      ]
+    },
+    {
+      "text": "James and Max love long walks on a nearby trail a mile from James’s house, which he finds great exercise, tranquil and a good way to relax and connect with nature.",
+      "speaker": "James",
+      "statedOn": "2022-06-16",
+      "entities": [
+        "james",
+        "max"
+      ],
+      "sourceTurns": [
+        "D14:25",
+        "D14:26",
+        "D14:27",
+        "D14:28"
+      ]
+    },
+    {
+      "text": "James says walking in nature is relaxing and refreshing and helps him think straight and find his inner peace, and that when he is alone in the park he usually brings a book and chills, calling it an escape from reality.",
+      "speaker": "James",
+      "statedOn": "2022-06-16",
+      "entities": [
+        "james",
+        "reading"
+      ],
+      "sourceTurns": [
+        "D14:29",
+        "D14:30",
+        "D14:31",
+        "D14:32",
+        "D14:33",
+        "D14:34"
+      ]
+    },
+    {
+      "text": "James started introducing his new puppy Ned to Max and Daisy on 17 June 2022; it was hard at first but they were slowly adapting, and he found it sweet to watch them bond and have fun together.",
+      "speaker": "James",
+      "statedOn": "2022-06-19",
+      "entities": [
+        "james",
+        "max",
+        "daisy",
+        "ned"
+      ],
+      "sourceTurns": [
+        "D15:1",
+        "D15:2",
+        "D15:3",
+        "D15:4"
+      ],
+      "chrono": [
+        "ch-dogs-introduced"
+      ]
+    },
+    {
+      "text": "In June 2022 John had been thinking about his career and where he wants to be in future, describing himself as driven and passionate and wanting to make a positive impact on the world.",
+      "speaker": "John",
+      "statedOn": "2022-06-19",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D15:5",
+        "D15:6",
+        "D15:7"
+      ]
+    },
+    {
+      "text": "John had been looking into volunteering and was thinking of going into non-profit work so that he could put his passions and abilities to use for causes he really cares about.",
+      "speaker": "John",
+      "statedOn": "2022-06-19",
+      "entities": [
+        "john",
+        "volunteering"
+      ],
+      "sourceTurns": [
+        "D15:8"
+      ]
+    },
+    {
+      "text": "James volunteered in May 2022 with an organisation that provides necessary items to people who are less fortunate, and found it rewarding to see how much a simple act of kindness can mean to someone in need.",
+      "speaker": "James",
+      "statedOn": "2022-06-19",
+      "entities": [
+        "james",
+        "gift-charity",
+        "volunteering"
+      ],
+      "sourceTurns": [
+        "D15:9",
+        "D15:10",
+        "D15:11"
+      ]
+    },
+    {
+      "text": "John asked James on 19 June 2022 to take him to the charity James volunteers with the following weekend, and James agreed, saying some of the previous staff are still there and he could even introduce them.",
+      "speaker": "John",
+      "statedOn": "2022-06-19",
+      "entities": [
+        "john",
+        "james",
+        "gift-charity",
+        "volunteering"
+      ],
+      "sourceTurns": [
+        "D15:12",
+        "D15:13"
+      ]
+    },
+    {
+      "text": "James told John no interview is needed to volunteer at the charity — only being a friendly, polite person with a great desire to help people.",
+      "speaker": "James",
+      "statedOn": "2022-06-19",
+      "entities": [
+        "james",
+        "john",
+        "gift-charity"
+      ],
+      "sourceTurns": [
+        "D15:14",
+        "D15:15"
+      ]
+    },
+    {
+      "text": "John said he wants to make the world a better place and was determined to make a positive impact with James’s help, and James said they could do it together.",
+      "speaker": "John",
+      "statedOn": "2022-06-19",
+      "entities": [
+        "john",
+        "james",
+        "volunteering"
+      ],
+      "sourceTurns": [
+        "D15:16",
+        "D15:17",
+        "D15:18",
+        "D15:19"
+      ]
+    },
+    {
+      "text": "James won an online gaming tournament in the week before 9 July 2022, which he found an exciting experience and which motivated him to keep improving.",
+      "speaker": "James",
+      "statedOn": "2022-07-09",
+      "entities": [
+        "james",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D16:1",
+        "D16:2",
+        "D16:3"
+      ]
+    },
+    {
+      "text": "In July 2022 John felt pulled between determination and passion on one side and feeling overwhelmed and stressed on the other, finding the balance of personal and professional life a challenge.",
+      "speaker": "John",
+      "statedOn": "2022-07-09",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D16:4"
+      ]
+    },
+    {
+      "text": "James became interested in extreme sports in the summer of 2022 as a way of taking breaks from his hobbies, and went rope jumping on 8 July 2022 from a height of 150 metres, his highest jump.",
+      "speaker": "James",
+      "statedOn": "2022-07-09",
+      "entities": [
+        "james",
+        "extreme-sports"
+      ],
+      "sourceTurns": [
+        "D16:5",
+        "D16:6"
+      ],
+      "chrono": [
+        "ch-rope-jump"
+      ]
+    },
+    {
+      "text": "James went surfing on 6 July 2022 and said that catching a wave, strangely, relaxes him a great deal.",
+      "speaker": "James",
+      "statedOn": "2022-07-09",
+      "entities": [
+        "james",
+        "extreme-sports"
+      ],
+      "sourceTurns": [
+        "D16:7"
+      ],
+      "chrono": [
+        "ch-surfing"
+      ]
+    },
+    {
+      "text": "John relaxes by reading, loving to enter the imaginative worlds of authors as a fun escape from reality.",
+      "speaker": "John",
+      "statedOn": "2022-07-09",
+      "entities": [
+        "john",
+        "reading"
+      ],
+      "sourceTurns": [
+        "D16:8"
+      ]
+    },
+    {
+      "text": "James also loves to read, especially snuggled under the covers on a cold winter day, but wanted something more exciting in the summer of 2022.",
+      "speaker": "James",
+      "statedOn": "2022-07-09",
+      "entities": [
+        "james",
+        "reading"
+      ],
+      "sourceTurns": [
+        "D16:9"
+      ]
+    },
+    {
+      "text": "James bought air tickets to Toronto and was to leave on the evening of 11 July 2022, making Canada the fourth country he had visited; he also planned to visit Vancouver and perhaps somewhere else.",
+      "speaker": "James",
+      "statedOn": "2022-07-09",
+      "entities": [
+        "james",
+        "canada",
+        "toronto",
+        "vancouver",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D16:9",
+        "D16:10",
+        "D16:11"
+      ],
+      "chrono": [
+        "ch-canada-departure"
+      ]
+    },
+    {
+      "text": "James planned to return from his Canada trip on 20 July 2022 and promised to bring John back a souvenir.",
+      "speaker": "James",
+      "statedOn": "2022-07-09",
+      "entities": [
+        "james",
+        "john",
+        "canada",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D16:12",
+        "D16:13",
+        "D16:14",
+        "D16:15",
+        "D16:16"
+      ],
+      "chrono": [
+        "ch-canada-return"
+      ]
+    },
+    {
+      "text": "John started playing chess in July 2022 to get better at strategy and was loving it, describing it as an endless puzzle and a constant attempt to outwit his opponent; James had played chess before.",
+      "speaker": "John",
+      "statedOn": "2022-07-22",
+      "entities": [
+        "john",
+        "james",
+        "chess"
+      ],
+      "sourceTurns": [
+        "D17:1",
+        "D17:2",
+        "D17:3"
+      ]
+    },
+    {
+      "text": "John plays chess mostly online but has also joined a chess club to practise with other players.",
+      "speaker": "John",
+      "statedOn": "2022-07-22",
+      "entities": [
+        "john",
+        "chess",
+        "chess-club"
+      ],
+      "sourceTurns": [
+        "D17:4",
+        "D17:5"
+      ]
+    },
+    {
+      "text": "John took up chess because he has always been drawn to strategy games and wanted to challenge himself, and because he believes chess improves decision-making; he was excited to see how it would sharpen his strategic thinking in everyday situations.",
+      "speaker": "John",
+      "statedOn": "2022-07-22",
+      "entities": [
+        "john",
+        "chess"
+      ],
+      "sourceTurns": [
+        "D17:6",
+        "D17:7",
+        "D17:8",
+        "D17:9"
+      ]
+    },
+    {
+      "text": "James advised John on 22 July 2022 to improve at chess by studying opening moves and strategies and by analysing his own games to spot weaknesses.",
+      "speaker": "James",
+      "statedOn": "2022-07-22",
+      "entities": [
+        "james",
+        "john",
+        "chess"
+      ],
+      "sourceTurns": [
+        "D17:10",
+        "D17:11",
+        "D17:12"
+      ]
+    },
+    {
+      "text": "James and John were friends as ten-year-olds and were both really into skateboarding, going to the skate park with a group of friends and helping each other learn new tricks; John showed James a photograph of them from elementary school on 22 July 2022.",
+      "speaker": "John",
+      "statedOn": "2022-07-22",
+      "entities": [
+        "john",
+        "james",
+        "skateboarding"
+      ],
+      "sourceTurns": [
+        "D17:13",
+        "D17:14",
+        "D17:15"
+      ]
+    },
+    {
+      "text": "James remembers that he and John sometimes left class early as children to skateboard, still likes to go for a ride sometimes, and has taught his dogs to balance on a skateboard.",
+      "speaker": "James",
+      "statedOn": "2022-07-22",
+      "entities": [
+        "james",
+        "john",
+        "skateboarding",
+        "max",
+        "daisy",
+        "ned"
+      ],
+      "sourceTurns": [
+        "D17:16",
+        "D17:17"
+      ]
+    },
+    {
+      "text": "James’s dogs love the skateboard, chasing after it and running with it, which he says is great exercise for them, keeps them happy and builds a strong bond.",
+      "speaker": "James",
+      "statedOn": "2022-07-22",
+      "entities": [
+        "james",
+        "max",
+        "daisy",
+        "ned"
+      ],
+      "sourceTurns": [
+        "D17:18",
+        "D17:19",
+        "D17:20"
+      ]
+    },
+    {
+      "text": "John said on 22 July 2022 that he still has no pets and finds it a pity, but will definitely get one someday.",
+      "speaker": "John",
+      "statedOn": "2022-07-22",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D17:21"
+      ]
+    },
+    {
+      "text": "James’s July 2022 trip went well and he also got out to the city of Nuuk in Greenland, staying only a short time but adding another country to his list.",
+      "speaker": "James",
+      "statedOn": "2022-07-22",
+      "entities": [
+        "james",
+        "nuuk",
+        "greenland",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D17:22",
+        "D17:23"
+      ]
+    },
+    {
+      "text": "James brought souvenirs back from his July 2022 trip for both John and Jill, and John said Jill would be delighted.",
+      "speaker": "James",
+      "statedOn": "2022-07-22",
+      "entities": [
+        "james",
+        "john",
+        "jill",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D17:24",
+        "D17:25"
+      ]
+    },
+    {
+      "text": "James’s sister came to see him on 21 July 2022 and the two of them spent the day chilling with his dogs; James says he is blessed with a close bond with her and that they are like a family.",
+      "speaker": "James",
+      "statedOn": "2022-07-22",
+      "entities": [
+        "james",
+        "james-sister",
+        "max",
+        "daisy",
+        "ned"
+      ],
+      "sourceTurns": [
+        "D17:26",
+        "D17:27",
+        "D17:28",
+        "D17:29",
+        "D17:30"
+      ],
+      "chrono": [
+        "ch-sister-visit"
+      ]
+    },
+    {
+      "text": "John said he is grateful for the connection he has with his siblings, whose support means everything to him even when things are tough.",
+      "speaker": "John",
+      "statedOn": "2022-07-22",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D17:31"
+      ]
+    },
+    {
+      "text": "James and his sister were also near the ocean on 21 July 2022 and watched a sunset; he took a lot of shots that day and chose the best one to send to John.",
+      "speaker": "James",
+      "statedOn": "2022-07-22",
+      "entities": [
+        "james",
+        "james-sister"
+      ],
+      "sourceTurns": [
+        "D17:32",
+        "D17:33",
+        "D17:34",
+        "D17:35",
+        "D17:36",
+        "D17:37"
+      ],
+      "chrono": [
+        "ch-ocean-sunset"
+      ]
+    },
+    {
+      "text": "John’s turn toward using programming for good ran from building a charitable foundation’s inventory application in May 2022, through deciding in June 2022 to look into volunteering and non-profit work, to asking James on 19 June 2022 to take him to the charity James volunteers with.",
+      "speaker": "John",
+      "statedOn": "2022-06-19",
+      "entities": [
+        "john",
+        "volunteering",
+        "programming",
+        "charity-foundation",
+        "gift-charity"
+      ],
+      "sourceTurns": [
+        "D11:1",
+        "D11:11",
+        "D15:8",
+        "D15:12"
+      ]
+    },
+    {
+      "text": "James’s travelling grew over 2022 from three countries — Italy, Turkey and Mexico as of April — to Canada in July, which John counted as his fourth, and then Greenland when he got out to Nuuk on the same trip.",
+      "speaker": "James",
+      "statedOn": "2022-07-22",
+      "entities": [
+        "james",
+        "travel",
+        "italy",
+        "turkey",
+        "mexico",
+        "canada",
+        "greenland"
+      ],
+      "sourceTurns": [
+        "D6:14",
+        "D16:10",
+        "D17:22"
+      ]
+    },
+    {
+      "text": "John worked at an IT job for three years, which he left shortly before 6 August 2022.",
+      "speaker": "John",
+      "statedOn": "2022-08-06",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D18:1",
+        "D18:2"
+      ],
+      "key": "john-it-job",
+      "superseded": true
+    },
+    {
+      "text": "John left his three-year IT job because he wanted something that made a difference and aligned with his values and passions; it was scary at first, but by 6 August 2022 he was happy with the decision and loving the new job.",
+      "speaker": "John",
+      "statedOn": "2022-08-06",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D18:1",
+        "D18:3",
+        "D18:4",
+        "D18:5",
+        "D18:6"
+      ],
+      "key": "john-new-job"
+    },
+    {
+      "text": "By August 2022 John had decided he was drawn to the gaming industry and wanted to turn it into a career by becoming an organiser of computer-game tournaments in his state, starting with CS:GO.",
+      "speaker": "John",
+      "statedOn": "2022-08-06",
+      "entities": [
+        "john",
+        "esports-organizing",
+        "csgo",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D18:7",
+        "D18:8"
+      ]
+    },
+    {
+      "text": "John said he could also host Fortnite competitions, had already made some connections that would help him, and planned to gain experience and perfect his skills in the field.",
+      "speaker": "John",
+      "statedOn": "2022-08-06",
+      "entities": [
+        "john",
+        "fortnite",
+        "esports-organizing"
+      ],
+      "sourceTurns": [
+        "D18:9",
+        "D18:10",
+        "D18:11"
+      ]
+    },
+    {
+      "text": "James offered John financial assistance or advice for his new tournament-organising venture if he ever needed it, and John said he would ask if necessary.",
+      "speaker": "James",
+      "statedOn": "2022-08-06",
+      "entities": [
+        "james",
+        "john",
+        "esports-organizing"
+      ],
+      "sourceTurns": [
+        "D18:12",
+        "D18:13"
+      ]
+    },
+    {
+      "text": "James took his puppy Ned to the clinic on 5 August 2022 for a routine examination, and Ned was vaccinated to prevent him catching the seasonal canine disease.",
+      "speaker": "James",
+      "statedOn": "2022-08-06",
+      "entities": [
+        "james",
+        "ned"
+      ],
+      "sourceTurns": [
+        "D18:14",
+        "D18:15",
+        "D18:16",
+        "D18:17"
+      ],
+      "chrono": [
+        "ch-puppy-clinic"
+      ]
+    },
+    {
+      "text": "James says his dogs are the source of his joy and that he will always take care of them.",
+      "speaker": "James",
+      "statedOn": "2022-08-06",
+      "entities": [
+        "james",
+        "max",
+        "daisy",
+        "ned"
+      ],
+      "sourceTurns": [
+        "D18:18",
+        "D18:19",
+        "D18:20"
+      ]
+    },
+    {
+      "text": "John credited his conversations with James with making him think about his passions and goals, and thanked him for encouraging him to try new game genres.",
+      "speaker": "John",
+      "statedOn": "2022-08-10",
+      "entities": [
+        "john",
+        "james",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D19:1",
+        "D19:2"
+      ]
+    },
+    {
+      "text": "By August 2022 John had been playing strategy and role-playing games instead of his usual shooters, and was already thinking about running competitions for those genres too.",
+      "speaker": "John",
+      "statedOn": "2022-08-10",
+      "entities": [
+        "john",
+        "gaming",
+        "esports-organizing"
+      ],
+      "sourceTurns": [
+        "D19:3",
+        "D19:4"
+      ]
+    },
+    {
+      "text": "John was hooked on The Witcher 3 in August 2022, praising its storytelling and characters, its monster-hunter protagonist and being able to shape the world through his own choices.",
+      "speaker": "John",
+      "statedOn": "2022-08-10",
+      "entities": [
+        "john",
+        "the-witcher-3"
+      ],
+      "sourceTurns": [
+        "D19:5",
+        "D19:6",
+        "D19:7"
+      ]
+    },
+    {
+      "text": "James agreed The Witcher 3 is amazing, saying he loves how choices shape the world and that the graphics are insane.",
+      "speaker": "James",
+      "statedOn": "2022-08-10",
+      "entities": [
+        "james",
+        "the-witcher-3"
+      ],
+      "sourceTurns": [
+        "D19:8"
+      ]
+    },
+    {
+      "text": "John organised his gaming workplace in August 2022 and added wall lighting, which James said added beauty to the workspace.",
+      "speaker": "John",
+      "statedOn": "2022-08-10",
+      "entities": [
+        "john",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D19:9",
+        "D19:10",
+        "D19:11"
+      ]
+    },
+    {
+      "text": "James took his three dogs to a beach outing on 9 August 2022 to have fun and bond with other dog keepers.",
+      "speaker": "James",
+      "statedOn": "2022-08-10",
+      "entities": [
+        "james",
+        "max",
+        "daisy",
+        "ned"
+      ],
+      "sourceTurns": [
+        "D19:12",
+        "D19:13"
+      ],
+      "chrono": [
+        "ch-beach-outing"
+      ]
+    },
+    {
+      "text": "At the beach outing on 9 August 2022 James met a woman called Samantha who left him her phone number; he planned to telephone her on 11 August 2022 and ask her out on a date.",
+      "speaker": "James",
+      "statedOn": "2022-08-10",
+      "entities": [
+        "james",
+        "samantha"
+      ],
+      "sourceTurns": [
+        "D19:14",
+        "D19:15",
+        "D19:16",
+        "D19:17"
+      ],
+      "chrono": [
+        "ch-beach-outing",
+        "ch-call-samantha"
+      ]
+    },
+    {
+      "text": "John joined an online programming group on 19 August 2022 and found it incredible to be part of a community of people with similar goals — coding and making a difference.",
+      "speaker": "John",
+      "statedOn": "2022-08-21",
+      "entities": [
+        "john",
+        "online-programming-group",
+        "programming"
+      ],
+      "sourceTurns": [
+        "D20:1",
+        "D20:2"
+      ],
+      "chrono": [
+        "ch-joined-programming-group"
+      ]
+    },
+    {
+      "text": "John’s online programming group is full of skilled coders passionate about using technology for good; they share ideas and work on projects together, and he exchanged contacts with several of them.",
+      "speaker": "John",
+      "statedOn": "2022-08-21",
+      "entities": [
+        "john",
+        "online-programming-group"
+      ],
+      "sourceTurns": [
+        "D20:3",
+        "D20:4"
+      ]
+    },
+    {
+      "text": "In the week before 21 August 2022 John worked with someone from his online programming group on a project, each of them bringing their strong points to it.",
+      "speaker": "John",
+      "statedOn": "2022-08-21",
+      "entities": [
+        "john",
+        "online-programming-group",
+        "programming"
+      ],
+      "sourceTurns": [
+        "D20:5",
+        "D20:6"
+      ]
+    },
+    {
+      "text": "John said the group project was a one-time experience to learn something new and work as a team rather than a return to working with programming, and that he remained set on hosting esports competitions.",
+      "speaker": "John",
+      "statedOn": "2022-08-21",
+      "entities": [
+        "john",
+        "esports-organizing",
+        "programming"
+      ],
+      "sourceTurns": [
+        "D20:7"
+      ]
+    },
+    {
+      "text": "James belongs to no online groups but plays regularly with his own gaming group, who stream their game sessions and had recently had a get-together.",
+      "speaker": "James",
+      "statedOn": "2022-08-21",
+      "entities": [
+        "james",
+        "james-gaming-group",
+        "game-streaming"
+      ],
+      "sourceTurns": [
+        "D20:8",
+        "D20:9"
+      ]
+    },
+    {
+      "text": "John bought new devices and refurbished his gaming desk in August 2022; his setup is a gaming PC with a powerful graphics card, a gaming chair, a keyboard and a headset for immersive sound.",
+      "speaker": "John",
+      "statedOn": "2022-08-21",
+      "entities": [
+        "john",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D20:9",
+        "D20:10",
+        "D20:11"
+      ]
+    },
+    {
+      "text": "James’s gaming setup is a gaming PC, a keyboard, a mouse and a comfortable chair, which he says makes gaming for hours much more bearable.",
+      "speaker": "James",
+      "statedOn": "2022-08-21",
+      "entities": [
+        "james",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D20:10"
+      ]
+    },
+    {
+      "text": "John says gaming has always been an awesome escape for him and keeps him focused and motivated in other areas of life.",
+      "speaker": "John",
+      "statedOn": "2022-08-21",
+      "entities": [
+        "john",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D20:11",
+        "D20:12"
+      ]
+    },
+    {
+      "text": "James hosted an all-night gaming marathon with some friends in August 2022, which he said they had a blast at and which really strengthened their bond.",
+      "speaker": "James",
+      "statedOn": "2022-08-21",
+      "entities": [
+        "james",
+        "james-gaming-group",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D20:12",
+        "D20:13"
+      ]
+    },
+    {
+      "text": "John’s siblings threw him a gaming marathon when he was younger and they stayed up all night playing, which really bonded them.",
+      "speaker": "John",
+      "statedOn": "2022-08-21",
+      "entities": [
+        "john",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D20:13",
+        "D20:14"
+      ]
+    },
+    {
+      "text": "John and his siblings do not see much of each other because they live far apart, but when they do they always try to plan a gaming night.",
+      "speaker": "John",
+      "statedOn": "2022-08-21",
+      "entities": [
+        "john",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D20:15",
+        "D20:16"
+      ]
+    },
+    {
+      "text": "John was organising a gaming night with his siblings for September 2022 and was looking forward to it.",
+      "speaker": "John",
+      "statedOn": "2022-08-21",
+      "entities": [
+        "john",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D20:17",
+        "D20:18",
+        "D20:19",
+        "D20:20",
+        "D20:21",
+        "D20:22"
+      ]
+    },
+    {
+      "text": "One of James’s dogs came to him on 26 August 2022 while he was playing on the console.",
+      "speaker": "James",
+      "statedOn": "2022-08-26",
+      "entities": [
+        "james",
+        "ned"
+      ],
+      "sourceTurns": [
+        "D21:1"
+      ]
+    },
+    {
+      "text": "John had been helping his younger siblings with programming since they joined his programming course, and found it really cool to see them get into it.",
+      "speaker": "John",
+      "statedOn": "2022-08-26",
+      "entities": [
+        "john",
+        "john-programming-course",
+        "programming"
+      ],
+      "sourceTurns": [
+        "D21:2",
+        "D21:3"
+      ]
+    },
+    {
+      "text": "The puppy James adopted is called Ned and James says he has been awesome ever since and that he cannot imagine life without him; John had forgotten the name and was reminded on 26 August 2022.",
+      "speaker": "James",
+      "statedOn": "2022-08-26",
+      "entities": [
+        "james",
+        "ned"
+      ],
+      "sourceTurns": [
+        "D21:3",
+        "D21:4"
+      ]
+    },
+    {
+      "text": "John and his younger siblings were working together on a coding project — a simple text-based adventure game that lets them work on their coding skills while having fun — and he was proud of them.",
+      "speaker": "John",
+      "statedOn": "2022-08-26",
+      "entities": [
+        "john",
+        "john-siblings-project",
+        "programming"
+      ],
+      "sourceTurns": [
+        "D21:5",
+        "D21:6",
+        "D21:7",
+        "D21:8"
+      ]
+    },
+    {
+      "text": "After trying out different genres, James said on 26 August 2022 that he was dying to create a strategy game of his own like Civilization, loving how complicated and in-depth they are, and hoped one day to make it.",
+      "speaker": "James",
+      "statedOn": "2022-08-26",
+      "entities": [
+        "james",
+        "james-strategy-game",
+        "civilization",
+        "game-development"
+      ],
+      "sourceTurns": [
+        "D21:9",
+        "D21:10"
+      ]
+    },
+    {
+      "text": "James asked John on 26 August 2022 to meet the next day, which was John’s day off, and suggested going to Starbucks for coffee.",
+      "speaker": "James",
+      "statedOn": "2022-08-26",
+      "entities": [
+        "james",
+        "john"
+      ],
+      "sourceTurns": [
+        "D21:11",
+        "D21:12",
+        "D21:13"
+      ]
+    },
+    {
+      "text": "John asked for a beer rather than coffee, so James proposed McGee’s pub for its stout; John does not like dark beer, and on learning there were light beers too he agreed to meet James there on 27 August 2022.",
+      "speaker": "John",
+      "statedOn": "2022-08-26",
+      "entities": [
+        "john",
+        "james",
+        "mcgees-pub"
+      ],
+      "sourceTurns": [
+        "D21:14",
+        "D21:15",
+        "D21:16",
+        "D21:17",
+        "D21:18",
+        "D21:19"
+      ],
+      "chrono": [
+        "ch-pub-meeting"
+      ]
+    },
+    {
+      "text": "James finished his Unity strategy game on about 1 September 2022 after a great deal of time and effort, was really proud of it, and credited John’s support and encouragement with making a real difference.",
+      "speaker": "James",
+      "statedOn": "2022-09-01",
+      "entities": [
+        "james",
+        "james-strategy-game",
+        "john",
+        "game-development"
+      ],
+      "sourceTurns": [
+        "D22:1",
+        "D22:2",
+        "D22:3"
+      ],
+      "chrono": [
+        "ch-strategy-game-finished"
+      ]
+    },
+    {
+      "text": "James built his own strategy game because he has always loved playing strategy games such as Civilization and Total War and decided to challenge himself to create one.",
+      "speaker": "James",
+      "statedOn": "2022-09-01",
+      "entities": [
+        "james",
+        "james-strategy-game",
+        "civilization",
+        "total-war"
+      ],
+      "sourceTurns": [
+        "D22:4",
+        "D22:5",
+        "D22:6"
+      ]
+    },
+    {
+      "text": "The challenging part of building James’s strategy game was getting everything right — balancing the mechanics and ensuring fairness — which he managed by trial and error.",
+      "speaker": "James",
+      "statedOn": "2022-09-01",
+      "entities": [
+        "james",
+        "james-strategy-game"
+      ],
+      "sourceTurns": [
+        "D22:7",
+        "D22:8"
+      ]
+    },
+    {
+      "text": "James’s takeaways from building his strategy game were that perseverance and patience are key and that feedback and collaboration are essential, the help of others having made the game better.",
+      "speaker": "James",
+      "statedOn": "2022-09-01",
+      "entities": [
+        "james",
+        "james-strategy-game"
+      ],
+      "sourceTurns": [
+        "D22:9"
+      ]
+    },
+    {
+      "text": "By September 2022 John had been teaching his siblings to code and they were already creating their own programs — basic games and stories — which he found inspiring and was proud of, hoping their passion for video games would carry them further.",
+      "speaker": "John",
+      "statedOn": "2022-09-01",
+      "entities": [
+        "john",
+        "john-siblings-project",
+        "programming"
+      ],
+      "sourceTurns": [
+        "D22:10",
+        "D22:11",
+        "D22:12",
+        "D22:13",
+        "D22:14",
+        "D22:15",
+        "D22:16",
+        "D22:17"
+      ]
+    },
+    {
+      "text": "John said on 1 September 2022 that he was going through difficult times and that it meant a lot to have James, and James told him he was there to be talked to or vented at.",
+      "speaker": "John",
+      "statedOn": "2022-09-01",
+      "entities": [
+        "john",
+        "james"
+      ],
+      "sourceTurns": [
+        "D22:18",
+        "D22:19"
+      ]
+    },
+    {
+      "text": "James asked Samantha to become his girlfriend at the theatre on 3 September 2022 and she agreed; he said they had been through a lot of ups and downs in a short period but that he is happy with her, and that Samantha loves the theatre.",
+      "speaker": "James",
+      "statedOn": "2022-09-04",
+      "entities": [
+        "james",
+        "samantha"
+      ],
+      "sourceTurns": [
+        "D23:1"
+      ],
+      "chrono": [
+        "ch-asked-samantha-out"
+      ]
+    },
+    {
+      "text": "John’s parents started learning to code from him shortly before 4 September 2022, which he called a learning experience that binds the family closer, and he photographed his father coding his own program for the first time.",
+      "speaker": "John",
+      "statedOn": "2022-09-04",
+      "entities": [
+        "john",
+        "programming"
+      ],
+      "sourceTurns": [
+        "D23:2",
+        "D23:3"
+      ]
+    },
+    {
+      "text": "James and Samantha have also been to McGee’s bar together, where she turned out to love a good lager beer, and James said the two of them have a great deal in common.",
+      "speaker": "James",
+      "statedOn": "2022-09-04",
+      "entities": [
+        "james",
+        "samantha",
+        "mcgees-pub"
+      ],
+      "sourceTurns": [
+        "D23:3",
+        "D23:4"
+      ]
+    },
+    {
+      "text": "James invited John to join him and Samantha at a baseball game on 11 September 2022, and John accepted.",
+      "speaker": "James",
+      "statedOn": "2022-09-04",
+      "entities": [
+        "james",
+        "samantha",
+        "john"
+      ],
+      "sourceTurns": [
+        "D23:5",
+        "D23:6",
+        "D23:7"
+      ],
+      "chrono": [
+        "ch-baseball-plan"
+      ]
+    },
+    {
+      "text": "John bought new gaming equipment in September 2022 to improve his skills: Sennheiser headphones chosen for their excellent sound on the reviews, and a Logitech mouse.",
+      "speaker": "John",
+      "statedOn": "2022-09-04",
+      "entities": [
+        "john",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D23:8",
+        "D23:9",
+        "D23:10",
+        "D23:11",
+        "D23:12"
+      ]
+    },
+    {
+      "text": "James signed up for a cooking class on 2 September 2022 even though he had never liked cooking, because he wanted to learn something new; in the first lesson he made a great omelette first time, made meringue and was taught how to make dough.",
+      "speaker": "James",
+      "statedOn": "2022-09-04",
+      "entities": [
+        "james",
+        "cooking-class",
+        "cooking"
+      ],
+      "sourceTurns": [
+        "D23:13",
+        "D23:14",
+        "D23:15"
+      ],
+      "chrono": [
+        "ch-cooking-class-signup"
+      ]
+    },
+    {
+      "text": "James’s cooking class costs $10 a lesson, which John thought really cheap.",
+      "speaker": "James",
+      "statedOn": "2022-09-04",
+      "entities": [
+        "james",
+        "cooking-class"
+      ],
+      "sourceTurns": [
+        "D23:15",
+        "D23:16"
+      ]
+    },
+    {
+      "text": "James hoped to treat John to something he had cooked once he had learned a little more, and said John’s words gave him more strength to pursue his new hobby.",
+      "speaker": "James",
+      "statedOn": "2022-09-04",
+      "entities": [
+        "james",
+        "john",
+        "cooking"
+      ],
+      "sourceTurns": [
+        "D23:17",
+        "D23:18",
+        "D23:19",
+        "D23:20",
+        "D23:21"
+      ]
+    },
+    {
+      "text": "John started getting into board games in September 2022, trying one in the week before 18 September that turned out to be a lot of fun.",
+      "speaker": "John",
+      "statedOn": "2022-09-18",
+      "entities": [
+        "john",
+        "board-games"
+      ],
+      "sourceTurns": [
+        "D24:1",
+        "D24:2"
+      ]
+    },
+    {
+      "text": "James started writing down everything he needed to do in a notebook in September 2022, having had a lot on and not wanting to forget anything.",
+      "speaker": "James",
+      "statedOn": "2022-09-18",
+      "entities": [
+        "james"
+      ],
+      "sourceTurns": [
+        "D24:2",
+        "D24:3"
+      ]
+    },
+    {
+      "text": "The board game John had tried is called Dungeons of the Dragon, and he found it very exciting.",
+      "speaker": "John",
+      "statedOn": "2022-09-18",
+      "entities": [
+        "john",
+        "dungeons-of-the-dragon",
+        "board-games"
+      ],
+      "sourceTurns": [
+        "D24:3"
+      ]
+    },
+    {
+      "text": "James gets his ideas from various sources — books, films and even dreams.",
+      "speaker": "James",
+      "statedOn": "2022-09-18",
+      "entities": [
+        "james"
+      ],
+      "sourceTurns": [
+        "D24:4",
+        "D24:5"
+      ]
+    },
+    {
+      "text": "A few weeks before 18 September 2022 James had a vivid dream that led to creative ideas: a medieval castle with its own labyrinth full of puzzles and traps, which felt like playing a video game in real life.",
+      "speaker": "James",
+      "statedOn": "2022-09-18",
+      "entities": [
+        "james",
+        "game-development"
+      ],
+      "sourceTurns": [
+        "D24:6",
+        "D24:7",
+        "D24:8"
+      ]
+    },
+    {
+      "text": "James made sketches and notes from the castle dream and showed them to John on 18 September 2022.",
+      "speaker": "James",
+      "statedOn": "2022-09-18",
+      "entities": [
+        "james",
+        "john",
+        "game-development"
+      ],
+      "sourceTurns": [
+        "D24:9",
+        "D24:10"
+      ]
+    },
+    {
+      "text": "Music is a big part of James’s life, and he used to play the guitar when he was younger although he had not in a while.",
+      "speaker": "James",
+      "statedOn": "2022-09-18",
+      "entities": [
+        "james"
+      ],
+      "sourceTurns": [
+        "D24:11",
+        "D24:12",
+        "D24:14"
+      ]
+    },
+    {
+      "text": "John is into electronic and rock music and used to play the drums when he was younger, though he had not in a while; he showed James a photograph of the old drum set he used to play on.",
+      "speaker": "John",
+      "statedOn": "2022-09-18",
+      "entities": [
+        "john",
+        "drumming"
+      ],
+      "sourceTurns": [
+        "D24:13",
+        "D24:15"
+      ]
+    },
+    {
+      "text": "John has jammed with friends and found it a lot of fun, but kept no recordings or videos of those sessions because for him it was about the experience and the moment.",
+      "speaker": "John",
+      "statedOn": "2022-09-18",
+      "entities": [
+        "john",
+        "drumming"
+      ],
+      "sourceTurns": [
+        "D24:16",
+        "D24:17",
+        "D24:18",
+        "D24:19"
+      ]
+    },
+    {
+      "text": "James started streaming games in September 2022, with no details to give yet, and John wished him luck and asked to be told how it went.",
+      "speaker": "James",
+      "statedOn": "2022-09-18",
+      "entities": [
+        "james",
+        "game-streaming"
+      ],
+      "sourceTurns": [
+        "D24:20",
+        "D24:21"
+      ]
+    },
+    {
+      "text": "John started a startup making portable smokers on 19 September 2022 and had already welded one himself out of metal.",
+      "speaker": "John",
+      "statedOn": "2022-09-20",
+      "entities": [
+        "john",
+        "portable-smoker-startup"
+      ],
+      "sourceTurns": [
+        "D25:1",
+        "D25:2",
+        "D25:3"
+      ],
+      "chrono": [
+        "ch-startup-started"
+      ]
+    },
+    {
+      "text": "James streamed a game on the night of 19 September 2022 and was blown away by the nice comments from the gaming community, which left him stoked and inspired to keep going.",
+      "speaker": "James",
+      "statedOn": "2022-09-20",
+      "entities": [
+        "james",
+        "game-streaming"
+      ],
+      "sourceTurns": [
+        "D25:4",
+        "D25:5",
+        "D25:6"
+      ],
+      "chrono": [
+        "ch-stream-night"
+      ]
+    },
+    {
+      "text": "John announced on 20 September 2022 that he had made his first mobile game, a 2D adventure game with puzzles and exploration launching the following month; he had worked on it for the past few months and kept it secret in case it did not work out.",
+      "speaker": "John",
+      "statedOn": "2022-09-20",
+      "entities": [
+        "john",
+        "john-mobile-game",
+        "game-development"
+      ],
+      "sourceTurns": [
+        "D25:7",
+        "D25:8",
+        "D25:9"
+      ]
+    },
+    {
+      "text": "James, who likes 2D adventures with puzzles such as The Legend of Zelda, offered to help test John’s mobile game, and John said he would let him know when testing was ready.",
+      "speaker": "James",
+      "statedOn": "2022-09-20",
+      "entities": [
+        "james",
+        "john",
+        "john-mobile-game",
+        "legend-of-zelda"
+      ],
+      "sourceTurns": [
+        "D25:10",
+        "D25:11"
+      ]
+    },
+    {
+      "text": "John used a book full of tips and insights on game design to create the puzzles in his mobile game, and also watches tutorials and keeps up with developer forums to stay informed.",
+      "speaker": "John",
+      "statedOn": "2022-09-20",
+      "entities": [
+        "john",
+        "john-mobile-game",
+        "game-development"
+      ],
+      "sourceTurns": [
+        "D25:11",
+        "D25:12",
+        "D25:13"
+      ]
+    },
+    {
+      "text": "James recommended a magazine of tutorials, developer interviews and tips as a source for game development, and John said he reads it too and has found it great.",
+      "speaker": "James",
+      "statedOn": "2022-09-20",
+      "entities": [
+        "james",
+        "john",
+        "game-development"
+      ],
+      "sourceTurns": [
+        "D25:14",
+        "D25:15",
+        "D25:16",
+        "D25:17",
+        "D25:18",
+        "D25:19"
+      ]
+    },
+    {
+      "text": "In the week of 20 September 2022 James’s week was good but he was trying to find a balance between work and other activities, while John’s was chaotic and he was powering through; James told him to take time for himself and John said he would.",
+      "speaker": "James",
+      "statedOn": "2022-09-20",
+      "entities": [
+        "james",
+        "john"
+      ],
+      "sourceTurns": [
+        "D25:20",
+        "D25:21",
+        "D25:22",
+        "D25:23",
+        "D25:24",
+        "D25:25"
+      ]
+    },
+    {
+      "text": "James’s strategy game went from an ambition on 26 August 2022 to build something like Civilization, to a finished Unity game on about 1 September 2022, the hard part having been balancing its mechanics and keeping it fair.",
+      "speaker": "James",
+      "statedOn": "2022-09-01",
+      "entities": [
+        "james",
+        "james-strategy-game",
+        "civilization"
+      ],
+      "sourceTurns": [
+        "D21:9",
+        "D22:1",
+        "D22:7"
+      ]
+    },
+    {
+      "text": "John’s relationship with programming shifted over 2022 from taking a class and freelancing to teaching it: he was helping his younger siblings after they joined his course by August 2022, they were writing their own programs by September, and his parents started learning from him shortly before 4 September 2022.",
+      "speaker": "John",
+      "statedOn": "2022-09-04",
+      "entities": [
+        "john",
+        "programming",
+        "john-programming-course",
+        "john-siblings-project"
+      ],
+      "sourceTurns": [
+        "D21:2",
+        "D22:10",
+        "D23:2"
+      ]
+    },
+    {
+      "text": "John was emailed in late September 2022 about a volunteer position at a game-development non-profit, something he had wanted to do for a while and which he saw as the perfect start to a career combining his two loves, gaming and helping people.",
+      "speaker": "John",
+      "statedOn": "2022-10-03",
+      "entities": [
+        "john",
+        "gamedev-nonprofit",
+        "volunteering",
+        "game-development"
+      ],
+      "sourceTurns": [
+        "D26:1",
+        "D26:2"
+      ]
+    },
+    {
+      "text": "The non-profit asked John to be a programming mentor for game developers, teaching coding and assisting with their projects, and he was excited to share his knowledge and motivate people passionate about gaming.",
+      "speaker": "John",
+      "statedOn": "2022-10-03",
+      "entities": [
+        "john",
+        "gamedev-nonprofit",
+        "programming",
+        "game-development"
+      ],
+      "sourceTurns": [
+        "D26:3",
+        "D26:4"
+      ]
+    },
+    {
+      "text": "John saw the mentoring position as a chance both to help others and to boost his own skills, found it rewarding to see others reach their potential, and hoped it would open more opportunities for him.",
+      "speaker": "John",
+      "statedOn": "2022-10-03",
+      "entities": [
+        "john",
+        "gamedev-nonprofit"
+      ],
+      "sourceTurns": [
+        "D26:5",
+        "D26:6",
+        "D26:7"
+      ]
+    },
+    {
+      "text": "James got a new video card in the week before 3 October 2022 and was excited to jump back into gaming with it, being especially into role-playing games.",
+      "speaker": "James",
+      "statedOn": "2022-10-03",
+      "entities": [
+        "james",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D26:8",
+        "D26:9",
+        "D26:10"
+      ]
+    },
+    {
+      "text": "John recommended Cyberpunk 2077 to James on 3 October 2022, having played it himself and found it awesome with an immersive world and an amazing story, and James was excited to try it.",
+      "speaker": "John",
+      "statedOn": "2022-10-03",
+      "entities": [
+        "john",
+        "james",
+        "cyberpunk-2077"
+      ],
+      "sourceTurns": [
+        "D26:10",
+        "D26:11",
+        "D26:12",
+        "D26:13",
+        "D26:14",
+        "D26:15"
+      ]
+    },
+    {
+      "text": "John and his programmer friends organised an online competition in the week before 13 October 2022, and he had a blast seeing everyone show off their skills.",
+      "speaker": "John",
+      "statedOn": "2022-10-13",
+      "entities": [
+        "john",
+        "esports-organizing",
+        "programming"
+      ],
+      "sourceTurns": [
+        "D27:1"
+      ]
+    },
+    {
+      "text": "James made his first game and released it to the gaming community shortly before 13 October 2022, and found it fulfilling to see players engage with the game world he had created and enjoy something he had put so much work into.",
+      "speaker": "James",
+      "statedOn": "2022-10-13",
+      "entities": [
+        "james",
+        "james-strategy-game",
+        "game-development"
+      ],
+      "sourceTurns": [
+        "D27:2",
+        "D27:3",
+        "D27:4",
+        "D27:5"
+      ]
+    },
+    {
+      "text": "James said The Witcher 3, with its amazing world and story, gave him a great deal of the inspiration for creating his own game and pushed him to make something cool.",
+      "speaker": "James",
+      "statedOn": "2022-10-13",
+      "entities": [
+        "james",
+        "the-witcher-3",
+        "james-strategy-game"
+      ],
+      "sourceTurns": [
+        "D27:6",
+        "D27:7"
+      ]
+    },
+    {
+      "text": "After releasing his first game James said his effort had paid off and that he was ready to make more games in different genres and test out new ideas.",
+      "speaker": "James",
+      "statedOn": "2022-10-13",
+      "entities": [
+        "james",
+        "game-development"
+      ],
+      "sourceTurns": [
+        "D27:8",
+        "D27:9",
+        "D27:10",
+        "D27:11",
+        "D27:12",
+        "D27:13",
+        "D27:14"
+      ]
+    },
+    {
+      "text": "James’s apartment lost power on 18 October 2022 just as he reached the big reveal in a game, and he had to wait hours before he could play again.",
+      "speaker": "James",
+      "statedOn": "2022-10-21",
+      "entities": [
+        "james",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D28:1",
+        "D28:2",
+        "D28:3",
+        "D28:4"
+      ],
+      "chrono": [
+        "ch-power-cut"
+      ]
+    },
+    {
+      "text": "The power cut on 18 October 2022 cost James some of his game progress because he had forgotten to save, and he resolved to save more often.",
+      "speaker": "James",
+      "statedOn": "2022-10-21",
+      "entities": [
+        "james",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D28:5"
+      ]
+    },
+    {
+      "text": "John organised a programming seminar in the week before 21 October 2022; it had a great turnout, he learned interesting new things, and he found sharing his knowledge with the group fulfilling.",
+      "speaker": "John",
+      "statedOn": "2022-10-21",
+      "entities": [
+        "john",
+        "programming"
+      ],
+      "sourceTurns": [
+        "D28:6",
+        "D28:7",
+        "D28:8"
+      ]
+    },
+    {
+      "text": "At his programming seminar John gained insight into various programming approaches and techniques and found it interesting to hear other developers’ ideas and strategies.",
+      "speaker": "John",
+      "statedOn": "2022-10-21",
+      "entities": [
+        "john",
+        "programming"
+      ],
+      "sourceTurns": [
+        "D28:9",
+        "D28:10"
+      ]
+    },
+    {
+      "text": "John found ideas at the programming seminar he could use in his own work but had not tried them as of 21 October 2022, and was looking forward to experimenting with them.",
+      "speaker": "John",
+      "statedOn": "2022-10-21",
+      "entities": [
+        "john",
+        "programming"
+      ],
+      "sourceTurns": [
+        "D28:11",
+        "D28:12",
+        "D28:13",
+        "D28:14",
+        "D28:15"
+      ]
+    },
+    {
+      "text": "John promised to send James resources and tutorials on the new programming approaches and techniques he had learned at his seminar.",
+      "speaker": "John",
+      "statedOn": "2022-10-21",
+      "entities": [
+        "john",
+        "james",
+        "programming"
+      ],
+      "sourceTurns": [
+        "D28:16",
+        "D28:17",
+        "D28:18"
+      ]
+    },
+    {
+      "text": "James’s mother came to see him with her army friend on 19 October 2022 and they had fun; James said the friend is still serving although she retired long ago, and that the two of them used to tell him stories about their time in the military and about their dog.",
+      "speaker": "James",
+      "statedOn": "2022-10-21",
+      "entities": [
+        "james",
+        "james-mother"
+      ],
+      "sourceTurns": [
+        "D28:19",
+        "D28:20",
+        "D28:21"
+      ],
+      "chrono": [
+        "ch-mother-visit"
+      ]
+    },
+    {
+      "text": "James has a photograph of himself as a child playing on his mother and her army friend’s old gaming setup — a Nintendo console with the game Mario and, he said, a funny gamepad — which he showed John on 21 October 2022.",
+      "speaker": "James",
+      "statedOn": "2022-10-21",
+      "entities": [
+        "james",
+        "nintendo-console",
+        "super-mario",
+        "james-mother"
+      ],
+      "sourceTurns": [
+        "D28:21",
+        "D28:22",
+        "D28:23",
+        "D28:24"
+      ]
+    },
+    {
+      "text": "The Nintendo was James’s first gaming system as a child; he played Super Mario and The Legend of Zelda on it for hours, and those games introduced him to gaming and sparked the passion he has had ever since.",
+      "speaker": "James",
+      "statedOn": "2022-10-21",
+      "entities": [
+        "james",
+        "nintendo-console",
+        "super-mario",
+        "legend-of-zelda",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D28:25",
+        "D28:26"
+      ]
+    },
+    {
+      "text": "James tried Cyberpunk 2077 for the first time on 20 October 2022 and found it a great, addictive game.",
+      "speaker": "James",
+      "statedOn": "2022-10-21",
+      "entities": [
+        "james",
+        "cyberpunk-2077"
+      ],
+      "sourceTurns": [
+        "D28:27",
+        "D28:28"
+      ],
+      "chrono": [
+        "ch-cyberpunk-try"
+      ]
+    },
+    {
+      "text": "John told James the most difficult thing in Cyberpunk 2077 is making the right choice, because even the choice of lines in dialogue can send everything wrong, and warned him without spoilers that he does not have to be friends with every character.",
+      "speaker": "John",
+      "statedOn": "2022-10-21",
+      "entities": [
+        "john",
+        "james",
+        "cyberpunk-2077"
+      ],
+      "sourceTurns": [
+        "D28:29",
+        "D28:30",
+        "D28:31",
+        "D28:32",
+        "D28:33",
+        "D28:34",
+        "D28:35"
+      ]
+    },
+    {
+      "text": "John held a gaming tournament with his gaming friends on the night of 30 October 2022, playing Fortnite, Overwatch and Apex Legends, and they raised a decent amount for a children’s hospital.",
+      "speaker": "John",
+      "statedOn": "2022-10-31",
+      "entities": [
+        "john",
+        "fortnite",
+        "overwatch",
+        "apex-legends",
+        "esports-organizing",
+        "volunteering"
+      ],
+      "sourceTurns": [
+        "D29:1",
+        "D29:2",
+        "D29:3"
+      ],
+      "chrono": [
+        "ch-fortnite-charity"
+      ]
+    },
+    {
+      "text": "John said the atmosphere at the charity tournament on 30 October 2022 was awesome and competitive and the moment unforgettable, and that it felt good to use their love of gaming for good.",
+      "speaker": "John",
+      "statedOn": "2022-10-31",
+      "entities": [
+        "john",
+        "esports-organizing"
+      ],
+      "sourceTurns": [
+        "D29:4",
+        "D29:5",
+        "D29:6",
+        "D29:7"
+      ]
+    },
+    {
+      "text": "James and Samantha decided in October 2022 to move in together and rented an apartment not far from McGee’s bar; James said it was a mutual and informed decision.",
+      "speaker": "James",
+      "statedOn": "2022-10-31",
+      "entities": [
+        "james",
+        "samantha",
+        "mcgees-pub"
+      ],
+      "sourceTurns": [
+        "D29:8",
+        "D29:9",
+        "D29:10"
+      ]
+    },
+    {
+      "text": "James said he and Samantha simply love spending time at McGee’s bar and that being near it was one of their criteria in choosing the apartment they rented.",
+      "speaker": "James",
+      "statedOn": "2022-10-31",
+      "entities": [
+        "james",
+        "samantha",
+        "mcgees-pub"
+      ],
+      "sourceTurns": [
+        "D29:11",
+        "D29:12",
+        "D29:13",
+        "D29:14",
+        "D29:15",
+        "D29:16"
+      ]
+    },
+    {
+      "text": "James set off on a road trip with his family and his dogs on 4 November 2022, enjoying exploring new places and taking in nature with them.",
+      "speaker": "James",
+      "statedOn": "2022-11-05",
+      "entities": [
+        "james",
+        "max",
+        "daisy",
+        "ned",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D30:1"
+      ],
+      "chrono": [
+        "ch-road-trip-start"
+      ]
+    },
+    {
+      "text": "John won the regional chess tournament on 1 November 2022, an intense contest he came out on top of.",
+      "speaker": "John",
+      "statedOn": "2022-11-05",
+      "entities": [
+        "john",
+        "chess"
+      ],
+      "sourceTurns": [
+        "D30:2",
+        "D30:3",
+        "D30:4",
+        "D30:5"
+      ],
+      "chrono": [
+        "ch-chess-win"
+      ]
+    },
+    {
+      "text": "Winning the regional chess tournament felt good to John: his hard work and practice had paid off, he had conquered the challenges, and it gave him a huge confidence boost.",
+      "speaker": "John",
+      "statedOn": "2022-11-05",
+      "entities": [
+        "john",
+        "chess"
+      ],
+      "sourceTurns": [
+        "D30:6",
+        "D30:7"
+      ]
+    },
+    {
+      "text": "John’s strategy in the regional chess tournament was to analyse and anticipate his opponent’s moves so as to stay one step ahead.",
+      "speaker": "John",
+      "statedOn": "2022-11-05",
+      "entities": [
+        "john",
+        "chess"
+      ],
+      "sourceTurns": [
+        "D30:8",
+        "D30:9"
+      ]
+    },
+    {
+      "text": "John’s tips for improving at chess are studying opening moves and strategies, learning from experienced players and analysing past games; he said the chess advice James gave him in July 2022 had also helped, and he sent James a resource on chess openings.",
+      "speaker": "John",
+      "statedOn": "2022-11-05",
+      "entities": [
+        "john",
+        "james",
+        "chess"
+      ],
+      "sourceTurns": [
+        "D30:10",
+        "D30:11",
+        "D30:12"
+      ]
+    },
+    {
+      "text": "John was hooked on FIFA 23 in November 2022, a football game that can be played online against players from all over the world.",
+      "speaker": "John",
+      "statedOn": "2022-11-05",
+      "entities": [
+        "john",
+        "fifa-23",
+        "football"
+      ],
+      "sourceTurns": [
+        "D30:13",
+        "D30:14"
+      ]
+    },
+    {
+      "text": "James decided on 5 November 2022 to try the sports genre with FIFA 23 and go and train first so that he and John could play together; John told him all it takes is a gamepad and a sense of timing.",
+      "speaker": "James",
+      "statedOn": "2022-11-05",
+      "entities": [
+        "james",
+        "john",
+        "fifa-23"
+      ],
+      "sourceTurns": [
+        "D30:15",
+        "D30:16",
+        "D30:17",
+        "D30:18",
+        "D30:19"
+      ]
+    },
+    {
+      "text": "James and his family were still on their road trip on 7 November 2022 and had already visited his friends Josh and Mark, with whom they had a great time.",
+      "speaker": "James",
+      "statedOn": "2022-11-07",
+      "entities": [
+        "james",
+        "josh",
+        "mark",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D31:1"
+      ]
+    },
+    {
+      "text": "John spent the weekend of 5–6 November 2022 working with a game developer on a project, and found it an incredible experience to see his own ideas come to life.",
+      "speaker": "John",
+      "statedOn": "2022-11-07",
+      "entities": [
+        "john",
+        "john-online-board-game",
+        "game-development"
+      ],
+      "sourceTurns": [
+        "D31:2",
+        "D31:3"
+      ]
+    },
+    {
+      "text": "John collaborated with a game developer to create an online board game, which he called a fun and unique experience.",
+      "speaker": "John",
+      "statedOn": "2022-11-07",
+      "entities": [
+        "john",
+        "john-online-board-game",
+        "board-games"
+      ],
+      "sourceTurns": [
+        "D31:4",
+        "D31:5"
+      ]
+    },
+    {
+      "text": "A demo of the online board game John made was about to be released so others could try it, and he was looking forward to their feedback and suggestions; James promised to try it and give his thoughts.",
+      "speaker": "John",
+      "statedOn": "2022-11-07",
+      "entities": [
+        "john",
+        "james",
+        "john-online-board-game"
+      ],
+      "sourceTurns": [
+        "D31:6",
+        "D31:7",
+        "D31:8"
+      ]
+    },
+    {
+      "text": "On the way to visit Mark and Josh, James and his family stopped at an animal sanctuary full of cute rescue dogs, which made him think of his and John’s love of furry pals.",
+      "speaker": "James",
+      "statedOn": "2022-11-07",
+      "entities": [
+        "james",
+        "josh",
+        "mark",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D31:9",
+        "D31:10",
+        "D31:11",
+        "D31:12"
+      ]
+    },
+    {
+      "text": "James wanted to take the rescue dogs at the sanctuary home but stopped himself because he already has three dogs, and said that more than three would be too many.",
+      "speaker": "James",
+      "statedOn": "2022-11-07",
+      "entities": [
+        "james",
+        "max",
+        "daisy",
+        "ned"
+      ],
+      "sourceTurns": [
+        "D31:13"
+      ]
+    },
+    {
+      "text": "John said on 7 November 2022 that he still has not got a dog although he very much wants one.",
+      "speaker": "John",
+      "statedOn": "2022-11-07",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D31:14"
+      ]
+    },
+    {
+      "text": "James says having his dogs around brings so much joy and friendship that life would not be the same without them, and that they make even dark days better.",
+      "speaker": "James",
+      "statedOn": "2022-11-07",
+      "entities": [
+        "james",
+        "max",
+        "daisy",
+        "ned"
+      ],
+      "sourceTurns": [
+        "D31:15",
+        "D31:16",
+        "D31:17",
+        "D31:18",
+        "D31:19"
+      ]
+    },
+    {
+      "text": "John says dogs bring a daily dose of positivity and happiness, accept people without judgement and are always there for us.",
+      "speaker": "John",
+      "statedOn": "2022-11-07",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D31:20"
+      ]
+    },
+    {
+      "text": "Luna is the name of the dog belonging to John’s cousin, whose photograph John showed James on 7 November 2022; James said it was a great name.",
+      "speaker": "John",
+      "statedOn": "2022-11-07",
+      "entities": [
+        "john",
+        "luna"
+      ],
+      "sourceTurns": [
+        "D31:20",
+        "D31:21",
+        "D31:22",
+        "D31:23",
+        "D31:24",
+        "D31:25"
+      ]
+    },
+    {
+      "text": "James’s dog household grew over 2022 from Max and Daisy to three after he adopted the puppy Ned in early April, introduced the three to each other on 17 June 2022, and decided in November 2022 that three dogs is as many as he wants.",
+      "speaker": "James",
+      "statedOn": "2022-11-07",
+      "entities": [
+        "james",
+        "max",
+        "daisy",
+        "ned"
+      ],
+      "sourceTurns": [
+        "D5:1",
+        "D15:1",
+        "D31:13"
+      ]
+    },
+    {
+      "text": "John’s charity gaming ran from a CS:GO tournament on 7 May 2022 for a dog shelter near his street to a Fortnite, Overwatch and Apex Legends tournament on 30 October 2022 for a children’s hospital, by way of his decision in August 2022 to make organising tournaments his career.",
+      "speaker": "John",
+      "statedOn": "2022-10-31",
+      "entities": [
+        "john",
+        "esports-organizing",
+        "volunteering",
+        "csgo"
+      ],
+      "sourceTurns": [
+        "D10:4",
+        "D18:7",
+        "D29:1"
+      ]
+    }
+  ]
+}

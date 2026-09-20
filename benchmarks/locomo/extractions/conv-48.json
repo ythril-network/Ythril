@@ -1,0 +1,6186 @@
+{
+  "conversationId": "conv-48",
+  "sessions": [
+    {
+      "date": "2023-01-23",
+      "turns": [
+        "D1:1",
+        "D1:2",
+        "D1:3",
+        "D1:4",
+        "D1:5",
+        "D1:6",
+        "D1:7",
+        "D1:8",
+        "D1:9",
+        "D1:10",
+        "D1:11",
+        "D1:12",
+        "D1:13",
+        "D1:14",
+        "D1:15",
+        "D1:16",
+        "D1:17",
+        "D1:18"
+      ]
+    },
+    {
+      "date": "2023-01-27",
+      "turns": [
+        "D2:1",
+        "D2:2",
+        "D2:3",
+        "D2:4",
+        "D2:5",
+        "D2:6",
+        "D2:7",
+        "D2:8",
+        "D2:9",
+        "D2:10",
+        "D2:11",
+        "D2:12",
+        "D2:13",
+        "D2:14",
+        "D2:15",
+        "D2:16",
+        "D2:17",
+        "D2:18",
+        "D2:19",
+        "D2:20",
+        "D2:21",
+        "D2:22",
+        "D2:23",
+        "D2:24",
+        "D2:25",
+        "D2:26",
+        "D2:27",
+        "D2:28",
+        "D2:29",
+        "D2:30",
+        "D2:31",
+        "D2:32"
+      ]
+    },
+    {
+      "date": "2023-02-01",
+      "turns": [
+        "D3:1",
+        "D3:2",
+        "D3:3",
+        "D3:4",
+        "D3:5",
+        "D3:6",
+        "D3:7",
+        "D3:8",
+        "D3:9",
+        "D3:10",
+        "D3:11",
+        "D3:12",
+        "D3:13",
+        "D3:14",
+        "D3:15"
+      ]
+    },
+    {
+      "date": "2023-02-04",
+      "turns": [
+        "D4:1",
+        "D4:2",
+        "D4:3",
+        "D4:4",
+        "D4:5",
+        "D4:6",
+        "D4:7",
+        "D4:8",
+        "D4:9",
+        "D4:10",
+        "D4:11",
+        "D4:12",
+        "D4:13",
+        "D4:14",
+        "D4:15",
+        "D4:16",
+        "D4:17",
+        "D4:18",
+        "D4:19",
+        "D4:20",
+        "D4:21",
+        "D4:22",
+        "D4:23",
+        "D4:24",
+        "D4:25",
+        "D4:26",
+        "D4:27",
+        "D4:28",
+        "D4:29",
+        "D4:30",
+        "D4:31",
+        "D4:32",
+        "D4:33",
+        "D4:34",
+        "D4:35",
+        "D4:36",
+        "D4:37",
+        "D4:38",
+        "D4:39",
+        "D4:40",
+        "D4:41",
+        "D4:42",
+        "D4:43",
+        "D4:44"
+      ]
+    },
+    {
+      "date": "2023-02-09",
+      "turns": [
+        "D5:1",
+        "D5:2",
+        "D5:3",
+        "D5:4",
+        "D5:5",
+        "D5:6",
+        "D5:7",
+        "D5:8",
+        "D5:9",
+        "D5:10",
+        "D5:11",
+        "D5:12",
+        "D5:13",
+        "D5:14",
+        "D5:15",
+        "D5:16",
+        "D5:17"
+      ]
+    },
+    {
+      "date": "2023-02-22",
+      "turns": [
+        "D6:1",
+        "D6:2",
+        "D6:3",
+        "D6:4",
+        "D6:5",
+        "D6:6",
+        "D6:7",
+        "D6:8",
+        "D6:9",
+        "D6:10",
+        "D6:11",
+        "D6:12",
+        "D6:13",
+        "D6:14",
+        "D6:15",
+        "D6:16"
+      ]
+    },
+    {
+      "date": "2023-02-25",
+      "turns": [
+        "D7:1",
+        "D7:2",
+        "D7:3",
+        "D7:4",
+        "D7:5",
+        "D7:6",
+        "D7:7",
+        "D7:8",
+        "D7:9",
+        "D7:10",
+        "D7:11",
+        "D7:12",
+        "D7:13",
+        "D7:14",
+        "D7:15",
+        "D7:16",
+        "D7:17",
+        "D7:18",
+        "D7:19",
+        "D7:20",
+        "D7:21",
+        "D7:22",
+        "D7:23"
+      ]
+    },
+    {
+      "date": "2023-03-02",
+      "turns": [
+        "D8:1",
+        "D8:2",
+        "D8:3",
+        "D8:4",
+        "D8:5",
+        "D8:6",
+        "D8:7",
+        "D8:8",
+        "D8:9",
+        "D8:10",
+        "D8:11",
+        "D8:12",
+        "D8:13",
+        "D8:14",
+        "D8:15",
+        "D8:16",
+        "D8:17",
+        "D8:18",
+        "D8:19",
+        "D8:20",
+        "D8:21",
+        "D8:22",
+        "D8:23"
+      ]
+    },
+    {
+      "date": "2023-03-13",
+      "turns": [
+        "D9:1",
+        "D9:2",
+        "D9:3",
+        "D9:4",
+        "D9:5",
+        "D9:6",
+        "D9:7",
+        "D9:8",
+        "D9:9",
+        "D9:10",
+        "D9:11",
+        "D9:12",
+        "D9:13",
+        "D9:14",
+        "D9:15",
+        "D9:16",
+        "D9:17",
+        "D9:18",
+        "D9:19",
+        "D9:20"
+      ]
+    },
+    {
+      "date": "2023-03-22",
+      "turns": [
+        "D10:1",
+        "D10:2",
+        "D10:3",
+        "D10:4",
+        "D10:5",
+        "D10:6",
+        "D10:7",
+        "D10:8",
+        "D10:9",
+        "D10:10",
+        "D10:11",
+        "D10:12",
+        "D10:13",
+        "D10:14",
+        "D10:15",
+        "D10:16",
+        "D10:17",
+        "D10:18",
+        "D10:19",
+        "D10:20",
+        "D10:21",
+        "D10:22",
+        "D10:23",
+        "D10:24"
+      ]
+    },
+    {
+      "date": "2023-03-28",
+      "turns": [
+        "D11:1",
+        "D11:2",
+        "D11:3",
+        "D11:4",
+        "D11:5",
+        "D11:6",
+        "D11:7",
+        "D11:8",
+        "D11:9",
+        "D11:10",
+        "D11:11",
+        "D11:12",
+        "D11:13",
+        "D11:14"
+      ]
+    },
+    {
+      "date": "2023-04-09",
+      "turns": [
+        "D12:1",
+        "D12:2",
+        "D12:3",
+        "D12:4",
+        "D12:5",
+        "D12:6",
+        "D12:7",
+        "D12:8",
+        "D12:9",
+        "D12:10",
+        "D12:11",
+        "D12:12",
+        "D12:13",
+        "D12:14",
+        "D12:15",
+        "D12:16"
+      ]
+    },
+    {
+      "date": "2023-06-06",
+      "turns": [
+        "D13:1",
+        "D13:2",
+        "D13:3",
+        "D13:4",
+        "D13:5",
+        "D13:6",
+        "D13:7",
+        "D13:8",
+        "D13:9",
+        "D13:10",
+        "D13:11",
+        "D13:12",
+        "D13:13",
+        "D13:14",
+        "D13:15",
+        "D13:16",
+        "D13:17",
+        "D13:18",
+        "D13:19",
+        "D13:20",
+        "D13:21",
+        "D13:22",
+        "D13:23",
+        "D13:24",
+        "D13:25",
+        "D13:26",
+        "D13:27"
+      ]
+    },
+    {
+      "date": "2023-06-26",
+      "turns": [
+        "D14:1",
+        "D14:2",
+        "D14:3",
+        "D14:4",
+        "D14:5",
+        "D14:6",
+        "D14:7",
+        "D14:8",
+        "D14:9",
+        "D14:10",
+        "D14:11",
+        "D14:12",
+        "D14:13",
+        "D14:14",
+        "D14:15",
+        "D14:16",
+        "D14:17",
+        "D14:18",
+        "D14:19",
+        "D14:20",
+        "D14:21",
+        "D14:22",
+        "D14:23"
+      ]
+    },
+    {
+      "date": "2023-07-09",
+      "turns": [
+        "D15:1",
+        "D15:2",
+        "D15:3",
+        "D15:4",
+        "D15:5",
+        "D15:6",
+        "D15:7",
+        "D15:8",
+        "D15:9",
+        "D15:10",
+        "D15:11",
+        "D15:12",
+        "D15:13",
+        "D15:14",
+        "D15:15",
+        "D15:16",
+        "D15:17",
+        "D15:18",
+        "D15:19",
+        "D15:20",
+        "D15:21",
+        "D15:22",
+        "D15:23",
+        "D15:24",
+        "D15:25",
+        "D15:26",
+        "D15:27",
+        "D15:28",
+        "D15:29",
+        "D15:30",
+        "D15:31",
+        "D15:32",
+        "D15:33",
+        "D15:34",
+        "D15:35",
+        "D15:36",
+        "D15:37",
+        "D15:38",
+        "D15:39"
+      ]
+    },
+    {
+      "date": "2023-08-01",
+      "turns": [
+        "D16:1",
+        "D16:2",
+        "D16:3",
+        "D16:4",
+        "D16:5",
+        "D16:6",
+        "D16:7",
+        "D16:8",
+        "D16:9",
+        "D16:10",
+        "D16:11",
+        "D16:12",
+        "D16:13",
+        "D16:14",
+        "D16:15",
+        "D16:16",
+        "D16:17",
+        "D16:18",
+        "D16:19",
+        "D16:20"
+      ]
+    },
+    {
+      "date": "2023-08-12",
+      "turns": [
+        "D17:1",
+        "D17:2",
+        "D17:3",
+        "D17:4",
+        "D17:5",
+        "D17:6",
+        "D17:7",
+        "D17:8",
+        "D17:9",
+        "D17:10",
+        "D17:11",
+        "D17:12",
+        "D17:13",
+        "D17:14",
+        "D17:15"
+      ]
+    },
+    {
+      "date": "2023-08-16",
+      "turns": [
+        "D18:1",
+        "D18:2",
+        "D18:3",
+        "D18:4",
+        "D18:5",
+        "D18:6",
+        "D18:7",
+        "D18:8",
+        "D18:9",
+        "D18:10",
+        "D18:11",
+        "D18:12",
+        "D18:13",
+        "D18:14",
+        "D18:15"
+      ]
+    },
+    {
+      "date": "2023-08-19",
+      "turns": [
+        "D19:1",
+        "D19:2",
+        "D19:3",
+        "D19:4",
+        "D19:5",
+        "D19:6",
+        "D19:7",
+        "D19:8",
+        "D19:9",
+        "D19:10",
+        "D19:11",
+        "D19:12",
+        "D19:13",
+        "D19:14",
+        "D19:15",
+        "D19:16",
+        "D19:17",
+        "D19:18",
+        "D19:19",
+        "D19:20",
+        "D19:21",
+        "D19:22",
+        "D19:23",
+        "D19:24"
+      ]
+    },
+    {
+      "date": "2023-08-21",
+      "turns": [
+        "D20:1",
+        "D20:2",
+        "D20:3",
+        "D20:4",
+        "D20:5",
+        "D20:6",
+        "D20:7",
+        "D20:8",
+        "D20:9",
+        "D20:10",
+        "D20:11",
+        "D20:12",
+        "D20:13",
+        "D20:14",
+        "D20:15",
+        "D20:16",
+        "D20:17",
+        "D20:18",
+        "D20:19",
+        "D20:20",
+        "D20:21",
+        "D20:22",
+        "D20:23",
+        "D20:24",
+        "D20:25",
+        "D20:26"
+      ]
+    },
+    {
+      "date": "2023-08-24",
+      "turns": [
+        "D21:1",
+        "D21:2",
+        "D21:3",
+        "D21:4",
+        "D21:5",
+        "D21:6",
+        "D21:7",
+        "D21:8",
+        "D21:9",
+        "D21:10",
+        "D21:11",
+        "D21:12",
+        "D21:13",
+        "D21:14",
+        "D21:15",
+        "D21:16",
+        "D21:17"
+      ]
+    },
+    {
+      "date": "2023-08-26",
+      "turns": [
+        "D22:1",
+        "D22:2",
+        "D22:3",
+        "D22:4",
+        "D22:5",
+        "D22:6",
+        "D22:7",
+        "D22:8",
+        "D22:9",
+        "D22:10",
+        "D22:11",
+        "D22:12",
+        "D22:13",
+        "D22:14",
+        "D22:15",
+        "D22:16",
+        "D22:17",
+        "D22:18",
+        "D22:19",
+        "D22:20",
+        "D22:21",
+        "D22:22",
+        "D22:23",
+        "D22:24",
+        "D22:25",
+        "D22:26",
+        "D22:27",
+        "D22:28",
+        "D22:29",
+        "D22:30"
+      ]
+    },
+    {
+      "date": "2023-08-30",
+      "turns": [
+        "D23:1",
+        "D23:2",
+        "D23:3",
+        "D23:4",
+        "D23:5",
+        "D23:6",
+        "D23:7",
+        "D23:8",
+        "D23:9",
+        "D23:10",
+        "D23:11",
+        "D23:12",
+        "D23:13",
+        "D23:14",
+        "D23:15",
+        "D23:16",
+        "D23:17",
+        "D23:18",
+        "D23:19",
+        "D23:20",
+        "D23:21",
+        "D23:22",
+        "D23:23",
+        "D23:24",
+        "D23:25",
+        "D23:26",
+        "D23:27",
+        "D23:28",
+        "D23:29",
+        "D23:30",
+        "D23:31",
+        "D23:32"
+      ]
+    },
+    {
+      "date": "2023-09-03",
+      "turns": [
+        "D24:1",
+        "D24:2",
+        "D24:3",
+        "D24:4",
+        "D24:5",
+        "D24:6",
+        "D24:7",
+        "D24:8",
+        "D24:9",
+        "D24:10",
+        "D24:11",
+        "D24:12",
+        "D24:13",
+        "D24:14",
+        "D24:15"
+      ]
+    },
+    {
+      "date": "2023-09-06",
+      "turns": [
+        "D25:1",
+        "D25:2",
+        "D25:3",
+        "D25:4",
+        "D25:5",
+        "D25:6",
+        "D25:7",
+        "D25:8",
+        "D25:9",
+        "D25:10",
+        "D25:11",
+        "D25:12",
+        "D25:13",
+        "D25:14",
+        "D25:15",
+        "D25:16",
+        "D25:17",
+        "D25:18",
+        "D25:19",
+        "D25:20"
+      ]
+    },
+    {
+      "date": "2023-09-08",
+      "turns": [
+        "D26:1",
+        "D26:2",
+        "D26:3",
+        "D26:4",
+        "D26:5",
+        "D26:6",
+        "D26:7",
+        "D26:8",
+        "D26:9",
+        "D26:10",
+        "D26:11",
+        "D26:12",
+        "D26:13",
+        "D26:14",
+        "D26:15",
+        "D26:16",
+        "D26:17",
+        "D26:18",
+        "D26:19",
+        "D26:20",
+        "D26:21"
+      ]
+    },
+    {
+      "date": "2023-09-12",
+      "turns": [
+        "D27:1",
+        "D27:2",
+        "D27:3",
+        "D27:4",
+        "D27:5",
+        "D27:6",
+        "D27:7",
+        "D27:8",
+        "D27:9",
+        "D27:10",
+        "D27:11",
+        "D27:12",
+        "D27:13"
+      ]
+    },
+    {
+      "date": "2023-09-15",
+      "turns": [
+        "D28:1",
+        "D28:2",
+        "D28:3",
+        "D28:4",
+        "D28:5",
+        "D28:6",
+        "D28:7",
+        "D28:8",
+        "D28:9",
+        "D28:10",
+        "D28:11",
+        "D28:12",
+        "D28:13",
+        "D28:14",
+        "D28:15",
+        "D28:16",
+        "D28:17",
+        "D28:18",
+        "D28:19",
+        "D28:20",
+        "D28:21",
+        "D28:22",
+        "D28:23",
+        "D28:24",
+        "D28:25",
+        "D28:26",
+        "D28:27",
+        "D28:28",
+        "D28:29",
+        "D28:30"
+      ]
+    },
+    {
+      "date": "2023-09-17",
+      "turns": [
+        "D29:1",
+        "D29:2",
+        "D29:3",
+        "D29:4",
+        "D29:5",
+        "D29:6",
+        "D29:7",
+        "D29:8",
+        "D29:9",
+        "D29:10",
+        "D29:11",
+        "D29:12",
+        "D29:13",
+        "D29:14",
+        "D29:15",
+        "D29:16",
+        "D29:17",
+        "D29:18",
+        "D29:19",
+        "D29:20",
+        "D29:21",
+        "D29:22",
+        "D29:23",
+        "D29:24",
+        "D29:25",
+        "D29:26",
+        "D29:27",
+        "D29:28",
+        "D29:29",
+        "D29:30",
+        "D29:31",
+        "D29:32",
+        "D29:33",
+        "D29:34"
+      ]
+    },
+    {
+      "date": "2023-09-20",
+      "turns": [
+        "D30:1",
+        "D30:2",
+        "D30:3",
+        "D30:4",
+        "D30:5",
+        "D30:6",
+        "D30:7",
+        "D30:8",
+        "D30:9",
+        "D30:10",
+        "D30:11",
+        "D30:12",
+        "D30:13",
+        "D30:14",
+        "D30:15",
+        "D30:16",
+        "D30:17",
+        "D30:18"
+      ]
+    }
+  ],
+  "entities": [
+    {
+      "key": "deborah",
+      "type": "person",
+      "name": "Deborah",
+      "properties": {
+        "aliases": "Deb; Debs"
+      },
+      "description": "One of the two people in this conversation: a yoga teacher who runs neighbourhood classes, workshops, events and retreats and builds community around them. Her mother died a few years before 2023 and her father suddenly on 25 January 2023; she is married, keeps two cats (Luna and Max), lost her friend Karlie in February 2023, and returns often to her mother's old house and to the park near her home. She met Jolene on 23 January 2023 and her neighbour Anna on 31 January 2023."
+    },
+    {
+      "key": "jolene",
+      "type": "person",
+      "name": "Jolene",
+      "properties": {
+        "aliases": "Jo"
+      },
+      "description": "The other person in this conversation: an engineering student whose projects run from an electrical engineering project finished in January 2023 to a water purifier, a robotics project and an aerial surveillance prototype. She keeps two pet snakes (Susie and Seraphim), games with her partner of about three years, has practised yoga and meditation sporadically for about three years as of 2023, and began an internship at an engineering firm by June 2023. Her mother died in 2022."
+    },
+    {
+      "key": "anna",
+      "type": "person",
+      "name": "Anna",
+      "description": "Deborah's neighbour, met at yoga in the park on 31 January 2023. She attends Deborah's yoga classes, bonded with her over difficult poses on 3 February 2023, wears a pendant in memory of her own mother, bought her a vegan stir-fry in late February 2023, started a running group with her by July 2023, heard her life story on 18 August 2023 and ran a free community gardening class with her on 16 September 2023."
+    },
+    {
+      "key": "karlie",
+      "type": "person",
+      "name": "Karlie",
+      "description": "A friend of Deborah's who died in the week before 22 February 2023. The last photograph of the two of them together was taken on a hike in the summer of 2022, and Deborah spent time in a garden of roses and dahlias for comfort after losing her."
+    },
+    {
+      "key": "deborah-mother",
+      "type": "person",
+      "name": "Deborah's mother",
+      "properties": {
+        "aliases": "Deb's mom; Deborah's mum"
+      },
+      "description": "Deborah's mother, who died a few years before 2023. She married Deborah's father in 1993, read by the bench at the window of her house every morning and evening, loved travel, art, flowers and cooking, baked pineapple birthday cakes for Deborah, sang her lullabies, came to Deborah's early yoga classes as her biggest supporter, and left her the pendant Deborah carries and the cat Max."
+    },
+    {
+      "key": "deborah-father",
+      "type": "person",
+      "name": "Deborah's father",
+      "description": "Deborah's father, who died suddenly on 25 January 2023, leaving the family shell-shocked. He married Deborah's mother in 1993."
+    },
+    {
+      "key": "deborah-husband",
+      "type": "person",
+      "name": "Deborah's husband",
+      "description": "Deborah's husband. They married on the beach Deborah loves, where she also discovered surfing; they used to play detective video games together and enjoyed exploring the outdoors, and he was photographed in front of her mother's old house around August 2023."
+    },
+    {
+      "key": "jolene-mother",
+      "type": "person",
+      "name": "Jolene's mother",
+      "properties": {
+        "aliases": "Jolene's mom"
+      },
+      "description": "Jolene's mother, who died in 2022. She gave Jolene the heart-shaped pendant in Paris in 2010, played video games with her as a child — 'Monster Hunter: World' was their favourite — and taught her never to give up and to help others, values Jolene now carries into her engineering work."
+    },
+    {
+      "key": "jolene-father",
+      "type": "person",
+      "name": "Jolene's father",
+      "description": "Jolene's father, who supported her interest in video games as a child without teaching her to play; she taught herself."
+    },
+    {
+      "key": "jolene-partner",
+      "type": "person",
+      "name": "Jolene's partner",
+      "properties": {
+        "aliases": "her bf; her boyfriend; her significant other"
+      },
+      "description": "Jolene's partner of about three years as of February 2023, whom she met in an engineering class at college. They are not married, game together constantly, took up yoga alongside her, travelled to Rio de Janeiro in August 2023 and to a meditation retreat in Phuket from 9 September 2023, and tried scuba diving together on 15 September 2023. His own father taught him to stay determined."
+    },
+    {
+      "key": "neal-stephenson",
+      "type": "person",
+      "name": "Neal Stephenson",
+      "description": "The author of the novel Jolene calls 'Avalanche', which she read in one sitting about two weeks before 4 February 2023."
+    },
+    {
+      "key": "nils-frahm",
+      "type": "person",
+      "name": "Nils Frahm",
+      "description": "A musician Jolene listens to during her yoga practice, named on 28 March 2023 as calming music that puts her in a different headspace."
+    },
+    {
+      "key": "olafur-arnalds",
+      "type": "person",
+      "name": "Olafur Arnalds",
+      "description": "A musician Jolene listens to during her yoga practice, named alongside Nils Frahm on 28 March 2023."
+    },
+    {
+      "key": "susie",
+      "type": "animal",
+      "name": "Susie",
+      "properties": {
+        "species": "snake"
+      },
+      "description": "One of Jolene's two pet snakes, adopted around 2021 when she was feeling lonely and wanted company. Jolene introduced her to Deborah on 27 January 2023, leaned on her during the project setback of late July 2023, and said on 15 September 2023 that she had had her for two years."
+    },
+    {
+      "key": "seraphim",
+      "type": "animal",
+      "name": "Seraphim",
+      "properties": {
+        "species": "snake"
+      },
+      "description": "Jolene's second pet snake, bought in Paris around 2022. She once slid out of her cage and coiled up beside Jolene during a video game, went to the park on 26 February 2023, escaped once and was found hours later under the bed, and was given a new aquarium on 24 June 2023."
+    },
+    {
+      "key": "luna",
+      "type": "animal",
+      "name": "Luna",
+      "properties": {
+        "species": "cat"
+      },
+      "description": "One of Deborah's two cats, taken from a shelter; she was five years old in August 2023. Deborah takes her cats out to the park for a run every morning and evening."
+    },
+    {
+      "key": "max",
+      "type": "animal",
+      "name": "Max",
+      "properties": {
+        "species": "cat"
+      },
+      "description": "Deborah's other cat, originally her mother's; Deborah took him in when her mother died. He was eight years old in August 2023."
+    },
+    {
+      "key": "mothers-house",
+      "type": "place",
+      "name": "Deborah's mother's old house",
+      "properties": {
+        "kind": "venue"
+      },
+      "description": "The old house of Deborah's mother, kept as a place of memory. It has a bench by the window where her mother read every morning and evening, and a spot by the water nearby where Deborah reflects. Deborah visited it in the week before 23 January 2023, does yoga there, took her husband there around August 2023, visited it in July 2023, and sat on its bench again on 10 September 2023."
+    },
+    {
+      "key": "local-park",
+      "type": "place",
+      "name": "The park near Deborah's house",
+      "properties": {
+        "kind": "venue"
+      },
+      "description": "The park near Deborah's home, with a forest trail, a beach and a bench that holds memories of her mother, where they used to talk about dreams and life and once watched a sunset together in silence. Deborah does yoga and reflects there, met Anna at yoga in the park on 31 January 2023, took her first morning jog there on 24 February 2023, and walks her cats there twice a day."
+    },
+    {
+      "key": "paris",
+      "type": "place",
+      "name": "Paris",
+      "properties": {
+        "kind": "city",
+        "country": "France"
+      },
+      "description": "The city where Jolene's mother gave her the heart-shaped pendant in 2010 and where Jolene bought her snake Seraphim around 2022."
+    },
+    {
+      "key": "france",
+      "type": "place",
+      "name": "France",
+      "properties": {
+        "kind": "country"
+      },
+      "description": "The country containing Paris, where Jolene's mother gave her the pendant in 2010 and where she later bought Seraphim."
+    },
+    {
+      "key": "bali",
+      "type": "place",
+      "name": "Bali",
+      "properties": {
+        "kind": "region"
+      },
+      "description": "A gorgeous island Deborah travelled to in 2022 and counts among her favourite trips; she found it peaceful and good for yoga."
+    },
+    {
+      "key": "bogota",
+      "type": "place",
+      "name": "Bogota",
+      "properties": {
+        "kind": "city",
+        "country": "Colombia"
+      },
+      "description": "The city where Jolene spent a vacation in the summer of 2022, watching the sunset over the water and finding nature's calming power there."
+    },
+    {
+      "key": "colombia",
+      "type": "place",
+      "name": "Colombia",
+      "properties": {
+        "kind": "country"
+      },
+      "description": "The country containing Bogota, where Jolene holidayed in the summer of 2022."
+    },
+    {
+      "key": "rio-de-janeiro",
+      "type": "place",
+      "name": "Rio de Janeiro",
+      "properties": {
+        "kind": "city",
+        "country": "Brazil"
+      },
+      "description": "The Brazilian city Jolene and her partner returned from on 29 August 2023 after trying local yoga classes, visiting cafes, going on excursions and climbing the stairs of an old temple. Deborah had also visited it around 2020 and photographed a large stone structure there."
+    },
+    {
+      "key": "brazil",
+      "type": "place",
+      "name": "Brazil",
+      "properties": {
+        "kind": "country"
+      },
+      "description": "The country containing Rio de Janeiro, visited by Jolene and her partner in August 2023 and by Deborah around 2020."
+    },
+    {
+      "key": "phuket",
+      "type": "place",
+      "name": "Phuket",
+      "properties": {
+        "kind": "region",
+        "country": "Thailand"
+      },
+      "description": "The place in Thailand where Jolene and her partner went on a meditation retreat from the weekend of 9 September 2023, staying a few weeks; its nature and one session on releasing expectations made the strongest impression on her."
+    },
+    {
+      "key": "thailand",
+      "type": "place",
+      "name": "Thailand",
+      "properties": {
+        "kind": "country"
+      },
+      "description": "The country containing Phuket, where Jolene and her partner attended a meditation retreat in September 2023 and tried a style of meditation using flowers."
+    },
+    {
+      "key": "mount-talkeetna",
+      "type": "place",
+      "name": "Mount Talkeetna",
+      "properties": {
+        "kind": "natural"
+      },
+      "description": "The mountain on top of which Jolene did yoga on the morning of 5 June 2023, while trying to find work-life balance during her internship."
+    },
+    {
+      "key": "deborah-yoga-classes",
+      "type": "organization",
+      "name": "Deborah's yoga classes",
+      "properties": {
+        "kind": "club"
+      },
+      "description": "The yoga classes, workshops and events Deborah teaches, and the community around them. Her students sent her a thank-you letter received on 26 January 2023; she started a class for her neighbours on 10 March 2023, bought new props and a scented candle for it in March 2023, organised a yoga event with food stalls and live music in July 2023, led a session for the elderly at a local care home in August 2023, and wrote a meditation guide for her retreat by 12 August 2023. Her yoga friends, she says, are a second family."
+    },
+    {
+      "key": "running-group",
+      "type": "organization",
+      "name": "Deborah and Anna's running group",
+      "properties": {
+        "kind": "club"
+      },
+      "description": "The running group Deborah started with Anna, first described on 9 July 2023, whose members help and push each other on runs and make it easier to stay motivated."
+    },
+    {
+      "key": "engineering-school",
+      "type": "organization",
+      "name": "Jolene's engineering school",
+      "properties": {
+        "kind": "school"
+      },
+      "description": "The college where Jolene studies engineering. She met her partner in an engineering class there, a professor set her the large robotics project in early 2023, her assignments and exams repeatedly overwhelmed her through 2023, and she had finals in September 2023."
+    },
+    {
+      "key": "engineering-firm",
+      "type": "organization",
+      "name": "The engineering firm where Jolene interned",
+      "properties": {
+        "kind": "employer"
+      },
+      "description": "A well-known engineering firm where Jolene began an internship by 6 June 2023. She valued applying what she had learned at school to real projects and being around people who love their work, but found the work-life balance hard."
+    },
+    {
+      "key": "sapiens",
+      "type": "work",
+      "name": "Sapiens",
+      "properties": {
+        "medium": "book"
+      },
+      "description": "A book on human history and technology's effect on us that Jolene was reading in February 2023 and found fascinating and thought-provoking."
+    },
+    {
+      "key": "avalanche",
+      "type": "work",
+      "name": "Avalanche",
+      "properties": {
+        "medium": "book"
+      },
+      "description": "The Neal Stephenson novel Jolene read in one sitting about two weeks before 4 February 2023."
+    },
+    {
+      "key": "detroit",
+      "type": "work",
+      "name": "Detroit",
+      "properties": {
+        "medium": "video game"
+      },
+      "description": "The console game Jolene and her partner played together in the week before 27 January 2023."
+    },
+    {
+      "key": "walking-dead",
+      "type": "work",
+      "name": "The Walking Dead",
+      "properties": {
+        "medium": "video game"
+      },
+      "description": "The console game Jolene and her partner planned to play on the Saturday after 27 January 2023."
+    },
+    {
+      "key": "it-takes-two",
+      "type": "work",
+      "name": "It Takes Two",
+      "properties": {
+        "medium": "video game"
+      },
+      "description": "The competitive team-strategy co-op game Jolene and her partner love playing together, named on 9 July 2023 as a way they bond."
+    },
+    {
+      "key": "zelda-botw",
+      "type": "work",
+      "name": "The Legend of Zelda: Breath of the Wild",
+      "properties": {
+        "medium": "video game"
+      },
+      "description": "The Switch open-world game Jolene recommended to Deborah on 19 August 2023."
+    },
+    {
+      "key": "animal-crossing-nh",
+      "type": "work",
+      "name": "Animal Crossing: New Horizons",
+      "properties": {
+        "medium": "video game"
+      },
+      "description": "The calming, cute game Jolene recommended to Deborah on 19 August 2023."
+    },
+    {
+      "key": "overcooked-2",
+      "type": "work",
+      "name": "Overcooked 2",
+      "properties": {
+        "medium": "video game"
+      },
+      "description": "The chaotic co-op cooking game Jolene and her partner often play for bets; she once won three large pizzas off him."
+    },
+    {
+      "key": "battlefield-1",
+      "type": "work",
+      "name": "Battlefield 1",
+      "properties": {
+        "medium": "video game"
+      },
+      "description": "The console game Jolene and her partner were given in the week before 21 August 2023."
+    },
+    {
+      "key": "monster-hunter-world",
+      "type": "work",
+      "name": "Monster Hunter: World",
+      "properties": {
+        "medium": "video game"
+      },
+      "description": "One of Jolene's favourite games and the one she most liked playing with her mother, praised on 3 September 2023 for its immersive story and open world."
+    },
+    {
+      "key": "savana",
+      "type": "work",
+      "name": "Savana",
+      "properties": {
+        "medium": "music track"
+      },
+      "description": "An instrumental track with a mellow melody that is one of Deborah's favourites to play during her yoga practice."
+    },
+    {
+      "key": "sleep-album",
+      "type": "work",
+      "name": "Sleep",
+      "properties": {
+        "medium": "album"
+      },
+      "description": "An album Deborah listens to for meditation and deep relaxation, recommended to Jolene on 28 March 2023."
+    },
+    {
+      "key": "jolene-pendant",
+      "type": "object",
+      "name": "Jolene's heart-shaped pendant",
+      "properties": {
+        "kind": "pendant"
+      },
+      "description": "The heart-shaped pendant with a bird on it that Jolene's mother gave her in Paris in 2010. Its symbol stands for freedom to Jolene and reminds her to go for her goals and not be held back."
+    },
+    {
+      "key": "deborah-amulet",
+      "type": "object",
+      "name": "Deborah's pendant from her mother",
+      "properties": {
+        "kind": "pendant"
+      },
+      "description": "The pendant and amulet Deborah keeps in memory of her mother — referred to both as her pendant on 23 January 2023 and as the amulet from her mother on 4 February 2023, and treated here as one object. She brings it to the spot by the water near her mother's old house, and holding it lets her feel her mother's love."
+    },
+    {
+      "key": "yoga",
+      "type": "activity",
+      "name": "Yoga",
+      "properties": {
+        "kind": "exercise"
+      },
+      "description": "The practice at the centre of Deborah's life and work: it helped her through a rough time, she teaches it and builds community around it, and she practises it at home, in her mother's old house, in the park and on the beach. Jolene has practised it sporadically for about three years as of 2023 — on Mount Talkeetna, at retreats in Rio de Janeiro and Phuket — and uses it to manage the stress of engineering study."
+    },
+    {
+      "key": "meditation",
+      "type": "activity",
+      "name": "Meditation",
+      "properties": {
+        "kind": "practice"
+      },
+      "description": "A daily practice for both women. Deborah meditates each morning and wrote a meditation guide for her retreat by August 2023; Jolene uses breathing and meditation whenever she is overwhelmed, credits it with keeping her clear-headed after losing her work files, signed up for a meditation course on 6 September 2023 and spent weeks at a meditation retreat in Phuket from 9 September 2023."
+    },
+    {
+      "key": "gaming",
+      "type": "activity",
+      "name": "Playing video games",
+      "properties": {
+        "kind": "hobby"
+      },
+      "description": "Jolene's hobby since childhood — her parents gave her a console when she was ten and she taught herself to play — and now something she shares constantly with her partner, from 'Detroit' to 'It Takes Two', 'Overcooked 2' and 'Battlefield 1'. Deborah used to play with her husband, preferring detective games, but had not played for a while by August 2023."
+    },
+    {
+      "key": "running",
+      "type": "activity",
+      "name": "Running",
+      "properties": {
+        "kind": "exercise"
+      },
+      "description": "Running, which Deborah took up with a first morning jog in the park on 24 February 2023 and decided to make part of her daily routine; by July 2023 she had turned it into a running group with Anna."
+    },
+    {
+      "key": "surfing",
+      "type": "activity",
+      "name": "Surfing",
+      "properties": {
+        "kind": "sport"
+      },
+      "description": "Surfing: Deborah discovered a love for it at the beach where she married and had surfed by September 2023, while Jolene had been gathering videos and a beginners' guide since March 2023 and had still not tried it by 17 September 2023, when the two agreed to go together."
+    },
+    {
+      "key": "gardening",
+      "type": "activity",
+      "name": "Gardening",
+      "properties": {
+        "kind": "hobby"
+      },
+      "description": "Gardening: Deborah finds comfort among roses and dahlias, spent time in a garden after losing Karlie in February 2023, and ran a free gardening class for the community with Anna on 16 September 2023 to share her love of plants."
+    },
+    {
+      "key": "scuba-diving",
+      "type": "activity",
+      "name": "Scuba diving",
+      "properties": {
+        "kind": "sport"
+      },
+      "description": "Scuba diving, which Jolene and her partner tried for the first time in a lesson on 15 September 2023; they found a dive spot to explore together and she hopes one day to be a certified diver. Deborah is interested in underwater life but had never tried it."
+    },
+    {
+      "key": "electrical-engineering-project",
+      "type": "project",
+      "name": "Jolene's electrical engineering project",
+      "description": "The electrical engineering project Jolene finished in the week before 23 January 2023 after a great deal of work — the first thing she told Deborah about herself."
+    },
+    {
+      "key": "water-purifier-project",
+      "type": "project",
+      "name": "Jolene's sustainable water purifier",
+      "description": "The sustainable water purifier Jolene planned, researched, designed and built for a rural community in need. It reached its milestone in the week before 4 February 2023, and seeing it deliver clean water felt surreal and gave her a sense of purpose."
+    },
+    {
+      "key": "robotics-project",
+      "type": "project",
+      "name": "Jolene's robotics project",
+      "description": "The large robotics project Jolene's engineering professor set her in early 2023. She felt excited and nervous when she received it and came to enjoy it like a puzzle; she found neat solutions at her retreat on 1 February 2023, had a breakthrough on 24 March 2023, and wrapped it up in May 2023 with a solar-powered vehicle as the result."
+    },
+    {
+      "key": "stem-volunteer-program",
+      "type": "project",
+      "name": "Jolene's STEM volunteer programme",
+      "description": "Jolene's idea, proposed on 9 February 2023, for a volunteer programme in which engineers teach STEM to underprivileged children through workshops run with local schools and centres, with engineers invited as guest speakers. She sketched it in her planner but had contacted nobody, wanting to solidify the plan first."
+    },
+    {
+      "key": "aerial-surveillance-project",
+      "type": "project",
+      "name": "Jolene's aerial surveillance prototype",
+      "description": "The prototype Jolene began by 12 August 2023 for a more productive and affordable aerial surveillance system, intended to help with emergency response and environmental monitoring."
+    },
+    {
+      "key": "community-cleanup-project",
+      "type": "project",
+      "name": "Deborah's community cleanup",
+      "description": "The community cleanup Deborah started and raised funds for by 1 August 2023; she was moved by how everyone came together to make a difference."
+    }
+  ],
+  "chrono": [
+    {
+      "key": "deborah-father-death",
+      "type": "event",
+      "title": "Deborah's father died suddenly",
+      "date": "2023-01-25",
+      "entities": [
+        "deborah",
+        "deborah-father"
+      ]
+    },
+    {
+      "key": "yoga-group-letter",
+      "type": "event",
+      "title": "Deborah received a thank-you letter from the members of her yoga group",
+      "date": "2023-01-26",
+      "entities": [
+        "deborah",
+        "deborah-yoga-classes"
+      ]
+    },
+    {
+      "key": "deborah-meets-anna",
+      "type": "event",
+      "title": "Deborah met her new neighbour Anna at yoga in the park",
+      "date": "2023-01-31",
+      "entities": [
+        "deborah",
+        "anna",
+        "local-park",
+        "yoga"
+      ]
+    },
+    {
+      "key": "jolene-mini-retreat",
+      "type": "event",
+      "title": "Jolene took a mini retreat to assess where she was in life",
+      "date": "2023-02-01",
+      "entities": [
+        "jolene"
+      ]
+    },
+    {
+      "key": "anna-yoga-bonding",
+      "type": "event",
+      "title": "Deborah and Anna tried Warrior II and other poses together in Deborah's yoga class",
+      "date": "2023-02-03",
+      "entities": [
+        "deborah",
+        "anna",
+        "yoga",
+        "deborah-yoga-classes"
+      ]
+    },
+    {
+      "key": "walking-dead-plan",
+      "type": "plan",
+      "title": "Jolene and her partner planned to play the console game 'The Walking Dead'",
+      "date": "2023-02-04",
+      "entities": [
+        "jolene",
+        "jolene-partner",
+        "walking-dead"
+      ]
+    },
+    {
+      "key": "jolene-night-out",
+      "type": "event",
+      "title": "Jolene had dinner and drinks out with her friends",
+      "date": "2023-02-21",
+      "entities": [
+        "jolene"
+      ]
+    },
+    {
+      "key": "deborah-garden-visit",
+      "type": "event",
+      "title": "Deborah visited a garden of roses and dahlias for comfort after losing her friend Karlie",
+      "date": "2023-02-22",
+      "entities": [
+        "deborah",
+        "karlie",
+        "gardening"
+      ]
+    },
+    {
+      "key": "deborah-first-jog",
+      "type": "event",
+      "title": "Deborah went for her first morning jog in the park near her house",
+      "date": "2023-02-24",
+      "entities": [
+        "deborah",
+        "local-park",
+        "running"
+      ]
+    },
+    {
+      "key": "jolene-yoga-meditation-friday",
+      "type": "event",
+      "title": "Jolene did yoga and meditation to relax during a heavy exam period",
+      "date": "2023-02-24",
+      "entities": [
+        "jolene",
+        "yoga",
+        "meditation"
+      ]
+    },
+    {
+      "key": "seraphim-park-visit",
+      "type": "event",
+      "title": "Jolene took her snake Seraphim to the park",
+      "date": "2023-02-26",
+      "entities": [
+        "jolene",
+        "seraphim"
+      ]
+    },
+    {
+      "key": "neighbourhood-yoga-class-first",
+      "type": "milestone",
+      "title": "Deborah hosted her first yoga class for her neighbours",
+      "date": "2023-03-10",
+      "entities": [
+        "deborah",
+        "deborah-yoga-classes",
+        "yoga"
+      ]
+    },
+    {
+      "key": "robotics-breakthrough",
+      "type": "milestone",
+      "title": "Jolene solved the problem that had been blocking her robotics project",
+      "date": "2023-03-24",
+      "entities": [
+        "jolene",
+        "robotics-project"
+      ]
+    },
+    {
+      "key": "deborah-art-show",
+      "type": "event",
+      "title": "Deborah visited an art show with a friend and was reminded of her mother",
+      "date": "2023-04-09",
+      "entities": [
+        "deborah",
+        "deborah-mother"
+      ]
+    },
+    {
+      "key": "jolene-talkeetna-yoga",
+      "type": "event",
+      "title": "Jolene did yoga on top of Mount Talkeetna",
+      "date": "2023-06-05",
+      "entities": [
+        "jolene",
+        "mount-talkeetna",
+        "yoga"
+      ]
+    },
+    {
+      "key": "seraphim-new-aquarium",
+      "type": "event",
+      "title": "Jolene bought a new aquarium for her snake Seraphim",
+      "date": "2023-06-24",
+      "entities": [
+        "jolene",
+        "seraphim"
+      ]
+    },
+    {
+      "key": "console-gift",
+      "type": "event",
+      "title": "Jolene bought a games console as a gift for her partner",
+      "date": "2023-08-17",
+      "entities": [
+        "jolene",
+        "jolene-partner",
+        "gaming"
+      ]
+    },
+    {
+      "key": "deborah-tells-anna-life-story",
+      "type": "event",
+      "title": "Deborah told her neighbour Anna the story of her life",
+      "date": "2023-08-18",
+      "entities": [
+        "deborah",
+        "anna"
+      ]
+    },
+    {
+      "key": "values-conversation",
+      "type": "event",
+      "title": "Jolene and her partner talked about how their late loved ones' values had shaped them",
+      "date": "2023-08-25",
+      "entities": [
+        "jolene",
+        "jolene-partner",
+        "jolene-mother"
+      ]
+    },
+    {
+      "key": "rio-trip-return",
+      "type": "event",
+      "title": "Jolene and her partner returned from their trip to Rio de Janeiro",
+      "date": "2023-08-29",
+      "entities": [
+        "jolene",
+        "jolene-partner",
+        "rio-de-janeiro"
+      ]
+    },
+    {
+      "key": "community-meetup",
+      "type": "event",
+      "title": "Deborah went to a community meetup where people shared their stories",
+      "date": "2023-09-01",
+      "entities": [
+        "deborah"
+      ]
+    },
+    {
+      "key": "meditation-course-signup",
+      "type": "event",
+      "title": "Jolene signed up for a meditation course at a retreat near a lake",
+      "date": "2023-09-06",
+      "entities": [
+        "jolene",
+        "meditation"
+      ]
+    },
+    {
+      "key": "phuket-retreat-departure",
+      "type": "event",
+      "title": "Jolene and her partner travelled to a meditation retreat in Phuket",
+      "date": "2023-09-09",
+      "entities": [
+        "jolene",
+        "jolene-partner",
+        "phuket",
+        "meditation"
+      ]
+    },
+    {
+      "key": "deborah-mothers-house-visit",
+      "type": "event",
+      "title": "Deborah visited her mother's old house and sat on the bench there",
+      "date": "2023-09-10",
+      "entities": [
+        "deborah",
+        "deborah-mother",
+        "mothers-house"
+      ]
+    },
+    {
+      "key": "coffee-date-plan",
+      "type": "plan",
+      "title": "Deborah and Jolene arranged to meet for a coffee date at a cafe at 5",
+      "date": "2023-09-15",
+      "entities": [
+        "deborah",
+        "jolene"
+      ]
+    },
+    {
+      "key": "scuba-lesson",
+      "type": "event",
+      "title": "Jolene and her partner took their first scuba diving lesson",
+      "date": "2023-09-15",
+      "entities": [
+        "jolene",
+        "jolene-partner",
+        "scuba-diving"
+      ]
+    },
+    {
+      "key": "gardening-class",
+      "type": "event",
+      "title": "Deborah and her neighbour Anna ran a free gardening class for the community",
+      "date": "2023-09-16",
+      "entities": [
+        "deborah",
+        "anna",
+        "gardening"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "label": "family_of",
+      "from": "deborah",
+      "to": "deborah-mother",
+      "properties": {
+        "relation": "mother"
+      }
+    },
+    {
+      "label": "family_of",
+      "from": "deborah",
+      "to": "deborah-father",
+      "properties": {
+        "relation": "father"
+      }
+    },
+    {
+      "label": "family_of",
+      "from": "deborah",
+      "to": "deborah-husband",
+      "properties": {
+        "relation": "husband"
+      }
+    },
+    {
+      "label": "family_of",
+      "from": "deborah-mother",
+      "to": "deborah-father",
+      "properties": {
+        "relation": "husband"
+      }
+    },
+    {
+      "label": "family_of",
+      "from": "jolene",
+      "to": "jolene-mother",
+      "properties": {
+        "relation": "mother"
+      }
+    },
+    {
+      "label": "family_of",
+      "from": "jolene",
+      "to": "jolene-partner",
+      "properties": {
+        "relation": "partner"
+      }
+    },
+    {
+      "label": "knows",
+      "from": "deborah",
+      "to": "jolene",
+      "properties": {
+        "kind": "friend",
+        "since": "2023-01-23"
+      }
+    },
+    {
+      "label": "knows",
+      "from": "deborah",
+      "to": "anna",
+      "properties": {
+        "kind": "neighbour",
+        "since": "2023-01-31"
+      }
+    },
+    {
+      "label": "knows",
+      "from": "deborah",
+      "to": "karlie",
+      "properties": {
+        "kind": "friend"
+      }
+    },
+    {
+      "label": "owns",
+      "from": "jolene",
+      "to": "susie"
+    },
+    {
+      "label": "owns",
+      "from": "jolene",
+      "to": "seraphim"
+    },
+    {
+      "label": "owns",
+      "from": "jolene",
+      "to": "jolene-pendant"
+    },
+    {
+      "label": "owns",
+      "from": "deborah",
+      "to": "deborah-amulet"
+    },
+    {
+      "label": "member_of",
+      "from": "jolene",
+      "to": "engineering-school",
+      "properties": {
+        "role": "student"
+      }
+    },
+    {
+      "label": "member_of",
+      "from": "jolene-partner",
+      "to": "engineering-school",
+      "properties": {
+        "role": "student"
+      }
+    },
+    {
+      "label": "member_of",
+      "from": "deborah",
+      "to": "deborah-yoga-classes",
+      "properties": {
+        "role": "teacher"
+      }
+    },
+    {
+      "label": "member_of",
+      "from": "anna",
+      "to": "deborah-yoga-classes",
+      "properties": {
+        "role": "student"
+      }
+    },
+    {
+      "label": "located_in",
+      "from": "paris",
+      "to": "france"
+    },
+    {
+      "label": "located_in",
+      "from": "bogota",
+      "to": "colombia"
+    },
+    {
+      "label": "practices",
+      "from": "deborah",
+      "to": "yoga"
+    },
+    {
+      "label": "practices",
+      "from": "deborah",
+      "to": "meditation"
+    },
+    {
+      "label": "practices",
+      "from": "deborah",
+      "to": "running",
+      "properties": {
+        "since": "2023-02-24"
+      }
+    },
+    {
+      "label": "practices",
+      "from": "jolene",
+      "to": "yoga"
+    },
+    {
+      "label": "practices",
+      "from": "jolene",
+      "to": "meditation"
+    },
+    {
+      "label": "practices",
+      "from": "jolene",
+      "to": "gaming"
+    },
+    {
+      "label": "practices",
+      "from": "jolene-partner",
+      "to": "gaming"
+    },
+    {
+      "label": "practices",
+      "from": "jolene-partner",
+      "to": "yoga"
+    },
+    {
+      "label": "works_on",
+      "from": "jolene",
+      "to": "electrical-engineering-project"
+    },
+    {
+      "label": "works_on",
+      "from": "jolene",
+      "to": "water-purifier-project"
+    },
+    {
+      "label": "works_on",
+      "from": "jolene",
+      "to": "robotics-project"
+    },
+    {
+      "label": "works_on",
+      "from": "jolene",
+      "to": "stem-volunteer-program"
+    },
+    {
+      "label": "created_by",
+      "from": "avalanche",
+      "to": "neal-stephenson",
+      "properties": {
+        "role": "author"
+      }
+    },
+    {
+      "label": "likes",
+      "from": "jolene",
+      "to": "sapiens"
+    },
+    {
+      "label": "likes",
+      "from": "jolene",
+      "to": "avalanche"
+    },
+    {
+      "label": "likes",
+      "from": "jolene",
+      "to": "bogota"
+    },
+    {
+      "label": "likes",
+      "from": "deborah",
+      "to": "bali"
+    },
+    {
+      "label": "likes",
+      "from": "deborah",
+      "to": "local-park"
+    },
+    {
+      "label": "works_at",
+      "from": "jolene",
+      "to": "engineering-firm",
+      "properties": {
+        "role": "intern"
+      }
+    },
+    {
+      "label": "member_of",
+      "from": "deborah",
+      "to": "running-group",
+      "properties": {
+        "role": "founder"
+      }
+    },
+    {
+      "label": "member_of",
+      "from": "anna",
+      "to": "running-group"
+    },
+    {
+      "label": "likes",
+      "from": "deborah",
+      "to": "savana"
+    },
+    {
+      "label": "likes",
+      "from": "deborah",
+      "to": "sleep-album"
+    },
+    {
+      "label": "likes",
+      "from": "jolene",
+      "to": "nils-frahm"
+    },
+    {
+      "label": "likes",
+      "from": "jolene",
+      "to": "olafur-arnalds"
+    },
+    {
+      "label": "likes",
+      "from": "jolene",
+      "to": "it-takes-two"
+    },
+    {
+      "label": "likes",
+      "from": "jolene",
+      "to": "surfing"
+    },
+    {
+      "label": "works_on",
+      "from": "jolene",
+      "to": "aerial-surveillance-project"
+    },
+    {
+      "label": "works_on",
+      "from": "deborah",
+      "to": "community-cleanup-project"
+    },
+    {
+      "label": "owns",
+      "from": "deborah",
+      "to": "luna"
+    },
+    {
+      "label": "owns",
+      "from": "deborah",
+      "to": "max"
+    },
+    {
+      "label": "likes",
+      "from": "jolene",
+      "to": "zelda-botw"
+    },
+    {
+      "label": "likes",
+      "from": "jolene",
+      "to": "animal-crossing-nh"
+    },
+    {
+      "label": "likes",
+      "from": "jolene",
+      "to": "overcooked-2"
+    },
+    {
+      "label": "located_in",
+      "from": "rio-de-janeiro",
+      "to": "brazil"
+    },
+    {
+      "label": "family_of",
+      "from": "jolene",
+      "to": "jolene-father",
+      "properties": {
+        "relation": "father"
+      }
+    },
+    {
+      "label": "located_in",
+      "from": "phuket",
+      "to": "thailand"
+    },
+    {
+      "label": "practices",
+      "from": "deborah",
+      "to": "surfing"
+    },
+    {
+      "label": "practices",
+      "from": "deborah",
+      "to": "gardening"
+    },
+    {
+      "label": "likes",
+      "from": "jolene",
+      "to": "monster-hunter-world"
+    },
+    {
+      "label": "likes",
+      "from": "jolene",
+      "to": "scuba-diving"
+    },
+    {
+      "label": "supersedes",
+      "from": "coffee-date-wednesday",
+      "to": "coffee-date-monday"
+    },
+    {
+      "label": "supersedes",
+      "from": "coffee-date-friday",
+      "to": "coffee-date-wednesday"
+    }
+  ],
+  "claims": [
+    {
+      "text": "Deborah and Jolene met and spoke to each other for the first time on 23 January 2023.",
+      "speaker": "Deborah",
+      "statedOn": "2023-01-23",
+      "entities": [
+        "deborah",
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D1:1",
+        "D1:2"
+      ]
+    },
+    {
+      "text": "Jolene finished an electrical engineering project in the week before 23 January 2023, after a great deal of work.",
+      "speaker": "Jolene",
+      "statedOn": "2023-01-23",
+      "entities": [
+        "jolene",
+        "electrical-engineering-project"
+      ],
+      "sourceTurns": [
+        "D1:2"
+      ]
+    },
+    {
+      "text": "Deborah visited her late mother's old house, a place that holds a lot of memories for her, in the week before 23 January 2023.",
+      "speaker": "Deborah",
+      "statedOn": "2023-01-23",
+      "entities": [
+        "deborah",
+        "deborah-mother",
+        "mothers-house"
+      ],
+      "sourceTurns": [
+        "D1:3",
+        "D1:4"
+      ]
+    },
+    {
+      "text": "Deborah's mother died a few years before January 2023; the last photograph of the two of them together shows them both in wheelchairs.",
+      "speaker": "Deborah",
+      "statedOn": "2023-01-23",
+      "entities": [
+        "deborah",
+        "deborah-mother"
+      ],
+      "sourceTurns": [
+        "D1:5"
+      ]
+    },
+    {
+      "text": "Jolene's mother died in 2022, and Jolene keeps many memories of her own room in her mother's house.",
+      "speaker": "Jolene",
+      "statedOn": "2023-01-23",
+      "entities": [
+        "jolene",
+        "jolene-mother"
+      ],
+      "sourceTurns": [
+        "D1:6"
+      ]
+    },
+    {
+      "text": "Deborah's mother loved to sit on a special bench by the window of her house every morning and take in the view; Deborah still goes to sit there sometimes because it helps her stay connected to her.",
+      "speaker": "Deborah",
+      "statedOn": "2023-01-23",
+      "entities": [
+        "deborah",
+        "deborah-mother",
+        "mothers-house"
+      ],
+      "sourceTurns": [
+        "D1:7"
+      ]
+    },
+    {
+      "text": "Jolene's mother gave her a heart-shaped pendant with a bird on it in Paris in 2010, and Jolene keeps it as the thing that reminds her of her mother.",
+      "speaker": "Jolene",
+      "statedOn": "2023-01-23",
+      "entities": [
+        "jolene",
+        "jolene-mother",
+        "jolene-pendant",
+        "paris"
+      ],
+      "sourceTurns": [
+        "D1:8"
+      ]
+    },
+    {
+      "text": "Deborah also keeps a pendant that reminds her of her mother.",
+      "speaker": "Deborah",
+      "statedOn": "2023-01-23",
+      "entities": [
+        "deborah",
+        "deborah-mother",
+        "deborah-amulet"
+      ],
+      "sourceTurns": [
+        "D1:9"
+      ]
+    },
+    {
+      "text": "The symbol on Jolene's pendant represents freedom to her and reminds her to go for her goals and not be held back; Deborah told her on 23 January 2023 that it should give her strength and energy.",
+      "speaker": "Jolene",
+      "statedOn": "2023-01-23",
+      "entities": [
+        "jolene",
+        "jolene-pendant"
+      ],
+      "sourceTurns": [
+        "D1:10",
+        "D1:11"
+      ]
+    },
+    {
+      "text": "One of Deborah's goals, stated on 23 January 2023, is to keep teaching yoga and supporting her community, because she is passionate about helping people find peace and joy through it.",
+      "speaker": "Deborah",
+      "statedOn": "2023-01-23",
+      "entities": [
+        "deborah",
+        "yoga",
+        "deborah-yoga-classes"
+      ],
+      "sourceTurns": [
+        "D1:12",
+        "D1:13"
+      ]
+    },
+    {
+      "text": "Yoga helped Deborah find peace during a rough time in her life, and that is what made her passionate about sharing it with others.",
+      "speaker": "Deborah",
+      "statedOn": "2023-01-23",
+      "entities": [
+        "deborah",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D1:14",
+        "D1:15",
+        "D1:16"
+      ]
+    },
+    {
+      "text": "Deborah and Jolene parted at the end of their first conversation on 23 January 2023 looking forward to speaking again.",
+      "speaker": "Deborah",
+      "statedOn": "2023-01-23",
+      "entities": [
+        "deborah",
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D1:17",
+        "D1:18"
+      ]
+    },
+    {
+      "text": "Deborah's father died suddenly on 25 January 2023, which left the whole family shell-shocked; she tried to channel her grief by spending more time with family and cherishing the memories.",
+      "speaker": "Deborah",
+      "statedOn": "2023-01-27",
+      "entities": [
+        "deborah",
+        "deborah-father"
+      ],
+      "chrono": [
+        "deborah-father-death"
+      ],
+      "sourceTurns": [
+        "D2:1",
+        "D2:2"
+      ]
+    },
+    {
+      "text": "Deborah and her family looked through the family album after her father's death in January 2023 and found peace in the photographs, among them her parents' wedding photo from 1993.",
+      "speaker": "Deborah",
+      "statedOn": "2023-01-27",
+      "entities": [
+        "deborah",
+        "deborah-mother",
+        "deborah-father"
+      ],
+      "sourceTurns": [
+        "D2:3",
+        "D2:4"
+      ]
+    },
+    {
+      "text": "Deborah and her husband try to be as good a family as her parents were, and she credits love, openness and being there for each other with keeping the two of them close and happy over the years.",
+      "speaker": "Deborah",
+      "statedOn": "2023-01-27",
+      "entities": [
+        "deborah",
+        "deborah-husband"
+      ],
+      "sourceTurns": [
+        "D2:5",
+        "D2:6",
+        "D2:7"
+      ]
+    },
+    {
+      "text": "Deborah received a letter on 26 January 2023 from the members of her yoga group thanking her for the positive influence she had had on them, which reminded her why she is so passionate about yoga.",
+      "speaker": "Deborah",
+      "statedOn": "2023-01-27",
+      "entities": [
+        "deborah",
+        "deborah-yoga-classes",
+        "yoga"
+      ],
+      "chrono": [
+        "yoga-group-letter"
+      ],
+      "sourceTurns": [
+        "D2:8",
+        "D2:9"
+      ]
+    },
+    {
+      "text": "One of the places Deborah practises yoga is her mother's old home, where she goes now and then for her mother and finds peace sitting in the spot by the window, feeling her presence there.",
+      "speaker": "Deborah",
+      "statedOn": "2023-01-27",
+      "entities": [
+        "deborah",
+        "deborah-mother",
+        "mothers-house",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D2:10",
+        "D2:11",
+        "D2:12",
+        "D2:13",
+        "D2:14",
+        "D2:15"
+      ]
+    },
+    {
+      "text": "Deborah's mother would sit by the window of her house every night with a book and a smile; reading was one of her hobbies and that spot was one of her favourite places in the house.",
+      "speaker": "Deborah",
+      "statedOn": "2023-01-27",
+      "entities": [
+        "deborah-mother",
+        "mothers-house"
+      ],
+      "sourceTurns": [
+        "D2:16",
+        "D2:17"
+      ]
+    },
+    {
+      "text": "Travel was another of the great passions of Deborah's mother.",
+      "speaker": "Deborah",
+      "statedOn": "2023-01-27",
+      "entities": [
+        "deborah-mother"
+      ],
+      "sourceTurns": [
+        "D2:18",
+        "D2:19"
+      ]
+    },
+    {
+      "text": "Jolene keeps snakes as pets because they calm her down and make her happy; the first she introduced to Deborah, on 27 January 2023, was Susie.",
+      "speaker": "Jolene",
+      "statedOn": "2023-01-27",
+      "entities": [
+        "jolene",
+        "susie"
+      ],
+      "sourceTurns": [
+        "D2:20",
+        "D2:21"
+      ]
+    },
+    {
+      "text": "Jolene's second snake Seraphim once slid out of her cage and coiled up next to her while she was playing video games, which Jolene found very funny.",
+      "speaker": "Jolene",
+      "statedOn": "2023-01-27",
+      "entities": [
+        "jolene",
+        "seraphim",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D2:22",
+        "D2:23"
+      ]
+    },
+    {
+      "text": "Jolene bought her snake Seraphim in Paris about a year before 27 January 2023.",
+      "speaker": "Jolene",
+      "statedOn": "2023-01-27",
+      "entities": [
+        "jolene",
+        "seraphim",
+        "paris"
+      ],
+      "sourceTurns": [
+        "D2:24",
+        "D2:25"
+      ]
+    },
+    {
+      "text": "Jolene and her partner played the console game 'Detroit' together in the week before 27 January 2023, and both are crazy about gaming.",
+      "speaker": "Jolene",
+      "statedOn": "2023-01-27",
+      "entities": [
+        "jolene",
+        "jolene-partner",
+        "detroit",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D2:26"
+      ]
+    },
+    {
+      "text": "Jolene taught herself to play video games as a child rather than being taught by her partner.",
+      "speaker": "Jolene",
+      "statedOn": "2023-01-27",
+      "entities": [
+        "jolene",
+        "gaming",
+        "jolene-partner"
+      ],
+      "sourceTurns": [
+        "D2:27",
+        "D2:28"
+      ]
+    },
+    {
+      "text": "Jolene and her partner planned to play the game 'The Walking Dead' on the Saturday after 27 January 2023, which fell on 4 February 2023.",
+      "speaker": "Jolene",
+      "statedOn": "2023-01-27",
+      "entities": [
+        "jolene",
+        "jolene-partner",
+        "walking-dead",
+        "gaming"
+      ],
+      "chrono": [
+        "walking-dead-plan"
+      ],
+      "sourceTurns": [
+        "D2:29",
+        "D2:30"
+      ]
+    },
+    {
+      "text": "Deborah and Jolene closed their conversation of 27 January 2023 by wishing each other well.",
+      "speaker": "Deborah",
+      "statedOn": "2023-01-27",
+      "entities": [
+        "deborah",
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D2:31",
+        "D2:32"
+      ]
+    },
+    {
+      "text": "Jolene's engineering professor set her a large robotics project, which she described on 1 February 2023 as tough but fun and a spur to creativity and problem-solving.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-01",
+      "entities": [
+        "jolene",
+        "robotics-project",
+        "engineering-school"
+      ],
+      "sourceTurns": [
+        "D3:1",
+        "D3:2"
+      ]
+    },
+    {
+      "text": "Jolene felt a mix of excitement and nervousness when she first received the robotics project, and by 1 February 2023 was enjoying it like a puzzle, finding satisfaction in working out the design and programming and watching the robot come together.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-01",
+      "entities": [
+        "jolene",
+        "robotics-project"
+      ],
+      "sourceTurns": [
+        "D3:3"
+      ]
+    },
+    {
+      "text": "Deborah met her new neighbour Anna on 31 January 2023, at yoga in the park.",
+      "speaker": "Deborah",
+      "statedOn": "2023-02-01",
+      "entities": [
+        "deborah",
+        "anna",
+        "local-park",
+        "yoga"
+      ],
+      "chrono": [
+        "deborah-meets-anna"
+      ],
+      "sourceTurns": [
+        "D3:4",
+        "D3:5",
+        "D3:6"
+      ]
+    },
+    {
+      "text": "At their first meeting Deborah and Anna talked about how yoga had improved their lives and about the sense of community it gives them.",
+      "speaker": "Deborah",
+      "statedOn": "2023-02-01",
+      "entities": [
+        "deborah",
+        "anna",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D3:7",
+        "D3:8",
+        "D3:9"
+      ]
+    },
+    {
+      "text": "Jolene had given up yoga by February 2023, and when Deborah asked her on 1 February 2023 whether she had thought of resuming it, she said she and her partner had planned to play console games instead.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-01",
+      "entities": [
+        "jolene",
+        "yoga",
+        "jolene-partner",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D3:10",
+        "D3:11",
+        "D3:12",
+        "D3:13"
+      ]
+    },
+    {
+      "text": "Deborah cut the conversation of 1 February 2023 short because she had to go.",
+      "speaker": "Deborah",
+      "statedOn": "2023-02-01",
+      "entities": [
+        "deborah",
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D3:14",
+        "D3:15"
+      ]
+    },
+    {
+      "text": "Jolene described herself on 4 February 2023 as having been on an emotional rollercoaster lately but coping.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-04",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D4:1",
+        "D4:2"
+      ]
+    },
+    {
+      "text": "Jolene reached a major engineering milestone in the week before 4 February 2023 and felt relieved and proud of what she called a huge accomplishment for her as an engineer.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-04",
+      "entities": [
+        "jolene",
+        "water-purifier-project"
+      ],
+      "sourceTurns": [
+        "D4:3",
+        "D4:4"
+      ]
+    },
+    {
+      "text": "The milestone Jolene reached in late January 2023 was designing and building a sustainable water purifier for a rural community in need, which took a great deal of planning and research.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-04",
+      "entities": [
+        "jolene",
+        "water-purifier-project"
+      ],
+      "sourceTurns": [
+        "D4:5",
+        "D4:6"
+      ]
+    },
+    {
+      "text": "Seeing the water purifier working and providing clean water to the community was a surreal moment for Jolene that gave her a sense of purpose and reminded her that engineering can make a difference in people's lives.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-04",
+      "entities": [
+        "jolene",
+        "water-purifier-project"
+      ],
+      "sourceTurns": [
+        "D4:7"
+      ]
+    },
+    {
+      "text": "Jolene's stated career aspiration on 4 February 2023 was to keep working in engineering and to go on making a positive impact on communities in need by creating sustainable solutions, and she said Deborah's encouragement motivated her to pursue it.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-04",
+      "entities": [
+        "jolene",
+        "deborah"
+      ],
+      "sourceTurns": [
+        "D4:8",
+        "D4:9",
+        "D4:10",
+        "D4:11"
+      ]
+    },
+    {
+      "text": "Deborah bonded with Anna during a yoga class on 3 February 2023, where they tried dance-like poses including Warrior II, which builds strength and boosts focus.",
+      "speaker": "Deborah",
+      "statedOn": "2023-02-04",
+      "entities": [
+        "deborah",
+        "anna",
+        "yoga",
+        "deborah-yoga-classes"
+      ],
+      "chrono": [
+        "anna-yoga-bonding"
+      ],
+      "sourceTurns": [
+        "D4:12",
+        "D4:13",
+        "D4:14"
+      ]
+    },
+    {
+      "text": "The poses Deborah and Anna tried on 3 February 2023 were difficult, and supporting each other through them brought the two women closer.",
+      "speaker": "Deborah",
+      "statedOn": "2023-02-04",
+      "entities": [
+        "deborah",
+        "anna",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D4:15",
+        "D4:16"
+      ]
+    },
+    {
+      "text": "Deborah described a modified chair pose to Jolene on 4 February 2023: sit on the edge of a chair with the feet planted, twist the torso to one side using a hand on the knee for support, hold for a few breaths and switch sides, which stretches the back and shoulders and relaxes tense muscles.",
+      "speaker": "Deborah",
+      "statedOn": "2023-02-04",
+      "entities": [
+        "deborah",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D4:17",
+        "D4:18"
+      ]
+    },
+    {
+      "text": "Jolene keeps a large bookshelf and was reading 'Sapiens' in February 2023, finding its account of human history and technology's effect on us fascinating and thought-provoking.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-04",
+      "entities": [
+        "jolene",
+        "sapiens"
+      ],
+      "sourceTurns": [
+        "D4:19",
+        "D4:20",
+        "D4:21",
+        "D4:22"
+      ]
+    },
+    {
+      "text": "Jolene read 'Avalanche' by Neal Stephenson in one sitting about two weeks before 4 February 2023.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-04",
+      "entities": [
+        "jolene",
+        "avalanche",
+        "neal-stephenson"
+      ],
+      "sourceTurns": [
+        "D4:23",
+        "D4:24"
+      ]
+    },
+    {
+      "text": "Jolene also read a story about someone who became successful despite facing numerous challenges, which convinced her that anything is possible if you believe and work hard.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-04",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D4:25"
+      ]
+    },
+    {
+      "text": "A friend gave Deborah a bouquet of flowers when she was struggling, and it still gives her hope and courage and fills her with warmth and appreciation whenever she looks at it.",
+      "speaker": "Deborah",
+      "statedOn": "2023-02-04",
+      "entities": [
+        "deborah"
+      ],
+      "sourceTurns": [
+        "D4:26",
+        "D4:27",
+        "D4:28",
+        "D4:29",
+        "D4:30"
+      ]
+    },
+    {
+      "text": "Deborah's favourite nature spots, named on 4 February 2023, are a park with a forest trail where she finds it calming to get lost in nature and a nearby beach whose waves and sand make her feel peaceful and happy.",
+      "speaker": "Deborah",
+      "statedOn": "2023-02-04",
+      "entities": [
+        "deborah",
+        "local-park"
+      ],
+      "sourceTurns": [
+        "D4:31",
+        "D4:32"
+      ]
+    },
+    {
+      "text": "Jolene spent a vacation in Bogota in the summer of 2022 and found watching the sunset over the water there beautiful and calming.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-04",
+      "entities": [
+        "jolene",
+        "bogota"
+      ],
+      "sourceTurns": [
+        "D4:33"
+      ]
+    },
+    {
+      "text": "Deborah goes to a spot by the water near her mother's old house to reflect on her mother's life and find peace, and says being surrounded by nature helps a lot.",
+      "speaker": "Deborah",
+      "statedOn": "2023-02-04",
+      "entities": [
+        "deborah",
+        "deborah-mother",
+        "mothers-house"
+      ],
+      "sourceTurns": [
+        "D4:34",
+        "D4:35"
+      ]
+    },
+    {
+      "text": "Deborah brings the amulet that belonged to her mother whenever she visits the spot by the water near her mother's house; holding it comforts her and is how she feels her mother's love and stays close to her.",
+      "speaker": "Deborah",
+      "statedOn": "2023-02-04",
+      "entities": [
+        "deborah",
+        "deborah-mother",
+        "deborah-amulet",
+        "mothers-house"
+      ],
+      "sourceTurns": [
+        "D4:36",
+        "D4:37",
+        "D4:38",
+        "D4:39"
+      ]
+    },
+    {
+      "text": "Anna also wears a pendant in memory of her own mother, and discovering that brought her and Deborah closer.",
+      "speaker": "Deborah",
+      "statedOn": "2023-02-04",
+      "entities": [
+        "deborah",
+        "anna"
+      ],
+      "sourceTurns": [
+        "D4:40",
+        "D4:41"
+      ]
+    },
+    {
+      "text": "Deborah urged Jolene on 4 February 2023 to look to her sources of strength when life is tough, and the two agreed to stay in touch.",
+      "speaker": "Deborah",
+      "statedOn": "2023-02-04",
+      "entities": [
+        "deborah",
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D4:42",
+        "D4:43",
+        "D4:44"
+      ]
+    },
+    {
+      "text": "Jolene took a mini retreat on 1 February 2023 to assess where she was in life, and came away from it with a new outlook.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-09",
+      "entities": [
+        "jolene"
+      ],
+      "chrono": [
+        "jolene-mini-retreat"
+      ],
+      "sourceTurns": [
+        "D5:1",
+        "D5:2"
+      ]
+    },
+    {
+      "text": "Jolene came away from her retreat of 1 February 2023 feeling she had achieved far more than she had imagined, which was a real confidence boost and took her outside her comfort zone.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-09",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D5:3",
+        "D5:4"
+      ]
+    },
+    {
+      "text": "At her retreat on 1 February 2023 Jolene worked out some neat solutions for her engineering project and was excited about them.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-09",
+      "entities": [
+        "jolene",
+        "robotics-project"
+      ],
+      "sourceTurns": [
+        "D5:5",
+        "D5:6"
+      ]
+    },
+    {
+      "text": "Jolene said on 9 February 2023 that she wanted to look into green technology, because she believes it could make a real difference in disadvantaged areas.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-09",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D5:7"
+      ]
+    },
+    {
+      "text": "Jolene proposed on 9 February 2023 a volunteer programme in which engineers would teach STEM to underprivileged children, and Deborah thought it a great way to help and inspire others.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-09",
+      "entities": [
+        "jolene",
+        "stem-volunteer-program",
+        "deborah"
+      ],
+      "sourceTurns": [
+        "D5:7",
+        "D5:8"
+      ]
+    },
+    {
+      "text": "Jolene's plan for the STEM volunteer programme, as of 9 February 2023, was to team up with local schools and centres to run workshops and to invite engineers as guest speakers so the children could see their career options.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-09",
+      "entities": [
+        "jolene",
+        "stem-volunteer-program"
+      ],
+      "sourceTurns": [
+        "D5:9",
+        "D5:10"
+      ]
+    },
+    {
+      "text": "As of 9 February 2023 Jolene had not yet reached out to any schools or centres about the STEM volunteer programme, because she wanted to solidify the plan first.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-09",
+      "entities": [
+        "jolene",
+        "stem-volunteer-program"
+      ],
+      "sourceTurns": [
+        "D5:11",
+        "D5:12"
+      ]
+    },
+    {
+      "text": "Jolene kept her sketches for the STEM volunteer programme in her planner and promised on 9 February 2023 to keep Deborah posted on how it went.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-09",
+      "entities": [
+        "jolene",
+        "stem-volunteer-program",
+        "deborah"
+      ],
+      "sourceTurns": [
+        "D5:13",
+        "D5:14",
+        "D5:15",
+        "D5:16",
+        "D5:17"
+      ]
+    },
+    {
+      "text": "Jolene went out with friends for dinner and drinks on the night of 21 February 2023 and was glad to let her hair down.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-22",
+      "entities": [
+        "jolene"
+      ],
+      "chrono": [
+        "jolene-night-out"
+      ],
+      "sourceTurns": [
+        "D6:1"
+      ]
+    },
+    {
+      "text": "Deborah visited a garden of roses and dahlias on 22 February 2023 and found it calming and nostalgic; those flowers bring her peace.",
+      "speaker": "Deborah",
+      "statedOn": "2023-02-22",
+      "entities": [
+        "deborah",
+        "gardening"
+      ],
+      "chrono": [
+        "deborah-garden-visit"
+      ],
+      "sourceTurns": [
+        "D6:2",
+        "D6:3",
+        "D6:4"
+      ]
+    },
+    {
+      "text": "Deborah lost her friend Karlie in the week before 22 February 2023 and had been spending time in the garden to find some comfort.",
+      "speaker": "Deborah",
+      "statedOn": "2023-02-22",
+      "entities": [
+        "deborah",
+        "karlie",
+        "gardening"
+      ],
+      "sourceTurns": [
+        "D6:4",
+        "D6:5"
+      ]
+    },
+    {
+      "text": "Deborah found the death of her friend Karlie hard but was comforted by remembering their time together, which reminded her how special life is.",
+      "speaker": "Deborah",
+      "statedOn": "2023-02-22",
+      "entities": [
+        "deborah",
+        "karlie"
+      ],
+      "sourceTurns": [
+        "D6:6",
+        "D6:7"
+      ]
+    },
+    {
+      "text": "The last photograph of Deborah and Karlie together was taken on a hike in the summer of 2022, and it still makes Deborah smile every time she sees it.",
+      "speaker": "Deborah",
+      "statedOn": "2023-02-22",
+      "entities": [
+        "deborah",
+        "karlie"
+      ],
+      "sourceTurns": [
+        "D6:8",
+        "D6:9"
+      ]
+    },
+    {
+      "text": "Deborah travelled to Bali in 2022 and counts it among her favourite trips: a gorgeous island that gave her peace and was great for yoga.",
+      "speaker": "Deborah",
+      "statedOn": "2023-02-22",
+      "entities": [
+        "deborah",
+        "bali",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D6:10"
+      ]
+    },
+    {
+      "text": "Jolene had been wanting to try yoga on the beach and said on 22 February 2023 that she would give it a go after Deborah described the sound of the waves and the fresh air.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-22",
+      "entities": [
+        "jolene",
+        "yoga",
+        "deborah"
+      ],
+      "sourceTurns": [
+        "D6:11",
+        "D6:12",
+        "D6:13",
+        "D6:14",
+        "D6:15",
+        "D6:16"
+      ]
+    },
+    {
+      "text": "By 25 February 2023 Jolene was balancing engineering school with her partner's video games while setting aside time for yoga and meditation, which gave her calm amid the craziness.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-25",
+      "entities": [
+        "jolene",
+        "engineering-school",
+        "yoga",
+        "meditation",
+        "jolene-partner",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D7:1",
+        "D7:2"
+      ]
+    },
+    {
+      "text": "Yoga leaves Jolene calmer, more alert and more motivated and gives her perspective; she said on 25 February 2023 that the practice had seriously saved her.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-25",
+      "entities": [
+        "jolene",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D7:3"
+      ]
+    },
+    {
+      "text": "Jolene's partner started joining her for yoga sometimes by February 2023, which was good for bonding and relaxing and brought the two of them closer.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-25",
+      "entities": [
+        "jolene",
+        "jolene-partner",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D7:4",
+        "D7:5"
+      ]
+    },
+    {
+      "text": "Jolene and her partner were not married as of 25 February 2023 but had been together for about three years and were taking it slow; the ring he wears is a decoration rather than a wedding ring.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-25",
+      "entities": [
+        "jolene",
+        "jolene-partner"
+      ],
+      "sourceTurns": [
+        "D7:6",
+        "D7:7",
+        "D7:8"
+      ]
+    },
+    {
+      "text": "Jolene and her partner met in an engineering class at college, quickly became friends, and the friendship eventually turned into a relationship.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-25",
+      "entities": [
+        "jolene",
+        "jolene-partner",
+        "engineering-school"
+      ],
+      "sourceTurns": [
+        "D7:9",
+        "D7:10"
+      ]
+    },
+    {
+      "text": "Jolene and her partner still team up on engineering projects and enjoy it, because they understand each other's struggles and both love the work.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-25",
+      "entities": [
+        "jolene",
+        "jolene-partner"
+      ],
+      "sourceTurns": [
+        "D7:11"
+      ]
+    },
+    {
+      "text": "Whenever Jolene is overwhelmed she takes a break to do breathing exercises or meditate, which leaves her calmer and clearer and better able to handle challenges.",
+      "speaker": "Jolene",
+      "statedOn": "2023-02-25",
+      "entities": [
+        "jolene",
+        "meditation"
+      ],
+      "sourceTurns": [
+        "D7:12",
+        "D7:13",
+        "D7:14",
+        "D7:15"
+      ]
+    },
+    {
+      "text": "Deborah took a photograph while reflecting outdoors and keeps it as a reminder to find peace even in chaos.",
+      "speaker": "Deborah",
+      "statedOn": "2023-02-25",
+      "entities": [
+        "deborah"
+      ],
+      "sourceTurns": [
+        "D7:16"
+      ]
+    },
+    {
+      "text": "Deborah's daily routine as of 25 February 2023 was to meditate, do yoga and teach classes in the morning and to spend the evenings with loved ones.",
+      "speaker": "Deborah",
+      "statedOn": "2023-02-25",
+      "entities": [
+        "deborah",
+        "meditation",
+        "yoga",
+        "deborah-yoga-classes"
+      ],
+      "sourceTurns": [
+        "D7:17",
+        "D7:18"
+      ]
+    },
+    {
+      "text": "Deborah went for a morning jog in a nearby park for the first time on 24 February 2023 and decided to make it part of her daily routine, because exercise makes her feel connected to her body.",
+      "speaker": "Deborah",
+      "statedOn": "2023-02-25",
+      "entities": [
+        "deborah",
+        "running",
+        "local-park"
+      ],
+      "chrono": [
+        "deborah-first-jog"
+      ],
+      "sourceTurns": [
+        "D7:18",
+        "D7:19",
+        "D7:20",
+        "D7:21"
+      ]
+    },
+    {
+      "text": "Deborah told Jolene on 25 February 2023 that looking after yourself is what gives you the energy to help others, quoting the saying that you cannot pour from an empty cup.",
+      "speaker": "Deborah",
+      "statedOn": "2023-02-25",
+      "entities": [
+        "deborah",
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D7:22",
+        "D7:23"
+      ]
+    },
+    {
+      "text": "Anna bought Deborah a vegan stir-fry of tofu and vegetables with ginger and soy sauce in late February 2023, and Deborah found it really tasty.",
+      "speaker": "Deborah",
+      "statedOn": "2023-03-02",
+      "entities": [
+        "deborah",
+        "anna"
+      ],
+      "sourceTurns": [
+        "D8:1"
+      ]
+    },
+    {
+      "text": "Jolene's favourite comfort dish is lasagna, and in early March 2023 she had a great deal going on with her studies and exams.",
+      "speaker": "Jolene",
+      "statedOn": "2023-03-02",
+      "entities": [
+        "jolene",
+        "engineering-school"
+      ],
+      "sourceTurns": [
+        "D8:2",
+        "D8:3"
+      ]
+    },
+    {
+      "text": "Jolene did yoga and meditation to relax on 24 February 2023, and Deborah did the same, finding it helped her reset her mind.",
+      "speaker": "Jolene",
+      "statedOn": "2023-03-02",
+      "entities": [
+        "jolene",
+        "deborah",
+        "yoga",
+        "meditation"
+      ],
+      "chrono": [
+        "jolene-yoga-meditation-friday"
+      ],
+      "sourceTurns": [
+        "D8:4",
+        "D8:5",
+        "D8:6"
+      ]
+    },
+    {
+      "text": "Jolene took her snake Seraphim to the park on 26 February 2023; Seraphim loved it, they explored new places, and people are surprised when they see a tamed snake.",
+      "speaker": "Jolene",
+      "statedOn": "2023-03-02",
+      "entities": [
+        "jolene",
+        "seraphim"
+      ],
+      "chrono": [
+        "seraphim-park-visit"
+      ],
+      "sourceTurns": [
+        "D8:7",
+        "D8:8",
+        "D8:9",
+        "D8:10"
+      ]
+    },
+    {
+      "text": "What Deborah likes about being outdoors is the birds chirping and the breeze gently blowing, which remind her of what really matters.",
+      "speaker": "Deborah",
+      "statedOn": "2023-03-02",
+      "entities": [
+        "deborah"
+      ],
+      "sourceTurns": [
+        "D8:11",
+        "D8:12"
+      ]
+    },
+    {
+      "text": "Jolene said on 2 March 2023 that she needed to be more mindful of her stress levels and her mental health, because she sometimes gets too caught up in her studies and forgets to prioritise self-care.",
+      "speaker": "Jolene",
+      "statedOn": "2023-03-02",
+      "entities": [
+        "jolene",
+        "engineering-school"
+      ],
+      "sourceTurns": [
+        "D8:13",
+        "D8:14",
+        "D8:15"
+      ]
+    },
+    {
+      "text": "Exams and deadlines left Jolene feeling overwhelmed in early March 2023, with a to-do list she described as never-ending.",
+      "speaker": "Jolene",
+      "statedOn": "2023-03-02",
+      "entities": [
+        "jolene",
+        "engineering-school"
+      ],
+      "sourceTurns": [
+        "D8:16",
+        "D8:17",
+        "D8:18"
+      ]
+    },
+    {
+      "text": "Deborah's study and time-management advice to Jolene on 2 March 2023 was to break the work into smaller pieces and set goals, and to use a planner or scheduler to stay organised and keep time for herself.",
+      "speaker": "Deborah",
+      "statedOn": "2023-03-02",
+      "entities": [
+        "deborah",
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D8:19",
+        "D8:20"
+      ]
+    },
+    {
+      "text": "Deborah promised Jolene an encouraging mug like her own and wished her luck with her exams on 2 March 2023.",
+      "speaker": "Deborah",
+      "statedOn": "2023-03-02",
+      "entities": [
+        "deborah",
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D8:21",
+        "D8:22",
+        "D8:23"
+      ]
+    },
+    {
+      "text": "Deborah and Jolene had gone a long time without speaking before their conversation of 13 March 2023.",
+      "speaker": "Deborah",
+      "statedOn": "2023-03-13",
+      "entities": [
+        "deborah",
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D9:1",
+        "D9:2"
+      ]
+    },
+    {
+      "text": "Deborah had started a yoga class in her neighbourhood by 13 March 2023 and enjoys sharing the exercise with her neighbours and watching it transform them.",
+      "speaker": "Deborah",
+      "statedOn": "2023-03-13",
+      "entities": [
+        "deborah",
+        "deborah-yoga-classes",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D9:3",
+        "D9:4"
+      ]
+    },
+    {
+      "text": "Deborah's neighbours were interested in trying yoga, so she hosted a class for them on 10 March 2023 and was delighted to see everyone embrace and enjoy it.",
+      "speaker": "Deborah",
+      "statedOn": "2023-03-13",
+      "entities": [
+        "deborah",
+        "deborah-yoga-classes",
+        "yoga"
+      ],
+      "chrono": [
+        "neighbourhood-yoga-class-first"
+      ],
+      "sourceTurns": [
+        "D9:5"
+      ]
+    },
+    {
+      "text": "Deborah started teaching yoga because she finds it calming and wanted to share that with others; giving people peace and awareness brings her a lot of happiness.",
+      "speaker": "Deborah",
+      "statedOn": "2023-03-13",
+      "entities": [
+        "deborah",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D9:6",
+        "D9:7",
+        "D9:8"
+      ]
+    },
+    {
+      "text": "Teaching yoga has won Deborah great friends as well as helping others, and she counts it as how she builds community connections and finds support in tough times.",
+      "speaker": "Deborah",
+      "statedOn": "2023-03-13",
+      "entities": [
+        "deborah",
+        "yoga",
+        "deborah-yoga-classes"
+      ],
+      "sourceTurns": [
+        "D9:9",
+        "D9:10",
+        "D9:11",
+        "D9:12"
+      ]
+    },
+    {
+      "text": "Jolene was having a hard time keeping up with her engineering assignments in March 2023 and asked Deborah on 13 March 2023 whether they could still talk about time management.",
+      "speaker": "Jolene",
+      "statedOn": "2023-03-13",
+      "entities": [
+        "jolene",
+        "engineering-school",
+        "deborah"
+      ],
+      "sourceTurns": [
+        "D9:13",
+        "D9:14"
+      ]
+    },
+    {
+      "text": "Deborah and Jolene agreed on 13 March 2023 to find a time to talk through Jolene's time-management problems, with Jolene to check her schedule and get back to her.",
+      "speaker": "Deborah",
+      "statedOn": "2023-03-13",
+      "entities": [
+        "deborah",
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D9:15",
+        "D9:16",
+        "D9:17",
+        "D9:18",
+        "D9:19",
+        "D9:20"
+      ]
+    },
+    {
+      "text": "Jolene found it stressful in March 2023 to find time for everything during exams and deadlines, describing it as playing catch-up.",
+      "speaker": "Jolene",
+      "statedOn": "2023-03-22",
+      "entities": [
+        "jolene",
+        "engineering-school"
+      ],
+      "sourceTurns": [
+        "D10:1",
+        "D10:2"
+      ]
+    },
+    {
+      "text": "Jolene used the Pomodoro Technique of twenty-five minutes of work and a five-minute break to avoid burnout, but as of 22 March 2023 was still struggling to prioritise her tasks.",
+      "speaker": "Jolene",
+      "statedOn": "2023-03-22",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D10:3",
+        "D10:4"
+      ]
+    },
+    {
+      "text": "Deborah manages her own time by creating a daily schedule or to-do list.",
+      "speaker": "Deborah",
+      "statedOn": "2023-03-22",
+      "entities": [
+        "deborah"
+      ],
+      "sourceTurns": [
+        "D10:5"
+      ]
+    },
+    {
+      "text": "Jolene had tried making a to-do list but found a big stack of tasks overwhelming and hard to start on.",
+      "speaker": "Jolene",
+      "statedOn": "2023-03-22",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D10:6",
+        "D10:7",
+        "D10:8"
+      ]
+    },
+    {
+      "text": "Deborah taught Jolene the Eisenhower Matrix on 22 March 2023 — a method that sorts tasks into four boxes by urgency and importance — and Jolene agreed to give it a try in the hope it would keep her focused and less stressed.",
+      "speaker": "Deborah",
+      "statedOn": "2023-03-22",
+      "entities": [
+        "deborah",
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D10:9",
+        "D10:10",
+        "D10:11",
+        "D10:12",
+        "D10:13",
+        "D10:14",
+        "D10:15",
+        "D10:16"
+      ]
+    },
+    {
+      "text": "Deborah and Anna sat by the sea watching the sunset in March 2023, talked about each other and realised that they inspire each other.",
+      "speaker": "Deborah",
+      "statedOn": "2023-03-22",
+      "entities": [
+        "deborah",
+        "anna"
+      ],
+      "sourceTurns": [
+        "D10:17"
+      ]
+    },
+    {
+      "text": "Jolene wants to learn to surf and said on 22 March 2023 that she only had to find the spare time for it.",
+      "speaker": "Jolene",
+      "statedOn": "2023-03-22",
+      "entities": [
+        "jolene",
+        "surfing"
+      ],
+      "sourceTurns": [
+        "D10:18",
+        "D10:19"
+      ]
+    },
+    {
+      "text": "By 22 March 2023 Jolene had been gathering information about surfing and watching videos, and had got hold of a beginners' guide; she needed only the right time and place for a lesson.",
+      "speaker": "Jolene",
+      "statedOn": "2023-03-22",
+      "entities": [
+        "jolene",
+        "surfing"
+      ],
+      "sourceTurns": [
+        "D10:20",
+        "D10:21",
+        "D10:22"
+      ]
+    },
+    {
+      "text": "Deborah told Jolene on 22 March 2023 that with surfing the experience matters just as much as the end result, and to take it step by step and have fun along the way.",
+      "speaker": "Deborah",
+      "statedOn": "2023-03-22",
+      "entities": [
+        "deborah",
+        "jolene",
+        "surfing"
+      ],
+      "sourceTurns": [
+        "D10:23",
+        "D10:24"
+      ]
+    },
+    {
+      "text": "Jolene had a breakthrough on her robotics project on 24 March 2023, finding a solution to a problem that had been bugging her, and felt her hard work was paying off.",
+      "speaker": "Jolene",
+      "statedOn": "2023-03-28",
+      "entities": [
+        "jolene",
+        "robotics-project"
+      ],
+      "chrono": [
+        "robotics-breakthrough"
+      ],
+      "sourceTurns": [
+        "D11:1",
+        "D11:2"
+      ]
+    },
+    {
+      "text": "Deborah bought new props for her yoga class in March 2023 and put them to use straight away.",
+      "speaker": "Deborah",
+      "statedOn": "2023-03-28",
+      "entities": [
+        "deborah",
+        "deborah-yoga-classes",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D11:2"
+      ]
+    },
+    {
+      "text": "Jolene built new details for her project's case in March 2023 and asked Deborah to rate them.",
+      "speaker": "Jolene",
+      "statedOn": "2023-03-28",
+      "entities": [
+        "jolene",
+        "robotics-project",
+        "deborah"
+      ],
+      "sourceTurns": [
+        "D11:3"
+      ]
+    },
+    {
+      "text": "Deborah bought a candle in March 2023 for the atmosphere and to improve her yoga practice.",
+      "speaker": "Deborah",
+      "statedOn": "2023-03-28",
+      "entities": [
+        "deborah",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D11:4"
+      ]
+    },
+    {
+      "text": "Jolene feels relaxed during yoga and likes creating a serene space with soothing scents such as lavender and rosemary.",
+      "speaker": "Jolene",
+      "statedOn": "2023-03-28",
+      "entities": [
+        "jolene",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D11:5"
+      ]
+    },
+    {
+      "text": "Deborah is also a fan of scents like lavender and rosemary, and uses candles and essential oils to add warmth and calm to her yoga sessions.",
+      "speaker": "Deborah",
+      "statedOn": "2023-03-28",
+      "entities": [
+        "deborah",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D11:6"
+      ]
+    },
+    {
+      "text": "Jolene finds that music helps her yoga practice.",
+      "speaker": "Jolene",
+      "statedOn": "2023-03-28",
+      "entities": [
+        "jolene",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D11:7"
+      ]
+    },
+    {
+      "text": "Deborah favours instrumental tracks with mellow melodies and rhythms for a peaceful yoga session, one of her favourites being a track called 'Savana'.",
+      "speaker": "Deborah",
+      "statedOn": "2023-03-28",
+      "entities": [
+        "deborah",
+        "savana",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D11:8"
+      ]
+    },
+    {
+      "text": "Jolene listens to Nils Frahm and Olafur Arnalds during her yoga practice, finding their music calming and a way into a different headspace.",
+      "speaker": "Jolene",
+      "statedOn": "2023-03-28",
+      "entities": [
+        "jolene",
+        "nils-frahm",
+        "olafur-arnalds",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D11:9"
+      ]
+    },
+    {
+      "text": "Deborah recommended the album 'Sleep' to Jolene on 28 March 2023 as good for meditation and deep relaxation, and Jolene said she would check it out.",
+      "speaker": "Deborah",
+      "statedOn": "2023-03-28",
+      "entities": [
+        "deborah",
+        "jolene",
+        "sleep-album",
+        "meditation"
+      ],
+      "sourceTurns": [
+        "D11:10",
+        "D11:11",
+        "D11:12"
+      ]
+    },
+    {
+      "text": "Deborah closed the conversation of 28 March 2023 by telling Jolene to take care and keep up the good work.",
+      "speaker": "Deborah",
+      "statedOn": "2023-03-28",
+      "entities": [
+        "deborah",
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D11:13",
+        "D11:14"
+      ]
+    },
+    {
+      "text": "Deborah went biking near home with her neighbour in the week before 9 April 2023 and found it freeing and beautiful.",
+      "speaker": "Deborah",
+      "statedOn": "2023-04-09",
+      "entities": [
+        "deborah",
+        "anna"
+      ],
+      "sourceTurns": [
+        "D12:1"
+      ]
+    },
+    {
+      "text": "Deborah went to an art show with a friend on 9 April 2023, found the work cool and inspiring, and was reminded of her mother by it.",
+      "speaker": "Deborah",
+      "statedOn": "2023-04-09",
+      "entities": [
+        "deborah",
+        "deborah-mother"
+      ],
+      "chrono": [
+        "deborah-art-show"
+      ],
+      "sourceTurns": [
+        "D12:1",
+        "D12:2"
+      ]
+    },
+    {
+      "text": "Deborah's mother was interested in art and believed it could give out strong emotions and connect people uniquely; going to an art show feels to Deborah as though they are still experiencing it together, which is hard but comforting and keeps her mother's memory alive.",
+      "speaker": "Deborah",
+      "statedOn": "2023-04-09",
+      "entities": [
+        "deborah",
+        "deborah-mother"
+      ],
+      "sourceTurns": [
+        "D12:3",
+        "D12:4",
+        "D12:5"
+      ]
+    },
+    {
+      "text": "Jolene values her time with her snakes because it teaches her to slow down and be in tune with herself, and playing video games with her partner after a long day relaxes her and brings the two of them closer.",
+      "speaker": "Jolene",
+      "statedOn": "2023-04-09",
+      "entities": [
+        "jolene",
+        "susie",
+        "seraphim",
+        "gaming",
+        "jolene-partner"
+      ],
+      "sourceTurns": [
+        "D12:6",
+        "D12:7",
+        "D12:8",
+        "D12:9"
+      ]
+    },
+    {
+      "text": "Jolene was working on a big project in April 2023 that was tough but rewarding to watch take shape, and promised to keep Deborah updated on its progress.",
+      "speaker": "Jolene",
+      "statedOn": "2023-04-09",
+      "entities": [
+        "jolene",
+        "robotics-project",
+        "deborah"
+      ],
+      "sourceTurns": [
+        "D12:10",
+        "D12:11",
+        "D12:12"
+      ]
+    },
+    {
+      "text": "Deborah assured Jolene on 9 April 2023 that she would always be there for her, and both wished each other time for the things that bring them joy.",
+      "speaker": "Deborah",
+      "statedOn": "2023-04-09",
+      "entities": [
+        "deborah",
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D12:13",
+        "D12:14",
+        "D12:15",
+        "D12:16"
+      ]
+    },
+    {
+      "text": "Jolene wrapped up her long-running robotics project in May 2023, and the result was a solar-powered vehicle.",
+      "speaker": "Jolene",
+      "statedOn": "2023-06-06",
+      "entities": [
+        "jolene",
+        "robotics-project"
+      ],
+      "sourceTurns": [
+        "D13:1",
+        "D13:2"
+      ]
+    },
+    {
+      "text": "Jolene was proud of herself for sticking with the robotics project despite its problems and called finishing it a big milestone.",
+      "speaker": "Jolene",
+      "statedOn": "2023-06-06",
+      "entities": [
+        "jolene",
+        "robotics-project"
+      ],
+      "sourceTurns": [
+        "D13:3",
+        "D13:4"
+      ]
+    },
+    {
+      "text": "Jolene was interning at a well-known engineering firm by 6 June 2023 and called it a great opportunity to test her skills and gain real-world experience.",
+      "speaker": "Jolene",
+      "statedOn": "2023-06-06",
+      "entities": [
+        "jolene",
+        "engineering-firm"
+      ],
+      "sourceTurns": [
+        "D13:5",
+        "D13:6"
+      ]
+    },
+    {
+      "text": "The best part of the internship for Jolene was being able to apply what she had learned at school to real projects and to see her ideas come to life.",
+      "speaker": "Jolene",
+      "statedOn": "2023-06-06",
+      "entities": [
+        "jolene",
+        "engineering-firm"
+      ],
+      "sourceTurns": [
+        "D13:7",
+        "D13:8"
+      ]
+    },
+    {
+      "text": "The internship had a positive impact on Jolene, stoking her love of engineering, and being around people who love what they do inspired her to stay focused and keep working towards her goals.",
+      "speaker": "Jolene",
+      "statedOn": "2023-06-06",
+      "entities": [
+        "jolene",
+        "engineering-firm"
+      ],
+      "sourceTurns": [
+        "D13:9",
+        "D13:10",
+        "D13:11"
+      ]
+    },
+    {
+      "text": "Jolene found work-life balance hard during her internship in June 2023, slogging away and struggling to make time for her hobbies and for relaxing.",
+      "speaker": "Jolene",
+      "statedOn": "2023-06-06",
+      "entities": [
+        "jolene",
+        "engineering-firm"
+      ],
+      "sourceTurns": [
+        "D13:12",
+        "D13:13",
+        "D13:14"
+      ]
+    },
+    {
+      "text": "Jolene did yoga on top of Mount Talkeetna on the morning of 5 June 2023, as an attempt to make time to relax during her internship.",
+      "speaker": "Jolene",
+      "statedOn": "2023-06-06",
+      "entities": [
+        "jolene",
+        "mount-talkeetna",
+        "yoga"
+      ],
+      "chrono": [
+        "jolene-talkeetna-yoga"
+      ],
+      "sourceTurns": [
+        "D13:15",
+        "D13:16"
+      ]
+    },
+    {
+      "text": "Jolene had been doing yoga and meditation sporadically for about three years as of 6 June 2023, and says they have had a real positive effect on her, helping with stress and keeping her centred.",
+      "speaker": "Jolene",
+      "statedOn": "2023-06-06",
+      "entities": [
+        "jolene",
+        "yoga",
+        "meditation"
+      ],
+      "sourceTurns": [
+        "D13:17",
+        "D13:18",
+        "D13:19",
+        "D13:20",
+        "D13:21"
+      ]
+    },
+    {
+      "text": "Deborah has a favourite yoga studio that she finds always calming.",
+      "speaker": "Deborah",
+      "statedOn": "2023-06-06",
+      "entities": [
+        "deborah",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D13:22"
+      ]
+    },
+    {
+      "text": "Deborah's advice to Jolene on 6 June 2023 for calming the mind was mindful breathing: set aside a few minutes each day to sit with the eyes closed, take deep breaths and focus on how the air feels entering and leaving the body.",
+      "speaker": "Deborah",
+      "statedOn": "2023-06-06",
+      "entities": [
+        "deborah",
+        "jolene",
+        "meditation",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D13:23",
+        "D13:24",
+        "D13:25",
+        "D13:26",
+        "D13:27"
+      ]
+    },
+    {
+      "text": "Deborah was getting ready for a yoga retreat with friends in late June 2023, looking forward to time with like-minded people and to finding peace and understanding.",
+      "speaker": "Deborah",
+      "statedOn": "2023-06-26",
+      "entities": [
+        "deborah",
+        "yoga",
+        "deborah-yoga-classes"
+      ],
+      "sourceTurns": [
+        "D14:1",
+        "D14:2"
+      ]
+    },
+    {
+      "text": "Deborah tried a new yoga pose, the Dancer Pose (Natarajasana), by 26 June 2023.",
+      "speaker": "Deborah",
+      "statedOn": "2023-06-26",
+      "entities": [
+        "deborah",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D14:3"
+      ]
+    },
+    {
+      "text": "Jolene bought a new aquarium for her snake Seraphim on 24 June 2023.",
+      "speaker": "Jolene",
+      "statedOn": "2023-06-26",
+      "entities": [
+        "jolene",
+        "seraphim"
+      ],
+      "chrono": [
+        "seraphim-new-aquarium"
+      ],
+      "sourceTurns": [
+        "D14:4",
+        "D14:5"
+      ]
+    },
+    {
+      "text": "Jolene got her snake Seraphim in 2022 and calls her a great pet who always cheers her up, brings a sense of peace and is comforting to spend time with.",
+      "speaker": "Jolene",
+      "statedOn": "2023-06-26",
+      "entities": [
+        "jolene",
+        "seraphim"
+      ],
+      "sourceTurns": [
+        "D14:6",
+        "D14:7",
+        "D14:8"
+      ]
+    },
+    {
+      "text": "Jolene described her life as intense in June 2023: pushing herself hard to succeed, sometimes feeling overwhelmed, but determined to overcome any obstacles and reach her goals.",
+      "speaker": "Jolene",
+      "statedOn": "2023-06-26",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D14:9",
+        "D14:10",
+        "D14:11"
+      ]
+    },
+    {
+      "text": "Jolene had a big breakthrough on a project around 26 June 2023 that she found exciting and rewarding.",
+      "speaker": "Jolene",
+      "statedOn": "2023-06-26",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D14:12",
+        "D14:13"
+      ]
+    },
+    {
+      "text": "Deborah showed Jolene a photograph from her yoga retreat of the tree pose being tried in front of a statue that symbolises peace and enlightenment.",
+      "speaker": "Deborah",
+      "statedOn": "2023-06-26",
+      "entities": [
+        "deborah",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D14:14",
+        "D14:15",
+        "D14:16",
+        "D14:17"
+      ]
+    },
+    {
+      "text": "Jolene said on 26 June 2023 that she would love to visit a retreat like Deborah's, seeing it as the ideal spot to find peace and refreshment, and Deborah agreed it is perfect for reflecting and getting centred.",
+      "speaker": "Jolene",
+      "statedOn": "2023-06-26",
+      "entities": [
+        "jolene",
+        "deborah"
+      ],
+      "sourceTurns": [
+        "D14:18",
+        "D14:19",
+        "D14:20",
+        "D14:21",
+        "D14:22",
+        "D14:23"
+      ]
+    },
+    {
+      "text": "Deborah had started a running group with Anna by 9 July 2023 and finds it awesome to connect with people who care about fitness.",
+      "speaker": "Deborah",
+      "statedOn": "2023-07-09",
+      "entities": [
+        "deborah",
+        "anna",
+        "running-group",
+        "running"
+      ],
+      "sourceTurns": [
+        "D15:1"
+      ]
+    },
+    {
+      "text": "Jolene was trying to add workouts into her study schedule in July 2023, which she found tough but fun.",
+      "speaker": "Jolene",
+      "statedOn": "2023-07-09",
+      "entities": [
+        "jolene",
+        "engineering-school"
+      ],
+      "sourceTurns": [
+        "D15:2"
+      ]
+    },
+    {
+      "text": "The members of Deborah's running group help and push each other during their runs, which makes it much easier to stay motivated.",
+      "speaker": "Deborah",
+      "statedOn": "2023-07-09",
+      "entities": [
+        "deborah",
+        "running-group",
+        "running"
+      ],
+      "sourceTurns": [
+        "D15:3",
+        "D15:4",
+        "D15:5"
+      ]
+    },
+    {
+      "text": "Jolene found gaming tough in mid-2023 but was grateful to have a partner who is into it too and who helps her stay focused on their goals.",
+      "speaker": "Jolene",
+      "statedOn": "2023-07-09",
+      "entities": [
+        "jolene",
+        "jolene-partner",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D15:6",
+        "D15:7"
+      ]
+    },
+    {
+      "text": "Jolene and her partner like gaming together because they tackle challenges as a shared experience, and achieving something difficult in the same game is a great way for them to bond.",
+      "speaker": "Jolene",
+      "statedOn": "2023-07-09",
+      "entities": [
+        "jolene",
+        "jolene-partner",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D15:8",
+        "D15:9"
+      ]
+    },
+    {
+      "text": "Jolene and her partner love playing 'It Takes Two' together, a competitive team-strategy game that is a great way for them to bond.",
+      "speaker": "Jolene",
+      "statedOn": "2023-07-09",
+      "entities": [
+        "jolene",
+        "jolene-partner",
+        "it-takes-two",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D15:10"
+      ]
+    },
+    {
+      "text": "Deborah does running and yoga and meditation with other people and loves organising workshops and events for mindfulness and self-care, as a way to have fun, build relationships and support each other's growth.",
+      "speaker": "Deborah",
+      "statedOn": "2023-07-09",
+      "entities": [
+        "deborah",
+        "running",
+        "yoga",
+        "meditation",
+        "deborah-yoga-classes"
+      ],
+      "sourceTurns": [
+        "D15:11",
+        "D15:12"
+      ]
+    },
+    {
+      "text": "Deborah's workshops involve yoga, meditation and self-reflection, and aim to cultivate self-awareness, promote mental and emotional wellbeing and help people find inner peace in a space where they can connect, explore and grow.",
+      "speaker": "Deborah",
+      "statedOn": "2023-07-09",
+      "entities": [
+        "deborah",
+        "deborah-yoga-classes",
+        "yoga",
+        "meditation"
+      ],
+      "sourceTurns": [
+        "D15:13",
+        "D15:14"
+      ]
+    },
+    {
+      "text": "Deborah says it is amazing to witness the growth and transformation that happens through her workshops and that she is honoured to be part of it.",
+      "speaker": "Deborah",
+      "statedOn": "2023-07-09",
+      "entities": [
+        "deborah",
+        "deborah-yoga-classes"
+      ],
+      "sourceTurns": [
+        "D15:15",
+        "D15:16",
+        "D15:17"
+      ]
+    },
+    {
+      "text": "Jolene chose a snake as a pet because she was fascinated by reptiles; caring for one has been calming and is a way for her to connect with nature.",
+      "speaker": "Jolene",
+      "statedOn": "2023-07-09",
+      "entities": [
+        "jolene",
+        "susie",
+        "seraphim"
+      ],
+      "sourceTurns": [
+        "D15:18"
+      ]
+    },
+    {
+      "text": "One of Jolene's favourite memories of her snake is the 'snake adventure', when the snake got out and Jolene spent hours searching before finding her snuggled under the bed; the relief filled her with love and gratitude and showed her how important the snake is to her.",
+      "speaker": "Jolene",
+      "statedOn": "2023-07-09",
+      "entities": [
+        "jolene",
+        "seraphim"
+      ],
+      "sourceTurns": [
+        "D15:19",
+        "D15:20",
+        "D15:21",
+        "D15:22",
+        "D15:23",
+        "D15:24"
+      ]
+    },
+    {
+      "text": "Deborah does not like dogs and keeps two cats instead, which she introduced to Jolene on 9 July 2023.",
+      "speaker": "Deborah",
+      "statedOn": "2023-07-09",
+      "entities": [
+        "deborah",
+        "luna",
+        "max"
+      ],
+      "sourceTurns": [
+        "D15:25",
+        "D15:26"
+      ]
+    },
+    {
+      "text": "Deborah takes her cats out for a run in the park every morning and evening, because exercise and nature are really important to her.",
+      "speaker": "Deborah",
+      "statedOn": "2023-07-09",
+      "entities": [
+        "deborah",
+        "luna",
+        "max",
+        "local-park",
+        "running"
+      ],
+      "sourceTurns": [
+        "D15:27",
+        "D15:28",
+        "D15:29"
+      ]
+    },
+    {
+      "text": "Jolene regrets that her snakes cannot run with her, because she thinks they would motivate her and make it more fun.",
+      "speaker": "Jolene",
+      "statedOn": "2023-07-09",
+      "entities": [
+        "jolene",
+        "susie",
+        "seraphim",
+        "running"
+      ],
+      "sourceTurns": [
+        "D15:30"
+      ]
+    },
+    {
+      "text": "Deborah describes time in nature as hitting a reset button that puts things into perspective and gives her time to reflect.",
+      "speaker": "Deborah",
+      "statedOn": "2023-07-09",
+      "entities": [
+        "deborah"
+      ],
+      "sourceTurns": [
+        "D15:31"
+      ]
+    },
+    {
+      "text": "Jolene loves going for walks whenever she can and photographs what she sees, including a lake surrounded by trees that she calls a hidden gem and finds peaceful and tranquil.",
+      "speaker": "Jolene",
+      "statedOn": "2023-07-09",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D15:32",
+        "D15:33",
+        "D15:34",
+        "D15:35",
+        "D15:36"
+      ]
+    },
+    {
+      "text": "Jolene and Deborah agreed on 9 July 2023 that they would go together sometime to the lake spot Jolene finds peaceful.",
+      "speaker": "Jolene",
+      "statedOn": "2023-07-09",
+      "entities": [
+        "jolene",
+        "deborah"
+      ],
+      "sourceTurns": [
+        "D15:37",
+        "D15:38",
+        "D15:39"
+      ]
+    },
+    {
+      "text": "Jolene's robotics project ran from her engineering professor setting it in early 2023, through the neat solutions she worked out at her retreat on 1 February 2023 and the breakthrough of 24 March 2023, to being wrapped up in May 2023 with a solar-powered vehicle as the result.",
+      "speaker": "Jolene",
+      "statedOn": "2023-06-06",
+      "entities": [
+        "jolene",
+        "robotics-project",
+        "engineering-school"
+      ],
+      "sourceTurns": [
+        "D3:1",
+        "D5:5",
+        "D11:1",
+        "D13:1"
+      ]
+    },
+    {
+      "text": "Deborah's yoga teaching grew from the goal she stated on 23 January 2023 into a neighbourhood class first held on 10 March 2023, then workshops and events for mindfulness and self-care, and by 9 July 2023 a running group started with Anna as well.",
+      "speaker": "Deborah",
+      "statedOn": "2023-07-09",
+      "entities": [
+        "deborah",
+        "deborah-yoga-classes",
+        "yoga",
+        "running-group",
+        "anna"
+      ],
+      "sourceTurns": [
+        "D1:13",
+        "D9:3",
+        "D15:11",
+        "D15:1"
+      ]
+    },
+    {
+      "text": "Deborah started a project for a cleanup in her community and had been raising funds for it by 1 August 2023, and found it amazing to see everyone come together to make a difference.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-01",
+      "entities": [
+        "deborah",
+        "community-cleanup-project"
+      ],
+      "sourceTurns": [
+        "D16:1"
+      ]
+    },
+    {
+      "text": "Jolene had a huge setback in the week before 1 August 2023: the project she had put so much work into crashed and she lost everything, which she found frustrating and depressing.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-01",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D16:2",
+        "D16:3"
+      ]
+    },
+    {
+      "text": "Jolene coped with the loss of her project work in late July 2023 with the company of her snake Susie and with video games as a distraction.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-01",
+      "entities": [
+        "jolene",
+        "susie",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D16:4"
+      ]
+    },
+    {
+      "text": "Jolene adopted her snake Susie about two years before 1 August 2023, when she was feeling lonely and wanted some company.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-01",
+      "entities": [
+        "jolene",
+        "susie"
+      ],
+      "sourceTurns": [
+        "D16:5",
+        "D16:6"
+      ]
+    },
+    {
+      "text": "Deborah told Jolene on 1 August 2023 that Susie had come at the perfect time and that she should find strength in her presence, and Jolene said having her around showed her she could stay strong and find joy in the small stuff.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-01",
+      "entities": [
+        "deborah",
+        "jolene",
+        "susie"
+      ],
+      "sourceTurns": [
+        "D16:7",
+        "D16:8",
+        "D16:9"
+      ]
+    },
+    {
+      "text": "Jolene was prioritising self-care through yoga and meditation in August 2023, which helped her stay balanced and grounded, and she was on the lookout for new routines to mix things up.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-01",
+      "entities": [
+        "jolene",
+        "yoga",
+        "meditation"
+      ],
+      "sourceTurns": [
+        "D16:10",
+        "D16:11",
+        "D16:12"
+      ]
+    },
+    {
+      "text": "Deborah's favourite yoga routine is a gentle flow built around breathing and grounding that helps her find balance in tough times, and she offered to send Jolene a tutorial video of its poses on 1 August 2023.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-01",
+      "entities": [
+        "deborah",
+        "jolene",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D16:13",
+        "D16:14",
+        "D16:15",
+        "D16:16",
+        "D16:17"
+      ]
+    },
+    {
+      "text": "Jolene promised on 1 August 2023 to practise the yoga routine Deborah had sent her and report back on how it went.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-01",
+      "entities": [
+        "jolene",
+        "deborah",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D16:18",
+        "D16:19",
+        "D16:20"
+      ]
+    },
+    {
+      "text": "Deborah made a meditation guide for her yoga retreat by 12 August 2023.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-12",
+      "entities": [
+        "deborah",
+        "meditation",
+        "deborah-yoga-classes"
+      ],
+      "sourceTurns": [
+        "D17:1"
+      ]
+    },
+    {
+      "text": "Jolene had been stressed and overwhelmed since losing her work files in late July 2023, but meditation kept her calm and got her clarity back, and she was grateful for the practice.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-12",
+      "entities": [
+        "jolene",
+        "meditation"
+      ],
+      "sourceTurns": [
+        "D17:2",
+        "D17:3"
+      ]
+    },
+    {
+      "text": "Jolene designed a pair of notebooks decorated with galaxies and circuitry, inspired by her love of space and engines, and showed them to Deborah on 12 August 2023.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-12",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D17:4",
+        "D17:5",
+        "D17:6"
+      ]
+    },
+    {
+      "text": "Jolene says that seeing art and design in various things gives her a unique perspective on engineering problems.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-12",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D17:7",
+        "D17:8"
+      ]
+    },
+    {
+      "text": "Jolene was working by 12 August 2023 on a prototype she believed could revolutionise aerial surveillance.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-12",
+      "entities": [
+        "jolene",
+        "aerial-surveillance-project"
+      ],
+      "sourceTurns": [
+        "D17:9",
+        "D17:10"
+      ]
+    },
+    {
+      "text": "Jolene's aim for the aerial surveillance prototype is a more productive and affordable system that would help with responding to emergencies and monitoring the environment, making the world safer.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-12",
+      "entities": [
+        "jolene",
+        "aerial-surveillance-project"
+      ],
+      "sourceTurns": [
+        "D17:11",
+        "D17:12"
+      ]
+    },
+    {
+      "text": "Deborah told Jolene on 12 August 2023 that she admired her ambition to make a difference, and Jolene said she would keep pushing and doing her best.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-12",
+      "entities": [
+        "deborah",
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D17:13",
+        "D17:14",
+        "D17:15"
+      ]
+    },
+    {
+      "text": "Jolene found it hard in August 2023 to juggle her engineering work, her relationship and her own growth, and asked Deborah on 16 August 2023 how she manages when it all becomes too much.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-16",
+      "entities": [
+        "jolene",
+        "jolene-partner",
+        "engineering-school",
+        "deborah"
+      ],
+      "sourceTurns": [
+        "D18:1",
+        "D18:2"
+      ]
+    },
+    {
+      "text": "Jolene had taken up several time-management strategies by 16 August 2023 and started using a bullet journal, which she found really helpful for tracking her tasks and staying organised.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-16",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D18:3",
+        "D18:4"
+      ]
+    },
+    {
+      "text": "Jolene finds it satisfying to cross tasks off her bullet journal list and keeps a favourite quote in her newest spread as a reminder to stick to her goals and never give up.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-16",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D18:5",
+        "D18:6",
+        "D18:7"
+      ]
+    },
+    {
+      "text": "Deborah led a meditation yoga session for the elderly at a local care home at sunset in the week before 16 August 2023.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-16",
+      "entities": [
+        "deborah",
+        "meditation",
+        "yoga",
+        "deborah-yoga-classes"
+      ],
+      "sourceTurns": [
+        "D18:8"
+      ]
+    },
+    {
+      "text": "Jolene had not tried mindfulness by 16 August 2023 but was keen to give it a shot, wanting some of that calm to destress.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-16",
+      "entities": [
+        "jolene",
+        "meditation"
+      ],
+      "sourceTurns": [
+        "D18:9"
+      ]
+    },
+    {
+      "text": "Deborah came to mindfulness through workshops and books, and by August 2023 it was a huge part of her life.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-16",
+      "entities": [
+        "deborah",
+        "meditation"
+      ],
+      "sourceTurns": [
+        "D18:10"
+      ]
+    },
+    {
+      "text": "Deborah offered on 16 August 2023 to help Jolene get started with mindfulness, and Jolene said she would look into it and come back if she needed anything.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-16",
+      "entities": [
+        "deborah",
+        "jolene",
+        "meditation"
+      ],
+      "sourceTurns": [
+        "D18:11",
+        "D18:12",
+        "D18:13",
+        "D18:14",
+        "D18:15"
+      ]
+    },
+    {
+      "text": "Deborah told Anna the story of her life on 18 August 2023 and Anna was very kind about it; Deborah valued the meaningful connection it made.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-19",
+      "entities": [
+        "deborah",
+        "anna"
+      ],
+      "chrono": [
+        "deborah-tells-anna-life-story"
+      ],
+      "sourceTurns": [
+        "D19:1"
+      ]
+    },
+    {
+      "text": "Jolene bought a games console as a gift for her partner on 17 August 2023, and both of them enjoyed it while her engineering studies carried on alongside.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-19",
+      "entities": [
+        "jolene",
+        "jolene-partner",
+        "gaming",
+        "engineering-school"
+      ],
+      "chrono": [
+        "console-gift"
+      ],
+      "sourceTurns": [
+        "D19:2"
+      ]
+    },
+    {
+      "text": "Deborah was focusing on teaching yoga and spending time with her community in August 2023.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-19",
+      "entities": [
+        "deborah",
+        "yoga",
+        "deborah-yoga-classes"
+      ],
+      "sourceTurns": [
+        "D19:3"
+      ]
+    },
+    {
+      "text": "Deborah organised a yoga event in July 2023 by reaching out to nearby businesses and places; it had yoga, food stalls and live music.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-19",
+      "entities": [
+        "deborah",
+        "deborah-yoga-classes",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D19:4",
+        "D19:5"
+      ]
+    },
+    {
+      "text": "Deborah's advice on 19 August 2023 for balancing hobbies and studies was to prioritise, manage time effectively and make a schedule with specific time set aside for studying and for hobbies, and Jolene said she would make such a plan.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-19",
+      "entities": [
+        "deborah",
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D19:5",
+        "D19:6"
+      ]
+    },
+    {
+      "text": "Deborah used to play video games as a way to relax after a busy day but had not played for a while as of 19 August 2023.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-19",
+      "entities": [
+        "deborah",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D19:7"
+      ]
+    },
+    {
+      "text": "Jolene recommended Zelda: Breath of the Wild for the Switch and Animal Crossing: New Horizons to Deborah on 19 August 2023, and said she could not pick a single favourite game.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-19",
+      "entities": [
+        "jolene",
+        "deborah",
+        "zelda-botw",
+        "animal-crossing-nh",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D19:8",
+        "D19:9"
+      ]
+    },
+    {
+      "text": "Jolene and her partner often play 'Overcooked 2' for bets, and she once won three large pizzas off him.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-19",
+      "entities": [
+        "jolene",
+        "jolene-partner",
+        "overcooked-2",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D19:10"
+      ]
+    },
+    {
+      "text": "Deborah used to play video games with her husband, taking turns, as a way to bond and make memories; detective games are the ones they preferred.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-19",
+      "entities": [
+        "deborah",
+        "deborah-husband",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D19:11",
+        "D19:12",
+        "D19:13"
+      ]
+    },
+    {
+      "text": "Deborah and her husband also enjoyed spending time outdoors and exploring nature together, which she found refreshing.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-19",
+      "entities": [
+        "deborah",
+        "deborah-husband"
+      ],
+      "sourceTurns": [
+        "D19:14",
+        "D19:15",
+        "D19:16"
+      ]
+    },
+    {
+      "text": "Deborah loves a park near her house with a forest trail and a beach, a peaceful spot where she does yoga and reflects, and which holds a bench with special meaning for her.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-19",
+      "entities": [
+        "deborah",
+        "local-park",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D19:17",
+        "D19:18"
+      ]
+    },
+    {
+      "text": "The bench in the park near Deborah's house holds memories of her and her mother, who used to come there together to chat about dreams and life.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-19",
+      "entities": [
+        "deborah",
+        "deborah-mother",
+        "local-park"
+      ],
+      "sourceTurns": [
+        "D19:19",
+        "D19:20"
+      ]
+    },
+    {
+      "text": "Deborah's most cherished memory of the park bench is a beautiful sunset she and her mother watched together in silence, and going back there fills her with peace and gratitude for the time they had.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-19",
+      "entities": [
+        "deborah",
+        "deborah-mother",
+        "local-park"
+      ],
+      "sourceTurns": [
+        "D19:21",
+        "D19:22",
+        "D19:23",
+        "D19:24"
+      ]
+    },
+    {
+      "text": "Jolene and her partner were given a new console game, 'Battlefield 1', in the week before 21 August 2023.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-21",
+      "entities": [
+        "jolene",
+        "jolene-partner",
+        "battlefield-1",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D20:1"
+      ]
+    },
+    {
+      "text": "Deborah went around 21 August 2023 to a place full of memories and sat on the bench where she and her mother used to chat, which brought back a mix of nostalgia, longing and gratitude; she brought flowers there.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-21",
+      "entities": [
+        "deborah",
+        "deborah-mother",
+        "local-park"
+      ],
+      "sourceTurns": [
+        "D20:2",
+        "D20:3",
+        "D20:4"
+      ]
+    },
+    {
+      "text": "Deborah's mother really loved flowers, which always made her happy, and she appreciated the simple things in life.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-21",
+      "entities": [
+        "deborah",
+        "deborah-mother"
+      ],
+      "sourceTurns": [
+        "D20:5",
+        "D20:6",
+        "D20:7"
+      ]
+    },
+    {
+      "text": "Deborah's mother taught her to appreciate simple things by taking it slow, seeing the beauty in them and finding joy.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-21",
+      "entities": [
+        "deborah",
+        "deborah-mother"
+      ],
+      "sourceTurns": [
+        "D20:8",
+        "D20:9",
+        "D20:10"
+      ]
+    },
+    {
+      "text": "Jolene was doing more yoga and meditation in August 2023 to help her relax and stay focused.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-21",
+      "entities": [
+        "jolene",
+        "yoga",
+        "meditation"
+      ],
+      "sourceTurns": [
+        "D20:11"
+      ]
+    },
+    {
+      "text": "Deborah's calming habits, named on 21 August 2023, are yoga, meditation, going out for walks and staying mindful, and she photographs what she sees on her walks.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-21",
+      "entities": [
+        "deborah",
+        "yoga",
+        "meditation"
+      ],
+      "sourceTurns": [
+        "D20:12",
+        "D20:13",
+        "D20:14"
+      ]
+    },
+    {
+      "text": "Deborah describes the calm of her walks as a reboot that leaves her recharged and thinking clearly.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-21",
+      "entities": [
+        "deborah"
+      ],
+      "sourceTurns": [
+        "D20:15",
+        "D20:16",
+        "D20:17"
+      ]
+    },
+    {
+      "text": "Jolene's favourite yoga pose for rest is savasana, the corpse pose, which she finds calming and a way to let go and surrender.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-21",
+      "entities": [
+        "jolene",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D20:18",
+        "D20:19",
+        "D20:20"
+      ]
+    },
+    {
+      "text": "Jolene had been doing yoga for three years as of 21 August 2023 and uses it to escape the stress of studying and work; she said she was finding her zen again.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-21",
+      "entities": [
+        "jolene",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D20:21",
+        "D20:22",
+        "D20:23",
+        "D20:24",
+        "D20:25",
+        "D20:26"
+      ]
+    },
+    {
+      "text": "Deborah went to a yoga retreat near her mother's place in the week before 24 August 2023, spent time in nature and got to know herself; she called it life-changing.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-24",
+      "entities": [
+        "deborah",
+        "yoga",
+        "mothers-house"
+      ],
+      "sourceTurns": [
+        "D21:1",
+        "D21:2"
+      ]
+    },
+    {
+      "text": "Deborah said on 24 August 2023 that nature and self-reflection had made her life feel meaningful and had shown her how beautiful every moment is, and that we grow and learn by listening to ourselves.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-24",
+      "entities": [
+        "deborah"
+      ],
+      "sourceTurns": [
+        "D21:3"
+      ]
+    },
+    {
+      "text": "Jolene described her life as hectic in August 2023 but said she was making strides towards her goals, which was tough but satisfying.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-24",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D21:4",
+        "D21:5"
+      ]
+    },
+    {
+      "text": "Jolene's goal is to be successful in engineering and make a positive impact, and she had been studying, attending workshops and networking to get there.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-24",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D21:6"
+      ]
+    },
+    {
+      "text": "Jolene presented at a virtual conference shortly before 24 August 2023 and received positive feedback, which she found thrilling and rewarding and which confirmed to her that she was on the right track.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-24",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D21:6",
+        "D21:7"
+      ]
+    },
+    {
+      "text": "Jolene was focusing on studying and gaining experience as of 24 August 2023 and was thinking about doing more internships to enhance her skills.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-24",
+      "entities": [
+        "jolene",
+        "engineering-school"
+      ],
+      "sourceTurns": [
+        "D21:8",
+        "D21:9"
+      ]
+    },
+    {
+      "text": "Deborah told Jolene on 24 August 2023 that she was proud of everything she had achieved and urged her to reach for her goals while enjoying the journey as much as the destination, and Jolene said she would take the advice.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-24",
+      "entities": [
+        "deborah",
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D21:10",
+        "D21:11",
+        "D21:12",
+        "D21:13",
+        "D21:14",
+        "D21:15",
+        "D21:16",
+        "D21:17"
+      ]
+    },
+    {
+      "text": "Deborah had been thinking about her mother's influence in late August 2023, and said that remembering the people we love is important.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-26",
+      "entities": [
+        "deborah",
+        "deborah-mother"
+      ],
+      "sourceTurns": [
+        "D22:1",
+        "D22:2"
+      ]
+    },
+    {
+      "text": "Jolene and her partner talked on 25 August 2023 about how their loved ones had influenced them and what those people's values meant to them; the conversation was emotional and made the two of them feel closer.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-26",
+      "entities": [
+        "jolene",
+        "jolene-partner"
+      ],
+      "chrono": [
+        "values-conversation"
+      ],
+      "sourceTurns": [
+        "D22:2",
+        "D22:3"
+      ]
+    },
+    {
+      "text": "Jolene's mother always told her never to give up and her partner's father taught him to stay determined; both sets of values still push the couple towards their goals, Jolene in engineering and her partner in creative work.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-26",
+      "entities": [
+        "jolene",
+        "jolene-mother",
+        "jolene-partner"
+      ],
+      "sourceTurns": [
+        "D22:4",
+        "D22:5"
+      ]
+    },
+    {
+      "text": "Jolene wants to use her engineering talents to do good and solve important problems, and holds on to her mother's teaching about the value of helping others as a guide for her projects.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-26",
+      "entities": [
+        "jolene",
+        "jolene-mother"
+      ],
+      "sourceTurns": [
+        "D22:6",
+        "D22:7"
+      ]
+    },
+    {
+      "text": "Jolene's stated ambition on 26 August 2023 was to work on projects that make a real difference to communities, on sustainable initiatives and innovative solutions to environmental issues, and with organisations focused on social causes.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-26",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D22:8",
+        "D22:9"
+      ]
+    },
+    {
+      "text": "The two projects Jolene was keenest on in August 2023 were developing renewable energy such as solar to reduce communities' dependence on non-renewables, and finding ways to supply clean water to those with limited access; both align with her beliefs about sustainability and helping those in need, and she still had much to figure out before starting.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-26",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D22:10",
+        "D22:11",
+        "D22:12",
+        "D22:13"
+      ]
+    },
+    {
+      "text": "Deborah's advice to Jolene on 26 August 2023 for staying relaxed while studying was to take breaks, stretch or do yoga, go for a walk, get enough sleep and make time for self-care.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-26",
+      "entities": [
+        "deborah",
+        "jolene",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D22:14",
+        "D22:15"
+      ]
+    },
+    {
+      "text": "Jolene had shared her newfound love of yoga with her partner by 26 August 2023, and the two were planning to go on a meditation retreat together to deepen their practice.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-26",
+      "entities": [
+        "jolene",
+        "jolene-partner",
+        "yoga",
+        "meditation"
+      ],
+      "sourceTurns": [
+        "D22:16",
+        "D22:17"
+      ]
+    },
+    {
+      "text": "Jolene's snakes like watching her while she practises yoga, and she counts them good company that brings a sense of calm.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-26",
+      "entities": [
+        "jolene",
+        "susie",
+        "seraphim",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D22:18",
+        "D22:19"
+      ]
+    },
+    {
+      "text": "Deborah's two cats are named Luna and Max, and she says they bring a lot of joy and peace to her home.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-26",
+      "entities": [
+        "deborah",
+        "luna",
+        "max"
+      ],
+      "sourceTurns": [
+        "D22:19",
+        "D22:20",
+        "D22:21",
+        "D22:22"
+      ]
+    },
+    {
+      "text": "Max was originally the cat of Deborah's mother, and Deborah took him in when her mother died.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-26",
+      "entities": [
+        "deborah",
+        "max",
+        "deborah-mother"
+      ],
+      "sourceTurns": [
+        "D22:23",
+        "D22:24"
+      ]
+    },
+    {
+      "text": "Deborah took Luna from a shelter, because she loves cats and believes they need a home, love and care.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-26",
+      "entities": [
+        "deborah",
+        "luna"
+      ],
+      "sourceTurns": [
+        "D22:25",
+        "D22:26",
+        "D22:27"
+      ]
+    },
+    {
+      "text": "Max was eight years old in August 2023 and Luna, the younger of Deborah's two cats, was five.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-26",
+      "entities": [
+        "deborah",
+        "luna",
+        "max"
+      ],
+      "sourceTurns": [
+        "D22:27",
+        "D22:28",
+        "D22:29",
+        "D22:30"
+      ]
+    },
+    {
+      "text": "Jolene and her partner got back on 29 August 2023 from a trip to Rio de Janeiro, where they tried out some local yoga classes.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-30",
+      "entities": [
+        "jolene",
+        "jolene-partner",
+        "rio-de-janeiro",
+        "yoga"
+      ],
+      "chrono": [
+        "rio-trip-return"
+      ],
+      "sourceTurns": [
+        "D23:1",
+        "D23:2"
+      ]
+    },
+    {
+      "text": "The trip to Rio de Janeiro showed Jolene different kinds of yoga and their backgrounds, which deepened her appreciation of the practice, and she and her partner visited a lot of delicious cafes there.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-30",
+      "entities": [
+        "jolene",
+        "jolene-partner",
+        "rio-de-janeiro",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D23:3"
+      ]
+    },
+    {
+      "text": "Deborah visited her mother's house in July 2023; the house holds a special place in her heart as a symbol of her mother's strength and the love she shared, despite the good and bad times she had there, and Deborah photographed her husband in front of it.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-30",
+      "entities": [
+        "deborah",
+        "deborah-mother",
+        "deborah-husband",
+        "mothers-house"
+      ],
+      "sourceTurns": [
+        "D23:4",
+        "D23:5",
+        "D23:6"
+      ]
+    },
+    {
+      "text": "Relaxing outside her mother's house brought back fond memories for Deborah, and she counts it a place where she can find peace.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-30",
+      "entities": [
+        "deborah",
+        "mothers-house"
+      ],
+      "sourceTurns": [
+        "D23:7",
+        "D23:8"
+      ]
+    },
+    {
+      "text": "Jolene goes to a nearby tranquil spot with a pond to meditate; it helps her make sense of everything and relieves her stress, like a restart.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-30",
+      "entities": [
+        "jolene",
+        "meditation"
+      ],
+      "sourceTurns": [
+        "D23:9",
+        "D23:10",
+        "D23:11"
+      ]
+    },
+    {
+      "text": "One of Deborah's favourite spots to ponder and let things go is a lake with a few trees standing in the water, which she picked for its soothing vibes and views.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-30",
+      "entities": [
+        "deborah"
+      ],
+      "sourceTurns": [
+        "D23:12",
+        "D23:13",
+        "D23:14"
+      ]
+    },
+    {
+      "text": "Jolene and her partner went on many excursions in Rio de Janeiro, among them a visit to an old temple with striking stairs.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-30",
+      "entities": [
+        "jolene",
+        "jolene-partner",
+        "rio-de-janeiro"
+      ],
+      "sourceTurns": [
+        "D23:15",
+        "D23:16",
+        "D23:17"
+      ]
+    },
+    {
+      "text": "Deborah visited Rio de Janeiro around 2020 and photographed a large stone structure with a mountain behind it on one of the excursions.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-30",
+      "entities": [
+        "deborah",
+        "rio-de-janeiro"
+      ],
+      "sourceTurns": [
+        "D23:18",
+        "D23:19"
+      ]
+    },
+    {
+      "text": "Deborah finds exploring historical places and learning their stories fun, and called visiting them in Rio de Janeiro a great experience.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-30",
+      "entities": [
+        "deborah",
+        "rio-de-janeiro"
+      ],
+      "sourceTurns": [
+        "D23:20"
+      ]
+    },
+    {
+      "text": "Deborah keeps a handwritten paper from a friend who has since died and can never support her again; the quote on it reads 'Let go of what no longer serves you.'",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-30",
+      "entities": [
+        "deborah"
+      ],
+      "sourceTurns": [
+        "D23:21",
+        "D23:22"
+      ]
+    },
+    {
+      "text": "Jolene keeps an inspiring quote in her notebook and found another while browsing that she took as a reminder to ditch the negative and focus on growing and being positive.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-30",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D23:23",
+        "D23:24",
+        "D23:25",
+        "D23:26"
+      ]
+    },
+    {
+      "text": "Jolene got a new plant at the end of August 2023 as a reminder to nurture herself and embrace fresh starts.",
+      "speaker": "Jolene",
+      "statedOn": "2023-08-30",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D23:27",
+        "D23:28",
+        "D23:29",
+        "D23:30",
+        "D23:31",
+        "D23:32"
+      ]
+    },
+    {
+      "text": "Deborah's mourning for her mother runs through 2023 as a series of returns to particular places and objects: the bench by the window of her mother's house, the spot by the water where she brings her mother's amulet, the park bench where the two of them talked about dreams and life, and the flowers she carried there in August 2023.",
+      "speaker": "Deborah",
+      "statedOn": "2023-08-21",
+      "entities": [
+        "deborah",
+        "deborah-mother",
+        "mothers-house",
+        "local-park",
+        "deborah-amulet"
+      ],
+      "sourceTurns": [
+        "D1:7",
+        "D4:36",
+        "D19:19",
+        "D20:4"
+      ]
+    },
+    {
+      "text": "Deborah went to an event whose aim was for people to support each other in the week before 3 September 2023 and found it inspiring.",
+      "speaker": "Deborah",
+      "statedOn": "2023-09-03",
+      "entities": [
+        "deborah"
+      ],
+      "sourceTurns": [
+        "D24:1"
+      ]
+    },
+    {
+      "text": "Jolene was focusing on her studies and on her relationship in early September 2023, and she and her partner were taking little trips to the beach to relax.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-03",
+      "entities": [
+        "jolene",
+        "jolene-partner",
+        "engineering-school"
+      ],
+      "sourceTurns": [
+        "D24:2"
+      ]
+    },
+    {
+      "text": "Deborah went to a community meetup on 1 September 2023 where people shared stories; it left her feeling how connected they all are and thinking about how important relationships are.",
+      "speaker": "Deborah",
+      "statedOn": "2023-09-03",
+      "entities": [
+        "deborah"
+      ],
+      "chrono": [
+        "community-meetup"
+      ],
+      "sourceTurns": [
+        "D24:3"
+      ]
+    },
+    {
+      "text": "Jolene said on 3 September 2023 that she was thankful for her partner, who encourages her goals.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-03",
+      "entities": [
+        "jolene",
+        "jolene-partner"
+      ],
+      "sourceTurns": [
+        "D24:4"
+      ]
+    },
+    {
+      "text": "Deborah calls her yoga friends a second family who have held each other up through a lot; she also found an old photograph from when she first started doing yoga, a time when her mother was her biggest fan and would often come to her classes with her.",
+      "speaker": "Deborah",
+      "statedOn": "2023-09-03",
+      "entities": [
+        "deborah",
+        "deborah-mother",
+        "deborah-yoga-classes",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D24:5"
+      ]
+    },
+    {
+      "text": "Jolene's parents gave her a games console when she was ten, and that was the start of her passion for video games.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-03",
+      "entities": [
+        "jolene",
+        "jolene-mother",
+        "jolene-father",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D24:6",
+        "D24:7"
+      ]
+    },
+    {
+      "text": "Jolene taught herself to play video games; her father was always supportive of it and her mother would play games with her.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-03",
+      "entities": [
+        "jolene",
+        "jolene-mother",
+        "jolene-father",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D24:8",
+        "D24:9"
+      ]
+    },
+    {
+      "text": "Jolene's favourite game to play with her mother was 'Monster Hunter: World', which she praises for its immersive story and open world; gaming is her way to de-stress and take a break from life.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-03",
+      "entities": [
+        "jolene",
+        "jolene-mother",
+        "monster-hunter-world",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D24:10",
+        "D24:11",
+        "D24:12"
+      ]
+    },
+    {
+      "text": "Jolene had a lot of finals coming up in September 2023 and had been studying hard; she found it stressful and was thinking about taking a trip somewhere to relax and recharge afterwards.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-03",
+      "entities": [
+        "jolene",
+        "engineering-school"
+      ],
+      "sourceTurns": [
+        "D24:13",
+        "D24:14",
+        "D24:15"
+      ]
+    },
+    {
+      "text": "Jolene signed up on 6 September 2023 for a meditation course at a retreat near a lake, excited to share the experience with her partner and learn new techniques.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-06",
+      "entities": [
+        "jolene",
+        "jolene-partner",
+        "meditation"
+      ],
+      "chrono": [
+        "meditation-course-signup"
+      ],
+      "sourceTurns": [
+        "D25:1",
+        "D25:2"
+      ]
+    },
+    {
+      "text": "Deborah and Jolene agreed on 6 September 2023 that meditation makes a big difference to their health: Deborah said it had become part of her routine and she could not imagine life without it, and Jolene said it helps her stay balanced during her studies.",
+      "speaker": "Deborah",
+      "statedOn": "2023-09-06",
+      "entities": [
+        "deborah",
+        "jolene",
+        "meditation"
+      ],
+      "sourceTurns": [
+        "D25:3",
+        "D25:4",
+        "D25:5"
+      ]
+    },
+    {
+      "text": "Jolene's project was tough in early September 2023 but she was chugging along with it.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-06",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D25:6",
+        "D25:7"
+      ]
+    },
+    {
+      "text": "Deborah told Jolene on 6 September 2023 that she was strong for handling all her challenges, and offered to be there if she needed her.",
+      "speaker": "Deborah",
+      "statedOn": "2023-09-06",
+      "entities": [
+        "deborah",
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D25:8",
+        "D25:9",
+        "D25:10"
+      ]
+    },
+    {
+      "text": "Deborah saw and photographed a wonderful sunrise in early September 2023.",
+      "speaker": "Deborah",
+      "statedOn": "2023-09-06",
+      "entities": [
+        "deborah"
+      ],
+      "sourceTurns": [
+        "D25:11",
+        "D25:12"
+      ]
+    },
+    {
+      "text": "Jolene finds beach walks relaxing, and Deborah's sunrise photograph reminded her of her last beach getaway.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-06",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D25:13",
+        "D25:14",
+        "D25:15",
+        "D25:16"
+      ]
+    },
+    {
+      "text": "Jolene and Deborah said on 6 September 2023 that they hoped to watch a sunrise together one day.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-06",
+      "entities": [
+        "jolene",
+        "deborah"
+      ],
+      "sourceTurns": [
+        "D25:17",
+        "D25:18",
+        "D25:19",
+        "D25:20"
+      ]
+    },
+    {
+      "text": "A storm forced Deborah to cancel her yoga getaway in the week before 8 September 2023; she was bummed about it but found comfort in her work and in spending time at home.",
+      "speaker": "Deborah",
+      "statedOn": "2023-09-08",
+      "entities": [
+        "deborah",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D26:1",
+        "D26:2",
+        "D26:3"
+      ]
+    },
+    {
+      "text": "Jolene and her partner were planning a camping trip in September 2023 to connect with nature and practise yoga.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-08",
+      "entities": [
+        "jolene",
+        "jolene-partner",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D26:4"
+      ]
+    },
+    {
+      "text": "Jolene keeps to a routine with a schedule for classes, studying and personal time, and uses self-care activities like yoga and meditation to stay balanced; it took some experimenting to arrive at.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-08",
+      "entities": [
+        "jolene",
+        "yoga",
+        "meditation",
+        "engineering-school"
+      ],
+      "sourceTurns": [
+        "D26:5",
+        "D26:6",
+        "D26:7",
+        "D26:8"
+      ]
+    },
+    {
+      "text": "Deborah proposed a coffee date on 8 September 2023 so that Jolene could explain in person how she organises her time.",
+      "speaker": "Deborah",
+      "statedOn": "2023-09-08",
+      "entities": [
+        "deborah",
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D26:9"
+      ]
+    },
+    {
+      "key": "coffee-date-monday",
+      "text": "Jolene first suggested on 8 September 2023 that she and Deborah meet at a cafe on Monday 11 September 2023 to try the fresh pastries.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-08",
+      "superseded": true,
+      "entities": [
+        "jolene",
+        "deborah"
+      ],
+      "sourceTurns": [
+        "D26:10",
+        "D26:11"
+      ]
+    },
+    {
+      "key": "coffee-date-wednesday",
+      "text": "Jolene then proposed that she and Deborah hold their coffee date on Wednesday 13 September 2023 at 4.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-08",
+      "superseded": true,
+      "entities": [
+        "jolene",
+        "deborah"
+      ],
+      "sourceTurns": [
+        "D26:12"
+      ]
+    },
+    {
+      "text": "Deborah described a hidden coffee shop near her on 8 September 2023, and Jolene asked to hear more about it when they met, hoping to go there another time.",
+      "speaker": "Deborah",
+      "statedOn": "2023-09-08",
+      "entities": [
+        "deborah",
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D26:13",
+        "D26:14"
+      ]
+    },
+    {
+      "text": "Deborah had to withdraw from the Wednesday coffee date because she already had plans that day, and Jolene said she would look for a more convenient time.",
+      "speaker": "Deborah",
+      "statedOn": "2023-09-08",
+      "entities": [
+        "deborah",
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D26:15",
+        "D26:16",
+        "D26:17"
+      ]
+    },
+    {
+      "key": "coffee-date-friday",
+      "text": "Deborah and Jolene settled on Friday 15 September 2023 at 5 for their coffee date, once Jolene had sorted out the books from her bookcase; Deborah asked her to bring some interesting books along.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-08",
+      "entities": [
+        "jolene",
+        "deborah"
+      ],
+      "chrono": [
+        "coffee-date-plan"
+      ],
+      "sourceTurns": [
+        "D26:18",
+        "D26:19",
+        "D26:20",
+        "D26:21"
+      ]
+    },
+    {
+      "text": "Jolene and her partner travelled over the weekend of 9 September 2023 to a meditation retreat in Phuket for a few weeks; the nature, reflection and break from her engineering studies were amazing and helped her find inner peace.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-12",
+      "entities": [
+        "jolene",
+        "jolene-partner",
+        "phuket",
+        "meditation",
+        "engineering-school"
+      ],
+      "chrono": [
+        "phuket-retreat-departure"
+      ],
+      "sourceTurns": [
+        "D27:1",
+        "D27:2"
+      ]
+    },
+    {
+      "text": "At the Phuket retreat Jolene reflected on what makes her happy and realised the importance of building relaxation, self-care and balance into her life alongside her engineering studies; she found the beauty of the nature there inspiring and refreshing.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-12",
+      "entities": [
+        "jolene",
+        "phuket",
+        "meditation"
+      ],
+      "sourceTurns": [
+        "D27:3",
+        "D27:4"
+      ]
+    },
+    {
+      "text": "The session that stood out most to Jolene at the Phuket retreat was about releasing expectations and judgments and savouring the present — a reminder not to dwell on the finish line, since she usually gets too consumed with hitting her goals to appreciate the ride.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-12",
+      "entities": [
+        "jolene",
+        "phuket",
+        "meditation"
+      ],
+      "sourceTurns": [
+        "D27:5",
+        "D27:6"
+      ]
+    },
+    {
+      "text": "Jolene said on 12 September 2023 that she was trying to be more mindful and grateful about small things such as the feeling of the sun or a good cup of coffee, and that she was experiencing a new level of joy and happiness.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-12",
+      "entities": [
+        "jolene",
+        "meditation"
+      ],
+      "sourceTurns": [
+        "D27:7",
+        "D27:8",
+        "D27:9",
+        "D27:10",
+        "D27:11"
+      ]
+    },
+    {
+      "text": "Deborah played a card game about cats in early September 2023 — one in which players take cards one by one from a deck and can attack an opponent with them — and could not remember its name, but promised to play it with Jolene when they meet.",
+      "speaker": "Deborah",
+      "statedOn": "2023-09-12",
+      "entities": [
+        "deborah",
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D27:12",
+        "D27:13"
+      ]
+    },
+    {
+      "text": "Deborah reconnected with her mother's old friends in early September 2023, and their stories moved her to tears and reminded her how lucky she was to have had her.",
+      "speaker": "Deborah",
+      "statedOn": "2023-09-15",
+      "entities": [
+        "deborah",
+        "deborah-mother"
+      ],
+      "sourceTurns": [
+        "D28:1",
+        "D28:2"
+      ]
+    },
+    {
+      "text": "Hearing her mother's old friends tell their stories was both happy and sad for Deborah, who learned things she had not heard before and got a glimpse of her mother's life beyond what she knew, which made her appreciate her more.",
+      "speaker": "Deborah",
+      "statedOn": "2023-09-15",
+      "entities": [
+        "deborah",
+        "deborah-mother"
+      ],
+      "sourceTurns": [
+        "D28:3",
+        "D28:4",
+        "D28:5"
+      ]
+    },
+    {
+      "text": "Deborah and her mother's old friends reminisced and looked through her mother's photographs together, which Deborah found sweet and which deepened her appreciation of the people she loves.",
+      "speaker": "Deborah",
+      "statedOn": "2023-09-15",
+      "entities": [
+        "deborah",
+        "deborah-mother"
+      ],
+      "sourceTurns": [
+        "D28:6",
+        "D28:7",
+        "D28:8",
+        "D28:9"
+      ]
+    },
+    {
+      "text": "The beach in Deborah's photographs is where she got married and where she discovered her love of surfing, and it is always filled with joy and peace for her.",
+      "speaker": "Deborah",
+      "statedOn": "2023-09-15",
+      "entities": [
+        "deborah",
+        "deborah-husband",
+        "surfing"
+      ],
+      "sourceTurns": [
+        "D28:10",
+        "D28:11",
+        "D28:12"
+      ]
+    },
+    {
+      "text": "Deborah teaches yoga classes on the beach, where the ocean, sand and fresh air make a relaxing atmosphere and the perfect way for her to take care of herself.",
+      "speaker": "Deborah",
+      "statedOn": "2023-09-15",
+      "entities": [
+        "deborah",
+        "yoga",
+        "deborah-yoga-classes"
+      ],
+      "sourceTurns": [
+        "D28:13",
+        "D28:14",
+        "D28:15"
+      ]
+    },
+    {
+      "text": "Jolene creates a serene yoga space with candles, essential oils and soft, soothing music, and tried a new style of meditation using flowers while in Thailand in September 2023.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-15",
+      "entities": [
+        "jolene",
+        "yoga",
+        "meditation",
+        "thailand"
+      ],
+      "sourceTurns": [
+        "D28:16",
+        "D28:17",
+        "D28:18",
+        "D28:19"
+      ]
+    },
+    {
+      "text": "Jolene says surroundings really affect mood and how much calm a routine gives, so creating a place that feels safe and chill is key.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-15",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D28:20",
+        "D28:21"
+      ]
+    },
+    {
+      "text": "Jolene's room is where she goes to relax after a busy day: her little haven for peace and rest.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-15",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D28:22",
+        "D28:23"
+      ]
+    },
+    {
+      "text": "Jolene had had her snake Susie for two years as of 15 September 2023, and calls her a great companion whose comfort makes life brighter.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-15",
+      "entities": [
+        "jolene",
+        "susie"
+      ],
+      "sourceTurns": [
+        "D28:24",
+        "D28:25",
+        "D28:26",
+        "D28:27",
+        "D28:28",
+        "D28:29",
+        "D28:30"
+      ]
+    },
+    {
+      "text": "Deborah and her neighbour Anna ran a free gardening class for the community on 16 September 2023, which people of every age joined.",
+      "speaker": "Deborah",
+      "statedOn": "2023-09-17",
+      "entities": [
+        "deborah",
+        "anna",
+        "gardening"
+      ],
+      "chrono": [
+        "gardening-class"
+      ],
+      "sourceTurns": [
+        "D29:1",
+        "D29:2"
+      ]
+    },
+    {
+      "text": "Deborah says gardening brings people together, and she was glad to share her love of plants and help people take care of the world.",
+      "speaker": "Deborah",
+      "statedOn": "2023-09-17",
+      "entities": [
+        "deborah",
+        "gardening"
+      ],
+      "sourceTurns": [
+        "D29:3"
+      ]
+    },
+    {
+      "text": "Jolene and her partner took a scuba diving lesson on 15 September 2023, had an awesome time and found a dive spot they can explore together; she hopes one day to be a certified diver.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-17",
+      "entities": [
+        "jolene",
+        "jolene-partner",
+        "scuba-diving"
+      ],
+      "chrono": [
+        "scuba-lesson"
+      ],
+      "sourceTurns": [
+        "D29:4"
+      ]
+    },
+    {
+      "text": "Deborah has been interested in underwater life but had never had the chance to try scuba diving as of 17 September 2023.",
+      "speaker": "Deborah",
+      "statedOn": "2023-09-17",
+      "entities": [
+        "deborah",
+        "scuba-diving"
+      ],
+      "sourceTurns": [
+        "D29:5"
+      ]
+    },
+    {
+      "text": "Deborah visited her mother's old house and sat on the bench there on 10 September 2023, a comforting experience in which she felt as though her mother's presence was guiding her and reminding her of her love.",
+      "speaker": "Deborah",
+      "statedOn": "2023-09-17",
+      "entities": [
+        "deborah",
+        "deborah-mother",
+        "mothers-house"
+      ],
+      "chrono": [
+        "deborah-mothers-house-visit"
+      ],
+      "sourceTurns": [
+        "D29:5",
+        "D29:6"
+      ]
+    },
+    {
+      "text": "Deborah's mother had a big passion for cooking and made amazing meals full of love and warmth; Deborah can still remember the smell of her special dish filling the house and bringing everyone together.",
+      "speaker": "Deborah",
+      "statedOn": "2023-09-17",
+      "entities": [
+        "deborah",
+        "deborah-mother"
+      ],
+      "sourceTurns": [
+        "D29:7",
+        "D29:8"
+      ]
+    },
+    {
+      "text": "Deborah's best memory of cooking with her mother is the pineapple birthday cakes her mother baked for her as a child, which always made her feel special.",
+      "speaker": "Deborah",
+      "statedOn": "2023-09-17",
+      "entities": [
+        "deborah",
+        "deborah-mother"
+      ],
+      "sourceTurns": [
+        "D29:9",
+        "D29:10",
+        "D29:11"
+      ]
+    },
+    {
+      "text": "Jolene used to bake cookies with someone close to her, and her favourite is the chocolate chip cookie for its warm, gooey chocolate and soft, buttery texture.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-17",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D29:12",
+        "D29:13",
+        "D29:14",
+        "D29:15"
+      ]
+    },
+    {
+      "text": "Jolene keeps a book that takes her to another world when she reads it.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-17",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D29:16",
+        "D29:17",
+        "D29:18"
+      ]
+    },
+    {
+      "text": "Deborah has a big bookshelf in her living room and values having a space for escaping reality and relaxing with a book.",
+      "speaker": "Deborah",
+      "statedOn": "2023-09-17",
+      "entities": [
+        "deborah"
+      ],
+      "sourceTurns": [
+        "D29:19",
+        "D29:20",
+        "D29:21"
+      ]
+    },
+    {
+      "text": "Jolene once read a self-discovery book in her bathroom, which she keeps with an aesthetic vibe, and the book really resonated with her.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-17",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D29:22",
+        "D29:23"
+      ]
+    },
+    {
+      "text": "Deborah had surfed by 17 September 2023 and had a photograph to prove it, while Jolene said she had never decided to try it.",
+      "speaker": "Deborah",
+      "statedOn": "2023-09-17",
+      "entities": [
+        "deborah",
+        "jolene",
+        "surfing"
+      ],
+      "sourceTurns": [
+        "D29:24",
+        "D29:25",
+        "D29:26"
+      ]
+    },
+    {
+      "text": "Deborah suggested on 17 September 2023 that she and Jolene try surfing together, and Jolene said she had only just started learning about it and had not yet gone.",
+      "speaker": "Deborah",
+      "statedOn": "2023-09-17",
+      "entities": [
+        "deborah",
+        "jolene",
+        "surfing"
+      ],
+      "sourceTurns": [
+        "D29:27",
+        "D29:28",
+        "D29:29",
+        "D29:30"
+      ]
+    },
+    {
+      "text": "Deborah and Jolene agreed on 17 September 2023 to go surfing together in October 2023, with Jolene to check her schedule and pick a time that suited them both.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-17",
+      "entities": [
+        "deborah",
+        "jolene",
+        "surfing"
+      ],
+      "sourceTurns": [
+        "D29:31",
+        "D29:32",
+        "D29:33",
+        "D29:34"
+      ]
+    },
+    {
+      "text": "Deborah had a great time at a music festival with her friends in September 2023; the dancing felt freeing and the music reminded her of her mother and the lullabies she used to sing to her.",
+      "speaker": "Deborah",
+      "statedOn": "2023-09-20",
+      "entities": [
+        "deborah",
+        "deborah-mother"
+      ],
+      "sourceTurns": [
+        "D30:1"
+      ]
+    },
+    {
+      "text": "Jolene went to a festival with her partner in 2022 and calls festivals her way of expressing herself and getting away from everyday stress.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-20",
+      "entities": [
+        "jolene",
+        "jolene-partner"
+      ],
+      "sourceTurns": [
+        "D30:2",
+        "D30:3"
+      ]
+    },
+    {
+      "text": "Jolene and her partner had just returned by 20 September 2023 from a yoga retreat in a peaceful place, where the sunrise lit up the whole sky during their practice and left them feeling alive and grateful.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-20",
+      "entities": [
+        "jolene",
+        "jolene-partner",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D30:4",
+        "D30:5",
+        "D30:6"
+      ]
+    },
+    {
+      "text": "Jolene once hiked with her partner and came across a waterfall oasis where everything felt peaceful and her worries disappeared.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-20",
+      "entities": [
+        "jolene",
+        "jolene-partner"
+      ],
+      "sourceTurns": [
+        "D30:7",
+        "D30:8"
+      ]
+    },
+    {
+      "text": "Jolene planned on 20 September 2023 to get out into nature again in October 2023.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-20",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D30:9",
+        "D30:10"
+      ]
+    },
+    {
+      "text": "There is a blossom tree near Deborah's home that she found magical to watch bloom every spring, like admiring nature's artwork; it filled her with awe and made her appreciate the beauty of life and the hope for growth even in tough times.",
+      "speaker": "Deborah",
+      "statedOn": "2023-09-20",
+      "entities": [
+        "deborah"
+      ],
+      "sourceTurns": [
+        "D30:11",
+        "D30:12",
+        "D30:13"
+      ]
+    },
+    {
+      "text": "Jolene photographed a plant growing out of the corner of a building as a reminder that she can keep growing through any obstacle, and Deborah said it captured resilience and strength.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-20",
+      "entities": [
+        "jolene"
+      ],
+      "sourceTurns": [
+        "D30:14",
+        "D30:15"
+      ]
+    },
+    {
+      "text": "Jolene and Deborah agreed on 20 September 2023 that appreciating small things helps them remember there is always something positive to hold on to when times are tough.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-20",
+      "entities": [
+        "jolene",
+        "deborah"
+      ],
+      "sourceTurns": [
+        "D30:16",
+        "D30:17",
+        "D30:18"
+      ]
+    },
+    {
+      "text": "Jolene's practice deepened across 2023, from yoga and meditation squeezed between engineering deadlines in February, through yoga on top of Mount Talkeetna in June and yoga classes in Rio de Janeiro in August, to signing up for a meditation course on 6 September 2023 and spending weeks at a meditation retreat in Phuket with her partner from 9 September 2023.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-12",
+      "entities": [
+        "jolene",
+        "yoga",
+        "meditation",
+        "jolene-partner",
+        "phuket"
+      ],
+      "sourceTurns": [
+        "D7:1",
+        "D13:15",
+        "D23:1",
+        "D25:1",
+        "D27:1"
+      ]
+    },
+    {
+      "text": "Jolene's interest in surfing went from gathering videos and a beginners' guide by 22 March 2023 to still not having tried it by 17 September 2023, when she and Deborah agreed to go together in October.",
+      "speaker": "Jolene",
+      "statedOn": "2023-09-17",
+      "entities": [
+        "jolene",
+        "deborah",
+        "surfing"
+      ],
+      "sourceTurns": [
+        "D10:20",
+        "D29:30",
+        "D29:34"
+      ]
+    },
+    {
+      "text": "Deborah's community work widened through 2023 from the yoga classes she teaches to a running group started with Anna by July, a funded community cleanup by August, a meditation yoga session for the elderly at a local care home, and a free gardening class for all ages on 16 September 2023.",
+      "speaker": "Deborah",
+      "statedOn": "2023-09-17",
+      "entities": [
+        "deborah",
+        "anna",
+        "running-group",
+        "community-cleanup-project",
+        "gardening",
+        "deborah-yoga-classes"
+      ],
+      "sourceTurns": [
+        "D15:1",
+        "D16:1",
+        "D18:8",
+        "D29:1"
+      ]
+    }
+  ]
+}
