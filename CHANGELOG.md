@@ -766,6 +766,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The recorder-start stamp could be skipped by an unrelated failure five statements earlier.** The
+  conversion pre-flight clamps its `since` to when this instance began recording, so an unstamped
+  instance reports the full retention window over a recorder it cannot vouch for — the defect `B-13`
+  was filed for, where a space of 270 chronos answered `count: 1`.
+
+  That was fixed once by moving the stamp out of `index.ts` into `startConfiguredInstanceServices`,
+  because a first-run instance never reaches the boot path. Correct, and not enough: it landed as the
+  **last of six statements inside one `try` whose `catch` only logs**. An index creation racing a Mongo
+  that is still coming up skips every statement after it — including the stamp — and says so in a line
+  nobody reads.
+
+  Caught by CI, intermittently, on a change that touched no server code at all. The stamp now sits
+  outside that block; it needs no net of its own, because it already never throws, and what it needed
+  was not to be downstream of five unrelated things inside somebody else's. A gate asserts the
+  POSITION rather than the behaviour, and also that nothing else was hoisted out with it — the other
+  five failures MUST stay tolerated, or a slow database takes the boot down.
+
 - **A tracker row said the graded benchmark harness exists. It was deleted eight weeks ago** (`B-2`).
   The row opened *"it is a DECISION rather than a build: the harness exists (`benchmarks/harness/` —
   dataset, ingest, retrieve, grade, report, pins)"*, and there is no such directory: `#1282` removed 56
