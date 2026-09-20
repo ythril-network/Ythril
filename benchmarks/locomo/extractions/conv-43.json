@@ -1,0 +1,6340 @@
+{
+  "conversationId": "conv-43",
+  "sessions": [
+    {
+      "date": "2023-05-21",
+      "turns": [
+        "D1:1",
+        "D1:2",
+        "D1:3",
+        "D1:4",
+        "D1:5",
+        "D1:6",
+        "D1:7",
+        "D1:8",
+        "D1:9",
+        "D1:10",
+        "D1:11",
+        "D1:12",
+        "D1:13",
+        "D1:14",
+        "D1:15",
+        "D1:16",
+        "D1:17",
+        "D1:18",
+        "D1:19",
+        "D1:20"
+      ]
+    },
+    {
+      "date": "2023-06-15",
+      "turns": [
+        "D2:1",
+        "D2:2",
+        "D2:3",
+        "D2:4",
+        "D2:5",
+        "D2:6",
+        "D2:7",
+        "D2:8",
+        "D2:9",
+        "D2:10",
+        "D2:11",
+        "D2:12",
+        "D2:13",
+        "D2:14",
+        "D2:15",
+        "D2:16",
+        "D2:17",
+        "D2:18",
+        "D2:19"
+      ]
+    },
+    {
+      "date": "2023-07-16",
+      "turns": [
+        "D3:1",
+        "D3:2",
+        "D3:3",
+        "D3:4",
+        "D3:5",
+        "D3:6",
+        "D3:7",
+        "D3:8",
+        "D3:9",
+        "D3:10",
+        "D3:11",
+        "D3:12",
+        "D3:13",
+        "D3:14",
+        "D3:15",
+        "D3:16",
+        "D3:17",
+        "D3:18",
+        "D3:19",
+        "D3:20",
+        "D3:21",
+        "D3:22",
+        "D3:23",
+        "D3:24",
+        "D3:25",
+        "D3:26",
+        "D3:27",
+        "D3:28",
+        "D3:29",
+        "D3:30",
+        "D3:31",
+        "D3:32",
+        "D3:33",
+        "D3:34",
+        "D3:35"
+      ]
+    },
+    {
+      "date": "2023-08-02",
+      "turns": [
+        "D4:1",
+        "D4:2",
+        "D4:3",
+        "D4:4",
+        "D4:5",
+        "D4:6",
+        "D4:7",
+        "D4:8",
+        "D4:9",
+        "D4:10",
+        "D4:11",
+        "D4:12",
+        "D4:13",
+        "D4:14",
+        "D4:15"
+      ]
+    },
+    {
+      "date": "2023-08-09",
+      "turns": [
+        "D5:1",
+        "D5:2",
+        "D5:3",
+        "D5:4",
+        "D5:5",
+        "D5:6",
+        "D5:7",
+        "D5:8",
+        "D5:9",
+        "D5:10",
+        "D5:11",
+        "D5:12",
+        "D5:13",
+        "D5:14",
+        "D5:15",
+        "D5:16",
+        "D5:17",
+        "D5:18",
+        "D5:19",
+        "D5:20"
+      ]
+    },
+    {
+      "date": "2023-08-11",
+      "turns": [
+        "D6:1",
+        "D6:2",
+        "D6:3",
+        "D6:4",
+        "D6:5",
+        "D6:6",
+        "D6:7",
+        "D6:8",
+        "D6:9",
+        "D6:10",
+        "D6:11",
+        "D6:12",
+        "D6:13",
+        "D6:14",
+        "D6:15",
+        "D6:16",
+        "D6:17",
+        "D6:18",
+        "D6:19",
+        "D6:20",
+        "D6:21",
+        "D6:22",
+        "D6:23"
+      ]
+    },
+    {
+      "date": "2023-08-17",
+      "turns": [
+        "D7:1",
+        "D7:2",
+        "D7:3",
+        "D7:4",
+        "D7:5",
+        "D7:6",
+        "D7:7",
+        "D7:8",
+        "D7:9",
+        "D7:10",
+        "D7:11",
+        "D7:12",
+        "D7:13",
+        "D7:14",
+        "D7:15",
+        "D7:16"
+      ]
+    },
+    {
+      "date": "2023-08-21",
+      "turns": [
+        "D8:1",
+        "D8:2",
+        "D8:3",
+        "D8:4",
+        "D8:5",
+        "D8:6",
+        "D8:7",
+        "D8:8",
+        "D8:9",
+        "D8:10",
+        "D8:11",
+        "D8:12",
+        "D8:13",
+        "D8:14",
+        "D8:15",
+        "D8:16",
+        "D8:17",
+        "D8:18",
+        "D8:19",
+        "D8:20",
+        "D8:21",
+        "D8:22",
+        "D8:23",
+        "D8:24",
+        "D8:25",
+        "D8:26",
+        "D8:27",
+        "D8:28",
+        "D8:29",
+        "D8:30",
+        "D8:31",
+        "D8:32",
+        "D8:33",
+        "D8:34",
+        "D8:35",
+        "D8:36",
+        "D8:37"
+      ]
+    },
+    {
+      "date": "2023-08-26",
+      "turns": [
+        "D9:1",
+        "D9:2",
+        "D9:3",
+        "D9:4",
+        "D9:5",
+        "D9:6",
+        "D9:7",
+        "D9:8",
+        "D9:9",
+        "D9:10",
+        "D9:11",
+        "D9:12",
+        "D9:13",
+        "D9:14",
+        "D9:15"
+      ]
+    },
+    {
+      "date": "2023-08-31",
+      "turns": [
+        "D10:1",
+        "D10:2",
+        "D10:3",
+        "D10:4",
+        "D10:5",
+        "D10:6",
+        "D10:7",
+        "D10:8",
+        "D10:9",
+        "D10:10",
+        "D10:11",
+        "D10:12",
+        "D10:13",
+        "D10:14",
+        "D10:15",
+        "D10:16",
+        "D10:17"
+      ]
+    },
+    {
+      "date": "2023-09-21",
+      "turns": [
+        "D11:1",
+        "D11:2",
+        "D11:3",
+        "D11:4",
+        "D11:5",
+        "D11:6",
+        "D11:7",
+        "D11:8",
+        "D11:9",
+        "D11:10",
+        "D11:11",
+        "D11:12",
+        "D11:13",
+        "D11:14",
+        "D11:15",
+        "D11:16",
+        "D11:17",
+        "D11:18",
+        "D11:19",
+        "D11:20",
+        "D11:21",
+        "D11:22",
+        "D11:23",
+        "D11:24",
+        "D11:25",
+        "D11:26",
+        "D11:27",
+        "D11:28",
+        "D11:29",
+        "D11:30"
+      ]
+    },
+    {
+      "date": "2023-10-02",
+      "turns": [
+        "D12:1",
+        "D12:2",
+        "D12:3",
+        "D12:4",
+        "D12:5",
+        "D12:6",
+        "D12:7",
+        "D12:8",
+        "D12:9",
+        "D12:10",
+        "D12:11",
+        "D12:12",
+        "D12:13",
+        "D12:14",
+        "D12:15",
+        "D12:16",
+        "D12:17",
+        "D12:18",
+        "D12:19",
+        "D12:20",
+        "D12:21",
+        "D12:22",
+        "D12:23",
+        "D12:24",
+        "D12:25",
+        "D12:26",
+        "D12:27",
+        "D12:28",
+        "D12:29"
+      ]
+    },
+    {
+      "date": "2023-10-13",
+      "turns": [
+        "D13:1",
+        "D13:2",
+        "D13:3",
+        "D13:4",
+        "D13:5",
+        "D13:6",
+        "D13:7",
+        "D13:8",
+        "D13:9",
+        "D13:10",
+        "D13:11",
+        "D13:12",
+        "D13:13",
+        "D13:14",
+        "D13:15",
+        "D13:16",
+        "D13:17",
+        "D13:18",
+        "D13:19",
+        "D13:20",
+        "D13:21",
+        "D13:22"
+      ]
+    },
+    {
+      "date": "2023-10-17",
+      "turns": [
+        "D14:1",
+        "D14:2",
+        "D14:3",
+        "D14:4",
+        "D14:5",
+        "D14:6",
+        "D14:7",
+        "D14:8",
+        "D14:9",
+        "D14:10",
+        "D14:11",
+        "D14:12",
+        "D14:13",
+        "D14:14",
+        "D14:15",
+        "D14:16",
+        "D14:17",
+        "D14:18",
+        "D14:19",
+        "D14:20",
+        "D14:21",
+        "D14:22",
+        "D14:23"
+      ]
+    },
+    {
+      "date": "2023-10-21",
+      "turns": [
+        "D15:1",
+        "D15:2",
+        "D15:3",
+        "D15:4",
+        "D15:5",
+        "D15:6",
+        "D15:7",
+        "D15:8",
+        "D15:9",
+        "D15:10",
+        "D15:11",
+        "D15:12",
+        "D15:13",
+        "D15:14",
+        "D15:15",
+        "D15:16",
+        "D15:17",
+        "D15:18",
+        "D15:19",
+        "D15:20",
+        "D15:21",
+        "D15:22",
+        "D15:23",
+        "D15:24",
+        "D15:25",
+        "D15:26",
+        "D15:27",
+        "D15:28",
+        "D15:29",
+        "D15:30",
+        "D15:31",
+        "D15:32",
+        "D15:33",
+        "D15:34",
+        "D15:35",
+        "D15:36",
+        "D15:37",
+        "D15:38"
+      ]
+    },
+    {
+      "date": "2023-11-06",
+      "turns": [
+        "D16:1",
+        "D16:2",
+        "D16:3",
+        "D16:4",
+        "D16:5",
+        "D16:6",
+        "D16:7",
+        "D16:8",
+        "D16:9",
+        "D16:10",
+        "D16:11",
+        "D16:12",
+        "D16:13",
+        "D16:14",
+        "D16:15",
+        "D16:16",
+        "D16:17"
+      ]
+    },
+    {
+      "date": "2023-11-11",
+      "turns": [
+        "D17:1",
+        "D17:2",
+        "D17:3",
+        "D17:4",
+        "D17:5",
+        "D17:6",
+        "D17:7",
+        "D17:8",
+        "D17:9",
+        "D17:10",
+        "D17:11",
+        "D17:12",
+        "D17:13",
+        "D17:14",
+        "D17:15",
+        "D17:16",
+        "D17:17",
+        "D17:18",
+        "D17:19"
+      ]
+    },
+    {
+      "date": "2023-11-16",
+      "turns": [
+        "D18:1",
+        "D18:2",
+        "D18:3",
+        "D18:4",
+        "D18:5",
+        "D18:6",
+        "D18:7",
+        "D18:8",
+        "D18:9",
+        "D18:10",
+        "D18:11",
+        "D18:12",
+        "D18:13",
+        "D18:14",
+        "D18:15"
+      ]
+    },
+    {
+      "date": "2023-11-21",
+      "turns": [
+        "D19:1",
+        "D19:2",
+        "D19:3",
+        "D19:4",
+        "D19:5",
+        "D19:6",
+        "D19:7",
+        "D19:8",
+        "D19:9",
+        "D19:10",
+        "D19:11",
+        "D19:12",
+        "D19:13",
+        "D19:14",
+        "D19:15",
+        "D19:16",
+        "D19:17",
+        "D19:18",
+        "D19:19",
+        "D19:20",
+        "D19:21",
+        "D19:22",
+        "D19:23"
+      ]
+    },
+    {
+      "date": "2023-12-01",
+      "turns": [
+        "D20:1",
+        "D20:2",
+        "D20:3",
+        "D20:4",
+        "D20:5",
+        "D20:6",
+        "D20:7",
+        "D20:8",
+        "D20:9",
+        "D20:10",
+        "D20:11",
+        "D20:12",
+        "D20:13",
+        "D20:14",
+        "D20:15",
+        "D20:16",
+        "D20:17",
+        "D20:18",
+        "D20:19",
+        "D20:20",
+        "D20:21",
+        "D20:22",
+        "D20:23",
+        "D20:24",
+        "D20:25",
+        "D20:26",
+        "D20:27",
+        "D20:28",
+        "D20:29",
+        "D20:30",
+        "D20:31",
+        "D20:32",
+        "D20:33",
+        "D20:34",
+        "D20:35",
+        "D20:36",
+        "D20:37",
+        "D20:38",
+        "D20:39",
+        "D20:40",
+        "D20:41",
+        "D20:42",
+        "D20:43"
+      ]
+    },
+    {
+      "date": "2023-12-06",
+      "turns": [
+        "D21:1",
+        "D21:2",
+        "D21:3",
+        "D21:4",
+        "D21:5",
+        "D21:6",
+        "D21:7",
+        "D21:8",
+        "D21:9",
+        "D21:10",
+        "D21:11",
+        "D21:12",
+        "D21:13",
+        "D21:14",
+        "D21:15",
+        "D21:16",
+        "D21:17",
+        "D21:18",
+        "D21:19"
+      ]
+    },
+    {
+      "date": "2023-12-08",
+      "turns": [
+        "D22:1",
+        "D22:2",
+        "D22:3",
+        "D22:4",
+        "D22:5",
+        "D22:6",
+        "D22:7",
+        "D22:8",
+        "D22:9",
+        "D22:10",
+        "D22:11",
+        "D22:12",
+        "D22:13",
+        "D22:14",
+        "D22:15",
+        "D22:16",
+        "D22:17",
+        "D22:18"
+      ]
+    },
+    {
+      "date": "2023-12-11",
+      "turns": [
+        "D23:1",
+        "D23:2",
+        "D23:3",
+        "D23:4",
+        "D23:5",
+        "D23:6",
+        "D23:7",
+        "D23:8",
+        "D23:9",
+        "D23:10",
+        "D23:11",
+        "D23:12",
+        "D23:13",
+        "D23:14",
+        "D23:15",
+        "D23:16"
+      ]
+    },
+    {
+      "date": "2023-12-16",
+      "turns": [
+        "D24:1",
+        "D24:2",
+        "D24:3",
+        "D24:4",
+        "D24:5",
+        "D24:6",
+        "D24:7",
+        "D24:8",
+        "D24:9",
+        "D24:10",
+        "D24:11",
+        "D24:12",
+        "D24:13",
+        "D24:14",
+        "D24:15",
+        "D24:16",
+        "D24:17",
+        "D24:18",
+        "D24:19",
+        "D24:20"
+      ]
+    },
+    {
+      "date": "2023-12-19",
+      "turns": [
+        "D25:1",
+        "D25:2",
+        "D25:3",
+        "D25:4",
+        "D25:5",
+        "D25:6",
+        "D25:7",
+        "D25:8",
+        "D25:9",
+        "D25:10",
+        "D25:11",
+        "D25:12",
+        "D25:13",
+        "D25:14",
+        "D25:15",
+        "D25:16",
+        "D25:17"
+      ]
+    },
+    {
+      "date": "2023-12-26",
+      "turns": [
+        "D26:1",
+        "D26:2",
+        "D26:3",
+        "D26:4",
+        "D26:5",
+        "D26:6",
+        "D26:7",
+        "D26:8",
+        "D26:9",
+        "D26:10",
+        "D26:11",
+        "D26:12",
+        "D26:13",
+        "D26:14",
+        "D26:15",
+        "D26:16",
+        "D26:17",
+        "D26:18",
+        "D26:19",
+        "D26:20",
+        "D26:21",
+        "D26:22",
+        "D26:23",
+        "D26:24",
+        "D26:25",
+        "D26:26",
+        "D26:27",
+        "D26:28",
+        "D26:29",
+        "D26:30",
+        "D26:31",
+        "D26:32",
+        "D26:33",
+        "D26:34",
+        "D26:35",
+        "D26:36",
+        "D26:37",
+        "D26:38"
+      ]
+    },
+    {
+      "date": "2024-01-02",
+      "turns": [
+        "D27:1",
+        "D27:2",
+        "D27:3",
+        "D27:4",
+        "D27:5",
+        "D27:6",
+        "D27:7",
+        "D27:8",
+        "D27:9",
+        "D27:10",
+        "D27:11",
+        "D27:12",
+        "D27:13",
+        "D27:14",
+        "D27:15",
+        "D27:16",
+        "D27:17",
+        "D27:18",
+        "D27:19",
+        "D27:20",
+        "D27:21",
+        "D27:22",
+        "D27:23",
+        "D27:24",
+        "D27:25",
+        "D27:26",
+        "D27:27",
+        "D27:28",
+        "D27:29",
+        "D27:30",
+        "D27:31",
+        "D27:32",
+        "D27:33",
+        "D27:34",
+        "D27:35",
+        "D27:36",
+        "D27:37",
+        "D27:38",
+        "D27:39",
+        "D27:40"
+      ]
+    },
+    {
+      "date": "2024-01-07",
+      "turns": [
+        "D28:1",
+        "D28:2",
+        "D28:3",
+        "D28:4",
+        "D28:5",
+        "D28:6",
+        "D28:7",
+        "D28:8",
+        "D28:9",
+        "D28:10",
+        "D28:11",
+        "D28:12",
+        "D28:13",
+        "D28:14",
+        "D28:15",
+        "D28:16",
+        "D28:17",
+        "D28:18",
+        "D28:19",
+        "D28:20",
+        "D28:21"
+      ]
+    },
+    {
+      "date": "2024-01-12",
+      "turns": [
+        "D29:1",
+        "D29:2",
+        "D29:3",
+        "D29:4",
+        "D29:5",
+        "D29:6",
+        "D29:7",
+        "D29:8",
+        "D29:9",
+        "D29:10",
+        "D29:11",
+        "D29:12",
+        "D29:13",
+        "D29:14",
+        "D29:15"
+      ]
+    }
+  ],
+  "entities": [
+    {
+      "key": "tim",
+      "type": "person",
+      "name": "Tim",
+      "description": "One of the two speakers: a student and lifelong Harry Potter and fantasy-literature fan. He runs a Harry Potter fan project, joined an online fantasy literature forum in June 2023, writes articles about fantasy novels for an online magazine from August 2023, is midway through his own fantasy novel, learns piano, violin and German, joined a travel club in December 2023, and was accepted on 5 January 2024 for a semester in Galway, Ireland. He met John on 21 May 2023 and they have been close friends since."
+    },
+    {
+      "key": "john",
+      "type": "person",
+      "name": "John",
+      "description": "One of the two speakers: a professional basketball player who signed with the Minnesota Wolves as a shooting guard in May 2023. He married in late September 2023, collects sneakers and jerseys, surfs, hikes, cooks, does yoga and strength training, mentors younger players, runs youth-sports charity work, and signed endorsement deals with Nike, an outdoor gear company and a beverage company. He met Tim on 21 May 2023."
+    },
+    {
+      "key": "johns-wife",
+      "type": "person",
+      "name": "John's wife",
+      "description": "John's partner, never named in the conversation. They married in a greenhouse ceremony in the week before 2 October 2023, had their first dance at a cosy restaurant, took a European coastal road trip in November 2023, and hosted a small get-together with friends and family in December 2023 to celebrate his recovery from injury.",
+      "properties": {
+        "aliases": "John's girlfriend"
+      }
+    },
+    {
+      "key": "anthony",
+      "type": "person",
+      "name": "Anthony",
+      "description": "A friend of John's. The two went to a charity event together before August 2023 and took part in its Harry Potter trivia contest, where another guest won a signed Harry Potter book."
+    },
+    {
+      "key": "lebron-james",
+      "type": "person",
+      "name": "LeBron James",
+      "description": "The basketball player both speakers admire. He is John's favourite player, whom John has met several times and watched play live, and the player who signed the cased basketball Tim keeps as his prized possession. On 6 November 2023 both recalled his chase-down block on Iguodala in Game 7 of the 2016 Finals.",
+      "properties": {
+        "aliases": "LeBron"
+      }
+    },
+    {
+      "key": "jk-rowling",
+      "type": "person",
+      "name": "J.K. Rowling",
+      "description": "The author of the Harry Potter books and the writer Tim names as his greatest inspiration. He has read her work for a long time, takes notes on her style for his own novel, and quotes her line about turning on the light because happiness hides in the darkest of times."
+    },
+    {
+      "key": "patrick-rothfuss",
+      "type": "person",
+      "name": "Patrick Rothfuss",
+      "description": "The author of The Name of the Wind. Tim recommended his work to John on 9 August 2023, named the book on 11 August 2023, recommended it again as travel reading on 21 September 2023, and was still reading it on 7 January 2024."
+    },
+    {
+      "key": "emma-watson",
+      "type": "person",
+      "name": "Emma Watson",
+      "description": "The lead actress of the Harry Potter films. Tim named her for John on 26 December 2023 and said he is a huge fan, particularly of her gender-equality and women's-rights advocacy."
+    },
+    {
+      "key": "george-rr-martin",
+      "type": "person",
+      "name": "George R. R. Martin",
+      "description": "The author of the Game of Thrones novels. As of 8 December 2023 Tim had read only that series of his, and John had read none of his books but said he would check them out."
+    },
+    {
+      "key": "frank-herbert",
+      "type": "person",
+      "name": "Frank Herbert",
+      "description": "The author of Dune, the novel John was reading and recommending on 8 December 2023."
+    },
+    {
+      "key": "london",
+      "type": "place",
+      "name": "London",
+      "description": "The city where Tim visited a Harry Potter attraction and took a tour a few years before May 2023, an experience he described as like walking into a Harry Potter film.",
+      "properties": {
+        "kind": "city",
+        "country": "United Kingdom"
+      }
+    },
+    {
+      "key": "united-kingdom",
+      "type": "place",
+      "name": "United Kingdom",
+      "description": "The country, also called the UK, that Tim travelled to for a Harry Potter conference in early October 2023 and where he visited a castle on 10 November 2023. Its castles, which he read a book about in October 2023, gave him ideas for his fantasy novel, and a story he tried to base on the trip did not work out.",
+      "properties": {
+        "kind": "country"
+      }
+    },
+    {
+      "key": "scotland",
+      "type": "place",
+      "name": "Scotland",
+      "description": "Part of the United Kingdom and the country Edinburgh is in; Tim named both when recommending the city to John on 21 September 2023.",
+      "properties": {
+        "kind": "country"
+      }
+    },
+    {
+      "key": "edinburgh",
+      "type": "place",
+      "name": "Edinburgh",
+      "description": "The Scottish city Tim recommended to John on 21 September 2023 as a destination for the Minnesota Wolves team trip, calling it the birthplace of Harry Potter and praising its history, architecture and magical feel. John had never been and said it was worth considering.",
+      "properties": {
+        "kind": "city",
+        "country": "Scotland"
+      }
+    },
+    {
+      "key": "seattle",
+      "type": "place",
+      "name": "Seattle",
+      "description": "One of John's favourite cities, where he had a game scheduled for August 2023. He loves its energy, diversity, local seafood and the support of the fans there; Tim said he has always wanted to try the seafood.",
+      "properties": {
+        "kind": "city"
+      }
+    },
+    {
+      "key": "chicago",
+      "type": "place",
+      "name": "Chicago",
+      "description": "The city John visited in early August 2023, praising its energy and friendly locals. He rejoined his teammates on 15 August 2023 after the trip.",
+      "properties": {
+        "kind": "city"
+      }
+    },
+    {
+      "key": "new-york-city",
+      "type": "place",
+      "name": "New York City",
+      "description": "The city, also called NYC, that John has visited and strongly recommends for its culture and restaurants, though he found the subway confusing until a stranger explained it. Tim added it to his travel list on 26 August 2023 and John offered to help him plan a visit.",
+      "properties": {
+        "kind": "city"
+      }
+    },
+    {
+      "key": "california",
+      "type": "place",
+      "name": "California",
+      "description": "Where the fellow Harry Potter fan Tim met in July 2023 lives. Tim spoke to that fan again over Skype around 9 August 2023 and they discussed characters and a possible collaboration.",
+      "properties": {
+        "kind": "region"
+      }
+    },
+    {
+      "key": "universal-studios",
+      "type": "place",
+      "name": "Universal Studios",
+      "description": "The theme park Tim planned to visit for the first time in September 2023, mainly for its Harry Potter attractions. John had not been but said it was on his bucket list.",
+      "properties": {
+        "kind": "venue"
+      }
+    },
+    {
+      "key": "smoky-mountains",
+      "type": "place",
+      "name": "Smoky Mountains",
+      "description": "The mountains Tim travelled to in 2022, where he took the sunset photograph he shared with John on 17 October 2023.",
+      "properties": {
+        "kind": "natural"
+      }
+    },
+    {
+      "key": "rocky-mountains",
+      "type": "place",
+      "name": "Rocky Mountains",
+      "description": "The mountains John visited in 2022 on a trip he described on 1 December 2023 as stunning, with mountain views and fresh air that made him realise how incredible the world is.",
+      "properties": {
+        "kind": "natural"
+      }
+    },
+    {
+      "key": "europe",
+      "type": "place",
+      "name": "Europe",
+      "description": "Where John and his wife took a short holiday from early November 2023, road-tripping along the coastline; Tim recommended they visit castles. John also holidayed in Italy in December 2023 and has visited Paris.",
+      "properties": {
+        "kind": "region"
+      }
+    },
+    {
+      "key": "italy",
+      "type": "place",
+      "name": "Italy",
+      "description": "Where John holidayed in December 2023, praising the food, history and architecture, and where he bought a cookbook that has been giving him cooking inspiration. Tim has never been but has it on his list.",
+      "properties": {
+        "kind": "country"
+      }
+    },
+    {
+      "key": "paris",
+      "type": "place",
+      "name": "Paris",
+      "description": "The city John has visited and loved, praising the view from the Eiffel Tower. Tim has not been and said on 2 January 2024 that he cannot wait to see it.",
+      "properties": {
+        "kind": "city",
+        "country": "France"
+      }
+    },
+    {
+      "key": "ireland",
+      "type": "place",
+      "name": "Ireland",
+      "description": "The country Tim was due to spend a semester in from February 2024 on a study-abroad programme, staying in Galway.",
+      "properties": {
+        "kind": "country"
+      }
+    },
+    {
+      "key": "galway",
+      "type": "place",
+      "name": "Galway",
+      "description": "The Irish city Tim chose to stay in for his semester abroad from February 2024, for its arts scene, Irish music and vibrant atmosphere.",
+      "properties": {
+        "kind": "city",
+        "country": "Ireland"
+      }
+    },
+    {
+      "key": "cliffs-of-moher",
+      "type": "place",
+      "name": "Cliffs of Moher",
+      "description": "The Irish cliffs Tim most wanted to visit during his semester in Galway, for their ocean views. John said on 7 January 2024 that he might stop by there after his season.",
+      "properties": {
+        "kind": "natural",
+        "country": "Ireland"
+      }
+    },
+    {
+      "key": "barcelona",
+      "type": "place",
+      "name": "Barcelona",
+      "description": "The city John recommended to Tim on 12 January 2024 for its culture, architecture, food and nearby beaches; Tim added it to his travel list.",
+      "properties": {
+        "kind": "city"
+      }
+    },
+    {
+      "key": "himalayas",
+      "type": "place",
+      "name": "Himalayas",
+      "description": "The mountain range crossed by the two hikers whose account, in the collection of travellers' stories Tim read in December 2023, motivated him: a tough trek with difficult terrain, altitude sickness and bad weather that ended in amazing sights.",
+      "properties": {
+        "kind": "natural"
+      }
+    },
+    {
+      "key": "minnesota-wolves",
+      "type": "organization",
+      "name": "Minnesota Wolves",
+      "description": "The professional basketball team, which John calls the Wolves, that he signed with in May 2023 as a shooting guard and which is also his favourite team. His teammates are like a second family to him: they gave him a signed basketball when he rejoined them on 15 August 2023, he began mentoring the younger players in October 2023, and the team won a trophy by October 2023.",
+      "properties": {
+        "kind": "team"
+      }
+    },
+    {
+      "key": "nike",
+      "type": "organization",
+      "name": "Nike",
+      "description": "The sportswear brand John was considering in June 2023 and had signed a basketball shoe and gear endorsement deal with by 16 July 2023.",
+      "properties": {
+        "kind": "business"
+      }
+    },
+    {
+      "key": "gatorade",
+      "type": "organization",
+      "name": "Gatorade",
+      "description": "The sports-drink brand John said on 16 July 2023 he was in talks with about a potential sponsorship.",
+      "properties": {
+        "kind": "business"
+      }
+    },
+    {
+      "key": "under-armour",
+      "type": "organization",
+      "name": "Under Armour",
+      "description": "A sportswear brand John was considering in June 2023 and said on 16 July 2023 he had always liked and would love to work with.",
+      "properties": {
+        "kind": "business"
+      }
+    },
+    {
+      "key": "minalima",
+      "type": "organization",
+      "name": "MinaLima",
+      "description": "The design studio that created the props for the Harry Potter films. Tim loves their work and keeps one of their pictures by his bookshelf, calling it like having a piece of the wizarding world at home.",
+      "properties": {
+        "kind": "business"
+      }
+    },
+    {
+      "key": "fantasy-literature-forum",
+      "type": "organization",
+      "name": "online fantasy literature forum",
+      "description": "The online forum Tim joined on 14 June 2023 and where he had an enriching first conversation about his favourite books. It is also where he found the article-writing opportunity that led to his work for an online fantasy magazine.",
+      "properties": {
+        "kind": "club"
+      }
+    },
+    {
+      "key": "fantasy-magazine",
+      "type": "organization",
+      "name": "online fantasy magazine",
+      "description": "The online magazine Tim began writing articles about fantasy novels for by 2 August 2023, analysing characters and themes and making book recommendations. He found the opening on a fantasy literature forum and they liked the ideas he pitched.",
+      "properties": {
+        "kind": "business"
+      }
+    },
+    {
+      "key": "travel-club",
+      "type": "organization",
+      "name": "travel club",
+      "description": "The travel club Tim joined around 6 December 2023 out of interest in other cultures and countries and a wish to meet new people. On 2 January 2024 he described the same group as globetrotters who share his interests and whose trips he enjoys hearing about.",
+      "properties": {
+        "kind": "club"
+      }
+    },
+    {
+      "key": "hiking-club",
+      "type": "organization",
+      "name": "hiking club",
+      "description": "The hiking club John had only just joined by 2 October 2023; some of its members still came to his wedding.",
+      "properties": {
+        "kind": "club"
+      }
+    },
+    {
+      "key": "harry-potter",
+      "type": "work",
+      "name": "Harry Potter",
+      "description": "The book and film series, often called HP by the two speakers, that is at the centre of Tim's life: the subject of his fan project, his London visit, his UK conference, his Harry Potter party, his themed Christmas tree and his favourite book, and the series whose props MinaLima made. John is a fan too, owns the whole film collection and took part in a Harry Potter trivia contest at a charity event.",
+      "properties": {
+        "medium": "book and film series"
+      }
+    },
+    {
+      "key": "hp-philosophers-stone",
+      "type": "work",
+      "name": "Harry Potter and the Philosopher's Stone",
+      "description": "The first Harry Potter film, which Tim named on 21 August 2023 as special to him for the memory of watching it with his family under a blanket with snacks. Its theme is his favourite piece to play on the piano, and John said he loves the film too.",
+      "properties": {
+        "medium": "film"
+      }
+    },
+    {
+      "key": "game-of-thrones",
+      "type": "work",
+      "name": "Game of Thrones",
+      "description": "George R. R. Martin's fantasy series, abbreviated GoT by the speakers, which Tim named alongside Harry Potter as his favourite on 2 August 2023, still called a favourite on 21 November 2023, and analysed for his English literature class in December 2023.",
+      "properties": {
+        "medium": "book and television series"
+      }
+    },
+    {
+      "key": "a-dance-with-dragons",
+      "type": "work",
+      "name": "A Dance with Dragons",
+      "description": "The Game of Thrones novel Tim had just finished and recommended to John on 8 December 2023, calling it a really good story.",
+      "properties": {
+        "medium": "novel"
+      }
+    },
+    {
+      "key": "the-name-of-the-wind",
+      "type": "work",
+      "name": "The Name of the Wind",
+      "description": "Patrick Rothfuss's fantasy novel about a magician and musician protagonist, praised by Tim for its world-building and character development. He recommended it to John on 11 August 2023 and again on 21 September 2023 as travel reading, and was reading it himself on 7 January 2024.",
+      "properties": {
+        "medium": "novel"
+      }
+    },
+    {
+      "key": "the-alchemist",
+      "type": "work",
+      "name": "The Alchemist",
+      "description": "One of Tim's favourite novels, which he spotted on John's bookshelf on 21 September 2023. John had read and loved it for its message about following one's dreams, and reread it in November 2023, finding it inspiring and motivating.",
+      "properties": {
+        "medium": "novel"
+      }
+    },
+    {
+      "key": "the-hobbit",
+      "type": "work",
+      "name": "The Hobbit",
+      "description": "The novel John spotted on Tim's reorganised bookshelf on 1 December 2023 and named as one of his favourites too.",
+      "properties": {
+        "medium": "novel"
+      }
+    },
+    {
+      "key": "lord-of-the-rings",
+      "type": "work",
+      "name": "The Lord of the Rings",
+      "description": "The fantasy series, abbreviated LOTR, that Tim called his favourite on 26 December 2023 and whose map of Middle-earth he keeps. John named it as his favourite fantasy film series on 2 January 2024, with Aragorn as his favourite character for his growth from ranger to king of Gondor, his bravery and his selflessness; John keeps a painting of him as a reminder to stay true and lead well.",
+      "properties": {
+        "medium": "film and book series"
+      }
+    },
+    {
+      "key": "star-wars",
+      "type": "work",
+      "name": "Star Wars",
+      "description": "The film series Tim named as his favourite on 2 January 2024, saying it never gets old.",
+      "properties": {
+        "medium": "film series"
+      }
+    },
+    {
+      "key": "home-alone",
+      "type": "work",
+      "name": "Home Alone",
+      "description": "One of the films Tim's family watch together at Thanksgiving; he says it always brings lots of laughs.",
+      "properties": {
+        "medium": "film"
+      }
+    },
+    {
+      "key": "elf",
+      "type": "work",
+      "name": "Elf",
+      "description": "A holiday film Tim's family watch together, which he says makes them laugh and feel festive.",
+      "properties": {
+        "medium": "film"
+      }
+    },
+    {
+      "key": "the-santa-clause",
+      "type": "work",
+      "name": "The Santa Clause",
+      "description": "A holiday film Tim's family watch together, which he calls heartwarming; John called it a classic that captures the Christmas magic.",
+      "properties": {
+        "medium": "film"
+      }
+    },
+    {
+      "key": "dune",
+      "type": "work",
+      "name": "Dune",
+      "description": "Frank Herbert's novel, which John was reading and recommending on 8 December 2023, describing it as a story about religion and human control over ecology. Tim had not read it but had heard good things.",
+      "properties": {
+        "medium": "novel"
+      }
+    },
+    {
+      "key": "wheel-of-time",
+      "type": "work",
+      "name": "The Wheel of Time",
+      "description": "The television series adapted from a book series Tim loves. On 26 December 2023 he said it was coming out the following month and that he could not wait to see the books come to life on screen.",
+      "properties": {
+        "medium": "television series"
+      }
+    },
+    {
+      "key": "johns-lucky-shoes",
+      "type": "object",
+      "name": "John's lucky basketball shoes",
+      "description": "The basketball shoes John has worn since the start of his career. He showed them to Tim on 11 August 2023 and said every mark has a story and that they stand for resilience, determination and his love of the game.",
+      "properties": {
+        "kind": "shoes"
+      }
+    },
+    {
+      "key": "teammate-signed-basketball",
+      "type": "object",
+      "name": "the basketball signed by John's teammates",
+      "description": "The basketball John's Minnesota Wolves teammates signed and gave him when he rejoined them on 15 August 2023, as a sign of their friendship. He keeps it as a comforting reminder of their bond and of why he started playing.",
+      "properties": {
+        "kind": "basketball"
+      }
+    },
+    {
+      "key": "tims-signed-basketball",
+      "type": "object",
+      "name": "Tim's signed basketball",
+      "description": "Tim's prized possession: a cased basketball signed by his favourite player, LeBron James, which he showed John on 6 November 2023 and keeps as a reminder of all the hard work.",
+      "properties": {
+        "kind": "basketball"
+      }
+    },
+    {
+      "key": "tims-book-collection",
+      "type": "object",
+      "name": "Tim's book collection",
+      "description": "The bookshelf of fantasy novels Tim has shown John repeatedly from June 2023 onwards. It holds his favourites, including Harry Potter, Game of Thrones and The Hobbit, and the MinaLima picture stands with it; he reorganised it at the end of November 2023.",
+      "properties": {
+        "kind": "book collection"
+      }
+    },
+    {
+      "key": "minalima-picture",
+      "type": "object",
+      "name": "Tim's MinaLima picture",
+      "description": "The MinaLima print displayed with Tim's bookshelf, which he described on 15 June 2023 as like having a piece of the wizarding world at home.",
+      "properties": {
+        "kind": "print",
+        "brand": "MinaLima"
+      }
+    },
+    {
+      "key": "basketball",
+      "type": "activity",
+      "name": "basketball",
+      "description": "John's sport and profession. He watched NBA games with his father as a child, was signed up to a local league at ten, played through middle and high school, earned a college scholarship and was drafted after college. He had been playing professionally for just under a year as of December 2023 and practises and trains daily.",
+      "properties": {
+        "kind": "sport"
+      }
+    },
+    {
+      "key": "surfing",
+      "type": "activity",
+      "name": "surfing",
+      "description": "The sport John took up around 2018 and loves for its connection to nature. He spent a summer surfing with friends and describes the waves and wind as exciting and freeing.",
+      "properties": {
+        "kind": "sport"
+      }
+    },
+    {
+      "key": "reading-fantasy",
+      "type": "activity",
+      "name": "reading fantasy literature",
+      "description": "Tim's central pastime and his escape from reality; he reads Harry Potter, Game of Thrones and other fantasy constantly, and it feeds both his magazine articles and his own novel. He also reads books on growth and psychology. John reads fantasy and non-fiction personal-development books, and picked reading back up after talking to Tim in October 2023.",
+      "properties": {
+        "kind": "reading"
+      }
+    },
+    {
+      "key": "fantasy-writing",
+      "type": "activity",
+      "name": "fantasy writing",
+      "description": "Tim's writing practice: articles about fantasy novels for an online magazine from August 2023 and his own fantasy novel from late 2023. He draws inspiration from books, films, real-life experiences and above all from J.K. Rowling.",
+      "properties": {
+        "kind": "writing"
+      }
+    },
+    {
+      "key": "piano",
+      "type": "activity",
+      "name": "playing the piano",
+      "description": "The instrument Tim began learning in August 2023; by 6 December 2023 he had been playing about four months and was enjoying his progress. His favourite piece to play is the theme from Harry Potter and the Philosopher's Stone.",
+      "properties": {
+        "kind": "music"
+      }
+    },
+    {
+      "key": "violin",
+      "type": "activity",
+      "name": "playing the violin",
+      "description": "The instrument Tim had recently started learning as of 6 December 2023. He is mainly into classical music but wants to try jazz and film scores, and finds it a way to relax and be creative.",
+      "properties": {
+        "kind": "music"
+      }
+    },
+    {
+      "key": "cooking",
+      "type": "activity",
+      "name": "cooking",
+      "description": "John's therapy away from the court and a way to be creative with flavours. He improvised a butternut soup with sage in August 2023, makes honey garlic chicken with roasted vegetables often, and bought a cookbook in Italy in December 2023.",
+      "properties": {
+        "kind": "cooking"
+      }
+    },
+    {
+      "key": "yoga",
+      "type": "activity",
+      "name": "yoga",
+      "description": "The practice John had taken up by 1 December 2023 for extra strength and flexibility, which he says has also improved his focus and balance during workouts. Warrior II is a favourite pose and he holds his balance poses for 30 to 60 seconds.",
+      "properties": {
+        "kind": "exercise"
+      }
+    },
+    {
+      "key": "strength-training",
+      "type": "activity",
+      "name": "strength training",
+      "description": "Half of the routine John built at his new gym in August 2023, alongside basketball work and rest. He credits it with building muscle and power, preventing injuries, and improving his shooting accuracy, agility and speed.",
+      "properties": {
+        "kind": "exercise"
+      }
+    },
+    {
+      "key": "hiking",
+      "type": "activity",
+      "name": "hiking",
+      "description": "John hikes, joined a hiking club in 2023, received hiking gear in his outdoor-gear endorsement and found the river spot used in its photoshoot while out hiking. Tim hikes on road trips with friends and family.",
+      "properties": {
+        "kind": "outdoors"
+      }
+    },
+    {
+      "key": "travel",
+      "type": "activity",
+      "name": "travel",
+      "description": "A shared interest. John loves discovering new cities, travels for games and holidays and recommends destinations to Tim. Tim loves travelling for a different kind of magic, joined a travel club in December 2023, read travellers' stories, visited a travel agency and was researching visa requirements in January 2024.",
+      "properties": {
+        "kind": "travel"
+      }
+    },
+    {
+      "key": "learning-german",
+      "type": "activity",
+      "name": "learning German",
+      "description": "The language Tim was learning as of 2 January 2024. He finds it tough but worth it and likes its structure, and says it is easier than the French he took in high school.",
+      "properties": {
+        "kind": "language learning"
+      }
+    },
+    {
+      "key": "learning-spanish",
+      "type": "activity",
+      "name": "learning Spanish",
+      "description": "The language John had just started learning as of 2 January 2024, using a phone app, because he considers it useful for personal and professional opportunities. He already knows a bit of German.",
+      "properties": {
+        "kind": "language learning"
+      }
+    },
+    {
+      "key": "johns-injury",
+      "type": "condition",
+      "name": "John's 2023 leg injury",
+      "description": "The injury John was dealing with from mid-November 2023. His doctor said it was not too serious; he missed games, hated being off the court, did physical therapy exercises daily, jogged pain-free again on 15 December 2023 and was practising and training every day by January 2024.",
+      "properties": {
+        "kind": "injury"
+      }
+    },
+    {
+      "key": "hp-fan-project",
+      "type": "project",
+      "name": "Harry Potter fan project",
+      "description": "The fan project Tim was working on from May 2023, discussing collaborations about the characters, spells and magical creatures of the Harry Potter universe. A Harry Potter fan friend was helping him work out ideas in May 2023, and a fellow fan he met in California in July 2023 discussed collaborating with him over Skype in August 2023."
+    },
+    {
+      "key": "tims-novel",
+      "type": "project",
+      "name": "Tim's fantasy novel",
+      "description": "The fantasy novel Tim was midway through by 21 October 2023, inspired by J.K. Rowling and by a book about British castles. He got stuck on a plot twist at the end of October 2023 but pushed through, and in mid-November 2023 a story he tried to base on his UK trip did not turn out as he wanted."
+    },
+    {
+      "key": "youth-sports-charity",
+      "type": "project",
+      "name": "John's youth sports charity work",
+      "description": "John's work off the court: a partnership from August 2023 with a local organisation helping disadvantaged children through sport and school, a week-long basketball camp in his hometown in summer 2023, seminars on sport and marketing from December 2023, and a benefit basketball game at the start of January 2024 that raised money for charity. His aim is fair access to good sports programmes for underserved communities."
+    },
+    {
+      "key": "study-abroad-ireland",
+      "type": "project",
+      "name": "Tim's semester abroad in Ireland",
+      "description": "The study-abroad programme Tim applied for and was accepted onto on 5 January 2024, taking him to Galway, Ireland for a semester from February 2024. He wants to explore Irish nature and visit the Cliffs of Moher, and was researching visa requirements on 12 January 2024."
+    }
+  ],
+  "chrono": [
+    {
+      "key": "forum-joined",
+      "type": "event",
+      "date": "2023-06-14",
+      "title": "Tim joined an online fantasy literature forum and had a long conversation there about his favourite books",
+      "entities": [
+        "tim",
+        "fantasy-literature-forum",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D2:1"
+      ]
+    },
+    {
+      "key": "teammates-reunion",
+      "type": "event",
+      "date": "2023-08-15",
+      "title": "John rejoined his Minnesota Wolves teammates after his trip to Chicago and they gave him a basketball they had all signed",
+      "entities": [
+        "john",
+        "minnesota-wolves",
+        "teammate-signed-basketball"
+      ],
+      "sourceTurns": [
+        "D7:1",
+        "D7:7",
+        "D7:9"
+      ]
+    },
+    {
+      "key": "class-presentation",
+      "type": "milestone",
+      "date": "2023-08-30",
+      "title": "Tim gave a presentation in class, nervous but through it, and counted it as progress",
+      "entities": [
+        "tim"
+      ],
+      "sourceTurns": [
+        "D10:3"
+      ]
+    },
+    {
+      "key": "castle-visit",
+      "type": "event",
+      "date": "2023-11-10",
+      "title": "Tim visited a castle in the UK and found its architecture and history unbelievable",
+      "entities": [
+        "tim",
+        "united-kingdom"
+      ],
+      "sourceTurns": [
+        "D18:1"
+      ]
+    },
+    {
+      "key": "career-high-assists",
+      "type": "milestone",
+      "date": "2023-12-08",
+      "title": "John set a career high in assists in the Minnesota Wolves' big game against their rivals",
+      "entities": [
+        "john",
+        "minnesota-wolves",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D23:3",
+        "D23:5"
+      ]
+    },
+    {
+      "key": "pain-free-jog",
+      "type": "milestone",
+      "date": "2023-12-15",
+      "title": "John jogged at the gym with no pain for the first time since his injury",
+      "entities": [
+        "john",
+        "johns-injury"
+      ],
+      "sourceTurns": [
+        "D24:14",
+        "D24:16"
+      ]
+    },
+    {
+      "key": "study-abroad-acceptance",
+      "type": "milestone",
+      "date": "2024-01-05",
+      "title": "Tim was accepted onto the study abroad programme that would take him to Galway, Ireland",
+      "entities": [
+        "tim",
+        "study-abroad-ireland",
+        "galway",
+        "ireland"
+      ],
+      "sourceTurns": [
+        "D28:1"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "label": "knows",
+      "from": "tim",
+      "to": "john",
+      "properties": {
+        "kind": "friend",
+        "since": "2023-05-21"
+      }
+    },
+    {
+      "label": "knows",
+      "from": "john",
+      "to": "anthony",
+      "properties": {
+        "kind": "friend"
+      }
+    },
+    {
+      "label": "works_at",
+      "from": "john",
+      "to": "minnesota-wolves",
+      "properties": {
+        "role": "shooting guard"
+      }
+    },
+    {
+      "label": "practices",
+      "from": "john",
+      "to": "basketball"
+    },
+    {
+      "label": "practices",
+      "from": "john",
+      "to": "surfing"
+    },
+    {
+      "label": "practices",
+      "from": "john",
+      "to": "strength-training"
+    },
+    {
+      "label": "owns",
+      "from": "john",
+      "to": "johns-lucky-shoes"
+    },
+    {
+      "label": "owns",
+      "from": "john",
+      "to": "teammate-signed-basketball",
+      "properties": {
+        "since": "2023-08-15"
+      }
+    },
+    {
+      "label": "works_on",
+      "from": "john",
+      "to": "youth-sports-charity"
+    },
+    {
+      "label": "likes",
+      "from": "john",
+      "to": "seattle"
+    },
+    {
+      "label": "likes",
+      "from": "john",
+      "to": "chicago"
+    },
+    {
+      "label": "likes",
+      "from": "john",
+      "to": "harry-potter"
+    },
+    {
+      "label": "likes",
+      "from": "john",
+      "to": "hp-philosophers-stone"
+    },
+    {
+      "label": "likes",
+      "from": "john",
+      "to": "the-santa-clause"
+    },
+    {
+      "label": "practices",
+      "from": "tim",
+      "to": "reading-fantasy"
+    },
+    {
+      "label": "practices",
+      "from": "tim",
+      "to": "fantasy-writing"
+    },
+    {
+      "label": "practices",
+      "from": "tim",
+      "to": "piano"
+    },
+    {
+      "label": "member_of",
+      "from": "tim",
+      "to": "fantasy-literature-forum",
+      "properties": {
+        "since": "2023-06-14"
+      }
+    },
+    {
+      "label": "works_at",
+      "from": "tim",
+      "to": "fantasy-magazine",
+      "properties": {
+        "role": "writes articles about fantasy novels"
+      }
+    },
+    {
+      "label": "works_on",
+      "from": "tim",
+      "to": "hp-fan-project"
+    },
+    {
+      "label": "owns",
+      "from": "tim",
+      "to": "tims-book-collection"
+    },
+    {
+      "label": "owns",
+      "from": "tim",
+      "to": "minalima-picture"
+    },
+    {
+      "label": "likes",
+      "from": "tim",
+      "to": "harry-potter"
+    },
+    {
+      "label": "likes",
+      "from": "tim",
+      "to": "hp-philosophers-stone"
+    },
+    {
+      "label": "likes",
+      "from": "tim",
+      "to": "game-of-thrones"
+    },
+    {
+      "label": "likes",
+      "from": "tim",
+      "to": "minalima"
+    },
+    {
+      "label": "likes",
+      "from": "tim",
+      "to": "the-name-of-the-wind"
+    },
+    {
+      "label": "likes",
+      "from": "tim",
+      "to": "home-alone"
+    },
+    {
+      "label": "likes",
+      "from": "tim",
+      "to": "elf"
+    },
+    {
+      "label": "likes",
+      "from": "tim",
+      "to": "the-santa-clause"
+    },
+    {
+      "label": "created_by",
+      "from": "the-name-of-the-wind",
+      "to": "patrick-rothfuss",
+      "properties": {
+        "role": "author"
+      }
+    },
+    {
+      "label": "part_of",
+      "from": "hp-philosophers-stone",
+      "to": "harry-potter"
+    },
+    {
+      "label": "located_in",
+      "from": "london",
+      "to": "united-kingdom"
+    },
+    {
+      "label": "likes",
+      "from": "john",
+      "to": "new-york-city"
+    },
+    {
+      "label": "likes",
+      "from": "john",
+      "to": "lebron-james"
+    },
+    {
+      "label": "likes",
+      "from": "john",
+      "to": "minnesota-wolves"
+    },
+    {
+      "label": "likes",
+      "from": "john",
+      "to": "the-alchemist"
+    },
+    {
+      "label": "practices",
+      "from": "john",
+      "to": "cooking"
+    },
+    {
+      "label": "practices",
+      "from": "john",
+      "to": "travel"
+    },
+    {
+      "label": "practices",
+      "from": "john",
+      "to": "hiking"
+    },
+    {
+      "label": "member_of",
+      "from": "john",
+      "to": "hiking-club"
+    },
+    {
+      "label": "family_of",
+      "from": "john",
+      "to": "johns-wife",
+      "properties": {
+        "relation": "wife"
+      }
+    },
+    {
+      "label": "likes",
+      "from": "tim",
+      "to": "the-alchemist"
+    },
+    {
+      "label": "likes",
+      "from": "tim",
+      "to": "lebron-james"
+    },
+    {
+      "label": "likes",
+      "from": "tim",
+      "to": "jk-rowling"
+    },
+    {
+      "label": "owns",
+      "from": "tim",
+      "to": "tims-signed-basketball"
+    },
+    {
+      "label": "works_on",
+      "from": "tim",
+      "to": "tims-novel"
+    },
+    {
+      "label": "practices",
+      "from": "tim",
+      "to": "travel"
+    },
+    {
+      "label": "practices",
+      "from": "tim",
+      "to": "hiking"
+    },
+    {
+      "label": "created_by",
+      "from": "harry-potter",
+      "to": "jk-rowling",
+      "properties": {
+        "role": "author"
+      }
+    },
+    {
+      "label": "located_in",
+      "from": "edinburgh",
+      "to": "scotland"
+    },
+    {
+      "label": "located_in",
+      "from": "scotland",
+      "to": "united-kingdom"
+    },
+    {
+      "label": "located_in",
+      "from": "united-kingdom",
+      "to": "europe"
+    },
+    {
+      "label": "has_condition",
+      "from": "john",
+      "to": "johns-injury"
+    },
+    {
+      "label": "practices",
+      "from": "john",
+      "to": "yoga"
+    },
+    {
+      "label": "likes",
+      "from": "john",
+      "to": "dune"
+    },
+    {
+      "label": "likes",
+      "from": "john",
+      "to": "the-hobbit"
+    },
+    {
+      "label": "member_of",
+      "from": "tim",
+      "to": "travel-club"
+    },
+    {
+      "label": "practices",
+      "from": "tim",
+      "to": "violin"
+    },
+    {
+      "label": "likes",
+      "from": "tim",
+      "to": "a-dance-with-dragons"
+    },
+    {
+      "label": "created_by",
+      "from": "dune",
+      "to": "frank-herbert",
+      "properties": {
+        "role": "author"
+      }
+    },
+    {
+      "label": "created_by",
+      "from": "game-of-thrones",
+      "to": "george-rr-martin",
+      "properties": {
+        "role": "author"
+      }
+    },
+    {
+      "label": "created_by",
+      "from": "a-dance-with-dragons",
+      "to": "george-rr-martin",
+      "properties": {
+        "role": "author"
+      }
+    },
+    {
+      "label": "part_of",
+      "from": "a-dance-with-dragons",
+      "to": "game-of-thrones"
+    },
+    {
+      "label": "likes",
+      "from": "tim",
+      "to": "emma-watson"
+    },
+    {
+      "label": "likes",
+      "from": "tim",
+      "to": "lord-of-the-rings"
+    },
+    {
+      "label": "likes",
+      "from": "tim",
+      "to": "star-wars"
+    },
+    {
+      "label": "likes",
+      "from": "tim",
+      "to": "galway"
+    },
+    {
+      "label": "practices",
+      "from": "tim",
+      "to": "learning-german"
+    },
+    {
+      "label": "works_on",
+      "from": "tim",
+      "to": "study-abroad-ireland"
+    },
+    {
+      "label": "likes",
+      "from": "john",
+      "to": "lord-of-the-rings"
+    },
+    {
+      "label": "likes",
+      "from": "john",
+      "to": "italy"
+    },
+    {
+      "label": "likes",
+      "from": "john",
+      "to": "paris"
+    },
+    {
+      "label": "likes",
+      "from": "john",
+      "to": "barcelona"
+    },
+    {
+      "label": "practices",
+      "from": "john",
+      "to": "learning-spanish"
+    },
+    {
+      "label": "located_in",
+      "from": "galway",
+      "to": "ireland"
+    },
+    {
+      "label": "located_in",
+      "from": "cliffs-of-moher",
+      "to": "ireland"
+    },
+    {
+      "label": "located_in",
+      "from": "ireland",
+      "to": "europe"
+    },
+    {
+      "label": "located_in",
+      "from": "italy",
+      "to": "europe"
+    },
+    {
+      "label": "located_in",
+      "from": "paris",
+      "to": "europe"
+    },
+    {
+      "label": "located_in",
+      "from": "barcelona",
+      "to": "europe"
+    }
+  ],
+  "claims": [
+    {
+      "text": "Tim and John met for the first time on 21 May 2023 and greeted each other as strangers.",
+      "speaker": "John",
+      "statedOn": "2023-05-21",
+      "entities": [
+        "tim",
+        "john"
+      ],
+      "sourceTurns": [
+        "D1:1"
+      ]
+    },
+    {
+      "text": "Tim was working on a Harry Potter fan project as of 21 May 2023 and was discussing collaborations for it, which he was excited about.",
+      "speaker": "Tim",
+      "statedOn": "2023-05-21",
+      "entities": [
+        "tim",
+        "harry-potter",
+        "hp-fan-project"
+      ],
+      "sourceTurns": [
+        "D1:2"
+      ]
+    },
+    {
+      "text": "John signed with the Minnesota Wolves, a professional basketball team, shortly before 21 May 2023 and was excited for the season ahead.",
+      "speaker": "John",
+      "statedOn": "2023-05-21",
+      "entities": [
+        "john",
+        "minnesota-wolves",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D1:3",
+        "D1:4",
+        "D1:5"
+      ]
+    },
+    {
+      "text": "John plays shooting guard for the Minnesota Wolves, and his season opener fell in the week after 21 May 2023.",
+      "speaker": "John",
+      "statedOn": "2023-05-21",
+      "entities": [
+        "john",
+        "minnesota-wolves",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D1:6",
+        "D1:7"
+      ]
+    },
+    {
+      "text": "John's stated goal for his first season with the Minnesota Wolves, on 21 May 2023, was to improve his shooting percentage, and he had been practising hard for it.",
+      "speaker": "John",
+      "statedOn": "2023-05-21",
+      "entities": [
+        "john",
+        "basketball",
+        "minnesota-wolves"
+      ],
+      "sourceTurns": [
+        "D1:8",
+        "D1:9"
+      ]
+    },
+    {
+      "text": "John's main challenge during pre-season training with the Minnesota Wolves was fitting into the team's style of play.",
+      "speaker": "John",
+      "statedOn": "2023-05-21",
+      "entities": [
+        "john",
+        "minnesota-wolves",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D1:10",
+        "D1:11"
+      ]
+    },
+    {
+      "text": "As of 21 May 2023 John said things were going well with the Minnesota Wolves, that the team had been really nice to him and that he was having fun.",
+      "speaker": "John",
+      "statedOn": "2023-05-21",
+      "entities": [
+        "john",
+        "minnesota-wolves"
+      ],
+      "sourceTurns": [
+        "D1:12",
+        "D1:13"
+      ]
+    },
+    {
+      "text": "Tim spoke with a friend who is a Harry Potter fan in the week before 21 May 2023, and the two were working out ideas for his fan project.",
+      "speaker": "Tim",
+      "statedOn": "2023-05-21",
+      "entities": [
+        "tim",
+        "harry-potter",
+        "hp-fan-project"
+      ],
+      "sourceTurns": [
+        "D1:14"
+      ]
+    },
+    {
+      "text": "John collects sneakers and enjoys talking to people about his sneaker collection.",
+      "speaker": "John",
+      "statedOn": "2023-05-21",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D1:15"
+      ]
+    },
+    {
+      "text": "Tim's Harry Potter fan collaboration covers the characters, spells and magical creatures of the Harry Potter universe, and he values fans coming together for it.",
+      "speaker": "Tim",
+      "statedOn": "2023-05-21",
+      "entities": [
+        "tim",
+        "harry-potter",
+        "hp-fan-project"
+      ],
+      "sourceTurns": [
+        "D1:16"
+      ]
+    },
+    {
+      "text": "Tim visited a Harry Potter attraction in London a few years before 21 May 2023 and took a tour there, saying it was like walking into a Harry Potter film.",
+      "speaker": "Tim",
+      "statedOn": "2023-05-21",
+      "entities": [
+        "tim",
+        "london",
+        "harry-potter",
+        "united-kingdom"
+      ],
+      "sourceTurns": [
+        "D1:17",
+        "D1:18"
+      ]
+    },
+    {
+      "text": "John had never been to any of the real Harry Potter locations as of 21 May 2023 but said visiting them was on his to-do list, and Tim offered to give him tips.",
+      "speaker": "John",
+      "statedOn": "2023-05-21",
+      "entities": [
+        "john",
+        "tim",
+        "harry-potter"
+      ],
+      "sourceTurns": [
+        "D1:19",
+        "D1:20"
+      ]
+    },
+    {
+      "text": "Tim joined an online fantasy literature forum on the evening of 14 June 2023 and had a conversation there about his favourite books that he found enriching.",
+      "speaker": "Tim",
+      "statedOn": "2023-06-15",
+      "entities": [
+        "tim",
+        "fantasy-literature-forum",
+        "reading-fantasy"
+      ],
+      "chrono": [
+        "forum-joined"
+      ],
+      "sourceTurns": [
+        "D2:1"
+      ]
+    },
+    {
+      "text": "John was exploring endorsement opportunities as of 15 June 2023 and found it rewarding to see his hard work paying off that way.",
+      "speaker": "John",
+      "statedOn": "2023-06-15",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D2:2",
+        "D2:3"
+      ]
+    },
+    {
+      "text": "On 15 June 2023 John said he was considering sports brands such as Nike and Under Armour for endorsements, and was also open to other brands that aligned with his values and interests.",
+      "speaker": "John",
+      "statedOn": "2023-06-15",
+      "entities": [
+        "john",
+        "nike",
+        "under-armour"
+      ],
+      "sourceTurns": [
+        "D2:4",
+        "D2:5"
+      ]
+    },
+    {
+      "text": "John promised Tim on 15 June 2023 that he would keep him updated on which brands he ended up choosing.",
+      "speaker": "John",
+      "statedOn": "2023-06-15",
+      "entities": [
+        "john",
+        "tim"
+      ],
+      "sourceTurns": [
+        "D2:6"
+      ]
+    },
+    {
+      "text": "Tim showed John a photo of his book collection on 15 June 2023, and John admired the bookshelf and asked about the picture standing on it.",
+      "speaker": "Tim",
+      "statedOn": "2023-06-15",
+      "entities": [
+        "tim",
+        "tims-book-collection"
+      ],
+      "sourceTurns": [
+        "D2:7",
+        "D2:8"
+      ]
+    },
+    {
+      "text": "The picture on Tim's bookshelf is by MinaLima, the studio that created the props for the Harry Potter films; Tim loves their work and says owning it is like having a piece of the wizarding world at home.",
+      "speaker": "Tim",
+      "statedOn": "2023-06-15",
+      "entities": [
+        "tim",
+        "minalima",
+        "minalima-picture",
+        "harry-potter"
+      ],
+      "sourceTurns": [
+        "D2:9",
+        "D2:10"
+      ]
+    },
+    {
+      "text": "Tim keeps many Harry Potter reminders around him as a way of escaping reality, said on 15 June 2023 that they really help, and expected to visit more Harry Potter locations in future because it feels like stepping into the books.",
+      "speaker": "Tim",
+      "statedOn": "2023-06-15",
+      "entities": [
+        "tim",
+        "harry-potter"
+      ],
+      "sourceTurns": [
+        "D2:11",
+        "D2:12",
+        "D2:13"
+      ]
+    },
+    {
+      "text": "John shared a photo from a game he had just played on 15 June 2023 and said being out on the court doing what he loves was an awesome feeling, and that he gives his all every time.",
+      "speaker": "John",
+      "statedOn": "2023-06-15",
+      "entities": [
+        "john",
+        "basketball",
+        "minnesota-wolves"
+      ],
+      "sourceTurns": [
+        "D2:14",
+        "D2:15",
+        "D2:16",
+        "D2:17",
+        "D2:18"
+      ]
+    },
+    {
+      "text": "Tim encouraged John on 15 June 2023 to keep going and not give up on his dreams.",
+      "speaker": "Tim",
+      "statedOn": "2023-06-15",
+      "entities": [
+        "tim",
+        "john"
+      ],
+      "sourceTurns": [
+        "D2:19"
+      ]
+    },
+    {
+      "text": "John scored 40 points in a game in the week before 16 July 2023, the highest of his career, in an electric atmosphere that thrilled him and his teammates.",
+      "speaker": "John",
+      "statedOn": "2023-07-16",
+      "entities": [
+        "john",
+        "basketball",
+        "minnesota-wolves"
+      ],
+      "sourceTurns": [
+        "D3:1",
+        "D3:3"
+      ]
+    },
+    {
+      "text": "Tim had a conversation with a fellow Harry Potter fan in California in the week before 16 July 2023 and described it as magical.",
+      "speaker": "Tim",
+      "statedOn": "2023-07-16",
+      "entities": [
+        "tim",
+        "california",
+        "harry-potter",
+        "hp-fan-project"
+      ],
+      "sourceTurns": [
+        "D3:2"
+      ]
+    },
+    {
+      "text": "John's team won a tough game in the week before 16 July 2023 and celebrated afterwards at a restaurant, exhausted but happy and reliving the intense moments.",
+      "speaker": "John",
+      "statedOn": "2023-07-16",
+      "entities": [
+        "john",
+        "minnesota-wolves",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D3:4",
+        "D3:5"
+      ]
+    },
+    {
+      "text": "Tim said that meeting a fellow Harry Potter fan showed him the love you can feel among people who share a passion, and John agreed that teammates who share a love of the game create a strong bond that is like a second family.",
+      "speaker": "John",
+      "statedOn": "2023-07-16",
+      "entities": [
+        "tim",
+        "john",
+        "minnesota-wolves",
+        "harry-potter"
+      ],
+      "sourceTurns": [
+        "D3:6",
+        "D3:7"
+      ]
+    },
+    {
+      "text": "Asked about his endorsements on 16 July 2023, John said he was getting somewhere and had spoken to some big names, which looked promising.",
+      "speaker": "John",
+      "statedOn": "2023-07-16",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D3:8",
+        "D3:9"
+      ]
+    },
+    {
+      "text": "John connected with endorsement companies through his contacts in the basketball industry and his marketing skills, and credits networking for the deals he has received.",
+      "speaker": "John",
+      "statedOn": "2023-07-16",
+      "entities": [
+        "john",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D3:10",
+        "D3:11"
+      ]
+    },
+    {
+      "text": "John had signed an endorsement deal with Nike for basketball shoes and gear by 16 July 2023, and was in talks with Gatorade about a potential sponsorship.",
+      "speaker": "John",
+      "statedOn": "2023-07-16",
+      "entities": [
+        "john",
+        "nike",
+        "gatorade"
+      ],
+      "sourceTurns": [
+        "D3:12",
+        "D3:13",
+        "D3:14"
+      ]
+    },
+    {
+      "text": "John said on 16 July 2023 that he had always liked Under Armour and that working with them would be really cool.",
+      "speaker": "John",
+      "statedOn": "2023-07-16",
+      "entities": [
+        "john",
+        "under-armour"
+      ],
+      "sourceTurns": [
+        "D3:15"
+      ]
+    },
+    {
+      "text": "John shared a photo of a city skyline at sunset on 16 July 2023 and said it was where he was headed and that exciting things were coming.",
+      "speaker": "John",
+      "statedOn": "2023-07-16",
+      "entities": [
+        "john",
+        "seattle"
+      ],
+      "sourceTurns": [
+        "D3:16",
+        "D3:17"
+      ]
+    },
+    {
+      "text": "The skyline John shared on 16 July 2023 was Seattle, where he had a game scheduled for the following month, August 2023.",
+      "speaker": "John",
+      "statedOn": "2023-07-16",
+      "entities": [
+        "john",
+        "seattle",
+        "minnesota-wolves"
+      ],
+      "sourceTurns": [
+        "D3:18",
+        "D3:19"
+      ]
+    },
+    {
+      "text": "John loves Seattle for its energy, diversity, food and the support of the fans at games, and says trying the local seafood is a must; Tim said he had always wanted to try the seafood there.",
+      "speaker": "John",
+      "statedOn": "2023-07-16",
+      "entities": [
+        "john",
+        "tim",
+        "seattle"
+      ],
+      "sourceTurns": [
+        "D3:20",
+        "D3:21",
+        "D3:22"
+      ]
+    },
+    {
+      "text": "John loves the ocean and remembers an awesome summer surfing and riding the waves with his friends as his favourite beach memory.",
+      "speaker": "John",
+      "statedOn": "2023-07-16",
+      "entities": [
+        "john",
+        "surfing"
+      ],
+      "sourceTurns": [
+        "D3:23",
+        "D3:24",
+        "D3:25"
+      ]
+    },
+    {
+      "text": "John started surfing around 2018, five years before 16 July 2023, and loves it for the connection to nature and the free feeling of the waves and wind.",
+      "speaker": "John",
+      "statedOn": "2023-07-16",
+      "entities": [
+        "john",
+        "surfing"
+      ],
+      "sourceTurns": [
+        "D3:26",
+        "D3:27",
+        "D3:28",
+        "D3:29"
+      ]
+    },
+    {
+      "text": "Tim does not surf; reading a great fantasy book is how he escapes and feels free, and he says it is bliss when he does it in a comfortable spot, like being in another world.",
+      "speaker": "Tim",
+      "statedOn": "2023-07-16",
+      "entities": [
+        "tim",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D3:30",
+        "D3:31",
+        "D3:32"
+      ]
+    },
+    {
+      "text": "Tim and John agreed on 16 July 2023 that everyone finds their own way to feel happy and free, and that it is what makes life good.",
+      "speaker": "Tim",
+      "statedOn": "2023-07-16",
+      "entities": [
+        "tim",
+        "john"
+      ],
+      "sourceTurns": [
+        "D3:33",
+        "D3:34",
+        "D3:35"
+      ]
+    },
+    {
+      "text": "Tim began writing articles about fantasy novels for an online magazine by 2 August 2023 and found it rewarding.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-02",
+      "entities": [
+        "tim",
+        "fantasy-magazine",
+        "fantasy-writing"
+      ],
+      "sourceTurns": [
+        "D4:1",
+        "D4:2"
+      ]
+    },
+    {
+      "text": "Tim found the magazine writing opportunity on a fantasy literature forum, shared his ideas with the magazine and they liked them, which let him spread his love of fantasy.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-02",
+      "entities": [
+        "tim",
+        "fantasy-magazine",
+        "fantasy-literature-forum",
+        "fantasy-writing"
+      ],
+      "sourceTurns": [
+        "D4:3"
+      ]
+    },
+    {
+      "text": "Tim's articles for the online fantasy magazine study the characters and themes of different fantasy novels and make book recommendations.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-02",
+      "entities": [
+        "tim",
+        "fantasy-magazine",
+        "fantasy-writing"
+      ],
+      "sourceTurns": [
+        "D4:4",
+        "D4:5",
+        "D4:6"
+      ]
+    },
+    {
+      "text": "Tim named Harry Potter and Game of Thrones on 2 August 2023 as the books he most loves writing about and said he is totally hooked on both.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-02",
+      "entities": [
+        "tim",
+        "harry-potter",
+        "game-of-thrones",
+        "fantasy-writing"
+      ],
+      "sourceTurns": [
+        "D4:7"
+      ]
+    },
+    {
+      "text": "John and his friend Anthony went to a charity event before 2 August 2023 and ended up in an intense Harry Potter trivia contest, where another guest won a signed Harry Potter book as a prize.",
+      "speaker": "John",
+      "statedOn": "2023-08-02",
+      "entities": [
+        "john",
+        "anthony",
+        "harry-potter"
+      ],
+      "sourceTurns": [
+        "D4:8",
+        "D4:9"
+      ]
+    },
+    {
+      "text": "John was reading an inspiring book in early August 2023 that reminded him to keep dreaming and to keep reaching for new goals.",
+      "speaker": "John",
+      "statedOn": "2023-08-02",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D4:10",
+        "D4:11",
+        "D4:12",
+        "D4:13"
+      ]
+    },
+    {
+      "text": "John wished Tim well with his magazine writing on 2 August 2023 and Tim said he would enjoy it.",
+      "speaker": "John",
+      "statedOn": "2023-08-02",
+      "entities": [
+        "tim",
+        "john",
+        "fantasy-writing"
+      ],
+      "sourceTurns": [
+        "D4:14",
+        "D4:15"
+      ]
+    },
+    {
+      "text": "Tim spoke over Skype around 9 August 2023 with the Harry Potter fan he had met in California, and they discussed characters and a possible collaboration.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-09",
+      "entities": [
+        "tim",
+        "california",
+        "harry-potter",
+        "hp-fan-project"
+      ],
+      "sourceTurns": [
+        "D5:1"
+      ]
+    },
+    {
+      "text": "John's team won a tight, intense game in the week before 9 August 2023, and he described scoring the final basket to a cheering crowd as an amazing adrenaline rush.",
+      "speaker": "John",
+      "statedOn": "2023-08-09",
+      "entities": [
+        "john",
+        "minnesota-wolves",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D5:2",
+        "D5:3",
+        "D5:4",
+        "D5:5"
+      ]
+    },
+    {
+      "text": "John says the bond in the Minnesota Wolves squad makes all the hard work worth it and that the team is like a family away from home who push each other to improve.",
+      "speaker": "John",
+      "statedOn": "2023-08-09",
+      "entities": [
+        "john",
+        "minnesota-wolves"
+      ],
+      "sourceTurns": [
+        "D5:6",
+        "D5:7",
+        "D5:8",
+        "D5:9"
+      ]
+    },
+    {
+      "text": "John said on 9 August 2023 that his teammates encourage him when he is down, in life as well as in sport, and that they hang out a lot; Tim said having a second family like that helps him with his home life and hobbies too.",
+      "speaker": "John",
+      "statedOn": "2023-08-09",
+      "entities": [
+        "john",
+        "tim",
+        "minnesota-wolves"
+      ],
+      "sourceTurns": [
+        "D5:10",
+        "D5:11"
+      ]
+    },
+    {
+      "text": "Tim was reading a fantasy book in August 2023 that captivated him, saying it takes him to another world and makes his imagination soar.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-09",
+      "entities": [
+        "tim",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D5:12",
+        "D5:13",
+        "D5:14"
+      ]
+    },
+    {
+      "text": "The fantasy book Tim was reading on 9 August 2023 was by Patrick Rothfuss, and he recommended it to John for the way the author builds the world and the characters.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-09",
+      "entities": [
+        "tim",
+        "patrick-rothfuss",
+        "the-name-of-the-wind",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D5:15",
+        "D5:16",
+        "D5:17"
+      ]
+    },
+    {
+      "text": "John promised on 9 August 2023 to read the Patrick Rothfuss novel Tim recommended and to tell him what he thought of it.",
+      "speaker": "John",
+      "statedOn": "2023-08-09",
+      "entities": [
+        "john",
+        "tim",
+        "patrick-rothfuss",
+        "the-name-of-the-wind"
+      ],
+      "sourceTurns": [
+        "D5:18",
+        "D5:19",
+        "D5:20"
+      ]
+    },
+    {
+      "text": "John took a trip in early August 2023 and said he loved the energy of the place he visited.",
+      "speaker": "John",
+      "statedOn": "2023-08-11",
+      "entities": [
+        "john",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D6:1"
+      ]
+    },
+    {
+      "text": "Tim went to a fan event shortly before 11 August 2023 and found it fantastic to be among other fans who love the same thing.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-11",
+      "entities": [
+        "tim"
+      ],
+      "sourceTurns": [
+        "D6:2"
+      ]
+    },
+    {
+      "text": "The trip John took in early August 2023 was to Chicago, which he found full of energy with really friendly locals, and he valued experiencing other cultures there.",
+      "speaker": "John",
+      "statedOn": "2023-08-11",
+      "entities": [
+        "john",
+        "chicago",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D6:3",
+        "D6:4"
+      ]
+    },
+    {
+      "text": "John says the energy in a stadium during a game, with everyone cheering and chanting, is a really special experience.",
+      "speaker": "John",
+      "statedOn": "2023-08-11",
+      "entities": [
+        "john",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D6:5"
+      ]
+    },
+    {
+      "text": "Tim had written more articles for the online fantasy magazine by 11 August 2023 and said the work lets him combine his love of reading with the joy of sharing great stories.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-11",
+      "entities": [
+        "tim",
+        "fantasy-magazine",
+        "fantasy-writing",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D6:6",
+        "D6:7"
+      ]
+    },
+    {
+      "text": "Tim recommended The Name of the Wind to John on 11 August 2023, a fantasy novel with a magician and musician protagonist, praising its world-building and character development; John added it to his reading list.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-11",
+      "entities": [
+        "tim",
+        "john",
+        "the-name-of-the-wind",
+        "patrick-rothfuss"
+      ],
+      "sourceTurns": [
+        "D6:8",
+        "D6:9"
+      ]
+    },
+    {
+      "text": "John showed Tim his lucky basketball shoes on 11 August 2023, saying they had been with him through the good and the bad and that every mark on them has a story.",
+      "speaker": "John",
+      "statedOn": "2023-08-11",
+      "entities": [
+        "john",
+        "johns-lucky-shoes",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D6:9",
+        "D6:10"
+      ]
+    },
+    {
+      "text": "John's lucky basketball shoes have been with him since the beginning of his career and symbolise resilience, determination and his love of the game, reminding him of his successes, his failures and how far he has come.",
+      "speaker": "John",
+      "statedOn": "2023-08-11",
+      "entities": [
+        "john",
+        "johns-lucky-shoes",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D6:11",
+        "D6:12"
+      ]
+    },
+    {
+      "text": "John got into basketball as a child watching NBA games with his father; his father signed him up to a local league when he turned ten, he played through middle and high school, earned a college scholarship and was drafted by a team after college, which he calls a dream come true.",
+      "speaker": "John",
+      "statedOn": "2023-08-11",
+      "entities": [
+        "john",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D6:12",
+        "D6:13",
+        "D6:14"
+      ]
+    },
+    {
+      "text": "John's number one basketball goal is to win a championship, and he also wants to make a difference away from the court through charity and by inspiring people, to give something back to the game.",
+      "speaker": "John",
+      "statedOn": "2023-08-11",
+      "entities": [
+        "john",
+        "basketball",
+        "youth-sports-charity"
+      ],
+      "sourceTurns": [
+        "D6:15",
+        "D6:16"
+      ]
+    },
+    {
+      "text": "John was teaming up with a local organisation that helps disadvantaged children with sport and school as of 11 August 2023, hoping to use his platform to have a positive impact on the community.",
+      "speaker": "John",
+      "statedOn": "2023-08-11",
+      "entities": [
+        "john",
+        "youth-sports-charity"
+      ],
+      "sourceTurns": [
+        "D6:17",
+        "D6:18"
+      ]
+    },
+    {
+      "text": "Tim promised John his support for the charity work on 11 August 2023 and praised his determination and passion.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-11",
+      "entities": [
+        "tim",
+        "john",
+        "youth-sports-charity"
+      ],
+      "sourceTurns": [
+        "D6:19",
+        "D6:20",
+        "D6:21",
+        "D6:22",
+        "D6:23"
+      ]
+    },
+    {
+      "text": "John rejoined his Minnesota Wolves teammates on 15 August 2023 after his trip to Chicago and was given a warm welcome he described as an electric atmosphere, saying he felt lucky to be part of the team.",
+      "speaker": "John",
+      "statedOn": "2023-08-17",
+      "entities": [
+        "john",
+        "minnesota-wolves",
+        "chicago"
+      ],
+      "chrono": [
+        "teammates-reunion"
+      ],
+      "sourceTurns": [
+        "D7:1",
+        "D7:2",
+        "D7:3"
+      ]
+    },
+    {
+      "text": "Tim said on 17 August 2023 that he has felt he belonged several times, and that the fan event he went to in July 2023 was one of his favourites because everyone there shared the same love for it.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-17",
+      "entities": [
+        "tim"
+      ],
+      "sourceTurns": [
+        "D7:4",
+        "D7:5"
+      ]
+    },
+    {
+      "text": "Tim had no big events planned as of 17 August 2023 but hoped to attend a book conference the following month, a gathering of authors, publishers and book lovers, to learn more about literature; John said it would be great to go with him.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-17",
+      "entities": [
+        "tim",
+        "john",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D7:6",
+        "D7:7"
+      ]
+    },
+    {
+      "text": "John's Minnesota Wolves teammates gave him a basketball they had all signed, as a sign of their friendship and appreciation.",
+      "speaker": "John",
+      "statedOn": "2023-08-17",
+      "entities": [
+        "john",
+        "minnesota-wolves",
+        "teammate-signed-basketball"
+      ],
+      "chrono": [
+        "teammates-reunion"
+      ],
+      "sourceTurns": [
+        "D7:7",
+        "D7:8",
+        "D7:9"
+      ]
+    },
+    {
+      "text": "John keeps the basketball his teammates signed as a comforting reminder of their bond and of why he started playing, and says it motivates him to stay strong and give his all.",
+      "speaker": "John",
+      "statedOn": "2023-08-17",
+      "entities": [
+        "john",
+        "teammate-signed-basketball",
+        "basketball",
+        "minnesota-wolves"
+      ],
+      "sourceTurns": [
+        "D7:10",
+        "D7:11",
+        "D7:12",
+        "D7:13"
+      ]
+    },
+    {
+      "text": "Tim and John agreed on 17 August 2023 that supportive people around you are a powerful source of strength.",
+      "speaker": "John",
+      "statedOn": "2023-08-17",
+      "entities": [
+        "tim",
+        "john"
+      ],
+      "sourceTurns": [
+        "D7:14",
+        "D7:15",
+        "D7:16"
+      ]
+    },
+    {
+      "text": "John found a new gym shortly before 21 August 2023 to keep up his basketball fitness, saying staying fit is essential to surviving professional basketball and that finding the right place was tough.",
+      "speaker": "John",
+      "statedOn": "2023-08-21",
+      "entities": [
+        "john",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D8:1",
+        "D8:2"
+      ]
+    },
+    {
+      "text": "John had to adapt and tweak his training routine when he moved to the new gym in August 2023, and found the right balance through trial and error.",
+      "speaker": "John",
+      "statedOn": "2023-08-21",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D8:3",
+        "D8:4"
+      ]
+    },
+    {
+      "text": "John's written workout plan combines basketball work with strength training and enough rest so he can push himself in practice; he showed it to Tim on 21 August 2023.",
+      "speaker": "John",
+      "statedOn": "2023-08-21",
+      "entities": [
+        "john",
+        "strength-training",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D8:5",
+        "D8:6"
+      ]
+    },
+    {
+      "text": "John includes strength training in his routine because it builds muscle, increases power, prevents injuries, makes him more explosive and boosts his overall athleticism.",
+      "speaker": "John",
+      "statedOn": "2023-08-21",
+      "entities": [
+        "john",
+        "strength-training",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D8:7",
+        "D8:8"
+      ]
+    },
+    {
+      "text": "John says strength training changed the game for him, improving his shooting accuracy, agility and speed, giving him an edge over opponents and the confidence to take on whatever comes.",
+      "speaker": "John",
+      "statedOn": "2023-08-21",
+      "entities": [
+        "john",
+        "strength-training",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D8:9",
+        "D8:10",
+        "D8:11"
+      ]
+    },
+    {
+      "text": "Tim had been focusing on school and reading a lot of fantasy books as of 21 August 2023, and had started learning the piano, which he found a learning curve but satisfying to progress at.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-21",
+      "entities": [
+        "tim",
+        "piano",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D8:12",
+        "D8:13"
+      ]
+    },
+    {
+      "text": "Tim's favourite piece to play on the piano is a theme from a film he loves, because it brings back a lot of good memories.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-21",
+      "entities": [
+        "tim",
+        "piano"
+      ],
+      "sourceTurns": [
+        "D8:14",
+        "D8:15"
+      ]
+    },
+    {
+      "text": "The film whose theme Tim plays on the piano is Harry Potter and the Philosopher's Stone, the first of the series, which is special to him for the memory of watching it with his family.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-21",
+      "entities": [
+        "tim",
+        "hp-philosophers-stone",
+        "harry-potter",
+        "piano"
+      ],
+      "sourceTurns": [
+        "D8:16"
+      ]
+    },
+    {
+      "text": "John owns the whole Harry Potter film collection and said on 21 August 2023 that he loves the first film too.",
+      "speaker": "John",
+      "statedOn": "2023-08-21",
+      "entities": [
+        "john",
+        "harry-potter",
+        "hp-philosophers-stone"
+      ],
+      "sourceTurns": [
+        "D8:17"
+      ]
+    },
+    {
+      "text": "Tim's family would get comfortable with snacks and a blanket to watch Harry Potter and the Philosopher's Stone together, absorbed in it, a memory he calls special.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-21",
+      "entities": [
+        "tim",
+        "hp-philosophers-stone"
+      ],
+      "sourceTurns": [
+        "D8:18",
+        "D8:19"
+      ]
+    },
+    {
+      "text": "Tim shared a photo on 21 August 2023 of a day when his family got together to eat, calling it a great day full of love and laughter, and said family time means a lot to him; John said his family gets together all the time too.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-21",
+      "entities": [
+        "tim",
+        "john"
+      ],
+      "sourceTurns": [
+        "D8:19",
+        "D8:20",
+        "D8:21"
+      ]
+    },
+    {
+      "text": "Tim's family Thanksgiving traditions are preparing the feast together, saying what they are thankful for, and watching films afterwards.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-21",
+      "entities": [
+        "tim"
+      ],
+      "sourceTurns": [
+        "D8:22",
+        "D8:23"
+      ]
+    },
+    {
+      "text": "Home Alone is one of the films Tim's family watch together at Thanksgiving, because it always brings a lot of laughs.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-21",
+      "entities": [
+        "tim",
+        "home-alone"
+      ],
+      "sourceTurns": [
+        "D8:24",
+        "D8:25"
+      ]
+    },
+    {
+      "text": "Tim's family also watch Elf over the holidays, which makes them laugh and feel festive.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-21",
+      "entities": [
+        "tim",
+        "elf"
+      ],
+      "sourceTurns": [
+        "D8:26",
+        "D8:27"
+      ]
+    },
+    {
+      "text": "Tim's family watch The Santa Clause over the holidays as well; Tim calls it heartwarming and festive and John called it a classic that captures the Christmas magic.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-21",
+      "entities": [
+        "tim",
+        "john",
+        "the-santa-clause"
+      ],
+      "sourceTurns": [
+        "D8:28",
+        "D8:29"
+      ]
+    },
+    {
+      "text": "Tim decorated his family's Christmas tree in 2022 himself with an all-out Harry Potter theme, and said it was a fun project he was really happy with; John shared a photo of his own 2022 tree covered in lights.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-21",
+      "entities": [
+        "tim",
+        "john",
+        "harry-potter"
+      ],
+      "sourceTurns": [
+        "D8:29",
+        "D8:30",
+        "D8:31",
+        "D8:32",
+        "D8:33",
+        "D8:34"
+      ]
+    },
+    {
+      "text": "Tim and John ended their 21 August 2023 conversation warmly, promising to talk again soon.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-21",
+      "entities": [
+        "tim",
+        "john"
+      ],
+      "sourceTurns": [
+        "D8:35",
+        "D8:36",
+        "D8:37"
+      ]
+    },
+    {
+      "text": "Tim was overwhelmed by assignments and exams in the week before 26 August 2023 but was not giving up, and was trying to balance studying with his fantasy reading.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-26",
+      "entities": [
+        "tim",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D9:1"
+      ]
+    },
+    {
+      "text": "John visited his hometown in the week before 26 August 2023 and caught up with his family and old friends, reminiscing about their childhood.",
+      "speaker": "John",
+      "statedOn": "2023-08-26",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D9:2"
+      ]
+    },
+    {
+      "text": "John played on the same basketball team as the friends in the old team photo he showed Tim for four years in high school.",
+      "speaker": "John",
+      "statedOn": "2023-08-26",
+      "entities": [
+        "john",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D9:3",
+        "D9:4"
+      ]
+    },
+    {
+      "text": "Tim has never been part of a sports team; he is into reading and fantasy novels and loves sinking into magical worlds, which is one reason he loves travelling to new places for a different kind of magic.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-26",
+      "entities": [
+        "tim",
+        "reading-fantasy",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D9:5"
+      ]
+    },
+    {
+      "text": "John loves discovering new cities and shared a photo from one of his trips to New York City on 26 August 2023, calling it amazing for its constant novelty, its exploring and its restaurants.",
+      "speaker": "John",
+      "statedOn": "2023-08-26",
+      "entities": [
+        "john",
+        "new-york-city",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D9:6",
+        "D9:7",
+        "D9:8"
+      ]
+    },
+    {
+      "text": "Tim added New York City to his travel list on 26 August 2023 after John called its culture and food an adventure he would never forget.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-26",
+      "entities": [
+        "tim",
+        "new-york-city",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D9:9",
+        "D9:10",
+        "D9:11"
+      ]
+    },
+    {
+      "text": "John offered on 26 August 2023 to help Tim plan his New York City trip whenever he goes, and Tim said the support meant a lot to him.",
+      "speaker": "John",
+      "statedOn": "2023-08-26",
+      "entities": [
+        "john",
+        "tim",
+        "new-york-city"
+      ],
+      "sourceTurns": [
+        "D9:12",
+        "D9:13",
+        "D9:14",
+        "D9:15"
+      ]
+    },
+    {
+      "text": "Tim was turned down for a summer job he wanted shortly before 31 August 2023 but said he was staying positive about it, and John encouraged him.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-31",
+      "entities": [
+        "tim",
+        "john"
+      ],
+      "sourceTurns": [
+        "D10:1",
+        "D10:2"
+      ]
+    },
+    {
+      "text": "John had trouble working out the subway on his New York City trip until someone explained it to him, after which the trip went fine.",
+      "speaker": "John",
+      "statedOn": "2023-08-31",
+      "entities": [
+        "john",
+        "new-york-city",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D10:2"
+      ]
+    },
+    {
+      "text": "Tim gave a presentation in class on 30 August 2023, was nervous but got through it, and called it a small step that felt like progress.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-31",
+      "entities": [
+        "tim"
+      ],
+      "chrono": [
+        "class-presentation"
+      ],
+      "sourceTurns": [
+        "D10:3",
+        "D10:4"
+      ]
+    },
+    {
+      "text": "John had been trying out cooking recipes by 31 August 2023 and made a butternut soup he improvised on the spot, so he had no written recipe to share.",
+      "speaker": "John",
+      "statedOn": "2023-08-31",
+      "entities": [
+        "john",
+        "cooking"
+      ],
+      "sourceTurns": [
+        "D10:4",
+        "D10:5",
+        "D10:6"
+      ]
+    },
+    {
+      "text": "John seasoned his improvised butternut soup with sage, and Tim said he loves experimenting with spices and would look a recipe up.",
+      "speaker": "John",
+      "statedOn": "2023-08-31",
+      "entities": [
+        "john",
+        "tim",
+        "cooking"
+      ],
+      "sourceTurns": [
+        "D10:7",
+        "D10:8",
+        "D10:9"
+      ]
+    },
+    {
+      "text": "Tim was planning his first trip to Universal Studios for September 2023, mainly for the Harry Potter attractions; John had never been but said it was on his bucket list.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-31",
+      "entities": [
+        "tim",
+        "john",
+        "universal-studios",
+        "harry-potter",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D10:9",
+        "D10:10",
+        "D10:11",
+        "D10:12"
+      ]
+    },
+    {
+      "text": "Tim promised on 31 August 2023 to tell John how his Universal Studios trip went, and John wished him a safe trip.",
+      "speaker": "Tim",
+      "statedOn": "2023-08-31",
+      "entities": [
+        "tim",
+        "john",
+        "universal-studios"
+      ],
+      "sourceTurns": [
+        "D10:13",
+        "D10:14",
+        "D10:15",
+        "D10:16",
+        "D10:17"
+      ]
+    },
+    {
+      "text": "John went to a local restaurant with some new Minnesota Wolves teammates in the week before 21 September 2023 and enjoyed getting to know them better.",
+      "speaker": "John",
+      "statedOn": "2023-09-21",
+      "entities": [
+        "john",
+        "minnesota-wolves"
+      ],
+      "sourceTurns": [
+        "D11:1",
+        "D11:2",
+        "D11:3"
+      ]
+    },
+    {
+      "text": "John calls his new Minnesota Wolves teammates great friends, says they connected over their shared love of basketball and that they had a lot of fun together.",
+      "speaker": "John",
+      "statedOn": "2023-09-21",
+      "entities": [
+        "john",
+        "minnesota-wolves",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D11:4",
+        "D11:5",
+        "D11:6"
+      ]
+    },
+    {
+      "text": "John and his teammates were planning a team trip for October 2023 to explore a new city, with the destination still undecided as of 21 September 2023.",
+      "speaker": "John",
+      "statedOn": "2023-09-21",
+      "entities": [
+        "john",
+        "minnesota-wolves",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D11:7",
+        "D11:8",
+        "D11:9"
+      ]
+    },
+    {
+      "text": "Tim suggested Edinburgh in Scotland for the Minnesota Wolves team trip on 21 September 2023, calling it the birthplace of Harry Potter with great history, architecture and a magical vibe; John had never been to Edinburgh and said it was worth considering.",
+      "speaker": "Tim",
+      "statedOn": "2023-09-21",
+      "entities": [
+        "tim",
+        "john",
+        "edinburgh",
+        "scotland",
+        "harry-potter",
+        "minnesota-wolves"
+      ],
+      "sourceTurns": [
+        "D11:10",
+        "D11:11",
+        "D11:12",
+        "D11:13"
+      ]
+    },
+    {
+      "text": "John shared a photo of the sunset over the practice court on 21 September 2023 and said moments like it make him grateful for his basketball career.",
+      "speaker": "John",
+      "statedOn": "2023-09-21",
+      "entities": [
+        "john",
+        "basketball",
+        "minnesota-wolves"
+      ],
+      "sourceTurns": [
+        "D11:13",
+        "D11:14"
+      ]
+    },
+    {
+      "text": "John loves professional basketball for the constant challenge, for seeing himself improve and beat his goals, and for playing alongside his teammates in front of cheering fans; he says it gives him satisfaction and purpose.",
+      "speaker": "John",
+      "statedOn": "2023-09-21",
+      "entities": [
+        "john",
+        "basketball",
+        "minnesota-wolves"
+      ],
+      "sourceTurns": [
+        "D11:15",
+        "D11:16"
+      ]
+    },
+    {
+      "text": "John's goals as of 21 September 2023 were to shoot better and make more impact on court and to be known as a consistent performer, and off court to win more endorsements and build his brand with life after basketball in mind.",
+      "speaker": "John",
+      "statedOn": "2023-09-21",
+      "entities": [
+        "john",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D11:17",
+        "D11:18"
+      ]
+    },
+    {
+      "text": "John wants to use his platform after basketball to make a positive difference and inspire others, possibly by starting a foundation and doing charity work, and to leave a meaningful legacy.",
+      "speaker": "John",
+      "statedOn": "2023-09-21",
+      "entities": [
+        "john",
+        "youth-sports-charity",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D11:19",
+        "D11:20"
+      ]
+    },
+    {
+      "text": "Tim advised John on 21 September 2023 to choose endorsements that align with his values and brand, to look for companies that share his wish to help others, and to keep them feeling authentic to his followers.",
+      "speaker": "Tim",
+      "statedOn": "2023-09-21",
+      "entities": [
+        "tim",
+        "john"
+      ],
+      "sourceTurns": [
+        "D11:21",
+        "D11:22"
+      ]
+    },
+    {
+      "text": "Tim recommended Patrick Rothfuss's The Name of the Wind to John again on 21 September 2023 as reading for his trip, and John said it looked like a great travelling book and he could not wait to start it.",
+      "speaker": "Tim",
+      "statedOn": "2023-09-21",
+      "entities": [
+        "tim",
+        "john",
+        "patrick-rothfuss",
+        "the-name-of-the-wind",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D11:23",
+        "D11:24",
+        "D11:25"
+      ]
+    },
+    {
+      "text": "Tim spotted The Alchemist in the photo of John's bookshelf on 21 September 2023 and called it one of his favourites; John had read it, loved it for making him think about following his dreams, and recommends it highly.",
+      "speaker": "John",
+      "statedOn": "2023-09-21",
+      "entities": [
+        "tim",
+        "john",
+        "the-alchemist"
+      ],
+      "sourceTurns": [
+        "D11:25",
+        "D11:26",
+        "D11:27",
+        "D11:28"
+      ]
+    },
+    {
+      "text": "Tim and John said their goodbyes on 21 September 2023.",
+      "speaker": "John",
+      "statedOn": "2023-09-21",
+      "entities": [
+        "tim",
+        "john"
+      ],
+      "sourceTurns": [
+        "D11:29",
+        "D11:30"
+      ]
+    },
+    {
+      "text": "Tim told John on 2 October 2023 that a lot had changed for him since they last spoke.",
+      "speaker": "Tim",
+      "statedOn": "2023-10-02",
+      "entities": [
+        "tim",
+        "john"
+      ],
+      "sourceTurns": [
+        "D12:1"
+      ]
+    },
+    {
+      "text": "John and his girlfriend married in an emotional greenhouse ceremony in the week before 2 October 2023.",
+      "speaker": "John",
+      "statedOn": "2023-10-02",
+      "entities": [
+        "john",
+        "johns-wife"
+      ],
+      "sourceTurns": [
+        "D12:2",
+        "D12:3"
+      ]
+    },
+    {
+      "text": "John and his wife chose a greenhouse venue for a smaller, more intimate wedding and followed the necessary safety protocols so that everyone felt safe, and were glad to have their loved ones celebrate with them.",
+      "speaker": "John",
+      "statedOn": "2023-10-02",
+      "entities": [
+        "john",
+        "johns-wife"
+      ],
+      "sourceTurns": [
+        "D12:4",
+        "D12:5"
+      ]
+    },
+    {
+      "text": "John described his wedding day as full of more love and happiness than he had ever felt, and said friends from the hiking club he had only just joined came to it.",
+      "speaker": "John",
+      "statedOn": "2023-10-02",
+      "entities": [
+        "john",
+        "johns-wife",
+        "hiking-club"
+      ],
+      "sourceTurns": [
+        "D12:6",
+        "D12:7"
+      ]
+    },
+    {
+      "text": "John's favourite memory of his wedding is seeing his bride walk down the aisle with her face lit up, a magical moment that choked him up.",
+      "speaker": "John",
+      "statedOn": "2023-10-02",
+      "entities": [
+        "john",
+        "johns-wife"
+      ],
+      "sourceTurns": [
+        "D12:8",
+        "D12:9"
+      ]
+    },
+    {
+      "text": "John and his wife had their first dance at a cosy restaurant, which he described as dreamy with the music and the candlelight and special for having everyone there.",
+      "speaker": "John",
+      "statedOn": "2023-10-02",
+      "entities": [
+        "john",
+        "johns-wife"
+      ],
+      "sourceTurns": [
+        "D12:10",
+        "D12:11",
+        "D12:12"
+      ]
+    },
+    {
+      "text": "Tim congratulated John on his marriage on 2 October 2023; John said he was lucky to have Tim in his life and Tim said John's friendship meant a lot to him.",
+      "speaker": "Tim",
+      "statedOn": "2023-10-02",
+      "entities": [
+        "tim",
+        "john",
+        "johns-wife"
+      ],
+      "sourceTurns": [
+        "D12:13",
+        "D12:14",
+        "D12:15"
+      ]
+    },
+    {
+      "text": "Tim's bookshelf is filled with his favourite fantasy novels, which he says fire up his imagination, take him to alternate realities and are his escape from reality.",
+      "speaker": "Tim",
+      "statedOn": "2023-10-02",
+      "entities": [
+        "tim",
+        "tims-book-collection",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D12:15",
+        "D12:16",
+        "D12:17"
+      ]
+    },
+    {
+      "text": "John collects basketball jerseys and showed Tim a photo of the collection on 2 October 2023.",
+      "speaker": "John",
+      "statedOn": "2023-10-02",
+      "entities": [
+        "john",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D12:18"
+      ]
+    },
+    {
+      "text": "John's favourite basketball team is the Minnesota Wolves and his favourite player is LeBron James, whose skills and leadership he loves; Tim agreed both were impressive.",
+      "speaker": "John",
+      "statedOn": "2023-10-02",
+      "entities": [
+        "john",
+        "tim",
+        "minnesota-wolves",
+        "lebron-james",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D12:19",
+        "D12:20",
+        "D12:21"
+      ]
+    },
+    {
+      "text": "John admires LeBron James's work ethic and dedication to the game and finds him an inspiration.",
+      "speaker": "John",
+      "statedOn": "2023-10-02",
+      "entities": [
+        "john",
+        "lebron-james"
+      ],
+      "sourceTurns": [
+        "D12:22",
+        "D12:23"
+      ]
+    },
+    {
+      "text": "John has met LeBron James a few times and found him relaxed, and has also watched him play live, saying he learned a lot from watching a top player.",
+      "speaker": "John",
+      "statedOn": "2023-10-02",
+      "entities": [
+        "john",
+        "lebron-james",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D12:24",
+        "D12:25"
+      ]
+    },
+    {
+      "text": "John found the crowd energy at the game where he watched LeBron James play incredible and motivating, and said moments like it make him love his job.",
+      "speaker": "John",
+      "statedOn": "2023-10-02",
+      "entities": [
+        "john",
+        "lebron-james",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D12:26",
+        "D12:27",
+        "D12:28"
+      ]
+    },
+    {
+      "text": "Tim encouraged John on 2 October 2023 to keep going with the work he enjoys.",
+      "speaker": "Tim",
+      "statedOn": "2023-10-02",
+      "entities": [
+        "tim",
+        "john"
+      ],
+      "sourceTurns": [
+        "D12:29"
+      ]
+    },
+    {
+      "text": "Tim went to a Harry Potter conference in the UK in the week before 13 October 2023, found the crowd of fellow fans like a magical family, and came away inspired and with a new lease of life.",
+      "speaker": "Tim",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "tim",
+        "harry-potter",
+        "united-kingdom",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D13:1",
+        "D13:2"
+      ]
+    },
+    {
+      "text": "John shared a Minnesota Wolves team photo on 13 October 2023 and said the season had been intense, with both tough losses and great wins, and that overall the team did pretty well.",
+      "speaker": "John",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "john",
+        "minnesota-wolves",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D13:3",
+        "D13:4"
+      ]
+    },
+    {
+      "text": "John says the Minnesota Wolves handle tough opponents by backing each other up and refusing to quit, and that facing them is what drives the team to improve.",
+      "speaker": "John",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "john",
+        "minnesota-wolves"
+      ],
+      "sourceTurns": [
+        "D13:5",
+        "D13:6"
+      ]
+    },
+    {
+      "text": "John's team won a trophy by 13 October 2023; he said all the hard work was totally worth it and that he was elated holding it up.",
+      "speaker": "John",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "john",
+        "minnesota-wolves",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D13:7",
+        "D13:8",
+        "D13:9",
+        "D13:10"
+      ]
+    },
+    {
+      "text": "Tim told John on 13 October 2023 to keep believing in himself and that anything is possible with hard work, and John said the encouragement meant a lot and left him motivated.",
+      "speaker": "Tim",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "tim",
+        "john"
+      ],
+      "sourceTurns": [
+        "D13:11",
+        "D13:12",
+        "D13:13",
+        "D13:14"
+      ]
+    },
+    {
+      "text": "John said on 13 October 2023 that he would need new shoes after all the games, and Tim recommended a pair of running shoes he had bought online, calling them a game changer that is like walking on clouds.",
+      "speaker": "Tim",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "tim",
+        "john"
+      ],
+      "sourceTurns": [
+        "D13:14",
+        "D13:15",
+        "D13:16",
+        "D13:17",
+        "D13:18"
+      ]
+    },
+    {
+      "text": "Tim offered John further help on 13 October 2023 and the two encouraged each other to stay motivated and keep chasing their dreams.",
+      "speaker": "Tim",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "tim",
+        "john"
+      ],
+      "sourceTurns": [
+        "D13:19",
+        "D13:20",
+        "D13:21",
+        "D13:22"
+      ]
+    },
+    {
+      "text": "Tim and John caught up on 17 October 2023 after a long gap, with a lot having happened for both of them.",
+      "speaker": "John",
+      "statedOn": "2023-10-17",
+      "entities": [
+        "tim",
+        "john"
+      ],
+      "sourceTurns": [
+        "D14:1",
+        "D14:2"
+      ]
+    },
+    {
+      "text": "John began mentoring the younger players on the Minnesota Wolves by 17 October 2023, finding it rewarding to share his skills and knowledge and a good way to stay involved in the game during the off-season.",
+      "speaker": "John",
+      "statedOn": "2023-10-17",
+      "entities": [
+        "john",
+        "minnesota-wolves",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D14:3",
+        "D14:4"
+      ]
+    },
+    {
+      "text": "John says mentoring is challenging because everyone is different, but that adapting, motivating and watching each player develop and reach their goals has been a real reward.",
+      "speaker": "John",
+      "statedOn": "2023-10-17",
+      "entities": [
+        "john",
+        "minnesota-wolves"
+      ],
+      "sourceTurns": [
+        "D14:5",
+        "D14:6"
+      ]
+    },
+    {
+      "text": "John finds mentoring the young Minnesota Wolves players fulfilling for their growth, improvement and confidence, and shared a photo of himself with them at a recent practice on 17 October 2023.",
+      "speaker": "John",
+      "statedOn": "2023-10-17",
+      "entities": [
+        "john",
+        "minnesota-wolves"
+      ],
+      "sourceTurns": [
+        "D14:7",
+        "D14:8"
+      ]
+    },
+    {
+      "text": "Some of the young Minnesota Wolves players see John as a mentor; he gives them advice and support on and off the court and enjoys being a positive role model whose experience can shape their future.",
+      "speaker": "John",
+      "statedOn": "2023-10-17",
+      "entities": [
+        "john",
+        "minnesota-wolves"
+      ],
+      "sourceTurns": [
+        "D14:9",
+        "D14:10",
+        "D14:11",
+        "D14:12"
+      ]
+    },
+    {
+      "text": "Tim shared a sunset photograph over a mountain range with John on 17 October 2023 and John called it stunning.",
+      "speaker": "Tim",
+      "statedOn": "2023-10-17",
+      "entities": [
+        "tim",
+        "john"
+      ],
+      "sourceTurns": [
+        "D14:12",
+        "D14:13"
+      ]
+    },
+    {
+      "text": "Tim took the sunset photograph he shared on 17 October 2023 during his trip to the Smoky Mountains in 2022, and said seeing it in person was incredible.",
+      "speaker": "Tim",
+      "statedOn": "2023-10-17",
+      "entities": [
+        "tim",
+        "smoky-mountains",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D14:14",
+        "D14:15",
+        "D14:16",
+        "D14:17"
+      ]
+    },
+    {
+      "text": "Tim said on 17 October 2023 that nature is a refreshing break from school, that his studies were going well and that he was finding time to relax with books, which he called a good balance.",
+      "speaker": "Tim",
+      "statedOn": "2023-10-17",
+      "entities": [
+        "tim",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D14:18",
+        "D14:19",
+        "D14:20",
+        "D14:21"
+      ]
+    },
+    {
+      "text": "Tim was hooked on the book he was reading on 17 October 2023, and John said that after their earlier conversations he had finally picked up a book himself and was enjoying it.",
+      "speaker": "John",
+      "statedOn": "2023-10-17",
+      "entities": [
+        "tim",
+        "john",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D14:22",
+        "D14:23"
+      ]
+    },
+    {
+      "text": "Tim read a book about castles in the UK shortly before 21 October 2023, was blown away by it and said he dreams of visiting them one day.",
+      "speaker": "Tim",
+      "statedOn": "2023-10-21",
+      "entities": [
+        "tim",
+        "united-kingdom",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D15:1"
+      ]
+    },
+    {
+      "text": "John is fascinated by other cultures and historical architecture, says visiting castles is on his bucket list and that he is excited to explore the world, and shared a photo of a clifftop view on 21 October 2023.",
+      "speaker": "John",
+      "statedOn": "2023-10-21",
+      "entities": [
+        "john",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D15:2"
+      ]
+    },
+    {
+      "text": "Tim was midway through writing his fantasy novel on 21 October 2023, finding it nerve-wracking but exciting, and said his hard work was paying off and that writing brings him joy by letting him create a whole new world.",
+      "speaker": "Tim",
+      "statedOn": "2023-10-21",
+      "entities": [
+        "tim",
+        "tims-novel",
+        "fantasy-writing"
+      ],
+      "sourceTurns": [
+        "D15:3",
+        "D15:4"
+      ]
+    },
+    {
+      "text": "Tim draws inspiration for his stories from books, films and real-life experiences; reading about castles in the UK gave him a lot of ideas, and certain authors are goldmines of inspiration for him.",
+      "speaker": "Tim",
+      "statedOn": "2023-10-21",
+      "entities": [
+        "tim",
+        "tims-novel",
+        "fantasy-writing",
+        "united-kingdom"
+      ],
+      "sourceTurns": [
+        "D15:5",
+        "D15:6"
+      ]
+    },
+    {
+      "text": "J.K. Rowling is the author who most inspires Tim's writing; he praises the detail and creative storytelling that transport readers into another world, and takes notes on her style for his own novel.",
+      "speaker": "Tim",
+      "statedOn": "2023-10-21",
+      "entities": [
+        "tim",
+        "jk-rowling",
+        "fantasy-writing",
+        "tims-novel"
+      ],
+      "sourceTurns": [
+        "D15:7",
+        "D15:8"
+      ]
+    },
+    {
+      "text": "Tim has read J.K. Rowling's work for a long time and says her stories have stayed with him and still inspire him because something in her writing speaks to him.",
+      "speaker": "Tim",
+      "statedOn": "2023-10-21",
+      "entities": [
+        "tim",
+        "jk-rowling"
+      ],
+      "sourceTurns": [
+        "D15:9",
+        "D15:10"
+      ]
+    },
+    {
+      "text": "Tim's favourite J.K. Rowling quote is 'Turn on the light - happiness hides in the darkest of times', which is how he keeps hope alive during tough times; John called it a guiding light when things get rough.",
+      "speaker": "Tim",
+      "statedOn": "2023-10-21",
+      "entities": [
+        "tim",
+        "john",
+        "jk-rowling"
+      ],
+      "sourceTurns": [
+        "D15:11",
+        "D15:12"
+      ]
+    },
+    {
+      "text": "John writes motivational quotes and training strategies on a whiteboard to stay focused and push through tough workouts, and showed it to Tim on 21 October 2023.",
+      "speaker": "John",
+      "statedOn": "2023-10-21",
+      "entities": [
+        "john",
+        "strength-training"
+      ],
+      "sourceTurns": [
+        "D15:13",
+        "D15:14",
+        "D15:15"
+      ]
+    },
+    {
+      "text": "John keeps a plaque on his desk as a constant reminder to believe in himself and trust his abilities, and says physical reminders like it really help him stay motivated.",
+      "speaker": "John",
+      "statedOn": "2023-10-21",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D15:16",
+        "D15:17"
+      ]
+    },
+    {
+      "text": "John says his teammates believing in him and his own love of improving his skills keep him going through challenges, because he does not want to let them down, and that they support him even when he makes mistakes.",
+      "speaker": "John",
+      "statedOn": "2023-10-21",
+      "entities": [
+        "john",
+        "minnesota-wolves",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D15:18",
+        "D15:19",
+        "D15:20"
+      ]
+    },
+    {
+      "text": "John has supportive people outside sport who are always there for him and said on 21 October 2023 that his family is always there; Tim said he is grateful for the friends and family who support him.",
+      "speaker": "John",
+      "statedOn": "2023-10-21",
+      "entities": [
+        "john",
+        "tim"
+      ],
+      "sourceTurns": [
+        "D15:21",
+        "D15:22",
+        "D15:23",
+        "D15:24"
+      ]
+    },
+    {
+      "text": "John shared a photo of his family on 21 October 2023, saying being with them brings him happiness and reminds him what is important, and that his team is like a second family too.",
+      "speaker": "John",
+      "statedOn": "2023-10-21",
+      "entities": [
+        "john",
+        "minnesota-wolves"
+      ],
+      "sourceTurns": [
+        "D15:25",
+        "D15:26",
+        "D15:27"
+      ]
+    },
+    {
+      "text": "John spends time with his family and friends going to the cinema and out for dinner.",
+      "speaker": "John",
+      "statedOn": "2023-10-21",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D15:28"
+      ]
+    },
+    {
+      "text": "Tim's favourite things to do for fun are road trips with friends and family, exploring and hiking, playing board games, and curling up with a good book in his free time.",
+      "speaker": "Tim",
+      "statedOn": "2023-10-21",
+      "entities": [
+        "tim",
+        "hiking",
+        "reading-fantasy",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D15:29"
+      ]
+    },
+    {
+      "text": "Cooking is therapy for John when he is away from the court, a way to be creative and experiment with flavours while taking a break; he shared a photo of a slow cooker meal on 21 October 2023.",
+      "speaker": "John",
+      "statedOn": "2023-10-21",
+      "entities": [
+        "john",
+        "cooking"
+      ],
+      "sourceTurns": [
+        "D15:30",
+        "D15:31"
+      ]
+    },
+    {
+      "text": "John's favourite recipe is honey garlic chicken with roasted vegetables, which he makes often, and he offered on 21 October 2023 to write it down and post it to Tim.",
+      "speaker": "John",
+      "statedOn": "2023-10-21",
+      "entities": [
+        "john",
+        "tim",
+        "cooking"
+      ],
+      "sourceTurns": [
+        "D15:32",
+        "D15:33",
+        "D15:34",
+        "D15:35"
+      ]
+    },
+    {
+      "text": "Tim promised on 21 October 2023 to tell John how the honey garlic chicken recipe turned out, and the two parted warmly.",
+      "speaker": "Tim",
+      "statedOn": "2023-10-21",
+      "entities": [
+        "tim",
+        "john",
+        "cooking"
+      ],
+      "sourceTurns": [
+        "D15:36",
+        "D15:37",
+        "D15:38"
+      ]
+    },
+    {
+      "text": "Tim got stuck on a plot twist in his fantasy novel in the week before 6 November 2023, found it crazy frustrating, but kept pushing until the ideas flowed again.",
+      "speaker": "Tim",
+      "statedOn": "2023-11-06",
+      "entities": [
+        "tim",
+        "tims-novel",
+        "fantasy-writing"
+      ],
+      "sourceTurns": [
+        "D16:1",
+        "D16:2"
+      ]
+    },
+    {
+      "text": "Tim and John agreed on 6 November 2023 that the struggle is what makes the satisfaction of getting through it so good, and that challenges force a person to develop.",
+      "speaker": "Tim",
+      "statedOn": "2023-11-06",
+      "entities": [
+        "tim",
+        "john"
+      ],
+      "sourceTurns": [
+        "D16:3",
+        "D16:4",
+        "D16:5"
+      ]
+    },
+    {
+      "text": "John's team were trailing badly in the fourth quarter of a game in 2022, dug deep and overturned the deficit, which he called an unforgettable feeling when the final buzzer sounded.",
+      "speaker": "John",
+      "statedOn": "2023-11-06",
+      "entities": [
+        "john",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D16:6",
+        "D16:7"
+      ]
+    },
+    {
+      "text": "Tim's prized possession is a cased basketball signed by his favourite player, which he keeps as a reminder of all the hard work and showed John on 6 November 2023.",
+      "speaker": "Tim",
+      "statedOn": "2023-11-06",
+      "entities": [
+        "tim",
+        "tims-signed-basketball",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D16:7",
+        "D16:8"
+      ]
+    },
+    {
+      "text": "Tim's favourite basketball player is LeBron James, whom he loves watching, and he was inspired by an epic block LeBron made in a Finals game some years earlier that turned the game and won it.",
+      "speaker": "Tim",
+      "statedOn": "2023-11-06",
+      "entities": [
+        "tim",
+        "lebron-james",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D16:9"
+      ]
+    },
+    {
+      "text": "The block Tim and John both remembered on 6 November 2023 was LeBron James's chase-down on Iguodala in Game 7 of the 2016 Finals, pinning the ball against the backboard; John said that determination and heart is why he loves basketball.",
+      "speaker": "John",
+      "statedOn": "2023-11-06",
+      "entities": [
+        "tim",
+        "john",
+        "lebron-james",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D16:10",
+        "D16:11",
+        "D16:12",
+        "D16:13"
+      ]
+    },
+    {
+      "text": "John and his wife left for a short European vacation around 6 November 2023, and Tim recommended they visit some castles while there.",
+      "speaker": "John",
+      "statedOn": "2023-11-06",
+      "entities": [
+        "john",
+        "johns-wife",
+        "europe",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D16:14",
+        "D16:15",
+        "D16:16",
+        "D16:17"
+      ]
+    },
+    {
+      "text": "Tim and John caught up on 11 November 2023, with John saying a lot had happened and Tim saying he had been reading as usual.",
+      "speaker": "John",
+      "statedOn": "2023-11-11",
+      "entities": [
+        "tim",
+        "john",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D17:1",
+        "D17:2"
+      ]
+    },
+    {
+      "text": "John and his wife road-tripped along the European coastline in early November 2023, finding the views spectacular, enjoying the bonding and the memories, and he called it a nice change from his regular life.",
+      "speaker": "John",
+      "statedOn": "2023-11-11",
+      "entities": [
+        "john",
+        "johns-wife",
+        "europe",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D17:3",
+        "D17:4",
+        "D17:5"
+      ]
+    },
+    {
+      "text": "John and Tim agreed on 11 November 2023 that nature is powerful, beautiful and humbling, and that such sights show how big and special the world is.",
+      "speaker": "John",
+      "statedOn": "2023-11-11",
+      "entities": [
+        "john",
+        "tim"
+      ],
+      "sourceTurns": [
+        "D17:6",
+        "D17:7",
+        "D17:8"
+      ]
+    },
+    {
+      "text": "John had just finished a fantasy series by 11 November 2023, calling it a wild ride full of twists with great storylines and characters, and said he loves getting lost in fantasy worlds.",
+      "speaker": "John",
+      "statedOn": "2023-11-11",
+      "entities": [
+        "john",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D17:9"
+      ]
+    },
+    {
+      "text": "Tim named a fantasy television show as one of his favourites on 11 November 2023, and John said he had seen it too and loved watching those worlds and characters come alive as an escape from reality.",
+      "speaker": "Tim",
+      "statedOn": "2023-11-11",
+      "entities": [
+        "tim",
+        "john",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D17:10",
+        "D17:11"
+      ]
+    },
+    {
+      "text": "Tim and John agreed on 11 November 2023 that books and films are a mental break that lets the mind wander and recharge, and that taking time for yourself brings new perspective and energy for life's challenges.",
+      "speaker": "Tim",
+      "statedOn": "2023-11-11",
+      "entities": [
+        "tim",
+        "john"
+      ],
+      "sourceTurns": [
+        "D17:12",
+        "D17:13",
+        "D17:14",
+        "D17:15",
+        "D17:16",
+        "D17:17"
+      ]
+    },
+    {
+      "text": "Tim told John on 11 November 2023 that balance varies from person to person and to look after himself mentally and physically, and John said he would keep pushing forward.",
+      "speaker": "Tim",
+      "statedOn": "2023-11-11",
+      "entities": [
+        "tim",
+        "john"
+      ],
+      "sourceTurns": [
+        "D17:18",
+        "D17:19"
+      ]
+    },
+    {
+      "text": "Tim visited a castle during his trip to the UK on Friday 10 November 2023 and found its architecture and history unbelievable.",
+      "speaker": "Tim",
+      "statedOn": "2023-11-16",
+      "entities": [
+        "tim",
+        "united-kingdom",
+        "travel"
+      ],
+      "chrono": [
+        "castle-visit"
+      ],
+      "sourceTurns": [
+        "D18:1"
+      ]
+    },
+    {
+      "text": "John was injured and having a tough week as of 16 November 2023 but was staying positive, while Tim's week was swamped with exams.",
+      "speaker": "John",
+      "statedOn": "2023-11-16",
+      "entities": [
+        "john",
+        "tim",
+        "johns-injury"
+      ],
+      "sourceTurns": [
+        "D18:2",
+        "D18:3",
+        "D18:4"
+      ]
+    },
+    {
+      "text": "Tim said on 16 November 2023 that he was putting his best effort into his exams and feeling optimistic, and asked John how he stays motivated during difficult study sessions.",
+      "speaker": "Tim",
+      "statedOn": "2023-11-16",
+      "entities": [
+        "tim",
+        "john"
+      ],
+      "sourceTurns": [
+        "D18:5"
+      ]
+    },
+    {
+      "text": "John stays motivated during difficult sessions by visualising his goals and his success.",
+      "speaker": "John",
+      "statedOn": "2023-11-16",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D18:6"
+      ]
+    },
+    {
+      "text": "Tim studies by breaking the work into smaller parts, 25 minutes on and 5 minutes off for something fun, which he finds less overwhelming; John called it a smart move and wished him well in his exams.",
+      "speaker": "Tim",
+      "statedOn": "2023-11-16",
+      "entities": [
+        "tim",
+        "john"
+      ],
+      "sourceTurns": [
+        "D18:7",
+        "D18:8",
+        "D18:9"
+      ]
+    },
+    {
+      "text": "John's doctor said his November 2023 injury was not too serious; John told Tim on 16 November 2023 that he hates not being on the court but is pushing on, and Tim wished him a quick recovery.",
+      "speaker": "John",
+      "statedOn": "2023-11-16",
+      "entities": [
+        "john",
+        "tim",
+        "johns-injury",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D18:10",
+        "D18:11",
+        "D18:12",
+        "D18:13",
+        "D18:14",
+        "D18:15"
+      ]
+    },
+    {
+      "text": "John was still recovering from his injury on 21 November 2023, saying it had been tough but that he was staying positive and taking it slow.",
+      "speaker": "John",
+      "statedOn": "2023-11-21",
+      "entities": [
+        "john",
+        "tim",
+        "johns-injury"
+      ],
+      "sourceTurns": [
+        "D19:1",
+        "D19:2"
+      ]
+    },
+    {
+      "text": "Tim tried to write a story based on his experiences in the UK in the week before 21 November 2023 and it did not go the way he wanted, which he found tough on top of being swamped with studies and projects.",
+      "speaker": "Tim",
+      "statedOn": "2023-11-21",
+      "entities": [
+        "tim",
+        "tims-novel",
+        "fantasy-writing",
+        "united-kingdom"
+      ],
+      "sourceTurns": [
+        "D19:3"
+      ]
+    },
+    {
+      "text": "John advised Tim on 21 November 2023 to reflect on what went wrong with his story and find ways to improve, as he does after challenges on the court, and Tim said it could help him get back on track.",
+      "speaker": "John",
+      "statedOn": "2023-11-21",
+      "entities": [
+        "john",
+        "tim",
+        "fantasy-writing"
+      ],
+      "sourceTurns": [
+        "D19:4",
+        "D19:5"
+      ]
+    },
+    {
+      "text": "John's toughest challenge in basketball was hurting his ankle in the season before November 2023, which required time off and physical therapy and kept him from playing or helping the team; he stayed focused on recovery and said it taught him patience and perseverance.",
+      "speaker": "John",
+      "statedOn": "2023-11-21",
+      "entities": [
+        "john",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D19:6",
+        "D19:7"
+      ]
+    },
+    {
+      "text": "John says that when things get tough he remembers why he is passionate about basketball, and that the love and enthusiasm for it keeps him motivated whatever happens.",
+      "speaker": "John",
+      "statedOn": "2023-11-21",
+      "entities": [
+        "john",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D19:8",
+        "D19:9"
+      ]
+    },
+    {
+      "text": "John once made a bad mistake in a big game and found it hard to accept, but worked to get better rather than dwelling on it, learning that resilience and owning up to mistakes matter.",
+      "speaker": "John",
+      "statedOn": "2023-11-21",
+      "entities": [
+        "john",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D19:10",
+        "D19:11",
+        "D19:12"
+      ]
+    },
+    {
+      "text": "Tim shared a photo of his books on 21 November 2023 and called them his companions on his growth journey; John said fantasy books fuel his own creativity in and outside his hobbies.",
+      "speaker": "Tim",
+      "statedOn": "2023-11-21",
+      "entities": [
+        "tim",
+        "john",
+        "tims-book-collection",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D19:13",
+        "D19:14"
+      ]
+    },
+    {
+      "text": "Harry Potter and Game of Thrones were still Tim's favourite books on 21 November 2023, because of the way they take him to other places.",
+      "speaker": "Tim",
+      "statedOn": "2023-11-21",
+      "entities": [
+        "tim",
+        "harry-potter",
+        "game-of-thrones",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D19:14",
+        "D19:15"
+      ]
+    },
+    {
+      "text": "John loves non-fiction books about personal development and mindset because they help him know himself better, and Tim said he reads books on growth, psychology and self-improvement alongside his fantasy.",
+      "speaker": "John",
+      "statedOn": "2023-11-21",
+      "entities": [
+        "john",
+        "tim",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D19:16",
+        "D19:17",
+        "D19:18"
+      ]
+    },
+    {
+      "text": "Tim recently read a book about how small changes can make big differences that changed the way he does things, and told John about it on 21 November 2023.",
+      "speaker": "Tim",
+      "statedOn": "2023-11-21",
+      "entities": [
+        "tim",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D19:19"
+      ]
+    },
+    {
+      "text": "John reread The Alchemist shortly before 21 November 2023, found it inspiring about following dreams and searching for a personal legend, and came away motivated and hopeful; Tim had read it a while earlier and said it changed his perspective on his goals.",
+      "speaker": "John",
+      "statedOn": "2023-11-21",
+      "entities": [
+        "john",
+        "tim",
+        "the-alchemist"
+      ],
+      "sourceTurns": [
+        "D19:20",
+        "D19:21",
+        "D19:22"
+      ]
+    },
+    {
+      "text": "Tim and John agreed on 21 November 2023 that books open new worlds, inspire and help people grow, and said they would keep exploring books and motivating each other.",
+      "speaker": "Tim",
+      "statedOn": "2023-11-21",
+      "entities": [
+        "tim",
+        "john",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D19:23"
+      ]
+    },
+    {
+      "text": "Tim had a tough exam in the week before 1 December 2023 that left him doubting himself, but he studied hard, turned it into a learning experience and said it showed him how resilient and determined he can be.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-01",
+      "entities": [
+        "tim"
+      ],
+      "sourceTurns": [
+        "D20:1",
+        "D20:2"
+      ]
+    },
+    {
+      "text": "John took up yoga by 1 December 2023 to get extra strength and flexibility, finding it challenging but worth it.",
+      "speaker": "John",
+      "statedOn": "2023-12-01",
+      "entities": [
+        "john",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D20:2",
+        "D20:3"
+      ]
+    },
+    {
+      "text": "John says yoga has improved his strength and flexibility as well as his focus and balance during workouts.",
+      "speaker": "John",
+      "statedOn": "2023-12-01",
+      "entities": [
+        "john",
+        "yoga",
+        "strength-training"
+      ],
+      "sourceTurns": [
+        "D20:4",
+        "D20:5"
+      ]
+    },
+    {
+      "text": "John's favourite yoga poses are Warrior II, which makes him feel strong, and one that helps with balance and stability; he likes how they challenge his body and mind.",
+      "speaker": "John",
+      "statedOn": "2023-12-01",
+      "entities": [
+        "john",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D20:6",
+        "D20:7"
+      ]
+    },
+    {
+      "text": "John shared a photo of himself in a yoga pose on 1 December 2023, said it works the legs and core and that he holds it for 30 to 60 seconds to build strength and stability, and Tim said he would give it a try.",
+      "speaker": "John",
+      "statedOn": "2023-12-01",
+      "entities": [
+        "john",
+        "tim",
+        "yoga"
+      ],
+      "sourceTurns": [
+        "D20:8",
+        "D20:9",
+        "D20:10",
+        "D20:11",
+        "D20:12"
+      ]
+    },
+    {
+      "text": "Tim thanked John on 1 December 2023 for the support and encouragement that had made his journey better, and the two said their friendship means a lot to each other.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-01",
+      "entities": [
+        "tim",
+        "john"
+      ],
+      "sourceTurns": [
+        "D20:13",
+        "D20:14",
+        "D20:15",
+        "D20:16"
+      ]
+    },
+    {
+      "text": "Tim reorganised his bookshelf shortly before 1 December 2023 and showed it to John, noting that they are both into fantasy books and films.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-01",
+      "entities": [
+        "tim",
+        "tims-book-collection",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D20:17",
+        "D20:18",
+        "D20:19"
+      ]
+    },
+    {
+      "text": "John named The Hobbit as one of his favourites when he saw it on Tim's bookshelf on 1 December 2023, and said he had also read the other popular fantasy series Tim asked about and counted it among his favourites.",
+      "speaker": "John",
+      "statedOn": "2023-12-01",
+      "entities": [
+        "john",
+        "tim",
+        "the-hobbit",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D20:20",
+        "D20:21",
+        "D20:22"
+      ]
+    },
+    {
+      "text": "Tim and John agreed on 1 December 2023 that fantasy books take them to different worlds and give them a magical break from reality.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-01",
+      "entities": [
+        "tim",
+        "john",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D20:23",
+        "D20:24",
+        "D20:25",
+        "D20:26"
+      ]
+    },
+    {
+      "text": "John shared a photo of a sunlit forest near his hometown on 1 December 2023 and called it tranquil.",
+      "speaker": "John",
+      "statedOn": "2023-12-01",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D20:27",
+        "D20:28"
+      ]
+    },
+    {
+      "text": "Tim and John agreed on 1 December 2023 that they are lucky to have beautiful natural places near their homes and that they should take time to appreciate them.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-01",
+      "entities": [
+        "tim",
+        "john"
+      ],
+      "sourceTurns": [
+        "D20:29",
+        "D20:30",
+        "D20:31",
+        "D20:32"
+      ]
+    },
+    {
+      "text": "John's photo of a lake reminded Tim on 1 December 2023 of a trip he had taken in the summer of 2023.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-01",
+      "entities": [
+        "tim",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D20:33"
+      ]
+    },
+    {
+      "text": "John went camping in the mountains and had a blast disconnecting from everyday life, loving the refreshing air and the peace of just taking in the beauty of nature.",
+      "speaker": "John",
+      "statedOn": "2023-12-01",
+      "entities": [
+        "john",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D20:34",
+        "D20:35",
+        "D20:36",
+        "D20:37",
+        "D20:38"
+      ]
+    },
+    {
+      "text": "John visited the Rocky Mountains in 2022 and described the mountains and the fresh air as stunning and a reminder of how incredible the world is.",
+      "speaker": "John",
+      "statedOn": "2023-12-01",
+      "entities": [
+        "john",
+        "rocky-mountains",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D20:39",
+        "D20:40"
+      ]
+    },
+    {
+      "text": "Tim and John agreed on 1 December 2023 that nature humbles them, clears the mind and reminds them they are part of something bigger.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-01",
+      "entities": [
+        "tim",
+        "john"
+      ],
+      "sourceTurns": [
+        "D20:41",
+        "D20:42",
+        "D20:43"
+      ]
+    },
+    {
+      "text": "Tim joined a travel club shortly before 6 December 2023, out of a long-standing interest in different cultures and countries and a wish to meet new people and learn what makes them unique.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-06",
+      "entities": [
+        "tim",
+        "travel-club",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D21:1"
+      ]
+    },
+    {
+      "text": "John loves learning about different cultures and meeting people from different backgrounds, and said on 6 December 2023 that his Minnesota Wolves teammates come from all over.",
+      "speaker": "John",
+      "statedOn": "2023-12-06",
+      "entities": [
+        "john",
+        "minnesota-wolves"
+      ],
+      "sourceTurns": [
+        "D21:2"
+      ]
+    },
+    {
+      "text": "John had been playing professional basketball for just under a year as of 6 December 2023 and called it a wild ride of challenges and growth that has lived up to his expectations.",
+      "speaker": "John",
+      "statedOn": "2023-12-06",
+      "entities": [
+        "john",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D21:3",
+        "D21:4",
+        "D21:5",
+        "D21:6",
+        "D21:7"
+      ]
+    },
+    {
+      "text": "John's growth as of 6 December 2023 was in his overall game on court, in the endorsement deals he had won, and in learning to market himself and boost his brand.",
+      "speaker": "John",
+      "statedOn": "2023-12-06",
+      "entities": [
+        "john",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D21:8"
+      ]
+    },
+    {
+      "text": "Tim was keeping up his travel club and his studies as of 6 December 2023 and had picked up new skills, including recently starting to learn an instrument, having always admired musicians.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-06",
+      "entities": [
+        "tim",
+        "travel-club"
+      ],
+      "sourceTurns": [
+        "D21:9",
+        "D21:10"
+      ]
+    },
+    {
+      "text": "Tim was learning the violin as of 6 December 2023; he is mainly into classical music but keen to try jazz and film scores, and finds it a way to chill out and be creative.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-06",
+      "entities": [
+        "tim",
+        "violin"
+      ],
+      "sourceTurns": [
+        "D21:11",
+        "D21:12"
+      ]
+    },
+    {
+      "text": "Tim had been playing the piano for about four months as of 6 December 2023 and was really enjoying the progress he had made.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-06",
+      "entities": [
+        "tim",
+        "piano"
+      ],
+      "sourceTurns": [
+        "D21:12",
+        "D21:13",
+        "D21:14"
+      ]
+    },
+    {
+      "text": "John shared a photo of himself with a trophy on 6 December 2023 and said it feels great to finally achieve something after putting in so much time and energy; Tim congratulated him on it.",
+      "speaker": "John",
+      "statedOn": "2023-12-06",
+      "entities": [
+        "john",
+        "tim",
+        "basketball",
+        "minnesota-wolves"
+      ],
+      "sourceTurns": [
+        "D21:14",
+        "D21:15"
+      ]
+    },
+    {
+      "text": "John's advice for motivating teammates, given on 6 December 2023, is to show care for them, celebrate their achievements, give constructive feedback, remind them of the bigger goal, create a positive environment and give a pep talk before a game.",
+      "speaker": "John",
+      "statedOn": "2023-12-06",
+      "entities": [
+        "john",
+        "minnesota-wolves"
+      ],
+      "sourceTurns": [
+        "D21:16"
+      ]
+    },
+    {
+      "text": "Tim added on 6 December 2023 that a constructive atmosphere, setting an example by working hard and using your own story are what inspire people, and John agreed.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-06",
+      "entities": [
+        "tim",
+        "john"
+      ],
+      "sourceTurns": [
+        "D21:17",
+        "D21:18",
+        "D21:19"
+      ]
+    },
+    {
+      "text": "Tim went to a Harry Potter party shortly before 8 December 2023, met a lot of people who share his interests and had a great time.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-08",
+      "entities": [
+        "tim",
+        "harry-potter"
+      ],
+      "sourceTurns": [
+        "D22:1",
+        "D22:2"
+      ]
+    },
+    {
+      "text": "John reminded Tim on 8 December 2023 of the charity event with Harry Potter trivia he had told him about in August 2023, and said he loves being around people as passionate about Harry Potter as they are.",
+      "speaker": "John",
+      "statedOn": "2023-12-08",
+      "entities": [
+        "john",
+        "tim",
+        "harry-potter"
+      ],
+      "sourceTurns": [
+        "D22:2"
+      ]
+    },
+    {
+      "text": "Tim did not dress up as a character at the December 2023 Harry Potter party but wore his Gryffindor scarf while everyone else had costumes, and came away with a chocolate frog.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-08",
+      "entities": [
+        "tim",
+        "harry-potter"
+      ],
+      "sourceTurns": [
+        "D22:3"
+      ]
+    },
+    {
+      "text": "John's team played a top team in the week before 8 December 2023 and fought hard for the win, which he said showed the value of having his team to push them all.",
+      "speaker": "John",
+      "statedOn": "2023-12-08",
+      "entities": [
+        "john",
+        "minnesota-wolves",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D22:4",
+        "D22:5"
+      ]
+    },
+    {
+      "text": "John said the best part of the early December 2023 win was the camaraderie the team had built on and off the court, and that winning felt worth all the hard work.",
+      "speaker": "John",
+      "statedOn": "2023-12-08",
+      "entities": [
+        "john",
+        "minnesota-wolves"
+      ],
+      "sourceTurns": [
+        "D22:6"
+      ]
+    },
+    {
+      "text": "Tim was reading a series about the power of friendship and loyalty on 8 December 2023 and found it really inspiring.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-08",
+      "entities": [
+        "tim",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D22:7"
+      ]
+    },
+    {
+      "text": "John's Minnesota Wolves keep their bond strong with team dinners, outings and basketball games away from practice, which he says is what really builds their unity.",
+      "speaker": "John",
+      "statedOn": "2023-12-08",
+      "entities": [
+        "john",
+        "minnesota-wolves"
+      ],
+      "sourceTurns": [
+        "D22:8",
+        "D22:9"
+      ]
+    },
+    {
+      "text": "John was reading and highly recommending Dune by Frank Herbert on 8 December 2023, describing it as a great story about religion and human control over ecology.",
+      "speaker": "John",
+      "statedOn": "2023-12-08",
+      "entities": [
+        "john",
+        "dune",
+        "frank-herbert"
+      ],
+      "sourceTurns": [
+        "D22:10",
+        "D22:11",
+        "D22:12"
+      ]
+    },
+    {
+      "text": "Tim had just finished A Dance with Dragons by 8 December 2023 and recommended it highly; he had not read Dune but had heard great things about it.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-08",
+      "entities": [
+        "tim",
+        "a-dance-with-dragons",
+        "dune",
+        "game-of-thrones"
+      ],
+      "sourceTurns": [
+        "D22:12",
+        "D22:13"
+      ]
+    },
+    {
+      "text": "As of 8 December 2023 Tim had read only the Game of Thrones series of George R. R. Martin's books, and John had read none of them but said he would check them out.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-08",
+      "entities": [
+        "tim",
+        "john",
+        "george-rr-martin",
+        "game-of-thrones"
+      ],
+      "sourceTurns": [
+        "D22:14",
+        "D22:15",
+        "D22:16",
+        "D22:17",
+        "D22:18"
+      ]
+    },
+    {
+      "text": "Tim had a tough time with his English literature class in early December 2023, in which he did an analysis of the Game of Thrones series, and thought it went all right.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-11",
+      "entities": [
+        "tim",
+        "game-of-thrones"
+      ],
+      "sourceTurns": [
+        "D23:1",
+        "D23:2",
+        "D23:3"
+      ]
+    },
+    {
+      "text": "John recorded a career high in assists on Friday 8 December 2023 in a big game against the Minnesota Wolves' rivals.",
+      "speaker": "John",
+      "statedOn": "2023-12-11",
+      "entities": [
+        "john",
+        "minnesota-wolves",
+        "basketball"
+      ],
+      "chrono": [
+        "career-high-assists"
+      ],
+      "sourceTurns": [
+        "D23:3",
+        "D23:4"
+      ]
+    },
+    {
+      "text": "John loved making plays for his teammates in the rivalry game on 8 December 2023, and described the electric atmosphere in the arena and the extra intensity of playing the rivals as a memorable night.",
+      "speaker": "John",
+      "statedOn": "2023-12-11",
+      "entities": [
+        "john",
+        "minnesota-wolves",
+        "basketball"
+      ],
+      "chrono": [
+        "career-high-assists"
+      ],
+      "sourceTurns": [
+        "D23:5",
+        "D23:6"
+      ]
+    },
+    {
+      "text": "John's favourite game of his career was one where his team were down ten in the fourth quarter and he hit the buzzer-beater to win it, in an incredible atmosphere.",
+      "speaker": "John",
+      "statedOn": "2023-12-11",
+      "entities": [
+        "john",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D23:7",
+        "D23:8"
+      ]
+    },
+    {
+      "text": "John used to practise basketball outside for hours as a boy, dreaming of playing in big games, and it was how he dealt with his doubts and stress.",
+      "speaker": "John",
+      "statedOn": "2023-12-11",
+      "entities": [
+        "john",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D23:9",
+        "D23:10"
+      ]
+    },
+    {
+      "text": "John says basketball has been a significant part of his life, lets him be himself and pursue his passions, and that he will keep chasing his dreams.",
+      "speaker": "John",
+      "statedOn": "2023-12-11",
+      "entities": [
+        "john",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D23:11",
+        "D23:12",
+        "D23:13"
+      ]
+    },
+    {
+      "text": "Tim and John promised on 11 December 2023 to keep supporting and motivating each other on the way to their dreams.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-11",
+      "entities": [
+        "tim",
+        "john"
+      ],
+      "sourceTurns": [
+        "D23:14",
+        "D23:15",
+        "D23:16"
+      ]
+    },
+    {
+      "text": "Tim's fantasy writing grew from articles about fantasy novels for an online magazine in August 2023, to being midway through his own fantasy novel by 21 October 2023, through a plot twist that stalled him at the end of October and a story based on his UK trip that did not work out in mid-November 2023.",
+      "speaker": "Tim",
+      "statedOn": "2023-11-21",
+      "entities": [
+        "tim",
+        "fantasy-writing",
+        "tims-novel",
+        "fantasy-magazine",
+        "united-kingdom"
+      ],
+      "sourceTurns": [
+        "D4:1",
+        "D15:3",
+        "D16:1",
+        "D19:3"
+      ]
+    },
+    {
+      "text": "Tim's Harry Potter life over 2023 ran from a fan project and collaborations in May, through meeting a fellow fan in California in July and Skyping him in August, to a Harry Potter conference in the UK in early October and a Harry Potter party in early December 2023.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-08",
+      "entities": [
+        "tim",
+        "harry-potter",
+        "hp-fan-project",
+        "california",
+        "united-kingdom"
+      ],
+      "sourceTurns": [
+        "D1:2",
+        "D3:2",
+        "D5:1",
+        "D13:1",
+        "D22:1"
+      ]
+    },
+    {
+      "text": "John's first season with the Minnesota Wolves ran from signing in May 2023, through a career-high 40 points in July and a tight win in August, to a trophy by October 2023, mentoring the younger players in the off-season and a career high in assists in December 2023.",
+      "speaker": "John",
+      "statedOn": "2023-12-11",
+      "entities": [
+        "john",
+        "minnesota-wolves",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D1:3",
+        "D3:1",
+        "D5:2",
+        "D13:8",
+        "D14:3",
+        "D23:3"
+      ]
+    },
+    {
+      "text": "John's team had a close battle against another team in the week before 16 December 2023 and won it at the final buzzer.",
+      "speaker": "John",
+      "statedOn": "2023-12-16",
+      "entities": [
+        "john",
+        "minnesota-wolves",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D24:1",
+        "D24:2",
+        "D24:3",
+        "D24:4"
+      ]
+    },
+    {
+      "text": "John said winning the close game in December 2023 was a thrill and an awesome moment that makes him love the game and keeps him motivated through the tough times.",
+      "speaker": "John",
+      "statedOn": "2023-12-16",
+      "entities": [
+        "john",
+        "minnesota-wolves",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D24:5",
+        "D24:6",
+        "D24:7",
+        "D24:8"
+      ]
+    },
+    {
+      "text": "John shared a photo from a morning workout on 16 December 2023 as a reminder that the journey itself can be awesome.",
+      "speaker": "John",
+      "statedOn": "2023-12-16",
+      "entities": [
+        "john",
+        "strength-training"
+      ],
+      "sourceTurns": [
+        "D24:8"
+      ]
+    },
+    {
+      "text": "John injured himself not long before 16 December 2023 and had to miss games, which he hated because he could not help his team.",
+      "speaker": "John",
+      "statedOn": "2023-12-16",
+      "entities": [
+        "john",
+        "johns-injury",
+        "minnesota-wolves"
+      ],
+      "sourceTurns": [
+        "D24:9",
+        "D24:10"
+      ]
+    },
+    {
+      "text": "John was staying active and doing physical therapy exercises every day for his injury as of 16 December 2023, and said the rehabilitation was going great.",
+      "speaker": "John",
+      "statedOn": "2023-12-16",
+      "entities": [
+        "john",
+        "johns-injury"
+      ],
+      "sourceTurns": [
+        "D24:11",
+        "D24:12",
+        "D24:13"
+      ]
+    },
+    {
+      "text": "John jogged a short distance with no pain at the gym on Friday 15 December 2023, a milestone in his recovery that he called a huge relief and a huge success after being out for so long.",
+      "speaker": "John",
+      "statedOn": "2023-12-16",
+      "entities": [
+        "john",
+        "johns-injury"
+      ],
+      "chrono": [
+        "pain-free-jog"
+      ],
+      "sourceTurns": [
+        "D24:14",
+        "D24:15",
+        "D24:16"
+      ]
+    },
+    {
+      "text": "John and his wife hosted a small get-together with friends and family in December 2023 to celebrate his pain-free jog, and he said it was good to see everyone again and that they had a lot of fun.",
+      "speaker": "John",
+      "statedOn": "2023-12-16",
+      "entities": [
+        "john",
+        "johns-wife",
+        "johns-injury"
+      ],
+      "sourceTurns": [
+        "D24:16",
+        "D24:17",
+        "D24:18",
+        "D24:19",
+        "D24:20"
+      ]
+    },
+    {
+      "text": "John signed a deal with a renowned outdoor gear company in the week before 19 December 2023 and was excited about it.",
+      "speaker": "John",
+      "statedOn": "2023-12-19",
+      "entities": [
+        "john",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D25:1",
+        "D25:2"
+      ]
+    },
+    {
+      "text": "John received top-notch hiking and outdoor gear from his December 2023 endorsement deal, and the photoshoot for it, held in a gorgeous forest, went really well.",
+      "speaker": "John",
+      "statedOn": "2023-12-19",
+      "entities": [
+        "john",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D25:3",
+        "D25:4"
+      ]
+    },
+    {
+      "text": "John shared a photo from the outdoor gear photoshoot on 19 December 2023 and said nature puts him in a great mood and always energises him.",
+      "speaker": "John",
+      "statedOn": "2023-12-19",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D25:5",
+        "D25:6"
+      ]
+    },
+    {
+      "text": "John came across the river and rocks used in the outdoor gear photoshoot while out hiking, and said the sound of the river left him feeling at peace, as if nature was telling him to stop and admire its beauty.",
+      "speaker": "John",
+      "statedOn": "2023-12-19",
+      "entities": [
+        "john",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D25:7",
+        "D25:8",
+        "D25:9"
+      ]
+    },
+    {
+      "text": "John said on 19 December 2023 that things were going great on the court, with the team putting in a lot of work and achieving their goals.",
+      "speaker": "John",
+      "statedOn": "2023-12-19",
+      "entities": [
+        "john",
+        "minnesota-wolves",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D25:10",
+        "D25:11"
+      ]
+    },
+    {
+      "text": "John's team gave their all in a scrimmage in the week before 19 December 2023, and he said it was amazing to see the team's growth and that it would be worth it when they see the results.",
+      "speaker": "John",
+      "statedOn": "2023-12-19",
+      "entities": [
+        "john",
+        "minnesota-wolves",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D25:12",
+        "D25:13"
+      ]
+    },
+    {
+      "text": "The Minnesota Wolves' biggest area of growth in training has been communication and bonding, which John says has improved their performances by letting them understand each other's strengths and weaknesses.",
+      "speaker": "John",
+      "statedOn": "2023-12-19",
+      "entities": [
+        "john",
+        "minnesota-wolves"
+      ],
+      "sourceTurns": [
+        "D25:14",
+        "D25:15",
+        "D25:16",
+        "D25:17"
+      ]
+    },
+    {
+      "text": "John started giving seminars helping people with sport and marketing in the week before 26 December 2023 and found it awesome.",
+      "speaker": "John",
+      "statedOn": "2023-12-26",
+      "entities": [
+        "john",
+        "youth-sports-charity"
+      ],
+      "sourceTurns": [
+        "D26:1",
+        "D26:2"
+      ]
+    },
+    {
+      "text": "John's December 2023 seminars went really well, with eager and motivated aspiring professionals, and he was happy to share his knowledge and help out.",
+      "speaker": "John",
+      "statedOn": "2023-12-26",
+      "entities": [
+        "john",
+        "youth-sports-charity"
+      ],
+      "sourceTurns": [
+        "D26:3",
+        "D26:4"
+      ]
+    },
+    {
+      "text": "Tim said on 26 December 2023 that he was starting some big new things of his own.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-26",
+      "entities": [
+        "tim"
+      ],
+      "sourceTurns": [
+        "D26:4",
+        "D26:5"
+      ]
+    },
+    {
+      "text": "Tim had been reading stories from travellers around the world in December 2023 and was using them to plan his next adventure, showing John the book of them he had found.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-26",
+      "entities": [
+        "tim",
+        "travel",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D26:6",
+        "D26:7"
+      ]
+    },
+    {
+      "text": "One of the travellers' stories Tim read in December 2023 was of two hikers who trekked through the Himalayas, which he thought sounded awesome.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-26",
+      "entities": [
+        "tim",
+        "himalayas",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D26:8",
+        "D26:9"
+      ]
+    },
+    {
+      "text": "The Himalayan trek in the book Tim read was tough, with challenging terrain, altitude sickness and bad weather, but the hikers made it and saw amazing sights, which Tim found motivating.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-26",
+      "entities": [
+        "tim",
+        "himalayas"
+      ],
+      "sourceTurns": [
+        "D26:10",
+        "D26:11"
+      ]
+    },
+    {
+      "text": "Tim visited a travel agency shortly before 26 December 2023 to find out the requirements for his next dream trip, and said that facing challenges can make people stronger.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-26",
+      "entities": [
+        "tim",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D26:12",
+        "D26:13",
+        "D26:14"
+      ]
+    },
+    {
+      "text": "The main actress in the Harry Potter films is Emma Watson, whom Tim named for John on 26 December 2023 and called himself a huge fan of.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-26",
+      "entities": [
+        "tim",
+        "john",
+        "emma-watson",
+        "harry-potter"
+      ],
+      "sourceTurns": [
+        "D26:15",
+        "D26:16"
+      ]
+    },
+    {
+      "text": "Tim admires Emma Watson for her support of gender equality and her women's rights advocacy, and both he and John said on 26 December 2023 that it is inspiring when people use their platform for such causes.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-26",
+      "entities": [
+        "tim",
+        "john",
+        "emma-watson"
+      ],
+      "sourceTurns": [
+        "D26:17",
+        "D26:18"
+      ]
+    },
+    {
+      "text": "John uses his influence and resources to help causes he believes in and shared a photo of himself speaking at a charity event on 26 December 2023.",
+      "speaker": "John",
+      "statedOn": "2023-12-26",
+      "entities": [
+        "john",
+        "youth-sports-charity"
+      ],
+      "sourceTurns": [
+        "D26:19",
+        "D26:20"
+      ]
+    },
+    {
+      "text": "John's causes are supporting youth sports and fighting for fair chances in sport for underserved communities; he collaborates with organisations to create opportunities for young athletes so that every child has access to good sports programmes.",
+      "speaker": "John",
+      "statedOn": "2023-12-26",
+      "entities": [
+        "john",
+        "youth-sports-charity",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D26:21",
+        "D26:22"
+      ]
+    },
+    {
+      "text": "John organised a week-long basketball camp for children in his hometown in the summer of 2023, which he called an incredible chance to inspire them and show them their potential.",
+      "speaker": "John",
+      "statedOn": "2023-12-26",
+      "entities": [
+        "john",
+        "youth-sports-charity",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D26:23",
+        "D26:24",
+        "D26:25"
+      ]
+    },
+    {
+      "text": "Tim still loves getting lost in the Harry Potter books in his downtime and called the series one of his favourites and a magical world to escape to on 26 December 2023.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-26",
+      "entities": [
+        "tim",
+        "harry-potter",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D26:26",
+        "D26:27"
+      ]
+    },
+    {
+      "text": "Tim has seen all the Harry Potter films and enjoys comparing them with the books; John said he is a total film fan and finds seeing a story come alive on the big screen a great way to relax.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-26",
+      "entities": [
+        "tim",
+        "john",
+        "harry-potter"
+      ],
+      "sourceTurns": [
+        "D26:28",
+        "D26:29"
+      ]
+    },
+    {
+      "text": "Tim and his friends have movie marathons together, which he says is a fun way to relax.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-26",
+      "entities": [
+        "tim"
+      ],
+      "sourceTurns": [
+        "D26:30",
+        "D26:31"
+      ]
+    },
+    {
+      "text": "Tim's favourite film genre is fantasy, for its epic adventures and magical worlds, and on 26 December 2023 he named The Lord of the Rings as his favourite.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-26",
+      "entities": [
+        "tim",
+        "lord-of-the-rings"
+      ],
+      "sourceTurns": [
+        "D26:32",
+        "D26:33"
+      ]
+    },
+    {
+      "text": "Tim was looking forward on 26 December 2023 to The Wheel of Time, a new fantasy television series due out the following month and based on a book series he loves.",
+      "speaker": "Tim",
+      "statedOn": "2023-12-26",
+      "entities": [
+        "tim",
+        "wheel-of-time",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D26:34",
+        "D26:35",
+        "D26:36",
+        "D26:37",
+        "D26:38"
+      ]
+    },
+    {
+      "text": "Tim joined a group of fellow globetrotters shortly before 2 January 2024 and had been enjoying getting to know them and hearing about their trips.",
+      "speaker": "Tim",
+      "statedOn": "2024-01-02",
+      "entities": [
+        "tim",
+        "travel-club",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D27:1",
+        "D27:2"
+      ]
+    },
+    {
+      "text": "John had a great time in Italy in December 2023; Tim has never been but has it on his list of places to visit.",
+      "speaker": "John",
+      "statedOn": "2024-01-02",
+      "entities": [
+        "john",
+        "tim",
+        "italy",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D27:2",
+        "D27:3"
+      ]
+    },
+    {
+      "text": "John loved everything about Italy from the food to the history and architecture, and bought a book there that has been giving him cooking inspiration.",
+      "speaker": "John",
+      "statedOn": "2024-01-02",
+      "entities": [
+        "john",
+        "italy",
+        "cooking"
+      ],
+      "sourceTurns": [
+        "D27:4"
+      ]
+    },
+    {
+      "text": "Tim was learning German as of 2 January 2024 and found it tough but fun.",
+      "speaker": "Tim",
+      "statedOn": "2024-01-02",
+      "entities": [
+        "tim",
+        "learning-german"
+      ],
+      "sourceTurns": [
+        "D27:5"
+      ]
+    },
+    {
+      "text": "John knows a bit of German and Spanish and says knowing them makes travelling much easier.",
+      "speaker": "John",
+      "statedOn": "2024-01-02",
+      "entities": [
+        "john",
+        "learning-spanish",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D27:6"
+      ]
+    },
+    {
+      "text": "Tim finds learning German tough but worth it, likes the structure of the language, and says it is easier than the French he took in high school.",
+      "speaker": "Tim",
+      "statedOn": "2024-01-02",
+      "entities": [
+        "tim",
+        "learning-german"
+      ],
+      "sourceTurns": [
+        "D27:7"
+      ]
+    },
+    {
+      "text": "John had just started learning Spanish as of 2 January 2024, having always wanted to, because it is a useful language with many personal and professional opportunities.",
+      "speaker": "John",
+      "statedOn": "2024-01-02",
+      "entities": [
+        "john",
+        "learning-spanish"
+      ],
+      "sourceTurns": [
+        "D27:8"
+      ]
+    },
+    {
+      "text": "Tim and John both use the same phone app to practise their languages, and agreed on 2 January 2024 that language learning takes dedication but is rewarding for communicating with different cultures.",
+      "speaker": "Tim",
+      "statedOn": "2024-01-02",
+      "entities": [
+        "tim",
+        "john",
+        "learning-german",
+        "learning-spanish"
+      ],
+      "sourceTurns": [
+        "D27:9",
+        "D27:10",
+        "D27:11",
+        "D27:12",
+        "D27:13"
+      ]
+    },
+    {
+      "text": "Basketball was still central to John on 2 January 2024: he practises and trains every day to stay in shape and improve, and says he cannot imagine his life without it.",
+      "speaker": "John",
+      "statedOn": "2024-01-02",
+      "entities": [
+        "john",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D27:14",
+        "D27:15"
+      ]
+    },
+    {
+      "text": "Tim said on 2 January 2024 that he will always love reading, and showed John the collection of books that takes him to another world.",
+      "speaker": "Tim",
+      "statedOn": "2024-01-02",
+      "entities": [
+        "tim",
+        "reading-fantasy",
+        "tims-book-collection"
+      ],
+      "sourceTurns": [
+        "D27:16",
+        "D27:17",
+        "D27:18"
+      ]
+    },
+    {
+      "text": "Harry Potter was still Tim's favourite book on 2 January 2024, and he called it immersive.",
+      "speaker": "Tim",
+      "statedOn": "2024-01-02",
+      "entities": [
+        "tim",
+        "harry-potter"
+      ],
+      "sourceTurns": [
+        "D27:19",
+        "D27:20"
+      ]
+    },
+    {
+      "text": "Tim named Star Wars as his favourite film series on 2 January 2024, saying it never gets old.",
+      "speaker": "Tim",
+      "statedOn": "2024-01-02",
+      "entities": [
+        "tim",
+        "star-wars"
+      ],
+      "sourceTurns": [
+        "D27:21"
+      ]
+    },
+    {
+      "text": "John is a huge fan of The Lord of the Rings films for the adventure, the world and the characters, and showed Tim his collection on 2 January 2024.",
+      "speaker": "John",
+      "statedOn": "2024-01-02",
+      "entities": [
+        "john",
+        "lord-of-the-rings"
+      ],
+      "sourceTurns": [
+        "D27:22",
+        "D27:23"
+      ]
+    },
+    {
+      "text": "John's favourite Lord of the Rings character is Aragorn, for how much he grows through the story and because he leads well and puts others first; Tim agreed that his journey from ranger to king of Gondor is inspiring.",
+      "speaker": "John",
+      "statedOn": "2024-01-02",
+      "entities": [
+        "john",
+        "tim",
+        "lord-of-the-rings"
+      ],
+      "sourceTurns": [
+        "D27:24",
+        "D27:25",
+        "D27:26",
+        "D27:27"
+      ]
+    },
+    {
+      "text": "John keeps a painting of Aragorn in his room as a reminder to stay true and be a leader, and admires his brave, selfless, down-to-earth attitude and the way he never gives up and stands up for justice.",
+      "speaker": "John",
+      "statedOn": "2024-01-02",
+      "entities": [
+        "john",
+        "lord-of-the-rings"
+      ],
+      "sourceTurns": [
+        "D27:28",
+        "D27:29",
+        "D27:30"
+      ]
+    },
+    {
+      "text": "Tim keeps a map of Middle-earth from The Lord of the Rings and says what he loves about fantasy books is getting lost in another world and exploring all the tiny details of its realms and regions from home.",
+      "speaker": "Tim",
+      "statedOn": "2024-01-02",
+      "entities": [
+        "tim",
+        "lord-of-the-rings",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D27:31",
+        "D27:32",
+        "D27:33",
+        "D27:34",
+        "D27:35"
+      ]
+    },
+    {
+      "text": "John loves travelling because it is a way to learn about different cultures and places, and Tim said on 2 January 2024 that he loves it too.",
+      "speaker": "John",
+      "statedOn": "2024-01-02",
+      "entities": [
+        "john",
+        "tim",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D27:36",
+        "D27:37"
+      ]
+    },
+    {
+      "text": "John has been to Paris and loved it, praising the incredible view from the Eiffel Tower; Tim has not been and said on 2 January 2024 that he cannot wait to see it for himself.",
+      "speaker": "John",
+      "statedOn": "2024-01-02",
+      "entities": [
+        "john",
+        "tim",
+        "paris",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D27:37",
+        "D27:38",
+        "D27:39"
+      ]
+    },
+    {
+      "text": "Tim and John agreed on 2 January 2024 that travelling is eye-opening and educational and gives you a different view of everything.",
+      "speaker": "John",
+      "statedOn": "2024-01-02",
+      "entities": [
+        "tim",
+        "john",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D27:40"
+      ]
+    },
+    {
+      "text": "Tim was accepted onto the study abroad programme he had applied for on Friday 5 January 2024, and was due to go to Ireland for a semester from February 2024.",
+      "speaker": "Tim",
+      "statedOn": "2024-01-07",
+      "entities": [
+        "tim",
+        "study-abroad-ireland",
+        "ireland"
+      ],
+      "chrono": [
+        "study-abroad-acceptance"
+      ],
+      "sourceTurns": [
+        "D28:1",
+        "D28:2"
+      ]
+    },
+    {
+      "text": "Tim chose to stay in Galway during his semester in Ireland, for its arts, its Irish music and its vibrant atmosphere.",
+      "speaker": "Tim",
+      "statedOn": "2024-01-07",
+      "entities": [
+        "tim",
+        "galway",
+        "ireland",
+        "study-abroad-ireland"
+      ],
+      "sourceTurns": [
+        "D28:3",
+        "D28:4"
+      ]
+    },
+    {
+      "text": "Tim was most excited to explore Ireland's nature during his semester in Galway.",
+      "speaker": "Tim",
+      "statedOn": "2024-01-07",
+      "entities": [
+        "tim",
+        "ireland",
+        "study-abroad-ireland"
+      ],
+      "sourceTurns": [
+        "D28:5",
+        "D28:6"
+      ]
+    },
+    {
+      "text": "Tim wants to visit the Cliffs of Moher for their ocean views and cliffs while he is in Ireland, and John said on 7 January 2024 that he could stop by there after his season.",
+      "speaker": "Tim",
+      "statedOn": "2024-01-07",
+      "entities": [
+        "tim",
+        "john",
+        "cliffs-of-moher",
+        "ireland"
+      ],
+      "sourceTurns": [
+        "D28:7",
+        "D28:8",
+        "D28:9",
+        "D28:10"
+      ]
+    },
+    {
+      "text": "John held a benefit basketball game in the week before 7 January 2024 which was a total success, drawing a big crowd and raising money for charity.",
+      "speaker": "John",
+      "statedOn": "2024-01-07",
+      "entities": [
+        "john",
+        "youth-sports-charity",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D28:10",
+        "D28:11",
+        "D28:12",
+        "D28:13"
+      ]
+    },
+    {
+      "text": "John said on 7 January 2024 that it is amazing how basketball brings people together, unites them and creates a positive impact.",
+      "speaker": "John",
+      "statedOn": "2024-01-07",
+      "entities": [
+        "john",
+        "basketball",
+        "youth-sports-charity"
+      ],
+      "sourceTurns": [
+        "D28:14",
+        "D28:15",
+        "D28:16"
+      ]
+    },
+    {
+      "text": "Tim was reading The Name of the Wind by Patrick Rothfuss on 7 January 2024 and recommended it to John, who added it to his list.",
+      "speaker": "Tim",
+      "statedOn": "2024-01-07",
+      "entities": [
+        "tim",
+        "john",
+        "the-name-of-the-wind",
+        "patrick-rothfuss",
+        "reading-fantasy"
+      ],
+      "sourceTurns": [
+        "D28:17",
+        "D28:18",
+        "D28:19",
+        "D28:20",
+        "D28:21"
+      ]
+    },
+    {
+      "text": "Tim and John caught up on 12 January 2024, both saying they had news to share.",
+      "speaker": "Tim",
+      "statedOn": "2024-01-12",
+      "entities": [
+        "tim",
+        "john"
+      ],
+      "sourceTurns": [
+        "D29:1",
+        "D29:2"
+      ]
+    },
+    {
+      "text": "Tim was working through the visa requirements for the countries he wants to visit as of 12 January 2024, and found it overwhelming but exciting.",
+      "speaker": "Tim",
+      "statedOn": "2024-01-12",
+      "entities": [
+        "tim",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D29:3"
+      ]
+    },
+    {
+      "text": "John signed an endorsement with a popular beverage company in the week before 12 January 2024, which he called a dream come true.",
+      "speaker": "John",
+      "statedOn": "2024-01-12",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D29:4",
+        "D29:5"
+      ]
+    },
+    {
+      "text": "John said the beverage endorsement felt like all the hard work and the training hours had paid off, and was a reminder that he is going in the right direction.",
+      "speaker": "John",
+      "statedOn": "2024-01-12",
+      "entities": [
+        "john"
+      ],
+      "sourceTurns": [
+        "D29:6",
+        "D29:7",
+        "D29:8"
+      ]
+    },
+    {
+      "text": "Tim said on 12 January 2024 that he is proud of having taken the initiative to research visa requirements, calling it a step towards making his travel dreams real.",
+      "speaker": "Tim",
+      "statedOn": "2024-01-12",
+      "entities": [
+        "tim",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D29:9",
+        "D29:10",
+        "D29:11"
+      ]
+    },
+    {
+      "text": "John recommended Barcelona to Tim on 12 January 2024 for its culture, architecture, food and nearby beaches, and Tim added it to his travel list.",
+      "speaker": "John",
+      "statedOn": "2024-01-12",
+      "entities": [
+        "john",
+        "tim",
+        "barcelona",
+        "travel"
+      ],
+      "sourceTurns": [
+        "D29:12",
+        "D29:13"
+      ]
+    },
+    {
+      "text": "Tim and John offered each other help as they said goodbye on 12 January 2024.",
+      "speaker": "John",
+      "statedOn": "2024-01-12",
+      "entities": [
+        "tim",
+        "john"
+      ],
+      "sourceTurns": [
+        "D29:14",
+        "D29:15"
+      ]
+    },
+    {
+      "text": "John's endorsement work ran from exploring opportunities and considering Nike and Under Armour in June 2023, to a signed Nike shoe and gear deal with Gatorade talks by July 2023, to a deal with an outdoor gear company in December 2023 and an endorsement with a popular beverage company in January 2024.",
+      "speaker": "John",
+      "statedOn": "2024-01-12",
+      "entities": [
+        "john",
+        "nike",
+        "under-armour",
+        "gatorade"
+      ],
+      "sourceTurns": [
+        "D2:2",
+        "D3:13",
+        "D25:2",
+        "D29:4"
+      ]
+    },
+    {
+      "text": "John's 2023 leg injury ran from mid-November 2023, when he was off the court and his doctor said it was not too serious, through daily physical therapy, to jogging pain-free on 15 December 2023 and training every day again by January 2024.",
+      "speaker": "John",
+      "statedOn": "2024-01-02",
+      "entities": [
+        "john",
+        "johns-injury",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D18:2",
+        "D18:10",
+        "D24:12",
+        "D24:14",
+        "D27:14"
+      ]
+    },
+    {
+      "text": "Tim took up several new pursuits over 2023 and into 2024: the piano in August 2023, a travel club and the violin in December 2023, and German by January 2024.",
+      "speaker": "Tim",
+      "statedOn": "2024-01-02",
+      "entities": [
+        "tim",
+        "piano",
+        "violin",
+        "travel-club",
+        "learning-german"
+      ],
+      "sourceTurns": [
+        "D8:12",
+        "D21:9",
+        "D21:11",
+        "D27:5"
+      ]
+    },
+    {
+      "text": "John's charity work developed from a partnership with a local organisation for disadvantaged children in August 2023, through a basketball camp in his hometown in summer 2023 and seminars on sport and marketing in December 2023, to a benefit basketball game in the first week of January 2024 that raised money for charity.",
+      "speaker": "John",
+      "statedOn": "2024-01-07",
+      "entities": [
+        "john",
+        "youth-sports-charity",
+        "basketball"
+      ],
+      "sourceTurns": [
+        "D6:17",
+        "D26:21",
+        "D26:23",
+        "D28:10",
+        "D28:12"
+      ]
+    },
+    {
+      "text": "Tim's travel ambitions built up over 2023 and into 2024: adding New York City to his list in August 2023, planning Universal Studios for September, going to the UK in the autumn, joining a travel club and visiting a travel agency in December 2023, and researching visa requirements by January 2024.",
+      "speaker": "Tim",
+      "statedOn": "2024-01-12",
+      "entities": [
+        "tim",
+        "travel",
+        "new-york-city",
+        "universal-studios",
+        "united-kingdom",
+        "travel-club"
+      ],
+      "sourceTurns": [
+        "D9:9",
+        "D10:9",
+        "D13:1",
+        "D21:1",
+        "D26:12",
+        "D29:3"
+      ]
+    }
+  ]
+}

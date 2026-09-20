@@ -1,0 +1,4670 @@
+{
+  "conversationId": "conv-42",
+  "sessions": [
+    {
+      "date": "2022-01-21",
+      "turns": [
+        "D1:1",
+        "D1:2",
+        "D1:3",
+        "D1:4",
+        "D1:5",
+        "D1:6",
+        "D1:7",
+        "D1:8",
+        "D1:9",
+        "D1:10",
+        "D1:11",
+        "D1:12",
+        "D1:13",
+        "D1:14",
+        "D1:15",
+        "D1:16",
+        "D1:17",
+        "D1:18",
+        "D1:19",
+        "D1:20",
+        "D1:21",
+        "D1:22"
+      ]
+    },
+    {
+      "date": "2022-01-23",
+      "turns": [
+        "D2:1",
+        "D2:2",
+        "D2:3",
+        "D2:4",
+        "D2:5",
+        "D2:6",
+        "D2:7",
+        "D2:8",
+        "D2:9",
+        "D2:10",
+        "D2:11",
+        "D2:12",
+        "D2:13",
+        "D2:14",
+        "D2:15",
+        "D2:16",
+        "D2:17",
+        "D2:18",
+        "D2:19",
+        "D2:20",
+        "D2:21",
+        "D2:22",
+        "D2:23",
+        "D2:24",
+        "D2:25",
+        "D2:26",
+        "D2:27",
+        "D2:28",
+        "D2:29"
+      ]
+    },
+    {
+      "date": "2022-02-07",
+      "turns": [
+        "D3:1",
+        "D3:2",
+        "D3:3",
+        "D3:4",
+        "D3:5",
+        "D3:6",
+        "D3:7",
+        "D3:8",
+        "D3:9",
+        "D3:10",
+        "D3:11",
+        "D3:12",
+        "D3:13",
+        "D3:14",
+        "D3:15",
+        "D3:16",
+        "D3:17",
+        "D3:18",
+        "D3:19",
+        "D3:20",
+        "D3:21",
+        "D3:22",
+        "D3:23",
+        "D3:24",
+        "D3:25"
+      ]
+    },
+    {
+      "date": "2022-02-25",
+      "turns": [
+        "D4:1",
+        "D4:2",
+        "D4:3",
+        "D4:4",
+        "D4:5",
+        "D4:6",
+        "D4:7",
+        "D4:8",
+        "D4:9",
+        "D4:10",
+        "D4:11",
+        "D4:12",
+        "D4:13",
+        "D4:14",
+        "D4:15",
+        "D4:16",
+        "D4:17",
+        "D4:18",
+        "D4:19"
+      ]
+    },
+    {
+      "date": "2022-03-18",
+      "turns": [
+        "D5:1",
+        "D5:2",
+        "D5:3",
+        "D5:4",
+        "D5:5",
+        "D5:6",
+        "D5:7",
+        "D5:8",
+        "D5:9",
+        "D5:10",
+        "D5:11",
+        "D5:12",
+        "D5:13",
+        "D5:14",
+        "D5:15",
+        "D5:16",
+        "D5:17",
+        "D5:18",
+        "D5:19",
+        "D5:20",
+        "D5:21"
+      ]
+    },
+    {
+      "date": "2022-03-24",
+      "turns": [
+        "D6:1",
+        "D6:2",
+        "D6:3",
+        "D6:4",
+        "D6:5",
+        "D6:6",
+        "D6:7",
+        "D6:8",
+        "D6:9",
+        "D6:10",
+        "D6:11",
+        "D6:12",
+        "D6:13"
+      ]
+    },
+    {
+      "date": "2022-04-15",
+      "turns": [
+        "D7:1",
+        "D7:2",
+        "D7:3",
+        "D7:4",
+        "D7:5",
+        "D7:6",
+        "D7:7",
+        "D7:8",
+        "D7:9",
+        "D7:10",
+        "D7:11",
+        "D7:12",
+        "D7:13"
+      ]
+    },
+    {
+      "date": "2022-04-17",
+      "turns": [
+        "D8:1",
+        "D8:2",
+        "D8:3",
+        "D8:4",
+        "D8:5",
+        "D8:6",
+        "D8:7",
+        "D8:8",
+        "D8:9",
+        "D8:10",
+        "D8:11",
+        "D8:12",
+        "D8:13",
+        "D8:14",
+        "D8:15",
+        "D8:16",
+        "D8:17",
+        "D8:18",
+        "D8:19",
+        "D8:20",
+        "D8:21",
+        "D8:22"
+      ]
+    },
+    {
+      "date": "2022-04-21",
+      "turns": [
+        "D9:1",
+        "D9:2",
+        "D9:3",
+        "D9:4",
+        "D9:5",
+        "D9:6",
+        "D9:7",
+        "D9:8",
+        "D9:9",
+        "D9:10",
+        "D9:11",
+        "D9:12",
+        "D9:13",
+        "D9:14",
+        "D9:15",
+        "D9:16",
+        "D9:17",
+        "D9:18"
+      ]
+    },
+    {
+      "date": "2022-05-02",
+      "turns": [
+        "D10:1",
+        "D10:2",
+        "D10:3",
+        "D10:4",
+        "D10:5",
+        "D10:6",
+        "D10:7",
+        "D10:8",
+        "D10:9",
+        "D10:10",
+        "D10:11",
+        "D10:12",
+        "D10:13",
+        "D10:14",
+        "D10:15",
+        "D10:16"
+      ]
+    },
+    {
+      "date": "2022-05-12",
+      "turns": [
+        "D11:1",
+        "D11:2",
+        "D11:3",
+        "D11:4",
+        "D11:5",
+        "D11:6",
+        "D11:7",
+        "D11:8",
+        "D11:9",
+        "D11:10",
+        "D11:11",
+        "D11:12",
+        "D11:13",
+        "D11:14",
+        "D11:15",
+        "D11:16",
+        "D11:17",
+        "D11:18",
+        "D11:19",
+        "D11:20"
+      ]
+    },
+    {
+      "date": "2022-05-20",
+      "turns": [
+        "D12:1",
+        "D12:2",
+        "D12:3",
+        "D12:4",
+        "D12:5",
+        "D12:6",
+        "D12:7",
+        "D12:8",
+        "D12:9",
+        "D12:10",
+        "D12:11",
+        "D12:12",
+        "D12:13",
+        "D12:14",
+        "D12:15",
+        "D12:16",
+        "D12:17",
+        "D12:18",
+        "D12:19"
+      ]
+    },
+    {
+      "date": "2022-05-25",
+      "turns": [
+        "D13:1",
+        "D13:2",
+        "D13:3",
+        "D13:4",
+        "D13:5",
+        "D13:6",
+        "D13:7",
+        "D13:8",
+        "D13:9",
+        "D13:10",
+        "D13:11",
+        "D13:12",
+        "D13:13",
+        "D13:14",
+        "D13:15",
+        "D13:16",
+        "D13:17",
+        "D13:18",
+        "D13:19",
+        "D13:20",
+        "D13:21",
+        "D13:22",
+        "D13:23"
+      ]
+    },
+    {
+      "date": "2022-06-03",
+      "turns": [
+        "D14:1",
+        "D14:2",
+        "D14:3",
+        "D14:4",
+        "D14:5",
+        "D14:6",
+        "D14:7",
+        "D14:8",
+        "D14:9",
+        "D14:10",
+        "D14:11",
+        "D14:12",
+        "D14:13",
+        "D14:14",
+        "D14:15",
+        "D14:16",
+        "D14:17",
+        "D14:18",
+        "D14:19",
+        "D14:20",
+        "D14:21",
+        "D14:22",
+        "D14:23",
+        "D14:24",
+        "D14:25",
+        "D14:26",
+        "D14:27"
+      ]
+    },
+    {
+      "date": "2022-06-05",
+      "turns": [
+        "D15:1",
+        "D15:2",
+        "D15:3",
+        "D15:4",
+        "D15:5",
+        "D15:6",
+        "D15:7",
+        "D15:8",
+        "D15:9",
+        "D15:10",
+        "D15:11",
+        "D15:12",
+        "D15:13",
+        "D15:14",
+        "D15:15",
+        "D15:16",
+        "D15:17"
+      ]
+    },
+    {
+      "date": "2022-06-24",
+      "turns": [
+        "D16:1",
+        "D16:2",
+        "D16:3",
+        "D16:4",
+        "D16:5",
+        "D16:6",
+        "D16:7",
+        "D16:8",
+        "D16:9",
+        "D16:10",
+        "D16:11",
+        "D16:12",
+        "D16:13",
+        "D16:14",
+        "D16:15",
+        "D16:16"
+      ]
+    },
+    {
+      "date": "2022-07-10",
+      "turns": [
+        "D17:1",
+        "D17:2",
+        "D17:3",
+        "D17:4",
+        "D17:5",
+        "D17:6",
+        "D17:7",
+        "D17:8",
+        "D17:9",
+        "D17:10",
+        "D17:11",
+        "D17:12",
+        "D17:13",
+        "D17:14",
+        "D17:15",
+        "D17:16",
+        "D17:17",
+        "D17:18",
+        "D17:19",
+        "D17:20",
+        "D17:21"
+      ]
+    },
+    {
+      "date": "2022-08-14",
+      "turns": [
+        "D18:1",
+        "D18:2",
+        "D18:3",
+        "D18:4",
+        "D18:5",
+        "D18:6",
+        "D18:7",
+        "D18:8",
+        "D18:9",
+        "D18:10",
+        "D18:11",
+        "D18:12",
+        "D18:13",
+        "D18:14",
+        "D18:15",
+        "D18:16"
+      ]
+    },
+    {
+      "date": "2022-08-22",
+      "turns": [
+        "D19:1",
+        "D19:2",
+        "D19:3",
+        "D19:4",
+        "D19:5",
+        "D19:6",
+        "D19:7",
+        "D19:8",
+        "D19:9",
+        "D19:10",
+        "D19:11",
+        "D19:12",
+        "D19:13",
+        "D19:14",
+        "D19:15",
+        "D19:16",
+        "D19:17",
+        "D19:18",
+        "D19:19",
+        "D19:20",
+        "D19:21",
+        "D19:22"
+      ]
+    },
+    {
+      "date": "2022-09-05",
+      "turns": [
+        "D20:1",
+        "D20:2",
+        "D20:3",
+        "D20:4",
+        "D20:5",
+        "D20:6",
+        "D20:7",
+        "D20:8",
+        "D20:9",
+        "D20:10",
+        "D20:11",
+        "D20:12",
+        "D20:13",
+        "D20:14",
+        "D20:15",
+        "D20:16",
+        "D20:17",
+        "D20:18",
+        "D20:19"
+      ]
+    },
+    {
+      "date": "2022-09-14",
+      "turns": [
+        "D21:1",
+        "D21:2",
+        "D21:3",
+        "D21:4",
+        "D21:5",
+        "D21:6",
+        "D21:7",
+        "D21:8",
+        "D21:9",
+        "D21:10",
+        "D21:11",
+        "D21:12",
+        "D21:13",
+        "D21:14",
+        "D21:15",
+        "D21:16",
+        "D21:17",
+        "D21:18",
+        "D21:19",
+        "D21:20"
+      ]
+    },
+    {
+      "date": "2022-10-06",
+      "turns": [
+        "D22:1",
+        "D22:2",
+        "D22:3",
+        "D22:4",
+        "D22:5",
+        "D22:6",
+        "D22:7",
+        "D22:8",
+        "D22:9",
+        "D22:10",
+        "D22:11",
+        "D22:12",
+        "D22:13",
+        "D22:14",
+        "D22:15",
+        "D22:16",
+        "D22:17",
+        "D22:18",
+        "D22:19",
+        "D22:20",
+        "D22:21",
+        "D22:22",
+        "D22:23"
+      ]
+    },
+    {
+      "date": "2022-10-09",
+      "turns": [
+        "D23:1",
+        "D23:2",
+        "D23:3",
+        "D23:4",
+        "D23:5",
+        "D23:6",
+        "D23:7",
+        "D23:8",
+        "D23:9",
+        "D23:10",
+        "D23:11",
+        "D23:12",
+        "D23:13",
+        "D23:14",
+        "D23:15",
+        "D23:16",
+        "D23:17",
+        "D23:18",
+        "D23:19",
+        "D23:20",
+        "D23:21",
+        "D23:22",
+        "D23:23",
+        "D23:24",
+        "D23:25",
+        "D23:26",
+        "D23:27",
+        "D23:28",
+        "D23:29",
+        "D23:30"
+      ]
+    },
+    {
+      "date": "2022-10-21",
+      "turns": [
+        "D24:1",
+        "D24:2",
+        "D24:3",
+        "D24:4",
+        "D24:5",
+        "D24:6",
+        "D24:7",
+        "D24:8",
+        "D24:9",
+        "D24:10",
+        "D24:11",
+        "D24:12",
+        "D24:13",
+        "D24:14",
+        "D24:15",
+        "D24:16",
+        "D24:17",
+        "D24:18",
+        "D24:19"
+      ]
+    },
+    {
+      "date": "2022-10-25",
+      "turns": [
+        "D25:1",
+        "D25:2",
+        "D25:3",
+        "D25:4",
+        "D25:5",
+        "D25:6",
+        "D25:7",
+        "D25:8",
+        "D25:9",
+        "D25:10",
+        "D25:11",
+        "D25:12",
+        "D25:13",
+        "D25:14",
+        "D25:15",
+        "D25:16",
+        "D25:17",
+        "D25:18",
+        "D25:19",
+        "D25:20",
+        "D25:21",
+        "D25:22",
+        "D25:23",
+        "D25:24",
+        "D25:25",
+        "D25:26",
+        "D25:27",
+        "D25:28",
+        "D25:29"
+      ]
+    },
+    {
+      "date": "2022-11-04",
+      "turns": [
+        "D26:1",
+        "D26:2",
+        "D26:3",
+        "D26:4",
+        "D26:5",
+        "D26:6",
+        "D26:7",
+        "D26:8",
+        "D26:9",
+        "D26:10",
+        "D26:11",
+        "D26:12",
+        "D26:13",
+        "D26:14",
+        "D26:15",
+        "D26:16",
+        "D26:17",
+        "D26:18",
+        "D26:19",
+        "D26:20",
+        "D26:21",
+        "D26:22",
+        "D26:23",
+        "D26:24"
+      ]
+    },
+    {
+      "date": "2022-11-07",
+      "turns": [
+        "D27:1",
+        "D27:2",
+        "D27:3",
+        "D27:4",
+        "D27:5",
+        "D27:6",
+        "D27:7",
+        "D27:8",
+        "D27:9",
+        "D27:10",
+        "D27:11",
+        "D27:12",
+        "D27:13",
+        "D27:14",
+        "D27:15",
+        "D27:16",
+        "D27:17",
+        "D27:18",
+        "D27:19",
+        "D27:20",
+        "D27:21",
+        "D27:22",
+        "D27:23",
+        "D27:24",
+        "D27:25",
+        "D27:26",
+        "D27:27",
+        "D27:28",
+        "D27:29",
+        "D27:30",
+        "D27:31",
+        "D27:32",
+        "D27:33",
+        "D27:34",
+        "D27:35",
+        "D27:36",
+        "D27:37",
+        "D27:38"
+      ]
+    },
+    {
+      "date": "2022-11-09",
+      "turns": [
+        "D28:1",
+        "D28:2",
+        "D28:3",
+        "D28:4",
+        "D28:5",
+        "D28:6",
+        "D28:7",
+        "D28:8",
+        "D28:9",
+        "D28:10",
+        "D28:11",
+        "D28:12",
+        "D28:13",
+        "D28:14",
+        "D28:15",
+        "D28:16",
+        "D28:17",
+        "D28:18",
+        "D28:19",
+        "D28:20",
+        "D28:21",
+        "D28:22",
+        "D28:23",
+        "D28:24",
+        "D28:25",
+        "D28:26",
+        "D28:27",
+        "D28:28",
+        "D28:29",
+        "D28:30",
+        "D28:31",
+        "D28:32",
+        "D28:33"
+      ]
+    },
+    {
+      "date": "2022-11-11",
+      "turns": [
+        "D29:1",
+        "D29:2",
+        "D29:3",
+        "D29:4",
+        "D29:5",
+        "D29:6",
+        "D29:7",
+        "D29:8",
+        "D29:9",
+        "D29:10",
+        "D29:11",
+        "D29:12",
+        "D29:13",
+        "D29:14",
+        "D29:15"
+      ]
+    }
+  ],
+  "entities": [
+    {
+      "key": "joanna",
+      "type": "person",
+      "name": "Joanna",
+      "properties": {
+        "aliases": "Jo"
+      },
+      "description": "A screenwriter and author, and Nate's long-standing friend. Through 2022 she finished her first three screenplays, joined a writers group, saw three scripts she contributed to reach the big screen, wrote a book, and by November 2022 was filming her own movie from her road-trip script. She is lactose intolerant and allergic to furred animals, most reptiles and cockroaches, so she keeps no pets. She also hikes, reads, watches dramas and romcoms, and bakes dairy-free desserts."
+    },
+    {
+      "key": "nate",
+      "type": "person",
+      "name": "Nate",
+      "description": "A competitive video gamer and Joanna's long-standing friend. He won his first tournament in January 2022 and by August 2022 was making a living from competitive gaming, including an international title and a Valorant final in November 2022. He keeps turtles and, from May 2022, an adopted dog called Max; he makes dairy-free and vegan desserts, taught them on his own cooking show in September 2022, and started a gaming YouTube channel in November 2022. He dyed his hair purple in April 2022."
+    },
+    {
+      "key": "nates-turtles",
+      "type": "animal",
+      "name": "Nate's turtles",
+      "properties": {
+        "species": "turtle",
+        "aliases": "the turtles, Nate's little dudes, his little guys, his little buddies"
+      },
+      "description": "Nate's pet turtles, never given individual names in the conversation and treated throughout as one household of animals. He had two of them for about three years as of January 2022, gave them a larger tank in August 2022 and added a third in November 2022. They eat vegetables, fruit and insects, have distinct personalities — one adventurous, one reserved — and he walks them, takes them into the kitchen, to the park and once to the beach at Tampa. They are how he stays calm when he is nervous."
+    },
+    {
+      "key": "max",
+      "type": "animal",
+      "name": "Max",
+      "properties": {
+        "species": "dog"
+      },
+      "description": "Nate's adopted dog, who joined the household around 20 May 2022. He is full of energy, fills Nate's life with joy, keeps the turtles active, and has doggy playdates with the dog of a couple who live nearby and whom Nate met while walking him."
+    },
+    {
+      "key": "tilly",
+      "type": "animal",
+      "name": "Tilly",
+      "properties": {
+        "species": "dog"
+      },
+      "description": "A dog Joanna had back in Michigan before she developed her animal allergy, which meant the family had to rehome her. Joanna later named the stuffed toy dog Nate gave her after this dog, because the name reminds her of when she could hold an animal without a reaction."
+    },
+    {
+      "key": "tilly-toy",
+      "type": "object",
+      "name": "Tilly the stuffed dog",
+      "properties": {
+        "kind": "stuffed animal"
+      },
+      "description": "A stuffed toy dog Nate gave Joanna on 25 May 2022 as a reminder of good vibes. She named it Tilly after the dog she used to have in Michigan, keeps it with her while she writes, and says it helps her stay focused and brings her joy."
+    },
+    {
+      "key": "writers-group",
+      "type": "organization",
+      "name": "Joanna's writers group",
+      "properties": {
+        "kind": "club"
+      },
+      "description": "The writers group Joanna joined shortly before 21 April 2022, full of inspirational people who understand her writing and which left her feeling she finally belonged somewhere. She develops the script 'Finding Home' with them, shared her book with them in August 2022 and got great feedback, and made a bookmark for one of the women in the group in October 2022. She also calls it her writing club."
+    },
+    {
+      "key": "vegan-diet-group",
+      "type": "organization",
+      "name": "Nate's vegan diet group",
+      "properties": {
+        "kind": "club"
+      },
+      "description": "A vegan diet group Nate belongs to. He shared the vegan ice cream he made on 17 June 2022 with its members."
+    },
+    {
+      "key": "screenplay-one",
+      "type": "project",
+      "name": "Joanna's first screenplay",
+      "description": "Joanna's first full screenplay, a mix of drama and romance. She finished and printed it on 21 January 2022 after working on it for a long while, felt relief, excitement and anxiety, and submitted it to film festivals hoping a producer or director would pick it up. By 3 June 2022 a major company had sent her a generic rejection letter with no feedback."
+    },
+    {
+      "key": "road-trip-script",
+      "type": "project",
+      "name": "Joanna's road-trip screenplay",
+      "description": "Joanna's second screenplay, about a thirty-year-old woman on a journey of self-discovery after a loss who takes a road trip to heal and grow. It is her own story, drawn from personal experience. She began it around 25 February 2022 and had finished it by 18 March 2022, and by 11 November 2022 she was filming it as her own movie, with an actor on set telling her how much she liked the script."
+    },
+    {
+      "key": "finding-home",
+      "type": "project",
+      "name": "Finding Home",
+      "description": "A script about a girl on a journey to find her true home, which Joanna developed with her writers group from April 2022 and finished by 20 May 2022. She called it her third screenplay and her most personal — about loss, identity and connection — a story she had held for years before finding the courage to write it, and one she wanted to show Nate."
+    },
+    {
+      "key": "joannas-book",
+      "type": "project",
+      "name": "Joanna's book",
+      "description": "A book Joanna started writing around 10 July 2022 after a movie she wrote for did well: a deep, emotional story exploring loss, redemption and forgiveness, and the first book she had tried to publish. She shared it nervously with her writers group in August 2022 and got great feedback, and finished the writing in the week before 6 October 2022 after many late nights and edits."
+    },
+    {
+      "key": "midwest-thriller",
+      "type": "project",
+      "name": "Joanna's Midwestern small-town thriller",
+      "description": "A script Joanna was inspired to write after her research road trip to Woodhaven in July 2022, where the town's history and a book of local stories and sketches from the 1900s sparked the idea. She said it would be different from her previous work, and by 9 November 2022 described it as a suspenseful thriller set in a small Midwestern town and a great creative outlet."
+    },
+    {
+      "key": "love-story-script",
+      "type": "project",
+      "name": "Joanna's love-story script",
+      "description": "A movie script Joanna was writing in November 2022: a love story with many challenges, which she got the idea for from a dream and hoped to get on the big screen. She opened it with a letter her brother wrote her when they were children."
+    },
+    {
+      "key": "nates-cooking-show",
+      "type": "project",
+      "name": "Nate's cooking show",
+      "description": "Nate's own cooking show, on which he taught people vegan ice cream recipes on Monday 12 September 2022. It was nerve-wracking to put himself out there but a blast, and he picked up a few new recipes from it; his favourite dish from the show is coconut milk ice cream."
+    },
+    {
+      "key": "gaming-party",
+      "type": "project",
+      "name": "Nate's gaming party",
+      "description": "A gaming party Nate organised for the weekend of 18 June 2022, inviting tournament friends and old teammates and giving everyone custom controller decorations. Seven people came, six of them said they wanted to do it again the following month, and they played Chess afterwards."
+    },
+    {
+      "key": "gaming-youtube-channel",
+      "type": "project",
+      "name": "Nate's gaming YouTube channel",
+      "description": "Gaming content for YouTube that Nate began making in November 2022 to entertain people and satisfy his gaming cravings between tournaments, hoping to share his love of gaming and connect with others. He was already studying other creators' videos first, which was also Joanna's advice."
+    },
+    {
+      "key": "michigan",
+      "type": "place",
+      "name": "Michigan",
+      "properties": {
+        "kind": "region"
+      },
+      "description": "Where Joanna lived earlier in her life and kept a dog called Tilly, before her animal allergy meant the family had to rehome her."
+    },
+    {
+      "key": "whispering-falls",
+      "type": "place",
+      "name": "Whispering Falls",
+      "properties": {
+        "kind": "natural"
+      },
+      "description": "A waterfall Joanna hiked to and photographed in the week before 12 May 2022. She found it peaceful and serene and the rush of the water soothing, and it was one of the trails that made her want to write a drama."
+    },
+    {
+      "key": "woodhaven",
+      "type": "place",
+      "name": "Woodhaven",
+      "properties": {
+        "kind": "city"
+      },
+      "description": "A small town in the Midwest that Joanna visited on a research road trip shortly before 10 July 2022. She saw its scenery and historic buildings and found a book from the 1900s of local stories and sketches in its library; the town's past and how much it had changed sparked her next script."
+    },
+    {
+      "key": "midwest",
+      "type": "place",
+      "name": "the Midwest",
+      "properties": {
+        "kind": "region"
+      },
+      "description": "The American region containing Woodhaven, and the setting of the suspenseful small-town thriller Joanna began writing in 2022."
+    },
+    {
+      "key": "fort-wayne",
+      "type": "place",
+      "name": "Fort Wayne",
+      "properties": {
+        "kind": "city"
+      },
+      "description": "A place Joanna hiked near in the summer of 2022, where she took the photograph of a sunflower field at sunset that she shared with Nate on 9 November 2022."
+    },
+    {
+      "key": "tampa",
+      "type": "place",
+      "name": "Tampa",
+      "properties": {
+        "kind": "city"
+      },
+      "description": "The city whose beach Nate took his turtles to on 10 November 2022."
+    },
+    {
+      "key": "little-women",
+      "type": "work",
+      "name": "Little Women",
+      "properties": {
+        "medium": "film"
+      },
+      "description": "A film about sisterhood, love and reaching for your dreams. Joanna watched it shortly before 7 February 2022 and recommended it to Nate as a must-see; he watched it about eight months later, by 6 October 2022, and thought the acting and the story were great."
+    },
+    {
+      "key": "lord-of-the-rings",
+      "type": "work",
+      "name": "The Lord of the Rings trilogy",
+      "properties": {
+        "medium": "film"
+      },
+      "description": "The film trilogy Nate named as one of his favourites on 21 April 2022 for its world building, battles and storytelling, and which he calls probably the greatest trilogy of all time. Joanna watched it on 1 May 2022 on his recommendation and thought it awesome."
+    },
+    {
+      "key": "inception",
+      "type": "work",
+      "name": "Inception",
+      "properties": {
+        "medium": "film"
+      },
+      "description": "A film Nate saw shortly before 9 October 2022; he said its twists and dream material blew his mind."
+    },
+    {
+      "key": "csgo",
+      "type": "work",
+      "name": "Counter-Strike: Global Offensive",
+      "properties": {
+        "medium": "video game"
+      },
+      "description": "The team shooter Nate won his first video game tournament in, in the week before 21 January 2022, playing with his team; it is his usual competitive game."
+    },
+    {
+      "key": "street-fighter",
+      "type": "work",
+      "name": "Street Fighter",
+      "properties": {
+        "medium": "video game"
+      },
+      "description": "The fighting game Nate plays a lot with his friends and won a local tournament in — his second tournament win — in the week before 2 May 2022, to his own surprise."
+    },
+    {
+      "key": "valorant",
+      "type": "work",
+      "name": "Valorant",
+      "properties": {
+        "medium": "video game"
+      },
+      "description": "The game of the big tournament whose final Nate reached and won on 5 November 2022; seeing his name as champion was the best feeling."
+    },
+    {
+      "key": "cyberpunk-2077",
+      "type": "work",
+      "name": "Cyberpunk 2077",
+      "properties": {
+        "medium": "video game"
+      },
+      "description": "A game with a futuristic setting and gameplay that Nate had been playing nonstop as of 9 October 2022."
+    },
+    {
+      "key": "xenoblade-chronicles",
+      "type": "work",
+      "name": "Xenoblade Chronicles",
+      "properties": {
+        "medium": "video game"
+      },
+      "description": "A Japanese fantasy RPG Nate was playing and recommending in November 2022. He is a big Nintendo fan and had wanted to play it for a while because his friends had recommended it."
+    },
+    {
+      "key": "catan",
+      "type": "work",
+      "name": "Catan",
+      "properties": {
+        "medium": "board game"
+      },
+      "description": "A strategy board game of building settlements and trading resources that Nate loves. He played it with people he met at a game convention on 7 October 2022; the group competed but stayed relaxed about it."
+    },
+    {
+      "key": "writing",
+      "type": "activity",
+      "name": "writing",
+      "properties": {
+        "kind": "craft"
+      },
+      "description": "Joanna's central practice and, since acting, her main way of expressing herself: screenplays, a book, a blog, a journal and her own memories. She calls it an escape, a way to create wild worlds and characters and to heal, and what gets her through hard times. She reads widely and keeps a bookshelf of books and magazines as her source of inspiration, and gave Nate advice on taking it up in March 2022."
+    },
+    {
+      "key": "hiking",
+      "type": "activity",
+      "name": "hiking",
+      "properties": {
+        "kind": "outdoor sport"
+      },
+      "description": "Joanna's way of resetting and finding inspiration; nature has always been her haven. She found a trail in her hometown in April 2022, more trails and Whispering Falls in May 2022 and declared herself an expert hiker, and hiked with friends in June 2022. Nate is not into hiking but agreed he might try it with her."
+    },
+    {
+      "key": "reading",
+      "type": "activity",
+      "name": "reading",
+      "description": "Something both Joanna and Nate enjoy. She reads widely for writing inspiration and rediscovered forgotten books in April 2022; he has shelves of books he has not read in years. They trade book and series recommendations, including a fantasy series each way in August 2022."
+    },
+    {
+      "key": "movie-watching",
+      "type": "activity",
+      "name": "watching movies",
+      "description": "A hobby Joanna and Nate share and the thing they most often recommend to each other. Joanna likes dramas and romcoms and getting immersed in the feelings and plots; Nate likes action, science fiction and fantasy for the effects and the escape. Both say films take you to new worlds and make you feel things you would not otherwise."
+    },
+    {
+      "key": "gaming",
+      "type": "activity",
+      "name": "video gaming",
+      "description": "Nate's main hobby and, from 2022, his career: competitive video game tournaments, plus board games and playing with friends. He calls games his escape from life's struggles and does not get very competitive about them. Joanna is not into games."
+    },
+    {
+      "key": "acting",
+      "type": "activity",
+      "name": "acting",
+      "description": "Joanna's first passion, before writing. She was so nervous in her first play that she forgot her lines, which taught her to prepare and stay in the moment. She now shines in writing but has not ruled out returning to acting."
+    },
+    {
+      "key": "dairy-free-desserts",
+      "type": "activity",
+      "name": "making dairy-free desserts",
+      "properties": {
+        "kind": "cooking",
+        "aliases": "vegan desserts, dairy-free baking, coconut milk ice cream"
+      },
+      "description": "Making dairy-free and vegan sweets, above all coconut milk ice cream. Nate discovered he could make it in February 2022 and it became his signature, taught on his cooking show in September 2022. Joanna, who is lactose intolerant, built a repertoire of dairy-free cakes, tarts and cupcakes through 2022 for her family and friends. It is the thing the two of them most often trade recipes about."
+    },
+    {
+      "key": "pet-allergy",
+      "type": "condition",
+      "name": "Joanna's animal allergy",
+      "properties": {
+        "kind": "allergy"
+      },
+      "description": "Joanna's severe allergy to most reptiles and to animals with fur — her face becomes puffy and itchy — which is why she keeps no pets and why her family had to rehome her dog Tilly. She learned shortly before 18 March 2022 that she is allergic to cockroaches as well, and by 20 May 2022 had given up on finding a pet she could keep."
+    },
+    {
+      "key": "lactose-intolerance",
+      "type": "condition",
+      "name": "Joanna's lactose intolerance",
+      "properties": {
+        "kind": "food intolerance"
+      },
+      "description": "Joanna cannot have dairy, which is why every dessert she makes and every recipe she asks Nate for is dairy-free, and why she uses coconut or almond milk."
+    },
+    {
+      "key": "cork-board",
+      "type": "object",
+      "name": "Joanna's cork board",
+      "properties": {
+        "kind": "cork board"
+      },
+      "description": "A board of quotes, photographs and keepsakes in Joanna's room that she calls her little corner of inspiration. It carries a family photograph that reminds her daily of her family's love and encouragement. Nate said in June 2022 that he should start one of his own."
+    },
+    {
+      "key": "gaming-setup",
+      "type": "object",
+      "name": "Nate's gaming setup",
+      "properties": {
+        "kind": "computer setup",
+        "aliases": "his gaming room"
+      },
+      "description": "Nate's home gaming room and computer, where he practises, competes and plays with friends. He showed it to Joanna in May 2022 and upgraded the equipment in November 2022, calling it his own little haven and essential to his career because without it he could never beat his competition."
+    }
+  ],
+  "chrono": [
+    {
+      "key": "screenplay-one-finished",
+      "type": "milestone",
+      "title": "Joanna finished and printed her first full screenplay, a drama and romance",
+      "date": "2022-01-21",
+      "entities": [
+        "joanna",
+        "screenplay-one"
+      ]
+    },
+    {
+      "key": "joanna-writing-audition",
+      "type": "event",
+      "title": "Joanna auditioned for a writing job",
+      "date": "2022-03-23",
+      "entities": [
+        "joanna",
+        "writing"
+      ]
+    },
+    {
+      "key": "hometown-trail-found",
+      "type": "event",
+      "title": "Joanna discovered a hiking trail in her hometown",
+      "date": "2022-04-16",
+      "entities": [
+        "joanna",
+        "hiking"
+      ]
+    },
+    {
+      "key": "joanna-watched-lotr",
+      "type": "event",
+      "title": "Joanna watched The Lord of the Rings trilogy on Nate's recommendation",
+      "date": "2022-05-01",
+      "entities": [
+        "joanna",
+        "lord-of-the-rings"
+      ]
+    },
+    {
+      "key": "stuffed-dog-given",
+      "type": "event",
+      "title": "Nate gave Joanna a stuffed toy dog, which she named Tilly",
+      "date": "2022-05-25",
+      "entities": [
+        "nate",
+        "joanna",
+        "tilly-toy"
+      ]
+    },
+    {
+      "key": "first-script-on-screen",
+      "type": "milestone",
+      "title": "A screenplay Joanna wrote parts of appeared on the big screen",
+      "date": "2022-06-04",
+      "entities": [
+        "joanna",
+        "writing"
+      ]
+    },
+    {
+      "key": "film-contest-submission",
+      "type": "milestone",
+      "title": "Joanna submitted her most recent screenplay to a film contest",
+      "date": "2022-06-24",
+      "entities": [
+        "joanna",
+        "writing"
+      ]
+    },
+    {
+      "key": "vegan-icecream-shared",
+      "type": "event",
+      "title": "Nate made vegan ice cream and shared it with his vegan diet group",
+      "date": "2022-06-17",
+      "entities": [
+        "nate",
+        "vegan-diet-group",
+        "dairy-free-desserts"
+      ]
+    },
+    {
+      "key": "fourth-tournament-win",
+      "type": "milestone",
+      "title": "Nate won his fourth video game tournament, played online",
+      "date": "2022-07-08",
+      "entities": [
+        "nate",
+        "gaming"
+      ]
+    },
+    {
+      "key": "international-tournament-win",
+      "type": "milestone",
+      "title": "Nate won an international video game tournament",
+      "date": "2022-08-21",
+      "entities": [
+        "nate",
+        "gaming"
+      ]
+    },
+    {
+      "key": "cooking-show-episode",
+      "type": "event",
+      "title": "Nate taught vegan ice cream recipes on his own cooking show",
+      "date": "2022-09-12",
+      "entities": [
+        "nate",
+        "nates-cooking-show",
+        "dairy-free-desserts"
+      ]
+    },
+    {
+      "key": "almond-milk-dessert",
+      "type": "event",
+      "title": "Joanna made a dessert with almond milk",
+      "date": "2022-09-09",
+      "entities": [
+        "joanna",
+        "dairy-free-desserts"
+      ]
+    },
+    {
+      "key": "family-liked-new-recipe",
+      "type": "event",
+      "title": "Joanna's newest dairy-free recipe was a winner with her family",
+      "date": "2022-10-05",
+      "entities": [
+        "joanna",
+        "dairy-free-desserts"
+      ]
+    },
+    {
+      "key": "game-convention",
+      "type": "event",
+      "title": "Nate went to a game convention and met new people outside his usual circle",
+      "date": "2022-10-07",
+      "entities": [
+        "nate",
+        "gaming"
+      ]
+    },
+    {
+      "key": "third-script-on-screen",
+      "type": "milestone",
+      "title": "A movie script Joanna contributed to was shown on the big screen for the first time, the third time this had happened for her",
+      "date": "2022-10-23",
+      "entities": [
+        "joanna",
+        "writing"
+      ]
+    },
+    {
+      "key": "dessert-visit-plan",
+      "type": "plan",
+      "title": "Joanna planned to visit Nate to try his coconut milk ice cream and share her own dessert recipes",
+      "date": "2022-11-05",
+      "entities": [
+        "joanna",
+        "nate",
+        "dairy-free-desserts"
+      ]
+    },
+    {
+      "key": "valorant-final-win",
+      "type": "milestone",
+      "title": "Nate reached the final of a big Valorant tournament and won it",
+      "date": "2022-11-05",
+      "entities": [
+        "nate",
+        "valorant",
+        "gaming"
+      ]
+    },
+    {
+      "key": "producer-presentation-finished",
+      "type": "milestone",
+      "title": "Joanna finished the presentation of her script for producers",
+      "date": "2022-11-04",
+      "entities": [
+        "joanna",
+        "writing"
+      ]
+    },
+    {
+      "key": "producer-pitch",
+      "type": "milestone",
+      "title": "Joanna pitched her script to producers, who really liked it",
+      "date": "2022-11-08",
+      "entities": [
+        "joanna",
+        "writing"
+      ]
+    },
+    {
+      "key": "turtle-visit-plan",
+      "type": "plan",
+      "title": "Joanna planned to visit Nate to watch him play with his turtles from a distance",
+      "date": "2022-11-10",
+      "entities": [
+        "joanna",
+        "nate",
+        "nates-turtles"
+      ]
+    },
+    {
+      "key": "turtles-at-tampa-beach",
+      "type": "event",
+      "title": "Nate took his turtles to the beach in Tampa",
+      "date": "2022-11-10",
+      "entities": [
+        "nate",
+        "nates-turtles",
+        "tampa"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "label": "knows",
+      "from": "joanna",
+      "to": "nate",
+      "properties": {
+        "kind": "friend"
+      }
+    },
+    {
+      "label": "practices",
+      "from": "joanna",
+      "to": "writing"
+    },
+    {
+      "label": "practices",
+      "from": "joanna",
+      "to": "reading"
+    },
+    {
+      "label": "practices",
+      "from": "joanna",
+      "to": "movie-watching"
+    },
+    {
+      "label": "practices",
+      "from": "joanna",
+      "to": "hiking"
+    },
+    {
+      "label": "practices",
+      "from": "nate",
+      "to": "gaming"
+    },
+    {
+      "label": "practices",
+      "from": "nate",
+      "to": "movie-watching"
+    },
+    {
+      "label": "practices",
+      "from": "nate",
+      "to": "dairy-free-desserts"
+    },
+    {
+      "label": "dislikes",
+      "from": "joanna",
+      "to": "gaming"
+    },
+    {
+      "label": "dislikes",
+      "from": "nate",
+      "to": "hiking"
+    },
+    {
+      "label": "likes",
+      "from": "joanna",
+      "to": "little-women"
+    },
+    {
+      "label": "likes",
+      "from": "joanna",
+      "to": "hiking"
+    },
+    {
+      "label": "likes",
+      "from": "joanna",
+      "to": "writing"
+    },
+    {
+      "label": "owns",
+      "from": "nate",
+      "to": "nates-turtles"
+    },
+    {
+      "label": "has_condition",
+      "from": "joanna",
+      "to": "pet-allergy"
+    },
+    {
+      "label": "has_condition",
+      "from": "joanna",
+      "to": "lactose-intolerance"
+    },
+    {
+      "label": "works_on",
+      "from": "joanna",
+      "to": "screenplay-one"
+    },
+    {
+      "label": "works_on",
+      "from": "joanna",
+      "to": "road-trip-script"
+    },
+    {
+      "label": "member_of",
+      "from": "joanna",
+      "to": "writers-group"
+    },
+    {
+      "label": "member_of",
+      "from": "nate",
+      "to": "vegan-diet-group"
+    },
+    {
+      "label": "works_on",
+      "from": "joanna",
+      "to": "finding-home"
+    },
+    {
+      "label": "works_on",
+      "from": "nate",
+      "to": "gaming-party"
+    },
+    {
+      "label": "practices",
+      "from": "joanna",
+      "to": "acting"
+    },
+    {
+      "label": "practices",
+      "from": "joanna",
+      "to": "dairy-free-desserts"
+    },
+    {
+      "label": "likes",
+      "from": "nate",
+      "to": "lord-of-the-rings"
+    },
+    {
+      "label": "likes",
+      "from": "joanna",
+      "to": "lord-of-the-rings"
+    },
+    {
+      "label": "likes",
+      "from": "nate",
+      "to": "csgo"
+    },
+    {
+      "label": "likes",
+      "from": "nate",
+      "to": "street-fighter"
+    },
+    {
+      "label": "likes",
+      "from": "joanna",
+      "to": "whispering-falls"
+    },
+    {
+      "label": "owns",
+      "from": "nate",
+      "to": "max"
+    },
+    {
+      "label": "owns",
+      "from": "joanna",
+      "to": "tilly-toy",
+      "properties": {
+        "since": "2022-05-25"
+      }
+    },
+    {
+      "label": "supersedes",
+      "from": "joanna-gave-up-on-pet",
+      "to": "joanna-might-get-pet"
+    },
+    {
+      "label": "located_in",
+      "from": "woodhaven",
+      "to": "midwest"
+    },
+    {
+      "label": "works_on",
+      "from": "joanna",
+      "to": "midwest-thriller"
+    },
+    {
+      "label": "works_on",
+      "from": "joanna",
+      "to": "joannas-book"
+    },
+    {
+      "label": "works_on",
+      "from": "nate",
+      "to": "nates-cooking-show"
+    },
+    {
+      "label": "practices",
+      "from": "nate",
+      "to": "reading"
+    },
+    {
+      "label": "likes",
+      "from": "nate",
+      "to": "little-women"
+    },
+    {
+      "label": "likes",
+      "from": "nate",
+      "to": "catan"
+    },
+    {
+      "label": "likes",
+      "from": "nate",
+      "to": "cyberpunk-2077"
+    },
+    {
+      "label": "likes",
+      "from": "nate",
+      "to": "inception"
+    },
+    {
+      "label": "likes",
+      "from": "nate",
+      "to": "dairy-free-desserts"
+    },
+    {
+      "label": "likes",
+      "from": "joanna",
+      "to": "dairy-free-desserts"
+    },
+    {
+      "label": "likes",
+      "from": "joanna",
+      "to": "reading"
+    },
+    {
+      "label": "supersedes",
+      "from": "nate-gaming-career",
+      "to": "nate-plays-for-fun"
+    },
+    {
+      "label": "owns",
+      "from": "joanna",
+      "to": "tilly"
+    },
+    {
+      "label": "lives_in",
+      "from": "joanna",
+      "to": "michigan"
+    },
+    {
+      "label": "works_on",
+      "from": "joanna",
+      "to": "love-story-script"
+    },
+    {
+      "label": "works_on",
+      "from": "nate",
+      "to": "gaming-youtube-channel"
+    },
+    {
+      "label": "likes",
+      "from": "nate",
+      "to": "nates-turtles"
+    },
+    {
+      "label": "likes",
+      "from": "nate",
+      "to": "xenoblade-chronicles"
+    },
+    {
+      "label": "likes",
+      "from": "nate",
+      "to": "gaming"
+    },
+    {
+      "label": "likes",
+      "from": "joanna",
+      "to": "tilly-toy"
+    },
+    {
+      "label": "likes",
+      "from": "joanna",
+      "to": "nates-turtles"
+    }
+  ],
+  "claims": [
+    {
+      "text": "Joanna and Nate got back in touch on 21 January 2022 after a long gap, and Joanna said she had been working on a project she was enjoying.",
+      "speaker": "Joanna",
+      "statedOn": "2022-01-21",
+      "entities": [
+        "joanna",
+        "nate"
+      ],
+      "sourceTurns": [
+        "D1:1",
+        "D1:2"
+      ]
+    },
+    {
+      "text": "Nate won his first video game tournament in the week before 21 January 2022, playing the team shooter Counter-Strike: Global Offensive with his team, and found it exciting.",
+      "speaker": "Nate",
+      "statedOn": "2022-01-21",
+      "entities": [
+        "nate",
+        "csgo",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D1:3",
+        "D1:4",
+        "D1:5",
+        "D1:6",
+        "D1:7"
+      ]
+    },
+    {
+      "text": "Joanna told Nate on 21 January 2022 that she is not into video games.",
+      "speaker": "Joanna",
+      "statedOn": "2022-01-21",
+      "entities": [
+        "joanna",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D1:8"
+      ]
+    },
+    {
+      "text": "Besides writing, Joanna's hobbies are reading, watching movies and exploring nature.",
+      "speaker": "Joanna",
+      "statedOn": "2022-01-21",
+      "entities": [
+        "joanna",
+        "writing",
+        "reading",
+        "movie-watching"
+      ],
+      "sourceTurns": [
+        "D1:9",
+        "D1:10"
+      ]
+    },
+    {
+      "text": "Nate's main hobbies are playing video games and watching movies.",
+      "speaker": "Nate",
+      "statedOn": "2022-01-21",
+      "entities": [
+        "nate",
+        "gaming",
+        "movie-watching"
+      ],
+      "sourceTurns": [
+        "D1:11"
+      ]
+    },
+    {
+      "text": "Nate's favourite film genres are action and science fiction, because he loves the effects.",
+      "speaker": "Nate",
+      "statedOn": "2022-01-21",
+      "entities": [
+        "nate",
+        "movie-watching"
+      ],
+      "sourceTurns": [
+        "D1:12",
+        "D1:13"
+      ]
+    },
+    {
+      "text": "Joanna's favourite film genres are drama and romantic comedy, because she loves getting immersed in the feelings and the plots.",
+      "speaker": "Joanna",
+      "statedOn": "2022-01-21",
+      "entities": [
+        "joanna",
+        "movie-watching"
+      ],
+      "sourceTurns": [
+        "D1:14",
+        "D1:15"
+      ]
+    },
+    {
+      "text": "On 21 January 2022 Joanna recommended to Nate a romantic drama about memory and relationships; she first watched it around three years earlier, in about 2019, and liked it enough to buy a physical copy.",
+      "speaker": "Joanna",
+      "statedOn": "2022-01-21",
+      "entities": [
+        "joanna",
+        "nate",
+        "movie-watching"
+      ],
+      "sourceTurns": [
+        "D1:16",
+        "D1:17",
+        "D1:18"
+      ]
+    },
+    {
+      "text": "Joanna has watched the romantic drama about memory and relationships a few times and counts it among her favourite films, for its idea and its acting.",
+      "speaker": "Joanna",
+      "statedOn": "2022-01-21",
+      "entities": [
+        "joanna",
+        "movie-watching"
+      ],
+      "sourceTurns": [
+        "D1:19",
+        "D1:20"
+      ]
+    },
+    {
+      "text": "Nate said on 21 January 2022 that he would watch the romantic drama Joanna recommended, and she asked him to tell her whether he liked it.",
+      "speaker": "Nate",
+      "statedOn": "2022-01-21",
+      "entities": [
+        "nate",
+        "joanna",
+        "movie-watching"
+      ],
+      "sourceTurns": [
+        "D1:21",
+        "D1:22"
+      ]
+    },
+    {
+      "text": "Joanna finished and printed her first full screenplay on 21 January 2022, after working on it for a long while, and felt a great relief at having it done.",
+      "speaker": "Joanna",
+      "statedOn": "2022-01-23",
+      "entities": [
+        "joanna",
+        "screenplay-one"
+      ],
+      "chrono": [
+        "screenplay-one-finished"
+      ],
+      "sourceTurns": [
+        "D2:1",
+        "D2:2",
+        "D2:3"
+      ]
+    },
+    {
+      "text": "Joanna's first full screenplay is a mix of drama and romance.",
+      "speaker": "Joanna",
+      "statedOn": "2022-01-23",
+      "entities": [
+        "joanna",
+        "screenplay-one"
+      ],
+      "sourceTurns": [
+        "D2:4",
+        "D2:5"
+      ]
+    },
+    {
+      "text": "On finishing her first screenplay Joanna felt a rollercoaster of relief, excitement and anxiety, and planned to submit it to film festivals in the hope that producers and directors would look at it.",
+      "speaker": "Joanna",
+      "statedOn": "2022-01-23",
+      "entities": [
+        "joanna",
+        "screenplay-one"
+      ],
+      "sourceTurns": [
+        "D2:6",
+        "D2:7",
+        "D2:8",
+        "D2:9"
+      ]
+    },
+    {
+      "text": "Nate keeps turtles to help him stay calm when things matter and he is nervous, and had had two of them for about three years as of 23 January 2022; they bring him a great deal of joy and have big personalities despite being small. He recommends keeping something like them for times of stress.",
+      "speaker": "Nate",
+      "statedOn": "2022-01-23",
+      "entities": [
+        "nate",
+        "nates-turtles"
+      ],
+      "sourceTurns": [
+        "D2:10",
+        "D2:11",
+        "D2:12",
+        "D2:13",
+        "D2:14"
+      ]
+    },
+    {
+      "key": "joanna-might-get-pet",
+      "text": "On 23 January 2022 Joanna said she would think about getting pets of her own soon if she could find any she was not allergic to.",
+      "speaker": "Joanna",
+      "statedOn": "2022-01-23",
+      "superseded": true,
+      "entities": [
+        "joanna",
+        "pet-allergy"
+      ],
+      "sourceTurns": [
+        "D2:15"
+      ]
+    },
+    {
+      "text": "Nate started spending time with people outside his usual circle whom he met at the video game tournament, sticking to the more relaxed players rather than the very competitive ones.",
+      "speaker": "Nate",
+      "statedOn": "2022-01-23",
+      "entities": [
+        "nate",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D2:16",
+        "D2:17",
+        "D2:18",
+        "D2:19"
+      ]
+    },
+    {
+      "key": "nate-plays-for-fun",
+      "text": "In January 2022 Nate said he did not expect to win big at tournaments and played mainly for fun, and that he would cheer his new tournament friends on even if he lost.",
+      "speaker": "Nate",
+      "statedOn": "2022-01-23",
+      "superseded": true,
+      "entities": [
+        "nate",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D2:20"
+      ]
+    },
+    {
+      "text": "Joanna's animal allergy is severe — her face becomes puffy and itchy — and she is allergic to most reptiles and to animals with fur, so she has always stayed away from them.",
+      "speaker": "Joanna",
+      "statedOn": "2022-01-23",
+      "entities": [
+        "joanna",
+        "pet-allergy"
+      ],
+      "sourceTurns": [
+        "D2:21",
+        "D2:22",
+        "D2:23"
+      ]
+    },
+    {
+      "text": "Instead of pets, Joanna finds joy in writing and in spending time with friends; she says writing lets her create wild worlds and characters and express her feelings, and that she cannot imagine life without it.",
+      "speaker": "Joanna",
+      "statedOn": "2022-01-23",
+      "entities": [
+        "joanna",
+        "writing"
+      ],
+      "sourceTurns": [
+        "D2:24",
+        "D2:25",
+        "D2:26",
+        "D2:27",
+        "D2:28",
+        "D2:29"
+      ]
+    },
+    {
+      "text": "On 7 February 2022, two weeks after sending her first screenplay to a film festival, Joanna said it was on her mind every day and she was swinging between relief, excitement and worry, hoping a producer or director would love it enough to put it on the big screen.",
+      "speaker": "Joanna",
+      "statedOn": "2022-02-07",
+      "entities": [
+        "joanna",
+        "screenplay-one"
+      ],
+      "sourceTurns": [
+        "D3:1",
+        "D3:2",
+        "D3:3"
+      ]
+    },
+    {
+      "text": "Nate discovered he could make coconut milk ice cream and tried it for the first time shortly before 7 February 2022; he found it rich and creamy and said it might be his new favourite snack.",
+      "speaker": "Nate",
+      "statedOn": "2022-02-07",
+      "entities": [
+        "nate",
+        "dairy-free-desserts"
+      ],
+      "sourceTurns": [
+        "D3:4",
+        "D3:5",
+        "D3:6"
+      ]
+    },
+    {
+      "text": "Nate planned to keep making dairy-free ice cream and to experiment with different flavours and toppings; his favourite dairy-free dessert flavours are coconut milk, chocolate and mixed berry.",
+      "speaker": "Nate",
+      "statedOn": "2022-02-07",
+      "entities": [
+        "nate",
+        "dairy-free-desserts"
+      ],
+      "sourceTurns": [
+        "D3:7",
+        "D3:8",
+        "D3:9",
+        "D3:10",
+        "D3:11"
+      ]
+    },
+    {
+      "text": "Nate also made a dairy-free chocolate cake with berries shortly before 7 February 2022; Joanna said she should try making one herself or visit him to taste one, and called his cooking skills awesome.",
+      "speaker": "Nate",
+      "statedOn": "2022-02-07",
+      "entities": [
+        "nate",
+        "joanna",
+        "dairy-free-desserts"
+      ],
+      "sourceTurns": [
+        "D3:12",
+        "D3:13",
+        "D3:14",
+        "D3:15"
+      ]
+    },
+    {
+      "text": "Joanna watched the film Little Women shortly before 7 February 2022 and recommended it to Nate as a must-see story about sisterhood, love and reaching for your dreams; he added it to his list.",
+      "speaker": "Joanna",
+      "statedOn": "2022-02-07",
+      "entities": [
+        "joanna",
+        "nate",
+        "little-women"
+      ],
+      "sourceTurns": [
+        "D3:16",
+        "D3:17",
+        "D3:18"
+      ]
+    },
+    {
+      "text": "Joanna offered on 7 February 2022 to give Nate film recommendations whenever he runs out of things to watch, and he promised she would be the first to know what he thought of Little Women.",
+      "speaker": "Joanna",
+      "statedOn": "2022-02-07",
+      "entities": [
+        "joanna",
+        "nate",
+        "movie-watching",
+        "little-women"
+      ],
+      "sourceTurns": [
+        "D3:19",
+        "D3:20",
+        "D3:21",
+        "D3:22",
+        "D3:23",
+        "D3:24",
+        "D3:25"
+      ]
+    },
+    {
+      "text": "Nate made chocolate and vanilla swirl ice cream for a friend shortly before 25 February 2022, and they loved it.",
+      "speaker": "Nate",
+      "statedOn": "2022-02-25",
+      "entities": [
+        "nate",
+        "dairy-free-desserts"
+      ],
+      "sourceTurns": [
+        "D4:1",
+        "D4:2",
+        "D4:3"
+      ]
+    },
+    {
+      "text": "Joanna cannot have dairy, so on 25 February 2022 she asked Nate for a dairy-free recipe and he offered to send her his coconut milk one.",
+      "speaker": "Joanna",
+      "statedOn": "2022-02-25",
+      "entities": [
+        "joanna",
+        "nate",
+        "lactose-intolerance",
+        "dairy-free-desserts"
+      ],
+      "sourceTurns": [
+        "D4:4",
+        "D4:5",
+        "D4:6",
+        "D4:7",
+        "D4:8",
+        "D4:9"
+      ]
+    },
+    {
+      "text": "Joanna started writing a second screenplay around 25 February 2022, to take her mind off waiting to hear how the first one had done.",
+      "speaker": "Joanna",
+      "statedOn": "2022-02-25",
+      "entities": [
+        "joanna",
+        "road-trip-script",
+        "screenplay-one"
+      ],
+      "sourceTurns": [
+        "D4:10",
+        "D4:11"
+      ]
+    },
+    {
+      "text": "Joanna's second screenplay is about a thirty-year-old woman on a journey of self-discovery after a loss, who takes a road trip to heal and grow; it is Joanna's own story, inspired by her personal experiences and her own journey of self-discovery.",
+      "speaker": "Joanna",
+      "statedOn": "2022-02-25",
+      "entities": [
+        "joanna",
+        "road-trip-script"
+      ],
+      "sourceTurns": [
+        "D4:12",
+        "D4:13",
+        "D4:14",
+        "D4:15",
+        "D4:16",
+        "D4:17"
+      ]
+    },
+    {
+      "text": "On 25 February 2022 Joanna was still hoping her first screenplay would be noticed and reach the screen, and Nate wished her luck with it.",
+      "speaker": "Joanna",
+      "statedOn": "2022-02-25",
+      "entities": [
+        "joanna",
+        "nate",
+        "screenplay-one"
+      ],
+      "sourceTurns": [
+        "D4:18",
+        "D4:19"
+      ]
+    },
+    {
+      "text": "Joanna finished her second screenplay by 18 March 2022, and said the feelings were wild: relief mixed with anxiety about what came next, and both excitement and terror at the thought of her work being noticed and hitting the big screen.",
+      "speaker": "Joanna",
+      "statedOn": "2022-03-18",
+      "entities": [
+        "joanna",
+        "road-trip-script"
+      ],
+      "sourceTurns": [
+        "D5:1",
+        "D5:2",
+        "D5:3"
+      ]
+    },
+    {
+      "text": "On 18 March 2022 Nate told Joanna her doubts were normal, that her hard work and passion would show, and shared a photograph from walking his turtles, which he says reminds him to enjoy the small stuff.",
+      "speaker": "Nate",
+      "statedOn": "2022-03-18",
+      "entities": [
+        "nate",
+        "joanna",
+        "nates-turtles"
+      ],
+      "sourceTurns": [
+        "D5:4"
+      ]
+    },
+    {
+      "text": "Nate chose turtles as pets because he is drawn to them: they are unusual, their slow pace is a change from the rush of life, and they are low-maintenance and calming.",
+      "speaker": "Nate",
+      "statedOn": "2022-03-18",
+      "entities": [
+        "nate",
+        "nates-turtles"
+      ],
+      "sourceTurns": [
+        "D5:5",
+        "D5:6",
+        "D5:7"
+      ]
+    },
+    {
+      "text": "Caring for Nate's turtles is not hard — keeping their area clean, feeding them properly and making sure they get enough light — and he finds it fun.",
+      "speaker": "Nate",
+      "statedOn": "2022-03-18",
+      "entities": [
+        "nate",
+        "nates-turtles"
+      ],
+      "sourceTurns": [
+        "D5:8",
+        "D5:9",
+        "D5:10"
+      ]
+    },
+    {
+      "text": "Joanna learned shortly before 18 March 2022 that she is allergic to cockroaches as well as to reptiles and furred animals, and said she would get two turtles that very day if she were not allergic.",
+      "speaker": "Joanna",
+      "statedOn": "2022-03-18",
+      "entities": [
+        "joanna",
+        "pet-allergy",
+        "nates-turtles"
+      ],
+      "sourceTurns": [
+        "D5:11"
+      ]
+    },
+    {
+      "text": "Nate promised on 18 March 2022 to keep sending Joanna photographs of his turtles so she could watch them grow without getting too close, and she said she was already invested in them.",
+      "speaker": "Nate",
+      "statedOn": "2022-03-18",
+      "entities": [
+        "nate",
+        "joanna",
+        "nates-turtles"
+      ],
+      "sourceTurns": [
+        "D5:12",
+        "D5:13",
+        "D5:14"
+      ]
+    },
+    {
+      "text": "By 18 March 2022 Joanna was researching and networking non-stop to find the next step for her scripts, and said it was tough but she was determined to make it happen.",
+      "speaker": "Joanna",
+      "statedOn": "2022-03-18",
+      "entities": [
+        "joanna",
+        "writing"
+      ],
+      "sourceTurns": [
+        "D5:15",
+        "D5:16",
+        "D5:17"
+      ]
+    },
+    {
+      "text": "Joanna said on 18 March 2022 that having Nate's support through the whole writing process was a blessing that gave her the motivation to keep pushing forward.",
+      "speaker": "Joanna",
+      "statedOn": "2022-03-18",
+      "entities": [
+        "joanna",
+        "nate"
+      ],
+      "sourceTurns": [
+        "D5:18",
+        "D5:19",
+        "D5:20",
+        "D5:21"
+      ]
+    },
+    {
+      "text": "Joanna auditioned for a writing job on 23 March 2022; it went alright and left her with mixed emotions, excited but also anxious.",
+      "speaker": "Joanna",
+      "statedOn": "2022-03-24",
+      "entities": [
+        "joanna",
+        "writing"
+      ],
+      "chrono": [
+        "joanna-writing-audition"
+      ],
+      "sourceTurns": [
+        "D6:1",
+        "D6:2",
+        "D6:3",
+        "D6:4",
+        "D6:5",
+        "D6:6"
+      ]
+    },
+    {
+      "text": "Nate was competing in the video game tournament again as of 24 March 2022 and described it as intense and full of adrenaline.",
+      "speaker": "Nate",
+      "statedOn": "2022-03-24",
+      "entities": [
+        "nate",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D6:7"
+      ]
+    },
+    {
+      "text": "Joanna keeps a shelf of books and magazines that is her go-to place for writing inspiration, and says it helps her stay sharp and motivated.",
+      "speaker": "Joanna",
+      "statedOn": "2022-03-24",
+      "entities": [
+        "joanna",
+        "writing",
+        "reading"
+      ],
+      "sourceTurns": [
+        "D6:8"
+      ]
+    },
+    {
+      "text": "Asked on 24 March 2022 by Nate, who wanted to pursue writing, for advice, Joanna said to read a lot across different genres, build a solid understanding of literature, not be afraid to write and share even if only with friends, practise and gather feedback, and have faith in yourself.",
+      "speaker": "Joanna",
+      "statedOn": "2022-03-24",
+      "entities": [
+        "joanna",
+        "nate",
+        "writing"
+      ],
+      "sourceTurns": [
+        "D6:9",
+        "D6:10",
+        "D6:11"
+      ]
+    },
+    {
+      "text": "Joanna and Nate agreed on 24 March 2022 to keep working hard towards their dreams and to keep supporting each other.",
+      "speaker": "Joanna",
+      "statedOn": "2022-03-24",
+      "entities": [
+        "joanna",
+        "nate"
+      ],
+      "sourceTurns": [
+        "D6:12",
+        "D6:13"
+      ]
+    },
+    {
+      "text": "Nate dyed his hair purple in the week before 15 April 2022 and was delighted with it; he chose a bright, bold shade because it is like him and he wanted to stand out from the regular options.",
+      "speaker": "Nate",
+      "statedOn": "2022-04-15",
+      "entities": [
+        "nate"
+      ],
+      "sourceTurns": [
+        "D7:1",
+        "D7:2",
+        "D7:3",
+        "D7:4",
+        "D7:5"
+      ]
+    },
+    {
+      "text": "Nate's boldness in dyeing his hair reminded Joanna of a sunset she saw while hiking shortly before 15 April 2022, which made her realise the importance of showing the world who we are.",
+      "speaker": "Joanna",
+      "statedOn": "2022-04-15",
+      "entities": [
+        "joanna",
+        "nate",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D7:6",
+        "D7:7"
+      ]
+    },
+    {
+      "text": "As of 15 April 2022 Joanna had no holiday lined up because her writing was consuming her, and she was hoping for good news soon.",
+      "speaker": "Joanna",
+      "statedOn": "2022-04-15",
+      "entities": [
+        "joanna",
+        "writing"
+      ],
+      "sourceTurns": [
+        "D7:8",
+        "D7:9",
+        "D7:10",
+        "D7:11",
+        "D7:12",
+        "D7:13"
+      ]
+    },
+    {
+      "text": "Joanna read a great deal in the week before 17 April 2022 and rediscovered good books she had forgotten she owned; Nate said he probably has shelves of books he has not read in years too.",
+      "speaker": "Joanna",
+      "statedOn": "2022-04-17",
+      "entities": [
+        "joanna",
+        "nate",
+        "reading"
+      ],
+      "sourceTurns": [
+        "D8:1",
+        "D8:2",
+        "D8:3"
+      ]
+    },
+    {
+      "text": "Joanna found a hiking trail in her hometown on 16 April 2022 and thought it gorgeous; she says nature is inspiring and a great way to reset.",
+      "speaker": "Joanna",
+      "statedOn": "2022-04-17",
+      "entities": [
+        "joanna",
+        "hiking"
+      ],
+      "chrono": [
+        "hometown-trail-found"
+      ],
+      "sourceTurns": [
+        "D8:4"
+      ]
+    },
+    {
+      "text": "Nate is not really into hiking, though he has heard of a nice trail just north of where he lives and likes nature enough that going with someone else might be fun; Joanna offered on 17 April 2022 to talk him into coming with her.",
+      "speaker": "Nate",
+      "statedOn": "2022-04-17",
+      "entities": [
+        "nate",
+        "joanna",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D8:5",
+        "D8:6",
+        "D8:7"
+      ]
+    },
+    {
+      "text": "Nature has always been Joanna's haven: walking in it, feeling it and hearing its sounds calms her, and her worries and stress seem to vanish.",
+      "speaker": "Joanna",
+      "statedOn": "2022-04-17",
+      "entities": [
+        "joanna",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D8:8",
+        "D8:9",
+        "D8:10"
+      ]
+    },
+    {
+      "text": "Nate finds his own peace in spending time with his pets and in his hobbies, which let him take a break from reality; he and Joanna agreed that small things have a powerful effect on happiness and should be savoured.",
+      "speaker": "Nate",
+      "statedOn": "2022-04-17",
+      "entities": [
+        "nate",
+        "joanna",
+        "nates-turtles",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D8:11",
+        "D8:12"
+      ]
+    },
+    {
+      "text": "Nate sometimes brings his turtles into the kitchen so they can watch him make food, and Joanna told him on 17 April 2022 that she loves his turtles and wishes she could make ice cream the way he does.",
+      "speaker": "Nate",
+      "statedOn": "2022-04-17",
+      "entities": [
+        "nate",
+        "joanna",
+        "nates-turtles",
+        "dairy-free-desserts"
+      ],
+      "sourceTurns": [
+        "D8:13",
+        "D8:14",
+        "D8:15",
+        "D8:16"
+      ]
+    },
+    {
+      "text": "Nate's dairy-free ice cream recipe, which he gave Joanna on 17 April 2022 because she is lactose intolerant, is coconut milk, vanilla extract, sugar and a pinch of salt, chilled in the fridge and then churned in an ice cream maker until it is scoopable; Joanna planned to make it that night.",
+      "speaker": "Nate",
+      "statedOn": "2022-04-17",
+      "entities": [
+        "nate",
+        "joanna",
+        "dairy-free-desserts",
+        "lactose-intolerance"
+      ],
+      "sourceTurns": [
+        "D8:17",
+        "D8:18",
+        "D8:19",
+        "D8:20",
+        "D8:21",
+        "D8:22"
+      ]
+    },
+    {
+      "text": "Joanna joined a writers group shortly before 21 April 2022 and found it full of inspirational people who really understand her writing; it left her motivated, supported and feeling that she finally belonged somewhere.",
+      "speaker": "Joanna",
+      "statedOn": "2022-04-21",
+      "entities": [
+        "joanna",
+        "writers-group",
+        "writing"
+      ],
+      "sourceTurns": [
+        "D9:1",
+        "D9:2"
+      ]
+    },
+    {
+      "text": "With her writers group Joanna was working on a script called 'Finding Home', about a girl on a journey to find her true home, which she found rewarding and emotional.",
+      "speaker": "Joanna",
+      "statedOn": "2022-04-21",
+      "entities": [
+        "joanna",
+        "writers-group",
+        "finding-home"
+      ],
+      "sourceTurns": [
+        "D9:3"
+      ]
+    },
+    {
+      "text": "Nate had a gaming tournament coming up in May 2022 — his fourth — and was feeling good about it.",
+      "speaker": "Nate",
+      "statedOn": "2022-04-21",
+      "entities": [
+        "nate",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D9:4"
+      ]
+    },
+    {
+      "text": "Acting was Joanna's first passion, before writing. She was so nervous in her first play that she forgot her lines, which was embarrassing but taught her how important it is to prepare and stay in the moment; she now shines in writing but has not ruled out going back to acting one day.",
+      "speaker": "Joanna",
+      "statedOn": "2022-04-21",
+      "entities": [
+        "joanna",
+        "acting",
+        "writing"
+      ],
+      "sourceTurns": [
+        "D9:5",
+        "D9:6",
+        "D9:7",
+        "D9:8"
+      ]
+    },
+    {
+      "text": "Joanna's writing is sparked by dramas and emotionally driven films.",
+      "speaker": "Joanna",
+      "statedOn": "2022-04-21",
+      "entities": [
+        "joanna",
+        "movie-watching",
+        "writing"
+      ],
+      "sourceTurns": [
+        "D9:9"
+      ]
+    },
+    {
+      "text": "Nate is inspired by fantasy and science fiction films, which he treats as an escape that gets his imagination going, and he plays video games as a way of expressing his creativity and passion.",
+      "speaker": "Nate",
+      "statedOn": "2022-04-21",
+      "entities": [
+        "nate",
+        "movie-watching",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D9:10",
+        "D9:11"
+      ]
+    },
+    {
+      "text": "Nate named The Lord of the Rings trilogy as one of his favourites on 21 April 2022, for its world building, its battles and its storytelling.",
+      "speaker": "Nate",
+      "statedOn": "2022-04-21",
+      "entities": [
+        "nate",
+        "lord-of-the-rings"
+      ],
+      "sourceTurns": [
+        "D9:12"
+      ]
+    },
+    {
+      "text": "Nate recommended a book series of adventures, magic and great characters to Joanna on 21 April 2022; she said it had been on her list for ages and that she would read it and tell him what she thought.",
+      "speaker": "Nate",
+      "statedOn": "2022-04-21",
+      "entities": [
+        "nate",
+        "joanna",
+        "reading"
+      ],
+      "sourceTurns": [
+        "D9:13",
+        "D9:14",
+        "D9:15",
+        "D9:16",
+        "D9:17",
+        "D9:18"
+      ]
+    },
+    {
+      "text": "Joanna watched The Lord of the Rings trilogy on 1 May 2022 on Nate's recommendation and thought it awesome; Nate calls it probably the greatest trilogy of all time.",
+      "speaker": "Joanna",
+      "statedOn": "2022-05-02",
+      "entities": [
+        "joanna",
+        "nate",
+        "lord-of-the-rings"
+      ],
+      "chrono": [
+        "joanna-watched-lotr"
+      ],
+      "sourceTurns": [
+        "D10:1",
+        "D10:2"
+      ]
+    },
+    {
+      "text": "Nate showed Joanna his gaming room at home on 2 May 2022, and she said she was proud of what he had done with it.",
+      "speaker": "Nate",
+      "statedOn": "2022-05-02",
+      "entities": [
+        "nate",
+        "joanna",
+        "gaming-setup"
+      ],
+      "sourceTurns": [
+        "D10:2",
+        "D10:3"
+      ]
+    },
+    {
+      "text": "Nate won his second video game tournament in the week before 2 May 2022, at a local Street Fighter competition rather than his usual Counter-Strike: Global Offensive; he plays Street Fighter a lot with friends and turned out to be very good at it, the final match was full of adrenaline and the other finalist shook his hand.",
+      "speaker": "Nate",
+      "statedOn": "2022-05-02",
+      "entities": [
+        "nate",
+        "street-fighter",
+        "csgo",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D10:4",
+        "D10:5",
+        "D10:6",
+        "D10:7",
+        "D10:8"
+      ]
+    },
+    {
+      "text": "Joanna had been testing dairy-free dessert recipes for friends and family, and shortly before 2 May 2022 made a dairy-free vanilla cake with strawberry filling and coconut cream frosting, crediting the coconut recommendation Nate had given her.",
+      "speaker": "Joanna",
+      "statedOn": "2022-05-02",
+      "entities": [
+        "joanna",
+        "nate",
+        "dairy-free-desserts"
+      ],
+      "sourceTurns": [
+        "D10:9",
+        "D10:10",
+        "D10:11"
+      ]
+    },
+    {
+      "text": "Cooking and baking are creative outlets for Joanna; she finds making dairy-free desserts that are just as delicious a rewarding challenge, and says seeing everyone's smiles when they try them is a total win.",
+      "speaker": "Joanna",
+      "statedOn": "2022-05-02",
+      "entities": [
+        "joanna",
+        "dairy-free-desserts"
+      ],
+      "sourceTurns": [
+        "D10:12",
+        "D10:13",
+        "D10:14",
+        "D10:15",
+        "D10:16"
+      ]
+    },
+    {
+      "text": "Joanna went hiking in the week before 12 May 2022 and found more amazing trails in her town, and said she thought she was an expert hiker now.",
+      "speaker": "Joanna",
+      "statedOn": "2022-05-12",
+      "entities": [
+        "joanna",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D11:1",
+        "D11:2",
+        "D11:3",
+        "D11:4"
+      ]
+    },
+    {
+      "text": "On that hike Joanna photographed Whispering Falls, a waterfall she found peaceful and serene, and said the rush of the water was soothing.",
+      "speaker": "Joanna",
+      "statedOn": "2022-05-12",
+      "entities": [
+        "joanna",
+        "whispering-falls",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D11:5",
+        "D11:6",
+        "D11:7",
+        "D11:8"
+      ]
+    },
+    {
+      "text": "Joanna says the sound and beauty of Whispering Falls made everything else fade away, that nature inspires and calms her, and that hiking has opened up a whole new world and made her feel like a different person.",
+      "speaker": "Joanna",
+      "statedOn": "2022-05-12",
+      "entities": [
+        "joanna",
+        "hiking",
+        "whispering-falls"
+      ],
+      "sourceTurns": [
+        "D11:9",
+        "D11:10",
+        "D11:11",
+        "D11:12"
+      ]
+    },
+    {
+      "text": "Joanna feels she could write a whole film when she is out on trails, and said the trails she found in May 2022 in particular made her want to write a drama; Nate said that out in nature he mostly gets deep in thought about his life or about new recipes.",
+      "speaker": "Joanna",
+      "statedOn": "2022-05-12",
+      "entities": [
+        "joanna",
+        "nate",
+        "hiking",
+        "writing"
+      ],
+      "sourceTurns": [
+        "D11:13",
+        "D11:14",
+        "D11:15"
+      ]
+    },
+    {
+      "text": "On 12 May 2022 Nate suggested that he and Joanna go hiking together sometime and joked about writing and publishing a drama screenplay of his own; she invited him to come down and join her on the trails.",
+      "speaker": "Nate",
+      "statedOn": "2022-05-12",
+      "entities": [
+        "nate",
+        "joanna",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D11:16",
+        "D11:17",
+        "D11:18",
+        "D11:19",
+        "D11:20"
+      ]
+    },
+    {
+      "text": "Nate adopted a dog called Max shortly before 20 May 2022; Max is full of energy, fills his life with joy and keeps his other pets active.",
+      "speaker": "Nate",
+      "statedOn": "2022-05-20",
+      "entities": [
+        "nate",
+        "max",
+        "nates-turtles"
+      ],
+      "sourceTurns": [
+        "D12:1",
+        "D12:2",
+        "D12:3",
+        "D12:4",
+        "D12:5",
+        "D12:6"
+      ]
+    },
+    {
+      "key": "joanna-gave-up-on-pet",
+      "text": "By 20 May 2022 Joanna had decided against getting a pet of her own: her allergies meant she did not really want one, and she said she was too lazy to research alternative pets that would suit her allergies.",
+      "speaker": "Joanna",
+      "statedOn": "2022-05-20",
+      "entities": [
+        "joanna",
+        "pet-allergy"
+      ],
+      "sourceTurns": [
+        "D12:7",
+        "D12:8"
+      ]
+    },
+    {
+      "text": "Joanna gets through tough times with writing and creative projects and with the support of friends who understand and appreciate her work and give her feedback; she calls being able to talk it over with them priceless.",
+      "speaker": "Joanna",
+      "statedOn": "2022-05-20",
+      "entities": [
+        "joanna",
+        "writing"
+      ],
+      "sourceTurns": [
+        "D12:9",
+        "D12:10",
+        "D12:11",
+        "D12:12"
+      ]
+    },
+    {
+      "text": "Joanna finished her third screenplay by 20 May 2022: a very personal story about loss, identity and connection that she had held for ages before finding the guts to write it. It was hard, but she is proud of it.",
+      "speaker": "Joanna",
+      "statedOn": "2022-05-20",
+      "entities": [
+        "joanna",
+        "finding-home"
+      ],
+      "sourceTurns": [
+        "D12:12",
+        "D12:13",
+        "D12:14"
+      ]
+    },
+    {
+      "text": "Joanna writes about sadness and loss deliberately, having to be vulnerable and dig deep, because she believes meaningful stories come from personal experiences and feelings and that she writes best when she is being true to herself even when it is hard.",
+      "speaker": "Joanna",
+      "statedOn": "2022-05-20",
+      "entities": [
+        "joanna",
+        "writing"
+      ],
+      "sourceTurns": [
+        "D12:15",
+        "D12:16",
+        "D12:17"
+      ]
+    },
+    {
+      "text": "Joanna said on 20 May 2022 that knowing she had people like Nate cheering her on made the writing journey far easier.",
+      "speaker": "Joanna",
+      "statedOn": "2022-05-20",
+      "entities": [
+        "joanna",
+        "nate"
+      ],
+      "sourceTurns": [
+        "D12:18",
+        "D12:19"
+      ]
+    },
+    {
+      "text": "While walking Max shortly before 25 May 2022 Nate ran into a very nice couple with a dog who turn out to live close by, and they agreed to hold doggy playdates; Max likes their dog and Nate is glad of a walking buddy for him.",
+      "speaker": "Nate",
+      "statedOn": "2022-05-25",
+      "entities": [
+        "nate",
+        "max"
+      ],
+      "sourceTurns": [
+        "D13:1",
+        "D13:2",
+        "D13:3"
+      ]
+    },
+    {
+      "text": "Nate said the couple he met while walking Max had little in common with him beyond a love of animals, but that it was all they needed to become good friends, and that watching their pets play together is like a dream come true.",
+      "speaker": "Nate",
+      "statedOn": "2022-05-25",
+      "entities": [
+        "nate",
+        "max"
+      ],
+      "sourceTurns": [
+        "D13:4",
+        "D13:5",
+        "D13:6",
+        "D13:7",
+        "D13:8"
+      ]
+    },
+    {
+      "text": "Nate gave Joanna a stuffed toy dog on 25 May 2022, as a reminder of good vibes, and she said she would cherish it.",
+      "speaker": "Nate",
+      "statedOn": "2022-05-25",
+      "entities": [
+        "nate",
+        "joanna",
+        "tilly-toy"
+      ],
+      "chrono": [
+        "stuffed-dog-given"
+      ],
+      "sourceTurns": [
+        "D13:9",
+        "D13:10",
+        "D13:11",
+        "D13:12"
+      ]
+    },
+    {
+      "text": "Nate and Joanna agreed on 25 May 2022 that small joys like the stuffed toy dog are what make life better, and that finding and cherishing them is what keeps you from getting down.",
+      "speaker": "Nate",
+      "statedOn": "2022-05-25",
+      "entities": [
+        "nate",
+        "joanna",
+        "tilly-toy"
+      ],
+      "sourceTurns": [
+        "D13:13",
+        "D13:14",
+        "D13:15",
+        "D13:16",
+        "D13:17"
+      ]
+    },
+    {
+      "text": "Looking back on 25 May 2022 at the tough times finishing her screenplay, Joanna said it was the small joyful moments that made the journey worth it, and she wanted to show the script to Nate because she values his opinion.",
+      "speaker": "Joanna",
+      "statedOn": "2022-05-25",
+      "entities": [
+        "joanna",
+        "nate",
+        "finding-home"
+      ],
+      "sourceTurns": [
+        "D13:18",
+        "D13:19",
+        "D13:20",
+        "D13:21",
+        "D13:22",
+        "D13:23"
+      ]
+    },
+    {
+      "text": "Joanna received a rejection letter from a major company for her screenplay, which she reported on 3 June 2022; it was a generic letter with no real feedback, so she did not know why it had not worked out, and it bummed her out and felt like a step back.",
+      "speaker": "Joanna",
+      "statedOn": "2022-06-03",
+      "entities": [
+        "joanna",
+        "screenplay-one"
+      ],
+      "sourceTurns": [
+        "D14:1",
+        "D14:2",
+        "D14:3",
+        "D14:4",
+        "D14:5",
+        "D14:6"
+      ]
+    },
+    {
+      "text": "Joanna said on 3 June 2022 that she would not let the rejection bring her down.",
+      "speaker": "Joanna",
+      "statedOn": "2022-06-03",
+      "entities": [
+        "joanna",
+        "screenplay-one"
+      ],
+      "sourceTurns": [
+        "D14:7"
+      ]
+    },
+    {
+      "text": "Nate won another regional video game tournament in the week before 3 June 2022 and met new people there; he called the win a huge confidence boost that showed his hard work had paid off.",
+      "speaker": "Nate",
+      "statedOn": "2022-06-03",
+      "entities": [
+        "nate",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D14:8",
+        "D14:9",
+        "D14:10"
+      ]
+    },
+    {
+      "text": "On 3 June 2022 Joanna remarked that she had been hearing about Nate's tournaments for years, and he agreed it had been a long while since his first one.",
+      "speaker": "Joanna",
+      "statedOn": "2022-06-03",
+      "entities": [
+        "joanna",
+        "nate",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D14:11",
+        "D14:12",
+        "D14:13"
+      ]
+    },
+    {
+      "text": "Some of the gamers Nate talked to after the regional tournament in the week before 3 June 2022 wanted to hang out later and asked him for tips on improving their game, which he agreed to give because he likes helping people.",
+      "speaker": "Nate",
+      "statedOn": "2022-06-03",
+      "entities": [
+        "nate",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D14:14",
+        "D14:15",
+        "D14:16",
+        "D14:17",
+        "D14:18"
+      ]
+    },
+    {
+      "text": "Joanna planned to hike a new trail with a waterfall together with friends over the weekend of 4 and 5 June 2022.",
+      "speaker": "Joanna",
+      "statedOn": "2022-06-03",
+      "entities": [
+        "joanna",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D14:19"
+      ]
+    },
+    {
+      "text": "Nate was organising a gaming party for the weekend of 18 June 2022, planning to invite his tournament friends along with old friends and teammates from other tournaments, and to give everyone custom controller decorations for coming.",
+      "speaker": "Nate",
+      "statedOn": "2022-06-03",
+      "entities": [
+        "nate",
+        "gaming-party",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D14:20",
+        "D14:21",
+        "D14:22",
+        "D14:23",
+        "D14:24",
+        "D14:25",
+        "D14:26",
+        "D14:27"
+      ]
+    },
+    {
+      "text": "A screenplay Joanna wrote parts of appeared on the big screen on 4 June 2022; she found it nerve-wracking but inspiring to see her words come alive.",
+      "speaker": "Joanna",
+      "statedOn": "2022-06-05",
+      "entities": [
+        "joanna",
+        "writing"
+      ],
+      "chrono": [
+        "first-script-on-screen"
+      ],
+      "sourceTurns": [
+        "D15:1"
+      ]
+    },
+    {
+      "text": "Spider-Man is Joanna's favourite superhero, because she loves Peter Parker's struggle between being a hero and being a person, though she likes any superhero for their own story and powers; Nate had noticed a Spider-Man pin on her purse the last time they met.",
+      "speaker": "Joanna",
+      "statedOn": "2022-06-05",
+      "entities": [
+        "joanna",
+        "nate"
+      ],
+      "sourceTurns": [
+        "D15:2",
+        "D15:3"
+      ]
+    },
+    {
+      "text": "Iron Man is Nate's favourite superhero, for his technology and sarcastic humour; he keeps an Iron Man figure in his room because it reminds him of something he loves and keeps him working on his goals.",
+      "speaker": "Nate",
+      "statedOn": "2022-06-05",
+      "entities": [
+        "nate"
+      ],
+      "sourceTurns": [
+        "D15:4",
+        "D15:5",
+        "D15:6"
+      ]
+    },
+    {
+      "text": "Joanna keeps a cork board full of inspiring quotes, photographs and little keepsakes in her room, which she calls her little corner of inspiration.",
+      "speaker": "Joanna",
+      "statedOn": "2022-06-05",
+      "entities": [
+        "joanna",
+        "cork-board"
+      ],
+      "sourceTurns": [
+        "D15:7",
+        "D15:8",
+        "D15:9"
+      ]
+    },
+    {
+      "text": "A photograph of her family on Joanna's cork board reminds her every day of their love and encouragement, which she says means a lot and keeps her going.",
+      "speaker": "Joanna",
+      "statedOn": "2022-06-05",
+      "entities": [
+        "joanna",
+        "cork-board"
+      ],
+      "sourceTurns": [
+        "D15:10",
+        "D15:11",
+        "D15:12",
+        "D15:13"
+      ]
+    },
+    {
+      "text": "Nate said on 5 June 2022 that he should start a cork board of his own, and Joanna recommended it as long as he was willing to explain it to his friends.",
+      "speaker": "Nate",
+      "statedOn": "2022-06-05",
+      "entities": [
+        "nate",
+        "joanna",
+        "cork-board"
+      ],
+      "sourceTurns": [
+        "D15:14",
+        "D15:15",
+        "D15:16",
+        "D15:17"
+      ]
+    },
+    {
+      "text": "Joanna submitted her most recent screenplay to a film contest on 24 June 2022, to see how others might like it.",
+      "speaker": "Joanna",
+      "statedOn": "2022-06-24",
+      "entities": [
+        "joanna",
+        "writing"
+      ],
+      "chrono": [
+        "film-contest-submission"
+      ],
+      "sourceTurns": [
+        "D16:1"
+      ]
+    },
+    {
+      "text": "Nate's gaming party in June 2022 was a great success, and the group played Chess afterwards just for fun.",
+      "speaker": "Nate",
+      "statedOn": "2022-06-24",
+      "entities": [
+        "nate",
+        "gaming-party"
+      ],
+      "sourceTurns": [
+        "D16:2"
+      ]
+    },
+    {
+      "text": "Most of Nate's guests liked the custom controller accessories he gave them, though he could not say whether they would all keep using them; he and Joanna agreed that the thought was what mattered.",
+      "speaker": "Nate",
+      "statedOn": "2022-06-24",
+      "entities": [
+        "nate",
+        "gaming-party"
+      ],
+      "sourceTurns": [
+        "D16:3",
+        "D16:4",
+        "D16:5"
+      ]
+    },
+    {
+      "text": "Seven people came to Nate's gaming party in June 2022 and six of them said they would want to do it again the following month.",
+      "speaker": "Nate",
+      "statedOn": "2022-06-24",
+      "entities": [
+        "nate",
+        "gaming-party"
+      ],
+      "sourceTurns": [
+        "D16:6",
+        "D16:7"
+      ]
+    },
+    {
+      "text": "Nate made vegan ice cream on 17 June 2022 and shared it with some people from his vegan diet group.",
+      "speaker": "Nate",
+      "statedOn": "2022-06-24",
+      "entities": [
+        "nate",
+        "vegan-diet-group",
+        "dairy-free-desserts"
+      ],
+      "chrono": [
+        "vegan-icecream-shared"
+      ],
+      "sourceTurns": [
+        "D16:8"
+      ]
+    },
+    {
+      "text": "Nate agreed on 24 June 2022 to give Joanna his vegan ice cream recipe the next day, and she planned to make it for her family that weekend; her family love it when she makes them new things.",
+      "speaker": "Joanna",
+      "statedOn": "2022-06-24",
+      "entities": [
+        "joanna",
+        "nate",
+        "dairy-free-desserts"
+      ],
+      "sourceTurns": [
+        "D16:9",
+        "D16:10",
+        "D16:11",
+        "D16:12",
+        "D16:13",
+        "D16:14",
+        "D16:15",
+        "D16:16"
+      ]
+    },
+    {
+      "text": "Nate won his fourth video game tournament on 8 July 2022; this one was online, the victory was indescribable, and he said he was proud to be making money doing what he loves.",
+      "speaker": "Nate",
+      "statedOn": "2022-07-10",
+      "entities": [
+        "nate",
+        "gaming"
+      ],
+      "chrono": [
+        "fourth-tournament-win"
+      ],
+      "sourceTurns": [
+        "D17:1"
+      ]
+    },
+    {
+      "text": "Joanna took a road trip for research for her next film shortly before 10 July 2022, which was a much-needed break and a chance to explore new places and get inspired.",
+      "speaker": "Joanna",
+      "statedOn": "2022-07-10",
+      "entities": [
+        "joanna",
+        "midwest-thriller",
+        "writing"
+      ],
+      "sourceTurns": [
+        "D17:2",
+        "D17:3"
+      ]
+    },
+    {
+      "text": "Joanna's research road trip in July 2022 took her to Woodhaven, a small town in the Midwest, where she saw lovely scenery and historic buildings and visited the library for its collection of old books.",
+      "speaker": "Joanna",
+      "statedOn": "2022-07-10",
+      "entities": [
+        "joanna",
+        "woodhaven",
+        "midwest"
+      ],
+      "sourceTurns": [
+        "D17:4",
+        "D17:5"
+      ]
+    },
+    {
+      "text": "In Woodhaven library Joanna found a book from the 1900s of stories and sketches about the town and the people who lived there; Woodhaven's interesting past and how much it had changed sparked ideas for her next script.",
+      "speaker": "Joanna",
+      "statedOn": "2022-07-10",
+      "entities": [
+        "joanna",
+        "woodhaven",
+        "midwest-thriller"
+      ],
+      "sourceTurns": [
+        "D17:6",
+        "D17:7",
+        "D17:8",
+        "D17:9"
+      ]
+    },
+    {
+      "text": "Joanna said on 10 July 2022 that the new script she was excited about would be different from her previous work but had the potential to be something awesome.",
+      "speaker": "Joanna",
+      "statedOn": "2022-07-10",
+      "entities": [
+        "joanna",
+        "midwest-thriller"
+      ],
+      "sourceTurns": [
+        "D17:10",
+        "D17:11",
+        "D17:12",
+        "D17:13"
+      ]
+    },
+    {
+      "text": "Joanna started writing a book around 10 July 2022, after her movie did well; it is a deep, emotional story exploring loss, redemption and forgiveness, and it would be the first book she had tried to publish.",
+      "speaker": "Joanna",
+      "statedOn": "2022-07-10",
+      "entities": [
+        "joanna",
+        "joannas-book"
+      ],
+      "sourceTurns": [
+        "D17:14",
+        "D17:15",
+        "D17:16",
+        "D17:17",
+        "D17:18",
+        "D17:19",
+        "D17:20",
+        "D17:21"
+      ]
+    },
+    {
+      "text": "By 14 August 2022 Joanna was busy with writing projects and going all out with them, through a mix of highs and lows, with her journal as her rock; writing had become a huge part of her, an escape and a way to put her thoughts and feelings down and make something good out of them.",
+      "speaker": "Joanna",
+      "statedOn": "2022-08-14",
+      "entities": [
+        "joanna",
+        "writing"
+      ],
+      "sourceTurns": [
+        "D18:1",
+        "D18:2",
+        "D18:3",
+        "D18:4"
+      ]
+    },
+    {
+      "text": "In the week before 14 August 2022 someone wrote Joanna a letter after reading a blog post she had published online about a hard moment in her life, saying her story had brought them comfort; realising her words had that power reminded her why she loves writing and keeps her going on tough days.",
+      "speaker": "Joanna",
+      "statedOn": "2022-08-14",
+      "entities": [
+        "joanna",
+        "writing"
+      ],
+      "sourceTurns": [
+        "D18:5",
+        "D18:6",
+        "D18:7"
+      ]
+    },
+    {
+      "text": "Nate started teaching people how to make dairy-free desserts in the summer of 2022, and found sharing his love of them fun and rewarding.",
+      "speaker": "Nate",
+      "statedOn": "2022-08-14",
+      "entities": [
+        "nate",
+        "dairy-free-desserts"
+      ],
+      "sourceTurns": [
+        "D18:8",
+        "D18:9"
+      ]
+    },
+    {
+      "text": "Nate had a new dairy-free dessert recipe in August 2022 that he described as creamy, rich and dairy-free, and he sent it to Joanna on 14 August 2022; she planned to surprise her family with it.",
+      "speaker": "Nate",
+      "statedOn": "2022-08-14",
+      "entities": [
+        "nate",
+        "joanna",
+        "dairy-free-desserts"
+      ],
+      "sourceTurns": [
+        "D18:10",
+        "D18:11",
+        "D18:12",
+        "D18:13",
+        "D18:14",
+        "D18:15",
+        "D18:16"
+      ]
+    },
+    {
+      "key": "nate-gaming-career",
+      "text": "Nate won an international video game tournament on 21 August 2022 and said gaming had brought him so much success that he was now able to make a living from something he is passionate about.",
+      "speaker": "Nate",
+      "statedOn": "2022-08-22",
+      "entities": [
+        "nate",
+        "gaming"
+      ],
+      "chrono": [
+        "international-tournament-win"
+      ],
+      "sourceTurns": [
+        "D19:1",
+        "D19:2"
+      ]
+    },
+    {
+      "text": "Nate's turtles got a new, larger tank by 22 August 2022, which gave them much more room and made them happy; he says they are calm and peaceful and make coming home after a long day of gaming better.",
+      "speaker": "Nate",
+      "statedOn": "2022-08-22",
+      "entities": [
+        "nate",
+        "nates-turtles"
+      ],
+      "sourceTurns": [
+        "D19:3",
+        "D19:4",
+        "D19:5"
+      ]
+    },
+    {
+      "text": "Joanna shared her book with her writers group in the week before 22 August 2022; she was very nervous but got great feedback, felt her hard work was paying off, and celebrated by making a dessert.",
+      "speaker": "Joanna",
+      "statedOn": "2022-08-22",
+      "entities": [
+        "joanna",
+        "joannas-book",
+        "writers-group",
+        "dairy-free-desserts"
+      ],
+      "sourceTurns": [
+        "D19:6",
+        "D19:7",
+        "D19:8"
+      ]
+    },
+    {
+      "text": "Nate planned to take the weekend of 27 August 2022 off to relax with his pets while Joanna planned a long walk and some reading; both said that taking breaks and looking after yourself matter for inspiration, mental health and creativity, and that it is all about balance.",
+      "speaker": "Joanna",
+      "statedOn": "2022-08-22",
+      "entities": [
+        "joanna",
+        "nate",
+        "reading",
+        "nates-turtles"
+      ],
+      "sourceTurns": [
+        "D19:9",
+        "D19:10",
+        "D19:11",
+        "D19:12"
+      ]
+    },
+    {
+      "text": "On 22 August 2022 Joanna recommended that Nate find a fantasy book series to read, saying most fiction series are great reads when you are trying to relax, and he picked one out from his shelves.",
+      "speaker": "Joanna",
+      "statedOn": "2022-08-22",
+      "entities": [
+        "joanna",
+        "nate",
+        "reading"
+      ],
+      "sourceTurns": [
+        "D19:13",
+        "D19:14",
+        "D19:15",
+        "D19:16"
+      ]
+    },
+    {
+      "text": "Nate recommended a book series with awesome battles and interesting characters to Joanna on 22 August 2022, one of his favourites, and she said she would add it to her list.",
+      "speaker": "Nate",
+      "statedOn": "2022-08-22",
+      "entities": [
+        "nate",
+        "joanna",
+        "reading"
+      ],
+      "sourceTurns": [
+        "D19:17",
+        "D19:18",
+        "D19:19",
+        "D19:20",
+        "D19:21",
+        "D19:22"
+      ]
+    },
+    {
+      "text": "Nate did badly in a video game tournament shortly before 5 September 2022 despite trying; he called it a setback and part of the learning curve and was trying to stay positive, and said spending time with his turtles had been a big help.",
+      "speaker": "Nate",
+      "statedOn": "2022-09-05",
+      "entities": [
+        "nate",
+        "gaming",
+        "nates-turtles"
+      ],
+      "sourceTurns": [
+        "D20:1",
+        "D20:2",
+        "D20:3"
+      ]
+    },
+    {
+      "text": "Joanna revised one of her old dessert recipes shortly before 5 September 2022; tinkering with that recipe and a few others was giving her comfort and a way to get creative.",
+      "speaker": "Joanna",
+      "statedOn": "2022-09-05",
+      "entities": [
+        "joanna",
+        "dairy-free-desserts"
+      ],
+      "sourceTurns": [
+        "D20:4",
+        "D20:5",
+        "D20:6"
+      ]
+    },
+    {
+      "text": "Joanna was experimenting with chocolate, raspberry and coconut flavours in September 2022, using coconut or almond milk because she is lactose intolerant, and made dairy-free chocolate coconut cupcakes with raspberry frosting.",
+      "speaker": "Joanna",
+      "statedOn": "2022-09-05",
+      "entities": [
+        "joanna",
+        "dairy-free-desserts",
+        "lactose-intolerance"
+      ],
+      "sourceTurns": [
+        "D20:7",
+        "D20:8",
+        "D20:9",
+        "D20:10"
+      ]
+    },
+    {
+      "text": "By September 2022 Joanna was making cookies, pies and cakes that suit everyone's diets, promised to share more recipes with Nate, and agreed he could join her in the kitchen sometime.",
+      "speaker": "Joanna",
+      "statedOn": "2022-09-05",
+      "entities": [
+        "joanna",
+        "nate",
+        "dairy-free-desserts"
+      ],
+      "sourceTurns": [
+        "D20:11",
+        "D20:12",
+        "D20:13",
+        "D20:14"
+      ]
+    },
+    {
+      "text": "Nate's tips for dairy-free baking, given to Joanna on 5 September 2022, are to use dairy-free margarine or coconut oil instead of butter and to check labels to make sure ingredients really are dairy-free.",
+      "speaker": "Nate",
+      "statedOn": "2022-09-05",
+      "entities": [
+        "nate",
+        "joanna",
+        "dairy-free-desserts"
+      ],
+      "sourceTurns": [
+        "D20:15",
+        "D20:16",
+        "D20:17",
+        "D20:18",
+        "D20:19"
+      ]
+    },
+    {
+      "text": "Joanna's laptop crashed in the week before 14 September 2022 and she lost all her work with nothing recoverable, which was a major blow because as a writer her laptop is half her lifeline; she has since bought an external drive for backups.",
+      "speaker": "Joanna",
+      "statedOn": "2022-09-14",
+      "entities": [
+        "joanna",
+        "writing"
+      ],
+      "sourceTurns": [
+        "D21:1",
+        "D21:2",
+        "D21:3"
+      ]
+    },
+    {
+      "text": "Nate taught people vegan ice cream recipes on his own cooking show on Monday 12 September 2022; it was nerve-wracking to put himself out there but a blast, and he picked up a few new recipes.",
+      "speaker": "Nate",
+      "statedOn": "2022-09-14",
+      "entities": [
+        "nate",
+        "nates-cooking-show",
+        "dairy-free-desserts"
+      ],
+      "chrono": [
+        "cooking-show-episode"
+      ],
+      "sourceTurns": [
+        "D21:4",
+        "D21:5"
+      ]
+    },
+    {
+      "text": "Coconut milk ice cream is Nate's favourite dish from his cooking show: smooth and creamy with a tropical coconut twist, and dairy-free for people who cannot have lactose or who want vegan options. He agreed on 14 September 2022 to share the recipe with Joanna.",
+      "speaker": "Nate",
+      "statedOn": "2022-09-14",
+      "entities": [
+        "nate",
+        "joanna",
+        "dairy-free-desserts",
+        "nates-cooking-show"
+      ],
+      "sourceTurns": [
+        "D21:6",
+        "D21:7",
+        "D21:8"
+      ]
+    },
+    {
+      "text": "Joanna made a delicious dessert with almond milk on 9 September 2022, and says dairy-free is a must for her, especially for desserts.",
+      "speaker": "Joanna",
+      "statedOn": "2022-09-14",
+      "entities": [
+        "joanna",
+        "dairy-free-desserts",
+        "lactose-intolerance"
+      ],
+      "chrono": [
+        "almond-milk-dessert"
+      ],
+      "sourceTurns": [
+        "D21:9"
+      ]
+    },
+    {
+      "text": "Besides coconut milk ice cream, Nate's favourite dairy-free dessert is a chocolate mousse he says is super creamy and tastes like the real thing.",
+      "speaker": "Nate",
+      "statedOn": "2022-09-14",
+      "entities": [
+        "nate",
+        "dairy-free-desserts"
+      ],
+      "sourceTurns": [
+        "D21:10"
+      ]
+    },
+    {
+      "text": "Joanna's favourite dairy-free treat is a chocolate raspberry tart with an almond flour crust, chocolate ganache and fresh raspberries.",
+      "speaker": "Joanna",
+      "statedOn": "2022-09-14",
+      "entities": [
+        "joanna",
+        "dairy-free-desserts"
+      ],
+      "sourceTurns": [
+        "D21:11",
+        "D21:12"
+      ]
+    },
+    {
+      "text": "Joanna makes a dairy-free chocolate cake with raspberries out of almond flour, coconut oil, chocolate and raspberries, which she calls moist and perfectly sweet and reserves for birthdays and special days.",
+      "speaker": "Joanna",
+      "statedOn": "2022-09-14",
+      "entities": [
+        "joanna",
+        "dairy-free-desserts"
+      ],
+      "sourceTurns": [
+        "D21:13",
+        "D21:14",
+        "D21:15",
+        "D21:16"
+      ]
+    },
+    {
+      "text": "Joanna also makes a creamy dessert of blueberries, coconut milk and a gluten-free crust, whose recipe she shared with Nate on 14 September 2022.",
+      "speaker": "Joanna",
+      "statedOn": "2022-09-14",
+      "entities": [
+        "joanna",
+        "nate",
+        "dairy-free-desserts"
+      ],
+      "sourceTurns": [
+        "D21:17",
+        "D21:18",
+        "D21:19",
+        "D21:20"
+      ]
+    },
+    {
+      "text": "Joanna tried her newest dairy-free recipe on 5 October 2022 and it was a winner with her family; she enjoys mixing and matching flavours and is always trying new things.",
+      "speaker": "Joanna",
+      "statedOn": "2022-10-06",
+      "entities": [
+        "joanna",
+        "dairy-free-desserts"
+      ],
+      "chrono": [
+        "family-liked-new-recipe"
+      ],
+      "sourceTurns": [
+        "D22:1"
+      ]
+    },
+    {
+      "text": "Nate won a really big video game tournament in the week before 6 October 2022 and made a lot of money from it; he saved some but was unsure what to do with it because he is completely content already, and enjoyed no longer having to stress about money.",
+      "speaker": "Nate",
+      "statedOn": "2022-10-06",
+      "entities": [
+        "nate",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D22:2",
+        "D22:3",
+        "D22:4",
+        "D22:5",
+        "D22:6"
+      ]
+    },
+    {
+      "text": "Nate watched Little Women shortly before 6 October 2022, eight months after Joanna recommended it to him, and thought the acting awesome and the story captivating; Joanna said its themes of sisterhood, love and chasing dreams really spoke to her.",
+      "speaker": "Nate",
+      "statedOn": "2022-10-06",
+      "entities": [
+        "nate",
+        "joanna",
+        "little-women"
+      ],
+      "sourceTurns": [
+        "D22:7",
+        "D22:8",
+        "D22:9"
+      ]
+    },
+    {
+      "text": "Joanna finished writing her book in the week before 6 October 2022, after a ton of late nights and edits, and said she was proud of it and could not wait to see what happened next.",
+      "speaker": "Joanna",
+      "statedOn": "2022-10-06",
+      "entities": [
+        "joanna",
+        "joannas-book"
+      ],
+      "sourceTurns": [
+        "D22:9",
+        "D22:10",
+        "D22:11"
+      ]
+    },
+    {
+      "text": "Joanna said on 6 October 2022 that she would not give up on her goals as long as Nate was there to support her, and he told her she could always count on him.",
+      "speaker": "Joanna",
+      "statedOn": "2022-10-06",
+      "entities": [
+        "joanna",
+        "nate"
+      ],
+      "sourceTurns": [
+        "D22:12",
+        "D22:13",
+        "D22:14"
+      ]
+    },
+    {
+      "text": "Nate made Joanna a hand-drawn encouragement board on 6 October 2022 so she could look back on it whenever she needed encouragement, saying her life path is inspirational and that encouragement was what got him so far in his gaming career.",
+      "speaker": "Nate",
+      "statedOn": "2022-10-06",
+      "entities": [
+        "nate",
+        "joanna"
+      ],
+      "sourceTurns": [
+        "D22:14",
+        "D22:15",
+        "D22:16",
+        "D22:17",
+        "D22:18"
+      ]
+    },
+    {
+      "text": "Joanna made a bookmark for one of the women at her writing club shortly before 6 October 2022; she absolutely loves DIY projects and knows the recipient does too.",
+      "speaker": "Joanna",
+      "statedOn": "2022-10-06",
+      "entities": [
+        "joanna",
+        "writers-group"
+      ],
+      "sourceTurns": [
+        "D22:19",
+        "D22:20",
+        "D22:21",
+        "D22:22",
+        "D22:23"
+      ]
+    },
+    {
+      "text": "Nate went to a game convention on 7 October 2022 and met new people from outside his normal circle; it was a bit overwhelming but reminded him of the good times gaming can bring, and he and Joanna agreed it is good to step outside your comfort zone.",
+      "speaker": "Nate",
+      "statedOn": "2022-10-09",
+      "entities": [
+        "nate",
+        "gaming"
+      ],
+      "chrono": [
+        "game-convention"
+      ],
+      "sourceTurns": [
+        "D23:1",
+        "D23:2"
+      ]
+    },
+    {
+      "text": "At the game convention on 7 October 2022 Nate made friends who love games as he does, and they had already planned a gaming session together.",
+      "speaker": "Nate",
+      "statedOn": "2022-10-09",
+      "entities": [
+        "nate",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D23:3",
+        "D23:4"
+      ]
+    },
+    {
+      "text": "At the convention Nate joined some people playing a board game he loves, found he had a lot in common with them and hit it off, and said it is great when a shared hobby bonds people.",
+      "speaker": "Nate",
+      "statedOn": "2022-10-09",
+      "entities": [
+        "nate",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D23:5",
+        "D23:6"
+      ]
+    },
+    {
+      "text": "The board game Nate played at the convention on 7 October 2022 was Catan, a strategy game of building settlements and trading resources that he loves; the group competed but stayed relaxed and had fun.",
+      "speaker": "Nate",
+      "statedOn": "2022-10-09",
+      "entities": [
+        "nate",
+        "catan"
+      ],
+      "sourceTurns": [
+        "D23:7",
+        "D23:8",
+        "D23:9",
+        "D23:10"
+      ]
+    },
+    {
+      "text": "Nate says playing games is his escape from life's struggles, so he does not get crazily competitive about them, and the people at the October 2022 convention were the same way.",
+      "speaker": "Nate",
+      "statedOn": "2022-10-09",
+      "entities": [
+        "nate",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D23:11",
+        "D23:12"
+      ]
+    },
+    {
+      "text": "Nate suggested on 9 October 2022 that Joanna go to a writing convention, and she said she would look into whether such things exist because it could be fun.",
+      "speaker": "Nate",
+      "statedOn": "2022-10-09",
+      "entities": [
+        "nate",
+        "joanna",
+        "writing"
+      ],
+      "sourceTurns": [
+        "D23:13",
+        "D23:14"
+      ]
+    },
+    {
+      "text": "Nate spends his evenings at home playing video games or watching films to unwind.",
+      "speaker": "Nate",
+      "statedOn": "2022-10-09",
+      "entities": [
+        "nate",
+        "gaming",
+        "movie-watching"
+      ],
+      "sourceTurns": [
+        "D23:15",
+        "D23:16"
+      ]
+    },
+    {
+      "text": "Nate saw the film Inception shortly before 9 October 2022 and said its twists and dream material blew his mind, and he had been playing the game Cyberpunk 2077 nonstop for its futuristic setting and gameplay.",
+      "speaker": "Nate",
+      "statedOn": "2022-10-09",
+      "entities": [
+        "nate",
+        "inception",
+        "cyberpunk-2077"
+      ],
+      "sourceTurns": [
+        "D23:17"
+      ]
+    },
+    {
+      "text": "Joanna watched a classic film shortly before 9 October 2022 with a gripping story and great actors that really stuck with her; she rated it 9 or 10 out of 10.",
+      "speaker": "Joanna",
+      "statedOn": "2022-10-09",
+      "entities": [
+        "joanna",
+        "movie-watching"
+      ],
+      "sourceTurns": [
+        "D23:18",
+        "D23:19",
+        "D23:20"
+      ]
+    },
+    {
+      "text": "Joanna and Nate agreed on 9 October 2022 that films take you to new worlds, fill you with emotions you would not normally experience, and are a great way to chill out after a day.",
+      "speaker": "Nate",
+      "statedOn": "2022-10-09",
+      "entities": [
+        "nate",
+        "joanna",
+        "movie-watching"
+      ],
+      "sourceTurns": [
+        "D23:21",
+        "D23:22"
+      ]
+    },
+    {
+      "text": "Joanna's advice to Nate on 9 October 2022 for making a living room comfortable for watching films was a couch big enough to lie down on and really fluffy, a blanket with some weight to it, and lights that can be dimmed; she admits she gets very invested in small things like that.",
+      "speaker": "Joanna",
+      "statedOn": "2022-10-09",
+      "entities": [
+        "joanna",
+        "nate",
+        "movie-watching"
+      ],
+      "sourceTurns": [
+        "D23:23",
+        "D23:24",
+        "D23:25",
+        "D23:26",
+        "D23:27",
+        "D23:28",
+        "D23:29",
+        "D23:30"
+      ]
+    },
+    {
+      "text": "Nate's competitive gaming changed from a hobby he played for fun in January 2022, through his first tournament win that month and a second at a local Street Fighter event in May 2022, into a career he made a living from by August 2022, when he won an international tournament.",
+      "speaker": "Nate",
+      "statedOn": "2022-08-22",
+      "entities": [
+        "nate",
+        "gaming",
+        "csgo",
+        "street-fighter"
+      ],
+      "sourceTurns": [
+        "D1:3",
+        "D2:20",
+        "D10:4",
+        "D17:1",
+        "D19:1"
+      ]
+    },
+    {
+      "text": "Joanna spent the weeks before 21 October 2022 revising and perfecting the dessert recipe she had made for her family, and it turned out really tasty.",
+      "speaker": "Joanna",
+      "statedOn": "2022-10-21",
+      "entities": [
+        "joanna",
+        "dairy-free-desserts"
+      ],
+      "sourceTurns": [
+        "D24:1",
+        "D24:2"
+      ]
+    },
+    {
+      "text": "Nate had been very stressed in October 2022 because of his tournament progress against tough competitors, and said his turtles always cheer him up.",
+      "speaker": "Nate",
+      "statedOn": "2022-10-21",
+      "entities": [
+        "nate",
+        "gaming",
+        "nates-turtles"
+      ],
+      "sourceTurns": [
+        "D24:3"
+      ]
+    },
+    {
+      "text": "Joanna named the stuffed toy dog Nate gave her Tilly, and keeps her close while she writes.",
+      "speaker": "Joanna",
+      "statedOn": "2022-10-21",
+      "entities": [
+        "joanna",
+        "tilly-toy",
+        "writing"
+      ],
+      "sourceTurns": [
+        "D24:4",
+        "D24:5"
+      ]
+    },
+    {
+      "text": "Joanna named the stuffed dog Tilly after a dog of that name she used to have back in Michigan, whom the family had to rehome when she became allergic; the name reminds her of when she could hold and squeeze an animal without an allergic reaction.",
+      "speaker": "Joanna",
+      "statedOn": "2022-10-21",
+      "entities": [
+        "joanna",
+        "tilly",
+        "tilly-toy",
+        "michigan",
+        "pet-allergy"
+      ],
+      "sourceTurns": [
+        "D24:6",
+        "D24:7"
+      ]
+    },
+    {
+      "text": "Joanna says the stuffed dog Tilly helps her stay focused and brings her a lot of joy, and Nate said he is not sure he will ever understand why watching his turtles slowly walk around makes him so happy, but is very glad it does.",
+      "speaker": "Joanna",
+      "statedOn": "2022-10-21",
+      "entities": [
+        "joanna",
+        "nate",
+        "tilly-toy",
+        "nates-turtles"
+      ],
+      "sourceTurns": [
+        "D24:8",
+        "D24:9",
+        "D24:10"
+      ]
+    },
+    {
+      "text": "Nate was practising for his next video game tournament as of 21 October 2022.",
+      "speaker": "Nate",
+      "statedOn": "2022-10-21",
+      "entities": [
+        "nate",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D24:11"
+      ]
+    },
+    {
+      "text": "Joanna had another rejection from a production company shortly before 21 October 2022, for the script she had sent to a film contest; she said it was hard but that she would keep grinding and would not let it slow her down.",
+      "speaker": "Joanna",
+      "statedOn": "2022-10-21",
+      "entities": [
+        "joanna",
+        "nate",
+        "writing"
+      ],
+      "sourceTurns": [
+        "D24:12",
+        "D24:13",
+        "D24:14",
+        "D24:15",
+        "D24:16",
+        "D24:17",
+        "D24:18",
+        "D24:19"
+      ]
+    },
+    {
+      "text": "Another movie script Joanna contributed to was shown on the big screen for the first time on 23 October 2022 — the third time this had happened for her — and she found it surreal and satisfying after waiting a long time to see her characters and dialogue acted out.",
+      "speaker": "Joanna",
+      "statedOn": "2022-10-25",
+      "entities": [
+        "joanna",
+        "writing"
+      ],
+      "chrono": [
+        "third-script-on-screen"
+      ],
+      "sourceTurns": [
+        "D25:1",
+        "D25:2",
+        "D25:3",
+        "D25:4"
+      ]
+    },
+    {
+      "text": "Joanna's favourite part of seeing her script on the big screen in October 2022 was watching the characters she had worked so hard on come alive, as though they had jumped off the page and become real.",
+      "speaker": "Joanna",
+      "statedOn": "2022-10-25",
+      "entities": [
+        "joanna",
+        "writing"
+      ],
+      "sourceTurns": [
+        "D25:5",
+        "D25:6"
+      ]
+    },
+    {
+      "text": "Joanna draws visuals of her characters to bring them alive in her head so she can write them better, and takes ideas for them from people she knows, things she has seen and things she has imagined.",
+      "speaker": "Joanna",
+      "statedOn": "2022-10-25",
+      "entities": [
+        "joanna",
+        "writing"
+      ],
+      "sourceTurns": [
+        "D25:7",
+        "D25:8",
+        "D25:9",
+        "D25:10"
+      ]
+    },
+    {
+      "text": "Joanna refused on 25 October 2022 to tell Nate about one of the characters in her drawings, telling him to watch the movie and find out, which made him keener to see it.",
+      "speaker": "Joanna",
+      "statedOn": "2022-10-25",
+      "entities": [
+        "joanna",
+        "nate",
+        "writing"
+      ],
+      "sourceTurns": [
+        "D25:11",
+        "D25:12",
+        "D25:13",
+        "D25:14"
+      ]
+    },
+    {
+      "text": "Nate took his turtles out for a walk on 25 October 2022 because he was bored, and afterwards they rested in their tank, tired from all the walking.",
+      "speaker": "Nate",
+      "statedOn": "2022-10-25",
+      "entities": [
+        "nate",
+        "nates-turtles"
+      ],
+      "sourceTurns": [
+        "D25:15",
+        "D25:16",
+        "D25:17"
+      ]
+    },
+    {
+      "text": "Nate's turtles eat a varied diet of vegetables, fruit and insects, and he most loves watching them eat fruit because they get so excited about it; he also likes holding them.",
+      "speaker": "Nate",
+      "statedOn": "2022-10-25",
+      "entities": [
+        "nate",
+        "nates-turtles"
+      ],
+      "sourceTurns": [
+        "D25:18",
+        "D25:19",
+        "D25:20",
+        "D25:21",
+        "D25:22",
+        "D25:23"
+      ]
+    },
+    {
+      "text": "Nate's turtles have distinct personalities — one more adventurous, the other more reserved — and he says they bring him joy and make great companions; he has liked turtles since he was a boy and knows all about them.",
+      "speaker": "Nate",
+      "statedOn": "2022-10-25",
+      "entities": [
+        "nate",
+        "nates-turtles"
+      ],
+      "sourceTurns": [
+        "D25:24",
+        "D25:25",
+        "D25:26",
+        "D25:27",
+        "D25:28",
+        "D25:29"
+      ]
+    },
+    {
+      "text": "Joanna set up meetings with movie producers and held them shortly before 4 November 2022; they went really well, she felt confident discussing her script and her vision, the producers seemed interested and loved the elements of self-discovery in it, and being taken seriously left her hopeful and inspired.",
+      "speaker": "Joanna",
+      "statedOn": "2022-11-04",
+      "entities": [
+        "joanna",
+        "writing"
+      ],
+      "sourceTurns": [
+        "D26:1",
+        "D26:2",
+        "D26:3",
+        "D26:4"
+      ]
+    },
+    {
+      "text": "Joanna found old notebooks of her early writing in the week before 4 November 2022, and enjoyed seeing how far she had come as an artist.",
+      "speaker": "Joanna",
+      "statedOn": "2022-11-04",
+      "entities": [
+        "joanna",
+        "writing"
+      ],
+      "sourceTurns": [
+        "D26:5",
+        "D26:6"
+      ]
+    },
+    {
+      "text": "Joanna still remembers a story she wrote when she was ten, about a brave little turtle who was scared but explored the world anyway, and thinks she was already drawn then to stories about finding courage and taking risks, as she still is.",
+      "speaker": "Joanna",
+      "statedOn": "2022-11-04",
+      "entities": [
+        "joanna",
+        "writing"
+      ],
+      "sourceTurns": [
+        "D26:7",
+        "D26:8"
+      ]
+    },
+    {
+      "text": "Joanna says turtles make her think of strength and perseverance and help motivate her in tough times, and Nate reaffirmed on 4 November 2022 that he loves turtles.",
+      "speaker": "Joanna",
+      "statedOn": "2022-11-04",
+      "entities": [
+        "joanna",
+        "nate",
+        "nates-turtles"
+      ],
+      "sourceTurns": [
+        "D26:9",
+        "D26:10"
+      ]
+    },
+    {
+      "text": "Besides her producer meetings, Joanna was working on a project in November 2022 that she found challenging but fulfilling.",
+      "speaker": "Joanna",
+      "statedOn": "2022-11-04",
+      "entities": [
+        "joanna",
+        "writing"
+      ],
+      "sourceTurns": [
+        "D26:11"
+      ]
+    },
+    {
+      "text": "Nate spent early November 2022 helping friends reset their high scores at the international tournament, and said it felt good to use his skills to make a difference.",
+      "speaker": "Nate",
+      "statedOn": "2022-11-04",
+      "entities": [
+        "nate",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D26:12",
+        "D26:13",
+        "D26:14",
+        "D26:15"
+      ]
+    },
+    {
+      "text": "Nate made lactose-free coconut milk ice cream on 3 November 2022 and invited Joanna over to try it; she arranged to come on 5 November 2022 and to bring her own recipes so they could share desserts, and Nate said he had been wanting to try her chocolate and raspberry cake.",
+      "speaker": "Nate",
+      "statedOn": "2022-11-04",
+      "entities": [
+        "nate",
+        "joanna",
+        "dairy-free-desserts",
+        "lactose-intolerance"
+      ],
+      "chrono": [
+        "dessert-visit-plan"
+      ],
+      "sourceTurns": [
+        "D26:16",
+        "D26:17",
+        "D26:18",
+        "D26:19",
+        "D26:20",
+        "D26:21",
+        "D26:22",
+        "D26:23",
+        "D26:24"
+      ]
+    },
+    {
+      "text": "Nate reached the final of a big Valorant tournament on 5 November 2022 and won it; seeing his name as the champion was the best feeling, and he says tournaments bring out strong emotions in him.",
+      "speaker": "Nate",
+      "statedOn": "2022-11-07",
+      "entities": [
+        "nate",
+        "valorant",
+        "gaming"
+      ],
+      "chrono": [
+        "valorant-final-win"
+      ],
+      "sourceTurns": [
+        "D27:1"
+      ]
+    },
+    {
+      "text": "Joanna finished the presentation of her script for producers on 4 November 2022; it was tough but it was looking good.",
+      "speaker": "Joanna",
+      "statedOn": "2022-11-07",
+      "entities": [
+        "joanna",
+        "writing"
+      ],
+      "chrono": [
+        "producer-presentation-finished"
+      ],
+      "sourceTurns": [
+        "D27:2"
+      ]
+    },
+    {
+      "text": "Nate was busy preparing for further tournaments in November 2022 and loving it, and said he is really grateful to have a job he enjoys every day.",
+      "speaker": "Nate",
+      "statedOn": "2022-11-07",
+      "entities": [
+        "nate",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D27:3",
+        "D27:4",
+        "D27:5"
+      ]
+    },
+    {
+      "text": "Joanna was writing another movie script in November 2022, a love story with lots of challenges that she hoped to get on the big screen; she got the idea for it from a dream.",
+      "speaker": "Joanna",
+      "statedOn": "2022-11-07",
+      "entities": [
+        "joanna",
+        "love-story-script"
+      ],
+      "sourceTurns": [
+        "D27:6",
+        "D27:7",
+        "D27:8"
+      ]
+    },
+    {
+      "text": "Nate said on 7 November 2022 that his turtles were doing great and that watching them is calming and fascinating, and Joanna said that creating stories and watching them come alive is what gives her happiness and fulfilment.",
+      "speaker": "Nate",
+      "statedOn": "2022-11-07",
+      "entities": [
+        "nate",
+        "joanna",
+        "nates-turtles",
+        "writing"
+      ],
+      "sourceTurns": [
+        "D27:9",
+        "D27:10"
+      ]
+    },
+    {
+      "text": "Joanna submitted several more scripts in the week before 7 November 2022 and expected a few to be rejected, but promised Nate she would not give up.",
+      "speaker": "Joanna",
+      "statedOn": "2022-11-07",
+      "entities": [
+        "joanna",
+        "nate",
+        "writing"
+      ],
+      "sourceTurns": [
+        "D27:11",
+        "D27:12",
+        "D27:13",
+        "D27:14"
+      ]
+    },
+    {
+      "text": "Nate upgraded some of his home gaming equipment in early November 2022; the computer is where he practises, competes and plays games with friends, and he calls the setup his own little haven and says it is important to his career because without it he could never beat his competition.",
+      "speaker": "Nate",
+      "statedOn": "2022-11-07",
+      "entities": [
+        "nate",
+        "gaming-setup",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D27:15",
+        "D27:16",
+        "D27:17",
+        "D27:18",
+        "D27:19",
+        "D27:20",
+        "D27:21"
+      ]
+    },
+    {
+      "text": "Nate was playing the Japanese fantasy RPG Xenoblade Chronicles in November 2022 and recommending it; he is a big fan of Nintendo games and had wanted to play this one for a while because his friends had recommended it, and he values Joanna's film recommendations for the same reason.",
+      "speaker": "Nate",
+      "statedOn": "2022-11-07",
+      "entities": [
+        "nate",
+        "joanna",
+        "xenoblade-chronicles",
+        "gaming",
+        "movie-watching"
+      ],
+      "sourceTurns": [
+        "D27:22",
+        "D27:23",
+        "D27:24",
+        "D27:25",
+        "D27:26",
+        "D27:27"
+      ]
+    },
+    {
+      "text": "Joanna opened the intro of her next movie script with a letter her brother wrote her when they were children; he used to make her such notes, and it brings back sweet memories of simpler times.",
+      "speaker": "Joanna",
+      "statedOn": "2022-11-07",
+      "entities": [
+        "joanna",
+        "love-story-script"
+      ],
+      "sourceTurns": [
+        "D27:28",
+        "D27:29",
+        "D27:30",
+        "D27:31",
+        "D27:32"
+      ]
+    },
+    {
+      "text": "Nate had a special day in 2022 taking his pets to the park, where their happy faces made it memorable, and he says mixing new memories with old ones is priceless.",
+      "speaker": "Nate",
+      "statedOn": "2022-11-07",
+      "entities": [
+        "nate",
+        "nates-turtles"
+      ],
+      "sourceTurns": [
+        "D27:33"
+      ]
+    },
+    {
+      "text": "Joanna started writing down her favourite memories by 7 November 2022, and Nate said he would start doing the same, both for the things his animals like and for his favourite memories with her.",
+      "speaker": "Joanna",
+      "statedOn": "2022-11-07",
+      "entities": [
+        "joanna",
+        "nate",
+        "writing"
+      ],
+      "sourceTurns": [
+        "D27:34",
+        "D27:35",
+        "D27:36",
+        "D27:37",
+        "D27:38"
+      ]
+    },
+    {
+      "text": "Nate's game tournament was pushed back in the week before 9 November 2022, so he tried some cooking instead and made homemade coconut ice cream, whose colour the sprinkles changed this time.",
+      "speaker": "Nate",
+      "statedOn": "2022-11-09",
+      "entities": [
+        "nate",
+        "dairy-free-desserts",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D28:1",
+        "D28:2"
+      ]
+    },
+    {
+      "text": "Nate did not make it to the finals of his last tournament before 9 November 2022, calling it a tough one, but stayed positive about getting them next time.",
+      "speaker": "Nate",
+      "statedOn": "2022-11-09",
+      "entities": [
+        "nate",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D28:3",
+        "D28:4"
+      ]
+    },
+    {
+      "text": "Nate was thinking of joining a new gaming team after his next tournament as of 9 November 2022; he had had a few offers but had not decided, and called it a big step he was ready for.",
+      "speaker": "Nate",
+      "statedOn": "2022-11-09",
+      "entities": [
+        "nate",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D28:5",
+        "D28:6",
+        "D28:7"
+      ]
+    },
+    {
+      "text": "Joanna worked out a plan for getting another of her scripts made into a movie and pitched it to producers on 8 November 2022; they really liked it, which gave her a big confidence boost and left her feeling she could not stop writing.",
+      "speaker": "Joanna",
+      "statedOn": "2022-11-09",
+      "entities": [
+        "joanna",
+        "nate",
+        "writing"
+      ],
+      "chrono": [
+        "producer-pitch"
+      ],
+      "sourceTurns": [
+        "D28:8",
+        "D28:9",
+        "D28:10"
+      ]
+    },
+    {
+      "text": "Joanna's new project as of 9 November 2022 is a suspenseful thriller set in a small Midwestern town, which she calls a great creative outlet.",
+      "speaker": "Joanna",
+      "statedOn": "2022-11-09",
+      "entities": [
+        "joanna",
+        "midwest-thriller",
+        "midwest"
+      ],
+      "sourceTurns": [
+        "D28:11",
+        "D28:12"
+      ]
+    },
+    {
+      "text": "Nate started creating gaming content for YouTube in November 2022, as a way to entertain people and satisfy his video game cravings between tournaments and to connect with others who enjoy gaming; he was already watching other people's videos first, which was also Joanna's advice.",
+      "speaker": "Nate",
+      "statedOn": "2022-11-09",
+      "entities": [
+        "nate",
+        "joanna",
+        "gaming-youtube-channel",
+        "gaming"
+      ],
+      "sourceTurns": [
+        "D28:13",
+        "D28:14",
+        "D28:15",
+        "D28:16",
+        "D28:17",
+        "D28:18",
+        "D28:19"
+      ]
+    },
+    {
+      "text": "Joanna photographed a sunflower field at sunset on a hike near Fort Wayne in the summer of 2022, and shared the picture with Nate on 9 November 2022 as a reminder of nature's beauty.",
+      "speaker": "Joanna",
+      "statedOn": "2022-11-09",
+      "entities": [
+        "joanna",
+        "fort-wayne",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D28:20",
+        "D28:21",
+        "D28:22"
+      ]
+    },
+    {
+      "text": "Nate got a third turtle shortly before 9 November 2022, after seeing it at a pet store and deciding the tank was now big enough for three; he says turtles bring him joy and peace and that he is very happy with the decision.",
+      "speaker": "Nate",
+      "statedOn": "2022-11-09",
+      "entities": [
+        "nate",
+        "nates-turtles"
+      ],
+      "sourceTurns": [
+        "D28:23",
+        "D28:24",
+        "D28:25",
+        "D28:26",
+        "D28:27"
+      ]
+    },
+    {
+      "text": "Joanna arranged on 9 November 2022 to visit Nate the next day to watch him play with his turtles from a distance because of her allergy; they also planned to watch one of her movies together or go to the park, and Nate said he would bath the turtles first.",
+      "speaker": "Joanna",
+      "statedOn": "2022-11-09",
+      "entities": [
+        "joanna",
+        "nate",
+        "nates-turtles",
+        "pet-allergy"
+      ],
+      "chrono": [
+        "turtle-visit-plan"
+      ],
+      "sourceTurns": [
+        "D28:28",
+        "D28:29",
+        "D28:30",
+        "D28:31",
+        "D28:32",
+        "D28:33"
+      ]
+    },
+    {
+      "text": "By 11 November 2022 Joanna was filming her own movie from her road-trip script; she said it was wild to see it come alive, that every day on set was full of potential, and that being able to show her vision was wonderful.",
+      "speaker": "Joanna",
+      "statedOn": "2022-11-11",
+      "entities": [
+        "joanna",
+        "road-trip-script"
+      ],
+      "sourceTurns": [
+        "D29:1",
+        "D29:2",
+        "D29:3"
+      ]
+    },
+    {
+      "text": "The coolest moment on set for Joanna was one of the actors telling her how much she liked the script, which gave her chills.",
+      "speaker": "Joanna",
+      "statedOn": "2022-11-11",
+      "entities": [
+        "joanna",
+        "road-trip-script"
+      ],
+      "sourceTurns": [
+        "D29:4",
+        "D29:5"
+      ]
+    },
+    {
+      "text": "Nate took his turtles to the beach in Tampa on 10 November 2022; he says they always bring him peace in the craziness of life.",
+      "speaker": "Nate",
+      "statedOn": "2022-11-11",
+      "entities": [
+        "nate",
+        "nates-turtles",
+        "tampa"
+      ],
+      "chrono": [
+        "turtles-at-tampa-beach"
+      ],
+      "sourceTurns": [
+        "D29:6"
+      ]
+    },
+    {
+      "text": "Nate loves having his turtles around because they make him feel calm, need little looking after and look serene soaking in the sun; he calls them zen masters who remind him to slow down and appreciate the small things in life.",
+      "speaker": "Nate",
+      "statedOn": "2022-11-11",
+      "entities": [
+        "nate",
+        "nates-turtles"
+      ],
+      "sourceTurns": [
+        "D29:7",
+        "D29:8",
+        "D29:9",
+        "D29:10"
+      ]
+    },
+    {
+      "text": "Nate was experimenting with coconut milk ice cream flavours and mix-ins in November 2022 and offered Joanna the recipe that jazzes it up, which she accepted.",
+      "speaker": "Nate",
+      "statedOn": "2022-11-11",
+      "entities": [
+        "nate",
+        "joanna",
+        "dairy-free-desserts"
+      ],
+      "sourceTurns": [
+        "D29:10",
+        "D29:11",
+        "D29:12",
+        "D29:13",
+        "D29:14",
+        "D29:15"
+      ]
+    },
+    {
+      "text": "Joanna's screenwriting went from finishing and printing her first screenplay on 21 January 2022, through festival submissions and rejections from a major company and a production company, to three scripts she contributed to reaching the big screen during 2022 and, by 11 November 2022, filming her own movie from her road-trip script.",
+      "speaker": "Joanna",
+      "statedOn": "2022-11-11",
+      "entities": [
+        "joanna",
+        "screenplay-one",
+        "road-trip-script",
+        "writing"
+      ],
+      "sourceTurns": [
+        "D2:3",
+        "D14:1",
+        "D15:1",
+        "D25:4",
+        "D29:1"
+      ]
+    },
+    {
+      "text": "Nate's household of pets grew through 2022, from the two turtles he had kept for about three years, to an adopted dog called Max in May 2022, to a third turtle in November 2022.",
+      "speaker": "Nate",
+      "statedOn": "2022-11-09",
+      "entities": [
+        "nate",
+        "nates-turtles",
+        "max"
+      ],
+      "sourceTurns": [
+        "D2:12",
+        "D12:5",
+        "D28:25"
+      ]
+    },
+    {
+      "text": "Nate's dairy-free dessert making developed from first trying coconut milk ice cream in February 2022, through sharing vegan ice cream with his diet group in June 2022 and teaching the recipes on his own cooking show in September 2022, to experimenting with new flavours and mix-ins in November 2022.",
+      "speaker": "Nate",
+      "statedOn": "2022-11-11",
+      "entities": [
+        "nate",
+        "dairy-free-desserts",
+        "nates-cooking-show",
+        "vegan-diet-group"
+      ],
+      "sourceTurns": [
+        "D3:4",
+        "D16:8",
+        "D21:4",
+        "D29:10"
+      ]
+    },
+    {
+      "text": "Joanna's book went from being started around 10 July 2022, through being shared nervously with her writers group in August 2022 for feedback, to the writing being finished in the week before 6 October 2022.",
+      "speaker": "Joanna",
+      "statedOn": "2022-10-06",
+      "entities": [
+        "joanna",
+        "joannas-book",
+        "writers-group"
+      ],
+      "sourceTurns": [
+        "D17:14",
+        "D19:6",
+        "D22:9"
+      ]
+    },
+    {
+      "text": "Joanna's hiking grew from discovering a trail in her hometown in April 2022, to finding more trails and Whispering Falls in May 2022 and calling herself an expert hiker, to hiking a new waterfall trail with friends in June 2022.",
+      "speaker": "Joanna",
+      "statedOn": "2022-06-03",
+      "entities": [
+        "joanna",
+        "hiking",
+        "whispering-falls"
+      ],
+      "sourceTurns": [
+        "D8:4",
+        "D11:3",
+        "D14:19"
+      ]
+    }
+  ]
+}

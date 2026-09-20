@@ -15,6 +15,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **All ten LoCoMo conversations are extracted unattended, and conv-26 was re-extracted unattended too**
+  (`B-4`). 5,882 turns across 272 sessions, producing 2,294 claims, 470 entities, 212 chrono entries and 527
+  edges. Every file passes `bench.mjs check`: valid against the schema, every key resolving, every turn id
+  real, and every one of the 5,882 turns named by a claim.
+
+  **Each conversation was extracted in a context that had seen none of the others, and no retrieval score was
+  measured until all ten were committed.** That is the whole point of the row rather than a procedural detail:
+  a prompt that only works while its author watches the scoreboard is not a product capability, and the only
+  way to find out is to not look. `conv-26`'s previous extraction was written by hand with the scores visible
+  — legitimate development, illegitimate evidence — and is replaced rather than kept beside the rest. The
+  unattended version of it finds 198 claims where the hand-tuned one found 129.
+
+  **What the run measured about the prompt, which is the part worth keeping.** One prompt and one model
+  produce a **6.6x spread in how much of a conversation reaches the timeline** — chrono entries per 1,000
+  turns range from 10.3 to 67.8 — and supersessions range from 0 to 8 across conversations of comparable
+  length. The prompt states that two models disagreeing a lot is a finding about the prompt; one model
+  disagreeing with itself by 6.6x meets that test without a second model.
+
+  Nine gaps are filed as `B-14`, every one of them reported independently by extractions that could not see
+  each other's work. The largest has a concrete cause rather than a judgement call: a Ythril chrono record
+  carries `startsAt` **and** `endsAt`, the extraction format exposes only a single `date`, and five separate
+  runs therefore dropped two-day events — a marriage, a gastritis diagnosis, a pride parade, a career-high
+  game — off the timeline entirely while keeping a photograph taken on a named Friday.
+
+  **The prompt is deliberately unchanged.** Editing it between conversation six and conversation seven would
+  produce a corpus extracted by two prompts, and every per-conversation difference afterwards would be
+  unattributable — the same defect on the authoring side that watching the scoreboard is on the scoring side.
+
+- **An extraction is now checked against the conversation it NAMES, not only against itself** (`B-4`).
+  `benchmarks/writer/extraction-matches-conversation.mjs`, called by `bench.mjs check` and swept over every
+  committed extraction by its own gate.
+
+  The validator reads the extraction alone and the merge refuses a run with a part missing. Between them they
+  catch everything except records from a **different conversation**, because neither holds the evidence: a
+  spliced file is internally perfect. Every type is declared, every key resolves, every date parses, the
+  writer writes it, and the turn-coverage line reads 100% — because the foreign part brought its own
+  `sessions` block along with its claims. The graph is consistent and it is about somebody else.
+
+  It is not hypothetical. The ten extractions of `B-4` run in ten separate contexts, and the scratch directory
+  those contexts write their parts into turned out to be shared: two runs had a working file overwritten by
+  another run's, mid-extraction, and one of them found a completely different conversation in a file it had
+  written moments earlier. Both rebuilt the affected part. Nothing foreign reached a committed file — which is
+  the point, because nothing would have said so.
+
+  **A turn id is the witness**, and the check is honest about how far that goes. Turn ids are positional, so
+  two conversations share most of their spellings: swapping one whole extraction in under another's name
+  leaves only 23 of 369 ids foreign. The coverage half is the other side of it — whatever a splice did not
+  bring, the real conversation's own turns go unaccounted for. Measured against the corpus rather than against
+  the file's own `sessions` block, which is the reading a truncated extraction passes at 100%.
+
+  **The skip is loud.** The corpus is pulled by URL and is never present in CI, so `check` prints
+  `NOT CROSS-CHECKED` rather than reporting `valid` on a file nothing verified, and the gate says how many
+  extractions it did not look at.
+
 - **`benchmarks/bench.mjs` — the four things an extraction takes, so the next nine do not rewrite them**
   (`B-4`). `conv-30` was extracted with four throwaway scripts: dump the conversation, merge the parts,
   validate, write it to a space. Each was written at the keyboard and deleted. Nine conversations
