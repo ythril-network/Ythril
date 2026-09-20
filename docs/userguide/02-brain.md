@@ -586,6 +586,13 @@ that showing them all by default would bury the entities you came to look at. An
 on purpose, so there are only as many as you meant, and the graph shows them. Before 5.0 it did not: an edge
 you drew from one fact to another was saved, listed on the Edges table, and never appeared on the canvas.
 
+**Two more kinds of relationship appear here that used to be invisible, also since 5.0.** A record joined
+to ITSELF — a status that routes on its own state, a task that blocks itself — now draws as a small loop
+at that node; before, it was stored and shown nowhere. And where you drew **two different edges between
+the same pair**, both are drawn side by side instead of one standing in for both. If a graph you know
+well suddenly has more lines in it, nothing was added: those relationships were always in the Edges
+table and the canvas was only showing one per pair.
+
 **Toolbar controls:**
 
 | Control | What it does |

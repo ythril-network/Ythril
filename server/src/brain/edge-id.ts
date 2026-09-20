@@ -120,3 +120,36 @@ export function edgeIdFor(
   const kinds = fk === 'entity' && tk === 'entity' ? '' : `${part(fk)}${part(tk)}`;
   return uuidv5(`${part(from)}${part(to)}${part(label)}${kinds}`, EDGE_NAMESPACE);
 }
+
+/**
+ * The id of a SYNTHETIC traverse edge — the link from an entity to a chrono entry, fact or file.
+ *
+ * ## What it replaces, and why that was wrong in both directions
+ *
+ * These edges used to carry the TARGET DOCUMENT'S OWN `_id`, on this rationale: *"nothing has to invent an
+ * edge id that does not exist — a caller looking it up finds the chrono, not a 404."*
+ *
+ * **The consumer half of that was the exact opposite of true.** `getEdgeById` queries `${spaceId}_edges` and
+ * nothing else, and a chrono lives in `_chrono`, a fact in `_facts`, a file in `_files`. So the
+ * "helpful" id 404s on every edge-lookup path the product actually has — `GET /edges/:id`, the PATCH, and
+ * `update_edge`. The one lookup that does resolve is `GET /chrono/:id`, which needs an id the caller already
+ * has from the NODE. The affordance was never delivered; only the collision was.
+ *
+ * **And it made the links disappear.** A graph library has ONE id namespace for nodes and edges — cytoscape
+ * skips a repeated id with a bare `continue` inside its `Collection` constructor, before the code path that
+ * would have thrown. Nodes are added before edges, so the node always won and the edge was always dropped,
+ * silently. What an operator saw was a detached band of chrono bubbles floating above the graph, connected
+ * to nothing, with no console output and an edge count that overreported by exactly that many.
+ *
+ * ## The shape
+ *
+ * Label-prefixed and carrying both endpoints, so it can collide with neither a stored edge `_id` (a UUID) nor
+ * any node id (also a UUID). Two seeds linking to the SAME chrono entry produce two different edges, which is
+ * correct — they are two different relationships — and under the old scheme they were one id twice.
+ *
+ * It is deliberately NOT a UUID: a synthetic edge has no stored record, and an id shaped like a real one
+ * invites exactly the lookup that cannot work. This one says what it is.
+ */
+export function syntheticEdgeId(label: string, from: string, to: string): string {
+  return `${label}:${from}:${to}`;
+}

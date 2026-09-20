@@ -18,7 +18,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-const { nestNeighbours } = await import('../../server/dist/brain/recall-graph.js');
+const { nestNeighbours, mapGraphNodes } = await import('../../server/dist/brain/recall-graph.js');
 
 const edge = (from, to, label = 'depends_on') => ({
   _id: `e-${from}-${to}`, from, to, label, spaceId: 's',
@@ -28,7 +28,7 @@ const edge = (from, to, label = 'depends_on') => ({
 /** A neighbour as `traverseFromSeeds` emits it. */
 const hop = (id, parentId, idPath, altPaths = [], truncated = false) => ({
   _id: id, spaceId: 's', hops: idPath.length - 1, path: [], record: { _id: id, name: id, type: 'service' },
-  parentId, edge: edge(parentId, id), idPath, altPaths, altPathsTruncated: truncated,
+  parentId, edges: [edge(parentId, id)], idPath, altPaths, altPathsTruncated: truncated,
 });
 
 describe('one seed, one chain', () => {
@@ -64,9 +64,10 @@ describe('one seed, one chain', () => {
   it('the edge is the whole document, not {from,label,to}', () => {
     // The reason for a link lives in the edge description on the board this was reported from.
     const [b] = bySeed.get('A');
-    assert.equal(b.edge.description, 'A depends_on B');
-    assert.deepEqual(b.edge.tags, ['t']);
-    assert.ok(b.edge.createdAt, 'createdAt was dropped by the three-field reduction too');
+    assert.equal(b.edges.length, 1, 'one hop, one edge — the list is plural, not always many');
+    assert.equal(b.edges[0].description, 'A depends_on B');
+    assert.deepEqual(b.edges[0].tags, ['t']);
+    assert.ok(b.edges[0].createdAt, 'createdAt was dropped by the three-field reduction too');
   });
 });
 
@@ -137,5 +138,56 @@ describe('order does not matter', () => {
     ], ['A']);
     assert.equal(bySeed.get('A')[0].node._id, 'B');
     assert.equal(bySeed.get('A')[0]._graph[0].node._id, 'C');
+  });
+});
+
+describe('an edge says which way it runs instead of repeating two ids it already stated', () => {
+  /*
+   * `Q-24`. Every edge in one entry joins the SAME pair — this node and the one it is nested under — so
+   * `from` and `to` were two UUIDs per edge restating `node._id` and `paths[0]`. What is left is the
+   * orientation.
+   *
+   * Asserted here rather than only over the wire because this is the pure half: `mapGraphNodes` is the ONE
+   * nesting implementation both doors map their tree through, so a case here covers REST and MCP at once
+   * and can be mutated without rebuilding an image.
+   */
+  const through = (flat, seeds) => mapGraphNodes([...nestNeighbours(flat, seeds).bySeed.values()][0], x => x);
+
+  it('drops `from` and `to`, and says `outbound` when the edge runs parent to node', () => {
+    const [b] = through([hop('B', 'A', ['A', 'B'])], ['A']);
+    assert.equal('from' in b.edges[0], false, 'the endpoint ids are still being repeated per edge');
+    assert.equal('to' in b.edges[0], false);
+    assert.equal(b.edges[0].direction, 'outbound');
+  });
+
+  it('says `inbound` when it runs the other way, which is the bit that is NOT derivable', () => {
+    // The whole justification for dropping the ids is that everything except this can be read off the
+    // entry. If direction were wrong the saving would be a loss of information rather than of bytes.
+    const n = hop('B', 'A', ['A', 'B']);
+    n.edges = [edge('B', 'A')];
+    const [b] = through([n], ['A']);
+    assert.equal(b.edges[0].direction, 'inbound');
+  });
+
+  it('says `self` for a record joined to itself, which has no second end', () => {
+    const n = hop('A', 'A', ['A', 'A']);
+    n.edges = [edge('A', 'A', 'conditional')];
+    const [a] = through([n], ['A']);
+    assert.equal(a.edges[0].direction, 'self',
+      'oriented against the node, a loop would otherwise read as outbound and claim a parent it has not got');
+  });
+
+  it('keeps everything else of the document, because that half was never the cost', () => {
+    const [b] = through([hop('B', 'A', ['A', 'B'])], ['A']);
+    assert.equal(b.edges[0].description, 'A depends_on B');
+    assert.deepEqual(b.edges[0].tags, ['t']);
+    assert.ok(b.edges[0]._id, 'the id still names both ends for anyone who wants them');
+  });
+
+  it('and the far end is where the doc says it is', () => {
+    // The promise the ids were dropped on. If this is wrong the field is not a saving, it is a deletion.
+    const [b] = through([hop('B', 'A', ['A', 'B'])], ['A']);
+    assert.equal(b.paths[0][b.paths[0].length - 2], 'A');
+    assert.equal(b.node._id, 'B');
   });
 });

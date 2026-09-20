@@ -1057,6 +1057,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A traversal answered per NODE while its response promised per EDGE, so a self-loop and a second edge
+  between one pair were silently dropped** (`Q-24`). Reported from outside against a live instance and
+  reproduced through both graph-reading doors. `truncated` stayed `false` throughout — which the product
+  documents as *"nothing was cut for size reasons"* — so the one signal a caller had for an incomplete
+  answer was actively saying the answer was complete.
+
+  **One cause, two symptoms that look unrelated.** Both walks track whether a NODE has been reached, never
+  whether an EDGE has been followed, and the answer was derived from that decision. A self-loop is invisible
+  by definition — its far end is the node you are standing on, so it is always "already visited" — and the
+  second of two differently-labelled edges to one target lost to whichever was read first. On the reporter's
+  space a node with six outbound edges returned three, missing both self-loops and a `triggerable` that was
+  competing with an `optional` to the same node. Asked for one at a time, each came back.
+
+  **`paths` could not have carried it, and that is why this is a contract change rather than a patch.** A
+  path is a chain of record ids, so two edges between one pair produce the identical chain — the
+  alternate-route bookkeeping compares chains and correctly concludes it has seen that route. There is no
+  second route to record. There is a second relationship, and nothing in the shape could say so.
+
+  **So the answer is the subgraph: the nodes reached, and every relationship among them.** `traverse`
+  already returned a flat `edges` list and its shape is unchanged — it now holds every edge among the
+  returned nodes rather than one per node, and an edge to a record that is not in `nodes` is still left out.
+  **`recall(traverse: n)`'s `_graph` entries carry `edges` (plural) in place of `edge`**, whole documents as
+  before, and a record that loops back on itself appears as its own neighbour. Both doors, same commit, plus
+  the two schema descriptions, the recall and graph API guides, and the sentence in the graph guide that
+  said the list held *"only the edges actually traversed"*.
+
+  **The endpoint ids go, and the answer gets SMALLER rather than larger.** Every edge in one `_graph` entry
+  joins the same pair — this node and the one it is nested under — so `from` and `to` were two UUIDs per
+  edge restating what `node._id` and `paths[0]` already say. They are replaced by `direction`:
+  `outbound`, `inbound`, or `self` for a record joined to itself. The far end is
+  `paths[0][paths[0].length - 2]`. The flat `edges` list on `POST /traverse` is unaffected — it has no entry
+  around it to state the ends — so this is one shape changing, not two.
+
+  **It reaches the benchmark, which is why it went first.** Across the ten LoCoMo extractions: 486 edges,
+  and **21 node pairs carry more than one edge** — a person tied to painting twice, to a pet twice, to a
+  team twice. `B-6` grades retrieval through `recall(traverse: n)`, so every figure that run would have
+  produced was taken over a graph quietly missing relationships.
+
 - **Two feature ids were reused for different work, so grepping either one misled in both directions.**
   `#1262` shipped as `F-25` — *"find out who still writes the arrays before converting a space"* — and
   `#1265` as `F-26`, *"a passed date means what the schema says"*. Seven source files cite `F-25` and

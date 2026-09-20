@@ -122,7 +122,11 @@ describe('it reaches _graph, at every depth, on nodes AND edges', () => {
       _id: 'e1', spaceId: 'general', from: 'a', to: 'b', label: 'depends_on',
       description: 'a long edge body', properties: { since: '2026-01' }, embedding: [0.3],
     };
-    return [{ edge, node, paths: [['r1', 'n1']], _graph: [{ edge, node, paths: [['r1', 'n1', 'n2']] }] }];
+    // Two edges on the outer hop, because `edges` is plural and a projection that only reached the first
+    // would be the same defect one level down from the one that made the field plural.
+    const second = { ...edge, _id: 'e2', label: 'triggers' };
+    return [{ edges: [edge, second], node, paths: [['r1', 'n1']],
+      _graph: [{ edges: [edge], node, paths: [['r1', 'n1', 'n2']] }] }];
   };
 
   it('a projection trims every node and every edge, recursively', () => {
@@ -137,15 +141,17 @@ describe('it reaches _graph, at every depth, on nodes AND edges', () => {
     for (const n of all) {
       assert.deepEqual(Object.keys(n.node).sort(), ['_id', 'name'],
         'a traversed node kept a field the projection did not name');
-      assert.deepEqual(Object.keys(n.edge).sort(), ['_id', 'label'],
-        'the EDGE is the whole document once per hop — it is where a traverse answer gets large');
+      for (const e of n.edges) {
+        assert.deepEqual(Object.keys(e).sort(), ['_id', 'label'],
+          'an EDGE is a whole document and there may be several — it is where a traverse answer gets large');
+      }
     }
   });
 
   it('and the vector is gone from the graph under a projection that asked for it', () => {
     const out = mapGraphNodes(tree(), graphNodeRecord, true, normaliseProjection({ name: 1, embedding: 1 }));
     assert.equal('embedding' in out[0].node, false);
-    assert.equal('embedding' in out[0].edge, false);
+    assert.equal('embedding' in out[0].edges[0], false);
   });
 
   it('no projection leaves the tree as it was', () => {

@@ -174,7 +174,7 @@ describe('REST find-similar traverse actually expands', () => {
     assert.ok(n, `the neighbour must be nested under the match: ${JSON.stringify((match._graph ?? []).map(x => x.node?._id))}`);
     assert.deepEqual(n.paths[0], [matchId, NEIGHBOUR], 'the route is ids, match first');
     assert.equal(n.paths[0].length - 1, 1, 'hop count is derived from the route');
-    assert.equal(n.edge.label, 'depends_on', 'the reaching edge is the whole document, label included');
+    assert.equal(n.edges[0].label, 'depends_on', 'the reaching edge is the whole document, label included');
     assert.ok(!('score' in n), 'a structurally-reached node has no score to report');
     assert.equal(r.body.graphNodes, allNested(r.body.results).length, 'graphNodes counts what came back');
   });
@@ -196,7 +196,7 @@ describe('both doors answer the same question the same way', () => {
       assert.ok(nestedIds.includes(NEIGHBOUR), `MCP must reach the same neighbour: ${JSON.stringify(nestedIds)}`);
       // The node keys are the contract a caller reads. Both doors ship the same three, from one builder.
       const reached = allNested(parsed.results).find(x => x.node?._id === NEIGHBOUR);
-      for (const key of ['edge', 'node', 'paths']) {
+      for (const key of ['edges', 'node', 'paths']) {
         assert.ok(key in reached, `MCP node is missing ${key}, which REST ships`);
       }
       assert.equal(parsed.count, parsed.results.length, 'MCP count is the matches too');

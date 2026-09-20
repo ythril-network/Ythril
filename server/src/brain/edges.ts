@@ -36,6 +36,13 @@ import type { RefKind } from '../config/types-knowledge.js';
 import { PROPERTIES_SCAN_MAX_MS } from './tag-filter.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { subgraphEdges } from './traverse-subgraph.js';
+// `syntheticEdgeId` moved to `edge-id.ts`, beside `edgeIdFor`: its own docblock says the id format is a
+// fact about EDGES rather than about either walk, and this file is frozen at its size.
+export { syntheticEdgeId } from './edge-id.js';
+import { syntheticEdgeId } from './edge-id.js';
+export type { TraverseEdge } from './traverse-subgraph.js';
+import type { TraverseEdge } from './traverse-subgraph.js';
 
 export interface TraverseNode {
   _id: string;
@@ -62,51 +69,12 @@ export interface TraverseNode {
   tags?: string[];
 }
 
-export interface TraverseEdge {
-  _id: string;
-  from: string;
-  to: string;
-  label: string;
-}
-
 export interface TraverseResult {
   nodes: TraverseNode[];
   edges: TraverseEdge[];
   truncated: boolean;
 }
 
-/**
- * The id of a SYNTHETIC traverse edge — the link from an entity to a chrono entry, fact or file.
- *
- * ## What it replaces, and why that was wrong in both directions
- *
- * These edges used to carry the TARGET DOCUMENT'S OWN `_id`, on this rationale: *"nothing has to invent an
- * edge id that does not exist — a caller looking it up finds the chrono, not a 404."*
- *
- * **The consumer half of that was the exact opposite of true.** `getEdgeById` queries `${spaceId}_edges` and
- * nothing else, and a chrono lives in `_chrono`, a fact in `_facts`, a file in `_files`. So the
- * "helpful" id 404s on every edge-lookup path the product actually has — `GET /edges/:id`, the PATCH, and
- * `update_edge`. The one lookup that does resolve is `GET /chrono/:id`, which needs an id the caller already
- * has from the NODE. The affordance was never delivered; only the collision was.
- *
- * **And it made the links disappear.** A graph library has ONE id namespace for nodes and edges — cytoscape
- * skips a repeated id with a bare `continue` inside its `Collection` constructor, before the code path that
- * would have thrown. Nodes are added before edges, so the node always won and the edge was always dropped,
- * silently. What an operator saw was a detached band of chrono bubbles floating above the graph, connected
- * to nothing, with no console output and an edge count that overreported by exactly that many.
- *
- * ## The shape
- *
- * Label-prefixed and carrying both endpoints, so it can collide with neither a stored edge `_id` (a UUID) nor
- * any node id (also a UUID). Two seeds linking to the SAME chrono entry produce two different edges, which is
- * correct — they are two different relationships — and under the old scheme they were one id twice.
- *
- * It is deliberately NOT a UUID: a synthetic edge has no stored record, and an id shaped like a real one
- * invites exactly the lookup that cannot work. This one says what it is.
- */
-export function syntheticEdgeId(label: string, from: string, to: string): string {
-  return `${label}:${from}:${to}`;
-}
 
 
 /**
@@ -775,12 +743,19 @@ export async function traverseGraph(
   let frontierSet = new Set<string>(frontier);
   let currentDepth = 0;
   const resultNodes: TraverseNode[] = [];
+  /** Link-derived hops. They have no stored document, so they are built once and kept as they are. */
   const resultEdges: TraverseEdge[] = [];
+
+  // The subgraph's edges — `Q-24`. See `traverse-subgraph.ts` for what a hand-written version drops.
+  const subgraph = subgraphEdges();
 
   // Three return sites below, and every one of them owed the same decision about the edge list. A rule copied
   // three times is a rule that will eventually disagree with itself, so it is written once here.
-  const answer = (truncated: boolean): TraverseResult =>
-    ({ nodes: resultNodes, edges: includeEdges ? resultEdges : [], truncated: truncated || edgeScanCapped });
+  const answer = (truncated: boolean): TraverseResult => ({
+    nodes: resultNodes,
+    edges: includeEdges ? [...resultEdges, ...subgraph.among()] : [],
+    truncated: truncated || edgeScanCapped,
+  });
 
   /**
    * Set when a hop's EDGE read hit its budget (W-11). Read by every return site through `answer` above, for the
@@ -810,6 +785,7 @@ export async function traverseGraph(
   const started = await startNode(memberIds, startId);
   // `push` returns the new length, so the cap is checked against the value that just changed — and this
   // file is frozen at its size, so the short form is the one that fits beside the reasoning above it.
+  if (started) subgraph.reached(startId);
   if (started && resultNodes.push(started) >= limit) return answer(true);
 
   while (frontier.length > 0 && currentDepth < maxDepth) {
@@ -845,11 +821,14 @@ export async function traverseGraph(
         edges.length = hopBudget;
       }
       adjacentEdges.push(...edges);
+      // Collected here rather than where a neighbour is chosen, because an edge the node loop skips —
+      // a self-loop, a second edge to a pair already joined, a same-level connection — is still a
+      // relationship among the nodes being returned.
+      subgraph.saw(edges);
     }
 
     // Collect new neighbor IDs (not yet visited) and their traversed edges
     const newNeighborIds: string[] = [];
-    const edgesForNewNeighbors: EdgeDoc[] = [];
     /*
      * The KIND each neighbour was declared as, captured where the end is chosen rather than re-derived.
      *
@@ -877,7 +856,6 @@ export async function traverseGraph(
       if (visited.has(neighborId)) continue;
       visited.add(neighborId);
       newNeighborIds.push(neighborId);
-      edgesForNewNeighbors.push(edge);
       neighborKinds.push(neighborKind);
     }
 
@@ -940,8 +918,9 @@ export async function traverseGraph(
       // outlive the record it points at, and inventing a placeholder node would be a fact the walk made up.
       if (!node) continue;
 
-      const edge = edgesForNewNeighbors[i];
-      resultEdges.push({ _id: edge._id, from: edge.from, to: edge.to, label: edge.label });
+      // The reaching edge is no longer pushed here: it is in `storedEdges` with every other edge read
+      // this hop, and pushing it again would report it twice.
+      subgraph.reached(neighborId);
       resultNodes.push(node);
 
       if (resultNodes.length >= limit) {
@@ -963,9 +942,12 @@ export async function traverseGraph(
     // never to another record of its own kind, so expanding from one would only walk back to entities
     // already visited. Files carry their meta — never chunk text, which is what the class projection is for.
     for (const rec of linkedHere) {
+      // A link has no stored document, so it is pushed rather than collected — it cannot be filtered
+      // against the emitted set because it is created at the same moment its node is.
       resultEdges.push({
         _id: syntheticEdgeId(rec.label, rec.via, rec.doc._id), from: rec.via, to: rec.doc._id, label: rec.label,
       });
+      subgraph.reached(rec.doc._id);
       const file = rec.kind === 'file' ? rec.doc as FileMetaDoc : undefined;
       resultNodes.push({
         _id: rec.doc._id, name: recordDisplayName(rec.kind, rec.doc), type: recordDisplayType(rec.kind, rec.doc),
