@@ -1,0 +1,5389 @@
+{
+  "conversationId": "conv-44",
+  "sessions": [
+    {
+      "date": "2023-03-27",
+      "turns": [
+        "D1:1",
+        "D1:2",
+        "D1:3",
+        "D1:4",
+        "D1:5",
+        "D1:6",
+        "D1:7",
+        "D1:8",
+        "D1:9",
+        "D1:10",
+        "D1:11",
+        "D1:12",
+        "D1:13",
+        "D1:14",
+        "D1:15",
+        "D1:16",
+        "D1:17",
+        "D1:18",
+        "D1:19",
+        "D1:20",
+        "D1:21",
+        "D1:22",
+        "D1:23",
+        "D1:24"
+      ]
+    },
+    {
+      "date": "2023-04-02",
+      "turns": [
+        "D2:1",
+        "D2:2",
+        "D2:3",
+        "D2:4",
+        "D2:5",
+        "D2:6",
+        "D2:7",
+        "D2:8",
+        "D2:9",
+        "D2:10",
+        "D2:11",
+        "D2:12",
+        "D2:13",
+        "D2:14",
+        "D2:15",
+        "D2:16",
+        "D2:17",
+        "D2:18",
+        "D2:19",
+        "D2:20",
+        "D2:21",
+        "D2:22",
+        "D2:23",
+        "D2:24",
+        "D2:25",
+        "D2:26"
+      ]
+    },
+    {
+      "date": "2023-04-16",
+      "turns": [
+        "D3:1",
+        "D3:2",
+        "D3:3",
+        "D3:4",
+        "D3:5",
+        "D3:6",
+        "D3:7",
+        "D3:8",
+        "D3:9",
+        "D3:10",
+        "D3:11",
+        "D3:12",
+        "D3:13",
+        "D3:14",
+        "D3:15",
+        "D3:16",
+        "D3:17",
+        "D3:18",
+        "D3:19",
+        "D3:20",
+        "D3:21",
+        "D3:22",
+        "D3:23",
+        "D3:24",
+        "D3:25",
+        "D3:26",
+        "D3:27",
+        "D3:28",
+        "D3:29",
+        "D3:30",
+        "D3:31"
+      ]
+    },
+    {
+      "date": "2023-05-03",
+      "turns": [
+        "D4:1",
+        "D4:2",
+        "D4:3",
+        "D4:4",
+        "D4:5",
+        "D4:6",
+        "D4:7",
+        "D4:8",
+        "D4:9",
+        "D4:10",
+        "D4:11",
+        "D4:12",
+        "D4:13",
+        "D4:14",
+        "D4:15",
+        "D4:16",
+        "D4:17",
+        "D4:18",
+        "D4:19",
+        "D4:20",
+        "D4:21",
+        "D4:22",
+        "D4:23",
+        "D4:24",
+        "D4:25",
+        "D4:26",
+        "D4:27",
+        "D4:28",
+        "D4:29",
+        "D4:30"
+      ]
+    },
+    {
+      "date": "2023-05-06",
+      "turns": [
+        "D5:1",
+        "D5:2",
+        "D5:3",
+        "D5:4",
+        "D5:5",
+        "D5:6",
+        "D5:7",
+        "D5:8",
+        "D5:9",
+        "D5:10",
+        "D5:11",
+        "D5:12",
+        "D5:13",
+        "D5:14",
+        "D5:15",
+        "D5:16",
+        "D5:17",
+        "D5:18",
+        "D5:19",
+        "D5:20",
+        "D5:21",
+        "D5:22"
+      ]
+    },
+    {
+      "date": "2023-05-11",
+      "turns": [
+        "D6:1",
+        "D6:2",
+        "D6:3",
+        "D6:4",
+        "D6:5",
+        "D6:6",
+        "D6:7",
+        "D6:8",
+        "D6:9",
+        "D6:10",
+        "D6:11",
+        "D6:12",
+        "D6:13",
+        "D6:14",
+        "D6:15",
+        "D6:16"
+      ]
+    },
+    {
+      "date": "2023-06-02",
+      "turns": [
+        "D7:1",
+        "D7:2",
+        "D7:3",
+        "D7:4",
+        "D7:5",
+        "D7:6",
+        "D7:7",
+        "D7:8",
+        "D7:9",
+        "D7:10",
+        "D7:11",
+        "D7:12",
+        "D7:13"
+      ]
+    },
+    {
+      "date": "2023-06-13",
+      "turns": [
+        "D8:1",
+        "D8:2",
+        "D8:3",
+        "D8:4",
+        "D8:5",
+        "D8:6",
+        "D8:7",
+        "D8:8",
+        "D8:9",
+        "D8:10",
+        "D8:11",
+        "D8:12",
+        "D8:13",
+        "D8:14",
+        "D8:15",
+        "D8:16",
+        "D8:17",
+        "D8:18",
+        "D8:19",
+        "D8:20",
+        "D8:21",
+        "D8:22",
+        "D8:23",
+        "D8:24",
+        "D8:25",
+        "D8:26",
+        "D8:27",
+        "D8:28"
+      ]
+    },
+    {
+      "date": "2023-06-26",
+      "turns": [
+        "D9:1",
+        "D9:2",
+        "D9:3",
+        "D9:4",
+        "D9:5",
+        "D9:6",
+        "D9:7",
+        "D9:8",
+        "D9:9",
+        "D9:10",
+        "D9:11",
+        "D9:12",
+        "D9:13",
+        "D9:14",
+        "D9:15",
+        "D9:16",
+        "D9:17",
+        "D9:18",
+        "D9:19",
+        "D9:20",
+        "D9:21",
+        "D9:22",
+        "D9:23",
+        "D9:24",
+        "D9:25",
+        "D9:26",
+        "D9:27"
+      ]
+    },
+    {
+      "date": "2023-07-03",
+      "turns": [
+        "D10:1",
+        "D10:2",
+        "D10:3",
+        "D10:4",
+        "D10:5",
+        "D10:6",
+        "D10:7",
+        "D10:8",
+        "D10:9",
+        "D10:10",
+        "D10:11",
+        "D10:12",
+        "D10:13",
+        "D10:14",
+        "D10:15",
+        "D10:16",
+        "D10:17",
+        "D10:18",
+        "D10:19",
+        "D10:20",
+        "D10:21",
+        "D10:22",
+        "D10:23",
+        "D10:24",
+        "D10:25",
+        "D10:26",
+        "D10:27",
+        "D10:28",
+        "D10:29"
+      ]
+    },
+    {
+      "date": "2023-07-08",
+      "turns": [
+        "D11:1",
+        "D11:2",
+        "D11:3",
+        "D11:4",
+        "D11:5",
+        "D11:6",
+        "D11:7",
+        "D11:8",
+        "D11:9",
+        "D11:10",
+        "D11:11",
+        "D11:12",
+        "D11:13",
+        "D11:14",
+        "D11:15",
+        "D11:16",
+        "D11:17",
+        "D11:18",
+        "D11:19",
+        "D11:20",
+        "D11:21",
+        "D11:22",
+        "D11:23",
+        "D11:24",
+        "D11:25",
+        "D11:26",
+        "D11:27",
+        "D11:28",
+        "D11:29",
+        "D11:30",
+        "D11:31",
+        "D11:32",
+        "D11:33",
+        "D11:34",
+        "D11:35",
+        "D11:36",
+        "D11:37",
+        "D11:38"
+      ]
+    },
+    {
+      "date": "2023-07-11",
+      "turns": [
+        "D12:1",
+        "D12:2",
+        "D12:3",
+        "D12:4",
+        "D12:5",
+        "D12:6",
+        "D12:7",
+        "D12:8",
+        "D12:9",
+        "D12:10",
+        "D12:11",
+        "D12:12",
+        "D12:13",
+        "D12:14",
+        "D12:15",
+        "D12:16",
+        "D12:17"
+      ]
+    },
+    {
+      "date": "2023-07-27",
+      "turns": [
+        "D13:1",
+        "D13:2",
+        "D13:3",
+        "D13:4",
+        "D13:5",
+        "D13:6",
+        "D13:7",
+        "D13:8",
+        "D13:9",
+        "D13:10",
+        "D13:11",
+        "D13:12",
+        "D13:13",
+        "D13:14",
+        "D13:15",
+        "D13:16"
+      ]
+    },
+    {
+      "date": "2023-08-04",
+      "turns": [
+        "D14:1",
+        "D14:2",
+        "D14:3",
+        "D14:4",
+        "D14:5",
+        "D14:6",
+        "D14:7",
+        "D14:8",
+        "D14:9",
+        "D14:10",
+        "D14:11",
+        "D14:12",
+        "D14:13",
+        "D14:14",
+        "D14:15",
+        "D14:16",
+        "D14:17",
+        "D14:18",
+        "D14:19",
+        "D14:20",
+        "D14:21",
+        "D14:22",
+        "D14:23",
+        "D14:24",
+        "D14:25",
+        "D14:26",
+        "D14:27"
+      ]
+    },
+    {
+      "date": "2023-08-16",
+      "turns": [
+        "D15:1",
+        "D15:2",
+        "D15:3",
+        "D15:4",
+        "D15:5",
+        "D15:6",
+        "D15:7",
+        "D15:8",
+        "D15:9",
+        "D15:10",
+        "D15:11",
+        "D15:12",
+        "D15:13",
+        "D15:14",
+        "D15:15",
+        "D15:16",
+        "D15:17",
+        "D15:18",
+        "D15:19"
+      ]
+    },
+    {
+      "date": "2023-08-19",
+      "turns": [
+        "D16:1",
+        "D16:2",
+        "D16:3",
+        "D16:4",
+        "D16:5",
+        "D16:6",
+        "D16:7",
+        "D16:8",
+        "D16:9",
+        "D16:10",
+        "D16:11",
+        "D16:12",
+        "D16:13",
+        "D16:14",
+        "D16:15",
+        "D16:16",
+        "D16:17",
+        "D16:18",
+        "D16:19"
+      ]
+    },
+    {
+      "date": "2023-08-24",
+      "turns": [
+        "D17:1",
+        "D17:2",
+        "D17:3",
+        "D17:4",
+        "D17:5",
+        "D17:6",
+        "D17:7",
+        "D17:8",
+        "D17:9",
+        "D17:10",
+        "D17:11",
+        "D17:12",
+        "D17:13",
+        "D17:14",
+        "D17:15",
+        "D17:16",
+        "D17:17",
+        "D17:18",
+        "D17:19",
+        "D17:20",
+        "D17:21"
+      ]
+    },
+    {
+      "date": "2023-09-06",
+      "turns": [
+        "D18:1",
+        "D18:2",
+        "D18:3",
+        "D18:4",
+        "D18:5",
+        "D18:6",
+        "D18:7",
+        "D18:8",
+        "D18:9",
+        "D18:10",
+        "D18:11",
+        "D18:12",
+        "D18:13",
+        "D18:14",
+        "D18:15",
+        "D18:16",
+        "D18:17",
+        "D18:18",
+        "D18:19",
+        "D18:20",
+        "D18:21",
+        "D18:22"
+      ]
+    },
+    {
+      "date": "2023-09-24",
+      "turns": [
+        "D19:1",
+        "D19:2",
+        "D19:3",
+        "D19:4",
+        "D19:5",
+        "D19:6",
+        "D19:7",
+        "D19:8",
+        "D19:9",
+        "D19:10",
+        "D19:11",
+        "D19:12",
+        "D19:13",
+        "D19:14",
+        "D19:15",
+        "D19:16",
+        "D19:17",
+        "D19:18",
+        "D19:19",
+        "D19:20",
+        "D19:21",
+        "D19:22",
+        "D19:23",
+        "D19:24",
+        "D19:25",
+        "D19:26",
+        "D19:27",
+        "D19:28",
+        "D19:29",
+        "D19:30"
+      ]
+    },
+    {
+      "date": "2023-10-01",
+      "turns": [
+        "D20:1",
+        "D20:2",
+        "D20:3",
+        "D20:4",
+        "D20:5",
+        "D20:6",
+        "D20:7",
+        "D20:8",
+        "D20:9",
+        "D20:10",
+        "D20:11",
+        "D20:12",
+        "D20:13",
+        "D20:14",
+        "D20:15",
+        "D20:16",
+        "D20:17",
+        "D20:18",
+        "D20:19",
+        "D20:20",
+        "D20:21",
+        "D20:22",
+        "D20:23",
+        "D20:24",
+        "D20:25",
+        "D20:26",
+        "D20:27",
+        "D20:28",
+        "D20:29",
+        "D20:30",
+        "D20:31",
+        "D20:32",
+        "D20:33",
+        "D20:34",
+        "D20:35",
+        "D20:36",
+        "D20:37",
+        "D20:38",
+        "D20:39",
+        "D20:40"
+      ]
+    },
+    {
+      "date": "2023-10-04",
+      "turns": [
+        "D21:1",
+        "D21:2",
+        "D21:3",
+        "D21:4",
+        "D21:5",
+        "D21:6",
+        "D21:7",
+        "D21:8",
+        "D21:9",
+        "D21:10",
+        "D21:11",
+        "D21:12",
+        "D21:13",
+        "D21:14",
+        "D21:15",
+        "D21:16",
+        "D21:17",
+        "D21:18"
+      ]
+    },
+    {
+      "date": "2023-10-06",
+      "turns": [
+        "D22:1",
+        "D22:2",
+        "D22:3",
+        "D22:4",
+        "D22:5",
+        "D22:6",
+        "D22:7",
+        "D22:8",
+        "D22:9",
+        "D22:10",
+        "D22:11",
+        "D22:12",
+        "D22:13"
+      ]
+    },
+    {
+      "date": "2023-10-13",
+      "turns": [
+        "D23:1",
+        "D23:2",
+        "D23:3",
+        "D23:4",
+        "D23:5",
+        "D23:6",
+        "D23:7",
+        "D23:8",
+        "D23:9",
+        "D23:10",
+        "D23:11",
+        "D23:12",
+        "D23:13",
+        "D23:14",
+        "D23:15",
+        "D23:16",
+        "D23:17",
+        "D23:18",
+        "D23:19",
+        "D23:20",
+        "D23:21",
+        "D23:22",
+        "D23:23",
+        "D23:24",
+        "D23:25",
+        "D23:26",
+        "D23:27",
+        "D23:28"
+      ]
+    },
+    {
+      "date": "2023-10-19",
+      "turns": [
+        "D24:1",
+        "D24:2",
+        "D24:3",
+        "D24:4",
+        "D24:5",
+        "D24:6",
+        "D24:7",
+        "D24:8",
+        "D24:9",
+        "D24:10",
+        "D24:11",
+        "D24:12",
+        "D24:13",
+        "D24:14",
+        "D24:15",
+        "D24:16",
+        "D24:17",
+        "D24:18",
+        "D24:19",
+        "D24:20",
+        "D24:21",
+        "D24:22"
+      ]
+    },
+    {
+      "date": "2023-10-24",
+      "turns": [
+        "D25:1",
+        "D25:2",
+        "D25:3",
+        "D25:4",
+        "D25:5",
+        "D25:6",
+        "D25:7",
+        "D25:8",
+        "D25:9",
+        "D25:10",
+        "D25:11",
+        "D25:12",
+        "D25:13",
+        "D25:14",
+        "D25:15",
+        "D25:16"
+      ]
+    },
+    {
+      "date": "2023-10-28",
+      "turns": [
+        "D26:1",
+        "D26:2",
+        "D26:3",
+        "D26:4",
+        "D26:5",
+        "D26:6",
+        "D26:7",
+        "D26:8",
+        "D26:9",
+        "D26:10",
+        "D26:11",
+        "D26:12",
+        "D26:13",
+        "D26:14",
+        "D26:15",
+        "D26:16",
+        "D26:17",
+        "D26:18",
+        "D26:19",
+        "D26:20",
+        "D26:21",
+        "D26:22",
+        "D26:23",
+        "D26:24",
+        "D26:25",
+        "D26:26",
+        "D26:27",
+        "D26:28",
+        "D26:29",
+        "D26:30",
+        "D26:31",
+        "D26:32",
+        "D26:33",
+        "D26:34",
+        "D26:35",
+        "D26:36",
+        "D26:37",
+        "D26:38",
+        "D26:39",
+        "D26:40",
+        "D26:41",
+        "D26:42",
+        "D26:43",
+        "D26:44",
+        "D26:45",
+        "D26:46",
+        "D26:47"
+      ]
+    },
+    {
+      "date": "2023-11-04",
+      "turns": [
+        "D27:1",
+        "D27:2",
+        "D27:3",
+        "D27:4",
+        "D27:5",
+        "D27:6",
+        "D27:7",
+        "D27:8",
+        "D27:9",
+        "D27:10",
+        "D27:11",
+        "D27:12",
+        "D27:13",
+        "D27:14",
+        "D27:15",
+        "D27:16",
+        "D27:17",
+        "D27:18"
+      ]
+    },
+    {
+      "date": "2023-11-22",
+      "turns": [
+        "D28:1",
+        "D28:2",
+        "D28:3",
+        "D28:4",
+        "D28:5",
+        "D28:6",
+        "D28:7",
+        "D28:8",
+        "D28:9",
+        "D28:10",
+        "D28:11",
+        "D28:12",
+        "D28:13",
+        "D28:14",
+        "D28:15",
+        "D28:16",
+        "D28:17",
+        "D28:18"
+      ]
+    }
+  ],
+  "entities": [
+    {
+      "key": "audrey",
+      "type": "person",
+      "name": "Audrey",
+      "description": "Audrey, a city-dwelling dog owner and Andrew's long-standing friend, who caught up with him every week or two through 2023. Her life revolves around her four small mutts Pepper, Precious, Panda and Pixie: a positive-reinforcement training course, agility classes, a grooming course, a dog owners group, two tattoos of her dogs, daily walks, road trips and hikes. She also cooks, keeps a small garden, and makes and sells jewellery from recycled materials, donating part of the profits to an animal shelter. She moved to a home with a bigger backyard in June 2023 and broke her arm in a park accident in October 2023.",
+      "properties": {
+        "aliases": "doggy mom"
+      }
+    },
+    {
+      "key": "andrew",
+      "type": "person",
+      "name": "Andrew",
+      "description": "Andrew, who started a job as a Financial Analyst in March 2023 and lives in the city with his girlfriend. Hiking, birds and the outdoors are what he values most, and work stress and city living kept taking them away from him through 2023. After months of searching for a dog-friendly place to live he brought home the German Shepherd puppy Toby in July 2023, adopted Buddy from a shelter in October 2023 and Scout in November 2023. Audrey's friend and regular correspondent."
+    },
+    {
+      "key": "andrew-girlfriend",
+      "type": "person",
+      "name": "Andrew's girlfriend",
+      "description": "Andrew's girlfriend, never named in the conversation. She shares nearly all of his outings: city cafes and restaurants, a farm visit for vegetables, fishing at a nearby lake, camping with Toby, volunteering at a pet shelter, a wine tasting, board-game nights, a bike ride to a park outside town, and planned trips to the beach and a picnic. She adopted Scout with him in November 2023.",
+      "properties": {
+        "aliases": "his GF, my girl, the gf"
+      }
+    },
+    {
+      "key": "pepper",
+      "type": "animal",
+      "name": "Pepper",
+      "description": "One of Audrey's four dogs, and one of the three she had already had for about three years in March 2023. A mutt — Audrey called her a Jack Russell mix in July and September 2023 and a Lab mix in October 2023. She took a while to accept the puppy Pixie in April 2023 and then became inseparable from her. Her favourite spot is the couch.",
+      "properties": {
+        "species": "dog",
+        "breed": "mutt"
+      }
+    },
+    {
+      "key": "precious",
+      "type": "animal",
+      "name": "Precious",
+      "description": "One of Audrey's four dogs, with her since about 2020 alongside Pepper and Panda. A mutt, described as a Chihuahua mix in October 2023. Andrew identified her as the dog whose leash snapped at the park on 22 September 2023 and who had to be chased down. She relaxes in her own chair.",
+      "properties": {
+        "species": "dog",
+        "breed": "mutt"
+      }
+    },
+    {
+      "key": "panda",
+      "type": "animal",
+      "name": "Panda",
+      "description": "One of Audrey's four dogs, with her since about 2020 alongside Pepper and Precious. A mutt, described as a Lab mix in October 2023. He likes to relax on his rug.",
+      "properties": {
+        "species": "dog",
+        "breed": "mutt"
+      }
+    },
+    {
+      "key": "pixie",
+      "type": "animal",
+      "name": "Pixie",
+      "description": "The small white puppy Audrey adopted at the end of March 2023, making four dogs. Described as a Chihuahua mix in October 2023. She took a few days to settle in with the other three and then became inseparable from Pepper. She curls up in her own bed.",
+      "properties": {
+        "species": "dog",
+        "breed": "mutt"
+      }
+    },
+    {
+      "key": "max",
+      "type": "animal",
+      "name": "Max",
+      "description": "Audrey's childhood dog, full of energy and a keen fetch player. She took long walks around the neighbourhood with him as a child, sniffing out new paths, and confided her worries and hopes in him; she remembers him as a great listener and those walks as some of her favourite memories.",
+      "properties": {
+        "species": "dog"
+      }
+    },
+    {
+      "key": "toby",
+      "type": "animal",
+      "name": "Toby",
+      "description": "Andrew's German Shepherd, brought home as a puppy in July 2023 after months of searching — his first dog of his own. Active, fond of sweaters, and once chased a squirrel round a tree at the dog park. He goes camping and to board-game nights with Andrew and his girlfriend, was still too young to hike in September 2023, and was joined by Buddy in October and Scout in November 2023.",
+      "properties": {
+        "species": "dog",
+        "breed": "German Shepherd"
+      }
+    },
+    {
+      "key": "buddy",
+      "type": "animal",
+      "name": "Buddy",
+      "description": "The dog Andrew adopted from a shelter in October 2023, named Buddy because he is Andrew's buddy and because Andrew hoped he and Toby would become buddies. He and Andrew walk together and he loves checking out new hiking trails.",
+      "properties": {
+        "species": "dog"
+      }
+    },
+    {
+      "key": "scout",
+      "type": "animal",
+      "name": "Scout",
+      "description": "The third dog Andrew and his girlfriend adopted, in November 2023, named after a while deliberating because the name suited the pup's adventurous spirit. Kept on a leash outdoors at first, with a bed, toys and puppy pads at home, while being introduced slowly to Toby and Buddy.",
+      "properties": {
+        "species": "dog"
+      }
+    },
+    {
+      "key": "fox-hollow",
+      "type": "place",
+      "name": "Fox Hollow",
+      "description": "A hiking trail Andrew recommended to Audrey on 27 March 2023 as a great weekend hike with awesome views. A week later she still had not tried it, because the new puppy Pixie was keeping her busy.",
+      "properties": {
+        "kind": "natural"
+      }
+    },
+    {
+      "key": "dog-training-course",
+      "type": "organization",
+      "name": "Audrey's positive-reinforcement dog training course",
+      "description": "The positive-reinforcement dog training class Audrey signed up for on 11 May 2023 after seeing a flyer at her local pet store, held from June 2023 and still running on 3 July 2023, when she called it challenging, rewarding and a big time sink that was already paying off in her dogs' behaviour. Andrew said she had nearly sold him on it. She used its techniques again in October 2023 on the behaviourist's advice.",
+      "properties": {
+        "kind": "course"
+      }
+    },
+    {
+      "key": "agility-classes",
+      "type": "organization",
+      "name": "Audrey's dog agility classes",
+      "description": "Agility classes Audrey started with her four dogs at a dog park in early August 2023, attending twice a week. She calls them a physical and mental workout and a bonding experience, and enjoys watching the dogs face obstacles and build relationships with other dogs.",
+      "properties": {
+        "kind": "course"
+      }
+    },
+    {
+      "key": "dog-grooming-course",
+      "type": "organization",
+      "name": "Audrey's dog grooming course",
+      "description": "The dog grooming course Audrey took in August 2023, which taught her to groom her four dogs herself: work slowly and gently, pay attention to sensitive areas like ears and paws, and stay patient and positive throughout.",
+      "properties": {
+        "kind": "course"
+      }
+    },
+    {
+      "key": "dog-owners-group",
+      "type": "organization",
+      "name": "Audrey's dog owners group",
+      "description": "A group of dog owners Audrey joined around early November 2023 to learn to take better care of her dogs. She tries to meet them about once a week, for tips from other owners and so the dogs can play together.",
+      "properties": {
+        "kind": "club"
+      }
+    },
+    {
+      "key": "animal-shelter",
+      "type": "organization",
+      "name": "The animal shelter Audrey donates to",
+      "description": "The animal shelter Audrey gives a portion of her recycled-jewellery profits to. In October 2023 she called it a cause close to her heart that does great work, and her way of helping out when she cannot be there in person.",
+      "properties": {
+        "kind": "nonprofit"
+      }
+    },
+    {
+      "key": "pet-shelter",
+      "type": "organization",
+      "name": "The pet shelter Andrew volunteered at",
+      "description": "The pet shelter where Andrew and his girlfriend volunteered on Monday 24 July 2023. He called it one of the most rewarding things he had ever done and their way of giving back, and it reminded him how much he loves animals.",
+      "properties": {
+        "kind": "nonprofit"
+      }
+    },
+    {
+      "key": "hiking",
+      "type": "activity",
+      "name": "hiking",
+      "description": "The shared centre of Audrey and Andrew's friendship. Andrew calls hiking the best of the outdoor activities and nature a reset button and a home for his soul; how much of it he can get is the running theme of his year. Audrey hikes with her four dogs, on trails, in national parks and on a two-hour trail hike in August 2023. Their plan to hike together with the dogs runs from July 2023 to a date finally set for 4 November 2023.",
+      "properties": {
+        "kind": "outdoor"
+      }
+    },
+    {
+      "key": "rock-climbing",
+      "type": "activity",
+      "name": "rock climbing",
+      "description": "Andrew took a rock climbing class with friends on Sunday 11 June 2023, found it tricky as a newbie but reached the top with his friends' encouragement, and said he was hooked and proud of himself. It made him want to try kayaking and possibly bungee jumping.",
+      "properties": {
+        "kind": "outdoor"
+      }
+    },
+    {
+      "key": "cooking",
+      "type": "activity",
+      "name": "cooking",
+      "description": "A hobby both of them share. Audrey loves experimenting with recipes, calls it an escape, self-care and therapeutic, uses garlic as her go-to ingredient, and offered Andrew her family's Chicken Pot Pie and a Mediterranean-inspired Roasted Chicken. Andrew took it up in mid-2023 while he could not hike, as a way to de-stress and be creative, and it became one of his favourite hobbies.",
+      "properties": {
+        "kind": "craft"
+      }
+    },
+    {
+      "key": "jewelry-making",
+      "type": "activity",
+      "name": "making jewellery from recycled materials",
+      "description": "Audrey makes one-of-a-kind jewellery out of bottle caps, buttons and broken jewellery she hunts down, combining her love of creativity and sustainability and reducing waste. It began as a hobby and became something she sells, donating a portion of the profits to an animal shelter.",
+      "properties": {
+        "kind": "craft"
+      }
+    },
+    {
+      "key": "gardening",
+      "type": "activity",
+      "name": "gardening",
+      "description": "Audrey keeps a small garden of flowers — Peruvian Lilies, which she says need only water and enough sun — and a vegetable patch, which she finds relaxing and rewarding, and which her dogs run around in. Andrew tends flowers on his balcony and, in October 2023, considered more houseplants to bring some peace into his city home.",
+      "properties": {
+        "kind": "outdoor"
+      }
+    },
+    {
+      "key": "birdwatching",
+      "type": "activity",
+      "name": "birdwatching",
+      "description": "Andrew has been awed by birds, especially eagles, since before the conversation began; in March 2023 he had never gone out deliberately but spotted them while hiking, and by October 2023 he claimed some experience and offered to bring binoculars and a notebook. Audrey took the interest up in October 2023 with a birdwatching guidebook and a plan to learn her area's common birds, and the two agreed to go together.",
+      "properties": {
+        "kind": "outdoor"
+      }
+    },
+    {
+      "key": "dog-grooming",
+      "type": "activity",
+      "name": "grooming her own dogs",
+      "description": "Grooming she learned to do herself in August 2023 and said brought her closer to her dogs: daily brushing, regular baths, nail trims and lots of love. She still took all four to a pet salon in November 2023.",
+      "properties": {
+        "kind": "care"
+      }
+    },
+    {
+      "key": "cycling",
+      "type": "activity",
+      "name": "cycling",
+      "description": "Raised by Andrew on 1 October 2023 as a way to cut a carbon footprint; he knows good routes near the river and offered to show Audrey the best of them. He and his girlfriend rode to a park outside town at the end of October 2023.",
+      "properties": {
+        "kind": "outdoor"
+      }
+    },
+    {
+      "key": "knee-injury",
+      "type": "condition",
+      "name": "Audrey's knee injury",
+      "description": "A knee injury Audrey suffered at some point before October 2023 that stopped her walking her dogs, which she found hard because they bring her so much joy. She recovered, and photographed the dogs on her first walk back.",
+      "properties": {
+        "kind": "injury"
+      }
+    },
+    {
+      "key": "arm-injury",
+      "type": "condition",
+      "name": "Audrey's broken arm",
+      "description": "The arm Audrey injured in an accident while playing with her dogs at the park in the week before 24 October 2023. She wore a cast, found looking after four dogs one-handed tricky but manageable, and said she was feeling better each day.",
+      "properties": {
+        "kind": "injury"
+      }
+    },
+    {
+      "key": "dog-adoption-search",
+      "type": "project",
+      "name": "Andrew's search for a dog",
+      "description": "Andrew's search for a dog of his own, running from spring 2023 — browsing websites, visiting shelters and asking friends of theirs — to July 2023, when he brought home the puppy Toby. He reasoned that a smaller dog suited apartment life and matched a breed's exercise needs to living space, and ended up with a German Shepherd anyway.",
+      "properties": {}
+    },
+    {
+      "key": "dog-friendly-home-search",
+      "type": "project",
+      "name": "Andrew's search for a dog-friendly home",
+      "description": "Andrew's long search for a dog-friendly place to live in the city, from April 2023 onwards: rental websites with filters, contacting landlords and walking neighbourhoods, hoping for somewhere near a park or woods where a dog could run. Still unresolved in September 2023; by November 2023 he said he had made it work with dogs while still living in the city.",
+      "properties": {}
+    },
+    {
+      "key": "joint-dog-hike",
+      "type": "project",
+      "name": "Audrey and Andrew's hike together with their dogs",
+      "description": "The hike Audrey and Andrew planned to take together with their dogs. Proposed in July 2023 for the following month, still unrealised through October, and finally arranged for Saturday 4 November 2023 on a dog-friendly trail by a lake, with snacks, after which they talked about a second trail with autumn colours.",
+      "properties": {}
+    }
+  ],
+  "chrono": [
+    {
+      "key": "c-pixie-adopted",
+      "type": "event",
+      "title": "Audrey introduced Pixie, the puppy she had just adopted as her fourth dog",
+      "date": "2023-04-02",
+      "entities": [
+        "audrey",
+        "pixie"
+      ]
+    },
+    {
+      "key": "c-roadtrip-national-park",
+      "type": "event",
+      "title": "Audrey took her dogs on a road trip to a national park",
+      "date": "2023-05-05",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ]
+    },
+    {
+      "key": "c-park-offleash",
+      "type": "event",
+      "title": "Audrey took her dogs to the park and let them run off the leash",
+      "date": "2023-06-01",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ]
+    },
+    {
+      "key": "c-rock-climbing-class",
+      "type": "event",
+      "title": "Andrew took a rock climbing class with friends and made it to the top",
+      "date": "2023-06-11",
+      "entities": [
+        "andrew",
+        "rock-climbing"
+      ]
+    },
+    {
+      "key": "c-andrew-hike-friends",
+      "type": "event",
+      "title": "Andrew hiked with friends in good weather and took photographs",
+      "date": "2023-06-23",
+      "entities": [
+        "andrew",
+        "hiking"
+      ]
+    },
+    {
+      "key": "c-audrey-moves",
+      "type": "event",
+      "title": "Audrey moved into a new home with a bigger backyard for her four dogs, reported on 26 June 2023",
+      "date": "2023-06-26",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ]
+    },
+    {
+      "key": "c-doggy-playdate-june",
+      "type": "event",
+      "title": "Audrey's dogs had a doggy playdate that was crazy but fun",
+      "date": "2023-06-30",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ]
+    },
+    {
+      "key": "c-andrew-picnic",
+      "type": "event",
+      "title": "Andrew had a picnic with his girlfriend",
+      "date": "2023-07-07",
+      "entities": [
+        "andrew",
+        "andrew-girlfriend"
+      ]
+    },
+    {
+      "key": "c-toby-home",
+      "type": "event",
+      "title": "Andrew brought home Toby, a German Shepherd puppy and his first dog of his own, reported on 11 July 2023",
+      "date": "2023-07-11",
+      "entities": [
+        "andrew",
+        "toby",
+        "dog-adoption-search"
+      ]
+    },
+    {
+      "key": "c-shelter-volunteering",
+      "type": "event",
+      "title": "Andrew and his girlfriend volunteered at a pet shelter",
+      "date": "2023-07-24",
+      "entities": [
+        "andrew",
+        "andrew-girlfriend",
+        "pet-shelter"
+      ]
+    },
+    {
+      "key": "c-andrew-cafe-break",
+      "type": "event",
+      "title": "Andrew took a break from work and checked out a new cafe",
+      "date": "2023-08-18",
+      "entities": [
+        "andrew"
+      ]
+    },
+    {
+      "key": "c-leash-broke",
+      "type": "event",
+      "title": "One of Audrey's dogs snapped her leash at the park and had to be chased down",
+      "date": "2023-09-22",
+      "entities": [
+        "audrey",
+        "precious"
+      ]
+    },
+    {
+      "key": "c-dogpark-saturday",
+      "type": "event",
+      "title": "Audrey took her dogs to the dog park nearby",
+      "date": "2023-09-30",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ]
+    },
+    {
+      "key": "c-board-games",
+      "type": "event",
+      "title": "Andrew, his girlfriend and Toby spent an evening playing board games",
+      "date": "2023-10-10",
+      "entities": [
+        "andrew",
+        "andrew-girlfriend",
+        "toby"
+      ]
+    },
+    {
+      "key": "c-pet-store-toys",
+      "type": "event",
+      "title": "Audrey went to a pet store to buy toys for her dogs",
+      "date": "2023-10-16",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ]
+    },
+    {
+      "key": "c-buddy-adopted",
+      "type": "event",
+      "title": "Andrew adopted Buddy from a shelter, his second dog, reported on 19 October 2023",
+      "date": "2023-10-19",
+      "entities": [
+        "andrew",
+        "buddy",
+        "toby"
+      ]
+    },
+    {
+      "key": "c-behaviorist-appointment",
+      "type": "event",
+      "title": "Audrey took her dogs to an animal behaviorist after they stopped acting normally",
+      "date": "2023-10-25",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ]
+    },
+    {
+      "key": "c-hike-saturday-plan",
+      "type": "plan",
+      "title": "Audrey and Andrew planned to hike a dog-friendly trail by a lake with their dogs",
+      "date": "2023-11-04",
+      "entities": [
+        "audrey",
+        "andrew",
+        "joint-dog-hike",
+        "hiking"
+      ]
+    },
+    {
+      "key": "c-picnic-date-plan",
+      "type": "plan",
+      "title": "Andrew planned a picnic date with his girlfriend",
+      "date": "2023-11-05",
+      "entities": [
+        "andrew",
+        "andrew-girlfriend"
+      ]
+    },
+    {
+      "key": "c-pet-salon",
+      "type": "event",
+      "title": "Audrey took her four dogs to the pet salon to be groomed",
+      "date": "2023-11-17",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ]
+    },
+    {
+      "key": "c-scout-adopted",
+      "type": "event",
+      "title": "Andrew and his girlfriend adopted Scout, their third dog, reported on 22 November 2023",
+      "date": "2023-11-22",
+      "entities": [
+        "andrew",
+        "andrew-girlfriend",
+        "scout"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "label": "knows",
+      "from": "audrey",
+      "to": "andrew",
+      "properties": {
+        "kind": "friend"
+      }
+    },
+    {
+      "label": "knows",
+      "from": "andrew",
+      "to": "andrew-girlfriend"
+    },
+    {
+      "label": "owns",
+      "from": "audrey",
+      "to": "pepper"
+    },
+    {
+      "label": "owns",
+      "from": "audrey",
+      "to": "precious"
+    },
+    {
+      "label": "owns",
+      "from": "audrey",
+      "to": "panda"
+    },
+    {
+      "label": "owns",
+      "from": "audrey",
+      "to": "pixie"
+    },
+    {
+      "label": "owns",
+      "from": "audrey",
+      "to": "max"
+    },
+    {
+      "label": "practices",
+      "from": "audrey",
+      "to": "hiking"
+    },
+    {
+      "label": "practices",
+      "from": "andrew",
+      "to": "hiking"
+    },
+    {
+      "label": "practices",
+      "from": "andrew",
+      "to": "birdwatching"
+    },
+    {
+      "label": "likes",
+      "from": "andrew",
+      "to": "hiking"
+    },
+    {
+      "label": "likes",
+      "from": "andrew",
+      "to": "fox-hollow"
+    },
+    {
+      "label": "works_on",
+      "from": "andrew",
+      "to": "dog-adoption-search"
+    },
+    {
+      "label": "works_on",
+      "from": "andrew",
+      "to": "dog-friendly-home-search"
+    },
+    {
+      "label": "member_of",
+      "from": "audrey",
+      "to": "dog-training-course"
+    },
+    {
+      "label": "supersedes",
+      "from": "audrey-four-dogs",
+      "to": "audrey-three-dogs"
+    },
+    {
+      "label": "practices",
+      "from": "andrew",
+      "to": "rock-climbing",
+      "properties": {
+        "since": "2023-06-11"
+      }
+    },
+    {
+      "label": "practices",
+      "from": "audrey",
+      "to": "cooking"
+    },
+    {
+      "label": "likes",
+      "from": "audrey",
+      "to": "cooking"
+    },
+    {
+      "label": "practices",
+      "from": "andrew",
+      "to": "cooking"
+    },
+    {
+      "label": "owns",
+      "from": "andrew",
+      "to": "toby",
+      "properties": {
+        "since": "2023-07-11"
+      }
+    },
+    {
+      "label": "member_of",
+      "from": "andrew",
+      "to": "pet-shelter",
+      "properties": {
+        "role": "volunteer"
+      }
+    },
+    {
+      "label": "member_of",
+      "from": "andrew-girlfriend",
+      "to": "pet-shelter",
+      "properties": {
+        "role": "volunteer"
+      }
+    },
+    {
+      "label": "member_of",
+      "from": "audrey",
+      "to": "agility-classes"
+    },
+    {
+      "label": "works_on",
+      "from": "audrey",
+      "to": "joint-dog-hike"
+    },
+    {
+      "label": "works_on",
+      "from": "andrew",
+      "to": "joint-dog-hike"
+    },
+    {
+      "label": "supersedes",
+      "from": "toby-adopted",
+      "to": "andrew-no-pets"
+    },
+    {
+      "label": "supersedes",
+      "from": "audrey-moved-home",
+      "to": "audrey-home-near-park"
+    },
+    {
+      "label": "member_of",
+      "from": "audrey",
+      "to": "dog-grooming-course"
+    },
+    {
+      "label": "practices",
+      "from": "audrey",
+      "to": "dog-grooming"
+    },
+    {
+      "label": "practices",
+      "from": "audrey",
+      "to": "gardening"
+    },
+    {
+      "label": "practices",
+      "from": "andrew",
+      "to": "gardening"
+    },
+    {
+      "label": "supersedes",
+      "from": "andrew-outdoors-backseat",
+      "to": "andrew-weekly-hiking"
+    },
+    {
+      "label": "supersedes",
+      "from": "andrew-outdoors-backseat",
+      "to": "andrew-weekly-outdoor-plan"
+    },
+    {
+      "label": "supersedes",
+      "from": "hike-plan-november",
+      "to": "hike-plan-august"
+    },
+    {
+      "label": "practices",
+      "from": "audrey",
+      "to": "jewelry-making"
+    },
+    {
+      "label": "has_condition",
+      "from": "audrey",
+      "to": "knee-injury"
+    },
+    {
+      "label": "has_condition",
+      "from": "audrey",
+      "to": "arm-injury"
+    },
+    {
+      "label": "owns",
+      "from": "andrew",
+      "to": "buddy",
+      "properties": {
+        "since": "2023-10-19"
+      }
+    },
+    {
+      "label": "owns",
+      "from": "andrew",
+      "to": "scout",
+      "properties": {
+        "since": "2023-11-22"
+      }
+    },
+    {
+      "label": "owns",
+      "from": "andrew-girlfriend",
+      "to": "scout",
+      "properties": {
+        "since": "2023-11-22"
+      }
+    },
+    {
+      "label": "member_of",
+      "from": "audrey",
+      "to": "dog-owners-group"
+    },
+    {
+      "label": "practices",
+      "from": "andrew",
+      "to": "cycling"
+    },
+    {
+      "label": "supersedes",
+      "from": "hike-plan-saturday",
+      "to": "hike-plan-november"
+    },
+    {
+      "label": "supersedes",
+      "from": "scout-adopted",
+      "to": "andrew-two-dogs-enough"
+    }
+  ],
+  "claims": [
+    {
+      "text": "Andrew started a new job as a Financial Analyst in the week before 27 March 2023, and found it quite a change from his previous job.",
+      "speaker": "Andrew",
+      "statedOn": "2023-03-27",
+      "entities": [
+        "andrew"
+      ],
+      "sourceTurns": [
+        "D1:1",
+        "D1:2"
+      ]
+    },
+    {
+      "text": "Audrey bought new collars and tags for her dogs and showed Andrew a photograph of them wearing the collars on 27 March 2023.",
+      "speaker": "Audrey",
+      "statedOn": "2023-03-27",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda"
+      ],
+      "sourceTurns": [
+        "D1:3",
+        "D1:4",
+        "D1:5"
+      ]
+    },
+    {
+      "key": "audrey-three-dogs",
+      "text": "Audrey had owned three dogs — Pepper, Precious and Panda — for about three years as of 27 March 2023, and said she could not live without them.",
+      "speaker": "Audrey",
+      "statedOn": "2023-03-27",
+      "superseded": true,
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda"
+      ],
+      "sourceTurns": [
+        "D1:6",
+        "D1:7"
+      ]
+    },
+    {
+      "text": "Audrey's dogs are city dogs she explores new parks and trails with very often, and she says they bring her a great deal of happiness.",
+      "speaker": "Audrey",
+      "statedOn": "2023-03-27",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda"
+      ],
+      "sourceTurns": [
+        "D1:8",
+        "D1:9",
+        "D1:10"
+      ]
+    },
+    {
+      "key": "andrew-no-pets",
+      "text": "Andrew had no pets as of 27 March 2023, although he loved animals.",
+      "speaker": "Andrew",
+      "statedOn": "2023-03-27",
+      "superseded": true,
+      "entities": [
+        "andrew"
+      ],
+      "sourceTurns": [
+        "D1:11",
+        "D1:12"
+      ]
+    },
+    {
+      "text": "Andrew's favourite animals are birds, and eagles above all, which have always mesmerised him for their strength and grace.",
+      "speaker": "Andrew",
+      "statedOn": "2023-03-27",
+      "entities": [
+        "andrew",
+        "birdwatching"
+      ],
+      "sourceTurns": [
+        "D1:13",
+        "D1:14",
+        "D1:15",
+        "D1:16"
+      ]
+    },
+    {
+      "text": "Andrew had never gone out bird-watching deliberately as of 27 March 2023, but spotted birds while hiking.",
+      "speaker": "Andrew",
+      "statedOn": "2023-03-27",
+      "entities": [
+        "andrew",
+        "birdwatching",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D1:17",
+        "D1:18"
+      ]
+    },
+    {
+      "text": "Andrew recommended the Fox Hollow trail to Audrey on 27 March 2023 as a great weekend hike with awesome views, and she said she would try it and report back.",
+      "speaker": "Andrew",
+      "statedOn": "2023-03-27",
+      "entities": [
+        "andrew",
+        "audrey",
+        "fox-hollow",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D1:19",
+        "D1:20",
+        "D1:21",
+        "D1:22",
+        "D1:23",
+        "D1:24"
+      ]
+    },
+    {
+      "key": "audrey-four-dogs",
+      "text": "Audrey adopted a puppy called Pixie shortly before 2 April 2023, bringing her household to four dogs alongside Pepper, Precious and Panda.",
+      "speaker": "Audrey",
+      "statedOn": "2023-04-02",
+      "entities": [
+        "audrey",
+        "pixie",
+        "pepper",
+        "precious",
+        "panda"
+      ],
+      "chrono": [
+        "c-pixie-adopted"
+      ],
+      "sourceTurns": [
+        "D2:1"
+      ]
+    },
+    {
+      "text": "Audrey had not yet tried the Fox Hollow hiking spot Andrew recommended, because the new puppy Pixie was keeping the household busy (2 April 2023).",
+      "speaker": "Audrey",
+      "statedOn": "2023-04-02",
+      "entities": [
+        "audrey",
+        "fox-hollow",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D2:2",
+        "D2:3"
+      ]
+    },
+    {
+      "text": "Pixie took a few days to get used to Audrey's other dogs and then became good friends with them, playing and exploring the house together.",
+      "speaker": "Audrey",
+      "statedOn": "2023-04-02",
+      "entities": [
+        "audrey",
+        "pixie",
+        "pepper",
+        "precious",
+        "panda"
+      ],
+      "sourceTurns": [
+        "D2:4",
+        "D2:5"
+      ]
+    },
+    {
+      "text": "Pepper took a while to get used to Pixie, and by 2 April 2023 the two were always together.",
+      "speaker": "Audrey",
+      "statedOn": "2023-04-02",
+      "entities": [
+        "audrey",
+        "pepper",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D2:6",
+        "D2:7"
+      ]
+    },
+    {
+      "text": "Andrew was considering getting a dog in April 2023, but found it challenging to find a dog-friendly place in the city.",
+      "speaker": "Andrew",
+      "statedOn": "2023-04-02",
+      "entities": [
+        "andrew",
+        "dog-friendly-home-search",
+        "dog-adoption-search"
+      ],
+      "sourceTurns": [
+        "D2:8"
+      ]
+    },
+    {
+      "text": "Audrey found her dog-friendly home through rental websites with filters for places that allow dogs, and recommended them to Andrew on 2 April 2023.",
+      "speaker": "Audrey",
+      "statedOn": "2023-04-02",
+      "entities": [
+        "audrey",
+        "andrew",
+        "dog-friendly-home-search"
+      ],
+      "sourceTurns": [
+        "D2:9",
+        "D2:10",
+        "D2:11"
+      ]
+    },
+    {
+      "text": "Andrew hoped to find both an apartment and a dog, and Audrey told him dogs are great for cuddles and companionship.",
+      "speaker": "Andrew",
+      "statedOn": "2023-04-02",
+      "entities": [
+        "andrew",
+        "audrey",
+        "dog-friendly-home-search",
+        "dog-adoption-search"
+      ],
+      "sourceTurns": [
+        "D2:12",
+        "D2:13",
+        "D2:14",
+        "D2:15"
+      ]
+    },
+    {
+      "text": "Andrew's family has a dog, and he shared a photograph of it sitting on a couch on 2 April 2023.",
+      "speaker": "Andrew",
+      "statedOn": "2023-04-02",
+      "entities": [
+        "andrew"
+      ],
+      "sourceTurns": [
+        "D2:16",
+        "D2:17"
+      ]
+    },
+    {
+      "text": "Andrew misses hiking nature trails with his family's dog, and says hiking with a dog is a great way to bond and make memories.",
+      "speaker": "Andrew",
+      "statedOn": "2023-04-02",
+      "entities": [
+        "andrew",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D2:18",
+        "D2:19",
+        "D2:20",
+        "D2:21"
+      ]
+    },
+    {
+      "text": "Andrew said on 2 April 2023 that he would keep looking until he found a dog-friendly place, so he could get out exploring with a dog of his own.",
+      "speaker": "Andrew",
+      "statedOn": "2023-04-02",
+      "entities": [
+        "andrew",
+        "audrey",
+        "dog-friendly-home-search"
+      ],
+      "sourceTurns": [
+        "D2:22",
+        "D2:23",
+        "D2:24",
+        "D2:25",
+        "D2:26"
+      ]
+    },
+    {
+      "text": "Andrew and his girlfriend tried out a new cafe in the city over the weekend of 8-9 April 2023; he enjoyed it but missed being out in nature, where he feels he is really thriving.",
+      "speaker": "Andrew",
+      "statedOn": "2023-04-16",
+      "entities": [
+        "andrew",
+        "andrew-girlfriend"
+      ],
+      "sourceTurns": [
+        "D3:1",
+        "D3:2"
+      ]
+    },
+    {
+      "text": "Andrew describes nature as a home for his soul and like hitting the reset button when life gets chaotic.",
+      "speaker": "Andrew",
+      "statedOn": "2023-04-16",
+      "entities": [
+        "andrew"
+      ],
+      "sourceTurns": [
+        "D3:3",
+        "D3:4",
+        "D3:5"
+      ]
+    },
+    {
+      "text": "Audrey finds that walking her dogs in the park helps her find her centre and recharges her.",
+      "speaker": "Audrey",
+      "statedOn": "2023-04-16",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D3:6"
+      ]
+    },
+    {
+      "text": "Andrew felt in April 2023 that he was missing out, because city living made it hard for him to get outside and connect with nature.",
+      "speaker": "Andrew",
+      "statedOn": "2023-04-16",
+      "entities": [
+        "andrew"
+      ],
+      "sourceTurns": [
+        "D3:7",
+        "D3:8",
+        "D3:9",
+        "D3:10"
+      ]
+    },
+    {
+      "text": "Andrew and his girlfriend love discovering new places to eat around town as a way to try something new and wind down after a long week.",
+      "speaker": "Andrew",
+      "statedOn": "2023-04-16",
+      "entities": [
+        "andrew",
+        "andrew-girlfriend"
+      ],
+      "sourceTurns": [
+        "D3:11",
+        "D3:12"
+      ]
+    },
+    {
+      "text": "Andrew and his girlfriend found a cafe with croissants, muffins and tarts whose smell he called irresistible, and he photographed the pastries.",
+      "speaker": "Andrew",
+      "statedOn": "2023-04-16",
+      "entities": [
+        "andrew",
+        "andrew-girlfriend"
+      ],
+      "sourceTurns": [
+        "D3:13",
+        "D3:14",
+        "D3:15",
+        "D3:16",
+        "D3:17"
+      ]
+    },
+    {
+      "text": "Audrey baked muffins in the week before 16 April 2023 and proposed holding a pastry party with Andrew, which he accepted.",
+      "speaker": "Audrey",
+      "statedOn": "2023-04-16",
+      "entities": [
+        "audrey",
+        "andrew",
+        "cooking"
+      ],
+      "sourceTurns": [
+        "D3:18",
+        "D3:19"
+      ]
+    },
+    {
+      "text": "Audrey said she would bring her four dogs along to the pastry party she and Andrew planned, so he could meet them.",
+      "speaker": "Audrey",
+      "statedOn": "2023-04-16",
+      "entities": [
+        "audrey",
+        "andrew",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D3:20",
+        "D3:21",
+        "D3:22",
+        "D3:23",
+        "D3:24",
+        "D3:25"
+      ]
+    },
+    {
+      "text": "Audrey has a tattoo on her arm of a dog and sunflowers, done some time before April 2023, representing her love for her dogs and for the beauty of nature.",
+      "speaker": "Audrey",
+      "statedOn": "2023-04-16",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D3:26",
+        "D3:27",
+        "D3:28"
+      ]
+    },
+    {
+      "text": "Audrey got her dog tattoo because of her strong bond with her dogs and because she wants to see their happy faces even when they are not with her.",
+      "speaker": "Audrey",
+      "statedOn": "2023-04-16",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D3:29",
+        "D3:30",
+        "D3:31"
+      ]
+    },
+    {
+      "text": "Audrey went on a hike in the week before 3 May 2023 and watched a hummingbird darting about, which she photographed and called an amazing experience.",
+      "speaker": "Audrey",
+      "statedOn": "2023-05-03",
+      "entities": [
+        "audrey",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D4:1"
+      ]
+    },
+    {
+      "text": "Andrew found a new open space to hike near the city by early May 2023, after a period of feeling down about not being able to get out.",
+      "speaker": "Andrew",
+      "statedOn": "2023-05-03",
+      "entities": [
+        "andrew",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D4:2"
+      ]
+    },
+    {
+      "key": "andrew-weekly-hiking",
+      "text": "Andrew escaped the city to hike at least once every weekend as of 3 May 2023, calling it his much-needed break.",
+      "speaker": "Andrew",
+      "statedOn": "2023-05-03",
+      "superseded": true,
+      "entities": [
+        "andrew",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D4:3",
+        "D4:4",
+        "D4:5"
+      ]
+    },
+    {
+      "text": "Andrew finds nature therapeutic and photographs mountain views and sunsets to capture the tranquillity and share the feeling with other people.",
+      "speaker": "Andrew",
+      "statedOn": "2023-05-03",
+      "entities": [
+        "andrew",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D4:6",
+        "D4:7",
+        "D4:8"
+      ]
+    },
+    {
+      "text": "Andrew and Audrey agreed on 3 May 2023 that sharing a peaceful feeling with others has a ripple effect, and that even small gestures spread joy.",
+      "speaker": "Andrew",
+      "statedOn": "2023-05-03",
+      "entities": [
+        "andrew",
+        "audrey"
+      ],
+      "sourceTurns": [
+        "D4:9",
+        "D4:10",
+        "D4:11",
+        "D4:12",
+        "D4:13",
+        "D4:14"
+      ]
+    },
+    {
+      "text": "Audrey said on 3 May 2023 that little had changed for her and that she was busy caring for and spending time with her four dogs, which she found fulfilling.",
+      "speaker": "Audrey",
+      "statedOn": "2023-05-03",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D4:15"
+      ]
+    },
+    {
+      "text": "Audrey's dogs love hiking, exploring new scents and being in nature, which she can tell from their wagging tails and expressions.",
+      "speaker": "Audrey",
+      "statedOn": "2023-05-03",
+      "entities": [
+        "audrey",
+        "hiking",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D4:16",
+        "D4:17"
+      ]
+    },
+    {
+      "text": "Audrey treats safety as very important when her dogs are out and about, and bought them protective shoes, which she says look funny but work.",
+      "speaker": "Audrey",
+      "statedOn": "2023-05-03",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D4:18",
+        "D4:19",
+        "D4:20"
+      ]
+    },
+    {
+      "text": "On walks Audrey plays fetch with a ball or frisbee with her dogs and meets other dog owners in the park for doggy playdates, which she enjoys as a chance to chat.",
+      "speaker": "Audrey",
+      "statedOn": "2023-05-03",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D4:21",
+        "D4:22",
+        "D4:23"
+      ]
+    },
+    {
+      "text": "Audrey's dogs wear party hats for fun and treats, and she arranges their playdates at a dog park with trees and benches right by the park where she usually walks them; Andrew said he would check it out.",
+      "speaker": "Audrey",
+      "statedOn": "2023-05-03",
+      "entities": [
+        "audrey",
+        "andrew",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D4:24",
+        "D4:25",
+        "D4:26",
+        "D4:27",
+        "D4:28",
+        "D4:29",
+        "D4:30"
+      ]
+    },
+    {
+      "text": "Andrew spent early May 2023 looking for a dog to adopt — browsing websites, visiting shelters and asking friends of theirs — and found the process both fun and annoying.",
+      "speaker": "Andrew",
+      "statedOn": "2023-05-06",
+      "entities": [
+        "andrew",
+        "dog-adoption-search"
+      ],
+      "sourceTurns": [
+        "D5:1",
+        "D5:2"
+      ]
+    },
+    {
+      "text": "Andrew concluded that a smaller dog would suit him because he lives in an apartment, and advised matching a breed's exercise needs and the size of the living space when choosing a dog.",
+      "speaker": "Andrew",
+      "statedOn": "2023-05-06",
+      "entities": [
+        "andrew",
+        "dog-adoption-search"
+      ],
+      "sourceTurns": [
+        "D5:3",
+        "D5:4"
+      ]
+    },
+    {
+      "text": "Andrew was contacting landlords and walking neighbourhoods in May 2023 to find a pet-friendly place near a park or woods, so he could stay close to nature and give a dog space to run.",
+      "speaker": "Andrew",
+      "statedOn": "2023-05-06",
+      "entities": [
+        "andrew",
+        "dog-friendly-home-search"
+      ],
+      "sourceTurns": [
+        "D5:5",
+        "D5:6",
+        "D5:7"
+      ]
+    },
+    {
+      "key": "audrey-home-near-park",
+      "text": "Audrey lived near a park that was good for her dogs' walks as of 6 May 2023, and considered herself lucky for it.",
+      "speaker": "Audrey",
+      "statedOn": "2023-05-06",
+      "superseded": true,
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D5:8"
+      ]
+    },
+    {
+      "text": "Audrey took her dogs on a road trip to a beautiful national park on Friday 5 May 2023, and they had a blast.",
+      "speaker": "Audrey",
+      "statedOn": "2023-05-06",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "chrono": [
+        "c-roadtrip-national-park"
+      ],
+      "sourceTurns": [
+        "D5:8",
+        "D5:9"
+      ]
+    },
+    {
+      "text": "Audrey takes her dogs on a road trip once every couple of months, as a way for them to explore and stay active.",
+      "speaker": "Audrey",
+      "statedOn": "2023-05-06",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D5:10"
+      ]
+    },
+    {
+      "text": "Andrew added going on a road trip with a dog of his own to his bucket list on 6 May 2023.",
+      "speaker": "Andrew",
+      "statedOn": "2023-05-06",
+      "entities": [
+        "andrew",
+        "dog-adoption-search"
+      ],
+      "sourceTurns": [
+        "D5:11",
+        "D5:12",
+        "D5:13"
+      ]
+    },
+    {
+      "text": "Audrey offered Andrew help and suggestions with his search for a dog in May 2023, and he promised to keep her posted and send a picture when he found one.",
+      "speaker": "Audrey",
+      "statedOn": "2023-05-06",
+      "entities": [
+        "audrey",
+        "andrew",
+        "dog-adoption-search"
+      ],
+      "sourceTurns": [
+        "D5:14",
+        "D5:15",
+        "D5:16",
+        "D5:17",
+        "D5:18",
+        "D5:19",
+        "D5:20",
+        "D5:21",
+        "D5:22"
+      ]
+    },
+    {
+      "text": "Andrew hiked with friends and his girlfriend over the weekend of 6-7 May 2023, at the new spot he had recently found.",
+      "speaker": "Andrew",
+      "statedOn": "2023-05-11",
+      "entities": [
+        "andrew",
+        "andrew-girlfriend",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D6:1"
+      ]
+    },
+    {
+      "text": "Audrey spent most of her free time in early May 2023 looking after her four dogs and keeping them happy and healthy.",
+      "speaker": "Audrey",
+      "statedOn": "2023-05-11",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D6:2"
+      ]
+    },
+    {
+      "text": "Audrey signed up on 11 May 2023 for a positive-reinforcement dog training workshop about bonding with pets, to be held the following month, after seeing a flyer at her local pet store, where a volunteer let her meet their friendly dog.",
+      "speaker": "Audrey",
+      "statedOn": "2023-05-11",
+      "entities": [
+        "audrey",
+        "dog-training-course"
+      ],
+      "sourceTurns": [
+        "D6:2",
+        "D6:3",
+        "D6:4"
+      ]
+    },
+    {
+      "text": "Audrey expected her dogs to pick up positive-reinforcement training quickly because they are quick learners who love rewards, and promised to pass Andrew tips for his future dog.",
+      "speaker": "Audrey",
+      "statedOn": "2023-05-11",
+      "entities": [
+        "audrey",
+        "andrew",
+        "dog-training-course",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D6:5",
+        "D6:6",
+        "D6:7",
+        "D6:8"
+      ]
+    },
+    {
+      "text": "Andrew said on 11 May 2023 that Audrey had almost sold him on the positive-reinforcement class and that he would look into their classes himself.",
+      "speaker": "Andrew",
+      "statedOn": "2023-05-11",
+      "entities": [
+        "andrew",
+        "audrey",
+        "dog-training-course"
+      ],
+      "sourceTurns": [
+        "D6:9",
+        "D6:10",
+        "D6:11",
+        "D6:15"
+      ]
+    },
+    {
+      "text": "Audrey believes punishment is never the proper way to train a pet and that the thought of hurting one of her dogs pains her; Andrew agreed.",
+      "speaker": "Audrey",
+      "statedOn": "2023-05-11",
+      "entities": [
+        "audrey",
+        "andrew",
+        "dog-training-course"
+      ],
+      "sourceTurns": [
+        "D6:12",
+        "D6:13",
+        "D6:14",
+        "D6:16"
+      ]
+    },
+    {
+      "text": "Audrey took her dogs to the park on 1 June 2023 and let them run around off the leash, which she found joyful and peaceful.",
+      "speaker": "Audrey",
+      "statedOn": "2023-06-02",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "chrono": [
+        "c-park-offleash"
+      ],
+      "sourceTurns": [
+        "D7:1",
+        "D7:2"
+      ]
+    },
+    {
+      "text": "Audrey took her dogs hiking in a national park in the week before 2 June 2023, reaching a peak at sunset with a breeze and birds chirping, and photographed it.",
+      "speaker": "Audrey",
+      "statedOn": "2023-06-02",
+      "entities": [
+        "audrey",
+        "hiking",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D7:3",
+        "D7:4",
+        "D7:5",
+        "D7:6"
+      ]
+    },
+    {
+      "text": "Audrey says nature always cheers her up and makes her feel grateful.",
+      "speaker": "Audrey",
+      "statedOn": "2023-06-02",
+      "entities": [
+        "audrey"
+      ],
+      "sourceTurns": [
+        "D7:7"
+      ]
+    },
+    {
+      "text": "Andrew had still not found a pet-friendly place in the city by 2 June 2023 after checking out several, and was discouraged but determined to find the right place and dog.",
+      "speaker": "Andrew",
+      "statedOn": "2023-06-02",
+      "entities": [
+        "andrew",
+        "dog-friendly-home-search",
+        "dog-adoption-search"
+      ],
+      "sourceTurns": [
+        "D7:8",
+        "D7:9",
+        "D7:10"
+      ]
+    },
+    {
+      "text": "Audrey offered on 2 June 2023 to help Andrew find a place for him and his future dog if he emailed her his criteria.",
+      "speaker": "Audrey",
+      "statedOn": "2023-06-02",
+      "entities": [
+        "audrey",
+        "andrew",
+        "dog-friendly-home-search"
+      ],
+      "sourceTurns": [
+        "D7:11",
+        "D7:12",
+        "D7:13"
+      ]
+    },
+    {
+      "text": "Andrew took a rock climbing class with friends on Sunday 11 June 2023, made it to the top, found the view stunning and said he was hooked.",
+      "speaker": "Andrew",
+      "statedOn": "2023-06-13",
+      "entities": [
+        "andrew",
+        "rock-climbing"
+      ],
+      "chrono": [
+        "c-rock-climbing-class"
+      ],
+      "sourceTurns": [
+        "D8:1",
+        "D8:2",
+        "D8:3"
+      ]
+    },
+    {
+      "key": "andrew-weekly-outdoor-plan",
+      "text": "After his rock climbing class Andrew planned to do more outdoor activities like it every week (13 June 2023).",
+      "speaker": "Andrew",
+      "statedOn": "2023-06-13",
+      "superseded": true,
+      "entities": [
+        "andrew",
+        "rock-climbing"
+      ],
+      "sourceTurns": [
+        "D8:1"
+      ]
+    },
+    {
+      "text": "Andrew found the 11 June 2023 climb tricky because he was still a newbie, but completed it with his friends' support and cheering and was proud of himself.",
+      "speaker": "Andrew",
+      "statedOn": "2023-06-13",
+      "entities": [
+        "andrew",
+        "rock-climbing"
+      ],
+      "sourceTurns": [
+        "D8:4",
+        "D8:5",
+        "D8:6"
+      ]
+    },
+    {
+      "text": "Rock climbing encouraged Andrew to want to try other outdoor activities such as kayaking and possibly bungee jumping.",
+      "speaker": "Andrew",
+      "statedOn": "2023-06-13",
+      "entities": [
+        "andrew",
+        "rock-climbing"
+      ],
+      "sourceTurns": [
+        "D8:7"
+      ]
+    },
+    {
+      "text": "Audrey found a small park with a tree-lined trail for her dogs' walks in the week before 13 June 2023 and invited Andrew to join them, which he accepted.",
+      "speaker": "Audrey",
+      "statedOn": "2023-06-13",
+      "entities": [
+        "audrey",
+        "andrew",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D8:8",
+        "D8:9",
+        "D8:10",
+        "D8:11"
+      ]
+    },
+    {
+      "text": "Audrey usually walks her dogs for about an hour, varying by the day, and lets them explore at their own pace.",
+      "speaker": "Audrey",
+      "statedOn": "2023-06-13",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D8:12",
+        "D8:13",
+        "D8:14",
+        "D8:15"
+      ]
+    },
+    {
+      "text": "Audrey's dogs come home tired and happy from their walks, which are their favourite part of the day; their faces brighten as soon as she gets ready to go.",
+      "speaker": "Audrey",
+      "statedOn": "2023-06-13",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D8:16",
+        "D8:17",
+        "D8:18"
+      ]
+    },
+    {
+      "text": "Audrey says being outdoors with her dogs is her happy place, peaceful and inspiring, and showed Andrew photographs of them in a meadow.",
+      "speaker": "Audrey",
+      "statedOn": "2023-06-13",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D8:19",
+        "D8:20",
+        "D8:21",
+        "D8:22",
+        "D8:23",
+        "D8:24"
+      ]
+    },
+    {
+      "text": "Andrew turns to nature whenever he needs a reset, and he and Audrey agreed it refreshes the mind and changes how you think.",
+      "speaker": "Andrew",
+      "statedOn": "2023-06-13",
+      "entities": [
+        "andrew",
+        "audrey"
+      ],
+      "sourceTurns": [
+        "D8:25",
+        "D8:26",
+        "D8:27",
+        "D8:28"
+      ]
+    },
+    {
+      "key": "audrey-moved-home",
+      "text": "Audrey moved into a new place with a bigger backyard for her four dogs, which she announced on 26 June 2023.",
+      "speaker": "Audrey",
+      "statedOn": "2023-06-26",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "chrono": [
+        "c-audrey-moves"
+      ],
+      "sourceTurns": [
+        "D9:1",
+        "D9:2"
+      ]
+    },
+    {
+      "text": "Audrey's dogs took to the new home's bigger backyard at once, with space to run and new smells to sniff out.",
+      "speaker": "Audrey",
+      "statedOn": "2023-06-26",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D9:3",
+        "D9:4"
+      ]
+    },
+    {
+      "text": "Audrey set up a doggy play area with agility equipment and toys in the backyard of her new home in June 2023, and her dogs loved it.",
+      "speaker": "Audrey",
+      "statedOn": "2023-06-26",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D9:5",
+        "D9:6"
+      ]
+    },
+    {
+      "text": "Andrew told Audrey on 26 June 2023 about a doggy daycare near him with a big indoor space for dogs to play, and she said she would look into taking her dogs there.",
+      "speaker": "Andrew",
+      "statedOn": "2023-06-26",
+      "entities": [
+        "andrew",
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D9:7",
+        "D9:8",
+        "D9:9",
+        "D9:10"
+      ]
+    },
+    {
+      "text": "Audrey and Andrew agreed that it is good to have friends who understand a love of pets, since not everyone feels that way about animals.",
+      "speaker": "Audrey",
+      "statedOn": "2023-06-26",
+      "entities": [
+        "audrey",
+        "andrew"
+      ],
+      "sourceTurns": [
+        "D9:11",
+        "D9:12",
+        "D9:13",
+        "D9:14",
+        "D9:15"
+      ]
+    },
+    {
+      "text": "Audrey spent late June 2023 unboxing the packed boxes after her move, and Andrew showed her a flower bed in a park in his neighbourhood.",
+      "speaker": "Audrey",
+      "statedOn": "2023-06-26",
+      "entities": [
+        "audrey",
+        "andrew"
+      ],
+      "sourceTurns": [
+        "D9:16",
+        "D9:17"
+      ]
+    },
+    {
+      "text": "Andrew hiked with friends on Friday 23 June 2023 in good weather, took photographs he had not yet looked through, and said he had been missing his connection with nature.",
+      "speaker": "Andrew",
+      "statedOn": "2023-06-26",
+      "entities": [
+        "andrew",
+        "hiking"
+      ],
+      "chrono": [
+        "c-andrew-hike-friends"
+      ],
+      "sourceTurns": [
+        "D9:18",
+        "D9:19",
+        "D9:20"
+      ]
+    },
+    {
+      "text": "A few years before June 2023 Audrey and her friends came across a lake in the mountains on a hike and sat by it talking, a memory she says she will never forget.",
+      "speaker": "Audrey",
+      "statedOn": "2023-06-26",
+      "entities": [
+        "audrey",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D9:21",
+        "D9:22",
+        "D9:23",
+        "D9:24",
+        "D9:25"
+      ]
+    },
+    {
+      "text": "Audrey and Andrew agreed on 26 June 2023 that the small things in life should be appreciated and not taken for granted.",
+      "speaker": "Audrey",
+      "statedOn": "2023-06-26",
+      "entities": [
+        "audrey",
+        "andrew"
+      ],
+      "sourceTurns": [
+        "D9:26",
+        "D9:27"
+      ]
+    },
+    {
+      "text": "Audrey was taking a dog training course in July 2023 which she called challenging but rewarding and a big time sink, and her dogs were already doing better.",
+      "speaker": "Audrey",
+      "statedOn": "2023-07-03",
+      "entities": [
+        "audrey",
+        "dog-training-course",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D10:1",
+        "D10:3"
+      ]
+    },
+    {
+      "text": "Andrew had still not found a dog-friendly place to rent by 3 July 2023, and neither he nor Audrey had had time to explore new trails.",
+      "speaker": "Andrew",
+      "statedOn": "2023-07-03",
+      "entities": [
+        "andrew",
+        "audrey",
+        "dog-friendly-home-search",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D10:2",
+        "D10:4"
+      ]
+    },
+    {
+      "text": "Audrey said on 3 July 2023 that seeing her dogs do well in training was rewarding and that nature is calming and restorative with them around.",
+      "speaker": "Audrey",
+      "statedOn": "2023-07-03",
+      "entities": [
+        "audrey",
+        "dog-training-course",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D10:5"
+      ]
+    },
+    {
+      "text": "Audrey said on 3 July 2023 that her four dogs are all mutts — two Jack Russell mixes and two Chihuahua mixes — and that they love running and playing fetch.",
+      "speaker": "Audrey",
+      "statedOn": "2023-07-03",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D10:6",
+        "D10:7"
+      ]
+    },
+    {
+      "text": "Audrey's four dogs were all three years old in July 2023 and made a great pack together.",
+      "speaker": "Audrey",
+      "statedOn": "2023-07-03",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D10:8",
+        "D10:9"
+      ]
+    },
+    {
+      "text": "Audrey's dogs had a doggy playdate on Friday 30 June 2023, which she described as a bit crazy but lots of fun.",
+      "speaker": "Audrey",
+      "statedOn": "2023-07-03",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "chrono": [
+        "c-doggy-playdate-june"
+      ],
+      "sourceTurns": [
+        "D10:9",
+        "D10:10",
+        "D10:11"
+      ]
+    },
+    {
+      "text": "Andrew took up cooking in mid-2023 as a new hobby while he could not get out hiking, trying out new recipes.",
+      "speaker": "Andrew",
+      "statedOn": "2023-07-03",
+      "entities": [
+        "andrew",
+        "cooking"
+      ],
+      "sourceTurns": [
+        "D10:12"
+      ]
+    },
+    {
+      "text": "Audrey's favourite recipe is Chicken Pot Pie, a family recipe handed down for years that reminds her of her grandmother's kitchen and the conversations at the table, and she offered to send it to Andrew.",
+      "speaker": "Audrey",
+      "statedOn": "2023-07-03",
+      "entities": [
+        "audrey",
+        "andrew",
+        "cooking"
+      ],
+      "sourceTurns": [
+        "D10:13",
+        "D10:14",
+        "D10:15"
+      ]
+    },
+    {
+      "text": "Andrew said cooking was helping him de-stress and be creative and was becoming one of his favourite hobbies, though he was still a rookie experimenting.",
+      "speaker": "Andrew",
+      "statedOn": "2023-07-03",
+      "entities": [
+        "andrew",
+        "cooking"
+      ],
+      "sourceTurns": [
+        "D10:16",
+        "D10:18"
+      ]
+    },
+    {
+      "text": "Audrey loves trying new recipes and calls cooking an escape, a form of self-care and therapeutic — music on, a glass of wine, and going with the flow in the kitchen.",
+      "speaker": "Audrey",
+      "statedOn": "2023-07-03",
+      "entities": [
+        "audrey",
+        "cooking"
+      ],
+      "sourceTurns": [
+        "D10:17",
+        "D10:19",
+        "D10:20"
+      ]
+    },
+    {
+      "text": "Audrey's go-to ingredient is garlic, and her favourite dish with it is a Roasted Chicken with garlic, lemon and herbs based on her love of Mediterranean flavours, which she calls her favourite comfort meal and offered to send Andrew.",
+      "speaker": "Audrey",
+      "statedOn": "2023-07-03",
+      "entities": [
+        "audrey",
+        "andrew",
+        "cooking"
+      ],
+      "sourceTurns": [
+        "D10:21",
+        "D10:22",
+        "D10:23",
+        "D10:24",
+        "D10:25",
+        "D10:26",
+        "D10:27",
+        "D10:28",
+        "D10:29"
+      ]
+    },
+    {
+      "text": "Andrew had a picnic with his girlfriend on Friday 7 July 2023 and called it refreshing and joyful.",
+      "speaker": "Andrew",
+      "statedOn": "2023-07-08",
+      "entities": [
+        "andrew",
+        "andrew-girlfriend"
+      ],
+      "chrono": [
+        "c-andrew-picnic"
+      ],
+      "sourceTurns": [
+        "D11:1"
+      ]
+    },
+    {
+      "text": "Audrey had a good walk with her dogs in early July 2023 and said her furry friends always make her happy.",
+      "speaker": "Audrey",
+      "statedOn": "2023-07-08",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D11:2"
+      ]
+    },
+    {
+      "text": "Audrey got her dogs from a breeder near her who had the dogs she wanted, and agreed with Andrew on 8 July 2023 that places allowing dogs are hard to find.",
+      "speaker": "Audrey",
+      "statedOn": "2023-07-08",
+      "entities": [
+        "audrey",
+        "andrew",
+        "dog-friendly-home-search",
+        "dog-adoption-search"
+      ],
+      "sourceTurns": [
+        "D11:3",
+        "D11:4"
+      ]
+    },
+    {
+      "text": "By July 2023 Andrew had found a few parks where a dog may be walked on a leash, but still wanted an open area where one could run and play freely.",
+      "speaker": "Andrew",
+      "statedOn": "2023-07-08",
+      "entities": [
+        "andrew",
+        "dog-friendly-home-search"
+      ],
+      "sourceTurns": [
+        "D11:5"
+      ]
+    },
+    {
+      "key": "hike-plan-august",
+      "text": "Audrey and Andrew agreed on 8 July 2023 to hike together with her dogs the following month, when the weather would be more pleasant, and Andrew sent a trail suggestion and its map.",
+      "speaker": "Andrew",
+      "statedOn": "2023-07-08",
+      "superseded": true,
+      "entities": [
+        "audrey",
+        "andrew",
+        "joint-dog-hike",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D11:6",
+        "D11:7",
+        "D11:8",
+        "D11:9",
+        "D11:10"
+      ]
+    },
+    {
+      "text": "Audrey and Andrew agreed that safety is the top priority when dogs are running around outside, and wanted to make sure the trail they chose was safe for them.",
+      "speaker": "Audrey",
+      "statedOn": "2023-07-08",
+      "entities": [
+        "audrey",
+        "andrew",
+        "joint-dog-hike"
+      ],
+      "sourceTurns": [
+        "D11:11",
+        "D11:12",
+        "D11:13"
+      ]
+    },
+    {
+      "text": "Audrey showed Andrew a photograph of her dogs on their leashes ready for an outdoor adventure on 8 July 2023, and he said he could not wait to meet them.",
+      "speaker": "Audrey",
+      "statedOn": "2023-07-08",
+      "entities": [
+        "audrey",
+        "andrew",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D11:14",
+        "D11:15",
+        "D11:16",
+        "D11:17",
+        "D11:18",
+        "D11:19"
+      ]
+    },
+    {
+      "text": "Audrey says her dogs are so full of energy that she can never get bored, and Andrew said their happiness was contagious even in photographs.",
+      "speaker": "Audrey",
+      "statedOn": "2023-07-08",
+      "entities": [
+        "audrey",
+        "andrew",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D11:20",
+        "D11:21",
+        "D11:22",
+        "D11:23",
+        "D11:24"
+      ]
+    },
+    {
+      "text": "Andrew said on 8 July 2023 that he could not wait to go hiking with Audrey's dogs and expected it to be a great day.",
+      "speaker": "Andrew",
+      "statedOn": "2023-07-08",
+      "entities": [
+        "andrew",
+        "audrey",
+        "joint-dog-hike",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D11:25",
+        "D11:26",
+        "D11:27",
+        "D11:28",
+        "D11:29"
+      ]
+    },
+    {
+      "text": "In 2022 Audrey hiked to a viewpoint a three-hour drive from her home and watched a sunset whose vibrant colours she remembers as peaceful and breathtaking.",
+      "speaker": "Audrey",
+      "statedOn": "2023-07-08",
+      "entities": [
+        "audrey",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D11:30",
+        "D11:31",
+        "D11:32",
+        "D11:33",
+        "D11:34",
+        "D11:35",
+        "D11:36",
+        "D11:37",
+        "D11:38"
+      ]
+    },
+    {
+      "key": "toby-adopted",
+      "text": "Andrew brought home a puppy called Toby in July 2023, despite living in the city, ending his months-long search for a dog.",
+      "speaker": "Andrew",
+      "statedOn": "2023-07-11",
+      "entities": [
+        "andrew",
+        "toby",
+        "dog-adoption-search"
+      ],
+      "chrono": [
+        "c-toby-home"
+      ],
+      "sourceTurns": [
+        "D12:1",
+        "D12:2"
+      ]
+    },
+    {
+      "text": "Andrew's work piled up in early July 2023, keeping him stuck inside and stressed, and he missed the peace and freedom of a hike.",
+      "speaker": "Andrew",
+      "statedOn": "2023-07-11",
+      "entities": [
+        "andrew",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D12:3",
+        "D12:4"
+      ]
+    },
+    {
+      "text": "Andrew invited Audrey and her dogs to join the hike he had planned for August 2023, as a break from stressful work.",
+      "speaker": "Andrew",
+      "statedOn": "2023-07-11",
+      "entities": [
+        "andrew",
+        "audrey",
+        "joint-dog-hike",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D12:5",
+        "D12:6"
+      ]
+    },
+    {
+      "text": "Audrey handmade personalised wooden name tags for each of her four dogs, wanting each one to be special and to fit its dog's personality.",
+      "speaker": "Audrey",
+      "statedOn": "2023-07-11",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D12:6",
+        "D12:7",
+        "D12:8",
+        "D12:9",
+        "D12:10"
+      ]
+    },
+    {
+      "text": "Audrey and Andrew agreed that small acts of love are what show pets how much they are cared about.",
+      "speaker": "Audrey",
+      "statedOn": "2023-07-11",
+      "entities": [
+        "audrey",
+        "andrew"
+      ],
+      "sourceTurns": [
+        "D12:11",
+        "D12:12",
+        "D12:13"
+      ]
+    },
+    {
+      "text": "Audrey and Andrew were counting down to their planned hike in July 2023 and looking forward to Toby meeting her dogs.",
+      "speaker": "Audrey",
+      "statedOn": "2023-07-11",
+      "entities": [
+        "audrey",
+        "andrew",
+        "toby",
+        "joint-dog-hike"
+      ],
+      "sourceTurns": [
+        "D12:14",
+        "D12:15",
+        "D12:16",
+        "D12:17"
+      ]
+    },
+    {
+      "text": "Andrew and his girlfriend volunteered at a pet shelter on Monday 24 July 2023 and found spending time with the animals rewarding and joyful.",
+      "speaker": "Andrew",
+      "statedOn": "2023-07-27",
+      "entities": [
+        "andrew",
+        "andrew-girlfriend",
+        "pet-shelter"
+      ],
+      "chrono": [
+        "c-shelter-volunteering"
+      ],
+      "sourceTurns": [
+        "D13:1",
+        "D13:2"
+      ]
+    },
+    {
+      "text": "Audrey had never volunteered at an animal shelter as of 27 July 2023, though she said she should do it some day.",
+      "speaker": "Audrey",
+      "statedOn": "2023-07-27",
+      "entities": [
+        "audrey"
+      ],
+      "sourceTurns": [
+        "D13:2",
+        "D13:3",
+        "D13:4"
+      ]
+    },
+    {
+      "text": "Audrey described her four dogs' personalities in July 2023: the oldest the most relaxed, like a wise old sage; the second always ready for a game; the third naughty but fond of a cuddle; and the youngest full of life and up for an adventure.",
+      "speaker": "Audrey",
+      "statedOn": "2023-07-27",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D13:5",
+        "D13:6"
+      ]
+    },
+    {
+      "text": "Max was Audrey's childhood dog, full of energy and fond of a game of fetch, and she has many happy memories of him.",
+      "speaker": "Audrey",
+      "statedOn": "2023-07-27",
+      "entities": [
+        "audrey",
+        "max"
+      ],
+      "sourceTurns": [
+        "D13:7",
+        "D13:8"
+      ]
+    },
+    {
+      "text": "As a child Audrey took long walks around the neighbourhood with Max, exploring new paths, and confided her worries and hopes in him; she remembers him as a great listener and those days as some of her favourite memories.",
+      "speaker": "Audrey",
+      "statedOn": "2023-07-27",
+      "entities": [
+        "audrey",
+        "max"
+      ],
+      "sourceTurns": [
+        "D13:9",
+        "D13:10"
+      ]
+    },
+    {
+      "text": "Audrey and Andrew agreed that pets become friends and confidantes who listen without judging and leave a lasting mark.",
+      "speaker": "Audrey",
+      "statedOn": "2023-07-27",
+      "entities": [
+        "audrey",
+        "andrew"
+      ],
+      "sourceTurns": [
+        "D13:11",
+        "D13:12"
+      ]
+    },
+    {
+      "text": "Andrew called volunteering with animals one of the most rewarding things he had ever done and his and his girlfriend's way of giving back.",
+      "speaker": "Andrew",
+      "statedOn": "2023-07-27",
+      "entities": [
+        "andrew",
+        "andrew-girlfriend",
+        "pet-shelter"
+      ],
+      "sourceTurns": [
+        "D13:13",
+        "D13:14",
+        "D13:15",
+        "D13:16"
+      ]
+    },
+    {
+      "text": "Andrew planned to go camping with his girlfriend and Toby over the weekend of 5-6 August 2023, his first time in nature for a while.",
+      "speaker": "Andrew",
+      "statedOn": "2023-08-04",
+      "entities": [
+        "andrew",
+        "andrew-girlfriend",
+        "toby"
+      ],
+      "sourceTurns": [
+        "D14:1"
+      ]
+    },
+    {
+      "text": "Audrey started agility classes with her dogs at a dog park in early August 2023 and enjoyed watching them learn, meet other dogs and conquer obstacles.",
+      "speaker": "Audrey",
+      "statedOn": "2023-08-04",
+      "entities": [
+        "audrey",
+        "agility-classes",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D14:2",
+        "D14:3"
+      ]
+    },
+    {
+      "text": "Audrey takes her dogs to the park twice a week for agility practice, which she calls a great physical and mental workout and a bonding experience.",
+      "speaker": "Audrey",
+      "statedOn": "2023-08-04",
+      "entities": [
+        "audrey",
+        "agility-classes",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D14:4",
+        "D14:5"
+      ]
+    },
+    {
+      "text": "Audrey took her dogs on a two-hour trail hike shortly before 4 August 2023, with lots of amazing views.",
+      "speaker": "Audrey",
+      "statedOn": "2023-08-04",
+      "entities": [
+        "audrey",
+        "hiking",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D14:6",
+        "D14:7",
+        "D14:8",
+        "D14:9"
+      ]
+    },
+    {
+      "text": "Andrew says hiking is the best outdoor activity for him and that reaching the top of a challenging trail makes all his worries vanish, and that nature is a break from the craziness of city living.",
+      "speaker": "Andrew",
+      "statedOn": "2023-08-04",
+      "entities": [
+        "andrew",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D14:10",
+        "D14:11",
+        "D14:12",
+        "D14:13"
+      ]
+    },
+    {
+      "text": "Audrey says her pets have been her good companions through all the tough times and that she is blessed to have them in her life.",
+      "speaker": "Audrey",
+      "statedOn": "2023-08-04",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D14:14",
+        "D14:15",
+        "D14:16"
+      ]
+    },
+    {
+      "text": "Toby is a German Shepherd, a breed Andrew admires for being smart and loyal, and he hoped to take Toby hiking as a trail companion.",
+      "speaker": "Andrew",
+      "statedOn": "2023-08-04",
+      "entities": [
+        "andrew",
+        "toby",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D14:17",
+        "D14:18",
+        "D14:19",
+        "D14:20",
+        "D14:21",
+        "D14:22"
+      ]
+    },
+    {
+      "text": "Audrey advised Andrew that a city dog owner needs enough time and energy for attention and walks, especially with a high-energy German Shepherd like Toby, and he said he did not want to limit Toby's growth.",
+      "speaker": "Audrey",
+      "statedOn": "2023-08-04",
+      "entities": [
+        "audrey",
+        "andrew",
+        "toby"
+      ],
+      "sourceTurns": [
+        "D14:23",
+        "D14:24",
+        "D14:25",
+        "D14:26",
+        "D14:27"
+      ]
+    },
+    {
+      "text": "Audrey got a second tattoo, of her four dogs, on her arm in August 2023, so that they would be with her wherever she goes.",
+      "speaker": "Audrey",
+      "statedOn": "2023-08-16",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D15:1"
+      ]
+    },
+    {
+      "text": "Andrew and his girlfriend visited a farm in August 2023 to pick up fresh vegetables for dinner.",
+      "speaker": "Andrew",
+      "statedOn": "2023-08-16",
+      "entities": [
+        "andrew",
+        "andrew-girlfriend"
+      ],
+      "sourceTurns": [
+        "D15:2"
+      ]
+    },
+    {
+      "text": "Audrey said on 16 August 2023 that although she would love more dogs, four was enough for now, because she wants to give each of them the attention it deserves.",
+      "speaker": "Audrey",
+      "statedOn": "2023-08-16",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D15:2",
+        "D15:3"
+      ]
+    },
+    {
+      "text": "Audrey took all four of her dogs to the vet for a check-up in August 2023; it was such havoc that she decided to bring them one at a time in future.",
+      "speaker": "Audrey",
+      "statedOn": "2023-08-16",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D15:3",
+        "D15:4"
+      ]
+    },
+    {
+      "text": "Each of Audrey's dogs has its own favourite place to relax: Pepper on the couch, Pixie curled up in her bed, Precious in her chair and Panda on his rug.",
+      "speaker": "Audrey",
+      "statedOn": "2023-08-16",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D15:5"
+      ]
+    },
+    {
+      "text": "Toby's favourite spot is a fluffy blanket on the floor, which Andrew photographed in August 2023.",
+      "speaker": "Andrew",
+      "statedOn": "2023-08-16",
+      "entities": [
+        "andrew",
+        "toby"
+      ],
+      "sourceTurns": [
+        "D15:6"
+      ]
+    },
+    {
+      "text": "Audrey's dogs always sleep cuddled up together on her favourite blanket, especially at nap time, and she calls them best friends.",
+      "speaker": "Audrey",
+      "statedOn": "2023-08-16",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D15:7",
+        "D15:8",
+        "D15:9",
+        "D15:10",
+        "D15:11",
+        "D15:12"
+      ]
+    },
+    {
+      "text": "Audrey said on 16 August 2023 that she cannot imagine life without her dogs and will always cherish her time outside with them; Andrew agreed that pets feel like family.",
+      "speaker": "Audrey",
+      "statedOn": "2023-08-16",
+      "entities": [
+        "audrey",
+        "andrew",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D15:13",
+        "D15:14",
+        "D15:15",
+        "D15:16",
+        "D15:17",
+        "D15:18",
+        "D15:19"
+      ]
+    },
+    {
+      "text": "Andrew took a break from work on 18 August 2023 to check out a new cafe, which he found a nice change.",
+      "speaker": "Andrew",
+      "statedOn": "2023-08-19",
+      "entities": [
+        "andrew"
+      ],
+      "chrono": [
+        "c-andrew-cafe-break"
+      ],
+      "sourceTurns": [
+        "D16:1"
+      ]
+    },
+    {
+      "text": "Audrey learned to groom her four dogs herself in August 2023, which she says makes her closer to them, and showed Andrew how soft and fluffy they looked afterwards.",
+      "speaker": "Audrey",
+      "statedOn": "2023-08-19",
+      "entities": [
+        "audrey",
+        "dog-grooming",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D16:2",
+        "D16:3",
+        "D16:4"
+      ]
+    },
+    {
+      "text": "Audrey learned her grooming techniques on a dog grooming course, and offered Andrew tips because he had always wanted to learn but never found the time.",
+      "speaker": "Audrey",
+      "statedOn": "2023-08-19",
+      "entities": [
+        "audrey",
+        "andrew",
+        "dog-grooming-course",
+        "dog-grooming"
+      ],
+      "sourceTurns": [
+        "D16:5",
+        "D16:6"
+      ]
+    },
+    {
+      "text": "Audrey's grooming advice is to work slowly and gently, pay attention to sensitive areas such as ears and paws, and stay patient and positive; Andrew said he would remember it if he ever groomed Toby.",
+      "speaker": "Audrey",
+      "statedOn": "2023-08-19",
+      "entities": [
+        "audrey",
+        "andrew",
+        "toby",
+        "dog-grooming"
+      ],
+      "sourceTurns": [
+        "D16:7",
+        "D16:8",
+        "D16:9",
+        "D16:10",
+        "D16:11"
+      ]
+    },
+    {
+      "text": "Audrey planned to take her dogs for a stroll in the park over the weekend of 19-20 August 2023, as a good workout for all of them.",
+      "speaker": "Audrey",
+      "statedOn": "2023-08-19",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D16:12"
+      ]
+    },
+    {
+      "text": "Andrew planned to visit a nature reserve over the weekend of 19-20 August 2023 to reconnect with the outdoors, and promised Audrey photographs.",
+      "speaker": "Andrew",
+      "statedOn": "2023-08-19",
+      "entities": [
+        "andrew",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D16:13",
+        "D16:14",
+        "D16:15",
+        "D16:16",
+        "D16:17",
+        "D16:18",
+        "D16:19"
+      ]
+    },
+    {
+      "text": "Andrew and his girlfriend went fishing at one of the nearby lakes over the weekend of 19-20 August 2023 and caught a few fish.",
+      "speaker": "Andrew",
+      "statedOn": "2023-08-24",
+      "entities": [
+        "andrew",
+        "andrew-girlfriend"
+      ],
+      "sourceTurns": [
+        "D17:1"
+      ]
+    },
+    {
+      "text": "Audrey had never been fishing as of 24 August 2023; her lake memory is of sitting by a mountain lake with friends a few years earlier, in the stillness and birdsong.",
+      "speaker": "Audrey",
+      "statedOn": "2023-08-24",
+      "entities": [
+        "audrey"
+      ],
+      "sourceTurns": [
+        "D17:2"
+      ]
+    },
+    {
+      "text": "Audrey keeps her dogs looking good with regular grooming — daily brushing, regular baths, nail trims and lots of love.",
+      "speaker": "Audrey",
+      "statedOn": "2023-08-24",
+      "entities": [
+        "audrey",
+        "dog-grooming",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D17:3",
+        "D17:4",
+        "D17:5"
+      ]
+    },
+    {
+      "text": "Audrey takes the responsibility of caring for her dogs seriously and finds it tough but super rewarding, and says they have a strong bond.",
+      "speaker": "Audrey",
+      "statedOn": "2023-08-24",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D17:6",
+        "D17:7",
+        "D17:8"
+      ]
+    },
+    {
+      "text": "Andrew hoped in August 2023 to build as strong a bond with Toby as Audrey has with her dogs, and she advised him that a bond takes time and should not be rushed.",
+      "speaker": "Audrey",
+      "statedOn": "2023-08-24",
+      "entities": [
+        "audrey",
+        "andrew",
+        "toby"
+      ],
+      "sourceTurns": [
+        "D17:9",
+        "D17:10",
+        "D17:11",
+        "D17:12",
+        "D17:13",
+        "D17:14",
+        "D17:15",
+        "D17:16"
+      ]
+    },
+    {
+      "text": "Andrew shared a photograph of Toby on 24 August 2023, said he loved him, and looked forward to exploring the outdoors with him.",
+      "speaker": "Andrew",
+      "statedOn": "2023-08-24",
+      "entities": [
+        "andrew",
+        "toby"
+      ],
+      "sourceTurns": [
+        "D17:17",
+        "D17:18",
+        "D17:19",
+        "D17:20",
+        "D17:21"
+      ]
+    },
+    {
+      "key": "andrew-outdoors-backseat",
+      "text": "By 6 September 2023 work had become tough and stressful for Andrew and his outdoor activities had taken a backseat, leaving him struggling to find a balance.",
+      "speaker": "Andrew",
+      "statedOn": "2023-09-06",
+      "entities": [
+        "andrew",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D18:1",
+        "D18:2",
+        "D18:3"
+      ]
+    },
+    {
+      "text": "Audrey makes sure to do at least one self-care activity every day, such as treating herself to something nice.",
+      "speaker": "Audrey",
+      "statedOn": "2023-09-06",
+      "entities": [
+        "audrey"
+      ],
+      "sourceTurns": [
+        "D18:4"
+      ]
+    },
+    {
+      "text": "Andrew added small things to his day in September 2023 to recharge — a coffee in the morning, a walk at lunchtime.",
+      "speaker": "Andrew",
+      "statedOn": "2023-09-06",
+      "entities": [
+        "andrew"
+      ],
+      "sourceTurns": [
+        "D18:5"
+      ]
+    },
+    {
+      "text": "Audrey organised a doggy playdate with the neighbours' dogs in early September 2023 and photographed it; she said all the wagging tails made her heart feel full.",
+      "speaker": "Audrey",
+      "statedOn": "2023-09-06",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D18:6",
+        "D18:7",
+        "D18:8",
+        "D18:9"
+      ]
+    },
+    {
+      "text": "Audrey bought new beds for her dogs in the week before 6 September 2023 for extra comfort as the weather cooled, and they curl up and snuggle in them.",
+      "speaker": "Audrey",
+      "statedOn": "2023-09-06",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D18:10",
+        "D18:11",
+        "D18:12",
+        "D18:13",
+        "D18:14"
+      ]
+    },
+    {
+      "text": "Andrew got away for a hike over the weekend of 2-3 September 2023, a relief from the city, and photographed the sunset.",
+      "speaker": "Andrew",
+      "statedOn": "2023-09-06",
+      "entities": [
+        "andrew",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D18:15"
+      ]
+    },
+    {
+      "text": "Toby was still too young to go hiking in September 2023, though Andrew had been wanting to take him for a while.",
+      "speaker": "Andrew",
+      "statedOn": "2023-09-06",
+      "entities": [
+        "andrew",
+        "toby",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D18:16",
+        "D18:17"
+      ]
+    },
+    {
+      "text": "Andrew had still not found a dog-friendly place to live by 6 September 2023 and was finding it challenging, but said he would keep searching.",
+      "speaker": "Andrew",
+      "statedOn": "2023-09-06",
+      "entities": [
+        "andrew",
+        "audrey",
+        "dog-friendly-home-search"
+      ],
+      "sourceTurns": [
+        "D18:18",
+        "D18:19",
+        "D18:20",
+        "D18:21",
+        "D18:22"
+      ]
+    },
+    {
+      "text": "On Friday 22 September 2023 one of Audrey's dogs, whom Andrew referred to as Precious, saw something at the park and pulled so hard that her leash broke; Audrey chased and caught her before she came to harm.",
+      "speaker": "Audrey",
+      "statedOn": "2023-09-24",
+      "entities": [
+        "audrey",
+        "precious"
+      ],
+      "chrono": [
+        "c-leash-broke"
+      ],
+      "sourceTurns": [
+        "D19:1",
+        "D19:2",
+        "D19:3"
+      ]
+    },
+    {
+      "text": "Audrey calmed the dog after the leash broke by petting and hugging her, speaking calmly and walking her slowly, and said their bond felt stronger for it.",
+      "speaker": "Audrey",
+      "statedOn": "2023-09-24",
+      "entities": [
+        "audrey",
+        "precious"
+      ],
+      "sourceTurns": [
+        "D19:4",
+        "D19:5"
+      ]
+    },
+    {
+      "text": "Audrey's advice for building trust with a dog is patience, regular training, time, love and praising their successes.",
+      "speaker": "Audrey",
+      "statedOn": "2023-09-24",
+      "entities": [
+        "audrey",
+        "andrew"
+      ],
+      "sourceTurns": [
+        "D19:6",
+        "D19:7"
+      ]
+    },
+    {
+      "text": "Audrey works on obedience with her dogs and teaches them tricks such as sit, stay, shake and roll over, which she finds fun and rewarding.",
+      "speaker": "Audrey",
+      "statedOn": "2023-09-24",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D19:8",
+        "D19:9"
+      ]
+    },
+    {
+      "text": "Audrey walks her dogs very often, several times a day, as exercise for them and bonding time for all of them.",
+      "speaker": "Audrey",
+      "statedOn": "2023-09-24",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D19:10",
+        "D19:11"
+      ]
+    },
+    {
+      "text": "Audrey said on 24 September 2023 that her four dogs are all mutts — two Jack Russell mixes and two Chihuahua mixes — and agreed that some breeds bond more readily than others.",
+      "speaker": "Audrey",
+      "statedOn": "2023-09-24",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D19:11",
+        "D19:12",
+        "D19:13",
+        "D19:14"
+      ]
+    },
+    {
+      "text": "Andrew had been tending a balcony full of flowers by September 2023.",
+      "speaker": "Andrew",
+      "statedOn": "2023-09-24",
+      "entities": [
+        "andrew",
+        "gardening"
+      ],
+      "sourceTurns": [
+        "D19:15"
+      ]
+    },
+    {
+      "text": "Audrey keeps a small garden with flowers and a vegetable patch, which she finds relaxing, peaceful and satisfying to watch grow.",
+      "speaker": "Audrey",
+      "statedOn": "2023-09-24",
+      "entities": [
+        "audrey",
+        "gardening"
+      ],
+      "sourceTurns": [
+        "D19:16",
+        "D19:17",
+        "D19:18"
+      ]
+    },
+    {
+      "text": "The flowers in Audrey's garden are Peruvian Lilies, which she likes for their bright colours and delicate petals and says are easy to care for — just water and enough sun.",
+      "speaker": "Audrey",
+      "statedOn": "2023-09-24",
+      "entities": [
+        "audrey",
+        "gardening"
+      ],
+      "sourceTurns": [
+        "D19:19",
+        "D19:20",
+        "D19:21",
+        "D19:22"
+      ]
+    },
+    {
+      "text": "Audrey's dogs enjoy her garden, running around and exploring it, and they play with no other dogs but each other.",
+      "speaker": "Audrey",
+      "statedOn": "2023-09-24",
+      "entities": [
+        "audrey",
+        "gardening",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D19:23",
+        "D19:24",
+        "D19:25",
+        "D19:26"
+      ]
+    },
+    {
+      "text": "Audrey said on 24 September 2023 that her dogs make everything better and mean everything to her.",
+      "speaker": "Audrey",
+      "statedOn": "2023-09-24",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D19:27",
+        "D19:28",
+        "D19:29",
+        "D19:30"
+      ]
+    },
+    {
+      "text": "Andrew, his girlfriend and Toby planned a beach trip for November 2023.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-01",
+      "entities": [
+        "andrew",
+        "andrew-girlfriend",
+        "toby"
+      ],
+      "sourceTurns": [
+        "D20:1"
+      ]
+    },
+    {
+      "key": "hike-plan-november",
+      "text": "Audrey and Andrew were looking forward on 1 October 2023 to their long-postponed hike with the dogs, now set for the following month.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-01",
+      "superseded": true,
+      "entities": [
+        "audrey",
+        "andrew",
+        "joint-dog-hike",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D20:2",
+        "D20:3"
+      ]
+    },
+    {
+      "text": "Audrey said on 1 October 2023 that things had been tough for her lately and that walking her dogs in the park helped clear her mind and find some peace.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-01",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D20:4"
+      ]
+    },
+    {
+      "text": "Audrey took her dogs to the dog park nearby on Saturday 30 September 2023, where a big grassy area let them play and shaded spots let her relax.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-01",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "chrono": [
+        "c-dogpark-saturday"
+      ],
+      "sourceTurns": [
+        "D20:5",
+        "D20:6",
+        "D20:7"
+      ]
+    },
+    {
+      "text": "Audrey said checking out new trails with her dogs is nothing like being in the city, and she and Andrew agreed everyone needs to leave the hustle and bustle now and then.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-01",
+      "entities": [
+        "audrey",
+        "andrew",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D20:8",
+        "D20:9"
+      ]
+    },
+    {
+      "text": "Audrey and Andrew admired the freedom of birds in October 2023; Andrew said he had seen them up close and found their grace awe-inspiring.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-01",
+      "entities": [
+        "andrew",
+        "audrey",
+        "birdwatching"
+      ],
+      "sourceTurns": [
+        "D20:10",
+        "D20:11",
+        "D20:12",
+        "D20:13"
+      ]
+    },
+    {
+      "text": "Audrey said on 1 October 2023 that she had been wanting to take up birdwatching, and Andrew offered his advice and suggested they all go together.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-01",
+      "entities": [
+        "audrey",
+        "andrew",
+        "birdwatching"
+      ],
+      "sourceTurns": [
+        "D20:14",
+        "D20:15"
+      ]
+    },
+    {
+      "text": "Audrey was using a birdwatching guidebook in October 2023 and planned to learn the common birds of her area before a trip with Andrew.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-01",
+      "entities": [
+        "audrey",
+        "andrew",
+        "birdwatching"
+      ],
+      "sourceTurns": [
+        "D20:16",
+        "D20:17",
+        "D20:18",
+        "D20:19",
+        "D20:20"
+      ]
+    },
+    {
+      "text": "Andrew said he would bring binoculars and a notebook to log the birds on the birdwatching trip he and Audrey planned.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-01",
+      "entities": [
+        "andrew",
+        "audrey",
+        "birdwatching"
+      ],
+      "sourceTurns": [
+        "D20:21",
+        "D20:22"
+      ]
+    },
+    {
+      "text": "Andrew reads books about ecological systems and has learned from them how animals, plants and ecosystems fit together.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-01",
+      "entities": [
+        "andrew"
+      ],
+      "sourceTurns": [
+        "D20:23",
+        "D20:24",
+        "D20:25",
+        "D20:26"
+      ]
+    },
+    {
+      "text": "Audrey and Andrew agreed on 1 October 2023 that nature is all connected and must be looked after so future generations still have its resources.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-01",
+      "entities": [
+        "andrew",
+        "audrey"
+      ],
+      "sourceTurns": [
+        "D20:27",
+        "D20:28",
+        "D20:29",
+        "D20:30"
+      ]
+    },
+    {
+      "text": "Audrey recycles, and Andrew suggested cutting their carbon footprint further by biking or using public transport.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-01",
+      "entities": [
+        "audrey",
+        "andrew",
+        "cycling"
+      ],
+      "sourceTurns": [
+        "D20:31",
+        "D20:32",
+        "D20:33"
+      ]
+    },
+    {
+      "text": "Audrey usually takes public transport and was keen to try biking; Andrew knows good bike routes near the river and offered to show her the best of them.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-01",
+      "entities": [
+        "audrey",
+        "andrew",
+        "cycling"
+      ],
+      "sourceTurns": [
+        "D20:34",
+        "D20:35",
+        "D20:36",
+        "D20:37",
+        "D20:38",
+        "D20:39",
+        "D20:40"
+      ]
+    },
+    {
+      "text": "Audrey took her dogs to the beach over the weekend of 30 September - 1 October 2023, where they had a blast swimming in the ocean.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-04",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D21:1",
+        "D21:2",
+        "D21:3",
+        "D21:4"
+      ]
+    },
+    {
+      "text": "Andrew had not been to the beach in a while by October 2023 and said that although he used to hike a lot, his work-life balance made it harder now.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-04",
+      "entities": [
+        "andrew",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D21:5",
+        "D21:6"
+      ]
+    },
+    {
+      "text": "Andrew said on 4 October 2023 that exploring nature had been his escape and that his job and living in the city had left him with a void in his heart.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-04",
+      "entities": [
+        "andrew",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D21:7"
+      ]
+    },
+    {
+      "text": "Audrey suggested Andrew bring nature into the city with houseplants and weekend trips to the park, and he said he would get more plants for his home.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-04",
+      "entities": [
+        "audrey",
+        "andrew",
+        "gardening"
+      ],
+      "sourceTurns": [
+        "D21:8",
+        "D21:9",
+        "D21:10",
+        "D21:11",
+        "D21:12"
+      ]
+    },
+    {
+      "text": "Andrew thanked Audrey on 4 October 2023 for how much her help and support had meant to him.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-04",
+      "entities": [
+        "andrew",
+        "audrey"
+      ],
+      "sourceTurns": [
+        "D21:13",
+        "D21:14",
+        "D21:15",
+        "D21:16",
+        "D21:17",
+        "D21:18"
+      ]
+    },
+    {
+      "text": "Audrey was once unable to walk her dogs because of a knee injury, which she found hard because they bring her so much joy; she photographed them on her first walk after she could get back out.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-06",
+      "entities": [
+        "audrey",
+        "knee-injury",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D22:1",
+        "D22:2"
+      ]
+    },
+    {
+      "text": "Audrey says her dogs remind her to appreciate life's little pleasures and see the world differently.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-06",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D22:3"
+      ]
+    },
+    {
+      "text": "Audrey makes one-of-a-kind jewellery out of recycled bottle caps, buttons and broken jewellery, combining her love of creativity and sustainability and reducing waste; each piece holds a story.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-06",
+      "entities": [
+        "audrey",
+        "jewelry-making"
+      ],
+      "sourceTurns": [
+        "D22:4",
+        "D22:5",
+        "D22:6"
+      ]
+    },
+    {
+      "text": "Audrey began making jewellery as a hobby and went on to sell it, donating a portion of the profits to a cause close to her heart so that customers support it too.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-06",
+      "entities": [
+        "audrey",
+        "jewelry-making"
+      ],
+      "sourceTurns": [
+        "D22:7",
+        "D22:8"
+      ]
+    },
+    {
+      "text": "Audrey donates part of her jewellery profits to an animal shelter, and says any hobby can have an impact when it is used right.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-06",
+      "entities": [
+        "audrey",
+        "jewelry-making",
+        "animal-shelter"
+      ],
+      "sourceTurns": [
+        "D22:9"
+      ]
+    },
+    {
+      "text": "Audrey said on 6 October 2023 that she keeps finding ways to help the animal shelter even though she cannot be there in person — Andrew believed she had once volunteered there, although in July 2023 she had said she never had.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-06",
+      "entities": [
+        "audrey",
+        "andrew",
+        "animal-shelter"
+      ],
+      "sourceTurns": [
+        "D22:10",
+        "D22:11",
+        "D22:12",
+        "D22:13"
+      ]
+    },
+    {
+      "text": "Andrew, his girlfriend and Toby spent the evening of Tuesday 10 October 2023 playing board games.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "andrew",
+        "andrew-girlfriend",
+        "toby"
+      ],
+      "chrono": [
+        "c-board-games"
+      ],
+      "sourceTurns": [
+        "D23:1"
+      ]
+    },
+    {
+      "text": "Audrey baked cookies in early October 2023 to thank her neighbours for keeping their homes pup-friendly.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "audrey",
+        "cooking"
+      ],
+      "sourceTurns": [
+        "D23:2"
+      ]
+    },
+    {
+      "text": "Andrew planned to spend the weekend of 14-15 October 2023 at a cosy cafe, and recommended to Audrey a newly opened spot with a good view; he referred to the board-game night as Friday night's session.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "andrew",
+        "audrey"
+      ],
+      "sourceTurns": [
+        "D23:3",
+        "D23:4",
+        "D23:5"
+      ]
+    },
+    {
+      "text": "Andrew thought the newly opened cafe was not suitable for Audrey's dogs, but suggested a dog park close by where they could take their coffee instead.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "andrew",
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D23:6",
+        "D23:7",
+        "D23:8"
+      ]
+    },
+    {
+      "text": "Audrey's dogs treat the dog park as paradise, socialising with other dogs and getting lots of exercise.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D23:9",
+        "D23:10"
+      ]
+    },
+    {
+      "text": "Toby once got too excited at the dog park and chased a squirrel round a tree while the squirrel watched him from the branches.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "andrew",
+        "toby"
+      ],
+      "sourceTurns": [
+        "D23:11"
+      ]
+    },
+    {
+      "text": "Audrey's dogs hate snow — she took them to a snowy park in the winter of 2022-23 and they were confused; they prefer sunny days on the grass.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D23:12"
+      ]
+    },
+    {
+      "text": "Toby is a German Shepherd who loves cute sweaters and is very active, as Andrew described him on 13 October 2023.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "andrew",
+        "toby"
+      ],
+      "sourceTurns": [
+        "D23:13"
+      ]
+    },
+    {
+      "text": "Audrey's dogs go crazy for fetch and frisbee at the park and could keep running for hours.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D23:14",
+        "D23:15",
+        "D23:16",
+        "D23:17"
+      ]
+    },
+    {
+      "text": "Audrey had more drawings added to her dog tattoo at the tattoo parlour in October 2023, and said that was enough unless she ever gets another dog.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D23:18",
+        "D23:19",
+        "D23:20"
+      ]
+    },
+    {
+      "text": "Andrew said on 13 October 2023 that living in the city he misses nature a lot, and goes to nearby parks or on hikes whenever he can.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "andrew",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D23:21",
+        "D23:22",
+        "D23:23"
+      ]
+    },
+    {
+      "text": "Audrey had not taken her dogs out for a walk in a while by 13 October 2023 because life had been crazy, and said a hike with them would be great therapy.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "audrey",
+        "hiking",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D23:24",
+        "D23:25",
+        "D23:26",
+        "D23:27",
+        "D23:28"
+      ]
+    },
+    {
+      "text": "Audrey went to a pet store on Monday 16 October 2023 to buy toys for her dogs, and loved seeing how excited they were when she brought them home.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-19",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "chrono": [
+        "c-pet-store-toys"
+      ],
+      "sourceTurns": [
+        "D24:1"
+      ]
+    },
+    {
+      "text": "Andrew adopted a second dog from a shelter shortly before 19 October 2023; the new dog was settling in well but still getting used to Toby and the new environment.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-19",
+      "entities": [
+        "andrew",
+        "buddy",
+        "toby"
+      ],
+      "chrono": [
+        "c-buddy-adopted"
+      ],
+      "sourceTurns": [
+        "D24:2",
+        "D24:3",
+        "D24:4"
+      ]
+    },
+    {
+      "text": "Andrew named his new dog Buddy because he is his buddy and because he hoped Buddy and Toby would become buddies.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-19",
+      "entities": [
+        "andrew",
+        "buddy",
+        "toby"
+      ],
+      "sourceTurns": [
+        "D24:5",
+        "D24:6",
+        "D24:7"
+      ]
+    },
+    {
+      "text": "Andrew and Buddy spend time together on walks in the fresh air, and Buddy loves checking out new hiking trails.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-19",
+      "entities": [
+        "andrew",
+        "buddy",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D24:8",
+        "D24:9",
+        "D24:10",
+        "D24:11",
+        "D24:12"
+      ]
+    },
+    {
+      "text": "Audrey and Andrew looked forward on 19 October 2023 to their hike with the dogs the following month, now with Buddy along as well.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-19",
+      "entities": [
+        "audrey",
+        "andrew",
+        "buddy",
+        "joint-dog-hike"
+      ],
+      "sourceTurns": [
+        "D24:13",
+        "D24:14"
+      ]
+    },
+    {
+      "text": "Andrew shared photographs of countryside nowhere near the city in October 2023 and wished he could take his dogs somewhere like it.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-19",
+      "entities": [
+        "andrew",
+        "toby",
+        "buddy"
+      ],
+      "sourceTurns": [
+        "D24:15",
+        "D24:16",
+        "D24:17"
+      ]
+    },
+    {
+      "text": "Audrey promised on 19 October 2023 to research a hiking spot as good as the countryside Andrew had photographed, for their hike together.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-19",
+      "entities": [
+        "audrey",
+        "andrew",
+        "joint-dog-hike",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D24:18",
+        "D24:19",
+        "D24:20",
+        "D24:21",
+        "D24:22"
+      ]
+    },
+    {
+      "text": "Andrew and his girlfriend went to a wine tasting over the weekend of 21-22 October 2023, tried many unusual wines and learned a lot; he was surprised how much he enjoyed it and called it a reminder to step out of his comfort zone.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-24",
+      "entities": [
+        "andrew",
+        "andrew-girlfriend"
+      ],
+      "sourceTurns": [
+        "D25:1"
+      ]
+    },
+    {
+      "text": "Audrey had an accident while playing with her dogs at the park in the week before 24 October 2023, ended up with her arm in a cast, and found looking after them one-handed tricky but manageable.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-24",
+      "entities": [
+        "audrey",
+        "arm-injury",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D25:2",
+        "D25:4"
+      ]
+    },
+    {
+      "text": "Andrew tried sushi for the first time in October 2023 at a new place in town, having been curious about it for a while, and understood the hype.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-24",
+      "entities": [
+        "andrew"
+      ],
+      "sourceTurns": [
+        "D25:3",
+        "D25:5"
+      ]
+    },
+    {
+      "text": "Audrey loves sushi and encouraged Andrew to try the many different types and flavours rather than limiting himself.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-24",
+      "entities": [
+        "audrey",
+        "andrew"
+      ],
+      "sourceTurns": [
+        "D25:6"
+      ]
+    },
+    {
+      "text": "Audrey's advice for a sushi beginner is to start with a California or salmon roll and to mix it up with different sauces and dips.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-24",
+      "entities": [
+        "audrey",
+        "andrew"
+      ],
+      "sourceTurns": [
+        "D25:7",
+        "D25:8",
+        "D25:9",
+        "D25:10"
+      ]
+    },
+    {
+      "text": "Andrew promised to photograph his next sushi meal for Audrey, and she decided to order sushi for dinner on 24 October 2023.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-24",
+      "entities": [
+        "andrew",
+        "audrey"
+      ],
+      "sourceTurns": [
+        "D25:11",
+        "D25:12",
+        "D25:13",
+        "D25:14",
+        "D25:15",
+        "D25:16"
+      ]
+    },
+    {
+      "text": "Audrey noticed her dogs were not acting normally in October 2023 and took them to an animal behaviorist on Wednesday 25 October 2023, which was hectic but which she hoped would help her understand them.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-28",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "chrono": [
+        "c-behaviorist-appointment"
+      ],
+      "sourceTurns": [
+        "D26:1",
+        "D26:2"
+      ]
+    },
+    {
+      "text": "At the 25 October 2023 appointment the behaviorist checked Audrey's dogs over, asked questions, and gave her tips and some changes to their routine.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-28",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D26:3",
+        "D26:4"
+      ]
+    },
+    {
+      "text": "Audrey used positive reinforcement techniques on her dogs' behaviour problems and saw some progress by 28 October 2023, though it was still a work in progress.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-28",
+      "entities": [
+        "audrey",
+        "dog-training-course",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D26:5",
+        "D26:6",
+        "D26:7",
+        "D26:8"
+      ]
+    },
+    {
+      "text": "Audrey said on 28 October 2023 that she was devoted to keeping her dogs healthy and happy and was looking forward to the day they were back to normal.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-28",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D26:9",
+        "D26:10",
+        "D26:11"
+      ]
+    },
+    {
+      "text": "Audrey said on 28 October 2023 that her four dogs are all mutts, with Pepper and Panda Lab mixes and Precious and Pixie Chihuahua mixes.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-28",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D26:12",
+        "D26:13"
+      ]
+    },
+    {
+      "text": "Andrew shared a photograph from a national park he had visited and hoped Audrey's dogs would get better and join them on a hike soon.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-28",
+      "entities": [
+        "andrew",
+        "audrey",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D26:14",
+        "D26:15",
+        "D26:16"
+      ]
+    },
+    {
+      "text": "Andrew knew a dog-friendly trail close by with killer views and proposed a hike there in late October 2023.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-28",
+      "entities": [
+        "andrew",
+        "audrey",
+        "joint-dog-hike",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D26:17",
+        "D26:18",
+        "D26:19"
+      ]
+    },
+    {
+      "key": "hike-plan-saturday",
+      "text": "Andrew and Audrey arranged on 28 October 2023 to hike with their dogs on the following Saturday, 4 November 2023, bringing snacks.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-28",
+      "entities": [
+        "andrew",
+        "audrey",
+        "joint-dog-hike",
+        "hiking"
+      ],
+      "chrono": [
+        "c-hike-saturday-plan"
+      ],
+      "sourceTurns": [
+        "D26:20",
+        "D26:21",
+        "D26:22",
+        "D26:23"
+      ]
+    },
+    {
+      "text": "Andrew planned a picnic date with his girlfriend on Sunday 5 November 2023, the day after his hike with Audrey.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-28",
+      "entities": [
+        "andrew",
+        "andrew-girlfriend"
+      ],
+      "chrono": [
+        "c-picnic-date-plan"
+      ],
+      "sourceTurns": [
+        "D26:20"
+      ]
+    },
+    {
+      "text": "Audrey and Andrew agreed to explore a trail by a lake on their planned hike, a peaceful spot with great views for the dogs.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-28",
+      "entities": [
+        "audrey",
+        "andrew",
+        "joint-dog-hike",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D26:24",
+        "D26:25",
+        "D26:26",
+        "D26:27",
+        "D26:28",
+        "D26:29",
+        "D26:30"
+      ]
+    },
+    {
+      "text": "Audrey and Andrew each said on 28 October 2023 that they were lucky to have a friend who shares their love of the outdoors and of dogs, and that such people are hard to find.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-28",
+      "entities": [
+        "audrey",
+        "andrew"
+      ],
+      "sourceTurns": [
+        "D26:31",
+        "D26:32",
+        "D26:33"
+      ]
+    },
+    {
+      "text": "Andrew suggested a second trail with beautiful autumn colours for the trip after their planned hike, and Audrey agreed it would photograph well with the dogs.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-28",
+      "entities": [
+        "andrew",
+        "audrey",
+        "joint-dog-hike",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D26:34",
+        "D26:35",
+        "D26:36",
+        "D26:37",
+        "D26:38",
+        "D26:39"
+      ]
+    },
+    {
+      "text": "Audrey and Andrew looked forward to a memorable day out with their dogs, and Andrew shared a photograph of himself hiking with his dog.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-28",
+      "entities": [
+        "andrew",
+        "audrey",
+        "toby",
+        "joint-dog-hike"
+      ],
+      "sourceTurns": [
+        "D26:40",
+        "D26:41",
+        "D26:42",
+        "D26:43",
+        "D26:44",
+        "D26:45",
+        "D26:46",
+        "D26:47"
+      ]
+    },
+    {
+      "text": "Andrew and his girlfriend went on a bike ride over the weekend of 28-29 October 2023 and came across a park outside town, away from the city.",
+      "speaker": "Andrew",
+      "statedOn": "2023-11-04",
+      "entities": [
+        "andrew",
+        "andrew-girlfriend",
+        "cycling"
+      ],
+      "sourceTurns": [
+        "D27:1"
+      ]
+    },
+    {
+      "text": "Audrey took her four dogs to a new park over the weekend of 28-29 October 2023, where they ran around and got some fresh air.",
+      "speaker": "Audrey",
+      "statedOn": "2023-11-04",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D27:2"
+      ]
+    },
+    {
+      "text": "Audrey joined a dog owners group shortly before 4 November 2023 to learn to care for her dogs better, and tries to meet the other owners about once a week for tips and so the dogs can play together.",
+      "speaker": "Audrey",
+      "statedOn": "2023-11-04",
+      "entities": [
+        "audrey",
+        "dog-owners-group"
+      ],
+      "sourceTurns": [
+        "D27:2",
+        "D27:3",
+        "D27:4"
+      ]
+    },
+    {
+      "key": "andrew-two-dogs-enough",
+      "text": "Andrew thought about getting a third dog in early November 2023 but decided, on Audrey's advice, to concentrate on keeping Toby and Buddy happy and healthy first.",
+      "speaker": "Andrew",
+      "statedOn": "2023-11-04",
+      "superseded": true,
+      "entities": [
+        "andrew",
+        "audrey",
+        "toby",
+        "buddy"
+      ],
+      "sourceTurns": [
+        "D27:5",
+        "D27:6",
+        "D27:7"
+      ]
+    },
+    {
+      "text": "Andrew said on 4 November 2023 that he had managed to make life with dogs work while still living in the city.",
+      "speaker": "Andrew",
+      "statedOn": "2023-11-04",
+      "entities": [
+        "andrew",
+        "dog-friendly-home-search",
+        "toby",
+        "buddy"
+      ],
+      "sourceTurns": [
+        "D27:8",
+        "D27:9"
+      ]
+    },
+    {
+      "text": "Audrey says keeping a dog active is the key to city dog ownership, and showed Andrew the toys and games she uses to entertain her dogs indoors.",
+      "speaker": "Audrey",
+      "statedOn": "2023-11-04",
+      "entities": [
+        "audrey",
+        "andrew",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D27:10",
+        "D27:11",
+        "D27:12"
+      ]
+    },
+    {
+      "text": "Audrey keeps her dogs mentally stimulated with puzzles, training and hide-and-seek, and Andrew said he would try those activities with his dogs.",
+      "speaker": "Audrey",
+      "statedOn": "2023-11-04",
+      "entities": [
+        "audrey",
+        "andrew",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D27:13",
+        "D27:14",
+        "D27:15",
+        "D27:16"
+      ]
+    },
+    {
+      "text": "Andrew and Audrey told each other on 4 November 2023 how much their friendship and mutual support meant to them.",
+      "speaker": "Andrew",
+      "statedOn": "2023-11-04",
+      "entities": [
+        "andrew",
+        "audrey"
+      ],
+      "sourceTurns": [
+        "D27:17",
+        "D27:18"
+      ]
+    },
+    {
+      "text": "Audrey took her four dogs to the pet salon on Friday 17 November 2023; they were excited, took a while to calm down, behaved well and came home with shiny coats.",
+      "speaker": "Audrey",
+      "statedOn": "2023-11-22",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "chrono": [
+        "c-pet-salon"
+      ],
+      "sourceTurns": [
+        "D28:1",
+        "D28:2",
+        "D28:3",
+        "D28:4",
+        "D28:5"
+      ]
+    },
+    {
+      "key": "scout-adopted",
+      "text": "Andrew and his girlfriend adopted a third dog shortly before 22 November 2023, having not yet taken Toby and Buddy to a groomer.",
+      "speaker": "Andrew",
+      "statedOn": "2023-11-22",
+      "entities": [
+        "andrew",
+        "andrew-girlfriend",
+        "scout",
+        "toby",
+        "buddy"
+      ],
+      "chrono": [
+        "c-scout-adopted"
+      ],
+      "sourceTurns": [
+        "D28:6",
+        "D28:7"
+      ]
+    },
+    {
+      "text": "Andrew and his girlfriend took a while to decide and then named their third dog Scout, which seemed to suit the pup's adventurous spirit.",
+      "speaker": "Andrew",
+      "statedOn": "2023-11-22",
+      "entities": [
+        "andrew",
+        "andrew-girlfriend",
+        "scout"
+      ],
+      "sourceTurns": [
+        "D28:8",
+        "D28:9"
+      ]
+    },
+    {
+      "text": "Andrew planned to take Scout, Toby and Buddy to a small nearby park for Scout's first outing, and Audrey advised starting small and keeping them leashed.",
+      "speaker": "Andrew",
+      "statedOn": "2023-11-22",
+      "entities": [
+        "andrew",
+        "scout",
+        "toby",
+        "buddy",
+        "audrey"
+      ],
+      "sourceTurns": [
+        "D28:10",
+        "D28:11"
+      ]
+    },
+    {
+      "text": "Andrew kept Scout on a leash outdoors at first while the pup got used to being outside, and bought a bed, toys and puppy pads to make a safe haven at home.",
+      "speaker": "Andrew",
+      "statedOn": "2023-11-22",
+      "entities": [
+        "andrew",
+        "scout"
+      ],
+      "sourceTurns": [
+        "D28:12"
+      ]
+    },
+    {
+      "text": "Audrey advised Andrew to introduce Scout to Toby and Buddy slowly, because dogs take time to get used to each other.",
+      "speaker": "Audrey",
+      "statedOn": "2023-11-22",
+      "entities": [
+        "audrey",
+        "andrew",
+        "scout",
+        "toby",
+        "buddy"
+      ],
+      "sourceTurns": [
+        "D28:13",
+        "D28:14"
+      ]
+    },
+    {
+      "text": "Audrey said on 22 November 2023 that her dogs were doing great — exploring, meeting new people and feeling loved and safe — and that she is grateful to have them as part of her family.",
+      "speaker": "Audrey",
+      "statedOn": "2023-11-22",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D28:15",
+        "D28:16",
+        "D28:17",
+        "D28:18"
+      ]
+    },
+    {
+      "text": "Andrew went from having no pets in March 2023 and hunting for a dog-friendly city apartment, to bringing home the puppy Toby in July 2023, adopting Buddy from a shelter in October 2023 and Scout in November 2023 — three dogs in five months.",
+      "speaker": "Andrew",
+      "statedOn": "2023-11-22",
+      "entities": [
+        "andrew",
+        "toby",
+        "buddy",
+        "scout",
+        "dog-adoption-search"
+      ],
+      "sourceTurns": [
+        "D1:12",
+        "D5:1",
+        "D12:1",
+        "D24:2",
+        "D28:6"
+      ]
+    },
+    {
+      "text": "Audrey's work on her dogs' training built up through 2023: a positive-reinforcement workshop signed up for in May, a dog training course under way by July, agility classes twice a week from August, a grooming course the same month, and a dog owners group by November.",
+      "speaker": "Audrey",
+      "statedOn": "2023-11-04",
+      "entities": [
+        "audrey",
+        "dog-training-course",
+        "agility-classes",
+        "dog-grooming-course",
+        "dog-owners-group"
+      ],
+      "sourceTurns": [
+        "D6:2",
+        "D10:1",
+        "D14:2",
+        "D16:6",
+        "D27:2"
+      ]
+    },
+    {
+      "text": "The hike Audrey and Andrew planned to take together with their dogs was first set for August 2023, was still unrealised through October, and was finally arranged for Saturday 4 November 2023 on a dog-friendly trail by a lake.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-28",
+      "entities": [
+        "andrew",
+        "audrey",
+        "joint-dog-hike",
+        "hiking"
+      ],
+      "sourceTurns": [
+        "D11:7",
+        "D12:5",
+        "D20:2",
+        "D24:13",
+        "D26:20"
+      ]
+    },
+    {
+      "text": "Andrew's access to the outdoors shrank over 2023: weekly escapes from the city in May, a rock climbing class in June he meant to build on weekly, then work stress from September that pushed his outdoor activities aside until he described a void in his heart in October.",
+      "speaker": "Andrew",
+      "statedOn": "2023-10-04",
+      "entities": [
+        "andrew",
+        "hiking",
+        "rock-climbing"
+      ],
+      "sourceTurns": [
+        "D4:4",
+        "D8:1",
+        "D18:1",
+        "D21:5",
+        "D21:7"
+      ]
+    },
+    {
+      "text": "Audrey's household went from three dogs to four when she adopted the puppy Pixie at the end of March 2023, and she marked her attachment with a tattoo of a dog and sunflowers before April 2023, a second tattoo of all four dogs in August 2023, and further drawings added in October 2023.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-13",
+      "entities": [
+        "audrey",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D1:7",
+        "D2:1",
+        "D3:26",
+        "D15:1",
+        "D23:18"
+      ]
+    },
+    {
+      "text": "Audrey had a difficult autumn in 2023: a knee injury in the past that had kept her from walking her dogs, an accident at the park in mid-October that left her arm in a cast, and her dogs behaving abnormally enough to need an animal behaviorist on 25 October.",
+      "speaker": "Audrey",
+      "statedOn": "2023-10-28",
+      "entities": [
+        "audrey",
+        "knee-injury",
+        "arm-injury",
+        "pepper",
+        "precious",
+        "panda",
+        "pixie"
+      ],
+      "sourceTurns": [
+        "D22:1",
+        "D25:2",
+        "D26:1"
+      ]
+    }
+  ]
+}

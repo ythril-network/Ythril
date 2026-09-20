@@ -15,6 +15,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **An extraction is now checked against the conversation it NAMES, not only against itself** (`B-4`).
+  `benchmarks/writer/extraction-matches-conversation.mjs`, called by `bench.mjs check` and swept over every
+  committed extraction by its own gate.
+
+  The validator reads the extraction alone and the merge refuses a run with a part missing. Between them they
+  catch everything except records from a **different conversation**, because neither holds the evidence: a
+  spliced file is internally perfect. Every type is declared, every key resolves, every date parses, the
+  writer writes it, and the turn-coverage line reads 100% — because the foreign part brought its own
+  `sessions` block along with its claims. The graph is consistent and it is about somebody else.
+
+  It is not hypothetical. The ten extractions of `B-4` run in ten separate contexts, and the scratch directory
+  those contexts write their parts into turned out to be shared: two runs had a working file overwritten by
+  another run's, mid-extraction, and one of them found a completely different conversation in a file it had
+  written moments earlier. Both rebuilt the affected part. Nothing foreign reached a committed file — which is
+  the point, because nothing would have said so.
+
+  **A turn id is the witness**, and the check is honest about how far that goes. Turn ids are positional, so
+  two conversations share most of their spellings: swapping one whole extraction in under another's name
+  leaves only 23 of 369 ids foreign. The coverage half is the other side of it — whatever a splice did not
+  bring, the real conversation's own turns go unaccounted for. Measured against the corpus rather than against
+  the file's own `sessions` block, which is the reading a truncated extraction passes at 100%.
+
+  **The skip is loud.** The corpus is pulled by URL and is never present in CI, so `check` prints
+  `NOT CROSS-CHECKED` rather than reporting `valid` on a file nothing verified, and the gate says how many
+  extractions it did not look at.
+
 - **`benchmarks/bench.mjs` — the four things an extraction takes, so the next nine do not rewrite them**
   (`B-4`). `conv-30` was extracted with four throwaway scripts: dump the conversation, merge the parts,
   validate, write it to a space. Each was written at the keyboard and deleted. Nine conversations

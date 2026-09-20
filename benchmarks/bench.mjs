@@ -36,6 +36,7 @@ import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { loadConversations } from './locomo/loader.mjs';
 import { validateExtraction } from './writer/validate-extraction.mjs';
 import { mergeExtractionParts } from './writer/merge-extraction.mjs';
+import { extractionMatchesConversation } from './writer/extraction-matches-conversation.mjs';
 import { writeSpace, loadSpaceDefinition } from './writer/write-space.mjs';
 import { makeYthril } from './writer/ythril-client.mjs';
 
@@ -92,6 +93,13 @@ function check(path) {
   const extraction = JSON.parse(readFileSync(path, 'utf8'));
   const { entries } = loadSpaceDefinition();
   const problems = validateExtraction(extraction, entries);
+  /*
+   * Against the CORPUS, and this is the half the validator structurally cannot do: it reads the file alone,
+   * so a file carrying another conversation's records is internally perfect to it. See
+   * extraction-matches-conversation.mjs — the parts of one extraction are written into a scratch directory
+   * that turned out to be shared between runs.
+   */
+  problems.push(...againstTheCorpus(extraction));
   if (problems.length === 0) {
     const turns = new Set((extraction.sessions ?? []).flatMap(s => s.turns ?? []));
     const covered = new Set((extraction.claims ?? []).flatMap(c => c.sourceTurns ?? []));
@@ -111,6 +119,28 @@ function check(path) {
   console.error(`${problems.length} problem(s):`);
   for (const p of problems) console.error('  - ' + p);
   process.exit(1);
+}
+
+/**
+ * The corpus's verdict on this file, or a loud line saying there was none.
+ *
+ * A silent skip is the failure mode here: the corpus is pulled by URL and is absent on any machine that has
+ * not fetched it, so a check that quietly dropped this test would report `valid` on a spliced file and look
+ * exactly like one that had done the work.
+ */
+function againstTheCorpus(extraction) {
+  const pin = JSON.parse(readFileSync('benchmarks/locomo/pin.json', 'utf8'));
+  const path = pin.datasets.locomo.cachePath;
+  if (!existsSync(path)) {
+    console.error(`NOT CROSS-CHECKED against the corpus: ${path} is not fetched, so nothing here can tell `
+      + 'whether these records belong to this conversation.');
+    return [];
+  }
+  const conversation = loadConversations(path).find(c => c.id === extraction.conversationId);
+  if (!conversation) {
+    return [`the corpus has no conversation '${extraction.conversationId}'`];
+  }
+  return extractionMatchesConversation(extraction, conversation);
 }
 
 /** Join parts into one file, on stdout. Refuses an incomplete run — see merge-extraction.mjs. */
