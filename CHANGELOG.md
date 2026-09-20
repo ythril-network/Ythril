@@ -15,6 +15,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The second-corpus work is finished, and its measurements are written down** (`B-5`, closed). Six
+  fixes shipped from `longmemeval_s` today and each has its own entry above; what none of them carried
+  is the arithmetic. That is now one entry in `benchmarks/DEVELOPMENT-LOG.md`, which is the file for it:
+  *"the measurements behind the LoCoMo work — what was tried, what the number was, and which premises
+  turned out to be wrong"*.
+
+  **The row's method was substituted and the log says so.** It asked for three histories to be
+  extracted and the extractions read; two were read directly and the whole 500-instance release was
+  measured instead. Four of the six defects are distribution facts — 211 of 500 histories out of time
+  order, 18,565 of 25,112 sessions sharing a date, 253 of 500 carrying a pasted document, 896 turns
+  flagged as evidence — invisible in any single extraction and undeniable across the release. The two
+  that did need a human read were both in the first history opened, which is why a third was never
+  needed.
+
+  The extraction prompt is now FROZEN, which is what `B-4` waits on.
+
 - **The conversation-writer ships, and `B-3` closes on work that was already done** (`B-3`). The row's
   remaining scope read *"what is left to build is the writer: mint entities, link them, resolve dates
   against the session they were said in, and store each remark as a claim"*. All of it is in
