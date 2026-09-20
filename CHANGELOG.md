@@ -15,6 +15,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`conv-30` is extracted, and it is the first conversation the shipped pipeline has produced end to
+  end** (`B-4`, 1 of 10). 19 sessions, 369 turns, two speakers who both lose their jobs in January 2023 and
+  spend the year building businesses. 84 claims, 12 entities, 25 chrono entries, 12 edges — and **all 369
+  turns are named by some claim's `sourceTurns`**, with none invented.
+
+  It was delivered in three parts and joined by `mergeExtractionParts`, which is the protocol's first real
+  use rather than its test fixture. The merged file passed `validateExtraction` on the first attempt and
+  then wrote 133 records into a live space through `writeSpace`.
+
+  **It carries a real supersession**, which is what `Q-35` and the prompt rule were built for: Jon says on 9
+  July that he is going full-time on the dance studio, and on 21 July that he has taken a temporary job
+  while he looks for investors. The July claim carries `superseded: true`, a `supersedes` edge runs from the
+  later claim to it, and a recall against the live space returns the earlier one **marked** rather than
+  hidden — so *"what happened after he went full time"* is answerable and *"he went full time"* is not
+  offered as current.
+
+  **No score was read.** `B-4`'s rule is that no retrieval score may be measured until all ten extractions
+  are committed, and the rule this sits under is to improve the prompt by reading its OUTPUT and never its
+  number. The three recalls run against the live space were questions written here, against a conversation
+  whose own question set has never been opened; what they checked is that records came back and that the
+  mark was on the right one.
+
+  **`conv-26` is not this.** Its committed extraction was written by hand with the scores visible and is
+  still to be replaced. Nine remain, each needing a context that has not seen the others.
+
 - **A pasted document is treated as material rather than assertion** (`B-5`). Measured on the pinned
   corpora: LoCoMo's longest turn ever is **454 characters**; LongMemEval has **351 user turns over 5,000**,
   across **253 of 500 histories**, the largest **76,560** — a user pasting the whole Wikipedia article on
