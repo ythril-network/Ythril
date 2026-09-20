@@ -15,6 +15,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`benchmarks/harness/` exists again, with the half of a graded run that needs no model** (`B-6`,
+  first increment). `#1282` deleted the previous one — 56 files, on the owner's instruction — because
+  everything in it rested on the premise that a conversation is a pile of transcript chunks, under
+  which multi-hop scored **0.0% across all twelve** strategies. So this retrieves from the graph the
+  writer now produces rather than from a window over the transcript.
+
+  One question against one written space; the exact request returned beside the answer, because `topK`
+  and the traversal depth are part of what a figure means and a report that reconstructs them from what
+  the caller believes it passed makes two runs incomparable. The `superseded` mark is carried through,
+  since a grader that cannot see it scores a correct historical answer as a wrong current one.
+
+  **A failed call is not an empty result**, and that is the assertion this module exists around: if a
+  broken instance reported as "no results", a run against a down service would publish a low score
+  rather than an error and nothing afterwards would tell them apart. Mutation-checked.
+
+  **It cannot reach a question set.** `loadQuestions` is one import away and a gate refuses it —
+  retrieval takes a question string from its caller, because a convenience import here is how the
+  extraction side would come to see an answer key.
+
+  The answerer and the judge are **parked on two provider API keys**, which `B-2` requires from
+  different hosted families so the judge is not marking its own phrasing. That is now the only thing in
+  the queue waiting on the owner.
+
 - **The second-corpus work is finished, and its measurements are written down** (`B-5`, closed). Six
   fixes shipped from `longmemeval_s` today and each has its own entry above; what none of them carried
   is the arithmetic. That is now one entry in `benchmarks/DEVELOPMENT-LOG.md`, which is the file for it:
