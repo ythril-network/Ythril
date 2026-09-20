@@ -5,6 +5,122 @@ out to be wrong. It is here rather than in the CHANGELOG because none of it is a
 a reader of the changelog wants to know what is different for them, and this is the record of how the
 benchmark got to the number it publishes.
 
+## 2026-09-20 — what a second corpus was worth, and how it was actually read
+
+`B-5` asked for `longmemeval_s` to be fetched, two or three histories extracted, the extractions read, and
+whatever the prompt or the schema turned out not to express fixed.
+
+**The method was substituted, and it is disclosed rather than smoothed over.** No LongMemEval extraction
+was produced. Two histories were read directly through the loader, and the whole 500-instance release was
+measured statistically. Six defects came out of it, and **four of the six could not have been found by
+reading an extraction** — they are properties of the corpus or of the harness, visible only across many
+histories or in the code that writes them. A third history was never needed; the second was chosen by a
+survey rather than sampled, and the survey found a defect before the reading started.
+
+What follows is every number, so the next person can disagree with the reasoning rather than re-derive the
+facts.
+
+### The corpus is not what the tracker said it was
+
+`B-5` called the histories structurally different because *"a history runs to 500 sessions rather than
+20"*. Measured from the pinned file, that is wrong twice: **500 is the number of INSTANCES**, and the
+500-sessions figure belongs to `longmemeval_m`, which is neither pinned nor fetched.
+
+| `longmemeval_s`, measured | min | p50 | p90 | max |
+|---|---|---|---|---|
+| sessions per history | 39 | 50 | 55 | 66 |
+| turns per history | 396 | 492 | 532 | 616 |
+| characters per history | 461,807 | 490,326 | 500,046 | 513,954 |
+
+So a history is about 2.5× LoCoMo's session count and 1.2× its turn count. It READS in one pass — around
+140k tokens. Recorded in the dataset pin as an `observed` block, which the pin's own `$method` note had
+been asking for since the fetch.
+
+**The constraint is the output.** `conv-26` is 419 turns and its extraction is 133 KB, so a median history
+is roughly 45k tokens of JSON in one reply — inside a couple of frontier models and nothing else. The
+prompt's stated goal is model portability, which it loses entirely at that size, and that is what the parts
+protocol exists for.
+
+### The answer key is inside the haystack
+
+LoCoMo keeps its questions in a block beside the conversation. A LongMemEval instance is one object holding
+the history AND `question`, `answer`, `question_type` and `answer_session_ids` — and **896 turns inside the
+haystack carry `has_answer: true`**.
+
+That last one is the dangerous one: a third key on a turn otherwise holding `role` and `content`, on
+exactly the turns a score is computed from. A loader passing sessions through verbatim hands the extraction
+model a flag reading *this turn is the evidence*, and nothing downstream can see that it did.
+
+There was no LongMemEval loader at all when this started. The pin had said the rule since the fetch —
+extraction *"must never read the questions, the answers or the abilities. That is enforced by the loader
+rather than promised"* — and the loader it named did not exist.
+
+**Twelve turns of 246,930 carry no content**, across seven histories, nine of the user's and three of the
+assistant's, and **none of them is evidence**. Dropped and reported rather than refused: refusing would
+make seven histories unreadable over twelve blank strings.
+
+### Sessions are not in time order
+
+| | out of chronological order |
+|---|---|
+| LongMemEval `_s` | **211 of 500** histories, 3,382 backward steps, largest a full day |
+| LoCoMo | **0 of 10** |
+
+Which is why nothing in the harness had ever needed to think about it — and why it mattered more than it
+sounds. The supersession rule reads *"when a LATER session makes an earlier fact wrong"*, and the parts
+protocol splits on *"a contiguous run of sessions"*. Both read position as time. Told to retire the earlier
+claim, a model reading array order would have retired **the wrong one in nearly half the corpus** —
+asserting the stale fact and marking the current one dead. No score would have looked odd.
+
+### A day holds more than one session, and the writer lost the rest
+
+| | sessions sharing a date with another |
+|---|---|
+| LongMemEval `_s` | **18,565 of 25,112**, in 500 of 500 histories |
+| LoCoMo | **0 of 272** |
+
+The writer named each transcript `transcripts/<date>.md` and filed each claim by `statedOn` — correct for
+one session a day, and on this corpus it would have sent six transcripts to one path and kept the last,
+filing all six sessions' claims under whichever survived. Nothing fails; a question about a lost session
+returns nothing, which reads as a retrieval result.
+
+**This is the one found by reading the history rather than by measuring**, and the measurement came second,
+to turn *"this history looks odd"* into a number.
+
+### Half the corpus pastes a document in
+
+| | longest turn | user turns over 5,000 chars |
+|---|---|---|
+| LoCoMo | 454 | none — the class does not exist there |
+| LongMemEval `_s` | 76,560 | **351, across 253 of 500 histories** |
+
+Assistant turns over 5,000 characters: **three**, in the whole corpus. The 76,560-character one is a user
+pasting the entire Wikipedia article on the GDPR and asking what it says about AI regulation.
+
+The prompt had a rule for the ASSISTANT supplying world knowledge and none for a person pasting it — and
+`attributed` is the wrong tool twice over, because the writer refuses it on a person's claim and refuses
+correctly. So a pasted article had two possible outcomes: a hundred unmarked claims the graph ASSERTS, or a
+validation failure.
+
+### And the prompt's own first sentence described the other corpus
+
+It opened *"a long conversation between people, recorded over many sessions spread across months"* —
+written against LoCoMo, true of it, and true of nothing above. By the time the five fixes had landed, four
+sections contradicted the paragraph a model reads first. A rule written for one shape applied to another is
+the failure each of those sections exists to prevent, so the prompt was reproducing it in its opening line.
+
+### What this says about the method, for next time
+
+Reading a corpus statistically found four defects that reading an extraction would not have, because they
+are facts about the distribution rather than about any one file: **211 of 500**, **18,565 of 25,112**,
+**253 of 500**, **896 turns**. Each was invisible in the single history that hinted at it and undeniable
+across the release.
+
+The two that did need a human read — the pasted document and the session collision — were both found in
+the FIRST history opened, which suggests the marginal value of the third was low. The survey that chose the
+second history is the cheap step worth keeping: it named the most structurally unlike candidate, and its
+outlier column was itself a finding.
+
 ## 2026-09-15 — moved out of the CHANGELOG
 
 These entries were written as changelog entries and do not belong there: a changelog says what changed for
