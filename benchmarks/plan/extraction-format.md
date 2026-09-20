@@ -22,7 +22,9 @@ depends on a write having happened.
   ],
   "chrono": [
     { "key": "support-group-visit", "type": "event", "title": "Caroline attended an LGBTQ support group",
-      "date": "2023-05-07", "entities": ["caroline"] }
+      "date": "2023-05-07", "entities": ["caroline"] },
+    { "key": "pride-parade", "type": "event", "title": "Caroline went to the city pride parade",
+      "date": "2023-07-15", "endsAt": "2023-07-16", "entities": ["caroline"] }
   ],
   "claims": [
     { "text": "Caroline: I went to a LGBTQ support group yesterday and it was so powerful.",
@@ -48,8 +50,22 @@ fails halfway leaves a space nobody can interpret.
 **Every edge's endpoints must match the label's declared ends.** `works_at` from anything but a person is an
 error in the file, not something to discover from a 400.
 
+**A chrono entry may carry `endsAt`, and that is how a two-day event gets onto the timeline.** `date` is
+the day it started and `endsAt` the day it ended; omit `endsAt` for anything that happened on one day. It
+exists because a weekend is neither one date nor a vague span — and before it did, a marriage, a medical
+diagnosis, a pride parade and a career-high game were all left off the timeline while a photograph taken
+on a named Friday was on it. What reached the timeline was being decided by the grammar somebody happened
+to use. The range must not run backwards; a same-day range is fine and is simply explicit.
+
 **Dates are `YYYY-MM-DD`, resolved.** No `last year`, no relative expressions, no partial dates. The session
 date is the anchor and resolution happens during extraction, where the surrounding text is available.
+
+**An entity and a chrono entry may carry `sourceTurns` too, and should.** A claim always does; those two
+are optional and are the turns that established the SUBJECT — where the person was introduced, where the
+event was described. **The validator has always had a rule about them and the format never said they
+existed**, so a run following this document exactly never wrote the field and the rule never fired: a
+synthesised record may name at most 12% of a conversation as its provenance, because a few sentences
+about one subject cannot have been derived from most of a transcript.
 
 **`sourceTurns` is the one thing that never reaches Ythril.** It records which turns of the transcript a claim
 came from, so a benchmark can join a result back to an answer key. The writer keeps it in a side map and

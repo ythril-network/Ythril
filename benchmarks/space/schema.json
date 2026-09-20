@@ -56,6 +56,9 @@
         },
         "country": {
           "type": "string"
+        },
+        "aliases": {
+          "type": "string"
         }
       }
     }
@@ -80,6 +83,9 @@
             "business",
             "course"
           ]
+        },
+        "aliases": {
+          "type": "string"
         }
       }
     }
@@ -94,6 +100,9 @@
     "schema": {
       "propertySchemas": {
         "medium": {
+          "type": "string"
+        },
+        "aliases": {
           "type": "string"
         }
       }
@@ -552,7 +561,7 @@
     "typeName": "event",
     "schemaGroup": "conversation",
     "published": true,
-    "description": "Something that happened, on a date. This is where a date lands when it is not qualifying an edge: a birth, an acquisition, a move, a diagnosis, a release. Linked to the entities it concerns.",
+    "description": "Something that happened, on a date, or over a run of days. This is where a date lands when it is not qualifying an edge: a birth, an acquisition, a move, a diagnosis, a release. Give it `endsAt` when it took more than one day — a weekend away, a trip, a festival — and leave `endsAt` off when it did not. Linked to the entities it concerns.",
     "schema": {
       "propertySchemas": {}
     }
@@ -563,7 +572,7 @@
     "typeName": "milestone",
     "schemaGroup": "conversation",
     "published": true,
-    "description": "A dated point in a project or a life that the speakers treat as significant.",
+    "description": "A dated point in a project or a life that the speakers treat as significant. A point, so it takes no `endsAt`: the undertaking around it may run for months and the milestone is the day it was reached.",
     "schema": {
       "propertySchemas": {}
     }
@@ -585,7 +594,7 @@
     "typeName": "deadline",
     "schemaGroup": "conversation",
     "published": true,
-    "description": "A date something is due by.",
+    "description": "A date something is due by. A point, so it takes no `endsAt` — the work leading up to it is not the deadline.",
     "schema": {
       "propertySchemas": {}
     }
