@@ -71,10 +71,10 @@ const seed = () => ({
 });
 
 const tree = () => [{
-  edge: edgeDoc(),
+  edges: [edgeDoc()],
   node: entityDoc(),
   paths: [['seed-1', 'ent-b']],
-  _graph: [{ edge: edgeDoc(), node: entityDoc(), paths: [['seed-1', 'ent-b', 'ent-c']] }],
+  _graph: [{ edges: [edgeDoc()], node: entityDoc(), paths: [['seed-1', 'ent-b', 'ent-c']] }],
 }];
 
 /** The REST result: the flat hit, diagnostics applied, graph nested through the one implementation. */
@@ -121,7 +121,7 @@ for (const diag of [false, true]) {
     it('and so does every node at every depth of _graph', () => {
       const walk = (nodes, out = []) => {
         for (const n of nodes ?? []) {
-          out.push({ node: Object.keys(n.node).sort(), edge: Object.keys(n.edge).sort() });
+          out.push({ node: Object.keys(n.node).sort(), edge: Object.keys(n.edges[0]).sort() });
           walk(n._graph, out);
         }
         return out;
@@ -174,14 +174,14 @@ describe('the default withholds the system fields, everywhere', () => {
       for (const n of nodes ?? []) {
         for (const f of RECALL_RECORD_DIAGNOSTICS) {
           assert.equal(f in n.node, false, `${door}: _graph node still carries \`${f}\``);
-          assert.equal(f in n.edge, false, `${door}: _graph edge still carries \`${f}\``);
+          for (const e of n.edges) assert.equal(f in e, false, `${door}: _graph edge still carries \`${f}\``);
         }
         // A ranking score has no meaning on a traversed node and must not appear even though the scores are
         // now unconditional at the RESULT level. A node was never ranked — it is here because the graph
         // relates it to something that was — so a score on one would be a number with nothing behind it.
         for (const f of RECALL_RANKING_DIAGNOSTICS) {
           assert.equal(f in n.node, false, `${door}: _graph node carries \`${f}\`, but it was never ranked`);
-          assert.equal(f in n.edge, false, `${door}: _graph edge carries \`${f}\`, but it was never ranked`);
+          for (const e of n.edges) assert.equal(f in e, false, `${door}: _graph edge carries \`${f}\`, but it was never ranked`);
         }
         check(n._graph, door);
       }
@@ -208,7 +208,7 @@ describe('the vector is never returned, and includeDiagnostics cannot bring it b
     const check = (nodes, label) => {
       for (const n of nodes ?? []) {
         assert.equal('embedding' in n.node, false, `${label}: a graph node carried the vector`);
-        assert.equal('embedding' in n.edge, false, `${label}: a graph edge carried the vector`);
+        for (const e of n.edges) assert.equal('embedding' in e, false, `${label}: a graph edge carried the vector`);
         check(n._graph, label);
       }
     };

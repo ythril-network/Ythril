@@ -77,7 +77,7 @@ export interface RecallRequestBody {
       includeRecordMeta?: boolean;
       /**
        * Graph expansion depth, 0–5. Each match is expanded along edges and what the walk reached comes back
-       * NESTED under it, as `_graph: [{edge, node, paths}]`, and a nested node carries its own `_graph` again.
+       * NESTED under it, as `_graph: [{edges, node, paths}]`, and a nested node carries its own `_graph` again.
        * It STAYS nested — see `relatedOf`, which reads a match's neighbourhood without moving anything into
        * the result list. This sentence used to point at a flattener that did move them, which is the bug the
        * owner reported: a neighbour arriving in rank order, counted in the total, looking like a match.

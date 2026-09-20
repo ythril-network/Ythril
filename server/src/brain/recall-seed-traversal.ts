@@ -99,14 +99,22 @@ export interface SeedTraverseNeighbor {
   /** The record this one was reached FROM — its parent in the nesting. A seed id at hop 1. */
   parentId: string;
   /**
-   * The WHOLE edge document for the reaching hop, not `{from, label, to}`.
+   * EVERY edge this node is joined to the walk by — whole documents, not `{from, label, to}`.
    *
-   * Its `description` is where the reason for a link lives, and its `tags` are how a caller filters one kind of
-   * relationship from another. Reducing the edge to three fields threw both away on every traversal.
+   * Their `description` is where the reason for a link lives, and their `tags` are how a caller filters one
+   * kind of relationship from another. Reducing an edge to three fields threw both away on every traversal.
    *
-   * A LINK hop has no stored edge, so it carries a synthetic one — see `SyntheticLinkEdge`.
+   * **Plural since `Q-24`, and the singular was a lie by omission.** The walk decides which NODES to expand,
+   * correctly once per node — and the answer was derived from that decision, so the first edge into a node
+   * stood for all of them. Two records joined by two differently-labelled relationships reported one, and a
+   * self-loop reported none at all, with `truncated: false` saying nothing had been cut.
+   *
+   * `paths` could not have carried it: a path is a chain of record ids, so two edges between one pair
+   * produce the identical chain and the alternate-route bookkeeping correctly concludes it has seen it.
+   *
+   * A LINK hop has no stored edge, so it carries one synthetic one — see `SyntheticLinkEdge`.
    */
-  edge: TraverseHopEdge;
+  edges: TraverseHopEdge[];
   /** Ordered record ids, seed first and this node last. `idPath.length - 1` is the hop count. */
   idPath: string[];
   /** Every OTHER route from a seed to this node, ids in the same seed-first order. */
@@ -150,7 +158,21 @@ export async function traverseFromSeeds(
   // so a node reachable two ways was attributed to whichever edge won the race and the other link was invisible.
   const altPathTo = new Map<string, string[][]>();
   const altTruncated = new Set<string>();
-  const reachedBy = new Map<string, { parentId: string; edge: EdgeDoc }>();
+  const reachedBy = new Map<string, { parentId: string; edges: EdgeDoc[] }>();
+  /**
+   * Self-loops at a SEED, which have no parent hop to hang from.
+   *
+   * A self-loop makes a node its own neighbour — one rule, so it reads the same at a seed and at a reached
+   * node. At a reached node the loop simply joins that node's `edges`; a seed has no entry of its own, so
+   * one is built for it below rather than the edge being dropped, which is what used to happen.
+   */
+  const selfLoopsAtSeed = new Map<string, EdgeDoc[]>();
+  const seedSet = new Set<string>(seedIds);
+
+  /** Add an edge unless the list already names it. One edge can be read on two hops; it is still one edge. */
+  const addEdge = (list: EdgeDoc[], edge: EdgeDoc): void => {
+    if (!list.some(e => e._id === edge._id)) list.push(edge);
+  };
 
   let frontier: string[] = [...new Set(seedIds)];
   let frontierSet = new Set<string>(frontier);
@@ -192,7 +214,7 @@ export async function traverseFromSeeds(
         results.push({
           _id: entity._id, spaceId, hops: 1, path: pathTo.get(link.to) ?? [], record: entity,
           parentId: link.from,
-          edge: { _id: syntheticEdgeId(link.label, link.from, link.to), spaceId, from: link.from, to: link.to, label: link.label },
+          edges: [{ _id: syntheticEdgeId(link.label, link.from, link.to), spaceId, from: link.from, to: link.to, label: link.label }],
           idPath: [link.from, link.to], altPaths: altPathTo.get(link.to) ?? [], altPathsTruncated: false,
         });
         if (results.length >= limit) return { neighbours: stampTruncation(results, altTruncated), scanCapped: capped };
@@ -250,6 +272,22 @@ export async function traverseFromSeeds(
      */
     const neighborKinds = new Map<string, RefKind>();
     for (const edge of edges) {
+      /*
+       * A SELF-LOOP is an edge AT a node, not a route to a new one — and it used to vanish here, twice over:
+       * both its ends are the same frontier node, so the same-level test below discarded it, and the visited
+       * set would have discarded it anyway. It is a relationship the graph holds, so the node becomes its
+       * own neighbour and carries it.
+       */
+      if (edge.from === edge.to) {
+        const already = reachedBy.get(edge.from);
+        if (already) addEdge(already.edges, edge);
+        else if (seedSet.has(edge.from)) {
+          const loops = selfLoopsAtSeed.get(edge.from) ?? [];
+          addEdge(loops, edge);
+          selfLoopsAtSeed.set(edge.from, loops);
+        }
+        continue;
+      }
       // Same-level edge (both ends already in the frontier) — introduces no new node.
       if (frontierSet.has(edge.from) && frontierSet.has(edge.to)) continue;
       const frontierEnd = frontierSet.has(edge.from) ? edge.from : edge.to;
@@ -257,6 +295,18 @@ export async function traverseFromSeeds(
       neighborKinds.set(neighborId, edgeEndpointKind(frontierEnd === edge.from ? edge.toKind : edge.fromKind));
       const routeHere = [...(idPathTo.get(frontierEnd) ?? [frontierEnd]), neighborId];
       if (visited.has(neighborId)) {
+        /*
+         * A SECOND EDGE to a node already reached, and the two cases go to different places.
+         *
+         * From the SAME parent it is another relationship between one pair, and `paths` cannot say so — two
+         * edges between two records produce the identical chain of ids — so it joins that node's `edges`.
+         *
+         * From a DIFFERENT parent it is another ROUTE, which `paths` states exactly, and it is deliberately
+         * not added: an entry's `edges` all join this node to the one it is nested under, which is what
+         * makes them readable as a set rather than as a bag of edges that happen to touch it.
+         */
+        const already = reachedBy.get(neighborId);
+        if (already && already.parentId === frontierEnd) addEdge(already.edges, edge);
         // Already nested somewhere: this is a SECOND route to it, so record the route without re-nesting or
         // re-expanding the node. `paths` carrying every route is what lets one node object stay one row —
         // duplicating it under each parent would make a caller counting rows double-count the same record.
@@ -277,7 +327,7 @@ export async function traverseFromSeeds(
       // it with `?? []` at push time would hand out a copy that no later discovery could reach — and an
       // alternate route is usually found at a deeper hop than the one that nested the node.
       altPathTo.set(neighborId, []);
-      reachedBy.set(neighborId, { parentId: frontierEnd, edge });
+      reachedBy.set(neighborId, { parentId: frontierEnd, edges: [edge] });
       newNeighborIds.push(neighborId);
     }
 
@@ -342,11 +392,43 @@ export async function traverseFromSeeds(
         // `kind` stamped for a non-entity exactly as the linked-record half below stamps it, so one record
         // reached two ways is described one way.
         record: entity ?? { ...other!.doc, spaceId, kind: other!.kind },
-        parentId: reached.parentId, edge: reached.edge, idPath: idPathTo.get(neighborId) ?? [neighborId],
+        parentId: reached.parentId, edges: reached.edges, idPath: idPathTo.get(neighborId) ?? [neighborId],
         altPaths: altPathTo.get(neighborId) ?? [], altPathsTruncated: false,
       });
       if (results.length >= limit) return { neighbours: stampTruncation(results, altTruncated), scanCapped: capped };
       nextFrontier.push(neighborId);
+    }
+
+    /*
+     * A SEED THAT LOOPS BACK ON ITSELF becomes its own neighbour, once.
+     *
+     * Hydrated separately rather than joined to `newNeighborIds`, because a seed is already in `visited`,
+     * already in `pathTo` and already the parent of everything reached at hop 1 — writing its self-entry
+     * through the shared maps would rewrite the route every one of its children reports. Cheap: the query
+     * runs only when a seed really has a loop, which is rare and is exactly the case that used to be
+     * invisible.
+     */
+    for (const [seedId, loops] of selfLoopsAtSeed) {
+      selfLoopsAtSeed.delete(seedId);
+      const kind = edgeEndpointKind(loops[0].fromKind);
+      const entity = kind === 'entity'
+        ? (await col<EntityDoc>(spaceCollection(spaceId, 'entities'))
+            .find(asFilter<EntityDoc>({ _id: seedId })).project(NEVER_RETURNED_PROJECTION).toArray() as EntityDoc[])[0]
+        : undefined;
+      const other = entity ? undefined : (await endpointRecordsByKind([spaceId], [{ id: seedId, kind }])).get(seedId);
+      // The edge outlived the record, or the seed lives somewhere this walk cannot read. Same `continue` and
+      // the same meaning as the neighbour loop above.
+      if (!entity && !other) continue;
+      results.push({
+        _id: seedId, spaceId, hops: 0,
+        path: [{ from: seedId, label: loops[0].label, to: seedId }],
+        record: entity ?? { ...other!.doc, spaceId, kind: other!.kind },
+        // Its own parent, which is what a loop IS. `nestNeighbours` hangs it under the seed like any other
+        // direct neighbour and does not recurse, because a seed is never attached to a parent node.
+        parentId: seedId, edges: loops, idPath: [seedId, seedId],
+        altPaths: [], altPathsTruncated: false,
+      });
+      if (results.length >= limit) return { neighbours: stampTruncation(results, altTruncated), scanCapped: capped };
     }
 
     // Linked records are LEAVES — they do not join the next frontier. A chrono entry links to entities, never
@@ -369,7 +451,7 @@ export async function traverseFromSeeds(
         // be the only node in the answer that cannot say where it lives.
         record: { ...rec.doc, spaceId, kind: rec.kind },
         parentId: rec.via,
-        edge: { _id: syntheticEdgeId(rec.label, rec.via, rec.doc._id), spaceId, from: rec.via, to: rec.doc._id, label: rec.label },
+        edges: [{ _id: syntheticEdgeId(rec.label, rec.via, rec.doc._id), spaceId, from: rec.via, to: rec.doc._id, label: rec.label }],
         idPath: [...viaPath, rec.doc._id],
         altPaths: [],
         altPathsTruncated: false,

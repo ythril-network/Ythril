@@ -70,8 +70,12 @@ describe('traverse follows chrono.entityIds', () => {
   const strip = (t) =>
     t.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter(l => !l.trim().startsWith('//')).join('\n');
   // Both traversals: the standalone one stayed in `edges.ts`, the recall walk moved to its own module in A-4,
-  // and the break condition this pins has to be right in both.
-  const code = strip(read('server/src/brain/edges.ts') + read('server/src/brain/recall-seed-traversal.ts'));
+  // and the break condition this pins has to be right in both. `edge-id.ts` is here because `edges.ts` is
+  // frozen at its size and `syntheticEdgeId` went there in `Q-24` — the id format is a fact about edges
+  // rather than about either walk, which is what its own docblock had been saying while it sat in the
+  // walk's file. A gate reading only the two walks would have reported the id rule clean about nothing.
+  const code = strip(read('server/src/brain/edges.ts') + read('server/src/brain/recall-seed-traversal.ts')
+    + read('server/src/brain/edge-id.ts'));
 /*
  * The node RENDERING moved out of the walk in 5.0 and this gate has to follow it.
  *
