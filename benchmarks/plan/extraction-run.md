@@ -9,6 +9,11 @@ file rather than a paragraph somebody remembers.
 isolation is the point: an extractor that has seen another conversation's records, or any retrieval score,
 is doing development rather than producing evidence.
 
+**Two or three conversations at a time, never ten.** Measured 2026-09-20: ten extractors launched together
+exhausted the session window in about twenty minutes and finished **none** of them, every one dying between
+reading its conversation and writing its file. Three at a time finished three in the same wall-clock. Launch
+the next only as one comes back.
+
 ## What you may read, and what you may not
 
 | | |
@@ -23,14 +28,23 @@ is doing development rather than producing evidence.
 answers and evidence ids removed. Reading the release with `JSON.parse` is one line shorter and it carries
 the answer key, which is why nothing here does it.
 
+## Before you start: find out what is already done
+
+```bash
+node benchmarks/bench.mjs status
+```
+
+`done` means extracted **under the prompt now in the tree**. `RE-DO` is a file from an earlier prompt and
+needs extracting again. A line ending `2/4 parts written, resume at part 3` is a conversation an earlier
+session got part-way through — **pick up at that part, do not start again.**
+
 ## The steps
 
 ```bash
 node benchmarks/bench.mjs dump conv-NN > <your own scratch dir>/conv-NN.md
 ```
 
-Read the prompt. Read the conversation. Then write the extraction into **your own** scratch directory — not
-a shared one, and not `benchmarks/`. A shared scratch directory clobbered three extractions in one round.
+Read the prompt. Read the conversation.
 
 **Write it in parts of about ten sessions**, because one reply carrying 130 KB of JSON is where a long
 extraction gets truncated in the middle of an array. Each part is a file carrying only the sessions,
@@ -38,7 +52,18 @@ entities, chrono, edges and claims of its own session range, plus:
 
 - `"conversationId": "conv-NN"` on every part
 - `"part": { "index": 1, "of": 4 }` — the merge refuses an incomplete run, and this is what lets it
-- `"producedBy": { "unattended": true }` on the FIRST part only
+- `"producedBy": { "promptSha256": "<the sha `status` printed>", "unattended": true }` on **every** part
+
+**The parts go in `benchmarks/.cache/extraction-parts/conv-NN/`, named `part1.json`, `part2.json`, …**, and
+NOT in a session scratch directory. A scratch directory is wiped between sessions, which is exactly when
+the parts are needed: a round killed by a rate limit used to lose everything it had written, and the next
+session started again at part 1. Write each part the moment it is finished rather than at the end.
+
+**The fingerprint on every part is not bookkeeping.** Parts that survive a session survive a prompt change,
+and merging last week's parts with today's produces one conversation described under two sets of rules —
+which `bench.mjs merge` would then stamp with a single fingerprint, so nothing downstream could see it. A
+resume refuses a directory whose parts name a different prompt. If that happens, delete the directory and
+extract the conversation again.
 
 **Carry the entity keys forward.** A person named in session 3 and again in session 30 is one node, so a
 later part reuses the key the earlier part minted rather than inventing a second. The merge reconciles by
@@ -51,7 +76,7 @@ development, because every figure taken across the corpus afterwards is unattrib
 Then join and check:
 
 ```bash
-node benchmarks/bench.mjs merge <scratch>/conv-NN.part1.json <scratch>/conv-NN.part2.json > benchmarks/locomo/extractions/conv-NN.json
+node benchmarks/bench.mjs merge benchmarks/.cache/extraction-parts/conv-NN/part*.json > benchmarks/locomo/extractions/conv-NN.json
 node benchmarks/bench.mjs check benchmarks/locomo/extractions/conv-NN.json
 ```
 

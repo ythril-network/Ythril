@@ -40,6 +40,7 @@ import { mergeExtractionParts } from './writer/merge-extraction.mjs';
 import { corpusSpread } from './writer/corpus-spread.mjs';
 import { promptFingerprint, provenanceProblems, corpusProvenance } from './writer/extraction-provenance.mjs';
 import { extractionMatchesConversation } from './writer/extraction-matches-conversation.mjs';
+import { resumePoint } from './writer/extraction-parts.mjs';
 import { writeSpace, loadSpaceDefinition } from './writer/write-space.mjs';
 import { makeYthril } from './writer/ythril-client.mjs';
 
@@ -58,17 +59,50 @@ function conversations() {
   return loadConversations(path);
 }
 
-/** Which conversations still need extracting, read off the directory rather than a list. */
+/**
+ * Which conversations still need extracting, read off the directory rather than a list — and how far the
+ * half-finished ones got.
+ *
+ * **The part column is what stops a killed round being redone from scratch.** A round interrupted by a rate
+ * limit leaves parts on disk; without this, "where did the last session get to" is something somebody has to
+ * remember, and three rounds in one day proved that nobody does.
+ */
 function status() {
-  const done = new Set(existsSync(EXTRACTIONS)
-    ? readdirSync(EXTRACTIONS).filter(f => f.endsWith('.json')).map(f => f.replace(/\.json$/, ''))
-    : []);
   const all = conversations();
-  console.log(`${done.size} of ${all.length} extracted\n`);
+  const sha = promptFingerprint(PROMPT);
+  /*
+   * DONE MEANS DONE UNDER THE PROMPT IN THE TREE, and that is the whole question a resuming session has.
+   *
+   * "A file exists" was the old test, and after a prompt change it reads as finished for every conversation
+   * of the previous round — so the one command somebody runs to find out what is left answered "nothing",
+   * and the round was declared complete while most of it described the old rules. `stats` warns about a
+   * two-prompt corpus after the fact; this says which files to redo before anyone spends a session on it.
+   */
+  const stale = [];
+  const done = new Set();
+  for (const f of existsSync(EXTRACTIONS) ? readdirSync(EXTRACTIONS).filter(x => x.endsWith('.json')) : []) {
+    const id = f.replace(/\.json$/, '');
+    const was = JSON.parse(readFileSync(`${EXTRACTIONS}/${f}`, 'utf8')).producedBy?.promptSha256;
+    if (was === sha) done.add(id); else stale.push({ id, was });
+  }
+  console.log(`${done.size} of ${all.length} extracted under prompt ${sha.slice(0, 12)}`
+    + (stale.length > 0 ? `, ${stale.length} left from an earlier prompt` : ''));
+  /*
+   * THE FULL DIGEST, ON ITS OWN LINE, because the abbreviated one above is what gets copied.
+   *
+   * It did: two extractors put `a3e8136cc402` on their parts because that is what this command showed them,
+   * and the resume refused both. A number a reader has to expand by hand is a number that will be copied
+   * short — so the line they are meant to copy is printed whole and says what it is for.
+   */
+  console.log(`prompt fingerprint, put this on every part: ${sha}\n`);
   for (const c of all) {
     const turns = c.sessions.reduce((n, s) => n + s.turns.length, 0);
-    const mark = done.has(c.id) ? 'done   ' : 'TO DO  ';
-    console.log(`  ${mark} ${c.id.padEnd(9)} ${String(c.sessions.length).padStart(2)} sessions, ${String(turns).padStart(4)} turns`);
+    const old = stale.find(x => x.id === c.id);
+    const mark = done.has(c.id) ? 'done   ' : (old ? 'RE-DO  ' : 'TO DO  ');
+    console.log(`  ${mark} ${c.id.padEnd(9)} `
+      + `${String(c.sessions.length).padStart(2)} sessions, ${String(turns).padStart(4)} turns`
+      + (done.has(c.id) ? '' : partProgress(c.id, sha))
+      + (old ? `  <- committed under ${old.was ? old.was.slice(0, 12) : '(no fingerprint)'}` : ''));
   }
   /*
    * A paragraph naming conv-26 stood here until 2026-09-20, because its extraction had been written by hand
@@ -77,6 +111,24 @@ function status() {
    * extraction produced unattended from one tuned against a scoreboard; what caught conv-26 was somebody
    * remembering. That is B-15, and it is a field the writer cannot omit rather than a note here.
    */
+}
+
+/**
+ * How far a not-yet-merged conversation got, as a suffix for the status line.
+ *
+ * A REFUSAL is reported here rather than thrown: `status` is the command somebody runs to find out what
+ * state the round is in, and the commonest reason to run it is that something went wrong. Failing the whole
+ * listing because one conversation's parts are stale would hide the nine that are fine.
+ */
+function partProgress(id, sha) {
+  let r;
+  try {
+    r = resumePoint(id, sha);
+  } catch (e) {
+    return `  <- PARTS UNUSABLE: ${e.message.split('\n')[0]}`;
+  }
+  if (r.done.length === 0) return '';
+  return `  <- ${r.done.length}/${r.of ?? '?'} parts written, resume at part ${r.next ?? '(merge it)'}`;
 }
 
 /** One conversation as readable text, for the model that is about to extract it. */
