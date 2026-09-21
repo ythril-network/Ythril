@@ -644,7 +644,7 @@
       "properties": {
         "aliases": "Ev"
       },
-      "description": "One of the two speakers, a father who talks with his friend Sam roughly fortnightly from May 2023 to January 2024. A watercolour painter of some years' standing who joined painting classes in August 2023 and had a piece shown in an exhibition in December 2023; a keen hiker, skier, road-tripper and gym-goer who has worked on his health since about 2021. Over the conversation he has a heart-palpitation scare (June 2023), twists his knee (August 2023) and re-injures it playing basketball (October 2023), loses his job to a downsizing (October 2023), meets a Canadian woman (August 2023) and marries her (December 2023), and learns she is pregnant (December 2023).",
+      "description": "One of the two friends in this conversation, a father who talks to Sam every few weeks between May 2023 and January 2024. Watercolour painter of several years' standing, keen hiker, skier and gym-goer, Prius driver and owner of a bonsai tree and a fitness watch. Over the conversation he has a heart-palpitation scare, twists his knee twice, meets a Canadian woman in August 2023 and marries her in December 2023, loses his job to a company downsizing in October 2023, and learns his wife is pregnant in December 2023. He grew up on a small island and keeps a favourite sunset spot by the beach near his home.",
       "sourceTurns": [
         "D1:2",
         "D5:1",
@@ -656,10 +656,12 @@
       "key": "sam",
       "type": "person",
       "name": "Sam",
-      "properties": {},
-      "description": "The other speaker, Evan's friend. His weight and health are the running subject of the conversation: a doctor's check-up in May 2023, friends mocking his weight in July 2023, a diet from August 2023, a doctor calling his weight a serious health risk in October 2023, an ER visit for gastritis in October 2023, and becoming a Weight Watchers coach by November 2023. He takes a cooking class, journals and writes creatively, is learning to draw, and repeatedly means to take up painting.",
+      "properties": {
+        "aliases": "bud"
+      },
+      "description": "The other friend in this conversation, whose running thread is his weight and health. Doctors warn him in May 2023 and again on 2 October 2023 that his weight is a serious risk; he is diagnosed with gastritis in October 2023, starts a diet and exercise routine on 21 August 2023 and becomes a Weight Watchers coach in his group on 9 November 2023. He takes a cooking class, journals and does creative writing, sketches occasionally, takes up morning running by the end of 2023, and repeatedly has trouble with supermarket self-checkouts and with his new phone.",
       "sourceTurns": [
-        "D1:1",
+        "D1:7",
         "D2:6",
         "D8:1",
         "D16:1"
@@ -668,27 +670,25 @@
     {
       "key": "evans-partner",
       "type": "person",
-      "name": "Evan's wife",
+      "name": "Evan's wife, the Canadian woman he met in August 2023",
       "properties": {
-        "aliases": "the Canadian woman; my new SO; my partner; the woman from Canada"
+        "aliases": "the Canadian woman; my new SO; my partner; my wife"
       },
-      "description": "The Canadian woman Evan met on a trip to Canada in the week before 7 August 2023 and married in the week before 26 December 2023; he says he fell in love with her at first sight. They holidayed in Canada together in August 2023, tried snowshoeing in January 2024, told their extended families about the marriage on 5 January 2024, and planned a Canadian honeymoon for February 2024. She was pregnant as of 9 December 2023. Never named in the conversation.",
+      "description": "The woman Evan met on a trip to Canada in the week before 7 August 2023 and describes as making him feel alive. They holidayed in Canada together in August 2023, married in the week before 26 December 2023, told their extended family on 5 January 2024, tried snowshoeing over the weekend of 6-7 January 2024 and planned a February 2024 honeymoon in Canada. Evan announced on 9 December 2023 that she was pregnant. Never named in the conversation; referred to as the Canadian woman, his new SO, his partner and his wife.",
       "sourceTurns": [
         "D5:1",
         "D19:1",
         "D21:2",
-        "D23:1"
+        "D21:4"
       ]
     },
     {
       "key": "evans-son",
       "type": "person",
       "name": "Evan's son",
-      "properties": {},
-      "description": "Evan's son, hurt twice during the conversation: a soccer accident on 12 August 2023 that injured his ankle, and a fall from his bike on 12 December 2023. Both times Evan looked after him and reported him recovering. Never named in the conversation.",
+      "description": "Evan's son, the subject of two accidents Evan reports: a soccer accident on 12 August 2023 that hurt his ankle, and a fall from his bike on 12 December 2023 that left him on crutches. He recovered well from both. Never named.",
       "sourceTurns": [
         "D7:1",
-        "D7:9",
         "D20:3"
       ]
     },
@@ -697,9 +697,9 @@
       "type": "person",
       "name": "Evan's family",
       "properties": {
-        "aliases": "my family; the kids; our extended fam"
+        "aliases": "my family; the kids; we"
       },
-      "description": "The group Evan calls 'my family' — his partner, his children (including the son who is hurt twice) and, more widely, the extended family told about his marriage on 5 January 2024. They road-trip together (the Rockies in May 2023, Jasper that same month, the mountains in December 2023), motivate him to stay healthy, keep a memory collage and the motto 'Bring it on Home' from a trip to Banff, held a get-together on 6 January 2024, and were planning a big family reunion for summer 2024.",
+      "description": "The group Evan means by 'my family' — his children (including the son who had two accidents) and, from December 2023, his wife. They take a Rockies trip in May 2023, a road trip to Jasper over 20-21 May 2023, a mountain drive in the Prius in December 2023, and hold a lasagne get-together on 6 January 2024. Evan says they motivate him to stay healthy, keeps a collage of family memories with a 'Bring it on Home' sign from their Banff trip as a family motto, and was planning a big family reunion for the summer of 2024.",
       "sourceTurns": [
         "D1:2",
         "D5:9",
@@ -708,39 +708,20 @@
       ]
     },
     {
-      "key": "sams-family",
-      "type": "person",
-      "name": "Sam's family",
-      "properties": {
-        "aliases": "my family"
-      },
-      "description": "The group Sam calls 'my family'. In October 2023 they were pushing hard for his new health routine, which left him feeling pressured; by January 2024 he described them as his rock through everything. Individual members are never named.",
-      "sourceTurns": [
-        "D15:1",
-        "D23:12"
-      ]
-    },
-    {
       "key": "sams-dad",
       "type": "person",
       "name": "Sam's father",
-      "properties": {
-        "aliases": "my dad"
-      },
-      "description": "Sam's father, who took him on a long hike when Sam was ten. Sam calls it a great and special memory and it is the only time he mentions his father.",
+      "description": "Sam's father, who took him on a long hike when Sam was about ten years old; Sam calls it a great and special memory and the reason he loves hiking. Mentioned only in this context and never named.",
       "sourceTurns": [
         "D1:7",
         "D1:9"
       ]
     },
     {
-      "key": "evans-painting-friend",
+      "key": "evans-friend-painter",
       "type": "person",
       "name": "The friend who got Evan into painting",
-      "properties": {
-        "aliases": "my friend"
-      },
-      "description": "The friend who introduced Evan to watercolour painting some years before 2023, gave him advice and, on Evan's later telling, gave him a painting that inspired him to start. Told twice and merged here because both accounts describe one friend starting Evan off; never named.",
+      "description": "An unnamed friend of Evan's who introduced him to watercolour painting a few years before 2023, gave him advice, and gave him a painting that inspired him to start painting himself. Referred to in May 2023 as 'my friend' and in August 2023 as 'a friend of mine'; these two mentions are joined here because both describe the same origin of his painting.",
       "sourceTurns": [
         "D1:16",
         "D8:14"
@@ -754,10 +735,9 @@
         "kind": "natural",
         "aliases": "the Rockies"
       },
-      "description": "The mountain range Evan visits twice in the conversation: a family trip in the week before 18 May 2023 on which they hiked the trails, and a road trip in July 2023 he described as refreshing with stunning views.",
+      "description": "The mountain range Evan visited twice in 2023: a family trip in the week before 18 May 2023 on which they hiked the trails, and a solo road trip in the month before 27 August 2023 that he found refreshing and relaxing.",
       "sourceTurns": [
         "D1:4",
-        "D1:6",
         "D9:10"
       ]
     },
@@ -766,11 +746,9 @@
       "type": "place",
       "name": "Jasper",
       "properties": {
-        "kind": "region",
-        "country": "Canada",
-        "aliases": "the Icefields Parkway trip"
+        "kind": "region"
       },
-      "description": "The destination of Evan's family road trip over the weekend of 20-21 May 2023, reached by driving the Icefields Parkway past glaciers and lakes, with a stay in a cosy cabin among mountains and forests. Sam had never been there.",
+      "description": "The destination of the road trip Evan took his family on over the weekend of 20-21 May 2023, driving the Icefields Parkway past glaciers and lakes and staying in a cabin surrounded by mountains and forests. Sam has never been there.",
       "sourceTurns": [
         "D2:1",
         "D2:2",
@@ -778,33 +756,31 @@
       ]
     },
     {
-      "key": "banff",
-      "type": "place",
-      "name": "Banff",
-      "properties": {
-        "kind": "region",
-        "country": "Canada"
-      },
-      "description": "Where Evan drove in July 2023 and went skiing, saying the snow was great and he could not wait to return the following year. An earlier family trip to Banff is where the framed 'Bring it on Home' sign in his family collage came from.",
-      "sourceTurns": [
-        "D8:26",
-        "D8:27",
-        "D19:7"
-      ]
-    },
-    {
       "key": "canada",
       "type": "place",
       "name": "Canada",
       "properties": {
-        "kind": "country",
-        "country": "Canada"
+        "kind": "country"
       },
-      "description": "Where Evan travelled in the week before 7 August 2023 and met the Canadian woman he later married, and where the two of them holidayed together in August 2023, hiking and biking. They planned to return there in February 2024 for their honeymoon, to ski, see the snowy landscapes and try poutine.",
+      "description": "Where Evan met his future wife on a trip in the week before 7 August 2023, where the two of them holidayed together in August 2023 camping, hiking and biking, and where they planned to honeymoon in February 2024 to ski, eat local food and see the snowy landscapes. Evan intended to try poutine there.",
       "sourceTurns": [
         "D5:1",
         "D6:1",
         "D23:23"
+      ]
+    },
+    {
+      "key": "banff",
+      "type": "place",
+      "name": "Banff",
+      "properties": {
+        "kind": "region"
+      },
+      "description": "Where Evan went skiing on a drive in the month before 19 August 2023, saying the snow was amazing and he could not wait to go back the next year. An earlier family trip to Banff is where the 'Bring it on Home' sign in Evan's family memory collage came from.",
+      "sourceTurns": [
+        "D8:27",
+        "D8:28",
+        "D19:7"
       ]
     },
     {
@@ -814,7 +790,7 @@
       "properties": {
         "kind": "natural"
       },
-      "description": "The lake Sam and a friend set out to kayak on 14 October 2023, having heard it was great for kayaking; Evan said they would love the clear water and views there.",
+      "description": "Where Sam and a friend were travelling on 14 October 2023 to try kayaking, having heard it was great for it; Evan said they would love the clear water and views.",
       "sourceTurns": [
         "D13:14",
         "D13:15"
@@ -825,9 +801,10 @@
       "type": "place",
       "name": "Evan's favourite spot by the beach",
       "properties": {
-        "kind": "natural"
+        "kind": "venue",
+        "aliases": "my favorite spot by the beach; this peaceful place close to my home"
       },
-      "description": "A peaceful place close to Evan's home where he goes to relax and unwind and to watch the waves and the sunset; he photographed it on 3 November 2023. He and Sam agreed in November 2023 to visit it together, planning it for December 2023. Unnamed in the conversation.",
+      "description": "A peaceful place close to Evan's home where he often goes to relax and unwind and to watch the sunset over the waves; he says it helps him find peace during tough times. He photographed the sunset there on 3 November 2023 and he and Sam agreed on 9 November 2023 to visit it together, planning it for the following month. Unnamed in the conversation.",
       "sourceTurns": [
         "D16:18",
         "D16:20",
@@ -837,15 +814,29 @@
     {
       "key": "evans-childhood-island",
       "type": "place",
-      "name": "The island Evan grew up on",
+      "name": "The island where Evan grew up",
       "properties": {
         "kind": "natural"
       },
-      "description": "A small island Evan grew up on and calls his happy place and a slice of paradise; he says it shaped him and will always hold a special place in his heart. Unnamed in the conversation.",
+      "description": "A small island Evan grew up on and calls his happy place, shown to Sam in photographs on 21 November 2023. Evan says it shaped him, will always hold a special place in his heart, and feels like a slice of paradise. Unnamed in the conversation.",
       "sourceTurns": [
-        "D17:17",
         "D17:18",
-        "D17:20"
+        "D17:20",
+        "D17:24"
+      ]
+    },
+    {
+      "key": "evans-gym",
+      "type": "organization",
+      "name": "Evan's gym",
+      "properties": {
+        "kind": "business"
+      },
+      "description": "The gym Evan belongs to; he keeps his membership card as a reminder of the commitment he made when he turned his health around. He lifts weights there, was there on 16 October 2023 gaining strength, and said on 21 November 2023 that hitting the gym is how he stays in shape. Unnamed in the conversation.",
+      "sourceTurns": [
+        "D4:4",
+        "D12:2",
+        "D14:8"
       ]
     },
     {
@@ -853,14 +844,13 @@
       "type": "organization",
       "name": "Sam's cooking class",
       "properties": {
-        "kind": "course",
-        "aliases": "the cooking class"
+        "kind": "course"
       },
-      "description": "The class Sam took from around August 2023 to learn to make healthier meals. He learned several recipes there, grilled a marinated dish with vegetables on 14 August 2023, and offered Evan a roasted vegetable recipe from it.",
+      "description": "A cooking class Sam was taking as of 15 August 2023 to learn to make healthier meals. He learned several recipes there, cooked a grilled marinated fish dish with vegetables on the evening of 14 August 2023, and offered Evan a roasted vegetable recipe from it.",
       "sourceTurns": [
         "D7:2",
         "D7:4",
-        "D7:8"
+        "D7:6"
       ]
     },
     {
@@ -868,10 +858,9 @@
       "type": "organization",
       "name": "Evan's painting classes",
       "properties": {
-        "kind": "course",
-        "aliases": "the painting classes"
+        "kind": "course"
       },
-      "description": "Classes Evan started a few days before 19 August 2023, to meet like-minded people and improve his skills. They cover watercolours, and the instructor stresses observing nature and painting what you see. They were the only classes he was taking as of August 2023.",
+      "description": "Painting classes Evan started a few days before 19 August 2023, joining to meet like-minded people and improve his skills. The classes cover watercolours and the instructor stresses observing nature and painting what you see; Evan finds them a relaxing break from everyday stress.",
       "sourceTurns": [
         "D8:12",
         "D8:14",
@@ -883,273 +872,25 @@
       "type": "organization",
       "name": "Weight Watchers",
       "properties": {
-        "kind": "business",
-        "aliases": "WW; my group"
+        "kind": "club"
       },
-      "description": "The weight-loss organisation whose local group Sam belongs to. He had become a coach in his group by 9 November 2023, which he called a big accomplishment and a step in his quest for better health, and he attended a meeting on 4 December 2023 that he found insightful.",
+      "description": "The weight-loss programme Sam takes part in. He was made a coach in his group by 9 November 2023, which he called a big accomplishment and a step in his quest for better health, and he attended a meeting on 4 December 2023 that he found insightful.",
       "sourceTurns": [
         "D16:1",
         "D18:6"
       ]
     },
     {
-      "key": "evans-employer",
+      "key": "evans-former-employer",
       "type": "organization",
-      "name": "The company Evan worked for",
+      "name": "The company Evan worked for until October 2023",
       "properties": {
         "kind": "employer"
       },
-      "description": "Evan's employer until October 2023, when the company downsized and he was let go; he was job-hunting as of 9 November 2023 and still spoke of his work friends at the end of December 2023. Never named in the conversation.",
+      "description": "Evan's employer until it downsized and made him redundant in October 2023, which he told Sam about on 9 November 2023. He was job-hunting without much luck afterwards. Unnamed in the conversation.",
       "sourceTurns": [
         "D16:10",
-        "D16:12",
-        "D22:4"
-      ]
-    },
-    {
-      "key": "evans-gym",
-      "type": "organization",
-      "name": "Evan's gym",
-      "properties": {
-        "kind": "business",
-        "aliases": "the gym"
-      },
-      "description": "The gym Evan trains at. He showed Sam his membership card on 27 July 2023 as a reminder of his commitment, started lifting weights there about a year before October 2023, was there on 16 October 2023 gaining strength, and named it in November 2023 as one of the two ways he stays in shape. Unnamed in the conversation.",
-      "sourceTurns": [
-        "D4:4",
-        "D12:2",
-        "D14:8",
-        "D17:14"
-      ]
-    },
-    {
-      "key": "hiking",
-      "type": "activity",
-      "name": "Hiking",
-      "properties": {
-        "kind": "outdoor sport"
-      },
-      "description": "The outdoor activity both men return to. Evan hikes the Rockies with his family (May 2023), hikes in Canada with his partner (August 2023) and says a thirst for adventure on interesting hikes motivates him. Sam hiked a long way with his father at ten, had not hiked in years, and took friends on a hiking trip on 29 December 2023. The two repeatedly agree to hike together and never fix a date.",
-      "sourceTurns": [
-        "D1:6",
-        "D1:7",
-        "D14:6",
-        "D22:1"
-      ]
-    },
-    {
-      "key": "painting",
-      "type": "activity",
-      "name": "Watercolour painting",
-      "properties": {
-        "kind": "art"
-      },
-      "description": "Evan's main creative outlet, taken up a few years before 2023 after a friend gave him a painting and some advice; he calls it a stress-buster, paints landscapes and what is on his mind, and took classes from August 2023. Referred to as painting, watercolour painting and simply art. Sam repeatedly means to try it as a way to de-stress, is offered supplies and a joint session, but never reports painting anything.",
-      "sourceTurns": [
-        "D1:14",
-        "D2:10",
-        "D8:18",
-        "D11:12"
-      ]
-    },
-    {
-      "key": "skiing",
-      "type": "activity",
-      "name": "Skiing",
-      "properties": {
-        "kind": "winter sport"
-      },
-      "description": "One of the winter sports Evan enjoys, alongside snowboarding and ice skating. He skied at Banff in July 2023 and planned to ski again on his Canadian honeymoon in February 2024. Sam would like to try it but doubted in August 2023 that his body could take it.",
-      "sourceTurns": [
-        "D8:28",
-        "D8:30",
-        "D23:25"
-      ]
-    },
-    {
-      "key": "kayaking",
-      "type": "activity",
-      "name": "Kayaking",
-      "properties": {
-        "kind": "water sport"
-      },
-      "description": "Suggested by Evan to Sam on 14 October 2023 as a fun, active way to spend time outdoors; Sam and a friend set out that same day to kayak on Lake Tahoe. Evan himself kayaked and watched a sunset from the water during a camping trip in summer 2023.",
-      "sourceTurns": [
-        "D13:7",
-        "D13:10",
-        "D25:10"
-      ]
-    },
-    {
-      "key": "yoga",
-      "type": "activity",
-      "name": "Yoga",
-      "properties": {
-        "kind": "exercise"
-      },
-      "description": "Raised by Evan on 5 December 2023 as something gentle he was thinking of trying for stress relief and flexibility; Sam, for whom it had already done wonders on both counts, encouraged him. By January 2024 Evan said it had helped him with stress and staying flexible, and he listed it among low-impact exercises for Sam.",
-      "sourceTurns": [
-        "D18:7",
-        "D18:8",
-        "D24:19"
-      ]
-    },
-    {
-      "key": "writing",
-      "type": "activity",
-      "name": "Journalling and creative writing",
-      "properties": {
-        "kind": "writing"
-      },
-      "description": "Sam's own form of self-expression: writing in his journal and doing creative writing, which he calls therapeutic, a way of sorting out his feelings and like having a conversation with himself. Described in October 2023 alongside his admission that he is still only learning to draw.",
-      "sourceTurns": [
-        "D11:15",
-        "D11:17",
-        "D11:19"
-      ]
-    },
-    {
-      "key": "road-trips",
-      "type": "activity",
-      "name": "Road trips",
-      "properties": {
-        "kind": "travel"
-      },
-      "description": "Driving out to places is one of Evan's fixed habits and one of the two ways he says he stays in shape. The conversation covers the Rockies trip of May 2023, the Jasper weekend of 20-21 May 2023, a drive to Banff in July 2023, a Rockies road trip in July 2023, a drive that inspired his cactus painting in September 2023, and a long mountain drive over the weekend of 23-24 December 2023. Sam had not been on one in years but was taking short country drives by January 2024.",
-      "sourceTurns": [
-        "D2:1",
-        "D8:24",
-        "D9:8",
-        "D22:2"
-      ]
-    },
-    {
-      "key": "sams-weight",
-      "type": "condition",
-      "name": "Sam's weight",
-      "properties": {
-        "kind": "health risk"
-      },
-      "description": "The health problem that runs through the whole conversation. A check-up a few days before 24 May 2023 gave Sam an eye-opening reading; friends mocked his weight on 21 July 2023; a doctor told him on 2 October 2023 that it was a serious health risk that would worsen without change. It limits what he will attempt, affects his confidence and motivation, and by January 2024 he said it felt like it was keeping him from fully living.",
-      "sourceTurns": [
-        "D2:6",
-        "D12:1",
-        "D20:8",
-        "D25:1"
-      ]
-    },
-    {
-      "key": "sams-gastritis",
-      "type": "condition",
-      "name": "Sam's gastritis",
-      "properties": {
-        "kind": "digestive condition"
-      },
-      "description": "Diagnosed after Sam went to the emergency room with a severe stomachache over the weekend of 14-15 October 2023. He called it alarming and a wake-up call to adopt a more nutritious diet and exercise regularly.",
-      "sourceTurns": [
-        "D14:1",
-        "D14:2"
-      ]
-    },
-    {
-      "key": "evans-knee-injury",
-      "type": "condition",
-      "name": "Evan's knee trouble",
-      "properties": {
-        "kind": "injury"
-      },
-      "description": "Evan twisted his knee on 25 August 2023, which was painful and disrupted his fitness routine; he swam to stay active and waited on a physical therapy appointment. He hurt the same knee again in the week before 6 October 2023 playing basketball with his children, after which physical therapy helped somewhat and he kept to easy exercises rather than intense workouts.",
-      "sourceTurns": [
-        "D9:2",
-        "D9:6",
-        "D11:2",
-        "D11:4"
-      ]
-    },
-    {
-      "key": "evans-new-prius",
-      "type": "object",
-      "name": "Evan's new Prius",
-      "properties": {
-        "kind": "car",
-        "brand": "Toyota"
-      },
-      "description": "The car Evan bought to replace his old Prius; he had already driven his family to the Rockies in it by 18 May 2023. He relies on it for his active lifestyle and road trips. It broke down in early December 2023 — which he described then as happening soon after he bought it — and in late December 2023 he took it on a long mountain drive that ended in a minor accident.",
-      "sourceTurns": [
-        "D1:2",
-        "D18:1",
-        "D22:2"
-      ]
-    },
-    {
-      "key": "evans-old-prius",
-      "type": "object",
-      "name": "Evan's old Prius",
-      "properties": {
-        "kind": "car",
-        "brand": "Toyota"
-      },
-      "description": "Evan's previous car, which broke down; as of 18 May 2023 he had decided to have it repaired and sell it, having already replaced it with a new Prius.",
-      "sourceTurns": [
-        "D1:3",
-        "D1:4"
-      ]
-    },
-    {
-      "key": "evans-guitar",
-      "type": "object",
-      "name": "Evan's 1968 Kustom K-200A guitar",
-      "properties": {
-        "kind": "guitar",
-        "brand": "Kustom"
-      },
-      "description": "A vintage 1968 Kustom K-200A guitar Evan received as a gift from a close friend and showed Sam on 9 November 2023, in the same exchange in which he admitted losing his job.",
-      "sourceTurns": [
-        "D16:8",
-        "D16:9",
-        "D16:10"
-      ]
-    },
-    {
-      "key": "evans-bonsai",
-      "type": "object",
-      "name": "Evan's bonsai tree",
-      "properties": {
-        "kind": "bonsai tree"
-      },
-      "description": "A bonsai Evan keeps because it symbolises strength and resilience; caring for it motivates him to keep going through tough times and reminds him that toughness shows in little things. Shown to Sam on 7 August 2023.",
-      "sourceTurns": [
-        "D5:15",
-        "D5:16",
-        "D5:17"
-      ]
-    },
-    {
-      "key": "evans-fitness-watch",
-      "type": "object",
-      "name": "Evan's fitness watch",
-      "properties": {
-        "kind": "fitness watch"
-      },
-      "description": "A smart watch Evan uses to track his health progress; he calls it a constant reminder to keep going and says the visual reminder has been really motivating. Sam considered ordering a similar one after seeing it on 7 August 2023.",
-      "sourceTurns": [
-        "D5:7",
-        "D5:8",
-        "D5:9"
-      ]
-    },
-    {
-      "key": "sams-phone",
-      "type": "object",
-      "name": "Sam's new phone",
-      "properties": {
-        "kind": "mobile phone"
-      },
-      "description": "A phone Sam had recently bought whose navigation app kept malfunctioning in October 2023, making getting around a challenge; Evan suggested updating it. It was still giving him trouble on 17 October 2023 and adding to his stress.",
-      "sourceTurns": [
-        "D11:15",
-        "D11:16",
-        "D14:1"
+        "D16:12"
       ]
     },
     {
@@ -1157,10 +898,10 @@
       "type": "work",
       "name": "The Great Gatsby",
       "properties": {
-        "medium": "book",
+        "medium": "novel",
         "aliases": "that new mystery novel; that book I was talking about"
       },
-      "description": "The novel Evan was reading through the second half of 2023. He introduced it on 27 July 2023 as a gripping new mystery novel he could not stop thinking about and named it when Sam asked; on 27 August 2023 he said it got better with every page. Sam said he would read it sometime.",
+      "description": "The novel Evan was reading in the second half of 2023. He described it on 27 July 2023 as a gripping new mystery novel he could not stop thinking about and named it when Sam asked; on 27 August 2023 he said it got better with every page and he could not put it down. Sam said he would read it sometime.",
       "sourceTurns": [
         "D4:8",
         "D4:10",
@@ -1174,23 +915,320 @@
       "properties": {
         "medium": "film"
       },
-      "description": "The film Sam watched on the night of 9 January 2024; he quoted 'I'm gonna make him an offer he can't refuse' and said it motivated him to keep up his routine. Evan called it legendary and worth re-watching many times.",
+      "description": "The film Sam watched on the evening of 9 January 2024; he found the line 'I'm gonna make him an offer he can't refuse' motivating for sticking to his health routine, and Evan called it a legendary watch that bears re-watching.",
       "sourceTurns": [
         "D24:18",
         "D24:19"
       ]
     },
     {
-      "key": "evans-figurative-painting",
+      "key": "evans-cactus-painting",
+      "type": "work",
+      "name": "Evan's cactus painting",
+      "properties": {
+        "medium": "watercolour"
+      },
+      "description": "A watercolour of a cactus in the desert that Evan showed Sam on 18 May 2023 and again on 6 October 2023, when he said it was inspired by a road trip in the month before. Sam called it impressive.",
+      "sourceTurns": [
+        "D1:14",
+        "D11:8",
+        "D11:10"
+      ]
+    },
+    {
+      "key": "evans-sunset-painting",
+      "type": "work",
+      "name": "Evan's sunset painting",
+      "properties": {
+        "medium": "watercolour"
+      },
+      "description": "A painting of a sunset over the ocean that Evan showed Sam on 19 August 2023 as one of his recent works, and which on 6 October 2023 he said was inspired by a vacation a few years earlier. The mention in August and the one in October are joined here because both describe one sunset painting he had already finished; the sunset painting he finished on 14 October 2023 is recorded separately as an event, since nothing says it is this one.",
+      "sourceTurns": [
+        "D8:20",
+        "D11:10"
+      ]
+    },
+    {
+      "key": "evans-exhibition-painting",
       "type": "work",
       "name": "Evan's contemporary figurative painting",
       "properties": {
         "medium": "painting"
       },
-      "description": "A contemporary figurative painting Evan finished a few days before 17 December 2023, emphasising emotional state through expressive brushwork and vibrant colour and capturing a moment of introspection. He was very proud of it, and a close friend helped him get it published in an exhibition.",
+      "description": "A contemporary figurative painting Evan finished a few days before 17 December 2023, using expressive brushwork and vibrant colour to capture a moment of introspection. He was very proud of it, and a close friend helped him get it published in an exhibition.",
       "sourceTurns": [
         "D20:15",
         "D20:17"
+      ]
+    },
+    {
+      "key": "evans-prius",
+      "type": "object",
+      "name": "Evan's new Prius",
+      "properties": {
+        "kind": "car",
+        "brand": "Toyota Prius"
+      },
+      "description": "The Prius Evan bought to replace his old one before May 2023. He took his family to the Rockies in it, relies on it for his active lifestyle and road trips, and it broke down on 5 December 2023, which he found a real stressor. The family still took it on a long mountain drive over the weekend of 23-24 December 2023, on which they had a minor accident on the way back.",
+      "sourceTurns": [
+        "D1:2",
+        "D18:1",
+        "D22:2"
+      ]
+    },
+    {
+      "key": "evans-old-prius",
+      "type": "object",
+      "name": "Evan's old Prius",
+      "properties": {
+        "kind": "car",
+        "brand": "Toyota Prius"
+      },
+      "description": "The Prius Evan had before the new one. It broke down, and he decided to have it repaired so he could sell it, replacing it with the new Prius before 18 May 2023.",
+      "sourceTurns": [
+        "D1:3",
+        "D1:4"
+      ]
+    },
+    {
+      "key": "evans-fitness-watch",
+      "type": "object",
+      "name": "Evan's fitness watch",
+      "properties": {
+        "kind": "smart watch"
+      },
+      "description": "A fitness watch Evan wears that tracks his progress and serves as a constant visual reminder to keep going with his health goals. He showed it to Sam on 7 August 2023 and Sam was considering ordering a similar one.",
+      "sourceTurns": [
+        "D5:7",
+        "D5:9",
+        "D5:11"
+      ]
+    },
+    {
+      "key": "evans-guitar",
+      "type": "object",
+      "name": "Evan's 1968 Kustom K-200A guitar",
+      "properties": {
+        "kind": "guitar",
+        "brand": "Kustom"
+      },
+      "description": "A 1968 Kustom K-200A vintage guitar Evan received as a gift from a close friend and showed Sam on 9 November 2023, during the rough patch after he lost his job. Sam thought it looked vintage and cool.",
+      "sourceTurns": [
+        "D16:8",
+        "D16:9",
+        "D16:10"
+      ]
+    },
+    {
+      "key": "evans-bonsai",
+      "type": "object",
+      "name": "Evan's bonsai tree",
+      "properties": {
+        "kind": "bonsai tree"
+      },
+      "description": "A bonsai tree Evan keeps because it symbolises strength and resilience; caring for it motivates him to keep going through tough times and reminds him that toughness shows in little things. Shown to Sam on 7 August 2023.",
+      "sourceTurns": [
+        "D5:15",
+        "D5:17",
+        "D5:19"
+      ]
+    },
+    {
+      "key": "evans-keys",
+      "type": "object",
+      "name": "Evan's keys",
+      "properties": {
+        "kind": "keys"
+      },
+      "description": "Evan's house keys, a running joke between the two. He spent half an hour hunting for them on 13 August 2023 and said he loses them every week; he lost them again on 26 December 2023 and called it a weekly ritual, prompting Sam to suggest fitting a GPS sensor to them.",
+      "sourceTurns": [
+        "D6:13",
+        "D21:20",
+        "D21:21"
+      ]
+    },
+    {
+      "key": "sams-phone",
+      "type": "object",
+      "name": "Sam's new phone",
+      "properties": {
+        "kind": "mobile phone"
+      },
+      "description": "A new phone Sam had by October 2023 whose navigation app kept malfunctioning, making it hard to get around. Evan suggested updating it. It was still giving Sam trouble on 17 October 2023 and adding to his stress.",
+      "sourceTurns": [
+        "D11:15",
+        "D11:16",
+        "D14:1"
+      ]
+    },
+    {
+      "key": "watercolor-painting",
+      "type": "activity",
+      "name": "Watercolour painting",
+      "properties": {
+        "kind": "craft"
+      },
+      "description": "Evan's long-standing hobby, taken up a few years before 2023 after a friend introduced him to it and gave him a painting. He calls it a stress-buster and a way of expressing feelings without words, paints landscapes and whatever is on his mind, and took formal classes from August 2023. Sam repeatedly said he wanted to try painting to de-stress and the two planned a session together for 16 September 2023.",
+      "sourceTurns": [
+        "D1:14",
+        "D8:18",
+        "D11:12"
+      ]
+    },
+    {
+      "key": "hiking",
+      "type": "activity",
+      "name": "Hiking",
+      "properties": {
+        "kind": "sport"
+      },
+      "description": "An activity both men value. Evan hikes often, hiked the Rockies trails with his family in May 2023 and in Canada in August 2023, and says a thirst for adventure on interesting hikes motivates him. Sam hiked with his father at about age ten, had not hiked in years by 2023, took friends on a hiking trip on 29 December 2023, and he and Evan repeatedly agreed to hike together.",
+      "sourceTurns": [
+        "D1:6",
+        "D1:7",
+        "D5:13",
+        "D22:1"
+      ]
+    },
+    {
+      "key": "kayaking",
+      "type": "activity",
+      "name": "Kayaking",
+      "properties": {
+        "kind": "sport"
+      },
+      "description": "Suggested by Evan to Sam on 14 October 2023 as a fun, active way to get exercise outdoors. Sam and a friend set off to try it at Lake Tahoe the same day, and Evan offered to plan a kayaking trip together at a spot of his choosing. Evan himself kayaked and watched the sunset on a camping trip in the summer of 2023.",
+      "sourceTurns": [
+        "D13:7",
+        "D13:10",
+        "D25:10"
+      ]
+    },
+    {
+      "key": "skiing",
+      "type": "activity",
+      "name": "Skiing",
+      "properties": {
+        "kind": "winter sport"
+      },
+      "description": "One of the winter sports Evan enjoys, along with snowboarding and ice skating. He skied at Banff in the month before 19 August 2023 and hoped to return the next year, and skiing was part of the plan for the February 2024 honeymoon in Canada. Sam would like to try it but doubts his body could take it.",
+      "sourceTurns": [
+        "D8:28",
+        "D8:30",
+        "D23:25"
+      ]
+    },
+    {
+      "key": "yoga",
+      "type": "activity",
+      "name": "Yoga",
+      "properties": {
+        "kind": "exercise"
+      },
+      "description": "Suggested between the two as gentle, effective exercise. Sam said on 5 December 2023 that yoga had done wonders for his flexibility and stress levels; Evan, who had been thinking about trying it, took it up and said on 10 January 2024 that it had helped him with stress and staying flexible alongside his diet, and recommended it to Sam as a low-impact exercise.",
+      "sourceTurns": [
+        "D18:7",
+        "D18:8",
+        "D24:19"
+      ]
+    },
+    {
+      "key": "creative-writing",
+      "type": "activity",
+      "name": "Sam's journal and creative writing",
+      "properties": {
+        "kind": "writing"
+      },
+      "description": "How Sam expresses himself. He keeps a journal and does creative writing, which he finds therapeutic and describes as a way of sorting out his feelings and having a conversation with himself. He also sketches occasionally but said on 26 December 2023 that he had not yet made anything remarkable.",
+      "sourceTurns": [
+        "D11:15",
+        "D11:17",
+        "D11:19"
+      ]
+    },
+    {
+      "key": "evans-health-routine",
+      "type": "activity",
+      "name": "Evan's health and fitness routine",
+      "properties": {
+        "kind": "health routine"
+      },
+      "description": "The diet and exercise regime Evan has kept up since about 2021: a fitness routine he genuinely enjoys, weight training started around October 2022, morning walks, cutting sugary snacks and eating more vegetables and fruit. He said on 7 August 2023 he had been working on it for two years with ups and downs, credits letting go of quick-result expectations, and is motivated by his family and his fitness watch. On 6 January 2024 he added a limit of two ginger snaps a day, ginger snaps being his admitted weakness.",
+      "sourceTurns": [
+        "D2:9",
+        "D5:7",
+        "D15:10",
+        "D23:15"
+      ]
+    },
+    {
+      "key": "sams-diet-and-exercise-routine",
+      "type": "activity",
+      "name": "Sam's diet and exercise routine",
+      "properties": {
+        "kind": "health routine"
+      },
+      "description": "Sam's attempt to change how he eats and exercises, which runs through the whole conversation. He made no changes at all in June 2023, was cutting soda and candy by late July, announced a diet on 19 August 2023, started a new diet and exercise routine on 21 August 2023 and felt more energetic, posted before-and-after photographs in September, relapsed with snacks in October, kept going under family pressure, became a Weight Watchers coach in November, took up morning running by late December, and drew up a meal plan and workout schedule to start on 10 January 2024.",
+      "sourceTurns": [
+        "D4:7",
+        "D8:1",
+        "D9:1",
+        "D24:10"
+      ]
+    },
+    {
+      "key": "sams-weight",
+      "type": "condition",
+      "name": "Sam's weight",
+      "properties": {
+        "kind": "health risk"
+      },
+      "description": "The health problem that dominates Sam's side of the conversation. A doctor's check-up a few days before 24 May 2023 showed his weight was not good; on 2 October 2023 a doctor told him it was a serious health risk that would get worse without change. Friends mocked it on 21 July 2023, it limited his movement by November 2023, and by 17 December 2023 he said it was hurting his confidence and he lacked the motivation to overcome it. On 11 January 2024 he said it felt like it was keeping him from fully living.",
+      "sourceTurns": [
+        "D2:6",
+        "D12:1",
+        "D20:8",
+        "D25:1"
+      ]
+    },
+    {
+      "key": "sams-gastritis",
+      "type": "condition",
+      "name": "Sam's gastritis",
+      "properties": {
+        "kind": "illness"
+      },
+      "description": "Diagnosed after Sam went to the emergency room with a severe stomachache over the weekend of 14-15 October 2023. He found it alarming and took it as a wake-up call to adopt a more nutritious diet and exercise regularly.",
+      "sourceTurns": [
+        "D14:1"
+      ]
+    },
+    {
+      "key": "evans-knee-injury",
+      "type": "condition",
+      "name": "Evan's knee injury",
+      "properties": {
+        "kind": "injury"
+      },
+      "description": "Evan twisted his knee on 25 August 2023, which made it painful to keep up his usual fitness routine; he swam and kept things low-key while waiting for physiotherapy. He hurt the same knee again in the week before 6 October 2023 playing basketball with his children. By 6 October physiotherapy had helped some, and he was doing easy exercises rather than intense workouts.",
+      "sourceTurns": [
+        "D9:2",
+        "D9:6",
+        "D11:2",
+        "D11:4"
+      ]
+    },
+    {
+      "key": "evans-heart-palpitations",
+      "type": "condition",
+      "name": "Evan's heart palpitations",
+      "properties": {
+        "kind": "health scare"
+      },
+      "description": "A sudden heart palpitation incident Evan had in the week before 6 June 2023 that shook him badly and served as a wake-up call about his lifestyle; he was carrying medication and became extra careful about processed food and sugary snacks afterwards.",
+      "sourceTurns": [
+        "D3:1",
+        "D3:3"
       ]
     }
   ],
@@ -1198,15 +1236,14 @@
     {
       "key": "jasper-road-trip",
       "type": "event",
-      "title": "Evan took his family on a road trip to Jasper, driving the Icefields Parkway and staying in a cabin",
+      "status": "completed",
+      "title": "Evan took his family on a road trip to Jasper, staying in a cabin in the mountains",
       "date": "2023-05-20",
       "endsAt": "2023-05-21",
-      "status": "completed",
       "entities": [
         "evan",
         "evans-family",
-        "jasper",
-        "road-trips"
+        "jasper"
       ],
       "sourceTurns": [
         "D2:1",
@@ -1214,24 +1251,11 @@
       ]
     },
     {
-      "key": "sam-supermarket-checkout",
+      "key": "friends-mocked-sam",
       "type": "event",
-      "title": "Sam found every self-checkout machine at the supermarket broken, which ruined his mood",
-      "date": "2023-06-06",
       "status": "completed",
-      "entities": [
-        "sam"
-      ],
-      "sourceTurns": [
-        "D3:16"
-      ]
-    },
-    {
-      "key": "friends-mocked-sams-weight",
-      "type": "event",
-      "title": "Sam's friends mocked his weight, which hurt him and convinced him he needed to change",
+      "title": "Sam's friends mocked his weight, which hurt him and pushed him to change",
       "date": "2023-07-21",
-      "status": "completed",
       "entities": [
         "sam",
         "sams-weight"
@@ -1241,24 +1265,41 @@
       ]
     },
     {
-      "key": "sam-gym-start-plan",
+      "key": "sam-gym-start",
       "type": "event",
-      "title": "Sam meant to start going to the gym and exercising regularly",
-      "date": "2023-07-28",
       "status": "upcoming",
+      "title": "Sam's intended first day of going to the gym and exercising regularly",
+      "date": "2023-07-28",
       "entities": [
-        "sam"
+        "sam",
+        "sams-diet-and-exercise-routine",
+        "evans-gym"
       ],
       "sourceTurns": [
         "D4:15"
       ]
     },
     {
-      "key": "sams-dream-skyscrapers",
+      "key": "evan-canada-vacation-return",
       "type": "event",
-      "title": "Sam dreamed he was soaring over skyscrapers and wondered what it signified",
-      "date": "2023-08-12",
       "status": "completed",
+      "title": "Evan got back from a vacation in Canada with his new partner, camping, hiking and biking",
+      "date": "2023-08-13",
+      "entities": [
+        "evan",
+        "evans-partner",
+        "canada"
+      ],
+      "sourceTurns": [
+        "D6:1"
+      ]
+    },
+    {
+      "key": "sams-flying-dream",
+      "type": "event",
+      "status": "completed",
+      "title": "Sam dreamt that he was soaring over skyscrapers",
+      "date": "2023-08-12",
       "entities": [
         "sam"
       ],
@@ -1267,44 +1308,28 @@
       ]
     },
     {
-      "key": "evans-son-soccer-injury",
+      "key": "sons-soccer-accident",
       "type": "event",
-      "title": "Evan's son hurt his ankle in a soccer accident and Evan took him to the doctor",
-      "date": "2023-08-12",
       "status": "completed",
+      "title": "Evan's son hurt his ankle in a soccer accident",
+      "date": "2023-08-12",
       "entities": [
         "evan",
         "evans-son"
       ],
       "sourceTurns": [
-        "D7:1",
-        "D7:9"
+        "D7:1"
       ]
     },
     {
-      "key": "sam-grilled-dish",
+      "key": "sam-started-routine",
       "type": "event",
-      "title": "Sam grilled a marinated dish with vegetables from his cooking class",
-      "date": "2023-08-14",
       "status": "completed",
-      "entities": [
-        "sam",
-        "sams-cooking-class"
-      ],
-      "sourceTurns": [
-        "D7:4",
-        "D7:6"
-      ]
-    },
-    {
-      "key": "sam-diet-exercise-routine",
-      "type": "event",
-      "title": "Sam's new diet and exercise routine, which he began on 21 August 2023 and was still working at months later",
+      "title": "Sam started a new diet and exercise routine",
       "date": "2023-08-21",
-      "status": "active",
       "entities": [
         "sam",
-        "sams-weight"
+        "sams-diet-and-exercise-routine"
       ],
       "sourceTurns": [
         "D9:1"
@@ -1313,9 +1338,9 @@
     {
       "key": "evan-twisted-knee",
       "type": "event",
-      "title": "Evan twisted his knee, which made it hard to keep up his fitness routine",
-      "date": "2023-08-25",
       "status": "completed",
+      "title": "Evan twisted his knee, interrupting his fitness routine",
+      "date": "2023-08-25",
       "entities": [
         "evan",
         "evans-knee-injury"
@@ -1327,13 +1352,13 @@
     {
       "key": "painting-session-plan",
       "type": "event",
-      "title": "Evan and Sam meant to hold a painting session together, with Evan helping Sam pick out supplies",
-      "date": "2023-09-16",
       "status": "upcoming",
+      "title": "The painting session Evan and Sam arranged to hold together",
+      "date": "2023-09-16",
       "entities": [
         "evan",
         "sam",
-        "painting"
+        "watercolor-painting"
       ],
       "sourceTurns": [
         "D10:13",
@@ -1341,11 +1366,11 @@
       ]
     },
     {
-      "key": "sams-weight-checkup",
+      "key": "sam-checkup-oct-2023",
       "type": "event",
-      "title": "Sam's doctor told him at a check-up that his weight was a serious health risk that would worsen without changes",
-      "date": "2023-10-02",
       "status": "completed",
+      "title": "Sam's check-up at which his doctor called his weight a serious health risk",
+      "date": "2023-10-02",
       "entities": [
         "sam",
         "sams-weight"
@@ -1355,11 +1380,25 @@
       ]
     },
     {
+      "key": "evan-finished-sunset-painting",
+      "type": "event",
+      "status": "completed",
+      "title": "Evan finished a painting of a sunset",
+      "date": "2023-10-14",
+      "entities": [
+        "evan",
+        "watercolor-painting"
+      ],
+      "sourceTurns": [
+        "D13:3"
+      ]
+    },
+    {
       "key": "sam-kayaking-tahoe",
       "type": "event",
-      "title": "Sam and a friend set out to go kayaking on Lake Tahoe",
-      "date": "2023-10-14",
       "status": "upcoming",
+      "title": "Sam and a friend setting out to try kayaking at Lake Tahoe",
+      "date": "2023-10-14",
       "entities": [
         "sam",
         "kayaking",
@@ -1371,38 +1410,11 @@
       ]
     },
     {
-      "key": "evan-gym-session",
+      "key": "evan-beach-photo",
       "type": "event",
-      "title": "Evan went to the gym and said he was gaining strength",
-      "date": "2023-10-16",
       "status": "completed",
-      "entities": [
-        "evan",
-        "evans-gym"
-      ],
-      "sourceTurns": [
-        "D14:8"
-      ]
-    },
-    {
-      "key": "evan-morning-walk",
-      "type": "event",
-      "title": "Evan took a morning walk and said starting the day actively helps",
-      "date": "2023-10-25",
-      "status": "completed",
-      "entities": [
-        "evan"
-      ],
-      "sourceTurns": [
-        "D15:2"
-      ]
-    },
-    {
-      "key": "evan-beach-sunset-photo",
-      "type": "event",
       "title": "Evan photographed the sunset at his favourite spot by the beach",
       "date": "2023-11-03",
-      "status": "completed",
       "entities": [
         "evan",
         "evans-beach-spot"
@@ -1412,39 +1424,84 @@
       ]
     },
     {
-      "key": "sam-got-feelgood-film",
+      "key": "sam-became-ww-coach",
       "type": "event",
-      "title": "Sam acquired the film he calls his go-to feel-good watch",
-      "date": "2023-11-20",
       "status": "completed",
-      "entities": [
-        "sam"
-      ],
-      "sourceTurns": [
-        "D17:5"
-      ]
-    },
-    {
-      "key": "sam-ww-meeting",
-      "type": "event",
-      "title": "Sam attended a Weight Watchers meeting and found it insightful",
-      "date": "2023-12-04",
-      "status": "completed",
+      "title": "Sam was made a Weight Watchers coach in his group",
+      "date": "2023-11-09",
       "entities": [
         "sam",
         "weight-watchers"
       ],
       "sourceTurns": [
-        "D18:6",
-        "D18:8"
+        "D16:1",
+        "D16:3"
       ]
     },
     {
-      "key": "evans-son-bike-accident",
+      "key": "evan-got-guitar",
       "type": "event",
+      "status": "completed",
+      "title": "Evan received a 1968 Kustom K-200A vintage guitar as a gift from a close friend",
+      "date": "2023-11-09",
+      "entities": [
+        "evan",
+        "evans-guitar"
+      ],
+      "sourceTurns": [
+        "D16:8",
+        "D16:10"
+      ]
+    },
+    {
+      "key": "sam-ww-meeting",
+      "type": "event",
+      "status": "completed",
+      "title": "Sam attended a Weight Watchers meeting and picked up new tips",
+      "date": "2023-12-04",
+      "entities": [
+        "sam",
+        "weight-watchers"
+      ],
+      "sourceTurns": [
+        "D18:6"
+      ]
+    },
+    {
+      "key": "prius-broke-down",
+      "type": "event",
+      "status": "completed",
+      "title": "Evan's new Prius broke down",
+      "date": "2023-12-05",
+      "entities": [
+        "evan",
+        "evans-prius"
+      ],
+      "sourceTurns": [
+        "D18:1"
+      ]
+    },
+    {
+      "key": "partner-pregnancy-news",
+      "type": "event",
+      "status": "completed",
+      "title": "Evan shared the news that his partner was pregnant",
+      "date": "2023-12-09",
+      "entities": [
+        "evan",
+        "evans-partner"
+      ],
+      "sourceTurns": [
+        "D19:1",
+        "D19:3"
+      ]
+    },
+    {
+      "key": "son-bike-accident",
+      "type": "event",
+      "status": "completed",
       "title": "Evan's son fell off his bike and was hurt",
       "date": "2023-12-12",
-      "status": "completed",
       "entities": [
         "evan",
         "evans-son"
@@ -1456,9 +1513,9 @@
     {
       "key": "sams-hiking-trip",
       "type": "event",
+      "status": "completed",
       "title": "Sam took his friends on a hiking trip",
       "date": "2023-12-29",
-      "status": "completed",
       "entities": [
         "sam",
         "hiking"
@@ -1468,11 +1525,11 @@
       ]
     },
     {
-      "key": "told-extended-family-marriage",
+      "key": "told-family-about-marriage",
       "type": "event",
-      "title": "Evan and his wife told their extended family about their marriage",
-      "date": "2024-01-05",
       "status": "completed",
+      "title": "Evan and his partner told their extended family about their marriage",
+      "date": "2024-01-05",
       "entities": [
         "evan",
         "evans-partner",
@@ -1483,11 +1540,11 @@
       ]
     },
     {
-      "key": "evans-family-gettogether",
+      "key": "family-lasagne-dinner",
       "type": "event",
-      "title": "Evan's family get-together over homemade lasagna",
-      "date": "2024-01-06",
       "status": "upcoming",
+      "title": "Evan's family get-together over homemade lasagne",
+      "date": "2024-01-06",
       "entities": [
         "evan",
         "evans-family"
@@ -1497,11 +1554,26 @@
       ]
     },
     {
-      "key": "evan-drunken-rose-incident",
+      "key": "evan-ginger-snap-diet",
       "type": "event",
-      "title": "Evan drank too much on a night out with friends and urinated near somebody's roses",
-      "date": "2024-01-09",
       "status": "completed",
+      "title": "Evan started a diet limiting himself to two ginger snaps a day",
+      "date": "2024-01-06",
+      "entities": [
+        "evan",
+        "evans-health-routine"
+      ],
+      "sourceTurns": [
+        "D23:15",
+        "D23:17"
+      ]
+    },
+    {
+      "key": "rose-bush-incident",
+      "type": "event",
+      "status": "completed",
+      "title": "Evan drank too much on a night out and had a pee accident near someone's roses",
+      "date": "2024-01-09",
       "entities": [
         "evan"
       ],
@@ -1511,30 +1583,32 @@
       ]
     },
     {
-      "key": "sam-watched-godfather",
+      "key": "sam-meal-plan-start",
       "type": "event",
-      "title": "Sam watched The Godfather and found it motivating",
-      "date": "2024-01-09",
-      "status": "completed",
+      "status": "upcoming",
+      "title": "The day Sam set to begin following his new meal plan and workout schedule",
+      "date": "2024-01-10",
       "entities": [
         "sam",
-        "the-godfather"
-      ],
-      "sourceTurns": [
-        "D24:18"
-      ]
-    },
-    {
-      "key": "sam-made-meal-plan",
-      "type": "event",
-      "title": "Sam drew up a meal plan and workout schedule and began following it",
-      "date": "2024-01-10",
-      "status": "completed",
-      "entities": [
-        "sam"
+        "sams-diet-and-exercise-routine"
       ],
       "sourceTurns": [
         "D24:10"
+      ]
+    },
+    {
+      "key": "evan-apologised-to-partner",
+      "type": "event",
+      "status": "completed",
+      "title": "Evan apologised to his partner for the drunken night by the rose bushes",
+      "date": "2024-01-11",
+      "entities": [
+        "evan",
+        "evans-partner"
+      ],
+      "sourceTurns": [
+        "D25:2",
+        "D25:4"
       ]
     }
   ],
@@ -1550,17 +1624,9 @@
     {
       "label": "knows",
       "from": "evan",
-      "to": "evans-painting-friend",
+      "to": "evans-friend-painter",
       "properties": {
         "kind": "friend"
-      }
-    },
-    {
-      "label": "family_of",
-      "from": "evan",
-      "to": "evans-family",
-      "properties": {
-        "relation": "immediate family"
       }
     },
     {
@@ -1569,6 +1635,14 @@
       "to": "evans-son",
       "properties": {
         "relation": "son"
+      }
+    },
+    {
+      "label": "family_of",
+      "from": "evan",
+      "to": "evans-family",
+      "properties": {
+        "relation": "immediate family"
       }
     },
     {
@@ -1582,7 +1656,7 @@
     {
       "label": "owns",
       "from": "evan",
-      "to": "evans-new-prius"
+      "to": "evans-prius"
     },
     {
       "label": "owns",
@@ -1600,9 +1674,32 @@
       "to": "evans-bonsai"
     },
     {
+      "label": "owns",
+      "from": "evan",
+      "to": "evans-keys"
+    },
+    {
+      "label": "member_of",
+      "from": "evan",
+      "to": "evans-gym"
+    },
+    {
+      "label": "member_of",
+      "from": "evan",
+      "to": "evans-painting-class",
+      "properties": {
+        "since": "2023-08-19"
+      }
+    },
+    {
+      "label": "member_of",
+      "from": "sam",
+      "to": "sams-cooking-class"
+    },
+    {
       "label": "practices",
       "from": "evan",
-      "to": "painting"
+      "to": "watercolor-painting"
     },
     {
       "label": "practices",
@@ -1612,17 +1709,56 @@
     {
       "label": "practices",
       "from": "evan",
-      "to": "road-trips"
+      "to": "skiing"
     },
     {
       "label": "practices",
       "from": "evan",
-      "to": "skiing"
+      "to": "evans-health-routine"
+    },
+    {
+      "label": "practices",
+      "from": "sam",
+      "to": "hiking"
+    },
+    {
+      "label": "practices",
+      "from": "sam",
+      "to": "sams-diet-and-exercise-routine",
+      "properties": {
+        "since": "2023-08-21"
+      }
+    },
+    {
+      "label": "has_condition",
+      "from": "sam",
+      "to": "sams-weight"
+    },
+    {
+      "label": "has_condition",
+      "from": "evan",
+      "to": "evans-heart-palpitations"
+    },
+    {
+      "label": "has_condition",
+      "from": "evan",
+      "to": "evans-knee-injury",
+      "properties": {
+        "since": "2023-08-25"
+      }
+    },
+    {
+      "label": "created_by",
+      "from": "evans-sunset-painting",
+      "to": "evan",
+      "properties": {
+        "role": "painter"
+      }
     },
     {
       "label": "likes",
       "from": "evan",
-      "to": "painting"
+      "to": "watercolor-painting"
     },
     {
       "label": "likes",
@@ -1645,58 +1781,9 @@
       "to": "hiking"
     },
     {
-      "label": "located_in",
-      "from": "jasper",
-      "to": "canada"
-    },
-    {
-      "label": "located_in",
-      "from": "banff",
-      "to": "canada"
-    },
-    {
-      "label": "member_of",
-      "from": "evan",
-      "to": "evans-gym"
-    },
-    {
-      "label": "member_of",
-      "from": "evan",
-      "to": "evans-painting-class",
-      "properties": {
-        "role": "student"
-      }
-    },
-    {
-      "label": "member_of",
-      "from": "sam",
-      "to": "sams-cooking-class",
-      "properties": {
-        "role": "student"
-      }
-    },
-    {
-      "label": "has_condition",
-      "from": "sam",
-      "to": "sams-weight"
-    },
-    {
-      "label": "has_condition",
-      "from": "evan",
-      "to": "evans-knee-injury",
-      "properties": {
-        "since": "2023-08-25"
-      }
-    },
-    {
-      "label": "works_at",
-      "from": "evan",
-      "to": "evans-employer"
-    },
-    {
-      "label": "owns",
-      "from": "evan",
-      "to": "evans-guitar"
+      "label": "supersedes",
+      "from": "sam-on-a-diet-aug-2023",
+      "to": "sam-no-diet-changes-june-2023"
     },
     {
       "label": "owns",
@@ -1704,35 +1791,52 @@
       "to": "sams-phone"
     },
     {
-      "label": "member_of",
-      "from": "sam",
-      "to": "weight-watchers",
+      "label": "owns",
+      "from": "evan",
+      "to": "evans-guitar",
       "properties": {
-        "role": "coach"
-      }
-    },
-    {
-      "label": "family_of",
-      "from": "sam",
-      "to": "sams-family",
-      "properties": {
-        "relation": "immediate family"
+        "since": "2023-11-09"
       }
     },
     {
       "label": "practices",
       "from": "sam",
-      "to": "writing"
+      "to": "creative-writing"
+    },
+    {
+      "label": "created_by",
+      "from": "evans-cactus-painting",
+      "to": "evan",
+      "properties": {
+        "role": "painter"
+      }
+    },
+    {
+      "label": "has_condition",
+      "from": "sam",
+      "to": "sams-gastritis",
+      "properties": {
+        "since": "2023-10-14"
+      }
+    },
+    {
+      "label": "member_of",
+      "from": "sam",
+      "to": "weight-watchers",
+      "properties": {
+        "role": "coach",
+        "since": "2023-11-09"
+      }
+    },
+    {
+      "label": "works_at",
+      "from": "evan",
+      "to": "evans-former-employer"
     },
     {
       "label": "likes",
       "from": "sam",
-      "to": "writing"
-    },
-    {
-      "label": "likes",
-      "from": "evan",
-      "to": "evans-beach-spot"
+      "to": "creative-writing"
     },
     {
       "label": "likes",
@@ -1740,17 +1844,22 @@
       "to": "evans-childhood-island"
     },
     {
-      "label": "has_condition",
-      "from": "sam",
-      "to": "sams-gastritis"
+      "label": "likes",
+      "from": "evan",
+      "to": "evans-beach-spot"
     },
     {
       "label": "family_of",
       "from": "evan",
       "to": "evans-partner",
       "properties": {
-        "relation": "spouse"
+        "relation": "wife"
       }
+    },
+    {
+      "label": "practices",
+      "from": "sam",
+      "to": "yoga"
     },
     {
       "label": "practices",
@@ -1763,18 +1872,8 @@
       "to": "kayaking"
     },
     {
-      "label": "practices",
-      "from": "sam",
-      "to": "yoga"
-    },
-    {
-      "label": "practices",
-      "from": "sam",
-      "to": "hiking"
-    },
-    {
       "label": "created_by",
-      "from": "evans-figurative-painting",
+      "from": "evans-exhibition-painting",
       "to": "evan",
       "properties": {
         "role": "painter"
@@ -1784,33 +1883,41 @@
       "label": "likes",
       "from": "sam",
       "to": "the-godfather"
+    },
+    {
+      "label": "likes",
+      "from": "evan",
+      "to": "canada"
     }
   ],
   "claims": [
     {
-      "text": "Evan had just returned from a trip to the Rocky Mountains with his family, driven in his new Prius, which he told Sam about on 18 May 2023.",
+      "text": "Evan and his family took a trip to the Rocky Mountains in Evan's new Prius and hiked the trails there in the week before 18 May 2023; Evan said the views were amazing.",
       "speaker": "Evan",
       "statedOn": "2023-05-18",
       "entities": [
         "evan",
         "evans-family",
         "rocky-mountains",
-        "evans-new-prius",
-        "road-trips"
+        "evans-prius",
+        "hiking"
       ],
       "sourceTurns": [
         "D1:1",
-        "D1:2"
+        "D1:2",
+        "D1:4",
+        "D1:5",
+        "D1:6"
       ]
     },
     {
-      "text": "Evan's old Prius broke down, and as of 18 May 2023 he had decided to have it repaired and sell it, having already replaced it with a new Prius.",
+      "text": "Evan's old Prius broke down, and he decided to have it repaired so that he could sell it; he had replaced it with a new Prius by 18 May 2023.",
       "speaker": "Evan",
       "statedOn": "2023-05-18",
       "entities": [
         "evan",
         "evans-old-prius",
-        "evans-new-prius"
+        "evans-prius"
       ],
       "sourceTurns": [
         "D1:3",
@@ -1818,22 +1925,7 @@
       ]
     },
     {
-      "text": "Evan and his family hiked the trails in the Rocky Mountains in the week before 18 May 2023, and he said the views were amazing.",
-      "speaker": "Evan",
-      "statedOn": "2023-05-18",
-      "entities": [
-        "evan",
-        "evans-family",
-        "rocky-mountains",
-        "hiking"
-      ],
-      "sourceTurns": [
-        "D1:5",
-        "D1:6"
-      ]
-    },
-    {
-      "text": "Sam hiked a long way with his father when he was ten years old, calls it a great memory and something special between them, and said on 18 May 2023 that it had been ages since he last went hiking.",
+      "text": "Sam went on a hike with his father when he was ten years old, covering what was a long distance for him at that age, and still counts it as a great and special memory.",
       "speaker": "Sam",
       "statedOn": "2023-05-18",
       "entities": [
@@ -1848,49 +1940,53 @@
       ]
     },
     {
-      "text": "Sam had found no new hobbies as of 18 May 2023 but was thinking about trying painting, which he saw as a way to relax and be creative, though he had never tried it.",
+      "text": "Sam had not found a hobby as of 18 May 2023 but was thinking about trying painting, which he thought looked like a nice way to relax and be creative.",
       "speaker": "Sam",
       "statedOn": "2023-05-18",
       "entities": [
         "sam",
-        "painting"
+        "watercolor-painting"
       ],
       "sourceTurns": [
         "D1:10",
         "D1:11",
-        "D1:12",
         "D1:13"
       ]
     },
     {
-      "text": "Evan took up watercolour painting a few years before May 2023 and calls it a great stress-buster.",
+      "text": "Evan took up watercolour painting a few years before 18 May 2023, after a friend got him into it and gave him some advice; he was hooked straight away and calls it a great stress-buster.",
       "speaker": "Evan",
       "statedOn": "2023-05-18",
       "entities": [
         "evan",
-        "painting"
+        "watercolor-painting",
+        "evans-friend-painter",
+        "evans-cactus-painting"
       ],
       "sourceTurns": [
+        "D1:12",
         "D1:14",
-        "D1:15"
+        "D1:15",
+        "D1:16"
       ]
     },
     {
-      "text": "A friend introduced Evan to watercolour painting and gave him advice, and he was hooked right away.",
-      "speaker": "Evan",
+      "text": "Sam said on 18 May 2023 that he hoped to find something he could be as passionate about as Evan is about watercolour painting, and Evan told him to keep trying new things until something sparked his excitement.",
+      "speaker": "Sam",
       "statedOn": "2023-05-18",
       "entities": [
+        "sam",
         "evan",
-        "evans-painting-friend",
-        "painting"
+        "watercolor-painting"
       ],
       "sourceTurns": [
-        "D1:16",
-        "D1:17"
+        "D1:17",
+        "D1:18",
+        "D1:19"
       ]
     },
     {
-      "text": "Evan told Sam on 18 May 2023 to keep trying new things until something sparked his excitement, and Sam said he was excited to try and would keep Evan posted.",
+      "text": "Evan and Sam agreed on 18 May 2023 to catch up again soon so that Evan could hear how Sam was getting on with new hobbies.",
       "speaker": "Evan",
       "statedOn": "2023-05-18",
       "entities": [
@@ -1898,44 +1994,30 @@
         "sam"
       ],
       "sourceTurns": [
-        "D1:18",
-        "D1:19",
         "D1:20",
         "D1:21",
         "D1:22"
       ]
     },
     {
-      "text": "Evan took his family on a road trip to Jasper over the weekend of 20-21 May 2023, driving the Icefields Parkway past glaciers and lakes, and photographed a glacier.",
+      "text": "Evan took his family on a road trip to Jasper over the weekend of 20-21 May 2023, driving the Icefields Parkway past glaciers and lakes, and photographed a glacier there.",
       "speaker": "Evan",
       "statedOn": "2023-05-24",
       "entities": [
         "evan",
         "evans-family",
-        "jasper",
-        "road-trips"
+        "jasper"
       ],
       "chrono": [
         "jasper-road-trip"
       ],
       "sourceTurns": [
-        "D2:1"
-      ]
-    },
-    {
-      "text": "Sam had never been to Jasper as of 24 May 2023 and said it looked breathtaking.",
-      "speaker": "Sam",
-      "statedOn": "2023-05-24",
-      "entities": [
-        "sam",
-        "jasper"
-      ],
-      "sourceTurns": [
+        "D2:1",
         "D2:2"
       ]
     },
     {
-      "text": "Evan described the Jasper weekend of 20-21 May 2023 as a real retreat: fresh air, peacefulness and a cosy cabin surrounded by mountains and forests.",
+      "text": "Evan described the Jasper road trip as a real retreat — fresh air, peacefulness and a cosy cabin surrounded by mountains and forests.",
       "speaker": "Evan",
       "statedOn": "2023-05-24",
       "entities": [
@@ -1950,20 +2032,7 @@
       ]
     },
     {
-      "text": "Sam had a tough week in the week before 24 May 2023, and Evan offered to help.",
-      "speaker": "Sam",
-      "statedOn": "2023-05-24",
-      "entities": [
-        "sam",
-        "evan"
-      ],
-      "sourceTurns": [
-        "D2:4",
-        "D2:5"
-      ]
-    },
-    {
-      "text": "Sam had a check-up with his doctor a few days before 24 May 2023 at which his weight was not good, and he called the reading eye-opening.",
+      "text": "Sam had a tough week leading up to 24 May 2023 and had a check-up with his doctor a few days earlier at which his weight was not good; he called it pretty eye-opening.",
       "speaker": "Sam",
       "statedOn": "2023-05-24",
       "entities": [
@@ -1971,17 +2040,32 @@
         "sams-weight"
       ],
       "sourceTurns": [
-        "D2:6",
-        "D2:7"
+        "D2:4",
+        "D2:5",
+        "D2:6"
       ]
     },
     {
-      "text": "Evan told Sam on 24 May 2023 that what worked for him was finding a fitness routine he genuinely enjoyed and making small, smarter choices in his diet that added up.",
+      "text": "Evan told Sam on 24 May 2023 that it is never too late to make positive changes for a healthier lifestyle, and offered to support him through it.",
       "speaker": "Evan",
       "statedOn": "2023-05-24",
       "entities": [
         "evan",
-        "sam"
+        "sam",
+        "sams-weight"
+      ],
+      "sourceTurns": [
+        "D2:7"
+      ]
+    },
+    {
+      "text": "Evan's advice to Sam for breaking old habits was to find a fitness routine you genuinely enjoy and to make small, smarter choices in your diet, which he said is what worked for him.",
+      "speaker": "Evan",
+      "statedOn": "2023-05-24",
+      "entities": [
+        "evan",
+        "sam",
+        "evans-health-routine"
       ],
       "sourceTurns": [
         "D2:8",
@@ -1989,28 +2073,17 @@
       ]
     },
     {
-      "text": "Sam was looking for a hobby to keep himself motivated and asked Evan on 24 May 2023 whether painting would help him de-stress.",
+      "text": "Sam was looking for a hobby to keep himself motivated and asked whether painting would help him de-stress; Evan said painting is a great way to relieve stress and be creative but would not help with his weight, and recommended exercise as well.",
       "speaker": "Sam",
       "statedOn": "2023-05-24",
       "entities": [
         "sam",
-        "painting"
-      ],
-      "sourceTurns": [
-        "D2:10"
-      ]
-    },
-    {
-      "text": "Evan, who had been painting for a few years as of 24 May 2023, said painting relieves stress and helps him find peace but would not help Sam's weight problem, and recommended exercise as well.",
-      "speaker": "Evan",
-      "statedOn": "2023-05-24",
-      "entities": [
         "evan",
-        "sam",
-        "painting",
+        "watercolor-painting",
         "sams-weight"
       ],
       "sourceTurns": [
+        "D2:10",
         "D2:11"
       ]
     },
@@ -2021,7 +2094,7 @@
       "entities": [
         "sam",
         "evan",
-        "painting"
+        "watercolor-painting"
       ],
       "sourceTurns": [
         "D2:12",
@@ -2033,64 +2106,75 @@
       ]
     },
     {
-      "text": "Evan had a health scare in the week before 6 June 2023, a sudden heart palpitation incident that shook him up and served as a serious wake-up call about his lifestyle.",
+      "text": "Evan had a health scare in the week before 6 June 2023 — a sudden heart palpitation incident that shook him up and served as a serious wake-up call about his lifestyle.",
       "speaker": "Evan",
       "statedOn": "2023-06-06",
       "entities": [
-        "evan"
+        "evan",
+        "evans-heart-palpitations"
       ],
       "sourceTurns": [
         "D3:1"
       ]
     },
     {
-      "text": "Sam was trying to eat healthier as of 6 June 2023.",
+      "text": "Sam said on 6 June 2023 that he was trying to eat healthier these days, showing Evan a plate of vegetables and a glass of milk.",
       "speaker": "Sam",
       "statedOn": "2023-06-06",
       "entities": [
-        "sam"
+        "sam",
+        "sams-diet-and-exercise-routine"
       ],
       "sourceTurns": [
         "D3:2"
       ]
     },
     {
-      "text": "Evan was being extra careful with his health in June 2023, trying to eat less processed food and fewer sugary snacks despite loving ginger snaps.",
+      "text": "After the heart palpitations Evan was being extra careful with his health, trying to eat less processed food and fewer sugary snacks even though he loves ginger snaps.",
       "speaker": "Evan",
       "statedOn": "2023-06-06",
       "entities": [
-        "evan"
+        "evan",
+        "evans-health-routine",
+        "evans-heart-palpitations"
       ],
       "sourceTurns": [
         "D3:3"
       ]
     },
     {
-      "text": "Sam had made no changes to his diet as of 6 June 2023 and was still having soda and candy, which he knew was not the best habit.",
+      "key": "sam-no-diet-changes-june-2023",
+      "text": "Sam said on 6 June 2023 that he had made no changes to his diet and was still enjoying his soda and candy, although he knew it was not the best habit.",
       "speaker": "Sam",
       "statedOn": "2023-06-06",
+      "superseded": true,
       "entities": [
-        "sam"
+        "sam",
+        "sams-weight",
+        "sams-diet-and-exercise-routine"
       ],
       "sourceTurns": [
         "D3:4"
       ]
     },
     {
-      "text": "Evan suggested on 6 June 2023 that Sam swap soda for flavoured seltzer water and candy for dark chocolate with a high cocoa content, and Sam agreed to try it.",
+      "text": "Evan suggested on 6 June 2023 that Sam swap soda for flavoured seltzer water and candy for dark chocolate with a high cocoa content, and Sam said he would give it a try.",
       "speaker": "Evan",
       "statedOn": "2023-06-06",
       "entities": [
         "evan",
-        "sam"
+        "sam",
+        "sams-diet-and-exercise-routine"
       ],
       "sourceTurns": [
         "D3:5",
-        "D3:6"
+        "D3:6",
+        "D3:7",
+        "D3:8"
       ]
     },
     {
-      "text": "Evan and Sam agreed on 6 June 2023 to keep supporting each other on their health journeys, with Evan insisting that progress takes time and every step matters.",
+      "text": "Evan and Sam agreed on 6 June 2023 to keep supporting each other on their health journeys, accepting that progress takes time.",
       "speaker": "Evan",
       "statedOn": "2023-06-06",
       "entities": [
@@ -2098,8 +2182,6 @@
         "sam"
       ],
       "sourceTurns": [
-        "D3:7",
-        "D3:8",
         "D3:9",
         "D3:10",
         "D3:11",
@@ -2107,12 +2189,13 @@
       ]
     },
     {
-      "text": "Evan said on 6 June 2023 that exercise clears the mind, and offered to meet Sam and show him some basic exercises.",
+      "text": "Evan said exercise clears the mind, and offered on 6 June 2023 to get together with Sam and show him some basic exercises to get started.",
       "speaker": "Evan",
       "statedOn": "2023-06-06",
       "entities": [
         "evan",
-        "sam"
+        "sam",
+        "evans-health-routine"
       ],
       "sourceTurns": [
         "D3:13",
@@ -2121,14 +2204,11 @@
       ]
     },
     {
-      "text": "Sam found all the self-checkout machines at the supermarket broken on 6 June 2023, which left him in a terrible mood.",
+      "text": "Sam came away from the supermarket on 6 June 2023 in a terrible mood because all the self-checkout machines were broken.",
       "speaker": "Sam",
       "statedOn": "2023-06-06",
       "entities": [
         "sam"
-      ],
-      "chrono": [
-        "sam-supermarket-checkout"
       ],
       "sourceTurns": [
         "D3:16",
@@ -2137,7 +2217,7 @@
       ]
     },
     {
-      "text": "Sam's friends mocked his weight on 21 July 2023, which hurt him and made him realise he needed to make changes.",
+      "text": "Sam's friends mocked his weight on 21 July 2023; it hurt him and made him realise he needed to make changes.",
       "speaker": "Sam",
       "statedOn": "2023-07-27",
       "entities": [
@@ -2145,7 +2225,7 @@
         "sams-weight"
       ],
       "chrono": [
-        "friends-mocked-sams-weight"
+        "friends-mocked-sam"
       ],
       "sourceTurns": [
         "D4:1",
@@ -2153,23 +2233,25 @@
       ]
     },
     {
-      "text": "Sam said on 27 July 2023 that he was working on his health and getting active.",
+      "text": "Sam said on 27 July 2023 that he was working on his health and getting active, and thanked Evan for his support.",
       "speaker": "Sam",
       "statedOn": "2023-07-27",
       "entities": [
-        "sam"
+        "sam",
+        "sams-diet-and-exercise-routine"
       ],
       "sourceTurns": [
         "D4:3"
       ]
     },
     {
-      "text": "Evan struggled with his health a few years before 2023 but stuck with it, and keeps his gym membership card as a reminder of that commitment, saying diet and lifestyle matter as much as exercise.",
+      "text": "Evan struggled with his health a few years before 2023 but stuck with it; he keeps his gym membership card as a reminder of that commitment and says diet and lifestyle changes matter as much as exercise.",
       "speaker": "Evan",
       "statedOn": "2023-07-27",
       "entities": [
         "evan",
-        "evans-gym"
+        "evans-gym",
+        "evans-health-routine"
       ],
       "sourceTurns": [
         "D4:4",
@@ -2177,43 +2259,33 @@
       ]
     },
     {
-      "text": "Evan said cutting down on sugary snacks and eating more vegetables and fruit made the biggest impact on his health.",
+      "text": "Evan said the biggest impact on his health came from dietary changes: cutting down on sugary snacks and eating more vegetables and fruit.",
       "speaker": "Evan",
       "statedOn": "2023-07-27",
       "entities": [
-        "evan"
+        "evan",
+        "evans-health-routine"
       ],
       "sourceTurns": [
         "D4:6"
       ]
     },
     {
-      "text": "Sam was reducing his soda and candy intake as of 27 July 2023 and found it tough but was determined to change.",
+      "key": "sam-reducing-soda-july-2023",
+      "text": "Sam was reducing his soda and candy intake as of 27 July 2023 and said that although it was tough he was determined to make the change.",
       "speaker": "Sam",
       "statedOn": "2023-07-27",
       "entities": [
-        "sam"
+        "sam",
+        "sams-diet-and-exercise-routine"
       ],
       "sourceTurns": [
-        "D4:7"
+        "D4:7",
+        "D4:8"
       ]
     },
     {
-      "text": "Evan recommended flavoured seltzer water in place of soda on 27 July 2023, with air-popped popcorn or fruit as low-calorie snacks to go with it, and Sam said he had tried seltzer before and liked it.",
-      "speaker": "Evan",
-      "statedOn": "2023-07-27",
-      "entities": [
-        "evan",
-        "sam"
-      ],
-      "sourceTurns": [
-        "D4:8",
-        "D4:9",
-        "D4:10"
-      ]
-    },
-    {
-      "text": "Evan was reading The Great Gatsby in late July 2023, which he introduced as a gripping new mystery novel he could not stop thinking about, and Sam said he would read it sometime.",
+      "text": "Evan was engrossed in a novel he had started and could not stop thinking about, which he told Sam on 27 July 2023 was 'The Great Gatsby'; Sam said he would read it sometime.",
       "speaker": "Evan",
       "statedOn": "2023-07-27",
       "entities": [
@@ -2222,33 +2294,37 @@
       ],
       "sourceTurns": [
         "D4:8",
+        "D4:9",
         "D4:10",
         "D4:11"
       ]
     },
     {
-      "text": "Evan urged Sam on 27 July 2023 to focus on healthy swaps and small steps, and Sam said the reminder to focus on progress rather than perfection was inspiring.",
+      "text": "Evan suggested flavoured seltzer water with air-popped popcorn or fruit to Sam on 27 July 2023 as a tasty low-calorie snack, and told him to focus on healthy swaps and small steps.",
       "speaker": "Evan",
       "statedOn": "2023-07-27",
       "entities": [
         "evan",
-        "sam"
+        "sam",
+        "sams-diet-and-exercise-routine"
       ],
       "sourceTurns": [
+        "D4:9",
+        "D4:10",
         "D4:12",
         "D4:13"
       ]
     },
     {
-      "text": "Evan told Sam on 27 July 2023 that exercising matters as much as eating right, and Sam said he would start going to the gym and exercising regularly from 28 July 2023, reasoning that the sooner he started the sooner he would see the rewards.",
+      "text": "Sam committed on 27 July 2023 to start going to the gym and exercising regularly the following day, 28 July 2023, saying the sooner he started the sooner he would see the rewards.",
       "speaker": "Sam",
       "statedOn": "2023-07-27",
       "entities": [
         "sam",
-        "evan"
+        "sams-diet-and-exercise-routine"
       ],
       "chrono": [
-        "sam-gym-start-plan"
+        "sam-gym-start"
       ],
       "sourceTurns": [
         "D4:14",
@@ -2257,7 +2333,7 @@
       ]
     },
     {
-      "text": "Sam thanked Evan on 27 July 2023 for support that he said meant a lot to him.",
+      "text": "Sam thanked Evan on 27 July 2023 for support that meant a lot to him, and Evan told him he was there if he needed him.",
       "speaker": "Sam",
       "statedOn": "2023-07-27",
       "entities": [
@@ -2272,31 +2348,22 @@
       ]
     },
     {
-      "text": "Evan went on a trip to Canada in the week before 7 August 2023 and met a Canadian woman there, describing it as something out of a movie and saying being with her made him feel alive.",
+      "text": "Evan went on a trip to Canada in the week before 7 August 2023 and met a Canadian woman there; he said it was like something out of a movie and that being with her makes him feel alive.",
       "speaker": "Evan",
       "statedOn": "2023-08-07",
       "entities": [
         "evan",
-        "canada",
-        "evans-partner"
+        "evans-partner",
+        "canada"
       ],
       "sourceTurns": [
-        "D5:1"
+        "D5:1",
+        "D5:2",
+        "D5:3"
       ]
     },
     {
-      "text": "Sam was dealing with health issues as of 7 August 2023 that made it hard for him to fully enjoy things.",
-      "speaker": "Sam",
-      "statedOn": "2023-08-07",
-      "entities": [
-        "sam"
-      ],
-      "sourceTurns": [
-        "D5:2"
-      ]
-    },
-    {
-      "text": "Evan said on 7 August 2023 that every moment with his new Canadian partner was fun and energising, a welcome change after his own health troubles.",
+      "text": "Evan said on 7 August 2023 that every moment with his new Canadian partner is fun and energizing, and a welcome change after the health issues he had been dealing with.",
       "speaker": "Evan",
       "statedOn": "2023-08-07",
       "entities": [
@@ -2304,41 +2371,46 @@
         "evans-partner"
       ],
       "sourceTurns": [
+        "D5:2",
         "D5:3",
         "D5:4"
       ]
     },
     {
-      "text": "Ginger snaps are Evan's weakness, and he said on 7 August 2023 that dealing with health issues had made him appreciate the good moments more.",
-      "speaker": "Evan",
-      "statedOn": "2023-08-07",
-      "entities": [
-        "evan"
-      ],
-      "sourceTurns": [
-        "D5:5"
-      ]
-    },
-    {
-      "text": "Evan's children bring him great joy, which he said on 7 August 2023 while showing Sam a picture of them playing.",
+      "text": "Evan called ginger snaps his weakness, and said his health issues had been tough but had made him appreciate the good moments more.",
       "speaker": "Evan",
       "statedOn": "2023-08-07",
       "entities": [
         "evan",
-        "evans-family"
+        "evans-health-routine"
+      ],
+      "sourceTurns": [
+        "D5:3",
+        "D5:5"
+      ]
+    },
+    {
+      "text": "Evan's children bring him great joy, and he told Sam on 7 August 2023 that his family is what motivates him to stay healthy.",
+      "speaker": "Evan",
+      "statedOn": "2023-08-07",
+      "entities": [
+        "evan",
+        "evans-family",
+        "evans-health-routine"
       ],
       "sourceTurns": [
         "D5:5",
         "D5:6",
-        "D5:7"
+        "D5:9"
       ]
     },
     {
-      "text": "Evan had been working on his health for two years as of 7 August 2023, with ups and downs along the way.",
+      "text": "Evan had been working on his health for two years as of 7 August 2023, a long road with ups and downs on which he says he is doing his best.",
       "speaker": "Evan",
       "statedOn": "2023-08-07",
       "entities": [
-        "evan"
+        "evan",
+        "evans-health-routine"
       ],
       "sourceTurns": [
         "D5:6",
@@ -2346,35 +2418,25 @@
       ]
     },
     {
-      "text": "Evan uses a fitness watch that tracks his progress well and acts as a constant reminder to keep going, and he said on 7 August 2023 that the visual reminder had been really motivating; Sam was thinking of ordering a similar one.",
+      "text": "Evan wears a fitness watch that tracks his progress well and acts as a constant visual reminder to keep going; Sam was thinking of ordering a similar one and asked on 7 August 2023 whether it was worth it.",
       "speaker": "Evan",
       "statedOn": "2023-08-07",
       "entities": [
         "evan",
         "sam",
-        "evans-fitness-watch"
+        "evans-fitness-watch",
+        "evans-health-routine"
       ],
       "sourceTurns": [
         "D5:8",
         "D5:9",
         "D5:10",
-        "D5:11"
+        "D5:11",
+        "D5:12"
       ]
     },
     {
-      "text": "Evan said on 7 August 2023 that his family is what motivates him to stay healthy.",
-      "speaker": "Evan",
-      "statedOn": "2023-08-07",
-      "entities": [
-        "evan",
-        "evans-family"
-      ],
-      "sourceTurns": [
-        "D5:9"
-      ]
-    },
-    {
-      "text": "Evan said on 7 August 2023 that he is motivated by a thirst for adventure on interesting hikes.",
+      "text": "Evan said on 7 August 2023 that a thirst for adventure on interesting hikes is one of the things that motivates him.",
       "speaker": "Evan",
       "statedOn": "2023-08-07",
       "entities": [
@@ -2382,13 +2444,12 @@
         "hiking"
       ],
       "sourceTurns": [
-        "D5:12",
         "D5:13",
         "D5:14"
       ]
     },
     {
-      "text": "Evan keeps a bonsai tree because it symbolises strength and resilience, and says caring for it motivates him to keep going through tough times and reminds him that toughness shows in little things.",
+      "text": "Evan keeps a bonsai tree because it symbolises strength and resilience; taking care of it motivates him to keep going through tough times and reminds him that toughness shows in little things.",
       "speaker": "Evan",
       "statedOn": "2023-08-07",
       "entities": [
@@ -2404,8 +2465,8 @@
       ]
     },
     {
-      "text": "Evan and Sam agreed on 7 August 2023 that small consistent steps add up and that consistency and perseverance are what carry a person through.",
-      "speaker": "Sam",
+      "text": "Evan and Sam agreed on 7 August 2023 that small consistent steps build resilience over time and are what will carry them through their struggles.",
+      "speaker": "Evan",
       "statedOn": "2023-08-07",
       "entities": [
         "evan",
@@ -2421,7 +2482,7 @@
       ]
     },
     {
-      "text": "Evan returned shortly before 13 August 2023 from a holiday in Canada with his new partner, where they hiked, biked and explored the outdoors together.",
+      "text": "Evan got back on 13 August 2023 from a vacation in Canada with his new partner, where they camped, hiked and biked and loved exploring the outdoors together.",
       "speaker": "Evan",
       "statedOn": "2023-08-13",
       "entities": [
@@ -2430,46 +2491,40 @@
         "canada",
         "hiking"
       ],
+      "chrono": [
+        "evan-canada-vacation-return"
+      ],
       "sourceTurns": [
-        "D6:1"
+        "D6:1",
+        "D6:2"
       ]
     },
     {
-      "text": "Sam said on 13 August 2023 that he wished he could take a trip like Evan's to Canada, and that things had been challenging and hard on his health lately.",
+      "text": "Sam said on 13 August 2023 that things had been challenging and some of it had been hard on his health, and that having people like Evan in his corner made staying positive easier.",
       "speaker": "Sam",
       "statedOn": "2023-08-13",
       "entities": [
         "sam",
-        "canada",
-        "evan"
+        "evan",
+        "sams-weight"
       ],
       "sourceTurns": [
         "D6:2",
-        "D6:3"
+        "D6:3",
+        "D6:4"
       ]
     },
     {
-      "text": "Sam said on 13 August 2023 that staying positive was tough but that having people like Evan in his corner made it easier.",
+      "text": "Sam kept a motivational quote on a notepad — 'Don't fear it, just take the first step' — which reminded him that progress matters more than perfection and helped him move towards healthier habits; he shared it with Evan on 13 August 2023.",
       "speaker": "Sam",
       "statedOn": "2023-08-13",
       "entities": [
         "sam",
-        "evan"
+        "evan",
+        "sams-diet-and-exercise-routine"
       ],
       "sourceTurns": [
-        "D6:4",
-        "D6:5"
-      ]
-    },
-    {
-      "text": "Sam keeps a note with the quote 'Don't fear it, just take the first step', which reminds him that progress matters more than perfection and helps him move toward healthier habits; he shared it with Evan on 13 August 2023.",
-      "speaker": "Sam",
-      "statedOn": "2023-08-13",
-      "entities": [
-        "sam",
-        "evan"
-      ],
-      "sourceTurns": [
+        "D6:5",
         "D6:6",
         "D6:7",
         "D6:8",
@@ -2477,7 +2532,7 @@
       ]
     },
     {
-      "text": "Evan and Sam agreed on 13 August 2023 that celebrating small wins is what keeps a person going through setbacks.",
+      "text": "Evan told Sam on 13 August 2023 to celebrate the small wins, and Sam said those little victories were what kept him motivated when the setbacks piled up.",
       "speaker": "Evan",
       "statedOn": "2023-08-13",
       "entities": [
@@ -2487,62 +2542,56 @@
       "sourceTurns": [
         "D6:10",
         "D6:11",
-        "D6:12"
-      ]
-    },
-    {
-      "text": "Evan had been losing his keys every week and had spent half an hour searching for them on 13 August 2023 without luck.",
-      "speaker": "Evan",
-      "statedOn": "2023-08-13",
-      "entities": [
-        "evan"
-      ],
-      "sourceTurns": [
+        "D6:12",
         "D6:13"
       ]
     },
     {
-      "text": "Sam dreamed on the night of 12 August 2023 that he was soaring over skyscrapers, said it felt incredible and wondered what it signified.",
-      "speaker": "Sam",
-      "statedOn": "2023-08-13",
-      "entities": [
-        "sam"
-      ],
-      "chrono": [
-        "sams-dream-skyscrapers"
-      ],
-      "sourceTurns": [
-        "D6:14"
-      ]
-    },
-    {
-      "text": "Evan suggested on 13 August 2023 that Sam look at a dream interpretation book, and Sam said he would look into it.",
+      "text": "Evan had spent half an hour searching for his keys on 13 August 2023 without finding them, and said he loses them every week.",
       "speaker": "Evan",
       "statedOn": "2023-08-13",
       "entities": [
         "evan",
-        "sam"
+        "evans-keys"
       ],
       "sourceTurns": [
-        "D6:15",
-        "D6:16"
+        "D6:13",
+        "D6:16",
+        "D6:17"
       ]
     },
     {
-      "text": "Evan said on 13 August 2023 that he would keep going step by step and would find his keys.",
-      "speaker": "Evan",
+      "text": "Sam dreamt on the night of 12 August 2023 that he was soaring over skyscrapers, which felt incredible and left him wondering what it signified; Evan suggested a dream interpretation book.",
+      "speaker": "Sam",
       "statedOn": "2023-08-13",
       "entities": [
+        "sam",
         "evan"
       ],
+      "chrono": [
+        "sams-flying-dream"
+      ],
       "sourceTurns": [
-        "D6:17",
+        "D6:14",
+        "D6:15"
+      ]
+    },
+    {
+      "text": "Sam said on 13 August 2023 that his health journey felt endless at times but that he was convinced it would be rewarding in the end.",
+      "speaker": "Sam",
+      "statedOn": "2023-08-13",
+      "entities": [
+        "sam",
+        "sams-diet-and-exercise-routine"
+      ],
+      "sourceTurns": [
+        "D6:16",
         "D6:18",
         "D6:19"
       ]
     },
     {
-      "text": "Evan's son hurt his ankle in a soccer accident on 12 August 2023, and Evan looked after him and took him to the doctor, finding it hard as a father to watch his child go through it.",
+      "text": "Evan's son had a soccer accident on 12 August 2023 and hurt his ankle; Evan looked after him and took him to the doctor, and found it hard as a father to watch his child go through it.",
       "speaker": "Evan",
       "statedOn": "2023-08-15",
       "entities": [
@@ -2550,30 +2599,34 @@
         "evans-son"
       ],
       "chrono": [
-        "evans-son-soccer-injury"
+        "sons-soccer-accident"
       ],
       "sourceTurns": [
-        "D7:1"
-      ]
-    },
-    {
-      "text": "Sam had a tough week and a doctor's appointment in the days before 15 August 2023, which he called a wake-up call to take better care of himself.",
-      "speaker": "Sam",
-      "statedOn": "2023-08-15",
-      "entities": [
-        "sam"
-      ],
-      "sourceTurns": [
+        "D7:1",
         "D7:2"
       ]
     },
     {
-      "text": "Sam was taking a cooking class to learn to make healthier meals and had learned several good recipes by 15 August 2023.",
+      "text": "Sam had a tough week and a doctor's appointment in the days before 15 August 2023, which he took as a wake-up call to take better care of himself.",
       "speaker": "Sam",
       "statedOn": "2023-08-15",
       "entities": [
         "sam",
-        "sams-cooking-class"
+        "sams-weight"
+      ],
+      "sourceTurns": [
+        "D7:2",
+        "D7:3"
+      ]
+    },
+    {
+      "text": "Sam was taking a cooking class as of 15 August 2023 to learn how to make healthier meals, and said he had learned some great recipes there.",
+      "speaker": "Sam",
+      "statedOn": "2023-08-15",
+      "entities": [
+        "sam",
+        "sams-cooking-class",
+        "sams-diet-and-exercise-routine"
       ],
       "sourceTurns": [
         "D7:2",
@@ -2582,15 +2635,12 @@
       ]
     },
     {
-      "text": "Sam grilled a marinated dish with vegetables on the evening of 14 August 2023 and said it turned out really flavourful.",
+      "text": "Sam cooked a grilled marinated fish dish with vegetables on the evening of 14 August 2023 and said it turned out really flavourful.",
       "speaker": "Sam",
       "statedOn": "2023-08-15",
       "entities": [
         "sam",
         "sams-cooking-class"
-      ],
-      "chrono": [
-        "sam-grilled-dish"
       ],
       "sourceTurns": [
         "D7:4",
@@ -2599,8 +2649,8 @@
       ]
     },
     {
-      "text": "Evan wanted to add more vegetables to his meals, and Sam offered him an easy roasted vegetable recipe from his cooking class on 15 August 2023.",
-      "speaker": "Sam",
+      "text": "Evan asked Sam on 15 August 2023 for recipes that would help him add more vegetables to his meals, and Sam offered a tasty and easy roasted vegetable recipe from his cooking class.",
+      "speaker": "Evan",
       "statedOn": "2023-08-15",
       "entities": [
         "evan",
@@ -2608,12 +2658,13 @@
         "sams-cooking-class"
       ],
       "sourceTurns": [
+        "D7:6",
         "D7:7",
         "D7:8"
       ]
     },
     {
-      "text": "Evan's son's ankle was getting better but still sore on 15 August 2023, and Evan said it had been rough at first but turned out to be nothing serious.",
+      "text": "Evan's son's ankle was getting better but still sore by 15 August 2023; it had been rough at first but turned out to be nothing serious.",
       "speaker": "Evan",
       "statedOn": "2023-08-15",
       "entities": [
@@ -2621,44 +2672,37 @@
         "evans-son"
       ],
       "sourceTurns": [
+        "D7:8",
         "D7:9",
         "D7:10"
       ]
     },
     {
-      "text": "Sam said on 15 August 2023 that he felt a mix of emotions, concerned about his health but motivated to make positive changes, and was taking things one step at a time.",
-      "speaker": "Sam",
-      "statedOn": "2023-08-15",
-      "entities": [
-        "sam"
-      ],
-      "sourceTurns": [
-        "D7:11",
-        "D7:12",
-        "D7:13"
-      ]
-    },
-    {
-      "text": "Sam told Evan on 15 August 2023 that his encouragement meant a lot and that he would keep going one step at a time.",
+      "text": "Sam said on 15 August 2023 that he was feeling a mix of emotions — somewhat concerned about his health but also motivated to make positive changes, taking things one step at a time.",
       "speaker": "Sam",
       "statedOn": "2023-08-15",
       "entities": [
         "sam",
-        "evan"
+        "sams-weight",
+        "sams-diet-and-exercise-routine"
       ],
       "sourceTurns": [
+        "D7:11",
+        "D7:12",
+        "D7:13",
         "D7:14",
         "D7:15",
         "D7:16"
       ]
     },
     {
-      "text": "Sam began a diet and a healthier lifestyle, announcing it to Evan on 19 August 2023 and calling it tough but something he was determined to stick with.",
+      "key": "sam-on-a-diet-aug-2023",
+      "text": "Sam announced to Evan on 19 August 2023 that he was on a diet and living healthier, and that although it was tough he was determined and sticking with it.",
       "speaker": "Sam",
       "statedOn": "2023-08-19",
       "entities": [
         "sam",
-        "sams-weight"
+        "sams-diet-and-exercise-routine"
       ],
       "sourceTurns": [
         "D8:1",
@@ -2668,11 +2712,12 @@
       ]
     },
     {
-      "text": "Sam had noticed more energy and less sluggishness after eating by 19 August 2023, which he found encouraging.",
+      "text": "Sam had noticed several positive changes from his diet by 19 August 2023, including more energy and less sluggishness after eating, which he found encouraging.",
       "speaker": "Sam",
       "statedOn": "2023-08-19",
       "entities": [
-        "sam"
+        "sam",
+        "sams-diet-and-exercise-routine"
       ],
       "sourceTurns": [
         "D8:5",
@@ -2680,7 +2725,7 @@
       ]
     },
     {
-      "text": "Sam shared his recipe for a grilled chicken and vegetable stir-fry with his own homemade sauce with Evan on 19 August 2023, and Evan said he would try it.",
+      "text": "Sam shared a grilled chicken and vegetable stir-fry recipe with his own homemade sauce with Evan on 19 August 2023, and Evan said he would try it.",
       "speaker": "Sam",
       "statedOn": "2023-08-19",
       "entities": [
@@ -2697,28 +2742,30 @@
       ]
     },
     {
-      "text": "Evan started taking painting classes a few days before 19 August 2023 and was really enjoying them.",
+      "text": "Evan started taking painting classes a few days before 19 August 2023, joining to find like-minded people, show what he can do and improve his skills; he was really enjoying them and might look into other classes later.",
       "speaker": "Evan",
       "statedOn": "2023-08-19",
       "entities": [
         "evan",
         "evans-painting-class",
-        "painting"
+        "watercolor-painting"
       ],
       "sourceTurns": [
         "D8:12",
-        "D8:13"
+        "D8:13",
+        "D8:14",
+        "D8:15",
+        "D8:16"
       ]
     },
     {
-      "text": "Evan began painting years before 2023 after a friend gave him a painting that inspired him, and he joined classes in August 2023 to find like-minded people, show what he could do and keep improving.",
+      "text": "Evan started painting years earlier because a friend gave him a painting one day that inspired him a lot.",
       "speaker": "Evan",
       "statedOn": "2023-08-19",
       "entities": [
         "evan",
-        "evans-painting-friend",
-        "evans-painting-class",
-        "painting"
+        "evans-friend-painter",
+        "watercolor-painting"
       ],
       "sourceTurns": [
         "D8:13",
@@ -2726,27 +2773,13 @@
       ]
     },
     {
-      "text": "The painting classes were the only classes Evan was taking as of 19 August 2023, though he said he might look into others; he called painting a way of finding peace and expressing himself.",
+      "text": "Evan's painting classes were teaching watercolours, with the instructor stressing observing nature and painting what you see; Evan called it a relaxing way to take a break from everyday stress.",
       "speaker": "Evan",
       "statedOn": "2023-08-19",
       "entities": [
         "evan",
         "evans-painting-class",
-        "painting"
-      ],
-      "sourceTurns": [
-        "D8:15",
-        "D8:16"
-      ]
-    },
-    {
-      "text": "Evan's painting classes were teaching watercolours as of 19 August 2023, with the instructor stressing observing nature and painting what you see, which Evan found a relaxing break from everyday stress.",
-      "speaker": "Evan",
-      "statedOn": "2023-08-19",
-      "entities": [
-        "evan",
-        "evans-painting-class",
-        "painting"
+        "watercolor-painting"
       ],
       "sourceTurns": [
         "D8:17",
@@ -2754,12 +2787,13 @@
       ]
     },
     {
-      "text": "Evan most enjoys painting landscapes, saying nature's beauty captivates him and that he aims to convey the peacefulness of being outdoors.",
+      "text": "Evan most loves painting landscapes because nature's beauty captivates him, and he showed Sam a recent painting of a sunset over the ocean on 19 August 2023, saying he aims to convey the peacefulness of being outdoors.",
       "speaker": "Evan",
       "statedOn": "2023-08-19",
       "entities": [
         "evan",
-        "painting"
+        "watercolor-painting",
+        "evans-sunset-painting"
       ],
       "sourceTurns": [
         "D8:19",
@@ -2769,58 +2803,45 @@
       ]
     },
     {
-      "text": "Evan said on 19 August 2023 that being out in places like the ones he paints brings back memories of road tripping in his car.",
+      "text": "Evan said on 19 August 2023 that being out in places like the ones he paints brings back memories of road-tripping in his trusty car.",
       "speaker": "Evan",
       "statedOn": "2023-08-19",
       "entities": [
-        "evan",
-        "road-trips"
+        "evan"
       ],
       "sourceTurns": [
         "D8:23",
-        "D8:24"
+        "D8:24",
+        "D8:25"
       ]
     },
     {
-      "text": "Evan drove to Banff in July 2023 and went skiing there, saying the snow was amazing and that he could not wait to go back the following year.",
+      "text": "Evan drove somewhere in the month before 19 August 2023 and went skiing at Banff, where the snow was amazing and he had a lot of fun; he said he could not wait to go back the next year.",
       "speaker": "Evan",
       "statedOn": "2023-08-19",
       "entities": [
         "evan",
         "banff",
-        "skiing",
-        "road-trips"
+        "skiing"
       ],
       "sourceTurns": [
-        "D8:25",
         "D8:26",
         "D8:27",
         "D8:28"
       ]
     },
     {
-      "text": "Sam said on 19 August 2023 that skiing looked like a blast but he was not sure his body could take it.",
-      "speaker": "Sam",
-      "statedOn": "2023-08-19",
-      "entities": [
-        "sam",
-        "skiing",
-        "sams-weight"
-      ],
-      "sourceTurns": [
-        "D8:29"
-      ]
-    },
-    {
-      "text": "Evan enjoys skiing, snowboarding and ice skating, and invited Sam on 19 August 2023 to join him for winter activities some day.",
+      "text": "Evan enjoys skiing, snowboarding and ice skating, and said on 19 August 2023 that he would like Sam to join him; Sam liked the idea but was not sure his body could take it.",
       "speaker": "Evan",
       "statedOn": "2023-08-19",
       "entities": [
         "evan",
         "sam",
-        "skiing"
+        "skiing",
+        "sams-weight"
       ],
       "sourceTurns": [
+        "D8:29",
         "D8:30",
         "D8:31",
         "D8:32",
@@ -2828,27 +2849,28 @@
       ]
     },
     {
-      "text": "Sam started a new diet and exercise routine on 21 August 2023 and said on 27 August that it had made a huge difference and he felt great.",
+      "text": "Sam started a new diet and exercise routine on 21 August 2023 and told Evan on 27 August 2023 that it had made a huge difference and he felt great.",
       "speaker": "Sam",
       "statedOn": "2023-08-27",
       "entities": [
         "sam",
-        "sams-weight"
+        "sams-diet-and-exercise-routine"
       ],
       "chrono": [
-        "sam-diet-exercise-routine"
+        "sam-started-routine"
       ],
       "sourceTurns": [
         "D9:1"
       ]
     },
     {
-      "text": "Evan twisted his knee on 25 August 2023; it was painful and made it hard to stay consistent with his usual fitness routine, which frustrated him because staying active matters a great deal to him.",
+      "text": "Evan twisted his knee on 25 August 2023 and was in real pain, which made it hard to keep up his usual fitness routine and frustrated him because staying active matters so much to him.",
       "speaker": "Evan",
       "statedOn": "2023-08-27",
       "entities": [
         "evan",
-        "evans-knee-injury"
+        "evans-knee-injury",
+        "evans-health-routine"
       ],
       "chrono": [
         "evan-twisted-knee"
@@ -2859,11 +2881,12 @@
       ]
     },
     {
-      "text": "Evan was still reading The Great Gatsby on 27 August 2023 and said it got better with every page and he could not put it down.",
+      "text": "Evan said on 27 August 2023 that the novel he had mentioned earlier kept getting better with every page and he could not put it down, which made Sam curious about it.",
       "speaker": "Evan",
       "statedOn": "2023-08-27",
       "entities": [
         "evan",
+        "sam",
         "the-great-gatsby"
       ],
       "sourceTurns": [
@@ -2872,26 +2895,28 @@
       ]
     },
     {
-      "text": "Evan expected to have physical therapy for his knee and was hoping for an appointment soon, and in the meantime was swimming to stay active as of 27 August 2023.",
+      "text": "Evan was waiting for a physiotherapy appointment for his twisted knee as of 27 August 2023 and was keeping things low-key and swimming to stay active in the meantime, on Sam's suggestion of low-impact exercise.",
       "speaker": "Evan",
       "statedOn": "2023-08-27",
       "entities": [
         "evan",
+        "sam",
         "evans-knee-injury"
       ],
       "sourceTurns": [
+        "D9:5",
         "D9:6",
-        "D9:7"
+        "D9:7",
+        "D9:8"
       ]
     },
     {
-      "text": "Evan took a road trip to the Rocky Mountains in July 2023 and found the scenery stunning and the nature relaxing.",
+      "text": "Evan took a road trip up to the Rocky Mountains in the month before 27 August 2023, finding the scenery stunning and nature relaxing; he came across a photograph of it while tidying up.",
       "speaker": "Evan",
       "statedOn": "2023-08-27",
       "entities": [
         "evan",
-        "rocky-mountains",
-        "road-trips"
+        "rocky-mountains"
       ],
       "sourceTurns": [
         "D9:8",
@@ -2900,20 +2925,20 @@
       ]
     },
     {
-      "text": "Sam had not been on a road trip in years as of 27 August 2023 but loves being surrounded by nature, and hoped a road trip and a hike would become possible as he got healthier.",
+      "text": "Sam had not been on a road trip in ages as of 27 August 2023 but loves being surrounded by nature, and hoped that as he got healthier a road trip and a hike would become possible.",
       "speaker": "Sam",
       "statedOn": "2023-08-27",
       "entities": [
         "sam",
-        "road-trips",
         "hiking"
       ],
       "sourceTurns": [
+        "D9:10",
         "D9:11"
       ]
     },
     {
-      "text": "Evan suggested on 27 August 2023 that Sam go on more hikes as he does, and that the two of them do one together sometime.",
+      "text": "Evan recommended a lake about a two-hour drive away with lots of trails nearby, and Sam decided on 27 August 2023 to make a day trip of it; Evan also said the two of them should hike together sometime.",
       "speaker": "Evan",
       "statedOn": "2023-08-27",
       "entities": [
@@ -2922,19 +2947,7 @@
         "hiking"
       ],
       "sourceTurns": [
-        "D9:12"
-      ]
-    },
-    {
-      "text": "Evan recommended a lake about a two-hour drive from where he lives, with plenty of trails nearby, and Sam said on 27 August 2023 that a day trip there was doable and he would go and see it.",
-      "speaker": "Evan",
-      "statedOn": "2023-08-27",
-      "entities": [
-        "evan",
-        "sam",
-        "hiking"
-      ],
-      "sourceTurns": [
+        "D9:12",
         "D9:13",
         "D9:14",
         "D9:15",
@@ -2945,35 +2958,26 @@
       ]
     },
     {
-      "text": "Sam posted before-and-after pictures of his body showing the result of his diet, to motivate other people to make better choices, and told Evan about it on 11 September 2023.",
+      "text": "Sam posted before-and-after photographs of his body showing the results of his diet, hoping to motivate others to make better choices, and told Evan about it on 11 September 2023.",
       "speaker": "Sam",
       "statedOn": "2023-09-11",
       "entities": [
         "sam",
-        "sams-weight"
+        "sams-diet-and-exercise-routine"
       ],
       "sourceTurns": [
         "D10:1",
-        "D10:2"
-      ]
-    },
-    {
-      "text": "Evan said on 11 September 2023 that making healthier choices had definitely made a difference for him and that small changes have a big impact.",
-      "speaker": "Evan",
-      "statedOn": "2023-09-11",
-      "entities": [
-        "evan"
-      ],
-      "sourceTurns": [
+        "D10:2",
         "D10:3"
       ]
     },
     {
-      "text": "Sam still had frequent cravings for sugary drinks and snacks in September 2023, set off by stress, boredom or simply wanting comfort.",
+      "text": "Sam said on 11 September 2023 that he was trying to make healthier choices but still had occasional cravings for sugary drinks and snacks, usually set off by stress, boredom or wanting comfort.",
       "speaker": "Sam",
       "statedOn": "2023-09-11",
       "entities": [
-        "sam"
+        "sam",
+        "sams-diet-and-exercise-routine"
       ],
       "sourceTurns": [
         "D10:4",
@@ -2982,54 +2986,42 @@
       ]
     },
     {
-      "text": "Evan turns to painting or going for a drive when he is stressed, which he told Sam on 11 September 2023.",
+      "text": "Evan turns to painting or going for a drive when he is stressed, rather than to comfort food, and showed Sam a painting of a mountain range with a horse on 11 September 2023.",
       "speaker": "Evan",
       "statedOn": "2023-09-11",
       "entities": [
         "evan",
-        "painting",
-        "road-trips"
+        "watercolor-painting"
       ],
       "sourceTurns": [
-        "D10:7"
+        "D10:7",
+        "D10:8"
       ]
     },
     {
-      "text": "Sam said on 11 September 2023 that he might take up painting or another calming hobby, and Evan offered to help him start and recommend supplies.",
-      "speaker": "Sam",
+      "text": "Evan offered on 11 September 2023 to help Sam get started with painting and recommended acrylic paints, brushes, a canvas or paper, and a palette for mixing colours as basic supplies.",
+      "speaker": "Evan",
       "statedOn": "2023-09-11",
       "entities": [
-        "sam",
         "evan",
-        "painting"
+        "sam",
+        "watercolor-painting"
       ],
       "sourceTurns": [
-        "D10:8",
         "D10:9",
-        "D10:10"
+        "D10:10",
+        "D10:11",
+        "D10:12"
       ]
     },
     {
-      "text": "Evan advised Sam on 11 September 2023 to get acrylic paints, brushes, a canvas or paper and a palette for mixing colours in order to start painting.",
+      "text": "Evan and Sam arranged on 11 September 2023 to buy supplies and hold a painting session together on Saturday 16 September 2023.",
       "speaker": "Evan",
       "statedOn": "2023-09-11",
       "entities": [
         "evan",
         "sam",
-        "painting"
-      ],
-      "sourceTurns": [
-        "D10:11"
-      ]
-    },
-    {
-      "text": "Evan and Sam arranged on 11 September 2023 to hold a painting session together on 16 September 2023, with Evan helping Sam pick out supplies first.",
-      "speaker": "Evan",
-      "statedOn": "2023-09-11",
-      "entities": [
-        "evan",
-        "sam",
-        "painting"
+        "watercolor-painting"
       ],
       "chrono": [
         "painting-session-plan"
@@ -3041,18 +3033,19 @@
       ]
     },
     {
-      "text": "Sam had started eating healthier by 6 October 2023.",
+      "text": "Sam had started eating more healthily by 6 October 2023 and asked Evan whether he had picked up any new hobbies.",
       "speaker": "Sam",
       "statedOn": "2023-10-06",
       "entities": [
-        "sam"
+        "sam",
+        "sams-diet-and-exercise-routine"
       ],
       "sourceTurns": [
         "D11:1"
       ]
     },
     {
-      "text": "Evan hurt his knee again playing basketball with his children in the week before 6 October 2023, which made it hard to stay active; he said he missed the adventures his family went on the previous year.",
+      "text": "Evan hurt his knee again in the week before 6 October 2023 playing basketball with his children, making it hard to stay active; he said he missed the adventures the family had gone on the previous year.",
       "speaker": "Evan",
       "statedOn": "2023-10-06",
       "entities": [
@@ -3061,12 +3054,13 @@
         "evans-family"
       ],
       "sourceTurns": [
+        "D11:1",
         "D11:2",
         "D11:3"
       ]
     },
     {
-      "text": "Physical therapy had helped Evan's knee somewhat by 6 October 2023, and he was doing easy exercises to keep it strong rather than intense workouts, which he found a poor substitute for being active outdoors.",
+      "text": "Physiotherapy had helped Evan's knee somewhat by 6 October 2023; he could not do intense workouts but was doing easy exercises to keep the knee strong, which he said was not as good as being active outdoors.",
       "speaker": "Evan",
       "statedOn": "2023-10-06",
       "entities": [
@@ -3079,21 +3073,23 @@
       ]
     },
     {
-      "text": "Evan kept up his watercolour painting as an indoor occupation while his knee healed in October 2023, calling it a chill way to relax and a great stress reliever.",
+      "text": "Evan kept up his watercolour painting while his knee healed, calling it a chill way to relax and a great stress reliever, and showed Sam work he had done in the week before 6 October 2023.",
       "speaker": "Evan",
       "statedOn": "2023-10-06",
       "entities": [
         "evan",
-        "painting"
+        "watercolor-painting",
+        "evans-cactus-painting"
       ],
       "sourceTurns": [
         "D11:6",
         "D11:7",
-        "D11:8"
+        "D11:8",
+        "D11:9"
       ]
     },
     {
-      "text": "Evan helped a lost tourist find their way about two weeks before 6 October 2023, and the two of them ended up taking an unexpected tour around the city, which Evan called a blast.",
+      "text": "Evan helped a lost tourist find their way about two weeks before 6 October 2023 and ended up taking an unexpected tour around the city with them, which he called a blast.",
       "speaker": "Evan",
       "statedOn": "2023-10-06",
       "entities": [
@@ -3105,44 +3101,44 @@
       ]
     },
     {
-      "text": "Evan's sunset painting was inspired by a vacation a few years before October 2023 whose colours he found stunning, and his cactus painting came from a road trip in September 2023.",
+      "text": "Evan said on 6 October 2023 that his sunset painting was inspired by a vacation a few years earlier with stunning colours, and his cactus painting by a road trip in the month before.",
       "speaker": "Evan",
       "statedOn": "2023-10-06",
       "entities": [
         "evan",
-        "painting",
-        "road-trips"
+        "evans-sunset-painting",
+        "evans-cactus-painting"
       ],
       "sourceTurns": [
-        "D11:9",
-        "D11:10",
-        "D11:11"
+        "D11:10"
       ]
     },
     {
-      "text": "Evan paints whatever is on his mind — a feeling, a good memory, or a place he wants to go — and calls it a way of communicating and expressing himself without words.",
+      "text": "Evan paints whatever is on his mind — good memories, or places he wants to go — and treats painting as a way of expressing himself and his emotions without using words.",
       "speaker": "Evan",
       "statedOn": "2023-10-06",
       "entities": [
         "evan",
-        "painting"
+        "watercolor-painting"
       ],
       "sourceTurns": [
+        "D11:11",
         "D11:12",
         "D11:13",
         "D11:14"
       ]
     },
     {
-      "text": "Sam was still learning to draw as of 6 October 2023 and expresses himself mainly through journalling and creative writing, which he finds therapeutic, says helps him sort out his feelings and describes as like having a conversation with himself.",
+      "text": "Sam was still learning to draw as of 6 October 2023 and expresses himself mainly through journal and creative writing, which he finds therapeutic and describes as like having a conversation with himself.",
       "speaker": "Sam",
       "statedOn": "2023-10-06",
       "entities": [
         "sam",
-        "writing"
+        "creative-writing"
       ],
       "sourceTurns": [
         "D11:15",
+        "D11:16",
         "D11:17",
         "D11:18",
         "D11:19",
@@ -3150,13 +3146,13 @@
       ]
     },
     {
-      "text": "The navigation app on Sam's new phone kept malfunctioning in October 2023, making getting around a challenge, and Evan suggested updating the phone.",
+      "text": "Sam was frustrated in early October 2023 with his new phone, whose navigation app kept malfunctioning and made getting around a challenge; Evan recommended updating it.",
       "speaker": "Sam",
       "statedOn": "2023-10-06",
       "entities": [
         "sam",
-        "sams-phone",
-        "evan"
+        "evan",
+        "sams-phone"
       ],
       "sourceTurns": [
         "D11:15",
@@ -3164,7 +3160,7 @@
       ]
     },
     {
-      "text": "Sam's doctor told him at a check-up on 2 October 2023 that his weight was a serious health risk which could get worse if he did not make changes soon, and Sam said that after the jokes he had made about it, the news was really hitting him.",
+      "text": "Sam went for a check-up on Monday 2 October 2023 at which his doctor said his weight was a serious health risk that could get worse if he did not make changes soon; although he had joked about his weight before, it hit him hard.",
       "speaker": "Sam",
       "statedOn": "2023-10-08",
       "entities": [
@@ -3172,34 +3168,36 @@
         "sams-weight"
       ],
       "chrono": [
-        "sams-weight-checkup"
+        "sam-checkup-oct-2023"
       ],
       "sourceTurns": [
         "D12:1"
       ]
     },
     {
-      "text": "Evan started lifting weights about a year before October 2023; it was a struggle at first but he was seeing gains, and he invited Sam to try it.",
+      "text": "Evan started lifting weights about a year before October 2023; it was a struggle at first but he was seeing gains, and he invited Sam on 8 October 2023 to try it too.",
       "speaker": "Evan",
       "statedOn": "2023-10-08",
       "entities": [
         "evan",
+        "evans-health-routine",
         "evans-gym"
       ],
       "sourceTurns": [
-        "D12:2"
+        "D12:2",
+        "D12:3"
       ]
     },
     {
-      "text": "Evan advised Sam on 8 October 2023 to start weight training with good form and technique, find a trainer to avoid injuries, start small and increase intensity as he got stronger, and Sam said he would find someone to help him.",
+      "text": "Evan advised Sam on 8 October 2023 to start weight training with good form and technique, find a trainer to avoid injuries, begin with something small and increase intensity as he got stronger; Sam said he would find someone to help him.",
       "speaker": "Evan",
       "statedOn": "2023-10-08",
       "entities": [
         "evan",
-        "sam"
+        "sam",
+        "sams-diet-and-exercise-routine"
       ],
       "sourceTurns": [
-        "D12:3",
         "D12:4",
         "D12:5",
         "D12:6",
@@ -3207,7 +3205,7 @@
       ]
     },
     {
-      "text": "Evan told Sam on 8 October 2023 to be patient with himself, that his health matters and that taking one step at a time would get him there, and Sam said the support gave him a boost.",
+      "text": "Evan told Sam on 8 October 2023 to be patient with himself and keep believing in his abilities, and Sam said the words gave him a boost and he would take it slow.",
       "speaker": "Evan",
       "statedOn": "2023-10-08",
       "entities": [
@@ -3228,11 +3226,12 @@
       ]
     },
     {
-      "text": "Sam had a rough week before 14 October 2023 and gave in and bought unhealthy snacks, which left him feeling guilty.",
+      "text": "Sam had a rough week before 14 October 2023, gave in and bought unhealthy snacks that he could not resist, and felt guilty about it; he was also dealing with work stress and struggling to stay motivated.",
       "speaker": "Sam",
       "statedOn": "2023-10-14",
       "entities": [
-        "sam"
+        "sam",
+        "sams-diet-and-exercise-routine"
       ],
       "sourceTurns": [
         "D13:1",
@@ -3242,32 +3241,24 @@
       ]
     },
     {
-      "text": "Evan finished a painting of a sunset shortly before 14 October 2023 and said painting really helps him relax.",
+      "text": "Evan finished a painting of a sunset on 14 October 2023 and said painting really helps him relax.",
       "speaker": "Evan",
       "statedOn": "2023-10-14",
       "entities": [
         "evan",
-        "painting"
+        "watercolor-painting"
+      ],
+      "chrono": [
+        "evan-finished-sunset-painting"
       ],
       "sourceTurns": [
         "D13:1",
+        "D13:2",
         "D13:3"
       ]
     },
     {
-      "text": "Sam was dealing with work stress in October 2023 and trying to stay motivated.",
-      "speaker": "Sam",
-      "statedOn": "2023-10-14",
-      "entities": [
-        "sam"
-      ],
-      "sourceTurns": [
-        "D13:4",
-        "D13:5"
-      ]
-    },
-    {
-      "text": "Evan suggested kayaking to Sam on 14 October 2023 as a fun, active way to get exercise and enjoy nature, and Sam, who had never tried it, said he was definitely considering it.",
+      "text": "Evan suggested kayaking to Sam on 14 October 2023 as a fun, active way to get exercise and enjoy nature, and Sam — who had never tried it — said he was definitely considering it.",
       "speaker": "Evan",
       "statedOn": "2023-10-14",
       "entities": [
@@ -3276,6 +3267,7 @@
         "kayaking"
       ],
       "sourceTurns": [
+        "D13:5",
         "D13:6",
         "D13:7",
         "D13:8",
@@ -3283,11 +3275,12 @@
       ]
     },
     {
-      "text": "Sam and a friend set out to kayak on Lake Tahoe on 14 October 2023, having heard it was great for kayaking, and Evan said they would love the clear water and gorgeous views.",
+      "text": "Sam and a friend were travelling through Lake Tahoe on 14 October 2023 and set off to try kayaking on the lake there, having heard it was great for it; Evan offered to plan a kayaking trip together at a spot of his choosing.",
       "speaker": "Sam",
       "statedOn": "2023-10-14",
       "entities": [
         "sam",
+        "evan",
         "kayaking",
         "lake-tahoe"
       ],
@@ -3296,6 +3289,7 @@
       ],
       "sourceTurns": [
         "D13:10",
+        "D13:11",
         "D13:12",
         "D13:13",
         "D13:14",
@@ -3304,29 +3298,17 @@
       ]
     },
     {
-      "text": "Evan offered on 14 October 2023 to pick a good spot and plan a kayaking trip with Sam once Sam had tried it.",
-      "speaker": "Evan",
-      "statedOn": "2023-10-14",
-      "entities": [
-        "evan",
-        "sam",
-        "kayaking"
-      ],
-      "sourceTurns": [
-        "D13:11",
-        "D13:12"
-      ]
-    },
-    {
-      "text": "Sam went to the emergency room with a severe stomachache over the weekend of 14-15 October 2023 and was diagnosed with gastritis, which he found alarming and took as a wake-up call to adopt a more nutritious diet and exercise regularly.",
+      "text": "Sam ended up in the emergency room with a severe stomachache over the weekend of 14-15 October 2023 and was diagnosed with gastritis, which alarmed him and served as a wake-up call to adopt a more nutritious diet and exercise regularly.",
       "speaker": "Sam",
       "statedOn": "2023-10-17",
       "entities": [
         "sam",
-        "sams-gastritis"
+        "sams-gastritis",
+        "sams-diet-and-exercise-routine"
       ],
       "sourceTurns": [
-        "D14:1"
+        "D14:1",
+        "D14:2"
       ]
     },
     {
@@ -3342,31 +3324,7 @@
       ]
     },
     {
-      "text": "Evan was focusing on fitness in October 2023 and said it had been really beneficial for his overall well-being.",
-      "speaker": "Evan",
-      "statedOn": "2023-10-17",
-      "entities": [
-        "evan"
-      ],
-      "sourceTurns": [
-        "D14:2",
-        "D14:3"
-      ]
-    },
-    {
-      "text": "Evan had another encounter with a lost tourist shortly before 17 October 2023, and he and Sam joked that helping tourists was becoming a recurring theme in his life.",
-      "speaker": "Evan",
-      "statedOn": "2023-10-17",
-      "entities": [
-        "evan"
-      ],
-      "sourceTurns": [
-        "D14:2",
-        "D14:3"
-      ]
-    },
-    {
-      "text": "Evan advised Sam on 17 October 2023 to set concrete goals such as a distance to run or a number of push-ups, find an exercise he enjoys and get a buddy for accountability, and Sam said he would try it.",
+      "text": "Evan had another encounter with a lost tourist shortly before 17 October 2023 and joked that helping tourists was becoming a recurring theme in his life; Sam called him the go-to guy for tourists in need.",
       "speaker": "Evan",
       "statedOn": "2023-10-17",
       "entities": [
@@ -3374,13 +3332,42 @@
         "sam"
       ],
       "sourceTurns": [
+        "D14:2",
+        "D14:3"
+      ]
+    },
+    {
+      "text": "Evan said focusing on fitness had been really beneficial for his overall well-being, and advised Sam on 17 October 2023 to set concrete goals such as a distance to run or a number of push-ups, find an exercise he enjoys and get a buddy for accountability.",
+      "speaker": "Evan",
+      "statedOn": "2023-10-17",
+      "entities": [
+        "evan",
+        "sam",
+        "evans-health-routine"
+      ],
+      "sourceTurns": [
+        "D14:2",
+        "D14:3",
         "D14:4",
         "D14:5",
         "D14:6"
       ]
     },
     {
-      "text": "Evan and Sam agreed on 17 October 2023 to go on a hike together soon, without fixing a date, and both said they were looking forward to it.",
+      "text": "Evan was at the gym on 16 October 2023 and said he was gaining strength and glad to see progress.",
+      "speaker": "Evan",
+      "statedOn": "2023-10-17",
+      "entities": [
+        "evan",
+        "evans-gym",
+        "evans-health-routine"
+      ],
+      "sourceTurns": [
+        "D14:8"
+      ]
+    },
+    {
+      "text": "Evan and Sam agreed on 17 October 2023 to go on a hike together soon; Sam was excited about the challenge and about connecting with nature, and Evan said it would be a cool memory for them both.",
       "speaker": "Evan",
       "statedOn": "2023-10-17",
       "entities": [
@@ -3391,25 +3378,11 @@
       "sourceTurns": [
         "D14:6",
         "D14:7",
+        "D14:8",
         "D14:9",
         "D14:10",
         "D14:11",
         "D14:12"
-      ]
-    },
-    {
-      "text": "Evan went to the gym on 16 October 2023 and said he was gaining strength.",
-      "speaker": "Evan",
-      "statedOn": "2023-10-17",
-      "entities": [
-        "evan",
-        "evans-gym"
-      ],
-      "chrono": [
-        "evan-gym-session"
-      ],
-      "sourceTurns": [
-        "D14:8"
       ]
     },
     {
@@ -3428,39 +3401,38 @@
       ]
     },
     {
-      "text": "Sam was finding his new health routine tough to keep up in late October 2023 and felt pressured by his family, who were pushing hard for it.",
+      "text": "Sam was finding it tough to keep up his new health routine as of 25 October 2023 and felt pressured by his family, who were really pushing him to stick to it.",
       "speaker": "Sam",
       "statedOn": "2023-10-25",
       "entities": [
         "sam",
-        "sams-family"
+        "sams-diet-and-exercise-routine"
       ],
       "sourceTurns": [
-        "D15:1"
-      ]
-    },
-    {
-      "text": "Evan took a morning walk on 25 October 2023 and said starting the day actively really helps; he added that encouragement should not become pressure.",
-      "speaker": "Evan",
-      "statedOn": "2023-10-25",
-      "entities": [
-        "evan",
-        "sam"
-      ],
-      "chrono": [
-        "evan-morning-walk"
-      ],
-      "sourceTurns": [
+        "D15:1",
         "D15:2",
         "D15:3"
       ]
     },
     {
-      "text": "Sam said on 25 October 2023 that he gets impatient with himself when he wants fast results and has to remind himself to be patient and take it easy.",
+      "text": "Evan got back from a morning walk on 25 October 2023 and said starting the day actively really helps.",
+      "speaker": "Evan",
+      "statedOn": "2023-10-25",
+      "entities": [
+        "evan",
+        "evans-health-routine"
+      ],
+      "sourceTurns": [
+        "D15:2"
+      ]
+    },
+    {
+      "text": "Sam admitted on 25 October 2023 that he gets impatient with himself when he wants fast results, and accepted Evan's reminder that taking it slow beats doing too much.",
       "speaker": "Sam",
       "statedOn": "2023-10-25",
       "entities": [
-        "sam"
+        "sam",
+        "evan"
       ],
       "sourceTurns": [
         "D15:4",
@@ -3470,11 +3442,12 @@
       ]
     },
     {
-      "text": "Evan went through a similar phase about two years before October 2023, changing his diet and starting to walk regularly.",
+      "text": "Evan went through a phase like Sam's about two years before October 2023, changing his diet and starting to walk regularly.",
       "speaker": "Evan",
       "statedOn": "2023-10-25",
       "entities": [
-        "evan"
+        "evan",
+        "evans-health-routine"
       ],
       "sourceTurns": [
         "D15:8",
@@ -3482,11 +3455,12 @@
       ]
     },
     {
-      "text": "Evan said what changed things for him was focusing on his well-being rather than fixating on quick results, and that letting go of unrealistic expectations was liberating both physically and mentally.",
+      "text": "Evan said what made the difference in his own transformation was focusing on his well-being rather than fixating on quick results; letting go of that pressure and of unrealistic expectations was liberating both physically and mentally.",
       "speaker": "Evan",
       "statedOn": "2023-10-25",
       "entities": [
-        "evan"
+        "evan",
+        "evans-health-routine"
       ],
       "sourceTurns": [
         "D15:10",
@@ -3496,7 +3470,7 @@
       ]
     },
     {
-      "text": "Evan told Sam on 25 October 2023 to take it one day at a time and celebrate every small victory, and Sam said he would focus on small wins.",
+      "text": "Evan advised Sam on 25 October 2023 to take it one day at a time and celebrate every small victory, and Sam said he would.",
       "speaker": "Evan",
       "statedOn": "2023-10-25",
       "entities": [
@@ -3512,13 +3486,15 @@
       ]
     },
     {
-      "text": "Sam became a Weight Watchers coach in his group by 9 November 2023, an accomplishment he was proud of and called a great step in his quest for better health.",
+      "text": "Sam was made a Weight Watchers coach in his group and told Evan on 9 November 2023 that it was a big accomplishment he felt really proud of.",
       "speaker": "Sam",
       "statedOn": "2023-11-09",
       "entities": [
         "sam",
-        "weight-watchers",
-        "sams-weight"
+        "weight-watchers"
+      ],
+      "chrono": [
+        "sam-became-ww-coach"
       ],
       "sourceTurns": [
         "D16:1",
@@ -3527,7 +3503,7 @@
       ]
     },
     {
-      "text": "Sam hoped on 9 November 2023 that coaching at Weight Watchers would keep him motivated and help others stay committed, calling it a big challenge he was ready for after a difficult road.",
+      "text": "Sam said on 9 November 2023 that being a coach would hopefully keep him motivated and help others stay committed, and that although it was a big challenge after a difficult road he was ready for it.",
       "speaker": "Sam",
       "statedOn": "2023-11-09",
       "entities": [
@@ -3542,12 +3518,27 @@
       ]
     },
     {
-      "text": "Evan received a 1968 Kustom K-200A vintage guitar as a gift from a close friend, and showed it to Sam on 9 November 2023.",
+      "text": "Evan apologised on 9 November 2023 for having missed events, saying he had had some personal challenges since the two last spoke.",
+      "speaker": "Evan",
+      "statedOn": "2023-11-09",
+      "entities": [
+        "evan",
+        "sam"
+      ],
+      "sourceTurns": [
+        "D16:8"
+      ]
+    },
+    {
+      "text": "Evan received a 1968 Kustom K-200A vintage guitar as a gift from a close friend and showed it to Sam on 9 November 2023, who thought it looked vintage and cool.",
       "speaker": "Evan",
       "statedOn": "2023-11-09",
       "entities": [
         "evan",
         "evans-guitar"
+      ],
+      "chrono": [
+        "evan-got-guitar"
       ],
       "sourceTurns": [
         "D16:8",
@@ -3556,12 +3547,12 @@
       ]
     },
     {
-      "text": "Evan lost his job in October 2023 when his company downsized, and as of 9 November 2023 he was hunting for a new one, which he said had not been easy though he was staying hopeful.",
+      "text": "Evan lost his job in October 2023 when his company downsized and he was part of the cut; as of 9 November 2023 he was hunting for a new job without much luck but keeping his spirits up.",
       "speaker": "Evan",
       "statedOn": "2023-11-09",
       "entities": [
         "evan",
-        "evans-employer"
+        "evans-former-employer"
       ],
       "sourceTurns": [
         "D16:10",
@@ -3570,7 +3561,7 @@
       ]
     },
     {
-      "text": "Sam offered Evan support over the job loss on 9 November 2023 and said he was proud of how Evan was handling it, and Evan said he would reach out if he needed anything.",
+      "text": "Sam told Evan on 9 November 2023 that he was proud of how Evan was handling the job loss and offered to talk or help however he could.",
       "speaker": "Sam",
       "statedOn": "2023-11-09",
       "entities": [
@@ -3585,7 +3576,7 @@
       ]
     },
     {
-      "text": "Evan has a peaceful favourite spot by the beach close to his home where he often goes to relax and unwind, and he took a photograph of the sunset there on 3 November 2023, saying watching the waves and the colours helps him find peace during tough times.",
+      "text": "Evan has a favourite peaceful spot by the beach close to his home where he goes to relax and unwind; he photographed the sunset there on 3 November 2023 and said watching the waves and the colours helps him find peace in tough times.",
       "speaker": "Evan",
       "statedOn": "2023-11-09",
       "entities": [
@@ -3593,9 +3584,10 @@
         "evans-beach-spot"
       ],
       "chrono": [
-        "evan-beach-sunset-photo"
+        "evan-beach-photo"
       ],
       "sourceTurns": [
+        "D16:16",
         "D16:17",
         "D16:18",
         "D16:19",
@@ -3603,7 +3595,7 @@
       ]
     },
     {
-      "text": "Evan and Sam agreed on 9 November 2023 to visit Evan's beach spot together and planned it for December 2023.",
+      "text": "Evan and Sam agreed on 9 November 2023 to visit Evan's favourite beach spot together, planning it for the following month.",
       "speaker": "Evan",
       "statedOn": "2023-11-09",
       "entities": [
@@ -3619,7 +3611,7 @@
       ]
     },
     {
-      "text": "Evan had a health scare in the week before 21 November 2023: a check-up found something suspicious and he had to go to hospital, which frightened him, and it made him realise how important it is to keep an eye on his health.",
+      "text": "Evan had a health scare in the week before 21 November 2023 and went to hospital after a check-up found something suspicious; it turned out to be a misunderstanding, but it made him realise how important it is to keep an eye on his health.",
       "speaker": "Evan",
       "statedOn": "2023-11-21",
       "entities": [
@@ -3627,54 +3619,54 @@
       ],
       "sourceTurns": [
         "D17:1",
-        "D17:2"
-      ]
-    },
-    {
-      "text": "Sam was dealing with discomfort that limited his movement in November 2023 and was finding dietary changes hard.",
-      "speaker": "Sam",
-      "statedOn": "2023-11-21",
-      "entities": [
-        "sam",
-        "sams-weight"
-      ],
-      "sourceTurns": [
+        "D17:2",
         "D17:3"
       ]
     },
     {
-      "text": "Sam got hold of his go-to feel-good film on 20 November 2023, the only new thing he had picked up lately.",
+      "text": "Sam was dealing with discomfort that limited his movement as of 21 November 2023 and was finding it hard to make dietary changes.",
+      "speaker": "Sam",
+      "statedOn": "2023-11-21",
+      "entities": [
+        "sam",
+        "sams-weight",
+        "sams-diet-and-exercise-routine"
+      ],
+      "sourceTurns": [
+        "D17:3",
+        "D17:4"
+      ]
+    },
+    {
+      "text": "Sam got a film on 20 November 2023 that had become his go-to feel-good watch; he had not otherwise tried anything new lately.",
       "speaker": "Sam",
       "statedOn": "2023-11-21",
       "entities": [
         "sam"
       ],
-      "chrono": [
-        "sam-got-feelgood-film"
-      ],
       "sourceTurns": [
-        "D17:4",
         "D17:5"
       ]
     },
     {
-      "text": "Evan's November 2023 hospital finding turned out to be a misunderstanding and his doctors told him everything was fine; he said it taught him the value of life and to enjoy the moment.",
+      "text": "Evan said on 21 November 2023 that doctors had told him everything was fine after his hospital check, and that the scare had taught him the value of life and to enjoy the moment.",
       "speaker": "Evan",
       "statedOn": "2023-11-21",
       "entities": [
         "evan"
       ],
       "sourceTurns": [
+        "D17:5",
         "D17:6"
       ]
     },
     {
-      "text": "Evan and Sam agreed on 21 November 2023 to make a habit of appreciating something small each day, and said tough times are easier with friends to rely on.",
+      "text": "Evan and Sam agreed on 21 November 2023 to make a habit of appreciating something each day and to stick together through tough times.",
       "speaker": "Sam",
       "statedOn": "2023-11-21",
       "entities": [
-        "evan",
-        "sam"
+        "sam",
+        "evan"
       ],
       "sourceTurns": [
         "D17:7",
@@ -3686,33 +3678,24 @@
       ]
     },
     {
-      "text": "Evan said on 21 November 2023 that he stays in shape by hitting the gym and taking his car out for a spin.",
+      "text": "Evan said on 21 November 2023 that he stays fit by hitting the gym and taking his car out for a spin, while Sam said his own fitness goals had been hard to reach.",
       "speaker": "Evan",
       "statedOn": "2023-11-21",
       "entities": [
         "evan",
+        "sam",
         "evans-gym",
-        "road-trips"
+        "evans-health-routine"
       ],
       "sourceTurns": [
         "D17:13",
-        "D17:14"
-      ]
-    },
-    {
-      "text": "Sam said on 21 November 2023 that his fitness goals had been hard to reach.",
-      "speaker": "Sam",
-      "statedOn": "2023-11-21",
-      "entities": [
-        "sam"
-      ],
-      "sourceTurns": [
+        "D17:14",
         "D17:15",
         "D17:16"
       ]
     },
     {
-      "text": "Evan grew up on a small island that he calls his happy place and a slice of paradise, saying it shaped him and will always hold a special place in his heart; he showed Sam pictures of it on 21 November 2023.",
+      "text": "Evan grew up on a small island that he calls his happy place and showed Sam photographs of it on 21 November 2023, saying it shaped him, will always hold a special place in his heart and feels like a slice of paradise.",
       "speaker": "Evan",
       "statedOn": "2023-11-21",
       "entities": [
@@ -3728,20 +3711,33 @@
         "D17:22",
         "D17:23",
         "D17:24",
-        "D17:25",
+        "D17:25"
+      ]
+    },
+    {
+      "text": "Evan and Sam closed their conversation of 21 November 2023 by telling each other they were there to talk whenever needed.",
+      "speaker": "Evan",
+      "statedOn": "2023-11-21",
+      "entities": [
+        "evan",
+        "sam"
+      ],
+      "sourceTurns": [
         "D17:26",
         "D17:27",
         "D17:28"
       ]
     },
     {
-      "text": "Evan's new Prius broke down in early December 2023 — a car he described on 5 December as one he had just bought, and had been counting on to be reliable — which stressed him because he relies on it for his active lifestyle and road trips.",
+      "text": "Evan's new Prius broke down on 5 December 2023, which he found a real stressor because he relies on the car for his active lifestyle and road trips, and frustrating because he had counted on a new car being reliable.",
       "speaker": "Evan",
       "statedOn": "2023-12-05",
       "entities": [
         "evan",
-        "evans-new-prius",
-        "road-trips"
+        "evans-prius"
+      ],
+      "chrono": [
+        "prius-broke-down"
       ],
       "sourceTurns": [
         "D18:1",
@@ -3750,12 +3746,12 @@
       ]
     },
     {
-      "text": "Evan said on 5 December 2023 that he was trying to see the Prius breaking down as a chance to explore other ways of staying active and travelling.",
+      "text": "Evan said on 5 December 2023 that he was trying to treat the Prius breaking down as a chance to explore other ways of staying active and travelling.",
       "speaker": "Evan",
       "statedOn": "2023-12-05",
       "entities": [
         "evan",
-        "evans-new-prius"
+        "evans-prius"
       ],
       "sourceTurns": [
         "D18:4",
@@ -3763,7 +3759,7 @@
       ]
     },
     {
-      "text": "Sam attended a Weight Watchers meeting on 4 December 2023, learned some good tips and found it really insightful.",
+      "text": "Sam attended a Weight Watchers meeting on 4 December 2023, found it really insightful and picked up some great tips, including a smoothie bowl that was a hit.",
       "speaker": "Sam",
       "statedOn": "2023-12-05",
       "entities": [
@@ -3780,7 +3776,7 @@
       ]
     },
     {
-      "text": "Evan was thinking of trying yoga as of 5 December 2023 as something gentle but effective for stress relief and flexibility, and Sam — for whom yoga had done wonders on both counts — told him he should definitely try it.",
+      "text": "Evan had been thinking about trying yoga for stress relief and flexibility, and Sam — for whom yoga had done wonders on both counts — encouraged him to on 5 December 2023; Evan said he thought he would.",
       "speaker": "Evan",
       "statedOn": "2023-12-05",
       "entities": [
@@ -3791,20 +3787,19 @@
       "sourceTurns": [
         "D18:7",
         "D18:8",
-        "D18:9"
+        "D18:9",
+        "D18:10"
       ]
     },
     {
-      "text": "Sam offered Evan yoga tips and any other help he needed on 5 December 2023, and Evan said Sam's support had been invaluable.",
-      "speaker": "Sam",
+      "text": "Evan thanked Sam on 5 December 2023 for support he called invaluable, saying it makes a big difference to know he is not alone in these situations.",
+      "speaker": "Evan",
       "statedOn": "2023-12-05",
       "entities": [
-        "sam",
         "evan",
-        "yoga"
+        "sam"
       ],
       "sourceTurns": [
-        "D18:10",
         "D18:11",
         "D18:12",
         "D18:13",
@@ -3813,12 +3808,15 @@
       ]
     },
     {
-      "text": "Evan's partner was pregnant as of 9 December 2023, news Evan shared with Sam and described as exciting and a bit nerve-wracking after a long gap since he last had a small child around.",
+      "text": "Evan shared with Sam on 9 December 2023 that his partner was pregnant; he was excited and a bit nervous, since it had been a while since he had a toddler around.",
       "speaker": "Evan",
       "statedOn": "2023-12-09",
       "entities": [
         "evan",
         "evans-partner"
+      ],
+      "chrono": [
+        "partner-pregnancy-news"
       ],
       "sourceTurns": [
         "D19:1",
@@ -3827,7 +3825,7 @@
       ]
     },
     {
-      "text": "Evan remembers the joy of his first child's birth and said on 9 December 2023 that he was looking forward to witnessing it again and building more memories with his family.",
+      "text": "Evan still remembers the amazing joy of his first child's birth and said on 9 December 2023 that he was looking forward to witnessing the miracle of life again and building more memories with his family.",
       "speaker": "Evan",
       "statedOn": "2023-12-09",
       "entities": [
@@ -3840,7 +3838,7 @@
       ]
     },
     {
-      "text": "Evan keeps a collage of his family's top memories — birthdays, holidays and vacations — which he showed Sam on 9 December 2023 and enjoys looking back on.",
+      "text": "Evan keeps a collage of his family's top memories — birthdays, holidays and vacations — and showed it to Sam on 9 December 2023, saying it is good to look back on the great times.",
       "speaker": "Evan",
       "statedOn": "2023-12-09",
       "entities": [
@@ -3853,7 +3851,7 @@
       ]
     },
     {
-      "text": "The framed sign in the centre of Evan's family collage reads 'Bring it on Home' and came from the family's trip to Banff; it is the family's motto and a reminder of the importance of togetherness.",
+      "text": "The sign at the centre of Evan's family memory collage reads 'Bring it on Home' and came from the family's trip to Banff; it is the family motto and a reminder of togetherness wherever they are.",
       "speaker": "Evan",
       "statedOn": "2023-12-09",
       "entities": [
@@ -3868,7 +3866,7 @@
       ]
     },
     {
-      "text": "Evan said on 9 December 2023 that his family means the world to him and are his rock, and that he was looking forward to expanding it.",
+      "text": "Evan said on 9 December 2023 that his family means the world to him and are his rock, and that he was looking forward to expanding the family.",
       "speaker": "Evan",
       "statedOn": "2023-12-09",
       "entities": [
@@ -3881,7 +3879,7 @@
       ]
     },
     {
-      "text": "Evan and his family were planning a big family reunion for the summer of 2024, which he saw as a perfect chance to add to the family memory collage.",
+      "text": "Evan and his family were planning a big family reunion for the summer of 2024, which he said would be a perfect opportunity to add to the memory collage.",
       "speaker": "Evan",
       "statedOn": "2023-12-09",
       "entities": [
@@ -3889,17 +3887,19 @@
         "evans-family"
       ],
       "sourceTurns": [
+        "D19:10",
         "D19:11",
         "D19:12"
       ]
     },
     {
-      "text": "Sam offered on 9 December 2023 to help Evan with tips on organising the family reunion, and Evan said he would keep him updated.",
+      "text": "Sam offered on 9 December 2023 to help with organising the family reunion and said he was always there to support and celebrate Evan's family milestones.",
       "speaker": "Sam",
       "statedOn": "2023-12-09",
       "entities": [
         "sam",
-        "evan"
+        "evan",
+        "evans-family"
       ],
       "sourceTurns": [
         "D19:12",
@@ -3909,7 +3909,7 @@
       ]
     },
     {
-      "text": "Evan's son fell off his bike on 12 December 2023 and was hurt, which Evan called rough, though the boy was doing better by 17 December 2023.",
+      "text": "Evan's son fell off his bike on 12 December 2023 and was hurt badly enough to need crutches, though he was doing better by 17 December 2023.",
       "speaker": "Evan",
       "statedOn": "2023-12-17",
       "entities": [
@@ -3917,7 +3917,7 @@
         "evans-son"
       ],
       "chrono": [
-        "evans-son-bike-accident"
+        "son-bike-accident"
       ],
       "sourceTurns": [
         "D20:1",
@@ -3926,7 +3926,7 @@
       ]
     },
     {
-      "text": "Sam had been through a few bumps and was finding things tough in December 2023, and said he had been thinking about ways to cope since he and Evan last spoke.",
+      "text": "Sam said on 17 December 2023 that he had been through a few bumps and, since their last talk, had been thinking about ways to cope, but was finding it challenging.",
       "speaker": "Sam",
       "statedOn": "2023-12-17",
       "entities": [
@@ -3938,7 +3938,7 @@
       ]
     },
     {
-      "text": "Sam said on 17 December 2023 that he used to love hiking but had not had the chance for a long time, and Evan proposed they plan a hike soon.",
+      "text": "Sam used to love hiking but had not had the chance to do it in a long time as of 17 December 2023; Evan remembered him mentioning it and said they should plan a hike soon.",
       "speaker": "Sam",
       "statedOn": "2023-12-17",
       "entities": [
@@ -3952,21 +3952,22 @@
       ]
     },
     {
-      "text": "Sam was struggling with his weight in December 2023, said it was affecting his confidence and that he kept lacking motivation, and Evan told him his worth is not defined by his weight.",
+      "text": "Sam said on 17 December 2023 that his weight was affecting his confidence, that he felt unable to overcome the challenges it brought and kept lacking motivation; Evan told him his worth is not defined by his weight.",
       "speaker": "Sam",
       "statedOn": "2023-12-17",
       "entities": [
         "sam",
-        "sams-weight",
-        "evan"
+        "evan",
+        "sams-weight"
       ],
       "sourceTurns": [
         "D20:8",
-        "D20:9"
+        "D20:9",
+        "D20:10"
       ]
     },
     {
-      "text": "Evan urged Sam on 17 December 2023 to challenge himself with something new however small, and Sam said stepping out of his comfort zone was difficult but he would take the advice.",
+      "text": "Evan encouraged Sam on 17 December 2023 to step out of his comfort zone and challenge himself to try something new, however small, for the sense of accomplishment it brings.",
       "speaker": "Evan",
       "statedOn": "2023-12-17",
       "entities": [
@@ -3974,20 +3975,18 @@
         "sam"
       ],
       "sourceTurns": [
-        "D20:10",
         "D20:11",
         "D20:12",
         "D20:13"
       ]
     },
     {
-      "text": "Evan finished a contemporary figurative painting a few days before 17 December 2023, emphasising emotional state through expressive brushwork and vibrant colour and capturing a moment of introspection, and said he was very proud of it.",
+      "text": "Evan finished a contemporary figurative painting a few days before 17 December 2023, using expressive brushwork and vibrant colour to capture a moment of introspection, and said he was very proud of it.",
       "speaker": "Evan",
       "statedOn": "2023-12-17",
       "entities": [
         "evan",
-        "painting",
-        "evans-figurative-painting"
+        "evans-exhibition-painting"
       ],
       "sourceTurns": [
         "D20:13",
@@ -3996,12 +3995,12 @@
       ]
     },
     {
-      "text": "A close friend of Evan's helped him get his contemporary figurative painting published in an exhibition, and appears beside it in the photograph he showed Sam on 17 December 2023.",
+      "text": "The woman photographed beside Evan's contemporary figurative painting is a close friend of his who helped him get the painting published in an exhibition.",
       "speaker": "Evan",
       "statedOn": "2023-12-17",
       "entities": [
         "evan",
-        "evans-figurative-painting"
+        "evans-exhibition-painting"
       ],
       "sourceTurns": [
         "D20:16",
@@ -4009,13 +4008,12 @@
       ]
     },
     {
-      "text": "Evan married the Canadian woman he had met in August 2023, in the week before 26 December 2023.",
+      "text": "Evan married his Canadian partner in the week before 26 December 2023, telling Sam about it on 26 December; Sam confirmed it was the woman from Canada.",
       "speaker": "Evan",
       "statedOn": "2023-12-26",
       "entities": [
         "evan",
-        "evans-partner",
-        "canada"
+        "evans-partner"
       ],
       "sourceTurns": [
         "D21:1",
@@ -4025,7 +4023,7 @@
       ]
     },
     {
-      "text": "Evan said on 26 December 2023 that he had been in love with his wife at first sight, that he believes in love at first sight, and that it felt as though time stopped and a spark lit inside him.",
+      "text": "Evan said he had been in love with his wife at first sight and wondered why they had not married sooner; he believes in love at first sight, describing it as time stopping and a spark lighting inside him.",
       "speaker": "Evan",
       "statedOn": "2023-12-26",
       "entities": [
@@ -4041,49 +4039,40 @@
       ]
     },
     {
-      "text": "Sam had started running in the mornings by 26 December 2023 and found it a great way to clear his head, while saying he wished he could feel the same way about love that Evan does.",
+      "text": "Sam had started running in the mornings by 26 December 2023 and found it a great way to clear his head, though he said he wished he could feel about love the way Evan does.",
       "speaker": "Sam",
       "statedOn": "2023-12-26",
       "entities": [
-        "sam"
+        "sam",
+        "sams-diet-and-exercise-routine"
       ],
       "sourceTurns": [
-        "D21:9"
-      ]
-    },
-    {
-      "text": "Evan told Sam on 26 December 2023 that his morning runs were a step toward something good and that he should keep trying new things.",
-      "speaker": "Evan",
-      "statedOn": "2023-12-26",
-      "entities": [
-        "evan",
-        "sam"
-      ],
-      "sourceTurns": [
+        "D21:9",
         "D21:10"
       ]
     },
     {
-      "text": "Evan painted a minimalist work in white, blue, orange and black while feeling a mix of sadness, anger and hope, and said art is remarkable for portraying feelings without words.",
+      "text": "Evan painted a minimalist work in blue, orange and black on a white background while feeling a mix of sadness, anger and hope, and says art is amazing for portraying feelings without words.",
       "speaker": "Evan",
       "statedOn": "2023-12-26",
       "entities": [
         "evan",
-        "painting"
+        "watercolor-painting"
       ],
       "sourceTurns": [
+        "D21:10",
         "D21:11",
         "D21:12",
         "D21:13"
       ]
     },
     {
-      "text": "Evan painted another work with a sense of joy and freedom, using spontaneous strokes and bold colours to reflect a playful, liberated mood, and said painting helps him recognise and handle his own feelings.",
+      "text": "Evan painted another work with a sense of joy and freedom, its spontaneous strokes and bold colours reflecting a playful, liberated mood, and said it gave him a rush of joy when he looked at it.",
       "speaker": "Evan",
       "statedOn": "2023-12-26",
       "entities": [
         "evan",
-        "painting"
+        "watercolor-painting"
       ],
       "sourceTurns": [
         "D21:14",
@@ -4092,40 +4081,28 @@
       ]
     },
     {
-      "text": "Sam went to an art exhibit a few days before 26 December 2023 and was inspired by a painting there; he sketches occasionally but had not yet made anything he considered remarkable, and said Evan's passion for painting inspired him.",
+      "text": "Sam went to an art exhibit a few days before 26 December 2023 and was inspired by a painting he saw there; he sketches occasionally but said he had not yet created anything remarkable, though he expected to before long.",
       "speaker": "Sam",
       "statedOn": "2023-12-26",
       "entities": [
         "sam",
-        "painting",
         "evan"
       ],
       "sourceTurns": [
         "D21:17",
         "D21:18",
-        "D21:19"
+        "D21:19",
+        "D21:20"
       ]
     },
     {
-      "text": "Evan offered on 26 December 2023 to help Sam get started painting whenever he wanted to try.",
+      "text": "Evan lost his keys again on 26 December 2023 and called it a weekly ritual; Sam suggested putting a GPS sensor on them, which Evan said he would do as soon as he found them.",
       "speaker": "Evan",
       "statedOn": "2023-12-26",
       "entities": [
         "evan",
         "sam",
-        "painting"
-      ],
-      "sourceTurns": [
-        "D21:20"
-      ]
-    },
-    {
-      "text": "Evan lost his keys again on 26 December 2023, calling it a weekly ritual, and Sam suggested putting a GPS sensor on them, which Evan said he would do as soon as he found them.",
-      "speaker": "Evan",
-      "statedOn": "2023-12-26",
-      "entities": [
-        "evan",
-        "sam"
+        "evans-keys"
       ],
       "sourceTurns": [
         "D21:20",
@@ -4134,38 +4111,42 @@
       ]
     },
     {
-      "text": "Sam took his friends on a hiking trip on 29 December 2023, which he described as epic and as part of getting into a healthier lifestyle.",
+      "text": "Sam took his friends on an epic hiking trip on 29 December 2023, which he described on 31 December as part of really getting into a healthier lifestyle.",
       "speaker": "Sam",
       "statedOn": "2023-12-31",
       "entities": [
         "sam",
-        "hiking"
+        "hiking",
+        "sams-diet-and-exercise-routine"
       ],
       "chrono": [
         "sams-hiking-trip"
       ],
       "sourceTurns": [
-        "D22:1"
+        "D22:1",
+        "D22:2"
       ]
     },
     {
-      "text": "Evan and his family took the Prius on a long drive to the mountains over the weekend of 23-24 December 2023 and had a minor accident on the way back; nobody was hurt, and Evan took it as a reminder to take it easy on the road.",
+      "text": "Evan and his family took the Prius on a long drive to the mountains over the weekend of 23-24 December 2023, which was perfect until they had a minor accident on the way back; nobody was hurt.",
       "speaker": "Evan",
       "statedOn": "2023-12-31",
       "entities": [
         "evan",
-        "evans-new-prius",
-        "road-trips",
+        "evans-prius",
         "evans-family"
       ],
       "sourceTurns": [
         "D22:2",
         "D22:3",
-        "D22:6"
+        "D22:4",
+        "D22:5",
+        "D22:6",
+        "D22:7"
       ]
     },
     {
-      "text": "Evan told his work friends about his marriage around the end of December 2023 and said they had been a great support, though the car accident took some of the shine off the moment.",
+      "text": "Evan told his work friends about his marriage around the end of December 2023 and found them a great support, though the minor car accident took some of the shine off the telling.",
       "speaker": "Evan",
       "statedOn": "2023-12-31",
       "entities": [
@@ -4179,41 +4160,54 @@
       ]
     },
     {
-      "text": "Evan and Sam agreed on 31 December 2023 that nature brings peace and clarity and puts everything else in proportion.",
+      "text": "Evan said on 31 December 2023 that nature brings peace and clarity and has been a great healer for him.",
       "speaker": "Evan",
       "statedOn": "2023-12-31",
       "entities": [
-        "evan",
-        "sam"
+        "evan"
       ],
       "sourceTurns": [
         "D22:7",
         "D22:8",
-        "D22:9"
+        "D22:9",
+        "D22:10"
       ]
     },
     {
-      "text": "Evan had been trying new healthy snacks by 31 December 2023, including cookies and coconut-and-oat energy balls that he found energising and a healthy way to satisfy a sweet tooth, and offered Sam the recipes.",
+      "text": "Evan had been trying new healthy snacks at the end of December 2023 and offered on 31 December to send Sam the recipes, including ones for cookies and for coconut and oat energy balls he had discovered.",
       "speaker": "Evan",
       "statedOn": "2023-12-31",
       "entities": [
         "evan",
-        "sam"
+        "sam",
+        "evans-health-routine"
       ],
       "sourceTurns": [
         "D22:10",
         "D22:11",
         "D22:12",
         "D22:13",
-        "D22:14",
-        "D22:15",
-        "D22:16",
-        "D22:17",
-        "D22:18"
+        "D22:14"
       ]
     },
     {
-      "text": "Sam had trouble with the self-checkout at the store again by 31 December 2023, calling it a regular annoyance he seems to attract, while Evan said he had never once had a problem with one.",
+      "text": "Evan said he enjoys the taste of the energy balls, finding them energising and a healthy way to satisfy a sweet tooth, and Sam said he would give them a try.",
+      "speaker": "Evan",
+      "statedOn": "2023-12-31",
+      "entities": [
+        "evan",
+        "sam"
+      ],
+      "sourceTurns": [
+        "D22:15",
+        "D22:16",
+        "D22:17",
+        "D22:18",
+        "D22:19"
+      ]
+    },
+    {
+      "text": "Sam had trouble with the supermarket self-checkout again on 31 December 2023 and said it had become a regular annoyance he seemed to attract, while Evan said he had never once had a problem with one.",
       "speaker": "Sam",
       "statedOn": "2023-12-31",
       "entities": [
@@ -4227,7 +4221,7 @@
       ]
     },
     {
-      "text": "Evan and his wife told their extended family about their marriage on 5 January 2024 and were overwhelmed by the love and support they received.",
+      "text": "Evan and his partner told their extended family about their marriage on 5 January 2024 and were overwhelmed by the love and support they got back.",
       "speaker": "Evan",
       "statedOn": "2024-01-06",
       "entities": [
@@ -4236,7 +4230,7 @@
         "evans-family"
       ],
       "chrono": [
-        "told-extended-family-marriage"
+        "told-family-about-marriage"
       ],
       "sourceTurns": [
         "D23:1",
@@ -4245,7 +4239,7 @@
       ]
     },
     {
-      "text": "Evan said on 6 January 2024 that he felt lucky to have found someone who gets him and that both families being happy about the marriage was the best part.",
+      "text": "Evan said on 6 January 2024 that he feels lucky to have found someone who gets him, and that both families being happy about the marriage was the best part.",
       "speaker": "Evan",
       "statedOn": "2024-01-06",
       "entities": [
@@ -4254,21 +4248,23 @@
         "evans-family"
       ],
       "sourceTurns": [
+        "D23:3",
         "D23:4",
-        "D23:5",
-        "D23:6",
-        "D23:7"
+        "D23:5"
       ]
     },
     {
-      "text": "Sam said on 6 January 2024 that his family had been his rock through everything and that he does not know what he would do without them.",
-      "speaker": "Sam",
+      "text": "Evan and Sam agreed at length on 6 January 2024 that family support is what brings love and happiness into their lives, and both said their families are their rock and always there for them.",
+      "speaker": "Evan",
       "statedOn": "2024-01-06",
       "entities": [
+        "evan",
         "sam",
-        "sams-family"
+        "evans-family"
       ],
       "sourceTurns": [
+        "D23:6",
+        "D23:7",
         "D23:8",
         "D23:9",
         "D23:10",
@@ -4278,7 +4274,7 @@
       ]
     },
     {
-      "text": "Evan's family were holding a get-together on the evening of 6 January 2024 with homemade lasagna, which he was excited about.",
+      "text": "Evan's family were having a get-together with homemade lasagne on the evening of 6 January 2024, which he was excited about.",
       "speaker": "Evan",
       "statedOn": "2024-01-06",
       "entities": [
@@ -4286,7 +4282,7 @@
         "evans-family"
       ],
       "chrono": [
-        "evans-family-gettogether"
+        "family-lasagne-dinner"
       ],
       "sourceTurns": [
         "D23:13",
@@ -4295,19 +4291,24 @@
       ]
     },
     {
-      "text": "Evan started a new diet in early January 2024 limiting himself to two ginger snaps a day, and said he would stick to it even through the family gathering.",
+      "text": "Evan started a new diet on 6 January 2024 limiting himself to just two ginger snaps a day, and said he would stick to the plan even through the family gathering.",
       "speaker": "Evan",
       "statedOn": "2024-01-06",
       "entities": [
-        "evan"
+        "evan",
+        "evans-health-routine"
+      ],
+      "chrono": [
+        "evan-ginger-snap-diet"
       ],
       "sourceTurns": [
         "D23:15",
+        "D23:16",
         "D23:17"
       ]
     },
     {
-      "text": "Sam was having homemade lasagna for dinner on 6 January 2024 and joked that he could not compete with Evan's ginger snap limit.",
+      "text": "Sam was also having homemade lasagne on the evening of 6 January 2024, and showed Evan a photograph of a raspberry and lime pie from his cousin's wedding, which he called super special.",
       "speaker": "Sam",
       "statedOn": "2024-01-06",
       "entities": [
@@ -4315,17 +4316,6 @@
       ],
       "sourceTurns": [
         "D23:16",
-        "D23:17"
-      ]
-    },
-    {
-      "text": "The dessert Sam showed Evan on 6 January 2024 was photographed at Sam's cousin's wedding, which Sam called super special.",
-      "speaker": "Sam",
-      "statedOn": "2024-01-06",
-      "entities": [
-        "sam"
-      ],
-      "sourceTurns": [
         "D23:18",
         "D23:19",
         "D23:20",
@@ -4334,7 +4324,7 @@
       ]
     },
     {
-      "text": "Evan and his wife were going to Canada in February 2024 for their honeymoon, planning to ski, try the local cuisine and enjoy the snowy landscapes; Evan had never had poutine and meant to try it there.",
+      "text": "Evan and his wife were going to Canada in February 2024 for their honeymoon, planning to ski, try the local cuisine and enjoy the snowy landscapes.",
       "speaker": "Evan",
       "statedOn": "2024-01-06",
       "entities": [
@@ -4344,23 +4334,26 @@
         "skiing"
       ],
       "sourceTurns": [
+        "D23:22",
         "D23:23",
         "D23:24",
         "D23:25",
-        "D23:26",
-        "D23:27",
-        "D23:28"
+        "D23:26"
       ]
     },
     {
-      "text": "Evan promised on 6 January 2024 to tell Sam all about the honeymoon when he got back.",
+      "text": "Evan planned to try poutine on the Canadian honeymoon, having never had it; Sam, who called it a Canadian thing, asked him to report back on whether it lived up to the hype.",
       "speaker": "Evan",
       "statedOn": "2024-01-06",
       "entities": [
         "evan",
-        "sam"
+        "sam",
+        "canada"
       ],
       "sourceTurns": [
+        "D23:26",
+        "D23:27",
+        "D23:28",
         "D23:29",
         "D23:30",
         "D23:31",
@@ -4369,31 +4362,21 @@
       ]
     },
     {
-      "text": "Evan went out with friends on 9 January 2024, had too much to drink and urinated near somebody's roses, which he found deeply embarrassing.",
+      "text": "Evan went out with friends on 9 January 2024, had too much to drink and had a pee accident near someone's roses; he was mortified when he saw it the next morning, apologised, and the people concerned were understanding.",
       "speaker": "Evan",
       "statedOn": "2024-01-10",
       "entities": [
         "evan"
       ],
       "chrono": [
-        "evan-drunken-rose-incident"
+        "rose-bush-incident"
       ],
       "sourceTurns": [
         "D24:1",
         "D24:2",
         "D24:3",
         "D24:4",
-        "D24:5"
-      ]
-    },
-    {
-      "text": "Evan apologised on the morning of 10 January 2024 to the people whose roses he had used and found them understanding, and said he had been out of control and needed to be more careful.",
-      "speaker": "Evan",
-      "statedOn": "2024-01-10",
-      "entities": [
-        "evan"
-      ],
-      "sourceTurns": [
+        "D24:5",
         "D24:6",
         "D24:7",
         "D24:8",
@@ -4401,7 +4384,7 @@
       ]
     },
     {
-      "text": "Evan and his partner tried snowshoeing over the weekend of 6-7 January 2024 as part of a new adventure and found it surprisingly fun.",
+      "text": "Evan and his partner tried snowshoeing over the weekend of 6-7 January 2024 as part of a new adventure together and found it surprisingly fun.",
       "speaker": "Evan",
       "statedOn": "2024-01-10",
       "entities": [
@@ -4409,18 +4392,20 @@
         "evans-partner"
       ],
       "sourceTurns": [
-        "D24:9"
+        "D24:9",
+        "D24:10"
       ]
     },
     {
-      "text": "Sam drew up a meal plan and workout schedule and started following it on 10 January 2024, motivated by something he had seen.",
+      "text": "Sam drew up a meal plan and workout schedule and said on 10 January 2024 that, motivated by something he had seen, he would start doing his best to stay on track that same day.",
       "speaker": "Sam",
       "statedOn": "2024-01-10",
       "entities": [
-        "sam"
+        "sam",
+        "sams-diet-and-exercise-routine"
       ],
       "chrono": [
-        "sam-made-meal-plan"
+        "sam-meal-plan-start"
       ],
       "sourceTurns": [
         "D24:10",
@@ -4428,11 +4413,12 @@
       ]
     },
     {
-      "text": "Sam had not seen a doctor in a while as of 10 January 2024 and intended to make an appointment to ask about a balanced diet plan and low-impact exercises suited to his situation.",
+      "text": "Sam had not seen a doctor in a while and said on 10 January 2024 that he would make an appointment soon to ask about a balanced diet plan and low-impact exercises suited to his situation.",
       "speaker": "Sam",
       "statedOn": "2024-01-10",
       "entities": [
-        "sam"
+        "sam",
+        "sams-weight"
       ],
       "sourceTurns": [
         "D24:11",
@@ -4443,7 +4429,7 @@
       ]
     },
     {
-      "text": "Evan recommended swimming, yoga and walking to Sam as low-impact exercises on 10 January 2024, and said the salad he showed him came from an idea he took from a nearby restaurant.",
+      "text": "Evan recommended swimming, yoga and walking to Sam on 10 January 2024 as low-impact exercises, and said yoga had helped him with stress and staying flexible alongside his diet.",
       "speaker": "Evan",
       "statedOn": "2024-01-10",
       "entities": [
@@ -4454,19 +4440,32 @@
       "sourceTurns": [
         "D24:16",
         "D24:17",
-        "D24:18"
+        "D24:19",
+        "D24:20"
       ]
     },
     {
-      "text": "Sam watched The Godfather on the night of 9 January 2024, quoted 'I'm gonna make him an offer he can't refuse' and said it motivated him to keep up his routine.",
+      "text": "Evan got the idea for a chicken, avocado, tomato, corn and cheese salad from a nearby restaurant.",
+      "speaker": "Evan",
+      "statedOn": "2024-01-10",
+      "entities": [
+        "evan",
+        "evans-health-routine"
+      ],
+      "sourceTurns": [
+        "D24:15",
+        "D24:16",
+        "D24:17"
+      ]
+    },
+    {
+      "text": "Sam watched The Godfather on the evening of 9 January 2024 and found the line 'I'm gonna make him an offer he can't refuse' motivating for keeping up his routine; Evan called the film legendary and endlessly re-watchable.",
       "speaker": "Sam",
       "statedOn": "2024-01-10",
       "entities": [
         "sam",
+        "evan",
         "the-godfather"
-      ],
-      "chrono": [
-        "sam-watched-godfather"
       ],
       "sourceTurns": [
         "D24:18",
@@ -4474,21 +4473,7 @@
       ]
     },
     {
-      "text": "Yoga had helped Evan with stress and staying flexible by January 2024, and Sam said he hoped a healthier diet together with yoga would bring positive changes.",
-      "speaker": "Evan",
-      "statedOn": "2024-01-10",
-      "entities": [
-        "evan",
-        "sam",
-        "yoga"
-      ],
-      "sourceTurns": [
-        "D24:19",
-        "D24:20"
-      ]
-    },
-    {
-      "text": "Evan named walking on the beach at sunset as one of his favourite low-impact exercises, calling it good exercise and totally calming, and Sam said he would go for beach walks.",
+      "text": "Evan counts walking on the beach at sunset among his favourite low-impact exercises, calling it good exercise and totally calming, and Sam said on 10 January 2024 that he would go for some beach walks.",
       "speaker": "Evan",
       "statedOn": "2024-01-10",
       "entities": [
@@ -4497,7 +4482,9 @@
       ],
       "sourceTurns": [
         "D24:21",
-        "D24:22"
+        "D24:22",
+        "D24:23",
+        "D24:24"
       ]
     },
     {
@@ -4505,16 +4492,16 @@
       "speaker": "Sam",
       "statedOn": "2024-01-10",
       "entities": [
-        "sam"
+        "sam",
+        "evan"
       ],
       "sourceTurns": [
         "D24:22",
-        "D24:23",
-        "D24:24"
+        "D24:23"
       ]
     },
     {
-      "text": "Sam's health was rough in January 2024 and he said on the 11th that his weight felt like it was keeping him from fully living, though he was trying to stay positive.",
+      "text": "Sam said on 11 January 2024 that his health had been rough and that his weight felt like it was keeping him from fully living, though he was trying to stay positive and doing his best.",
       "speaker": "Sam",
       "statedOn": "2024-01-11",
       "entities": [
@@ -4527,12 +4514,15 @@
       ]
     },
     {
-      "text": "Evan apologised to his wife for the drunken night near the rose bushes; she was not thrilled but understood it was an accident, and he promised her he would be more careful in future.",
+      "text": "Evan apologised to his partner for the drunken rose-bush incident, telling Sam on 11 January 2024 that she was not thrilled but understood it was an accident, and that he promised to be more careful in future.",
       "speaker": "Evan",
       "statedOn": "2024-01-11",
       "entities": [
         "evan",
         "evans-partner"
+      ],
+      "chrono": [
+        "evan-apologised-to-partner"
       ],
       "sourceTurns": [
         "D25:2",
@@ -4541,12 +4531,12 @@
       ]
     },
     {
-      "text": "Sam had found no low-impact exercises he enjoyed as of 11 January 2024, but had been taking car rides that helped him relax, and photographed the countryside on one of them in the week before 11 January 2024.",
+      "text": "Sam had not found any low-impact exercises he enjoyed as of 11 January 2024, but had been taking car rides that helped him relax, photographing a country field and dirt road in the week before 11 January 2024; he says being in nature away from the city relaxes him.",
       "speaker": "Sam",
       "statedOn": "2024-01-11",
       "entities": [
         "sam",
-        "road-trips"
+        "evan"
       ],
       "sourceTurns": [
         "D25:4",
@@ -4556,7 +4546,7 @@
       ]
     },
     {
-      "text": "Evan went camping in summer 2023 and kayaked and watched the sunset from the water, which he called truly unforgettable and deeply peaceful.",
+      "text": "Evan went kayaking and watched the sunset on a camping trip in the summer of 2023, which he called truly unforgettable and a reminder of the beauty of life.",
       "speaker": "Evan",
       "statedOn": "2024-01-11",
       "entities": [
@@ -4570,8 +4560,8 @@
       ]
     },
     {
-      "text": "Evan and Sam agreed on 11 January 2024 that being outdoors is like pushing a reset button for the mind and body, and Sam said he planned to spend more time in nature.",
-      "speaker": "Sam",
+      "text": "Evan and Sam agreed on 11 January 2024 that being in nature is calming and rejuvenating — like pushing a reset button for mind and body — and Sam planned to spend more time outdoors.",
+      "speaker": "Evan",
       "statedOn": "2024-01-11",
       "entities": [
         "evan",
@@ -4584,27 +4574,28 @@
       ]
     },
     {
-      "text": "Evan was feeling low in spring 2023 when he photographed a tree of pink blossom whose colours cheered him up, and he offered it to Sam on 11 January 2024 as a reminder to find joy in little things.",
+      "text": "Evan was feeling down in the spring of 2023 and was cheered by the vibrant pink blossom of a tree in a park that he photographed, which he offered to Sam on 11 January 2024 as a reminder to find joy in little things.",
       "speaker": "Evan",
       "statedOn": "2024-01-11",
       "entities": [
-        "evan"
+        "evan",
+        "sam"
       ],
       "sourceTurns": [
         "D25:14",
-        "D25:15",
-        "D25:16"
+        "D25:15"
       ]
     },
     {
-      "text": "Sam thanked Evan on 11 January 2024 for the reminder to appreciate small things, and Evan said he was always there if Sam needed to chat.",
-      "speaker": "Sam",
+      "text": "Evan told Sam on 11 January 2024 that small joys make the biggest difference when times are tough, and that he was always there if Sam needed to chat.",
+      "speaker": "Evan",
       "statedOn": "2024-01-11",
       "entities": [
-        "sam",
-        "evan"
+        "evan",
+        "sam"
       ],
       "sourceTurns": [
+        "D25:16",
         "D25:17",
         "D25:18",
         "D25:19",
@@ -4613,7 +4604,7 @@
     }
   ],
   "producedBy": {
-    "promptSha256": "aaa137e378802444a054c838c51516b075bc105224bf61bfefc748c3cee96f79",
+    "promptSha256": "a3e8136cc4025a760933677b5e80082f6c9221ee52c4e7c66c72477b9142bca4",
     "unattended": true
   }
 }
