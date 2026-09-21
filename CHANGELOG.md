@@ -15,6 +15,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The seven gaps the extraction round found in the rules it was run under, and the uneven-treatment
+  figure halves again** (`B-19`). 5,882 turns → 2,236 claims, 462 entities, **290 chrono entries**, 470
+  edges, every file valid and every turn accounted for. **Chrono entries per 1,000 turns now spread 2.4x
+  across the ten, against 4.6x last round and 6.6x the round before.** That is the number this work is
+  judged by: a corpus where what reaches the timeline is decided by the grammar somebody happened to use
+  is a corpus whose timeline means nothing.
+
+  **The lever was one clause, and it is worth naming because four independent runs asked for it.** An
+  undated *"it just happened"* now takes the session date. The distinction is where the uncertainty comes
+  from: *"last week I got married"* names an offset, which makes the session date KNOWN to be wrong, while
+  *"I just finished"* names none, so the session date is the tightest bound the conversation states and the
+  claim's `statedOn` already records the telling. One conversation went from 16 timeline entries over 568
+  turns to 38; another from 8 to 19; the corpus from 199 to 290.
+
+  **And the rule that did nothing is reported too.** Lexical knowledge now counts as knowing a duration —
+  camping entails a night, a 5K does not — and the span count did not move at all: **6 before, 6 after.**
+  Two runs had asked for it and both had resolved it the same way unaided, so what it bought was that the
+  file no longer depends on which reading its author picked, rather than more spans.
+
+  The rest: **`active` is no longer a status an extraction may write**, and the refusal names where an
+  ongoing thing goes instead — `date` is the day a thing started, something merely under way has no stated
+  start, so the slot was being filled with the day it happened to be mentioned. **`knows.kind` gains
+  `partner`**, beside the `ex_partner` it already had; two runs had hit that gap and worked around it
+  *differently*, so the corpus held one relation under two labels and a query for either found half of
+  them. *"This weekend"* said on a Saturday or Sunday is the weekend in progress, which also closes the
+  reported case where a dated, agreed plan reached the timeline in no form at all. And `upcoming` being
+  rare is now recorded as a limit of the format rather than worked around.
+
+- **An extraction round survives the session that started it** (`B-19`). Parts are written to
+  `benchmarks/.cache/` as they are finished instead of to a session scratch directory, which is wiped
+  between sessions — exactly when the parts are needed. `bench.mjs status` answers *"where did the last
+  round get to"*: `done` now means extracted **under the prompt in the tree**, so a file from an earlier
+  prompt reads `RE-DO` where it used to read as finished, and a half-written conversation reads
+  `2/4 parts written, resume at part 3`.
+
+  **Measured, twice.** Ten extractors launched together exhausted the session window in about twenty
+  minutes and finished **none** of them. With checkpoints, a later limit killed three mid-flight and cost
+  one conversation: two had written every part and were merged with no model at all, and a third had
+  authored all four and died during assembly.
+
+  **A resume refuses a directory whose parts name a different prompt.** Parts that survive a session
+  survive a prompt change, and merging last week's parts with today's produces one conversation under two
+  sets of rules wearing a single fingerprint — which is `B-15`'s defect one level down.
+
+  **It also found a hole in `check` that had already shipped a broken file.** An extractor killed while
+  writing its last part wrote that part's claims without the `sessions` block that belonged with them:
+  every turn was cited by some claim, so coverage read 100%, and the merged file declared 20 sessions of a
+  29-session conversation while `check` printed `valid`. The corpus cross-check asked *declared ⊆ real* and
+  *real ⊆ cited*, and never *real ⊆ declared*. It does now — a session nothing declares is a transcript
+  that never reaches the space.
+
 - **An extraction records how it was produced, and the whole corpus is regenerated under one prompt**
   (`B-15`, `B-18`, and the chrono vocabulary). 5,882 turns → 2,275 claims, 474 entities, 199 chrono
   entries, 489 edges. Every file valid, every turn cross-checked against the corpus, all 5,882 turns named

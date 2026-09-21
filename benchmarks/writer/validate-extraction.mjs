@@ -127,6 +127,15 @@ export function validateExtraction(extraction, schemaEntries) {
   const claimTypes = typesOf('fact');
   const edgeDefs = new Map(schemaEntries.filter(e => e.knowledgeType === 'edge')
     .map(e => [e.typeName, e.schema.endpoints]));
+  /*
+   * The ENUMS a label's properties declare, which the instance enforces and this did not.
+   *
+   * Found 2026-09-21 by a gate asserting that an undeclared `knows.kind` is refused: it was not. The
+   * instance answers 400 for it, on request 340 of several hundred, which is the exact failure this whole
+   * module exists to move forward — and until then the only symptom was a space missing one edge.
+   */
+  const edgeProps = new Map(schemaEntries.filter(e => e.knowledgeType === 'edge')
+    .map(e => [e.typeName, e.schema.propertySchemas ?? {}]));
 
   // The floor. A schema that loaded as nothing would make every check below vacuous and the file would
   // "validate" into a space that declares nothing and therefore validates nothing itself.
@@ -306,6 +315,13 @@ export function validateExtraction(extraction, schemaEntries) {
     for (const [k, v] of Object.entries(e.properties ?? {})) {
       if ((k === 'since' || k === 'until') && !ISO_DATE.test(String(v))) {
         say(`${at} ('${e.label}') has ${k} '${v}', which is not YYYY-MM-DD`);
+      }
+      const allowedValues = edgeProps.get(e.label)?.[k]?.enum;
+      if (Array.isArray(allowedValues) && !allowedValues.includes(v)) {
+        say(`${at} ('${e.label}') has ${k} '${v}', which the schema does not declare. It allows: `
+          + `${allowedValues.join(', ')}. A value outside the enum is a 400 from the instance, and a `
+          + 'relationship the vocabulary cannot express belongs in a claim rather than in a label it does '
+          + 'not fit.');
       }
     }
   }
