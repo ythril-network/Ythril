@@ -31,12 +31,12 @@
  *
  * Run: node --test testing/integration/sync-doors.test.js   (needs the test stack: npm run test:up)
  */
-import { describe, it, before } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post } from '../sync/helpers.js';
+import { INSTANCES, post, del } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -47,6 +47,16 @@ const MISSING_PEER = `no-such-peer-${RUN}`;
 describe('the sync doors say what they sync', () => {
   let tokenA;
   let nobody;
+  /*
+   * A REAL network, because the answer-shape cases below cannot use an unknown one.
+   *
+   * They did, inherited from the route this replaced: `POST /api/notify/trigger` accepted any id and
+   * answered 200 fire-and-forget, so an unknown network was a free deterministic fixture. The network door
+   * VALIDATES ITS SUBJECT FIRST and answers 404 — which this file's own first case already asserted, and
+   * which is the improvement. Its one member is deliberately unreachable: a cycle that reaches nobody is
+   * still a cycle, and nothing here is about replication.
+   */
+  let networkId;
 
   before(async () => {
     tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
@@ -63,6 +73,21 @@ describe('the sync doors say what they sync', () => {
     assert.equal(minted.status, 201, `could not mint the no-rights token: ${JSON.stringify(minted.body)}`);
     nobody = minted.body.plaintext;
     assert.ok(nobody, 'the mint returned no plaintext — the fixture is wrong, not the code');
+
+    const net = await post(INSTANCES.a, tokenA, '/api/networks', {
+      label: `sync-doors ${RUN}`, type: 'braintree', spaces: ['general'], votingDeadlineHours: 1,
+    });
+    assert.equal(net.status, 201, `could not create the fixture network: ${JSON.stringify(net.body)}`);
+    networkId = net.body.id;
+    const member = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/members`, {
+      instanceId: `sync-doors-peer-${RUN}`, label: 'unreachable on purpose',
+      url: 'http://sync-doors-peer.internal:3200', token: 'ythril_sync_doors_peer_token', direction: 'push',
+    });
+    assert.equal(member.status, 201, `could not add the fixture member: ${JSON.stringify(member.body)}`);
+  });
+
+  after(async () => {
+    if (networkId) await del(INSTANCES.a, tokenA, `/api/networks/${networkId}`).catch(() => {});
   });
 
   describe('the network door', () => {
@@ -112,25 +137,31 @@ describe('the sync doors say what they sync', () => {
     it('carries `ok` beside `status`, which is what the UI colours its banner from', async () => {
       // Dropping `ok` while enriching the response would make every successful sync render as "failed",
       // and nothing would fail: the client types the field it wants and an absent one is `undefined`.
-      const r = await post(INSTANCES.a, tokenA, `/api/networks/${MISSING_NET}/sync`, {});
+      const r = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync`, {});
       assert.equal(r.status, 200, JSON.stringify(r.body));
       assert.equal(r.body.ok, true, '`ok` is gone from the fire-and-forget answer');
       assert.equal(r.body.status, 'triggered');
+      assert.equal(r.body.networkId, networkId, 'the answer must echo the subject it acted on');
     });
 
-    it('and reports `ok: false` when a waited cycle fails', async () => {
+    it('and `ok` AGREES with the outcome rather than being a constant', async () => {
       /*
-       * `?wait=true` is what makes the two paths distinguishable at all, and an unknown network is the
-       * fixture that proves it: the cycle throws, the default path swallows that and answers 200, and
-       * only the waited one surfaces it. Absorbed from `notify-trigger-wait.test.js`, which asserted
-       * this against the route 5.0 removed.
+       * THE FAILURE BRANCHES CANNOT BE REACHED DETERMINISTICALLY THROUGH THIS DOOR ANY MORE, and that is
+       * the improvement rather than a hole. `notify-trigger-wait.test.js` produced `ok: false` by waiting
+       * on a cycle for an unknown network — the old route accepted the id and the cycle threw. This door
+       * refuses the id first, so the only remaining failures are a genuine throw and the timeout race,
+       * neither of which a test can force without making itself flaky.
+       *
+       * So the case asserts the CONTRACT instead: `ok` is the one-bit summary of the HTTP outcome, in
+       * whichever branch the cycle lands. A hard-coded `ok: true` on the 504 and 500 branches — the defect
+       * this describe block exists for — breaks it.
        */
-      const r = await post(INSTANCES.a, tokenA, `/api/networks/${MISSING_NET}/sync?wait=true`, {});
-      assert.equal(r.status, 500, JSON.stringify(r.body));
-      assert.equal(r.body.ok, false, '`ok` must disagree with the success case, or it says nothing');
-      assert.equal(r.body.status, 'error');
-      assert.match(r.body.error, /not found/i, 'the failure must name what went wrong, not just fail');
-      assert.equal(r.body.networkId, MISSING_NET, 'the answer must echo the subject it acted on');
+      const r = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync?wait=true&timeoutMs=1000`, {});
+      assert.equal(typeof r.body.ok, 'boolean', `\`ok\` is missing from the waited answer: ${JSON.stringify(r.body)}`);
+      assert.equal(r.body.ok, r.status === 200,
+        `\`ok\` says ${r.body.ok} and the status is ${r.status}: ${JSON.stringify(r.body)}`);
+      assert.ok(['completed', 'timeout', 'error'].includes(r.body.status),
+        `unexpected waited status: ${JSON.stringify(r.body)}`);
     });
   });
 

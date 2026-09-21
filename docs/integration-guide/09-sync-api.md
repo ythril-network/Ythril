@@ -65,6 +65,10 @@ member of several, and the cycle walks all of them.
 > body goes into the path, and `?wait=true` and `?timeoutMs` behave exactly as they did. A sync trigger on
 > the peer NOTIFICATION channel is what let that route accept any authenticated token until 4.4, because
 > the router-wide guard exemption had been written for the notification endpoint beside it.
+>
+> **One behaviour differs.** The old route answered `200 {status: "triggered"}` for a network that does not
+> exist — it fired and forgot before anything looked. Both routes above check their subject first and
+> answer `404`, so a stale or mistyped id is a refusal rather than a success you cannot act on.
 
 ---
 

@@ -836,6 +836,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for one peer across every network it belongs to. The body goes into the path; `?wait=true` and `?timeoutMs`
   behave exactly as they did, and the answer shape is unchanged.
 
+  **ONE BEHAVIOUR DOES CHANGE, and only a request shows it.** The removed route accepted any `networkId` and
+  answered `200 {status:"triggered"}` for one that does not exist, because it fired and forgot before
+  anything looked. **Both replacements validate their subject first and answer `404`.** A caller that
+  fire-and-forgets a stale or mistyped id used to get a success it could not act on; it now gets a refusal
+  naming the subject. Nothing else about the two doors differed.
+
   **It was removed rather than left working because the NAME was the defect.** A sync trigger sat on the peer
   notification channel, so the guard-coverage gate was told to look away by a router-wide exemption written for
   the notification endpoint beside it — and the route accepted any valid token, one with every area `none` and
