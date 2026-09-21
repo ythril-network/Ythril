@@ -310,7 +310,7 @@ export async function waitForIndexed(baseUrl, token, spaceId, ids, types, timeou
 
 /** Trigger a sync run on an instance for a given networkId. Throws on any non-200. */
 export async function triggerSync(baseUrl, token, networkId) {
-  const r = await post(baseUrl, token, '/api/notify/trigger', { networkId });
+  const r = await post(baseUrl, token, `/api/networks/${networkId}/sync`, {});
   if (r.status !== 200) throw new Error(`triggerSync failed: ${r.status} ${JSON.stringify(r.body)}`);
 }
 

@@ -187,7 +187,7 @@ describe('Conflicts API â€” seeded via file sync hash mismatch', () => {
     // engine to use; in the test stack setup.js seeds this automatically.
     // We retry a couple of times to let gossip propagate.
     for (let attempt = 0; attempt < 6; attempt++) {
-      await post(INSTANCES.a, tokenA, '/api/notify/trigger', { networkId: networkId2 });
+      await post(INSTANCES.a, tokenA, `/api/networks/${networkId2}/sync`, {});
       await new Promise(r => setTimeout(r, 2000));
       const check = await get(INSTANCES.a, tokenA, '/api/conflicts');
       const seeded = (check.body?.conflicts ?? []).filter(c => c.originalPath === filePath || c.conflictPath?.startsWith(filePath.replace('.txt', '')));
@@ -263,7 +263,7 @@ describe('Conflicts API â€” seeded via file sync hash mismatch', () => {
 
     let delConflictId;
     for (let attempt = 0; attempt < 6; attempt++) {
-      await post(INSTANCES.a, tokenA, '/api/notify/trigger', { networkId: networkId2 });
+      await post(INSTANCES.a, tokenA, `/api/networks/${networkId2}/sync`, {});
       await new Promise(r => setTimeout(r, 2000));
       const check = await get(INSTANCES.a, tokenA, '/api/conflicts');
       const seeded = (check.body?.conflicts ?? []).filter(c => c.originalPath === path2 || c.conflictPath?.startsWith(path2.replace('.txt', '')));

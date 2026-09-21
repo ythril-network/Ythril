@@ -3,11 +3,12 @@
  *
  * ## Why this exists
  *
- * Three routes trigger a sync and they had drifted into three different answers to the same questions.
+ * Three routes triggered a sync and they had drifted into three different answers to the same questions.
  * `POST /api/networks/:id/sync` could only fire and forget, and swallowed the cycle's failure with a bare
  * `void`. `POST /api/notify/trigger` grew `wait`, `timeoutMs` and `peerId`, and accepted ANY valid token
  * for as long as it did — the guard was wrong because the ROUTER was wrong, and the router was wrong
- * because a sync trigger had been put on the peer notification channel.
+ * because a sync trigger had been put on the peer notification channel. That route is removed in 5.0; the
+ * two that remain say what they sync, and both come through here.
  *
  * Owner, 2026-09-09: *"merge if the goal is the same. then use the strong sides of each."* The goal is the
  * same. The strong sides are the existence check and the global limiter from the networks route, and

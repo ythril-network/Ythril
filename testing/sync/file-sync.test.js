@@ -50,14 +50,14 @@ async function downloadFile(base, token, spaceId, filePath) {
 
 async function triggerAndWait(networkId, tokenA, condition, timeout = 60_000) {
   // Trigger once, then poll — avoid spawning overlapping sync cycles.
-  await post(INSTANCES.a, tokenA, '/api/notify/trigger', { networkId });
+  await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync`, {});
   const start = Date.now();
   while (Date.now() - start < timeout) {
     await new Promise(r => setTimeout(r, 2000));
     if (await condition()) return;
     // Re-trigger every 4th poll in case the first cycle finished before the file existed
     if (Math.floor((Date.now() - start) / 8000) % 2 === 1)
-      await post(INSTANCES.a, tokenA, '/api/notify/trigger', { networkId });
+      await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync`, {});
   }
   throw new Error(`Condition not met after ${timeout}ms`);
 }
@@ -246,7 +246,7 @@ describe('File sync — cross-instance', () => {
 
     // Trigger sync: A pulls from B, detects hash mismatch, should create conflict copy
     let conflictFound = false;
-    await post(INSTANCES.a, tokenA, '/api/notify/trigger', { networkId });
+    await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync`, {});
     const start = Date.now();
     while (Date.now() - start < 60_000) {
       await new Promise(r => setTimeout(r, 2000));
@@ -258,7 +258,7 @@ describe('File sync — cross-instance', () => {
         if (match) { conflictFound = true; break; }
       }
       if (Math.floor((Date.now() - start) / 8000) % 2 === 1)
-        await post(INSTANCES.a, tokenA, '/api/notify/trigger', { networkId });
+        await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync`, {});
     }
 
     if (!conflictFound) {

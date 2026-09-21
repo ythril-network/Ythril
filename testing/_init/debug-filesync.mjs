@@ -87,7 +87,7 @@ async function main() {
   console.log('Upload:', uploadR.status, JSON.stringify(uploadBody));
 
   console.log('\n=== Step 6: Trigger sync on A ===');
-  const trigR = await jpost(A, tokenA, '/api/notify/trigger', { networkId });
+  const trigR = await jpost(A, tokenA, `/api/networks/${networkId}/sync`, {});
   console.log('Trigger sync:', trigR.status, JSON.stringify(trigR.body).slice(0, 300));
 
   console.log('\n=== Step 7: Check if B has the file ===');

@@ -39,7 +39,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, readCollection } from '../sync/helpers.js';
+import { INSTANCES, post, readCollection, waitForIndexed } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -77,6 +77,20 @@ before(async () => {
   });
   ids.quiet = quiet.body?._id;
   assert.ok(ids.ranked && ids.quiet, `facts: ${JSON.stringify([ranked.body, quiet.body])}`);
+
+  /*
+   * WAIT FOR THE CONTROL TO BE INDEXED, and only the control.
+   *
+   * This file had no wait at all and was relying on recall's fresh-write scan to answer for a record
+   * written moments earlier. That scan covers a record whose embedding is still PENDING — so there is a
+   * window, after the embed job finishes and before `$vectorSearch` has the vector, where neither path
+   * finds it. CI landed in it: the control was absent from its own phrase and the case failed saying so,
+   * which is the failure a missing wait produces and not a defect in suppression.
+   *
+   * The suppressed record is deliberately NOT waited for. It never gets a vector, so waiting for it would
+   * time out on correct behaviour — and it is the whole subject of the file.
+   */
+  await waitForIndexed(INSTANCES.a, tokenA, SPACE, [ids.ranked], ['fact']);
 });
 
 describe('the fixture is what the assertions assume', () => {

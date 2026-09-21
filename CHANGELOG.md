@@ -829,6 +829,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Nothing an operator does in the UI changed: the client was already reading everything else through
   `filter` and now reads these the same way.
 
+#### Sync, peers and migrations
+
+- **`POST /api/notify/trigger` is gone. Trigger a sync through the door that names its subject.** Deprecated
+  in 4.5, removed here: `POST /api/networks/:id/sync` for a network and `POST /api/networks/peers/:peerId/sync`
+  for one peer across every network it belongs to. The body goes into the path; `?wait=true` and `?timeoutMs`
+  behave exactly as they did, and the answer shape is unchanged.
+
+  **ONE BEHAVIOUR DOES CHANGE, and only a request shows it.** The removed route accepted any `networkId` and
+  answered `200 {status:"triggered"}` for one that does not exist, because it fired and forgot before
+  anything looked. **Both replacements validate their subject first and answer `404`.** A caller that
+  fire-and-forgets a stale or mistyped id used to get a success it could not act on; it now gets a refusal
+  naming the subject. Nothing else about the two doors differed.
+
+  **It was removed rather than left working because the NAME was the defect.** A sync trigger sat on the peer
+  notification channel, so the guard-coverage gate was told to look away by a router-wide exemption written for
+  the notification endpoint beside it — and the route accepted any valid token, one with every area `none` and
+  no spaces, until 4.4. With it gone the exemption's reason is finally true of every route on that router.
+
+  **And the deletion moved something nothing would have reported.** `network_sync` was audited under
+  `sync.trigger`, which was THIS route's operation, so removing the route would have left the tool writing a
+  name no route records: an operator filtering the audit log by the REST operation would have seen no agent
+  traffic, and the cross-door parity gate would have gone quiet rather than red, because an unpaired tool is
+  skipped. A gate now refuses any tool whose operation no route records.
+
+  **A tool may now name more than one REST operation**, because `network_sync` IS both routes — a full cycle or
+  one named peer — and REST spells them apart only because a path has to name its subject. With a single name
+  the parity gate compared the tool against half of itself and called `peerId` a parameter no route accepts.
+
 ### Fixed
 
 #### The benchmark corpus and its extraction pipeline

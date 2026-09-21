@@ -110,11 +110,11 @@ export const notifyRateLimit = rateLimit({
     log.warn(`notifyRateLimit hit: ${req.ip} on ${req.method} ${req.path}`);
     res.status(options.statusCode).json(options.message);
   },
-  // This limiter guards POST /api/notify/trigger, which is how the test harness
-  // drives sync — and every request from the harness shares one source IP, so the
-  // suites collectively blew through 60/min and got 429s. Those 429s were swallowed
-  // by the tests' trigger `.catch()`, so no sync cycle ran and load-sensitive sync
-  // assertions timed out looking like flakes. It was the ONLY limiter missing a
+  // This limiter guards the peer notification channel. It also guarded the sync trigger that used to sit
+  // on it (`POST /api/notify/trigger`, removed in 5.0), and that is where the kill-switch came from: every
+  // request from the harness shares one source IP, so the suites collectively blew through 60/min and got
+  // 429s. Those 429s were swallowed by the tests' trigger `.catch()`, so no sync cycle ran and
+  // load-sensitive sync assertions timed out looking like flakes. It was the ONLY limiter missing a
   // kill-switch; it now honours the same one as the rest of the sync plane.
   // Instance C omits the env so rate-limit tests still exercise the real 429.
   skip: () => skipRateLimit('SKIP_SYNC_RATE_LIMIT'),

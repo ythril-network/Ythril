@@ -29,6 +29,15 @@
  * A tool with NO operation is not this gate's business — `audit-map.ts` carries the reason for each, and a
  * capability that is not audited at all is a different question from one audited twice.
  *
+ * ## A ROUTE DELETION is the other way this breaks, and it is the quiet one
+ *
+ * A tool's operation is only shared with its REST half while the route recording it still exists.
+ * `network_sync` was paired with `sync.trigger`, the operation `POST /api/notify/trigger` recorded; 5.0
+ * removed that route, and without moving the pairing the name would have become one only the MCP door ever
+ * writes. An operator filtering by what REST records sees no agent traffic, and the cross-door PARAMETER
+ * parity gate reports nothing either, because an unpaired tool is skipped there. A gate that skips is a
+ * gate that passes. The first case below is what refuses it.
+ *
  * Run: node --test testing/standalone/a-tool-and-its-route-log-one-operation.test.js
  * (requires a prior `npm run build` in server/)
  */
@@ -69,8 +78,18 @@ describe('a tool and its route log one operation', () => {
    * naming scheme, which is the property it should have had: the RULE is that one capability is audited
    * under one name, and neither half of that rule mentions spelling.
    */
+  /*
+   * A VALUE MAY BE A LIST, and every name in it has to be real rather than just the first.
+   *
+   * One capability's REST half can be more than one route: `network_sync` runs a full cycle or syncs one
+   * named peer, and REST spells those apart because a path has to name its subject. Flattened here, so the
+   * comparison below is against each operation and not against a joined array — which reported
+   * `'network.sync_trigger,peer.sync_trigger'` as a name no route emits, a finding that reads as the gate
+   * being broken rather than as the thing it is for.
+   */
   const candidates = Object.entries(MCP_TOOL_OPERATIONS)
-    .filter(([tool, op]) => op && toolNames.has(tool));
+    .filter(([tool, op]) => op && toolNames.has(tool))
+    .flatMap(([tool, op]) => (Array.isArray(op) ? op : [op]).map(one => [tool, one]));
 
   /** Every operation any ROUTE logs, so a tool's declared one can be checked against reality. */
   const routeOperations = new Set(ROUTE_RULES.map(r => r.operation));

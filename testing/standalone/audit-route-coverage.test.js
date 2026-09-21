@@ -67,9 +67,10 @@ const EXEMPT = new Map([
   // Machine-to-machine sync: peers write constantly and are authenticated as peers, not
   // users. Auditing every sync push would swamp the log and tell you nothing about a human.
   ['/api/sync', 'peer-to-peer sync traffic — not a user action'],
-  // Narrowed in scope by a new rule rather than in text: `/api/notify/trigger` now records
-  // `sync.trigger`, because a sync cycle writes peer records locally. This entry covers the peer
-  // notifications only, which are machine-to-machine and not a user action.
+  // The reason is now true of the WHOLE router, which it was not when it was written. It covered a
+  // `/api/notify/trigger` that started sync cycles, and that route is removed in 5.0 — so what is left is
+  // peer notifications, which are machine-to-machine. An exemption whose reason fits one route and is
+  // applied to every route on the router is the shape `CLAUDE.md` warns about; this one stopped being it.
   ['/api/notify', 'peer notifications — machine-to-machine, not a user action'],
   // First-run setup happens before any token exists, so there is nobody to attribute it to.
   ['/api/setup', 'first-run setup — runs before any identity exists'],

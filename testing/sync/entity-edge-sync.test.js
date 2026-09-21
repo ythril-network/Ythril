@@ -93,13 +93,13 @@ describe('Entity/edge sync — cross-instance (A→B)', () => {
     //
     // 25 s is that measurement plus room for a loaded runner, and it is deliberately still bounded: the retry
     // below is the real safety net, and a first attempt that never gives up would never reach it.
-    await post(INSTANCES.a, tokenA, '/api/notify/trigger', { networkId });
+    await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync`, {});
     await waitFor(async () => {
       const r2 = await reqJson(INSTANCES.b, tokenB, `/api/sync/entities/${entityId}?spaceId=general`);
       return r2.status === 200;
     }, 25_000).catch(() => {
       // Re-trigger once and give a final window
-      return post(INSTANCES.a, tokenA, '/api/notify/trigger', { networkId })
+      return post(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync`, {})
         .then(() => waitFor(async () => {
           const r2 = await reqJson(INSTANCES.b, tokenB, `/api/sync/entities/${entityId}?spaceId=general`);
           return r2.status === 200;
@@ -128,12 +128,12 @@ describe('Entity/edge sync — cross-instance (A→B)', () => {
     assert.equal(edgeR.status, 201, `Create edge: ${JSON.stringify(edgeR.body)}`);
     const edgeId = edgeR.body._id;
 
-    await post(INSTANCES.a, tokenA, '/api/notify/trigger', { networkId });
+    await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync`, {});
     await waitFor(async () => {
       const r2 = await reqJson(INSTANCES.b, tokenB, `/api/sync/edges/${edgeId}?spaceId=general`);
       return r2.status === 200;
     }).catch(() => {
-      return post(INSTANCES.a, tokenA, '/api/notify/trigger', { networkId })
+      return post(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync`, {})
         .then(() => waitFor(async () => {
           const r2 = await reqJson(INSTANCES.b, tokenB, `/api/sync/edges/${edgeId}?spaceId=general`);
           return r2.status === 200;

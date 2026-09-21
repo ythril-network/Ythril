@@ -148,7 +148,7 @@ export const network_syncTool: ToolHandler = {
     const syncCfg = getConfig();
 
     if (peerId) {
-      // SEC-16, through the shared check. `POST /api/notify/trigger` takes the same argument since Q-20,
+      // SEC-16, through the shared check. `POST /api/networks/peers/:peerId/sync` names the same subject,
       // and a security rule with two implementations is how the weaker one ends up in charge.
       const refusal = unknownPeerRefusal(peerId);
       if (refusal) {

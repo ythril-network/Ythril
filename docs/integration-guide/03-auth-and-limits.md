@@ -137,7 +137,7 @@ to correct. The information is identical; only the envelope differs.
 | Global | 300 / min | client | All authenticated endpoints — the pre-auth backstop |
 | Per token | 300 / min by default, **settable** | token id | All authenticated endpoints, once the token is resolved |
 | Sync | 2 000 / min | client (peer) | Sync API endpoints |
-| Notify | 60 / min | client | `GET /api/notify`, `POST /api/notify`, `POST /api/notify/trigger` |
+| Notify | 60 / min | client | `GET /api/notify`, `POST /api/notify` |
 | Bulk wipe | 5 / min | client | `POST /api/delete_space_data` |
 | Flood backstop | 3 000 / min | source IP | Everything except `/health`, `/ready`, `/metrics` |
 

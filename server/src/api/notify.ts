@@ -8,13 +8,11 @@
 
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth, requireAdmin, isInstanceAdmin } from '../auth/middleware.js';
+import { requireAuth, isInstanceAdmin } from '../auth/middleware.js';
 import { notifyRateLimit } from '../rate-limit/middleware.js';
 import { getConfig, saveConfig } from '../config/loader.js';
 import { revokePeerCredentialsIfOrphaned } from '../auth/tokens.js';
 import { log } from '../util/log.js';
-import { unknownPeerRefusal } from '../sync/peer-target.js';
-import { triggerNetworkSync, triggerPeerSync, syncTimeoutMs } from '../sync/trigger.js';
 
 export const notifyRouter = Router();
 
@@ -210,58 +208,3 @@ notifyRouter.get('/', notifyRateLimit, requireAuth, (req, res) => {
   const pageSize = Math.min(parseInt(limit, 10) || 50, 200);
   res.json({ events: results.slice(0, pageSize) });
 });
-
-// ── POST /api/notify/trigger — manually trigger a sync (admin) ────────────
-//
-// Fire-and-forget by default (`{ status: 'triggered' }`). Pass `?wait=true` (C6) to run the cycle
-// synchronously and get its outcome — bounded by `?timeoutMs` (default 30s, clamped 1s–120s) so a
-// slow or stuck sync can never hang the request; on timeout the cycle keeps running in the background.
-
-
-/*
- * DEPRECATED since 4.5. Use `POST /api/networks/:id/sync` or `POST /api/networks/peers/:peerId/sync`.
- *
- * A sync trigger has no business on the peer NOTIFICATION channel, and the cost of that was not
- * theoretical: this router was exempt from the guard sweep under a reason written for `POST /api/notify`,
- * and that exemption is why this route accepted any valid token for as long as it did. The name was wrong,
- * so the guard was wrong. Owner, 2026-09-09: *"merge if the goal is the same"* — it is, so both subjects
- * now have doors that say what they are, and this one delegates to the same module rather than keeping a
- * third implementation alive while it is retired.
- *
- * Kept working, not deleted: the integration harness calls it from twenty-odd places and an integrator's
- * tooling may too. `_DEPRECATIONS.md` carries the removal row.
- *
- * `requireAdmin`, matching `POST /api/networks/:id/sync`, and it was `requireAuth` until 2026-09-09.
- *
- * ANY valid token could start a sync cycle on any network id it named — proven by minting a token with
- * `instanceAdmin: false`, every area `none` and no spaces, and getting `200 {"status":"triggered"}`. The
- * sibling route refused the same token with `403 Admin token required`, which is what made the difference
- * visible: two doors onto one capability, and the weaker one in charge.
- *
- * The guard-coverage gate did not see it because `notifyRouter` is exempt as a whole, under a reason —
- * "peer notifications, peer-authenticated" — that is true of `POST /api/notify` and was never true of this
- * route. Its own comment above has always called it "(admin)". An exemption whose reason covers one route
- * and is applied to every route on the router is the shape `CLAUDE.md` warns about, and this is what it
- * costs.
- *
- * Found while answering `Q-21`, and worth saying plainly: adding `peerId` here in `Q-20` widened what an
- * unprivileged caller could aim before this line was written.
- */
-notifyRouter.post('/trigger', notifyRateLimit, requireAdmin, async (req, res) => {
-  const { networkId, peerId } = req.body as { networkId?: string; peerId?: string };
-  if (networkId && peerId) {
-    res.status(400).json({ error: 'Send networkId or peerId, not both — they name different subjects.' });
-    return;
-  }
-  if (!networkId && !peerId) { res.status(400).json({ error: 'networkId or peerId required' }); return; }
-  const wait = req.query['wait'] === 'true' || req.query['wait'] === '1';
-
-  if (peerId) {
-    const refusal = unknownPeerRefusal(peerId);
-    if (refusal) { res.status(refusal.status).json({ error: refusal.error }); return; }
-    await triggerPeerSync(res, peerId, { wait });
-    return;
-  }
-  await triggerNetworkSync(res, networkId as string, { wait, timeoutMs: syncTimeoutMs(req.query['timeoutMs']) });
-});
-

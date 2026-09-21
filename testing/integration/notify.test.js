@@ -4,7 +4,7 @@
  * Covers:
  *  - POST /api/notify: all supported event types, error paths, unauthenticated
  *  - GET  /api/notify: event log, networkId filter, limit parameter
- *  - POST /api/notify/trigger: trigger sync, missing networkId
+ *  - POST /api/networks/:id/sync: the trigger that replaced POST /api/notify/trigger
  *
  * All tests run against instance A (port 3200) only. No multi-instance setup required.
  *
@@ -267,9 +267,9 @@ describe('Notify channel', () => {
     assert.equal(r.status, 401, `Expected 401, got ${r.status}`);
   });
 
-  // â”€â”€ POST /api/notify/trigger â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── the sync trigger, on the door that names its subject ────────────────────
 
-  it('POST /api/notify/trigger returns 200 AND a sync cycle actually runs', async () => {
+  it('POST /api/networks/:id/sync returns 200 AND a sync cycle actually runs', async () => {
     // Baseline sync-history count — the echoed {status:'triggered'} alone is
     // satisfied by a handler that does nothing (exactly how the notify
     // rate-limit bug hid); the observable effect is a new history record.
@@ -277,7 +277,7 @@ describe('Notify channel', () => {
     assert.equal(before.status, 200, JSON.stringify(before.body));
     const baseline = before.body.history?.length ?? 0;
 
-    const r = await post(INSTANCES.a, token, '/api/notify/trigger', { networkId });
+    const r = await post(INSTANCES.a, token, `/api/networks/${networkId}/sync`, {});
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.status, 'triggered', JSON.stringify(r.body));
     assert.equal(r.body.networkId, networkId, 'Response must echo the networkId');
@@ -294,13 +294,8 @@ describe('Notify channel', () => {
     assert.ok(['success', 'partial', 'failed'].includes(rec.status), `unexpected history status: ${rec.status}`);
   });
 
-  it('POST /api/notify/trigger without networkId returns 400', async () => {
-    const r = await post(INSTANCES.a, token, '/api/notify/trigger', {});
-    assert.equal(r.status, 400, `Expected 400, got ${r.status}: ${JSON.stringify(r.body)}`);
-  });
-
-  it('POST /api/notify/trigger unauthenticated returns 401', async () => {
-    const r = await post(INSTANCES.a, '', '/api/notify/trigger', { networkId });
+  it('POST /api/networks/:id/sync unauthenticated returns 401', async () => {
+    const r = await post(INSTANCES.a, '', `/api/networks/${networkId}/sync`, {});
     assert.equal(r.status, 401, `Expected 401, got ${r.status}`);
   });
 });

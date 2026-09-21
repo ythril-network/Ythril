@@ -345,7 +345,7 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 | `schema_update` | Write the space's type schemas and its other meta fields — `validationMode`, `strictLinkage`, `usageNotes`, `suppressEmbeddings`, `whenDuePasses` (needs `schema` `admin` on the space). **Merges** by default: types you do not name are preserved. `typeSchemasMode: "replace"` makes the payload authoritative, which is the only way to DELETE a type. Same refusals as `PATCH /api/spaces/:id`, including `422` for a `$ref` to a schema-library entry that does not exist. In a networked space it opens a meta vote rather than applying at once |
 | `delete_space_data` | Wipe all or specific collection types from the space. Needs the **space-admin** grant on the space named (or instance admin), and `confirm: true`. Throttled to five calls a minute per token, on both doors |
 | `network_peers` | List all configured peer instances (admin only) |
-| `network_sync` | Trigger immediate sync (all networks, or one peer via `peerId`) (admin only). `POST /api/notify/trigger` takes the same `peerId` since 4.4 |
+| `network_sync` | Trigger immediate sync (all networks, or one peer via `peerId`) (admin only). The REST doors are `POST /api/networks/:id/sync` and `POST /api/networks/peers/:peerId/sync` |
 
 > **Instance-admin tools.** `network_peers`, `network_sync`, `save_space` and `space_reindex` require
 > instance-admin rights: they expose the whole peer topology, drive outbound connections to every peer, or
@@ -675,7 +675,7 @@ only shape and the two are identical by construction.
 | | `list_tokens` | `GET /api/tokens` | admin (MCP) · instance-level |
 | **Networks / sync** | | | |
 | | `network_peers` | `GET /api/networks` | admin (MCP) · instance-level |
-| | `network_sync` | `POST /api/notify/trigger` | admin (MCP) · instance-level |
+| | `network_sync` | `POST /api/networks/:id/sync` | admin (MCP) · instance-level |
 | **Meta** | | | |
 | | `help` | **MCP only** | read (MCP) |
 
