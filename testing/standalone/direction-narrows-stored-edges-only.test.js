@@ -31,7 +31,7 @@
  *    here.
  *
  * The rule was right; the REASON was a mechanism, and a mechanism has to be revisited every time it gains
- * a case. `docs/integration-guide/04a-recall-api.md` already gave the durable version — the ends are of
+ * a case. The integrator's graph-augmented-recall page already gave the durable version — the ends are of
  * different kinds — and the source did not. That is the `CLAUDE.md` lesson about schema descriptions,
  * arriving in a test docblock instead: write the guarantee, not the mechanism.
  *
@@ -41,6 +41,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { guidePartOwning } from '../_shared/integration-guide-parts.mjs';
 
 const read = (p) => readFileSync(p, 'utf8').replace(/\s+/g, ' ');
 
@@ -72,8 +73,10 @@ describe('and every surface that offers `direction` says so', () => {
     ['server/src/mcp/tools/search.ts', /narrows STORED EDGES ONLY/],
     // The standalone traverse tool.
     ['server/src/mcp/tools/edge.ts', /narrows STORED EDGES ONLY/],
-    // The integrator's two pages.
-    ['docs/integration-guide/04a-recall-api.md', /narrows stored edges only/i],
+    // The integrator's two pages. The recall half is looked up by its HEADING rather than named: it lived
+    // on `04a-recall-api.md` until that page hit the 900-line cap and graph-augmented recall moved to its
+    // own part, and a gate that names the page it used to be on asserts about whatever is left there.
+    [guidePartOwning('Graph-Augmented Recall'), /narrows stored edges only/i],
     ['docs/integration-guide/04b-graph-api.md', /narrows stored edges and never links/i],
     // The operator's own words — no jargon, and the one surface a UI user ever sees.
     ['docs/userguide/02-brain.md', /not to the facts, timeline entries and files that merely MENTION/],
@@ -92,7 +95,7 @@ describe('and every surface that offers `direction` says so', () => {
      * "Stored edges only" is the rule; "so an inbound walk on a matched memory still returns what it names" is
      * what a caller needs to predict the response. The rule alone reads as a technicality.
      */
-    for (const f of ['server/src/mcp/tools/search.ts', 'docs/integration-guide/04a-recall-api.md']) {
+    for (const f of ['server/src/mcp/tools/search.ts', guidePartOwning('Graph-Augmented Recall')]) {
       assert.match(read(f), /still return[s]? the entities that fact (NAMES|\*\*names\*\*)/i,
         `${f} states the rule without its consequence, which is the half a caller can act on`);
     }

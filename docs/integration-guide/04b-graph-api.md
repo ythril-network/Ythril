@@ -485,7 +485,7 @@ BFS traversal from a starting entity, following edges up to `maxDepth` hops.
 > **Not to be confused with `recall`'s `traverse` parameter**, which shares the name and does a different
 > job: it expands outward from whatever a *semantic query* matched, while this endpoint starts from an
 > **entity id you already hold**. Use this one when you have the node; use
-> [`recall` with `traverse`](04a-recall-api.md#graph-augmented-recall-traverse-parameter) when you can only describe it.
+> [`recall` with `traverse`](04h-graph-augmented-recall.md#graph-augmented-recall-traverse-parameter) when you can only describe it.
 
 ```http
 POST /api/brain/spaces/:spaceId/traverse

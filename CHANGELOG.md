@@ -2007,6 +2007,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **Graph-augmented recall is its own page, and the gates that named the page it used to be on now find it
+  by its heading** (`Q-26`). `docs/integration-guide/04a-recall-api.md` stood at exactly 900 lines, which is
+  the cap every tracked document is held to, so the next change to it was blocked — the previous one had
+  already been squeezed to net zero lines to fit. The `traverse`-on-recall section is now
+  `04h-graph-augmented-recall.md`, registered in `HELP_DOCS` and the index in numbered order. Moved by
+  `split-part.mjs` and checked by `verify-part.mjs`: 746 prose lines before, 747 after, nothing lost.
+
+  **The interesting half is what a split does to the gates around it.** Two named `04a-recall-api.md` as
+  "the integrator's recall page" and both went red the moment the section left it — the lucky outcome. The
+  unlucky one is a gate that asserts an ABSENCE, or greps a spelling the remaining page happens to keep: it
+  goes on passing about a document that no longer contains its subject, and nothing ever contradicts it. So
+  the page is resolved by DERIVATION now, from headings rather than from a filename, in
+  `testing/_shared/integration-guide-parts.mjs`. Headings and not whole files, because `04a` still refers to
+  graph-augmented recall twice by name — a file search answers with the page the section moved out of. It
+  throws on no match and on more than one, so a reworded heading cannot arrive as `undefined` and be read as
+  "nothing to check here".
+
+  **And a split silently breaks every "above" and "below" that now points at another file.** Nothing
+  mechanical sees those: the link resolves, the anchor exists, the sentence is simply about a page the reader
+  is not on. Two here, both rewritten to name what they mean.
+
 - **The benchmark fetcher could not fetch the corpus it was written to pin, and every LongMemEval URL
   404d.** Two independent failures on the same step.
 

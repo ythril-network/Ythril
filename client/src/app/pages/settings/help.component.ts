@@ -63,6 +63,11 @@ export const HELP_DOCS = [
       // here and in the index, because `the-integration-guide-index` gates on that and a second opinion
       // about where a part belongs is how the two lists start disagreeing.
       'integration-guide/04g-links-api.md',
+      // `04h` came out of `04a` the same way (Q-26), and the numbered order is why it reads oddly far from
+      // the recall page it belongs to. Graph-augmented recall is the part of that page that kept growing:
+      // it is the bridge between semantic search and the knowledge graph, so every `traverse`-on-recall
+      // change lands here rather than on a page already at its ceiling.
+      'integration-guide/04h-graph-augmented-recall.md',
       'integration-guide/05-files-api.md',
       // The three pipelines a file can go through are their own parts. They are read by different people
       // for different reasons — an operator sizing a document converter, an integrator wiring vision/STT
