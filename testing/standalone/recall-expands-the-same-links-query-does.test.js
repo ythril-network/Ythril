@@ -33,6 +33,7 @@
 import { describe, it } from 'node:test';
 import { trackedSources } from './_sources.mjs';
 import assert from 'node:assert/strict';
+import { guidePartOwning } from '../_shared/integration-guide-parts.mjs';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { stripComments } from './_strip-comments.mjs';
@@ -127,7 +128,10 @@ describe('both doors take the same three flags', () => {
         `${flag} is absent from the recall tool schema — a caller constructing arguments cannot discover it`);
       assert.doesNotMatch(desc, /has no equivalent flag/,
         'the description still says recall has no link flag, which is what this change made false');
-      assert.match(readFileSync('docs/integration-guide/04a-recall-api.md', 'utf8'), new RegExp(`\\b${flag}\\b`),
+      // Looked up by HEADING, not named: this said `04a-recall-api.md` until that page hit the 900-line
+      // cap and graph-augmented recall moved to its own part — at which point the assertion was reading a
+      // page that no longer documents the flags, and said so.
+      assert.match(readFileSync(guidePartOwning('Graph-Augmented Recall'), 'utf8'), new RegExp(`\\b${flag}\\b`),
         `${flag} is undocumented for the integrator`);
     });
   }
