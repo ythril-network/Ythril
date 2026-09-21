@@ -17,448 +17,288 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### The benchmark corpus and its extraction pipeline
 
-- **The seven gaps the extraction round found in the rules it was run under, and the uneven-treatment
-  figure halves again** (`B-19`). 5,882 turns → 2,236 claims, 462 entities, **290 chrono entries**, 470
-  edges, every file valid and every turn accounted for. **Chrono entries per 1,000 turns now spread 2.4x
-  across the ten, against 4.6x last round and 6.6x the round before.** That is the number this work is
-  judged by: a corpus where what reaches the timeline is decided by the grammar somebody happened to use
-  is a corpus whose timeline means nothing.
+- **The seven gaps the extraction round found in the rules it was run under, and the uneven-treatment figure halves
+  again** (`B-19`). 5,882 turns → 2,236 claims, 462 entities, 290 chrono entries, 470 edges. **Chrono entries per
+  1,000 turns now spread 2.4x across the ten, against 4.6x and 6.6x in the two rounds before** — the number this
+  work is judged by, because a corpus whose timeline is decided by the grammar somebody happened to use has a
+  timeline that means nothing.
 
-  **The lever was one clause, and it is worth naming because four independent runs asked for it.** An
-  undated *"it just happened"* now takes the session date. The distinction is where the uncertainty comes
-  from: *"last week I got married"* names an offset, which makes the session date KNOWN to be wrong, while
-  *"I just finished"* names none, so the session date is the tightest bound the conversation states and the
-  claim's `statedOn` already records the telling. One conversation went from 16 timeline entries over 568
-  turns to 38; another from 8 to 19; the corpus from 199 to 290.
+  **The lever was one clause.** An undated *"it just happened"* now takes the session date, while *"last
+  week I got married"* does not: an offset makes the session date KNOWN to be wrong. Also: `active` is no
+  longer a status an extraction may write, `knows.kind` gains `partner` beside `ex_partner`, *"this
+  weekend"* said on a Saturday or Sunday is the weekend in progress, and `upcoming` being rare is recorded
+  as a limit of the format.
 
-  **And the rule that did nothing is reported too.** Lexical knowledge now counts as knowing a duration —
-  camping entails a night, a 5K does not — and the span count did not move at all: **6 before, 6 after.**
-  Two runs had asked for it and both had resolved it the same way unaided, so what it bought was that the
-  file no longer depends on which reading its author picked, rather than more spans.
+  **One rule bought nothing and is reported anyway.** Lexical knowledge now counts as knowing a duration —
+  camping entails a night, a 5K does not — and the span count did not move: 6 before, 6 after. What it
+  bought is that a file no longer depends on which reading its author picked.
 
-  The rest: **`active` is no longer a status an extraction may write**, and the refusal names where an
-  ongoing thing goes instead — `date` is the day a thing started, something merely under way has no stated
-  start, so the slot was being filled with the day it happened to be mentioned. **`knows.kind` gains
-  `partner`**, beside the `ex_partner` it already had; two runs had hit that gap and worked around it
-  *differently*, so the corpus held one relation under two labels and a query for either found half of
-  them. *"This weekend"* said on a Saturday or Sunday is the weekend in progress, which also closes the
-  reported case where a dated, agreed plan reached the timeline in no form at all. And `upcoming` being
-  rare is now recorded as a limit of the format rather than worked around.
+- **An extraction round survives the session that started it** (`B-19`). Parts are written to `benchmarks/.cache/`
+  as they are finished, rather than to a session scratch directory that is wiped between sessions — exactly when the
+  parts are needed. `bench.mjs status` answers *"where did the last round get to"*: `done` means extracted under the
+  prompt in the tree, so a file from an earlier prompt reads `RE-DO`.
 
-- **An extraction round survives the session that started it** (`B-19`). Parts are written to
-  `benchmarks/.cache/` as they are finished instead of to a session scratch directory, which is wiped
-  between sessions — exactly when the parts are needed. `bench.mjs status` answers *"where did the last
-  round get to"*: `done` now means extracted **under the prompt in the tree**, so a file from an earlier
-  prompt reads `RE-DO` where it used to read as finished, and a half-written conversation reads
-  `2/4 parts written, resume at part 3`.
+  **Measured twice.** Ten extractors launched together exhausted the session window in twenty minutes and
+  finished none. With checkpoints, a later limit killed three mid-flight and cost one conversation.
 
-  **Measured, twice.** Ten extractors launched together exhausted the session window in about twenty
-  minutes and finished **none** of them. With checkpoints, a later limit killed three mid-flight and cost
-  one conversation: two had written every part and were merged with no model at all, and a third had
-  authored all four and died during assembly.
+  **A resume refuses a directory whose parts name a different prompt**, because merging last week's parts
+  with today's produces one conversation under two sets of rules wearing a single fingerprint.
 
-  **A resume refuses a directory whose parts name a different prompt.** Parts that survive a session
-  survive a prompt change, and merging last week's parts with today's produces one conversation under two
-  sets of rules wearing a single fingerprint — which is `B-15`'s defect one level down.
+- **An extraction records how it was produced, and the whole corpus is regenerated under one prompt** (`B-15`,
+  `B-18`, and the chrono vocabulary). 5,882 turns → 2,275 claims, 474 entities, 199 chrono entries, 489 edges, every
+  one stamped by the run that made it.
 
-  **It also found a hole in `check` that had already shipped a broken file.** An extractor killed while
-  writing its last part wrote that part's claims without the `sessions` block that belonged with them:
-  every turn was cited by some claim, so coverage read 100%, and the merged file declared 20 sessions of a
-  29-session conversation while `check` printed `valid`. The corpus cross-check asked *declared ⊆ real* and
-  *real ⊆ cited*, and never *real ⊆ declared*. It does now — a session nothing declares is a transcript
-  that never reaches the space.
+  **`producedBy`, split so neither half can be forgotten.** Which prompt produced a file is a fact about
+  the working tree, so `bench.mjs merge` stamps its sha256. Whether a retrieval score was visible is an
+  attestation only the extractor can make, so it travels in the first part, and a missing flag is refused
+  rather than read as `true`. `stats` warns when a corpus came from more than one prompt.
 
-- **An extraction records how it was produced, and the whole corpus is regenerated under one prompt**
-  (`B-15`, `B-18`, and the chrono vocabulary). 5,882 turns → 2,275 claims, 474 entities, 199 chrono
-  entries, 489 edges. Every file valid, every turn cross-checked against the corpus, all 5,882 turns named
-  by a claim, and every one stamped by the run that made it.
+  **It found a real defect on first use:** the 3.5x figure published earlier the same day was measured
+  across eight files from one prompt and two from another. It is withdrawn.
 
-  **`producedBy`, and the split is what makes it un-forgettable.** Which prompt produced a file is a fact
-  about the working tree, so `bench.mjs merge` stamps its sha256 and nobody can omit it. Whether a
-  retrieval score was visible is an attestation only the extractor can make, so it travels in the first
-  part. **A missing flag is refused rather than read as `true`** — the run that would misreport is exactly
-  the run that leaves it out — and an honest `false` records something real. `stats` now warns when a
-  corpus came from more than one prompt, naming which files came from which.
-
-  Two guards live inside rather than in a caller. A missing prompt file throws instead of hashing the
-  empty string, which would hand every run an identical fingerprint while looking like it worked. And
-  newlines are normalised before digesting, because this repo checks out CRLF on Windows and LF in CI:
-  without it one prompt yields two digests and the corpus reports itself as made by two prompts,
-  permanently and on nothing.
-
-  **It found a real defect on its first use.** The 3.5x figure published earlier the same day was measured
-  across eight files from one prompt and two from another. That number was never comparable and is
-  withdrawn.
-
-  **The chrono vocabulary is now one type.** The five conversation chrono types become `event` alone, with
-  `status` required and plumbed through the format, the prompt, the validator and the writer. `deadline`
-  had collected ONE record across 5,882 turns — an aspiration, not a due date — and `prediction` none;
-  `milestone` was an opinion about importance that nothing filters on, recalled at 57% by a classifier and
-  disputed by ten separate extractions. And `plan` duplicated a field the store already had: a thing
-  somebody means to do is an event with `status: upcoming`, not a different kind of thing, while
-  `write-space.mjs` never sent `status` at all. One rule, two implementations, and the weaker one won
-  because nothing plumbed the stronger one through. `overdue` is refused — the read path derives it, so a
-  stored one disagrees with what an operator is shown. **No product default changes:**
+  **The chrono vocabulary is now one type.** The five conversation chrono types become `event` alone with
+  `status` required. `deadline` had collected one record across 5,882 turns and `prediction` none;
+  `milestone` was an opinion nothing filters on; `plan` duplicated a field the store already had.
+  `overdue` is refused, because the read path derives it. **No product default changes** —
   `getAllowedChronoTypes` still returns the same five to a space that declares none.
 
-  Plus `B-18`: nine prompt clauses, each reported by extractions that could not see each other. The
-  largest was that **an end worked out from a later session is a bound, not an end** — one reading of it
-  was worth a whole conversation's timeline.
+  **The headline moved the wrong way and that is the result.** Spread 6.6x → 4.6x, a third narrower rather
+  than the halving the withdrawn number suggested. Spans fell 42 → 6 and chrono entries 251 → 199, because
+  the tightened duration rule refuses far more than it admits — which `B-19` then corrected.
 
-  **THE HEADLINE NUMBER MOVED THE WRONG WAY AND THAT IS THE RESULT.** Chrono entries per 1,000 turns now
-  spread **4.6x** across the ten, against **6.6x** for the first single-prompt round. A third narrower, not
-  the halving the withdrawn 3.5x suggested. Spans fell from 42 to **6** and chrono entries from 251 to 199,
-  because the tightened duration rule refuses far more than it admits — and `B-19` already records four
-  independent reports that it now refuses too much, including one conversation whose shop opening, tour,
-  video shoot and flood are all off its timeline for want of a stated day.
+- **All ten conversations re-extracted under the revised prompt, and the uneven-treatment figure halves** (`B-16`,
+  `B-17`). 5,882 turns → 2,445 claims, 457 entities, 251 chrono entries, 477 edges, every turn named by a claim.
 
-- **All ten conversations re-extracted under the revised prompt, and the uneven-treatment figure halves**
-  (`B-16`, `B-17`). 5,882 turns → 2,445 claims, 457 entities, 251 chrono entries, 477 edges. Every file
-  valid, every turn id cross-checked against the corpus, all 5,882 turns named by a claim.
+  **Two extractions had to be redone, and why was worth more than the number.** `conv-43` came back at 34
+  chrono entries against 7, which alone would have closed most of the gap — and all 24 of its spans were
+  week-windows over one-day events. It was following a convention rather than a rule, so the spread
+  appeared to narrow because two extractors applied a different one.
 
-  **The headline: a 6.6x spread in chrono entries per 1,000 turns becomes 3.5x.** Roughly half the
-  unevenness was the prompt and roughly half was the conversations. 42 chrono entries now carry a real
-  span, a shape the old format could not express at all.
+  **`B-17` is the clarification that decided it.** `endsAt` is how long something lasted, never how unsure
+  you are about when it happened. Bracketing a wedding to the Monday and Sunday of its week says the
+  wedding took a week, and nothing downstream can tell that from a genuine week-long event. Stated with no
+  size threshold, because a threshold only says how large a lie is tolerable.
 
-  **Two extractions had to be redone a second time, and finding out why was worth more than the number.**
-  `conv-43` came back at 34 chrono entries where the old prompt gave 7 — which on its own would have
-  closed most of the gap. All 24 of its spans were week-windows or whole months over events that took one
-  day: a wedding, a 40-point game, an endorsement signing. `conv-49` did the same to a lesser degree and
-  said outright that it was following a convention rather than a rule. **So the spread appeared to narrow
-  because two extractors applied a different rule, which is exactly the artefact that would have been
-  invisible in the headline.** Redone under the clarified text, `conv-43` reports 12 entries and no spans
-  at all, and `conv-49` one span instead of eleven.
-
-  **`B-17`, the clarification that decided it.** `endsAt` is **how long something lasted** and never **how
-  unsure you are about when it happened**. Bracketing a wedding to the Monday and Sunday of its week says
-  the wedding took a week, and nothing downstream can tell that apart from a genuine week-long event — so
-  a question about the Wednesday matches something that did not happen then, wrong in both directions and
-  silently. The rule is stated with **no size threshold**, because a threshold would only say how large a
-  lie is tolerable: *"we were away last weekend"* is a two-day event and gets a span, *"the concert last
-  weekend"* is one evening and does not. Three extractions found that boundary independently at three
-  scales — a month, a week and two days.
-
-  The closing test was also asking the wrong question. It read *"whether the speaker could name the days
-  if asked"*; it now reads **whether the conversation hands you both ends of something that genuinely took
-  more than a day**. And the weekday rule, which spoke only about the past, now points both ways for
-  weekdays and weekends alike — two extractions had already mirrored it unprompted and said so.
-
-  **The cost is documented rather than hidden.** Events dated only to a week stay off the timeline. In
-  `conv-43` that is eight of about twenty datable happenings, lost to phrasing rather than to
-  insignificance, and it is why that conversation remains the sparsest in the corpus at 17.6 entries per
-  1,000 turns against `conv-26`'s 62.1. **Its sparsity is a real property of two speakers who date
-  everything to a week, not a defect in the extraction** — which turns `F-29`, a chrono record that can
-  say how precisely it is dated, from a preference into a measured argument.
+  **The cost is documented rather than hidden.** Events dated only to a week stay off the timeline — eight
+  of about twenty datable happenings in `conv-43`, which is why it remains the sparsest conversation at
+  17.6 entries per 1,000 turns against `conv-26`'s 62.1. That is a property of two speakers who date
+  everything to a week, and it turns `F-29` from a preference into a measured argument.
 
 - **`bench.mjs stats` — the corpus states how unevenly one prompt treated it** (`B-16`).
   `benchmarks/writer/corpus-spread.mjs`, printed by a new CLI verb.
 
-  The figure that decided the last three rows was a 6.6x range in chrono entries per 1,000 turns across
-  ten conversations extracted by one prompt and one model — 10.3 to 67.8 — with supersessions running 0
-  to 8 across conversations of comparable length. It was arrived at by a command typed once, and the next
-  round is judged by whether it narrows. **A number nobody can recompute is a number everybody quotes**,
-  which is this repo's rule about a count in prose one level up, so the derivation is code now.
+  The figure that decided the last three rows was a 6.6x range in chrono entries per 1,000 turns across ten
+  conversations extracted by one prompt and one model. It was arrived at by a command typed once, and the
+  next round is judged by whether it narrows — **a number nobody can recompute is a number everybody
+  quotes**, so the derivation is code.
 
-  Two headlines it refuses to print rather than render. A conversation with no chrono entries makes the
-  ratio infinite, and `Infinity` beside nine honest numbers reads as a catastrophe rather than as one
-  empty file; a corpus of one has no spread at all, and `1.0` for it looks like perfect consistency. Both
-  return the reason instead. Totals are summed rather than averaged from the per-conversation rates,
-  because an average weights a 369-turn conversation like a 689-turn one.
+  Two headlines it refuses to print rather than render: a conversation with no chrono entries makes the
+  ratio infinite, and a corpus of one has no spread at all, so `1.0` would read as perfect consistency.
+  Totals are summed rather than averaged, because an average weights a 369-turn conversation like a
+  689-turn one.
 
-  It also reports `spans` — chrono entries carrying `endsAt` — which reads 0 across the current corpus
-  and is the direct measure of what the field just added was for.
+- **The extraction prompt's nine gaps are closed, and a two-day event can now reach the timeline** (`B-14`). Every
+  one was reported independently by extractions that could not see each other — one model finding an ambiguity is a
+  model having an opinion; five finding the same one is the prompt not saying something.
 
-- **The extraction prompt's nine gaps are closed, and a two-day event can now reach the timeline** (`B-14`).
-  Every one of them was reported independently by extractions that could not see each other's work — one
-  model finding an ambiguity is a model having an opinion; five finding the same one is the prompt not saying
-  something.
+  **The one that was a bug rather than a judgement call.** A Ythril chrono record carries `startsAt` and
+  `endsAt`; the extraction format offered only a single `date`, so a weekend was inexpressible and five
+  runs each invented the same fallback — write the span into the sentence and emit no chrono entry. A
+  marriage, a gastritis diagnosis, a pride parade and a career-high game are absent from their timelines
+  while a photograph taken on a named Friday is present. **What reached the timeline was being decided by
+  the grammar the speaker happened to use.** `endsAt` is now in the format, the prompt, the writer and
+  `conversation.event`; a backwards range is refused, a same-day range is accepted as explicit, and a
+  one-day event carries no `endsAt` key at all.
 
-  **The one that was a bug rather than a judgement call.** A Ythril chrono record carries `startsAt` **and**
-  `endsAt`, and the REST route validates both. The extraction format offered only a single `date`, the writer
-  mapped it onto `startsAt`, and all five chrono types were worded as single-dated — so a weekend was
-  inexpressible, and five separate runs each invented the same fallback: write the span into the sentence and
-  emit no chrono entry. A marriage, a gastritis diagnosis, a pride parade and a career-high game are
-  therefore absent from their timelines while a photograph taken on a named Friday is present. **What reached
-  the timeline was being decided by the grammar the speaker happened to use.** `endsAt` is now in the format,
-  in the prompt, in the writer and in `conversation.event`; a backwards range is refused before anything is
-  written, a same-day range is accepted as simply explicit, and a one-day event carries no `endsAt` key at
-  all rather than an undefined one.
+  **Six new prompt sections**, each answering a question ten runs had to answer for themselves: a
+  conversation that contradicts itself (date the claim to its telling); a turn carrying a machine-written
+  image caption (context, never a fact, because captions are frequently wrong); a recurring subject with no
+  name; order within a session (position orders claims inside one, the date between); *"last Tuesday"*
+  (the most recent past occurrence); and that a thin supersession count is the expected result.
 
-  **Six new prompt sections, each answering a question ten runs had to answer for themselves:**
+  Also: `aliases` now exists on `place`, `organization` and `work`, and the format documents that an entity
+  or chrono entry may carry `sourceTurns` — **the validator has always capped it at 12% of a transcript,
+  and a run following the format exactly never wrote the field, so that rule had never once fired.**
 
-  - **A conversation that contradicts ITSELF** — the same speaker saying incompatible things about one
-    unchanged world. Nothing was superseded, so the supersession section did not apply and writing both as
-    current facts produced two answers with no way to tell them apart. Three extractors independently
-    invented the same fix and it is now the rule: date the claim to its telling.
-  - **A turn carrying an IMAGE** — a machine-written caption is neither speech nor a pasted document, and
-    roughly a third of some conversations is one. Captions are context, never a fact of their own, because
-    they are frequently wrong: shoes captioned pink that their owner calls purple, a *"soccer team"* caption
-    on a basketball turn.
-  - **A recurring subject with no NAME** — *"my mom's old house"* across ten sessions, somebody's turtles
-    across half a conversation. The schema's *"a named location"* meant *"not a passing mention"*, and read
-    literally it dropped the strongest hubs in several graphs.
-  - **Order within a session** — *"later means a later DATE, never a later position in the file"* was written
-    against sessions handed over out of order, and read literally it forbade retiring a plan renegotiated
-    three times in one afternoon. Position orders claims inside a session, the date orders them between.
-  - **"Last Tuesday"** has two ordinary readings seven days apart, and unlike a weekend it *looks* exactly
-    resolvable, so it gets resolved silently. One rule, stated: the most recent past occurrence.
-  - **A thin supersession count is the expected result** — 24 across ten conversations and 5,882 turns — so
-    nobody tunes toward retiring what the text did not retire.
+- **All ten LoCoMo conversations are extracted unattended, and conv-26 was re-extracted unattended too** (`B-4`).
+  5,882 turns across 272 sessions, producing 2,294 claims, 470 entities, 212 chrono entries and 527 edges, every
+  file passing `bench.mjs check`.
 
-  Also: `aliases` now exists on `place`, `organization` and `work`, because *"the Wolves"*, *"GoT"* and
-  *"NYC"* had nowhere to go; and the format finally documents that an entity or a chrono entry may carry
-  `sourceTurns` — **the validator has always had a rule capping it at 12% of a transcript, and a run
-  following the format exactly never wrote the field, so that rule had never once fired.**
+  **Each conversation was extracted in a context that had seen none of the others, and no retrieval score
+  was measured until all ten were committed.** That is the row rather than a procedural detail: a prompt
+  that only works while its author watches the scoreboard is not a product capability, and the only way to
+  find out is to not look. `conv-26`'s previous extraction was written by hand with the scores visible —
+  legitimate development, illegitimate evidence — and the unattended replacement finds 198 claims where it
+  found 129.
 
-- **All ten LoCoMo conversations are extracted unattended, and conv-26 was re-extracted unattended too**
-  (`B-4`). 5,882 turns across 272 sessions, producing 2,294 claims, 470 entities, 212 chrono entries and 527
-  edges. Every file passes `bench.mjs check`: valid against the schema, every key resolving, every turn id
-  real, and every one of the 5,882 turns named by a claim.
+  **What the run measured about the prompt.** One prompt and one model produce a 6.6x spread in how much of
+  a conversation reaches the timeline, and supersessions ranging 0 to 8 across conversations of comparable
+  length. The prompt says two models disagreeing a lot is a finding about the prompt; one model disagreeing
+  with itself by 6.6x meets that test without a second model.
 
-  **Each conversation was extracted in a context that had seen none of the others, and no retrieval score was
-  measured until all ten were committed.** That is the whole point of the row rather than a procedural detail:
-  a prompt that only works while its author watches the scoreboard is not a product capability, and the only
-  way to find out is to not look. `conv-26`'s previous extraction was written by hand with the scores visible
-  — legitimate development, illegitimate evidence — and is replaced rather than kept beside the rest. The
-  unattended version of it finds 198 claims where the hand-tuned one found 129.
-
-  **What the run measured about the prompt, which is the part worth keeping.** One prompt and one model
-  produce a **6.6x spread in how much of a conversation reaches the timeline** — chrono entries per 1,000
-  turns range from 10.3 to 67.8 — and supersessions range from 0 to 8 across conversations of comparable
-  length. The prompt states that two models disagreeing a lot is a finding about the prompt; one model
-  disagreeing with itself by 6.6x meets that test without a second model.
-
-  Nine gaps are filed as `B-14`, every one of them reported independently by extractions that could not see
-  each other's work. The largest has a concrete cause rather than a judgement call: a Ythril chrono record
-  carries `startsAt` **and** `endsAt`, the extraction format exposes only a single `date`, and five separate
-  runs therefore dropped two-day events — a marriage, a gastritis diagnosis, a pride parade, a career-high
-  game — off the timeline entirely while keeping a photograph taken on a named Friday.
-
-  **The prompt is deliberately unchanged.** Editing it between conversation six and conversation seven would
-  produce a corpus extracted by two prompts, and every per-conversation difference afterwards would be
-  unattributable — the same defect on the authoring side that watching the scoreboard is on the scoring side.
+  **The prompt is deliberately unchanged.** Editing it between conversation six and seven would produce a
+  corpus extracted by two prompts, and every per-conversation difference afterwards would be
+  unattributable.
 
 - **An extraction is now checked against the conversation it NAMES, not only against itself** (`B-4`).
-  `benchmarks/writer/extraction-matches-conversation.mjs`, called by `bench.mjs check` and swept over every
-  committed extraction by its own gate.
+  `benchmarks/writer/extraction-matches-conversation.mjs`, called by `bench.mjs check`.
 
-  The validator reads the extraction alone and the merge refuses a run with a part missing. Between them they
-  catch everything except records from a **different conversation**, because neither holds the evidence: a
-  spliced file is internally perfect. Every type is declared, every key resolves, every date parses, the
-  writer writes it, and the turn-coverage line reads 100% — because the foreign part brought its own
-  `sessions` block along with its claims. The graph is consistent and it is about somebody else.
+  The validator reads the extraction alone and the merge refuses a run with a part missing. Between them
+  they catch everything except records from a **different conversation**: a spliced file is internally
+  perfect, and turn coverage reads 100% because the foreign part brought its own `sessions` block. The
+  graph is consistent and it is about somebody else.
 
-  It is not hypothetical. The ten extractions of `B-4` run in ten separate contexts, and the scratch directory
-  those contexts write their parts into turned out to be shared: two runs had a working file overwritten by
-  another run's, mid-extraction, and one of them found a completely different conversation in a file it had
-  written moments earlier. Both rebuilt the affected part. Nothing foreign reached a committed file — which is
-  the point, because nothing would have said so.
+  It is not hypothetical. The ten extractions run in ten separate contexts and the scratch directory they
+  wrote into turned out to be shared; two runs had a working file overwritten mid-extraction. Nothing
+  foreign reached a committed file — which is the point, because nothing would have said so.
 
-  **A turn id is the witness**, and the check is honest about how far that goes. Turn ids are positional, so
-  two conversations share most of their spellings: swapping one whole extraction in under another's name
-  leaves only 23 of 369 ids foreign. The coverage half is the other side of it — whatever a splice did not
-  bring, the real conversation's own turns go unaccounted for. Measured against the corpus rather than against
-  the file's own `sessions` block, which is the reading a truncated extraction passes at 100%.
+  **A turn id is the witness**, and the check is honest about how far that goes: ids are positional, so
+  swapping one whole extraction in under another's name leaves only 23 of 369 foreign. Coverage measured
+  against the CORPUS is the other half, because the file's own `sessions` block is the reading a truncated
+  extraction passes at 100%. The corpus is never present in CI, so the skip is loud.
 
-  **The skip is loud.** The corpus is pulled by URL and is never present in CI, so `check` prints
-  `NOT CROSS-CHECKED` rather than reporting `valid` on a file nothing verified, and the gate says how many
-  extractions it did not look at.
-
-- **`benchmarks/bench.mjs` — the four things an extraction takes, so the next nine do not rewrite them**
-  (`B-4`). `conv-30` was extracted with four throwaway scripts: dump the conversation, merge the parts,
-  validate, write it to a space. Each was written at the keyboard and deleted. Nine conversations
-  remain and `B-4` extracts each in a fresh context, so without this every one of them starts by
+- **`benchmarks/bench.mjs` — the four things an extraction takes, so the next nine do not rewrite them** (`B-4`).
+  `conv-30` was extracted with four throwaway scripts — dump, merge, validate, write — each written at the keyboard
+  and deleted. Nine conversations remained, each extracted in a fresh context, so without this every one starts by
   rewriting those four slightly differently.
 
-  `status` reads which are done off the directory rather than a list, and says plainly that `conv-26`
-  having a file does not make it admissible. `check` reports every problem at once and also counts the
-  turns no claim names — the number a person checks by eye before committing, since an extraction that
-  dropped the quiet turns once covered 34.6% of a conversation.
+  `status` reads which are done off the directory rather than a list. `check` reports every problem at once
+  and counts the turns no claim names, since an extraction that dropped the quiet turns once covered 34.6%
+  of a conversation.
 
-  **The part a rewritten copy would drop is the reason it is committed:** `dump` goes through
-  `loadConversations`. The pinned release is one object per instance — history, question, answer and
-  evidence together — so parsing it directly is one line shorter and puts the answer key in front of
-  the model doing the extraction. The blindness gate enforces that on the LOADER and cannot enforce it
-  on whoever opens the file next, so a second gate checks this CLI's imports. Mutation-checked by
-  making it read the raw file.
+  **The part a rewritten copy would drop is why it is committed:** `dump` goes through `loadConversations`.
+  The pinned release is one object per instance — history, question, answer and evidence together — so
+  parsing it directly is one line shorter and puts the answer key in front of the model doing the
+  extraction.
 
-- **The no-memory baseline, built so the two arms cannot differ in anything but the memory** (`B-6`).
-  `B-2` says the number to publish is not the accuracy but *"the accuracy minus what the same answerer
-  scores with the whole history in its context"* — same questions, same judge, same seeds, memory off.
-  Without it a figure in the eighties says nothing about whether the memory did anything, and it is the
-  column every self-reported figure omits.
+- **The no-memory baseline, built so the two arms cannot differ in anything but the memory** (`B-6`). `B-2` says the
+  number to publish is not the accuracy but *"the accuracy minus what the same answerer scores with the whole
+  history in its context"*. Without it a figure in the eighties says nothing about whether the memory did anything,
+  and it is the column every self-reported figure omits.
 
-  **One configuration produces both arms, and there is no way to ask for one.** A subtraction is only a
-  measurement of the memory if the arms differ in exactly one thing, and two arms configured separately
-  drift in a way nothing reports: a different seed, a judge swapped in one and not the other, and the
-  difference stops being the memory while still looking like a result. Every shared field is spread
-  from one object, `MEMORY_ONLY` is the whole list of what may differ, and `armsDisagreeOn` catches a
-  pair somebody else assembled — because the report calls it rather than trusting where they came from.
+  **One configuration produces both arms, and there is no way to ask for one.** A subtraction measures the
+  memory only if the arms differ in exactly one thing, and two arms configured separately drift in a way
+  nothing reports. `MEMORY_ONLY` is the whole list of what may differ, and `armsDisagreeOn` catches a pair
+  somebody else assembled.
 
-  Two refusals worth naming, both in the flattering direction nobody checks: a baseline handed a
-  conversation with no sessions answers nothing and makes the memory look better by exactly that much;
-  and absent hits are not empty hits, since one is a question retrieval FAILED on and the other is one
-  it found nothing for. A negative delta is a real result and is reported as one.
+  Two refusals, both in the flattering direction nobody checks: a baseline handed a conversation with no
+  sessions answers nothing and makes the memory look better by exactly that much, and absent hits are not
+  empty hits. A negative delta is a real result and is reported as one.
 
-  Still no model call: the answerer and the judge remain parked on two provider keys.
+- **`benchmarks/harness/` exists again, with the half of a graded run that needs no model** (`B-6`, first
+  increment). `#1282` deleted the previous one — 56 files, on the owner's instruction — because everything in it
+  rested on the premise that a conversation is a pile of transcript chunks, under which multi-hop scored **0.0%
+  across all twelve** strategies. This retrieves from the graph the writer produces instead.
 
-- **`benchmarks/harness/` exists again, with the half of a graded run that needs no model** (`B-6`,
-  first increment). `#1282` deleted the previous one — 56 files, on the owner's instruction — because
-  everything in it rested on the premise that a conversation is a pile of transcript chunks, under
-  which multi-hop scored **0.0% across all twelve** strategies. So this retrieves from the graph the
-  writer now produces rather than from a window over the transcript.
+  The exact request comes back beside the answer, because `topK` and the traversal depth are part of what a
+  figure means. The `superseded` mark is carried through, since a grader that cannot see it scores a correct
+  historical answer as a wrong current one.
 
-  One question against one written space; the exact request returned beside the answer, because `topK`
-  and the traversal depth are part of what a figure means and a report that reconstructs them from what
-  the caller believes it passed makes two runs incomparable. The `superseded` mark is carried through,
-  since a grader that cannot see it scores a correct historical answer as a wrong current one.
+  **A failed call is not an empty result.** If a broken instance reported "no results", a run against a down
+  service would publish a low score rather than an error, and nothing afterwards would tell them apart.
 
-  **A failed call is not an empty result**, and that is the assertion this module exists around: if a
-  broken instance reported as "no results", a run against a down service would publish a low score
-  rather than an error and nothing afterwards would tell them apart. Mutation-checked.
+  The answerer and the judge are **parked on two provider API keys**, which `B-2` requires from different
+  hosted families so the judge is not marking its own phrasing.
 
-  **It cannot reach a question set.** `loadQuestions` is one import away and a gate refuses it —
-  retrieval takes a question string from its caller, because a convenience import here is how the
-  extraction side would come to see an answer key.
+- **The second-corpus work is finished, and its measurements are written down** (`B-5`, closed). Six fixes shipped
+  from `longmemeval_s` and each has its own entry; what none of them carried is the arithmetic. That is now one
+  entry in `benchmarks/DEVELOPMENT-LOG.md`.
 
-  The answerer and the judge are **parked on two provider API keys**, which `B-2` requires from
-  different hosted families so the judge is not marking its own phrasing. That is now the only thing in
-  the queue waiting on the owner.
-
-- **The second-corpus work is finished, and its measurements are written down** (`B-5`, closed). Six
-  fixes shipped from `longmemeval_s` today and each has its own entry above; what none of them carried
-  is the arithmetic. That is now one entry in `benchmarks/DEVELOPMENT-LOG.md`, which is the file for it:
-  *"the measurements behind the LoCoMo work — what was tried, what the number was, and which premises
-  turned out to be wrong"*.
-
-  **The row's method was substituted and the log says so.** It asked for three histories to be
-  extracted and the extractions read; two were read directly and the whole 500-instance release was
-  measured instead. Four of the six defects are distribution facts — 211 of 500 histories out of time
-  order, 18,565 of 25,112 sessions sharing a date, 253 of 500 carrying a pasted document, 896 turns
-  flagged as evidence — invisible in any single extraction and undeniable across the release. The two
-  that did need a human read were both in the first history opened, which is why a third was never
-  needed.
+  **The row's method was substituted and the log says so.** It asked for three histories to be extracted and
+  read; two were read directly and the whole 500-instance release was measured instead. Four of the six
+  defects are distribution facts — 211 of 500 histories out of time order, 18,565 of 25,112 sessions sharing
+  a date, 253 of 500 carrying a pasted document, 896 turns flagged as evidence — invisible in any single
+  extraction and undeniable across the release.
 
   The extraction prompt is now FROZEN, which is what `B-4` waits on.
 
-- **The conversation-writer ships, and `B-3` closes on work that was already done** (`B-3`). The row's
-  remaining scope read *"what is left to build is the writer: mint entities, link them, resolve dates
-  against the session they were said in, and store each remark as a claim"*. All of it is in
-  `benchmarks/writer/` and has been for some time — what had never happened is the CHANGELOG line the
-  row watches for, so a reader of the tracker would have concluded the writer did not exist.
+- **The conversation-writer ships, and `B-3` closes on work that was already done** (`B-3`). The row's remaining
+  scope read *"what is left to build is the writer"* — and all of it was in `benchmarks/writer/` already. What had
+  never happened is the CHANGELOG line the row watches for, so a reader of the tracker would have concluded the
+  writer did not exist.
 
-  It is closed now rather than quietly, because the proof arrived with `conv-30`: a committed extraction
-  carrying no Ythril ids, replayed deterministically into a live space as 133 records — entities minted
-  and linked, dates resolved against their session, every remark a claim. That is the row's own
-  reproducibility claim demonstrated rather than asserted: anybody can rebuild the exact graph from the
-  repository, and only re-deriving the extraction needs a model.
+  The proof arrived with `conv-30`: a committed extraction carrying no Ythril ids, replayed deterministically
+  into a live space as 133 records. Anybody can rebuild the exact graph from the repository, and only
+  re-deriving the extraction needs a model.
 
   **Three rows in a row have now turned out to be stale in their central premise** — `B-2` said a graded
-  harness exists when it was deleted, this one said the writer was unbuilt when it was built and
-  working. Both were read as ready-to-act and were describing a different repository. A verify clause
-  catches the second kind and not the first: it can tell you a row has not closed, and cannot tell you
-  the reason it gives is no longer true.
+  harness exists when it was deleted, this one said the writer was unbuilt when it was built. A verify clause
+  catches the second kind and not the first: it can tell you a row has not closed, and cannot tell you the
+  reason it gives is no longer true.
 
-- **`conv-30` is extracted, and it is the first conversation the shipped pipeline has produced end to
-  end** (`B-4`, 1 of 10). 19 sessions, 369 turns, two speakers who both lose their jobs in January 2023 and
-  spend the year building businesses. 84 claims, 12 entities, 25 chrono entries, 12 edges — and **all 369
-  turns are named by some claim's `sourceTurns`**, with none invented.
+- **`conv-30` is extracted, and it is the first conversation the shipped pipeline has produced end to end** (`B-4`,
+  1 of 10). 19 sessions, 369 turns, 84 claims, 12 entities, 25 chrono entries, 12 edges — and **all 369 turns are
+  named by some claim's `sourceTurns`**, with none invented.
 
-  It was delivered in three parts and joined by `mergeExtractionParts`, which is the protocol's first real
-  use rather than its test fixture. The merged file passed `validateExtraction` on the first attempt and
-  then wrote 133 records into a live space through `writeSpace`.
+  Delivered in three parts and joined by `mergeExtractionParts`, which is the protocol's first real use
+  rather than its test fixture; the merged file passed `validateExtraction` first time and wrote 133 records
+  into a live space.
 
-  **It carries a real supersession**, which is what `Q-35` and the prompt rule were built for: Jon says on 9
-  July that he is going full-time on the dance studio, and on 21 July that he has taken a temporary job
-  while he looks for investors. The July claim carries `superseded: true`, a `supersedes` edge runs from the
-  later claim to it, and a recall against the live space returns the earlier one **marked** rather than
-  hidden — so *"what happened after he went full time"* is answerable and *"he went full time"* is not
-  offered as current.
+  **It carries a real supersession**, which is what `Q-35` and the prompt rule were built for: Jon goes
+  full-time on the dance studio on 9 July and takes a temporary job on 21 July. The July claim carries
+  `superseded: true`, a `supersedes` edge runs from the later claim to it, and a recall returns the earlier
+  one **marked** rather than hidden.
 
-  **No score was read.** `B-4`'s rule is that no retrieval score may be measured until all ten extractions
-  are committed, and the rule this sits under is to improve the prompt by reading its OUTPUT and never its
-  number. The three recalls run against the live space were questions written here, against a conversation
-  whose own question set has never been opened; what they checked is that records came back and that the
-  mark was on the right one.
+  **No score was read.** No retrieval score may be measured until all ten extractions are committed.
 
-  **`conv-26` is not this.** Its committed extraction was written by hand with the scores visible and is
-  still to be replaced. Nine remain, each needing a context that has not seen the others.
+- **A pasted document is treated as material rather than assertion** (`B-5`). Measured on the pinned corpora:
+  LoCoMo's longest turn ever is **454 characters**; LongMemEval has **351 user turns over 5,000**, across **253 of
+  500 histories**, the largest **76,560** — somebody pasting the Wikipedia article on the GDPR. Assistant turns over
+  5,000: three, in the entire corpus. So a long turn is almost always somebody pasting something in, and half the
+  corpus has one.
 
-- **A pasted document is treated as material rather than assertion** (`B-5`). Measured on the pinned
-  corpora: LoCoMo's longest turn ever is **454 characters**; LongMemEval has **351 user turns over 5,000**,
-  across **253 of 500 histories**, the largest **76,560** — a user pasting the whole Wikipedia article on
-  the GDPR and asking what it said about AI regulation. Assistant turns over 5,000: three, in the entire
-  corpus. So a long turn is almost always somebody pasting something in, and half the corpus has one.
+  The prompt had a rule for the ASSISTANT supplying world knowledge and none for a person pasting it, and
+  `attributed` is the wrong tool twice over. So a pasted article would have become either a hundred unmarked
+  claims the graph ASSERTS, or a refusal. It is now a third thing: the person did not say what is in it, they
+  brought it, and the fact is that they brought it and what they wanted from it.
 
-  The prompt had a rule for the ASSISTANT supplying world knowledge and none for a person pasting it — and
-  `attributed` is the wrong tool twice over, since the writer refuses it on a person's claim. So a pasted
-  article would have become either a hundred unmarked claims the graph ASSERTS, or a refusal. It is now a
-  third thing: the person did not say what is in it, they brought it, and the fact is that they brought it
-  and what they wanted from it. What the exchange then establishes about the people — what they were doing,
-  what they said about it, a detail the conversation turns on — is still a claim.
+  **With a validator rule, because the prompt half depends on the model having read it.** No single turn may
+  account for more than a share of a file's claims — a share rather than a count, because a threshold in
+  records is wrong for a short conversation and meaningless for a long one.
 
-  **With a validator rule, because the prompt half depends on the model having read it.** Mining a document
-  produces dozens of claims sharing one `sourceTurns` entry, about a subject nobody in the conversation is,
-  and nothing else downstream can see it — every claim is well formed. No single turn may account for more
-  than a share of a file's claims, expressed as a share rather than a count for the same reason as the rule
-  it inverts: a threshold in records is wrong for a short conversation and meaningless for a long one.
+- **LongMemEval has a loader, and it exists because the answer key is inside the histories** (`B-5`). LoCoMo keeps
+  its questions beside the conversation; a LongMemEval instance is one object holding the history AND `question`,
+  `answer`, `question_type` and `answer_session_ids` — and **896 turns inside the haystack carry `has_answer:
+  true`**. That last one is the dangerous one: a third key on a turn otherwise holding `role` and `content`, on
+  exactly the turns a score is computed from. Anything reading the release directly would have handed the extraction
+  model a flag saying *this turn is the evidence*.
 
-- **LongMemEval has a loader, and it exists because the answer key is inside the histories** (`B-5`).
-  LoCoMo keeps its questions in a block beside the conversation, so returning the conversation returns
-  nothing about them. A LongMemEval instance is one object holding the history AND `question`, `answer`,
-  `question_type` and `answer_session_ids` — and, measured across the release, **896 turns inside the
-  haystack carry `has_answer: true`**. That last one is the dangerous one: a third key on a turn otherwise
-  holding `role` and `content`, on exactly the turns a score is computed from. Anything reading the release
-  directly would have handed the extraction model a flag saying *this turn is the evidence*, and nothing
-  downstream could have seen it. The pin had said the rule since the fetch — extraction *"must never read
-  the questions, the answers or the abilities. That is enforced by the loader rather than promised"* — and
-  the loader it named did not exist.
+  A turn is BUILT from named fields rather than copied, so a field the authors add later cannot ride along, and
+  an unknown key stops the run. Twelve turns of 246,930 carry no content and are dropped and REPORTED. Ids are
+  minted from the PUBLISHED position, so a dropped turn leaves a gap — renumbering would make a committed
+  extraction's `sourceTurns` point at the wrong remark with nothing to reveal it.
 
-  A turn is BUILT from named fields rather than copied, so a field the authors add later cannot ride along,
-  and an unknown key stops the run instead of being dropped. Twelve turns of 246,930 carry no content, in
-  seven histories, none of them evidence: they are dropped and REPORTED, the shape LoCoMo's loader already
-  uses for its nine malformed evidence references. Ids are minted from the PUBLISHED position, so a dropped
-  turn leaves a gap — renumbering the survivors would make a committed extraction's `sourceTurns` point at
-  the wrong remark with nothing anywhere to reveal it.
+- **An extraction may arrive in parts, and an incomplete run is refused** (`B-5`). A long history reads in one pass;
+  the graph of one does not always write back in one. A part declares `part: {index, of}` and covers a contiguous
+  run of sessions, and `mergeExtractionParts` joins them.
 
-- **An extraction may arrive in parts, and an incomplete run is refused** (`B-5`). A long history reads in
-  one pass; the graph of one does not always write back in one, because the extraction is itself a large
-  document. A part declares `part: {index, of}` and covers a contiguous run of sessions, and
-  `mergeExtractionParts` joins them. **The refusal is the point:** three parts of four concatenate into a
-  file that is valid in every other way and describes three-quarters of a conversation — every type
-  declared, every key resolving, every date parsing — so the hole only ever surfaces as a question that
-  returns nothing, which reads as a retrieval failure. Nothing else in the pipeline can see it. Identity
-  crosses the seam by every part repeating every entity, reconciled by key with the later description
-  winning; a key whose TYPE changed between parts is refused rather than resolved, because whichever side
-  won, the edges the other part drew now run to the wrong kind of thing.
+  **The refusal is the point:** three parts of four concatenate into a file that is valid in every other way
+  and describes three-quarters of a conversation, so the hole only ever surfaces as a question that returns
+  nothing — which reads as a retrieval failure. Identity crosses the seam by every part repeating every
+  entity; a key whose TYPE changed between parts is refused rather than resolved, because whichever side won,
+  the edges the other part drew now run to the wrong kind of thing.
 
-- **`longmemeval_s` is measured rather than quoted, and the number this repository had been repeating was
-  wrong twice over.** The tracker called the corpus structurally different because *"a history runs to 500
-  sessions rather than 20"*. 500 is the number of INSTANCES, and the 500-sessions figure belongs to
-  `longmemeval_m`, which is neither pinned nor fetched. Measured from the file: 39–66 sessions per history
-  (p50 50), 396–616 turns (p50 492), 462–514 KB. The pin now carries an `observed` block beside the
-  authors' `stated` one, which its own `$method` note had been asking for since the first fetch.
+- **`longmemeval_s` is measured rather than quoted, and the number this repository had been repeating was wrong
+  twice over.** The tracker called the corpus structurally different because *"a history runs to 500 sessions rather
+  than 20"*. 500 is the number of INSTANCES, and the 500-sessions figure belongs to `longmemeval_m`, which is
+  neither pinned nor fetched. Measured from the file: 39–66 sessions per history (p50 50), 396–616 turns (p50 492),
+  462–514 KB. The pin now carries an `observed` block beside the authors' `stated` one.
 
-- **The extraction harness can say that a later session made an earlier fact wrong** (`B-5`). The prompt
-  had no sentence about supersession, so a chat log saying *"I left Acme"* produced two equally live
-  claims and a search for *"where does she work"* answered with both. A claim may now carry `superseded:
-  true`, written as a record field rather than a property — `attributed` is this corpus's vocabulary and
-  `superseded` is the product's, and a second spelling of a real field in the space people read to judge
-  the product is worse than no mark. It does not suppress: the retired claim keeps its vector and keeps
-  ranking, so *"where DID she work?"* still has an answer.
+- **The extraction harness can say that a later session made an earlier fact wrong** (`B-5`). The prompt had no
+  sentence about supersession, so a chat log saying *"I left Acme"* produced two equally live claims. A claim may
+  now carry `superseded: true`, written as a record field rather than a property — `superseded` is the product's
+  vocabulary, and a second spelling of a real field in the space people read to judge the product is worse than no
+  mark. It does not suppress: the retired claim keeps its vector and keeps ranking, so *"where DID she work?"* still
+  has an answer.
 
-  A claim may also carry a local `key` — the first thing that ever pointed at a claim — and the three key
-  spaces became one, because an edge end is a bare key and says nothing about which collection it is in.
-  The writer resolves an end across all three and declares the endpoint kind. `supersedes` is exempt from
-  the schema's label allowlist for the reason the server exempts it: the instance writes that label itself
-  when a reviewer resolves a contradiction, and a gate compares the harness's spelling against the
-  server's rather than trusting the copy.
+  A claim may also carry a local `key`, and the three key spaces became one, because an edge end is a bare key
+  and says nothing about which collection it is in. `supersedes` is exempt from the schema's label allowlist
+  for the reason the server exempts it, and a gate compares the harness's spelling against the server's.
 
-  The validator's rule is the implication and not the pair. A retirement need not have a successor —
-  *"she left and has not started anywhere new"* is a complete record, and demanding an edge would make the
-  model invent one. An edge saying X replaced Y with Y unmarked is refused, because both then come back
-  looking equally current, which is the thing the edge was drawn to prevent. Between two entities it is
-  refused outright: that is a merge, and `aliases` is where a merge belongs.
+  **The validator's rule is the implication and not the pair.** A retirement need not have a successor —
+  demanding an edge would make the model invent one. An edge saying X replaced Y with Y unmarked is refused,
+  because both then come back looking equally current. Between two entities it is refused outright: that is a
+  merge, and `aliases` is where a merge belongs.
 
 #### Claims, chrono, supersession and contradictions
 
@@ -468,16 +308,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   — which reads as the resolve having done nothing, the impression `Q-35` existed to end. It is the same
   defect one surface down: `Q-35` was *the judgement reaches the record and not retrieval*, this was *it
   reaches retrieval and not the operator*.
-
-  One shared component across the query results and the Facts, Entities, Edges and Chrono tabs, because
-  five copies of `@if (r.superseded)` is five chances to write the condition differently and the one that
-  reads `!== false` badges every record in the list while looking like the others. The condition is inside
-  it and is strict: absent and `false` both mean current, and a badge on a current record retires a real
-  fact in the reader's mind with nothing to contradict it.
-
-  Verified by reading the screenshots on a running instance rather than by counting elements — a count of
-  zero cannot tell a badge that does not render from a query that had not returned, and the first probe
-  hit exactly that.
 
 - **A record can be marked as no longer true, and it keeps ranking.** `superseded` is a boolean on facts,
   entities, edges and chrono entries, accepted on the create and the update, on both doors. Owner's
@@ -504,10 +334,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   question to get, and must not be hidden either. Suppression is the one mechanism that is neither. A record
   with no vector cannot be ranked by `recall` even deliberately, while `filter`, `graph_traverse` and
   recall's own expansion still reach it in full, because the walk follows links and never consults a vector.
-
-  The suppression is DERIVED from the mark in one expression rather than set beside it. Two fields meaning
-  one thing drift, and this drift is the invisible kind: a claim that says it is attributed while still
-  carrying a vector is back to competing for ranked slots, silently.
 
 ### Changed
 
@@ -561,13 +387,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   envelope comes back for every tool: `{ok: true, text, data}` on success, `{ok: false, error, data}` on a
   refusal, with `error` word-for-word what MCP puts in `content`.
 
-  **It is one route, not forty-five.** `mcp/call-tool.ts` now holds everything between *a caller named a
-  tool* and *the tool answered* — the visibility gate, the space parse, existence, reach, the per-space
-  rung, the space-admin grant, argument validation against the published schema, the throttle, the error
-  classification and the audit entry. The MCP dispatcher and the HTTP route are translations of their own
-  envelope into it and back. A tool added tomorrow is reachable both ways on the day it is written, because
-  there is no per-tool code on either door to forget.
-
   **Two real defects fell out of the extraction**, both the same shape — one rule, two implementations,
   the weaker one deciding:
 
@@ -601,9 +420,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   call — with the reason. A route in none of the three fails, so "I did not think about MCP" is no longer
   expressible, and the published capability table is generated from the same classification a gate holds
   true.
-
-  The README claimed *"every capability is on both doors… the exemption list for that check is empty"*. It
-  now claims what the build can keep: nothing is missing **silently**.
 
 - **BREAKING — the knowledge type `memory` is now `fact`, everywhere, and 5.0 does not accept the old word.**
 
@@ -651,12 +467,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `startsAt: {$gte,$lt}`, and `search` as `$or` of two case-insensitive `$regex` — verified against the
   operator allowlist rather than assumed. The cost is four lines of predicate where there was one word.
 
-  **And two documented blind spots stopped existing rather than moving.** `list_chrono`’s `after`/`before`
-  filtered when an entry was WRITTEN, on a tool full of dates; `find_entities_by_name` was exact and
-  case-sensitive, so an empty list did not mean the thing was absent. Both were warnings about a predicate
-  the wrapper hid. In `filter` the caller writes the predicate, so there is nothing left to warn about —
-  which is the general case: every hidden predicate is a blind spot somebody has to be told about in prose.
-
 - **BREAKING — every remaining MCP tool is renamed to the verb-first scheme.** 23 of them, on top of the
   search family that moved with its routes. No aliases: the old names are gone.
 
@@ -673,10 +483,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `delete_space_data` is the one worth reading twice — it was `wipe_space`, and the new name says what it
   removes rather than what it does.
 
-  **Audit operations follow the tools**, so a log filter on an old operation name stops matching. The
-  exported constants follow too: a `delete_memoryTool` exporting a tool named `delete_fact` is a trap for
-  the next reader.
-
   **Three names were NOT swept, deliberately.** `remember` is also a brain function, `traverse` is also
   recall's `traverse` BODY FIELD — including its entry in the allowlist — and `reindex` is also a route
   segment. A blanket rename would have removed a documented parameter from `RECALL_BODY_FIELDS`, so every
@@ -691,44 +497,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   | `find_similar` — `…/find-similar` | **`similar`** — `POST /api/brain/similar` |
   | `recall` — `…/recall` | `recall` — `POST /api/brain/recall` |
 
-  `query` was the collision worth removing: it is the word every caller reads as *search*, and ours is the
-  structured-predicate door — so a client reaching for meaning-ranked results picked it and got a 400 for a
-  missing `collection`. `recall` keeps its name because it is what every memory protocol calls this.
-  Audit operations follow: `brain.filter` and `brain.similar`, so a log filter on the old strings stops
-  matching.
-
   **The space is a body field on all three, and you may omit it.**
 
   Omit it and the search runs across every space the token holds `knowledge: read` in, ranked together. A
   `traverse` keeps its path deliberately: it walks FROM an entity, and an entity lives in exactly one
   space, so there is nothing to omit.
 
-  **`crossSpace` on `find-similar` stays, and checking why is the interesting part.** Its comment said it
-  existed only because the space was in the PATH and "omit the space" could not be expressed — which this
-  change would have retired. It does not, because on that route the space says where the SEED ENTRY lives
-  rather than where to search. "The entry is in Research, find similar records everywhere" is a real
-  request and omission cannot express it, because omitting the space stops pinning the entry too.
-
-  A path segment cannot be omitted, so the old routes could never express "search everything I can reach" —
-  MCP's `recall` has taken an optional space since it shipped, and REST callers had to point at a proxy
-  space or make one call per space and merge the rankings by hand.
-
   **What a caller changes:** move the space out of the URL and into the body as `space`, or leave it out.
   A space you cannot read is skipped, not an error; a space you NAME and cannot read is a 403.
-
-  **Authorisation happens once, and this is the part that needed building.** Every row in the rights
-  inventory was `scope: 'path'` or `scope: 'iterates'` — nothing had ever authorised on a space read out of
-  a body. `requireBodyScopedSpace` resolves it, checks the area and rung, and hands the handler the
-  authorised list; the handler never reads `req.body.space` again, because acting on a second reading of a
-  field is a vulnerability that no diff shows, the two readings being spelled identically. Where the caller
-  names a space, not holding the rung there is a refusal. Where it names none, the spaces it cannot read are
-  DROPPED rather than the call being refused — the path guard's all-or-nothing rule would have killed a
-  cross-space search because some space the caller never asked about exists on the instance.
-
-  **The audit log still says which spaces were read.** Its `spaceId` comes from a path match group, so this
-  move would have logged `null` for every recall — a hole in the one record that answers "who read what". It
-  now falls back to the spaces the guard AUTHORISED, never to the body, because an audit trail that
-  disagrees with what happened is worse than one that says nothing. A cross-space read logs `a,b,c`.
 
 #### `filter` is the one read path
 
@@ -736,11 +512,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   waiting on.** Facts, Entities, Edges and Chrono all issue one `POST /api/brain/filter`; the service
   re-keys `results` to the key each tab already destructures, so **not one caller changed** and deleting
   those routes becomes a server-only change.
-
-  It took four preceding fixes to be possible at all, and each was a gap that would have changed what a
-  tab shows: `filter` had none of the five list CONVENIENCES, none of the two DECORATIONS those routes
-  apply after the query, a silent page clamp of 100 where they serve 200 or 500, and a chrono `status`
-  that matched the stored value while the route matched the derived one.
 
   **What the client sends is arguments, not rules.** The fuzzy things — `tag`, `search`, `description`,
   `properties` — go as conveniences the server assembles; the exact ones — an entity's `name`, a fact's
@@ -767,10 +538,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   | the byte budget | `maxChars` / `maxBytes` trims the page, says `truncated`, and hands back `nextSkip` |
   | `maxTimeMS` | hard-capped at 10 000, so an absurd `limit` is bounded in time |
   | a PROXY space | `skip + limit` past the merge ceiling is an explicit `400` naming the limit |
-
-  So an oversized request is refused out loud on a proxy, bounded in time on a single space, and trimmed
-  with disclosure either way. The clamp added nothing those three do not do, and hid the one thing they
-  all report.
 
 - **BREAKING — the fresh-write scan honours `filter` and `tags`, and it did not.** The scan adds records
   the vector index has not ingested yet, and it added them without applying the caller's predicate: a
@@ -824,9 +591,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   | `includeMemories: false` | 2 332 | 0 | no | 0 |
   | `includeMemories: true` | 6 485 | 7 | yes | 6 |
 
-  The default costs one record. It is bounded because `attributed` is a DECLARED property, which makes the
-  scan a native index pre-filter rather than a read of every linked fact.
-
   **`false` still means false.** An explicit refusal brings nothing, attributed included — a default that
   overrode it would make the flag stop meaning what its own description says. Absent and `false` were
   already kept apart by the parser, which is what made this expressible.
@@ -843,20 +607,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     "record": { "_id": "…", "fact": "…", "tags": ["…"] } }
   ```
 
-  **This was a divergence with nothing behind it.** `RECALL_ENVELOPE_KEYS` existed only to stop a
-  `projection` on the flat door eating the `score` the caller searched for; with the record in its own
-  object the distinction is structural and needs no list. The two shapes are also not mechanically
-  inter-convertible — `toRecallRecord` puts an entity's own type under `record.type` while the envelope
-  `type` is the knowledge type — so a door translating between them would have to reimplement the mapping,
-  which is what collapsing the route removed.
-
   **What to change:** read `hit.record.<field>` where you read `hit.<field>`. `score`, `spaceId`, `type`,
   `_graph` and the per-stage scores stay where they were. Traversed neighbours under `_graph` are
   unchanged — they were already `{edge, node, paths}`.
-
-  **And it fixes something rather than only costing.** The flat envelope put the knowledge type and the
-  record's own `type` under one key, so an entity matched by `filter: {type: 'message'}` came back reading
-  `type: 'entity'` with its real type unreachable. They are `type` and `record.type` now.
 
   **`unrecognized_keys` is not on this route's 400 any more.** It came from `unknownBodyFields`, which a
   route uses when it parses its own body; the refusal now comes from the shared dispatcher, which names the
@@ -885,23 +638,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   thing happened. That lives in the record's own properties, put there by whoever stored it, and the two
   are routinely confused.
 
-  Nothing a question is answered from is affected — the text, the properties, the id, the type and the
-  scores all stay, and a gate asserts it. It applies recursively, so a `traverse` answer is trimmed at
-  every depth, which is where the bytes actually are.
-
 #### Spaces, tokens and the rights matrix
 
 - **A token that reaches exactly ONE space no longer has to name it.** `space` is optional on every
   writing tool when the calling token's accessible-space list has one member — `save_fact({fact: "…"})`
   lands. With two or more it stays required, and the refusal lists the spaces you can choose between.
-
-  **`space`'s enum was already narrowed to what the token reaches**, so with one member there is no other
-  space the call could mean. Requiring it there bought no safety and cost every caller who did not read
-  the schema — which is every GENERIC client, because a generic client matches a tool by name and fills
-  the parameters it recognises. `B-6` came from reading one: it sent `save_fact({content})`, was refused
-  for a missing `space` it had no way to know about, and the run then stored nothing, searched an empty
-  space and scored about zero **with no error anybody saw** — the harness swallows its own reset failure
-  and one 400 goes into a log nobody reads.
 
   **The schema you are SHOWN says so**, per token: `space` is absent from `required` for a single-space
   token and present for every other. Advertising and enforcement come from one materialisation, so a
@@ -916,16 +657,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ```json
   { "space": "work", "confirm": true, "types": ["facts", "chrono"] }
   ```
-
-  It was FIVE routes — `DELETE /api/brain/spaces/:spaceId/facts` and one each for entities, edges, chrono
-  and files — against one MCP tool taking `types[]`. Different parameters, different response, and
-  different safety: the routes demanded `confirm: true` and the tool demanded nothing.
-
-  **They also did different things.** The routes called `bulkDelete<Collection>` directly while the tool
-  asked `planSpaceWipe` first — so on a space belonging to a network, **the tool opened a vote and the
-  routes deleted shared data immediately.** Nothing reported it, because each door did exactly what its own
-  code said. The capability now lives in `spaces/delete-space-data.ts` and both doors are adapters over it,
-  so the governance step is not something either can forget.
 
   `confirm: true` is required on both doors now, and the route is named after the tool with `space` as a
   body parameter — the shape the rest of the REST surface moves to.
@@ -947,19 +678,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   { "spaceAdmin": { "floor": false, "spaces": ["work"] } }
   ```
 
-  It used to be derived: `admin` on all four areas of a space WAS administering it. Two things were wrong
-  with that. The capability could not be granted in one action — the canary operator asked twice — and the
-  equivalence is false: holding every DATA rung is not authority over the space's tokens and settings, so
-  the derivation handed the space's token surface to any token that happened to hold four rungs.
-
   | | |
   |---|---|
   | `spaceAdmin` | ⟹ `admin` in all four areas of that space |
   | `admin` in all four | ⟹̸ `spaceAdmin` |
-
-  **Nothing can disagree, for a better reason than before.** The grant is an INPUT to `grantedRung`, the
-  single funnel every per-space rung resolves through — not a second opinion checked beside the rungs,
-  which is what an earlier decision rejected a flag for.
 
   **Two scopes, like everything else in the matrix.** `spaces` names them; `floor` reaches every space
   including ones created later. The floor form exists because a real configuration needs it: a token
@@ -1013,11 +735,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`POST /api/notify/trigger` is DEPRECATED.** Use the two routes above. It still works and delegates to the same code,
   so nothing breaks today.
 
-  A sync trigger had no business on the peer NOTIFICATION channel, and the cost was not theoretical: that
-  router was exempt from parts of the guard sweep under a reason written for the notification endpoint
-  beside it, which is exactly why this route accepted any authenticated token until 4.4. The name was
-  wrong, so the guard was wrong, and no gate could see it.
-
 #### Documentation, gates and internal structure
 
 - **The graph guide's `Links` section is its own page, `04g-links-api.md`.** `04b-graph-api.md` sat on the
@@ -1025,10 +742,92 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which is the cap doing its job and being answered the wrong way. Links is a distinct capability with its
   own conversion story, its own pre-flight and its own lifecycle, so it is the boundary.
 
-  Every line was MOVED by line range, never retyped, and the move asserts a conserved multiset of prose
-  lines — an earlier hand-split of this guide lost a twenty-line block mid-word and shipped the remains
-  for months. Nothing was reworded. The `## Links` heading is kept, so an inbound `#links` anchor still
-  resolves; `#traverse-graph`, which `04a` links to, stays on the graph page.
+### Removed
+
+#### `filter` is the one read path
+
+- **`POST /api/brain/filter` is gone, and with it the last second shape of any capability.** `B-9` step
+  3c, which closes a row open since 2026-09-16. It was not a thin route over the `filter` tool — it was a
+  SECOND IMPLEMENTATION of it: its own body validation, its own paging parse, its own proxy fan-out, its
+  own budget resolution and its own error handling, four hundred lines beside a tool that already did all
+  of it.
+
+  Read a collection at `POST /api/filter` — the generic tool door, which has no per-tool code at all.
+
+  **THE ENVELOPE CHANGES, and that is the port.** One shape for every tool, so a caller writes the
+  response handling once:
+
+  | | was | is |
+  |---|---|---|
+  | `200` | `{results, count, total, limit, skip, truncated, …}` | `{ok: true, text, data}` — all of that inside `data` |
+  | a refusal | `{error}` | `{ok: false, error, data}`, with the same sentence the MCP door uses |
+
+- **The five collection LIST routes are gone. Reading a collection is `filter`.** `B-9` step 3b, and a
+  break: `GET /api/brain/spaces/:spaceId/{facts,entities,edges,chrono,files}` each answered what a
+  predicate over one collection answers, with their own query grammar, their own page caps and their own
+  response key.
+
+  ```json
+  POST /api/brain/filter
+  { "space": "work", "collection": "facts", "limit": 100, "tag": "release" }
+  ```
+
+  | | the routes | `filter` |
+  |---|---|---|
+  | the rows | `{ facts }`, `{ entities }`, `{ edges }`, `{ chrono }`, `{ files }` | `{ results }`, whichever collection |
+  | the page | default 50 or 100, hard max 200 or 500, and the five did not agree | `limit`, default 200, no maximum |
+  | a fact by entity id | `?entity=<id>` | `filter: { entityIds: "<id>" }` |
+  | an entity by exact name | `?name=` | `filter: { name: ... }` |
+  | chrono tag sets and date ranges | `?tags=`, `?tagsAny=`, `?after=`, `?before=` | `$all`, `$in` and a `createdAt` range |
+  | a file by path | `?path=` | `path`, an argument, normalised the same way |
+
+  **THREE THINGS THE ROUTES DID THAT A CALLER NOW HAS TO ASK FOR**, and each is silent if you miss it:
+
+  - **a chrono `status` derived on read** — send `deriveStatus: true`, or `active` means what is stored
+    rather than what is true. The route always derived; `filter` defaults to the stored value because a
+    predicate has to be able to match what is on disk.
+  - **chunk records hidden from a file listing** — the route excluded them by default, `filter` does not.
+    Send `filter: { parentFileId: { "$exists": false } }` or a converted document looks like the same
+    file many times over.
+  - **an unsupported paging name refused by name** — the routes answered `'offset' is not a parameter,
+    use 'skip'`. `filter`'s body is strictly allowlisted so it is still a `400`, and it still names the
+    parameter to use: the alias list moved onto the strict-body refusal rather than going with the routes.
+
+  Nothing an operator does in the UI changed. `listFileMeta` went with them: it had no caller, because the
+  file manager lists through the file STORE, which is a different question.
+
+- **The five `GET` routes that read ONE brain record are gone. Read a record through `filter`.** `B-9`
+  step 3a, and a break: `GET /api/brain/spaces/:spaceId/{facts,entities,edges,chrono}/:id` and
+  `GET .../entities/by-ids` all answered what a predicate over one collection answers, with their own
+  response shape, their own refusals and their own 404.
+
+  ```json
+  POST /api/brain/filter
+  { "space": "work", "collection": "entities", "filter": { "_id": "8f3c…" }, "limit": 1 }
+  ```
+
+  A set of ids is the same call with `$in`, which is what `entities/by-ids` did; unknown ids are absent
+  from `results` exactly as they were absent from `entities`.
+
+  **The one behaviour that CHANGED, and it is the reason this is a `Removed` rather than a rename: a
+  record that is not there is `200` with `results: []`, not `404`.** A predicate matching nothing and a
+  record not existing are the same event to a filter, and pretending otherwise would mean `filter`
+  answering 404 for an ordinary empty page. Branch on `results.length`.
+
+  **Two things the routes DID after the query, which a straight swap drops silently.** Both are
+  identical on most records and wrong on exactly the record somebody is looking at:
+
+  | | the route | `filter` |
+  |---|---|---|
+  | a chrono `status` | derived on read | the STORED value unless `deriveStatus: true` |
+  | `matchedText`, `embeddingModel` | returned by a by-id read, withheld by the list beside it | withheld unless `includeDiagnostics: true` |
+
+  Send `deriveStatus: true` on a chrono read to get what the route gave you; it is refused on any other
+  collection rather than ignored. The diagnostics default is now the same on both shapes, which the two
+  routes never were.
+
+  Nothing an operator does in the UI changed: the client was already reading everything else through
+  `filter` and now reads these the same way.
 
 ### Fixed
 
@@ -1040,14 +839,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   files on the owner's instruction, because everything in them rested on one premise — that a
   conversation is a pile of transcript chunks — under which **multi-hop scored 0.0% across all twelve**
   strategies built on it, since those answers need two remarks from sessions weeks apart.
-
-  So every cost line in that row — three seeds, two model families, roughly 1,200 calls — is an estimate
-  for a runner that has to be written first. The decision it records still stands; what is missing is
-  the thing that would carry it out. Filed as `B-6`, buildable now against `conv-30` and quotable only
-  after all ten conversations are re-ingested.
-
-  A stale row is worth an entry here when it was load-bearing, and this one read as a single decision
-  away from a graded number anybody could quote.
 
 - **The extraction prompt opened by describing one corpus, and five sections now contradicted it**
   (`B-5`). Its first paragraph said *"a long conversation between people, recorded over many sessions
@@ -1069,13 +860,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   earlier claim, a model reading position would retire the wrong one in nearly half the corpus — asserting
   the stale fact and marking the current one dead, which is the exact inverse of what supersession is for
   and appears in no count.
-
-  Sorted in the loader rather than by each consumer, because *remember to sort* is a line four callers each
-  have to write and one will not. Ties break on the published position, so two sessions recorded in the
-  same minute keep a stable order between runs. **`index` does not follow the sort** — it is the published
-  position, the turn ids are minted from it, and renumbering would repoint every `sourceTurns` in a
-  committed extraction at a different remark. The prompt now says the same thing in its own words: *later*
-  means a later date, never a later position in the file.
 
 - **A day with more than one session no longer loses all but the last of them** (`B-5`). The writer named
   each transcript `transcripts/<date>.md` and filed each claim by `statedOn`. That is correct for a
@@ -1113,16 +897,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   report it"* — plus a dozen more naming `traverse` where they meant `graph_traverse`. All of them sit in
   the text a caller reads while constructing a call.
 
-  **They were measured by the pre-5.0 audit and deliberately not fixed by it.** The gate it shipped skips
-  a retired name that is still live as a parameter, because reporting recall's `traverse` FIELD as a dead
-  tool is how a gate gets deleted — and that same skip hid these. In a schema description the question has
-  an answer the gate can derive: it is the parameter of the tool being described (`help`'s own `query`), or
-  it says whose parameter it is (`recall`'s `traverse`), or it is the dead tool. So the exclusion now
-  applies to guide prose only, and descriptions are held to naming live tools.
-
-  Two test gates had pinned themselves to the old names and kept passing on the rot; both now name the
-  live tool, so they fail if the pointer rots again.
-
 - **Twenty-four sentences still sent a caller to a tool 5.0 had removed.** A rename is the one change that
   passes the compiler while leaving the writing wrong, and these were in the writing a caller reads while
   constructing a call: `save_entity` told them to look an entity up with a tool that is gone, `space_meta`
@@ -1135,9 +909,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retired set from the previous major's last release tag rather than a list, and holds every tool
   description, every guide page and every use-case example to naming only tools that exist — unless the
   sentence is saying the old one is gone, which is the most useful sentence a migration note has.
-
-  Part of the pre-5.0 audit (`Q-22`); it is the first of that audit's six sweeps, and the two it covers are
-  the guide pages and the schema descriptions.
 
 #### `filter` is the one read path
 
@@ -1153,12 +924,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **Sending both spellings is a `400` rather than one of them quietly winning.** `path` and
   `filter: { path }` are two ways to ask one question and only the argument is normalised, so together
   they would disagree — the same call `recall` made about its two filter grammars.
-
-  This is what `B-9` step 3b needs before the file-metadata list route can go: deleting a forgiving read
-  and leaving an exact one is the *route does work around the query* shape that step 3a already paid for
-  once. **`includeChunks` deliberately did NOT move**: that is a default the route applies rather than a
-  transform, a caller can write `filter: { parentFileId: { $exists: false } }`, and adopting it here would
-  change what every existing `filter` caller gets back.
 
 - **`filter` returned an edge as two bare UUIDs, and a file with no job progress.** Two of the nine
   per-collection list routes do work on their rows AFTER the query, and the one call meant to replace all
@@ -1178,11 +943,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   It is accepted and APPLIED on both doors now, defaulting false on each. Admitting it without wiring the
   projection would have been the worse half: a `200` with the flag doing nothing.
 
-  **The file join moved out of a route file to make this possible at all.** `attachJobProgress` lived in
-  `api/brain/file-meta.ts`, and a `brain/` module may not import from `api/` — so no amount of care in
-  `filter` could have reached it where it was. It is `files/file-job-progress.ts` now, with its own gate
-  asserting exactly one declaration.
-
 - **An agent could not ask for "facts tagged release", and a browser could.** `filter` took a MongoDB
   predicate and knew nothing else, while the nine per-collection list routes it is meant to replace have
   always accepted five conveniences: `tag` (a case-insensitive SUBSTRING over the tag array, so `rel`
@@ -1194,17 +954,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   All five are arguments of `filter` now, on the tool and on `POST /api/brain/filter`, in the same
   change. `filter` itself is no longer REQUIRED: narrowing by tag alone used to mean sending
   `filter: {}` to say "and no predicate", which is a shape you have to be told about.
-
-  **They are assembled by one module, and that is the point rather than tidiness.** The same four-line
-  sequence existed five times — `buildFactFilter`, the entities route, `listEdges`, `buildChronoQuery`
-  and the file-meta route — each reading the same names into the same three primitives. `filter` would
-  have been the sixth, which is how the browser and an agent come to disagree about what `tag` means.
-
-  **The guard the module carries could not have survived a hand-written copy.** The old assemblies
-  merged the freetext `$or` by assignment, which is safe only because none of them has a caller-supplied
-  predicate to collide with. `filter` does: a caller passing `{$or: [...]}` beside `search` would have
-  had their disjunction silently REPLACED by ours — no error, no log, a plausible answer over the wrong
-  set. Everything accumulates under `$and` now, asserted against a live instance on both doors.
 
   **`links` refuses rather than ignoring.** It is a pair of ids, with no tags, type, description or text
   of its own, so `search` there would have matched every link in the space — and a filter that matched
@@ -1236,11 +985,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   combination it refused is `?status=overdue&search=…`, an ordinary query on the list route being removed
   in the same release: the capability would have gone quietly with it.
 
-  The check runs where the caller's filter is still identifiable as theirs, and a branded type keeps it
-  there — the read path cannot be handed an unchecked predicate without failing to compile. **The cap
-  itself stays at 8** (owner, 2026-09-18): the thing to fix if something composes one level deeper is the
-  composition.
-
 - **`filter` matched a chrono `status` against the STORED value while the list route matched the DERIVED
   one, so the same question returned different records.** `deriveStatus` made the displayed status
   askable; this is the half that changes which rows come back. `status: "active"` returned a fortnight-old
@@ -1253,19 +997,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `status` nested inside `$or`/`$and` is REFUSED rather than rewritten: the derived clause is itself a
   disjunction in two of the three cases, so folding it into a caller's would change what theirs means.
 
-  Nobody had hit this because the client has always used the list route — and it is what blocked moving
-  that client onto `filter`, which is the next step of retiring the per-collection list routes.
-
 - **The filter sanitiser silently turned a `Date` into `{}`.** Found by the above: it walks a filter and
   rebuilds each object key by key, and `Object.entries(new Date())` is empty — so a date value came out
   as an empty object, the comparison it was part of stopped meaning anything, and the query answered
   `200` over the wrong set.
-
-  **No caller could have reached it**, which is why it survived: a filter arriving over HTTP is JSON, so
-  its dates are strings. It bites the moment a predicate is built in-process, and the sanitiser is on the
-  path of every one of those. Dates are preserved now, and the guards that refuse a value still refuse
-  it — the general rule being that a sanitiser which REWRITES what it does not recognise is worse than
-  one that refuses it, and every other branch in that module already threw.
 
 - **BREAKING — `filter: {"type": "note"}` was accepted and silently DROPPED.** A bare scalar value was read
   as a malformed operator object — the grammar where a value is spelled `{"eq": "note"}` — so the
@@ -1315,11 +1050,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   agent asking the obvious question — *what do I have about X, anywhere* — got a validation error through
   one door and an answer through the other.
 
-  Caught by an integration test calling `filter` with no space, not by a unit test: both surfaces were
-  individually consistent, and only exercising them the same way showed the gap. The handler needed the
-  other half too — `memberSpacesWithin('')` answers nothing, so an optional parameter would have turned
-  into a read that silently returned empty rather than the cross-space read it advertises.
-
 #### Recall, expansion and the byte budget
 
 - **`POST /api/recall` answered to HALF the byte budget of `POST /api/brain/recall`.** 25 000 characters
@@ -1335,9 +1065,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is in the code and it is sound: the number that DECIDED a result's position must not be the one a caller
   cannot read, and three floats are not a cost worth a flag. The flag governs `matchedText`,
   `embeddingModel` and `seq`, which is three fields rather than six.
-
-  An integrator reading the guide would have believed the ordering signal was hidden from them by default.
-  Corrected in both copies of the parameter table.
 
 - **The guides now say which cross-encoder to pick, because the wrong one is a regression rather than a
   no-op.** Same instance, same questions, same budget, only the model changed: no reranker 45.7% first
@@ -1358,18 +1085,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documents as *"nothing was cut for size reasons"* — so the one signal a caller had for an incomplete
   answer was actively saying the answer was complete.
 
-  **One cause, two symptoms that look unrelated.** Both walks track whether a NODE has been reached, never
-  whether an EDGE has been followed, and the answer was derived from that decision. A self-loop is invisible
-  by definition — its far end is the node you are standing on, so it is always "already visited" — and the
-  second of two differently-labelled edges to one target lost to whichever was read first. On the reporter's
-  space a node with six outbound edges returned three, missing both self-loops and a `triggerable` that was
-  competing with an `optional` to the same node. Asked for one at a time, each came back.
-
-  **`paths` could not have carried it, and that is why this is a contract change rather than a patch.** A
-  path is a chain of record ids, so two edges between one pair produce the identical chain — the
-  alternate-route bookkeeping compares chains and correctly concludes it has seen that route. There is no
-  second route to record. There is a second relationship, and nothing in the shape could say so.
-
   **So the answer is the subgraph: the nodes reached, and every relationship among them.** `traverse`
   already returned a flat `edges` list and its shape is unchanged — it now holds every edge among the
   returned nodes rather than one per node, and an edge to a record that is not in `nodes` is still left out.
@@ -1385,27 +1100,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `paths[0][paths[0].length - 2]`. The flat `edges` list on `POST /traverse` is unaffected — it has no entry
   around it to state the ends — so this is one shape changing, not two.
 
-  **It reaches the benchmark, which is why it went first.** Across the ten LoCoMo extractions: 486 edges,
-  and **21 node pairs carry more than one edge** — a person tied to painting twice, to a pet twice, to a
-  team twice. `B-6` grades retrieval through `recall(traverse: n)`, so every figure that run would have
-  produced was taken over a graph quietly missing relationships.
-
 - **The recorder-start stamp could be skipped by an unrelated failure five statements earlier.** The
   conversion pre-flight clamps its `since` to when this instance began recording, so an unstamped
   instance reports the full retention window over a recorder it cannot vouch for — the defect `B-13`
   was filed for, where a space of 270 chronos answered `count: 1`.
-
-  That was fixed once by moving the stamp out of `index.ts` into `startConfiguredInstanceServices`,
-  because a first-run instance never reaches the boot path. Correct, and not enough: it landed as the
-  **last of six statements inside one `try` whose `catch` only logs**. An index creation racing a Mongo
-  that is still coming up skips every statement after it — including the stamp — and says so in a line
-  nobody reads.
-
-  Caught by CI, intermittently, on a change that touched no server code at all. The stamp now sits
-  outside that block; it needs no net of its own, because it already never throws, and what it needed
-  was not to be downstream of five unrelated things inside somebody else's. A gate asserts the
-  POSITION rather than the behaviour, and also that nothing else was hoisted out with it — the other
-  five failures MUST stay tolerated, or a slow database takes the boot down.
 
 - **A record's links and edges can be changed after it is created.** `linkEntities`, `linkFacts`,
   `linkChronos`, `linkFiles` and `edges` are now accepted on the UPDATE verb of every door that accepts
@@ -1421,18 +1119,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **`edges` rides in the same body**, so an edge can be drawn or adjusted through the record it hangs
   off, on an update as well as a create.
 
-  A body carrying only a connection field is a valid patch. It used to answer
-  `400 "At least one field must be provided"` — the field was not in the update allowlist, so it was not
-  rejected, it was not SEEN.
-
 - **Merging two entities left every LINK RECORD pointing at the entity it had just deleted.** `merge.ts`
   relinks edges, facts, chrono entries and file metadata by rewriting their `entityIds` arrays, and had
   no reference to the `links` collection at all. On a space that has been through the link conversion —
   which every space becomes at the boot after it is created — the links therefore survived the merge
   unchanged, pointing at an id phase 5 then removed.
-
-  Measured on a live instance: before the merge the link named the absorbed entity, after it the link
-  still named it, and the entity was gone.
 
   **A link is RE-KEYED rather than updated.** Its `_id` is derived from both endpoints, so moving the
   `to` changes its identity — the same reason edges have a re-key path. The old id gets a tombstone, or
@@ -1441,9 +1132,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **Deleting an entity was never exposed to this**: the delete guard reads link records and refuses with
   a `409`. A merge deletes the absorbed entity directly rather than passing that guard, which is why it
   was the one path that could do it.
-
-  It is the shape phase 3b of the same function already describes — *"Edges, facts and chrono were
-  relinked and files were not"* — one collection later.
 
 - **The link conversion DELETED links that existed only as records, and its own log said it removed
   nothing.** The 5.0 migration walks each record and reconciles its links from the legacy ARRAY fields.
@@ -1454,11 +1142,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   The operator was told the opposite in the same breath: *"It is additive: nothing is removed, the
   arrays keep being read until a space is marked."*
-
-  **The count is what hid it.** `N link(s) created` was a `countDocuments` delta, not a count of
-  creations — one creation and one removal net to `0`, which is indistinguishable from a space that
-  needed no work. A live instance printed `general converted — -1 link(s) created`, and a creation
-  count cannot be negative.
 
   The conversion no longer deletes, and it reports the creation count `reconcileLinks` already returns
   rather than measuring around it. **An ordinary write still deletes** — `linkEntities: []` means
@@ -1475,25 +1158,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so the first-run boot converts nothing and CI never saw it; any restart that preserves the config did.
   The failure named the link migration, which the test had nothing to do with.
 
-  Nothing about the product changed. The case now writes `linkEntities`/`linkFacts`, which work on a
-  converted space and an unconverted one alike, and asserts the link through a WALK rather than through
-  the echoed arrays — those are populated only on the unconverted side, so asserting them asserted which
-  side of the migration the space happened to be on.
-
   A new gate refuses an array-link field aimed at a space a test did not create.
 
 - **A walk did not return the node it started from, so an isolated record and a bad id looked the same.**
   `graph_traverse`'s own schema has always described *"`startId` itself at depth 0, so a walk that finds
   nothing still comes back with one node rather than empty — an empty `nodes` means the id resolved to
   nothing, which is a different answer from 'it has no neighbours'."* It never sent that node.
-
-  A caller who believed the description read every empty walk as a bad id. That cost four probe
-  iterations here, on an instance where the id was demonstrably good, and a schema description is what a
-  caller reads while constructing arguments.
-
-  **The promise is made true rather than the sentence corrected.** Both were open; emitting the node
-  costs one row and gives callers the distinction, and correcting the sentence would have left them with
-  no way to tell a bad id from a lonely one — which is the reason the sentence exists.
 
   The start node counts against `limit`, because it is a node: `limit: 1` answers the start alone, which
   is also the cheapest way to ask whether an id exists. **An id that resolves to nothing is still empty**,
@@ -1517,17 +1187,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instance was last rebooted — which is why it went unreported: a reporter could not reproduce it and a
   responder could.
 
-  **It also meant the two spellings swapped validity across a line a caller cannot see**: `entityIds`
-  worked and `linkEntities` did not on an unconverted space, and a converted space refuses `entityIds`
-  outright. And `linkEntities` is the spelling the MCP schemas publish, so an agent reading the contract
-  was told to use the one that did nothing.
-
   The writer now resolves the shape through the same selector every reader uses. **Nothing about the
   request changed**, and a caller who worked around this with `entityIds` is unaffected.
-
-  **Not fixed by making new spaces converted**, which was the first idea and contradicts a recorded
-  decision: the conversion is *"a performance and consistency upgrade rather than a correctness
-  prerequisite"*, so an unconverted space is a supported state and the writer has to work on one.
 
 - **An edge you drew to a fact, chrono entry or file was stored and reached by nothing.** An edge declares
   the kind at each end, the writer REFUSES a kind that does not match the record, and the edge is then
@@ -1535,11 +1196,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   everything accepted. The walk resolved every neighbour against the entities collection alone and dropped
   whatever was not there: no flag, no `truncated`, no error. On the Graph tab such an edge was saved, listed
   on the Edges table, and never drawn.
-
-  That is the *"stored, returned, and points at nothing traversable"* report arriving by a different route,
-  and it is why the contradiction resolver still refuses to draw one of these — a refusal written a month
-  before endpoint kinds existed, whose stated reason is obsolete and whose EFFECT was right, which is why
-  nothing ever contradicted it.
 
   **No include flag governs it, and the asymmetry is deliberate.** `includeMemories` and `includeFiles` are
   opt-in because they follow IMPLICIT links — a record that happens to name this one — of which a busy node
@@ -1561,13 +1217,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   space holds 270 chronos already carrying `entityIds`, `count` was 1, and `since` reported ninety days
   back because that is `retentionDays`.
 
-  It is the second, quieter version of this endpoint's known worst failure. The first was an inert
-  recorder answering `writers: []` for a space being written to. This one is a HEALTHY recorder whose
-  window is younger than the field says — and our own guidance, *"read `since` before you read the
-  count"*, does not save a reader, because `since` is the misleading field. The risk is a sequence rather
-  than a value: upgrade, run the pre-flight, see `writers: []`, convert, and the writers surface
-  afterwards one at a time as `400`s.
-
   `since` is clamped to when this instance began recording, and the new `recorderStartedAt` says why a
   ninety-day request came back as half an hour. The stamp is written once when the instance's services start —
   the path a first-run install goes through too, not only a restart — and it is **the oldest existing
@@ -1586,25 +1235,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   names the allowed ones". `links` now sorts by `createdAt`, `updatedAt`, `from` and `to` — a link has no
   name, title or type of its own, it IS a pair of endpoints.
 
-  **And `parseSortParam` accepts an absent set rather than assuming one.** Both doors index the map and
-  pass the result straight through, so the function that RECEIVES it is the only place that can hold
-  this: a collection somebody forgets is now a `400` saying sorting is not supported, not a crash. A gate
-  reads the enum out of the published schema and requires every member to be sortable-or-refused, because
-  what recurs is the PAIRING — a collection reaching the enum without reaching the map.
-
 - **The link conversion runs itself at boot, because the documented way to run it could not be run.**
   The canary operator, 2026-09-15: `npm run links:convert` on a deployed instance answers
 
   ```
   Error: Cannot find module '/app/scripts/convert-links.mjs'
   ```
-
-  The npm script survives into the published image and resolves its path correctly; `scripts/` is not
-  copied. So it presents as a Node stack trace rather than `missing script`, and reads like a broken
-  installation of theirs. `04b-graph-api.md` documented that script as **the** mechanism and there was no
-  second route — the pre-flight only reports, and `POST /links` writes one link at a time. "Spaces
-  converted" was a set a container deployment could not join, and the 5.0 removal of the six link ARRAY
-  fields is gated on exactly that set.
 
   Every start now converts each space not yet marked `completeLinkage` and marks the ones whose walk
   finished cleanly. It is additive — links are created, no array is removed, a space reads correctly
@@ -1617,12 +1253,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   handshake and no peer can write the arrays back. `renameMemoriesToFacts` runs at boot in the same
   release on the same argument.
 
-  **It does not refuse the boot on a failure**, deliberately: a space whose walk throws is left unmarked,
-  which is exactly its behaviour before this ran — it keeps reading its arrays and accepting array
-  writes. Exiting would turn a recoverable data problem into an instance nobody can log into to look at.
-  The space is named in an `ERROR` line and the next boot retries, so the array removal has a condition
-  it can check rather than an assumption: a space is either marked or named.
-
 #### Claims, chrono, supersession and contradictions
 
 - **A claim an AI assistant originated is marked, so the graph records that it was SAID rather than that it
@@ -1634,12 +1264,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolve the user's (*"Yes."* means nothing alone). A fact is attributed to whoever ORIGINATED it, not to
   the turn it was read in — most of what an assistant appears to state is the user's own fact echoed back.
   What is left, where the assistant really is the origin, is written with `attributed: true`.
-
-  **Measured rather than assumed**, over the 246,929 turns of `longmemeval_s`: 842 of its 896
-  evidence-bearing turns are the user's (94%), 54 are the assistant's, and 32 of those 54 repeat over half
-  of the preceding user turn's own words. The assistant is the sole origin of about 1% of the evidence —
-  and reading those turns is what showed the two shapes worth keeping: world knowledge it supplied, and an
-  artefact it produced on request.
 
   The mark is a declared boolean on the claim type, so a filter on it is a native index pre-filter on both
   doors rather than an exhaustive scan, and the validator refuses a file in BOTH directions — an unmarked
@@ -1663,11 +1287,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exactly what it saw before, and the client asks for `true`, so the Brain page is unchanged too. Nothing
   moves for anybody who does not ask. Sending it on any collection but `chrono` is refused rather than
   ignored: a silently dropped flag is a caller who believes they asked for something.
-
-  It is the same derivation the list route uses, not a second one — `whenDuePasses` makes "what a passed
-  due moment means" a per-TYPE decision, and a copy of that rule would be a second answer to it. Proved
-  against a live instance on both doors, including that `deriveStatus: true` and the list route agree
-  about the same entry, which is the condition for ever retiring that route.
 
   **And the operator page now says the status it shows is worked out rather than stored**, because that
   is the half an operator meets: a backup or an export reads what was stored, so an entry the page calls
@@ -1709,9 +1328,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   machine-readable and is not**, which is worse than prose rather than a lesser version of it: shipping
   `transitive: true` while `traverse` ignores it is the documented-but-inert defect at the scale of a
   feature.
-
-  The pattern is already proven one tier up — a SPACE carries `usageNotes`, and that is where the shared
-  dev board keeps the runbook three parties read at handshake.
 
 - **The space editor could reach a state where saving was IMPOSSIBLE, and the only way out read as
   discard.** Owner-reported, and it was two defects that made each other worse.
@@ -1756,13 +1372,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   embeddings for records with no vector since 4.4, and had no MCP counterpart. It is also
   `POST /api/space_reembed`, takes `kinds` and `limit`, and returns the same counts the route does.
 
-  **It was invisible rather than forgotten, which is the part worth reading.** The capability map paired
-  that route with `space_reindex` and the parity gate reads the map, so a REST-only capability was recorded
-  as covered — inside the file built to end exactly that. The two do opposite things: `space_reindex`
-  re-embeds EVERY record with the configured model and returns as soon as the job starts; `space_reembed`
-  touches only records with no vector, is awaited, and the counts are the answer. A map keyed on which
-  DATA a door touches cannot tell those apart; the question is what makes a pairing true.
-
 - **A route was attributed to a path nothing serves, in every gate that reads the route list.** The MCP
   OAuth consent screen is served at `/mcp-oauth/consent`; the mount graph resolved its router by bare name,
   another file's function parameter is also called `router`, and that one is mounted under `/api/files` —
@@ -1772,12 +1381,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The graph now scopes a parameter alias to the file that binds it, keeps a direct mount authoritative
   everywhere (a first attempt at this dropped all five space routes), and learned the fourth mount form —
   a router BUILT by a function and mounted through the value it returns.
-
-  **It was found by the one audit that compares the route list against the live express router objects,
-  and that audit had rotted because nothing ran it.** It grepped for the capability map in a file the map
-  had moved out of, so it reported all 46 tools as unmapped; its own route scan could not resolve a router
-  passed as a parameter, so it reported a real route as unserved. Forty-seven findings, every one false —
-  which is worse than no audit, because the next person to run it stops trusting the tooling.
 
   It reads the shared list and the imported map now, accounts explicitly for the routes only one side can
   see, and **runs in preflight**. A check nobody runs is a claim.
@@ -1792,10 +1395,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   list now, which gained the ability to hand back the source that registers each route — that window was
   the reason the second copy existed.
 
-  **The manual surface-matrix audit keeps its own scan on purpose.** It exists to cross-check the static
-  extraction against what express actually serves at runtime, and pointing it at the module it is meant to
-  check would make the comparison assert that a thing equals itself.
-
 - **A backfill could report records as suppressed when nothing was suppressed.** `space_reembed`'s
   `skippedSuppressed` is the number that tells an operator *"the setting is still on"*, and it was
   computed as `count(vectorless) - count(vectorless AND allowed)` — two separate reads of a collection
@@ -1806,10 +1405,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Both counts now come from one `$facet` pass, so they describe the same instant and their difference is
   what the exclusion removed rather than what the worker happened to finish in between. `remaining` came
   from a third live read and now shares the same snapshot.
-
-  Caught as an intermittent `skippedSuppressed: 1` in a loaded full-suite run, against a space whose
-  suppression had just been turned off — and passing when that file ran alone, which is the signature the
-  same file already documents twelve lines above the assertion that failed.
 
 #### Files
 
@@ -1876,23 +1471,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The UNSTARTED rows move — to `F-27` and `F-28` — because the shipped side is quoted in source
   comments and in merged PR titles that cannot be corrected. Both rows record why.
 
-  **`F-24` is the opposite case and is worth telling apart:** its citations really are its own, and its
-  step one — free-text descriptions on a type and a property — has shipped without the row saying so. A
-  reader who greps it, finds six files and concludes the row is underway is half right, which is the
-  more dangerous half.
-
 - **A client method called a route the server has never served.** `updateSyncSchedule` PATCHed
   `/api/networks/{id}/members/{memberId}`; that collection takes a `POST`, a `PUT` on the signing key and a
   `DELETE`, and nothing else. Nothing in the client called the method, so nobody had seen the 404 yet — it
   is deleted rather than pointed somewhere, because a method with no caller and no route is not a feature
   waiting to be wired up.
-
-  **It was found by teaching the client-path gate to read the VERB**, which is the part that makes the
-  check exact. `POST /api/{tool}` is a live route, so a path on its own resolves every two-segment
-  `/api/x` whatever `x` is; matched with its method, the question has one answer. The gate also stops
-  reporting a query string as part of the path — six calls read as unmatched for that reason — and counts
-  the paths it cannot read statically instead of silently passing them, so the skip cannot grow into the
-  gate.
 
 - **The gate that checks every mutating route is guarded could not see the five most destructive ones.**
   Wiping a space, importing one, exporting one, reloading the config and rotating the signing key are
@@ -1903,10 +1486,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **All five turned out to be correctly guarded and correctly audited**, so nothing was exposed; what was
   missing was the check. Proven by mutation: stripping the admin guard off `POST /api/admin/reload-config`
   left the suite green before this change and names the route after it.
-
-  **The route list was already a shared module, and the guard analysis had kept its own copy of it** — so
-  teaching the module to see `app` moved nine routes into every other gate's view and left the one that
-  matters exactly as blind. It reads the shared list now.
 
 - **Every path the client calls is now checked against a route the server mounts.** There is no type
   between a template string and a router, so a renamed route is a runtime 404 rather than a build error —
@@ -1928,14 +1507,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **This is the defect the canary operator reported against `query`, answered on the tool they named.**
   Nothing swept the siblings, and the sweep is where the cost was.
 
-  It was two classes, and the second is the expensive one. `recall`, `similar`, `graph_traverse`,
-  `save_bulk`, `save_link`, `delete_entity_preview`, `list_spaces`, `space_stats`, `space_meta` and
-  `network_peers` already built an object and dropped it — `graph_traverse` answered
-  `{"ok":true,"text":"{\"nodes\":[…]}","data":null}` throughout. **Every write tool then had the same
-  defect wearing a sentence**: `save_entity` answered `Entity 'Ada' (person) upserted (ID 9f2…).` and
-  nothing else, so getting the id of a record you had just written meant a regular expression over
-  English. Creates, updates, deletes, merges, file writes and `network_sync` were all in that state.
-
   **What a tool carries now is the record it wrote, or the identity of what it acted on** — one rule, not
   a decision per tool. A delete answers `{"_id": …, "deleted": true}`; a merge answers the survivor and
   the absorbed id; `move_file` answers `{"from": …, "to": …}`.
@@ -1954,107 +1525,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it compared `data` across the two doors with `deepEqual`, which passes for two nulls, so it reported
   agreement about an answer neither door gave.
 
-### Removed
-
-#### `filter` is the one read path
-
-- **`POST /api/brain/filter` is gone, and with it the last second shape of any capability.** `B-9` step
-  3c, which closes a row open since 2026-09-16. It was not a thin route over the `filter` tool — it was a
-  SECOND IMPLEMENTATION of it: its own body validation, its own paging parse, its own proxy fan-out, its
-  own budget resolution and its own error handling, four hundred lines beside a tool that already did all
-  of it.
-
-  Read a collection at `POST /api/filter` — the generic tool door, which has no per-tool code at all.
-
-  **THE ENVELOPE CHANGES, and that is the port.** One shape for every tool, so a caller writes the
-  response handling once:
-
-  | | was | is |
-  |---|---|---|
-  | `200` | `{results, count, total, limit, skip, truncated, …}` | `{ok: true, text, data}` — all of that inside `data` |
-  | a refusal | `{error}` | `{ok: false, error, data}`, with the same sentence the MCP door uses |
-
-  **Why this was worth four PRs rather than one.** Every capability gap had to close first, because a
-  deletion that also removes something is indistinguishable, from outside, from a deletion that broke
-  something. Steps 3a and 3b removed nine `GET` routes and found three defects in `filter` on the way;
-  this one removes the tenth shape and nothing else.
-
-  Governance simplifies with it: `filter` had a `ROUTE_RIGHTS` row beside its `TOOL_RIGHTS` row, which is
-  two governance points for one capability. One row governs both doors now.
-
-- **The five collection LIST routes are gone. Reading a collection is `filter`.** `B-9` step 3b, and a
-  break: `GET /api/brain/spaces/:spaceId/{facts,entities,edges,chrono,files}` each answered what a
-  predicate over one collection answers, with their own query grammar, their own page caps and their own
-  response key.
-
-  ```json
-  POST /api/brain/filter
-  { "space": "work", "collection": "facts", "limit": 100, "tag": "release" }
-  ```
-
-  | | the routes | `filter` |
-  |---|---|---|
-  | the rows | `{ facts }`, `{ entities }`, `{ edges }`, `{ chrono }`, `{ files }` | `{ results }`, whichever collection |
-  | the page | default 50 or 100, hard max 200 or 500, and the five did not agree | `limit`, default 200, no maximum |
-  | a fact by entity id | `?entity=<id>` | `filter: { entityIds: "<id>" }` |
-  | an entity by exact name | `?name=` | `filter: { name: ... }` |
-  | chrono tag sets and date ranges | `?tags=`, `?tagsAny=`, `?after=`, `?before=` | `$all`, `$in` and a `createdAt` range |
-  | a file by path | `?path=` | `path`, an argument, normalised the same way |
-
-  **THREE THINGS THE ROUTES DID THAT A CALLER NOW HAS TO ASK FOR**, and each is silent if you miss it:
-
-  - **a chrono `status` derived on read** — send `deriveStatus: true`, or `active` means what is stored
-    rather than what is true. The route always derived; `filter` defaults to the stored value because a
-    predicate has to be able to match what is on disk.
-  - **chunk records hidden from a file listing** — the route excluded them by default, `filter` does not.
-    Send `filter: { parentFileId: { "$exists": false } }` or a converted document looks like the same
-    file many times over.
-  - **an unsupported paging name refused by name** — the routes answered `'offset' is not a parameter,
-    use 'skip'`. `filter`'s body is strictly allowlisted so it is still a `400`, and it still names the
-    parameter to use: the alias list moved onto the strict-body refusal rather than going with the routes.
-
-  Nothing an operator does in the UI changed. `listFileMeta` went with them: it had no caller, because the
-  file manager lists through the file STORE, which is a different question.
-
-- **The five `GET` routes that read ONE brain record are gone. Read a record through `filter`.** `B-9`
-  step 3a, and a break: `GET /api/brain/spaces/:spaceId/{facts,entities,edges,chrono}/:id` and
-  `GET .../entities/by-ids` all answered what a predicate over one collection answers, with their own
-  response shape, their own refusals and their own 404.
-
-  ```json
-  POST /api/brain/filter
-  { "space": "work", "collection": "entities", "filter": { "_id": "8f3c…" }, "limit": 1 }
-  ```
-
-  A set of ids is the same call with `$in`, which is what `entities/by-ids` did; unknown ids are absent
-  from `results` exactly as they were absent from `entities`.
-
-  **The one behaviour that CHANGED, and it is the reason this is a `Removed` rather than a rename: a
-  record that is not there is `200` with `results: []`, not `404`.** A predicate matching nothing and a
-  record not existing are the same event to a filter, and pretending otherwise would mean `filter`
-  answering 404 for an ordinary empty page. Branch on `results.length`.
-
-  **Two things the routes DID after the query, which a straight swap drops silently.** Both are
-  identical on most records and wrong on exactly the record somebody is looking at:
-
-  | | the route | `filter` |
-  |---|---|---|
-  | a chrono `status` | derived on read | the STORED value unless `deriveStatus: true` |
-  | `matchedText`, `embeddingModel` | returned by a by-id read, withheld by the list beside it | withheld unless `includeDiagnostics: true` |
-
-  Send `deriveStatus: true` on a chrono read to get what the route gave you; it is refused on any other
-  collection rather than ignored. The diagnostics default is now the same on both shapes, which the two
-  routes never were.
-
-  **A fixture bug fell out of this and it is worth naming, because it is the section rule one level up.**
-  The duplicate-scanner suite waited for its records to be index-visible through a helper that took a flat
-  list of four ids and looked at the first two. So it proved one PAIR was visible and concluded about both
-  — CI then failed with `expected >=2 candidates, got 1`, on exactly the pair nobody had waited for. It
-  takes a list of PAIRS now, so a caller cannot hand it two and have one silently ignored.
-
-  Nothing an operator does in the UI changed: the client was already reading everything else through
-  `filter` and now reads these the same way.
-
 ### Internal
 
 #### The benchmark corpus and its extraction pipeline
@@ -2071,9 +1541,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   print a hash. It now hashes the response as it streams, writes to a `.partial`, and renames into the
   cache only after the digest verifies — so an unverified corpus never appears where a reader expects a
   pinned one.
-
-  The refusal is expressed once, against a digest: `assertPinnedDigest` holds the rule and the buffer
-  form delegates to it, rather than a streaming path growing its own copy of the comparison.
 
   `longmemeval_s` is now pinned at `08d8dad4be43…`, 278,025,796 bytes. `_m` and `_oracle` remain
   recorded and unpinned, which the fetcher refuses exactly as it refuses a mismatch.
@@ -2109,12 +1576,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   always been the smaller. The spill test budgeted at 80% of REST’s full answer and asserted that MCP
   truncates too — which held by a margin nobody had measured.
 
-  Making storage bookkeeping opt-in removes the same ABSOLUTE bytes from both doors, which is a smaller
-  proportion of the larger one. The bar moved from `M > 0.8R` to `M > 0.8R + 0.2S`, MCP’s answer dropped
-  under it, and CI failed an assertion with nothing wrong in either door. The budget is now 80% of the
-  SMALLER door’s full answer, so it binds on both by construction and cannot rot the next time either
-  envelope changes size.
-
 #### Documentation, gates and internal structure
 
 - **Graph-augmented recall is its own page, and the gates that named the page it used to be on now find it
@@ -2148,9 +1609,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   offline files have no instance to share, which is what `@needs-instance` declares — and the 16 files
   that do declare it still run one at a time.
 
-  Explicit sleeps across the whole test tree total 5.3 seconds in four call sites, so the time was
-  queueing, not waiting.
-
   **And the runner REFUSES a stale `server/dist`.** These files import from it; preflight builds it
   first and `test:all:core` never has, so running the suite straight after a branch switch tested
   whatever was compiled last. That cost two confused diagnoses in one evening — a fix that was already
@@ -2158,20 +1616,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   test. A check rather than a build, deliberately: building would hide the mistake and add a minute to
   every run, while refusing costs milliseconds and says what to do. `--allow-stale` is the escape hatch.
 
-  **The guard the change owes:** `openTestMongo('x')` drops `ythril_harness_x` on entry and exit, so two
-  files sharing a name were harmless while everything ran one at a time and delete each other's
-  documents in parallel — intermittently, blaming whichever file was unlucky.
-  `a-db-harness-name-is-unique` keeps all 48 names distinct.
-
 - **Six gates asserted a SITE rather than a rule, and every one of them went red on a change that improved
   the code.**
-
-  A guard recognised by a list of five names — the same list whose missing `requireMcpAuth` once caused the
-  entire agent-facing API to be *exempted* rather than checked. A client-body extractor that knew only the
-  `/spaces/${id}/…` template and so reported "no client POST to /recall" for a route the client calls on
-  every search. A count of one guard spelling standing in for "all three read routes carry the retryability
-  wrapper". An inline expression pinned by its exact text, which broke when it moved into a shared helper
-  that makes the rule harder to get wrong.
 
   All six now assert the rule: the guard list is DERIVED from the middleware that reaches `resolveAuthOrFail`
   with a floor under it, the extractor knows both route shapes, the wrapper is checked per route, and the
