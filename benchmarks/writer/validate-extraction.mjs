@@ -64,10 +64,27 @@ const MAX_CLAIMS_FROM_ONE_TURN_SHARE = 0.15;
 /**
  * The statuses an extraction may WRITE.
  *
- * The store also knows `overdue`, which it derives on read from the dates and the type's date policy — so it
- * is deliberately absent here rather than forgotten.
+ * **Narrower than the store's own vocabulary, and on purpose.** A Ythril chrono record may hold `active`, and
+ * the read path may return `overdue`; neither is something an extraction can honestly produce from a
+ * transcript. See `RETIRED_CHRONO_STATUSES` for what each one goes back to.
  */
-const CHRONO_STATUSES = ['upcoming', 'active', 'completed', 'cancelled'];
+const CHRONO_STATUSES = ['upcoming', 'completed', 'cancelled'];
+
+/**
+ * The statuses this refuses, each with the sentence that says where the record goes instead.
+ *
+ * **A refusal that only lists what is allowed is a wall.** Three separate extractions reached for `active`
+ * because the thing they were describing genuinely was under way, and being told the word is invalid does
+ * not tell anybody that the thing belongs in a different collection. The reason is the part that stops the
+ * next run making the same choice, so it lives beside the value rather than in a comment.
+ */
+const RETIRED_CHRONO_STATUSES = {
+  overdue: 'the read path derives and never stored. Write the status it actually has and let the reader '
+    + 'decide whether a passed date means late.',
+  active: '`date` is the day a thing STARTED, and something merely under way has no stated start — so the '
+    + 'slot gets filled with the day it was mentioned, which is a fabrication with a date on it. A subject '
+    + 'that persists is an entity; founding it, launching it and closing it are the events.',
+};
 
 /** `YYYY-MM-DD`, and nothing looser. A partial date cannot be compared and a relative one cannot be resolved. */
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -110,6 +127,15 @@ export function validateExtraction(extraction, schemaEntries) {
   const claimTypes = typesOf('fact');
   const edgeDefs = new Map(schemaEntries.filter(e => e.knowledgeType === 'edge')
     .map(e => [e.typeName, e.schema.endpoints]));
+  /*
+   * The ENUMS a label's properties declare, which the instance enforces and this did not.
+   *
+   * Found 2026-09-21 by a gate asserting that an undeclared `knows.kind` is refused: it was not. The
+   * instance answers 400 for it, on request 340 of several hundred, which is the exact failure this whole
+   * module exists to move forward — and until then the only symptom was a space missing one edge.
+   */
+  const edgeProps = new Map(schemaEntries.filter(e => e.knowledgeType === 'edge')
+    .map(e => [e.typeName, e.schema.propertySchemas ?? {}]));
 
   // The floor. A schema that loaded as nothing would make every check below vacuous and the file would
   // "validate" into a space that declares nothing and therefore validates nothing itself.
@@ -176,17 +202,16 @@ export function validateExtraction(extraction, schemaEntries) {
     if (!chronoTypes.has(c.type)) say(`${at} ('${c.key}') has type '${c.type}', which the schema does not declare`);
     if (!c.title) say(`${at} ('${c.key}') has no title`);
     /*
-     * `status` is REQUIRED, and `overdue` is refused.
+     * `status` is REQUIRED, and two statuses the STORE accepts are refused here.
      *
      * Required, because a default would make every silent omission read as a deliberate claim — the same
-     * asymmetry as `producedBy.unattended`. Refused for `overdue`, because the read path DERIVES that from
-     * the dates and the type's date policy and never stores it: a written one is a value in the collection
-     * that disagrees with the value an operator is shown.
+     * asymmetry as `producedBy.unattended`. The two refusals carry their own reasons, because a caller told
+     * only that a word is invalid picks the next-nearest word rather than the right collection.
      */
     if (!CHRONO_STATUSES.includes(c.status)) {
-      say(c.status === 'overdue'
-        ? `${at} ('${c.key}') has status 'overdue', which the read path derives and never stored. Write the `
-          + 'status it actually has and let the reader decide whether a passed date means late.'
+      const retired = RETIRED_CHRONO_STATUSES[c.status];
+      say(retired
+        ? `${at} ('${c.key}') has status '${c.status}', which ${retired}`
         : `${at} ('${c.key}') has status '${c.status}', which is not one of: ${CHRONO_STATUSES.join(', ')}`);
     }
     if (!ISO_DATE.test(String(c.date ?? ''))) say(`${at} ('${c.key}') has date '${c.date}', which is not YYYY-MM-DD`);
@@ -290,6 +315,13 @@ export function validateExtraction(extraction, schemaEntries) {
     for (const [k, v] of Object.entries(e.properties ?? {})) {
       if ((k === 'since' || k === 'until') && !ISO_DATE.test(String(v))) {
         say(`${at} ('${e.label}') has ${k} '${v}', which is not YYYY-MM-DD`);
+      }
+      const allowedValues = edgeProps.get(e.label)?.[k]?.enum;
+      if (Array.isArray(allowedValues) && !allowedValues.includes(v)) {
+        say(`${at} ('${e.label}') has ${k} '${v}', which the schema does not declare. It allows: `
+          + `${allowedValues.join(', ')}. A value outside the enum is a 400 from the instance, and a `
+          + 'relationship the vocabulary cannot express belongs in a claim rather than in a label it does '
+          + 'not fit.');
       }
     }
   }

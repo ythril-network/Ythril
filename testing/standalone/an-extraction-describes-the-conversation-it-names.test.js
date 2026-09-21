@@ -110,6 +110,28 @@ describe('coverage measured against the corpus, not against the file', () => {
     assert.deepEqual(problems, []);
   });
 
+  it('CATCHES a claim-covered conversation whose SESSIONS block is short', () => {
+    /*
+     * The hole this file's own coverage check left, and it shipped a broken extraction through `check`
+     * before it was found. 2026-09-21: an extractor was killed while writing its last part and wrote the
+     * part's claims without the `sessions` block that goes with them. Every turn of the conversation was
+     * cited by some claim, so coverage read 100%; the merged file declared 20 sessions of a 29-session
+     * conversation and `check` said `valid`.
+     *
+     * **A session is not bookkeeping.** The writer creates one transcript per declared session and files
+     * every claim under one, so nine undeclared sessions are nine transcripts that never exist and a claim
+     * layer whose provenance points at nothing. The old check asked `declared ⊆ real`; this asks the other
+     * direction, which is the one a truncated part fails.
+     */
+    const problems = extractionMatchesConversation(
+      { conversationId: 'conv-x', sessions: [{ turns: ['D1:1'] }],
+        claims: [{ sourceTurns: ['D1:1'] }, { sourceTurns: ['D1:2'] }] },
+      conversation('conv-x', ['D1:1', 'D1:2']));
+    assert.match(problems.join('\n'), /declare/i,
+      'every turn is cited by a claim, so only the sessions block can report this');
+    assert.match(problems.join('\n'), /D1:2/);
+  });
+
   it('refuses a conversation with no turns rather than calling the extraction complete', () => {
     // An empty right-hand side makes every assertion above vacuous: no id is foreign when none is real,
     // and coverage of nothing is total. It is the shape a failed load produces.

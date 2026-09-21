@@ -81,6 +81,29 @@ export function extractionMatchesConversation(extraction, conversation) {
   }
 
   /*
+   * AND THE OTHER DIRECTION — every turn the conversation has must be DECLARED by a session here, not
+   * merely cited by a claim.
+   *
+   * The check below asks `real ⊆ cited` and the foreign-id check above asks `declared ⊆ real`. Neither asks
+   * `real ⊆ declared`, and on 2026-09-21 that gap shipped a broken extraction straight through `check`: an
+   * extractor killed while writing its last part wrote that part's claims without the `sessions` block that
+   * belonged with them. Every turn was cited, so coverage read 100%, and the merged file declared 20
+   * sessions of a 29-session conversation while `check` printed `valid`.
+   *
+   * A session is not bookkeeping. `write-space.mjs` creates one transcript per declared session and files
+   * every claim under one, so nine undeclared sessions are nine transcripts that never exist and a claim
+   * layer whose provenance points at nothing.
+   */
+  const undeclared = [...real].filter(t => !declared.has(t));
+  if (undeclared.length > 0) {
+    problems.push(`${undeclared.length} of ${real.size} turns in ${id} are in no declared session: `
+      + `${undeclared.slice(0, 12).join(', ')}${undeclared.length > 12 ? ', …' : ''}. A claim may still name `
+      + 'them, which is why coverage can read complete — but the writer makes one transcript per declared '
+      + 'session and files every claim under one, so a session nothing declares is a session that never '
+      + 'reaches the space. This is the shape a part truncated mid-write leaves behind.');
+  }
+
+  /*
    * Against the CORPUS, deliberately. The same count against the file's own `sessions` block is what
    * `check` already prints, and it is the reading a truncated extraction passes.
    */

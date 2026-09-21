@@ -222,7 +222,6 @@ There is one chrono type. What varies is `status`, and it is required:
 |---|---|
 | `completed` | it happened. Most of them. |
 | `upcoming` | they mean to do it and the date has not come, or the conversation never says it did |
-| `active` | it is under way across the conversation — a course being taken, a build in progress |
 | `cancelled` | it was called off, and the conversation says so |
 
 **A thing somebody plans is an event that has not happened yet, not a different kind of thing.**
@@ -234,8 +233,21 @@ opening night is tomorrow"*, and then nothing — no later session says it happe
 the speaker is still looking forward to opening. Do not promote it to `completed` because it probably
 happened; the graph would be asserting something nobody said.
 
-**Never write `overdue`.** It is derived on read from the dates, and a stored one disagrees with what the
-reader is shown.
+**Something merely ONGOING is not a chrono entry at all.** A course being taken, a studio being run, a diet
+being kept to, a build in progress. None of them has a stated start, so `date` gets filled with the day the
+thing happened to be mentioned — a date nobody gave you, wearing the authority of one somebody did. A
+subject that persists is what an **entity** is for: the course and the studio are an `organization`, the
+routine is an `activity`, and the claims say how it is going. What IS a chrono entry is the moment it
+changed — starting it, finishing it, giving it up — because somebody dated that.
+
+**Never write `active` or `overdue`.** `active` is the ongoing case above and belongs in the entity layer.
+`overdue` is derived on read from the dates, so a stored one disagrees with what the reader is shown.
+
+**`upcoming` will be rare, and that is a limit of the format rather than a failure of yours.** A plan is
+usually dated coarsely — *"next month"*, *"sometime in the spring"*, *"once the weather turns"* — and a
+chrono entry needs a resolved day, so most plans get no entry and live as claims instead. Never manufacture
+a day to make one fit. A conversation whose plans are all vague ends with no `upcoming` entries, and that is
+the correct outcome.
 
 ## When something took MORE THAN A DAY
 
@@ -280,6 +292,17 @@ than a day, and a weekend that merely contains something tells you when, not how
 counted four such turns in a single conversation and read them one way; read the other way its span count
 changes by a factor of two or three, on no evidence either way. So: no chrono entry, and the weekend goes
 in the claim.
+
+**What a thing IS can tell you it lasted more than a day, and that counts as knowing it.** Camping entails
+a night. So does a stay with somebody, a festival that runs Friday to Sunday, a trip far enough that
+nobody drives it twice in an evening. A 5K does not; nor does a concert, a wedding, a dinner or a match.
+The length is carried by the ordinary meaning of the word the speaker chose, and declining to read it is
+not caution — it is discarding something every reader of the sentence already knows. So *"we went camping
+last weekend"* is a span; *"we ran the 5K last weekend"* is not.
+
+**It has to be ENTAILED, not merely likely.** *"We were at the lake last weekend"* could be an afternoon,
+and *"we had people over last weekend"* almost certainly was. If the word does not carry the night with
+it, the length is not stated and the rule above applies unchanged.
 
 **A one-day event with an uncertain date is not a span, however tightly the uncertainty is bounded.**
 Giving a wedding the Monday and Sunday of its calendar week says the wedding took a week. Nothing
@@ -332,9 +355,16 @@ completed one, not yesterday-and-today — the same rule, since the day of speak
 would otherwise name.
 
 **The same applies to a weekend**, which is where it bites hardest because a weekend also decides whether
-a span is written at all: *"last weekend"* is the most recent one, *"this weekend"* and *"next weekend"*
-are the coming one. Said ON a Sunday, *"this weekend"* is the one starting six days later, not the day
-before — one rule, applied everywhere, rather than the right answer case by case.
+a span is written at all: *"last weekend"* is the most recent completed one, and *"next weekend"* is the
+one after the coming Saturday.
+
+**`this weekend` names the weekend IN PROGRESS when the session falls inside one.** Said on a Saturday or a
+Sunday, *"can you take me there this weekend?"* means today or tomorrow, not six or seven days out. This
+is the one place the day of speaking does count, and it is not an exception bolted on: a weekend is a
+two-day window rather than a point, so a session inside it is inside the thing being named. Said on any
+other day, *"this weekend"* is the coming Saturday and Sunday. When that leaves a one-day plan on a known
+day — a visit agreed on the Sunday, for the Sunday — it is a dated event like any other. The span rule does
+not touch it, because the visit takes a day and you have the day.
 
 **Two sessions can legitimately land on the same weekend, and that is not a mistake to fix.** A session on
 the Monday and a session on the Saturday both say *"last weekend"* and both mean the same two days, so a
@@ -547,6 +577,18 @@ precise and must not become precise: write *"for about three weeks as of 24 May 
 and true, rather than *"since 3 May 2023"*, which is searchable and invented. The anchor date is the exact
 part; the offset is as exact as the speaker made it. And give a fuzzy span no chrono entry — a chrono entry
 is for something that happened ON a date, so one built from a guess puts a made-up day on the timeline.
+
+**An undated *"it just happened"* gets the SESSION date.** *"I just got a new car"*, *"I finally opened my
+shop"*, *"I wrapped up my second script"* — news brought to the session with no day attached to it. The
+session date is not a guess here. It is the tightest bound the conversation states, the speaker is saying
+it because it is fresh, and the claim's `statedOn` already records that this is the day of the telling.
+Write the chrono entry with the session date and `status: completed`.
+
+**The distinction is where the uncertainty comes from, and it runs opposite to the rule above.** *"Last
+week I got married"* names an offset, which makes the session date KNOWN to be wrong — so no entry. *"I
+just finished"* names no offset at all, so nothing contradicts the session date. Refusing both is what put
+a shop opening, a tour, a video shoot and a flood off one conversation's timeline, which ended with
+sixteen entries across 568 turns: **this is the largest single source of missing events.**
 
 **Link every claim to what it is about.** This is what makes it reachable from another session, and it is how
 two facts stated months apart become one answer: both hang off the subject they share.
