@@ -70,9 +70,9 @@ const DIFFER_ON_PURPOSE = new Map();
  * purpose: a defect filed beside a sanctioned difference stops looking like a defect.
  */
 const KNOWN_GAP = new Map([
-  // EMPTY, and it has been. The one row it held — `sync_now:peerId` — was closed by giving
-  // `POST /api/notify/trigger` the same argument, so the case below has nothing to police yet. A row here
-  // is a defect somebody has not got to; the list may only shrink.
+  // EMPTY, and it has been. The one row it held — `sync_now:peerId` — was closed by giving the REST side a
+  // door that names a peer (`POST /api/networks/peers/:peerId/sync`), so the case below has nothing to
+  // police yet. A row here is a defect somebody has not got to; the list may only shrink.
 ]);
 
 /** `/api/spaces/:id/schema` → a concrete path an audit rule's regex can be tested against. */
@@ -87,8 +87,17 @@ describe('a tool and its route take the same parameters', () => {
     byOperation.get(rule.operation).push(rule);
   }
 
+  // A tool may name SEVERAL operations, because one capability's REST half can be more than one route —
+  // `network_sync` is a full cycle or one named peer, and REST spells those apart because a path has to
+  // name its subject. Reading only the first compared the tool against half of itself and reported
+  // `peerId` as a parameter no route accepts.
+  const operationsOf = (tool) => {
+    const op = MCP_TOOL_OPERATIONS[tool];
+    return op == null ? [] : (Array.isArray(op) ? op : [op]);
+  };
+
   const routesFor = (tool) => {
-    const rules = byOperation.get(MCP_TOOL_OPERATIONS[tool]) ?? [];
+    const rules = operationsOf(tool).flatMap(op => byOperation.get(op) ?? []);
     return rows.filter(r => rules.some(u => u.method === r.method && u.pattern.test(concrete(r.route))));
   };
 

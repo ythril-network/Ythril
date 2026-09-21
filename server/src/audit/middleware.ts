@@ -140,14 +140,6 @@ export const ROUTE_RULES: RouteRule[] = [
 
   { method: 'POST',   pattern: /^\/api\/tokens\/([^/]+)\/regenerate$/,             operation: 'token.regenerate' },
 
-  // ── Sync trigger ─────────────────────────────────────────────────────────
-  // `/api/notify` as a whole is exempt in `audit-route-coverage` as "peer notifications + the admin
-  // sync trigger — not a data mutation". The peer half is right; the trigger half is not. A sync cycle
-  // pulls records from peers and writes them locally, so "who started the run that brought in these
-  // records" is a question the log should answer. Only the specific admin route is matched — peer
-  // notifications stay out.
-  { method: 'POST',   pattern: /^\/api\/notify\/trigger$/,                        operation: 'sync.trigger' },
-
   // ── MFA ──────────────────────────────────────────────────────────────────
   // Both of these were unaudited, exempted by an entry in `audit-route-coverage` reading "covered by its
   // own auth events". There is exactly one auth event in the whole map — `auth.failed` — so nothing was
@@ -190,8 +182,8 @@ export const ROUTE_RULES: RouteRule[] = [
   //
   // Both of these were unaudited, exempted by an entry in `audit-route-coverage` reading "network invite
   // handshake — peer-facing". That reason is true about WHO CALLS them and irrelevant to WHAT THEY CHANGE, which
-  // is the distinction the `/api/notify/trigger` carve-out above already makes: a sync cycle writes peer records
-  // locally, so it is audited even though a peer triggers it.
+  // is the distinction the sync-trigger routes already make: a sync cycle writes peer records locally, so it is
+  // audited even though a peer triggers it.
   //
   // `finalize` calls `saveConfig` — it is the moment another instance BECOMES A MEMBER of a network on this
   // instance, or is held for a join vote. That is the most consequential local mutation in the whole flow, and it

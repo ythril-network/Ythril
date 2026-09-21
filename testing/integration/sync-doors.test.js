@@ -17,9 +17,11 @@
  *  - **The peer door is not shadowed by the network door.** `/api/networks/peers/x/sync` also matches
  *    `/api/networks/:id/sync` as a string, so whether Express routes it to the right handler is a fact
  *    about registration ORDER and pattern specificity, not about either handler.
- *  - **Both refuse an unprivileged token.** `/api/notify/trigger` accepted any valid token until 4.4
+ *  - **Both refuse an unprivileged token.** The route these replaced accepted any valid token until 4.4
  *    precisely because no test asked, and the source gate that should have caught it was told to look away
- *    by a router-wide exemption.
+ *    by a router-wide exemption. That route is removed in 5.0, and the last case here proves it is GONE
+ *    rather than merely undocumented — a deletion and a route left mounted under a different guard read
+ *    the same from the source, and differently from outside.
  *
  * ## Why an unknown subject is the fixture
  *
@@ -49,7 +51,7 @@ describe('the sync doors say what they sync', () => {
   before(async () => {
     tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
     // A token with NOTHING: not an instance admin, every area `none`, no spaces. This is the exact shape
-    // that reached `POST /api/notify/trigger` and got `200 {"status":"triggered"}` before 4.4.
+    // that reached the retired `POST /api/notify/trigger` and got `200 {"status":"triggered"}` before 4.4.
     const minted = await post(INSTANCES.a, tokenA, '/api/tokens', {
       name: `sync-doors-nobody-${RUN}`,
       rights: {
@@ -110,30 +112,42 @@ describe('the sync doors say what they sync', () => {
     it('carries `ok` beside `status`, which is what the UI colours its banner from', async () => {
       // Dropping `ok` while enriching the response would make every successful sync render as "failed",
       // and nothing would fail: the client types the field it wants and an absent one is `undefined`.
-      const r = await post(INSTANCES.a, tokenA, `/api/notify/trigger`, { networkId: MISSING_NET });
+      const r = await post(INSTANCES.a, tokenA, `/api/networks/${MISSING_NET}/sync`, {});
       assert.equal(r.status, 200, JSON.stringify(r.body));
       assert.equal(r.body.ok, true, '`ok` is gone from the fire-and-forget answer');
       assert.equal(r.body.status, 'triggered');
     });
 
     it('and reports `ok: false` when a waited cycle fails', async () => {
-      const r = await post(INSTANCES.a, tokenA, `/api/notify/trigger?wait=true`, { networkId: MISSING_NET });
+      /*
+       * `?wait=true` is what makes the two paths distinguishable at all, and an unknown network is the
+       * fixture that proves it: the cycle throws, the default path swallows that and answers 200, and
+       * only the waited one surfaces it. Absorbed from `notify-trigger-wait.test.js`, which asserted
+       * this against the route 5.0 removed.
+       */
+      const r = await post(INSTANCES.a, tokenA, `/api/networks/${MISSING_NET}/sync?wait=true`, {});
       assert.equal(r.status, 500, JSON.stringify(r.body));
       assert.equal(r.body.ok, false, '`ok` must disagree with the success case, or it says nothing');
       assert.equal(r.body.status, 'error');
+      assert.match(r.body.error, /not found/i, 'the failure must name what went wrong, not just fail');
+      assert.equal(r.body.networkId, MISSING_NET, 'the answer must echo the subject it acted on');
     });
   });
 
-  describe('the deprecated door still works', () => {
-    it('refuses a token with no rights, as it has since 4.4', async () => {
-      const r = await post(INSTANCES.a, nobody, '/api/notify/trigger', { networkId: MISSING_NET });
-      assert.equal(r.status, 403, `the deprecated trigger accepted a no-rights token: ${JSON.stringify(r.body)}`);
-    });
-
-    it('refuses both subjects at once, because they name different things', async () => {
-      const r = await post(INSTANCES.a, tokenA, '/api/notify/trigger',
-        { networkId: MISSING_NET, peerId: MISSING_PEER });
-      assert.equal(r.status, 400, JSON.stringify(r.body));
+  describe('and the door they replaced is GONE', () => {
+    it('`POST /api/notify/trigger` is not served at all', async () => {
+      /*
+       * Asserted with a REQUEST rather than by reading the router, because the two answers a deletion can
+       * produce look alike from the source and not from outside. `notifyRouter` still exists and still
+       * serves `POST /api/notify`, so an unmatched sub-path falls through to the 404 handler — while a
+       * route left mounted under a different guard would answer 401 or 403 and read, to anyone checking,
+       * as "still there and protected".
+       *
+       * Sent with an ADMIN token on purpose: a no-rights token would be refused before routing on many
+       * paths, so a 403 would prove nothing about whether the route exists.
+       */
+      const r = await post(INSTANCES.a, tokenA, '/api/notify/trigger', { networkId: MISSING_NET });
+      assert.equal(r.status, 404, `the removed trigger still answers: ${JSON.stringify(r.body)}`);
     });
   });
 });

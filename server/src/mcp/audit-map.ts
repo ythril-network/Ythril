@@ -33,8 +33,16 @@
  * false when checked this week, so a reason here is written to be checkable against the code.
  */
 
-/** Tool name → the audit operation it performs, or `null` with the reason it is not one. */
-export const MCP_TOOL_OPERATIONS: Record<string, string | null> = {
+/**
+ * Tool name → the audit operation it performs, or `null` with the reason it is not one.
+ *
+ * **A LIST NAMES A CAPABILITY WHOSE REST HALF IS MORE THAN ONE ROUTE**, and it exists because pairing a
+ * tool with its route goes through this map. `network_sync` syncs every network or one named peer, and
+ * REST spells those as two routes because a path has to name its subject — so with a single operation
+ * here the parity gate compared the tool against half of itself and reported `peerId` as a parameter no
+ * route accepts. The FIRST entry is the one an audit record is written under.
+ */
+export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   // ── Mutations. Each records exactly what its REST counterpart records. ──────────────────────────
   save_fact: 'fact.create',
   update_fact: 'fact.update',
@@ -76,10 +84,17 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | null> = {
   create_dir: 'file.mkdir',
   // The tool registry flags this `mutating: true`, and it is right: a sync cycle pulls records from
   // peers and writes them locally, so "who started the run that brought in these records" is a fair
-  // audit question. `/api/notify` is exempt on the REST side as "peer notifications + the admin sync
-  // trigger — not a data mutation"; the peer half is right and the trigger half was not, so
-  // `/api/notify/trigger` records `sync.trigger` too and the two surfaces agree.
-  network_sync: 'sync.trigger',
+  // audit question.
+  //
+  // IT SAID `sync.trigger` UNTIL 5.0, which was `POST /api/notify/trigger`'s operation — and that route
+  // is gone, so the name would have become one only the MCP door ever wrote. An operator filtering by
+  // what the REST route records would have seen no agent traffic, and the cross-door parity gate would
+  // have gone quiet rather than red, because an unpaired tool is skipped.
+  //
+  // BOTH ROUTES, because this one tool is both of them: a full cycle over every network, or one named
+  // peer across every network it belongs to. A peer-scoped call is still RECORDED under the first name —
+  // the map is keyed by tool alone, so it cannot see the arguments — and that residue is `Q-28`.
+  network_sync: ['network.sync_trigger', 'peer.sync_trigger'],
 
   // ── Reads. Recorded only when `logReads` is on, exactly as the REST reads are. ──────────────────
   filter: 'brain.filter',
@@ -135,7 +150,10 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | null> = {
  * test is what guarantees no *registered* tool reaches here unclassified.
  */
 export function mcpAuditOperation(toolName: string): string | null {
-  return MCP_TOOL_OPERATIONS[toolName] ?? null;
+  const op = MCP_TOOL_OPERATIONS[toolName] ?? null;
+  // The first of a list is what a record is written under. A list says which REST operations the same
+  // capability is reachable through; it does not make one call produce two audit entries.
+  return Array.isArray(op) ? (op[0] ?? null) : op;
 }
 
 /** Operations that are reads — logged only when `logReads` is enabled, matching the REST convention. */

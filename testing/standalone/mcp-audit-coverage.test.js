@@ -98,7 +98,9 @@ describe('MCP audit coverage', () => {
     // Proof the parse works, rather than trusting a green result: an operation known to exist must be found.
     assert.ok(restOperations.has('file.retry_embedding'),
       'the REST operation parse is broken — it cannot see an operation that is plainly there');
-    const invented = [...new Set(Object.values(MCP_TOOL_OPERATIONS))]
+    // Flattened: a value may be a LIST when one capability's REST half is more than one route. Comparing
+    // an array against the vocabulary reports the array itself as invented, which reads as a broken parse.
+    const invented = [...new Set(Object.values(MCP_TOOL_OPERATIONS).flat())]
       .filter(op => op && !restOperations.has(op));
     assert.deepEqual(invented, [],
       'these operations exist only on the MCP side — reuse the REST vocabulary so entries are comparable');

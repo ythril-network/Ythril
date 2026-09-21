@@ -50,7 +50,8 @@ and `status` the detail.
 
 `?timeoutMs` (default `30000`, clamped `1000`–`120000`) bounds the WAIT on the network door only. A peer
 cycle is already bounded by that peer's own request timeouts, so racing it would report a timeout for
-something that cannot hang.
+something that cannot hang. A completed peer cycle reports `networksSynced` rather than `synced`, because
+one peer can belong to several networks.
 
 The peer id must be an exact `instanceId` of a configured member, as `GET /api/networks` returns — never a
 URL and never a label. An id belonging to no network is refused `404`, because an unvalidated value would
@@ -59,67 +60,11 @@ become the address this instance connects to.
 A peer lives on the networks COLLECTION rather than under one network's id on purpose: a peer can be a
 member of several, and the cycle walks all of them.
 
-#### `POST /api/notify/trigger` — DEPRECATED since 4.5
-
-It still works and takes `networkId` or `peerId` in the body, delegating to the same code as the two routes
-above. Prefer them: a sync trigger on the peer NOTIFICATION channel is what let this route accept any
-authenticated token until 4.4, because the router-wide guard exemption was written for the notification
-endpoint beside it.
-
-```http
-POST /api/notify/trigger
-Authorization: Bearer <instance-admin token>
-```
-
-```json
-{ "networkId": "net-uuid" }
-```
-
-**Instance administrator, since 4.4.** It was any authenticated token until then — a token with no rights at
-all could start a cycle on any network id it named, while `POST /api/networks/:id/sync`, which does the same
-thing, already required an administrator.
-
-Triggers an immediate sync cycle for the given network. **Fire-and-forget by default** — it returns as
-soon as the cycle is scheduled:
-
-**Response** `200`:
-
-```json
-{ "status": "triggered", "networkId": "net-uuid" }
-```
-
-**Synchronous mode** — add `?wait=true` to run the cycle and get its outcome in the response. Bounded by
-`?timeoutMs` (default `30000`, clamped to `1000`–`120000`) so a slow or stuck cycle can't hang the
-request; on timeout the cycle keeps running in the background.
-
-```http
-POST /api/notify/trigger?wait=true&timeoutMs=15000
-```
-
-**Response** `200` (completed): `{ "status": "completed", "networkId": "…", "synced": 12, "errors": 0 }`
-· `504` (timed out, still running): `{ "status": "timeout", "networkId": "…", "timeoutMs": 15000 }`
-· `500` (the cycle failed): `{ "status": "error", "networkId": "…", "error": "…" }`
-
-#### One peer instead of a network
-
-Send `peerId` in place of `networkId` to sync a single peer across every network it belongs to. Available
-since 4.4 — the `network_sync` MCP tool had taken this argument from the start and no REST route accepted one,
-so a REST caller could sync a network and never a single peer.
-
-```json
-{ "peerId": "inst-9f2c…" }
-```
-
-It must be an **exact `instanceId`** of a configured member, as returned by `GET /api/networks` — never a
-URL and never a label. An id that belongs to no network is refused with `404`, because an unvalidated value
-would become the address this instance connects to.
-
-Sending both `networkId` and `peerId` is a `400`: they name different subjects. Sending neither is also a
-`400`.
-
-`?wait=true` applies here too, and the completed body reports `networksSynced` rather than `synced` — one
-peer can belong to several networks. There is no `timeoutMs` race on this path: a single peer is bounded by
-its own request timeouts, where a network cycle can span many peers.
+> **The `/api/notify/trigger` route is GONE in 5.0.** It took `networkId` or `peerId` in the body and
+> delegated to the same code as the two routes above. Move to whichever of them names your subject: the
+> body goes into the path, and `?wait=true` and `?timeoutMs` behave exactly as they did. A sync trigger on
+> the peer NOTIFICATION channel is what let that route accept any authenticated token until 4.4, because
+> the router-wide guard exemption had been written for the notification endpoint beside it.
 
 ---
 
