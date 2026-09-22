@@ -127,6 +127,34 @@ describe('the declaration answers for every link class', () => {
     }
   });
 
+  it('a pair outside the six is REFUSED at the writer, not stored as a seventh class', async () => {
+    /*
+     * The hole the `link*` write fields opened. The link DOOR refused a pair outside the six from the
+     * start; `reconcileLinks` did not, and every write door reaches it — so `save_fact` naming
+     * `linkChronos` stored a `fact.chronoIds` link, a class no reader knows and no gate counts.
+     *
+     * Asserted over the WHOLE grid rather than on one pair: sixteen (fromKind, toKind) combinations, of
+     * which exactly the six declared here may be written. A seventh class declared later is admitted by
+     * this case on the day it is declared, and anything else still has to be refused.
+     */
+    const { linkClassRefusal } = await import('../../server/dist/brain/links.js');
+    const { REF_KINDS } = await import('../../server/dist/config/types-knowledge.js');
+    const declared = new Set(LINK_CLASSES.map(c => `${c.kind}>${c.toKind}`));
+    assert.ok(declared.size >= 6, `only ${declared.size} classes — the import is stale`);
+    for (const from of REF_KINDS) {
+      for (const to of REF_KINDS) {
+        const refusal = linkClassRefusal(from, to);
+        if (declared.has(`${from}>${to}`)) {
+          assert.equal(refusal, null, `${from}.${to} is a declared class and was refused`);
+        } else {
+          assert.ok(refusal, `${from} → ${to} is not a link class and was accepted — it would be stored `
+            + 'under a label nothing reads');
+          assert.match(refusal, new RegExp(to), 'the refusal must name the kind that cannot be linked');
+        }
+      }
+    }
+  });
+
   it('linkClassFor answers nothing for a kind that links by EDGE rather than by field', () => {
     assert.equal(linkClassFor('entity', 'entity'), undefined, 'an entity is the link TARGET, not a linker');
     assert.equal(linkClassFor('edge', 'entity'), undefined, 'an edge is a record, not a field-based link');

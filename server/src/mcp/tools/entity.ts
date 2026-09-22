@@ -28,7 +28,7 @@ export const save_entityTool: ToolHandler = {
           properties: {
             // `F-27`: the `link*` fields and `edges`, from the one builder REST reads with — so a field
             // on one door and not the other cannot happen.
-            ...connectionSchemas(),
+            ...connectionSchemas('entity'),
             space: s.requiredSpace,
             id: uuidSchema('UUID v4 of an EXISTING record to update. It is not a way to choose an id: identity is server-generated, so an id that names nothing is ignored rather than adopted. To carry your own reference, use `name` or `description`.'),
             name: {
@@ -243,7 +243,7 @@ export const update_entityTool: ToolHandler = {
             // `Q-30`: the same connection fields the CREATE tool takes, from the one builder both read —
             // a field on one verb and not the other is the gap this closes, and two hand-written copies
             // is how they would drift apart again.
-            ...connectionSchemas(),
+            ...connectionSchemas('entity'),
           },
           additionalProperties: false,
           required: ['space', 'id'],

@@ -339,9 +339,17 @@ export function connectionInputError(body: unknown): string | null {
   return retiredWriteFieldError(body) ?? linkInputError(body) ?? edgeInputError(body);
 }
 
-/** The published properties for a tool schema: the `link*` fields and `edges`, from one place. */
-export function connectionSchemas(): Record<string, unknown> {
-  return { ...linkInputSchemas(), edges: edgeInputSchema() };
+/**
+ * The published properties for a tool schema: the `link*` fields this record kind can hold, and `edges`.
+ *
+ * **Per kind, because the classes are.** A fact names entities and nothing else; an entity names nothing
+ * at all — it is only ever the far end. Declaring the whole set on every door advertised classes the
+ * writer refuses, which is the worst half of a parity defect: the schema a caller reads while
+ * constructing arguments promised something no door can do.
+ */
+export function connectionSchemas(fromKind?: RefKind): Record<string, unknown> {
+  const links = fromKind ? linkInputSchemasFor(fromKind) : linkInputSchemas();
+  return { ...links, edges: edgeInputSchema() };
 }
 
 /** Every body key these fields occupy, so a door can call them known rather than warn about them. */

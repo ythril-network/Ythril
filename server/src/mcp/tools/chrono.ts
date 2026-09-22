@@ -51,7 +51,7 @@ export const save_chronoTool: ToolHandler = {
             // `F-27`: the `link*` fields and `edges`, from the one builder REST reads with — so a field
             // on one door and not the other cannot happen, which is how `traverse`'s link flags shipped
             // refused by the dispatcher while REST answered 200.
-            ...connectionSchemas(),
+            ...connectionSchemas('chrono'),
             space: s.requiredSpace,
             id: uuidSchema('UUID v4 of an EXISTING record to update. It is not a way to choose an id: identity is server-generated, so an id that names nothing is ignored rather than adopted. To carry your own reference, use `name` or `description`.'),
             title: {
@@ -356,7 +356,7 @@ export const update_chronoTool: ToolHandler = {
             // `Q-30`: the same connection fields the CREATE tool takes, from the one builder both read —
             // a field on one verb and not the other is the gap this closes, and two hand-written copies
             // is how they would drift apart again.
-            ...connectionSchemas(),
+            ...connectionSchemas('chrono'),
           },
           required: ['space', 'id'],
           additionalProperties: false,

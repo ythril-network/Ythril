@@ -50,7 +50,7 @@ export const save_factTool: ToolHandler = {
             // `F-27`: the `link*` fields and `edges`, from the one builder REST reads with. The operator's
             // objection to edges on create tools — *"writing edge support into six endpoints"* — is answered
             // by there being one implementation rather than six.
-            ...connectionSchemas(),
+            ...connectionSchemas('fact'),
             tags: {
               type: 'array',
               items: { type: 'string' },
@@ -275,7 +275,7 @@ export const update_factTool: ToolHandler = {
             // `Q-30`: the same connection fields the CREATE tool takes, from the one builder both read —
             // a field on one verb and not the other is the gap this closes, and two hand-written copies
             // is how they would drift apart again.
-            ...connectionSchemas(),
+            ...connectionSchemas('fact'),
           },
           required: ['space', 'id'],
           additionalProperties: false,

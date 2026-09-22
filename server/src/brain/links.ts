@@ -77,6 +77,23 @@ import { spaceCollection } from '../db/space-collection.js';
  */
 export const linkLabel = (fromKind: RefKind, toKind: RefKind): string => `${fromKind}.${legacyField(toKind)}`;
 
+/**
+ * Why a record of this kind cannot link to that kind, or `null`.
+ *
+ * The six classes are a product fact — a fact names entities and nothing else — and a pair outside them
+ * has no label, so `linkIdFor` would derive an id for a class that does not exist. The link DOOR refused
+ * that from the start; `reconcileLinks` did not, and every write door reaches it through the `link*`
+ * fields. A `save_fact` naming `linkChronos` therefore stored a seventh class nothing reads.
+ *
+ * One sentence, wherever a class is named, so a caller gets the same answer at whichever door they ask.
+ */
+export function linkClassRefusal(fromKind: RefKind, toKind: RefKind): string | null {
+  if (!COLLECTION_OF[fromKind] || !(CLASSES_BY_FROM[fromKind] ?? []).includes(toKind)) {
+    return `${fromKind} records cannot link to ${toKind}: there is no ${linkLabel(fromKind, toKind)} link class`;
+  }
+  return null;
+}
+
 /** The id one connection always has. Exported so the conversion script derives it the same way. */
 export const linkIdFor = (from: string, fromKind: RefKind, to: string, toKind: RefKind): string =>
   edgeIdFor(from, to, linkLabel(fromKind, toKind), fromKind, toKind);
@@ -117,6 +134,13 @@ export async function reconcileLinks(
 ): Promise<{ added: number; removed: number }> {
   const classes = Object.keys(desired) as RefKind[];
   if (classes.length === 0) return { added: 0, removed: 0 };
+
+  // A class this record kind cannot hold is refused BEFORE anything is written. Without it a write door
+  // naming one stored a link whose class does not exist, which nothing reads and nothing reports.
+  for (const toKind of classes) {
+    const classRefusal = linkClassRefusal(fromKind, toKind);
+    if (classRefusal) throw new Error(classRefusal);
+  }
 
   /*
    * EXISTENCE, HERE, because this is the writer and `write-connections.ts` says so in as many words:
@@ -311,9 +335,8 @@ export async function addLink(
   actor?: WebhookActor,
 ): Promise<LinkDoc> {
   const suffix = COLLECTION_OF[fromKind];
-  if (!suffix || !(CLASSES_BY_FROM[fromKind] ?? []).includes(toKind)) {
-    throw new Error(`${fromKind} records cannot link to ${toKind}: there is no ${linkLabel(fromKind, toKind)} link class`);
-  }
+  const refusal = linkClassRefusal(fromKind, toKind);
+  if (refusal) throw new Error(refusal);
 
   /*
    * THE RECORD IS READ, NOT WRITTEN. Until 5.0 this wrote the array entry and let the reconcile derive the
@@ -322,7 +345,7 @@ export async function addLink(
    * link. With the arrays gone, `reconcileLinks` is driven by the set its caller names and a write that
    * names no link class leaves the links entirely alone, so a directly-created row survives.
    */
-  const doc = await sourceDoc(spaceId, suffix, from);
+  const doc = await sourceDoc(spaceId, suffix as string, from);
   if (!doc) throw new Error(`${fromKind} '${from}' not found`);
 
   // Existing ∪ {to}, because `reconcileLinks` REPLACES the class it is given. Adding one link by handing
