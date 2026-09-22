@@ -142,6 +142,9 @@ function makeBrain(overrides: Record<string, any> = {}) {
     getChrono: vi.fn(() => of(null as any)),
     listFacts: vi.fn(() => of({ facts: [] })),
     queryBrain: vi.fn(() => of({ results: [], collection: 'chrono', count: 0 })),
+    // The chrono panel reads the LINKS collection since 5.0 — an entry no longer carries the ids it
+    // is about, so there is no predicate the component could send instead.
+    chronoLinkedTo: vi.fn(() => of([])),
     ...overrides,
   } as any;
 }
@@ -612,10 +615,10 @@ describe('GraphComponent — selection written from cytoscape handlers', () => {
         { _id: 'to-only', linkEntities: ['a'] },        // kept: only `to` is checked
         { _id: 'from-only', linkEntities: ['root'] },   // dropped
       ] })),
-      queryBrain: vi.fn(() => of({ results: [
+      chronoLinkedTo: vi.fn(() => of([
         { _id: 'c-both', linkEntities: ['root', 'a'] },
         { _id: 'c-to-only', linkEntities: ['a'] },      // dropped: chrono requires both
-      ], collection: 'chrono', count: 0 })),
+      ])),
     });
     const { c } = withGraph(brain);
     cy.fire('tap', 'edge', tapTarget('e1'));

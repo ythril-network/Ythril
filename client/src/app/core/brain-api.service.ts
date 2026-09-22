@@ -270,6 +270,23 @@ export class BrainApi {
     return this.http.post<{ ticket: string; expiresInMs: number }>(`/api/brain/spaces/${spaceId}/events/ticket`, {});
   }
 
+  /**
+   * The chrono entries LINKED to an entity, with their own links filled in.
+   *
+   * It was `filter: { entityIds: <id> }` — a predicate over a field the entry carried. A connection is a
+   * link record since 5.0, so the ids come from the links collection and narrow `_id`; the rows are then
+   * hydrated, because the caller filters them further on what they link to.
+   */
+  chronoLinkedTo(spaceId: string, entityId: string, limit = 100): Observable<ChronoEntry[]> {
+    return recordsLinkingTo(this.http, spaceId, 'chrono', [entityId]).pipe(
+      switchMap(ids => (ids.length === 0
+        ? of([] as ChronoEntry[])
+        : filterCall<{ results: ChronoEntry[] }>(this.http, {
+          space: spaceId, collection: 'chrono', filter: { _id: { $in: ids } }, limit, deriveStatus: true,
+        }).pipe(switchMap(r => hydrateLinks(this.http, spaceId, 'chrono', r.results ?? []))))),
+    ) as Observable<ChronoEntry[]>;
+  }
+
   queryBrain(
     spaceId: string,
     body: {
