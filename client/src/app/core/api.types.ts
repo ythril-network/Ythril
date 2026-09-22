@@ -541,8 +541,8 @@ export const BRAIN_COLLECTIONS = ['facts', 'entities', 'edges', 'chrono', 'files
 /*
  * `links` is the sixth, and it is a COLLECTION only.
  *
- * A link record is what a `fact.entityIds`, `chrono.entityIds`/`linkFacts` or
- * `file.entityIds`/`linkFacts`/`linkChronos` entry becomes when it is stored as a record. It is queryable and
+ * A link record carries a `label` that reads like the 4.x field its class replaced — `fact.entityIds`,
+ * `chrono.memoryIds` and their siblings, frozen because the label is part of the link's id. It is queryable and
  * countable; it has no tab of its own, no write door of its own, and never appears in a meaning-ranked
  * search. `brain-tabs.ts` holds that decision.
  */
