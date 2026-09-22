@@ -55,38 +55,38 @@ describe('EntityRefPicker (characterization)', () => {
 
   it('pickEntity appends the id to the given target and caches the name', () => {
     const picker = create();
-    const target = { entityIds: '' };
+    const target = { linkEntities: '' };
     picker.pickEntity(entity('e1', 'Alice'), target);
-    expect(target.entityIds).toBe('e1');
+    expect(target.linkEntities).toBe('e1');
     expect(picker.entityNameCache()['e1']).toBe('Alice');
   });
 
   it('pickEntity writes to whichever distinct target it is handed (no cross-talk)', () => {
     const picker = create();
-    const memoryForm = { entityIds: '' };
-    const drawerEditChrono = { entityIds: '' };
+    const memoryForm = { linkEntities: '' };
+    const drawerEditChrono = { linkEntities: '' };
     picker.pickEntity(entity('e1', 'Alice'), memoryForm);
     picker.pickEntity(entity('e2', 'Bob'), drawerEditChrono);
-    expect(memoryForm.entityIds).toBe('e1');
-    expect(drawerEditChrono.entityIds).toBe('e2');
+    expect(memoryForm.linkEntities).toBe('e1');
+    expect(drawerEditChrono.linkEntities).toBe('e2');
   });
 
   it('appendEntityId (via pickEntity) joins with ", " and de-duplicates', () => {
     const picker = create();
-    const target = { entityIds: 'x' };
+    const target = { linkEntities: 'x' };
     picker.pickEntity(entity('y'), target);
-    expect(target.entityIds).toBe('x, y');
+    expect(target.linkEntities).toBe('x, y');
     picker.pickEntity(entity('y'), target); // already present
-    expect(target.entityIds).toBe('x, y');
+    expect(target.linkEntities).toBe('x, y');
   });
 
   // ── removeEntityId / entityChips ───────────────────────────────────────────
 
   it('removeEntityId drops the id and re-joins the remaining with ", "', () => {
     const picker = create();
-    const target = { entityIds: 'a, b, c' };
+    const target = { linkEntities: 'a, b, c' };
     picker.removeEntityId(target, 'b');
-    expect(target.entityIds).toBe('a, c');
+    expect(target.linkEntities).toBe('a, c');
   });
 
   it('entityChips resolves names from the cache, falls back to the id, trims and drops blanks', () => {
@@ -98,7 +98,7 @@ describe('EntityRefPicker (characterization)', () => {
     ]);
   });
 
-  // ── resolveEntityNamesFor (a form's comma-separated entityIds, used on edit-open) ───────────
+  // ── resolveEntityNamesFor (a form's comma-separated linkEntities, used on edit-open) ───────────
 
   it("resolveEntityNamesFor resolves a CSV field's UNCACHED ids and patches the cache", () => {
     const picker = create();

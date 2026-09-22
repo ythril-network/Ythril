@@ -15,10 +15,9 @@
  * ## Why derived rather than a list of four
  *
  * A hard-coded list is how the field was missed in the first place, and the same derivation already guards the
- * merge path (`merge-relinks-every-entity-reference.test.js`). So this reads `config/types.ts` for every record
- * type declaring `entityIds` and requires a scan of each one's collection. **A new record type that carries an
- * entity reference fails this gate on the day it is declared**, which is the only version of this check that
- * stays true.
+ * merge path (`merge-relinks-every-entity-reference.test.js`). So this reads the LINK CLASSES for every record
+ * kind that can point at an entity and requires a scan of each one's collection. **A new class fails this gate
+ * on the day it is declared**, which is the only version of this check that stays true.
  *
  * ## Why it asserts on source
  *
@@ -35,38 +34,28 @@ import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf, statementAround } from './_structural-window.mjs';
 
-const TYPES = 'server/src/config/types.ts';
 const ENTITIES = 'server/src/brain/entities.ts';
 
-/** Every record interface in `config/types.ts` that declares an `entityIds` field. */
-function typesWithEntityIds() {
-  const lines = stripComments(readFileSync(TYPES, 'utf8')).split(/\r?\n/);
-  const found = [];
-  let current = null;
-  for (const line of lines) {
-    const m = /^export interface (\w+)/.exec(line);
-    if (m) current = m[1];
-    if (/^\s*entityIds\??\s*:/.test(line) && current) found.push(current);
-  }
-  return [...new Set(found)];
+/**
+ * Every record kind that can point AT an entity, from the classes the scan itself loops.
+ *
+ * It read `config/types.ts` for the interfaces declaring an `entityIds` field until 5.0 removed the
+ * arrays. Same question, asked of the definition that survived it.
+ */
+async function kindsLinkingToEntities() {
+  const { LINK_CLASSES } = await import('../../server/dist/brain/link-adjacency.js');
+  return [...new Set(LINK_CLASSES.filter(c => c.toKind === 'entity').map(c => c.kind))];
 }
-
-/** The collection suffix each record type lives in. */
-const COLLECTION_FOR = {
-  FactDoc: 'facts',
-  ChronoEntry: 'chrono',
-  FileMetaDoc: 'files',
-};
 
 const backlinkFn = () => bodyOf(stripComments(readFileSync(ENTITIES, 'utf8')), 'findEntityReferences');
 
 describe('backlinks cover every entity reference', () => {
-  it('the derivation finds the record types before it is trusted', () => {
-    // A gate that derives nothing passes vacuously and would keep passing if the interfaces moved.
-    const types = typesWithEntityIds();
-    assert.ok(types.length >= 3, `only found ${types.length} types with entityIds in ${TYPES}`);
-    for (const t of ['FactDoc', 'ChronoEntry', 'FileMetaDoc']) {
-      assert.ok(types.includes(t), `expected ${t} to declare entityIds; got: ${types.join(', ')}`);
+  it('the derivation finds the record kinds before it is trusted', async () => {
+    // A gate that derives nothing passes vacuously and would keep passing if the classes moved.
+    const kinds = await kindsLinkingToEntities();
+    assert.ok(kinds.length >= 3, `only found ${kinds.length} kind(s) that can link to an entity`);
+    for (const k of ['fact', 'chrono', 'file']) {
+      assert.ok(kinds.includes(k), `expected ${k} to link to entities; got: ${kinds.join(', ')}`);
     }
   });
 
@@ -104,20 +93,16 @@ describe('backlinks cover every entity reference', () => {
      * The half the loop above cannot state: a loop over six classes that queried one collection would pass
      * every assertion in this file and answer about the wrong data six times.
      *
-     * Both storage shapes are checked. The array path must reach `linksToAny`, which is what carries the
-     * chunk exclusion; the link-record path must narrow its results by reading the records, because a link
-     * row has no `parentFileId` and a chunk link is otherwise indistinguishable from a file link.
+     * The scan must narrow its results by READING the records, because a link row has no `parentFileId`
+     * and a chunk link is otherwise indistinguishable from a file link.
      *
      * `referencesByClass` since the scan was batched — one query for every class rather than one per class.
      */
     const fn = bodyOf(stripComments(readFileSync(ENTITIES, 'utf8')), 'referencesByClass');
     assert.ok(fn, 'referencesByClass not found — re-anchor this gate');
-    assert.match(fn, /\$\{spaceId\}_\$\{cls\.collection\}/,
-      'the array path hardcodes a collection instead of taking the class\'s own');
-    assert.match(fn, /linksToAny\(spaceId, cls,/,
-      'the array path must go through the shared builder, which is what carries the chunk exclusion');
-    assert.match(fn, /usesLinkRecords\(spaceId\)/,
-      'the storage shape must be chosen by the one selector, never decided in a reader');
+    assert.match(fn, /assertLinkRecords\(spaceId\)/,
+      'a space whose links were never converted must be REFUSED here rather than answered with an empty '
+      + 'set — otherwise it reports no blockers and an entity three records name deletes cleanly');
     assert.match(fn, /docsFromCollection[<(]/,
       'the link-record path returns ids from a collection with no `parentFileId`, so it must narrow them by '
       + 'reading the records — otherwise a forty-passage document comes back as forty blockers');

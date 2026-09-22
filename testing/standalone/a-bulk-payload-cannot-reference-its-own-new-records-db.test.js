@@ -224,26 +224,31 @@ describe('a supplied id is not adopted, which is what makes the claim false', { 
       + 'a co-author of the primary key, and across a sync two instances deriving ids from one key collide');
   });
 
-  it('so an edge naming that id in the same payload is stored DANGLING, and reported as fine', async () => {
+  it('so an edge naming that id in the same payload is REFUSED, and says which end', async () => {
     /*
      * The measurement behind the correction, kept as a case because it is the whole reason the sentence
-     * mattered. Nothing here is a defect to fix: shape-not-existence is bulk's documented contract and a
-     * space may permit dangling references. What was wrong was five surfaces telling a caller this resolves.
+     * mattered: a supplied id does not become the new record's identity, so an edge naming it points at
+     * nothing.
+     *
+     * **What changed is the answer, not the finding.** This door stored the dangling edge and reported it
+     * as fine while shape-not-existence was its documented contract, and that contract was scoped to
+     * spaces still on the 4.x arrays. 5.0 leaves one shape, so the trade is gone and the reference is
+     * checked here as everywhere else — which is the better end of the same story: the caller is told, at
+     * the moment of the write, rather than finding out from a traversal that comes back empty.
      */
     const res = await bulkMod.bulkWrite(SPACE, {
       entities: [{ id: CHOSEN, name: 'Carol', type: 'person' }],
       edges: [{ from: CHOSEN, to: CHOSEN, label: 'knows' }],
     });
-    assert.deepEqual(res.errors, [], 'bulk started checking existence — if that is deliberate, this whole row changes');
-    assert.equal(res.inserted.edges, 1);
-
-    const edge = await coll('edges').findOne({ label: 'knows' });
-    assert.equal(edge.from, CHOSEN, 'the edge stored something other than what the caller sent');
+    assert.equal(res.inserted.edges, 0, 'the dangling edge was stored');
+    assert.equal(res.errors.length, 1, `expected one refusal, got ${JSON.stringify(res.errors)}`);
+    assert.equal(res.errors[0].type, 'edge');
+    assert.match(res.errors[0].reason, /from/,
+      'the refusal must name the END that does not resolve, or a caller with a large payload cannot find it');
     assert.equal(await coll('entities').countDocuments({ _id: CHOSEN }), 0,
       'an entity exists at the id the caller chose, so the forward reference DOES resolve and the five '
       + 'surfaces were right — re-open W-12 rather than editing this');
   });
-
   it('addressing an entity that already exists works, which is what the order is still good for', async () => {
     // The processing order is not wrong, it is merely no longer load-bearing for a NEW record. An entity the
     // batch UPDATES is updated before an edge in the same batch reads it — so the correction says that

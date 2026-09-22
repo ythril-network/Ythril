@@ -42,7 +42,7 @@ function make() {
 }
 
 const memory = (fact: string, id = fact): Fact =>
-  ({ _id: id, fact, tags: [], entityIds: [], properties: {}, createdAt: '2026-07-14T10:00:00.000Z', seq: 1 } as unknown as Fact);
+  ({ _id: id, fact, tags: [], linkEntities: [], properties: {}, createdAt: '2026-07-14T10:00:00.000Z', seq: 1 } as unknown as Fact);
 
 beforeEach(() => { for (const fn of Object.values(api)) (fn as any).mockClear(); });
 
@@ -131,17 +131,17 @@ describe('FactsTabComponent', () => {
     const c = fixture.componentInstance;
     const mutated = vi.fn();
     c.mutated.subscribe(mutated);
-    c.memoryForm = { fact: '  a fact  ', type: '', tags: ['t'], entityIds: 'e1, , e2', description: ' d ', properties: { k: 'v' } };
+    c.memoryForm = { fact: '  a fact  ', type: '', tags: ['t'], linkEntities: 'e1, , e2', description: ' d ', properties: { k: 'v' } };
     c.createMemory();
     expect(api.createMemory).toHaveBeenCalledWith('work', {
-      fact: 'a fact', tags: ['t'], entityIds: ['e1', 'e2'], description: 'd', properties: { k: 'v' },
+      fact: 'a fact', tags: ['t'], linkEntities: ['e1', 'e2'], description: 'd', properties: { k: 'v' },
     });
     expect(mutated).toHaveBeenCalled();
   });
 
   it('createMemory is a no-op when fact is blank', () => {
     const c = make().componentInstance;
-    c.memoryForm = { fact: '   ', type: '', tags: [], entityIds: '', description: '', properties: {} };
+    c.memoryForm = { fact: '   ', type: '', tags: [], linkEntities: '', description: '', properties: {} };
     c.createMemory();
     expect(api.createMemory).not.toHaveBeenCalled();
   });
@@ -151,12 +151,12 @@ describe('FactsTabComponent', () => {
     // `typeSchemas.fact[type]`, so an empty string selects nothing and stores a value no filter offers.
     const f = make();
     const c = f.componentInstance;
-    c.memoryForm = { fact: 'f', type: '  decision  ', tags: [], entityIds: '', description: '', properties: {} };
+    c.memoryForm = { fact: 'f', type: '  decision  ', tags: [], linkEntities: '', description: '', properties: {} };
     c.createMemory();
     expect(api.createMemory).toHaveBeenCalledWith('work', { fact: 'f', type: 'decision' });
 
     api.createMemory.mockClear();
-    c.memoryForm = { fact: 'f', type: '   ', tags: [], entityIds: '', description: '', properties: {} };
+    c.memoryForm = { fact: 'f', type: '   ', tags: [], linkEntities: '', description: '', properties: {} };
     c.createMemory();
     expect(api.createMemory).toHaveBeenCalledWith('work', { fact: 'f' });
   });
@@ -165,10 +165,10 @@ describe('FactsTabComponent', () => {
     const c = make().componentInstance;
     c.store.facts.set([{ _id: 'm1', fact: 'old' } as Fact]);
     c.recordList.editingId.set('m1');
-    c.editMemory = { fact: ' new ', tags: ['t'], entityIds: 'e1', description: ' d ', properties: {} };
+    c.editMemory = { fact: ' new ', tags: ['t'], linkEntities: 'e1', description: ' d ', properties: {} };
     c.saveEditMemory('m1');
     expect(api.updateFact).toHaveBeenCalledWith('work', 'm1', {
-      fact: 'new', tags: ['t'], entityIds: ['e1'], description: 'd',
+      fact: 'new', tags: ['t'], linkEntities: ['e1'], description: 'd',
     });
     expect(c.recordList.editingId()).toBe('');
     expect(c.store.facts()[0].fact).toBe('UPDATED');

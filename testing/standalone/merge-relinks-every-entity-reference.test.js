@@ -91,17 +91,21 @@ function typesWithEntityIds() {
  * first, with a message saying to add it, rather than passing silently.
  */
 const COLLECTION_SUFFIX = {
-  FactDoc: 'facts',
-  ChronoEntry: 'chrono',
   FileMetaDoc: 'files',
 };
 
 describe('the check itself works before it is trusted', () => {
-  it('finds the record types that carry entityIds', () => {
-    const types = typesWithEntityIds();
-    assert.ok(types.length >= 3, `only found ${types.length} types with entityIds in ${TYPES}`);
-    assert.ok(types.includes('FactDoc') && types.includes('ChronoEntry') && types.includes('FileMetaDoc'),
-      `expected the three known ones, got: ${types.join(', ')}`);
+  it('finds the record types that carry an entity id in a FIELD', () => {
+    /*
+     * One left, and that is the point of discovering by shape rather than by name. The six link arrays
+     * went in 5.0 — a fact, a chrono entry and a file name entities through LINK RECORDS now, which the
+     * merge re-keys in one phase rather than per collection. `faceEntityId` is what remains: a singular,
+     * differently-named link that was outside this gate by construction for two releases.
+     */
+    const fields = entityRefFields();
+    assert.ok(fields.length >= 1, `found no entity-id field at all in ${TYPES} — the matcher has broken`);
+    assert.ok(fields.some(f => f.field === 'faceEntityId'),
+      `expected the biometric link to be found by shape, got: ${fields.map(f => f.field).join(', ')}`);
   });
 
   it('knows a collection for every one of them', () => {
@@ -190,6 +194,38 @@ describe('executeMerge relinks every collection that can reference an entity', (
       }
     });
   }
+
+  it('re-keys the LINK rows, which is how a fact, a chrono entry and a file name an entity now', async () => {
+    /*
+     * THE PHASE THAT REPLACED THREE. Those three collections carried `entityIds` and were relinked one by
+     * one; 5.0 made a connection a link record, so one query over the links collection covers every kind
+     * that can name an entity — including any kind added later, which is what the per-collection version
+     * could never say.
+     *
+     * Measured on a live instance before the phase existed: after the merge the link still named the
+     * absorbed entity, and phase 5 had deleted it.
+     */
+    const { LINK_CLASSES } = await import('../../server/dist/brain/link-adjacency.js');
+    const naming = LINK_CLASSES.filter(c => c.toKind === 'entity');
+    assert.ok(naming.length >= 3,
+      `only ${naming.length} class(es) can name an entity — the import is stale and this checks less`);
+
+    assert.match(merge, /spaceCollection\(spaceId, 'links'\)/,
+      'the merge never opens the links collection, so every link naming the absorbed entity survives it '
+      + 'pointing at the record phase 5 deletes');
+    assert.match(merge, /to: absorbed\._id, toKind: 'entity'/,
+      'the link search is not aimed at the absorbed entity as a link TARGET — an entity is only ever a `to`');
+    /*
+     * RE-KEYED, not `$set`. A link's `_id` is derived from both endpoints, so moving the `to` changes the
+     * identity — an update in place leaves an id that disagrees with its own contents and nothing finds it
+     * again. The old id needs a tombstone, or the next pull from a peer restores the broken link.
+     */
+    assert.match(merge, /linkIdFor\(link\.from, link\.fromKind, survivor\._id, 'entity'\)/,
+      'the link is updated in place rather than re-keyed, so its id no longer derives from its contents');
+    assert.match(merge, /_id: link\._id, type: 'link'/,
+      'the old link id gets no tombstone, so the next pull from a peer re-creates it pointing at the '
+      + 'deleted entity and the repair undoes itself');
+  });
 
   it('a merge RELINKS a face rather than unlabelling it', () => {
     /*

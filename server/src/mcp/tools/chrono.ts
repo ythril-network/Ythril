@@ -1,8 +1,6 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { shapeError } from '../../brain/write-shape.js';
 import { CHRONO_STATUSES } from '../../config/types.js';
-import { usesLinkRecords } from '../../brain/link-adjacency.js';
-import { arrayWriteError } from '../../brain/array-write-refusal.js';
 import { UUID_V4_RE, TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, recurrenceSchema, unitScoreSchema, uuidSchema } from './shared.js';
 import { ChronoFilter, createChrono, deleteChrono, getChronoById, listChrono, updateChrono, parseRecurrence } from '../../brain/chrono.js';
 // The API layer's write gate, imported rather than reimplemented — see the note in memory.ts.
@@ -37,13 +35,13 @@ import { mergePropertiesOrKeep } from '../../brain/merge-fields.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
-import { connectionSchemas, applyConnections, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
+import { connectionSchemas, applyConnections, assertConnections, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
 
 export const save_chronoTool: ToolHandler = {
   name: 'save_chrono',
   description: 'Create a chronological entry — something that happened, or is meant to. Default types are event, deadline, plan, prediction and milestone; a space with its own `typeSchemas.chrono` accepts ITS names INSTEAD, not in addition, so a custom schema that omits `event` refuses `event`.\n\n'
     + 'THIS IS THE RECORD FOR ANYTHING DATED, and the reason the distinction matters: a fact saying "the migration is planned for March" is a fact whose truth expires, while a chrono entry carries `startsAt`/`endsAt` and a `status`, so it can be listed by date, found by `filter` in a window, and closed rather than contradicted. If it has a date, it belongs here.\n\n'
-    + 'Link it with `entityIds` — that is what lets `graph_traverse` reach it from the entity it is about (with `includeChrono`, on by default). Those references are NOT edges, so a chrono entry left unlinked is reachable only by search or by date, never from the thing it concerns.\n\n'
+    + 'Link it with `linkEntities` — that is what lets `graph_traverse` reach it from the entity it is about (with `includeChrono`, on by default). `entityIds` was the 4.x spelling and is REFUSED in 5.0. Those links are NOT edges, so a chrono entry left unlinked is reachable only by search or by date, never from the thing it concerns.\n\n'
     + 'Always an INSERT; use `update_chrono` to change one, including to move its `status`. IF THE SPACE VALIDATES: `introduced` are violations this write caused and are what refuses it; `preExisting` were already stored, are reported, and do NOT block. Branch on `introduced`.',
   mutating: true,
   spaceRequired: true,
@@ -53,7 +51,7 @@ export const save_chronoTool: ToolHandler = {
             // `F-27`: the `link*` fields and `edges`, from the one builder REST reads with — so a field
             // on one door and not the other cannot happen, which is how `traverse`'s link flags shipped
             // refused by the dispatcher while REST answered 200.
-            ...connectionSchemas(),
+            ...connectionSchemas('chrono'),
             space: s.requiredSpace,
             id: uuidSchema('UUID v4 of an EXISTING record to update. It is not a way to choose an id: identity is server-generated, so an id that names nothing is ignored rather than adopted. To carry your own reference, use `name` or `description`.'),
             title: {
@@ -91,17 +89,6 @@ export const save_chronoTool: ToolHandler = {
               type: 'array', items: { type: 'string' },
               description: 'Categorisation tags. EMBEDDED along with the title, so a tag affects meaning '
                 + 'ranking as well as being an exact filter for `filter`.',
-            },
-            entityIds: {
-              type: 'array', items: { type: 'string' },
-              description: 'Entity IDs this entry is about. THIS IS WHAT MAKES IT REACHABLE from the graph: '
-                + '`graph_traverse` follows these (with `includeChrono`, on by default), and they are NOT edges, so '
-                + 'an entry left unlinked is findable only by search or by date. Pass ids, not names.',
-            },
-            memoryIds: {
-              type: 'array', items: { type: 'string' },
-              description: 'Fact IDs this entry relates to. References rather than edges, like '
-                + '`entityIds`; deleting a fact leaves the id here and nothing reports it.',
             },
             description: {
               type: 'string',
@@ -144,11 +131,6 @@ export const save_chronoTool: ToolHandler = {
     // declare.
     const shapeErr = shapeError('chrono', a);
     if (shapeErr) throw new Error(shapeErr);
-    // `M-2`: on a converted space the six arrays are no longer a write surface — see `arrayWriteError`.
-    // Against the WRITE TARGET, because a proxy holds no records of its own and its marker would answer
-    // for a space it never writes to.
-    const linkArrErr = arrayWriteError({ converted: usesLinkRecords(wt.target), spaceId: wt.target, body: a, actor: ctx.actor });
-    if (linkArrErr) throw new Error(linkArrErr);
 
     // Schema validation (single pass)
     // Validate type against the space-specific allowlist (custom or default built-ins).
@@ -167,22 +149,13 @@ export const save_chronoTool: ToolHandler = {
 
     const remQuota = await checkQuota('brain');
 
-    // Validate entityIds and memoryIds are UUIDs (when strictLinkage is on)
-    const chronoEntityIds = Array.isArray(a['entityIds']) ? (a['entityIds'] as string[]) : undefined;
-    const chronoMemoryIds = Array.isArray(a['memoryIds']) ? (a['memoryIds'] as string[]) : undefined;
-    if (isStrictLinkage(wt.target)) {
-      if (chronoEntityIds) {
-        const invalidEIds = chronoEntityIds.filter(id => !UUID_V4_RE.test(id));
-        if (invalidEIds.length > 0) throw new Error(`entityIds must contain valid UUID v4 values (entity IDs), not names: ${invalidEIds.join(', ')}`);
-      }
-      if (chronoMemoryIds) {
-        const invalidMIds = chronoMemoryIds.filter(id => !UUID_V4_RE.test(id));
-        if (invalidMIds.length > 0) throw new Error(`memoryIds must contain valid UUID v4 values (fact IDs), not names: ${invalidMIds.join(', ')}`);
-      }
-    }
-
     const rec = parseRecurrence(a['recurrence']);
     if (!rec.ok) throw new Error(rec.error);
+
+    // Refused BEFORE the record is written: a class this kind cannot hold, and under strict linkage
+    // an id that names nothing. `applyConnections` runs after the write, so a refusal there would
+    // leave the record stored without the links the same call asked for.
+    await assertConnections(wt.target, 'chrono', a);
 
     let entry;
     try {
@@ -200,8 +173,6 @@ export const save_chronoTool: ToolHandler = {
       status: typeof a['status'] === 'string' ? a['status'] as import('../../config/types.js').ChronoStatus : undefined,
       confidence: typeof a['confidence'] === 'number' ? a['confidence'] : undefined,
       tags: Array.isArray(a['tags']) ? (a['tags'] as string[]) : undefined,
-      entityIds: chronoEntityIds,
-      memoryIds: chronoMemoryIds,
       properties: chronoProps,
       ...(rec.value ? { recurrence: rec.value } : {}),
     }, ctx.actor, ttlDaysFromArgs(a), {
@@ -272,7 +243,7 @@ export const update_chronoTool: ToolHandler = {
   description: 'Update one chrono entry by its ID. Every field except `id` is optional; a field you omit is '
     + 'left exactly as it was.\n\n'
     + 'ONE FIELD MERGES AND THE REST REPLACE, and the split is not guessable. `properties` MERGES key by key, '
-    + 'so patching one key keeps the others. `tags`, `entityIds` and `memoryIds` REPLACE — send the FULL list '
+    + 'so patching one key keeps the others. `tags`, `linkEntities` and `linkFacts` REPLACE — send the FULL list '
     + 'you want the entry to end up with, because sending one id drops the rest. (`update_entity` and '
     + '`update_edge` merge tags instead; `update_fact` replaces them, like this tool.)\n\n'
     + 'REMOVING SOMETHING IS `deleteFields`, NEVER AN OMISSION. An absent field means "leave it alone", so '
@@ -294,7 +265,7 @@ export const update_chronoTool: ToolHandler = {
     + '- `status` — `upcoming`, `active`, `completed`, `overdue`, `cancelled`. What you set here is the '
     + 'STORED value. ' + WHAT_A_PASSED_DATE_MEANS + '\n'
     + '- `confidence` — 0 to 1, for entries that are predictions rather than records.\n'
-    + '- `tags` / `entityIds` / `memoryIds` — each REPLACES the stored list.\n'
+    + '- `tags` / `linkEntities` / `linkFacts` — each REPLACES the stored list.\n'
     + '- `description` — replaced when sent.\n'
     + '- `properties` — MERGED key by key. String, number or boolean values only. Use `deleteFields` with '
     + '`properties.<key>` to remove one.\n'
@@ -363,18 +334,6 @@ export const update_chronoTool: ToolHandler = {
                 + 'instead; this tool and `update_fact` replace, and the split is not guessable from the '
                 + 'field name.',
             },
-            entityIds: {
-              type: 'array', items: { type: 'string' },
-              description: 'REPLACES the stored entity links — send the FULL list, because sending one id '
-                + 'drops the rest. These are what let `graph_traverse` reach the entry from the entity it concerns; '
-                + 'they are NOT edges, so an entry left with an empty list is reachable only by search or by '
-                + 'date.',
-            },
-            memoryIds: {
-              type: 'array', items: { type: 'string' },
-              description: 'REPLACES the stored fact links — send the FULL list, because sending one id '
-                + 'drops the rest.',
-            },
             description: {
               type: 'string',
               description: 'New prose description. Replaced when sent; an omitted field is left alone, so '
@@ -402,7 +361,7 @@ export const update_chronoTool: ToolHandler = {
             // `Q-30`: the same connection fields the CREATE tool takes, from the one builder both read —
             // a field on one verb and not the other is the gap this closes, and two hand-written copies
             // is how they would drift apart again.
-            ...connectionSchemas(),
+            ...connectionSchemas('chrono'),
           },
           required: ['space', 'id'],
           additionalProperties: false,
@@ -418,11 +377,6 @@ export const update_chronoTool: ToolHandler = {
     // declare.
     const shapeErr = shapeError('chrono', a);
     if (shapeErr) throw new Error(shapeErr);
-    // `M-2`: on a converted space the six arrays are no longer a write surface — see `arrayWriteError`.
-    // Against the WRITE TARGET, because a proxy holds no records of its own and its marker would answer
-    // for a space it never writes to.
-    const linkArrErr = arrayWriteError({ converted: usesLinkRecords(wt.target), spaceId: wt.target, body: a, actor: ctx.actor });
-    if (linkArrErr) throw new Error(linkArrErr);
 
     const updates: Record<string, unknown> = {};
     const sup = parseRecordSuppression(a);
@@ -449,22 +403,6 @@ export const update_chronoTool: ToolHandler = {
     if (typeof a['confidence'] === 'number') updates['confidence'] = a['confidence'];
     if (typeof a['description'] === 'string') updates['description'] = a['description'];
     if (Array.isArray(a['tags'])) updates['tags'] = a['tags'];
-    if (Array.isArray(a['entityIds'])) {
-      const eIds = a['entityIds'] as string[];
-      if (isStrictLinkage(wt.target)) {
-        const invalidEIds = eIds.filter(id => !UUID_V4_RE.test(id));
-        if (invalidEIds.length > 0) throw new Error(`entityIds must contain valid UUID v4 values (entity IDs), not names: ${invalidEIds.join(', ')}`);
-      }
-      updates['entityIds'] = eIds;
-    }
-    if (Array.isArray(a['memoryIds'])) {
-      const mIds = a['memoryIds'] as string[];
-      if (isStrictLinkage(wt.target)) {
-        const invalidMIds = mIds.filter(id => !UUID_V4_RE.test(id));
-        if (invalidMIds.length > 0) throw new Error(`memoryIds must contain valid UUID v4 values (fact IDs), not names: ${invalidMIds.join(', ')}`);
-      }
-      updates['memoryIds'] = mIds;
-    }
     if (a['properties'] != null && typeof a['properties'] === 'object' && !Array.isArray(a['properties'])) {
       updates['properties'] = a['properties'];
     }
@@ -490,7 +428,7 @@ export const update_chronoTool: ToolHandler = {
     // against `undefined` would be true for `null` and would DISABLE this refusal rather than widen it.
     const hasConnections = desiredLinksFrom(a) !== null || edgeInputsFrom(a) !== null;
     if (Object.keys(updates).length === 0 && ttlDaysFromArgs(a) === undefined && !dfPaths && !hasConnections) {
-      throw new Error('At least one of title, type, startsAt, endsAt, status, confidence, tags, entityIds, memoryIds, description, properties, recurrence, suppressEmbeddings, deleteFields, ttlDays, or a connection field must be provided');
+      throw new Error('At least one of title, type, startsAt, endsAt, status, confidence, tags, description, properties, recurrence, suppressEmbeddings, deleteFields, ttlDays, or a connection field must be provided');
     }
 
     // Validate the entry AS IT WILL BE, against the meta of the member space it actually lives in. The
@@ -502,6 +440,11 @@ export const update_chronoTool: ToolHandler = {
      * throws, so nothing about this tool's failure shape changes — the block was pure duplication, and the
      * duplicate is the one that drifted.
      */
+
+    // Refused BEFORE the record is written: a class this kind cannot hold, and under strict linkage
+    // an id that names nothing. `applyConnections` runs after the write, so a refusal there would
+    // leave the record stored without the links the same call asked for.
+    await assertConnections(wt.target, 'chrono', a);
 
     const entry = await updateChrono(wt.target, id, updates as Parameters<typeof updateChrono>[2], dfPaths, ctx.actor, ttlDaysFromArgs(a));
     if (!entry) throw new Error(`Chrono entry '${id}' not found`);
@@ -524,12 +467,13 @@ export const delete_chronoTool: ToolHandler = {
     + 'derived-overdue while staying as the record that it happened. Deleting is for '
     + 'entries that should never have existed. If you only want it out of meaning-ranking, set '
     + '`suppressEmbeddings` — it stays listable by `filter` and reachable by traversal.\n\n'
-    + 'THE ENTITIES AND MEMORIES IT LINKS ARE NOT TOUCHED. `entityIds` and `memoryIds` are references; '
+    + 'THE ENTITIES AND FACTS IT LINKS ARE NOT TOUCHED. Its links are links rather than ownership; '
     + 'deleting the entry drops the references and leaves every referenced record in place.\n\n'
-    + 'IT IS REFUSED IF SOMETHING STILL POINTS AT IT, in a space with strict linkage on — a file listing '
-    + 'this entry in `chronoIds` blocks the delete, and the error names it.\n\n'
+    + 'IT IS REFUSED IF SOMETHING STILL POINTS AT IT, in a space with strict linkage on — a file LINKED to '
+    + 'this entry blocks the delete, and the error names it. Clear the link first (`linkChronos: []` on the '
+    + 'file, or `delete_link`).\n\n'
     + 'THIS CHANGED IN 4.0 AND A RUNNING SCRIPT CAN HIT IT. Until then the delete always succeeded, because '
-    + '`file.chronoIds` had no reader anywhere in the server. With strict linkage OFF it still does.\n\n'
+    + 'a file-to-chrono link had no reader anywhere in the server. With strict linkage OFF it still does.\n\n'
     + 'A RECURRENCE RULE DOES NOT SPREAD THE DELETE, because it never created anything to delete. '
     + '`recurrence` describes one entry as repeating; it does not generate further entries, so there is no '
     + 'series here and no "this and all future occurrences" to choose between.\n\n'

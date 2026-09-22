@@ -34,6 +34,9 @@
  * `'instanceAdmin'` and `'spaceAdmin'` are not areas — they are the two requirements that sit outside the
  * four-area grid, and they are spelled out rather than approximated by "admin on everything".
  *
+ * `'nobody'` is the third of those: a field the route accepts and no caller may set, including an
+ * instance administrator. It is a row rather than a branch so the totality claim still covers it.
+ *
  * **Most rows LOOSEN**, because everything needed the whole space before. Each one hands a field to the
  * area the design already says owns it. `maxGiB` is the single row that TIGHTENS: a space's quota is its
  * share of the HOST's disk, so a space administrator raising their own was self-granting.
@@ -51,11 +54,19 @@ import { isSpaceAdminFor } from './editor-scope.js';
 /** Rungs contain the ones below them, so "at least" is an index comparison and never a set of cases. */
 const meetsRung = (held: Rung, need: Rung): boolean => RUNGS.indexOf(held) >= RUNGS.indexOf(need);
 
-/** What one field demands: an area rung, or one of the two requirements outside the grid. */
+/**
+ * What one field demands: an area rung, one of the two requirements outside the grid, or `'nobody'`.
+ *
+ * `'nobody'` is a field the route still ACCEPTS and no caller may set — not even an instance
+ * administrator, because it is not something the product can do any more. It is a row rather than a branch
+ * above the table so that the table stays TOTAL over the body: a field governed by a hand-written `if` is
+ * one the totality gate cannot see, and the next field retired this way would be governed by nothing.
+ */
 export type FieldRight =
   | { area: SpaceArea; needs: Exclude<Rung, 'none'> }
   | 'instanceAdmin'
-  | 'spaceAdmin';
+  | 'spaceAdmin'
+  | 'nobody';
 
 const area = (a: SpaceArea, needs: Exclude<Rung, 'none'>): FieldRight => ({ area: a, needs });
 
@@ -92,8 +103,19 @@ export const SPACE_FIELD_RIGHTS: Readonly<Record<string, FieldRight>> = {
   // It DELETES records on a clock.
   recordTtlDays: area('knowledge', 'admin'),
 
-  // Flipping it makes the six legacy array fields start REFUSING writes for every caller in the space.
-  completeLinkage: area('knowledge', 'admin'),
+  /*
+   * SETTABLE BY NOBODY.
+   *
+   * It was an ordinary reversible space setting: turning it off made a space accept the 4.x link arrays
+   * again, which is what made a single-space conversion a genuine pilot. 5.0 removed the arrays, so
+   * turning it off now means "read my links from a shape that does not exist" — every link read on that
+   * space is refused, and the operator who flipped it sees a working space stop answering.
+   *
+   * Above an instance administrator on purpose: they are allowed to do anything the product can do, and
+   * this is not something the product can do. The conversion and space creation set it, and neither comes
+   * through this route.
+   */
+  completeLinkage: 'nobody',
 
   // Tuning how duplicates are judged.
   dupeRules: area('dataQuality', 'write'),
@@ -146,14 +168,23 @@ export function refusalsForSpaceUpdate(
   instanceAdmin: boolean,
   rights: TokenRights | null | undefined,
 ): string[] {
-  // An instance administrator passes everything. Saying it once here keeps every row below about the
+  /*
+   * The `'nobody'` rows come FIRST, above the instance-admin shortcut, because they are the one
+   * requirement an instance administrator does not satisfy — see the type. Read out of the table rather
+   * than named here, so retiring a second field is a row and not another branch nothing can see.
+   */
+  const settable = settingsFieldsIn(body);
+  const refusedOutright = settable.filter(f => SPACE_FIELD_RIGHTS[f] === 'nobody');
+  if (refusedOutright.length > 0) return refusedOutright;
+
+  // An instance administrator passes everything else. Saying it once here keeps every row below about the
   // per-space question, which is the only question the rows differ on.
   if (instanceAdmin) return [];
 
   const spaceAdmin = isSpaceAdminFor(rights, spaceId);
   const refused: string[] = [];
 
-  for (const field of settingsFieldsIn(body)) {
+  for (const field of settable) {
     const need = SPACE_FIELD_RIGHTS[field];
     /*
      * An unknown field is REFUSED, not allowed.
@@ -164,6 +195,7 @@ export function refusalsForSpaceUpdate(
      * make a new field settable by everybody.
      */
     if (!need) { refused.push(field); continue; }
+    if (need === 'nobody') { refused.push(field); continue; }          // returned above; fails closed anyway
     if (need === 'instanceAdmin') { refused.push(field); continue; }   // instanceAdmin returned above
     if (need === 'spaceAdmin') { if (!spaceAdmin) refused.push(field); continue; }
     if (!rights || !meetsRung(effectiveRung(rights, spaceId, need.area), need.needs)) refused.push(field);
@@ -176,6 +208,8 @@ export function describeFieldRequirement(field: string): string {
   const need = SPACE_FIELD_RIGHTS[field];
   if (!need) return `${field} (no requirement is declared for this field, so it is refused)`;
   if (need === 'instanceAdmin') return `${field} (instance administrator)`;
+  if (need === 'nobody') return `${field} (set by the link conversion and by space creation; with the 4.x `
+    + 'link arrays gone there is no other shape for a space to be read through, so nobody may change it)';
   if (need === 'spaceAdmin') return `${field} (space administrator)`;
   return `${field} (${need.needs} on ${need.area})`;
 }

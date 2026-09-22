@@ -100,6 +100,11 @@ const entityProperties: Check = v => plainObject('properties')(v) ?? primitivePr
  *
  * A field absent from a table is one no door constrains — `id` is checked where identity is decided, and
  * `type` on a chrono entry is checked against the SPACE's allowlist, which this module cannot see.
+ *
+ * **The `link*` fields are absent on purpose.** They are not values a record stores, they are an
+ * instruction to make link records, and `write-connections.ts` already holds the one rule for their
+ * shape — every write door asks it in the same breath as this. A second rule here would be the exact
+ * drift this table was built to end.
  */
 const SHAPE: Record<ShapedType, Record<string, Check>> = {
   fact: {
@@ -110,7 +115,6 @@ const SHAPE: Record<ShapedType, Record<string, Check>> = {
         ? '`fact` must not exceed 50 000 characters' : null),
     type: str('type'),
     tags: strArray('tags'),
-    entityIds: strArray('entityIds'),
     description: str('description'),
     properties: plainObject('properties'),
   },
@@ -121,8 +125,6 @@ const SHAPE: Record<ShapedType, Record<string, Check>> = {
     status: oneOf('status', [...CHRONO_STATUSES]),
     confidence: unit('confidence'),
     tags: strArray('tags'),
-    entityIds: strArray('entityIds'),
-    memoryIds: strArray('memoryIds'),
     description: str('description'),
     properties: plainObject('properties'),
   },
@@ -163,7 +165,7 @@ export const shapedFields = (type: ShapedType): readonly string[] => Object.keys
  * a door seeing it got it from a destructure with no value — that is absence. `{"description": null}` is a
  * caller having sent something, and it is not a string.
  *
- * A returned string rather than a throw, matching `primitivePropertyError` and `arrayWriteError`: a REST
+ * A returned string rather than a throw, matching `primitivePropertyError` and `linkInputError`: a REST
  * door answers `400` with it and an MCP handler throws it, and the doors' existing catch blocks already
  * carry `SchemaViolationError`, which means something else entirely — a violation of the SPACE's schema,
  * which a space in `warn` mode records and stores. This is refused in every mode.

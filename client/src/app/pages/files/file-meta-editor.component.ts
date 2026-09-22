@@ -10,7 +10,7 @@ import { FILE_META_EDITOR_STYLES } from './file-manager.styles';
 /**
  * The edit model for a file's metadata record.
  *
- * **`entityIds` is a STRING while the other two reference fields are arrays**, and that asymmetry is not an
+ * **`linkEntities` is a STRING while the other two reference fields are arrays**, and that asymmetry is not an
  * oversight: its control is free text, so the page joins on the way in and splits on the way out. A rewrite
  * that made all three the same shape would break the round-trip in one direction, for one field, which is
  * exactly the sort of thing the characterization suite was written to catch.
@@ -18,9 +18,9 @@ import { FILE_META_EDITOR_STYLES } from './file-manager.styles';
 export interface FileMetaModel {
   description: string;
   tags: string[];
-  entityIds: string;
-  memoryIds: string[];
-  chronoIds: string[];
+  linkEntities: string;
+  linkFacts: string[];
+  linkChronos: string[];
 }
 
 /**

@@ -41,25 +41,26 @@
  * This module does not implement that. It maps input to the shape `reconcileLinks` already takes — see the
  * `CLAUDE.md` rule on reusing a module rather than writing the rule a second time.
  */
-import { REF_KINDS } from '../config/types-knowledge.js';
+import { REF_KINDS, LINK_INPUT_FIELDS } from '../config/types-knowledge.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import type { DesiredLinks } from './links.js';
-import { isWellFormedRef, edgeEndpointKindSchema, edgeEndpointKind } from './entity-refs.js';
+import { invalidRefsMessage, edgeEndpointKindSchema, edgeEndpointKind, isWellFormedRef } from './entity-refs.js';
 import { primitivePropertyError } from './property-values.js';
-import { reconcileLinks } from './links.js';
+import { reconcileLinks, assertDesiredLinks } from './links.js';
+import { linksStartingFrom, linkClassesFrom } from './link-adjacency.js';
 import { upsertEdge } from './edges.js';
+import { retiredWriteFieldError } from './retired-write-fields.js';
 import type { AuthorRef } from '../config/types.js';
 import type { WebhookActor } from '../webhooks/dispatcher.js';
 
 /**
- * The write field for each kind — DERIVED from the kind vocabulary, so a fifth kind gets its field on the
- * day it is declared rather than whenever somebody notices.
+ * The write field for each kind — declared beside the kind vocabulary and re-exported here.
  *
- * `entity` → `linkEntities`, `fact` → `linkFacts`, `chrono` → `linkChronos`, `file` → `linkFiles`.
+ * `entity` → `linkEntities`, `fact` → `linkFacts`, `chrono` → `linkChronos`, `file` → `linkFiles`. It sits
+ * in `config/types-knowledge.ts` because `brain/links.ts` names these fields in its refusals and cannot
+ * import this module — it is the writer this one calls. One map, both ends.
  */
-export const LINK_INPUT_FIELDS: Readonly<Record<RefKind, string>> = Object.freeze(
-  Object.fromEntries(REF_KINDS.map(k => [k, `link${plural(k)}`])) as Record<RefKind, string>,
-);
+export { LINK_INPUT_FIELDS } from '../config/types-knowledge.js';
 
 /** Every `link*` field name, for a door that needs to spot one in a body. */
 export const LINK_INPUT_NAMES: readonly string[] = Object.freeze(Object.values(LINK_INPUT_FIELDS));
@@ -84,14 +85,48 @@ export function desiredLinksFrom(body: unknown): DesiredLinks | null {
 }
 
 /**
+ * The `link*` fields a body names, keyed as the WRITERS take them rather than by kind.
+ *
+ * `saveFact`, `updateChrono` and `updateFileMeta` take `linkEntities` / `linkFacts` / `linkChronos`
+ * directly, so a door spreads this into the options object it was building anyway. A field the body does
+ * not name is ABSENT from the result rather than empty, because those two mean opposite things to
+ * `reconcileLinks` — omitted leaves the class alone, `[]` detaches it.
+ */
+export function linkFieldsFrom(body: unknown): Record<string, string[]> {
+  const desired = desiredLinksFrom(body);
+  if (!desired) return {};
+  const out: Record<string, string[]> = {};
+  for (const kind of Object.keys(desired) as RefKind[]) {
+    out[LINK_INPUT_FIELDS[kind]] = [...(desired[kind] ?? [])];
+  }
+  return out;
+}
+
+/**
  * Why this body's `link*` fields cannot be honoured, or `null`.
  *
- * Shape first, then well-formedness per kind. It does NOT check that the targets exist: that is
- * `assertRefsResolve`'s job at the writer, where it can be done in one query against the records being
- * written rather than once per door — and a door that checked existence itself would be the second
- * implementation this module exists to avoid.
+ * ## Two questions, and only one of them is unconditional
+ *
+ * **The SHAPE always**: the field is an array (or `null`, which is the caller writing "none"), and every
+ * entry a non-empty string. Reading `"abc"` as one id is how a write silently links to nothing.
+ *
+ * **The WELL-FORMEDNESS under `strictLinkage` only**, which is the same condition existence is checked
+ * under. That setting is a deliberate per-space choice to accept dangling references — the case it exists
+ * for is a staged import whose targets resolve in a later pass — and the 4.x arrays honoured it here too:
+ * a lax space stored `entityIds: ['created-later']` on purpose. Checking the shape of the ID regardless
+ * would close that door while the setting still claimed it was open.
+ *
+ * It does NOT check that the targets exist: that is `assertRefsResolve`'s job at the writer, where it can
+ * be done in one query against the records being written rather than once per door — and a door that
+ * checked existence itself would be the second implementation this module exists to avoid.
+ *
+ * ## The message comes from `entity-refs.ts`
+ *
+ * `invalidRefsMessage` names the offending VALUES, and this returned only the field. Two messages for one
+ * rule, and the weaker one won because it runs first: a caller who sent a name got "linkEntities must
+ * contain UUIDs" where the writer would have told them which value was the name.
  */
-export function linkInputError(body: unknown): string | null {
+export function linkInputError(body: unknown, opts: { strict?: boolean } = {}): string | null {
   if (!body || typeof body !== 'object') return null;
   const bag = body as Record<string, unknown>;
 
@@ -100,28 +135,18 @@ export function linkInputError(body: unknown): string | null {
     if (!(field in bag)) continue;
 
     const value = bag[field];
-    // `null` is the caller writing "none", the same as `[]`. Anything else that is not an array is a shape
-    // error rather than an empty set — reading `"abc"` as one id is how a filter silently matches nothing.
     if (value === null) continue;
     if (!Array.isArray(value)) return `${field} must be an array of ids`;
-
     for (const ref of value) {
       if (typeof ref !== 'string' || !ref.trim()) return `${field} must contain non-empty ids`;
-      if (!isWellFormedRef(kind, ref)) {
-        return kind === 'file'
-          ? `${field} must contain space-relative paths, not ids`
-          : `${field} must contain UUIDs`;
-      }
     }
+    if (opts.strict === false) continue;
+    const malformed = invalidRefsMessage(field, kind, value as string[]);
+    if (malformed) return malformed;
   }
   return null;
 }
 
-/** `entity` → `Entities`, `chrono` → `Chronos`. Kept beside the field map so the two cannot disagree. */
-function plural(kind: string): string {
-  const capital = kind.charAt(0).toUpperCase() + kind.slice(1);
-  return capital.endsWith('y') ? `${capital.slice(0, -1)}ies` : `${capital}s`;
-}
 
 /**
  * The `link*` properties for a tool's `inputSchema`, built from the same map the readers use.
@@ -132,8 +157,25 @@ function plural(kind: string): string {
  * parity structural rather than remembered.
  */
 export function linkInputSchemas(): Record<string, unknown> {
+  return linkInputSchemasForKinds(REF_KINDS);
+}
+
+/**
+ * The `link*` properties a record of THIS kind can honour — a fact names entities, a file names all three.
+ *
+ * A door for one record kind declares this rather than the whole set. Declaring a class the record cannot
+ * hold is the worse half of the same defect a missing declaration is: the caller is told they can attach a
+ * file to a file, the writer has no class for it, and what comes back is a success.
+ *
+ * Derived from `LINK_CLASSES`, which is the one definition of what the six classes are.
+ */
+export function linkInputSchemasFor(fromKind: RefKind): Record<string, unknown> {
+  return linkInputSchemasForKinds(linkClassesFrom(fromKind).map(c => c.toKind));
+}
+
+function linkInputSchemasForKinds(kinds: readonly RefKind[]): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const kind of REF_KINDS) {
+  for (const kind of kinds) {
     const isPath = kind === 'file';
     out[LINK_INPUT_FIELDS[kind]] = {
       type: 'array',
@@ -299,20 +341,93 @@ export function edgeInputError(body: unknown): string | null {
 /**
  * Everything a body says about relationships, refused in one call.
  *
- * A door asks this ONCE. Two separate checks would mean every door remembering both, and a door that
- * remembers one is the shape this repository has paid for over and over.
+ * A door asks this ONCE. Three separate checks would mean every door remembering all of them, and a door
+ * that remembers two is the shape this repository has paid for over and over. The retired NAMES are
+ * checked first, so a caller still on the 4.x spelling is told what to send instead of being told their
+ * ids are the wrong shape for a field they did not mention.
  */
-export function connectionInputError(body: unknown): string | null {
-  return linkInputError(body) ?? edgeInputError(body);
+export function connectionInputError(body: unknown, opts: { strict?: boolean } = {}): string | null {
+  return retiredWriteFieldError(body) ?? linkInputError(body, opts) ?? edgeInputError(body);
 }
 
-/** The published properties for a tool schema: the `link*` fields and `edges`, from one place. */
-export function connectionSchemas(): Record<string, unknown> {
-  return { ...linkInputSchemas(), edges: edgeInputSchema() };
+/**
+ * The published properties for a tool schema: the `link*` fields this record kind can hold, and `edges`.
+ *
+ * **Per kind, because the classes are.** A fact names entities and nothing else; an entity names nothing
+ * at all — it is only ever the far end. Declaring the whole set on every door advertised classes the
+ * writer refuses, which is the worst half of a parity defect: the schema a caller reads while
+ * constructing arguments promised something no door can do.
+ */
+export function connectionSchemas(fromKind?: RefKind): Record<string, unknown> {
+  const links = fromKind ? linkInputSchemasFor(fromKind) : linkInputSchemas();
+  return { ...links, edges: edgeInputSchema() };
 }
 
 /** Every body key these fields occupy, so a door can call them known rather than warn about them. */
 export const CONNECTION_BODY_KEYS: readonly string[] = Object.freeze([...LINK_INPUT_NAMES, 'edges']);
+
+/**
+ * What an audit entry should compare when a write changes a record's links — the pair, from ONE place.
+ *
+ * ## Why the record snapshots cannot answer this any more
+ *
+ * `audit/middleware.ts` records what changed by diffing the record BEFORE against the record AFTER, and
+ * the allowlist named `entityIds`, `memoryIds` and `chronoIds` so a re-link left a trace. 5.0 moved those
+ * connections into link records, so neither snapshot carries them — and the way that fails is the one this
+ * module's neighbours keep warning about: the entry still appears, the field is simply missing from
+ * `changes`, and an audit reader concludes the links were untouched. *"Losing track of what a file was
+ * linked to is exactly the kind of change nobody notices until a traversal comes back empty."*
+ *
+ * ## Only the classes the body NAMED, and that is the same rule the writer applies
+ *
+ * A class the caller omitted is not touched by the write, so reporting it would put an unchanged set into
+ * every entry. A body naming no link field at all gets two empty objects and costs no query — links cannot
+ * have changed, so there is nothing to read.
+ *
+ * Call it BEFORE the write: `before` is read from the link records as they still stand, and `after` is what
+ * the body asked for, which is what `reconcileLinks` will make true of the classes it names.
+ */
+export async function linkAuditSnapshots(
+  spaceId: string,
+  from: string,
+  body: unknown,
+): Promise<{ before: Record<string, string[]>; after: Record<string, string[]> }> {
+  const desired = desiredLinksFrom(body);
+  if (!desired) return { before: {}, after: {} };
+
+  const rows = await linksStartingFrom(spaceId, [from]);
+  const before: Record<string, string[]> = {};
+  const after: Record<string, string[]> = {};
+  for (const kind of Object.keys(desired) as RefKind[]) {
+    const field = LINK_INPUT_FIELDS[kind];
+    before[field] = rows.filter(r => r.toKind === kind).map(r => r.to);
+    after[field] = [...(desired[kind] ?? [])];
+  }
+  return { before, after };
+}
+
+/**
+ * Refuse what can be refused about this body's connections BEFORE the record is written.
+ *
+ * ## Why a door needs this when the writer already asserts
+ *
+ * `applyConnections` runs AFTER the record exists — it has to, because a link needs both ends and the
+ * `from` is what was just minted. So a link id naming nothing is refused with the record already stored:
+ * the caller gets a `400` and a row they did not ask for, which is the silent unlinked write made noisy
+ * rather than fixed.
+ *
+ * The writers assert too, and that is not a duplicate for the sake of it: `files/media/face-embedder.ts`
+ * and the conversion reach a writer directly, past every door there is. This is the same assertion asked
+ * one step earlier, where the answer can still be *nothing happened*.
+ */
+export async function assertConnections(
+  spaceId: string,
+  fromKind: RefKind,
+  body: unknown,
+): Promise<void> {
+  const desired = desiredLinksFrom(body);
+  if (desired) await assertDesiredLinks(spaceId, fromKind, desired);
+}
 
 /**
  * Make the relationships a write asked for, AFTER the record exists.

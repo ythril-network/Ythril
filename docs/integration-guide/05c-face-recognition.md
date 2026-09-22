@@ -52,7 +52,7 @@ and the infra pin not turned off):
      even if the default changes later — its stored vectors have not moved.
    - **A descriptor of any other width is skipped, and the first one is logged as a warning** naming the width received and which path produced it (in-process or external). One odd descriptor must not fail a whole media job, so the skip itself is not an error; the log is once per process, because a changed width means every face is affected and a per-face log would bury the message. If face recognition appears to find nothing, check for this warning before concluding the images have no faces — that is the symptom a width mismatch produces.
 4. **Gallery search** — each descriptor is searched against the space's face gallery (all face-chunk records that have a `faceEntityId`) using an exact `$vectorSearch`. The top-1 result is examined.
-5. **Auto-label** — if the top match's cosine similarity score ≥ `confidenceThreshold` (default: `0.6`), the parent image is linked to that entity (`entityIds` updated). The first successful match wins.
+5. **Auto-label** — if the top match's cosine similarity score ≥ `confidenceThreshold` (default: `0.6`), the parent image is linked to that entity (a `file` → `entity` link record is written). The first successful match wins.
 6. **Persist face-chunks** — one `{fileId}#face-chunk{N}` filemeta record per detected face is written (or replaced on reprocess) with:
    - `faceEmbedding` — the 128d descriptor
    - `faceBbox` — normalised `[x, y, w, h]` bounding box
@@ -64,12 +64,12 @@ and the infra pin not turned off):
 
 Only entities whose `type` is listed in `personEntityTypes` (default `["person"]`) are eligible for the face gallery. When a user manually links an image to an entity via `updateFileMeta`:
 
-- If exactly one `personEntityTypes` entity is in `entityIds`, all face-chunks of that file are immediately updated with `faceEntityId` — the labeled face enters the gallery at once.
+- If the file links to exactly one `personEntityTypes` entity, all face-chunks of that file are immediately updated with `faceEntityId` — the labeled face enters the gallery at once.
 - If zero or more than one person-type entity is present, no gallery entry is made. This prevents a "group photo" from poisoning the gallery with an ambiguous identity.
 
 #### Manual Label Propagation
 
-When a user manually updates `entityIds` on an image (e.g. correcting a mis-label via the Files UI or REST API), Ythril calls `propagateFaceLabel` — which sets `faceEntityId` on every face-chunk record belonging to that file. This immediately improves future auto-labeling for that person's identity.
+When a user manually changes which entities an image links to (`linkEntities`, e.g. correcting a mis-label via the Files UI or REST API), Ythril calls `propagateFaceLabel` — which sets `faceEntityId` on every face-chunk record belonging to that file. This immediately improves future auto-labeling for that person's identity.
 
 #### What happens to a label when the person record changes
 

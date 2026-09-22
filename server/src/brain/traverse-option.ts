@@ -53,12 +53,10 @@ export interface TraverseOption {
    * wrong, and the second was the dangerous one — it told a future reader to change a documented
    * parameter as soon as the migration landed.
    *
-   *  - Links are ALREADY records on a converted space. `usesLinkRecords` decides per space and
-   *    `links-conversion.ts` sets it, so "a link is an array today" describes one of the two shapes.
-   *  - **The array expresses BOTH readings, and `link-frontier.ts` implements both.** `linksToAny` finds
-   *    the records whose array names an id — inbound; reading a record's own `cls.field` gives what it
-   *    names — outbound. The record shape has the same two, as `linksPointingAt` and `linksStartingFrom`.
-   *    So the representation was never what made `direction` meaningless.
+   *  - Links ARE records — since 4.0 as the second of two shapes, and since 5.0 as the only one.
+   *  - **Both readings existed in either shape, and `link-frontier.ts` implements both.**
+   *    `linksPointingAt` finds what names a record — inbound; `linksStartingFrom` gives what it names —
+   *    outbound. So the representation was never what made `direction` meaningless.
    *
    * What makes it meaningless is the sentence at the top, which holds for both shapes and cannot rot with
    * the storage: the ends of a link are of different KINDS, so its orientation is implied by where you

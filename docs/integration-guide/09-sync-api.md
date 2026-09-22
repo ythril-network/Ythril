@@ -185,11 +185,10 @@ Base path: `/api/sync` — used by the sync engine between peers. All endpoints 
 | `/api/sync/networks/:networkId/votes/:roundId` | POST | Relay a yes/veto vote |
 | `/api/sync/warm` | POST | Pre-sync warm-up (auth/embedding/DB) |
 
-**Link records have no single-record `POST`, and that is deliberate.** A link is written by writing the array
-field it comes from on the record that holds it — `fact.entityIds`, `chrono.entityIds`/`memoryIds`,
-`file.entityIds`/`memoryIds`/`chronoIds` — so there is no independent create for a peer to mirror. Link
-records reach a peer through `batch-upsert`, which is what a sync cycle uses for every family anyway; the
-per-family `POST` routes are the older single-record path.
+**Link records have no single-record `POST`, and that is deliberate.** They reach a peer through
+`batch-upsert`, which is what a sync cycle uses for every family anyway; the per-family `POST` routes are
+the older single-record path. A link is a small record of its own — `from`, `to` and the two kinds — so
+nothing about it needs a bespoke ingest.
 
 ### A file's METADATA replicates; the bytes travel separately (4.0)
 
@@ -199,18 +198,19 @@ GET /api/sync/filemeta/:id
 ```
 
 The bytes have always moved through the manifest and `/api/files`. From 4.0 the file's **metadata record**
-moves too — its description, tags, properties, and the three link arrays.
+moves too — its description, tags and properties. Its LINKS travel as link records of their own, on the
+same channel.
 
-**Before this, a file linked to an entity on one instance sent the LINK record and not the array it came
-from.** So the graph on a peer showed the connection and the peer's own file list showed none: two answers
-to one question, differing by which collection you asked.
+**Before this, a file's metadata did not replicate at all**, so a description written on one instance was
+invisible on every other — while the graph already showed the connection, which is two answers to one
+question differing by which collection you asked.
 
 **Only the AUTHORED half crosses the wire, and the ingest MERGES rather than replaces.** A file meta record
 holds three different kinds of field:
 
 | | |
 |---|---|
-| **authored** — replicates | `description`, `descriptionSource`, `tags`, `entityIds`, `memoryIds`, `chronoIds`, `properties`, `author`, `createdAt`, `updatedAt`, `seq`, the two suppression spellings |
+| **authored** — replicates | `description`, `descriptionSource`, `tags`, `properties`, `author`, `createdAt`, `updatedAt`, `seq`, the two suppression spellings. A 4.x link array arriving here is REFUSED rather than stripped — this schema is `.strict()` |
 | **derived from the local blob** — never sent, never overwritten | `sizeBytes`, `sha256`, `excerpt`, the vector, `chunkCount`, `embeddingStatus`, `conversionError` |
 | **chunk-only** — the whole record is refused | `parentFileId`, `chunkIndex`, `content` |
 

@@ -50,7 +50,6 @@ bulkRouter.post('/spaces/:spaceId/bulk', globalRateLimit, requireSpaceAuth, deny
     ...((req.body ?? {}) as BulkInput),
     // `F-25`: who wrote it, for the conversion pre-flight. Spread AFTER the body so a caller cannot
     // supply its own actor and be recorded as somebody else.
-    actor: requestActor(req),
   });
   if (bulkWriteTotal(result) > 0) {
     // Bulk suppresses per-item webhooks; emit ONE summary a workflow can inspect.

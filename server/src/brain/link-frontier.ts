@@ -22,7 +22,7 @@
  */
 import { col, asFilter } from '../db/mongo.js';
 import {
-  LINK_CLASSES, linksToAny, usesLinkRecords, linksPointingAt, linksStartingFrom, docsFromCollection,
+  LINK_CLASSES, assertLinkRecords, linksPointingAt, linksStartingFrom, docsFromCollection,
   type LinkClass, type LinkEnd,
 } from './link-adjacency.js';
 import type { ChronoEntry, FactDoc, FileMetaDoc } from '../config/types.js';
@@ -117,7 +117,15 @@ function labelWanted(cls: LinkClass, edgeLabels?: readonly string[] | undefined)
 
 /** What one scan found, and whether the database stopped handing documents over before it ran out. */
 interface FoundRecords {
-  found: Array<{ cls: LinkClass; doc: LinkRow }>;
+  /**
+   * `via` is the FRONTIER id this record was reached from, and it comes off the link row.
+   *
+   * It used to be recomputed by the caller, by reading the record's own array field and picking the first
+   * id in it that was on the frontier. That field is gone in 5.0, and the fallback it had — `frontier[0]`
+   * — is a synthetic edge drawn from the wrong node, which reads as a real relationship rather than as a
+   * missing value. So the row carries it: the row is what actually knows.
+   */
+  found: Array<{ cls: LinkClass; doc: LinkRow; via: string }>;
   capped: boolean;
 }
 
@@ -146,6 +154,8 @@ async function linkedRecordsFromRows(
   /** Which ids each COLLECTION must be asked for, and which class each id was claimed by. */
   const idsPerCollection = new Map<LinkClass['collection'], Set<string>>();
   const classOfId = new Map<string, LinkClass[]>();
+  /** `${recordId}>${fromKind}>${toKind}` → the frontier id the row reached it from. */
+  const viaOf = new Map<string, string>();
   for (const r of rows) {
     const cls = byPair.get(`${r.fromKind}>${r.toKind}`);
     if (!cls) continue;
@@ -154,6 +164,10 @@ async function linkedRecordsFromRows(
     ids.add(r.from);
     const claimed = classOfId.get(r.from) ?? [];
     if (!claimed.includes(cls)) { claimed.push(cls); classOfId.set(r.from, claimed); }
+    // FIRST row wins, matching what the array path did: it took the first id in the record's field that
+    // was on the frontier. A record reached from two frontier nodes has two honest answers.
+    const key = `${r.from}>${cls.kind}>${cls.toKind}`;
+    if (!viaOf.has(key)) viaOf.set(key, r.to);
   }
 
   const found: FoundRecords['found'] = [];
@@ -169,43 +183,14 @@ async function linkedRecordsFromRows(
     const narrowed = claiming.length > 0 && claiming.every(c => attributedOnly.has(c));
     for (const doc of await docsFromCollection<LinkRow>(mid, collection, [...ids], undefined,
       narrowed ? { ...ATTRIBUTED_ONLY } : undefined)) {
-      for (const cls of classOfId.get(doc._id) ?? []) found.push({ cls, doc });
+      for (const cls of classOfId.get(doc._id) ?? []) {
+        found.push({ cls, doc, via: viaOf.get(`${doc._id}>${cls.kind}>${cls.toKind}`) as string });
+      }
     }
   }
   return { found, capped };
 }
 
-/**
- * The ARRAY path, byte-for-byte the 3.x walk: one collection read per class, bounded on the cursor.
- *
- * Every space that has not run the conversion answers from here, so this is not a fallback that can be
- * allowed to rot — it is what most instances will use for as long as the arrays exist.
- */
-async function linkedRecordsFromArrays(
-  mid: string, frontier: readonly string[], wanted: readonly LinkClass[], remaining: number | undefined,
-  attributedOnly: ReadonlySet<LinkClass>,
-): Promise<FoundRecords> {
-  const found: FoundRecords['found'] = [];
-  let capped = false;
-  for (const cls of wanted) {
-    // `found.length` is subtracted so the bound covers the call rather than each class separately.
-    const left = remaining === undefined ? undefined : Math.max(0, remaining - found.length);
-    // A budget spent before every class was read leaves whole kinds of record unlooked-at, not merely
-    // trimmed — so this is a truncation even though nothing was thrown away here.
-    if (left === 0) return { found, capped: true };
-    // The narrowing rides INSIDE the query rather than filtering what came back. Reading every linked fact
-    // and discarding the unattributed ones would spend the scan budget on records nobody asked for, which
-    // is the exact cost `includeMemories: false` exists to avoid.
-    const narrowing = attributedOnly.has(cls) ? ATTRIBUTED_ONLY : {};
-    const docs = await col<LinkRow>(`${mid}_${cls.collection}`)
-      .find(asFilter<LinkRow>({ ...linksToAny(mid, cls, frontier), ...narrowing }), { projection: cls.projection })
-      .limit(left ?? 0)
-      .toArray() as LinkRow[];
-    if (left !== undefined && docs.length === left) capped = true;
-    for (const doc of docs) found.push({ cls, doc });
-  }
-  return { found, capped };
-}
 /**
  * Every linked record meeting `frontier`, across `memberIds`, for the classes this walk follows.
  *
@@ -213,15 +198,15 @@ async function linkedRecordsFromArrays(
  * emitted again at depth 3. Passing the caller's set rather than returning ids to merge is what keeps the
  * two halves of one walk honest about each other.
  *
- * `frontierSet` decides which frontier node a record hangs off. A record can link to several at once, and
- * the first that is actually ON the frontier is the truthful `from`; `frontier[0]` is the fallback for the
- * case that cannot happen — a record matched by the `$in` with no id in the set — and is there so the
- * synthetic edge is never built from an id the caller cannot see.
+ * **`frontierSet` WAS A PARAMETER and is gone in 5.0.** It existed to answer which frontier node a record
+ * hangs off, by reading the record's own array field and picking the first id in it that was on the
+ * frontier. That field no longer exists, and the link ROW carries the answer — so the caller no longer has
+ * to hand in a set to reconstruct something the data already knows, and the `frontier[0]` fallback that
+ * drew a synthetic edge from the wrong node is gone with it.
  */
 export async function linkedRecordsAtFrontier(
   memberIds: readonly string[],
   frontier: readonly string[],
-  frontierSet: ReadonlySet<string>,
   visited: Set<string>,
   inclusion: LinkInclusion,
   edgeLabels?: readonly string[] | undefined,
@@ -268,24 +253,22 @@ export async function linkedRecordsAtFrontier(
      * 3.8× SLOWER than the array walk it replaced, for an identical answer. The indexed lookup was never
      * the cost; the round trips were. See `linksPointingAt`.
      *
-     * Which shape a space answers from is `usesLinkRecords`, never a decision taken here.
+     * There is ONE shape from 5.0. A space that never converted is refused rather than walked, because
+     * its pre-upgrade links were only ever in the arrays this release removed — see `assertLinkRecords`.
      */
-    const rows = usesLinkRecords(mid)
-      ? await linkedRecordsFromRows(mid, await linksPointingAt(mid, frontier, remaining), wanted, remaining, attributedOnly)
-      : await linkedRecordsFromArrays(mid, frontier, wanted, remaining, attributedOnly);
+    assertLinkRecords(mid);
+    const rows = await linkedRecordsFromRows(
+      mid, await linksPointingAt(mid, frontier, remaining), wanted, remaining, attributedOnly);
     if (rows.capped) scanCapped = true;
 
-    for (const { cls, doc } of rows.found) {
+    for (const { cls, doc, via } of rows.found) {
       if (visited.has(doc._id)) continue;
       visited.add(doc._id);
-      // `cls.field`, not `entityIds`: five of the six classes are named through a different field, and a
-      // hardcoded `entityIds` here would give every chrono-to-fact link a `via` of `frontier[0]` — a
-      // synthetic edge drawn from the wrong node, which reads as a real relationship.
-      //
-      // `?? []` because a projection is what decides whether the field comes BACK, which is a different
-      // question from whether the filter proved it present.
-      const named = (doc[cls.field] as string[] | undefined) ?? [];
-      const via = named.find(id => frontierSet.has(id)) ?? frontier[0];
+      // `via` comes off the LINK ROW now. It used to be recomputed here from the record's own array field
+      // — `cls.field`, never a hardcoded `entityIds`, because five of the six classes are named through a
+      // different one — and that field is gone. Its fallback was `frontier[0]`, a synthetic edge drawn
+      // from the wrong node, which reads as a real relationship rather than as a missing value; the row
+      // knows the answer, so nothing has to fall back.
       out.push({ kind: cls.kind, label: cls.label, doc: doc as unknown as LinkedRecord['doc'], via });
     }
   }
@@ -364,7 +347,10 @@ export async function entitiesLinkedFromRecords(
     const remaining = limit === undefined ? undefined : Math.max(0, limit - out.length);
     if (remaining === 0) return { records: out, scanCapped: true };
 
-    if (usesLinkRecords(mid)) {
+    // ONE shape from 5.0: a space that never converted is refused rather than walked. See
+    // `assertLinkRecords` — its pre-upgrade links were only ever in the arrays this release removed.
+    assertLinkRecords(mid);
+    {
       /*
        * ONE query on the `{from, fromKind, …}` index for the whole seed set, then one document read per
        * COLLECTION to apply the scope — a chunk is a filemeta record, so a chunk that names an entity would
@@ -397,26 +383,6 @@ export async function entitiesLinkedFromRecords(
       }
       for (const { cls, row } of claimed) {
         if (admitted.has(row.from)) out.push({ from: row.from, to: row.to, label: cls.label, kind: cls.kind });
-      }
-      continue;
-    }
-
-    // The ARRAY path, unchanged from 3.x: one read per class, `_id` the whole predicate beyond the scope.
-    for (const cls of wanted) {
-      const left = remaining === undefined ? undefined : Math.max(0, remaining - out.length);
-      if (left === 0) return { records: out, scanCapped: true };
-      const docs = await col<LinkRow>(`${mid}_${cls.collection}`)
-        .find(asFilter<LinkRow>({ _id: { $in: [...recordIds] }, ...cls.scope }),
-              { projection: { [cls.field]: 1 } })
-        .limit(left ?? 0)
-        .toArray() as LinkRow[];
-      if (left !== undefined && docs.length === left) scanCapped = true;
-      for (const doc of docs) {
-        // `cls.field` again. Reading `entityIds` here for all six classes is the mistake that would leave
-        // `chrono.memoryIds` looking implemented and answering nothing.
-        for (const to of ((doc[cls.field] as string[] | undefined) ?? [])) {
-          out.push({ from: doc._id, to, label: cls.label, kind: cls.kind });
-        }
       }
     }
   }

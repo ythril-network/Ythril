@@ -4,8 +4,8 @@ import { PhIconComponent } from '../../shared/ph-icon.component';
 import { EntityRefPicker } from './entity-ref-picker.service';
 import { BRAIN_CHIP_STYLES } from './brain-form.styles';
 
-/** A chrono-linking target: the form object whose `chronoIds` this field mutates. */
-export interface ChronoIdTarget { chronoIds: string[]; }
+/** A chrono-linking target: the form object whose `linkChronos` this field mutates. */
+export interface ChronoIdTarget { linkChronos: string[]; }
 
 /**
  * The chrono-reference field: linked-chrono chips + an inline title typeahead, in one element.
@@ -16,7 +16,7 @@ export interface ChronoIdTarget { chronoIds: string[]; }
  * consistency win the composite refactor exists for, and it mirrors the memory field one-for-one.
  *
  * Dumb + OnPush: it owns no state. `target` is the caller's form object; adding/removing mutates
- * `target.chronoIds` by reference and the title cache via the shared `EntityRefPicker`. Search is
+ * `target.linkChronos` by reference and the title cache via the shared `EntityRefPicker`. Search is
  * server-side (`listChrono(?search=)`), unlike the old `fm*` picker's client-side filter.
  */
 @Component({
@@ -26,9 +26,9 @@ export interface ChronoIdTarget { chronoIds: string[]; }
   imports: [PhIconComponent, TranslocoPipe],
   styles: [BRAIN_CHIP_STYLES],
   template: `
-    @if (target().chronoIds.length) {
+    @if (target().linkChronos.length) {
       <div class="entity-multi">
-        @for (id of target().chronoIds; track id) {
+        @for (id of target().linkChronos; track id) {
           <span class="chip" [title]="id"><span class="chip-name">{{ picker.chronoRefTitle(id) }}</span><button type="button" class="chip-remove" (mousedown)="picker.removeChronoRef(target(), id)"><ph-icon name="x" [size]="12"/></button></span>
         }
       </div>
@@ -47,6 +47,6 @@ export interface ChronoIdTarget { chronoIds: string[]; }
 })
 export class ChronoRefFieldComponent {
   readonly picker = inject(EntityRefPicker);
-  /** The caller's form object; adding/removing edits its `chronoIds`. */
+  /** The caller's form object; adding/removing edits its `linkChronos`. */
   readonly target = input.required<ChronoIdTarget>();
 }

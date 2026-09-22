@@ -4,7 +4,7 @@
  * ## The defect
  *
  * A graph carries four kinds of node. Entities are stored records; a chrono entry, a memory or a file reached
- * through its `entityIds` link is a node too, and `TraverseNode.kind` says which. `loadNodeDetails` ignored
+ * through its `linkEntities` link is a node too, and `TraverseNode.kind` says which. `loadNodeDetails` ignored
  * that and always called `getEntity`, so tapping any non-entity node issued a request that 404s. It is caught
  * — `catchError(() => of(null))` — so nothing breaks visibly: the detail drawer simply opens empty, with no
  * indication that anything was asked for or refused.
@@ -50,6 +50,9 @@ function makeApi(calls: string[]) {
     getSpaceMeta: () => of({ typeSchemas: {} }),
     listFacts: () => of({ facts: [] }),
     queryBrain: () => of({ results: [], collection: 'chrono', count: 0 }),
+    // The chrono panel asks the LINKS collection since 5.0 — a chrono entry no longer carries the ids
+    // it is about, so the component cannot ask for them with a predicate.
+    chronoLinkedTo: () => of([]),
     getRecord: (_s: string, type: string, id: string) => {
       calls.push(`getRecord:${type}:${id}`);
       return of({ _id: id, name: `record-${id}`, type });

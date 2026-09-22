@@ -313,7 +313,7 @@ export interface Fact {
   fact: string;
   type?: string;
   tags?: string[];
-  entityIds?: string[];
+  linkEntities?: string[];
   description?: string;
   properties?: Record<string, string | number | boolean>;
   /**
@@ -408,8 +408,8 @@ export interface ChronoEntry {
   status: ChronoStatus;
   confidence?: number;
   tags: string[];
-  entityIds: string[];
-  memoryIds: string[];
+  linkEntities: string[];
+  linkFacts: string[];
   properties?: Record<string, string | number | boolean>;
   recurrence?: { freq: string; interval?: number; until?: string };
   author: { instanceId: string; instanceLabel: string };
@@ -541,8 +541,8 @@ export const BRAIN_COLLECTIONS = ['facts', 'entities', 'edges', 'chrono', 'files
 /*
  * `links` is the sixth, and it is a COLLECTION only.
  *
- * A link record is what a `fact.entityIds`, `chrono.entityIds`/`memoryIds` or
- * `file.entityIds`/`memoryIds`/`chronoIds` entry becomes when it is stored as a record. It is queryable and
+ * A link record carries a `label` that reads like the 4.x field its class replaced — `fact.entityIds`,
+ * `chrono.memoryIds` and their siblings, frozen because the label is part of the link's id. It is queryable and
  * countable; it has no tab of its own, no write door of its own, and never appears in a meaning-ranked
  * search. `brain-tabs.ts` holds that decision.
  */
@@ -662,7 +662,7 @@ export interface TraverseNode {
   tags?: string[];
   /**
    * WHICH collection this node lives in — absent for an entity, so every pre-existing response is unchanged.
-   * A chrono entry or memory reached through its `entityIds` link carries its kind, because a caller that
+   * A chrono entry or memory reached through its `linkEntities` link carries its kind, because a caller that
    * follows `_id` needs to know where to look it up and `type` cannot say: a chrono's is `event`/`deadline`/…,
    * a memory's is optional entirely, and an entity's is whatever the space calls it.
    */
@@ -763,9 +763,9 @@ export interface FileMeta {
   /** A converted document's own opening prose — kept whatever the description says, and embedded. */
   excerpt?: string;
   tags: string[];
-  entityIds?: string[];
-  chronoIds?: string[];
-  memoryIds?: string[];
+  linkEntities?: string[];
+  linkChronos?: string[];
+  linkFacts?: string[];
   properties?: Record<string, string | number | boolean>;
   sizeBytes: number;
   createdAt: string;
@@ -1130,7 +1130,7 @@ export interface ErEntityType {
   declared: boolean;
   namingPattern?: string;
   properties: ErProperty[];
-  /** Records of the other kinds pointing AT this type through their `entityIds`. */
+  /** Records of the other kinds pointing AT this type through their `linkEntities`. */
   linkedFrom: { facts: number; chrono: number; files: number };
 }
 

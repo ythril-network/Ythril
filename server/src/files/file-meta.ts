@@ -17,8 +17,8 @@ import { toDocId } from '../util/paths.js';
 import { escapeRegex } from '../util/redos.js';
 import { authorRef } from '../config/author.js';
 import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
-import { assertRefsResolve } from '../brain/entity-refs.js';
-import { reconcileLinks, removeLinksFrom } from '../brain/links.js';
+import { reconcileLinks, removeLinksFrom, assertDesiredLinks } from '../brain/links.js';
+import { linksStartingFrom } from '../brain/link-adjacency.js';
 import { nextSeq } from '../util/seq.js';
 import { isStrictLinkage } from '../spaces/proxy.js';
 import { expiryForCreate } from '../brain/ttl.js';
@@ -37,12 +37,13 @@ import { LINK_CLASSES } from '../brain/link-adjacency.js';
  * exact failure `validateDeleteFields` exists to prevent at the other end. So a seventh link class must not
  * depend on somebody remembering this file.
  *
- * The other four are this record's own optional fields and have no list to derive from — they are named,
- * and `file-meta-merges-like-the-brain-tools.test.js` checks the derived half against `LINK_CLASSES`.
+ * **THE THREE LINK CLASSES ARE NOT HERE, and they used to be — derived from `LINK_CLASSES`.** 5.0 removed
+ * the arrays, so a file's links are not fields on it and `deleteFields` has nothing to clear: detaching a
+ * class is `linkEntities: []` or one of its two siblings, which says the same thing in the vocabulary that
+ * still exists. What is left are this record's own optional fields, which have no list to derive from.
  */
 export const DELETABLE_FILE_META_FIELDS: readonly string[] = [
   'description', 'excerpt', 'tags', 'properties',
-  ...LINK_CLASSES.filter(c => c.kind === 'file').map(c => c.field),
 ];
 import { applyDeleteFields } from '../brain/delete-fields.js';
 import { getConfig } from '../config/loader.js';
@@ -209,9 +210,16 @@ export async function updateFileMeta(
   opts: {
     description?: string;
     tags?: string[];
-    entityIds?: string[];
-    chronoIds?: string[];
-    memoryIds?: string[];
+    /**
+     * The entities, chrono entries and facts this file links to — DESIRED LINK SETS, never stored fields.
+     *
+     * They were `entityIds`, `chronoIds` and `memoryIds`, and they were both: written onto the record AND
+     * handed to `reconcileLinks`. 5.0 removes the arrays, so these are the input and the link records are
+     * the storage. Each named class is REPLACED wholesale; an omitted one is untouched.
+     */
+    linkEntities?: string[];
+    linkChronos?: string[];
+    linkFacts?: string[];
     properties?: Record<string, string | number | boolean>;
     /** Provenance of an instance-written description. Omit when a human wrote it — see `FileMetaDoc`. */
     descriptionSource?: 'generated' | 'extracted';
@@ -224,24 +232,29 @@ export async function updateFileMeta(
   /*
    * REFERENCES ARE VALIDATED HERE, so a caller cannot reach the collection around the check.
    *
-   * `assertRefsResolve` sat only at the two API doors (`api/brain/file-meta.ts:444-446` and
-   * `mcp/tools/file.ts`), which meant `strictLinkage`'s promise — that a stored reference resolves — held only
-   * for callers who remembered it. `files/media/face-embedder.ts` calls this function directly to write the
-   * `entityIds` of an auto-labelled face, and was never checked. The id comes from a live match so it resolves
-   * in practice, but the guarantee was structural in name only.
+   * The existence check sat only at the two API doors (`api/brain/file-meta.ts` and `mcp/tools/file.ts`),
+   * which meant `strictLinkage`'s promise — that a stored reference resolves — held only for callers who
+   * remembered it. `files/media/face-embedder.ts` calls this function directly to attach an auto-labelled
+   * face's entity, and was never checked. The id comes from a live match so it resolves in practice, but
+   * the guarantee was structural in name only.
+   *
+   * It is `assertDesiredLinks` now — one assertion for the class AND the existence, shared with every
+   * other writer, and made before the record is touched so a refusal cannot leave a half-applied update.
    *
    * Owner's ruling, 2026-08-29: *"all upsert/update/insert things must validate."* Same shape as the
    * `upsertEdge` fix, one record type over.
    *
-   * Gated on `isStrictLinkage` exactly as the doors were, so a space that opted out is unaffected — the setting
-   * exists for staged imports where targets are resolved in a later pass, and moving the check must not
-   * quietly withdraw that.
+   * Existence is gated on `isStrictLinkage` exactly as the doors were, so a space that opted out is
+   * unaffected — the setting exists for staged imports where targets are resolved in a later pass, and
+   * moving the check must not quietly withdraw that. The CLASS check is not gated: a file cannot link to
+   * another file whatever the space says.
    */
-  if (isStrictLinkage(spaceId)) {
-    await assertRefsResolve(spaceId, 'entityIds', 'entity', opts.entityIds);
-    await assertRefsResolve(spaceId, 'memoryIds', 'fact', opts.memoryIds);
-    await assertRefsResolve(spaceId, 'chronoIds', 'chrono', opts.chronoIds);
-  }
+  // The one assertion every writer makes before it writes — class and existence, from `links.ts`.
+  await assertDesiredLinks(spaceId, 'file', {
+    ...(opts.linkEntities !== undefined ? { entity: opts.linkEntities } : {}),
+    ...(opts.linkFacts !== undefined ? { fact: opts.linkFacts } : {}),
+    ...(opts.linkChronos !== undefined ? { chrono: opts.linkChronos } : {}),
+  });
 
   const normalised = toDocId(filePath);
   const existing = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(asFilter<FileMetaDoc>({ _id: normalised })) as FileMetaDoc | null;
@@ -263,9 +276,6 @@ export async function updateFileMeta(
   if (opts.descriptionSource !== undefined) $set['descriptionSource'] = opts.descriptionSource;
   if (opts.excerpt !== undefined) $set['excerpt'] = opts.excerpt;
   if (opts.tags !== undefined) $set['tags'] = opts.tags;
-  if (opts.entityIds !== undefined) $set['entityIds'] = opts.entityIds;
-  if (opts.chronoIds !== undefined) $set['chronoIds'] = opts.chronoIds;
-  if (opts.memoryIds !== undefined) $set['memoryIds'] = opts.memoryIds;
 
   /**
    * `properties` MERGES, as it does on all four brain record types (X-6).
@@ -304,9 +314,6 @@ export async function updateFileMeta(
       description: opts.description !== undefined ? opts.description : existing.description,
       excerpt: opts.excerpt !== undefined ? opts.excerpt : existing.excerpt,
       tags: opts.tags ?? existing.tags,
-      entityIds: opts.entityIds ?? existing.entityIds,
-      chronoIds: opts.chronoIds ?? existing.chronoIds,
-      memoryIds: opts.memoryIds ?? existing.memoryIds,
       properties: mergedProps ?? {},
     };
     applyDeleteFields(merged, deleteFieldsPaths);
@@ -341,12 +348,11 @@ export async function updateFileMeta(
    * also the ONLY writer of these three fields, so this one call covers every door - REST, MCP and the face
    * labeller, which appends through here rather than writing the array itself.
    */
-  if (opts.entityIds !== undefined || opts.memoryIds !== undefined || opts.chronoIds !== undefined
-      || deleteFieldsPaths?.some(p => p.startsWith('entityIds') || p.startsWith('memoryIds') || p.startsWith('chronoIds'))) {
+  if (opts.linkEntities !== undefined || opts.linkFacts !== undefined || opts.linkChronos !== undefined) {
     await reconcileLinks(spaceId, normalised, 'file', {
-      ...(opts.entityIds !== undefined ? { entity: ($set['entityIds'] as string[] | undefined) ?? [] } : {}),
-      ...(opts.memoryIds !== undefined ? { fact: ($set['memoryIds'] as string[] | undefined) ?? [] } : {}),
-      ...(opts.chronoIds !== undefined ? { chrono: ($set['chronoIds'] as string[] | undefined) ?? [] } : {}),
+      ...(opts.linkEntities !== undefined ? { entity: opts.linkEntities } : {}),
+      ...(opts.linkFacts !== undefined ? { fact: opts.linkFacts } : {}),
+      ...(opts.linkChronos !== undefined ? { chrono: opts.linkChronos } : {}),
     }, existing.author ?? authorRef());
   }
 
@@ -365,7 +371,7 @@ export async function updateFileMeta(
   //   [john(person), london(loc)]   → london ignored; same as above for john
   //   [john(person), alice(person)] → 2 persons — ambiguous, skip case B; still runs case A
   //   [london(location)]            → 0 persons — skip case B; still runs case A
-  if (opts.entityIds !== undefined && opts.entityIds.length > 0) {
+  if (opts.linkEntities !== undefined && opts.linkEntities.length > 0) {
     try {
       const { getFaceRecognitionConfig } = await import('../config/loader.js');
       const faceCfg = getFaceRecognitionConfig();
@@ -387,7 +393,7 @@ export async function updateFileMeta(
         } else if (faceChunkCount === 1) {
           // Case B: face chunks exist — propagate label if exactly 1 person entity.
           const entities = await col<EntityDoc>(spaceCollection(spaceId, 'entities'))
-            .find(asFilter<EntityDoc>({ _id: { $in: opts.entityIds } }), { projection: { _id: 1, type: 1 } })
+            .find(asFilter<EntityDoc>({ _id: { $in: opts.linkEntities } }), { projection: { _id: 1, type: 1 } })
             .toArray() as Array<{ _id: string; type: string }>;
           const personEntities = entities.filter(e =>
             faceCfg.personEntityTypes.some(t => t.toLowerCase() === e.type.toLowerCase()),
@@ -519,12 +525,21 @@ export async function renameFileMeta(
    * — so there is no rename of a link record either, only a delete and a create. The tombstone that the
    * removal writes is what stops a peer restoring the links under the old path on the next pull.
    */
+  /*
+   * READ THE LINK ROWS FIRST, because they are now the only record of what this file linked to.
+   *
+   * This used to take the desired set off the file's own `entityIds`/`memoryIds`/`chronoIds` arrays. 5.0
+   * removed them, and reading them after the removal would have been reading nothing — a move would have
+   * silently detached every link on the file it moved.
+   */
+  const carried = await linksStartingFrom(spaceId, [normSrc]);
+  const byKind = { entity: [] as string[], fact: [] as string[], chrono: [] as string[] };
+  for (const row of carried) {
+    const bucket = byKind[row.toKind as keyof typeof byKind];
+    if (bucket) bucket.push(row.to);
+  }
   await removeLinksFrom(spaceId, normSrc, 'file');
-  await reconcileLinks(spaceId, normDst, 'file', {
-    entity: existing.entityIds ?? [],
-    fact: existing.memoryIds ?? [],
-    chrono: existing.chronoIds ?? [],
-  }, existing.author ?? authorRef());
+  await reconcileLinks(spaceId, normDst, 'file', byKind, existing.author ?? authorRef());
 }
 
 /**

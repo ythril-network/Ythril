@@ -100,7 +100,6 @@ POST /api/brain/spaces/:spaceId/facts
   "fact": "Kubernetes pods are ephemeral by design",
   "type": "note",
   "tags": ["k8s", "architecture"],
-  "entityIds": [],
   "description": "This means pod-local storage is lost on restart.",
   "properties": { "source": "k8s-docs", "confidence": 0.95 }
 }
@@ -117,18 +116,17 @@ Two fields, and they behave differently on purpose. What a `PATCH` does with the
 way it runs follows from the kinds at its ends, so a bare id is the whole thing. `linkFiles` takes
 space-relative paths; the other three take UUIDs.
 
-> **Fixed in 5.0: this used to be silently lost on a space that had not been converted.** A link is stored
-> in two shapes during the 4.x transition — as a record in the space's `links` collection, and as the
-> array on the record itself — and which one a space is READ through depends on whether the link
-> conversion has run for it. That conversion runs at boot, so a space created since the last restart is
-> still read through the arrays. These fields wrote only the record, so on such a space the call answered
-> `201` and the link was reached by nothing: not by `traverse`, not by a graph-augmented `recall`, not by
-> the delete guard. **The same call therefore worked or did not depending on whether the instance had
-> rebooted since the space was made**, which is why it went unreported for so long.
+> **These fields REPLACED the 4.x arrays in 5.0.** A record used to carry the ids it linked to in
+> `entityIds`, `memoryIds` and `chronoIds`. Those are gone: a connection is a record in the space's
+> `links` collection and nothing else, so an ordinary edit of a fact can no longer drop a link somebody
+> else made.
 >
-> They now write whichever shape the space is read through, which is exactly what `entityIds` and its
-> siblings always did. Nothing about the request changed — if you worked around this by sending
-> `entityIds` instead, that still works and still means the same thing.
+> **A body still carrying one is REFUSED**, with the new field named in the message and the ids
+> unchanged. The whole call is refused rather than partly applied, so a record never lands without the
+> connections it asked for — which is what would have happened if the field were simply ignored.
+>
+> The ids do not change and neither does anything else about the request: `entityIds` becomes
+> `linkEntities`, `memoryIds` becomes `linkFacts`, `chronoIds` becomes `linkChronos`.
 
 ```json
 {
@@ -224,7 +222,6 @@ refused here as it is everywhere else. A resolved `$ref` always exists, so this 
   "fact": "Kubernetes pods are ephemeral by design",
   "type": "note",
   "tags": ["k8s", "architecture"],
-  "entityIds": [],
   "description": "This means pod-local storage is lost on restart.",
   "properties": { "source": "k8s-docs", "confidence": 0.95 },
   "seq": 42,
@@ -244,7 +241,7 @@ anyway. `{"fact": "...", "totallyMadeUpField": "xyzzy"}` returns `201` with:
   {
     "field": "totallyMadeUpField",
     "value": "xyzzy",
-    "reason": "unknown field — ignored. This route accepts: checkContradictions, checkDuplicates, description, dupeThreshold, entityIds, fact, id, properties, suppressEmbeddings, tags, ttlDays, type, waitForEmbedding"
+    "reason": "unknown field — ignored. This route accepts: checkContradictions, checkDuplicates, description, dupeThreshold, edges, fact, id, linkChronos, linkEntities, linkFacts, linkFiles, properties, suppressEmbeddings, tags, ttlDays, type, waitForEmbedding"
   }
 ]
 ```
@@ -274,7 +271,7 @@ there is something to say, with the schema violations and the unknown-field rows
 Their accepted-field lists differ from the creates', which is worth knowing before you copy one:
 `deleteFields` is an update field, and `id` is a path parameter rather than a body key.
 
-**Constraints**: `id` optional — a **UUID v4** naming an **existing** record to update. It is not a way to choose an id: identity is server-generated, so an id that matches nothing is ignored rather than adopted, and the record is created with a fresh one. Anything that is not a UUID v4 is a `400`. To carry your own reference, put it in `name` or `description`. See [Retry Safety](#retry-safety). **Constraints**: `fact` max 50 000 chars. `type` optional string — stored on the document and validated against the space's `typeSchemas.fact` allowlist when set. `tags` must be an array of strings. `description` optional string. `properties` optional object; property values should be a string, number, or boolean (unlike the ENTITY endpoints, the fact/edge/chrono write paths don't reject non-primitive values at the API layer — schema validation is the gate when the space defines the property). Every entity door does reject them: create, `PATCH`, `bulk` and both MCP tools, with one message. See [What a PATCH does to tags and properties](04f-write-semantics.md#what-a-patch-does-to-tags-and-properties) for why structure belongs in records and edges. Every id in `entityIds` must be a UUID v4 **and** name an entity that exists — passing a name, a malformed id, or an id that resolves to nothing returns `400` and stores nothing. This is the default; a space can opt out with `meta.strictLinkage: false` (see [Reference integrity](12-admin-api.md#reference-integrity)). `ttlDays` optional — see [Record Expiry (TTL)](04f-write-semantics.md#record-expiry-ttl). `waitForEmbedding` optional boolean — see below.
+**Constraints**: `id` optional — a **UUID v4** naming an **existing** record to update. It is not a way to choose an id: identity is server-generated, so an id that matches nothing is ignored rather than adopted, and the record is created with a fresh one. Anything that is not a UUID v4 is a `400`. To carry your own reference, put it in `name` or `description`. See [Retry Safety](#retry-safety). **Constraints**: `fact` max 50 000 chars. `type` optional string — stored on the document and validated against the space's `typeSchemas.fact` allowlist when set. `tags` must be an array of strings. `description` optional string. `properties` optional object; property values should be a string, number, or boolean (unlike the ENTITY endpoints, the fact/edge/chrono write paths don't reject non-primitive values at the API layer — schema validation is the gate when the space defines the property). Every entity door does reject them: create, `PATCH`, `bulk` and both MCP tools, with one message. See [What a PATCH does to tags and properties](04f-write-semantics.md#what-a-patch-does-to-tags-and-properties) for why structure belongs in records and edges. Every id in `linkEntities` must be a UUID v4 **and** name an entity that exists — passing a name, a malformed id, or an id that resolves to nothing returns `400` and stores nothing. The 4.x `entityIds` is refused by name, and the refusal says to send `linkEntities` instead. This is the default; a space can opt out with `meta.strictLinkage: false` (see [Reference integrity](12-admin-api.md#reference-integrity)). `ttlDays` optional — see [Record Expiry (TTL)](04f-write-semantics.md#record-expiry-ttl). `waitForEmbedding` optional boolean — see below.
 
 #### Catching a near-duplicate at write time (`checkDuplicates`, `checkContradictions`)
 
@@ -426,7 +423,7 @@ Every parameter the old route took, it takes: `tag`, `type`, `description`, `pro
 
 | | the route | `filter` |
 |---|---|---|
-| a fact linked to an entity ID | `?entity=<id>` | `filter: { entityIds: "<id>" }` — a plain predicate |
+| a fact linked to an entity ID | `?entity=<id>` | a `filter` over `links` — `{ "to": "<id>", "fromKind": "fact" }` — whose `from` ids are the facts. A connection is its own record since 5.0, so it is not a predicate over the fact. When a NAME will do, `entityName` still answers in one call |
 | the page size | default 100, hard max 500 | `limit`, default 200 and no maximum |
 
 **Compare your running sum against `total` and stop.** That is what `total` is for, and it is the one piece
@@ -463,7 +460,7 @@ DELETE /api/brain/spaces/:spaceId/facts/:id
 
 **Response** `204`, or `409` when something still points at it and the space has
 `strictLinkage` on. The body carries `error`, `blocking` (what refused it) and
-`references` (everything pointing at it). A chrono entry listing this fact in `memoryIds`, or a file listing it, blocks the delete.
+`references` (everything pointing at it). A chrono entry or a file LINKED to this fact blocks the delete; clear the link first (`linkFacts: []` on the referring record, or `DELETE .../links/:id`).
 
 > **This changed in 4.0 and a running script can hit it.** The same delete always succeeded before, because
 > those link fields had no reader anywhere in the server — the reference was stored and replicated and

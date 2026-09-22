@@ -88,13 +88,17 @@ const nodes = strip(read('server/src/brain/edge-endpoint-names.ts'));
   const scan = strip(read('server/src/brain/link-frontier.ts'));
 
   it('queries the chrono collection for entries pointing at the frontier', () => {
-    // The class supplies the collection name, so the literal is gone from the query. Requiring it back would
-    // force a copy of exactly what `link-adjacency.ts` holds once, and `one-definition-of-a-link-class` is
-    // what pins the contents of that class.
-    assert.match(scan, /linksToAny\(mid, cls, frontier\)/,
-      'the link is the class read against the frontier — that is the inbound edge this ask is about');
-    assert.match(scan, /\$\{mid\}_\$\{cls\.collection\}/,
-      'the collection name must come from the class, or this scan knows a name the class does not');
+    /*
+     * ONE query for the whole hop since 5.0: the links collection is asked which rows point AT the
+     * frontier, and the classes are separated in memory. The collection a row resolves to comes from the
+     * class, so no literal name appears here — requiring one back would force a copy of exactly what
+     * `link-adjacency.ts` holds once, and `one-definition-of-a-link-class` pins that.
+     */
+    assert.match(scan, /linksPointingAt\(mid, frontier/,
+      'the scan must ask which links point AT the frontier — that is the inbound edge this ask is about');
+    assert.match(scan, /docsFromCollection[<(]/,
+      'and it must resolve those ids through the class collection, which is where the chunk exclusion is '
+      + 'applied — a link row has no parentFileId to carry it');
   });
 
   it('an explicit edgeLabels filter excludes a link unless it names the label', () => {

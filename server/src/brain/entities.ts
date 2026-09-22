@@ -20,7 +20,7 @@ import { applyDeleteFields, setUnlessDeleted } from './delete-fields.js';
 import { mergeTagsAndProperties, mergePropertiesOrKeep, mergeTagsOrKeep } from './merge-fields.js';
 import { enqueueEmbedJob, retireEmbedJob } from './embed-queue.js';
 import { embeddingSuppressedFor } from './suppress-embeddings.js';
-import { linksToAny, LINK_CLASSES, usesLinkRecords, linksPointingAt, docsFromCollection, type LinkClass }
+import { LINK_CLASSES, assertLinkRecords, linksPointingAt, docsFromCollection, type LinkClass }
   from './link-adjacency.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import { checkDuplicates, type SimilarMatch } from './recall.js';
@@ -562,13 +562,6 @@ export async function deleteEntity(
  * silent about the one reference class holding biometric data.
  */
 /**
- * The ids of records of one class that reference `targetId`, through whichever storage shape this space
- * answers from.
- *
- * The fork lives here and nowhere else. `usesLinkRecords` is the one decision; a reader choosing for itself
- * is how five readers came to follow five different subsets of six fields.
- */
-/**
  * Every record that references `targetId`, grouped by the class that references it.
  *
  * ## Batched, and the measurement is why
@@ -585,18 +578,13 @@ async function referencesByClass(
   spaceId: string, targetId: string, classes: readonly LinkClass[],
 ): Promise<Array<{ cls: LinkClass; id: string }>> {
   if (classes.length === 0) return [];
-
-  if (!usesLinkRecords(spaceId)) {
-    // The ARRAY path, one read per class, exactly as 3.x did it. Every unconverted space answers here.
-    const out: Array<{ cls: LinkClass; id: string }> = [];
-    for (const cls of classes) {
-      const rows = await col<{ _id: string }>(`${spaceId}_${cls.collection}`)
-        .find(asFilter<{ _id: string }>(linksToAny(spaceId, cls, [targetId])), { projection: { _id: 1 } })
-        .toArray() as Array<{ _id: string }>;
-      for (const r of rows) out.push({ cls, id: r._id });
-    }
-    return out;
-  }
+  /*
+   * THE ARRAY PATH WAS HERE and 5.0 removed it with the fields. What stood in its place was a silent
+   * answer for a space that never converted, and this is the scan in front of every DELETE — an empty
+   * result means "nothing points at this", so the space with the most to lose would have been the one
+   * that stopped refusing.
+   */
+  assertLinkRecords(spaceId);
 
   const byPair = new Map<string, LinkClass>();
   for (const c of classes) byPair.set(`${c.kind}>${c.toKind}`, c);
@@ -664,11 +652,11 @@ export async function findEntityReferences(spaceId: string, targetId: string, ta
   }
 
   /*
-   * Files that reference this entity in `entityIds` — a modelled reference, exactly like a fact's.
+   * Files LINKED to this entity — a modelled reference, exactly like a fact's.
    *
    * This was missing while the `faceEntityId` scan below was present, which is the interesting part: the same
    * collection had already been patched once, for the other field, and its sibling was not added alongside. So
-   * an entity referenced ONLY by a file's `entityIds` deleted cleanly under `strictLinkage` and the file was
+   * an entity referenced ONLY by a file's link deleted cleanly under `strictLinkage` and the file was
    * left pointing at a record that no longer exists — the very outcome the setting is bought for.
    *
    * It blocks, unlike the face scan. Both doors filter `b.type !== 'face'`, and that exemption is deliberate

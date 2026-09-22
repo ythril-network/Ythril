@@ -22,13 +22,12 @@
  * **That instruction would have changed a documented parameter on a false basis**, which is worse than a
  * stale sentence: it pre-authorised the change and told the next reader not to trust the gate.
  *
- *  - Links are ALREADY records on a converted space — `usesLinkRecords` decides per space, and
- *    `links-conversion.ts` sets it. M-2's machinery shipped; this gate stayed green throughout.
- *  - **The ARRAY expresses both readings too, and `link-frontier.ts` implements both.** `linksToAny`
- *    finds records whose array names an id (inbound); reading a record's own `cls.field` gives what it
- *    names (outbound). The record shape has the same pair in `linksPointingAt` / `linksStartingFrom`. So
- *    the representation was never what made `direction` meaningless, and the migration decides nothing
- *    here.
+ *  - Links ARE records — M-2's machinery shipped, and 5.0 left it as the only shape. This gate stayed
+ *    green throughout.
+ *  - **Both readings existed in either shape, and `link-frontier.ts` implements both.**
+ *    `linksPointingAt` finds what names a record (inbound); `linksStartingFrom` gives what it names
+ *    (outbound). So the representation was never what made `direction` meaningless, and the migration
+ *    decided nothing here.
  *
  * The rule was right; the REASON was a mechanism, and a mechanism has to be revisited every time it gains
  * a case. The integrator's graph-augmented-recall page already gave the durable version — the ends are of

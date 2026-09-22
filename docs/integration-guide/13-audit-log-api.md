@@ -116,11 +116,11 @@ they have expired"*. Without it an absent `changes` would quietly imply nothing 
 
 | Operation | Recorded fields |
 |---|---|
-| `fact.update` | `fact`, `description`, `type`, `tags`, `entityIds` |
+| `fact.update` | `fact`, `description`, `type`, `tags`, `linkEntities` |
 | `entity.update` | `name`, `type`, `description`, `tags` |
 | `edge.update` | `label`, `from`, `to`, `weight`, `type` |
-| `chrono.update` | `title`, `description`, `type`, `status`, `startsAt`, `endsAt`, `tags`, `entityIds`, `memoryIds` |
-| `file.meta.update` | `description`, `tags`, `entityIds`, `chronoIds`, `memoryIds` |
+| `chrono.update` | `title`, `description`, `type`, `status`, `startsAt`, `endsAt`, `tags`, `linkEntities`, `linkFacts` |
+| `file.meta.update` | `description`, `tags`, `linkEntities`, `linkFacts`, `linkChronos` |
 | `entity.merge` | `absorbedName` (recorded as name → `null`) |
 
 A merge is a deletion wearing an edit's clothes. The entry already carries the survivor's id, and the request
@@ -131,7 +131,7 @@ absorbed entity's **name** is recorded as it disappears.
 is the one field on a record that could hold a pasted credential — and an allowlist cannot vet names it has
 never seen.
 
-List-valued fields (`tags`, `entityIds`, `memoryIds`) are recorded as what moved rather than as the whole
+List-valued fields (`tags`, and the `link*` sets) are recorded as what moved rather than as the whole
 list, so re-tagging one fact does not copy forty tags into the log twice:
 
 ```json

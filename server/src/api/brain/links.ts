@@ -34,8 +34,6 @@ import type { RefKind } from '../../config/types-knowledge.js';
 import { getConfig } from '../../config/loader.js';
 import { resolveWriteTarget, isStrictLinkage, findFirstAcrossMembers } from '../../spaces/proxy.js';
 import { unknownFieldWarnings } from './unknown-fields.js';
-import { legacyArrayWriters, DEFAULT_WRITER_WINDOW_DAYS } from '../../brain/legacy-array-writers.js';
-import { usesLinkRecords } from '../../brain/link-adjacency.js';
 import { webhookToken } from './_shared.js';
 
 export const linksRouter = Router();
@@ -122,35 +120,4 @@ linksRouter.delete('/spaces/:spaceId/links/:id', globalRateLimit, requireSpaceAu
   const removed = await findFirstAcrossMembers(spaceId, mid => removeLink(mid, id, webhookToken(req)));
   if (removed) { res.status(204).end(); return; }
   res.status(404).json({ error: 'Link not found' });
-});
-
-/**
- * GET /api/brain/spaces/:spaceId/links/convert-preflight — who is still writing the legacy arrays?
- *
- * Read before running `links:convert`. Conversion sets `completeLinkage`, and from then on the six array
- * fields are refused — correctly, and on the CALLER'S NEXT WRITE rather than at conversion time. Requested
- * by the canary operator (`F-25`): an operator converts and finds out which of their writers still use
- * `entityIds` when one of them breaks. They had five and knew none of them.
- *
- * A GET, and a view of one space's data, so it takes the same `knowledge` area as the link writes at their
- * lowest rung — see the `ROUTE_RIGHTS` row.
- *
- * `since` in the answer is not decoration: a count with no window on it cannot be told apart from a count
- * over a shorter one, and this is read by somebody about to make a decision on it.
- *
- * It is CLAMPED to when this instance began recording, and `recorderStartedAt` says when that was. Both
- * doors get that from `legacyArrayWriters` rather than computing it, which is the only reason the two
- * windows cannot drift apart.
- */
-linksRouter.get('/spaces/:spaceId/links/convert-preflight', globalRateLimit, requireSpaceAuth, async (req, res) => {
-  const spaceId = req.params['spaceId'] as string;
-  if (!getConfig().spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` }); return;
-  }
-  const raw = req.query['windowDays'];
-  const windowDays = raw === undefined ? DEFAULT_WRITER_WINDOW_DAYS : Number(raw);
-  if (!Number.isFinite(windowDays) || windowDays <= 0) {
-    res.status(400).json({ error: '`windowDays` must be a positive number' }); return;
-  }
-  res.json(await legacyArrayWriters({ spaceId, windowDays, converted: usesLinkRecords(spaceId) }));
 });

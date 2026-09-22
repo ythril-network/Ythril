@@ -287,10 +287,22 @@ it. The two views disagreed, and which one you believed depended on where you lo
 the checksum, the extracted text and the search vector. Those are never overwritten by another instance,
 because each one computed them from its own copy of the bytes.
 
-> **Connection lists convert themselves from 5.0, and there is nothing to run.** Every restart checks each
-> space and converts anything still holding the old lists. A space that has already been converted is
-> skipped, and a space that could not be converted is named in an `ERROR` line in the server log rather
-> than passed over quietly.
+> **Connections convert themselves on the first 5.0 start, and there is nothing to run.** A connection —
+> a fact about an entity, a file about a timeline entry — used to be a list of ids kept on the record
+> itself. It is now a small record of its own, and 5.0 is where the old lists stop existing. Every restart
+> checks each space and converts anything still holding them; a space already converted is skipped, and a
+> space that could NOT be converted is named in an `ERROR` line in the server log rather than passed over
+> quietly.
+>
+> **A space that failed to convert refuses to answer about connections**, by name, until it has been
+> converted cleanly. That is deliberate and it is the whole reason the failure is loud: the alternative is
+> a space that answers "no connections" for records that have plenty, which every reader believes. The
+> refusal names the space and tells you what to run.
+>
+> **The old way of writing connections is refused, and the refusal says what to send instead.** A script
+> still sending `entityIds`, `memoryIds` or `chronoIds` gets an error naming `linkEntities`, `linkFacts` or
+> `linkChronos` — the same ids, a different field. Nothing is written half-way: the whole call is refused,
+> so a record never lands without the connections it asked for.
 >
 > **Files uploaded before 4.0 are the one part startup does NOT do for you.** Their descriptions reach a
 > peer only once each record has been given a position in the space's history, and giving it one is a
@@ -299,39 +311,3 @@ because each one computed them from its own copy of the bytes.
 > administrator's one-off instead: `npm run links:convert`, from source, which prints how many records it
 > stamped per space. Nothing is lost by leaving it — those files work normally, and only their
 > descriptions stay local until somebody edits them.
->
-> **There is still a command, and it is for looking rather than doing.** An administrator running from
-> source can use `npm run links:convert`; on a container deployment that command is not present, which is
-> the reason the conversion moved into startup.
->
-> **You can look before it happens, and you can undo the part that changes anything.** Three things about
-> that conversion, because it sounds bigger than it is:
->
-> - **See the size of it first.** `npm run links:convert -- --preview` reads and writes nothing, and prints
->   per space how many records carry connection lists and how many entries those lists hold. Run it again
->   afterwards to see the link count rise and everything else stay put.
-> - **Find out who is still writing the old way.** `--preview` tells you how much there is to convert;
->   this tells you who would be affected by the switch that comes with it. Ask a space for its
->   **conversion pre-flight** and it answers with the access tokens that have sent a connection list to that
->   space, what they sent, when each last did, and how many times — enough to find whoever owns them and move
->   them across first. An empty answer is what you are hoping for.
->
->   It matters because of *when* the refusal arrives. Converting does not break anything at the moment it
->   happens; a writer still using the old way finds out on its **next write**, which could be a minute later or a
->   week later, and by then the connection between the two events is not obvious. One operator converted with
->   five such writers and knew about none of them.
->
->   **Read the two dates in the answer before you read the count.** `since` says how far back the answer
->   looks, and `recorderStartedAt` says when this instance began watching at all. An empty answer over
->   half an hour means something very different from an empty answer over three months, and the half-hour
->   case is the normal one right after an upgrade — the watching starts when the instance restarts, not
->   when the records were written. Nothing older than 90 days is remembered in any case.
->
->   You will not be shown a window that was never watched: if you ask for 90 days on an instance that
->   restarted this morning, `since` comes back as this morning rather than 90 days ago.
->
-> - **Do one space first if you like.** Give the command a space id and only that space converts. Nothing
->   starts being refused: the switch that makes a space reject the old way of writing connections is set only
->   by a full run, so a single space is a genuine trial with no effect on anything already writing to it.
-> - **That switch can be turned back off.** It is an ordinary space setting. Turn it off and the old way of
->   writing connections is accepted again; the connections the conversion created stay where they are.

@@ -6,8 +6,6 @@
 import { Router } from 'express';
 import { requestActor } from '../../auth/request-actor.js';
 import { shapeError } from '../../brain/write-shape.js';
-import { usesLinkRecords } from '../../brain/link-adjacency.js';
-import { arrayWriteError } from '../../brain/array-write-refusal.js';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { unknownFieldWarnings } from './unknown-fields.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
@@ -27,7 +25,7 @@ import {
   parseRecordSuppression, RECORD_SUPPRESS_FIELD,
 } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
-import { connectionInputError, applyConnections, CONNECTION_BODY_KEYS } from '../../brain/write-connections.js';
+import { connectionInputError, assertConnections, applyConnections, CONNECTION_BODY_KEYS, linkAuditSnapshots } from '../../brain/write-connections.js';
 
 export const chronoRouter = Router();
 
@@ -51,7 +49,7 @@ const CHRONO_STATUS_SET = new Set<ChronoStatus>(CHRONO_STATUSES);
  * The shared write options — ttlDays, waitForEmbedding, the duplicate flags and the two suppression
  * spellings — are NOT listed: they are read by helpers, and live in `SHARED_WRITE_BODY_KEYS`.
  */
-const CHRONO_CREATE_BODY_KEYS = ['title', 'type', 'startsAt', 'endsAt', 'status', 'confidence', 'tags', 'entityIds', 'memoryIds', 'description', 'properties', 'recurrence', 'id',
+const CHRONO_CREATE_BODY_KEYS = ['title', 'type', 'startsAt', 'endsAt', 'status', 'confidence', 'tags', 'description', 'properties', 'recurrence', 'id',
   ...CONNECTION_BODY_KEYS];
 chronoRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
@@ -62,14 +60,8 @@ chronoRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, 
   }
   const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
-  // `M-2`: on a converted space the six arrays are no longer a write surface — see `arrayWriteError`.
-  // Checked against the WRITE TARGET, which on a proxy is the member space that will hold the record: the
-  // proxy itself holds nothing and its own marker would answer for a space it never writes to.
-  const linkArrErr = arrayWriteError({ converted: usesLinkRecords(wt.target), spaceId: wt.target, body: req.body,
-    actor: requestActor(req) });
-  if (linkArrErr) { res.status(400).json({ error: linkArrErr }); return; }
 
-  const { title, type, startsAt, endsAt, status, confidence, tags, entityIds, memoryIds, description, properties, recurrence } = req.body ?? {};
+  const { title, type, startsAt, endsAt, status, confidence, tags, description, properties, recurrence } = req.body ?? {};
   // `recurrence` was previously persisted straight from the request body with NO shape
   // check — unlike every sibling field — so an arbitrary object could be stored and later
   // read as a recurrence rule. Shared with MCP so both surfaces enforce the same shape.
@@ -98,24 +90,6 @@ chronoRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, 
   }
   if (tags !== undefined && (!Array.isArray(tags) || tags.some((t: unknown) => typeof t !== 'string'))) {
     res.status(400).json({ error: '`tags` must be an array of strings' }); return;
-  }
-  if (entityIds !== undefined && (!Array.isArray(entityIds) || entityIds.some((t: unknown) => typeof t !== 'string'))) {
-    res.status(400).json({ error: '`entityIds` must be an array of strings' }); return;
-  }
-  if (entityIds !== undefined) {
-    if (isStrictLinkage(wt.target)) {
-      const invalidEIds = (entityIds as string[]).filter((id: string) => !UUID_V4_RE.test(id));
-      if (invalidEIds.length > 0) { res.status(400).json({ error: '`entityIds` must contain valid UUID v4 values (entity IDs), not names', invalid: invalidEIds }); return; }
-    }
-  }
-  if (memoryIds !== undefined && (!Array.isArray(memoryIds) || memoryIds.some((t: unknown) => typeof t !== 'string'))) {
-    res.status(400).json({ error: '`memoryIds` must be an array of strings' }); return;
-  }
-  if (memoryIds !== undefined) {
-    if (isStrictLinkage(wt.target)) {
-      const invalidMIds = (memoryIds as string[]).filter((id: string) => !UUID_V4_RE.test(id));
-      if (invalidMIds.length > 0) { res.status(400).json({ error: '`memoryIds` must contain valid UUID v4 values (fact IDs), not names', invalid: invalidMIds }); return; }
-    }
   }
   if (description !== undefined && typeof description !== 'string') {
     res.status(400).json({ error: '`description` must be a string' }); return;
@@ -159,8 +133,11 @@ chronoRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, 
   const shapeErr = shapeError('chrono', req.body);
   if (shapeErr) { res.status(400).json({ error: shapeErr }); return; }
   // `F-27`: the one-call write — links and labelled edges together. Shape here; existence at the writer.
-  const connErr = connectionInputError(req.body);
+  const connErr = connectionInputError(req.body, { strict: isStrictLinkage(wt.target) });
   if (connErr) { res.status(400).json({ error: connErr }); return; }
+  // And the half a shape check cannot answer: a class this kind cannot hold, and — under strict
+  // linkage — an id that names nothing. BEFORE the record is written, or a refusal leaves a row.
+  await assertConnections(wt.target, 'chrono', req.body);
 
 
   // `waitForEmbedding` (default false): the vector is normally computed by the embedding queue
@@ -181,7 +158,7 @@ chronoRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, 
   try {
     entry = await createChrono(wt.target, {
       title: title.trim(), type, startsAt, endsAt, status, confidence,
-      tags, entityIds, memoryIds, description, properties: safeProps, recurrence: safeRecurrence,
+      tags, description, properties: safeProps, recurrence: safeRecurrence,
       id: safeId,
     }, webhookToken(req), ttlDaysFromBody(req.body), { ...(embedOpts ?? {}), onValidation: c => { check = c; } });
   } catch (err) {
@@ -224,7 +201,7 @@ chronoRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, 
  * The shared write options — ttlDays, waitForEmbedding, the duplicate flags and the two suppression
  * spellings — are NOT listed: they are read by helpers, and live in `SHARED_WRITE_BODY_KEYS`.
  */
-const CHRONO_UPDATE_BODY_KEYS = ['title', 'type', 'startsAt', 'endsAt', 'status', 'confidence', 'tags', 'entityIds', 'memoryIds', 'description', 'properties', 'recurrence', 'deleteFields',
+const CHRONO_UPDATE_BODY_KEYS = ['title', 'type', 'startsAt', 'endsAt', 'status', 'confidence', 'tags', 'description', 'properties', 'recurrence', 'deleteFields',
   ...CONNECTION_BODY_KEYS];
 chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
@@ -236,16 +213,10 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
   }
   const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
-  // `M-2`: on a converted space the six arrays are no longer a write surface — see `arrayWriteError`.
-  // Checked against the WRITE TARGET, which on a proxy is the member space that will hold the record: the
-  // proxy itself holds nothing and its own marker would answer for a space it never writes to.
-  const linkArrErr = arrayWriteError({ converted: usesLinkRecords(wt.target), spaceId: wt.target, body: req.body,
-    actor: requestActor(req) });
-  if (linkArrErr) { res.status(400).json({ error: linkArrErr }); return; }
   const ifMatch = ifMatchFromRequest(req);
   if (!ifMatch.ok) { res.status(400).json({ error: ifMatch.error }); return; }
 
-  const { title, type, startsAt, endsAt, status, confidence, tags, entityIds, memoryIds, description, properties, recurrence } = req.body ?? {};
+  const { title, type, startsAt, endsAt, status, confidence, tags, description, properties, recurrence } = req.body ?? {};
   // `recurrence` was previously persisted straight from the request body with NO shape
   // check — unlike every sibling field — so an arbitrary object could be stored and later
   // read as a recurrence rule. Shared with MCP so both surfaces enforce the same shape.
@@ -263,14 +234,6 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
   }
   if (confidence !== undefined && (typeof confidence !== 'number' || confidence < 0 || confidence > 1)) {
     res.status(400).json({ error: '`confidence` must be a number between 0 and 1' }); return;
-  }
-  if (entityIds !== undefined && Array.isArray(entityIds) && isStrictLinkage(wt.target)) {
-    const invalidEIds = entityIds.filter((id: string) => !UUID_V4_RE.test(id));
-    if (invalidEIds.length > 0) { res.status(400).json({ error: '`entityIds` must contain valid UUID v4 values (entity IDs), not names', invalid: invalidEIds }); return; }
-  }
-  if (memoryIds !== undefined && Array.isArray(memoryIds) && isStrictLinkage(wt.target)) {
-    const invalidMIds = memoryIds.filter((id: string) => !UUID_V4_RE.test(id));
-    if (invalidMIds.length > 0) { res.status(400).json({ error: '`memoryIds` must contain valid UUID v4 values (fact IDs), not names', invalid: invalidMIds }); return; }
   }
   if (properties !== undefined && (typeof properties !== 'object' || properties === null || Array.isArray(properties))) {
     res.status(400).json({ error: '`properties` must be a plain object' }); return;
@@ -313,7 +276,7 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
   // provided` while `parseRecordSuppression` was perfectly willing to read it. Accepted by one half and
   // refused by the other is worse than not accepting it, and CI caught exactly that.
   const PATCHABLE_FIELDS = [
-    'title', 'type', 'startsAt', 'endsAt', 'status', 'confidence', 'tags', 'entityIds', 'memoryIds',
+    'title', 'type', 'startsAt', 'endsAt', 'status', 'confidence', 'tags',
     'description', 'properties', 'recurrence', 'ttlDays', 'deleteFields',
     RECORD_SUPPRESS_FIELD,
     // A connection field IS a field. Without these, `{linkEntities: [...]}` alone answered
@@ -339,9 +302,23 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
     ? body['deleteFields'] as string[]
     : undefined;
 
+  // Refused BEFORE the update lands, or a bad link id leaves every other field already changed.
+  await assertConnections(wt.target, 'chrono', req.body);
+
   // Snapshot for the audit change list — see the note in facts.ts. Read before the write, since
   // `updateChrono` returns only the new document.
-  const prior = await findFirstAcrossMembers(wt.target, mid => getChronoById(mid, id));
+  // The member space holding this entry, captured while looking for it: the link sets below are read per
+  // space, and an id belongs to the space that owns it.
+  let homeSpace: string | undefined;
+  const prior = await findFirstAcrossMembers(wt.target, async mid => {
+    const found = await getChronoById(mid, id);
+    if (found) homeSpace = mid;
+    return found;
+  });
+  // The link sets BEFORE this write, for the audit entry — see `linkAuditSnapshots`.
+  const linkAudit = homeSpace
+    ? await linkAuditSnapshots(homeSpace, id, req.body)
+    : { before: {}, after: {} };
 
   // Validate the entry AS IT WILL BE. This path had NO property validation at all — the `type` allowlist
   // above was the whole of it — so a patch could write a property the same space rejects at create time.
@@ -360,7 +337,7 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
   try {
     updated = await findFirstAcrossMembers(wt.target, mid => updateChrono(mid, id, {
       title, type, startsAt, endsAt, status, confidence,
-      tags, entityIds, memoryIds, description, properties: safeProps, recurrence: safeRecurrence,
+      tags, description, properties: safeProps, recurrence: safeRecurrence,
       suppressEmbeddings, superseded,
     }, dfPaths, webhookToken(req), ttlDaysFromBody(req.body), ifMatch.seq, c => { updateCheck = c; }));
   } catch (err) {
@@ -374,16 +351,16 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
     throw err;
   }
   if (updated) {
-    req.auditSnapshots = { before: prior ?? {}, after: updated };
+    req.auditSnapshots = { before: { ...(prior ?? {}), ...linkAudit.before }, after: { ...updated, ...linkAudit.after } };
     // The `warnings` array an update response did not have — see the facts route, where the
     // reasoning is written out. A warn-mode space reported on a create and said nothing on an edit.
     /*
      * `Q-30`: the connections, on the UPDATE too.
      *
      * Every create door applied these and no update door did, so a record's relationships could be
-     * set once and never changed. `entityIds` was the way round on an unconverted space — and a
-     * `completeLinkage` space refuses that outright, so on a converted space there was no way at
-     * all, by either door.
+     * set once and never changed. `entityIds` was the way round on an unconverted space, and a
+     * converted one refused it outright — so on a converted space there was no way at all, by either
+     * door. 5.0 removed that spelling, so these ARE the way.
      *
      * AFTER the record write, exactly as the create does: links REPLACE per class and edges UPSERT,
      * and both semantics live in `applyConnections` so no door has to restate them.
@@ -419,7 +396,7 @@ chronoRouter.delete('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpace
    * Until the three unread link fields gained readers, deleting a record another one named was never refused
    * — the reference existed, was stored and replicated, and nothing could see it. The naming record was then
    * left pointing at something that does not exist, which is the outcome `strictLinkage` is bought to
-   * prevent. Here the naming record is a FILE, through `file.chronoIds`.
+   * prevent. Here the naming record is a FILE, through a file-to-chrono link.
    *
    * ONE guard for both doors, and the same one entities use. `409` and not `404`: the record IS there.
    */

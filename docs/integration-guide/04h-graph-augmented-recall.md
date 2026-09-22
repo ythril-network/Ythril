@@ -161,7 +161,7 @@ counting rows never double-counts a record, and no relationship is invisible.
   - It is **hidden from file browsing** (like `_converted/` and `_extracted/`) and is **never embedded**, so it
     cannot come back as a recall hit.
 - **`graphTruncated` can arrive WITHOUT `graphComplete`, and that is the honest case.** The link scans — the
-  ones that follow the `entityIds` a fact, chrono entry or file carries — are bounded per hop, and a hop can
+  ones that follow the LINKS a fact, chrono entry or file carries — are bounded per hop, and a hop can
   spend its whole budget on records it then discards as already-visited. The neighbourhood is short, and there
   is **no complete copy to offer**, because the records that are missing are exactly the ones never read. So
   the flag stands alone: you are told the graph is partial, and a narrower `edgeLabels` or a lower `traverse`
@@ -173,7 +173,7 @@ counting rows never double-counts a record, and no relationship is invisible.
 - **Cycle-safe:** each record is visited once, so a circular graph (A→B→C→A) never loops or produces duplicates. A record reachable by several routes is nested under the **shortest** one, with the rest in `paths`.
 - **Space-scoped:** traversal stays within the spaces the calling token may access. An edge pointing at a record in a space the token cannot see (or at an id that is not an entity) is silently skipped — no data and no `403` leak.
 - **Entities, and the records that mention them.** A walk follows two things: stored **edges**, whose endpoints
-  are always entities, and **links** — the `entityIds` field a fact, chrono entry or file carries naming what
+  are always entities, and **links** — the records a fact, chrono entry or file is about, naming what
   it is about. Edges are followed always; links are opt-in, one flag per kind:
 
   ```json
@@ -192,13 +192,13 @@ counting rows never double-counts a record, and no relationship is invisible.
   for them. Read the content with the file API if you want it.
 
   The reaching edge is **synthetic** and the only entry in that node's `edges`: `_id` in the form `<label>:<from>:<to>` — which is where its
-  two ends still are — a label of `chrono.entityIds`, `fact.entityIds` or `file.entityIds`, and no `author`, `createdAt` or `seq`, because a
+  two ends still are — a label of `chrono.entityIds`, `fact.entityIds` or `file.entityIds` (frozen tokens naming the 4.x fields those link classes replaced), and no `author`, `createdAt` or `seq`, because a
   derived edge has none. Do not look one up by that id; do use the label to tell a modelled relationship from a derived one. `edgeLabels`
   filters these exactly like any other label, so `{"edgeLabels": ["owns"]}` excludes them and
   `{"edgeLabels": ["owns", "fact.entityIds"]}` keeps the facts.
 - **A non-entity seed reaches its own links.** An edge's endpoints are entity ids, so a fact, chrono entry or
   file that matched semantically has no edges of its own. With the matching flag on, the walk instead starts
-  from the entities that match's `entityIds` names — they are hop 1, and everything an edge reaches from there
+  from the entities that match LINKS TO — they are hop 1, and everything an edge reaches from there
   is hop 2.
 
   Without the flags it still comes back with an empty `_graph`, which is what it always did. Before 3.6 there

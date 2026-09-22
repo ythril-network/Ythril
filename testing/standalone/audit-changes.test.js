@@ -289,15 +289,21 @@ describe('audit changes — file meta and entity merge (the two held back from s
 
   const read = (rel) => readFileSync(new URL(`../../${rel}`, import.meta.url), 'utf8');
 
-  it('file meta records all THREE reference lists, not just entityIds', () => {
-    // A file links to entities, chrono entries AND memories. Missing one means a link nobody can
-    // account for later — and the symptom is a traversal that comes back empty, not an error.
+  it('file meta records all THREE link sets, not just the entities', () => {
+    /*
+     * A file links to entities, chrono entries AND facts. Missing one means a link nobody can account
+     * for later — and the symptom is a traversal that comes back empty, not an error.
+     *
+     * Named as the CALLER writes them since 5.0. A record no longer carries its connections, so the
+     * route reads the link rows and folds them into the snapshot under the field a reader of the entry
+     * would go and change — see `linkAuditSnapshots`.
+     */
     const changes = auditChanges('file.meta.update',
-      { entityIds: ['e1'], chronoIds: ['c1'], memoryIds: ['m1'] },
-      { entityIds: ['e1', 'e2'], chronoIds: [], memoryIds: ['m1'] });
+      { linkEntities: ['e1'], linkChronos: ['c1'], linkFacts: ['m1'] },
+      { linkEntities: ['e1', 'e2'], linkChronos: [], linkFacts: ['m1'] });
     assert.deepEqual(changes, [
-      { field: 'entityIds', added: ['e2'] },
-      { field: 'chronoIds', removed: ['c1'] },
+      { field: 'linkEntities', added: ['e2'] },
+      { field: 'linkChronos', removed: ['c1'] },
     ]);
   });
 
@@ -323,8 +329,13 @@ describe('audit changes — file meta and entity merge (the two held back from s
    * assertions that were checking a variable NAME while claiming to check that the snapshot exists. The
    * property worth holding is "before comes from a read", so that is what this matches; `before: {}`
    * still fails, which is the mutation that matters.
+   *
+   * Nor is the LAYOUT pinned, for the same reason. Three routes now spread the record's link sets in
+   * beside it — a record stopped carrying its connections in 5.0, so the diff has nowhere else to get
+   * them — and a pattern demanding `before: existing ?? {}` and nothing else would fail on the change
+   * that made link edits auditable again.
    */
-  const SNAPSHOT = /req\.auditSnapshots = \{ before: [A-Za-z_$][\w$]*(?:\[0\])? \?\? \{\}, after: updated \}/;
+  const SNAPSHOT = /req\.auditSnapshots = \{ before: (?:\{ \.\.\.)?\(?[A-Za-z_$][\w$]*(?:\[0\])? \?\? \{\}/;
 
   it('both routes actually supply snapshots — checked per SITE, not per file', () => {
     // The #471 rule: an allowlist with no route behind it records nothing while claiming coverage.

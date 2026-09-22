@@ -7,9 +7,7 @@ import { Router } from 'express';
 import { requestActor } from '../../auth/request-actor.js';
 import { shapeError } from '../../brain/write-shape.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
-import { usesLinkRecords } from '../../brain/link-adjacency.js';
-import { arrayWriteError } from '../../brain/array-write-refusal.js';
-import { connectionInputError, applyConnections, CONNECTION_BODY_KEYS, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
+import { connectionInputError, assertConnections, applyConnections, CONNECTION_BODY_KEYS, desiredLinksFrom, edgeInputsFrom, linkAuditSnapshots } from '../../brain/write-connections.js';
 import { WIPE_COLLECTION_TYPES, type WipeCollectionType, wipeSpace } from '../../spaces/lifecycle.js';
 import { assertRefsResolve } from '../../brain/entity-refs.js';
 import { requireSpaceAuth, requireBodyScopedSpace, denyReadOnly } from '../../auth/middleware.js';
@@ -55,7 +53,7 @@ export const memoriesRouter = Router();
  */
 // `LINK_INPUT_NAMES` spread rather than listed: a fifth kind gets its field here on the day it is declared,
 // and a caller using a real field must never be told it is unknown.
-const FACTS_CREATE_BODY_KEYS = ['fact', 'tags', 'entityIds', 'description', 'properties', 'type', 'id',
+const FACTS_CREATE_BODY_KEYS = ['fact', 'tags', 'description', 'properties', 'type', 'id',
   ...CONNECTION_BODY_KEYS];
 memoriesRouter.post('/spaces/:spaceId/facts', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
@@ -67,14 +65,8 @@ memoriesRouter.post('/spaces/:spaceId/facts', globalRateLimit, requireSpaceAuth,
   // Proxy space: resolve target space for write
   const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
-  // `M-2`: on a converted space the six arrays are no longer a write surface — see `arrayWriteError`.
-  // Checked against the WRITE TARGET, which on a proxy is the member space that will hold the record: the
-  // proxy itself holds nothing and its own marker would answer for a space it never writes to.
-  const linkArrErr = arrayWriteError({ converted: usesLinkRecords(wt.target), spaceId: wt.target, body: req.body,
-    actor: requestActor(req) });
-  if (linkArrErr) { res.status(400).json({ error: linkArrErr }); return; }
   const targetSpace = wt.target;
-  const { fact, tags = [], entityIds = [], description, properties, type: memoryType } = req.body ?? {};
+  const { fact, tags = [], description, properties, type: memoryType } = req.body ?? {};
   if (!fact || typeof fact !== 'string') {
     res.status(400).json({ error: '`fact` string required' });
     return;
@@ -103,18 +95,15 @@ memoriesRouter.post('/spaces/:spaceId/facts', globalRateLimit, requireSpaceAuth,
     properties != null && typeof properties === 'object' && !Array.isArray(properties)
       ? (properties as Record<string, string | number | boolean>)
       : undefined;
-  const safeEntityIds: string[] = Array.isArray(entityIds) ? entityIds : [];
-  // Every id must be a UUID v4 AND name an entity that exists. Format alone was never enough: a
-  // syntactically perfect id pointing at nothing stores exactly as silently as a name did, and the
-  // dangling link only shows up later as a traversal that comes back empty.
-  if (isStrictLinkage(wt.target)) {
-    try {
-      await assertRefsResolve(wt.target, 'entityIds', 'entity', safeEntityIds);
-    } catch (err) {
-      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
-      return;
-    }
-  }
+  /*
+   * THE EXISTENCE CHECK MOVED TO THE WRITER, with the `entityIds` spelling it guarded.
+   *
+   * Every id had to be a UUID v4 AND name an entity that exists — format alone was never enough, because a
+   * syntactically perfect id pointing at nothing stores exactly as silently as a name did and only shows up
+   * later as a traversal that comes back empty. That is still true and `reconcileLinks` is where it is
+   * asserted now, which is what `write-connections.ts` always claimed and what makes it true of
+   * `linkEntities` too — the newer spelling had no check at all.
+   */
   const safeTags: string[] = Array.isArray(tags) ? tags : [];
 
   // Schema validation
@@ -143,8 +132,11 @@ memoriesRouter.post('/spaces/:spaceId/facts', globalRateLimit, requireSpaceAuth,
 
   // `F-27`: the one-call write. Shape and well-formedness here; existence is the writer's job, in one query.
   // `F-27`: the one-call write — links and labelled edges together. Shape here; existence at the writer.
-  const connErr = connectionInputError(req.body);
+  const connErr = connectionInputError(req.body, { strict: isStrictLinkage(wt.target) });
   if (connErr) { res.status(400).json({ error: connErr }); return; }
+  // And the half a shape check cannot answer: a class this kind cannot hold, and — under strict
+  // linkage — an id that names nothing. BEFORE the record is written, or a refusal leaves a row.
+  await assertConnections(wt.target, 'fact', req.body);
 
   // A caller-supplied id becomes the sync identity of a record that replicates across networks, so it is held
   // to the same shape the rest of the API uses. (The entity route accepts any string here — pre-existing, and
@@ -172,7 +164,9 @@ memoriesRouter.post('/spaces/:spaceId/facts', globalRateLimit, requireSpaceAuth,
   const writeOpts = { ...dupe.opts, ...(waitForEmbedding === true ? { waitForEmbedding: true } : {}) };
 
   const doc = await saveFact(
-    targetSpace, fact, safeEntityIds, safeTags, safeDesc, safeProps,
+    // No link set here: the links come from the body's `link*` fields, through `applyConnections` below,
+    // which is the one path for both doors since the `entityIds` spelling went.
+    targetSpace, fact, [], safeTags, safeDesc, safeProps,
     safeFactType, Object.keys(writeOpts).length > 0 ? writeOpts : undefined,
     webhookToken(req), ttlDaysFromBody(req.body), safeId,
   );
@@ -236,7 +230,7 @@ memoriesRouter.delete('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpac
  * The shared write options — ttlDays, waitForEmbedding, the duplicate flags and the two suppression
  * spellings — are NOT listed: they are read by helpers, and live in `SHARED_WRITE_BODY_KEYS`.
  */
-const FACTS_UPDATE_BODY_KEYS = ['fact', 'tags', 'entityIds', 'description', 'properties', 'deleteFields', 'type',
+const FACTS_UPDATE_BODY_KEYS = ['fact', 'tags', 'description', 'properties', 'deleteFields', 'type',
   ...CONNECTION_BODY_KEYS];
 memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
@@ -248,15 +242,9 @@ memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpace
   }
   const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
-  // `M-2`: on a converted space the six arrays are no longer a write surface — see `arrayWriteError`.
-  // Checked against the WRITE TARGET, which on a proxy is the member space that will hold the record: the
-  // proxy itself holds nothing and its own marker would answer for a space it never writes to.
-  const linkArrErr = arrayWriteError({ converted: usesLinkRecords(wt.target), spaceId: wt.target, body: req.body,
-    actor: requestActor(req) });
-  if (linkArrErr) { res.status(400).json({ error: linkArrErr }); return; }
   const ifMatch = ifMatchFromRequest(req);
   if (!ifMatch.ok) { res.status(400).json({ error: ifMatch.error }); return; }
-  const { fact, tags, entityIds, description, properties, deleteFields, type: memoryType } = req.body ?? {};
+  const { fact, tags, description, properties, deleteFields, type: memoryType } = req.body ?? {};
   // Validate deleteFields
   const dfResult = validateDeleteFields(deleteFields);
   if (!dfResult.ok) { res.status(400).json({ error: dfResult.error }); return; }
@@ -271,11 +259,14 @@ memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpace
 
   // `F-27`: the one-call write. Shape and well-formedness here; existence is the writer's job, in one query.
   // `F-27`: the one-call write — links and labelled edges together. Shape here; existence at the writer.
-  const connErr = connectionInputError(req.body);
+  const connErr = connectionInputError(req.body, { strict: isStrictLinkage(wt.target) });
   if (connErr) { res.status(400).json({ error: connErr }); return; }
+  // And the half a shape check cannot answer: a class this kind cannot hold, and — under strict
+  // linkage — an id that names nothing. BEFORE the record is written, or a refusal leaves a row.
+  await assertConnections(wt.target, 'fact', req.body);
   const ttlDaysProvided = !!req.body && typeof req.body === 'object' && 'ttlDays' in req.body;
   const dfPaths: string[] | undefined = Array.isArray(deleteFields) && deleteFields.length > 0 ? deleteFields : undefined;
-  const updates: { fact?: string; type?: string; tags?: string[]; entityIds?: string[]; description?: string; properties?: Record<string, string | number | boolean>; suppressEmbeddings?: boolean; superseded?: boolean } = {};
+  const updates: { fact?: string; type?: string; tags?: string[]; description?: string; properties?: Record<string, string | number | boolean>; suppressEmbeddings?: boolean; superseded?: boolean } = {};
   // `type` was accepted on CREATE and silently DROPPED here: this handler never destructured it, so a caller PATCHing
   // a fact's type got 200 and no change. `updateFact` has always accepted it and writes `$set.type`, so the field
   // was plumbed the whole way down and lost at the door. An empty string CLEARS it, which is how the UI unsets a type —
@@ -291,27 +282,6 @@ memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpace
   if (tags !== undefined) {
     if (!Array.isArray(tags) || tags.some((t: unknown) => typeof t !== 'string')) { res.status(400).json({ error: '`tags` must be an array of strings' }); return; }
     updates.tags = tags;
-  }
-  if (entityIds !== undefined) {
-    if (!Array.isArray(entityIds) || entityIds.some((t: unknown) => typeof t !== 'string')) { res.status(400).json({ error: '`entityIds` must be an array of strings' }); return; }
-    /*
-     * `W-16`: EXISTENCE, not just shape — the same `assertRefsResolve` the create route, `saveFact` and
-     * `update_fact` all call. This door alone ran `UUID_V4_RE.test` and stopped, so a syntactically
-     * perfect id pointing at nothing was stored.
-     *
-     * The create route's own comment is the argument: *"a syntactically perfect id pointing at nothing
-     * stores exactly as silently as a name did, and the dangling link only shows up later as a traversal
-     * that comes back empty."* That was written about this route's sibling, three hundred lines up.
-     */
-    if (isStrictLinkage(wt.target)) {
-      try {
-        await assertRefsResolve(wt.target, 'entityIds', 'entity', entityIds as string[]);
-      } catch (err) {
-        res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
-        return;
-      }
-    }
-    updates.entityIds = entityIds;
   }
   if (description !== undefined) {
     if (typeof description !== 'string') { res.status(400).json({ error: '`description` must be a string' }); return; }
@@ -348,6 +318,9 @@ memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpace
     // The read this needs is the same one the audit snapshot below needed, so it is done once and shared
     // rather than issued twice per patch.
     const existing = await listFacts(mid, { _id: id }, 1, 0);
+    // The link sets BEFORE this write, for the audit entry. Read here because after the write they are
+    // already what the body asked for — see `linkAuditSnapshots`.
+    const linkAudit = await linkAuditSnapshots(mid, id, req.body);
     if (existing.length === 0) continue;
     /*
      * The schema check moved into `updateFact`.
@@ -376,7 +349,7 @@ memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpace
       throw err;
     }
     if (updated) {
-      req.auditSnapshots = { before: existing[0] ?? {}, after: updated };
+      req.auditSnapshots = { before: { ...(existing[0] ?? {}), ...linkAudit.before }, after: { ...updated, ...linkAudit.after } };
       /*
        * The `warnings` array an update response did not have.
        *

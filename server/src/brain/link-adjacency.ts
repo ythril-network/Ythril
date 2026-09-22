@@ -21,25 +21,20 @@
  * That was not a policy. It was three fields nobody had written a reader for, and every reader following a
  * different subset of the six is what `M-2` exists to end.
  *
- * ## Two storage shapes, one question, and the SELECTOR is in this file
+ * ## ONE storage shape since 5.0, and the refusal is in this file
  *
- * A link lives in two places during the transition:
+ * A link lived in two places through 4.x: an array on the record, and a link record in the space's
+ * `links` collection. 5.0 removed the arrays, so a link is one small document per connection, indexed
+ * both ways — which is what makes "what points at this?" one indexed lookup instead of a collection scan
+ * per class.
  *
- *   - the **array** on the record (`fact.entityIds` and its five siblings) — the 3.x shape, still written,
- *     still replicated, and the only thing a peer on an older build understands.
- *   - a **link record** in the space's `links` collection — one small document per connection, indexed both
- *     ways, which is what makes "what points at this?" one indexed lookup instead of one collection scan per
- *     class.
+ * What is left of the selector is a REFUSAL. `linkConversionRefusal` answers why a space cannot be read
+ * for links: its walk failed, so the records that replace its arrays were never written. Reading it
+ * anyway would answer "no links" for records that have plenty, and every reader would believe it.
  *
- * `usesLinkRecords` decides which a space is read through, and it is the ONLY place that decides. A reader
- * choosing for itself is how five readers came to follow five different subsets in the first place.
- *
- * **Both shapes answer all six classes.** The array path was widened rather than frozen, deliberately: it
- * means the three classes that never had a reader start working on every space immediately, and running the
- * conversion is a performance and consistency upgrade rather than a correctness prerequisite. An operator who
- * upgrades and runs nothing gets the fix; an operator who converts gets it faster.
- *
- * ## Deliberately not a migration
+ * **All six classes are answered.** The three that never had a reader — `chrono.memoryIds`,
+ * `file.memoryIds`, `file.chronoIds` — work on every converted space, which is every space that answers.
+ * * ## Deliberately not a migration
  *
  * Nothing here changes what is stored, what is embedded, or what crosses a sync.
  */
@@ -57,8 +52,6 @@ export interface LinkClass {
   toKind: RefKind;
   /** Collection suffix of the FROM record: the collection is `${spaceId}_${collection}`. */
   collection: 'chrono' | 'facts' | 'files';
-  /** The array field naming the linked records — the 3.x shape, and still the fallback. */
-  field: 'entityIds' | 'memoryIds' | 'chronoIds';
   /**
    * The label the synthetic edge for this link carries — `chrono.memoryIds` and its five siblings.
    *
@@ -88,7 +81,7 @@ export interface LinkClass {
   projection: Record<string, 1>;
 }
 
-/** The array field a kind is named through — `entity` → `entityIds`. Derived; see `brain/links.ts`. */
+/** The 4.x array field a kind was named through — `entity` → `entityIds`. See `legacyField`. */
 /*
  * THE STORED FIELD NAME IS NOT ALWAYS `${kind}Ids`, AND THE EXCEPTION IS DELIBERATE.
  *
@@ -106,15 +99,29 @@ export interface LinkClass {
  * Found by `a-converted-space-refuses-an-array-write.test.js`, which derives the six from here. A grep
  * could not have found it: the name is built, not written.
  */
-const STORED_FIELD: Partial<Record<RefKind, LinkClass['field']>> = { fact: 'memoryIds' };
-export const fieldFor = (toKind: RefKind): LinkClass['field'] =>
-  STORED_FIELD[toKind] ?? (`${toKind}Ids` as LinkClass['field']);
+const STORED_FIELD: Partial<Record<RefKind, string>> = { fact: 'memoryIds' };
+
+/**
+ * The 4.x array name for a link class — a LEGACY NAME with exactly two jobs left.
+ *
+ * The fields are gone in 5.0. This survives because:
+ *
+ *  - **the link conversion still reads them off disk.** A space that never converted holds its pre-upgrade
+ *    links in those arrays and nowhere else, so the migration has to know the old name. It is the one
+ *    reader of stored data the types no longer declare, which is what a migration is;
+ *  - **the class LABEL is built from it, and the label is an IDENTITY.** `linkIdFor` derives a link
+ *    record's `_id` as a UUIDv5 over `(from, to, label, fromKind, toKind)`. Renaming `fact.entityIds` to
+ *    something that does not name a dead field would re-key every link record on every instance, with
+ *    tombstones and replication in between, for a cosmetic gain. **So the label is a frozen token that
+ *    happens to look like a field name. Do not tidy it.**
+ */
+export const legacyField = (toKind: RefKind): string => STORED_FIELD[toKind] ?? `${toKind}Ids`;
 
 /** The projection each FROM kind needs, whatever it links to. */
 const PROJECTION: Record<LinkClass['kind'], Record<string, 1>> = {
-  chrono: { title: 1, type: 1, entityIds: 1, memoryIds: 1 },
-  fact: { fact: 1, type: 1, entityIds: 1 },
-  file: { path: 1, description: 1, tags: 1, entityIds: 1, memoryIds: 1, chronoIds: 1 },
+  chrono: { title: 1, type: 1 },
+  fact: { fact: 1, type: 1 },
+  file: { path: 1, description: 1, tags: 1 },
 };
 
 /** The collection each FROM kind lives in. */
@@ -153,11 +160,40 @@ export const LINK_CLASSES: readonly LinkClass[] =
       kind,
       toKind,
       collection: COLLECTION[kind],
-      field: fieldFor(toKind),
-      label: `${kind}.${fieldFor(toKind)}`,
+      label: `${kind}.${legacyField(toKind)}`,
       scope: SCOPE[kind],
       projection: PROJECTION[kind],
     })));
+
+/**
+ * The indexes a space's `links` collection needs — declared here, created in two places.
+ *
+ * ## Why one declaration and two callers
+ *
+ * `initSpace` creates them with the collection, and that only ever reaches a space NEW to the config. A
+ * space upgraded from 4.x got its links collection from the CONVERSION's first insert, which creates a
+ * collection and no indexes at all — so every link read on the spaces that have the most links would be
+ * the one case with none. `ensureQueryIndexes` is the backfill, and it must ask for the same set or the
+ * two drift in the direction nothing reports: an unindexed scan returns the right answer, slowly.
+ *
+ * ## What each is for
+ *
+ * Both directions are asked. From a record: what does this concern. From an entity: what concerns this —
+ * the backlink scan that blocks a delete, once per candidate. `seq` is the sync page, exactly as every
+ * other replicated collection has it: `pageBySeq` orders on it, and without the index every page a peer
+ * asks for sorts the whole collection.
+ *
+ * The first is UNIQUE, and that is what lets the ingest path drop fork resolution: a link is
+ * `(from, fromKind, to, toKind)` and nothing else, so two peers that notice the same connection have
+ * written the same fact and the second write is a duplicate rather than a fork.
+ */
+export const LINK_INDEXES: readonly { keys: Record<string, 1>; unique?: boolean }[] = Object.freeze<
+  { keys: Record<string, 1>; unique?: boolean }[]
+>([
+  { keys: { from: 1, fromKind: 1, to: 1, toKind: 1 }, unique: true },
+  { keys: { to: 1, toKind: 1 } },
+  { keys: { seq: 1 } },
+]);
 
 /**
  * The class for one `(fromKind, toKind)` pair, or `undefined` for a pair that is not a link.
@@ -176,43 +212,84 @@ export function linkClassesFrom(kind: RefKind | 'edge'): readonly LinkClass[] {
 }
 
 /**
- * Does this space answer adjacency from link RECORDS, or from the arrays?
+ * Why a space cannot be read for links, or `null` when it can.
  *
- * The one place that decides, for every reader. `completeLinkage` is set by the conversion script when it has
- * walked a space with no failures, and it is LOCAL — see `SpaceConfig.completeLinkage` for why a marker about
- * what has happened on one disk must not be a thing a network votes on.
+ * ## The failure it exists to make loud, and it arrives in 5.0
  *
- * A space that has not converted has link records only for what was written since the upgrade, so reading
- * records alone there would answer about recent data and silently drop the rest.
+ * With the six array fields removed there is ONE shape, so `completeLinkage` stops being a choice and
+ * becomes an invariant: a space either has its links as records or it has not been converted. And a space
+ * that has not been converted **still holds its pre-upgrade links in arrays that no longer exist**, so
+ * reading its link records answers about what was written since the upgrade and silently drops the rest.
  *
- * **THIS USED TO SAY the arrays are complete on every space, always, and that is what made them the
- * safe side of this branch. It stopped being true and nothing noticed.** `linkEntities` on a create
- * writes the link RECORD and leaves the array alone, so a record attached the way the integration
- * guide leads with has an empty `entityIds` — and `entityName`, which read the array, answered
- * `{facts: [], total: 0}` for it. Measured 2026-09-17; filed and fixed as `B-10`.
+ * The boot conversion runs for every unmarked space and deliberately **does not refuse the boot** when one
+ * space's walk throws — correct, because one bad space must not stop an instance. What must not follow is
+ * that space answering *"no links"* to every traversal, every backlink scan and every delete guard, which
+ * is what an empty result means to each of them. So it is refused, by name, with the command that fixes it.
  *
- * So NEITHER side is complete on its own: the arrays miss what `linkEntities` wrote, the link records
- * miss what predates the upgrade. A reader that must not drop records asks for both —
- * `brain/entity-name-scope.ts` is that predicate. This branch remains right for ADJACENCY, where the
- * question is which reader a converted space should use rather than which records exist.
+ * ## Why it takes the space record rather than reading the config
+ *
+ * So the rule can be exercised. Everything else here resolves a space id through `getConfig()`, which a
+ * unit test cannot drive — and the assertion that a refusal is a THROW rather than an empty array is
+ * exactly the kind that gets written as a source grep and proves nothing.
+ *
+ * @param space the space's config record, or `undefined` when no such space is configured
  */
-export function usesLinkRecords(spaceId: string): boolean {
-  return getConfig().spaces.find(s => s.id === spaceId)?.completeLinkage === true;
+export function linkConversionRefusal(space: { id: string; completeLinkage?: boolean } | undefined): string | null {
+  if (!space) return null;
+  if (space.completeLinkage === true) return null;
+  return `space '${space.id}' has no converted link records, so its connections cannot be read. The boot `
+    + 'conversion runs for every space and does not stop the instance when one space fails, so this space '
+    + 'was left behind by a failure that IS in the startup log. Answering with no links would be a lie '
+    + 'every reader believes. Run `npm run links:convert` — a full run walks every space and marks the '
+    + 'ones that finish cleanly — and read what it reports about this one.';
 }
 
 /**
- * The filter matching records of this class that link to ANY of `ids` — the ARRAY shape.
+ * Refuse a link read on a space whose links were never converted. See `linkConversionRefusal`.
  *
- * `$in` rather than an equality even for a single id, so a frontier and a single-record backlink scan use one
- * shape. Callers that want one id pass a one-element array.
+ * An unknown space is NOT this function's business — every caller has already resolved and authorised the
+ * space, and turning "no such space" into a link error here would replace a clear 404 with a confusing one.
  */
-export function linksToAny(spaceId: string, cls: LinkClass, ids: readonly string[]): Record<string, unknown> {
-  return { spaceId, [cls.field]: { $in: [...ids] }, ...cls.scope };
+export function assertLinkRecords(spaceId: string): void {
+  const refusal = linkConversionRefusal(getConfig().spaces.find(s => s.id === spaceId));
+  if (refusal) throw new Error(refusal);
 }
 
-/** The filter matching records of this class that have ANY link at all — the ER diagram's scan. */
-export function hasAnyLink(cls: LinkClass): Record<string, unknown> {
-  return { [cls.field]: { $exists: true, $ne: [] }, ...cls.scope };
+/**
+ * The links of one class, grouped by the record that holds them — the ER diagram's scan.
+ *
+ * It was `hasAnyLink`, a filter over the record's own array. With the arrays gone the question is asked of
+ * the link rows, and the answer has the same shape: one entry per source record that has any link of this
+ * class, each entry the ids it names.
+ *
+ * **The scope still applies, and it cannot be applied to a link row.** A link row has no `parentFileId`, so
+ * a file link and a chunk link are indistinguishable in the links collection — the narrowing has to happen
+ * against the records, which is why the ids are read back. Skipped entirely for a class with no scope, so
+ * the two classes that do not need it do not pay a query.
+ *
+ * `limit` bounds the ROWS read, not the groups, and the caller is told whether it bit: a diagram built from
+ * a truncated scan has to say so.
+ */
+export async function linkGroupsOfClass(
+  spaceId: string, cls: LinkClass, limit: number,
+): Promise<{ groups: string[][]; truncated: boolean }> {
+  const rows = await col<LinkDoc>(spaceCollection(spaceId, 'links'))
+    .find(asFilter<LinkDoc>({ spaceId, fromKind: cls.kind, toKind: cls.toKind }),
+          { projection: { from: 1, to: 1 }, limit })
+    .toArray() as Array<{ from: string; to: string }>;
+
+  const byFrom = new Map<string, string[]>();
+  for (const r of rows) {
+    const ids = byFrom.get(r.from);
+    if (ids) ids.push(r.to); else byFrom.set(r.from, [r.to]);
+  }
+
+  if (Object.keys(cls.scope).length > 0) {
+    const admitted = new Set((await docsFromCollection<{ _id: string }>(
+      spaceId, cls.collection, [...byFrom.keys()], { _id: 1 })).map(d => d._id));
+    for (const from of [...byFrom.keys()]) if (!admitted.has(from)) byFrom.delete(from);
+  }
+  return { groups: [...byFrom.values()], truncated: rows.length >= limit };
 }
 
 /** One link row, as both batched readers below project it. */

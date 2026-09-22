@@ -19,7 +19,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, patch, get, delWithBody, readCollection } from '../sync/helpers.js';
-import { LINK_ARRAY_FIELDS } from '../../server/dist/brain/array-write-refusal.js';
+import { linkInputSchemasFor } from '../../server/dist/brain/write-connections.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
@@ -51,15 +51,20 @@ describe('entity references must resolve', () => {
 
   it('a real entity id links, and the link is readable back', async () => {
     const r = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/facts`, {
-      fact: 'links to a real entity', entityIds: [entityId],
+      fact: 'links to a real entity', linkEntities: [entityId],
     });
     assert.equal(r.status, 201, JSON.stringify(r.body));
-    assert.deepEqual(r.body.entityIds, [entityId], 'the link must actually be stored');
+    // READ BACK FROM THE LINKS, because the record does not carry them since 5.0 — and a link nothing
+    // can find is exactly what this case exists to catch.
+    const links = await readCollection(INSTANCES.a, token, SPACE, 'links');
+    assert.equal(links.status, 200, JSON.stringify(links.body));
+    assert.ok((links.results ?? []).some(l => l.from === r.body._id && l.to === entityId),
+      `the link must actually be stored: ${JSON.stringify(links.results)}`);
   });
 
   it('a NAME where an id belongs is refused, and the error names the value', async () => {
     const r = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/facts`, {
-      fact: 'links by name', entityIds: [`Traefik-${RUN}`],
+      fact: 'links by name', linkEntities: [`Traefik-${RUN}`],
     });
     assert.equal(r.status, 400, `expected a refusal, got ${r.status}: ${JSON.stringify(r.body)}`);
     assert.match(JSON.stringify(r.body), /Traefik/, 'the error must name the offending value');
@@ -69,7 +74,7 @@ describe('entity references must resolve', () => {
     // Format alone was never the point: a syntactically perfect id pointing at nothing stores just
     // as silently as a name did.
     const r = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/facts`, {
-      fact: 'links to a ghost', entityIds: [NONEXISTENT_UUID],
+      fact: 'links to a ghost', linkEntities: [NONEXISTENT_UUID],
     });
     assert.equal(r.status, 400, `expected a refusal, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
@@ -92,16 +97,17 @@ describe('entity references must resolve', () => {
     assert.ok([200, 201, 202].includes(write.status), JSON.stringify(write.body));
 
     /*
-     * DERIVED from `LINK_ARRAY_FIELDS`, and the COUNT is out of the title (`Q-6`, 2026-09-07).
+     * DERIVED from the classes a FILE can hold, and the COUNT is out of the title (`Q-6`, 2026-09-07).
      *
      * It named the three fields a file carries today and said "three" out loud. A seventh link class would
-     * declare a fourth field, and this case would go on asserting about the old three while its title claimed
-     * all of them — which is the shape `LINK_ARRAY_FIELDS` exists to prevent one layer down: it is derived
-     * from `LINK_CLASSES` for exactly this reason.
+     * give a file a fourth, and this case would go on asserting about the old three while its title claimed
+     * all of them. The source moved in 5.0 — the link arrays went and `linkEntities` and its siblings are
+     * the input — and the derivation moved with it rather than becoming a list.
      */
-    assert.ok(LINK_ARRAY_FIELDS.length >= 3,
-      `only ${LINK_ARRAY_FIELDS.length} link array field(s); the three a file carries are the minimum`);
-    for (const field of LINK_ARRAY_FIELDS) {
+    const fileLinkFields = Object.keys(linkInputSchemasFor('file'));
+    assert.ok(fileLinkFields.length >= 3,
+      `only ${fileLinkFields.length} link field(s); the three a file carries are the minimum`);
+    for (const field of fileLinkFields) {
       const r = await patch(
         INSTANCES.a, token,
         `/api/brain/spaces/${SPACE}/files?path=${encodeURIComponent('note.txt')}`,
@@ -129,7 +135,7 @@ describe('entity references must resolve', () => {
       assert.equal(set.status, 200, JSON.stringify(set.body));
 
       const r = await post(INSTANCES.a, token, `/api/brain/spaces/${lax}/facts`, {
-        fact: 'forward reference during an import', entityIds: ['created-later'],
+        fact: 'forward reference during an import', linkEntities: ['created-later'],
       });
       assert.equal(r.status, 201, `the opt-out must still accept a dangling ref: ${JSON.stringify(r.body)}`);
     } finally {

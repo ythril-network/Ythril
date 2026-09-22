@@ -67,13 +67,13 @@ before(async () => {
 
   // THE CONTROL: same subject, same distinctive phrase, ranked normally.
   const ranked = await P(`/api/brain/spaces/${SPACE}/facts`, {
-    fact: `The ranked note about ${PHRASE}.`, entityIds: [ids.subject],
+    fact: `The ranked note about ${PHRASE}.`, linkEntities: [ids.subject],
   });
   ids.ranked = ranked.body?._id;
 
   // THE SUBJECT: identical in every way except that it carries no vector.
   const quiet = await P(`/api/brain/spaces/${SPACE}/facts`, {
-    fact: `The suppressed note about ${PHRASE}.`, entityIds: [ids.subject], suppressEmbeddings: true,
+    fact: `The suppressed note about ${PHRASE}.`, linkEntities: [ids.subject], suppressEmbeddings: true,
   });
   ids.quiet = quiet.body?._id;
   assert.ok(ids.ranked && ids.quiet, `facts: ${JSON.stringify([ranked.body, quiet.body])}`);

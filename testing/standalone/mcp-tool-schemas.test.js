@@ -81,11 +81,11 @@ describe('MCP tool schemas — universal invariants', () => {
     // `entity.cascade_preview`, it is READ-ONLY and deliberately visible to a readOnly token (it deletes
     // nothing and answers the same question the 409 already answers), and `16-mcp.md` carries its row in
     // the tool table, the read-only list and the REST mapping.
-    // 47 -> 48: `graph_link_preflight` (`F-25`). Prerequisites done -- `audit-map.ts` maps it to
-    // `link.convert_preflight`, it is READ-ONLY and visible to a readOnly token (it writes nothing and
-    // answers a question about writes that already happened), and `16-mcp.md` carries its row. It ships
-    // WITH its REST route rather than after it.
-    assert.equal(ALL_TOOLS.length, 46);
+    // 47 -> 48 -> 47 -> 45: `graph_link_preflight` (`F-25`) arrived and went again in 5.0 with its REST
+    // twin, in the same commit. It answered "who still writes the link arrays" so an operator could
+    // convert with their eyes open; the arrays are gone, so the question has no subject. The array-write
+    // pre-flight tool went with it for the same reason.
+    assert.equal(ALL_TOOLS.length, 45);
   });
 
   it('every tool advertises a closed object schema (type:object, additionalProperties:false)', () => {

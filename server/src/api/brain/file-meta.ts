@@ -1,7 +1,7 @@
 /**
  * File-metadata routes (/api/brain/spaces/:spaceId/files).
  *
- * This is the brain's file RECORD (a knowledge-graph doc: tags/entityIds/properties, one of the
+ * This is the brain's file RECORD (a knowledge-graph doc: tags, properties, links — one of the
  * five `query` collections). The file STORE — the bytes on disk — is `fileStoreRouter` in
  * api/files.ts, mounted at /api/files. The two are deliberately named as a Store/Meta pair: they
  * were both `filesRouter` at first, which broke name-keyed route analysis (the audit-coverage guard
@@ -11,8 +11,6 @@
  */
 import { Router } from 'express';
 import { requestActor } from '../../auth/request-actor.js';
-import { usesLinkRecords } from '../../brain/link-adjacency.js';
-import { arrayWriteError } from '../../brain/array-write-refusal.js';
 import { toDocId } from '../../util/paths.js';
 import { requireSpaceAuth, denyReadOnly, requireAdmin } from '../../auth/middleware.js';
 import { listTokens } from '../../auth/tokens.js';
@@ -20,6 +18,7 @@ import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { updateFileMeta, deleteFileMeta, getFileMeta } from '../../files/file-meta.js';
 import { assertRefsResolve } from '../../brain/entity-refs.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
+import { linkInputError, linkFieldsFrom, linkAuditSnapshots } from '../../brain/write-connections.js';
 import { primitivePropertyError } from '../../brain/property-values.js';
 import { fileExists, readFile } from '../../files/files.js';
 import { log } from '../../util/log.js';
@@ -307,12 +306,6 @@ fileMetaRouter.patch('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth
   }
   const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
-  // `M-2`: on a converted space the six arrays are no longer a write surface — see `arrayWriteError`.
-  // Checked against the WRITE TARGET, which on a proxy is the member space that will hold the record: the
-  // proxy itself holds nothing and its own marker would answer for a space it never writes to.
-  const linkArrErr = arrayWriteError({ converted: usesLinkRecords(wt.target), spaceId: wt.target, body: req.body,
-    actor: requestActor(req) });
-  if (linkArrErr) { res.status(400).json({ error: linkArrErr }); return; }
   // The four brain record types honour `If-Match` against their `seq`. File-metadata records have no `seq`
   // — `updateFileMeta` never calls `nextSeq` — so there is nothing here to condition a write on. Refused
   // rather than ignored, because the failure mode of ignoring is the one this feature exists to prevent:
@@ -322,7 +315,11 @@ fileMetaRouter.patch('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth
     return;
   }
 
-  const { description, tags, entityIds, chronoIds, memoryIds, properties, deleteFields } = req.body ?? {};
+  const { description, tags, properties, deleteFields } = req.body ?? {};
+  // The three link classes a file holds. Shape and well-formedness here, existence at the writer — the
+  // one refusal both doors share, from `write-connections.ts`.
+  const linkErr = linkInputError(req.body, { strict: isStrictLinkage(wt.target) });
+  if (linkErr) { res.status(400).json({ error: linkErr }); return; }
   // X-6: `properties` MERGE on this route now, matching the four brain types. `deleteFields` lands with the
   // merge and not after it — the merge alone would remove the only way a file property could be cleared, so
   // shipping them apart trades one silent data loss for a stale key nobody can delete.
@@ -332,37 +329,38 @@ fileMetaRouter.patch('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth
     ? deleteFields as string[]
     : undefined;
   if (tags !== undefined && !Array.isArray(tags)) { res.status(400).json({ error: '`tags` must be an array' }); return; }
-  if (entityIds !== undefined && !Array.isArray(entityIds)) { res.status(400).json({ error: '`entityIds` must be an array' }); return; }
-  if (chronoIds !== undefined && !Array.isArray(chronoIds)) { res.status(400).json({ error: '`chronoIds` must be an array' }); return; }
-  if (memoryIds !== undefined && !Array.isArray(memoryIds)) { res.status(400).json({ error: '`memoryIds` must be an array' }); return; }
   // The bag's shape AND its values, in one call. This checked only the shape, so a nested value was
   // refused by `write_file` (which declares `additionalProperties`) and stored here — the entity defect
   // reported on 2026-09-02, surviving one record type over.
   const propErr = primitivePropertyError(properties);
   if (propErr) { res.status(400).json({ error: propErr }); return; }
 
-  // A file carries THREE reference fields, and until now none of them was validated — not even under
-  // strict linkage, which every other brain route already honoured. So this was the widest silent
-  // hole: attach a fact to a file with a name or a stale id and it stored clean, then the file
-  // simply never turned up in anything that traversed the link.
-  if (isStrictLinkage(wt.target)) {
-    try {
-      await assertRefsResolve(wt.target, 'entityIds', 'entity', entityIds as string[] | undefined);
-      await assertRefsResolve(wt.target, 'memoryIds', 'fact', memoryIds as string[] | undefined);
-      await assertRefsResolve(wt.target, 'chronoIds', 'chrono', chronoIds as string[] | undefined);
-    } catch (err) {
-      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
-      return;
-    }
-  }
+  /*
+   * A file carries THREE link classes and until 4.x none of them was validated — not even under strict
+   * linkage, which every other brain route already honoured, so attaching a fact to a file with a name or
+   * a stale id stored clean and the file simply never turned up in anything that traversed the link.
+   *
+   * The check is at the WRITER now, with the spelling it guarded: `reconcileLinks` asserts every named
+   * class resolves. That is what makes it true of `linkEntities` as well, which had no check at all.
+   */
 
   // Snapshot for the audit change list — see the note in facts.ts. `properties` is not allowlisted,
   // so handing the record over cannot publish it.
-  const prior = await findFirstAcrossMembers(wt.target, mid => getFileMeta(mid, path));
+  let homeSpace: string | undefined;
+  const prior = await findFirstAcrossMembers(wt.target, async mid => {
+    const found = await getFileMeta(mid, path);
+    if (found) homeSpace = mid;
+    return found;
+  });
+  // The link sets BEFORE this write, for the audit entry — see `linkAuditSnapshots`. A file is keyed in
+  // the links collection by its stored path, which is what `getFileMeta` was just asked for.
+  const linkAudit = homeSpace
+    ? await linkAuditSnapshots(homeSpace, toDocId(path), req.body)
+    : { before: {}, after: {} };
   const updated = await findFirstAcrossMembers(wt.target,
-    mid => updateFileMeta(mid, path, { description, tags, entityIds, chronoIds, memoryIds, properties }, dfPaths));
+    mid => updateFileMeta(mid, path, { description, tags, properties, ...linkFieldsFrom(req.body) }, dfPaths));
   if (updated) {
-    req.auditSnapshots = { before: prior ?? {}, after: updated };
+    req.auditSnapshots = { before: { ...(prior ?? {}), ...linkAudit.before }, after: { ...updated, ...linkAudit.after } };
     res.json(updated);
     return;
   }

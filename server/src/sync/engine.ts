@@ -17,7 +17,6 @@
 
 import { getConfig, saveConfig, saveConfigSoon, getSecrets, getFaceRecognitionConfig } from '../config/loader.js';
 import { BRAIN_COLLECTIONS, type LinkDoc } from '../config/types.js';
-import { reconcileLinksForPage } from '../brain/links.js';
 import { applyFileMetaPage } from '../api/sync/_shared.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { reportPushRefusals } from './push-refusals.js';
@@ -1502,17 +1501,17 @@ async function batchUpsertBySeq<T extends { _id: string; seq: number }>(
   }
 
   /*
-   * The link records for PULLED documents — the sync direction that does NOT go through `ingestBrainDoc`.
+   * NO LINK DERIVATION HERE ANY MORE, and the deletion is the point.
    *
-   * Push arrives at `api/sync/_shared.ts`, which is the ingest router's only write door and carries the same
-   * call. Pull lands here instead, in a `bulkWrite` of its own, so the hook has to exist twice — and this is
-   * the copy that would have been forgotten, because the push side is the one anybody pictures. Left out, a
-   * space that only ever PULLS would hold arrays with no link records at all.
+   * A pulled document used to have its link records derived from the six arrays it carried, because push
+   * and pull are different write paths and each needed the hook. 5.0 removed the arrays: a link is its own
+   * record and replicates on the same channel as everything else, so there is nothing on an arriving fact
+   * to derive from and a `links` page applies through this same writer like any other collection.
    *
-   * One line because the ratchet on this file asked for it: the first version put the collection-to-kind
-   * lookup and the loop here, and both belong with the rest of the link logic rather than in the engine.
+   * Left in, it would read a shape no document has and reconcile an empty set — which is a no-op today and
+   * a data loss the moment somebody makes the reconcile authoritative about classes it was handed nothing
+   * for.
    */
-  await reconcileLinksForPage(localSpaceId, collName.slice(localSpaceId.length + 1), toWrite);
 }
 
 // Silence unused import warning — resolveSafePath may be used by future file push refinement

@@ -607,37 +607,15 @@ export async function executeMerge(
         );
       }
 
-      // ── 2. Relink facts ─────────────────────────────────────────────
-      const memoryColl = col<FactDoc>(spaceCollection(spaceId, 'facts'));
-      const affectedMemories = await memoryColl
-        .find(asFilter<FactDoc>({ spaceId, entityIds: absorbed._id }), { session })
-        .toArray() as FactDoc[];
-      for (const mem of affectedMemories) {
-        const newEntityIds = mem.entityIds.map(id => id === absorbed._id ? survivor._id : id);
-        const dedupedIds = [...new Set(newEntityIds)];
-        const memSeq = await nextSeq(spaceId);
-        await memoryColl.updateOne(
-          asFilter<FactDoc>({ _id: mem._id }),
-          asUpdate<FactDoc>({ $set: { entityIds: dedupedIds, updatedAt: now, seq: memSeq } }),
-          { session },
-        );
-      }
-
-      // ── 3. Relink chrono entries ───────────────────────────────────────
-      const chronoColl = col<ChronoEntry>(spaceCollection(spaceId, 'chrono'));
-      const affectedChronos = await chronoColl
-        .find(asFilter<ChronoEntry>({ spaceId, entityIds: absorbed._id }), { session })
-        .toArray() as ChronoEntry[];
-      for (const ch of affectedChronos) {
-        const newEntityIds = ch.entityIds.map(id => id === absorbed._id ? survivor._id : id);
-        const dedupedIds = [...new Set(newEntityIds)];
-        const chSeq = await nextSeq(spaceId);
-        await chronoColl.updateOne(
-          asFilter<ChronoEntry>({ _id: ch._id }),
-          asUpdate<ChronoEntry>({ $set: { entityIds: dedupedIds, updatedAt: now, seq: chSeq } }),
-          { session },
-        );
-      }
+      /*
+       * ── 2 and 3. Relinking facts and chrono entries USED TO BE HERE, one array rewrite each.
+       *
+       * 5.0 removed the arrays, and the link half below already did this correctly: a link is RE-KEYED
+       * rather than updated, because its `_id` is derived from both endpoints. Leaving these loops in
+       * would have been the same relink written twice, with the array copy silently winning on a space
+       * where the two disagreed — which is precisely the defect that put the link half here in the first
+       * place.
+       */
 
       // ── 3b. Relink FILE metadata records ───────────────────────────────
       //
@@ -682,18 +660,14 @@ export async function executeMerge(
       const affectedFiles = await fileColl
         .find(asFilter<FileMetaDoc>({
           spaceId,
-          $or: [{ entityIds: absorbed._id }, { faceEntityId: absorbed._id }],
+          faceEntityId: absorbed._id,
         }), { session })
         .toArray() as FileMetaDoc[];
       for (const f of affectedFiles) {
+        // `faceEntityId` ONLY. The file's `entityIds` array went with the other five in 5.0, and its links
+        // are re-keyed by the link half below; a face label is a different thing that happens to name an
+        // entity, so it is still a field and still has to follow the merge.
         const set: Record<string, unknown> = { updatedAt: now, seq: await nextSeq(spaceId) };
-        if ((f.entityIds ?? []).includes(absorbed._id)) {
-          // `?? []` because `entityIds` is OPTIONAL on a file record, unlike facts and chrono where it is
-          // required. The guard above already proves it is present — the fallback keeps the map total over
-          // the type rather than relying on that.
-          const newEntityIds = (f.entityIds ?? []).map(id => id === absorbed._id ? survivor._id : id);
-          set['entityIds'] = [...new Set(newEntityIds)];
-        }
         if (f.faceEntityId === absorbed._id) set['faceEntityId'] = survivor._id;
         await fileColl.updateOne(
           asFilter<FileMetaDoc>({ _id: f._id }),

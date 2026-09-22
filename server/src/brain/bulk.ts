@@ -13,11 +13,8 @@
 
 import { col, asFilter } from '../db/mongo.js';
 import { primitivePropertyError } from './property-values.js';
-import { arrayWriteError } from './array-write-refusal.js';
-import type { WriteActor } from './legacy-array-writers.js';
 import { shapeError } from './write-shape.js';
 import { parseRecurrence } from './chrono.js';
-import { usesLinkRecords } from './link-adjacency.js';
 import { assertRefsResolve } from './entity-refs.js';
 import { getConfig } from '../config/loader.js';
 import {
@@ -55,13 +52,6 @@ export interface BulkInput {
   entities?: unknown;
   edges?: unknown;
   chrono?: unknown;
-  /**
-   * Who is writing, threaded through so the array-write inspection can record it (`F-25`).
-   *
-   * Optional in the type and supplied by both doors: this function is also reachable from a test, and a
-   * required field there would only be satisfied with a placeholder that is worse than an honest `unknown`.
-   */
-  actor?: WriteActor;
 }
 
 export interface BulkResult {
@@ -113,31 +103,22 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
   const mode = meta?.validationMode ?? 'off';
   const strict = isStrictLinkage(spaceId);
   /*
-   * `M-2`: on a converted space the six link arrays are no longer a write surface.
+   * `F-27` item 2, owner's ruling 2026-09-07: on this door a REFERENCE is existence-checked too, under
+   * the same `strictLinkage` setting the single-record doors read.
    *
-   * Resolved ONCE for the batch rather than per item — the marker is a property of the space, and reading
-   * config inside a loop over a thousand items is a thousand lookups of a value that cannot change between
-   * them. Each item is still refused individually, so a batch reports which of its items were the problem
-   * instead of failing whole.
+   * This door was deliberately laxer than the single-record ones — references were checked for shape and
+   * never for existence, which is a defensible trade for a bulk import where records legitimately arrive
+   * in an order nobody controls.
    *
-   * ## `F-27` item 2, owner's ruling 2026-09-07: it also decides whether a REFERENCE is existence-checked
+   * It stopped being defensible once the correlation key made this the normal way to write a linked
+   * record. The operator said so plainly: their correspondence, deploy log and ticket updates would all
+   * move onto the door with the weaker guarantee, *"and a dangling `answers` edge is exactly the failure
+   * we would never notice — it reads as an unanswered post forever."*
    *
-   * This door is deliberately laxer than the single-record ones — references are checked for shape and never
-   * for existence, which is a defensible trade for a bulk import where records legitimately arrive in an
-   * order nobody controls.
-   *
-   * It stops being defensible once the correlation key makes this the normal way to write a linked record.
-   * The operator said so plainly: their correspondence, deploy log and ticket updates would all move onto the
-   * door with the weaker guarantee, *"and a dangling `answers` edge is exactly the failure we would never
-   * notice — it reads as an unanswered post forever."*
-   *
-   * Scoped to converted spaces rather than everywhere, which is exactly their concern: a space that has
-   * converted has already declared that links are the model. An unconverted space keeps the import trade.
-   *
-   * ONE flag for both, deliberately. They are the same question — has this space converted — and a second
-   * name for it is a second thing that can be read differently.
+   * It was scoped to CONVERTED spaces while a space could still be unconverted and keep the import trade.
+   * 5.0 leaves one shape — an unconverted space is refused rather than read — so the condition had one
+   * value left and is gone with the flag it read.
    */
-  const converted = usesLinkRecords(spaceId);
 
   /*
    * `F-27` item 2: what this call has minted, by the key its author gave it.
@@ -169,8 +150,6 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
     const properties = optProps(item['properties']);
     const ttlDays = bulkTtlDays(item['ttlDays']);
     if (ttlDays === TTL_INVALID) { errors.push({ type: 'fact', index: i, reason: TTL_INVALID_MSG }); continue; }
-    const linkArrErr = arrayWriteError({ converted, spaceId, body: item, actor: input.actor });
-    if (linkArrErr) { errors.push({ type: 'fact', index: i, reason: linkArrErr }); continue; }
     /*
      * `W-22`: THE CALLER-SUPPLIED `id`, which bulk ENTITIES read and these two ignored.
      *
@@ -190,9 +169,9 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
     // had one. Format only, like the rest of bulk: a payload may legitimately reference an entity
     // created earlier in the SAME payload, so an existence check here would reject valid forward
     // references. Staged imports that need dangling refs use the strictLinkage escape hatch.
-    const memEntityIds = strArray(item['entityIds']);
+    const memEntityIds = strArray(item['linkEntities']);
     if (strict && memEntityIds.some(id => !UUID_V4_RE.test(id))) {
-      errors.push({ type: 'fact', index: i, reason: '`entityIds` must contain valid UUID v4 values (entity IDs), not names' });
+      errors.push({ type: 'fact', index: i, reason: '`linkEntities` must contain valid UUID v4 values (entity IDs), not names' });
       continue;
     }
     try {
@@ -287,8 +266,6 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
     if (!title) { errors.push({ type: 'chrono', index: i, reason: 'missing required field: title' }); continue; }
     if (!allowedChronoTypes.has(type)) { errors.push({ type: 'chrono', index: i, reason: `\`type\` must be one of: ${[...allowedChronoTypes].join(', ')}` }); continue; }
     if (!startsAt) { errors.push({ type: 'chrono', index: i, reason: 'missing required field: startsAt' }); continue; }
-    const chronoLinkArrErr = arrayWriteError({ converted, spaceId, body: item, actor: input.actor });
-    if (chronoLinkArrErr) { errors.push({ type: 'chrono', index: i, reason: chronoLinkArrErr }); continue; }
     /*
      * `W-22`: THE CALLER-SUPPLIED `id`, which bulk ENTITIES read and these two ignored.
      *
@@ -316,10 +293,10 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
     // so a batch stored what the single create refuses and reported nothing.
     const shapeErr = shapeError('chrono', item);
     if (shapeErr) { errors.push({ type: 'chrono', index: i, reason: shapeErr }); continue; }
-    const entityIds = optStrArray(item['entityIds']);
-    const memoryIds = optStrArray(item['memoryIds']);
-    if (strict && entityIds && entityIds.some(id => !UUID_V4_RE.test(id))) { errors.push({ type: 'chrono', index: i, reason: '`entityIds` must contain valid UUID v4 values (entity IDs), not names' }); continue; }
-    if (strict && memoryIds && memoryIds.some(id => !UUID_V4_RE.test(id))) { errors.push({ type: 'chrono', index: i, reason: '`memoryIds` must contain valid UUID v4 values (fact IDs), not names' }); continue; }
+    const linkEntities = optStrArray(item['linkEntities']);
+    const linkFacts = optStrArray(item['linkFacts']);
+    if (strict && linkEntities && linkEntities.some(id => !UUID_V4_RE.test(id))) { errors.push({ type: 'chrono', index: i, reason: '`linkEntities` must contain valid UUID v4 values (entity IDs), not names' }); continue; }
+    if (strict && linkFacts && linkFacts.some(id => !UUID_V4_RE.test(id))) { errors.push({ type: 'chrono', index: i, reason: '`linkFacts` must contain valid UUID v4 values (fact IDs), not names' }); continue; }
     const properties = optProps(item['properties']);
     // Normalise status to a known value (drop unknowns) — REST did this; MCP did not.
     const status = typeof item['status'] === 'string' && CHRONO_STATUS_SET.has(item['status'] as ChronoStatus)
@@ -333,7 +310,7 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
         endsAt: typeof item['endsAt'] === 'string' ? item['endsAt'] : undefined,
         status, confidence: typeof item['confidence'] === 'number' ? item['confidence'] : undefined,
         description: typeof item['description'] === 'string' ? item['description'] : undefined,
-        tags: optStrArray(item['tags']), entityIds, memoryIds, properties,
+        tags: optStrArray(item['tags']), linkEntities, linkFacts, properties,
         recurrence: rec.value, id: rawId,
       }, undefined, ttlDays);
       /*
@@ -402,14 +379,22 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
     if (!to) { errors.push({ type: 'edge', index: i, reason: 'missing required field: to' }); continue; }
     if (strict && !isWellFormedRef(toKind, to)) { errors.push({ type: 'edge', index: i, reason: `\`to\` must be a valid ${toKind} reference, not a name` }); continue; }
     /*
-     * `F-27` item 2: on a CONVERTED space both ends must EXIST.
+     * `F-27` item 2: both ends must EXIST.
      *
      * A `$ref` that resolved is existent by construction — it names a record this call just wrote — so this
      * costs nothing for the case the feature is for. What it catches is the literal id: a well-formed UUID
      * pointing at nothing, which this door has always stored and which becomes unacceptable once the batch
      * is how linked records are written.
      */
-    if (converted) {
+    /*
+     * UNDER `strictLinkage`, which is the same condition the single-record doors use.
+     *
+     * It was scoped to a CONVERTED space while an unconverted one could keep the looser import trade, and
+     * 5.0 left that condition one value. Making it unconditional would have been the other half of the
+     * same defect: `strictLinkage: false` exists for staged imports where targets resolve in a later pass,
+     * and this door is where those imports arrive.
+     */
+    if (strict) {
       const missing = await firstMissingEnd(spaceId, [[from, fromKind, 'from'], [to, toKind, 'to']]);
       if (missing) { errors.push({ type: 'edge', index: i, reason: missing }); continue; }
     }

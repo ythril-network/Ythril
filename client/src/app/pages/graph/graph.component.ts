@@ -738,16 +738,12 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
       mems: this.brainApi.listFacts(spaceId, 100, 0, { entity: entityId }).pipe(
         catchError(() => of({ facts: [] as Fact[] })),
       ),
-      chrono: this.brainApi.queryBrain(spaceId, {
-        collection: 'chrono',
-        filter: { entityIds: entityId },
-        limit: 100,
-      }).pipe(
-        catchError(() => of({ results: [] as Record<string, unknown>[], collection: 'chrono' as const, count: 0 })),
+      chrono: this.brainApi.chronoLinkedTo(spaceId, entityId).pipe(
+        catchError(() => of([] as ChronoEntry[])),
       ),
     }).subscribe(({ mems, chrono }) => {
       this.nodeMemories.set(mems.facts);
-      this.nodeChrono.set(chrono.results as unknown as ChronoEntry[]);
+      this.nodeChrono.set(chrono);
     });
   }
 
@@ -786,20 +782,16 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
       mems: this.brainApi.listFacts(spaceId, 100, 0, { entity: te.from }).pipe(
         catchError(() => of({ facts: [] as Fact[] })),
       ),
-      chrono: this.brainApi.queryBrain(spaceId, {
-        collection: 'chrono',
-        filter: { entityIds: te.from },
-        limit: 100,
-      }).pipe(
-        catchError(() => of({ results: [] as Record<string, unknown>[], collection: 'chrono' as const, count: 0 })),
+      chrono: this.brainApi.chronoLinkedTo(spaceId, te.from).pipe(
+        catchError(() => of([] as ChronoEntry[])),
       ),
     }).subscribe(({ mems, chrono }) => {
       // filter to those also referencing te.to
       const filteredMems = mems.facts.filter(m =>
-        Array.isArray(m.entityIds) && m.entityIds.includes(te.to)
+        Array.isArray(m.linkEntities) && m.linkEntities.includes(te.to)
       );
-      const filteredChrono = (chrono.results as unknown as ChronoEntry[]).filter(c =>
-        Array.isArray(c.entityIds) && c.entityIds.includes(te.from) && c.entityIds.includes(te.to)
+      const filteredChrono = chrono.filter(c =>
+        Array.isArray(c.linkEntities) && c.linkEntities.includes(te.from) && c.linkEntities.includes(te.to)
       );
       this.nodeMemories.set(filteredMems);
       this.nodeChrono.set(filteredChrono);

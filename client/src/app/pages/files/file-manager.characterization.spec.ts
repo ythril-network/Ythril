@@ -432,16 +432,16 @@ describe('FileManagerComponent — the metadata edit model (characterization for
     return fixture.componentInstance as any;
   }
 
-  it('seeds every field from the record, and entityIds as a COMMA-JOINED STRING', () => {
+  it('seeds every field from the record, and linkEntities as a COMMA-JOINED STRING', () => {
     /*
-     * The asymmetry is the behaviour. `tags`, `memoryIds` and `chronoIds` stay arrays; `entityIds` becomes a
+     * The asymmetry is the behaviour. `tags`, `linkFacts` and `linkChronos` stay arrays; `linkEntities` becomes a
      * string because its control is a free-text field. A signal-based rewrite that made all four the same
      * shape would break the round-trip in one direction only, and only for entity references.
      */
     const c = create();
-    c.metaStore.seed({ description: 'd', tags: ['t'], entityIds: ['e1', 'e2'], memoryIds: ['m'], chronoIds: ['c'] });
+    c.metaStore.seed({ description: 'd', tags: ['t'], linkEntities: ['e1', 'e2'], linkFacts: ['m'], linkChronos: ['c'] });
     expect(c.metaStore.model).toEqual({
-      description: 'd', tags: ['t'], entityIds: 'e1, e2', memoryIds: ['m'], chronoIds: ['c'],
+      description: 'd', tags: ['t'], linkEntities: 'e1, e2', linkFacts: ['m'], linkChronos: ['c'],
     });
   });
 
@@ -449,14 +449,14 @@ describe('FileManagerComponent — the metadata edit model (characterization for
     // Opening a file with no meta record after one that had some is the case this protects: the drawer must
     // not show the last file's description.
     const c = create();
-    c.metaStore.seed({ description: 'old', tags: ['x'], entityIds: ['e'], memoryIds: [], chronoIds: [] });
+    c.metaStore.seed({ description: 'old', tags: ['x'], linkEntities: ['e'], linkFacts: [], linkChronos: [] });
     c.metaStore.seed(null);
-    expect(c.metaStore.model).toEqual({ description: '', tags: [], entityIds: '', memoryIds: [], chronoIds: [] });
+    expect(c.metaStore.model).toEqual({ description: '', tags: [], linkEntities: '', linkFacts: [], linkChronos: [] });
   });
 
   it('the arrays are COPIED, so editing the form cannot reach back into the loaded record', () => {
     const c = create();
-    const loaded = { description: '', tags: ['keep'], entityIds: [], memoryIds: [], chronoIds: [] };
+    const loaded = { description: '', tags: ['keep'], linkEntities: [], linkFacts: [], linkChronos: [] };
     c.metaStore.seed(loaded);
     c.metaStore.model.tags.push('added');
     expect(loaded.tags).toEqual(['keep']);
@@ -464,7 +464,7 @@ describe('FileManagerComponent — the metadata edit model (characterization for
 
   it('cancelling re-seeds from the loaded record and drops the error', () => {
     const c = create();
-    c.metaStore.selectedMeta.set({ description: 'saved', tags: [], entityIds: [], memoryIds: [], chronoIds: [] });
+    c.metaStore.selectedMeta.set({ description: 'saved', tags: [], linkEntities: [], linkFacts: [], linkChronos: [] });
     c.metaStore.model.description = 'typed but not saved';
     c.metaStore.error.set('something went wrong');
     c.cancelMeta();
@@ -473,9 +473,9 @@ describe('FileManagerComponent — the metadata edit model (characterization for
     expect(c.detailMode()).toBe('preview');
   });
 
-  it('SAVING splits entityIds back into an array, and trims the description', () => {
+  it('SAVING splits linkEntities back into an array, and trims the description', () => {
     /*
-     * The other half of the asymmetry the seeding case describes. `entityIds` is a comma-joined STRING in the
+     * The other half of the asymmetry the seeding case describes. `linkEntities` is a comma-joined STRING in the
      * form because its control is free text, and it has to become an array again on the way out — with the
      * blanks dropped, or a trailing comma posts an empty id. A rewrite that made all four fields the same
      * shape breaks the round trip in one direction only, and only for entity references.
@@ -483,9 +483,9 @@ describe('FileManagerComponent — the metadata edit model (characterization for
     let sent: any = null;
     const c = createWithSave((_s: string, _p: string, body: any) => { sent = body; return of({}); });
     c.preview.file.set(file('doc.pdf'));
-    c.metaStore.model = { description: '  spaced  ', tags: ['t'], entityIds: 'e1, e2 ,, e3', memoryIds: [], chronoIds: [] };
+    c.metaStore.model = { description: '  spaced  ', tags: ['t'], linkEntities: 'e1, e2 ,, e3', linkFacts: [], linkChronos: [] };
     c.saveMeta(file('doc.pdf'));
-    expect(sent.entityIds).toEqual(['e1', 'e2', 'e3']);
+    expect(sent.linkEntities).toEqual(['e1', 'e2', 'e3']);
     expect(sent.description).toBe('spaced');
   });
 
@@ -496,13 +496,13 @@ describe('FileManagerComponent — the metadata edit model (characterization for
      * then shows what the user asked for rather than what exists, and the difference only surfaces on a
      * reload, by which time nobody connects the two.
      */
-    const c = createWithSave(() => of({ description: 'as stored', tags: ['kept'], entityIds: ['e1'], memoryIds: [], chronoIds: [] }));
+    const c = createWithSave(() => of({ description: 'as stored', tags: ['kept'], linkEntities: ['e1'], linkFacts: [], linkChronos: [] }));
     c.preview.file.set(file('doc.pdf'));
-    c.metaStore.model = { description: 'as typed', tags: ['dropped'], entityIds: 'e1,e2', memoryIds: [], chronoIds: [] };
+    c.metaStore.model = { description: 'as typed', tags: ['dropped'], linkEntities: 'e1,e2', linkFacts: [], linkChronos: [] };
     c.saveMeta(file('doc.pdf'));
     expect(c.metaStore.model.description).toBe('as stored');
     expect(c.metaStore.model.tags).toEqual(['kept']);
-    expect(c.metaStore.model.entityIds).toBe('e1');
+    expect(c.metaStore.model.linkEntities).toBe('e1');
   });
 
   it('and it leaves the edit face, clears the spinner, and reloads the DIRECTORY', () => {
@@ -529,7 +529,7 @@ describe('FileManagerComponent — the metadata edit model (characterization for
     const c = createWithSave(() => throwError(() => ({ status: 500 })));
     c.preview.file.set(file('doc.pdf'));
     c.detailMode.set('meta');
-    c.metaStore.model = { description: 'kept', tags: [], entityIds: '', memoryIds: [], chronoIds: [] };
+    c.metaStore.model = { description: 'kept', tags: [], linkEntities: '', linkFacts: [], linkChronos: [] };
     c.saveMeta(file('doc.pdf'));
     expect(c.detailMode()).toBe('meta');
     expect(c.metaStore.error()).toBeTruthy();
@@ -539,7 +539,7 @@ describe('FileManagerComponent — the metadata edit model (characterization for
 
   it('opening the edit face re-seeds too, so a previous cancel cannot leak into it', () => {
     const c = create();
-    c.metaStore.selectedMeta.set({ description: 'saved', tags: [], entityIds: [], memoryIds: [], chronoIds: [] });
+    c.metaStore.selectedMeta.set({ description: 'saved', tags: [], linkEntities: [], linkFacts: [], linkChronos: [] });
     c.metaStore.model.description = 'stale';
     c.showMetaMode();
     expect(c.metaStore.model.description).toBe('saved');

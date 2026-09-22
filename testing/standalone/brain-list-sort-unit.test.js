@@ -74,18 +74,24 @@ describe('parseSortParam — the 400-on-unknown-sort contract', () => {
   // A rejected-by-design list, asserted so it is not "corrected" into the whitelist later. `properties` is
   // a free-form JSON blob with no single orderable value; the id arrays order by nothing a reader can see.
   it('keeps unsortable-by-nature fields OUT of every whitelist', async () => {
-    // set-claim: `properties` plus the DERIVED link array fields -- the literal half is one field whose
+    // set-claim: `properties` plus every LINK field name -- the literal half is one field whose
     // unsortability is a fact about JSON, not a member of any set the source enumerates.
     /*
-     * The link arrays come from `LINK_ARRAY_FIELDS`, not from a list written here. There are THREE of them
-     * and this named two: `chronoIds` arrived with M-2 and could have been whitelisted on any collection
-     * without a word from this case, which claims to keep them out of EVERY whitelist.
+     * The link names come from the modules that define them, not from a list written here. Two sets, and
+     * both matter: what a caller sends TODAY (`linkEntities` and its siblings, which are instructions to
+     * write link records rather than stored values) and what a caller sent BEFORE 5.0 (`entityIds` and
+     * its two siblings, now refused). A retired name reappearing in a sort whitelist would be a promise
+     * to order by a field no document has.
      */
-    const { LINK_ARRAY_FIELDS } = await import('../../server/dist/brain/array-write-refusal.js');
-    assert.ok(LINK_ARRAY_FIELDS.length >= 3,
-      `only ${LINK_ARRAY_FIELDS.length} link array field(s) — the import is stale and this checks less`);
+    const { LINK_INPUT_NAMES } = await import('../../server/dist/brain/write-connections.js');
+    const { RETIRED_WRITE_FIELDS } = await import('../../server/dist/brain/retired-write-fields.js');
+    const retired = Object.keys(RETIRED_WRITE_FIELDS);
+    assert.ok(LINK_INPUT_NAMES.length >= 4,
+      `only ${LINK_INPUT_NAMES.length} link input field(s) — the import is stale and this checks less`);
+    assert.ok(retired.length >= 3,
+      `only ${retired.length} retired link field(s) — the import is stale and this checks less`);
     for (const [name, set] of Object.entries(SORTABLE_FIELDS)) {
-      for (const field of ['properties', ...LINK_ARRAY_FIELDS]) {
+      for (const field of ['properties', ...LINK_INPUT_NAMES, ...retired]) {
         assert.ok(!set.has(field), `${name}.${field} must not be sortable — it has no orderable value`);
       }
     }

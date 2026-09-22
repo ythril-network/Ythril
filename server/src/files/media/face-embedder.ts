@@ -37,6 +37,7 @@ import { col, asDoc, asFilter } from '../../db/mongo.js';
 import { getConfig, getDataRoot, getFaceRecognitionConfig } from '../../config/loader.js';
 import { faceRecognitionAllowed } from '../converters/media-level.js';
 import { updateFileMeta } from '../file-meta.js';
+import { linksStartingFrom } from '../../brain/link-adjacency.js';
 import { log } from '../../util/log.js';
 import { isUsableDescriptor, FACE_DESCRIPTOR_DIMS } from './face-descriptor.js';
 import { faceDescriptorDimsFor } from '../../spaces/vector-index.js';
@@ -401,13 +402,20 @@ export async function embedFaces(
     try {
       const parent = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(
         asFilter<FileMetaDoc>({ _id: fileId }),
-        { projection: { entityIds: 1 } },
+        { projection: { _id: 1 } },
       ) as FileMetaDoc | null;
 
-      if (parent && !parent.entityIds?.includes(autoLabelEntityId)) {
-        const existingIds = parent.entityIds ?? [];
+      /*
+       * READ THE LINK ROWS, because the file's `entityIds` array went in 5.0 and `linkEntities` REPLACES
+       * the class wholesale. Appending to what a projection returned would have quietly become "this file
+       * links to exactly the one face I just recognised", deleting every other entity link on it.
+       */
+      const linked = parent
+        ? (await linksStartingFrom(spaceId, [fileId])).filter(r => r.toKind === 'entity').map(r => r.to)
+        : [];
+      if (parent && !linked.includes(autoLabelEntityId)) {
         await updateFileMeta(spaceId, fileId, {
-          entityIds: [...existingIds, autoLabelEntityId],
+          linkEntities: [...linked, autoLabelEntityId],
         });
         log.info(`Face recogniser: auto-labeled ${spaceId}/${fileId} → entity ${autoLabelEntityId}`);
       }

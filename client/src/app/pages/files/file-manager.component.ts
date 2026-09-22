@@ -528,13 +528,13 @@ export class FileManagerComponent implements OnInit, OnDestroy {
    * consumer wants.
    */
 
-  /** Edit model for the meta form — same shape the Brain File Meta tab uses (entityIds is comma-joined
+  /** Edit model for the meta form — same shape the Brain File Meta tab uses (linkEntities is comma-joined
    *  for app-entity-ref-field; memory/chrono are id arrays). Mutated in place by the ref-field widgets. */
   /**
    * The edit model, held as a PLAIN object because the reference widgets write into it.
    *
    * Typed by the editor that renders it, so there is one definition of the shape rather than a structural
-   * literal here and an interface there — the two drifting is how `entityIds` would quietly become an array
+   * literal here and an interface there — the two drifting is how `linkEntities` would quietly become an array
    * on one side.
    */
 
@@ -894,9 +894,9 @@ export class FileManagerComponent implements OnInit, OnDestroy {
    * couple it to the template's shape. The store publishes the model it built; this subscribes.
    */
   private primePickerFrom(model: FileMetaModel): void {
-    this.picker?.resolveEntityNamesFor(model.entityIds);
-    this.picker?.resolveMemoryTitles(model.memoryIds);
-    this.picker?.resolveChronoTitles(model.chronoIds);
+    this.picker?.resolveEntityNamesFor(model.linkEntities);
+    this.picker?.resolveMemoryTitles(model.linkFacts);
+    this.picker?.resolveChronoTitles(model.linkChronos);
   }
 
   /** Switch the pane to the file-meta edit face, re-seeding the form from the loaded record. */

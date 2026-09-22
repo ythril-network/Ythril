@@ -43,7 +43,7 @@ import { memoryText, chronoText } from './graph-details';
  * ## The four kinds, and the two defects still carried
  *
  * A graph node is one of four kinds, and since 3.6 a chrono entry, memory or file reaches the canvas through
- * its `entityIds` link. The card reads `kind` and asks `memoryText` / `chronoText` — the same functions the
+ * its `linkEntities` link. The card reads `kind` and asks `memoryText` / `chronoText` — the same functions the
  * linked-records list in this panel already uses — for the first row. It did not, and rendered a blank name
  * for a memory while its `fact` appeared nowhere (G-5).
  *

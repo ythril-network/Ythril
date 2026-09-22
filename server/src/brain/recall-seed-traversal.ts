@@ -343,7 +343,7 @@ export async function traverseFromSeeds(
     // Same bound, same reason — and it matters more here, because this is the RECALL path: a depth-N call
     // with all three flags on makes up to 3N of these reads.
     const { records: linkedHere, scanCapped: hopScanCapped } = await linkedRecordsAtFrontier(
-      [spaceId], frontier, frontierSet, visited, narrowing ?? {}, narrowing?.edgeLabels,
+      [spaceId], frontier, visited, narrowing ?? {}, narrowing?.edgeLabels,
       Math.max(0, limit - results.length));
     if (hopScanCapped) capped = true;
 

@@ -1,3 +1,4 @@
+import { ReferenceRefusal } from './brain/entity-refs.js';
 import express from 'express';
 import compression from 'compression';
 import { shouldCompress, staticCacheControl } from './util/transfer.js';
@@ -651,6 +652,22 @@ export function createApp() {
       const s = httpErr.status;
       const status = (s >= 400 && s < 600) ? s : 500;
       res.status(status).json({ error: httpErr.message ?? 'Request error' });
+      return;
+    }
+    /*
+     * A REFERENCE REFUSAL IS THE CALLER'S FAULT, and it reaches here rather than a route.
+     *
+     * The existence check for a link moved from the seven write doors into the writers — which is what
+     * made it true of `linkEntities` as well as of the 4.x arrays it guarded. Express 5 forwards a
+     * rejected handler here, so a caller naming a record that does not exist got **500 Internal server
+     * error** where they used to get a `400` naming the id. A refusal that reads as a server fault is
+     * worse than the silent write it replaced: there is nothing in it to act on.
+     *
+     * Answered HERE and not per door on purpose. Seven branches are seven chances for the next door to
+     * be written without one, and the symptom is a 500 on the path nobody exercised.
+     */
+    if (err instanceof ReferenceRefusal) {
+      res.status(400).json({ error: err.message });
       return;
     }
     const message = err instanceof Error ? err.message : String(err);

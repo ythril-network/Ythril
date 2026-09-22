@@ -163,7 +163,7 @@ export function startReindex(plan: ReindexPlan): void {
               while (true) {
                 const q: Record<string, unknown> = cursor ? { _id: { $gt: cursor } } : {};
                 const batch: FactDoc[] = await col<FactDoc>(spaceCollection(mid, 'facts'))
-                  .find(asFilter<FactDoc>(q), { projection: { _id: 1, fact: 1, tags: 1, entityIds: 1, description: 1, properties: 1, type: 1, suppressEmbeddings: 1,} })
+                  .find(asFilter<FactDoc>(q), { projection: { _id: 1, fact: 1, tags: 1, description: 1, properties: 1, type: 1, suppressEmbeddings: 1,} })
                   .sort({ _id: 1 })
                   .limit(BATCH)
                   .toArray() as FactDoc[];
@@ -277,7 +277,7 @@ export function startReindex(plan: ReindexPlan): void {
                   ? { _id: { $gt: cursor }, parentFileId: { $exists: false } }
                   : { parentFileId: { $exists: false } };
                 const batch: FileMetaDoc[] = await col<FileMetaDoc>(spaceCollection(mid, 'files'))
-                  .find(asFilter<FileMetaDoc>(q), { projection: { _id: 1, path: 1, tags: 1, description: 1, properties: 1, entityIds: 1, suppressEmbeddings: 1,} })
+                  .find(asFilter<FileMetaDoc>(q), { projection: { _id: 1, path: 1, tags: 1, description: 1, properties: 1, suppressEmbeddings: 1,} })
                   .sort({ _id: 1 })
                   .limit(BATCH)
                   .toArray() as FileMetaDoc[];

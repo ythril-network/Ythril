@@ -14,7 +14,7 @@ import { resolveMetaRefs, validateEntity } from '../../spaces/schema-validation.
 import { mergePropertiesOrKeep, mergeTagsOrKeep } from '../../brain/merge-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
-import { connectionSchemas, applyConnections, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
+import { connectionSchemas, applyConnections, assertConnections, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
 
 export const save_entityTool: ToolHandler = {
   name: 'save_entity',
@@ -28,7 +28,7 @@ export const save_entityTool: ToolHandler = {
           properties: {
             // `F-27`: the `link*` fields and `edges`, from the one builder REST reads with — so a field
             // on one door and not the other cannot happen.
-            ...connectionSchemas(),
+            ...connectionSchemas('entity'),
             space: s.requiredSpace,
             id: uuidSchema('UUID v4 of an EXISTING record to update. It is not a way to choose an id: identity is server-generated, so an id that names nothing is ignored rather than adopted. To carry your own reference, use `name` or `description`.'),
             name: {
@@ -101,6 +101,11 @@ export const save_entityTool: ToolHandler = {
     const entContraCheck = a['checkContradictions'] === true;
     const entDupeThreshold = typeof a['dupeThreshold'] === 'number' ? a['dupeThreshold'] : undefined;
     const entTtlDays = ttlDaysFromArgs(a);
+    // Refused BEFORE the record is written: a class this kind cannot hold, and under strict linkage
+    // an id that names nothing. `applyConnections` runs after the write, so a refusal there would
+    // leave the record stored without the links the same call asked for.
+    await assertConnections(wt.target, 'entity', a);
+
     let upserted;
     try {
       // The record tier, which no create door stated until 2026-09-02. `parseRecordSuppression` owns the
@@ -243,7 +248,7 @@ export const update_entityTool: ToolHandler = {
             // `Q-30`: the same connection fields the CREATE tool takes, from the one builder both read —
             // a field on one verb and not the other is the gap this closes, and two hand-written copies
             // is how they would drift apart again.
-            ...connectionSchemas(),
+            ...connectionSchemas('entity'),
           },
           additionalProperties: false,
           required: ['space', 'id'],
@@ -293,6 +298,9 @@ export const update_entityTool: ToolHandler = {
      * throws, so nothing about this tool's failure shape changes — the block was pure duplication, and the
      * duplicate is the one that drifted.
      */
+
+    // Refused BEFORE the update lands, or a bad link id leaves every other field already changed.
+    await assertConnections(wt.target, 'entity', a);
 
     const updatedEnt = await findFirstAcrossMembers(wt.target, mid => updateEntityById(mid, id, updates, dfPaths, ctx.actor, ttlDays));
     if (!updatedEnt) throw new Error(`Entity '${id}' not found`);

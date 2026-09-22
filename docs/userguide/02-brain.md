@@ -190,19 +190,24 @@ row per connection, showing which record it hangs off and which record it names.
 `save_link` tool, needing the same **write knowledge** right as an edge. There is no button for it,
 because the ordinary way to make a link is to attach the record, which the tabs already do.
 
-### Two things change when a space is converted
+### Two things changed in 5.0, and the conversion runs itself
 
-Converting a space (an administrator runs it once) turns the connection lists into records for good, and two
-things follow. **Nothing changes on a space nobody has converted.**
+A connection used to be a list of ids kept on the record. It is a small record of its own now, converted on
+the first 5.0 start with nothing for you to run — and two things follow.
 
 **1. Deleting a record that something still points at is refused** — but only in a space with the strict
 reference setting on. Delete a fact that a timeline entry refers to and you get a message naming what refers
 to it, instead of the delete going through. This is a **change**: it always went through before, and the
 timeline entry was quietly left pointing at a fact that was no longer there.
 
-**2. Writing the old connection lists through the API is refused**, with the error naming the link endpoint to
-use instead. Nothing you have stored is lost — the lists are still read, still saved and still copied between
-instances. The tabs are unaffected: attaching a record still works exactly as it did.
+**2. Writing the old connection lists through the API is refused**, with the error naming the field to send
+instead — the same ids, a different name. Nothing you have stored is lost: the conversion turned every list
+into links before the lists were removed. The tabs are unaffected, and attaching a record still works exactly
+as it did.
+
+**A space whose conversion failed says so** rather than answering that it has no connections, and names
+itself in the message. That is the one case where you have to do something, and the server log says what
+went wrong.
 
 ---
 
@@ -431,7 +436,7 @@ the same answer. Two uses, and the second is the reason it is there:
   and the Embedding queue on this page is where you see whether that queue is behind.
 - **Include passage text** — on by default. Turn it off to get passage *locations* without their text: useful when you want to find which document holds something and read only that part, since passage bodies are the largest thing a result carries.
 - **Include diagnostic fields** — off by default, and off is right for ordinary searching. Turn it on to see *why* a result ranked where it did: the exact text that was embedded, the embedding model, the sync counter, and the score from each ranking stage separately. It follows graph hops too, at every depth, so a search with **Graph hops** set shows the same detail on the connected records. The embedding vector itself is never returned and there is no option that asks for it.
-- **Include storage bookkeeping** — off by default, and off is what you want almost always. A result normally tells you what was remembered; this adds back where it is filed: when the record was written, when it was last changed, and the ids of everything it is linked to. Those fields are large and repeat on every result — measured on a real space, only about a third of an answer was the remembered content and most of the rest was this — so leaving it off gets you more actual fact inside the same size limit. One trap worth knowing: the creation date is when the RECORD was written, not when the thing you are remembering happened. That date lives in the record’s own properties, put there by whoever stored it.
+- **Include storage bookkeeping** — off by default, and off is what you want almost always. A result normally tells you what was remembered; this adds back where it is filed: when the record was written and when it was last changed. (It used to add the ids of everything the record was linked to; those are their own records now, and the graph view is how you follow them.) Those fields are large and repeat on every result — measured on a real space, only about a third of an answer was the remembered content and most of the rest was this — so leaving it off gets you more actual fact inside the same size limit. One trap worth knowing: the creation date is when the RECORD was written, not when the thing you are remembering happened. That date lives in the record’s own properties, put there by whoever stored it.
 
 **If a search fails, read whether it says it can be retried.** Some failures are the question — a filter the
 system cannot parse, a value out of range — and those will fail the same way however many times you try. But a

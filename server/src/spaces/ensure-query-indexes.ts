@@ -27,7 +27,8 @@
  */
 import { col } from '../db/mongo.js';
 import { COLLECTION_SUFFIX } from '../config/types-knowledge.js';
-import { LINK_CLASSES } from '../brain/link-adjacency.js';
+import { LINK_INDEXES } from '../brain/link-adjacency.js';
+import { spaceCollection } from '../db/space-collection.js';
 import { getConfig } from '../config/loader.js';
 import { log } from '../util/log.js';
 
@@ -42,23 +43,20 @@ import { log } from '../util/log.js';
 // The four knowledge-type collections, from the map that defines them rather than written out again.
 const TYPE_FILTERED = Object.values(COLLECTION_SUFFIX);
 
-/**
- * The collections a LINK scan reads, with the field it reads — one entry per LINK CLASS, derived.
+/*
+ * THE LINK INDEXES ARE ON THE LINKS COLLECTION, and this is the half that only bites an UPGRADED space.
  *
- * `initSpace` creates these, and that only ever reaches a space NEW to the config — so an index added there
- * leaves every existing operator on the collection scan. That is the half this file exists for, and it is why
- * the two lists have to widen together: `entityIds` was created for facts alone, while
- * `linkedRecordsAtFrontier` reads it on all three, once per class per member space per hop.
+ * `initSpace` creates them with the collection, and it only ever reaches a space new to the config. A
+ * space that came from 4.x got its links collection from the conversion's first insert — which creates a
+ * collection and no indexes — so the spaces with the most links to read are exactly the ones that would
+ * have none. Same set as `initSpace` asks for, from `LINK_INDEXES`, because two lists of indexes drift in
+ * the direction nothing reports.
  *
- * **It said three collections and one field, and a link is a (collection, FIELD) pair.** M-2 gave a chrono
- * entry `memoryIds` and a file `memoryIds` and `chronoIds` — three link classes whose scans had no index at
- * all, because the list named the collections while the field stayed written out as `entityIds`. Nothing
- * reported it: an unindexed scan returns the right answer, slowly, and only on a space large enough to
- * notice. Derived from `LINK_CLASSES` now, so a seventh class arrives with its index.
+ * It replaced a list of (collection, FIELD) pairs, one per link class, which is what a link scan read
+ * while the arrays existed. The lesson is worth keeping: that list once said three collections and ONE
+ * field, so three of the six classes had no index at all and nothing reported it. An unindexed scan
+ * returns the right answer, slowly, and only on a space large enough to notice.
  */
-const LINK_SCANNED: readonly { collection: string; field: string }[] =
-  [...new Map(LINK_CLASSES.map(c => [`${c.collection}.${c.field}`, { collection: c.collection, field: c.field }]))
-    .values()];
 
 /**
  * Create any missing read-path index, for every space.
@@ -81,12 +79,12 @@ export async function ensureQueryIndexes(): Promise<number> {
         log.warn(`ensureQueryIndexes: ${space.id}_${name} type index: ${err}`);
       }
     }
-    for (const { collection, field } of LINK_SCANNED) {
+    for (const ix of LINK_INDEXES) {
       try {
-        await col(`${space.id}_${collection}`).createIndex({ [field]: 1 });
+        await col(spaceCollection(space.id, 'links')).createIndex(ix.keys, ix.unique ? { unique: true } : {});
         issued++;
       } catch (err) {
-        log.warn(`ensureQueryIndexes: ${space.id}_${collection} ${field} index: ${err}`);
+        log.warn(`ensureQueryIndexes: ${space.id} links ${Object.keys(ix.keys).join(',')} index: ${err}`);
       }
     }
   }

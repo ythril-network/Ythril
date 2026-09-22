@@ -20,7 +20,7 @@ import { isOnPush } from '../../testing/onpush';
 /** The chrono write body, as `BrainApi.createChrono` declares it. */
 type ChronoWriteBody = {
   title: string; type: string; startsAt: string; endsAt?: string; status?: string; confidence?: number;
-  tags?: string[]; entityIds?: string[]; memoryIds?: string[]; description?: string;
+  tags?: string[]; linkEntities?: string[]; linkFacts?: string[]; description?: string;
   properties?: Record<string, string | number | boolean>;
 };
 
@@ -81,7 +81,7 @@ describe('ChronoTabComponent', () => {
     api.listChrono.mockReturnValueOnce(of({ chrono: [{
       _id: 'c1', spaceId: 'work', title: 'Q3 review', type: 'event', status: 'upcoming',
       startsAt: '2026-08-01T09:00:00Z', createdAt: '2026-01-15T10:00:00Z', updatedAt: '2026-01-15T10:00:00Z',
-      tags: [], entityIds: [], memoryIds: [],
+      tags: [], linkEntities: [], linkFacts: [],
     }] as unknown as ChronoEntry[] }));
     const fixture = make();
     expect((fixture.nativeElement as HTMLElement).textContent).toContain('15.01.2026');
@@ -134,7 +134,7 @@ describe('ChronoTabComponent', () => {
 
   it('createChrono sends the selected type verbatim and ISO-encodes startsAt', () => {
     const c = make().componentInstance;
-    c.chronoForm = { title: 'T', kind: 'launch', startsAt: '2026-03-04T09:07', endsAt: '', description: '', tags: [], entityIds: '', memoryIds: [], properties: {} };
+    c.chronoForm = { title: 'T', kind: 'launch', startsAt: '2026-03-04T09:07', endsAt: '', description: '', tags: [], linkEntities: '', linkFacts: [], properties: {} };
     c.createChrono();
     const [, body] = api.createChrono.mock.calls[0];
     expect(body.title).toBe('T');
@@ -153,28 +153,28 @@ describe('ChronoTabComponent', () => {
     expect(c.store.chronoAllowedTypes()).toEqual(['audit', 'launch']);
   });
 
-  // Slice 3c: linked memoryIds (from the inline memory picker) ride the create payload; omitted when empty.
-  it('createChrono includes memoryIds when the memory picker has linked some (omitted when empty)', () => {
+  // Slice 3c: linked linkFacts (from the inline memory picker) ride the create payload; omitted when empty.
+  it('createChrono includes linkFacts when the memory picker has linked some (omitted when empty)', () => {
     const c = make().componentInstance;
-    c.chronoForm = { title: 'T', kind: 'event', startsAt: '2026-03-04T09:07', endsAt: '', description: '', tags: [], entityIds: '', memoryIds: ['m1', 'm2'], properties: {} };
+    c.chronoForm = { title: 'T', kind: 'event', startsAt: '2026-03-04T09:07', endsAt: '', description: '', tags: [], linkEntities: '', linkFacts: ['m1', 'm2'], properties: {} };
     c.createChrono();
-    expect(api.createChrono.mock.calls[0][1].memoryIds).toEqual(['m1', 'm2']);
+    expect(api.createChrono.mock.calls[0][1].linkFacts).toEqual(['m1', 'm2']);
     api.createChrono.mockClear();
-    c.chronoForm = { title: 'T', kind: 'event', startsAt: '2026-03-04T09:07', endsAt: '', description: '', tags: [], entityIds: '', memoryIds: [], properties: {} };
+    c.chronoForm = { title: 'T', kind: 'event', startsAt: '2026-03-04T09:07', endsAt: '', description: '', tags: [], linkEntities: '', linkFacts: [], properties: {} };
     c.createChrono();
-    expect('memoryIds' in api.createChrono.mock.calls[0][1]).toBe(false);
+    expect('linkFacts' in api.createChrono.mock.calls[0][1]).toBe(false);
   });
 
   // Chrono properties editor (client-only gap fix): schema-defined properties ride the create payload,
   // stripped of empty optionals, and are omitted entirely when nothing is set.
   it('createChrono includes non-empty properties (omitted when empty)', () => {
     const c = make().componentInstance;
-    c.chronoForm = { title: 'T', kind: 'event', startsAt: '2026-03-04T09:07', endsAt: '', description: '', tags: [], entityIds: '', memoryIds: [], properties: { severity: 'high', note: '' } };
+    c.chronoForm = { title: 'T', kind: 'event', startsAt: '2026-03-04T09:07', endsAt: '', description: '', tags: [], linkEntities: '', linkFacts: [], properties: { severity: 'high', note: '' } };
     c.createChrono();
     // No schema loaded → stripEmptyOptionalProps passes values through; '' optionals stay only if no schema.
     expect(api.createChrono.mock.calls[0][1].properties).toEqual({ severity: 'high', note: '' });
     api.createChrono.mockClear();
-    c.chronoForm = { title: 'T', kind: 'event', startsAt: '2026-03-04T09:07', endsAt: '', description: '', tags: [], entityIds: '', memoryIds: [], properties: {} };
+    c.chronoForm = { title: 'T', kind: 'event', startsAt: '2026-03-04T09:07', endsAt: '', description: '', tags: [], linkEntities: '', linkFacts: [], properties: {} };
     c.createChrono();
     expect('properties' in api.createChrono.mock.calls[0][1]).toBe(false);
   });
@@ -183,7 +183,7 @@ describe('ChronoTabComponent', () => {
     const c = make().componentInstance;
     c.store.chrono.set([{ _id: 'c1' } as ChronoEntry]);
     c.recordList.editingId.set('c1');
-    c.editChrono = { title: 'T', kind: 'event', status: 'active', startsAt: '', endsAt: '', description: '', tags: [], entityIds: '', memoryIds: [], properties: { owner: 'ada' } };
+    c.editChrono = { title: 'T', kind: 'event', status: 'active', startsAt: '', endsAt: '', description: '', tags: [], linkEntities: '', linkFacts: [], properties: { owner: 'ada' } };
     c.saveEditChrono('c1');
     expect(api.updateChrono.mock.calls[0][2].properties).toEqual({ owner: 'ada' });
   });
@@ -192,14 +192,14 @@ describe('ChronoTabComponent', () => {
     const c = make().componentInstance;
     // With a schema for 'deadline', switching kind seeds its keys with typed defaults.
     c.store.spaceMeta.set({ typeSchemas: { chrono: { deadline: { propertySchemas: { dueBy: { type: 'string' } } } } } } as never);
-    c.chronoForm = { title: '', kind: 'deadline', startsAt: '', endsAt: '', description: '', tags: [], entityIds: '', memoryIds: [], properties: {} };
+    c.chronoForm = { title: '', kind: 'deadline', startsAt: '', endsAt: '', description: '', tags: [], linkEntities: '', linkFacts: [], properties: {} };
     c.onChronoFormKindChange();
     expect(c.chronoForm.properties).toEqual({ dueBy: '' });
   });
 
   it('createChrono is a no-op without a title or startsAt', () => {
     const c = make().componentInstance;
-    c.chronoForm = { title: '', kind: 'event', startsAt: '2026-03-04T09:07', endsAt: '', description: '', tags: [], entityIds: '', memoryIds: [], properties: {} };
+    c.chronoForm = { title: '', kind: 'event', startsAt: '2026-03-04T09:07', endsAt: '', description: '', tags: [], linkEntities: '', linkFacts: [], properties: {} };
     c.createChrono();
     expect(api.createChrono).not.toHaveBeenCalled();
   });
@@ -208,7 +208,7 @@ describe('ChronoTabComponent', () => {
     const c = make().componentInstance;
     c.store.chrono.set([{ _id: 'c1' } as ChronoEntry]);
     c.recordList.editingId.set('c1');
-    c.editChrono = { title: 'T', kind: 'launch', status: 'active', startsAt: '', endsAt: '', description: '', tags: [], entityIds: '', memoryIds: [], properties: {} };
+    c.editChrono = { title: 'T', kind: 'launch', status: 'active', startsAt: '', endsAt: '', description: '', tags: [], linkEntities: '', linkFacts: [], properties: {} };
     c.saveEditChrono('c1');
     const [, , body] = api.updateChrono.mock.calls[0];
     expect(body.type).toBe('launch'); // verbatim

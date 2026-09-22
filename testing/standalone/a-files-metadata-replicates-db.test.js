@@ -73,7 +73,6 @@ const arriving = (over = {}) => ({
   description: 'the spec, as the peer describes it',
   descriptionSource: 'extracted',
   tags: ['spec', 'from-peer'],
-  entityIds: [ENT], memoryIds: [MEM], chronoIds: [],
   properties: { version: '2' },
   author: AUTHOR,
   createdAt: '2026-01-01T00:00:00.000Z',
@@ -98,7 +97,7 @@ describe("a file's metadata replicates", { skip }, () => {
     mongo = await openTestMongo('filemetasync');
     fs.writeFileSync(CONFIG_PATH, JSON.stringify({
       instanceId: 'receiver', instanceLabel: 'Receiver', tokens: [], networks: [],
-      spaces: [{ id: SPACE, label: 'General', builtIn: true, folders: [] }],
+      spaces: [{ id: SPACE, label: 'General', builtIn: true, folders: [], completeLinkage: true }],
     }, null, 2), { mode: 0o600 });
     const loader = await import('../../server/dist/config/loader.js');
     loader.loadConfig();
@@ -116,11 +115,11 @@ describe("a file's metadata replicates", { skip }, () => {
       await coll(c).deleteMany({});
     }
     await coll('entities').insertOne({ _id: ENT, spaceId: SPACE, name: 'One', type: 'thing', tags: [], seq: 1 });
-    await coll('facts').insertOne({ _id: MEM, spaceId: SPACE, fact: 'a fact', tags: [], entityIds: [], seq: 2 });
+    await coll('facts').insertOne({ _id: MEM, spaceId: SPACE, fact: 'a fact', tags: [], seq: 2 });
     // The receiver's own record: a file it already has, with everything it derived from the bytes.
     await coll('files').insertOne({
       _id: FILE, spaceId: SPACE, path: FILE,
-      description: 'my own description', tags: ['mine'], entityIds: [], memoryIds: [], chronoIds: [],
+      description: 'my own description', tags: ['mine'],
       author: { instanceId: 'receiver', instanceLabel: 'Receiver' },
       createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-02-01T00:00:00.000Z', seq: 5,
       ...LOCAL_DERIVED,
@@ -139,8 +138,6 @@ describe("a file's metadata replicates", { skip }, () => {
     assert.equal(m.description, 'the spec, as the peer describes it');
     assert.equal(m.descriptionSource, 'extracted');
     assert.deepEqual(m.tags, ['spec', 'from-peer']);
-    assert.deepEqual(m.entityIds, [ENT]);
-    assert.deepEqual(m.memoryIds, [MEM]);
     assert.deepEqual(m.properties, { version: '2' });
     assert.equal(m.seq, 99);
   });
@@ -175,13 +172,24 @@ describe("a file's metadata replicates", { skip }, () => {
     assert.equal(m.sizeBytes, undefined, 'and no size, because this instance has not seen the bytes');
   });
 
-  it('the three link arrays are reconciled into link records', async () => {
-    // Files are a link-bearing collection. An arriving record carries arrays and no link rows — the sender
-    // may be on a build with none — so the ingest has to derive them, exactly as it does for a memory.
+  it('a LINK FIELD on an arriving file is refused, and its links travel as their own records', async () => {
+    /*
+     * The 5.0 shape, and the refusal is the point. `IncomingFileMetaDoc` is `.strict()`, so a peer still
+     * sending the 4.x arrays is a 400 rather than a document quietly stripped of them — and this schema is
+     * the one collection where that choice was already made, because a stripped `parentFileId` turns a
+     * chunk into a top-level file.
+     *
+     * A file's connections replicate as `LinkDoc` records on the same channel, so the ingest derives
+     * nothing: deriving links from an arriving record was how a sender's idea of a file's links could
+     * overwrite a receiver's, and there is no second representation left to disagree.
+     */
+    for (const field of ['entityIds', 'memoryIds', 'chronoIds', 'linkEntities']) {
+      assert.throws(() => shared.IncomingFileMetaDoc.parse(arriving({ [field]: [ENT] })),
+        `${field} was accepted on an arriving file — a link is a record of its own now`);
+    }
     await shared.ingestFileMeta(SPACE, shared.IncomingFileMetaDoc.parse(arriving()));
-    const links = await coll('links').find({}).toArray();
-    assert.deepEqual(links.map(l => `${l.fromKind}:${l.from}>${l.toKind}:${l.to}`).sort(),
-      [`file:${FILE}>entity:${ENT}`, `file:${FILE}>fact:${MEM}`].sort());
+    assert.deepEqual(await coll('links').find({}).toArray(), [],
+      'the ingest invented link records from a document that carries none');
   });
 
   it('a CHUNK is refused by the schema, not silently stored', async () => {

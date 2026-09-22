@@ -80,8 +80,8 @@ describe('the table itself', () => {
     // Asserted as membership rather than as a count: a count of N is satisfied by any N fields, including a
     // duplicate and a missing one.
     for (const [type, fields] of Object.entries({
-      fact: ['fact', 'type', 'tags', 'entityIds', 'description', 'properties'],
-      chrono: ['title', 'startsAt', 'endsAt', 'status', 'confidence', 'tags', 'entityIds', 'memoryIds',
+      fact: ['fact', 'type', 'tags', 'description', 'properties'],
+      chrono: ['title', 'startsAt', 'endsAt', 'status', 'confidence', 'tags',
         'description', 'properties'],
       entity: ['name', 'type', 'tags', 'description', 'properties'],
       edge: ['label', 'weight', 'type', 'description', 'tags', 'properties', 'fromKind', 'toKind'],
@@ -153,8 +153,13 @@ describe('the table itself', () => {
     assert.ok(shapeError('chrono', { startsAt: { $gte: '2026-01-01' } }), 'a query operator in a date field');
     assert.ok(shapeError('chrono', { tags: 'urgent' }), 'a bare string where an array belongs');
     assert.ok(shapeError('chrono', { description: { note: 'x' } }), 'an object in a description');
-    assert.ok(shapeError('chrono', { entityIds: 'not-an-array' }),
-      'a non-array entityIds — the one that damages READS, because it breaks every $in over that field');
+    /*
+     * W-14's fifth example was `entityIds: 'not-an-array'` — the one that damaged READS, because it broke
+     * every `$in` over that field. The field is gone: a connection is an instruction to write link
+     * records, `linkEntities` and its siblings, whose shape `write-connections.ts` owns. Refusing it
+     * HERE as well would be the second copy this table exists to end, so the claim moved rather than
+     * being dropped — see `a-retired-write-field-is-refused-by-name.test.js`.
+     */
 
     // W-15: the cap that only the create doors had
     assert.ok(shapeError('fact', { fact: 'x'.repeat(MAX_FACT_LENGTH + 1) }), 'an oversized fact');

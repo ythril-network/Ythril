@@ -223,9 +223,9 @@ import { TimestampComponent } from '../../shared/timestamp.component';
                         @for (tag of entry.tags; track tag) { <span class="tag">{{ tag }}</span> }
                       </td>
                       <td style="font-size:11px;">
-                        @if (entry.entityIds.length) {
+                        @if (entry.linkEntities.length) {
                           <div class="chip-list">
-                            @for (id of entry.entityIds; track id) {
+                            @for (id of entry.linkEntities; track id) {
                               <span class="chip" [title]="id">{{ picker.entityNameCache()[id] || id.slice(0,8) + '…' }}</span>
                             }
                           </div>
@@ -282,8 +282,8 @@ export class ChronoTabComponent extends RecordTabBase {
   showChronoForm = signal(false);
   creatingChrono = signal(false);
   createChronoError = signal('');
-  chronoForm = { title: '', kind: 'event' as string, startsAt: '', endsAt: '', description: '', tags: [] as string[], entityIds: '', memoryIds: [] as string[], properties: {} as Record<string, string | number | boolean> };
-  editChrono = { title: '', kind: '' as string, status: '' as string, startsAt: '', endsAt: '', description: '', tags: [] as string[], entityIds: '', memoryIds: [] as string[], properties: {} as Record<string, string | number | boolean> };
+  chronoForm = { title: '', kind: 'event' as string, startsAt: '', endsAt: '', description: '', tags: [] as string[], linkEntities: '', linkFacts: [] as string[], properties: {} as Record<string, string | number | boolean> };
+  editChrono = { title: '', kind: '' as string, status: '' as string, startsAt: '', endsAt: '', description: '', tags: [] as string[], linkEntities: '', linkFacts: [] as string[], properties: {} as Record<string, string | number | boolean> };
 
   private _chronoSemTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -317,7 +317,7 @@ export class ChronoTabComponent extends RecordTabBase {
     this.brainApi.listChrono(spaceId, this.pageSize, this.skip(), cf, this.sortParam()).subscribe({
       next: ({ chrono }) => {
         this.store.chrono.set(chrono);
-        const ids = [...new Set(chrono.flatMap(e => e.entityIds ?? []))];
+        const ids = [...new Set(chrono.flatMap(e => e.linkEntities ?? []))];
         if (ids.length) this.picker.resolveEntityNames(ids);
         this.recordList.loading.set(false);
       },
@@ -344,7 +344,7 @@ export class ChronoTabComponent extends RecordTabBase {
     this.brainApi.recallBrain(spaceId, { query: q, types: ['chrono'], topK: 20 }).pipe(
       catchError(() => of({ results: [], count: 0 })),
     ).subscribe(res => {
-      this.store.chrono.set(res.results.filter(r => r.type === 'chrono').map(r => ({
+      const rows = res.results.filter(r => r.type === 'chrono').map(r => ({
         _id: r['_id'] as string,
         spaceId: (r['spaceId'] as string) ?? spaceId,
         title: (r['title'] as string) ?? '',
@@ -355,13 +355,16 @@ export class ChronoTabComponent extends RecordTabBase {
         status: 'upcoming' as ChronoStatus,
         confidence: r['confidence'] as number | undefined,
         tags: (r['tags'] as string[]) ?? [],
-        entityIds: (r['entityIds'] as string[]) ?? [],
-        memoryIds: [],
+        linkEntities: (r['linkEntities'] as string[]) ?? [],
+        linkFacts: [],
         author: (r['author'] as { instanceId: string; instanceLabel: string }) ?? { instanceId: '', instanceLabel: '' },
         createdAt: (r['createdAt'] as string) ?? '',
         updatedAt: (r['createdAt'] as string) ?? '',
         seq: (r['seq'] as number) ?? 0,
-      } as ChronoEntry)));
+      } as ChronoEntry));
+      // The chips again: a ranked answer carries no links, so they come from the same hydration the
+      // list path uses — see `record-links.ts`.
+      this.brainApi.withLinks(spaceId, 'chrono', rows).subscribe(hydrated => this.store.chrono.set(hydrated));
     });
   }
 
@@ -374,7 +377,7 @@ export class ChronoTabComponent extends RecordTabBase {
     // Seed from the space's OWN allowlist, not from 'event': a space that declares `typeSchemas.chrono`
     // does not allow the built-ins, so opening on 'event' there armed the form with a value the server 400s on.
     const kind = this.store.chronoAllowedTypes()[0] ?? 'event';
-    this.chronoForm = { title: '', kind, startsAt: '', endsAt: '', description: '', tags: [], entityIds: '', memoryIds: [], properties: this.store.buildPropertiesObject('chrono', {}, kind) };
+    this.chronoForm = { title: '', kind, startsAt: '', endsAt: '', description: '', tags: [], linkEntities: '', linkFacts: [], properties: this.store.buildPropertiesObject('chrono', {}, kind) };
     this.showChronoForm.set(true);
   }
 
@@ -396,7 +399,7 @@ export class ChronoTabComponent extends RecordTabBase {
     if (!resolvedKind) return;
     this.creatingChrono.set(true);
     this.createChronoError.set('');
-    const entityIds = this.chronoForm.entityIds.split(',').map(s => s.trim()).filter(Boolean);
+    const linkEntities = this.chronoForm.linkEntities.split(',').map(s => s.trim()).filter(Boolean);
     const body: Parameters<BrainApi['createChrono']>[1] = {
       title: this.chronoForm.title.trim(),
       type: resolvedKind,
@@ -405,15 +408,15 @@ export class ChronoTabComponent extends RecordTabBase {
     if (this.chronoForm.endsAt) body.endsAt = new Date(this.chronoForm.endsAt).toISOString();
     if (this.chronoForm.description.trim()) body.description = this.chronoForm.description.trim();
     if (this.chronoForm.tags.length) body.tags = this.chronoForm.tags;
-    if (entityIds.length) body.entityIds = entityIds;
-    if (this.chronoForm.memoryIds.length) body.memoryIds = this.chronoForm.memoryIds;
+    if (linkEntities.length) body.linkEntities = linkEntities;
+    if (this.chronoForm.linkFacts.length) body.linkFacts = this.chronoForm.linkFacts;
     const props = this.store.stripEmptyOptionalProps(this.chronoForm.properties, this.store.chronoSchema(resolvedKind));
     if (Object.keys(props).length) body.properties = props;
     this.brainApi.createChrono(this.spaceId(), body).subscribe({
       next: () => {
         this.creatingChrono.set(false);
         this.showChronoForm.set(false);
-        this.chronoForm = { title: '', kind: resolvedKind, startsAt: '', endsAt: '', description: '', tags: [], entityIds: '', memoryIds: [], properties: this.store.buildPropertiesObject('chrono', {}, resolvedKind) };
+        this.chronoForm = { title: '', kind: resolvedKind, startsAt: '', endsAt: '', description: '', tags: [], linkEntities: '', linkFacts: [], properties: this.store.buildPropertiesObject('chrono', {}, resolvedKind) };
         this.load();
       },
       error: (err) => { this.creatingChrono.set(false); this.createChronoError.set(fmtApiError(err, 'Failed to create chrono entry')); },
@@ -431,11 +434,11 @@ export class ChronoTabComponent extends RecordTabBase {
       endsAt: entry.endsAt ? toLocalDatetime(entry.endsAt) : '',
       description: entry.description ?? '',
       tags: entry.tags ?? [],
-      entityIds: (entry.entityIds ?? []).join(', '),
-      memoryIds: [...(entry.memoryIds ?? [])],
+      linkEntities: (entry.linkEntities ?? []).join(', '),
+      linkFacts: [...(entry.linkFacts ?? [])],
       properties: this.store.buildPropertiesObject('chrono', entry.properties ?? {}, entry.type),
     };
-    this.picker.resolveMemoryTitles(entry.memoryIds ?? []);
+    this.picker.resolveMemoryTitles(entry.linkFacts ?? []);
   }
 
   saveEditChrono(id: string): void {
@@ -449,8 +452,8 @@ export class ChronoTabComponent extends RecordTabBase {
       ...(this.editChrono.endsAt ? { endsAt: new Date(this.editChrono.endsAt).toISOString() } : {}),
       description: this.editChrono.description.trim(),
       tags: this.editChrono.tags,
-      entityIds: this.editChrono.entityIds.split(',').map(s => s.trim()).filter(Boolean),
-      memoryIds: this.editChrono.memoryIds,
+      linkEntities: this.editChrono.linkEntities.split(',').map(s => s.trim()).filter(Boolean),
+      linkFacts: this.editChrono.linkFacts,
       properties: this.store.stripEmptyOptionalProps(this.editChrono.properties, this.store.chronoSchema(this.editChrono.kind)),
     }).subscribe({
       next: (updated) => {

@@ -4,7 +4,7 @@ import { FilesApi } from '../../core/files-api.service';
 import { httpErrorReason } from '../../core/http-error';
 import type { FileMeta } from '../../core/api.types';
 // The model type lives with the EDITOR that binds to it, not here: a second declaration of one shape is
-// how the comma-joined `entityIds` would end up an array on one side and a string on the other.
+// how the comma-joined `linkEntities` would end up an array on one side and a string on the other.
 import type { FileMetaModel } from './file-meta-editor.component';
 
 /** Which write failed, so the page can pick the wording. The MESSAGE is never this store's business. */
@@ -23,7 +23,7 @@ export type MetaFailure = 'save' | 'requeue';
  * form binds into its fields with `ngModel`; a signal would make each of those a set() and change when the
  * template sees a half-updated model.
  *
- * `tags`, `memoryIds` and `chronoIds` are arrays and `entityIds` is a comma-joined STRING, because its
+ * `tags`, `linkFacts` and `linkChronos` are arrays and `linkEntities` is a comma-joined STRING, because its
  * control is free text. A rewrite that made all four the same shape breaks the round trip in one direction
  * only, and only for entity references.
  *
@@ -57,7 +57,7 @@ export class FileMetaStore {
   readonly requeueingPath = signal('');
 
   /** The form model. Replaced wholesale rather than mutated — see the class note. */
-  model: FileMetaModel = { description: '', tags: [], entityIds: '', memoryIds: [], chronoIds: [] };
+  model: FileMetaModel = { description: '', tags: [], linkEntities: '', linkFacts: [], linkChronos: [] };
 
   /** A fresh model was seeded. The page primes the picker's chip labels from it. */
   readonly seeded = new Subject<FileMetaModel>();
@@ -72,9 +72,9 @@ export class FileMetaStore {
     this.model = {
       description: fm?.description ?? '',
       tags: [...(fm?.tags ?? [])],
-      entityIds: (fm?.entityIds ?? []).join(', '),
-      memoryIds: [...(fm?.memoryIds ?? [])],
-      chronoIds: [...(fm?.chronoIds ?? [])],
+      linkEntities: (fm?.linkEntities ?? []).join(', '),
+      linkFacts: [...(fm?.linkFacts ?? [])],
+      linkChronos: [...(fm?.linkChronos ?? [])],
     };
     // Copied, not referenced: editing the form must not reach back into the loaded record, or cancelling
     // would restore the edits it is supposed to discard.
@@ -110,9 +110,9 @@ export class FileMetaStore {
       description: this.model.description.trim(),
       tags: this.model.tags,
       // Blanks dropped: a trailing comma would otherwise post an empty id.
-      entityIds: this.model.entityIds.split(',').map(s => s.trim()).filter(Boolean),
-      memoryIds: this.model.memoryIds,
-      chronoIds: this.model.chronoIds,
+      linkEntities: this.model.linkEntities.split(',').map(s => s.trim()).filter(Boolean),
+      linkFacts: this.model.linkFacts,
+      linkChronos: this.model.linkChronos,
     }).subscribe({
       next: (fm) => {
         this.selectedMeta.set(fm);

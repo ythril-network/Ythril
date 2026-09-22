@@ -412,7 +412,7 @@ There is no dedicated identity endpoint — a peer that needs the instance's ide
 
 `POST /batch-upsert` is the primary push path used by the engine. The individual `POST /facts`, `/entities`, `/edges` endpoints remain for backwards compatibility and direct API usage.
 
-All incoming documents are validated against Zod schemas before any database write. Invalid documents are rejected with `400` (single endpoints) or silently filtered out (batch-upsert). Key constraints: `tags` max 100 items, `entityIds` max 500, all string fields validated for type safety. Unknown fields are stripped.
+All incoming documents are validated against Zod schemas before any database write. Invalid documents are rejected with `400` (single endpoints) or silently filtered out (batch-upsert). Key constraints: `tags` max 100 items, all string fields validated for type safety. Unknown fields are stripped.
 
 Two additional ingest safety caps protect the local seq counter and fork chains from a malicious or corrupted peer:
 

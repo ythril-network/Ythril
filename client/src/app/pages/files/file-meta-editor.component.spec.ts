@@ -26,7 +26,7 @@ import { BrainStore } from '../brain/brain-store.service';
 import { FileMetaEditorComponent, type FileMetaModel } from './file-meta-editor.component';
 
 function model(): FileMetaModel {
-  return { description: 'd', tags: ['t'], entityIds: 'e1', memoryIds: ['m1'], chronoIds: ['c1'] };
+  return { description: 'd', tags: ['t'], linkEntities: 'e1', linkFacts: ['m1'], linkChronos: ['c1'] };
 }
 
 function mount(m: FileMetaModel | null) {
@@ -92,8 +92,8 @@ describe('FileMetaEditorComponent', () => {
     }
     // And the consequence, stated as a consequence: whatever a widget writes, the page sees.
     (fixture.debugElement.query(By.directive(EntityRefFieldComponent)).componentInstance.target() as FileMetaModel)
-      .entityIds = 'e1, e2';
-    expect(m.entityIds).toBe('e1, e2');
+      .linkEntities = 'e1, e2';
+    expect(m.linkEntities).toBe('e1, e2');
   });
 
   it('offers the re-embed button only when the page says the file needs it', () => {

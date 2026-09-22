@@ -29,17 +29,16 @@ export const save_bulkTool: ToolHandler = {
     + '`errors` — items 501 and beyond are discarded before validation, so `inserted` plus `errors` can be far '
     + 'short of what you sent and nothing in the reply says so. The cap is per collection, so 500 facts AND '
     + '500 entities in one call is fine. Split larger imports yourself and check the counts add up.\n\n'
-    + 'REFERENCES ARE CHECKED FOR SHAPE, AND FOR EXISTENCE ONLY ON A CONVERTED SPACE — which differs from the '
-    + 'single-record tools, where existence is always checked. On a space using link records a reference that '
-    + 'resolves to nothing is refused here as it is everywhere else; on any other space it is stored. A '
-    + 'resolved `$ref` always exists, so the correlation key never pays for this. '
-    + 'On an UNCONVERTED space this door can therefore still write a dangling link the single-record path '
-    + 'would have refused — that is the deliberate trade for an import whose records arrive in an order '
-    + 'nobody controls. Verify with `graph_traverse` after a large import if linkage matters.\n\n'
+    + 'REFERENCES ARE CHECKED FOR SHAPE AND FOR EXISTENCE, exactly as the single-record tools check them. A '
+    + 'reference resolving to nothing is refused here too. A resolved `$ref` exists by construction, so the '
+    + 'correlation key never pays for it — what it catches is a literal id you invent, which is a well-formed '
+    + 'UUID pointing at nothing. Existence used to be checked only on a CONVERTED SPACE, while an unconverted '
+    + 'one kept the looser import trade; 5.0 leaves one shape, so there is no second behaviour left. Verify '
+    + 'with `graph_traverse` after a large import if linkage matters.\n\n'
     + 'ORDER IS facts → entities → chrono → edges, EDGES LAST so that a `$ref` can name a record of any '
     + 'kind. It also matters for records this call UPDATES: an entity '
     + 'addressed by an id that already exists is written before an edge in the same batch reads it. Facts go '
-    + 'first of all, so a fact\'s `entityIds` cannot name an entity from this same call under any ordering.\n\n'
+    + 'first of all, so a fact\'s `linkEntities` cannot name an entity from this same call under any ordering.\n\n'
     + 'A RECORD THIS CALL CREATES IS REFERENCED BY A CORRELATION KEY. Put `"$ref": "post-1"` on an item and later items name it as `"$ref:post-1"` — in an edge\'s `from`/`to`, or in a link field. The key is scoped to this call, is never stored, and is NOT the id: identities are still minted here. Every record array is written before any edge, so an edge can reference any record in the payload; within one array a reference cannot point FORWARDS. A key used twice is refused rather than resolved, and a stated kind that disagrees with the array the key was declared in is refused too — the array decides. A LITERAL id you invent is still not the id the record gets, and still points at nothing.\n\n'
     + 'PARAMETERS: each collection takes the same fields as its single-record tool — `facts` as `saveFact`, '
     + '`entities` as `save_entity`, `edges` as `save_edge`, `chrono` as `save_chrono` — including '
@@ -71,7 +70,7 @@ export const save_bulkTool: ToolHandler = {
                       + 'to merge with. They are embedded along with the fact, so a tag affects ranking as '
                       + 'well as being an exact filter.',
                   },
-                  entityIds:   {
+                  linkEntities: {
                     type: 'array', items: { type: 'string' },
                     description: 'Entity IDs to link this fact to. NEVER checked for existence on this '
                       + 'door — `saveFact` refuses an id that does not resolve, and here a well-formed UUID '
@@ -219,8 +218,8 @@ export const save_bulkTool: ToolHandler = {
                   confidence:  { type: 'number', description: 'Confidence 0 to 1, for entries that are predictions. A non-number is dropped silently and does not appear in `errors`; unlike `save_chrono`, the 0–1 bound is not enforced on this door.' },
                   description: { type: 'string', description: 'Optional longer description of the entry.' },
                   tags:        { type: 'array', items: { type: 'string' }, description: 'Categorisation tags. Every chrono item is an INSERT, so there is nothing to merge with.' },
-                  entityIds:   { type: 'array', items: { type: 'string' }, description: 'Entity IDs this entry concerns — what lets `graph_traverse` reach it from that entity. NEVER checked for existence on this door, and checked for UUID shape only when the space uses strict linkage, so a well-formed id pointing at nothing is stored as a dangling link.' },
-                  memoryIds:   { type: 'array', items: { type: 'string' }, description: 'Fact IDs this entry relates to. Shape-checked under strict linkage only, and never for existence — like `entityIds`.' },
+                  linkEntities: { type: 'array', items: { type: 'string' }, description: 'Entity IDs this entry concerns — what lets `graph_traverse` reach it from that entity. NEVER checked for existence on this door, and checked for UUID shape only when the space uses strict linkage, so a well-formed id pointing at nothing is stored as a dangling link.' },
+                  linkFacts:   { type: 'array', items: { type: 'string' }, description: 'Fact IDs this entry relates to. Shape-checked under strict linkage only, and never for existence — like `linkEntities`.' },
                   properties:  {
                     type: 'object',
                     description: 'Key-value metadata (string, number or boolean values only), validated '
@@ -246,7 +245,6 @@ export const save_bulkTool: ToolHandler = {
     const result = await bulkWrite(ts, {
       facts: a['facts'], entities: a['entities'], edges: a['edges'], chrono: a['chrono'],
       // `F-25`: who wrote it, for the conversion pre-flight.
-      actor: ctx.actor,
     });
     if (bulkWriteTotal(result) > 0) {
       // Bulk suppresses per-item webhooks; emit ONE summary a workflow can inspect.

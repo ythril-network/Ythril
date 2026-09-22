@@ -286,13 +286,13 @@ export function toRecallRecord(
   if (r.superseded === true) common['superseded'] = true;
   switch (r.type) {
     case 'fact':
-      return { ...common, fact: r.fact, ...(r.entityIds !== undefined ? { entityIds: r.entityIds } : {}) };
+      return { ...common, fact: r.fact };
     case 'entity':
       return { ...common, name: r.name, type: r.entityType };
     case 'edge':
       return { ...common, from: r.from, to: r.to, label: r.label, ...(r.weight !== undefined ? { weight: r.weight } : {}), ...(r.edgeType !== undefined ? { type: r.edgeType } : {}) };
     case 'chrono':
-      return { ...common, title: r.title, type: r.chronoType, startsAt: r.startsAt, ...(r.status !== undefined ? { status: r.status } : {}), ...(r.entityIds !== undefined ? { entityIds: r.entityIds } : {}) };
+      return { ...common, title: r.title, type: r.chronoType, startsAt: r.startsAt, ...(r.status !== undefined ? { status: r.status } : {}) };
     case 'file': {
       // `content` is the passage. It is what a caller asked for unless they said otherwise.
       const keepContent = includeFileContent && r.content !== undefined;

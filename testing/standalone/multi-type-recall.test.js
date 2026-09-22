@@ -148,9 +148,20 @@ describe('toRecallRecord — per-type optional fields', () => {
     assert.equal(toRecallRecord(file({ chunkIndex: 0 })).chunkIndex, 0);
   });
 
-  it('entityIds appear on memory and chrono when set', () => {
-    assert.deepEqual(toRecallRecord(memory({ entityIds: ['e1'] })).entityIds, ['e1']);
-    assert.deepEqual(toRecallRecord(chrono({ entityIds: ['e1'] })).entityIds, ['e1']);
+  it('a link set is NOT a field on a result, at any setting', () => {
+    /*
+     * It was: a fact and a chrono entry carried `entityIds` in their result, behind `includeRecordMeta`.
+     * 5.0 made a connection a link record, so there is no field to carry — and echoing one back from a
+     * stored key that survived an upgrade would be the worst version of it, since it would be true on the
+     * records that happen to be old and absent on the rest.
+     *
+     * What a caller wants them FOR is `traverse`, which returns the records rather than ids to look up.
+     */
+    for (const r of [toRecallRecord(memory({ entityIds: ['e1'] })), toRecallRecord(chrono({ entityIds: ['e1'] }))]) {
+      assert.equal(r.entityIds, undefined,
+        'a recall result carries a link array again — the field no longer exists on the record, so this can '
+        + 'only be a leftover key read off disk');
+    }
   });
 });
 

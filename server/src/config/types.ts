@@ -1403,7 +1403,6 @@ export interface FactDoc extends StampSkewable {
    */
   embedding?: number[];
   tags: string[];
-  entityIds: string[];
   description?: string;
   properties?: Record<string, string | number | boolean>;
   /** Pre-embedding source text — the exact string fed to the embedding model. */
@@ -1674,8 +1673,6 @@ export interface ChronoEntry extends StampSkewable {
   status: ChronoStatus;
   confidence?: number;
   tags: string[];
-  entityIds: string[];
-  memoryIds: string[];
   properties?: Record<string, string | number | boolean>;
   recurrence?: {
     freq: 'daily' | 'weekly' | 'monthly' | 'yearly';
@@ -1763,9 +1760,6 @@ export interface FileMetaDoc {
    */
   excerpt?: string;
   tags: string[];       // tags for filtering and recall scoping
-  entityIds?: string[];  // linked entity IDs
-  chronoIds?: string[];  // linked chrono entry IDs
-  memoryIds?: string[];  // linked fact IDs
   properties?: Record<string, string | number | boolean>; // structured metadata (optional)
   /** Pre-embedding source text — the exact string fed to the embedding model. */
   matchedText?: string;

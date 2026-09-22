@@ -10,8 +10,6 @@ import { assertRefsResolve } from '../../brain/entity-refs.js';
 import { REF_KINDS } from '../../config/types-knowledge.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import { resolveWriteTarget, isStrictLinkage, findFirstAcrossMembers } from '../../spaces/proxy.js';
-import { legacyArrayWriters, DEFAULT_WRITER_WINDOW_DAYS, WRITER_NOTE_RETENTION_DAYS } from '../../brain/legacy-array-writers.js';
-import { usesLinkRecords } from '../../brain/link-adjacency.js';
 
 /** Every legal class, as the arrays spell them — used in the schema text and in the refusal. */
 const PAIR_LABELS = LINK_PAIRS.map(([f, t]) => linkLabel(f, t)).join(', ');
@@ -44,13 +42,15 @@ export const save_linkTool: ToolHandler = {
     + 'IT IS AN UPSERT AND RE-RUNNING IT IS A NO-OP. A link\'s id is DERIVED from the two records and the '
     + 'class, so one connection has exactly one id for ever. Creating a link that already exists succeeds '
     + 'and changes nothing — safe to retry, and it can never produce a duplicate.\n\n'
-    + 'IT WRITES THE RECORD\'S ARRAY TOO, which is what makes it durable: the same connection appears in '
-    + '`fact.entityIds` (or whichever of the six it is) and as a link record, and the two cannot disagree.\n\n'
+    + 'A LINK IS A RECORD OF ITS OWN and that is the only place it lives. Neither record at the ends is '
+    + 'rewritten, so an ordinary edit of a fact cannot drop a link somebody else made. Asking for the same '
+    + 'connection on a write door is `linkEntities` and its siblings, which reach this same writer.\n\n'
     + 'UNDER STRICT LINKAGE BOTH ENDS MUST EXIST. Otherwise a well-formed id pointing at nothing is stored, '
     + 'and the dangling link only shows up later as a traversal that comes back empty.\n\n'
     + 'PARAMETERS:\n'
     + '- `from` / `fromKind` — the record the link hangs off, and what kind it is. It must exist; a missing '
-    + 'one is an ERROR, because there is no array to write into.\n'
+    + 'one is an ERROR: a link hanging off a record that does not exist is the dangling half this refuses '
+    + 'to create.\n'
     + '- `to` / `toKind` — the record it concerns.\n'
     + '- `targetSpace` — required when `space` is a proxy: the member space to write to.\n\n'
     + 'RESPONSE: the link record, including the derived `_id` you would pass to `delete_link`.',
@@ -118,9 +118,8 @@ export const delete_linkTool: ToolHandler = {
   name: 'delete_link',
   description: 'Remove one link by its ID — the two records at either end are NOT touched.\n\n'
     + WHAT_A_LINK_IS + '\n\n'
-    + 'IT CLEARS THE ARRAY ENTRY TOO. The id comes out of `fact.entityIds` (or whichever of the six the '
-    + 'link is) and the link record goes with it, so nothing is left claiming the connection. A delete that '
-    + 'removed only the record would be undone by the next ordinary edit of the record it hangs off.\n\n'
+    + 'THE LINK RECORD IS THE WHOLE CONNECTION, so removing it removes the connection. There is no second '
+    + 'copy on either end to contradict it, and nothing an ordinary edit of those records could restore.\n\n'
     + 'A TOMBSTONE IS WRITTEN, so the deletion reaches peer instances on the next sync instead of being '
     + 'quietly restored by one that still holds the link.\n\n'
     + 'PARAMETERS:\n'
@@ -156,87 +155,5 @@ export const delete_linkTool: ToolHandler = {
     if (!removed) throw new Error(`Link '${id}' not found`);
     return { content: [{ type: 'text' as const, text: `Link removed (ID ${id}).` }],
       structuredContent: { _id: id, deleted: true } };
-  },
-};
-
-export const graph_link_preflightTool: ToolHandler = {
-  name: 'graph_link_preflight',
-  description: 'Who is still writing the LEGACY ARRAYS to this space? Read this before converting it.\n\n'
-    + 'WHAT CONVERSION DOES. `links:convert` walks a space, turns its `entityIds` / `memoryIds` / '
-    + '`chronoIds` entries into link records, and marks the space `completeLinkage`. From then on those six '
-    + 'fields are REFUSED on write — they are still read, and they still replicate, so nothing stored is '
-    + 'lost. The refusal is the point: one fact, one write surface.\n\n'
-    + 'WHY YOU WANT THIS FIRST. The refusal reaches a caller on its NEXT WRITE, not at conversion time. So '
-    + 'without this you convert, and then learn which of your writers still use the old surface when one of '
-    + 'them breaks. This answers that question up front, from what those writers actually did.\n\n'
-    + 'WHAT AN ANSWER MEANS. An empty `writers` list is what you are hoping for. A writer in it is a TOKEN '
-    + 'that sent one of the six fields, with the fields it sent, when it last did, and how many times — '
-    + 'enough to find whoever owns it. A token that no longer exists still appears, by the label it had.\n\n'
-    + 'READ `since` BEFORE READING THE COUNT. It is the instant the answer starts from, and a count with no '
-    + 'window on it cannot be told apart from a count over a shorter one. Nothing before `retentionDays` ago '
-    + 'is remembered at all, whatever `windowDays` you ask for — AND nothing before this instance began '
-    + 'recording, which on a freshly upgraded one can be minutes ago. `recorderStartedAt` is when that '
-    + 'was. An empty answer over half an hour means nothing like an empty answer over three months.\n\n'
-    + 'PARAMETERS:\n'
-    + `- \`windowDays\` — how far back to look. Default ${DEFAULT_WRITER_WINDOW_DAYS}, capped at `
-    + `${WRITER_NOTE_RETENTION_DAYS} because nothing older is kept.\n\n`
-    + 'RESPONSE: `spaceId`, `since`, `recorderStartedAt`, `retentionDays`, `converted`, and `writers`.\n'
-    + 'GUARANTEE: `since` is never earlier than this instance began recording, so the window the count '
-    + 'was computed over is the window that was actually watched. `recorderStartedAt` is when that was, '
-    + 'or `null` on an instance that has not restarted since the recorder gained the stamp.',
-  spaceRequired: true,
-  inputSchema: (s: ToolSchemas) => ({
-    type: 'object',
-    properties: {
-      space: s.requiredSpace,
-      windowDays: {
-        // `minimum` and NO `maximum`, and the asymmetry is the fix rather than an oversight.
-        //
-        // The MCP dispatcher enforces this schema before the handler runs, so a `maximum` here would REFUSE
-        // a larger window while the REST door capped the same value and answered — a 400 on one door and a
-        // silent adjustment on the other, which is the parity defect `CLAUDE.md` names in those words.
-        //
-        // Capping is the right half to keep, because this feature's whole argument is that a count must
-        // carry the window it was computed over: an answer says `since` and `retentionDays`, so asking for
-        // 365 and being served 90 is DISCLOSED rather than silent. Refusing would make an operator guess the
-        // bound before they could ask a question we can answer. Zero and negatives are refused on both
-        // doors, because there is no honest answer to serve for those.
-        type: 'number', minimum: 1,
-        default: DEFAULT_WRITER_WINDOW_DAYS,
-        description: `How many days back to look. Default ${DEFAULT_WRITER_WINDOW_DAYS}. Nothing older than `
-          + `\`retentionDays\` (${WRITER_NOTE_RETENTION_DAYS}) is kept, so a larger number is CAPPED to it `
-          + 'rather than refused. Read `since` in the answer for the window actually used: it is capped to '
-          + 'retention AND clamped to when this instance began recording, so on a freshly upgraded instance '
-          + 'it can be far more recent than anything you asked for.',
-      },
-    },
-    required: ['space'],
-    additionalProperties: false,
-  }),
-  async handle(ctx: ToolContext): Promise<ToolResult> {
-    const { args: a, callSpace } = ctx;
-    const windowDays = a['windowDays'] === undefined ? DEFAULT_WRITER_WINDOW_DAYS : Number(a['windowDays']);
-    if (!Number.isFinite(windowDays) || windowDays <= 0) throw new Error('`windowDays` must be a positive number');
-    const answer = await legacyArrayWriters({
-      spaceId: callSpace, windowDays, converted: usesLinkRecords(callSpace),
-    });
-    /*
-     * The empty answer is the dangerous one — it is the one an operator converts on — so when the window
-     * was CLAMPED it says so in the sentence rather than only in a field of the JSON beside it. A reader
-     * who sees "no token has written since 09:14" for a 90-day question needs the reason in the same
-     * breath, or the honest window reads as a bug in the timestamp.
-     */
-    const clamped = answer.recorderStartedAt !== null && answer.recorderStartedAt === answer.since;
-    const why = clamped
-      ? ` This instance only began recording at ${answer.recorderStartedAt}, so that is as far back as the answer goes.`
-      : '';
-    const head = answer.writers.length === 0
-      ? `No token has written a link array to '${answer.spaceId}' since ${answer.since}.${why}`
-      : `${answer.writers.length} token(s) have written link arrays to '${answer.spaceId}' since ${answer.since}.${why}`;
-    return {
-      // Not pretty-printed: indentation is billed to the caller's context window and read by nothing.
-      content: [{ type: 'text' as const, text: `${head}\n${JSON.stringify(answer)}` }],
-      structuredContent: answer as unknown as Record<string, unknown>,
-    };
   },
 };

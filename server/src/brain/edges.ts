@@ -668,13 +668,13 @@ export const ALL_LINK_LABELS: readonly string[] = LINK_CLASSES.map(c => c.label)
  *
  * ── Chrono entries are nodes ──────────────────────────────────────────────────────────────────────────────
  *
- * `chrono.entityIds` is the only thing linking a chrono to the graph, and until now it was legible to
+ * A chrono-to-entity link is the only thing joining a chrono to the graph, and until now it was legible to
  * `query()` and invisible to `traverse` — which is the retrieval path an agent reaches for first. An
  * integrator measured the cost: reconstructing a 33-day hardware-RMA timeline took four `query()` calls plus
  * two repo greps, and the first pass still missed the actual carrier ticket, which had to be found by a name
  * regex instead of by traversal from the incident.
  *
- * So a chrono whose `entityIds` contains a frontier node is reached as though it were joined by an INBOUND
+ * So a chrono LINKED to a frontier node is reached as though it were joined by an INBOUND
  * edge — which is what that field is. No schema change and no migration: the link already exists, it simply
  * had no reader here.
  *
@@ -703,12 +703,12 @@ export async function traverseGraph(
   maxDepth = 3,
   limit = 100,
   /**
-   * Follow `chrono.entityIds` as inbound links, so a chrono entry is reachable from the entities it is
+   * Follow chrono-to-entity links inbound, so a chrono entry is reachable from the entities it is
    * about. Default ON — see the note above the function.
    */
   includeChrono = true,
   /**
-   * Follow `fact.entityIds` the same way, so a fact about an entity is reachable from it.
+   * Follow fact-to-entity links the same way, so a fact about an entity is reachable from it.
    *
    * **Default OFF, unlike chrono, and the asymmetry is deliberate.** Chrono defaults on because chrono
    * entries are both invisible otherwise and sparse — an incident has ten, not ten thousand. Facts are
@@ -719,7 +719,7 @@ export async function traverseGraph(
    */
   includeMemories = false,
   /**
-   * Follow `file.entityIds`, so a document about an entity is reachable from it. Opt-in for the same reason as
+   * Follow file-to-entity links, so a document about an entity is reachable from it. Opt-in for the same reason as
    * facts, and the node carries **file meta only** — path, description, tags. Never chunk text: a file's
    * body is its chunks, they are the largest thing the product stores, and a structural walk must not pay for
    * them.
@@ -859,7 +859,7 @@ export async function traverseGraph(
       neighborKinds.push(neighborKind);
     }
 
-    // Linked records that point AT the current frontier. `entityIds` is an inbound link in everything but
+    // Linked records that point AT the current frontier. A link is an inbound edge in everything but
     // name, so this reads it as one — see the note above the function.
     //
     // Collected BEFORE the early break, and counted by it. Keying the break on entity neighbours alone meant
@@ -872,7 +872,7 @@ export async function traverseGraph(
     // Bounded by THIS walk's node cap. Without it one hub entity returns its whole mention set per class per
     // member space per hop, and the cap below cannot help because it counts records after they are hydrated.
     const { records: linkedHere, scanCapped: hopScanCapped } = await linkedRecordsAtFrontier(
-      memberIds, frontier, frontierSet, visited,
+      memberIds, frontier, visited,
       { includeChrono, includeMemories, includeFiles }, edgeLabels,
       Math.max(0, limit - resultNodes.length));
 

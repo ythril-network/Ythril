@@ -20,7 +20,7 @@ import { moveSpaceData, applySpaceRenameToConfig } from './rename.js';
 import { unlabelAllFaces } from '../brain/entities.js';
 import { ensureMediaJobIndexes } from '../files/media/job-queue.js';
 import { ensureEmbedJobIndexes } from '../brain/embed-queue.js';
-import { LINK_CLASSES } from '../brain/link-adjacency.js';
+import { LINK_INDEXES } from '../brain/link-adjacency.js';
 import { envInt } from '../config/env-num.js';
 import { spaceCollection } from '../db/space-collection.js';
 
@@ -133,9 +133,7 @@ export async function initSpace(
    * `seq` for the sync page, exactly as every other replicated collection has it: `pageBySeq` orders on it,
    * and without the index every page a peer asks for sorts the whole collection.
    */
-  await linksColl.createIndex({ from: 1, fromKind: 1, to: 1, toKind: 1 }, { unique: true });
-  await linksColl.createIndex({ to: 1, toKind: 1 });
-  await linksColl.createIndex({ seq: 1 });
+  for (const ix of LINK_INDEXES) await linksColl.createIndex(ix.keys, ix.unique ? { unique: true } : {});
   await tombstonesColl.createIndex({ seq: 1 });
   await conflictsColl.createIndex({ detectedAt: -1 });
   // Serves the list query: equality on `status` (now the leading field) + sort by (score desc,
@@ -172,23 +170,15 @@ export async function initSpace(
   // The key patterns are declared next to the queries they serve, in job-queue.ts, and created by its own
   // function — so this cannot drift from them and the database-level test exercises the same call.
   /*
-   * The field every LINK scan reads, one index per link CLASS, derived from `LINK_CLASSES`.
+   * ONE INDEX PER LINK CLASS USED TO BE CREATED HERE, on the record's own array field. 5.0 removed the six
+   * arrays, so there is no record field for a link scan to read: a walk asks the `links` collection, whose
+   * `from` and `to` indexes are created with it.
    *
-   * `linkedRecordsAtFrontier` asks "which records of this class point at the frontier" once per class, per
-   * member space, per hop — so an unindexed class is a collection scan on every hop of every traversal.
-   *
-   * **It used to be three hand-placed `{ entityIds: 1 }` calls, and a link is a (collection, FIELD) pair.**
-   * The first version of this fixed the collections and left the field written out, which was right while
-   * `entityIds` was the only link field. M-2 gave a chrono entry `memoryIds` and a file `memoryIds` and
-   * `chronoIds`: three classes whose scans had no index at all. Nothing reported it, because an unindexed
-   * scan returns the correct answer — slowly, and only visibly on a space large enough to feel it.
-   *
-   * Deduplicated because a collection can carry several link fields, and each needs its own index.
+   * The lesson is kept because the shape recurs. It was three hand-placed `{ entityIds: 1 }` calls, and a
+   * link is a (collection, FIELD) pair — so when `M-2` gave a chrono entry `memoryIds` and a file
+   * `memoryIds` and `chronoIds`, three classes had no index at all and nothing reported it. An unindexed
+   * scan returns the correct answer, slowly, and only visibly on a space large enough to feel it.
    */
-  for (const key of new Set(LINK_CLASSES.map(c => `${c.collection}.${c.field}`))) {
-    const [collection, field] = key.split('.');
-    await db.collection(`${spaceId}_${collection}`).createIndex({ [field!]: 1 });
-  }
 
   await ensureMediaJobIndexes(spaceId);
   await ensureEmbedJobIndexes(spaceId);
@@ -364,6 +354,8 @@ export async function ensureGeneralSpace(): Promise<void> {
       label: 'General',
       builtIn: true,
       folders: [],
+      // Converted from birth, for the reason written out in `createSpace`.
+      completeLinkage: true,
     });
     saveConfig(cfg);
   }
@@ -391,6 +383,17 @@ export async function createSpace(opts: {
     builtIn: false,
     folders: opts.folders ?? [],
     maxGiB: opts.maxGiB,
+    /*
+     * CONVERTED FROM BIRTH, because there is nothing to convert FROM.
+     *
+     * The marker used to mean "somebody has run the conversion over this space", and the conversion runs
+     * at BOOT — so a space created afterwards kept the 4.x array shape until the next restart. 5.0 removed
+     * the arrays, so a new space's links are records from its first write and the marker is simply true.
+     *
+     * Without this a space made between two boots would be refused by `assertLinkRecords` — correctly, by
+     * a rule meant for a space whose conversion FAILED, applied to one that never needed it.
+     */
+    completeLinkage: true,
     // Omitted rather than defaulted when absent, so an existing space and a new one at the built-in width
     // are the same shape on disk — a stored `128` would read as a deliberate choice nobody made.
     ...(opts.faceDescriptorDims ? { faceDescriptorDims: opts.faceDescriptorDims } : {}),
@@ -478,22 +481,6 @@ export async function dropSpaceData(spaceId: string): Promise<string[]> {
     if (purged > 0) log.debug(`Purged ${purged} activity bucket(s) for space '${spaceId}'`);
   } catch (err) {
     const msg = `Could not purge activity for '${spaceId}': ${err}`;
-    log.warn(msg);
-    errors.push(msg);
-  }
-  // 2c. Forget who wrote its legacy link arrays.
-  //
-  // The SAME reason as 2b, and finding that out is why 2b's comment is worth keeping rather than trimming:
-  // `_legacy_array_writers` is instance-wide, keyed by `spaceId`, so the prefix drop above cannot reach it
-  // either. A space recreated with the same id would have its conversion pre-flight report writers that
-  // wrote to its predecessor -- a wrong answer that looks like a right one, to an operator about to decide
-  // something on it.
-  try {
-    const { purgeLegacyArrayWriters } = await import('../brain/legacy-array-writers.js');
-    const purged = await purgeLegacyArrayWriters(spaceId);
-    if (purged > 0) log.debug(`Purged ${purged} legacy array-writer note(s) for space '${spaceId}'`);
-  } catch (err) {
-    const msg = `Could not purge legacy array-writer notes for '${spaceId}': ${err}`;
     log.warn(msg);
     errors.push(msg);
   }

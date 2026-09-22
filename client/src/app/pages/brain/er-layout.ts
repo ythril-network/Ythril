@@ -180,7 +180,7 @@ const KINDS = [
  * ## Why this exists at all
  *
  * The server scans three extra collections per space to count, for every entity type, how many facts,
- * chrono entries and files point AT it through their `entityIds`. It has always sent that as `linkedFrom`, and
+ * chrono entries and files point AT it through their `linkEntities`. It has always sent that as `linkedFrom`, and
  * the client rendered it in **zero places** — so the diagram claimed to be the data model while showing one of
  * four record kinds, and the space paid for the scan on every Overview load and got nothing back.
  *

@@ -142,6 +142,9 @@ function makeBrain(overrides: Record<string, any> = {}) {
     getChrono: vi.fn(() => of(null as any)),
     listFacts: vi.fn(() => of({ facts: [] })),
     queryBrain: vi.fn(() => of({ results: [], collection: 'chrono', count: 0 })),
+    // The chrono panel reads the LINKS collection since 5.0 — an entry no longer carries the ids it
+    // is about, so there is no predicate the component could send instead.
+    chronoLinkedTo: vi.fn(() => of([])),
     ...overrides,
   } as any;
 }
@@ -172,11 +175,11 @@ beforeEach(() => { TestBed.resetTestingModule(); cy.reset(); vi.clearAllMocks();
 
 describe('GraphComponent — detail rows are derived, not stored', () => {
   const MEMS = [
-    { _id: 'm1', fact: 'Ada wrote the first program', tags: ['history'], properties: { x: 1 }, createdAt: '2026-01-02', entityIds: ['root'] },
+    { _id: 'm1', fact: 'Ada wrote the first program', tags: ['history'], properties: { x: 1 }, createdAt: '2026-01-02', linkEntities: ['root'] },
     { _id: 'm2', fact: '', description: 'falls back to description', tags: [], createdAt: '2026-01-03' },
   ] as any[];
   const CHRONO = [
-    { _id: 'c1', title: 'Analytical Engine note', tags: ['note'], createdAt: '2026-01-01', entityIds: ['root'] },
+    { _id: 'c1', title: 'Analytical Engine note', tags: ['note'], createdAt: '2026-01-01', linkEntities: ['root'] },
     { _id: 'c2', title: '', description: 'chrono description fallback', tags: [], createdAt: '2026-01-04' },
   ] as any[];
 
@@ -608,14 +611,14 @@ describe('GraphComponent — selection written from cytoscape handlers', () => {
     const brain: any = makeBrain({
       traverseGraph: vi.fn(() => of(traverseResult([['a', 1]], [['e1', 'root', 'a']]))),
       listFacts: vi.fn(() => of({ facts: [
-        { _id: 'both', entityIds: ['root', 'a'] },
-        { _id: 'to-only', entityIds: ['a'] },        // kept: only `to` is checked
-        { _id: 'from-only', entityIds: ['root'] },   // dropped
+        { _id: 'both', linkEntities: ['root', 'a'] },
+        { _id: 'to-only', linkEntities: ['a'] },        // kept: only `to` is checked
+        { _id: 'from-only', linkEntities: ['root'] },   // dropped
       ] })),
-      queryBrain: vi.fn(() => of({ results: [
-        { _id: 'c-both', entityIds: ['root', 'a'] },
-        { _id: 'c-to-only', entityIds: ['a'] },      // dropped: chrono requires both
-      ], collection: 'chrono', count: 0 })),
+      chronoLinkedTo: vi.fn(() => of([
+        { _id: 'c-both', linkEntities: ['root', 'a'] },
+        { _id: 'c-to-only', linkEntities: ['a'] },      // dropped: chrono requires both
+      ])),
     });
     const { c } = withGraph(brain);
     cy.fire('tap', 'edge', tapTarget('e1'));

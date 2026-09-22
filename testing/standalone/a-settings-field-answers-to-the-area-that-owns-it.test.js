@@ -74,7 +74,9 @@ const AGREED = {
   audioAnalysis:          'files:write',
   videoAnalysis:          'files:write',
   textAnalysis:           'files:write',
-  completeLinkage:        'knowledge:admin',
+  // Set by the link conversion and by space creation, and settable by NOBODY since 5.0: with the 4.x link
+  // arrays gone, turning it off would leave a space with no shape to be read through.
+  completeLinkage:        'nobody',
   'meta.purpose':         'spaceAdmin',
   'meta.usageNotes':      'spaceAdmin',
   'meta.typeSchemas':     'schema:write',

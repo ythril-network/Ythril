@@ -363,6 +363,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### One API, two doors: the 5.0 renames
 
+- **A link is audited again, as the sets a caller sends.** An audit entry recorded what changed by diffing
+  the record before against the record after, and a record no longer carries its connections — so a re-link
+  would have left an entry saying something changed and not what, which reads as *the links were untouched*.
+  The fact, chrono and file update routes now fold the before/after link sets into their snapshots, under
+  the names a caller writes: `linkEntities`, `linkFacts`, `linkChronos`.
+
+- **`update_file_meta` honours the link fields its own description promised.** Both doors accept
+  `linkEntities`, `linkFacts` and `linkChronos` on a file, and the MCP tool declares them, so the schema a
+  caller reads while constructing arguments is the contract the dispatcher enforces.
+
+- **A link id is existence-checked wherever it is written.** It was checked at each door for the array
+  spelling and NOWHERE for `linkEntities`, so on a strict space one spelling was refused and the other
+  stored. The check moved into the writer, which is what `write-connections.ts` always claimed. `save_bulk`
+  checks its edge endpoints under the same `strictLinkage` setting the single-record doors read — a space
+  that turns linkage off still accepts a staged import whose targets resolve later.
+
+- **A refused link no longer leaves the record behind.** The existence check moved into the writers, and
+  they reconcile AFTER the insert — so a link id naming nothing answered `400` with the record already
+  stored, which is the silent unlinked write made noisy rather than fixed. Every writer now refuses the
+  whole call before it touches anything, and the refusal is a `400` rather than a `500`.
+
+- **A write door cannot ask for a link class that does not exist.** There are six, and a pair outside them
+  has no label — so `save_fact` naming `linkChronos` stored a link nothing reads. Refused now, on both
+  doors, and the create tools advertise only the classes their record kind can hold.
+
+- **The UI reads a record's links as records.** The Brain and Files tabs draw their chips from one query
+  over the links collection per page, and every form and label names the field the API takes. A searched
+  list shows the same links the paged list does.
+
+- **An index the conversion never created.** A space upgraded from 4.x got its `links` collection from the
+  conversion's first insert, which creates a collection and no indexes — so the spaces with the most links
+  to read were the ones reading them unindexed. The boot backfill now asks for the same index set space
+  creation does.
+
 - **BREAKING — three recall parameters renamed or removed.** 5.0 breaks every public name, and these three
   were each lying in their own way.
 
@@ -743,6 +777,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   own conversion story, its own pre-flight and its own lifecycle, so it is the boundary.
 
 ### Removed
+
+#### The 4.x link arrays
+
+- **BREAKING — the six link array fields are gone, on the wire, in storage and as input.** `fact.entityIds`,
+  `chrono.entityIds`/`memoryIds` and `file.entityIds`/`memoryIds`/`chronoIds` were a record's connections
+  written onto the record itself. A connection is a link RECORD and nothing else now, so an ordinary edit of
+  a fact can no longer drop a link somebody else made, and one indexed lookup answers *"what points at
+  this?"* where six collection scans used to.
+
+  | you sent | send instead |
+  |---|---|
+  | `entityIds` | `linkEntities` |
+  | `memoryIds` | `linkFacts` |
+  | `chronoIds` | `linkChronos` |
+
+  **The ids do not change.** A body still carrying an old name is REFUSED, with the new name in the message,
+  on both doors — the whole call, so a record never lands without the connections it asked for. `[]` and
+  `null` are refused too: the call that meant *detach everything* is the one that must not be read as *said
+  nothing*.
+
+  **They are no longer READ either.** A record comes back without them, `recall`'s `includeRecordMeta` no
+  longer adds them, and a `filter` predicate over one matches nothing because no document has the key. To
+  find what a record is connected to, walk it — `traverse`, or `recall`'s `traverse` object, both of which
+  return the records rather than ids to look up one at a time — or filter the `links` collection directly.
+
+  **Every space converts itself on the first 5.0 start, and a space whose conversion FAILED is refused
+  rather than answered.** Every link read on it returns an error naming the space; answering "no links" for
+  records that have plenty is the one outcome worse than an error. The failure is in the startup log.
+
+- **The conversion pre-flight is gone with the arrays it watched** — `GET /api/brain/spaces/:spaceId/links/`
+  `convert-preflight` and the `graph_link_preflight` tool. It answered *"who still writes the old lists to
+  this space"* so an operator could convert with their eyes open; there is no shape left to write, so the
+  question has no subject.
+
+- **`completeLinkage` can no longer be turned off**, by anyone, an instance administrator included. It was a
+  reversible setting while a space could be read either way. With one shape left, turning it off would mean
+  *"read my links from a shape that does not exist"* — a working space that stops answering.
 
 #### `filter` is the one read path
 

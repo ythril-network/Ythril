@@ -1,9 +1,10 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams, HttpHeaders } from '@angular/common/http';
-import { Observable, Subscription } from 'rxjs';
-import { map } from 'rxjs/operators';
+import { Observable, Subscription, of } from 'rxjs';
+import { map, switchMap } from 'rxjs/operators';
 import type { FileEntry, FileMeta, FileExtract, UploadProgress, ConflictRecord } from './api.types';
 import { filterCall } from './filter-call';
+import { hydrateLinks } from './record-links';
 
 /** File store (listing, upload, download), brain file-metadata, and sync file conflicts. */
 @Injectable({ providedIn: 'root' })
@@ -184,8 +185,17 @@ export class FilesApi {
   getFileMeta(spaceId: string, path: string): Observable<FileMeta | null> {
     return filterCall<{ results: FileMeta[] }>(this.http, {
       space: spaceId, collection: 'files', path, limit: 1,
-    })
-      .pipe(map(r => r.results?.[0] ?? null));
+    }).pipe(
+      map(r => r.results?.[0] ?? null),
+      /*
+       * THE LINKS COME SEPARATELY since 5.0. A file's connections are link records, so the metadata
+       * record carries none — and the editor below draws chips from them, which would silently show a
+       * file as linked to nothing.
+       */
+      switchMap(fm => (fm
+        ? hydrateLinks(this.http, spaceId, 'file', [fm]).pipe(map(rows => rows[0] as FileMeta))
+        : of(null))),
+    );
   }
 
   /**
@@ -199,7 +209,7 @@ export class FilesApi {
     return this.http.get<FileExtract>(`/api/brain/spaces/${spaceId}/files/extract`, { params });
   }
 
-  updateFileMeta(spaceId: string, path: string, body: Partial<{ description: string; tags: string[]; entityIds: string[]; chronoIds: string[]; memoryIds: string[]; properties: Record<string, string | number | boolean> }>): Observable<FileMeta> {
+  updateFileMeta(spaceId: string, path: string, body: Partial<{ description: string; tags: string[]; linkEntities: string[]; linkChronos: string[]; linkFacts: string[]; properties: Record<string, string | number | boolean> }>): Observable<FileMeta> {
     const params = new HttpParams().set('path', path);
     return this.http.patch<FileMeta>(`/api/brain/spaces/${spaceId}/files`, body, { params });
   }

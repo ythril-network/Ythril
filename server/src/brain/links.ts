@@ -42,12 +42,15 @@ import { col, asFilter, asDoc } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
 import { nextSeq } from '../util/seq.js';
 import { edgeIdFor } from './edge-id.js';
-import { fieldFor, linkClassFor, linkClassesFrom, usesLinkRecords } from './link-adjacency.js';
+import { legacyField, linkClassFor, linkClassesFrom, linksStartingFrom } from './link-adjacency.js';
+import { assertRefsResolve, ReferenceRefusal } from './entity-refs.js';
+import { isStrictLinkage } from '../spaces/proxy.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { AuthorRef, LinkDoc, TombstoneDoc } from '../config/types.js';
 // `RefKind` is re-exported by `types.ts` as a type only, so it comes from the leaf that DECLARES it —
 // the same import every other `brain/` module that needs it uses.
 import type { RefKind } from '../config/types-knowledge.js';
+import { LINK_INPUT_FIELDS } from '../config/types-knowledge.js';
 import { spaceCollection } from '../db/space-collection.js';
 
 /*
@@ -72,7 +75,24 @@ import { spaceCollection } from '../db/space-collection.js';
  * the id a writer computes come from one expression: store it and the two can disagree, which is the defect
  * shape this migration exists to remove rather than to reproduce.
  */
-export const linkLabel = (fromKind: RefKind, toKind: RefKind): string => `${fromKind}.${fieldFor(toKind)}`;
+export const linkLabel = (fromKind: RefKind, toKind: RefKind): string => `${fromKind}.${legacyField(toKind)}`;
+
+/**
+ * Why a record of this kind cannot link to that kind, or `null`.
+ *
+ * The six classes are a product fact — a fact names entities and nothing else — and a pair outside them
+ * has no label, so `linkIdFor` would derive an id for a class that does not exist. The link DOOR refused
+ * that from the start; `reconcileLinks` did not, and every write door reaches it through the `link*`
+ * fields. A `save_fact` naming `linkChronos` therefore stored a seventh class nothing reads.
+ *
+ * One sentence, wherever a class is named, so a caller gets the same answer at whichever door they ask.
+ */
+export function linkClassRefusal(fromKind: RefKind, toKind: RefKind): string | null {
+  if (!COLLECTION_OF[fromKind] || !(CLASSES_BY_FROM[fromKind] ?? []).includes(toKind)) {
+    return `${fromKind} records cannot link to ${toKind}: there is no ${linkLabel(fromKind, toKind)} link class`;
+  }
+  return null;
+}
 
 /** The id one connection always has. Exported so the conversion script derives it the same way. */
 export const linkIdFor = (from: string, fromKind: RefKind, to: string, toKind: RefKind): string =>
@@ -80,6 +100,42 @@ export const linkIdFor = (from: string, fromKind: RefKind, to: string, toKind: R
 
 /** What a record says it concerns, by the kind of thing concerned. Absent means "leave that class alone". */
 export type DesiredLinks = Partial<Record<RefKind, readonly string[]>>;
+
+/**
+ * Refuse everything about a desired link set that can be refused, BEFORE anything is written.
+ *
+ * ## Two refusals, one place
+ *
+ * A class the record kind cannot hold — a fact naming `linkChronos` — has no label, so `linkIdFor` would
+ * derive an id for a class nothing reads. And under `strictLinkage` every id must name a record that
+ * exists: that check sat at each door for the 4.x arrays and NOWHERE for `linkEntities`, so one spelling
+ * was refused and the other stored.
+ *
+ * ## Why the WRITERS call it as well as the reconcile
+ *
+ * `reconcileLinks` runs after the record is inserted, so a refusal there leaves the record stored without
+ * the links it asked for — a caller gets a `400` and a row they did not want, which is the silent
+ * unlinked write made noisy rather than fixed. So each writer asks first, and the reconcile asks again:
+ * the reconcile is what makes the check unskippable by a caller that reaches it directly, and one extra
+ * `_id` lookup per class on a write that is already several queries is the price of that.
+ */
+export async function assertDesiredLinks(
+  spaceId: string,
+  fromKind: RefKind,
+  desired: DesiredLinks,
+): Promise<void> {
+  const classes = Object.keys(desired) as RefKind[];
+  for (const toKind of classes) {
+    const refusal = linkClassRefusal(fromKind, toKind);
+    if (refusal) throw new ReferenceRefusal(refusal);
+  }
+  if (!isStrictLinkage(spaceId)) return;
+  // Named as the CALLER spells it. Built by hand this said `linkentity`, a field no door accepts, in the
+  // one sentence somebody reads to find out what to send.
+  for (const toKind of classes) {
+    await assertRefsResolve(spaceId, LINK_INPUT_FIELDS[toKind], toKind, desired[toKind]);
+  }
+}
 
 /**
  * Make the link records for one record equal what its arrays now say.
@@ -115,6 +171,14 @@ export async function reconcileLinks(
   const classes = Object.keys(desired) as RefKind[];
   if (classes.length === 0) return { added: 0, removed: 0 };
 
+  /*
+   * Skipped for the CONVERSION, and both halves of that are deliberate. It is additive and reads its
+   * desired set off records that already exist, so re-validating a space's whole link graph on every boot
+   * would be a query per class per record — and the classes it names come from the collection it is
+   * walking rather than from a caller, so there is no seventh class for it to invent.
+   */
+  if (!opts.additive) await assertDesiredLinks(spaceId, fromKind, desired);
+
   const wanted = new Map<string, { to: string; toKind: RefKind }>();
   for (const toKind of classes) {
     for (const to of desired[toKind] ?? []) {
@@ -124,7 +188,7 @@ export async function reconcileLinks(
     }
   }
 
-  // Only the classes this write TOUCHED. A `PATCH` that names `entityIds` alone must not disturb the fact
+  // Only the classes this write TOUCHED. A `PATCH` that names `linkEntities` alone must not disturb the fact
   // links, so the existing set is read per class rather than per `from`.
   const existing = await col<LinkDoc>(spaceCollection(spaceId, 'links'))
     .find(asFilter<LinkDoc>({ spaceId, from, fromKind, toKind: { $in: classes } }), { projection: { _id: 1 } })
@@ -168,55 +232,9 @@ export async function reconcileLinks(
     added++;
   }
 
-  /*
-   * AND THE ARRAY, on a space whose readers are still reading arrays.
-   *
-   * `usesLinkRecords` picks which shape a space is READ through, and `link-adjacency.ts` calls it *"the
-   * ONLY place that decides"*. That was true of readers and of nothing else: this function wrote a link
-   * record and stopped, so on an unconverted space it wrote a row every reader looks away from — a `201`
-   * and a link nobody could see, for as long as the instance had not rebooted since the space was made.
-   *
-   * **Not "instead of": AS WELL AS.** The array path already writes both — `entityIds` on a create lands
-   * in the record and a link record is reconciled from it — so writing only the array here would make the
-   * two spellings of one question differ in the other direction, and would leave the conversion more to
-   * do rather than less.
-   *
-   * The selector is consulted, never re-derived. A writer with its own opinion about which shape a space
-   * uses is how five readers came to follow five different subsets in the first place.
-   */
-  if (!usesLinkRecords(spaceId)) await writeLinkArrays(spaceId, from, fromKind, desired);
-
   return { added, removed };
 }
 
-/**
- * Mirror the desired links onto the record's own arrays — the 3.x shape, still read by an unconverted space.
- *
- * One `$set` per class the caller NAMED, so a write that touches `linkEntities` alone cannot disturb the
- * fact links. That is the same per-class rule the link-record half above applies, said against the other
- * storage shape; expressing it twice differently is what this whole module exists to stop.
- *
- * A pair that is not a link class is skipped rather than invented: `linkClassFor` returns `undefined`, and
- * a field named from a kind pair the model does not have would be a key nothing ever reads.
- */
-async function writeLinkArrays(
-  spaceId: string,
-  from: string,
-  fromKind: RefKind,
-  desired: DesiredLinks,
-): Promise<void> {
-  const cls = linkClassesFrom(fromKind);
-  if (cls.length === 0) return;
-  const set: Record<string, string[]> = {};
-  for (const toKind of Object.keys(desired) as RefKind[]) {
-    const c = linkClassFor(fromKind, toKind);
-    if (!c) continue;
-    set[c.field] = [...new Set(desired[toKind] ?? [])];
-  }
-  if (Object.keys(set).length === 0) return;
-  await col<Record<string, unknown>>(spaceCollection(spaceId, cls[0].collection))
-    .updateOne(asFilter<Record<string, unknown>>({ _id: from, spaceId }), { $set: set } as never);
-}
 
 /**
  * Remove every link record a deleted record was the FROM of.
@@ -276,12 +294,6 @@ async function sourceDoc(spaceId: string, suffix: string, id: string): Promise<R
   return await col(`${spaceId}_${suffix}`).findOne(asFilter({ _id: id, spaceId })) as Record<string, unknown> | null;
 }
 
-/** One class's array off a source document — absent or non-array reads as empty. */
-const idsOn = (doc: Record<string, unknown> | null, toKind: RefKind): string[] => {
-  const raw = doc?.[fieldFor(toKind)];
-  return Array.isArray(raw) ? raw as string[] : [];
-};
-
 /**
  * Tell a subscriber the RECORD changed, because it did — its array gained or lost an id.
  *
@@ -339,24 +351,30 @@ export async function addLink(
   actor?: WebhookActor,
 ): Promise<LinkDoc> {
   const suffix = COLLECTION_OF[fromKind];
-  if (!suffix || !(CLASSES_BY_FROM[fromKind] ?? []).includes(toKind)) {
-    throw new Error(`${fromKind} records cannot link to ${toKind}: there is no ${linkLabel(fromKind, toKind)} field`);
-  }
+  const refusal = linkClassRefusal(fromKind, toKind);
+  if (refusal) throw new ReferenceRefusal(refusal);
 
-  const seq = await nextSeq(spaceId);
-  const res = await col(`${spaceId}_${suffix}`).updateOne(
-    asFilter({ _id: from, spaceId }),
-    { $addToSet: { [fieldFor(toKind)]: to }, $set: { seq, updatedAt: new Date().toISOString() } },
-  );
-  // `matchedCount`, not `modifiedCount`: re-adding a link that is already there matches and modifies
-  // nothing, and that is a successful idempotent call rather than a missing record.
-  if (res.matchedCount === 0) throw new Error(`${fromKind} '${from}' not found`);
+  /*
+   * THE RECORD IS READ, NOT WRITTEN. Until 5.0 this wrote the array entry and let the reconcile derive the
+   * row from it, because a row the array never claimed was deleted by the next ordinary write to that
+   * record — an unrelated PATCH of a fact's text, hours later, by somebody who had never heard of this
+   * link. With the arrays gone, `reconcileLinks` is driven by the set its caller names and a write that
+   * names no link class leaves the links entirely alone, so a directly-created row survives.
+   */
+  const doc = await sourceDoc(spaceId, suffix as string, from);
+  if (!doc) throw new Error(`${fromKind} '${from}' not found`);
 
-  const doc = await sourceDoc(spaceId, suffix, from);
+  // Existing ∪ {to}, because `reconcileLinks` REPLACES the class it is given. Adding one link by handing
+  // it a one-element set would remove every other link of that class — the same trap the file move and
+  // the face recogniser hit, and the reason this reads the rows first.
+  const existing = (await linksStartingFrom(spaceId, [from]))
+    .filter(r => r.fromKind === fromKind && r.toKind === toKind).map(r => r.to);
+
   // The link's author is the SOURCE RECORD's, not the caller's — the same value the six writers pass. A
   // link belongs to the record that claims it, and a door that stamped itself instead would give one
   // connection two different authors depending on which way it happened to be created.
-  await reconcileLinks(spaceId, from, fromKind, { [toKind]: idsOn(doc, toKind) }, (doc?.['author'] as AuthorRef) ?? NO_AUTHOR);
+  await reconcileLinks(spaceId, from, fromKind, { [toKind]: [...new Set([...existing, to])] },
+    (doc['author'] as AuthorRef) ?? NO_AUTHOR);
   emitRecordUpdated(spaceId, fromKind, from, actor);
 
   const link = await col<LinkDoc>(spaceCollection(spaceId, 'links'))
@@ -374,28 +392,25 @@ export async function addLink(
  */
 export async function removeLink(spaceId: string, id: string, actor?: WebhookActor): Promise<boolean> {
   /*
-   * The seq is claimed BEFORE the row is read, so nothing is awaited between learning which array this link
-   * names and writing to it. Read first and the `nextSeq` round trip is a window a concurrent writer's
-   * change lands in — `no-read-modify-write.test.js` is what asks for this, and it is right to: the values
-   * taken off the row are what the write is aimed at, so a stale read aims it somewhere else.
+   * NO SEQ IS CLAIMED HERE ANY MORE, and the reason it used to be is worth keeping.
    *
-   * A seq spent on an id that turns out not to be a link is a gap in a monotonic counter and costs nothing;
-   * sync compares seqs, it does not count them.
+   * This wrote the source record's array, so the seq was claimed BEFORE the row was read — nothing awaited
+   * between learning which array the link named and writing to it, because the `nextSeq` round trip was a
+   * window a concurrent writer's change landed in. `no-read-modify-write.test.js` asks for that, and it was
+   * right to. 5.0 removed the arrays, so this door does not write the source record at all: the link rows
+   * carry their own seqs and `reconcileLinks` claims them.
    */
-  const seq = await nextSeq(spaceId);
   const link = await col<LinkDoc>(spaceCollection(spaceId, 'links')).findOne(asFilter<LinkDoc>({ _id: id, spaceId }));
   if (!link) return false;
 
   const suffix = COLLECTION_OF[link.fromKind];
   if (!suffix) return false;
 
-  await col(`${spaceId}_${suffix}`).updateOne(
-    asFilter({ _id: link.from, spaceId }),
-    { $pull: { [fieldFor(link.toKind)]: link.to }, $set: { seq, updatedAt: new Date().toISOString() } },
-  );
-
-  const doc = await sourceDoc(spaceId, suffix, link.from);
-  await reconcileLinks(spaceId, link.from, link.fromKind, { [link.toKind]: idsOn(doc, link.toKind) }, link.author);
+  // Existing MINUS this one, for the same reason the add reads them: the class is replaced wholesale.
+  const remaining = (await linksStartingFrom(spaceId, [link.from]))
+    .filter(r => r.fromKind === link.fromKind && r.toKind === link.toKind && r.to !== link.to)
+    .map(r => r.to);
+  await reconcileLinks(spaceId, link.from, link.fromKind, { [link.toKind]: remaining }, link.author);
   emitRecordUpdated(spaceId, link.fromKind, link.from, actor);
   return true;
 }
@@ -442,22 +457,3 @@ export async function reconcileLinksForDocument(
   return await reconcileLinks(spaceId, docId, fromKind, desired, author ?? NO_AUTHOR, opts);
 }
 
-/**
- * Reconcile a whole PAGE of documents that arrived for one collection, or do nothing if it holds no links.
- *
- * The sync engine's pull applier is handed a collection NAME and a batch, and has no record kind in scope.
- * Deciding here rather than there keeps the collection-to-kind question in this module with everything else
- * about links — and keeps the caller to one line, which is what the god-file ratchet on that file asked for
- * when the first version of this put ten lines and a lookup table into it.
- */
-export async function reconcileLinksForPage(
-  spaceId: string,
-  collectionSuffix: string,
-  docs: readonly { _id: string }[],
-): Promise<void> {
-  const fromKind = LINK_BEARING_COLLECTIONS[collectionSuffix];
-  if (!fromKind) return;
-  for (const doc of docs) {
-    await reconcileLinksForDocument(spaceId, doc._id, fromKind, doc as unknown as Record<string, unknown>);
-  }
-}

@@ -7,7 +7,7 @@
  */
 import { applyRecordFlags } from './record-flag.js';
 import { v4 as uuidv4 } from 'uuid';
-import { reconcileLinks, removeLinksFrom } from './links.js';
+import { reconcileLinks, removeLinksFrom, assertDesiredLinks } from './links.js';
 import { authorRef } from '../config/author.js';
 import { findInsertContradictions, type ContradictionWarning } from './insert-contradictions.js';
 import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
@@ -39,7 +39,15 @@ import { spaceCollection } from '../db/space-collection.js';
 export async function saveFact(
   spaceId: string,
   fact: string,
-  entityIds: string[] = [],
+  /**
+   * The entities this fact links to — a DESIRED LINK SET, never a stored field.
+   *
+   * It was `entityIds` and it was both: the array was written onto the record AND handed to
+   * `reconcileLinks`, so the record and the link rows were two spellings of one fact. 5.0 removes the
+   * array, so this is the input and the link records are the storage. The name says which it is, because a
+   * parameter still called `entityIds` is one somebody stores again.
+   */
+  linkEntities: string[] = [],
   tags: string[] = [],
   description?: string,
   properties?: Record<string, string | number | boolean>,
@@ -101,6 +109,15 @@ export async function saveFact(
    * `required` and has a `default` must not be a violation, and on an update an absent property may be one
    * the caller has just removed.
    */
+  /*
+   * THE LINKS ARE REFUSED BEFORE THE RECORD IS WRITTEN.
+   *
+   * `reconcileLinks` asserts them too, and it runs AFTER the insert — so a bad id there leaves the fact
+   * stored without the links it asked for: a `400` and a row the caller did not want, which is the
+   * silent unlinked write made noisy rather than fixed.
+   */
+  await assertDesiredLinks(spaceId, 'fact', { entity: linkEntities });
+
   const meta = getSpaceMeta(spaceId);
   const withDefaults = existing
     ? properties
@@ -173,7 +190,6 @@ export async function saveFact(
     const $set: Record<string, unknown> = {
       fact,
       tags: mergedTags,
-      entityIds,
       matchedText: embedText,
       updatedAt: now,
       seq,
@@ -207,14 +223,14 @@ export async function saveFact(
     /*
      * The link records, after the write and before the event.
      *
-     * This branch writes `entityIds` UNCONDITIONALLY, from a parameter that defaults to `[]` — so a retried
-     * `saveFact` carrying the id and no entities WIPES the stored links. Whether that is right is not this
+     * This branch writes the link set UNCONDITIONALLY, from a parameter that defaults to `[]` — so a
+     * retried `saveFact` carrying the id and no entities WIPES the stored links. Whether that is right is not this
      * change's question; what matters is that the link records follow it either way, because a link left
      * behind describes a connection the fact itself no longer claims. `createChrono`'s equivalent branch
      * is guarded and does not clear, and that asymmetry is recorded on the `M-2` row rather than smoothed
      * over here.
      */
-    await reconcileLinks(spaceId, converged._id, 'fact', { entity: entityIds }, converged.author);
+    await reconcileLinks(spaceId, converged._id, 'fact', { entity: linkEntities }, converged.author);
     // `fact.updated`, not `created` — a subscriber must be able to tell a converged retry from a new record.
     if (actor) emitWebhookEvent({ event: 'fact.updated', spaceId, entry: { ...converged, embedding: undefined }, ...actor });
     return withoutVector((similar || contradicts)
@@ -233,7 +249,6 @@ export async function saveFact(
     spaceId,
     fact,
     tags,
-    entityIds,
     matchedText: embedText,
     author: authorRef(),
     createdAt: now,
@@ -264,7 +279,7 @@ export async function saveFact(
   if (!embResult && !suppressed) await enqueueEmbedJob(spaceId, 'fact', doc._id);
   // The link records for a new fact. One call whether the array is empty or not: `reconcileLinks` is a
   // reconcile, so "nothing to do" is a cheap answer rather than a decision this site has to make.
-  await reconcileLinks(spaceId, doc._id, 'fact', { entity: entityIds }, doc.author);
+  await reconcileLinks(spaceId, doc._id, 'fact', { entity: linkEntities }, doc.author);
   // Real-time duplicate-rule evaluation (opt-in per space). Fire-and-forget; the
   // dynamic import avoids a static cycle with dupe-scanner.js.
   if (getConfig().spaces.find(s => s.id === spaceId)?.dupeRulesOnInsert) {
@@ -275,11 +290,11 @@ export async function saveFact(
   return withoutVector((similar || contradicts) ? { ...doc, ...(similar ? { similar } : {}), ...(contradicts ? { contradicts } : {}) } : doc);
 }
 
-/** Update an existing fact's fact, tags, entityIds, description, or properties. Re-embeds when content fields change. */
+/** Update an existing fact's text, tags, links, description, or properties. Re-embeds when content fields change. */
 export async function updateFact(
   spaceId: string,
   memoryId: string,
-  updates: { fact?: string; tags?: string[]; entityIds?: string[]; description?: string; properties?: Record<string, string | number | boolean>; type?: string; suppressEmbeddings?: boolean; superseded?: boolean },
+  updates: { fact?: string; tags?: string[]; linkEntities?: string[]; description?: string; properties?: Record<string, string | number | boolean>; type?: string; suppressEmbeddings?: boolean; superseded?: boolean },
   deleteFieldsPaths?: string[],
   actor?: WebhookActor,
   ttlDays?: number | null,
@@ -291,6 +306,11 @@ export async function updateFact(
     .findOne(asFilter<FactDoc>({ _id: memoryId, spaceId }),
       { projection: NEVER_RETURNED_PROJECTION }) as FactDoc | null;
   if (!existing) return null;
+
+  // Refused BEFORE the update lands, or a bad link id leaves every other field already changed.
+  if (updates.linkEntities !== undefined) {
+    await assertDesiredLinks(spaceId, 'fact', { entity: updates.linkEntities });
+  }
 
   const seq = await nextSeq(spaceId);
   const now = new Date().toISOString();
@@ -309,7 +329,6 @@ export async function updateFact(
   const mergedUpdateProps = mergePropertiesOrKeep(existing.properties, updates.properties);
   if (updates.fact !== undefined) $set['fact'] = updates.fact;
   if (updates.tags !== undefined) $set['tags'] = updates.tags;
-  if (updates.entityIds !== undefined) $set['entityIds'] = updates.entityIds;
   if (updates.description !== undefined) $set['description'] = updates.description;
   if (updates.properties !== undefined) $set['properties'] = mergedUpdateProps;
   if (updates.type !== undefined) $set['type'] = updates.type;
@@ -325,14 +344,13 @@ export async function updateFact(
     const merged: Record<string, unknown> = {
       fact: updates.fact ?? existing.fact,
       tags: updates.tags ?? existing.tags,
-      entityIds: updates.entityIds ?? existing.entityIds,
       description: updates.description !== undefined ? updates.description : existing.description,
       properties: mergedUpdateProps ?? {},
     };
     applyDeleteFields(merged, deleteFieldsPaths);
 
     // Reflect deletions into $set/$unset
-    for (const field of ['description', 'tags', 'entityIds', 'properties']) {
+    for (const field of ['description', 'tags', 'properties']) {
       if (!(field in merged)) {
         $unset[field] = '';
         delete $set[field];
@@ -412,11 +430,13 @@ export async function updateFact(
   // STORED, and honour excludeFromVectorSearch in whichever direction it moved. See the entity update and
   // `embedStoredRecord` for why this replaced an inline embed built from a stale read.
   await enqueueEmbedJob(spaceId, 'fact', result._id);
-  // Only when the caller NAMED the field. Omitting `entityIds` on a patch means "leave the links alone",
-  // and passing `{ entity: undefined }` would read as "remove them all" — the same absent-versus-empty
+  // Only when the caller NAMED it. Omitting `linkEntities` on a patch means "leave the links alone", and
+  // passing `{ entity: undefined }` would read as "remove them all" — the same absent-versus-empty
   // distinction `deleteFields` exists for, one level down.
-  if (updates.entityIds !== undefined || deleteFieldsPaths?.some(p => p.startsWith('entityIds'))) {
-    await reconcileLinks(spaceId, result._id, 'fact', { entity: result.entityIds ?? [] }, result.author);
+  //
+  // `deleteFields` no longer reaches the links: it names RECORD fields, and the links are not one any more.
+  if (updates.linkEntities !== undefined) {
+    await reconcileLinks(spaceId, result._id, 'fact', { entity: updates.linkEntities }, result.author);
   }
   if (actor) emitWebhookEvent({ event: 'fact.updated', spaceId, entry: { ...result, embedding: undefined }, ...actor });
   return result;

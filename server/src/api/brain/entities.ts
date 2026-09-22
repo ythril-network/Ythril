@@ -23,7 +23,7 @@ import { SchemaViolationError, type UpdateValidation } from '../../brain/write-v
 import { mergePropertiesOrKeep, mergeTagsOrKeep } from '../../brain/merge-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
-import { connectionInputError, applyConnections, CONNECTION_BODY_KEYS, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
+import { connectionInputError, assertConnections, applyConnections, CONNECTION_BODY_KEYS, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
 
 export const entitiesRouter = Router();
 
@@ -120,8 +120,11 @@ entitiesRouter.post('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAu
   const shapeErr = shapeError('entity', req.body);
   if (shapeErr) { res.status(400).json({ error: shapeErr }); return; }
   // `F-27`: the one-call write — links and labelled edges together. Shape here; existence at the writer.
-  const connErr = connectionInputError(req.body);
+  const connErr = connectionInputError(req.body, { strict: isStrictLinkage(wt.target) });
   if (connErr) { res.status(400).json({ error: connErr }); return; }
+  // And the half a shape check cannot answer: a class this kind cannot hold, and — under strict
+  // linkage — an id that names nothing. BEFORE the record is written, or a refusal leaves a row.
+  await assertConnections(wt.target, 'entity', req.body);
 
   try {
     // `waitForEmbedding` (default false): the vector is normally computed by the embedding queue moments
@@ -372,6 +375,9 @@ entitiesRouter.patch('/spaces/:spaceId/entities/:id', globalRateLimit, requireSp
      */
     // Snapshot for the audit change list, from the read above — see the note in facts.ts.
     // `properties` is deliberately not allowlisted, so handing the record over cannot publish it.
+    // Refused BEFORE the update lands, or a bad link id leaves every other field already changed.
+    await assertConnections(mid, 'entity', req.body);
+
     let updated;
     let updateCheck: UpdateValidation | undefined;
     try {

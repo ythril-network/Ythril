@@ -5,7 +5,6 @@
  * pieces every sub-router needs: webhook token attribution, space-meta lookup, the schema
  * validation gate, the fact list filter, and the UUID matcher.
  */
-import { conveniencePredicate, conveniencesFrom } from '../../brain/list-conveniences.js';
 import type express from 'express';
 import { getConfig } from '../../config/loader.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
@@ -66,27 +65,6 @@ export function ttlDaysError(body: unknown): string | null {
  * imports them from `_shared` and there is no reason for those to change.
  */
 export { getSpaceMeta, applyValidation } from '../../spaces/schema-validation.js';
-
-/**
- * Build a MongoDB filter for the facts list route.
- *
- * The five common conveniences — `tag`, `type`, `description`, `properties`, `search` — go through
- * `conveniencePredicate`, the one module `filter` also calls, so the browser and an agent cannot come to
- * mean different things by `tag`. What stays here is the one name only a fact has: `entity`, an id
- * against the record's own link field.
- *
- * The refusal branch cannot fire for `facts` — it has searchable fields — so the throw is a structural
- * assertion rather than a path: reaching it would mean `facts` had left `SEARCHABLE_FIELDS`, and a
- * silent `{}` there is a full-collection read dressed as a filtered one.
- */
-export function buildFactFilter(query: Record<string, unknown>): Record<string, unknown> {
-  const base: Record<string, unknown> = {};
-  const entity = typeof query['entity'] === 'string' ? query['entity'] : undefined;
-  if (entity) base['entityIds'] = entity;
-  const merged = conveniencePredicate('facts', conveniencesFrom(query), base);
-  if ('error' in merged) throw new Error(merged.error);
-  return merged.predicate;
-}
 
 /**
  * Read the insert-time duplicate / contradiction flags from a REST write body.
@@ -221,4 +199,3 @@ export function preconditionFailedBody(record: string, currentSeq?: number): Rec
     ...(currentSeq === undefined ? {} : { currentSeq }),
   };
 }
-

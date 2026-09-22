@@ -79,32 +79,29 @@ describe('deleteFields shipped with the merge, not after it', () => {
     assert.ok(del > merge, 'and deletion must run AFTER it, or a merge would undo a deletion');
   });
 
-  it('every optional field is in the reflect list, and every LINK field is derived into it', async () => {
-    // set-claim: the record's OWN optional fields. The link arrays beside them are derived from
-    // LINK_CLASSES in the source and checked against it here; these four have no list to derive from.
+  it('every optional field is in the reflect list, and no LINK set is', async () => {
     /*
-     * The failure this whole mechanism exists to remove: a path accepted at the edge that then does nothing.
+     * The failure this whole mechanism exists to remove: a path accepted at the edge that then does
+     * nothing.
      *
-     * The seven names were written out here as well as in the source, and three of them are not a fixed set:
-     * a file's link arrays are whatever `LINK_CLASSES` says a file points at, and one of the three arrived
-     * after this mechanism shipped. So the source derives that half, and this checks the derivation rather
-     * than re-listing what it produced — a seventh link class must not depend on either file being edited.
+     * Three of the seven names used to be a file's link arrays, derived from `LINK_CLASSES` because one of
+     * them arrived after the mechanism shipped. **5.0 made a connection a link record**, so there is
+     * nothing on the document to unset: detaching is `linkEntities: []`, a value the caller sends rather
+     * than a path they delete. A reflect entry for one would be the same silent no-op arriving from the
+     * other side, so the absence is asserted rather than assumed.
      */
     const { DELETABLE_FILE_META_FIELDS } = await import('../../server/dist/files/file-meta.js');
-    const { LINK_CLASSES } = await import('../../server/dist/brain/link-adjacency.js');
+    const { LINK_INPUT_NAMES } = await import('../../server/dist/brain/write-connections.js');
 
-    const fileLinkFields = [...new Set(LINK_CLASSES.filter(c => c.kind === 'file').map(c => c.field))];
-    assert.ok(fileLinkFields.length >= 3,
-      `only ${fileLinkFields.length} file link field(s) — the import is stale and this checks nothing`);
-    for (const f of fileLinkFields) {
-      assert.ok(DELETABLE_FILE_META_FIELDS.includes(f),
-        `${f} is a file link array, so it is settable, and it is not in the reflect list — a deleteFields `
-        + 'path naming it is accepted and then does nothing');
-    }
     for (const f of ['description', 'excerpt', 'tags', 'properties']) {
       assert.ok(DELETABLE_FILE_META_FIELDS.includes(f), `${f} is settable but cannot be deleted`);
     }
-
+    assert.ok(LINK_INPUT_NAMES.length >= 4,
+      `only ${LINK_INPUT_NAMES.length} link field name(s) — the import is stale and this checks nothing`);
+    for (const f of [...LINK_INPUT_NAMES, 'entityIds', 'memoryIds', 'chronoIds']) {
+      assert.ok(!DELETABLE_FILE_META_FIELDS.includes(f),
+        `${f} is not a stored field, so unsetting it clears nothing — detaching is an empty link set`);
+    }
     // And the writer reflects THAT list rather than a copy of it.
     const s = src('server/src/files/file-meta.ts');
     const at = s.indexOf('if (deleteFieldsPaths && deleteFieldsPaths.length > 0)');

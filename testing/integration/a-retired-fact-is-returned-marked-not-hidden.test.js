@@ -76,14 +76,14 @@ before(async () => {
   // learns the correction and the history in one turn must not need two writes and a window between them.
   const o = await P(`/api/brain/spaces/${SPACE}/facts`, {
     fact: `Ada ${RUN} works at Acme as a platform engineer.`,
-    entityIds: [ada], superseded: true, waitForEmbedding: true,
+    linkEntities: [ada], superseded: true, waitForEmbedding: true,
   });
   assert.equal(o.status, 201, `older fact: ${JSON.stringify(o.body)}`);
   older = o.body._id;
 
   const n = await P(`/api/brain/spaces/${SPACE}/facts`, {
     fact: `Ada ${RUN} left Acme and works at Beta as a platform engineer.`,
-    entityIds: [ada], waitForEmbedding: true,
+    linkEntities: [ada], waitForEmbedding: true,
   });
   assert.equal(n.status, 201, `newer fact: ${JSON.stringify(n.body)}`);
   newer = n.body._id;

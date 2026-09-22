@@ -1,34 +1,32 @@
 /**
- * Integration: a link written through `linkEntities` is one a reader can see — on ANY space.
+ * Integration: a link written through `linkEntities` is one a reader can see — on a BRAND NEW space.
  *
- * ## The defect, and why it depends on when the instance last rebooted
+ * ## The defect, and why it depended on when the instance last rebooted
  *
- * A link lives in two shapes during the 4.x→5.0 transition: the ARRAY on the record (`fact.entityIds` and
- * its five siblings) and a LINK RECORD in the space's `links` collection. `usesLinkRecords` picks which a
- * space is read through, and `link-adjacency.ts` says of it: *"the ONLY place that decides."*
- *
- * **That is true of readers. Nothing held the WRITER to it.** `reconcileLinks` writes a link record and
- * nothing else, so on a space whose readers are still on the array path the row it writes is one every
- * reader looks away from. Measured 2026-09-18 against a live instance, with a control:
+ * A link lived in two shapes through 4.x: the ARRAY on the record (`fact.entityIds` and its five
+ * siblings) and a LINK RECORD in the space's `links` collection. Readers picked per space, by a marker
+ * the BOOT conversion set — and nothing held the WRITER to the same choice. `reconcileLinks` writes a
+ * link record and nothing else, so on a space whose readers were still on the array path the row it
+ * wrote was one every reader looked away from. Measured 2026-09-18 against a live instance, with a
+ * control:
  *
  * | a fact created with | its `entityIds` | link record written | reached by a reader |
  * |---|---|---|---|
  * | `entityIds: [pid]`   | `[pid]` | yes | YES |
  * | `linkEntities: [pid]`| `[]`    | yes | no  |
  *
- * Both link records exist. It is not a failed write; it is a write nobody reads.
+ * Both link records existed. It was not a failed write; it was a write nobody read.
  *
- * **`completeLinkage` is set by the BOOT conversion**, which walks every space that does not have it. A
- * space created after that boot keeps the array path until the next restart. So the same call succeeds or
- * silently loses the link depending on whether the instance has rebooted since the space was made — the
- * shape of bug a reporter cannot reproduce and a responder can.
+ * **A space created between two boots was the case that hid it**, because it kept the array path until
+ * the next restart — so the same call succeeded or silently lost the link depending on whether the
+ * instance had rebooted since the space was made.
  *
- * ## Why the fix is not "make new spaces converted"
+ * ## What 5.0 changed, and why this suite is kept
  *
- * `link-adjacency.ts` records the intent: *"Both shapes answer all six classes… running the conversion is
- * a performance and consistency upgrade rather than a **correctness prerequisite**. An operator who
- * upgrades and runs nothing gets the fix."* An unconverted space is a SUPPORTED state, so the writer has
- * to work on one.
+ * There is one shape. The arrays are gone, space creation marks a space converted, and a space whose
+ * conversion FAILED is refused rather than read. So the two paths that could disagree no longer exist —
+ * and what this suite asserts is the outcome that mattered: a link written on a space made moments ago
+ * is reached by the walk. That claim outlives the mechanism it was written against.
  *
  * ## Seen red
  *
@@ -48,9 +46,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
 const RUN = Date.now();
 /**
- * A space created HERE, in this test, and therefore unconverted — which is the whole point.
+ * A space created HERE, in this test, which is the whole point.
  *
- * A suite that reused a space seeded before a boot would exercise the converted path and pass throughout.
+ * It was the UNCONVERTED case when the two shapes coexisted; it is now the space that was created
+ * between two boots, which is the one a reader would still expect to be special.
  */
 const SPACE = `link-writer-${RUN}`;
 
@@ -89,12 +88,26 @@ after(async () => {
 });
 
 describe('a link written on an unconverted space is a link a reader can see', () => {
-  it('the control: `entityIds` lands and is reachable', async () => {
+  it('the control: a link made through the LINK DOOR is reachable', async () => {
     // First, so a failure below cannot be read as "the walk is broken" or "the space is empty".
-    const id = must('fact via entityIds', await P(`/api/brain/spaces/${SPACE}/facts`,
-      { fact: `via entityIds ${RUN}`, entityIds: [personId] }));
+    //
+    // It used to write `entityIds` — the spelling that was known to work — and that spelling is refused
+    // in 5.0. The link door is the other way to make the same link without going through the field under
+    // test, which is what a control has to be.
+    const id = must('fact to link', await P(`/api/brain/spaces/${SPACE}/facts`, { fact: `via the link door ${RUN}` }));
+    const link = await P(`/api/brain/spaces/${SPACE}/links`,
+      { from: id, fromKind: 'fact', to: personId, toKind: 'entity' });
+    assert.ok(link.status < 400, `the control link was refused: ${link.status} ${JSON.stringify(link.body)}`);
     assert.ok((await reachableFromPerson()).includes(id),
       'the control link is unreachable — the reader or the fixture is broken, not the writer');
+  });
+
+  it('and the 4.x spelling is refused, naming the field that replaced it', async () => {
+    const r = await P(`/api/brain/spaces/${SPACE}/facts`,
+      { fact: `via entityIds ${RUN}`, entityIds: [personId] });
+    assert.equal(r.status, 400, `the 4.x array was accepted: ${JSON.stringify(r.body)}`);
+    assert.match(JSON.stringify(r.body), /linkEntities/,
+      'the refusal must name the field to send instead, or an upgrading caller has nothing to act on');
   });
 
   it('`linkEntities` lands too, and that is the same question asked the other way', async () => {
@@ -117,7 +130,7 @@ describe('a link written on an unconverted space is a link a reader can see', ()
     const res = await fetch(`${INSTANCES.a}/api/brain/spaces/${SPACE}/facts/${id}`, {
       method: 'PATCH',
       headers: { Authorization: `Bearer ${tokenA}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ entityIds: [] }),
+      body: JSON.stringify({ linkEntities: [] }),
     });
     assert.ok(res.status < 400, `detach refused: ${res.status} ${await res.text()}`);
     assert.ok(!(await reachableFromPerson()).includes(id),
