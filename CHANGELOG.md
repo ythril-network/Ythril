@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.0.1] — 2026-09-22
+
+**A read was logged as a write on the MCP door, so an operator who had turned read logging OFF still got
+them.** Found hours after 5.0.0 published, and patched rather than held: a defect in an image people can
+already pull is a different thing from one in a tree nobody has.
+
+| | |
+|---|---|
+| who is affected | any instance on the default `audit.logReads: false` whose agents call `filter` or `similar` |
+| what it cost | extra rows in the audit log. No data lost, no call refused, no record changed |
+| what to do | upgrade. Nothing to re-point and nothing to re-configure |
+
+Entries already written for those two operations stay where they are. They are correct entries under a
+wrong classification, not wrong entries.
+
 ### Fixed
 
 - **Two read tools were logged as writes, so an operator who turned reads OFF still got them.** A
