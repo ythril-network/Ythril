@@ -51,7 +51,7 @@ const SPACE = 'general';
 const SUBJECT = 'aaaaaaaa-0000-4000-8000-00000000da7a';
 const OTHER = 'aaaaaaaa-0000-4000-8000-00000000b0b0';
 
-let mongo, guardMod, loader;
+let mongo, guardMod, loader, linksMod;
 
 const coll = (n) => mongo.col(`${SPACE}_${n}`);
 
@@ -63,10 +63,11 @@ describe('the delete refusal names the end it checked', { skip }, () => {
     loader = await import('../../server/dist/config/loader.js');
     fs.writeFileSync(CONFIG_PATH, JSON.stringify({
       instanceId: 'delete-refusal-test', instanceLabel: 'test', tokens: [], networks: [],
-      spaces: [{ id: SPACE, label: 'General', builtIn: true, folders: [], meta: { strictLinkage: true } }],
+      spaces: [{ id: SPACE, label: 'General', builtIn: true, folders: [], completeLinkage: true, meta: { strictLinkage: true } }],
     }, null, 2), { mode: 0o600 });
     loader.loadConfig();
     guardMod = await import('../../server/dist/brain/entity-delete-guard.js');
+    linksMod = await import('../../server/dist/brain/links.js');
   });
 
   after(async () => {
@@ -75,7 +76,7 @@ describe('the delete refusal names the end it checked', { skip }, () => {
   });
 
   beforeEach(async () => {
-    for (const c of ['entities', 'edges', 'facts', 'files']) await coll(c).deleteMany({});
+    for (const c of ['entities', 'edges', 'facts', 'files', 'links']) await coll(c).deleteMany({});
     await coll('entities').insertMany([entity(SUBJECT, 'Subject'), entity(OTHER, 'Other')]);
   });
 
@@ -118,8 +119,12 @@ describe('the delete refusal names the end it checked', { skip }, () => {
     // The distinction is the point. An edge has ends; a memory has a list. Labelling the memory `to` would be
     // inventing a direction, and a caller would look for an edge that does not exist.
     await coll('facts').insertOne({
-      _id: 'm-1', spaceId: SPACE, fact: 'about the subject', entityIds: [SUBJECT], tags: [], seq: 1,
+      _id: 'm-1', spaceId: SPACE, fact: 'about the subject', tags: [], seq: 1,
     });
+    // Through the writer, not by hand: a link's id is derived from the pair and the class, and a row with
+    // an invented id is one nothing else in the system could find.
+    await linksMod.reconcileLinks(SPACE, 'm-1', 'fact', { entity: [SUBJECT] },
+      { instanceId: 'delete-refusal-test', instanceLabel: 'test' });
     const block = await guardMod.entityDeleteBlockers(SPACE, SUBJECT);
     assert.deepEqual(block.backlinks, [{ type: 'fact', _id: 'm-1' }]);
   });
@@ -171,7 +176,7 @@ describe('the delete refusal names the end it checked', { skip }, () => {
     // one door ends up enforcing a setting the other ignores.
     fs.writeFileSync(CONFIG_PATH, JSON.stringify({
       instanceId: 'delete-refusal-test', instanceLabel: 'test', tokens: [], networks: [],
-      spaces: [{ id: SPACE, label: 'General', builtIn: true, folders: [], meta: { strictLinkage: false } }],
+      spaces: [{ id: SPACE, label: 'General', builtIn: true, folders: [], completeLinkage: true, meta: { strictLinkage: false } }],
     }, null, 2), { mode: 0o600 });
     loader.loadConfig();
     try {
@@ -181,7 +186,7 @@ describe('the delete refusal names the end it checked', { skip }, () => {
     } finally {
       fs.writeFileSync(CONFIG_PATH, JSON.stringify({
         instanceId: 'delete-refusal-test', instanceLabel: 'test', tokens: [], networks: [],
-        spaces: [{ id: SPACE, label: 'General', builtIn: true, folders: [], meta: { strictLinkage: true } }],
+        spaces: [{ id: SPACE, label: 'General', builtIn: true, folders: [], completeLinkage: true, meta: { strictLinkage: true } }],
       }, null, 2), { mode: 0o600 });
       loader.loadConfig();
     }

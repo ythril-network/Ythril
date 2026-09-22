@@ -61,7 +61,7 @@ describe('an entity cascade needs a token for the set', { skip }, () => {
     fs.writeFileSync(CONFIG_PATH, JSON.stringify({
       instanceId: 'cascade-test', instanceLabel: 'test', tokens: [], networks: [],
       // `strictLinkage` on: the guard only refuses under it, so the cascade only has anything to do there.
-      spaces: [{ id: SPACE, label: 'General', builtIn: true, folders: [], meta: { strictLinkage: true } }],
+      spaces: [{ id: SPACE, label: 'General', builtIn: true, folders: [], completeLinkage: true, meta: { strictLinkage: true } }],
     }, null, 2), { mode: 0o600 });
     const loader = await import('../../server/dist/config/loader.js');
     loader.loadConfig();
