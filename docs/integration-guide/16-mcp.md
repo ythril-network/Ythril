@@ -362,7 +362,7 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 > object, so patching one key destroyed the rest — the same defect already fixed on the four brain record
 > types. `deleteFields` arrived with the merge, because merging alone would have removed the only way to
 > clear a file property. A caller that resends the whole object is unaffected; one that patches a single key
-> now keeps what it did not name. The lists (`tags`, `entityIds`, `memoryIds`, `chronoIds`) still replace.
+> now keeps what it did not name. The lists (`tags`, and the `link*` sets) still replace.
 >
 > **Its published SCHEMA said REPLACES until 4.0**, three releases after the behaviour changed — so an agent
 > reading the tool definition to build its arguments was told the opposite of what the tool does. Fixed, and
@@ -527,7 +527,6 @@ The tool returns a JSON object with a `results` array and a `count`. Each result
         "tags": ["portal-backend", "traefik"],
         "description": "Configured via IngressRoute CRD.",
         "properties": { "version": "3.x" },
-        "entityIds": [],
         "createdAt": "2026-03-25T14:00:00.000Z",
         "updatedAt": "2026-03-25T14:00:00.000Z"
       }
